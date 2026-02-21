@@ -1,0 +1,13 @@
+[Unit]
+Description=BePure Monitoring Agent
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/bepure daemon
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

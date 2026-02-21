@@ -1,0 +1,243 @@
+mod api;
+mod capture;
+mod config;
+mod daemon;
+
+use std::collections::BTreeMap;
+use std::io::{self, Write};
+use std::process::{Command, ExitCode};
+use std::sync::Arc;
+
+use anyhow::{Context, Result};
+use clap::{Parser, Subcommand};
+use serde_json::json;
+
+use bepure_client_core::{AuthClient, FileTokenStore, TokenStore};
+
+use crate::api::ApiClient;
+use crate::capture::{CaptureBackend, probe_backend};
+use crate::config::{CaptureBackendHint, ClientPaths, load_state, save_state};
+
+#[derive(Debug, Parser)]
+#[command(name = "bepure")]
+#[command(about = "BePure Linux client")]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Debug, Subcommand)]
+enum Commands {
+    Login {
+        #[arg(long)]
+        email: Option<String>,
+    },
+    Logout {
+        #[arg(long)]
+        yes: bool,
+    },
+    Daemon,
+    Status,
+}
+
+#[tokio::main]
+async fn main() -> ExitCode {
+    match run().await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("error: {err:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn run() -> Result<()> {
+    let cli = Cli::parse();
+    let paths = ClientPaths::discover()?;
+    paths.ensure_dirs()?;
+
+    match cli.command {
+        Commands::Login { email } => login(paths, email).await,
+        Commands::Logout { yes } => logout(paths, yes).await,
+        Commands::Daemon => daemon::run_daemon(&paths).await,
+        Commands::Status => status(paths),
+    }
+}
+
+async fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
+    let email = match email {
+        Some(email) => email,
+        None => prompt_line("Email")?,
+    };
+    let password = rpassword::prompt_password("Password: ")?;
+
+    let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&paths.token_file));
+    let auth_client = AuthClient::new(token_store.clone())?;
+
+    auth_client
+        .login(&email, &password)
+        .await
+        .context("login failed")?;
+
+    let access_token = token_store
+        .get_access_token()?
+        .context("missing access token after login")?;
+
+    let probe = probe_backend(None);
+    println!("{}", probe.guidance);
+
+    let api_client = ApiClient::new()?;
+    let mut state = load_state(&paths.state_file)?;
+
+    let host = hostname::get()
+        .ok()
+        .and_then(|s| s.into_string().ok())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "linux-device".to_string());
+
+    let registration = api_client
+        .register_device(&access_token, &host, state.capture_interval_seconds)
+        .await
+        .context("device registration failed")?;
+
+    state.device_id = Some(registration.id.clone());
+    state.device_api_key = registration.api_key;
+    state.monitoring_enabled = true;
+    state.backend_hint = probe.backend.map(|backend| match backend {
+        CaptureBackend::Wayland => CaptureBackendHint::Wayland,
+        CaptureBackend::X11 => CaptureBackendHint::X11,
+    });
+    save_state(&paths.state_file, &state)?;
+
+    if let Err(err) = ensure_user_service_running() {
+        eprintln!(
+            "could not auto-start user service: {err}\nrun: systemctl --user daemon-reload && systemctl --user enable --now bepure.service"
+        );
+    }
+
+    println!("Logged in. Device id: {}", registration.id);
+    if !probe.captured_ok {
+        println!(
+            "Capture is not yet working; service will run and log missed captures until fixed."
+        );
+    }
+
+    Ok(())
+}
+
+async fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
+    let mut state = load_state(&paths.state_file)?;
+    let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&paths.token_file));
+
+    let access_token = token_store.get_access_token()?;
+    if access_token.is_none() && state.device_id.is_none() {
+        println!("Already logged out.");
+        return Ok(());
+    }
+
+    println!(
+        "Warning: logging out will send a log event indicating monitoring was turned off on this device."
+    );
+
+    if !yes && !prompt_yes_no("Continue logout? [y/N]")? {
+        println!("Logout cancelled.");
+        return Ok(());
+    }
+
+    if let (Some(token), Some(device_id)) = (access_token.as_deref(), state.device_id.as_deref()) {
+        let api_client = ApiClient::new()?;
+        let mut metadata = BTreeMap::new();
+        metadata.insert("reason".to_string(), json!("user_logout"));
+        let _ = api_client
+            .send_log(token, "manual_override", device_id, None, metadata)
+            .await;
+    }
+
+    if let Some(token) = access_token {
+        let auth_client = AuthClient::new(token_store.clone())?;
+        if let Err(err) = auth_client.logout().await {
+            eprintln!("logout endpoint warning: {err}");
+        }
+        let _ = token;
+    }
+
+    token_store.clear_access_token()?;
+    state.monitoring_enabled = false;
+    state.device_id = None;
+    state.device_api_key = None;
+    save_state(&paths.state_file, &state)?;
+
+    println!("Logged out. Monitoring is disabled on this device until you run `bepure login`.");
+    Ok(())
+}
+
+fn status(paths: ClientPaths) -> Result<()> {
+    let state = load_state(&paths.state_file)?;
+    let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&paths.token_file));
+    let logged_in = token_store.get_access_token()?.is_some();
+
+    println!("logged_in: {}", logged_in);
+    println!("monitoring_enabled: {}", state.monitoring_enabled);
+    println!(
+        "device_id: {}",
+        state.device_id.as_deref().unwrap_or("<none>")
+    );
+    println!(
+        "backend: {}",
+        match state.backend_hint {
+            Some(CaptureBackendHint::Wayland) => "wayland",
+            Some(CaptureBackendHint::X11) => "x11",
+            None => "<unknown>",
+        }
+    );
+
+    Ok(())
+}
+
+fn ensure_user_service_running() -> Result<()> {
+    run_systemctl_user(&["daemon-reload"])?;
+    run_systemctl_user(&["enable", "--now", "bepure.service"])?;
+    Ok(())
+}
+
+fn run_systemctl_user(args: &[&str]) -> Result<()> {
+    let status = Command::new("systemctl")
+        .arg("--user")
+        .args(args)
+        .status()
+        .with_context(|| format!("failed to run systemctl --user {}", args.join(" ")))?;
+
+    if !status.success() {
+        return Err(anyhow::anyhow!(
+            "systemctl --user {} exited with {}",
+            args.join(" "),
+            status
+        ));
+    }
+
+    Ok(())
+}
+
+fn prompt_line(label: &str) -> Result<String> {
+    print!("{label}: ");
+    io::stdout().flush().context("failed flushing stdout")?;
+
+    let mut value = String::new();
+    io::stdin()
+        .read_line(&mut value)
+        .context("failed reading stdin")?;
+    Ok(value.trim().to_string())
+}
+
+fn prompt_yes_no(prompt: &str) -> Result<bool> {
+    print!("{prompt} ");
+    io::stdout().flush().context("failed flushing stdout")?;
+
+    let mut value = String::new();
+    io::stdin()
+        .read_line(&mut value)
+        .context("failed reading stdin")?;
+
+    let normalized = value.trim().to_ascii_lowercase();
+    Ok(matches!(normalized.as_str(), "y" | "yes"))
+}
