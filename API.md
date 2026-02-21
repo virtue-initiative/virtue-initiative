@@ -3,7 +3,7 @@ Below is a structured REST design for a screenshot accountability system backed 
 Assumptions:
 
 * R2 stores image binaries.
-* Metadata (users, logs, devices, partners) stored in a relational DB.
+* Metadata (users, logs, devices, partners) stored in Cloudflare D1 (serverless SQL).
 * Auth via JWT (short-lived access + refresh).
 * All timestamps ISO-8601 UTC.
 * Images immutable once uploaded.
@@ -57,7 +57,7 @@ Sets the refresh token as a http-only cookie.
 
 **Response 200**
 
-Sets the request token as an http-only cookie
+Sets the refresh token as an http-only cookie
 
 ```json
 {
@@ -91,11 +91,13 @@ Reads refresh token from cookie
 
 # Images (R2-backed)
 
-Images are uploaded via pre-signed URL to avoid proxying large files through app server.
+Images are uploaded via pre-signed URL directly to R2 — the Worker is not in the upload path.
 
 ## `POST /image`
 
-Creates image metadata and returns R2 upload URL.
+Creates image metadata and returns a presigned R2 PUT URL.
+
+Requires: `Authorization: Bearer <access_token>`
 
 **Request**
 
@@ -120,11 +122,11 @@ Creates image metadata and returns R2 upload URL.
     "taken_at": "2026-02-20T14:21:55Z",
     "created_at": "2026-02-20T14:22:00Z"
   },
-  "upload_url": "https://r2-presigned-url"
+  "upload_url": "https://<bucket>.<account>.r2.cloudflarestorage.com/...?X-Amz-Signature=..."
 }
 ```
 
-Client uploads directly to R2.
+Client uploads directly to R2 via `PUT <upload_url>` with the binary body and matching `Content-Type`.
 
 ---
 
@@ -133,6 +135,8 @@ Client uploads directly to R2.
 Represents structured events (missed screenshot, manual override, review).
 
 ## `POST /log`
+
+Requires: `Authorization: Bearer <access_token>`
 
 **Request**
 
@@ -160,13 +164,15 @@ Represents structured events (missed screenshot, manual override, review).
 
 ## `GET /log`
 
+Requires: `Authorization: Bearer <access_token>`
+
 **Query**
 
 ```
 ?device_id=
 ?type=
-?user=
 ?cursor=
+?limit=
 ```
 
 **Response**
@@ -179,6 +185,7 @@ Represents structured events (missed screenshot, manual override, review).
       "type": "missed_capture",
       "device_id": "uuid",
       "image_url": "signed_url",
+      "metadata": {},
       "created_at": "..."
     }
   ],
@@ -186,15 +193,19 @@ Represents structured events (missed screenshot, manual override, review).
 }
 ```
 
+`image_url` is a presigned R2 GET URL (1 hour expiry). `next_cursor` is omitted when there are no more results.
+
 ---
 
 # Devices
 
-Represents registered client agents.
+Represents registered client agents. All device endpoints use the same JWT authentication as user endpoints.
 
 ## `POST /device`
 
 Register device.
+
+Requires: `Authorization: Bearer <access_token>`
 
 **Request**
 
@@ -211,7 +222,6 @@ Register device.
 ```json
 {
   "id": "uuid",
-  "api_key": "device-secret",
   "created_at": "..."
 }
 ```
@@ -221,6 +231,8 @@ Register device.
 ## `GET /device`
 
 List devices.
+
+Requires: `Authorization: Bearer <access_token>`
 
 Return device metadata + stats:
 
@@ -233,7 +245,8 @@ Return device metadata + stats:
     "last_seen_at": "...",
     "last_upload_at": "...",
     "interval_seconds": 300,
-    "status": "online|offline"
+    "status": "online|offline",
+    "enabled": true
   }
 ]
 ```
@@ -243,6 +256,8 @@ Return device metadata + stats:
 ## `PATCH /device/:id`
 
 Update configuration.
+
+Requires: `Authorization: Bearer <access_token>`
 
 ```json
 {
@@ -262,6 +277,8 @@ Represents another user who can review your logs/images.
 
 Send partner invite.
 
+Requires: `Authorization: Bearer <access_token>`
+
 ```json
 {
   "email": "partner@example.com",
@@ -272,7 +289,7 @@ Send partner invite.
 }
 ```
 
-Response:
+Response 201:
 
 ```json
 {
@@ -281,36 +298,54 @@ Response:
 }
 ```
 
-## `POST /accept-partner`
+## `POST /partner/accept`
 
-Accepts invite
+Accepts invite. The authenticated user must be the invited partner.
+
+Requires: `Authorization: Bearer <access_token>`
 
 ```json
 {
-  id: "uuid"
+  "id": "uuid"
 }
 ```
 
-Response:
+Response 200:
 
 ```json
 {
-  id: "uuid"
+  "id": "uuid"
 }
-
 ```
 
 ---
 
 ## `GET /partner`
 
-List partners. Get partner relationship.
+List all partnerships (both as owner and as partner).
+
+Requires: `Authorization: Bearer <access_token>`
+
+```json
+[
+  {
+    "id": "uuid",
+    "partner_email": "partner@example.com",
+    "status": "pending|accepted",
+    "permissions": { "view_images": true, "view_logs": true },
+    "role": "owner|partner",
+    "created_at": "..."
+  }
+]
+```
 
 ---
 
 ## `PATCH /partner/:id`
 
-Update permissions.
+Update permissions. Only the owner (invite sender) may update.
+
+Requires: `Authorization: Bearer <access_token>`
 
 ```json
 {
@@ -320,27 +355,50 @@ Update permissions.
 }
 ```
 
+Response 200:
+
+```json
+{
+  "id": "uuid",
+  "permissions": { "view_images": false, "view_logs": true }
+}
+```
+
 ---
 
 ## `DELETE /partner/:id`
 
-Revoke partner access.
+Revoke partner access. Only the owner may delete.
+
+Requires: `Authorization: Bearer <access_token>`
+
+**Response 204**
 
 ---
 
 # Settings
 
-User-level preferences.
+User-level preferences stored as a JSON object. `POST` merges with existing settings (partial update).
 
 ## `POST /settings`
 
-Create or replace settings.
+Requires: `Authorization: Bearer <access_token>`
 
 ```json
 {
   "name": "Andrew",
   "timezone": "America/Chicago",
   "retention_days": 30,
+}
+```
+
+**Response 200** — returns the full merged settings object:
+
+```json
+{
+  "name": "Andrew",
+  "timezone": "America/Chicago",
+  "retention_days": 30
 }
 ```
 
@@ -348,13 +406,17 @@ Create or replace settings.
 
 ## `GET /settings`
 
+Requires: `Authorization: Bearer <access_token>`
+
 ```json
 {
   "name": "Andrew",
   "timezone": "America/Chicago",
-  "retention_days": 30,
+  "retention_days": 30
 }
 ```
+
+Defaults: `timezone = "UTC"`, `retention_days = 30`, `name = null`.
 
 ---
 
@@ -372,11 +434,30 @@ Metadata stored in DB; R2 stores only binary.
 
 ---
 
+# Validation Errors
+
+All endpoints validate requests with Zod. Invalid requests return **400** with a structured error body:
+
+```json
+{
+  "error": {
+    "formErrors": [],
+    "fieldErrors": {
+      "email": ["Invalid email"],
+      "password": ["String must contain at least 8 character(s)"]
+    }
+  }
+}
+```
+
+---
+
 # Security Model
 
-* JWT for user endpoints.
-* Device API key scoped to `/image` + `/log`.
-* All R2 uploads/downloads via short-lived signed URLs.
+* JWT for all endpoints (access token in `Authorization: Bearer` header).
+* Refresh token stored in httpOnly, secure, sameSite=Strict cookie.
+* All R2 uploads/downloads via short-lived presigned S3 URLs (5 min upload, 1 hr download).
 * Store SHA-256 and verify after upload.
-* Immutable images (no PATCH/DELETE).
+* Immutable images (no PATCH/DELETE on images).
+* Passwords hashed with Argon2id.
 

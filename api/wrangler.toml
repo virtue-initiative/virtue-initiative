@@ -1,0 +1,30 @@
+name = "bepure-api"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Development settings
+[dev]
+port = 8787
+
+# Database binding (D1)
+[[d1_databases]]
+binding = "DB"
+database_name = "bepure-db"
+database_id = "placeholder" # Will be set after creating DB
+migrations_dir = "src/schema/migrations"
+
+# R2 bucket binding (native Workers binding)
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "bepure-images"
+
+# Environment variables (use wrangler secret for sensitive values)
+[vars]
+JWT_ACCESS_EXPIRY = "15m"
+JWT_REFRESH_EXPIRY = "7d"
+R2_BUCKET_NAME = "bepure-images"
+# R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY must be set as secrets:
+# npx wrangler secret put R2_ACCOUNT_ID
+# npx wrangler secret put R2_ACCESS_KEY_ID
+# npx wrangler secret put R2_SECRET_ACCESS_KEY

@@ -1,0 +1,42 @@
+{
+  "name": "api",
+  "version": "1.0.0",
+  "description": "Screenshot accountability API on Cloudflare Workers",
+  "main": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:migrate": "wrangler d1 migrations apply bepure-db",
+    "db:migrate:local": "wrangler d1 migrations apply bepure-db --local"
+  },
+  "keywords": [
+    "cloudflare",
+    "workers",
+    "api"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.12.14",
+    "@cloudflare/workers-types": "^4.20260228.0",
+    "@types/node": "^25.3.0",
+    "@types/uuid": "^10.0.0",
+    "hono": "^4.12.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "3.2.4",
+    "wrangler": "^4.67.0"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.995.0",
+    "@aws-sdk/s3-request-presigner": "^3.995.0",
+    "@hono/node-server": "^1.19.9",
+    "@noble/hashes": "^2.0.1",
+    "jose": "^6.1.3",
+    "uuid": "^13.0.0",
+    "zod": "^4.3.6"
+  }
+}
