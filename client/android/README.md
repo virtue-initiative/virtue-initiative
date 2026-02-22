@@ -38,33 +38,97 @@ Android screen capture requires user-granted MediaProjection permission. There i
 
 - JDK 21
 - Android SDK + emulator in `~/Android/Sdk`
-- Android cmdline tools (`sdkmanager`, `avdmanager`)
-- Rust + android targets
+- Android command-line tools (`sdkmanager`, `avdmanager`, `adb`, `emulator`)
+- Rust + Android targets
 - `cargo-ndk`
 
-Validate:
+From repo root, export SDK paths for this shell:
+
+```bash
+export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}"
+export ANDROID_HOME="$ANDROID_SDK_ROOT"
+export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/emulator:$PATH"
+```
+
+Run doctor check:
 
 ```bash
 ./client/android/scripts/doctor.sh
 ```
 
-## Build debug APK
+## One-time Android SDK setup
 
-From `client/android`:
+Install the exact SDK pieces this project expects (`compileSdk/targetSdk 35`, `ndkVersion 26.1.10909125`):
 
 ```bash
-./gradlew :app:assembleDebug
+yes | sdkmanager --licenses
+sdkmanager \
+  "platform-tools" \
+  "emulator" \
+  "platforms;android-35" \
+  "build-tools;35.0.0" \
+  "system-images;android-35;google_apis;x86_64" \
+  "ndk;26.1.10909125" \
+  "cmdline-tools;latest"
 ```
 
-APK path:
+## One-time emulator (AVD) creation
 
-- `client/android/app/build/outputs/apk/debug/app-debug.apk`
-
-## Run on emulator
+Create an emulator named `bepure_api35`:
 
 ```bash
-emulator -avd Medium_Phone_API_35
-adb install -r client/android/app/build/outputs/apk/debug/app-debug.apk
+avdmanager create avd \
+  -n bepure_api35 \
+  -k "system-images;android-35;google_apis;x86_64" \
+  -d pixel_7 \
+  --force
+```
+
+List available emulators:
+
+```bash
+emulator -list-avds
+```
+
+## Build, install, and run (every time)
+
+From repo root:
+
+1. Start emulator in background.
+```bash
+emulator -avd bepure_api35 -no-snapshot &
+```
+2. Wait until Android boot is complete.
+```bash
+adb wait-for-device
+until adb shell getprop sys.boot_completed | tr -d '\r' | grep -q "^1$"; do sleep 1; done
+adb shell input keyevent 82
+```
+3. Build and install debug app.
+```bash
+cd client/android
+./gradlew :app:assembleDebug
+./gradlew :app:installDebug
+```
+4. Launch app activity.
+```bash
 adb shell am start -n codes.anb.bepure/.MainActivity
 ```
 
+APK output path (if you want manual install):
+
+- `client/android/app/build/outputs/apk/debug/app-debug.apk`
+
+Manual install alternative:
+
+```bash
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+## Verify app is running
+
+```bash
+adb shell pm list packages | grep codes.anb.bepure
+adb shell pidof -s codes.anb.bepure
+adb logcat --pid "$(adb shell pidof -s codes.anb.bepure)"
+```
