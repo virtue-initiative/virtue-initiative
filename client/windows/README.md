@@ -42,6 +42,18 @@ Expected output:
 
 - `client/windows/dist/bepure-windows-installer-<version>.exe`
 
+## Custom API base URL
+
+The Windows client reads `BEPURE_BASE_API_URL` (same as other clients).
+
+PowerShell example:
+
+```powershell
+$env:BEPURE_BASE_API_URL = "https://your-api.example.com"
+```
+
+For the Windows service, set it as a machine-level environment variable and restart the service.
+
 ## Runtime data locations
 
 The tray app and service share state in:
