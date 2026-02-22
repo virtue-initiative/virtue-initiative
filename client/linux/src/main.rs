@@ -101,7 +101,6 @@ async fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
         .context("device registration failed")?;
 
     state.device_id = Some(registration.id.clone());
-    state.device_api_key = registration.api_key;
     state.monitoring_enabled = true;
     state.backend_hint = probe.backend.map(|backend| match backend {
         CaptureBackend::Wayland => CaptureBackendHint::Wayland,
@@ -164,7 +163,6 @@ async fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
     token_store.clear_access_token()?;
     state.monitoring_enabled = false;
     state.device_id = None;
-    state.device_api_key = None;
     save_state(&paths.state_file, &state)?;
 
     println!("Logged out. Monitoring is disabled on this device until you run `bepure login`.");

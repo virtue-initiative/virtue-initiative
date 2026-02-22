@@ -44,7 +44,6 @@ pub struct ClientState {
     pub monitoring_enabled: bool,
     pub capture_interval_seconds: u64,
     pub device_id: Option<String>,
-    pub device_api_key: Option<String>,
     pub backend_hint: Option<CaptureBackendHint>,
 }
 
@@ -54,7 +53,6 @@ impl Default for ClientState {
             monitoring_enabled: false,
             capture_interval_seconds: 300,
             device_id: None,
-            device_api_key: None,
             backend_hint: None,
         }
     }

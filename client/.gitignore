@@ -6,3 +6,6 @@ target/
 
 # Cargo-installed binaries in local workspace root (if used)
 .cargo/bin/
+
+# Packaged build artifacts
+linux/dist/

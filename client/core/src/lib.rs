@@ -1,4 +1,4 @@
-pub const DEFAULT_BASE_API_URL: &str = "https://api.bepure.app";
+pub const DEFAULT_BASE_API_URL: &str = "https://bepure-api.anb.codes";
 
 pub mod auth;
 pub mod error;

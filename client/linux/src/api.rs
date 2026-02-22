@@ -81,7 +81,6 @@ impl ApiClient {
 #[derive(Clone, Debug, Deserialize)]
 pub struct DeviceRegistration {
     pub id: String,
-    pub api_key: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
