@@ -6,6 +6,7 @@ import { Env, Variables } from '../types/bindings';
 import { hashPassword, verifyPassword } from '../lib/password';
 import { generateAccessToken, generateRefreshToken, verifyJWT } from '../lib/jwt';
 import { signupSchema, loginSchema } from '../lib/schemas';
+import { findUserByEmail, createUser } from '../lib/db';
 
 const ACCESS_EXPIRY = 60 * 60;
 const REFRESH_EXPIRY = 365 * 24 * 60 * 60;
@@ -33,16 +34,14 @@ auth.post('/signup', async (c) => {
 
   const { email, password, name } = parsed.data;
 
-  const existingUser = await c.env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first();
+  const existingUser = await findUserByEmail(c.env.DB, email);
   if (existingUser) return c.json({ error: 'User already exists' }, 409);
 
   const passwordHash = await hashPassword(password);
   const userId = uuidv4();
   const createdAt = new Date().toISOString();
 
-  await c.env.DB.prepare(
-    'INSERT INTO users (id, email, password_hash, name, created_at) VALUES (?, ?, ?, ?, ?)'
-  ).bind(userId, email, passwordHash, name ?? null, createdAt).run();
+  await createUser(c.env.DB, userId, email, passwordHash, name ?? null, createdAt);
 
   const accessToken = await createSession(userId, c);
 
@@ -58,15 +57,13 @@ auth.post('/login', async (c) => {
 
   const { email, password } = parsed.data;
 
-  const user = await c.env.DB.prepare(
-    'SELECT id, email, password_hash FROM users WHERE email = ?'
-  ).bind(email).first();
+  const user = await findUserByEmail(c.env.DB, email);
 
-  if (!user || !(await verifyPassword(password, user.password_hash as string))) {
+  if (!user || !(await verifyPassword(password, user.password_hash))) {
     return c.json({ error: 'Invalid credentials' }, 401);
   }
 
-  const accessToken = await createSession(user.id as string, c);
+  const accessToken = await createSession(user.id, c);
 
   return c.json({ access_token: accessToken });
 });

@@ -5,6 +5,7 @@ import { authenticate } from '../middleware/auth';
 import { generateUploadUrl } from '../lib/r2';
 import { createImageSchema } from '../lib/schemas';
 import z from 'zod';
+import { findDevice, createImage, updateDeviceActivity } from '../lib/db';
 
 const images = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -19,9 +20,7 @@ images.post('/', authenticate, async (c) => {
   const { device_id, sha256, content_type, size_bytes, taken_at } = parsed.data;
 
   // Verify device belongs to user
-  const device = await c.env.DB.prepare(
-    'SELECT id FROM devices WHERE id = ? AND user_id = ?'
-  ).bind(device_id, userId).first();
+  const device = await findDevice(c.env.DB, device_id, userId);
   if (!device) return c.json({ error: 'Device not found' }, 404);
 
   const imageId = uuidv4();
@@ -29,15 +28,10 @@ images.post('/', authenticate, async (c) => {
   const r2Key = `user/${userId}/images/${imageId}.webp`;
   const createdAt = new Date().toISOString();
 
-  await c.env.DB.prepare(
-    `INSERT INTO images (id, user_id, device_id, r2_key, sha256, content_type, size_bytes, status, taken_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_upload', ?, ?)`
-  ).bind(imageId, userId, device_id, r2Key, sha256, content_type, size_bytes, taken_at, createdAt).run();
+  await createImage(c.env.DB, imageId, userId, device_id, r2Key, sha256, content_type, size_bytes, taken_at, createdAt);
 
   // Update device activity
-  await c.env.DB.prepare(
-    'UPDATE devices SET last_seen_at = ?, last_upload_at = ? WHERE id = ?'
-  ).bind(createdAt, createdAt, device_id).run();
+  await updateDeviceActivity(c.env.DB, device_id, createdAt);
 
   const uploadUrl = await generateUploadUrl(c.env, r2Key, content_type, size_bytes);
 

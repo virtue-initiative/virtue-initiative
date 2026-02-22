@@ -5,6 +5,7 @@ import { Env, Variables } from '../types/bindings';
 import { authenticate } from '../middleware/auth';
 import { generateDownloadUrl } from '../lib/r2';
 import { createLogSchema, listLogsSchema } from '../lib/schemas';
+import { createLog, queryLogs, findImageById } from '../lib/db';
 
 const logs = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -21,10 +22,7 @@ logs.post('/', authenticate, async (c) => {
   const logId = uuidv4();
   const createdAt = new Date().toISOString();
 
-  await c.env.DB.prepare(
-    `INSERT INTO logs (id, user_id, device_id, image_id, type, metadata, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).bind(logId, userId, device_id, image_id ?? null, type, metadata ? JSON.stringify(metadata) : null, createdAt).run();
+  await createLog(c.env.DB, logId, userId, device_id, image_id ?? null, type, metadata ? JSON.stringify(metadata) : null, createdAt);
 
   return c.json({ id: logId, created_at: createdAt }, 201);
 });
@@ -39,33 +37,20 @@ logs.get('/', authenticate, async (c) => {
   const userId = c.get('userId');
   const { device_id, type, cursor, limit } = parsed.data;
 
-  let query = 'SELECT id, type, device_id, image_id, metadata, created_at FROM logs WHERE user_id = ?';
-  const params: unknown[] = [userId];
-
-  if (device_id) { query += ' AND device_id = ?'; params.push(device_id); }
-  if (type) { query += ' AND type = ?'; params.push(type); }
-  if (cursor) { query += ' AND created_at < ?'; params.push(cursor); }
-
-  query += ' ORDER BY created_at DESC LIMIT ?';
-  params.push(limit + 1);
-
-  const result = await c.env.DB.prepare(query).bind(...params).all();
-  const hasMore = result.results.length > limit;
-  const items = hasMore ? result.results.slice(0, limit) : result.results;
+  const { items, hasMore } = await queryLogs(c.env.DB, userId, { device_id, type, cursor }, limit);
 
   const itemsWithUrls = await Promise.all(items.map(async (log) => {
     let imageUrl: string | null = null;
     if (log.image_id) {
-      const image = await c.env.DB.prepare('SELECT r2_key FROM images WHERE id = ?')
-        .bind(log.image_id).first();
-      if (image) imageUrl = await generateDownloadUrl(c.env, image.r2_key as string);
+      const image = await findImageById(c.env.DB, log.image_id);
+      if (image) imageUrl = await generateDownloadUrl(c.env, image.r2_key);
     }
     return {
       id: log.id,
       type: log.type,
       device_id: log.device_id,
       image_url: imageUrl,
-      metadata: log.metadata ? JSON.parse(log.metadata as string) : null,
+      metadata: log.metadata ? JSON.parse(log.metadata) : null,
       created_at: log.created_at,
     };
   }));

@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { Env, Variables } from '../types/bindings';
 import { authenticate } from '../middleware/auth';
 import { settingsSchema } from '../lib/schemas';
+import { getSettings, saveSettings } from '../lib/db';
 
 const DEFAULTS = { name: null, timezone: 'UTC', retention_days: 30 };
 
@@ -19,17 +20,12 @@ settings.post('/', authenticate, async (c) => {
   const updatedAt = new Date().toISOString();
   
   // Fetch existing data to merge with
-  const existing = await c.env.DB.prepare(
-    'SELECT data FROM settings WHERE user_id = ?'
-  ).bind(userId).first<{ data: string }>();
+  const existing = await getSettings(c.env.DB, userId);
   
   const current = existing ? JSON.parse(existing.data) : { ...DEFAULTS };
   const merged = { ...current, ...parsed.data };
   
-  await c.env.DB.prepare(
-    `INSERT INTO settings (user_id, data, updated_at) VALUES (?, ?, ?)
-     ON CONFLICT(user_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`
-  ).bind(userId, JSON.stringify(merged), updatedAt).run();
+  await saveSettings(c.env.DB, userId, JSON.stringify(merged), updatedAt);
   
   return c.json(merged);
 });
@@ -40,9 +36,7 @@ settings.post('/', authenticate, async (c) => {
 settings.get('/', authenticate, async (c) => {
   const userId = c.get('userId');
   
-  const row = await c.env.DB.prepare(
-    'SELECT data FROM settings WHERE user_id = ?'
-  ).bind(userId).first<{ data: string }>();
+  const row = await getSettings(c.env.DB, userId);
   
   return c.json(row ? JSON.parse(row.data) : { ...DEFAULTS });
 });
