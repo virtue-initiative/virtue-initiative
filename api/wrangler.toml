@@ -11,7 +11,7 @@ port = 8787
 [[d1_databases]]
 binding = "DB"
 database_name = "bepure-db"
-database_id = "placeholder" # Will be set after creating DB
+database_id = "5fe6ffce-be10-4f89-914a-b995a7ff07ec"
 migrations_dir = "src/schema/migrations"
 
 # R2 bucket binding (native Workers binding)

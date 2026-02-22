@@ -8,40 +8,19 @@ export interface JWTPayload {
 }
 
 /**
- * Parse expiry string like "15m", "7d", "1h" to seconds
- */
-function parseExpiry(expiry: string): number {
-  const units: Record<string, number> = {
-    s: 1,
-    m: 60,
-    h: 3600,
-    d: 86400,
-  };
-  
-  const match = expiry.match(/^(\d+)([smhd])$/);
-  if (!match) {
-    throw new Error(`Invalid expiry format: ${expiry}`);
-  }
-  
-  const [, value, unit] = match;
-  return parseInt(value) * units[unit];
-}
-
-/**
  * Sign a JWT token
  */
 export async function signJWT(
   payload: Omit<JWTPayload, 'iat' | 'exp'>,
   secret: string,
-  expiresIn: string
+  expiresInSeconds: number
 ): Promise<string> {
   const secretKey = new TextEncoder().encode(secret);
-  const expirySeconds = parseExpiry(expiresIn);
-  
+
   return await new SignJWT({ ...payload })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
-    .setExpirationTime(Math.floor(Date.now() / 1000) + expirySeconds)
+    .setExpirationTime(Math.floor(Date.now() / 1000) + expiresInSeconds)
     .sign(secretKey);
 }
 
@@ -50,7 +29,7 @@ export async function signJWT(
  */
 export async function verifyJWT(token: string, secret: string): Promise<JWTPayload> {
   const secretKey = new TextEncoder().encode(secret);
-  
+
   try {
     const { payload } = await jwtVerify(token, secretKey);
     return {
@@ -67,13 +46,13 @@ export async function verifyJWT(token: string, secret: string): Promise<JWTPaylo
 /**
  * Generate access token
  */
-export async function generateAccessToken(userId: string, secret: string, expiry: string): Promise<string> {
+export async function generateAccessToken(userId: string, secret: string, expiry: number): Promise<string> {
   return signJWT({ sub: userId, type: 'access' }, secret, expiry);
 }
 
 /**
  * Generate refresh token
  */
-export async function generateRefreshToken(userId: string, secret: string, expiry: string): Promise<string> {
+export async function generateRefreshToken(userId: string, secret: string, expiry: number): Promise<string> {
   return signJWT({ sub: userId, type: 'refresh' }, secret, expiry);
 }

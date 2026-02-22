@@ -2,13 +2,13 @@ import { z } from 'zod';
 
 // Auth schemas
 export const signupSchema = z.object({
-  email: z.string().email(),
+  email: z.email(),
   password: z.string().min(8),
   name: z.string().optional(),
 });
 
 export const loginSchema = z.object({
-  email: z.string().email(),
+  email: z.email(),
   password: z.string().min(1),
 });
 
@@ -33,7 +33,7 @@ export const createImageSchema = z.object({
   sha256: z.string().regex(/^[0-9a-f]{64}$/, 'Must be a valid SHA-256 hex string'),
   content_type: z.string().regex(/^image\//),
   size_bytes: z.number().int().positive(),
-  taken_at: z.string().datetime(),
+  taken_at: z.iso.datetime(),
 });
 
 // Log schemas

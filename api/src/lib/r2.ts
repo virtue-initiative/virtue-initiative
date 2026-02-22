@@ -20,6 +20,7 @@ export async function generateUploadUrl(
   env: Env,
   key: string,
   contentType: string,
+  sizeBytes?: number,
   expiresIn: number = 300
 ): Promise<string> {
   const s3 = getS3Client(env);
@@ -29,6 +30,7 @@ export async function generateUploadUrl(
       Bucket: env.R2_BUCKET_NAME,
       Key: key,
       ContentType: contentType,
+      ContentLength: sizeBytes,
     }),
     { expiresIn }
   );

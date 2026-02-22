@@ -4,10 +4,6 @@
 # JWT Secret - Use a strong random string
 JWT_SECRET=your-super-secret-key-change-this-in-production
 
-# JWT Token Expiry
-JWT_ACCESS_EXPIRY=15m
-JWT_REFRESH_EXPIRY=7d
-
 # R2 S3-compatible credentials (for presigned URLs)
 # Create an R2 API token at: https://dash.cloudflare.com/ -> R2 -> Manage R2 API Tokens
 R2_ACCOUNT_ID=your-cloudflare-account-id
