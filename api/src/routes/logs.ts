@@ -22,7 +22,16 @@ logs.post('/', authenticate, async (c) => {
   const logId = uuidv4();
   const createdAt = new Date().toISOString();
 
-  await createLog(c.env.DB, logId, userId, device_id, image_id ?? null, type, metadata ? JSON.stringify(metadata) : null, createdAt);
+  await createLog(
+    c.env.DB,
+    logId,
+    userId,
+    device_id,
+    image_id ?? null,
+    type,
+    metadata ? JSON.stringify(metadata) : null,
+    createdAt,
+  );
 
   return c.json({ id: logId, created_at: createdAt }, 201);
 });
@@ -39,21 +48,23 @@ logs.get('/', authenticate, async (c) => {
 
   const { items, hasMore } = await queryLogs(c.env.DB, userId, { device_id, type, cursor }, limit);
 
-  const itemsWithUrls = await Promise.all(items.map(async (log) => {
-    let imageUrl: string | null = null;
-    if (log.image_id) {
-      const image = await findImageById(c.env.DB, log.image_id);
-      if (image) imageUrl = await generateDownloadUrl(c.env, image.r2_key);
-    }
-    return {
-      id: log.id,
-      type: log.type,
-      device_id: log.device_id,
-      image_url: imageUrl,
-      metadata: log.metadata ? JSON.parse(log.metadata) : null,
-      created_at: log.created_at,
-    };
-  }));
+  const itemsWithUrls = await Promise.all(
+    items.map(async (log) => {
+      let imageUrl: string | null = null;
+      if (log.image_id) {
+        const image = await findImageById(c.env.DB, log.image_id);
+        if (image) imageUrl = await generateDownloadUrl(c.env, image.r2_key);
+      }
+      return {
+        id: log.id,
+        type: log.type,
+        device_id: log.device_id,
+        image_url: imageUrl,
+        metadata: log.metadata ? JSON.parse(log.metadata) : null,
+        created_at: log.created_at,
+      };
+    }),
+  );
 
   return c.json({
     items: itemsWithUrls,

@@ -13,7 +13,7 @@ export interface JWTPayload {
 export async function signJWT(
   payload: Omit<JWTPayload, 'iat' | 'exp'>,
   secret: string,
-  expiresInSeconds: number
+  expiresInSeconds: number,
 ): Promise<string> {
   const secretKey = new TextEncoder().encode(secret);
 
@@ -46,13 +46,21 @@ export async function verifyJWT(token: string, secret: string): Promise<JWTPaylo
 /**
  * Generate access token
  */
-export async function generateAccessToken(userId: string, secret: string, expiry: number): Promise<string> {
+export async function generateAccessToken(
+  userId: string,
+  secret: string,
+  expiry: number,
+): Promise<string> {
   return signJWT({ sub: userId, type: 'access' }, secret, expiry);
 }
 
 /**
  * Generate refresh token
  */
-export async function generateRefreshToken(userId: string, secret: string, expiry: number): Promise<string> {
+export async function generateRefreshToken(
+  userId: string,
+  secret: string,
+  expiry: number,
+): Promise<string> {
   return signJWT({ sub: userId, type: 'refresh' }, secret, expiry);
 }

@@ -21,7 +21,7 @@ export async function generateUploadUrl(
   key: string,
   contentType: string,
   sizeBytes?: number,
-  expiresIn: number = 300
+  expiresIn: number = 300,
 ): Promise<string> {
   const s3 = getS3Client(env);
   return getSignedUrl(
@@ -32,7 +32,7 @@ export async function generateUploadUrl(
       ContentType: contentType,
       ContentLength: sizeBytes,
     }),
-    { expiresIn }
+    { expiresIn },
   );
 }
 
@@ -42,7 +42,7 @@ export async function generateUploadUrl(
 export async function generateDownloadUrl(
   env: Env,
   key: string,
-  expiresIn: number = 3600
+  expiresIn: number = 3600,
 ): Promise<string> {
   const s3 = getS3Client(env);
   return getSignedUrl(
@@ -51,7 +51,7 @@ export async function generateDownloadUrl(
       Bucket: env.R2_BUCKET_NAME,
       Key: key,
     }),
-    { expiresIn }
+    { expiresIn },
   );
 }
 
@@ -62,7 +62,7 @@ export async function putObject(
   env: Env,
   key: string,
   body: ReadableStream | ArrayBuffer | string,
-  contentType: string
+  contentType: string,
 ): Promise<void> {
   await env.BUCKET.put(key, body, {
     httpMetadata: { contentType },

@@ -19,13 +19,15 @@ export const createDeviceSchema = z.object({
   avg_interval_seconds: z.number().int().positive().optional().default(300),
 });
 
-export const updateDeviceSchema = z.object({
-  name: z.string().min(1).optional(),
-  interval_seconds: z.number().int().positive().optional(),
-  enabled: z.boolean().optional(),
-}).refine(data => Object.keys(data).length > 0, {
-  message: 'No fields to update',
-});
+export const updateDeviceSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    interval_seconds: z.number().int().positive().optional(),
+    enabled: z.boolean().optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, {
+    message: 'No fields to update',
+  });
 
 // Image schemas
 export const createImageSchema = z.object({
@@ -55,10 +57,13 @@ export const listLogsSchema = z.object({
 // Partner schemas
 export const createPartnerSchema = z.object({
   email: z.string().email(),
-  permissions: z.object({
-    view_images: z.boolean().optional().default(true),
-    view_logs: z.boolean().optional().default(true),
-  }).optional().default({ view_images: true, view_logs: true }),
+  permissions: z
+    .object({
+      view_images: z.boolean().optional().default(true),
+      view_logs: z.boolean().optional().default(true),
+    })
+    .optional()
+    .default({ view_images: true, view_logs: true }),
 });
 
 export const acceptPartnerSchema = z.object({

@@ -18,8 +18,11 @@ async function createSession(userId: string, c: Context<{ Bindings: Env; Variabl
   const refreshToken = await generateRefreshToken(userId, c.env.JWT_SECRET, REFRESH_EXPIRY);
 
   setCookie(c, 'refresh_token', refreshToken, {
-    httpOnly: true, secure: true, sameSite: 'Strict',
-    maxAge: REFRESH_EXPIRY, path: '/',
+    httpOnly: true,
+    secure: true,
+    sameSite: 'Strict',
+    maxAge: REFRESH_EXPIRY,
+    path: '/',
   });
 
   return accessToken;
@@ -45,7 +48,10 @@ auth.post('/signup', async (c) => {
 
   const accessToken = await createSession(userId, c);
 
-  return c.json({ user: { id: userId, email, created_at: createdAt }, access_token: accessToken }, 201);
+  return c.json(
+    { user: { id: userId, email, created_at: createdAt }, access_token: accessToken },
+    201,
+  );
 });
 
 /**

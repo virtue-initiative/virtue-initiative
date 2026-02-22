@@ -11,12 +11,15 @@ import settings from './routes/settings';
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // Also remove X-API-Key from allowed headers since devices now use JWT
-app.use('/*', cors({
-  origin: '*', // Configure appropriately for production
-  allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization'],
-  credentials: true,
-}));
+app.use(
+  '/*',
+  cors({
+    origin: '*', // Configure appropriately for production
+    allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
+  }),
+);
 
 // Health check
 app.get('/', (c) => {
@@ -28,7 +31,7 @@ app.get('/', (c) => {
 });
 
 // Mount routes
-app.route('/', auth);  // auth handles /signup, /login, /logout, /token at its own paths
+app.route('/', auth); // auth handles /signup, /login, /logout, /token at its own paths
 app.route('/image', images);
 app.route('/log', logs);
 app.route('/device', devices);
@@ -38,10 +41,13 @@ app.route('/settings', settings);
 // Error handling
 app.onError((err, c) => {
   console.error('Unhandled error:', err);
-  return c.json({
-    error: 'Internal server error',
-    message: err.message,
-  }, 500);
+  return c.json(
+    {
+      error: 'Internal server error',
+      message: err.message,
+    },
+    500,
+  );
 });
 
 // 404 handler

@@ -28,23 +28,37 @@ images.post('/', authenticate, async (c) => {
   const r2Key = `user/${userId}/images/${imageId}.webp`;
   const createdAt = new Date().toISOString();
 
-  await createImage(c.env.DB, imageId, userId, device_id, r2Key, sha256, content_type, size_bytes, taken_at, createdAt);
+  await createImage(
+    c.env.DB,
+    imageId,
+    userId,
+    device_id,
+    r2Key,
+    sha256,
+    content_type,
+    size_bytes,
+    taken_at,
+    createdAt,
+  );
 
   // Update device activity
   await updateDeviceActivity(c.env.DB, device_id, createdAt);
 
   const uploadUrl = await generateUploadUrl(c.env, r2Key, content_type, size_bytes);
 
-  return c.json({
-    image: {
-      id: imageId,
-      status: 'pending_upload',
-      r2_key: r2Key,
-      taken_at,
-      created_at: createdAt,
+  return c.json(
+    {
+      image: {
+        id: imageId,
+        status: 'pending_upload',
+        r2_key: r2Key,
+        taken_at,
+        created_at: createdAt,
+      },
+      upload_url: uploadUrl,
     },
-    upload_url: uploadUrl,
-  }, 201);
+    201,
+  );
 });
 
 export default images;

@@ -10,7 +10,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:migrate": "wrangler d1 migrations apply bepure-db",
-    "db:migrate:local": "wrangler d1 migrations apply bepure-db --local"
+    "db:migrate:local": "wrangler d1 migrations apply bepure-db --local",
+    "format": "prettier --write \"src/**/*.{ts,json}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,json}\""
   },
   "keywords": [
     "cloudflare",
@@ -25,6 +27,7 @@
     "@types/node": "^25.3.0",
     "@types/uuid": "^10.0.0",
     "hono": "^4.12.1",
+    "prettier": "^3.8.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "3.2.4",

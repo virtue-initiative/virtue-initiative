@@ -24,24 +24,31 @@ const partners = new Hono<{ Bindings: Env; Variables: Variables }>();
 partners.post('/', authenticate, async (c) => {
   const parsed = createPartnerSchema.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
-  
+
   const userId = c.get('userId');
   const { email, permissions } = parsed.data;
-  
+
   const partnerUser = await findUserByEmail(c.env.DB, email);
   if (!partnerUser) return c.json({ error: 'User not found' }, 404);
-  
+
   const partnerUserId = partnerUser.id;
   if (partnerUserId === userId) return c.json({ error: 'Cannot add yourself as partner' }, 400);
-  
+
   const existing = await findPartnerByUsers(c.env.DB, userId, partnerUserId);
   if (existing) return c.json({ error: 'Partnership already exists' }, 409);
-  
+
   const partnerId = uuidv4();
   const createdAt = new Date().toISOString();
-  
-  await createPartner(c.env.DB, partnerId, userId, partnerUserId, JSON.stringify(permissions), createdAt);
-  
+
+  await createPartner(
+    c.env.DB,
+    partnerId,
+    userId,
+    partnerUserId,
+    JSON.stringify(permissions),
+    createdAt,
+  );
+
   return c.json({ id: partnerId, status: 'pending' }, 201);
 });
 
@@ -51,15 +58,15 @@ partners.post('/', authenticate, async (c) => {
 partners.post('/accept', authenticate, async (c) => {
   const parsed = acceptPartnerSchema.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
-  
+
   const userId = c.get('userId');
   const { id } = parsed.data;
-  
+
   const partnership = await findPartnerInvite(c.env.DB, id, userId);
   if (!partnership) return c.json({ error: 'Partnership invite not found' }, 404);
-  
+
   await acceptPartner(c.env.DB, id, new Date().toISOString());
-  
+
   return c.json({ id });
 });
 
@@ -68,21 +75,27 @@ partners.post('/accept', authenticate, async (c) => {
  */
 partners.get('/', authenticate, async (c) => {
   const userId = c.get('userId');
-  
+
   const { owned, asPartner } = await listPartners(c.env.DB, userId);
-  
-  const map = (role: string) => (p: { id: string; partner_email: string; status: string; permissions: string; created_at: string }) => ({    id: p.id,
-    partner_email: p.partner_email,
-    status: p.status,
-    permissions: JSON.parse(p.permissions),
-    role,
-    created_at: p.created_at,
-  });
-  
-  return c.json([
-    ...owned.map(map('owner')),
-    ...asPartner.map(map('partner')),
-  ]);
+
+  const map =
+    (role: string) =>
+    (p: {
+      id: string;
+      partner_email: string;
+      status: string;
+      permissions: string;
+      created_at: string;
+    }) => ({
+      id: p.id,
+      partner_email: p.partner_email,
+      status: p.status,
+      permissions: JSON.parse(p.permissions),
+      role,
+      created_at: p.created_at,
+    });
+
+  return c.json([...owned.map(map('owner')), ...asPartner.map(map('partner'))]);
 });
 
 /**
@@ -91,18 +104,23 @@ partners.get('/', authenticate, async (c) => {
 partners.patch('/:id', authenticate, async (c) => {
   const parsed = updatePartnerSchema.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
-  
+
   const userId = c.get('userId');
   const partnerId = c.req.param('id');
-  
+
   const partnership = await findPartnerByOwner(c.env.DB, partnerId, userId);
   if (!partnership) return c.json({ error: 'Partnership not found' }, 404);
-  
+
   const current = JSON.parse(partnership.permissions);
   const merged = { ...current, ...parsed.data.permissions };
-  
-  await updatePartnerPermissions(c.env.DB, partnerId, JSON.stringify(merged), new Date().toISOString());
-  
+
+  await updatePartnerPermissions(
+    c.env.DB,
+    partnerId,
+    JSON.stringify(merged),
+    new Date().toISOString(),
+  );
+
   return c.json({ id: partnerId, permissions: merged });
 });
 
@@ -112,10 +130,10 @@ partners.patch('/:id', authenticate, async (c) => {
 partners.delete('/:id', authenticate, async (c) => {
   const userId = c.get('userId');
   const partnerId = c.req.param('id');
-  
+
   const partnership = await findPartnerByOwner(c.env.DB, partnerId, userId);
   if (!partnership) return c.json({ error: 'Partnership not found' }, 404);
-  
+
   await deletePartner(c.env.DB, partnerId);
   return c.body(null, 204);
 });
