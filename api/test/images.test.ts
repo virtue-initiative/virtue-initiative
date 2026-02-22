@@ -33,7 +33,7 @@ describe('POST /image', () => {
       body: JSON.stringify({
         device_id: deviceId,
         sha256: VALID_SHA256,
-        content_type: 'image/jpeg',
+        content_type: 'image/webp',
         size_bytes: 204800,
         taken_at: new Date().toISOString(),
       }),

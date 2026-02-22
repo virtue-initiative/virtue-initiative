@@ -1,3 +1,4 @@
+import z from 'zod';
 import { Hono } from 'hono';
 import { v4 as uuidv4 } from 'uuid';
 import { Env, Variables } from '../types/bindings';
@@ -11,7 +12,7 @@ const partners = new Hono<{ Bindings: Env; Variables: Variables }>();
  */
 partners.post('/', authenticate, async (c) => {
   const parsed = createPartnerSchema.safeParse(await c.req.json());
-  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
   
   const userId = c.get('userId');
   const { email, permissions } = parsed.data;
@@ -43,7 +44,7 @@ partners.post('/', authenticate, async (c) => {
  */
 partners.post('/accept', authenticate, async (c) => {
   const parsed = acceptPartnerSchema.safeParse(await c.req.json());
-  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
   
   const userId = c.get('userId');
   const { id } = parsed.data;
@@ -99,7 +100,7 @@ partners.get('/', authenticate, async (c) => {
  */
 partners.patch('/:id', authenticate, async (c) => {
   const parsed = updatePartnerSchema.safeParse(await c.req.json());
-  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
   
   const userId = c.get('userId');
   const partnerId = c.req.param('id');

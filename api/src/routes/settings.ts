@@ -1,3 +1,4 @@
+import z from 'zod';
 import { Hono } from 'hono';
 import { Env, Variables } from '../types/bindings';
 import { authenticate } from '../middleware/auth';
@@ -12,7 +13,7 @@ const settings = new Hono<{ Bindings: Env; Variables: Variables }>();
  */
 settings.post('/', authenticate, async (c) => {
   const parsed = settingsSchema.safeParse(await c.req.json());
-  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
   
   const userId = c.get('userId');
   const updatedAt = new Date().toISOString();

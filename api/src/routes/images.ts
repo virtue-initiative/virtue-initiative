@@ -26,10 +26,6 @@ images.post('/', authenticate, async (c) => {
 
   const imageId = uuidv4();
 
-  if (content_type !== 'image/webp') {
-    return c.json({ error: 'Only image/webp content type is allowed' }, 400);
-  }
-
   const r2Key = `user/${userId}/images/${imageId}.webp`;
   const createdAt = new Date().toISOString();
 

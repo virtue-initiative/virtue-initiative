@@ -1,3 +1,4 @@
+import z from 'zod';
 import { Context, Hono } from 'hono';
 import { setCookie, deleteCookie, getCookie } from 'hono/cookie';
 import { v4 as uuidv4 } from 'uuid';
@@ -28,7 +29,7 @@ async function createSession(userId: string, c: Context<{ Bindings: Env; Variabl
  */
 auth.post('/signup', async (c) => {
   const parsed = signupSchema.safeParse(await c.req.json());
-  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
 
   const { email, password, name } = parsed.data;
 
@@ -53,7 +54,7 @@ auth.post('/signup', async (c) => {
  */
 auth.post('/login', async (c) => {
   const parsed = loginSchema.safeParse(await c.req.json());
-  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
 
   const { email, password } = parsed.data;
 

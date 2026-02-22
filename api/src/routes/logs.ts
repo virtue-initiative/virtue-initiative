@@ -1,3 +1,4 @@
+import z from 'zod';
 import { Hono } from 'hono';
 import { v4 as uuidv4 } from 'uuid';
 import { Env, Variables } from '../types/bindings';
@@ -12,7 +13,7 @@ const logs = new Hono<{ Bindings: Env; Variables: Variables }>();
  */
 logs.post('/', authenticate, async (c) => {
   const parsed = createLogSchema.safeParse(await c.req.json());
-  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
 
   const userId = c.get('userId');
   const { type, device_id, image_id, metadata } = parsed.data;
@@ -33,7 +34,7 @@ logs.post('/', authenticate, async (c) => {
  */
 logs.get('/', authenticate, async (c) => {
   const parsed = listLogsSchema.safeParse(c.req.query());
-  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
 
   const userId = c.get('userId');
   const { device_id, type, cursor, limit } = parsed.data;

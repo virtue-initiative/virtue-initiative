@@ -32,19 +32,19 @@ describe('JWT tokens', () => {
   const userId = 'user-123';
 
   it('generates and verifies an access token', async () => {
-    const token = await generateAccessToken(userId, secret, '15m');
+    const token = await generateAccessToken(userId, secret, 900);
     const payload = await verifyJWT(token, secret);
     expect(payload.sub).toBe(userId);
     expect(payload.type).toBe('access');
   });
 
   it('rejects a token signed with the wrong secret', async () => {
-    const token = await generateAccessToken(userId, secret, '15m');
+    const token = await generateAccessToken(userId, secret, 900);
     await expect(verifyJWT(token, 'wrong-secret')).rejects.toThrow();
   });
 
   it('rejects an expired token', async () => {
-    const token = await generateAccessToken(userId, secret, '1s');
+    const token = await generateAccessToken(userId, secret, 1);
     await new Promise((r) => setTimeout(r, 1500));
     await expect(verifyJWT(token, secret)).rejects.toThrow();
   });

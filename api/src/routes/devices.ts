@@ -1,3 +1,4 @@
+import z from 'zod';
 import { Hono } from 'hono';
 import { v4 as uuidv4 } from 'uuid';
 import { Env, Variables } from '../types/bindings';
@@ -11,7 +12,7 @@ const devices = new Hono<{ Bindings: Env; Variables: Variables }>();
  */
 devices.post('/', authenticate, async (c) => {
   const parsed = createDeviceSchema.safeParse(await c.req.json());
-  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
   
   const { name, platform, avg_interval_seconds } = parsed.data;
   const userId = c.get('userId');
@@ -61,7 +62,7 @@ devices.get('/', authenticate, async (c) => {
  */
 devices.patch('/:id', authenticate, async (c) => {
   const parsed = updateDeviceSchema.safeParse(await c.req.json());
-  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
   
   const userId = c.get('userId');
   const deviceId = c.req.param('id');
