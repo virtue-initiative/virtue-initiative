@@ -20,7 +20,7 @@ use uuid::Uuid;
 use bepure_client_core::{
     AuthClient, BufferedUpload, CaptureSchedulePolicy, CaptureScheduleState, FileTokenStore,
     ImageOutputFormat, ImagePipeline, PersistentQueue, RetryPolicy, TokenStore, UploadClient,
-    DEFAULT_BASE_API_URL,
+    resolve_base_api_url,
 };
 
 static CORE: OnceCell<AndroidCore> = OnceCell::new();
@@ -420,7 +420,8 @@ async fn register_device(
         avg_interval_seconds,
     };
 
-    let url = format!("{}/device", DEFAULT_BASE_API_URL);
+    let base_url = resolve_base_api_url();
+    let url = format!("{}/device", base_url);
     let response = client
         .post(url)
         .bearer_auth(access_token)
@@ -453,7 +454,8 @@ async fn send_log(
         metadata,
     };
 
-    let url = format!("{}/log", DEFAULT_BASE_API_URL);
+    let base_url = resolve_base_api_url();
+    let url = format!("{}/log", base_url);
     let response = client
         .post(url)
         .bearer_auth(access_token)

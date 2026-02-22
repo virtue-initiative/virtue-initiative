@@ -5,7 +5,7 @@ use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use bepure_client_core::DEFAULT_BASE_API_URL;
+use bepure_client_core::resolve_base_api_url;
 
 #[derive(Clone)]
 pub struct ApiClient {
@@ -21,7 +21,7 @@ impl ApiClient {
             .build()?;
 
         Ok(Self {
-            base_url: DEFAULT_BASE_API_URL.to_string(),
+            base_url: resolve_base_api_url(),
             client,
         })
     }

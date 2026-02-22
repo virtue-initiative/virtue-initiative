@@ -3,9 +3,9 @@ use std::time::Duration;
 
 use serde::de::DeserializeOwned;
 
-use crate::DEFAULT_BASE_API_URL;
 use crate::error::{CoreError, CoreResult};
 use crate::models::{LoginRequest, TokenResponse};
+use crate::resolve_base_api_url;
 use crate::token_store::TokenStore;
 
 #[derive(Clone, Debug)]
@@ -17,7 +17,7 @@ pub struct AuthClientConfig {
 impl Default for AuthClientConfig {
     fn default() -> Self {
         Self {
-            base_url: DEFAULT_BASE_API_URL.to_string(),
+            base_url: resolve_base_api_url(),
             timeout: Duration::from_secs(15),
         }
     }

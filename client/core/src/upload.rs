@@ -6,10 +6,10 @@ use rand::thread_rng;
 use reqwest::header::CONTENT_TYPE;
 use sha2::{Digest, Sha256};
 
-use crate::DEFAULT_BASE_API_URL;
 use crate::error::{CoreError, CoreResult};
 use crate::models::{CreateImageRequest, CreateImageResponse};
 use crate::queue::PersistentQueue;
+use crate::resolve_base_api_url;
 use crate::schedule::RetryPolicy;
 
 #[derive(Clone, Debug)]
@@ -22,7 +22,7 @@ pub struct UploadClientConfig {
 impl Default for UploadClientConfig {
     fn default() -> Self {
         Self {
-            base_url: DEFAULT_BASE_API_URL.to_string(),
+            base_url: resolve_base_api_url(),
             connect_timeout: Duration::from_secs(10),
             request_timeout: Duration::from_secs(30),
         }
