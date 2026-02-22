@@ -9,3 +9,16 @@ target/
 
 # Packaged build artifacts
 linux/dist/
+
+# Android/Gradle generated and local-only files
+android/.gradle/
+android/local.properties
+android/**/build/
+android/.cxx/
+android/captures/
+android/app/src/main/jniLibs/
+android/rust/target/
+android/.idea/
+android/*.iml
+android/*.jks
+android/*.keystore
