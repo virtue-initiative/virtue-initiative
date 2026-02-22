@@ -9,6 +9,7 @@ target/
 
 # Packaged build artifacts
 linux/dist/
+windows/dist/
 
 # macOS packaged build artifacts
 target/macos/
