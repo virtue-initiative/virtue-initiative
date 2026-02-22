@@ -10,6 +10,12 @@ target/
 # Packaged build artifacts
 linux/dist/
 
+# macOS packaged build artifacts
+target/macos/
+target/**/*.app/
+target/**/*.dmg
+**/.DS_Store
+
 # Android/Gradle generated and local-only files
 android/.gradle/
 android/local.properties

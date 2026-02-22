@@ -2,5 +2,6 @@
 members = [
   "core",
   "linux",
+  "mac",
 ]
 resolver = "2"
