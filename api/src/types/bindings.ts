@@ -6,12 +6,6 @@ export interface Env {
   // R2 Bucket (native Workers binding)
   BUCKET: R2Bucket;
 
-  // R2 S3-compatible API credentials (for presigned URLs)
-  R2_ACCOUNT_ID: string;
-  R2_ACCESS_KEY_ID: string;
-  R2_SECRET_ACCESS_KEY: string;
-  R2_BUCKET_NAME: string;
-
   // JWT Configuration
   JWT_SECRET: string;
 }

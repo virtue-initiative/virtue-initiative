@@ -91,25 +91,22 @@ Reads refresh token from cookie
 
 # Images (R2-backed)
 
-Images are uploaded via pre-signed URL directly to R2 — the Worker is not in the upload path.
+Images are uploaded directly through the Worker to R2.
 
 ## `POST /image`
 
-Creates image metadata and returns a presigned R2 PUT URL.
+Upload an image and create its metadata record.
 
 Requires: `Authorization: Bearer <access_token>`
 
-**Request**
+**Request** — `multipart/form-data`
 
-```json
-{
-  "device_id": "uuid",
-  "sha256": "hexhash",
-  "content_type": "image/png",
-  "size_bytes": 153221,
-  "taken_at": "2026-02-20T14:21:55Z"
-}
-```
+| Field | Type | Description |
+|-------|------|-------------|
+| `file` | File | Image binary |
+| `device_id` | string | UUID of the uploading device |
+| `sha256` | string | SHA-256 hex hash of the image |
+| `taken_at` | string | ISO-8601 UTC timestamp when the screenshot was taken |
 
 **Response 201**
 
@@ -117,16 +114,23 @@ Requires: `Authorization: Bearer <access_token>`
 {
   "image": {
     "id": "uuid",
-    "status": "pending_upload",
-    "r2_key": "user/{userId}/images/{imageId}.png",
+    "status": "uploaded",
+    "r2_key": "user/{userId}/images/{imageId}.webp",
     "taken_at": "2026-02-20T14:21:55Z",
     "created_at": "2026-02-20T14:22:00Z"
-  },
-  "upload_url": "https://<bucket>.<account>.r2.cloudflarestorage.com/...?X-Amz-Signature=..."
+  }
 }
 ```
 
-Client uploads directly to R2 via `PUT <upload_url>` with the binary body and matching `Content-Type`.
+---
+
+## `GET /image/:id`
+
+Download an image binary.
+
+Requires: `Authorization: Bearer <access_token>`
+
+**Response 200** — image binary with the appropriate `Content-Type` header.
 
 ---
 
@@ -193,7 +197,7 @@ Requires: `Authorization: Bearer <access_token>`
 }
 ```
 
-`image_url` is a presigned R2 GET URL (1 hour expiry). `next_cursor` is omitted when there are no more results.
+`image_url` is a URL to `GET /image/:id`. `next_cursor` is omitted when there are no more results.
 
 ---
 
@@ -456,7 +460,7 @@ All endpoints validate requests with Zod. Invalid requests return **400** with a
 
 * JWT for all endpoints (access token in `Authorization: Bearer` header).
 * Refresh token stored in httpOnly, secure, sameSite=Strict cookie.
-* All R2 uploads/downloads via short-lived presigned S3 URLs (5 min upload, 1 hr download).
+* Images uploaded and served through the Worker (never directly exposed from R2).
 * Store SHA-256 and verify after upload.
 * Immutable images (no PATCH/DELETE on images).
 * Passwords hashed with Argon2id.

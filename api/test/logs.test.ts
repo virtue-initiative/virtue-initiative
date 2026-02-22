@@ -4,8 +4,6 @@ import { SELF } from 'cloudflare:test';
 import { BASE, clearDB, signupAndGetToken, authHeaders } from './helpers';
 
 vi.mock('../src/lib/r2', () => ({
-  generateUploadUrl: vi.fn().mockResolvedValue('https://r2.example.com/upload?sig=fake'),
-  generateDownloadUrl: vi.fn().mockResolvedValue('https://r2.example.com/download?sig=fake'),
   putObject: vi.fn().mockResolvedValue(undefined),
   objectExists: vi.fn().mockResolvedValue(false),
 }));

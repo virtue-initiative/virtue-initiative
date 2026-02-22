@@ -2,31 +2,49 @@ import { Hono } from 'hono';
 import { v4 as uuidv4 } from 'uuid';
 import { Env, Variables } from '../types/bindings';
 import { authenticate } from '../middleware/auth';
-import { generateUploadUrl } from '../lib/r2';
-import { createImageSchema } from '../lib/schemas';
+import { putObject, getObject } from '../lib/r2';
+import { uploadImageSchema } from '../lib/schemas';
 import z from 'zod';
-import { findDevice, createImage, updateDeviceActivity } from '../lib/db';
+import { findDevice, createImage, updateDeviceActivity, findImageById } from '../lib/db';
 
 const images = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 /**
- * POST /image - Create image metadata and return a presigned R2 upload URL
+ * POST /image - Upload image binary and create metadata record
  */
 images.post('/', authenticate, async (c) => {
-  const parsed = createImageSchema.safeParse(await c.req.json());
+  let formData: FormData;
+  try {
+    formData = await c.req.formData();
+  } catch {
+    return c.json({ error: 'Expected multipart/form-data' }, 400);
+  }
+
+  const file = formData.get('file');
+  if (!(file instanceof File)) {
+    return c.json({ error: { fieldErrors: { file: ['Required'] } } }, 400);
+  }
+
+  const parsed = uploadImageSchema.safeParse({
+    device_id: formData.get('device_id'),
+    sha256: formData.get('sha256'),
+    taken_at: formData.get('taken_at'),
+  });
   if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
 
   const userId = c.get('userId');
-  const { device_id, sha256, content_type, size_bytes, taken_at } = parsed.data;
+  const { device_id, sha256, taken_at } = parsed.data;
+  const content_type = file.type || 'application/octet-stream';
+  const size_bytes = file.size;
 
-  // Verify device belongs to user
   const device = await findDevice(c.env.DB, device_id, userId);
   if (!device) return c.json({ error: 'Device not found' }, 404);
 
   const imageId = uuidv4();
-
   const r2Key = `user/${userId}/images/${imageId}.webp`;
   const createdAt = new Date().toISOString();
+
+  await putObject(c.env, r2Key, await file.arrayBuffer(), content_type);
 
   await createImage(
     c.env.DB,
@@ -41,24 +59,38 @@ images.post('/', authenticate, async (c) => {
     createdAt,
   );
 
-  // Update device activity
   await updateDeviceActivity(c.env.DB, device_id, createdAt);
-
-  const uploadUrl = await generateUploadUrl(c.env, r2Key, content_type, size_bytes);
 
   return c.json(
     {
       image: {
         id: imageId,
-        status: 'pending_upload',
+        status: 'uploaded',
         r2_key: r2Key,
         taken_at,
         created_at: createdAt,
       },
-      upload_url: uploadUrl,
     },
     201,
   );
+});
+
+/**
+ * GET /image/:id - Download an image
+ */
+images.get('/:id', authenticate, async (c) => {
+  const userId = c.get('userId');
+  const imageId = c.req.param('id');
+
+  const image = await findImageById(c.env.DB, imageId);
+  if (!image || image.user_id !== userId) return c.json({ error: 'Not found' }, 404);
+
+  const object = await getObject(c.env, image.r2_key);
+  if (!object) return c.json({ error: 'Not found' }, 404);
+
+  return new Response(object.body, {
+    headers: { 'Content-Type': image.content_type },
+  });
 });
 
 export default images;

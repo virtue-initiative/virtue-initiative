@@ -30,11 +30,9 @@ export const updateDeviceSchema = z
   });
 
 // Image schemas
-export const createImageSchema = z.object({
+export const uploadImageSchema = z.object({
   device_id: z.string().min(1),
   sha256: z.string().regex(/^[0-9a-f]{64}$/, 'Must be a valid SHA-256 hex string'),
-  content_type: z.string().regex(/^image\//),
-  size_bytes: z.number().int().positive(),
   taken_at: z.iso.datetime(),
 });
 
@@ -88,7 +86,7 @@ export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type CreateDeviceInput = z.infer<typeof createDeviceSchema>;
 export type UpdateDeviceInput = z.infer<typeof updateDeviceSchema>;
-export type CreateImageInput = z.infer<typeof createImageSchema>;
+export type UploadImageInput = z.infer<typeof uploadImageSchema>;
 export type CreateLogInput = z.infer<typeof createLogSchema>;
 export type ListLogsInput = z.infer<typeof listLogsSchema>;
 export type CreatePartnerInput = z.infer<typeof createPartnerSchema>;

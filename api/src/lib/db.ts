@@ -120,7 +120,7 @@ export async function createImage(
   return db
     .prepare(
       `INSERT INTO images (id, user_id, device_id, r2_key, sha256, content_type, size_bytes, status, taken_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_upload', ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'uploaded', ?, ?)`,
     )
     .bind(id, userId, deviceId, r2Key, sha256, contentType, sizeBytes, takenAt, createdAt)
     .run();
@@ -128,9 +128,9 @@ export async function createImage(
 
 export async function findImageById(db: D1Database, imageId: string) {
   return db
-    .prepare('SELECT r2_key FROM images WHERE id = ?')
+    .prepare('SELECT r2_key, user_id, content_type FROM images WHERE id = ?')
     .bind(imageId)
-    .first<{ r2_key: string }>();
+    .first<{ r2_key: string; user_id: string; content_type: string }>();
 }
 
 export async function createLog(
