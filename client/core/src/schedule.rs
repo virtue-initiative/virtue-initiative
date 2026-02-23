@@ -2,9 +2,25 @@ use std::time::Duration;
 
 use rand::Rng;
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct CaptureScheduleState {
     pub consecutive_failures: u32,
+    pub first_capture_pending: bool,
+}
+
+impl CaptureScheduleState {
+    pub fn new() -> Self {
+        Self {
+            consecutive_failures: 0,
+            first_capture_pending: true,
+        }
+    }
+}
+
+impl Default for CaptureScheduleState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -33,6 +49,12 @@ impl CaptureSchedulePolicy {
         last_capture_succeeded: bool,
         rng: &mut R,
     ) -> Duration {
+        if state.first_capture_pending {
+            state.first_capture_pending = false;
+            state.consecutive_failures = 0;
+            return Duration::ZERO;
+        }
+
         if last_capture_succeeded {
             state.consecutive_failures = 0;
             return apply_jitter(self.base_interval, self.jitter_ratio, rng);
@@ -97,6 +119,8 @@ fn apply_jitter<R: Rng + ?Sized>(base: Duration, jitter_ratio: f64, rng: &mut R)
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use rand::SeedableRng;
     use rand::rngs::StdRng;
 
@@ -111,6 +135,7 @@ mod tests {
         };
         let mut state = CaptureScheduleState::default();
 
+        let _immediate = policy.next_delay(&mut state, true, &mut rng);
         let first = policy.next_delay(&mut state, false, &mut rng);
         let second = policy.next_delay(&mut state, false, &mut rng);
 
@@ -126,11 +151,23 @@ mod tests {
         };
         let mut state = CaptureScheduleState::default();
 
+        let _immediate = policy.next_delay(&mut state, true, &mut rng);
         let _ = policy.next_delay(&mut state, false, &mut rng);
         let success = policy.next_delay(&mut state, true, &mut rng);
 
         assert_eq!(success, policy.base_interval);
         assert_eq!(state.consecutive_failures, 0);
+    }
+
+    #[test]
+    fn first_capture_delay_is_zero() {
+        let mut rng = StdRng::seed_from_u64(11);
+        let policy = CaptureSchedulePolicy::default();
+        let mut state = CaptureScheduleState::default();
+
+        let first = policy.next_delay(&mut state, true, &mut rng);
+        assert_eq!(first, Duration::ZERO);
+        assert!(!state.first_capture_pending);
     }
 
     #[test]

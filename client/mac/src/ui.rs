@@ -10,6 +10,13 @@ pub struct LoginInput {
     pub password: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoggedInAction {
+    Close,
+    RestartDaemon,
+    Logout,
+}
+
 pub fn prompt_login() -> Result<Option<LoginInput>> {
     let script = r#"
 set emailPrompt to display dialog "BePure login" default answer "" buttons {"Cancel", "Next"} default button "Next"
@@ -36,11 +43,24 @@ return emailValue & "__BEPURE_SPLIT__" & passwordValue
     Ok(Some(LoginInput { email, password }))
 }
 
-pub fn prompt_logged_in_action(device_id: &str) -> Result<Option<bool>> {
-    let escaped_id = apple_script_escape(device_id);
+pub fn prompt_logged_in_action(
+    email: &str,
+    device_id: &str,
+    screenshot_permission: &str,
+    daemon_status_updated_at: Option<&str>,
+    daemon_last_error: Option<&str>,
+) -> Result<Option<LoggedInAction>> {
+    let message = format!(
+        "Signed in as {email}.\nDevice id: {device_id}\n\nDaemon status:\nScreen Recording permission: {screenshot_permission}\nLast status update: {}\nLast daemon error: {}",
+        daemon_status_updated_at.unwrap_or("<none>"),
+        daemon_last_error
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("<none>")
+    );
+    let escaped = apple_script_escape(&message);
     let script = format!(
         r#"
-set dialogResult to display dialog "Signed in.\nDevice id: {escaped_id}" buttons {{"Close", "Logout"}} default button "Close"
+set dialogResult to display dialog "{escaped}" buttons {{"Close", "Restart daemon", "Logout"}} default button "Close"
 return button returned of dialogResult
 "#
     );
@@ -49,11 +69,40 @@ return button returned of dialogResult
         return Ok(None);
     };
 
-    match raw.trim() {
-        "Logout" => Ok(Some(true)),
-        "Close" => Ok(Some(false)),
-        _ => Ok(None),
-    }
+    Ok(parse_logged_in_action(&raw))
+}
+
+pub fn prompt_permission_issue_action(
+    email: &str,
+    device_id: &str,
+    screenshot_permission: &str,
+    daemon_status_updated_at: Option<&str>,
+    last_error: Option<&str>,
+) -> Result<Option<LoggedInAction>> {
+    let mut message = format!(
+        "Signed in as {email}.\nDevice id: {device_id}\n\nDaemon status:\nScreen Recording permission: {screenshot_permission}\nLast status update: {}\nLast daemon error: {}",
+        daemon_status_updated_at.unwrap_or("<none>"),
+        last_error
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("<none>")
+    );
+    message.push_str(
+        "\n\nScreen Recording permission appears to be missing for the BePure background service.\n\nOpen System Settings > Privacy & Security > Screen Recording, enable BePure, then click Restart daemon. Restart is required even if you selected Quit & Reopen earlier.",
+    );
+
+    let escaped = apple_script_escape(&message);
+    let script = format!(
+        r#"
+set dialogResult to display dialog "{escaped}" buttons {{"Close", "Restart daemon", "Logout"}} default button "Restart daemon" with icon caution
+return button returned of dialogResult
+"#
+    );
+
+    let Some(raw) = run_script_allow_cancel(&script)? else {
+        return Ok(None);
+    };
+
+    Ok(parse_logged_in_action(&raw))
 }
 
 pub fn show_info(message: &str) -> Result<()> {
@@ -114,4 +163,13 @@ fn apple_script_escape(input: &str) -> String {
         .replace('"', "\\\"")
         .replace('\r', " ")
         .replace('\n', "\\n")
+}
+
+fn parse_logged_in_action(raw: &str) -> Option<LoggedInAction> {
+    match raw.trim() {
+        "Close" => Some(LoggedInAction::Close),
+        "Restart daemon" => Some(LoggedInAction::RestartDaemon),
+        "Logout" => Some(LoggedInAction::Logout),
+        _ => None,
+    }
 }

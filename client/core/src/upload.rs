@@ -1,8 +1,11 @@
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use chrono::{Duration as ChronoDuration, SecondsFormat, Utc};
 use rand::thread_rng;
 use reqwest::multipart::{Form, Part};
+use serde::Serialize;
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::error::{CoreError, CoreResult};
@@ -34,6 +37,8 @@ pub struct QueueProcessReport {
     pub retried: usize,
     pub dropped: usize,
     pub remaining: usize,
+    pub logs_sent: usize,
+    pub log_failures: usize,
     pub last_error: Option<String>,
 }
 
@@ -133,9 +138,30 @@ impl UploadClient {
                 )
                 .await
             {
-                Ok(_) => {
+                Ok(created_image) => {
                     queue.pop_front()?;
                     report.uploaded += 1;
+
+                    let mut metadata = BTreeMap::new();
+                    metadata.insert("reason".to_string(), json!("image_uploaded"));
+                    metadata.insert("buffered_upload_id".to_string(), json!(next_item.id));
+                    if let Err(err) = self
+                        .send_log(
+                            access_token,
+                            "screenshot",
+                            &next_item.device_id,
+                            Some(&created_image.image.id),
+                            metadata,
+                        )
+                        .await
+                    {
+                        report.log_failures += 1;
+                        report.last_error.get_or_insert_with(|| {
+                            format!("failed posting upload success log: {err}")
+                        });
+                    } else {
+                        report.logs_sent += 1;
+                    }
                 }
                 Err(err) => {
                     report.last_error = Some(err.to_string());
@@ -164,6 +190,29 @@ impl UploadClient {
                     } else {
                         queue.pop_front()?;
                         report.dropped += 1;
+
+                        let mut metadata = BTreeMap::new();
+                        metadata.insert("reason".to_string(), json!("upload_retries_exhausted"));
+                        metadata.insert("buffered_upload_id".to_string(), json!(next_item.id));
+                        metadata.insert("attempts".to_string(), json!(next_attempt));
+                        metadata.insert("error".to_string(), json!(err.to_string()));
+                        if let Err(log_err) = self
+                            .send_log(
+                                access_token,
+                                "missed_capture",
+                                &next_item.device_id,
+                                None,
+                                metadata,
+                            )
+                            .await
+                        {
+                            report.log_failures += 1;
+                            report.last_error.get_or_insert_with(|| {
+                                format!("failed posting upload failure log: {log_err}")
+                            });
+                        } else {
+                            report.logs_sent += 1;
+                        }
                     }
                 }
             }
@@ -171,6 +220,36 @@ impl UploadClient {
 
         report.remaining = queue.len()?;
         Ok(report)
+    }
+}
+
+impl UploadClient {
+    async fn send_log(
+        &self,
+        access_token: &str,
+        event_type: &str,
+        device_id: &str,
+        image_id: Option<&str>,
+        metadata: BTreeMap<String, Value>,
+    ) -> CoreResult<()> {
+        let request = CreateLogRequest {
+            event_type: event_type.to_string(),
+            device_id: device_id.to_string(),
+            image_id: image_id.map(ToString::to_string),
+            metadata,
+        };
+
+        let url = format!("{}/log", self.config.base_url);
+        let response = self
+            .client
+            .post(url)
+            .bearer_auth(access_token)
+            .json(&request)
+            .send()
+            .await?;
+
+        let _: CreatedLogResponse = decode_response(response).await?;
+        Ok(())
     }
 }
 
@@ -225,6 +304,19 @@ fn file_name_for_content_type(content_type: &str) -> String {
 
     format!("capture.{extension}")
 }
+
+#[derive(Clone, Debug, Serialize)]
+struct CreateLogRequest {
+    #[serde(rename = "type")]
+    event_type: String,
+    device_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    image_id: Option<String>,
+    metadata: BTreeMap<String, Value>,
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+struct CreatedLogResponse {}
 
 #[cfg(test)]
 mod tests {

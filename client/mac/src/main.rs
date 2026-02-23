@@ -22,7 +22,9 @@ use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEv
 use bepure_client_core::{AuthClient, FileTokenStore, TokenStore};
 
 use crate::api::ApiClient;
-use crate::config::{ClientPaths, load_state, save_state};
+use crate::config::{
+    ClientPaths, ScreenshotPermissionStatus, load_daemon_status, load_state, save_state,
+};
 
 #[derive(Debug, Parser)]
 #[command(name = "bepure-mac-client")]
@@ -136,13 +138,38 @@ fn run_tray(paths: ClientPaths) -> Result<()> {
 }
 
 fn open_app_dialog(paths: &ClientPaths, runtime: &Runtime) -> Result<()> {
-    if is_logged_in(paths)? {
-        let state = load_state(&paths.state_file)?;
-        let device_id = state.device_id.as_deref().unwrap_or("<unknown>");
+    let app_status = collect_status(paths)?;
+    if app_status.logged_in {
+        let email = app_status.email.as_deref().unwrap_or("<unknown>");
+        let device_id = app_status.device_id.as_deref().unwrap_or("<unknown>");
+        let action = if app_status.screenshot_permission == ScreenshotPermissionStatus::Missing {
+            ui::prompt_permission_issue_action(
+                email,
+                device_id,
+                app_status.screenshot_permission.as_str(),
+                app_status.daemon_status_updated_at.as_deref(),
+                app_status.daemon_last_error.as_deref(),
+            )?
+        } else {
+            ui::prompt_logged_in_action(
+                email,
+                device_id,
+                app_status.screenshot_permission.as_str(),
+                app_status.daemon_status_updated_at.as_deref(),
+                app_status.daemon_last_error.as_deref(),
+            )?
+        };
 
-        if ui::prompt_logged_in_action(device_id)?.unwrap_or(false) {
-            runtime.block_on(logout(paths))?;
-            ui::show_info("Signed out. Monitoring disabled on this device.")?;
+        match action {
+            Some(ui::LoggedInAction::RestartDaemon) => {
+                restart_daemon(paths)?;
+                ui::show_info("Background service restarted.")?;
+            }
+            Some(ui::LoggedInAction::Logout) => {
+                runtime.block_on(logout(paths))?;
+                ui::show_info("Signed out. Monitoring disabled on this device.")?;
+            }
+            _ => {}
         }
         return Ok(());
     }
@@ -154,6 +181,11 @@ fn open_app_dialog(paths: &ClientPaths, runtime: &Runtime) -> Result<()> {
     let device_id = runtime.block_on(login(paths, &input.email, &input.password))?;
     ui::show_info(&format!("Signed in.\nDevice id: {device_id}"))?;
     Ok(())
+}
+
+fn restart_daemon(paths: &ClientPaths) -> Result<()> {
+    let exe = std::env::current_exe().context("failed to resolve current executable")?;
+    launch_agent::ensure_agent_running(paths, &exe).context("failed to restart background service")
 }
 
 async fn login(paths: &ClientPaths, email: &str, password: &str) -> Result<String> {
@@ -185,6 +217,7 @@ async fn login(paths: &ClientPaths, email: &str, password: &str) -> Result<Strin
     let mut new_state = state;
     new_state.device_id = Some(registration.id.clone());
     new_state.monitoring_enabled = true;
+    new_state.email = Some(email.to_string());
     save_state(&paths.state_file, &new_state)?;
 
     if let Ok(exe) = std::env::current_exe() {
@@ -216,30 +249,76 @@ async fn logout(paths: &ClientPaths) -> Result<()> {
     token_store.clear_access_token()?;
     state.monitoring_enabled = false;
     state.device_id = None;
+    state.email = None;
     save_state(&paths.state_file, &state)?;
     Ok(())
 }
 
-fn is_logged_in(paths: &ClientPaths) -> Result<bool> {
-    let state = load_state(&paths.state_file)?;
-    let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&paths.token_file));
-    let logged_in = token_store.get_access_token()?.is_some() && state.device_id.is_some();
-    Ok(logged_in)
-}
-
 fn status(paths: ClientPaths) -> Result<()> {
-    let state = load_state(&paths.state_file)?;
-    let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&paths.token_file));
-    let logged_in = token_store.get_access_token()?.is_some();
+    let app_status = collect_status(&paths)?;
 
-    println!("logged_in: {}", logged_in);
-    println!("monitoring_enabled: {}", state.monitoring_enabled);
+    println!("state: {}", app_status.state_label());
+    println!("logged_in: {}", app_status.logged_in);
+    println!("monitoring_enabled: {}", app_status.monitoring_enabled);
+    println!("email: {}", app_status.email.as_deref().unwrap_or("<none>"));
     println!(
         "device_id: {}",
-        state.device_id.as_deref().unwrap_or("<none>")
+        app_status.device_id.as_deref().unwrap_or("<none>")
+    );
+    println!(
+        "screenshot_permission: {}",
+        app_status.screenshot_permission.as_str()
+    );
+    println!(
+        "daemon_last_error: {}",
+        app_status.daemon_last_error.as_deref().unwrap_or("<none>")
+    );
+    println!(
+        "daemon_status_updated_at: {}",
+        app_status.daemon_status_updated_at.as_deref().unwrap_or("<none>")
     );
     println!("timestamp: {}", Utc::now().to_rfc3339());
     Ok(())
+}
+
+#[derive(Debug)]
+struct AppStatus {
+    logged_in: bool,
+    monitoring_enabled: bool,
+    email: Option<String>,
+    device_id: Option<String>,
+    screenshot_permission: ScreenshotPermissionStatus,
+    daemon_last_error: Option<String>,
+    daemon_status_updated_at: Option<String>,
+}
+
+impl AppStatus {
+    fn state_label(&self) -> &'static str {
+        if !self.logged_in {
+            "logged_out"
+        } else if self.screenshot_permission == ScreenshotPermissionStatus::Missing {
+            "permissions_required"
+        } else {
+            "ok"
+        }
+    }
+}
+
+fn collect_status(paths: &ClientPaths) -> Result<AppStatus> {
+    let state = load_state(&paths.state_file)?;
+    let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&paths.token_file));
+    let logged_in = token_store.get_access_token()?.is_some() && state.device_id.is_some();
+    let daemon_status = load_daemon_status(&paths.daemon_status_file)?;
+
+    Ok(AppStatus {
+        logged_in,
+        monitoring_enabled: state.monitoring_enabled,
+        email: state.email,
+        device_id: state.device_id,
+        screenshot_permission: daemon_status.screenshot_permission,
+        daemon_last_error: daemon_status.last_error,
+        daemon_status_updated_at: daemon_status.updated_at,
+    })
 }
 
 fn build_tray_icon() -> Result<Icon> {

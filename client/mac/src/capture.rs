@@ -5,10 +5,26 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result, anyhow};
 use uuid::Uuid;
 
+#[link(name = "ApplicationServices", kind = "framework")]
+unsafe extern "C" {
+    fn CGPreflightScreenCaptureAccess() -> bool;
+    fn CGRequestScreenCaptureAccess() -> bool;
+}
+
 pub fn capture_screen() -> Result<Vec<u8>> {
     run_capture_command("/usr/sbin/screencapture", &["-x", "-t", "png"])
         .or_else(|_| run_capture_command("screencapture", &["-x", "-t", "png"]))
         .with_context(|| "screencapture failed (grant Screen Recording permission in macOS)")
+}
+
+pub fn has_screen_capture_access() -> bool {
+    // SAFETY: CoreGraphics API with no pointers and no preconditions beyond process context.
+    unsafe { CGPreflightScreenCaptureAccess() }
+}
+
+pub fn request_screen_capture_access() -> bool {
+    // SAFETY: CoreGraphics API with no pointers and no preconditions beyond process context.
+    unsafe { CGRequestScreenCaptureAccess() }
 }
 
 fn run_capture_command(cmd: &str, args: &[&str]) -> Result<Vec<u8>> {

@@ -88,10 +88,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
             }
         };
 
-        let processed = match pipeline
-            .process(&raw_capture, ImageOutputFormat::Webp)
-            .or_else(|_| pipeline.process(&raw_capture, ImageOutputFormat::Jpeg))
-        {
+        let processed = match pipeline.process(&raw_capture, ImageOutputFormat::Webp) {
             Ok(output) => output,
             Err(err) => {
                 last_cycle_success = false;
@@ -121,14 +118,6 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
         {
             Ok(report) => {
                 last_cycle_success = report.last_error.is_none();
-                if report.dropped > 0 {
-                    let mut metadata = BTreeMap::new();
-                    metadata.insert("reason".to_string(), json!("upload_retries_exhausted"));
-                    metadata.insert("dropped".to_string(), json!(report.dropped));
-                    let _ = api_client
-                        .send_log(&access_token, "missed_capture", &device_id, None, metadata)
-                        .await;
-                }
             }
             Err(err) => {
                 last_cycle_success = false;

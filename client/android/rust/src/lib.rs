@@ -298,10 +298,7 @@ pub extern "system" fn Java_codes_anb_bepure_NativeBridge_nativeProcessCapture(
                 .device_id
                 .ok_or_else(|| anyhow!("device id missing"))?;
 
-            let processed = core
-                .pipeline
-                .process(&bytes, ImageOutputFormat::Webp)
-                .or_else(|_| core.pipeline.process(&bytes, ImageOutputFormat::Jpeg))?;
+            let processed = core.pipeline.process(&bytes, ImageOutputFormat::Webp)?;
 
             let item = BufferedUpload::new(
                 Uuid::new_v4().to_string(),

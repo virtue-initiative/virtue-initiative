@@ -16,8 +16,10 @@ use bepure_client_core::{
 };
 
 use crate::api::ApiClient;
-use crate::capture::capture_screen;
-use crate::config::{ClientPaths, load_state};
+use crate::capture::{capture_screen, has_screen_capture_access, request_screen_capture_access};
+use crate::config::{
+    ClientPaths, ScreenshotPermissionStatus, load_daemon_status, load_state, save_daemon_status,
+};
 
 pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     paths.ensure_dirs()?;
@@ -33,6 +35,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
 
     let mut schedule_state = CaptureScheduleState::default();
     let mut last_cycle_success = true;
+    let mut permission_prompt_requested = false;
 
     loop {
         let state = load_state(&paths.state_file)?;
@@ -74,24 +77,51 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
         let delay = policy.next_delay(&mut schedule_state, last_cycle_success, &mut rng);
         sleep(delay).await;
 
+        if !has_screen_capture_access() {
+            last_cycle_success = false;
+            if !permission_prompt_requested {
+                let _ = request_screen_capture_access();
+                permission_prompt_requested = true;
+            }
+            let error_text = "screen recording permission missing for daemon process".to_string();
+            update_daemon_status(
+                paths,
+                ScreenshotPermissionStatus::Missing,
+                Some(error_text.clone()),
+            );
+            let mut metadata = BTreeMap::new();
+            metadata.insert("reason".to_string(), json!("permission_missing"));
+            metadata.insert("error".to_string(), json!(error_text));
+            let _ = api_client
+                .send_log(&access_token, "missed_capture", &device_id, None, metadata)
+                .await;
+            continue;
+        }
+        permission_prompt_requested = false;
+
         let raw_capture = match capture_screen() {
             Ok(bytes) => bytes,
             Err(err) => {
                 last_cycle_success = false;
+                let error_text = format!("{err:#}");
+                let screenshot_permission = if is_permission_missing_error(&error_text) {
+                    ScreenshotPermissionStatus::Missing
+                } else {
+                    ScreenshotPermissionStatus::Unknown
+                };
+                update_daemon_status(paths, screenshot_permission, Some(error_text.clone()));
                 let mut metadata = BTreeMap::new();
                 metadata.insert("reason".to_string(), json!("capture_failed"));
-                metadata.insert("error".to_string(), json!(format!("{err:#}")));
+                metadata.insert("error".to_string(), json!(error_text));
                 let _ = api_client
                     .send_log(&access_token, "missed_capture", &device_id, None, metadata)
                     .await;
                 continue;
             }
         };
+        update_daemon_status(paths, ScreenshotPermissionStatus::Granted, None);
 
-        let processed = match pipeline
-            .process(&raw_capture, ImageOutputFormat::Webp)
-            .or_else(|_| pipeline.process(&raw_capture, ImageOutputFormat::Jpeg))
-        {
+        let processed = match pipeline.process(&raw_capture, ImageOutputFormat::Webp) {
             Ok(output) => output,
             Err(err) => {
                 last_cycle_success = false;
@@ -121,14 +151,6 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
         {
             Ok(report) => {
                 last_cycle_success = report.last_error.is_none();
-                if report.dropped > 0 {
-                    let mut metadata = BTreeMap::new();
-                    metadata.insert("reason".to_string(), json!("upload_retries_exhausted"));
-                    metadata.insert("dropped".to_string(), json!(report.dropped));
-                    let _ = api_client
-                        .send_log(&access_token, "missed_capture", &device_id, None, metadata)
-                        .await;
-                }
             }
             Err(err) => {
                 last_cycle_success = false;
@@ -141,4 +163,24 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
             }
         }
     }
+}
+
+fn update_daemon_status(
+    paths: &ClientPaths,
+    screenshot_permission: ScreenshotPermissionStatus,
+    last_error: Option<String>,
+) {
+    let mut status = load_daemon_status(&paths.daemon_status_file).unwrap_or_default();
+    status.screenshot_permission = screenshot_permission;
+    status.last_error = last_error;
+    status.updated_at = Some(Utc::now().to_rfc3339());
+    let _ = save_daemon_status(&paths.daemon_status_file, &status);
+}
+
+fn is_permission_missing_error(error_text: &str) -> bool {
+    let normalized = error_text.to_ascii_lowercase();
+    normalized.contains("screen recording")
+        || normalized.contains("not authorized")
+        || normalized.contains("operation not permitted")
+        || normalized.contains("permission denied")
 }
