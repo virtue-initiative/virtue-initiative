@@ -1,9 +1,8 @@
 use std::time::Duration;
 
-use base64::Engine;
-use chrono::{Duration as ChronoDuration, Utc};
+use chrono::{Duration as ChronoDuration, SecondsFormat, Utc};
 use rand::thread_rng;
-use reqwest::header::CONTENT_TYPE;
+use reqwest::multipart::{Form, Part};
 use sha2::{Digest, Sha256};
 
 use crate::error::{CoreError, CoreResult};
@@ -58,77 +57,46 @@ impl UploadClient {
         Ok(Self { client, config })
     }
 
-    pub async fn create_signed_upload_url(
+    pub async fn upload_image(
         &self,
         access_token: &str,
         request: &CreateImageRequest,
+        payload: &[u8],
+        content_type: &str,
     ) -> CoreResult<CreateImageResponse> {
+        let computed_sha256 = sha256_hex(payload);
+        if !computed_sha256.eq_ignore_ascii_case(&request.sha256) {
+            return Err(CoreError::ChecksumMismatch {
+                expected: request.sha256.clone(),
+                actual: computed_sha256,
+            });
+        }
+
+        let file_name = file_name_for_content_type(content_type);
+        let file_part = Part::bytes(payload.to_vec())
+            .file_name(file_name)
+            .mime_str(content_type)?;
+        let form = Form::new()
+            .text("device_id", request.device_id.clone())
+            .text("sha256", request.sha256.clone())
+            .text(
+                "taken_at",
+                request
+                    .taken_at
+                    .to_rfc3339_opts(SecondsFormat::Millis, true),
+            )
+            .part("file", file_part);
+
         let url = format!("{}/image", self.config.base_url);
         let response = self
             .client
             .post(url)
             .bearer_auth(access_token)
-            .json(request)
+            .multipart(form)
             .send()
             .await?;
 
         decode_response(response).await
-    }
-
-    pub async fn upload_to_signed_url(
-        &self,
-        upload_url: &str,
-        payload: &[u8],
-        content_type: &str,
-        expected_sha256_hex: &str,
-    ) -> CoreResult<()> {
-        let computed_sha256 = sha256_hex(payload);
-        if !computed_sha256.eq_ignore_ascii_case(expected_sha256_hex) {
-            return Err(CoreError::ChecksumMismatch {
-                expected: expected_sha256_hex.to_string(),
-                actual: computed_sha256,
-            });
-        }
-
-        let checksum_b64 = sha256_base64(payload);
-
-        let response = self
-            .client
-            .put(upload_url)
-            .header(CONTENT_TYPE, content_type)
-            .header("x-amz-checksum-sha256", checksum_b64)
-            .body(payload.to_vec())
-            .send()
-            .await?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(CoreError::UnexpectedResponse { status, body });
-        }
-
-        Ok(())
-    }
-
-    pub async fn create_and_upload(
-        &self,
-        access_token: &str,
-        request: CreateImageRequest,
-        payload: &[u8],
-    ) -> CoreResult<CreateImageResponse> {
-        let created = self
-            .create_signed_upload_url(access_token, &request)
-            .await?;
-
-        self.upload_to_signed_url(
-            &created.upload_url,
-            payload,
-            &request.content_type,
-            &request.sha256,
-        )
-        .await?;
-
-        Ok(created)
     }
 
     pub async fn process_upload_queue(
@@ -153,13 +121,16 @@ impl UploadClient {
             let request = CreateImageRequest {
                 device_id: next_item.device_id.clone(),
                 sha256: next_item.sha256_hex.clone(),
-                content_type: next_item.content_type.clone(),
-                size_bytes: next_item.payload.len() as u64,
                 taken_at: next_item.taken_at,
             };
 
             match self
-                .create_and_upload(access_token, request, &next_item.payload)
+                .upload_image(
+                    access_token,
+                    &request,
+                    &next_item.payload,
+                    &next_item.content_type,
+                )
                 .await
             {
                 Ok(_) => {
@@ -243,16 +214,21 @@ pub fn sha256_hex(data: &[u8]) -> String {
     hex::encode(digest)
 }
 
-pub fn sha256_base64(data: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    let digest = hasher.finalize();
-    base64::engine::general_purpose::STANDARD.encode(digest)
+fn file_name_for_content_type(content_type: &str) -> String {
+    let extension = content_type
+        .split('/')
+        .nth(1)
+        .and_then(|value| value.split(';').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("bin");
+
+    format!("capture.{extension}")
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{sha256_base64, sha256_hex};
+    use super::sha256_hex;
 
     #[test]
     fn sha256_helpers_are_stable() {
@@ -261,10 +237,6 @@ mod tests {
         assert_eq!(
             sha256_hex(bytes),
             "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
-        );
-        assert_eq!(
-            sha256_base64(bytes),
-            "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ="
         );
     }
 }

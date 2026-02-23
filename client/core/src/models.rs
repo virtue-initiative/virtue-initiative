@@ -16,15 +16,12 @@ pub struct TokenResponse {
 pub struct CreateImageRequest {
     pub device_id: String,
     pub sha256: String,
-    pub content_type: String,
-    pub size_bytes: u64,
     pub taken_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct CreateImageResponse {
     pub image: UploadedImage,
-    pub upload_url: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
