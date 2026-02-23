@@ -98,7 +98,13 @@ export function Logs() {
         ) : (
           <div class="log-list">
             {logs.map((log) => (
-              <LogRow key={log.id} log={log} deviceName={deviceName(log.device_id)} showDevice={selectedDevice === null} />
+              <LogRow
+                key={log.id}
+                log={log}
+                token={token}
+                deviceName={deviceName(log.device_id)}
+                showDevice={selectedDevice === null}
+              />
             ))}
           </div>
         )}
@@ -117,15 +123,15 @@ export function Logs() {
 
 function LogRow({
   log,
+  token,
   deviceName,
   showDevice,
 }: {
   log: Log;
+  token: string;
   deviceName: string;
   showDevice: boolean;
 }) {
-  const [imgOpen, setImgOpen] = useState(false);
-
   return (
     <div class="log-row">
       <div class="log-row-main">
@@ -145,21 +151,65 @@ function LogRow({
           </dl>
         )}
       </div>
-      {log.image_url && (
-        <div class="log-thumb-wrap">
-          <button class="log-thumb-btn" type="button" onClick={() => setImgOpen(true)} aria-label="View image">
-            <img
-              class="log-thumb"
-              src={log.image_url}
-              alt="log capture"
-              loading="lazy"
-            />
-          </button>
-          {imgOpen && (
-            <div class="img-overlay" onClick={() => setImgOpen(false)}>
-              <img class="img-full" src={log.image_url} alt="log capture" onClick={(e) => e.stopPropagation()} />
-            </div>
-          )}
+      {log.image_url && <LogImage token={token} imageUrl={log.image_url} />}
+    </div>
+  );
+}
+
+function LogImage({ token, imageUrl }: { token: string; imageUrl: string }) {
+  const [imgOpen, setImgOpen] = useState(false);
+  const [imgSrc, setImgSrc] = useState<string | null>(null);
+  const [imgError, setImgError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+
+    setImgSrc(null);
+    setImgError(false);
+
+    fetch(imageUrl, {
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`image fetch failed (${res.status})`);
+        return await res.blob();
+      })
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setImgSrc(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setImgError(true);
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [imageUrl, token]);
+
+  if (imgError) {
+    return <div class="log-thumb-status">Image unavailable</div>;
+  }
+
+  if (!imgSrc) {
+    return <div class="log-thumb-status">Loading image…</div>;
+  }
+
+  return (
+    <div class="log-thumb-wrap">
+      <button class="log-thumb-btn" type="button" onClick={() => setImgOpen(true)} aria-label="View image">
+        <img class="log-thumb" src={imgSrc} alt="log capture" loading="lazy" />
+      </button>
+      {imgOpen && (
+        <div class="img-overlay" onClick={() => setImgOpen(false)}>
+          <img class="img-full" src={imgSrc} alt="log capture" onClick={(e) => e.stopPropagation()} />
         </div>
       )}
     </div>

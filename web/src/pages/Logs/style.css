@@ -185,6 +185,21 @@
   object-fit: cover;
 }
 
+.log-thumb-status {
+  width: 72px;
+  height: 72px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  text-align: center;
+  padding: 0.25rem;
+  box-sizing: border-box;
+}
+
 /* Lightbox */
 
 .img-overlay {
