@@ -45,15 +45,41 @@ header {
   gap: 1rem;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.btn-docs {
+  display: inline-block;
+  margin-top: 1.25rem;
+  padding: 0.45rem 1.1rem;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-docs:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
 .btn-login {
   display: inline-block;
   padding: 0.45rem 1.1rem;
   background: var(--accent);
   color: #fff;
-  text-decoration: none;
+  border: none;
   border-radius: 5px;
   font-size: 0.875rem;
   font-weight: 500;
+  cursor: pointer;
   white-space: nowrap;
 }
 
@@ -61,7 +87,7 @@ header {
   opacity: 0.88;
 }
 
-
+.wordmark {
   font-size: 2rem;
   font-weight: 700;
   letter-spacing: -0.5px;
