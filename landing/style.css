@@ -87,11 +87,15 @@ header {
   opacity: 0.88;
 }
 
+a.wordmark {
+  text-decoration: none;
+}
+
 .wordmark {
   font-size: 2rem;
   font-weight: 700;
   letter-spacing: -0.5px;
-  color: var(--accent);
+  color: var(--text);
 }
 
 .tagline {
@@ -186,6 +190,52 @@ td.yes {
 
 td.na {
   color: var(--na);
+}
+
+/* Legal pages */
+.legal h1 {
+  font-size: 1.6rem;
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+}
+
+.legal-date {
+  color: var(--muted);
+  font-size: 0.875rem;
+  margin-bottom: 2rem;
+}
+
+.legal h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 1.75rem 0 0.5rem;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: 0;
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.legal p,
+.legal li {
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.legal ul {
+  padding-left: 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.legal a {
+  color: var(--accent);
+}
+
+footer a {
+  color: var(--muted);
 }
 
 /* Footer */
