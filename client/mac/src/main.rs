@@ -93,6 +93,12 @@ fn run_tray(paths: ClientPaths) -> Result<()> {
         .build()
         .context("failed to build tray icon")?;
 
+    // Opening the app bundle should immediately show the current auth/status dialog.
+    if let Err(err) = open_app_dialog(&paths, &runtime) {
+        eprintln!("initial dialog failed: {err:#}");
+        let _ = ui::show_error(&format!("Operation failed:\n{err}"));
+    }
+
     event_loop.run(move |event, _event_loop_target, control_flow| {
         *control_flow = ControlFlow::Wait;
 

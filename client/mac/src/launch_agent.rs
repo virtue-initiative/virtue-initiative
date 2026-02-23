@@ -24,6 +24,11 @@ pub fn ensure_agent_running(paths: &ClientPaths, exe_path: &Path) -> Result<()> 
     let uid = current_uid()?;
     let gui_domain = format!("gui/{uid}");
     let service_id = format!("{gui_domain}/{LABEL}");
+
+    // A disabled override causes bootstrap to fail with a generic I/O error.
+    // Ensure the service is enabled before attempting to load the agent.
+    let _ = run_launchctl(&["enable", &service_id]);
+
     if needs_write {
         fs::write(&paths.launch_agent_file, plist).with_context(|| {
             format!(
@@ -40,11 +45,9 @@ pub fn ensure_agent_running(paths: &ClientPaths, exe_path: &Path) -> Result<()> 
         &paths.launch_agent_file.display().to_string(),
     ])?;
     if !bootstrap_status.success {
-        let lower = bootstrap_status.stderr.to_ascii_lowercase();
-        if !lower.contains("service already loaded")
-            && !lower.contains("already bootstrapped")
-            && !lower.contains("in progress")
-        {
+        // launchctl can return a generic bootstrap failure even when the service
+        // is already loaded. Treat that state as success.
+        if !service_is_loaded(&service_id)? {
             return Err(anyhow!(
                 "launchctl bootstrap failed: {}",
                 bootstrap_status.stderr.trim()
@@ -79,6 +82,14 @@ fn run_launchctl(args: &[&str]) -> Result<LaunchctlOutput> {
         success: output.status.success(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
     })
+}
+
+fn service_is_loaded(service_id: &str) -> Result<bool> {
+    let output = Command::new("/bin/launchctl")
+        .args(["print", service_id])
+        .output()
+        .with_context(|| format!("failed to execute launchctl print {service_id}"))?;
+    Ok(output.status.success())
 }
 
 fn current_uid() -> Result<String> {
