@@ -3,6 +3,7 @@ import { LocationProvider, Router, Route, hydrate, prerender as ssr } from 'prea
 import { AuthProvider, useAuth } from './context/auth';
 import { Header } from './components/Header';
 import { Home } from './pages/Home/index';
+import { Logs } from './pages/Logs/index';
 import { Auth } from './pages/Auth/index';
 import { NotFound } from './pages/_404';
 import './style.css';
@@ -24,6 +25,7 @@ function AppShell() {
       <main>
         <Router>
           <Route path="/" component={Home} />
+          <Route path="/logs" component={Logs} />
           <Route default component={NotFound} />
         </Router>
       </main>

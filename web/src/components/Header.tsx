@@ -10,6 +10,7 @@ export function Header() {
       <span class="header-brand">BePure</span>
       <nav>
         <a href="/">Dashboard</a>
+        <a href="/logs">Logs</a>
         <button class="header-logout" onClick={logout} type="button">
           Log out
         </button>

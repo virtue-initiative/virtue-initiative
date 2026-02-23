@@ -9,6 +9,20 @@ export interface Device {
   enabled: boolean;
 }
 
+export interface Log {
+  id: string;
+  type: string;
+  device_id: string;
+  image_url: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface LogPage {
+  items: Log[];
+  next_cursor?: string;
+}
+
 export interface Partner {
   id: string;
   partner_email: string;
@@ -78,4 +92,13 @@ export const api = {
 
   deletePartner: (token: string, id: string) =>
     req<void>(`/partner/${id}`, { method: 'DELETE' }, token),
+
+  getLogs: (token: string, params?: { device_id?: string; cursor?: string; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.device_id) qs.set('device_id', params.device_id);
+    if (params?.cursor) qs.set('cursor', params.cursor);
+    if (params?.limit) qs.set('limit', String(params.limit));
+    const query = qs.toString();
+    return req<LogPage>(`/log${query ? `?${query}` : ''}`, {}, token);
+  },
 };
