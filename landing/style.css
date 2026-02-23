@@ -87,6 +87,10 @@ header {
   opacity: 0.88;
 }
 
+.nolink {
+  text-decoration: none;
+}
+
 a.wordmark {
   text-decoration: none;
 }
@@ -142,6 +146,7 @@ section ol {
 
 /* Table */
 .table-wrapper {
+  margin-top: 10px;
   overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -230,7 +235,7 @@ td.na {
   margin-top: 0.5rem;
 }
 
-.legal a {
+a {
   color: var(--accent);
 }
 
