@@ -71,10 +71,3 @@
   border-radius: 6px;
   font-size: 0.875rem;
 }
-
-@media (prefers-color-scheme: dark) {
-  .auth-error {
-    background: #450a0a;
-    color: #fca5a5;
-  }
-}

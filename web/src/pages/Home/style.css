@@ -134,10 +134,6 @@
   color: #b91c1c;
 }
 
-@media (prefers-color-scheme: dark) {
-  .form-error { color: #fca5a5; }
-}
-
 /* Button sizes */
 
 .btn-sm {
