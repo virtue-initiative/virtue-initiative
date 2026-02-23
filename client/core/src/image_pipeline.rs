@@ -1,29 +1,10 @@
-use image::{DynamicImage, GenericImageView};
+use image::GenericImageView;
 
 use crate::error::CoreResult;
 use crate::upload::sha256_hex;
 
-const WEBP_QUALITY: f32 = 80.0;
-const RESIZE_FACTOR: f32 = 1.0;
-
-#[derive(Clone, Debug)]
-pub struct ImagePipelineConfig {
-    pub max_width: u32,
-    pub max_height: u32,
-    pub resize_factor: f32,
-    pub webp_quality: f32,
-}
-
-impl Default for ImagePipelineConfig {
-    fn default() -> Self {
-        Self {
-            max_width: 1280,
-            max_height: 720,
-            resize_factor: RESIZE_FACTOR,
-            webp_quality: WEBP_QUALITY,
-        }
-    }
-}
+const TARGET_HEIGHT: u32 = 256;
+const WEBP_QUALITY: f32 = 1.0;
 
 #[derive(Clone, Debug)]
 pub struct ProcessedImage {
@@ -35,48 +16,28 @@ pub struct ProcessedImage {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct ImagePipeline {
-    config: ImagePipelineConfig,
-}
+pub struct ImagePipeline;
 
 impl ImagePipeline {
-    pub fn new(config: ImagePipelineConfig) -> Self {
-        Self { config }
-    }
-
     pub fn process(&self, input: &[u8]) -> CoreResult<ProcessedImage> {
         let decoded = image::load_from_memory(input)?;
-        let capped = decoded.resize(
-            self.config.max_width,
-            self.config.max_height,
-            image::imageops::FilterType::Lanczos3,
-        );
+        let (orig_width, orig_height) = decoded.dimensions();
+        let target_width = (orig_width as f32 * TARGET_HEIGHT as f32 / orig_height as f32).round() as u32;
+        let working = decoded.resize_exact(target_width, TARGET_HEIGHT, image::imageops::FilterType::Lanczos3);
 
-        let scaled_width = ((capped.width() as f32) * self.config.resize_factor).round() as u32;
-        let scaled_height = ((capped.height() as f32) * self.config.resize_factor).round() as u32;
-        let working = if scaled_width != capped.width() || scaled_height != capped.height() {
-            capped.resize_exact(scaled_width, scaled_height, image::imageops::FilterType::Lanczos3)
-        } else {
-            capped
-        };
+        let rgba = working.to_rgba8();
+        let (width, height) = working.dimensions();
+        let encoded = webp::Encoder::from_rgba(rgba.as_raw(), width, height).encode(WEBP_QUALITY);
+        let bytes = encoded.to_vec();
 
-        let bytes = encode_webp(&working, self.config.webp_quality)?;
         Ok(ProcessedImage {
             sha256_hex: sha256_hex(&bytes),
             content_type: "image/webp".to_string(),
-            width: working.width(),
-            height: working.height(),
+            width,
+            height,
             bytes,
         })
     }
-}
-
-fn encode_webp(image: &DynamicImage, quality: f32) -> CoreResult<Vec<u8>> {
-    let rgba = image.to_rgba8();
-    let (width, height) = image.dimensions();
-    let encoded = webp::Encoder::from_rgba(rgba.as_raw(), width, height)
-        .encode(quality);
-    Ok(encoded.to_vec())
 }
 
 #[cfg(test)]
@@ -85,10 +46,10 @@ mod tests {
 
     use image::{DynamicImage, ImageFormat, Rgb, RgbImage};
 
-    use super::{ImagePipeline, ImagePipelineConfig};
+    use super::ImagePipeline;
 
     #[test]
-    fn webp_pipeline_encodes_output() {
+    fn resizes_to_target_height() {
         let mut source = RgbImage::new(800, 600);
         for pixel in source.pixels_mut() {
             *pixel = Rgb([22, 44, 88]);
@@ -99,37 +60,12 @@ mod tests {
             .write_to(&mut input, ImageFormat::Png)
             .expect("encode input");
 
-        let pipeline = ImagePipeline::default();
-        let output = pipeline
-            .process(&input.into_inner())
-            .expect("process webp");
+        let output = ImagePipeline.process(&input.into_inner()).expect("process");
 
+        assert_eq!(output.height, 128);
+        assert_eq!(output.width, 171); // 800/600 * 128, rounded
         assert_eq!(output.content_type, "image/webp");
         assert!(!output.bytes.is_empty());
     }
-
-    #[test]
-    fn webp_pipeline_respects_resize_factor() {
-        let mut source = RgbImage::new(800, 600);
-        for pixel in source.pixels_mut() {
-            *pixel = Rgb([22, 44, 88]);
-        }
-
-        let mut input = Cursor::new(Vec::new());
-        DynamicImage::ImageRgb8(source)
-            .write_to(&mut input, ImageFormat::Png)
-            .expect("encode input");
-
-        let config = ImagePipelineConfig {
-            resize_factor: 0.5,
-            ..ImagePipelineConfig::default()
-        };
-        let pipeline = ImagePipeline::new(config);
-        let output = pipeline
-            .process(&input.into_inner())
-            .expect("process webp");
-
-        assert_eq!(output.width, 400);
-        assert_eq!(output.height, 300);
-    }
 }
+

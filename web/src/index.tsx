@@ -26,6 +26,7 @@ function AppShell() {
         <Router>
           <Route path="/" component={Home} />
           <Route path="/logs" component={Logs} />
+          <Route path="/logs/gallery" component={Logs} />
           <Route default component={NotFound} />
         </Router>
       </main>

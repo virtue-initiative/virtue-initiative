@@ -5,7 +5,7 @@ import { authenticate } from '../middleware/auth';
 import { putObject, getObject } from '../lib/r2';
 import { uploadImageSchema } from '../lib/schemas';
 import z from 'zod';
-import { findDevice, createImage, updateDeviceActivity, findImageById } from '../lib/db';
+import { findDevice, createImage, updateDeviceActivity, findImageById, findAcceptedPartnership } from '../lib/db';
 
 const images = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -76,14 +76,21 @@ images.post('/', authenticate, async (c) => {
 });
 
 /**
- * GET /image/:id - Download an image
+ * GET /image/:id - Download an image (owner or partner with view_images permission)
  */
 images.get('/:id', authenticate, async (c) => {
-  const userId = c.get('userId');
+  const requesterId = c.get('userId');
   const imageId = c.req.param('id');
 
   const image = await findImageById(c.env.DB, imageId);
-  if (!image || image.user_id !== userId) return c.json({ error: 'Not found' }, 404);
+  if (!image) return c.json({ error: 'Not found' }, 404);
+
+  if (image.user_id !== requesterId) {
+    const partnership = await findAcceptedPartnership(c.env.DB, image.user_id, requesterId);
+    if (!partnership) return c.json({ error: 'Not found' }, 404);
+    const perms = JSON.parse(partnership.permissions);
+    if (!perms.view_images) return c.json({ error: 'Not found' }, 404);
+  }
 
   const object = await getObject(c.env, image.r2_key);
   if (!object) return c.json({ error: 'Not found' }, 404);

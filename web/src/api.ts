@@ -25,6 +25,7 @@ export interface LogPage {
 
 export interface Partner {
   id: string;
+  partner_user_id: string;
   partner_email: string;
   status: 'pending' | 'accepted';
   permissions: { view_images: boolean; view_logs: boolean };
@@ -70,7 +71,10 @@ export const api = {
 
   logout: (token: string) => req<void>('/logout', { method: 'POST' }, token),
 
-  getDevices: (token: string) => req<Device[]>('/device', {}, token),
+  getDevices: (token: string, params?: { user?: string }) => {
+    const qs = params?.user ? `?user=${encodeURIComponent(params.user)}` : '';
+    return req<Device[]>(`/device${qs}`, {}, token);
+  },
 
   getPartners: (token: string) => req<Partner[]>('/partner', {}, token),
 
@@ -93,8 +97,15 @@ export const api = {
   deletePartner: (token: string, id: string) =>
     req<void>(`/partner/${id}`, { method: 'DELETE' }, token),
 
-  getLogs: (token: string, params?: { device_id?: string; cursor?: string; limit?: number }) => {
+  patchDevice: (token: string, id: string, patch: { name?: string; interval_seconds?: number; enabled?: boolean }) =>
+    req<{ id: string; updated: boolean }>(`/device/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }, token),
+
+  getLogs: (token: string, params?: { user?: string; device_id?: string; cursor?: string; limit?: number }) => {
     const qs = new URLSearchParams();
+    if (params?.user) qs.set('user', params.user);
     if (params?.device_id) qs.set('device_id', params.device_id);
     if (params?.cursor) qs.set('cursor', params.cursor);
     if (params?.limit) qs.set('limit', String(params.limit));

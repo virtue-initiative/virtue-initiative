@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use chrono::Utc;
@@ -12,12 +12,14 @@ use uuid::Uuid;
 use bepure_client_core::{
     AuthClient, BufferedUpload, CaptureSchedulePolicy, CaptureScheduleState, FileTokenStore,
     ImagePipeline, PersistentQueue, RetryPolicy, TokenStore, UploadClient,
-    resolve_capture_interval_seconds,
+    DEFAULT_CAPTURE_INTERVAL_SECONDS,
 };
 
-use crate::api::ApiClient;
+use crate::api::{ApiClient, Device};
 use crate::capture::capture_screen;
 use crate::config::{ClientPaths, load_state};
+
+const SETTINGS_REFRESH_INTERVAL: Duration = Duration::from_secs(30 * 60);
 
 pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     paths.ensure_dirs()?;
@@ -33,6 +35,8 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
 
     let mut schedule_state = CaptureScheduleState::default();
     let mut last_cycle_success = true;
+    let mut device_settings: Option<Device> = None;
+    let mut last_settings_fetch: Option<Instant> = None;
 
     loop {
         let state = load_state(&paths.state_file)?;
@@ -64,10 +68,38 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
             }
         }
 
-        let effective_interval_seconds =
-            resolve_capture_interval_seconds(state.capture_interval_seconds);
+        // Fetch device settings on startup and every 30 minutes.
+        let needs_refresh = last_settings_fetch
+            .map(|t| t.elapsed() >= SETTINGS_REFRESH_INTERVAL)
+            .unwrap_or(true);
+        if needs_refresh {
+            match api_client.get_device(&access_token, &device_id).await {
+                Ok(settings) => {
+                    device_settings = Some(settings);
+                    last_settings_fetch = Some(Instant::now());
+                }
+                Err(_) => {
+                    sleep(Duration::from_secs(20)).await;
+                    continue;
+                }
+            }
+        }
+
+        let settings = device_settings.as_ref().unwrap();
+
+        if !settings.enabled {
+            sleep(Duration::from_secs(20)).await;
+            continue;
+        }
+
+        let interval_seconds = if settings.interval_seconds > 0 {
+            settings.interval_seconds
+        } else {
+            DEFAULT_CAPTURE_INTERVAL_SECONDS
+        };
+
         let policy = CaptureSchedulePolicy {
-            base_interval: Duration::from_secs(effective_interval_seconds),
+            base_interval: Duration::from_secs(interval_seconds),
             ..CaptureSchedulePolicy::default()
         };
         let mut rng = thread_rng();

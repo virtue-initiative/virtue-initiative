@@ -242,13 +242,14 @@ export async function listPartners(db: D1Database, userId: string) {
   const [owned, asPartner] = await Promise.all([
     db
       .prepare(
-        `SELECT p.id, u.email as partner_email, p.status, p.permissions, p.created_at
+        `SELECT p.id, p.partner_user_id as partner_user_id, u.email as partner_email, p.status, p.permissions, p.created_at
        FROM partners p JOIN users u ON p.partner_user_id = u.id
        WHERE p.user_id = ?`,
       )
       .bind(userId)
       .all<{
         id: string;
+        partner_user_id: string;
         partner_email: string;
         status: string;
         permissions: string;
@@ -256,13 +257,14 @@ export async function listPartners(db: D1Database, userId: string) {
       }>(),
     db
       .prepare(
-        `SELECT p.id, u.email as partner_email, p.status, p.permissions, p.created_at
+        `SELECT p.id, p.user_id as partner_user_id, u.email as partner_email, p.status, p.permissions, p.created_at
        FROM partners p JOIN users u ON p.user_id = u.id
        WHERE p.partner_user_id = ?`,
       )
       .bind(userId)
       .all<{
         id: string;
+        partner_user_id: string;
         partner_email: string;
         status: string;
         permissions: string;
@@ -306,6 +308,20 @@ export async function findPartnerByEitherParty(db: D1Database, partnerId: string
     `)
     .bind(partnerId, userId, userId)
     .first<{ id: string; owner_email: string; partner_email: string }>();
+}
+
+export async function findAcceptedPartnership(
+  db: D1Database,
+  ownerId: string,
+  requesterId: string,
+) {
+  return db
+    .prepare(
+      `SELECT permissions FROM partners
+       WHERE user_id = ? AND partner_user_id = ? AND status = 'accepted'`,
+    )
+    .bind(ownerId, requesterId)
+    .first<{ permissions: string }>();
 }
 
 export async function getSettings(db: D1Database, userId: string) {

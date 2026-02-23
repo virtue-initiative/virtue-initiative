@@ -22,6 +22,9 @@ export function Home() {
     (p) => p.role === 'partner' && p.status === 'pending',
   ) ?? [];
 
+  const monitoringYou = partners?.filter((p) => p.role === 'owner' && p.status === 'accepted') ?? [];
+  const youMonitor = partners?.filter((p) => p.role === 'partner' && p.status === 'accepted') ?? [];
+
   return (
     <div class="dashboard">
       {error && <p class="error-banner">{error}</p>}
@@ -38,17 +41,21 @@ export function Home() {
       )}
 
       <section class="dash-section">
-        <h2>Devices</h2>
+        <h2>My devices</h2>
         {devices === null ? (
           <p class="loading">Loading…</p>
         ) : devices.length === 0 ? (
           <p class="empty">No devices registered yet.</p>
         ) : (
           <div class="card-grid">
-            {devices.map((d) => <DeviceCard key={d.id} device={d} />)}
+            {devices.map((d) => <DeviceCard key={d.id} device={d} token={token!} onChanged={reload} />)}
           </div>
         )}
       </section>
+
+      {youMonitor.length > 0 && youMonitor.map((p) => (
+        <PartnerDevicesSection key={p.id} partner={p} token={token!} />
+      ))}
 
       <section class="dash-section">
         <div class="section-header">
@@ -58,7 +65,13 @@ export function Home() {
         {partners === null ? (
           <p class="loading">Loading…</p>
         ) : (
-          <PartnersList partners={partners} token={token!} onChanged={reload} />
+          <PartnersList
+            monitoringYou={monitoringYou}
+            youMonitor={youMonitor}
+            pendingInvites={pendingInvites}
+            token={token!}
+            onChanged={reload}
+          />
         )}
       </section>
     </div>
@@ -66,20 +79,19 @@ export function Home() {
 }
 
 function PartnersList({
-  partners,
+  monitoringYou,
+  youMonitor,
+  pendingInvites,
   token,
   onChanged,
 }: {
-  partners: Partner[];
+  monitoringYou: Partner[];
+  youMonitor: Partner[];
+  pendingInvites: Partner[];
   token: string;
   onChanged: () => void;
 }) {
-  // role='owner': you invited them → they monitor you
-  // role='partner': they invited you → you monitor them
-  const monitoringYou = partners.filter((p) => p.role === 'owner' && p.status === 'accepted');
-  const youMonitor = partners.filter((p) => p.role === 'partner' && p.status === 'accepted');
-
-  if (monitoringYou.length === 0 && youMonitor.length === 0) {
+  if (monitoringYou.length === 0 && youMonitor.length === 0 && pendingInvites.length === 0) {
     return <p class="empty">No accountability partners yet.</p>;
   }
 
@@ -95,11 +107,11 @@ function PartnersList({
           </div>
         </div>
       )}
-      {youMonitor.length > 0 && (
+      {pendingInvites.length > 0 && (
         <div>
-          <p class="partners-group-label">You're monitoring</p>
+          <p class="partners-group-label">Pending invites</p>
           <div class="card-grid">
-            {youMonitor.map((p) => (
+            {pendingInvites.map((p) => (
               <PartnerCard key={p.id} partner={p} token={token} onDeleted={onChanged} />
             ))}
           </div>
@@ -236,8 +248,99 @@ function PendingInviteCard({
   );
 }
 
-function DeviceCard({ device }: { device: Device }) {
+function PartnerDevicesSection({ partner, token }: { partner: Partner; token: string }) {
+  const [devices, setDevices] = useState<Device[] | null>(null);
+
+  useEffect(() => {
+    api.getDevices(token, { user: partner.partner_user_id })
+      .then(setDevices)
+      .catch(() => setDevices([]));
+  }, [partner.partner_user_id, token]);
+
+  return (
+    <section class="dash-section">
+      <div class="section-header">
+        <h2>{partner.partner_email}'s devices</h2>
+        <button
+          class="btn btn-ghost btn-sm"
+          type="button"
+          onClick={() => window.location.href = `/logs?user=${partner.partner_user_id}`}
+        >
+          View logs
+        </button>
+      </div>
+      {devices === null ? (
+        <p class="loading">Loading…</p>
+      ) : devices.length === 0 ? (
+        <p class="empty">No devices registered.</p>
+      ) : (
+        <div class="card-grid">
+          {devices.map((d) => (
+            <div class="card" key={d.id}>
+              <div class="card-header">
+                <span class="card-name">{d.name}</span>
+                <span class={`badge ${d.status === 'online' ? 'badge-green' : 'badge-gray'}`}>
+                  {d.status === 'online' ? 'Online' : 'Offline'}
+                </span>
+              </div>
+              <dl class="card-meta">
+                <dt>Platform</dt><dd>{d.platform}</dd>
+                <dt>Last seen</dt><dd>{d.last_seen_at ? relativeTime(d.last_seen_at) : 'Never'}</dd>
+                <dt>Last upload</dt><dd>{d.last_upload_at ? relativeTime(d.last_upload_at) : 'Never'}</dd>
+              </dl>
+              <div class="card-actions">
+                <button
+                  class="btn btn-ghost btn-sm"
+                  type="button"
+                  onClick={() => window.location.href = `/logs?user=${partner.partner_user_id}&device_id=${d.id}`}
+                >
+                  View logs
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DeviceCard({ device, token, onChanged }: { device: Device; token: string; onChanged: () => void }) {
   const online = device.status === 'online';
+  const [name, setName] = useState(device.name);
+  const [interval, setInterval] = useState(String(device.interval_seconds));
+  const [enabled, setEnabled] = useState(device.enabled);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  function openEdit() {
+    setName(device.name);
+    setInterval(String(device.interval_seconds));
+    setEnabled(device.enabled);
+    setError(null);
+    dialogRef.current?.showModal();
+  }
+
+  async function handleSave(e: Event) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      await api.patchDevice(token, device.id, {
+        name,
+        interval_seconds: Number(interval),
+        enabled,
+      });
+      dialogRef.current?.close();
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div class="card">
       <div class="card-header">
@@ -257,6 +360,58 @@ function DeviceCard({ device }: { device: Device }) {
         <dd>{device.last_upload_at ? relativeTime(device.last_upload_at) : 'Never'}</dd>
         {!device.enabled && <><dt>Status</dt><dd class="muted">Disabled</dd></>}
       </dl>
+      <div class="card-actions">
+        <button
+          class="btn btn-ghost btn-sm"
+          type="button"
+          onClick={() => window.location.href = `/logs?device_id=${device.id}`}
+        >
+          View logs
+        </button>
+        <button class="btn btn-ghost btn-sm" type="button" onClick={openEdit}>
+          Edit
+        </button>
+      </div>
+
+      <dialog ref={dialogRef} class="invite-dialog" onClick={(e) => { if (e.target === dialogRef.current) dialogRef.current?.close(); }}>
+        <h3 class="dialog-title">Edit device</h3>
+        <form onSubmit={handleSave}>
+          <div class="field">
+            <label for="device-name">Name</label>
+            <input
+              id="device-name"
+              type="text"
+              value={name}
+              onInput={(e) => setName((e.target as HTMLInputElement).value)}
+              required
+            />
+          </div>
+          <div class="field">
+            <label for="device-interval">Capture interval (seconds)</label>
+            <input
+              id="device-interval"
+              type="number"
+              min="15"
+              value={interval}
+              onInput={(e) => setInterval((e.target as HTMLInputElement).value)}
+              required
+            />
+          </div>
+          <label class="checkbox-label">
+            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled((e.target as HTMLInputElement).checked)} />
+            Enabled
+          </label>
+          {error && <p class="form-error">{error}</p>}
+          <div class="invite-actions">
+            <button class="btn btn-primary btn-sm" type="submit" disabled={saving}>
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            <button class="btn btn-ghost btn-sm" type="button" onClick={() => dialogRef.current?.close()}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      </dialog>
     </div>
   );
 }
@@ -272,20 +427,25 @@ function PartnerCard({
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const dialogRef = useRef<HTMLDialogElement>(null);
+  const deleteDialogRef = useRef<HTMLDialogElement>(null);
+  const infoDialogRef = useRef<HTMLDialogElement>(null);
 
   async function confirmDelete() {
     setLoading(true);
     setError(null);
     try {
       await api.deletePartner(token, partner.id);
-      dialogRef.current?.close();
+      deleteDialogRef.current?.close();
       onDeleted();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to remove partner');
       setLoading(false);
     }
   }
+
+  // role='owner': they monitor me (I invited them)
+  // role='partner': I monitor them (they invited me)
+  const isMonitoringMe = partner.role === 'owner';
 
   return (
     <div class="card">
@@ -294,22 +454,46 @@ function PartnerCard({
         <span class="badge badge-green">Active</span>
       </div>
       <dl class="card-meta">
-        <dt>Can view images</dt>
-        <dd>{partner.permissions.view_images ? 'Yes' : 'No'}</dd>
-        <dt>Can view logs</dt>
-        <dd>{partner.permissions.view_logs ? 'Yes' : 'No'}</dd>
         <dt>Since</dt>
         <dd>{new Date(partner.created_at).toLocaleDateString()}</dd>
       </dl>
-      <button
-        class="btn btn-danger btn-sm card-delete"
-        type="button"
-        onClick={() => dialogRef.current?.showModal()}
-      >
-        Remove
-      </button>
+      <div class="card-actions">
+        <button
+          class="btn btn-ghost btn-sm"
+          type="button"
+          onClick={() => infoDialogRef.current?.showModal()}
+        >
+          Info
+        </button>
+        <button
+          class="btn btn-danger btn-sm"
+          type="button"
+          onClick={() => deleteDialogRef.current?.showModal()}
+        >
+          Remove
+        </button>
+      </div>
 
-      <dialog ref={dialogRef} class="invite-dialog" onClick={(e) => { if (e.target === dialogRef.current) dialogRef.current?.close(); }}>
+      <dialog ref={infoDialogRef} class="invite-dialog" onClick={(e) => { if (e.target === infoDialogRef.current) infoDialogRef.current?.close(); }}>
+        <h3 class="dialog-title">{partner.partner_email}</h3>
+        <dl class="card-meta">
+          <dt>Role</dt>
+          <dd>{isMonitoringMe ? 'Monitoring you' : 'You are monitoring them'}</dd>
+          <dt>Can view images</dt>
+          <dd>{partner.permissions.view_images ? 'Yes' : 'No'}</dd>
+          <dt>Can view logs</dt>
+          <dd>{partner.permissions.view_logs ? 'Yes' : 'No'}</dd>
+          <dt>Since</dt>
+          <dd>{new Date(partner.created_at).toLocaleDateString()}</dd>
+        </dl>
+        <div class="invite-actions" style="margin-top:1rem">
+          <button class="btn btn-ghost btn-sm" type="button" onClick={() => infoDialogRef.current?.close()}>
+            Close
+          </button>
+        </div>
+      </dialog>
+
+      <dialog ref={deleteDialogRef} class="invite-dialog" onClick={(e) => { if (e.target === deleteDialogRef.current) deleteDialogRef.current?.close(); }}>
         <h3 class="dialog-title">Remove partner?</h3>
         <p class="invite-desc">
           Are you sure you want to remove <strong>{partner.partner_email}</strong> as an
@@ -320,7 +504,7 @@ function PartnerCard({
           <button class="btn btn-danger btn-sm" type="button" onClick={confirmDelete} disabled={loading}>
             {loading ? 'Removing…' : 'Yes, remove'}
           </button>
-          <button class="btn btn-ghost btn-sm" type="button" onClick={() => { dialogRef.current?.close(); setError(null); }}>
+          <button class="btn btn-ghost btn-sm" type="button" onClick={() => { deleteDialogRef.current?.close(); setError(null); }}>
             Cancel
           </button>
         </div>

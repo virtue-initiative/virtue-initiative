@@ -13,7 +13,7 @@ use clap::{Parser, Subcommand};
 use serde_json::json;
 
 use bepure_client_core::{
-    AuthClient, FileTokenStore, TokenStore, resolve_capture_interval_seconds,
+    AuthClient, FileTokenStore, TokenStore, apply_dev_env, resolve_capture_interval_seconds,
 };
 
 use crate::api::ApiClient;
@@ -44,6 +44,8 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    apply_dev_env();
+
     match run().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {

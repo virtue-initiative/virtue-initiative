@@ -24,3 +24,6 @@ webp = "0.3.1"
 
 [dev-dependencies]
 tempfile = "3"
+
+[build-dependencies]
+dotenv-build = "0.1.1"

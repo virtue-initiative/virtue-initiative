@@ -1,227 +1,134 @@
 import { useState, useEffect } from 'preact/hooks';
+import { useRoute } from 'preact-iso';
 import { useAuth } from '../../context/auth';
-import { api, Device, Log } from '../../api';
+import { api, Device } from '../../api';
+import { LogsList } from './LogsList';
+import { LogsGallery } from './LogsGallery';
 import './style.css';
 
-const PAGE_SIZE = 50;
+interface DeviceGroup {
+  label: string;
+  userId: string | null;
+  devices: Device[];
+}
+
+type View = 'list' | 'gallery';
 
 export function Logs() {
   const { token } = useAuth();
-  const [devices, setDevices] = useState<Device[] | null>(null);
-  const [selectedDevice, setSelectedDevice] = useState<string | null>(null);
-  const [logs, setLogs] = useState<Log[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | undefined>(undefined);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { path } = useRoute();
+  const view: View = path === '/logs/gallery' ? 'gallery' : 'list';
+
+  const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[] | null>(null);
+  const [selectedDevice, setSelectedDevice] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get('device_id'),
+  );
+  const [selectedUser, setSelectedUser] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get('user'),
+  );
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token) return;
-    api.getDevices(token)
-      .then(setDevices)
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load devices'));
+    Promise.all([api.getDevices(token), api.getPartners(token)])
+      .then(async ([myDevices, partners]) => {
+        const monitored = partners.filter((p) => p.role === 'partner' && p.status === 'accepted');
+        const partnerGroups = await Promise.all(
+          monitored.map(async (p) => {
+            const devs = await api.getDevices(token, { user: p.partner_user_id }).catch(() => [] as Device[]);
+            return { label: p.partner_email, userId: p.partner_user_id, devices: devs };
+          }),
+        );
+        setDeviceGroups([
+          { label: 'My devices', userId: null, devices: myDevices },
+          ...partnerGroups,
+        ]);
+      })
+      .catch((err) => setLoadError(err instanceof Error ? err.message : 'Failed to load devices'));
   }, [token]);
 
-  useEffect(() => {
-    if (!token) return;
-    setLogs([]);
-    setNextCursor(undefined);
-    fetchLogs(true);
-  }, [token, selectedDevice]);
+  const allDevices = deviceGroups?.flatMap((g) => g.devices) ?? [];
+  const deviceName = (id: string) => allDevices.find((d) => d.id === id)?.name ?? id.slice(0, 8) + '…';
+  const groupLabel = (userId: string) =>
+    deviceGroups?.find((g) => g.userId === userId)?.label ?? userId.slice(0, 8) + '…';
 
-  async function fetchLogs(reset = false) {
-    if (!token) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const cursor = reset ? undefined : nextCursor;
-      const page = await api.getLogs(token, {
-        device_id: selectedDevice ?? undefined,
-        cursor,
-        limit: PAGE_SIZE,
-      });
-      setLogs((prev) => (reset ? page.items : [...prev, ...page.items]));
-      setNextCursor(page.next_cursor);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load logs');
-    } finally {
-      setLoading(false);
-    }
+  function select(userId: string | null, deviceId: string | null) {
+    setSelectedUser(userId);
+    setSelectedDevice(deviceId);
   }
 
-  const deviceName = (id: string) =>
-    devices?.find((d) => d.id === id)?.name ?? id.slice(0, 8) + '…';
+  const title = selectedDevice
+    ? `${selectedUser ? groupLabel(selectedUser) + ' — ' : ''}${deviceName(selectedDevice)}`
+    : selectedUser
+    ? `${groupLabel(selectedUser)}'s logs`
+    : 'All logs';
+
+  function viewHref(v: View) {
+    const qs = window.location.search;
+    return v === 'gallery' ? `/logs/gallery${qs}` : `/logs${qs}`;
+  }
 
   return (
     <div class="logs-layout">
       <aside class="logs-sidebar">
-        <h2>Devices</h2>
-        <ul class="device-list">
-          <li>
-            <button
-              class={`device-btn${selectedDevice === null ? ' active' : ''}`}
-              onClick={() => setSelectedDevice(null)}
-              type="button"
-            >
-              All devices
-            </button>
-          </li>
-          {devices === null ? (
-            <li class="sidebar-loading">Loading…</li>
-          ) : (
-            devices.map((d) => (
-              <li key={d.id}>
+        {loadError && <p class="sidebar-loading">{loadError}</p>}
+        {deviceGroups === null && !loadError && <p class="sidebar-loading">Loading…</p>}
+        {deviceGroups?.map((group) => (
+          <div class="sidebar-group" key={group.label}>
+            <p class="sidebar-group-label">{group.label}</p>
+            <ul class="device-list">
+              <li>
                 <button
-                  class={`device-btn${selectedDevice === d.id ? ' active' : ''}`}
-                  onClick={() => setSelectedDevice(d.id)}
+                  class={`device-btn${selectedUser === group.userId && selectedDevice === null ? ' active' : ''}`}
+                  onClick={() => select(group.userId, null)}
                   type="button"
                 >
-                  <span class={`dot ${d.status === 'online' ? 'dot-green' : 'dot-gray'}`} />
-                  {d.name}
+                  All
                 </button>
               </li>
-            ))
-          )}
-        </ul>
+              {group.devices.map((d) => (
+                <li key={d.id}>
+                  <button
+                    class={`device-btn${selectedDevice === d.id ? ' active' : ''}`}
+                    onClick={() => select(group.userId, d.id)}
+                    type="button"
+                  >
+                    <span class={`dot ${d.status === 'online' ? 'dot-green' : 'dot-gray'}`} />
+                    {d.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
       </aside>
 
       <section class="logs-main">
         <div class="logs-header">
-          <h1>
-            {selectedDevice ? `Logs — ${deviceName(selectedDevice)}` : 'All logs'}
-          </h1>
+          <h1>{title}</h1>
+          <div class="view-tabs">
+            <a href={viewHref('list')} class={`view-tab${view === 'list' ? ' active' : ''}`}>List</a>
+            <a href={viewHref('gallery')} class={`view-tab${view === 'gallery' ? ' active' : ''}`}>Gallery</a>
+          </div>
         </div>
 
-        {error && <p class="error-banner">{error}</p>}
-
-        {logs.length === 0 && !loading ? (
-          <p class="empty">No logs found.</p>
-        ) : (
-          <div class="log-list">
-            {logs.map((log) => (
-              <LogRow
-                key={log.id}
-                log={log}
-                token={token}
-                deviceName={deviceName(log.device_id)}
-                showDevice={selectedDevice === null}
-              />
-            ))}
-          </div>
+        {view === 'list' && (
+          <LogsList
+            token={token!}
+            selectedUser={selectedUser}
+            selectedDevice={selectedDevice}
+            deviceName={deviceName}
+          />
         )}
-
-        {loading && <p class="logs-loading">Loading…</p>}
-
-        {!loading && nextCursor && (
-          <button class="btn btn-primary btn-sm load-more" onClick={() => fetchLogs(false)} type="button">
-            Load more
-          </button>
+        {view === 'gallery' && (
+          <LogsGallery
+            token={token!}
+            selectedUser={selectedUser}
+            selectedDevice={selectedDevice}
+            deviceName={deviceName}
+          />
         )}
       </section>
     </div>
   );
-}
-
-function LogRow({
-  log,
-  token,
-  deviceName,
-  showDevice,
-}: {
-  log: Log;
-  token: string;
-  deviceName: string;
-  showDevice: boolean;
-}) {
-  return (
-    <div class="log-row">
-      <div class="log-row-main">
-        <div class="log-row-top">
-          <span class="log-type">{log.type}</span>
-          {showDevice && <span class="log-device">{deviceName}</span>}
-          <span class="log-time">{relativeTime(log.created_at)}</span>
-        </div>
-        {log.metadata && Object.keys(log.metadata).length > 0 && (
-          <dl class="log-meta">
-            {Object.entries(log.metadata).map(([k, v]) => (
-              <>
-                <dt key={`k-${k}`}>{k}</dt>
-                <dd key={`v-${k}`}>{String(v)}</dd>
-              </>
-            ))}
-          </dl>
-        )}
-      </div>
-      {log.image_url && <LogImage token={token} imageUrl={log.image_url} />}
-    </div>
-  );
-}
-
-function LogImage({ token, imageUrl }: { token: string; imageUrl: string }) {
-  const [imgOpen, setImgOpen] = useState(false);
-  const [imgSrc, setImgSrc] = useState<string | null>(null);
-  const [imgError, setImgError] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    let objectUrl: string | null = null;
-
-    setImgSrc(null);
-    setImgError(false);
-
-    fetch(imageUrl, {
-      method: 'GET',
-      credentials: 'include',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`image fetch failed (${res.status})`);
-        return await res.blob();
-      })
-      .then((blob) => {
-        if (cancelled) return;
-        objectUrl = URL.createObjectURL(blob);
-        setImgSrc(objectUrl);
-      })
-      .catch(() => {
-        if (!cancelled) setImgError(true);
-      });
-
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [imageUrl, token]);
-
-  if (imgError) {
-    return <div class="log-thumb-status">Image unavailable</div>;
-  }
-
-  if (!imgSrc) {
-    return <div class="log-thumb-status">Loading image…</div>;
-  }
-
-  return (
-    <div class="log-thumb-wrap">
-      <button class="log-thumb-btn" type="button" onClick={() => setImgOpen(true)} aria-label="View image">
-        <img class="log-thumb" src={imgSrc} alt="log capture" loading="lazy" />
-      </button>
-      {imgOpen && (
-        <div class="img-overlay" onClick={() => setImgOpen(false)}>
-          <img class="img-full" src={imgSrc} alt="log capture" onClick={(e) => e.stopPropagation()} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'Just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
 }

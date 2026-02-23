@@ -84,12 +84,14 @@ partners.get('/', authenticate, async (c) => {
     (role: string) =>
     (p: {
       id: string;
+      partner_user_id: string;
       partner_email: string;
       status: string;
       permissions: string;
       created_at: string;
     }) => ({
       id: p.id,
+      partner_user_id: p.partner_user_id,
       partner_email: p.partner_email,
       status: p.status,
       permissions: JSON.parse(p.permissions),

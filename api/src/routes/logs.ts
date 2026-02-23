@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Env, Variables } from '../types/bindings';
 import { authenticate } from '../middleware/auth';
 import { createLogSchema, listLogsSchema } from '../lib/schemas';
-import { createLog, queryLogs } from '../lib/db';
+import { createLog, queryLogs, findAcceptedPartnership } from '../lib/db';
 
 const logs = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -42,10 +42,18 @@ logs.get('/', authenticate, async (c) => {
   const parsed = listLogsSchema.safeParse(c.req.query());
   if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
 
-  const userId = c.get('userId');
-  const { device_id, type, cursor, limit } = parsed.data;
+  const requesterId = c.get('userId');
+  const { device_id, type, user, cursor, limit } = parsed.data;
+  const targetId = user ?? requesterId;
 
-  const { items, hasMore } = await queryLogs(c.env.DB, userId, { device_id, type, cursor }, limit);
+  if (targetId !== requesterId) {
+    const partnership = await findAcceptedPartnership(c.env.DB, targetId, requesterId);
+    if (!partnership) return c.json({ error: 'Forbidden' }, 403);
+    const perms = JSON.parse(partnership.permissions);
+    if (!perms.view_logs) return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const { items, hasMore } = await queryLogs(c.env.DB, targetId, { device_id, type, cursor }, limit);
 
   const itemsWithUrls = items.map((log) => {
     const imageUrl = log.image_id

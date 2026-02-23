@@ -3,8 +3,8 @@ import { Hono } from 'hono';
 import { v4 as uuidv4 } from 'uuid';
 import { Env, Variables } from '../types/bindings';
 import { authenticate } from '../middleware/auth';
-import { createDeviceSchema, updateDeviceSchema } from '../lib/schemas';
-import { createDevice, listDevices, findDevice, updateDevice } from '../lib/db';
+import { createDeviceSchema, updateDeviceSchema, listDevicesSchema } from '../lib/schemas';
+import { createDevice, listDevices, findDevice, updateDevice, findAcceptedPartnership } from '../lib/db';
 
 const devices = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -26,12 +26,21 @@ devices.post('/', authenticate, async (c) => {
 });
 
 /**
- * GET /device - List user's devices
+ * GET /device - List devices (own, or a partner's with accepted partnership)
  */
 devices.get('/', authenticate, async (c) => {
-  const userId = c.get('userId');
+  const parsed = listDevicesSchema.safeParse(c.req.query());
+  if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
 
-  const result = await listDevices(c.env.DB, userId);
+  const requesterId = c.get('userId');
+  const targetId = parsed.data.user ?? requesterId;
+
+  if (targetId !== requesterId) {
+    const partnership = await findAcceptedPartnership(c.env.DB, targetId, requesterId);
+    if (!partnership) return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const result = await listDevices(c.env.DB, targetId);
 
   return c.json(
     result.results.map((device) => {

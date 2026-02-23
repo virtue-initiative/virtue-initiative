@@ -27,6 +27,19 @@
   color: var(--text-muted);
 }
 
+.sidebar-group {
+  margin-top: 1rem;
+}
+
+.sidebar-group-label {
+  margin: 0 0 0.3rem 0.65rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+}
+
 .device-list {
   list-style: none;
   margin: 0;
@@ -90,13 +103,92 @@
 }
 
 .logs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 1.25rem;
+  gap: 1rem;
+  flex-wrap: wrap;
 }
 
 .logs-header h1 {
   margin: 0;
   font-size: 1.3rem;
   font-weight: 700;
+}
+
+.view-tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--bg-subtle);
+  border-radius: 7px;
+  padding: 3px;
+}
+
+.view-tab {
+  padding: 0.3rem 0.85rem;
+  border-radius: 5px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-decoration: none;
+  color: var(--text-muted);
+  transition: background 0.12s, color 0.12s;
+}
+
+.view-tab:hover {
+  color: var(--text);
+  background: none;
+}
+
+.view-tab.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 3px #0002;
+}
+
+/* Gallery */
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 4px;
+}
+
+.gallery-item .log-thumb-wrap,
+.gallery-item .log-thumb-btn,
+.gallery-item .log-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: 3px;
+}
+
+.gallery-item .log-thumb-btn {
+  border: none;
+  border-radius: 3px;
+  aspect-ratio: 16/9;
+  overflow: hidden;
+}
+
+.gallery-item .log-thumb {
+  aspect-ratio: 16/9;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.gallery-item .log-thumb-status {
+  width: 100%;
+  aspect-ratio: 16/9;
+  font-size: 0.65rem;
+}
+
+@media (max-width: 900px) {
+  .gallery-grid { grid-template-columns: repeat(6, 1fr); }
+}
+
+@media (max-width: 600px) {
+  .gallery-grid { grid-template-columns: repeat(3, 1fr); }
 }
 
 .log-list {
@@ -214,11 +306,13 @@
 }
 
 .img-full {
-  max-width: 90vw;
+  width: 90vw;
   max-height: 90vh;
+  height: auto;
   border-radius: 8px;
   cursor: default;
   box-shadow: 0 8px 60px #0008;
+  display: block;
 }
 
 /* Misc */

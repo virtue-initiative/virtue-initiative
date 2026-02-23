@@ -199,6 +199,12 @@
   color: var(--text-muted);
 }
 
+.card-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 1rem;
+}
+
 /* Delete button */
 
 .btn-danger {

@@ -12,6 +12,26 @@ pub fn resolve_base_api_url() -> String {
         .unwrap_or_else(|| DEFAULT_BASE_API_URL.to_string())
 }
 
+/// Applies variables embedded from `.env.dev` at compile time.
+/// Call this once at startup before any threads are spawned.
+/// Only has an effect in debug builds; runtime env vars always take precedence.
+pub fn apply_dev_env() {
+    #[cfg(debug_assertions)]
+    {
+        if let Some(val) = option_env!("BEPURE_BASE_API_URL") {
+            if std::env::var("BEPURE_BASE_API_URL").is_err() {
+                // Safety: called once before any threads are spawned.
+                unsafe { std::env::set_var("BEPURE_BASE_API_URL", val) };
+            }
+        }
+        if let Some(val) = option_env!("BEPURE_CAPTURE_INTERVAL_SECONDS") {
+            if std::env::var("BEPURE_CAPTURE_INTERVAL_SECONDS").is_err() {
+                unsafe { std::env::set_var("BEPURE_CAPTURE_INTERVAL_SECONDS", val) };
+            }
+        }
+    }
+}
+
 pub fn clamp_capture_interval_seconds(seconds: u64) -> u64 {
     seconds.max(MIN_CAPTURE_INTERVAL_SECONDS)
 }
@@ -35,7 +55,7 @@ pub mod upload;
 
 pub use auth::{AuthClient, AuthClientConfig};
 pub use error::{CoreError, CoreResult};
-pub use image_pipeline::{ImagePipeline, ImagePipelineConfig, ProcessedImage};
+pub use image_pipeline::{ImagePipeline, ProcessedImage};
 pub use queue::{BufferedUpload, PersistentQueue, QueueEnqueueResult};
 pub use schedule::{CaptureSchedulePolicy, CaptureScheduleState, RetryPolicy};
 pub use token_store::{FileTokenStore, MemoryTokenStore, TokenStore};

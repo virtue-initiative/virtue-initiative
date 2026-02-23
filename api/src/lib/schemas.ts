@@ -19,6 +19,10 @@ export const createDeviceSchema = z.object({
   avg_interval_seconds: z.number().int().positive().optional().default(300),
 });
 
+export const listDevicesSchema = z.object({
+  user: z.string().min(1).optional(),
+});
+
 export const updateDeviceSchema = z
   .object({
     name: z.string().min(1).optional(),
@@ -89,6 +93,7 @@ export type UpdateDeviceInput = z.infer<typeof updateDeviceSchema>;
 export type UploadImageInput = z.infer<typeof uploadImageSchema>;
 export type CreateLogInput = z.infer<typeof createLogSchema>;
 export type ListLogsInput = z.infer<typeof listLogsSchema>;
+export type ListDevicesInput = z.infer<typeof listDevicesSchema>;
 export type CreatePartnerInput = z.infer<typeof createPartnerSchema>;
 export type AcceptPartnerInput = z.infer<typeof acceptPartnerSchema>;
 export type UpdatePartnerInput = z.infer<typeof updatePartnerSchema>;
