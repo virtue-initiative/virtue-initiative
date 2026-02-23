@@ -8,6 +8,9 @@ export interface Env {
 
   // JWT Configuration
   JWT_SECRET: string;
+
+  // Allowed CORS origin (e.g. https://app.example.com). Defaults to localhost in dev.
+  CORS_ORIGIN: string;
 }
 
 // Variables stored in context

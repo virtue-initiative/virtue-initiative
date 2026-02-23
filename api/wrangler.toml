@@ -19,12 +19,10 @@ migrations_dir = "src/schema/migrations"
 binding = "BUCKET"
 bucket_name = "bepure-images"
 
-# Environment variables (use wrangler secret for sensitive values)
+# Environment variables (use wrangler secret for sensitive values in production)
 [vars]
 JWT_ACCESS_EXPIRY = "15m"
 JWT_REFRESH_EXPIRY = "7d"
-R2_BUCKET_NAME = "bepure-images"
-# R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY must be set as secrets:
-# npx wrangler secret put R2_ACCOUNT_ID
-# npx wrangler secret put R2_ACCESS_KEY_ID
-# npx wrangler secret put R2_SECRET_ACCESS_KEY
+CORS_ORIGIN = "http://localhost:5173"
+# Dev default — override in production via `npx wrangler secret put JWT_SECRET`
+JWT_SECRET = "dev-secret-change-in-production"

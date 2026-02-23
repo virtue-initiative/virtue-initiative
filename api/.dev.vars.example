@@ -4,9 +4,5 @@
 # JWT Secret - Use a strong random string
 JWT_SECRET=your-super-secret-key-change-this-in-production
 
-# R2 S3-compatible credentials (for presigned URLs)
-# Create an R2 API token at: https://dash.cloudflare.com/ -> R2 -> Manage R2 API Tokens
-R2_ACCOUNT_ID=your-cloudflare-account-id
-R2_ACCESS_KEY_ID=your-r2-access-key-id
-R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
-R2_BUCKET_NAME=bepure-images
+# Allowed CORS origin (web app URL)
+CORS_ORIGIN=http://localhost:5173

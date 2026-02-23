@@ -10,11 +10,13 @@ import settings from './routes/settings';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-// Also remove X-API-Key from allowed headers since devices now use JWT
 app.use(
   '/*',
   cors({
-    origin: '*', // Configure appropriately for production
+    origin: (origin, c) => {
+      const allowed = c.env.CORS_ORIGIN || 'http://localhost:5173';
+      return origin === allowed ? origin : null;
+    },
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
