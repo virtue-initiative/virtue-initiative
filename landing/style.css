@@ -51,7 +51,7 @@ header {
   gap: 0.5rem;
 }
 
-.btn-docs {
+.btn-help {
   display: inline-block;
   margin-top: 1.25rem;
   padding: 0.45rem 1.1rem;
@@ -65,7 +65,7 @@ header {
   white-space: nowrap;
 }
 
-.btn-docs:hover {
+.btn-help:hover {
   background: var(--accent);
   color: #fff;
 }
