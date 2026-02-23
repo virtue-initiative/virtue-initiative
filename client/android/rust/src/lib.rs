@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use bepure_client_core::{
     AuthClient, BufferedUpload, CaptureSchedulePolicy, CaptureScheduleState, FileTokenStore,
-    DEFAULT_CAPTURE_INTERVAL_SECONDS, ImageOutputFormat, ImagePipeline, PersistentQueue,
+    DEFAULT_CAPTURE_INTERVAL_SECONDS, ImagePipeline, PersistentQueue,
     RetryPolicy, TokenStore, UploadClient, clamp_capture_interval_seconds, resolve_base_api_url,
 };
 
@@ -298,7 +298,7 @@ pub extern "system" fn Java_codes_anb_bepure_NativeBridge_nativeProcessCapture(
                 .device_id
                 .ok_or_else(|| anyhow!("device id missing"))?;
 
-            let processed = core.pipeline.process(&bytes, ImageOutputFormat::Webp)?;
+            let processed = core.pipeline.process(&bytes)?;
 
             let item = BufferedUpload::new(
                 Uuid::new_v4().to_string(),

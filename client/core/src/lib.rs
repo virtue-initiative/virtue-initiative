@@ -1,4 +1,4 @@
-pub const DEFAULT_BASE_API_URL: &str = "https://bepure-api.anb.codes";
+pub const DEFAULT_BASE_API_URL: &str = "https://api.bepure.anb.codes";
 pub const BASE_API_URL_ENV_VAR: &str = "BEPURE_BASE_API_URL";
 pub const CAPTURE_INTERVAL_SECONDS_ENV_VAR: &str = "BEPURE_CAPTURE_INTERVAL_SECONDS";
 pub const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
@@ -35,7 +35,7 @@ pub mod upload;
 
 pub use auth::{AuthClient, AuthClientConfig};
 pub use error::{CoreError, CoreResult};
-pub use image_pipeline::{ImageOutputFormat, ImagePipeline, ImagePipelineConfig, ProcessedImage};
+pub use image_pipeline::{ImagePipeline, ImagePipelineConfig, ProcessedImage};
 pub use queue::{BufferedUpload, PersistentQueue, QueueEnqueueResult};
 pub use schedule::{CaptureSchedulePolicy, CaptureScheduleState, RetryPolicy};
 pub use token_store::{FileTokenStore, MemoryTokenStore, TokenStore};

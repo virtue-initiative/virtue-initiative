@@ -1,5 +1,9 @@
 # BePure Linux Client
 
+## Development
+
+Copy `.env.example` to `.env`
+
 ## Commands
 
 - `bepure login`

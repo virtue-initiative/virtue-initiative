@@ -111,10 +111,12 @@ async fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
     });
     save_state(&paths.state_file, &state)?;
 
-    if let Err(err) = ensure_user_service_running() {
-        eprintln!(
-            "could not auto-start user service: {err}\nrun: systemctl --user daemon-reload && systemctl --user enable --now bepure.service"
-        );
+    if prompt_yes_no("Install and start the bepure systemd user service?")? {
+        if let Err(err) = ensure_user_service_running() {
+            eprintln!(
+                "could not auto-start user service: {err}\nrun: systemctl --user daemon-reload && systemctl --user enable --now bepure.service"
+            );
+        }
     }
 
     println!("Logged in. Device id: {}", registration.id);
@@ -205,8 +207,30 @@ fn status(paths: ClientPaths) -> Result<()> {
 }
 
 fn ensure_user_service_running() -> Result<()> {
+    install_user_service_file()?;
     run_systemctl_user(&["daemon-reload"])?;
     run_systemctl_user(&["enable", "--now", "bepure.service"])?;
+    Ok(())
+}
+
+fn install_user_service_file() -> Result<()> {
+    let exe = std::env::current_exe().context("could not determine current executable path")?;
+    let exe_str = exe.to_str().context("executable path is not valid UTF-8")?;
+
+    let service_content = include_str!("../packaging/systemd/bepure.service")
+        .replace("/usr/bin/bepure", exe_str);
+
+    let systemd_dir = dirs::config_dir()
+        .context("could not determine config directory")?
+        .join("systemd/user");
+
+    std::fs::create_dir_all(&systemd_dir)
+        .with_context(|| format!("could not create {}", systemd_dir.display()))?;
+
+    let dest = systemd_dir.join("bepure.service");
+    std::fs::write(&dest, service_content)
+        .with_context(|| format!("could not write {}", dest.display()))?;
+
     Ok(())
 }
 

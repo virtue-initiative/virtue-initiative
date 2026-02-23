@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use bepure_client_core::{
     AuthClient, BufferedUpload, CaptureSchedulePolicy, CaptureScheduleState, FileTokenStore,
-    ImageOutputFormat, ImagePipeline, PersistentQueue, RetryPolicy, TokenStore, UploadClient,
+    ImagePipeline, PersistentQueue, RetryPolicy, TokenStore, UploadClient,
     resolve_capture_interval_seconds,
 };
 
@@ -88,7 +88,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
             }
         };
 
-        let processed = match pipeline.process(&raw_capture, ImageOutputFormat::Webp) {
+        let processed = match pipeline.process(&raw_capture) {
             Ok(output) => output,
             Err(err) => {
                 last_cycle_success = false;
