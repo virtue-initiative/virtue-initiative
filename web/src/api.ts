@@ -59,4 +59,23 @@ export const api = {
   getDevices: (token: string) => req<Device[]>('/device', {}, token),
 
   getPartners: (token: string) => req<Partner[]>('/partner', {}, token),
+
+  invitePartner: (
+    token: string,
+    email: string,
+    permissions: { view_images: boolean; view_logs: boolean },
+  ) =>
+    req<{ id: string; status: string }>('/partner', {
+      method: 'POST',
+      body: JSON.stringify({ email, permissions }),
+    }, token),
+
+  acceptPartner: (token: string, id: string) =>
+    req<{ id: string }>('/partner/accept', {
+      method: 'POST',
+      body: JSON.stringify({ id }),
+    }, token),
+
+  deletePartner: (token: string, id: string) =>
+    req<void>(`/partner/${id}`, { method: 'DELETE' }, token),
 };

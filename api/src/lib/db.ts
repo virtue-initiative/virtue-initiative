@@ -295,6 +295,19 @@ export async function deletePartner(db: D1Database, partnerId: string) {
   return db.prepare('DELETE FROM partners WHERE id = ?').bind(partnerId).run();
 }
 
+export async function findPartnerByEitherParty(db: D1Database, partnerId: string, userId: string) {
+  return db
+    .prepare(`
+      SELECT p.id, u1.email as owner_email, u2.email as partner_email
+      FROM partners p
+      JOIN users u1 ON p.user_id = u1.id
+      JOIN users u2 ON p.partner_user_id = u2.id
+      WHERE p.id = ? AND (p.user_id = ? OR p.partner_user_id = ?)
+    `)
+    .bind(partnerId, userId, userId)
+    .first<{ id: string; owner_email: string; partner_email: string }>();
+}
+
 export async function getSettings(db: D1Database, userId: string) {
   return db
     .prepare('SELECT data FROM settings WHERE user_id = ?')

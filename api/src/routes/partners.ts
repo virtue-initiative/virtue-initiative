@@ -12,9 +12,11 @@ import {
   acceptPartner,
   listPartners,
   findPartnerByOwner,
+  findPartnerByEitherParty,
   updatePartnerPermissions,
   deletePartner,
 } from '../lib/db';
+import { sendPartnerDeletionEmail } from '../lib/email';
 
 const partners = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -125,16 +127,22 @@ partners.patch('/:id', authenticate, async (c) => {
 });
 
 /**
- * DELETE /partner/:id - Revoke partner access
+ * DELETE /partner/:id - Revoke partner access (either party may delete)
  */
 partners.delete('/:id', authenticate, async (c) => {
   const userId = c.get('userId');
   const partnerId = c.req.param('id');
 
-  const partnership = await findPartnerByOwner(c.env.DB, partnerId, userId);
+  const partnership = await findPartnerByEitherParty(c.env.DB, partnerId, userId);
   if (!partnership) return c.json({ error: 'Partnership not found' }, 404);
 
   await deletePartner(c.env.DB, partnerId);
+
+  // Fire-and-forget notification emails
+  c.executionCtx.waitUntil(
+    sendPartnerDeletionEmail(c.env, partnership.owner_email, partnership.partner_email),
+  );
+
   return c.body(null, 204);
 });
 
