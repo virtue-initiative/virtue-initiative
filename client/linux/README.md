@@ -20,6 +20,9 @@ The service is installed and auto-started for active desktop users by the packag
 Before `bepure login`, monitoring is idle because there is no token/device binding.
 After `bepure login`, captures and uploads start automatically.
 
+Capture interval can be overridden with environment variable `BEPURE_CAPTURE_INTERVAL_SECONDS`.
+Minimum interval is `15` seconds.
+
 ## Wayland and X11
 
 `bepure login` runs a capture probe.

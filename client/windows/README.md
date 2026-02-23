@@ -54,6 +54,11 @@ $env:BEPURE_BASE_API_URL = "https://your-api.example.com"
 
 For the Windows service, set it as a machine-level environment variable and restart the service.
 
+## Capture interval override
+
+The Windows client supports `BEPURE_CAPTURE_INTERVAL_SECONDS`.
+Minimum interval is `15` seconds.
+
 ## Runtime data locations
 
 The tray app and service share state in:

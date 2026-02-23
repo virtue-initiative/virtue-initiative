@@ -10,8 +10,9 @@ use tokio::time::sleep;
 use uuid::Uuid;
 
 use bepure_client_core::{
-    BufferedUpload, CaptureSchedulePolicy, CaptureScheduleState, FileTokenStore, ImageOutputFormat,
-    ImagePipeline, PersistentQueue, RetryPolicy, TokenStore, UploadClient,
+    AuthClient, BufferedUpload, CaptureSchedulePolicy, CaptureScheduleState, FileTokenStore,
+    ImageOutputFormat, ImagePipeline, PersistentQueue, RetryPolicy, TokenStore, UploadClient,
+    resolve_capture_interval_seconds,
 };
 
 use crate::api::ApiClient;
@@ -22,6 +23,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     paths.ensure_dirs()?;
 
     let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&paths.token_file));
+    let auth_client = AuthClient::new(token_store.clone())?;
     let queue = PersistentQueue::open(&paths.queue_file, 512)?;
     let upload_client = UploadClient::new()?;
     let api_client = ApiClient::new()?;
@@ -34,7 +36,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
 
     loop {
         let state = load_state(&paths.state_file)?;
-        let Some(access_token) = token_store.get_access_token()? else {
+        let Some(mut access_token) = token_store.get_access_token()? else {
             sleep(Duration::from_secs(20)).await;
             continue;
         };
@@ -48,8 +50,24 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
             continue;
         }
 
+        match auth_client
+            .refresh_access_token_if_needed(Duration::from_secs(120))
+            .await
+        {
+            Ok(Some(refreshed)) => {
+                access_token = refreshed.access_token;
+            }
+            Ok(None) => {}
+            Err(_) => {
+                sleep(Duration::from_secs(20)).await;
+                continue;
+            }
+        }
+
+        let effective_interval_seconds =
+            resolve_capture_interval_seconds(state.capture_interval_seconds);
         let policy = CaptureSchedulePolicy {
-            base_interval: Duration::from_secs(state.capture_interval_seconds.max(30)),
+            base_interval: Duration::from_secs(effective_interval_seconds),
             ..CaptureSchedulePolicy::default()
         };
         let mut rng = thread_rng();
@@ -62,7 +80,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
                 last_cycle_success = false;
                 let mut metadata = BTreeMap::new();
                 metadata.insert("reason".to_string(), json!("capture_failed"));
-                metadata.insert("error".to_string(), json!(err.to_string()));
+                metadata.insert("error".to_string(), json!(format!("{err:#}")));
                 let _ = api_client
                     .send_log(&access_token, "missed_capture", &device_id, None, metadata)
                     .await;
@@ -79,7 +97,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
                 last_cycle_success = false;
                 let mut metadata = BTreeMap::new();
                 metadata.insert("reason".to_string(), json!("image_pipeline_failed"));
-                metadata.insert("error".to_string(), json!(err.to_string()));
+                metadata.insert("error".to_string(), json!(format!("{err:#}")));
                 let _ = api_client
                     .send_log(&access_token, "missed_capture", &device_id, None, metadata)
                     .await;
@@ -116,7 +134,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
                 last_cycle_success = false;
                 let mut metadata = BTreeMap::new();
                 metadata.insert("reason".to_string(), json!("queue_processing_failed"));
-                metadata.insert("error".to_string(), json!(err.to_string()));
+                metadata.insert("error".to_string(), json!(format!("{err:#}")));
                 let _ = api_client
                     .send_log(&access_token, "missed_capture", &device_id, None, metadata)
                     .await;

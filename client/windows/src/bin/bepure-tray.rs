@@ -24,6 +24,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{PCWSTR, w};
 
+use bepure_client_core::DEFAULT_CAPTURE_INTERVAL_SECONDS;
 use bepure_windows_client::session::SessionManager;
 use bepure_windows_client::win_text::to_wide;
 
@@ -226,9 +227,13 @@ impl AppState {
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "windows-device".to_string());
 
-        let result =
-            self.session
-                .login_blocking(&self.runtime, &email, &password, &device_name, 300);
+        let result = self.session.login_blocking(
+            &self.runtime,
+            &email,
+            &password,
+            &device_name,
+            DEFAULT_CAPTURE_INTERVAL_SECONDS,
+        );
 
         match result {
             Ok(device_id) => {

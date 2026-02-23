@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use bepure_client_core::DEFAULT_CAPTURE_INTERVAL_SECONDS;
+
 #[derive(Clone, Debug)]
 pub struct ClientPaths {
     pub config_dir: PathBuf,
@@ -51,7 +53,7 @@ impl Default for ClientState {
     fn default() -> Self {
         Self {
             monitoring_enabled: false,
-            capture_interval_seconds: 300,
+            capture_interval_seconds: DEFAULT_CAPTURE_INTERVAL_SECONDS,
             device_id: None,
             backend_hint: None,
         }

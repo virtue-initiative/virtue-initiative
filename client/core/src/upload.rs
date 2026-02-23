@@ -169,6 +169,17 @@ impl UploadClient {
                 Err(err) => {
                     report.last_error = Some(err.to_string());
 
+                    if is_auth_error(&err) {
+                        let delay =
+                            retry_policy.next_delay(next_item.attempts.saturating_add(1), &mut rng);
+                        let chrono_delay = ChronoDuration::from_std(delay)
+                            .map_err(|e| CoreError::Time(e.to_string()))?;
+                        queue.mark_front_retry(Utc::now() + chrono_delay)?;
+                        report.retried += 1;
+                        // Stop this batch early; further attempts with the same stale token will fail.
+                        break;
+                    }
+
                     let next_attempt = next_item.attempts.saturating_add(1);
                     let retriable = is_retriable_error(&err);
                     let attempts_remaining = next_attempt < retry_policy.max_attempts;
@@ -192,11 +203,21 @@ impl UploadClient {
     }
 }
 
+fn is_auth_error(err: &CoreError) -> bool {
+    matches!(
+        err,
+        CoreError::UnexpectedResponse { status, .. }
+            if *status == reqwest::StatusCode::UNAUTHORIZED
+    )
+}
+
 fn is_retriable_error(err: &CoreError) -> bool {
     match err {
         CoreError::Http(inner) => inner.is_timeout() || inner.is_connect(),
         CoreError::UnexpectedResponse { status, .. } => {
-            *status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
+            *status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                || *status == reqwest::StatusCode::UNAUTHORIZED
+                || status.is_server_error()
         }
         CoreError::Io(_) => true,
         _ => false,

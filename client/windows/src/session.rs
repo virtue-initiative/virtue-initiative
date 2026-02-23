@@ -5,7 +5,9 @@ use anyhow::{Context, Result};
 use serde_json::json;
 use tokio::runtime::Runtime;
 
-use bepure_client_core::{AuthClient, FileTokenStore, TokenStore};
+use bepure_client_core::{
+    AuthClient, FileTokenStore, TokenStore, resolve_capture_interval_seconds,
+};
 
 use crate::api::ApiClient;
 use crate::config::{ClientPaths, load_state, save_state};
@@ -60,6 +62,8 @@ impl SessionManager {
         interval_seconds: u64,
     ) -> Result<String> {
         runtime.block_on(async {
+            let effective_interval_seconds = resolve_capture_interval_seconds(interval_seconds);
+
             self.auth_client
                 .login(email, password)
                 .await
@@ -76,7 +80,7 @@ impl SessionManager {
                     &access_token,
                     device_name,
                     "windows",
-                    interval_seconds.max(30),
+                    effective_interval_seconds,
                 )
                 .await
                 .context("device registration failed")?;
@@ -84,7 +88,7 @@ impl SessionManager {
             let mut state = load_state(&self.paths.state_file)?;
             state.device_id = Some(registration.id.clone());
             state.monitoring_enabled = true;
-            state.capture_interval_seconds = interval_seconds.max(30);
+            state.capture_interval_seconds = effective_interval_seconds;
             save_state(&self.paths.state_file, &state)?;
 
             Ok::<String, anyhow::Error>(registration.id)
@@ -109,6 +113,7 @@ impl SessionManager {
 
             let _ = self.auth_client.logout().await;
             self.token_store.clear_access_token()?;
+            self.token_store.clear_refresh_token()?;
 
             state.monitoring_enabled = false;
             state.device_id = None;

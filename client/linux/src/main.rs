@@ -12,7 +12,9 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use serde_json::json;
 
-use bepure_client_core::{AuthClient, FileTokenStore, TokenStore};
+use bepure_client_core::{
+    AuthClient, FileTokenStore, TokenStore, resolve_capture_interval_seconds,
+};
 
 use crate::api::ApiClient;
 use crate::capture::{CaptureBackend, probe_backend};
@@ -88,6 +90,7 @@ async fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
 
     let api_client = ApiClient::new()?;
     let mut state = load_state(&paths.state_file)?;
+    let capture_interval_seconds = resolve_capture_interval_seconds(state.capture_interval_seconds);
 
     let host = hostname::get()
         .ok()
@@ -96,7 +99,7 @@ async fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
         .unwrap_or_else(|| "linux-device".to_string());
 
     let registration = api_client
-        .register_device(&access_token, &host, state.capture_interval_seconds)
+        .register_device(&access_token, &host, capture_interval_seconds)
         .await
         .context("device registration failed")?;
 
@@ -161,6 +164,7 @@ async fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
     }
 
     token_store.clear_access_token()?;
+    token_store.clear_refresh_token()?;
     state.monitoring_enabled = false;
     state.device_id = None;
     save_state(&paths.state_file, &state)?;
@@ -171,14 +175,22 @@ async fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
 
 fn status(paths: ClientPaths) -> Result<()> {
     let state = load_state(&paths.state_file)?;
+    let effective_interval_seconds =
+        resolve_capture_interval_seconds(state.capture_interval_seconds);
     let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&paths.token_file));
     let logged_in = token_store.get_access_token()?.is_some();
+    let refresh_token_present = token_store.get_refresh_token()?.is_some();
 
     println!("logged_in: {}", logged_in);
+    println!("refresh_token_present: {}", refresh_token_present);
     println!("monitoring_enabled: {}", state.monitoring_enabled);
     println!(
         "device_id: {}",
         state.device_id.as_deref().unwrap_or("<none>")
+    );
+    println!(
+        "capture_interval_seconds: {} (effective: {})",
+        state.capture_interval_seconds, effective_interval_seconds
     );
     println!(
         "backend: {}",

@@ -19,8 +19,8 @@ use uuid::Uuid;
 
 use bepure_client_core::{
     AuthClient, BufferedUpload, CaptureSchedulePolicy, CaptureScheduleState, FileTokenStore,
-    ImageOutputFormat, ImagePipeline, PersistentQueue, RetryPolicy, TokenStore, UploadClient,
-    resolve_base_api_url,
+    DEFAULT_CAPTURE_INTERVAL_SECONDS, ImageOutputFormat, ImagePipeline, PersistentQueue,
+    RetryPolicy, TokenStore, UploadClient, clamp_capture_interval_seconds, resolve_base_api_url,
 };
 
 static CORE: OnceCell<AndroidCore> = OnceCell::new();
@@ -49,7 +49,7 @@ impl Default for AndroidState {
     fn default() -> Self {
         Self {
             device_id: None,
-            capture_interval_seconds: 300,
+            capture_interval_seconds: DEFAULT_CAPTURE_INTERVAL_SECONDS,
         }
     }
 }
@@ -147,6 +147,7 @@ pub extern "system" fn Java_codes_anb_bepure_NativeBridge_nativeLogin(
         let email: String = env.get_string(&email)?.into();
         let password: String = env.get_string(&password)?.into();
         let device_name: String = env.get_string(&device_name)?.into();
+        let interval_seconds = clamp_capture_interval_seconds(interval_seconds.max(0) as u64);
 
         core.runtime.block_on(async {
             core.auth_client.login(&email, &password).await?;
@@ -159,13 +160,13 @@ pub extern "system" fn Java_codes_anb_bepure_NativeBridge_nativeLogin(
                 &core.http_client,
                 &access_token,
                 &device_name,
-                interval_seconds.max(30) as u64,
+                interval_seconds,
             )
             .await?;
 
             let mut state = load_state(&core.state_path)?;
             state.device_id = Some(device_id);
-            state.capture_interval_seconds = interval_seconds.max(30) as u64;
+            state.capture_interval_seconds = interval_seconds;
             save_state(&core.state_path, &state)?;
 
             Ok::<(), anyhow::Error>(())
@@ -205,6 +206,7 @@ pub extern "system" fn Java_codes_anb_bepure_NativeBridge_nativeLogout(
 
             let _ = core.auth_client.logout().await;
             core.token_store.clear_access_token()?;
+            core.token_store.clear_refresh_token()?;
 
             let mut new_state = state;
             new_state.device_id = None;
