@@ -209,6 +209,14 @@ fn status(paths: ClientPaths) -> Result<()> {
 }
 
 fn ensure_user_service_running() -> Result<()> {
+    run_systemctl_user(&[
+        "import-environment",
+        "DISPLAY",
+        "WAYLAND_DISPLAY",
+        "XAUTHORITY",
+        "XDG_SESSION_TYPE",
+        "DBUS_SESSION_BUS_ADDRESS",
+    ])?;
     install_user_service_file()?;
     run_systemctl_user(&["daemon-reload"])?;
     run_systemctl_user(&["enable", "--now", "bepure.service"])?;
@@ -219,8 +227,8 @@ fn install_user_service_file() -> Result<()> {
     let exe = std::env::current_exe().context("could not determine current executable path")?;
     let exe_str = exe.to_str().context("executable path is not valid UTF-8")?;
 
-    let service_content = include_str!("../packaging/systemd/bepure.service")
-        .replace("/usr/bin/bepure", exe_str);
+    let service_content =
+        include_str!("../packaging/systemd/bepure.service").replace("/usr/bin/bepure", exe_str);
 
     let systemd_dir = dirs::config_dir()
         .context("could not determine config directory")?

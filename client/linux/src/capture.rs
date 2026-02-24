@@ -18,18 +18,24 @@ pub struct CaptureProbe {
 }
 
 pub fn detect_backend(hint: Option<CaptureBackendHint>) -> Option<CaptureBackend> {
+    let wayland_available = env_var_nonempty("WAYLAND_DISPLAY").is_some();
+    let x11_available = resolve_x11_display().is_some();
+
     if let Some(hint) = hint {
-        return Some(match hint {
-            CaptureBackendHint::Wayland => CaptureBackend::Wayland,
-            CaptureBackendHint::X11 => CaptureBackend::X11,
-        });
+        match hint {
+            CaptureBackendHint::Wayland if wayland_available => {
+                return Some(CaptureBackend::Wayland);
+            }
+            CaptureBackendHint::X11 if x11_available => return Some(CaptureBackend::X11),
+            _ => {}
+        }
     }
 
-    if std::env::var("WAYLAND_DISPLAY").is_ok() {
+    if wayland_available {
         return Some(CaptureBackend::Wayland);
     }
 
-    if std::env::var("DISPLAY").is_ok() {
+    if x11_available {
         return Some(CaptureBackend::X11);
     }
 
@@ -89,17 +95,27 @@ pub fn capture_screen(hint: Option<CaptureBackendHint>) -> Result<Vec<u8>> {
 }
 
 fn capture_wayland() -> Result<Vec<u8>> {
-    run_capture_command("grim", &["-"]).with_context(
+    run_capture_command("grim", &["-"], &[]).with_context(
         || "grim capture failed (Wayland usually requires compositor support and permissions)",
     )
 }
 
 fn capture_x11() -> Result<Vec<u8>> {
-    let import_attempt = run_capture_command("import", &["-window", "root", "png:-"]);
+    let display = resolve_x11_display().ok_or_else(|| {
+        anyhow!("X11 display unavailable (DISPLAY unset and no /tmp/.X11-unix/X* socket found)")
+    })?;
+    let mut env_overrides = vec![("DISPLAY", display)];
+    if let Some(xauthority) = resolve_xauthority() {
+        env_overrides.push(("XAUTHORITY", xauthority));
+    }
+
+    let import_attempt =
+        run_capture_command("import", &["-window", "root", "png:-"], &env_overrides);
     match import_attempt {
         Ok(bytes) => Ok(bytes),
         Err(import_error) => {
-            let maim_attempt = run_capture_command("maim", &["-u", "-f", "png", "-"]);
+            let maim_attempt =
+                run_capture_command("maim", &["-u", "-f", "png", "-"], &env_overrides);
             match maim_attempt {
                 Ok(bytes) => Ok(bytes),
                 Err(maim_error) => Err(anyhow!(
@@ -112,12 +128,65 @@ fn capture_x11() -> Result<Vec<u8>> {
     }
 }
 
-fn run_capture_command(cmd: &str, args: &[&str]) -> Result<Vec<u8>> {
-    let output = Command::new(cmd)
+fn env_var_nonempty(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn resolve_x11_display() -> Option<String> {
+    env_var_nonempty("DISPLAY").or_else(detect_x11_socket_display)
+}
+
+fn detect_x11_socket_display() -> Option<String> {
+    let mut display_numbers = Vec::new();
+    let entries = std::fs::read_dir("/tmp/.X11-unix").ok()?;
+
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if let Some(number) = name
+            .strip_prefix('X')
+            .and_then(|suffix| suffix.parse::<u32>().ok())
+        {
+            display_numbers.push(number);
+        }
+    }
+
+    display_numbers.sort_unstable();
+    display_numbers.first().map(|number| format!(":{number}"))
+}
+
+fn resolve_xauthority() -> Option<String> {
+    env_var_nonempty("XAUTHORITY").or_else(|| {
+        let home = env_var_nonempty("HOME")?;
+        let path = std::path::Path::new(&home).join(".Xauthority");
+        if path.exists() {
+            Some(path.to_string_lossy().to_string())
+        } else {
+            None
+        }
+    })
+}
+
+fn run_capture_command(
+    cmd: &str,
+    args: &[&str],
+    env_overrides: &[(&str, String)],
+) -> Result<Vec<u8>> {
+    let mut command = Command::new(cmd);
+    command
         .args(args)
         .stdin(Stdio::null())
         .stderr(Stdio::piped())
-        .stdout(Stdio::piped())
+        .stdout(Stdio::piped());
+
+    for (key, value) in env_overrides {
+        command.env(key, value);
+    }
+
+    let output = command
         .output()
         .with_context(|| format!("failed to execute {cmd}"))?;
 
