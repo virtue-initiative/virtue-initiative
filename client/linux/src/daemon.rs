@@ -10,16 +10,18 @@ use tokio::time::sleep;
 use uuid::Uuid;
 
 use bepure_client_core::{
-    AuthClient, BufferedUpload, CaptureSchedulePolicy, CaptureScheduleState, FileTokenStore,
-    ImagePipeline, PersistentQueue, RetryPolicy, TokenStore, UploadClient,
-    DEFAULT_CAPTURE_INTERVAL_SECONDS,
+    AuthClient, BufferedUpload, CaptureSchedulePolicy, CaptureScheduleState,
+    DEFAULT_CAPTURE_INTERVAL_SECONDS, FileTokenStore, ImagePipeline, PersistentQueue, RetryPolicy,
+    TokenStore, UploadClient,
 };
 
 use crate::api::{ApiClient, Device};
-use crate::capture::capture_screen;
+use crate::capture::{capture_screen, is_session_unavailable_error};
 use crate::config::{ClientPaths, load_state};
 
 const SETTINGS_REFRESH_INTERVAL: Duration = Duration::from_secs(30 * 60);
+const IDLE_RETRY_INTERVAL: Duration = Duration::from_secs(20);
+const SESSION_UNAVAILABLE_LOG_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     paths.ensure_dirs()?;
@@ -37,20 +39,21 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     let mut last_cycle_success = true;
     let mut device_settings: Option<Device> = None;
     let mut last_settings_fetch: Option<Instant> = None;
+    let mut last_session_unavailable_log: Option<Instant> = None;
 
     loop {
         let state = load_state(&paths.state_file)?;
         let Some(mut access_token) = token_store.get_access_token()? else {
-            sleep(Duration::from_secs(20)).await;
+            sleep(IDLE_RETRY_INTERVAL).await;
             continue;
         };
         let Some(device_id) = state.device_id.clone() else {
-            sleep(Duration::from_secs(20)).await;
+            sleep(IDLE_RETRY_INTERVAL).await;
             continue;
         };
 
         if !state.monitoring_enabled {
-            sleep(Duration::from_secs(20)).await;
+            sleep(IDLE_RETRY_INTERVAL).await;
             continue;
         }
 
@@ -63,7 +66,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
             }
             Ok(None) => {}
             Err(_) => {
-                sleep(Duration::from_secs(20)).await;
+                sleep(IDLE_RETRY_INTERVAL).await;
                 continue;
             }
         }
@@ -79,7 +82,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
                     last_settings_fetch = Some(Instant::now());
                 }
                 Err(_) => {
-                    sleep(Duration::from_secs(20)).await;
+                    sleep(IDLE_RETRY_INTERVAL).await;
                     continue;
                 }
             }
@@ -88,7 +91,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
         let settings = device_settings.as_ref().unwrap();
 
         if !settings.enabled {
-            sleep(Duration::from_secs(20)).await;
+            sleep(IDLE_RETRY_INTERVAL).await;
             continue;
         }
 
@@ -109,6 +112,25 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
         let raw_capture = match capture_screen(state.backend_hint) {
             Ok(bytes) => bytes,
             Err(err) => {
+                if is_session_unavailable_error(&err) {
+                    // A missing display/session at login/reboot is transient.
+                    // Probe quickly without exponential backoff, and throttle logs.
+                    last_cycle_success = true;
+                    let should_log = last_session_unavailable_log
+                        .map(|when| when.elapsed() >= SESSION_UNAVAILABLE_LOG_INTERVAL)
+                        .unwrap_or(true);
+                    if should_log {
+                        let mut metadata = BTreeMap::new();
+                        metadata.insert("reason".to_string(), json!("capture_session_unavailable"));
+                        metadata.insert("error".to_string(), json!(err.to_string()));
+                        let _ = api_client
+                            .send_log(&access_token, "missed_capture", &device_id, None, metadata)
+                            .await;
+                        last_session_unavailable_log = Some(Instant::now());
+                    }
+                    sleep(IDLE_RETRY_INTERVAL).await;
+                    continue;
+                }
                 last_cycle_success = false;
                 let mut metadata = BTreeMap::new();
                 metadata.insert("reason".to_string(), json!("capture_failed"));

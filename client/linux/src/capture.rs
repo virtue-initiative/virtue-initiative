@@ -94,6 +94,14 @@ pub fn capture_screen(hint: Option<CaptureBackendHint>) -> Result<Vec<u8>> {
     }
 }
 
+pub fn is_session_unavailable_error(err: &anyhow::Error) -> bool {
+    let text = err.to_string().to_ascii_lowercase();
+    text.contains("no graphical session detected")
+        || text.contains("x11 display unavailable")
+        || text.contains("unable to open x server")
+        || text.contains("can't open display")
+}
+
 fn capture_wayland() -> Result<Vec<u8>> {
     run_capture_command("grim", &["-"], &[]).with_context(
         || "grim capture failed (Wayland usually requires compositor support and permissions)",
