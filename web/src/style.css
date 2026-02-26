@@ -9,7 +9,7 @@
   --bg: #f9f9f7;
   --bg-subtle: #f3f2ef;
   --border: #e0ddd8;
-  --accent: #2c6e4f;
+  --accent: #c2410c;
 
   color: var(--text);
   background-color: var(--bg);
@@ -165,7 +165,7 @@ main {
   flex-shrink: 0;
 }
 
-.badge-green  { background: #dcfce7; color: #15803d; }
+.badge-green  { background: #fff7ed; color: #c2410c; }
 .badge-gray   { background: #f3f4f6; color: #6b7280; }
 .badge-yellow { background: #fef9c3; color: #a16207; }
 

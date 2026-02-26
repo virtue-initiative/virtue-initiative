@@ -5,8 +5,8 @@ import type * as Preset from '@docusaurus/preset-classic';
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
 
 const config: Config = {
-  title: 'BePure Docs',
-  tagline: 'Porn accountability, open source.',
+  title: 'BePure Help',
+  tagline: 'Porn accountability, free forever.',
   favicon: 'img/favicon.ico',
 
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
@@ -15,15 +15,10 @@ const config: Config = {
   },
 
   // Set the production url of your site here
-  url: 'https://your-docusaurus-site.example.com',
+  url: 'https://help.bepure.anb.codes',
   // Set the /<baseUrl>/ pathname under which your site is served
   // For GitHub pages deployment, it is often '/<projectName>/'
   baseUrl: '/',
-
-  // GitHub pages deployment config.
-  // If you aren't using GitHub pages, you don't need these.
-  organizationName: 'facebook', // Usually your GitHub org/user name.
-  projectName: 'docusaurus', // Usually your repo name.
 
   onBrokenLinks: 'throw',
 
@@ -41,6 +36,8 @@ const config: Config = {
       {
         docs: {
           sidebarPath: './sidebars.ts',
+          routeBasePath: '/help',
+          path: './help',
         },
         blog: false,
         theme: {
@@ -52,7 +49,7 @@ const config: Config = {
 
   themeConfig: {
     // Replace with your project's social card
-    image: 'img/docusaurus-social-card.jpg',
+    // image: '',
     colorMode: {
       defaultMode: 'light',
       disableSwitch: true,
@@ -60,22 +57,22 @@ const config: Config = {
     },
     navbar: {
       title: 'BePure',
-      logo: {
-        alt: 'BePure Logo',
-        src: 'img/logo.svg',
-      },
+      // logo: {
+      //   alt: 'BePure Logo',
+      //   src: '',
+      // },
       items: [
         {
           type: 'docSidebar',
-          sidebarId: 'tutorialSidebar',
+          sidebarId: 'helpSidebar',
           position: 'left',
-          label: 'Docs',
+          label: 'Help',
         },
       ],
     },
     footer: {
       style: 'light',
-      copyright: `BePure is a non-profit project. Free to use, free to self-host.`,
+      copyright: `BePure is a non-profit project. Free to use, forever.`,
     },
     prism: {
       theme: prismThemes.github,
