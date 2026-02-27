@@ -12,7 +12,7 @@ export function Header() {
 
   return (
     <header>
-      <a href="/" class="header-brand">BePure</a>
+      <a href="/" class="header-brand">The Virtue Initiative</a>
       <nav>
         <a href="/" class={isActive('/') ? 'nav-active' : ''}>Dashboard</a>
         <a href="/logs" class={isActive('/logs') ? 'nav-active' : ''}>Logs</a>

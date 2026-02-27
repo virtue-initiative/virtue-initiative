@@ -37,7 +37,7 @@ export function Auth() {
   return (
     <div class="auth-page">
       <div class="auth-card">
-        <h1 class="auth-title">BePure</h1>
+        <h1 class="auth-title">The Virtue Initiative</h1>
         <p class="auth-subtitle">Accountability starts here.</p>
 
         <div class="auth-tabs">

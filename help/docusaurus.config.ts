@@ -5,7 +5,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
 
 const config: Config = {
-  title: 'BePure Help',
+  title: 'The Virtue Initiative Help',
   tagline: 'Porn accountability, free forever.',
   favicon: 'img/favicon.ico',
 
@@ -56,9 +56,9 @@ const config: Config = {
       respectPrefersColorScheme: false,
     },
     navbar: {
-      title: 'BePure',
+      title: 'The Virtue Initiative',
       // logo: {
-      //   alt: 'BePure Logo',
+      //   alt: 'The Virtue Initiative Logo',
       //   src: '',
       // },
       items: [
@@ -72,7 +72,7 @@ const config: Config = {
     },
     footer: {
       style: 'light',
-      copyright: `BePure is a non-profit project. Free to use, forever.`,
+      copyright: `The Virtue Initiative is a non-profit project. Free to use, forever.`,
     },
     prism: {
       theme: prismThemes.github,

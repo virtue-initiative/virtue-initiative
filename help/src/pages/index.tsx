@@ -33,7 +33,7 @@ export default function Home(): ReactNode {
   return (
     <Layout
       title={`${siteConfig.title}`}
-      description="Help articles for BePure">
+      description="Help articles for The Virtue Initiative">
       <HomepageHeader />
       <main>
 
