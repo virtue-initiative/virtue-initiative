@@ -15,7 +15,7 @@ describe('POST /partner', () => {
       headers: authHeaders(token),
       body: JSON.stringify({
         email: 'bob@example.com',
-        permissions: { view_images: true, view_logs: false },
+        permissions: { view_data: true },
       }),
     });
     expect(res.status).toBe(201);
@@ -52,7 +52,7 @@ describe('POST /partner/accept', () => {
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
       headers: authHeaders(aliceToken),
-      body: JSON.stringify({ email: 'bob2@example.com', permissions: { view_images: false } }),
+      body: JSON.stringify({ email: 'bob2@example.com', permissions: { view_data: false } }),
     });
     const { id: inviteId } = (await inviteRes.json()) as { id: string };
 
@@ -106,18 +106,18 @@ describe('PATCH /partner/:id', () => {
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
       headers: authHeaders(aliceToken),
-      body: JSON.stringify({ email: 'bob4@example.com', permissions: { view_images: false } }),
+      body: JSON.stringify({ email: 'bob4@example.com', permissions: { view_data: false } }),
     });
     const { id } = (await inviteRes.json()) as { id: string };
 
     const patchRes = await SELF.fetch(`${BASE}/partner/${id}`, {
       method: 'PATCH',
       headers: authHeaders(aliceToken),
-      body: JSON.stringify({ permissions: { view_images: true } }),
+      body: JSON.stringify({ permissions: { view_data: true } }),
     });
     expect(patchRes.status).toBe(200);
-    const body = (await patchRes.json()) as { permissions: { view_images: boolean } };
-    expect(body.permissions.view_images).toBe(true);
+    const body = (await patchRes.json()) as { permissions: { view_data: boolean } };
+    expect(body.permissions.view_data).toBe(true);
   });
 });
 

@@ -29,6 +29,12 @@ pub enum CoreError {
 
     #[error("time conversion error: {0}")]
     Time(String),
+
+    #[error("crypto error: {0}")]
+    Crypto(String),
+
+    #[error("serialization error: {0}")]
+    Serialization(String),
 }
 
 pub type CoreResult<T> = Result<T, CoreError>;

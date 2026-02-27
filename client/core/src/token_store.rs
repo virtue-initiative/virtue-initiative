@@ -13,6 +13,9 @@ pub trait TokenStore: Send + Sync {
     fn get_refresh_token(&self) -> CoreResult<Option<String>>;
     fn set_refresh_token(&self, token: &str) -> CoreResult<()>;
     fn clear_refresh_token(&self) -> CoreResult<()>;
+    fn get_e2ee_key(&self) -> CoreResult<Option<[u8; 32]>>;
+    fn set_e2ee_key(&self, key: &[u8; 32]) -> CoreResult<()>;
+    fn clear_e2ee_key(&self) -> CoreResult<()>;
 }
 
 #[derive(Debug, Default)]
@@ -78,6 +81,32 @@ impl TokenStore for MemoryTokenStore {
         guard.refresh_token = None;
         Ok(())
     }
+
+    fn get_e2ee_key(&self) -> CoreResult<Option<[u8; 32]>> {
+        let guard = self
+            .tokens
+            .lock()
+            .map_err(|_| CoreError::TokenStore("memory token lock poisoned".to_string()))?;
+        parse_e2ee_key_hex(guard.e2ee_key_hex.as_deref())
+    }
+
+    fn set_e2ee_key(&self, key: &[u8; 32]) -> CoreResult<()> {
+        let mut guard = self
+            .tokens
+            .lock()
+            .map_err(|_| CoreError::TokenStore("memory token lock poisoned".to_string()))?;
+        guard.e2ee_key_hex = Some(hex::encode(key));
+        Ok(())
+    }
+
+    fn clear_e2ee_key(&self) -> CoreResult<()> {
+        let mut guard = self
+            .tokens
+            .lock()
+            .map_err(|_| CoreError::TokenStore("memory token lock poisoned".to_string()))?;
+        guard.e2ee_key_hex = None;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -89,6 +118,8 @@ pub struct FileTokenStore {
 struct StoredToken {
     access_token: Option<String>,
     refresh_token: Option<String>,
+    /// AES-256 key as lowercase hex (64 chars). Derived from the user's E2EE password.
+    e2ee_key_hex: Option<String>,
 }
 
 impl FileTokenStore {
@@ -158,6 +189,33 @@ impl TokenStore for FileTokenStore {
         stored.refresh_token = None;
         self.write_token_file(&stored)
     }
+
+    fn get_e2ee_key(&self) -> CoreResult<Option<[u8; 32]>> {
+        let stored = self.read_token_file()?;
+        parse_e2ee_key_hex(stored.e2ee_key_hex.as_deref())
+    }
+
+    fn set_e2ee_key(&self, key: &[u8; 32]) -> CoreResult<()> {
+        let mut stored = self.read_token_file()?;
+        stored.e2ee_key_hex = Some(hex::encode(key));
+        self.write_token_file(&stored)
+    }
+
+    fn clear_e2ee_key(&self) -> CoreResult<()> {
+        let mut stored = self.read_token_file()?;
+        stored.e2ee_key_hex = None;
+        self.write_token_file(&stored)
+    }
+}
+
+fn parse_e2ee_key_hex(hex_str: Option<&str>) -> CoreResult<Option<[u8; 32]>> {
+    let Some(s) = hex_str else { return Ok(None) };
+    let bytes = hex::decode(s)
+        .map_err(|e| CoreError::TokenStore(format!("invalid e2ee_key_hex: {e}")))?;
+    let arr: [u8; 32] = bytes
+        .try_into()
+        .map_err(|_| CoreError::TokenStore("e2ee_key_hex must be 32 bytes".to_string()))?;
+    Ok(Some(arr))
 }
 
 #[cfg(test)]

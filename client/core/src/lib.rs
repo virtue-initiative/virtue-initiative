@@ -2,6 +2,7 @@ pub const DEFAULT_BASE_API_URL: &str = "https://api.bepure.anb.codes";
 pub const BASE_API_URL_ENV_VAR: &str = "BEPURE_BASE_API_URL";
 pub const CAPTURE_INTERVAL_SECONDS_ENV_VAR: &str = "BEPURE_CAPTURE_INTERVAL_SECONDS";
 pub const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
+pub const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
 pub const MIN_CAPTURE_INTERVAL_SECONDS: u64 = 15;
 
 pub fn resolve_base_api_url() -> String {
@@ -13,14 +14,12 @@ pub fn resolve_base_api_url() -> String {
 }
 
 /// Applies variables embedded from `.env.dev` at compile time.
-/// Call this once at startup before any threads are spawned.
 /// Only has an effect in debug builds; runtime env vars always take precedence.
 pub fn apply_dev_env() {
     #[cfg(debug_assertions)]
     {
         if let Some(val) = option_env!("BEPURE_BASE_API_URL") {
             if std::env::var("BEPURE_BASE_API_URL").is_err() {
-                // Safety: called once before any threads are spawned.
                 unsafe { std::env::set_var("BEPURE_BASE_API_URL", val) };
             }
         }
@@ -45,7 +44,10 @@ pub fn resolve_capture_interval_seconds(default_seconds: u64) -> u64 {
 }
 
 pub mod auth;
+pub mod batch;
+pub mod crypto;
 pub mod error;
+pub mod hash_chain;
 pub mod image_pipeline;
 pub mod models;
 pub mod queue;
@@ -54,9 +56,11 @@ pub mod token_store;
 pub mod upload;
 
 pub use auth::{AuthClient, AuthClientConfig};
+pub use batch::{BatchBlob, BatchItem};
+pub use crypto::{decrypt, derive_key, encrypt};
 pub use error::{CoreError, CoreResult};
+pub use hash_chain::ChainHasher;
 pub use image_pipeline::{ImagePipeline, ProcessedImage};
-pub use queue::{BufferedUpload, PersistentQueue, QueueEnqueueResult};
 pub use schedule::{CaptureSchedulePolicy, CaptureScheduleState, RetryPolicy};
 pub use token_store::{FileTokenStore, MemoryTokenStore, TokenStore};
-pub use upload::{QueueProcessReport, UploadClient, UploadClientConfig};
+pub use upload::{UploadClient, UploadClientConfig, sha256_bytes, sha256_hex};

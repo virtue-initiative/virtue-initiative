@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use bepure_client_core::DEFAULT_CAPTURE_INTERVAL_SECONDS;
+use bepure_client_core::{DEFAULT_BATCH_WINDOW_SECONDS, DEFAULT_CAPTURE_INTERVAL_SECONDS};
 
 #[derive(Clone, Debug)]
 pub struct ClientPaths {
@@ -13,6 +13,7 @@ pub struct ClientPaths {
     pub state_file: PathBuf,
     pub token_file: PathBuf,
     pub queue_file: PathBuf,
+    pub batch_buffer_file: PathBuf,
 }
 
 impl ClientPaths {
@@ -27,6 +28,7 @@ impl ClientPaths {
             state_file: config_dir.join("client_state.json"),
             token_file: config_dir.join("token_store.json"),
             queue_file: data_dir.join("upload_queue.json"),
+            batch_buffer_file: data_dir.join("batch_buffer.json"),
             config_dir,
             data_dir,
         })
@@ -45,8 +47,12 @@ impl ClientPaths {
 pub struct ClientState {
     pub monitoring_enabled: bool,
     pub capture_interval_seconds: u64,
+    /// How many seconds of captures to accumulate before uploading a batch.
+    pub batch_window_seconds: u64,
     pub device_id: Option<String>,
     pub backend_hint: Option<CaptureBackendHint>,
+    /// User ID used as PBKDF2 salt for E2EE key derivation.
+    pub e2ee_user_id: Option<String>,
 }
 
 impl Default for ClientState {
@@ -54,8 +60,10 @@ impl Default for ClientState {
         Self {
             monitoring_enabled: false,
             capture_interval_seconds: DEFAULT_CAPTURE_INTERVAL_SECONDS,
+            batch_window_seconds: DEFAULT_BATCH_WINDOW_SECONDS,
             device_id: None,
             backend_hint: None,
+            e2ee_user_id: None,
         }
     }
 }

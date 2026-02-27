@@ -3,17 +3,17 @@ mod capture;
 mod config;
 mod daemon;
 
-use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::process::{Command, ExitCode};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use base64::Engine;
 use clap::{Parser, Subcommand};
-use serde_json::json;
+use serde::Deserialize;
 
 use bepure_client_core::{
-    AuthClient, FileTokenStore, TokenStore, apply_dev_env, resolve_capture_interval_seconds,
+    AuthClient, FileTokenStore, TokenStore, apply_dev_env, derive_key, resolve_capture_interval_seconds,
 };
 
 use crate::api::ApiClient;
@@ -40,6 +40,10 @@ enum Commands {
     },
     Daemon,
     Status,
+    /// Set how many seconds of captures to accumulate before uploading a batch.
+    SetBatchWindow {
+        seconds: u64,
+    },
 }
 
 #[tokio::main]
@@ -65,6 +69,7 @@ async fn run() -> Result<()> {
         Commands::Logout { yes } => logout(paths, yes).await,
         Commands::Daemon => daemon::run_daemon(&paths).await,
         Commands::Status => status(paths),
+        Commands::SetBatchWindow { seconds } => set_batch_window(paths, seconds),
     }
 }
 
@@ -87,6 +92,13 @@ async fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
         .get_access_token()?
         .context("missing access token after login")?;
 
+    // Derive and store the E2EE key.
+    let user_id = parse_jwt_sub(&access_token)
+        .context("could not extract user ID from access token")?;
+    let e2ee_password = rpassword::prompt_password("E2EE encryption password: ")?;
+    let e2ee_key = derive_key(&e2ee_password, &user_id);
+    token_store.set_e2ee_key(&e2ee_key)?;
+
     let probe = probe_backend(None);
     println!("{}", probe.guidance);
 
@@ -107,6 +119,7 @@ async fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
 
     state.device_id = Some(registration.id.clone());
     state.monitoring_enabled = true;
+    state.e2ee_user_id = Some(user_id.clone());
     state.backend_hint = probe.backend.map(|backend| match backend {
         CaptureBackend::Wayland => CaptureBackendHint::Wayland,
         CaptureBackend::X11 => CaptureBackendHint::X11,
@@ -150,27 +163,18 @@ async fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
         return Ok(());
     }
 
-    if let (Some(token), Some(device_id)) = (access_token.as_deref(), state.device_id.as_deref()) {
-        let api_client = ApiClient::new()?;
-        let mut metadata = BTreeMap::new();
-        metadata.insert("reason".to_string(), json!("user_logout"));
-        let _ = api_client
-            .send_log(token, "manual_override", device_id, None, metadata)
-            .await;
-    }
-
-    if let Some(token) = access_token {
-        let auth_client = AuthClient::new(token_store.clone())?;
-        if let Err(err) = auth_client.logout().await {
-            eprintln!("logout endpoint warning: {err}");
-        }
+    if let (Some(token), Some(_device_id)) = (access_token.as_deref(), state.device_id.as_deref()) {
+        let auth_client2 = AuthClient::new(token_store.clone())?;
+        let _ = auth_client2.logout().await;
         let _ = token;
     }
 
     token_store.clear_access_token()?;
     token_store.clear_refresh_token()?;
+    token_store.clear_e2ee_key()?;
     state.monitoring_enabled = false;
     state.device_id = None;
+    state.e2ee_user_id = None;
     save_state(&paths.state_file, &state)?;
 
     println!("Logged out. Monitoring is disabled on this device until you run `bepure login`.");
@@ -196,6 +200,7 @@ fn status(paths: ClientPaths) -> Result<()> {
         "capture_interval_seconds: {} (effective: {})",
         state.capture_interval_seconds, effective_interval_seconds
     );
+    println!("batch_window_seconds: {}", state.batch_window_seconds);
     println!(
         "backend: {}",
         match state.backend_hint {
@@ -205,6 +210,14 @@ fn status(paths: ClientPaths) -> Result<()> {
         }
     );
 
+    Ok(())
+}
+
+fn set_batch_window(paths: ClientPaths, seconds: u64) -> Result<()> {
+    let mut state = load_state(&paths.state_file)?;
+    state.batch_window_seconds = seconds;
+    save_state(&paths.state_file, &state)?;
+    println!("batch_window_seconds set to {seconds}");
     Ok(())
 }
 
@@ -284,4 +297,20 @@ fn prompt_yes_no(prompt: &str) -> Result<bool> {
 
     let normalized = value.trim().to_ascii_lowercase();
     Ok(matches!(normalized.as_str(), "y" | "yes"))
+}
+
+#[derive(Deserialize)]
+struct JwtClaims {
+    sub: Option<String>,
+}
+
+/// Extract the `sub` claim (user ID) from a JWT without verifying the signature.
+fn parse_jwt_sub(token: &str) -> Option<String> {
+    let payload_segment = token.split('.').nth(1)?;
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload_segment)
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(payload_segment))
+        .ok()?;
+    let claims: JwtClaims = serde_json::from_slice(&payload).ok()?;
+    claims.sub.filter(|s| !s.is_empty())
 }

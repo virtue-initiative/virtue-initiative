@@ -3,7 +3,6 @@
 This document reflects the API currently implemented in `api/src/routes`.
 
 Base URL examples:
-
 - Local: `http://127.0.0.1:8787`
 - Production: your deployed Workers URL
 
@@ -13,398 +12,234 @@ All timestamps are ISO-8601 UTC strings.
 
 - Access tokens are JWTs sent via `Authorization: Bearer <token>`.
 - Refresh tokens are stored in an `httpOnly` cookie named `refresh_token`.
-- Current server defaults (`api/src/routes/auth.ts`):
-  - Access token TTL: 1 hour
-  - Refresh token TTL: 365 days
+- Server defaults: access token TTL 15 min, refresh token TTL 365 days.
 
 ## Error format
-
-There are two common shapes:
-
-1. Simple string errors:
 
 ```json
 { "error": "Unauthorized" }
 ```
 
-2. Zod validation errors (treeified):
+Validation errors (Zod treeified):
 
 ```json
-{
-  "error": {
-    "errors": [],
-    "properties": {
-      "email": { "errors": ["Invalid email address"] }
-    }
-  }
-}
+{ "error": { "errors": [], "properties": { "email": { "errors": ["Invalid email"] } } } }
 ```
+
+---
 
 ## Health
 
 ### `GET /`
 
-Response `200`:
-
 ```json
-{
-  "name": "BePure API",
-  "version": "1.0.0",
-  "status": "ok"
-}
+{ "name": "BePure API", "version": "1.0.0", "status": "ok" }
 ```
 
-## Auth endpoints
+---
+
+## Auth
 
 ### `POST /signup`
-
-Request JSON:
-
 ```json
-{
-  "email": "user@example.com",
-  "password": "password123",
-  "name": "Optional Name"
-}
+{ "email": "user@example.com", "password": "password123", "name": "Optional" }
 ```
-
-Response `201`:
-
-```json
-{
-  "user": {
-    "id": "uuid",
-    "email": "user@example.com",
-    "created_at": "2026-02-23T00:00:00.000Z"
-  },
-  "access_token": "jwt"
-}
-```
+Response `201`: `{ "user": { "id", "email", "created_at" }, "access_token" }`
 
 ### `POST /login`
-
-Request JSON:
-
 ```json
-{
-  "email": "user@example.com",
-  "password": "password123"
-}
+{ "email": "user@example.com", "password": "password123" }
 ```
-
-Response `200`:
-
-```json
-{ "access_token": "jwt" }
-```
+Response `200`: `{ "user": { "id", "email" }, "access_token" }`
+Sets `refresh_token` httpOnly cookie.
 
 ### `POST /logout`
-
-Clears refresh cookie.
-
-Response `204` with empty body.
+Clears the refresh token cookie. Response `200`.
 
 ### `POST /token`
+Refreshes the access token using the `refresh_token` cookie.
+Response `200`: `{ "access_token" }`
 
-Reads `refresh_token` cookie and issues a new access token.
+---
 
-Response `201`:
+## Devices
 
-```json
-{ "access_token": "jwt" }
-```
-
-## Device endpoints
-
-All require `Authorization: Bearer <access_token>`.
+All device endpoints require `Authorization: Bearer <token>`.
 
 ### `POST /device`
-
-Request JSON:
-
 ```json
-{
-  "name": "Jeff-Mac",
-  "platform": "macos",
-  "avg_interval_seconds": 300
-}
+{ "name": "My Phone", "platform": "android", "avg_interval_seconds": 300 }
 ```
-
-Response `201`:
-
-```json
-{
-  "id": "uuid",
-  "created_at": "2026-02-23T00:00:00.000Z"
-}
-```
+Response `201`: `{ "device": { "id", "name", "platform", "avg_interval_seconds", "created_at" } }`
 
 ### `GET /device`
-
-Response `200`:
-
-```json
-[
-  {
-    "id": "uuid",
-    "name": "Jeff-Mac",
-    "platform": "macos",
-    "last_seen_at": "2026-02-23T00:00:00.000Z",
-    "last_upload_at": "2026-02-23T00:00:00.000Z",
-    "interval_seconds": 300,
-    "status": "online",
-    "enabled": true
-  }
-]
-```
+List devices. Optional query: `?user=<userId>` (requires accepted partnership).
+Response `200`: `{ "devices": [...] }`
 
 ### `PATCH /device/:id`
-
-Request JSON (one or more fields):
-
 ```json
-{
-  "name": "Jeff-MacBook",
-  "interval_seconds": 600,
-  "enabled": true
-}
+{ "name": "New Name", "interval_seconds": 120, "enabled": true }
 ```
+Response `200`: `{ "updated": true }`
 
-Response `200`:
+### `DELETE /device/:id`
+Response `200`: `{ "deleted": true }`
 
-```json
-{
-  "id": "uuid",
-  "updated": true
-}
-```
+---
 
-## Image endpoints
+## Batches
 
-All require `Authorization: Bearer <access_token>`.
+Encrypted, compressed 1-hour data blobs stored in R2.
+The blob content is AES-256-GCM encrypted and gzip-compressed client-side.
+The server stores opaque bytes — decryption happens on the client using the user's E2EE key.
 
-### `POST /image`
+All batch endpoints require `Authorization: Bearer <token>`.
 
-Uploads binary and creates metadata in one request.
+### `POST /batch`
 
-Request: `multipart/form-data`
+Upload a 1-hour encrypted batch. Multipart form:
 
-- `file` (required): image file part
-- `device_id` (required): device UUID
-- `sha256` (required): lowercase hex SHA-256 string
-- `taken_at` (required): ISO datetime
+| Field | Type | Description |
+|-------|------|-------------|
+| `file` | binary | Encrypted + compressed batch blob |
+| `device_id` | string | Device UUID |
+| `start_time` | ISO-8601 | Start of the batch window |
+| `end_time` | ISO-8601 | End of the batch window |
+| `start_chain_hash` | 64-char hex | SHA-256 of the first chain hash in this block |
+| `end_chain_hash` | 64-char hex | SHA-256 of the last chain hash in this block |
+| `item_count` | integer | Number of log+image items in the batch |
+| `size_bytes` | integer | Uncompressed plaintext size |
 
 Response `201`:
-
 ```json
 {
-  "image": {
+  "batch": {
     "id": "uuid",
-    "status": "uploaded",
-    "r2_key": "user/{userId}/images/{imageId}.webp",
-    "taken_at": "2026-02-23T00:00:00.000Z",
-    "created_at": "2026-02-23T00:00:00.000Z"
+    "r2_key": "user/{uid}/batches/{id}.enc",
+    "start_time": "...",
+    "end_time": "...",
+    "created_at": "..."
   }
 }
 ```
 
-Notes:
+The encrypted blob is publicly accessible at the R2 bucket's public URL using `r2_key`.
 
-- There is no signed upload URL flow.
-- The server currently stores the provided `sha256` metadata value; it does not currently recompute and verify content hash.
+### `GET /batch`
 
-### `GET /image/:id`
-
-Returns image bytes from R2 for an image owned by the authenticated user.
-
-Response `200` with image body and `Content-Type` header.
-
-## Log endpoints
-
-All require `Authorization: Bearer <access_token>`.
-
-### `POST /log`
-
-Request JSON:
-
-```json
-{
-  "type": "missed_capture",
-  "device_id": "uuid",
-  "image_id": "uuid",
-  "metadata": {
-    "reason": "capture_failed"
-  }
-}
-```
-
-`image_id` and `metadata` are optional.
-
-Response `201`:
-
-```json
-{
-  "id": "uuid",
-  "created_at": "2026-02-23T00:00:00.000Z"
-}
-```
-
-### `GET /log`
-
-Optional query params:
-
-- `device_id`
-- `type`
-- `cursor`
-- `limit` (default 50, max 100)
+List batches. Query params: `device_id?`, `user?` (partner access), `cursor?`, `limit?` (max 100).
 
 Response `200`:
-
 ```json
 {
-  "items": [
-    {
-      "id": "uuid",
-      "type": "missed_capture",
-      "device_id": "uuid",
-      "image_url": "http://127.0.0.1:8787/image/<image_id>",
-      "metadata": {
-        "reason": "capture_failed"
-      },
-      "created_at": "2026-02-23T00:00:00.000Z"
-    }
-  ],
-  "next_cursor": "2026-02-23T00:00:00.000Z"
+  "items": [{ "id", "device_id", "r2_key", "start_time", "end_time", "start_chain_hash", "end_chain_hash", "item_count", "size_bytes", "created_at" }],
+  "next_cursor": "..."
 }
 ```
 
-`next_cursor` is omitted when no more results remain.
+### `GET /batch/:id`
 
-## Partner endpoints
+Get metadata for a single batch.
 
-All require `Authorization: Bearer <access_token>`.
+Response `200`: `{ "batch": { ...all fields... } }`
+
+---
+
+## Hash Chain
+
+Clients push a SHA-256 chain hash every minute (binary, 32 bytes).  
+Chain construction: `hash[i] = SHA-256(hash[i-1] || minute_data[i])`.  
+The web client fetches hashes for a time range and re-verifies the chain to detect tampering.
+
+All hash endpoints require `Authorization: Bearer <token>`.
+
+### `POST /hash`
+
+Upload a binary chain hash.
+
+- **Content-Type**: `application/octet-stream`
+- **Body**: exactly 32 bytes (raw SHA-256 hash)
+- **Headers**:
+  - `X-Device-ID: <device_uuid>`
+  - `X-Client-Timestamp: <ISO-8601>`
+
+Rate-limited to **1 request per 60 seconds per device**.
+
+Response `201`:
+```json
+{ "id": "uuid", "timestamp": "2026-01-01T00:01:00.000Z" }
+```
+
+Rate-limit response `429`:
+```json
+{ "error": "Too many requests", "retry_after_seconds": 42 }
+```
+
+### `GET /hash`
+
+Query chain hashes for a time range.
+
+Query params:
+
+| Param | Required | Description |
+|-------|----------|-------------|
+| `device_id` | ✓ | Device UUID |
+| `from` | ✓ | ISO-8601 start (inclusive) |
+| `to` | ✓ | ISO-8601 end (inclusive) |
+| `user` | – | Target user ID (partner access requires `view_data`) |
+| `cursor` | – | Pagination cursor (client_timestamp of last item) |
+| `limit` | – | Max results (default 100, max 1500) |
+
+Response `200`:
+```json
+{
+  "items": [{ "id", "hash_hex", "client_timestamp" }],
+  "next_cursor": "..."
+}
+```
+
+`hash_hex` is the 64-character hex encoding of the raw 32-byte hash.
+
+---
+
+## Partners
 
 ### `POST /partner`
-
-Request JSON:
-
+Invite a partner by email.
 ```json
-{
-  "email": "partner@example.com",
-  "permissions": {
-    "view_images": true,
-    "view_logs": true
-  }
-}
+{ "email": "partner@example.com", "permissions": { "view_data": true } }
 ```
-
-Response `201`:
-
-```json
-{
-  "id": "uuid",
-  "status": "pending"
-}
-```
-
-### `POST /partner/accept`
-
-Request JSON:
-
-```json
-{ "id": "uuid" }
-```
-
-Response `200`:
-
-```json
-{ "id": "uuid" }
-```
+Response `201`: `{ "partner": { "id", "partner_email", "status", "permissions", "created_at" } }`
 
 ### `GET /partner`
+List all partnerships (owned + as partner). Response `200`: `{ "owned": [...], "asPartner": [...] }`
 
-Response `200`:
-
+### `POST /partner/accept`
+Accept a pending invite.
 ```json
-[
-  {
-    "id": "uuid",
-    "partner_email": "partner@example.com",
-    "status": "accepted",
-    "permissions": {
-      "view_images": true,
-      "view_logs": true
-    },
-    "role": "owner",
-    "created_at": "2026-02-23T00:00:00.000Z"
-  }
-]
+{ "id": "<partner_record_id>" }
 ```
+Response `200`: `{ "accepted": true }`
 
 ### `PATCH /partner/:id`
-
-Request JSON:
-
+Update permissions (owner only).
 ```json
-{
-  "permissions": {
-    "view_images": false
-  }
-}
+{ "permissions": { "view_data": true } }
 ```
-
-Response `200`:
-
-```json
-{
-  "id": "uuid",
-  "permissions": {
-    "view_images": false,
-    "view_logs": true
-  }
-}
-```
+Response `200`: `{ "updated": true }`
 
 ### `DELETE /partner/:id`
+Remove a partnership. Either party can delete. Response `200`: `{ "deleted": true }`
 
-Response `204` with empty body.
+---
 
-## Settings endpoints
-
-All require `Authorization: Bearer <access_token>`.
-
-### `POST /settings`
-
-Merges incoming fields with existing settings.
-
-Request JSON:
-
-```json
-{
-  "name": "Jeff",
-  "timezone": "America/New_York",
-  "retention_days": 30
-}
-```
-
-Response `200`:
-
-```json
-{
-  "name": "Jeff",
-  "timezone": "America/New_York",
-  "retention_days": 30
-}
-```
+## Settings
 
 ### `GET /settings`
+Response `200`: `{ "settings": { "name", "timezone", "retention_days" } }`
 
-Response `200` with stored settings, or defaults when absent:
-
+### `PUT /settings`
 ```json
-{
-  "name": null,
-  "timezone": "UTC",
-  "retention_days": 30
-}
+{ "name": "Alice", "timezone": "America/New_York", "retention_days": 90 }
 ```
+Response `200`: `{ "updated": true }`

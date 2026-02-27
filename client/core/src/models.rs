@@ -12,23 +12,22 @@ pub struct TokenResponse {
     pub access_token: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub struct CreateImageRequest {
-    pub device_id: String,
-    pub sha256: String,
-    pub taken_at: DateTime<Utc>,
+#[derive(Clone, Debug, Deserialize)]
+pub struct BatchUploadResponse {
+    pub batch: UploadedBatch,
 }
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct CreateImageResponse {
-    pub image: UploadedImage,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct UploadedImage {
+pub struct UploadedBatch {
     pub id: String,
-    pub status: String,
     pub r2_key: String,
-    pub taken_at: DateTime<Utc>,
+    pub start_time: DateTime<Utc>,
+    pub end_time: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct HashUploadResponse {
+    pub id: String,
+    pub timestamp: String,
 }

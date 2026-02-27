@@ -1,6 +1,7 @@
 import { LocationProvider, Router, Route, hydrate, prerender as ssr } from 'preact-iso';
 
 import { AuthProvider, useAuth } from './context/auth';
+import { E2EEProvider } from './context/e2ee';
 import { Header } from './components/Header';
 import { Home } from './pages/Home/index';
 import { Logs } from './pages/Logs/index';
@@ -37,7 +38,9 @@ function AppShell() {
 export function App() {
   return (
     <AuthProvider>
-      <AppShell />
+      <E2EEProvider>
+        <AppShell />
+      </E2EEProvider>
     </AuthProvider>
   );
 }

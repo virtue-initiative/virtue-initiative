@@ -33,27 +33,31 @@ export const updateDeviceSchema = z
     message: 'No fields to update',
   });
 
-// Image schemas
-export const uploadImageSchema = z.object({
+// Batch schemas
+export const uploadBatchSchema = z.object({
   device_id: z.string().min(1),
-  sha256: z.string().regex(/^[0-9a-f]{64}$/, 'Must be a valid SHA-256 hex string'),
-  taken_at: z.iso.datetime(),
+  start_time: z.iso.datetime(),
+  end_time: z.iso.datetime(),
+  start_chain_hash: z.string().regex(/^[0-9a-f]{64}$/, 'Must be a valid SHA-256 hex string'),
+  end_chain_hash: z.string().regex(/^[0-9a-f]{64}$/, 'Must be a valid SHA-256 hex string'),
+  item_count: z.coerce.number().int().nonnegative(),
+  size_bytes: z.coerce.number().int().nonnegative(),
 });
 
-// Log schemas
-export const createLogSchema = z.object({
-  type: z.string().min(1),
-  device_id: z.string().min(1),
-  image_id: z.string().min(1).nullable().optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-});
-
-export const listLogsSchema = z.object({
+export const listBatchesSchema = z.object({
   device_id: z.string().min(1).optional(),
-  type: z.string().optional(),
   user: z.string().optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().positive().max(100).optional().default(50),
+});
+
+// Hash chain schemas
+export const listHashesSchema = z.object({
+  device_id: z.string().min(1),
+  from: z.iso.datetime(),
+  to: z.iso.datetime(),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().positive().max(1500).optional().default(100),
 });
 
 // Partner schemas
@@ -61,11 +65,10 @@ export const createPartnerSchema = z.object({
   email: z.string().email(),
   permissions: z
     .object({
-      view_images: z.boolean().optional().default(true),
-      view_logs: z.boolean().optional().default(true),
+      view_data: z.boolean().optional().default(true),
     })
     .optional()
-    .default({ view_images: true, view_logs: true }),
+    .default({ view_data: true }),
 });
 
 export const acceptPartnerSchema = z.object({
@@ -74,8 +77,7 @@ export const acceptPartnerSchema = z.object({
 
 export const updatePartnerSchema = z.object({
   permissions: z.object({
-    view_images: z.boolean().optional(),
-    view_logs: z.boolean().optional(),
+    view_data: z.boolean().optional(),
   }),
 });
 
@@ -90,9 +92,9 @@ export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type CreateDeviceInput = z.infer<typeof createDeviceSchema>;
 export type UpdateDeviceInput = z.infer<typeof updateDeviceSchema>;
-export type UploadImageInput = z.infer<typeof uploadImageSchema>;
-export type CreateLogInput = z.infer<typeof createLogSchema>;
-export type ListLogsInput = z.infer<typeof listLogsSchema>;
+export type UploadBatchInput = z.infer<typeof uploadBatchSchema>;
+export type ListBatchesInput = z.infer<typeof listBatchesSchema>;
+export type ListHashesInput = z.infer<typeof listHashesSchema>;
 export type ListDevicesInput = z.infer<typeof listDevicesSchema>;
 export type CreatePartnerInput = z.infer<typeof createPartnerSchema>;
 export type AcceptPartnerInput = z.infer<typeof acceptPartnerSchema>;

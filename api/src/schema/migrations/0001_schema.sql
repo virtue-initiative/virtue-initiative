@@ -25,50 +25,48 @@ CREATE TABLE devices (
 
 CREATE INDEX idx_devices_user_id ON devices(user_id);
 
-CREATE TABLE images (
+-- Encrypted 1-hour batch blobs stored in R2
+CREATE TABLE r2_batches (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   device_id TEXT NOT NULL,
-  r2_key TEXT NOT NULL,
-  sha256 TEXT NOT NULL,
-  content_type TEXT NOT NULL,
-  size_bytes INTEGER NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending_upload',
-  taken_at TEXT NOT NULL,
+  r2_key TEXT NOT NULL UNIQUE,
+  start_time TEXT NOT NULL,
+  end_time TEXT NOT NULL,
+  start_chain_hash TEXT NOT NULL, -- hex SHA-256
+  end_chain_hash TEXT NOT NULL,   -- hex SHA-256
+  item_count INTEGER NOT NULL DEFAULT 0,
+  size_bytes INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_images_user_id ON images(user_id);
-CREATE INDEX idx_images_device_id ON images(device_id);
-CREATE INDEX idx_images_taken_at ON images(taken_at);
-CREATE INDEX idx_images_status ON images(status);
+CREATE INDEX idx_r2_batches_user_id ON r2_batches(user_id);
+CREATE INDEX idx_r2_batches_device_id ON r2_batches(device_id);
+CREATE INDEX idx_r2_batches_start_time ON r2_batches(start_time);
 
-CREATE TABLE logs (
+-- Per-minute binary hash chain entries for tamper detection
+CREATE TABLE chain_hashes (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   device_id TEXT NOT NULL,
-  image_id TEXT,
-  type TEXT NOT NULL,
-  metadata TEXT, -- JSON stored as text
+  hash BLOB NOT NULL,              -- raw 32 bytes
+  client_timestamp TEXT NOT NULL,  -- ISO-8601 from client
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
-  FOREIGN KEY (image_id) REFERENCES images(id) ON DELETE SET NULL
+  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_logs_user_id ON logs(user_id);
-CREATE INDEX idx_logs_device_id ON logs(device_id);
-CREATE INDEX idx_logs_type ON logs(type);
-CREATE INDEX idx_logs_created_at ON logs(created_at);
+CREATE INDEX idx_chain_hashes_user_device ON chain_hashes(user_id, device_id);
+CREATE INDEX idx_chain_hashes_client_timestamp ON chain_hashes(client_timestamp);
 
 CREATE TABLE partners (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   partner_user_id TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
-  permissions TEXT NOT NULL, -- JSON stored as text
+  permissions TEXT NOT NULL, -- JSON: { "view_data": true }
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,

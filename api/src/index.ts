@@ -2,8 +2,8 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { Env, Variables } from './types/bindings';
 import auth from './routes/auth';
-import images from './routes/images';
-import logs from './routes/logs';
+import batches from './routes/batches';
+import hashes from './routes/hashes';
 import devices from './routes/devices';
 import partners from './routes/partners';
 import settings from './routes/settings';
@@ -34,11 +34,23 @@ app.get('/', (c) => {
 
 // Mount routes
 app.route('/', auth); // auth handles /signup, /login, /logout, /token at its own paths
-app.route('/image', images);
-app.route('/log', logs);
+app.route('/batch', batches);
+app.route('/hash', hashes);
 app.route('/device', devices);
 app.route('/partner', partners);
 app.route('/settings', settings);
+
+// Public R2 pass-through — blobs are E2EE encrypted so no auth needed.
+// In production replace VITE_R2_URL with the real public R2 bucket URL.
+app.get('/r2/*', async (c) => {
+  const key = c.req.path.replace(/^\/r2\//, '');
+  if (!key) return c.json({ error: 'Not found' }, 404);
+  const obj = await c.env.BUCKET.get(key);
+  if (!obj) return c.json({ error: 'Not found' }, 404);
+  return new Response(obj.body, {
+    headers: { 'Content-Type': 'application/octet-stream' },
+  });
+});
 
 // Error handling
 app.onError((err, c) => {

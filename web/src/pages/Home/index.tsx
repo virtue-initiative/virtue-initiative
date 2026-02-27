@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'preact/hooks';
+import { useLocation } from 'preact-iso';
 import { useAuth } from '../../context/auth';
 import { api, Device, Partner } from '../../api';
 import './style.css';
@@ -123,8 +124,7 @@ function PartnersList({
 
 function InviteButton({ token, onInvited }: { token: string; onInvited: () => void }) {
   const [email, setEmail] = useState('');
-  const [viewImages, setViewImages] = useState(true);
-  const [viewLogs, setViewLogs] = useState(true);
+  const [viewData, setViewData] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -145,7 +145,7 @@ function InviteButton({ token, onInvited }: { token: string; onInvited: () => vo
     setError(null);
     setLoading(true);
     try {
-      await api.invitePartner(token, email, { view_images: viewImages, view_logs: viewLogs });
+      await api.invitePartner(token, email, { view_data: viewData });
       dialogRef.current?.close();
       onInvited();
     } catch (err) {
@@ -177,12 +177,8 @@ function InviteButton({ token, onInvited }: { token: string; onInvited: () => vo
           </div>
           <div class="invite-perms">
             <label class="checkbox-label">
-              <input type="checkbox" checked={viewImages} onChange={(e) => setViewImages((e.target as HTMLInputElement).checked)} />
-              Can view images
-            </label>
-            <label class="checkbox-label">
-              <input type="checkbox" checked={viewLogs} onChange={(e) => setViewLogs((e.target as HTMLInputElement).checked)} />
-              Can view logs
+              <input type="checkbox" checked={viewData} onChange={(e) => setViewData((e.target as HTMLInputElement).checked)} />
+              Can view data
             </label>
           </div>
           {error && <p class="form-error">{error}</p>}
@@ -232,12 +228,8 @@ function PendingInviteCard({
       </div>
       <p class="invite-desc">
         Invited you as an accountability partner
-        {partner.permissions.view_images && partner.permissions.view_logs
-          ? ' with access to your images and logs.'
-          : partner.permissions.view_images
-          ? ' with access to your images.'
-          : partner.permissions.view_logs
-          ? ' with access to your logs.'
+        {partner.permissions.view_data
+          ? ' with access to your encrypted activity data.'
           : '.'}
       </p>
       {error && <p class="form-error">{error}</p>}
@@ -249,6 +241,7 @@ function PendingInviteCard({
 }
 
 function PartnerDevicesSection({ partner, token }: { partner: Partner; token: string }) {
+  const { route } = useLocation();
   const [devices, setDevices] = useState<Device[] | null>(null);
 
   useEffect(() => {
@@ -264,7 +257,7 @@ function PartnerDevicesSection({ partner, token }: { partner: Partner; token: st
         <button
           class="btn btn-ghost btn-sm"
           type="button"
-          onClick={() => window.location.href = `/logs?user=${partner.partner_user_id}`}
+          onClick={() => route(`/logs?user=${partner.partner_user_id}`)}
         >
           View logs
         </button>
@@ -292,7 +285,7 @@ function PartnerDevicesSection({ partner, token }: { partner: Partner; token: st
                 <button
                   class="btn btn-ghost btn-sm"
                   type="button"
-                  onClick={() => window.location.href = `/logs?user=${partner.partner_user_id}&device_id=${d.id}`}
+                  onClick={() => route(`/logs?user=${partner.partner_user_id}&device_id=${d.id}`)}
                 >
                   View logs
                 </button>
@@ -306,6 +299,7 @@ function PartnerDevicesSection({ partner, token }: { partner: Partner; token: st
 }
 
 function DeviceCard({ device, token, onChanged }: { device: Device; token: string; onChanged: () => void }) {
+  const { route } = useLocation();
   const online = device.status === 'online';
   const [name, setName] = useState(device.name);
   const [interval, setInterval] = useState(String(device.interval_seconds));
@@ -364,7 +358,7 @@ function DeviceCard({ device, token, onChanged }: { device: Device; token: strin
         <button
           class="btn btn-ghost btn-sm"
           type="button"
-          onClick={() => window.location.href = `/logs?device_id=${device.id}`}
+          onClick={() => route(`/logs?device_id=${device.id}`)}
         >
           View logs
         </button>
@@ -479,10 +473,8 @@ function PartnerCard({
         <dl class="card-meta">
           <dt>Role</dt>
           <dd>{isMonitoringMe ? 'Monitoring you' : 'You are monitoring them'}</dd>
-          <dt>Can view images</dt>
-          <dd>{partner.permissions.view_images ? 'Yes' : 'No'}</dd>
-          <dt>Can view logs</dt>
-          <dd>{partner.permissions.view_logs ? 'Yes' : 'No'}</dd>
+          <dt>Can view data</dt>
+          <dd>{partner.permissions.view_data ? 'Yes' : 'No'}</dd>
           <dt>Since</dt>
           <dd>{new Date(partner.created_at).toLocaleDateString()}</dd>
         </dl>

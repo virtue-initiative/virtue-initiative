@@ -10,10 +10,12 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
+base64 = "0.22"
 bepure-client-core = { path = "../core" }
 chrono = { version = "0.4", features = ["clock", "serde"] }
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
+hex = "0.4"
 hostname = "0.4"
 rand = "0.8"
 rpassword = "7"

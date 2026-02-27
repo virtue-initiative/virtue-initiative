@@ -9,18 +9,36 @@ export interface Device {
   enabled: boolean;
 }
 
-export interface Log {
+export interface Batch {
   id: string;
-  type: string;
   device_id: string;
-  image_url: string | null;
-  metadata: Record<string, unknown> | null;
+  r2_key: string;
+  start_time: string;
+  end_time: string;
+  start_chain_hash: string;
+  end_chain_hash: string;
+  item_count: number;
+  size_bytes: number;
   created_at: string;
 }
 
-export interface LogPage {
-  items: Log[];
+export interface BatchPage {
+  items: Batch[];
   next_cursor?: string;
+}
+
+export interface ChainHash {
+  id: string;
+  hash_hex: string;
+  client_timestamp: string;
+}
+
+export interface BatchBlobItem {
+  id: string;
+  taken_at: number;
+  kind: string;
+  image?: Uint8Array;
+  metadata: [string, string][];
 }
 
 export interface Partner {
@@ -28,7 +46,7 @@ export interface Partner {
   partner_user_id: string;
   partner_email: string;
   status: 'pending' | 'accepted';
-  permissions: { view_images: boolean; view_logs: boolean };
+  permissions: { view_data: boolean };
   role: 'owner' | 'partner';
   created_at: string;
 }
@@ -81,7 +99,7 @@ export const api = {
   invitePartner: (
     token: string,
     email: string,
-    permissions: { view_images: boolean; view_logs: boolean },
+    permissions: { view_data: boolean },
   ) =>
     req<{ id: string; status: string }>('/partner', {
       method: 'POST',
@@ -103,13 +121,23 @@ export const api = {
       body: JSON.stringify(patch),
     }, token),
 
-  getLogs: (token: string, params?: { user?: string; device_id?: string; cursor?: string; limit?: number }) => {
+  getBatches: (token: string, params?: { user?: string; device_id?: string; cursor?: string; limit?: number }) => {
     const qs = new URLSearchParams();
     if (params?.user) qs.set('user', params.user);
     if (params?.device_id) qs.set('device_id', params.device_id);
     if (params?.cursor) qs.set('cursor', params.cursor);
     if (params?.limit) qs.set('limit', String(params.limit));
     const query = qs.toString();
-    return req<LogPage>(`/log${query ? `?${query}` : ''}`, {}, token);
+    return req<BatchPage>(`/batch${query ? `?${query}` : ''}`, {}, token);
+  },
+
+  getChainHashes: (token: string, params: { device_id: string; from: string; to: string; cursor?: string; limit?: number }) => {
+    const qs = new URLSearchParams();
+    qs.set('device_id', params.device_id);
+    qs.set('from', params.from);
+    qs.set('to', params.to);
+    if (params.cursor) qs.set('cursor', params.cursor);
+    if (params.limit) qs.set('limit', String(params.limit));
+    return req<{ items: ChainHash[] }>(`/hash?${qs.toString()}`, {}, token);
   },
 };

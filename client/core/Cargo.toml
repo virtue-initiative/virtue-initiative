@@ -10,13 +10,19 @@ path = "src/lib.rs"
 crate-type = ["rlib", "cdylib", "staticlib"]
 
 [dependencies]
+aes-gcm = "0.10"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["clock", "serde"] }
+flate2 = "1"
 hex = "0.4"
+hmac = "0.12"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+pbkdf2 = { version = "0.12", features = ["hmac"] }
 rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["cookies", "json", "multipart", "rustls-tls"] }
+rmp-serde = "1"
 serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
 serde_json = "1"
 sha2 = "0.10"
 thiserror = "2"

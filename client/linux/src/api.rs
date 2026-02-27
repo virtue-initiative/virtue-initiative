@@ -1,9 +1,7 @@
-use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use bepure_client_core::resolve_base_api_url;
 
@@ -65,33 +63,6 @@ impl ApiClient {
 
         decode_json(response).await
     }
-
-    pub async fn send_log(
-        &self,
-        access_token: &str,
-        event_type: &str,
-        device_id: &str,
-        image_id: Option<&str>,
-        metadata: BTreeMap<String, Value>,
-    ) -> Result<CreatedLog> {
-        let request = CreateLogRequest {
-            event_type: event_type.to_string(),
-            device_id: device_id.to_string(),
-            image_id: image_id.map(ToString::to_string),
-            metadata,
-        };
-
-        let url = format!("{}/log", self.base_url);
-        let response = self
-            .client
-            .post(url)
-            .bearer_auth(access_token)
-            .json(&request)
-            .send()
-            .await?;
-
-        decode_json(response).await
-    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -106,24 +77,11 @@ pub struct DeviceRegistration {
     pub id: String,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-pub struct CreatedLog {}
-
 #[derive(Clone, Debug, Serialize)]
 struct RegisterDeviceRequest {
     name: String,
     platform: String,
     avg_interval_seconds: u64,
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct CreateLogRequest {
-    #[serde(rename = "type")]
-    event_type: String,
-    device_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    image_id: Option<String>,
-    metadata: BTreeMap<String, Value>,
 }
 
 async fn decode_json<T: serde::de::DeserializeOwned>(response: reqwest::Response) -> Result<T> {
@@ -132,6 +90,5 @@ async fn decode_json<T: serde::de::DeserializeOwned>(response: reqwest::Response
         let body = response.text().await.unwrap_or_default();
         return Err(anyhow!("unexpected response {}: {}", status, body));
     }
-
     Ok(response.json::<T>().await?)
 }

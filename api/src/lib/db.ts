@@ -48,10 +48,13 @@ export async function createDevice(
 export async function listDevices(db: D1Database, userId: string) {
   return db
     .prepare(
-      `SELECT id, name, platform, last_seen_at, last_upload_at, avg_interval_seconds, enabled
-     FROM devices WHERE user_id = ? ORDER BY created_at DESC`,
+      `SELECT d.id, d.name, d.platform,
+       COALESCE((SELECT client_timestamp FROM chain_hashes WHERE user_id = ? AND device_id = d.id ORDER BY client_timestamp DESC LIMIT 1), d.last_seen_at) AS last_seen_at,
+       COALESCE((SELECT created_at FROM r2_batches WHERE user_id = ? AND device_id = d.id ORDER BY created_at DESC LIMIT 1), d.last_upload_at) AS last_upload_at,
+       d.avg_interval_seconds, d.enabled
+       FROM devices d WHERE d.user_id = ? ORDER BY d.created_at DESC`,
     )
-    .bind(userId)
+    .bind(userId, userId, userId)
     .all<{
       id: string;
       name: string;
@@ -105,70 +108,51 @@ export async function updateDeviceActivity(db: D1Database, deviceId: string, tim
     .run();
 }
 
-export async function createImage(
+// ── Batches ──────────────────────────────────────────────────────────────────
+
+export async function createBatch(
   db: D1Database,
   id: string,
   userId: string,
   deviceId: string,
   r2Key: string,
-  sha256: string,
-  contentType: string,
+  startTime: string,
+  endTime: string,
+  startChainHash: string,
+  endChainHash: string,
+  itemCount: number,
   sizeBytes: number,
-  takenAt: string,
   createdAt: string,
 ) {
   return db
     .prepare(
-      `INSERT INTO images (id, user_id, device_id, r2_key, sha256, content_type, size_bytes, status, taken_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'uploaded', ?, ?)`,
+      `INSERT INTO r2_batches
+         (id, user_id, device_id, r2_key, start_time, end_time,
+          start_chain_hash, end_chain_hash, item_count, size_bytes, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(id, userId, deviceId, r2Key, sha256, contentType, sizeBytes, takenAt, createdAt)
+    .bind(
+      id, userId, deviceId, r2Key, startTime, endTime,
+      startChainHash, endChainHash, itemCount, sizeBytes, createdAt,
+    )
     .run();
 }
 
-export async function findImageById(db: D1Database, imageId: string) {
-  return db
-    .prepare('SELECT r2_key, user_id, content_type FROM images WHERE id = ?')
-    .bind(imageId)
-    .first<{ r2_key: string; user_id: string; content_type: string }>();
-}
-
-export async function createLog(
-  db: D1Database,
-  id: string,
-  userId: string,
-  deviceId: string,
-  imageId: string | null,
-  type: string,
-  metadata: string | null,
-  createdAt: string,
-) {
-  return db
-    .prepare(
-      `INSERT INTO logs (id, user_id, device_id, image_id, type, metadata, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(id, userId, deviceId, imageId, type, metadata, createdAt)
-    .run();
-}
-
-export async function queryLogs(
+export async function listBatches(
   db: D1Database,
   userId: string,
-  filters: { device_id?: string; type?: string; cursor?: string },
+  filters: { device_id?: string; cursor?: string },
   limit: number,
 ) {
   let query =
-    'SELECT id, type, device_id, image_id, metadata, created_at FROM logs WHERE user_id = ?';
+    `SELECT id, device_id, r2_key, start_time, end_time,
+            start_chain_hash, end_chain_hash, item_count, size_bytes, created_at
+     FROM r2_batches WHERE user_id = ?`;
   const params: (string | number)[] = [userId];
 
   if (filters.device_id) {
     query += ' AND device_id = ?';
     params.push(filters.device_id);
-  }
-  if (filters.type) {
-    query += ' AND type = ?';
-    params.push(filters.type);
   }
   if (filters.cursor) {
     query += ' AND created_at < ?';
@@ -183,10 +167,14 @@ export async function queryLogs(
     .bind(...params)
     .all<{
       id: string;
-      type: string;
       device_id: string;
-      image_id: string | null;
-      metadata: string | null;
+      r2_key: string;
+      start_time: string;
+      end_time: string;
+      start_chain_hash: string;
+      end_chain_hash: string;
+      item_count: number;
+      size_bytes: number;
       created_at: string;
     }>();
 
@@ -195,6 +183,109 @@ export async function queryLogs(
     hasMore: result.results.length > limit,
   };
 }
+
+export async function findBatchById(
+  db: D1Database,
+  batchId: string,
+) {
+  return db
+    .prepare(
+      `SELECT id, user_id, device_id, r2_key, start_time, end_time,
+              start_chain_hash, end_chain_hash, item_count, size_bytes, created_at
+       FROM r2_batches WHERE id = ?`,
+    )
+    .bind(batchId)
+    .first<{
+      id: string;
+      user_id: string;
+      device_id: string;
+      r2_key: string;
+      start_time: string;
+      end_time: string;
+      start_chain_hash: string;
+      end_chain_hash: string;
+      item_count: number;
+      size_bytes: number;
+      created_at: string;
+    }>();
+}
+
+// ── Chain hashes ──────────────────────────────────────────────────────────────
+
+export async function createChainHash(
+  db: D1Database,
+  id: string,
+  userId: string,
+  deviceId: string,
+  hash: ArrayBuffer,
+  clientTimestamp: string,
+  createdAt: string,
+) {
+  return db
+    .prepare(
+      `INSERT INTO chain_hashes (id, user_id, device_id, hash, client_timestamp, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(id, userId, deviceId, hash, clientTimestamp, createdAt)
+    .run();
+}
+
+/** Returns ISO string of the most recent hash for this device, or null. */
+export async function getLastChainHashTimestamp(
+  db: D1Database,
+  userId: string,
+  deviceId: string,
+): Promise<string | null> {
+  const row = await db
+    .prepare(
+      'SELECT created_at FROM chain_hashes WHERE user_id = ? AND device_id = ? ORDER BY created_at DESC LIMIT 1',
+    )
+    .bind(userId, deviceId)
+    .first<{ created_at: string }>();
+  return row?.created_at ?? null;
+}
+
+export async function queryChainHashes(
+  db: D1Database,
+  userId: string,
+  deviceId: string,
+  from: string,
+  to: string,
+  cursor: string | undefined,
+  limit: number,
+) {
+  let query =
+    `SELECT id, hash, client_timestamp, created_at
+     FROM chain_hashes
+     WHERE user_id = ? AND device_id = ?
+       AND client_timestamp >= ? AND client_timestamp <= ?`;
+  const params: (string | number)[] = [userId, deviceId, from, to];
+
+  if (cursor) {
+    query += ' AND client_timestamp > ?';
+    params.push(cursor);
+  }
+
+  query += ' ORDER BY client_timestamp ASC LIMIT ?';
+  params.push(limit + 1);
+
+  const result = await db
+    .prepare(query)
+    .bind(...params)
+    .all<{
+      id: string;
+      hash: ArrayBuffer;
+      client_timestamp: string;
+      created_at: string;
+    }>();
+
+  return {
+    items: result.results.slice(0, limit),
+    hasMore: result.results.length > limit,
+  };
+}
+
+// ── Partners ──────────────────────────────────────────────────────────────────
 
 export async function findUserById(db: D1Database, userId: string) {
   return db.prepare('SELECT id FROM users WHERE id = ?').bind(userId).first<{ id: string }>();
