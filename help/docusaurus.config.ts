@@ -52,8 +52,8 @@ const config: Config = {
     // image: '',
     colorMode: {
       defaultMode: 'light',
-      disableSwitch: true,
-      respectPrefersColorScheme: false,
+      disableSwitch: false,
+      respectPrefersColorScheme: true,
     },
     navbar: {
       title: 'The Virtue Initiative',

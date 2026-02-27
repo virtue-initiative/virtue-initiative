@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>The Virtue Initiative</title>
   <link rel="stylesheet" href="style.css" />
+  <script>document.documentElement.setAttribute('data-theme',localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'));</script>
 </head>
 <body>
   <header>
@@ -12,6 +13,7 @@
       <div class="header-top">
         <a href="/" class="wordmark">The Virtue Initiative</a>
         <div class="header-actions">
+          <button class="btn-theme" id="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode"></button>
           <a href='https://app.bepure.anb.codes' class="btn-login nolink">Login / Sign up</a>
         </div>
       </div>
@@ -176,6 +178,14 @@
     <div class="container">
       <p>The Virtue Initiative is a non-profit project. Free to use, forever. &nbsp;·&nbsp; <a href="/privacy.html">Privacy Policy</a> &nbsp;·&nbsp; <a href="/terms.html">Terms of Use</a></p>
     </div>
-  </footer>
+  </footer>  <script>
+    function toggleTheme() {
+      var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('theme', next);
+      document.getElementById('theme-toggle').textContent = next === 'dark' ? '☀' : '🌙';
+    }
+    document.getElementById('theme-toggle').textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀' : '🌙';
+  </script>
 </body>
 </html>

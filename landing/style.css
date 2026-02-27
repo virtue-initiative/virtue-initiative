@@ -16,6 +16,17 @@
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
+[data-theme="dark"] {
+  --bg: #111713;
+  --surface: #1a1f1c;
+  --border: #2c332e;
+  --text: #e6e3df;
+  --muted: #9a9890;
+  --accent: #22a862;
+  --yes: #22a862;
+  --na: #666;
+}
+
 html {
   font-size: 16px;
 }
@@ -68,6 +79,22 @@ header {
 .btn-help:hover {
   background: var(--accent);
   color: #fff;
+}
+
+.btn-theme {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 5px;
+  padding: 0.35rem 0.6rem;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.btn-theme:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .btn-login {
@@ -160,7 +187,7 @@ table {
 }
 
 thead tr {
-  background: #f3f2ef;
+  background: var(--bg-subtle, #f3f2ef);
 }
 
 th, td {
@@ -185,7 +212,7 @@ tbody tr:last-child td {
 }
 
 tbody tr:hover {
-  background: #f8f7f4;
+  background: var(--bg-subtle, #f8f7f4);
 }
 
 td.yes {

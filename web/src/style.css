@@ -20,6 +20,24 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+[data-theme="dark"] {
+  --text: #e6e3df;
+  --text-muted: #9a9890;
+  --surface: #1a1f1c;
+  --bg: #111713;
+  --bg-subtle: #1e2421;
+  --border: #2c332e;
+  --accent: #22a862;
+  color: var(--text);
+  background-color: var(--bg);
+}
+
+[data-theme="dark"] .badge-green  { background: #14532d; color: #4ade80; }
+[data-theme="dark"] .badge-gray   { background: #1f2937; color: #9ca3af; }
+[data-theme="dark"] .badge-yellow { background: #2d1f07; color: #fbbf24; }
+[data-theme="dark"] .error-banner { background: #3b0a0a; color: #fca5a5; }
+[data-theme="dark"] .header-logout:hover { background: #3b0a0a; color: #fca5a5; border-color: #7f1d1d; }
+
 body {
   margin: 0;
 }
@@ -78,6 +96,23 @@ header a.nav-active {
   background: var(--bg-subtle);
   color: var(--accent);
   font-weight: 600;
+}
+
+.btn-theme {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.btn-theme:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .header-logout {
