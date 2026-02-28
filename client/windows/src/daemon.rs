@@ -71,8 +71,7 @@ pub async fn run_daemon(shutdown: Arc<AtomicBool>, logger: &ServiceLogger) -> Re
             }
         }
 
-        let effective_interval_seconds =
-            resolve_capture_interval_seconds(state.capture_interval_seconds);
+        let effective_interval_seconds = resolve_capture_interval_seconds();
         let policy = CaptureSchedulePolicy {
             base_interval: Duration::from_secs(effective_interval_seconds),
             ..CaptureSchedulePolicy::default()

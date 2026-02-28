@@ -4,8 +4,6 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use virtue_client_core::{DEFAULT_BATCH_WINDOW_SECONDS, DEFAULT_CAPTURE_INTERVAL_SECONDS};
-
 #[derive(Clone, Debug)]
 pub struct ClientPaths {
     pub config_dir: PathBuf,
@@ -44,9 +42,6 @@ impl ClientPaths {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ClientState {
     pub monitoring_enabled: bool,
-    pub capture_interval_seconds: u64,
-    /// How many seconds of captures to accumulate before uploading a batch.
-    pub batch_window_seconds: u64,
     pub email: Option<String>,
     pub device_id: Option<String>,
     pub backend_hint: Option<CaptureBackendHint>,
@@ -58,8 +53,6 @@ impl Default for ClientState {
     fn default() -> Self {
         Self {
             monitoring_enabled: false,
-            capture_interval_seconds: DEFAULT_CAPTURE_INTERVAL_SECONDS,
-            batch_window_seconds: DEFAULT_BATCH_WINDOW_SECONDS,
             email: None,
             device_id: None,
             backend_hint: None,

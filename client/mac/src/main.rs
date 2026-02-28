@@ -207,14 +207,13 @@ async fn login(paths: &ClientPaths, email: &str, password: &str) -> Result<Strin
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "mac-device".to_string());
 
-    let state = load_state(&paths.state_file)?;
     let api_client = ApiClient::new()?;
     let registration = api_client
-        .register_device(&access_token, &host, state.capture_interval_seconds.max(30))
+        .register_device(&access_token, &host)
         .await
         .context("device registration failed")?;
 
-    let mut new_state = state;
+    let mut new_state = load_state(&paths.state_file)?;
     new_state.device_id = Some(registration.id.clone());
     new_state.monitoring_enabled = true;
     new_state.email = Some(email.to_string());
@@ -275,7 +274,10 @@ fn status(paths: ClientPaths) -> Result<()> {
     );
     println!(
         "daemon_status_updated_at: {}",
-        app_status.daemon_status_updated_at.as_deref().unwrap_or("<none>")
+        app_status
+            .daemon_status_updated_at
+            .as_deref()
+            .unwrap_or("<none>")
     );
     println!("timestamp: {}", Utc::now().to_rfc3339());
     Ok(())

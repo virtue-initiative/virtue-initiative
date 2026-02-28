@@ -11,7 +11,7 @@ describe('POST /device', () => {
     const res = await SELF.fetch(`${BASE}/device`, {
       method: 'POST',
       headers: authHeaders(token),
-      body: JSON.stringify({ name: 'MacBook Pro', platform: 'macos', avg_interval_seconds: 300 }),
+      body: JSON.stringify({ name: 'MacBook Pro', platform: 'macos' }),
     });
     expect(res.status).toBe(201);
     const body = (await res.json()) as { id: string };
@@ -22,7 +22,7 @@ describe('POST /device', () => {
     const res = await SELF.fetch(`${BASE}/device`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'PC', platform: 'windows', avg_interval_seconds: 300 }),
+      body: JSON.stringify({ name: 'PC', platform: 'windows' }),
     });
     expect(res.status).toBe(401);
   });
@@ -51,7 +51,7 @@ describe('GET /device', () => {
     await SELF.fetch(`${BASE}/device`, {
       method: 'POST',
       headers: authHeaders(token),
-      body: JSON.stringify({ name: 'iPhone', platform: 'ios', avg_interval_seconds: 60 }),
+      body: JSON.stringify({ name: 'iPhone', platform: 'ios' }),
     });
     const res = await SELF.fetch(`${BASE}/device`, { headers: { Authorization: `Bearer ${token}` } });
     const body = (await res.json()) as Array<{ name: string; platform: string; status: string }>;
@@ -73,7 +73,7 @@ describe('PATCH /device/:id', () => {
     const createRes = await SELF.fetch(`${BASE}/device`, {
       method: 'POST',
       headers: authHeaders(token),
-      body: JSON.stringify({ name: 'Old Name', platform: 'linux', avg_interval_seconds: 300 }),
+      body: JSON.stringify({ name: 'Old Name', platform: 'linux' }),
     });
     const { id } = (await createRes.json()) as { id: string };
 
@@ -104,4 +104,3 @@ describe('PATCH /device/:id', () => {
     expect(res.status).toBe(404);
   });
 });
-

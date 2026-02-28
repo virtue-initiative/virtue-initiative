@@ -76,7 +76,7 @@ class MainActivity : AppCompatActivity() {
         binding.loginButton.isEnabled = false
         lifecycleScope.launch {
             val error = withContext(Dispatchers.IO) {
-                NativeBridge.nativeLogin(email, password, deviceName(), 300)
+                NativeBridge.nativeLogin(email, password, deviceName())
             }
             binding.loginButton.isEnabled = true
 

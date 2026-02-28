@@ -16,7 +16,6 @@ export const loginSchema = z.object({
 export const createDeviceSchema = z.object({
   name: z.string().min(1),
   platform: z.string().min(1),
-  avg_interval_seconds: z.number().int().positive().optional().default(300),
 });
 
 export const listDevicesSchema = z.object({
@@ -26,7 +25,6 @@ export const listDevicesSchema = z.object({
 export const updateDeviceSchema = z
   .object({
     name: z.string().min(1).optional(),
-    interval_seconds: z.number().int().positive().optional(),
     enabled: z.boolean().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {

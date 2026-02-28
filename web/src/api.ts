@@ -4,7 +4,6 @@ export interface Device {
   platform: string;
   last_seen_at: string | null;
   last_upload_at: string | null;
-  interval_seconds: number;
   status: 'online' | 'offline';
   enabled: boolean;
 }
@@ -115,7 +114,7 @@ export const api = {
   deletePartner: (token: string, id: string) =>
     req<void>(`/partner/${id}`, { method: 'DELETE' }, token),
 
-  patchDevice: (token: string, id: string, patch: { name?: string; interval_seconds?: number; enabled?: boolean }) =>
+  patchDevice: (token: string, id: string, patch: { name?: string; enabled?: boolean }) =>
     req<{ id: string; updated: boolean }>(`/device/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),

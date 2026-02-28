@@ -229,7 +229,6 @@ curl -H "X-API-Key: <device-api-key>" \
 - `name` (TEXT)
 - `platform` (TEXT)
 - `api_key_hash` (TEXT)
-- `avg_interval_seconds` (INTEGER)
 - `last_seen_at` (TEXT)
 - `last_upload_at` (TEXT)
 - `enabled` (INTEGER)

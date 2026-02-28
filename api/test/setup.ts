@@ -26,6 +26,37 @@ CREATE TABLE IF NOT EXISTS devices (
 );
 CREATE INDEX IF NOT EXISTS idx_devices_user_id ON devices(user_id);
 
+CREATE TABLE IF NOT EXISTS r2_batches (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  r2_key TEXT NOT NULL UNIQUE,
+  start_time TEXT NOT NULL,
+  end_time TEXT NOT NULL,
+  start_chain_hash TEXT NOT NULL,
+  end_chain_hash TEXT NOT NULL,
+  item_count INTEGER NOT NULL DEFAULT 0,
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_r2_batches_user_id ON r2_batches(user_id);
+CREATE INDEX IF NOT EXISTS idx_r2_batches_device_id ON r2_batches(device_id);
+
+CREATE TABLE IF NOT EXISTS chain_hashes (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  hash BLOB NOT NULL,
+  client_timestamp TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_chain_hashes_user_device ON chain_hashes(user_id, device_id);
+CREATE INDEX IF NOT EXISTS idx_chain_hashes_client_timestamp ON chain_hashes(client_timestamp);
+
 CREATE TABLE IF NOT EXISTS images (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,

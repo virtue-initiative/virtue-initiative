@@ -36,6 +36,7 @@ async function decryptAndFlattenBatch(batch: Batch, key: CryptoKey): Promise<Log
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`Fetch failed (${resp.status}) for ${url}`);
   const raw = new Uint8Array(await resp.arrayBuffer());
+  if (raw.length < 13) throw new Error(`Batch blob too short for AES-GCM payload: ${url}`);
   const decrypted = await decryptBatch(key, raw);
   const decompressed = await decompressGzip(decrypted);
   const decoded = decode(decompressed);

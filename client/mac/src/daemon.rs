@@ -67,8 +67,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
             }
         }
 
-        let effective_interval_seconds =
-            resolve_capture_interval_seconds(state.capture_interval_seconds);
+        let effective_interval_seconds = resolve_capture_interval_seconds();
         let policy = CaptureSchedulePolicy {
             base_interval: Duration::from_secs(effective_interval_seconds),
             ..CaptureSchedulePolicy::default()

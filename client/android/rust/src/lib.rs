@@ -4,11 +4,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use chrono::Utc;
+use jni::JNIEnv;
 use jni::objects::{JByteArray, JClass, JString};
 use jni::sys::{jboolean, jlong, jstring};
-use jni::JNIEnv;
 use once_cell::sync::OnceCell;
 use rand::thread_rng;
 use reqwest::Client;
@@ -19,8 +19,8 @@ use uuid::Uuid;
 
 use virtue_client_core::{
     AuthClient, BufferedUpload, CaptureSchedulePolicy, CaptureScheduleState, FileTokenStore,
-    DEFAULT_CAPTURE_INTERVAL_SECONDS, ImagePipeline, PersistentQueue,
-    RetryPolicy, TokenStore, UploadClient, clamp_capture_interval_seconds, resolve_base_api_url,
+    ImagePipeline, PersistentQueue, RetryPolicy, TokenStore, UploadClient, resolve_base_api_url,
+    resolve_capture_interval_seconds,
 };
 
 static CORE: OnceCell<AndroidCore> = OnceCell::new();
@@ -42,15 +42,11 @@ struct AndroidCore {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AndroidState {
     device_id: Option<String>,
-    capture_interval_seconds: u64,
 }
 
 impl Default for AndroidState {
     fn default() -> Self {
-        Self {
-            device_id: None,
-            capture_interval_seconds: DEFAULT_CAPTURE_INTERVAL_SECONDS,
-        }
+        Self { device_id: None }
     }
 }
 
@@ -58,7 +54,6 @@ impl Default for AndroidState {
 struct RegisterDeviceRequest {
     name: String,
     platform: String,
-    avg_interval_seconds: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -120,7 +115,10 @@ pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeInit(
             queue,
             pipeline: ImagePipeline::default(),
             retry_policy: RetryPolicy::default(),
-            schedule_policy: CaptureSchedulePolicy::default(),
+            schedule_policy: CaptureSchedulePolicy {
+                base_interval: Duration::from_secs(resolve_capture_interval_seconds()),
+                ..CaptureSchedulePolicy::default()
+            },
             schedule_state: Mutex::new(CaptureScheduleState::default()),
             state_path: state_file,
             http_client,
@@ -140,14 +138,12 @@ pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeLogin(
     email: JString,
     password: JString,
     device_name: JString,
-    interval_seconds: i32,
 ) -> jstring {
     let result = (|| -> Result<()> {
         let core = core()?;
         let email: String = env.get_string(&email)?.into();
         let password: String = env.get_string(&password)?.into();
         let device_name: String = env.get_string(&device_name)?.into();
-        let interval_seconds = clamp_capture_interval_seconds(interval_seconds.max(0) as u64);
 
         core.runtime.block_on(async {
             core.auth_client.login(&email, &password).await?;
@@ -156,17 +152,10 @@ pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeLogin(
                 .get_access_token()?
                 .ok_or_else(|| anyhow!("missing access token after login"))?;
 
-            let device_id = register_device(
-                &core.http_client,
-                &access_token,
-                &device_name,
-                interval_seconds,
-            )
-            .await?;
+            let device_id = register_device(&core.http_client, &access_token, &device_name).await?;
 
             let mut state = load_state(&core.state_path)?;
             state.device_id = Some(device_id);
-            state.capture_interval_seconds = interval_seconds;
             save_state(&core.state_path, &state)?;
 
             Ok::<(), anyhow::Error>(())
@@ -407,16 +396,10 @@ fn save_state(path: &Path, state: &AndroidState) -> Result<()> {
     Ok(())
 }
 
-async fn register_device(
-    client: &Client,
-    access_token: &str,
-    name: &str,
-    avg_interval_seconds: u64,
-) -> Result<String> {
+async fn register_device(client: &Client, access_token: &str, name: &str) -> Result<String> {
     let payload = RegisterDeviceRequest {
         name: name.to_string(),
         platform: "android".to_string(),
-        avg_interval_seconds,
     };
 
     let base_url = resolve_base_api_url();

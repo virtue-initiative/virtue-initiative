@@ -30,7 +30,7 @@ object NativeBridge {
     }
 
     external fun nativeInit(configDir: String, dataDir: String): String?
-    external fun nativeLogin(email: String, password: String, deviceName: String, intervalSeconds: Int): String?
+    external fun nativeLogin(email: String, password: String, deviceName: String): String?
     external fun nativeLogout(): String?
     external fun nativeIsLoggedIn(): Boolean
     external fun nativeGetDeviceId(): String?

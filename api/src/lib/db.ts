@@ -33,15 +33,14 @@ export async function createDevice(
   userId: string,
   name: string,
   platform: string,
-  avgIntervalSeconds: number,
   createdAt: string,
 ) {
   return db
     .prepare(
-      `INSERT INTO devices (id, user_id, name, platform, avg_interval_seconds, enabled, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO devices (id, user_id, name, platform, enabled, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
     )
-    .bind(id, userId, name, platform, avgIntervalSeconds, 1, createdAt)
+    .bind(id, userId, name, platform, 1, createdAt)
     .run();
 }
 
@@ -51,7 +50,7 @@ export async function listDevices(db: D1Database, userId: string) {
       `SELECT d.id, d.name, d.platform,
        COALESCE((SELECT client_timestamp FROM chain_hashes WHERE user_id = ? AND device_id = d.id ORDER BY client_timestamp DESC LIMIT 1), d.last_seen_at) AS last_seen_at,
        COALESCE((SELECT created_at FROM r2_batches WHERE user_id = ? AND device_id = d.id ORDER BY created_at DESC LIMIT 1), d.last_upload_at) AS last_upload_at,
-       d.avg_interval_seconds, d.enabled
+       d.enabled
        FROM devices d WHERE d.user_id = ? ORDER BY d.created_at DESC`,
     )
     .bind(userId, userId, userId)
@@ -61,7 +60,6 @@ export async function listDevices(db: D1Database, userId: string) {
       platform: string;
       last_seen_at: string | null;
       last_upload_at: string | null;
-      avg_interval_seconds: number;
       enabled: number;
     }>();
 }
@@ -76,7 +74,7 @@ export async function findDevice(db: D1Database, deviceId: string, userId: strin
 export async function updateDevice(
   db: D1Database,
   deviceId: string,
-  fields: { name?: string; interval_seconds?: number; enabled?: boolean },
+  fields: { name?: string; enabled?: boolean },
 ) {
   const updates: string[] = [];
   const params: (string | number)[] = [];
@@ -84,10 +82,6 @@ export async function updateDevice(
   if (fields.name !== undefined) {
     updates.push('name = ?');
     params.push(fields.name);
-  }
-  if (fields.interval_seconds !== undefined) {
-    updates.push('avg_interval_seconds = ?');
-    params.push(fields.interval_seconds);
   }
   if (fields.enabled !== undefined) {
     updates.push('enabled = ?');

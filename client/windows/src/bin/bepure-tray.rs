@@ -24,7 +24,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{PCWSTR, w};
 
-use virtue_client_core::DEFAULT_CAPTURE_INTERVAL_SECONDS;
 use virtue_windows_client::session::SessionManager;
 use virtue_windows_client::win_text::to_wide;
 
@@ -227,13 +226,9 @@ impl AppState {
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "windows-device".to_string());
 
-        let result = self.session.login_blocking(
-            &self.runtime,
-            &email,
-            &password,
-            &device_name,
-            DEFAULT_CAPTURE_INTERVAL_SECONDS,
-        );
+        let result = self
+            .session
+            .login_blocking(&self.runtime, &email, &password, &device_name);
 
         match result {
             Ok(device_id) => {

@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 use virtue_client_core::{
     AuthClient, BatchBlob, BatchItem, CaptureSchedulePolicy, CaptureScheduleState, ChainHasher,
-    DEFAULT_CAPTURE_INTERVAL_SECONDS, FileTokenStore, ImagePipeline, TokenStore, UploadClient,
-    sha256_bytes,
+    FileTokenStore, ImagePipeline, TokenStore, UploadClient, resolve_batch_window_seconds,
+    resolve_capture_interval_seconds, sha256_bytes,
 };
 
 use crate::api::{ApiClient, Device};
@@ -129,14 +129,8 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
             continue;
         }
 
-        let interval_seconds = if settings.interval_seconds > 0 {
-            settings.interval_seconds
-        } else {
-            DEFAULT_CAPTURE_INTERVAL_SECONDS
-        };
-
         let policy = CaptureSchedulePolicy {
-            base_interval: Duration::from_secs(interval_seconds),
+            base_interval: Duration::from_secs(resolve_capture_interval_seconds()),
             ..CaptureSchedulePolicy::default()
         };
         let mut rng = thread_rng();
@@ -171,7 +165,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
 
         // ── Batch flush ────────────────────────────────────────────────────────
         let window_age_secs = (now - batch_window_start).num_seconds() as u64;
-        if window_age_secs >= state.batch_window_seconds && !batch_buffer.items.is_empty() {
+        if window_age_secs >= resolve_batch_window_seconds() && !batch_buffer.items.is_empty() {
             let end_time = now;
             let start_time = batch_window_start;
 

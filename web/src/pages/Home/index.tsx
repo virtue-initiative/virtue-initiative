@@ -302,7 +302,6 @@ function DeviceCard({ device, token, onChanged }: { device: Device; token: strin
   const { route } = useLocation();
   const online = device.status === 'online';
   const [name, setName] = useState(device.name);
-  const [interval, setInterval] = useState(String(device.interval_seconds));
   const [enabled, setEnabled] = useState(device.enabled);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -310,7 +309,6 @@ function DeviceCard({ device, token, onChanged }: { device: Device; token: strin
 
   function openEdit() {
     setName(device.name);
-    setInterval(String(device.interval_seconds));
     setEnabled(device.enabled);
     setError(null);
     dialogRef.current?.showModal();
@@ -323,7 +321,6 @@ function DeviceCard({ device, token, onChanged }: { device: Device; token: strin
     try {
       await api.patchDevice(token, device.id, {
         name,
-        interval_seconds: Number(interval),
         enabled,
       });
       dialogRef.current?.close();
@@ -346,8 +343,6 @@ function DeviceCard({ device, token, onChanged }: { device: Device; token: strin
       <dl class="card-meta">
         <dt>Platform</dt>
         <dd>{device.platform}</dd>
-        <dt>Interval</dt>
-        <dd>{device.interval_seconds}s</dd>
         <dt>Last seen</dt>
         <dd>{device.last_seen_at ? relativeTime(device.last_seen_at) : 'Never'}</dd>
         <dt>Last upload</dt>
@@ -377,17 +372,6 @@ function DeviceCard({ device, token, onChanged }: { device: Device; token: strin
               type="text"
               value={name}
               onInput={(e) => setName((e.target as HTMLInputElement).value)}
-              required
-            />
-          </div>
-          <div class="field">
-            <label for="device-interval">Capture interval (seconds)</label>
-            <input
-              id="device-interval"
-              type="number"
-              min="15"
-              value={interval}
-              onInput={(e) => setInterval((e.target as HTMLInputElement).value)}
               required
             />
           </div>

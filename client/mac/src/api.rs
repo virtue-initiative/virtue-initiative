@@ -30,12 +30,10 @@ impl ApiClient {
         &self,
         access_token: &str,
         name: &str,
-        avg_interval_seconds: u64,
     ) -> Result<DeviceRegistration> {
         let request = RegisterDeviceRequest {
             name: name.to_string(),
             platform: "macos".to_string(),
-            avg_interval_seconds,
         };
 
         let url = format!("{}/device", self.base_url);
@@ -90,7 +88,6 @@ pub struct CreatedLog {}
 struct RegisterDeviceRequest {
     name: String,
     platform: String,
-    avg_interval_seconds: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]

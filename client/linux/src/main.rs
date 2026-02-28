@@ -14,8 +14,10 @@ use clap::{Parser, Subcommand};
 use serde::Deserialize;
 
 use virtue_client_core::{
-    AuthClient, FileTokenStore, TokenStore, apply_dev_env, derive_key,
-    resolve_capture_interval_seconds,
+    AuthClient, BASE_API_URL_ENV_VAR, BATCH_WINDOW_SECONDS_ENV_VAR,
+    CAPTURE_INTERVAL_SECONDS_ENV_VAR, FileTokenStore, TokenStore, apply_dev_env,
+    clamp_batch_window_seconds, clamp_capture_interval_seconds, derive_key, resolve_base_api_url,
+    resolve_batch_window_seconds, resolve_capture_interval_seconds,
 };
 
 use crate::api::ApiClient;
@@ -42,10 +44,6 @@ enum Commands {
     },
     Daemon,
     Status,
-    /// Set how many seconds of captures to accumulate before uploading a batch.
-    SetBatchWindow {
-        seconds: u64,
-    },
 }
 
 #[tokio::main]
@@ -65,13 +63,13 @@ async fn run() -> Result<()> {
     let cli = Cli::parse();
     let paths = ClientPaths::discover()?;
     paths.ensure_dirs()?;
+    apply_service_env_defaults("virtue.service");
 
     match cli.command {
         Commands::Login { email } => login(paths, email).await,
         Commands::Logout { yes } => logout(paths, yes).await,
         Commands::Daemon => daemon::run_daemon(&paths).await,
         Commands::Status => status(paths),
-        Commands::SetBatchWindow { seconds } => set_batch_window(paths, seconds),
     }
 }
 
@@ -106,7 +104,6 @@ async fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
 
     let api_client = ApiClient::new()?;
     let mut state = load_state(&paths.state_file)?;
-    let capture_interval_seconds = resolve_capture_interval_seconds(state.capture_interval_seconds);
 
     let host = hostname::get()
         .ok()
@@ -115,7 +112,7 @@ async fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
         .unwrap_or_else(|| "linux-device".to_string());
 
     let registration = api_client
-        .register_device(&access_token, &host, capture_interval_seconds)
+        .register_device(&access_token, &host)
         .await
         .context("device registration failed")?;
 
@@ -189,8 +186,11 @@ async fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
 
 fn status(paths: ClientPaths) -> Result<()> {
     let state = load_state(&paths.state_file)?;
-    let effective_interval_seconds =
-        resolve_capture_interval_seconds(state.capture_interval_seconds);
+    let service_env = load_service_env("virtue.service");
+    let capture_interval_seconds =
+        resolve_capture_interval_seconds_for_status(service_env.as_ref());
+    let batch_window_seconds = resolve_batch_window_seconds_for_status(service_env.as_ref());
+    let base_api_url = resolve_base_api_url_for_status(service_env.as_ref());
     let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&paths.token_file));
     let logged_in = token_store.get_access_token()?.is_some();
     let refresh_token_present = token_store.get_refresh_token()?.is_some();
@@ -203,11 +203,9 @@ fn status(paths: ClientPaths) -> Result<()> {
         "device_id: {}",
         state.device_id.as_deref().unwrap_or("<none>")
     );
-    println!(
-        "capture_interval_seconds: {} (effective: {})",
-        state.capture_interval_seconds, effective_interval_seconds
-    );
-    println!("batch_window_seconds: {}", state.batch_window_seconds);
+    println!("capture_interval_seconds: {}", capture_interval_seconds);
+    println!("batch_window_seconds: {}", batch_window_seconds);
+    println!("base_api_url: {}", base_api_url);
     println!(
         "backend: {}",
         match state.backend_hint {
@@ -220,12 +218,94 @@ fn status(paths: ClientPaths) -> Result<()> {
     Ok(())
 }
 
-fn set_batch_window(paths: ClientPaths, seconds: u64) -> Result<()> {
-    let mut state = load_state(&paths.state_file)?;
-    state.batch_window_seconds = seconds;
-    save_state(&paths.state_file, &state)?;
-    println!("batch_window_seconds set to {seconds}");
-    Ok(())
+fn load_service_env(service: &str) -> Option<std::collections::HashMap<String, String>> {
+    let output = Command::new("systemctl")
+        .arg("--user")
+        .args(["show", service, "--property=Environment", "--value"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let raw = String::from_utf8(output.stdout).ok()?;
+    if raw.trim().is_empty() {
+        return None;
+    }
+
+    let mut map = std::collections::HashMap::new();
+    for token in raw.split_whitespace() {
+        if let Some((key, value)) = token.split_once('=') {
+            map.insert(key.to_string(), value.to_string());
+        }
+    }
+    Some(map)
+}
+
+fn apply_service_env_defaults(service: &str) {
+    let Some(vars) = load_service_env(service) else {
+        return;
+    };
+
+    for key in [
+        BASE_API_URL_ENV_VAR,
+        CAPTURE_INTERVAL_SECONDS_ENV_VAR,
+        BATCH_WINDOW_SECONDS_ENV_VAR,
+    ] {
+        if std::env::var(key).is_ok() {
+            continue;
+        }
+        let Some(value) = vars.get(key) else {
+            continue;
+        };
+        // Environment values are applied only when shell env does not override.
+        unsafe { std::env::set_var(key, value) };
+    }
+}
+
+fn resolve_base_api_url_for_status(
+    service_env: Option<&std::collections::HashMap<String, String>>,
+) -> String {
+    if let Ok(value) = std::env::var(BASE_API_URL_ENV_VAR) {
+        let normalized = value.trim().trim_end_matches('/').to_string();
+        if !normalized.is_empty() {
+            return normalized;
+        }
+    }
+    if let Some(value) = service_env
+        .and_then(|vars| vars.get(BASE_API_URL_ENV_VAR))
+        .map(|v| v.trim().trim_end_matches('/').to_string())
+        .filter(|v| !v.is_empty())
+    {
+        return value;
+    }
+    resolve_base_api_url()
+}
+
+fn resolve_capture_interval_seconds_for_status(
+    service_env: Option<&std::collections::HashMap<String, String>>,
+) -> u64 {
+    if std::env::var(CAPTURE_INTERVAL_SECONDS_ENV_VAR).is_ok() {
+        return resolve_capture_interval_seconds();
+    }
+    service_env
+        .and_then(|vars| vars.get(CAPTURE_INTERVAL_SECONDS_ENV_VAR))
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(clamp_capture_interval_seconds)
+        .unwrap_or_else(resolve_capture_interval_seconds)
+}
+
+fn resolve_batch_window_seconds_for_status(
+    service_env: Option<&std::collections::HashMap<String, String>>,
+) -> u64 {
+    if std::env::var(BATCH_WINDOW_SECONDS_ENV_VAR).is_ok() {
+        return resolve_batch_window_seconds();
+    }
+    service_env
+        .and_then(|vars| vars.get(BATCH_WINDOW_SECONDS_ENV_VAR))
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(clamp_batch_window_seconds)
+        .unwrap_or_else(resolve_batch_window_seconds)
 }
 
 fn ensure_user_service_running() -> Result<()> {

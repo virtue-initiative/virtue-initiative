@@ -68,9 +68,9 @@ All device endpoints require `Authorization: Bearer <token>`.
 
 ### `POST /device`
 ```json
-{ "name": "My Phone", "platform": "android", "avg_interval_seconds": 300 }
+{ "name": "My Phone", "platform": "android" }
 ```
-Response `201`: `{ "device": { "id", "name", "platform", "avg_interval_seconds", "created_at" } }`
+Response `201`: `{ "id": "uuid", "created_at": "..." }`
 
 ### `GET /device`
 List devices. Optional query: `?user=<userId>` (requires accepted partnership).
@@ -78,7 +78,7 @@ Response `200`: `{ "devices": [...] }`
 
 ### `PATCH /device/:id`
 ```json
-{ "name": "New Name", "interval_seconds": 120, "enabled": true }
+{ "name": "New Name", "enabled": true }
 ```
 Response `200`: `{ "updated": true }`
 

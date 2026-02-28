@@ -5,9 +5,7 @@ use anyhow::{Context, Result};
 use serde_json::json;
 use tokio::runtime::Runtime;
 
-use virtue_client_core::{
-    AuthClient, FileTokenStore, TokenStore, resolve_capture_interval_seconds,
-};
+use virtue_client_core::{AuthClient, FileTokenStore, TokenStore};
 
 use crate::api::ApiClient;
 use crate::config::{ClientPaths, load_state, save_state};
@@ -59,11 +57,8 @@ impl SessionManager {
         email: &str,
         password: &str,
         device_name: &str,
-        interval_seconds: u64,
     ) -> Result<String> {
         runtime.block_on(async {
-            let effective_interval_seconds = resolve_capture_interval_seconds(interval_seconds);
-
             self.auth_client
                 .login(email, password)
                 .await
@@ -76,19 +71,13 @@ impl SessionManager {
 
             let registration = self
                 .api_client
-                .register_device(
-                    &access_token,
-                    device_name,
-                    "windows",
-                    effective_interval_seconds,
-                )
+                .register_device(&access_token, device_name, "windows")
                 .await
                 .context("device registration failed")?;
 
             let mut state = load_state(&self.paths.state_file)?;
             state.device_id = Some(registration.id.clone());
             state.monitoring_enabled = true;
-            state.capture_interval_seconds = effective_interval_seconds;
             save_state(&self.paths.state_file, &state)?;
 
             Ok::<String, anyhow::Error>(registration.id)

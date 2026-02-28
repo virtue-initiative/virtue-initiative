@@ -44,12 +44,10 @@ impl ApiClient {
         &self,
         access_token: &str,
         name: &str,
-        avg_interval_seconds: u64,
     ) -> Result<DeviceRegistration> {
         let request = RegisterDeviceRequest {
             name: name.to_string(),
             platform: "linux".to_string(),
-            avg_interval_seconds,
         };
 
         let url = format!("{}/device", self.base_url);
@@ -68,7 +66,6 @@ impl ApiClient {
 #[derive(Clone, Debug, Deserialize)]
 pub struct Device {
     pub id: String,
-    pub interval_seconds: u64,
     pub enabled: bool,
 }
 
@@ -81,7 +78,6 @@ pub struct DeviceRegistration {
 struct RegisterDeviceRequest {
     name: String,
     platform: String,
-    avg_interval_seconds: u64,
 }
 
 async fn decode_json<T: serde::de::DeserializeOwned>(response: reqwest::Response) -> Result<T> {

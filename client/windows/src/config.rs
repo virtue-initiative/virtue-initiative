@@ -4,8 +4,6 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use virtue_client_core::DEFAULT_CAPTURE_INTERVAL_SECONDS;
-
 #[derive(Clone, Debug)]
 pub struct ClientPaths {
     pub base_dir: PathBuf,
@@ -48,7 +46,6 @@ impl ClientPaths {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ClientState {
     pub monitoring_enabled: bool,
-    pub capture_interval_seconds: u64,
     pub device_id: Option<String>,
 }
 
@@ -56,7 +53,6 @@ impl Default for ClientState {
     fn default() -> Self {
         Self {
             monitoring_enabled: false,
-            capture_interval_seconds: DEFAULT_CAPTURE_INTERVAL_SECONDS,
             device_id: None,
         }
     }
