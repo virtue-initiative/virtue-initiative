@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use bepure_client_core::DEFAULT_CAPTURE_INTERVAL_SECONDS;
+use virtue_client_core::DEFAULT_CAPTURE_INTERVAL_SECONDS;
 
 #[derive(Clone, Debug)]
 pub struct ClientPaths {
@@ -25,8 +25,8 @@ impl ClientPaths {
         let data_root = dirs::data_dir().context("failed to resolve data directory")?;
         let home = dirs::home_dir().context("failed to resolve home directory")?;
 
-        let config_dir = config_root.join("bepure");
-        let data_dir = data_root.join("bepure");
+        let config_dir = config_root.join("virtue");
+        let data_dir = data_root.join("virtue");
         let launch_agents_dir = home.join("Library").join("LaunchAgents");
         let logs_dir = home.join("Library").join("Logs");
 
@@ -35,7 +35,7 @@ impl ClientPaths {
             token_file: config_dir.join("token_store.json"),
             queue_file: data_dir.join("upload_queue.json"),
             daemon_status_file: data_dir.join("mac_daemon_status.json"),
-            launch_agent_file: launch_agents_dir.join("codes.anb.bepure.daemon.plist"),
+            launch_agent_file: launch_agents_dir.join("codes.anb.virtue.daemon.plist"),
             config_dir,
             data_dir,
             launch_agents_dir,

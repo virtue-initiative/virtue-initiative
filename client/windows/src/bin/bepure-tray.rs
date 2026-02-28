@@ -24,12 +24,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{PCWSTR, w};
 
-use bepure_client_core::DEFAULT_CAPTURE_INTERVAL_SECONDS;
-use bepure_windows_client::session::SessionManager;
-use bepure_windows_client::win_text::to_wide;
+use virtue_client_core::DEFAULT_CAPTURE_INTERVAL_SECONDS;
+use virtue_windows_client::session::SessionManager;
+use virtue_windows_client::win_text::to_wide;
 
-const WINDOW_CLASS: PCWSTR = w!("BePureTrayWindow");
-const WINDOW_TITLE: PCWSTR = w!("BePure");
+const WINDOW_CLASS: PCWSTR = w!("VirtueTrayWindow");
+const WINDOW_TITLE: PCWSTR = w!("Virtue");
 
 const ID_EMAIL_INPUT: isize = 1001;
 const ID_PASSWORD_INPUT: isize = 1002;
@@ -185,7 +185,7 @@ impl AppState {
             ..Default::default()
         };
 
-        let tip = to_wide("BePure");
+        let tip = to_wide("Virtue");
         for (idx, ch) in tip.iter().take(data.szTip.len()).enumerate() {
             data.szTip[idx] = *ch;
         }

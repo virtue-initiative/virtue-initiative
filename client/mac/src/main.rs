@@ -19,7 +19,7 @@ use tokio::runtime::Runtime;
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
-use bepure_client_core::{AuthClient, FileTokenStore, TokenStore};
+use virtue_client_core::{AuthClient, FileTokenStore, TokenStore};
 
 use crate::api::ApiClient;
 use crate::config::{
@@ -27,8 +27,8 @@ use crate::config::{
 };
 
 #[derive(Debug, Parser)]
-#[command(name = "bepure-mac-client")]
-#[command(about = "BePure macOS tray client")]
+#[command(name = "virtue-mac-client")]
+#[command(about = "Virtue macOS tray client")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -81,14 +81,14 @@ fn run_tray(paths: ClientPaths) -> Result<()> {
     let event_loop = EventLoopBuilder::<()>::with_user_event().build();
 
     let menu = Menu::new();
-    let open_item = MenuItem::new("Open BePure", true, None);
+    let open_item = MenuItem::new("Open Virtue", true, None);
     let quit_item = MenuItem::new("Quit", true, None);
     menu.append(&open_item)?;
     menu.append(&PredefinedMenuItem::separator())?;
     menu.append(&quit_item)?;
 
     let _tray_icon = TrayIconBuilder::new()
-        .with_tooltip("BePure")
+        .with_tooltip("Virtue")
         .with_icon(build_tray_icon()?)
         .with_menu_on_left_click(false)
         .with_menu(Box::new(menu))

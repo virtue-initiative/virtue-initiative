@@ -1,4 +1,4 @@
-package codes.anb.bepure
+package codes.anb.virtue
 
 import android.content.BroadcastReceiver
 import android.content.Context

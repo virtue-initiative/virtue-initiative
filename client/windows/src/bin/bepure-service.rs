@@ -14,11 +14,11 @@ use windows_service::service::{
 use windows_service::service_control_handler::{self, ServiceControlHandlerResult};
 use windows_service::service_dispatcher;
 
-use bepure_windows_client::config::ClientPaths;
-use bepure_windows_client::daemon;
-use bepure_windows_client::service_log::ServiceLogger;
+use virtue_windows_client::config::ClientPaths;
+use virtue_windows_client::daemon;
+use virtue_windows_client::service_log::ServiceLogger;
 
-const SERVICE_NAME: &str = "BePureCaptureService";
+const SERVICE_NAME: &str = "VirtueCaptureService";
 
 define_windows_service!(ffi_service_main, service_main);
 

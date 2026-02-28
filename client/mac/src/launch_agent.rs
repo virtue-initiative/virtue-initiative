@@ -6,7 +6,7 @@ use anyhow::{Context, Result, anyhow};
 
 use crate::config::ClientPaths;
 
-pub const LABEL: &str = "codes.anb.bepure.daemon";
+pub const LABEL: &str = "codes.anb.virtue.daemon";
 
 pub fn ensure_agent_running(paths: &ClientPaths, exe_path: &Path) -> Result<()> {
     let plist = render_plist(exe_path, paths);
@@ -113,14 +113,14 @@ fn render_plist(exe_path: &Path, paths: &ClientPaths) -> String {
     let stdout_path = xml_escape(
         &paths
             .logs_dir
-            .join("bepure-daemon.log")
+            .join("virtue-daemon.log")
             .display()
             .to_string(),
     );
     let stderr_path = xml_escape(
         &paths
             .logs_dir
-            .join("bepure-daemon.error.log")
+            .join("virtue-daemon.error.log")
             .display()
             .to_string(),
     );

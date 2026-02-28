@@ -14,7 +14,7 @@ start_for_user() {
   su - "$user" -s /bin/sh -c "XDG_RUNTIME_DIR=$runtime systemctl --user daemon-reload >/dev/null 2>&1 || true"
 
   # Legacy cleanup: avoid running both service names at once.
-  su - "$user" -s /bin/sh -c "XDG_RUNTIME_DIR=$runtime systemctl --user disable --now bepure.service >/dev/null 2>&1 || true"
+  su - "$user" -s /bin/sh -c "XDG_RUNTIME_DIR=$runtime systemctl --user disable --now virtue.service >/dev/null 2>&1 || true"
 
   # Cinnamon uses the xapp-status panel applet as the StatusNotifier host.
   # If it's missing, the daemon can run but the tray icon has nowhere to render.

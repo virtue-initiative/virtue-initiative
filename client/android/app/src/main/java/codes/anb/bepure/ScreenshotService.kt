@@ -1,4 +1,4 @@
-package codes.anb.bepure
+package codes.anb.virtue
 
 import android.app.*
 import android.content.Context
@@ -185,7 +185,7 @@ class ScreenshotService : Service() {
         )
 
         virtualDisplay = mediaProjection?.createVirtualDisplay(
-            "bepure-capture",
+            "virtue-capture",
             metrics.widthPixels,
             metrics.heightPixels,
             metrics.densityDpi,
@@ -248,7 +248,7 @@ class ScreenshotService : Service() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "BePure monitoring",
+            "Virtue monitoring",
             NotificationManager.IMPORTANCE_LOW
         )
         channel.description = "Background screenshot accountability monitoring"
@@ -264,18 +264,18 @@ class ScreenshotService : Service() {
     private fun buildNotification(text: String): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setContentTitle("BePure")
+            .setContentTitle("Virtue")
             .setContentText(text)
             .setOngoing(true)
             .build()
     }
 
     companion object {
-        private const val ACTION_START = "codes.anb.bepure.START"
-        private const val ACTION_STOP = "codes.anb.bepure.STOP"
+        private const val ACTION_START = "codes.anb.virtue.START"
+        private const val ACTION_STOP = "codes.anb.virtue.STOP"
         private const val EXTRA_RESULT_CODE = "projection_result_code"
         private const val EXTRA_RESULT_DATA = "projection_result_data"
-        private const val CHANNEL_ID = "bepure_monitoring"
+        private const val CHANNEL_ID = "virtue_monitoring"
         private const val NOTIFICATION_ID = 1001
 
         fun start(context: Context, resultCode: Int, data: Intent) {

@@ -13,8 +13,8 @@ cd "$CLIENT_ROOT"
 "${SCRIPT_DIR}/build-app.sh"
 
 VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' mac/Cargo.toml | head -n1)"
-APP_NAME="BePure.app"
-DMG_NAME="BePure-${VERSION}.dmg"
+APP_NAME="Virtue.app"
+DMG_NAME="Virtue-${VERSION}.dmg"
 DMG_PATH="target/macos/${DMG_NAME}"
 STAGING_DIR="target/macos/dmg-staging"
 
@@ -24,7 +24,7 @@ cp -R "target/macos/${APP_NAME}" "$STAGING_DIR/${APP_NAME}"
 ln -s /Applications "$STAGING_DIR/Applications"
 
 hdiutil create \
-  -volname "BePure" \
+  -volname "Virtue" \
   -srcfolder "$STAGING_DIR" \
   -ov \
   -format UDZO \

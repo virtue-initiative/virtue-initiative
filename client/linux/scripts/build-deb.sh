@@ -31,7 +31,7 @@ Version: $VERSION
 Section: utils
 Priority: optional
 Architecture: $ARCH
-Maintainer: Virtue Initiative <support@bepure.app>
+Maintainer: Virtue Initiative <support@virtue.app>
 Depends: systemd
 Description: Virtue Linux monitoring client
  Virtue command line and background service for screenshot monitoring.

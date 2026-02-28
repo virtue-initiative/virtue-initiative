@@ -13,7 +13,7 @@ use base64::Engine;
 use clap::{Parser, Subcommand};
 use serde::Deserialize;
 
-use bepure_client_core::{
+use virtue_client_core::{
     AuthClient, FileTokenStore, TokenStore, apply_dev_env, derive_key,
     resolve_capture_interval_seconds,
 };

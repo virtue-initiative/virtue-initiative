@@ -17,7 +17,7 @@ use serde_json::json;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
-use bepure_client_core::{
+use virtue_client_core::{
     AuthClient, BufferedUpload, CaptureSchedulePolicy, CaptureScheduleState, FileTokenStore,
     DEFAULT_CAPTURE_INTERVAL_SECONDS, ImagePipeline, PersistentQueue,
     RetryPolicy, TokenStore, UploadClient, clamp_capture_interval_seconds, resolve_base_api_url,
@@ -77,7 +77,7 @@ struct CreateLogRequest {
 }
 
 #[no_mangle]
-pub extern "system" fn Java_codes_anb_bepure_NativeBridge_nativeInit(
+pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeInit(
     mut env: JNIEnv,
     _class: JClass,
     config_dir: JString,
@@ -134,7 +134,7 @@ pub extern "system" fn Java_codes_anb_bepure_NativeBridge_nativeInit(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_codes_anb_bepure_NativeBridge_nativeLogin(
+pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeLogin(
     mut env: JNIEnv,
     _class: JClass,
     email: JString,
@@ -177,7 +177,7 @@ pub extern "system" fn Java_codes_anb_bepure_NativeBridge_nativeLogin(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_codes_anb_bepure_NativeBridge_nativeLogout(
+pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeLogout(
     mut env: JNIEnv,
     _class: JClass,
 ) -> jstring {
@@ -220,7 +220,7 @@ pub extern "system" fn Java_codes_anb_bepure_NativeBridge_nativeLogout(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_codes_anb_bepure_NativeBridge_nativeIsLoggedIn(
+pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeIsLoggedIn(
     _env: JNIEnv,
     _class: JClass,
 ) -> jboolean {
@@ -238,7 +238,7 @@ pub extern "system" fn Java_codes_anb_bepure_NativeBridge_nativeIsLoggedIn(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_codes_anb_bepure_NativeBridge_nativeGetDeviceId(
+pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeGetDeviceId(
     mut env: JNIEnv,
     _class: JClass,
 ) -> jstring {
@@ -255,7 +255,7 @@ pub extern "system" fn Java_codes_anb_bepure_NativeBridge_nativeGetDeviceId(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_codes_anb_bepure_NativeBridge_nativeNextCaptureDelayMs(
+pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeNextCaptureDelayMs(
     _env: JNIEnv,
     _class: JClass,
     last_success: jboolean,
@@ -279,7 +279,7 @@ pub extern "system" fn Java_codes_anb_bepure_NativeBridge_nativeNextCaptureDelay
 }
 
 #[no_mangle]
-pub extern "system" fn Java_codes_anb_bepure_NativeBridge_nativeProcessCapture(
+pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeProcessCapture(
     mut env: JNIEnv,
     _class: JClass,
     png_bytes: JByteArray,
@@ -322,7 +322,7 @@ pub extern "system" fn Java_codes_anb_bepure_NativeBridge_nativeProcessCapture(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_codes_anb_bepure_NativeBridge_nativeReportLog(
+pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeReportLog(
     mut env: JNIEnv,
     _class: JClass,
     event_type: JString,

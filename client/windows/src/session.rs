@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use serde_json::json;
 use tokio::runtime::Runtime;
 
-use bepure_client_core::{
+use virtue_client_core::{
     AuthClient, FileTokenStore, TokenStore, resolve_capture_interval_seconds,
 };
 

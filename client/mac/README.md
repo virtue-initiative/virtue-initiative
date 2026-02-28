@@ -1,4 +1,4 @@
-# BePure macOS Client
+# Virtue macOS Client
 
 This client has two modes in one binary:
 
@@ -7,9 +7,9 @@ This client has two modes in one binary:
 
 ## Behavior
 
-- On tray app launch, it installs/starts a LaunchAgent (`codes.anb.bepure.daemon`) so the daemon restarts on login/reboot.
+- On tray app launch, it installs/starts a LaunchAgent (`codes.anb.virtue.daemon`) so the daemon restarts on login/reboot.
 - Daemon idles until login is complete (token + device ID).
-- Menu action `Open BePure`:
+- Menu action `Open Virtue`:
   - If logged out: prompts for email/password.
   - If logged in: shows signed-in state with a `Logout` action.
 
@@ -25,7 +25,7 @@ If captures fail, grant permission under:
 From `client/`:
 
 ```bash
-cargo build --release -p bepure-mac-client
+cargo build --release -p virtue-mac-client
 ```
 
 ## Build `.app`
@@ -36,7 +36,7 @@ cargo build --release -p bepure-mac-client
 
 Creates:
 
-`client/target/macos/BePure.app`
+`client/target/macos/Virtue.app`
 
 ## Build `.dmg` (drag to Applications)
 
@@ -46,4 +46,4 @@ Creates:
 
 Creates:
 
-`client/target/macos/BePure-<version>.dmg`
+`client/target/macos/Virtue-<version>.dmg`

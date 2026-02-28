@@ -1,8 +1,8 @@
-package codes.anb.bepure
+package codes.anb.virtue
 
 import android.app.Application
 
-class BePureApp : Application() {
+class VirtueApp : Application() {
     override fun onCreate() {
         super.onCreate()
         NativeBridge.ensureInitialized(this)

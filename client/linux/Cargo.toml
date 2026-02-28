@@ -11,7 +11,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 base64 = "0.22"
-bepure-client-core = { path = "../core" }
+virtue-client-core = { path = "../core" }
 chrono = { version = "0.4", features = ["clock", "serde"] }
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
@@ -33,7 +33,7 @@ features = ["json", "rustls-tls"]
 
 [package.metadata.deb]
 name = "virtue"
-maintainer = "Virtue Initiative <support@bepure.app>"
+maintainer = "Virtue Initiative <support@virtue.app>"
 section = "utils"
 priority = "optional"
 depends = "$auto, systemd"

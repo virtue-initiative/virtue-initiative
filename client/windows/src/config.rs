@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use bepure_client_core::DEFAULT_CAPTURE_INTERVAL_SECONDS;
+use virtue_client_core::DEFAULT_CAPTURE_INTERVAL_SECONDS;
 
 #[derive(Clone, Debug)]
 pub struct ClientPaths {
@@ -21,7 +21,7 @@ impl ClientPaths {
     pub fn discover() -> Result<Self> {
         let program_data = std::env::var_os("PROGRAMDATA")
             .context("PROGRAMDATA environment variable is not set")?;
-        let base_dir = PathBuf::from(program_data).join("BePure");
+        let base_dir = PathBuf::from(program_data).join("Virtue");
         let config_dir = base_dir.join("config");
         let data_dir = base_dir.join("data");
 

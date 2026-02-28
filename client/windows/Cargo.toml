@@ -1,24 +1,24 @@
 [package]
-name = "bepure-windows-client"
+name = "virtue-windows-client"
 version = "0.1.0"
 edition = "2024"
-description = "BePure Windows client"
+description = "Virtue Windows client"
 
 [lib]
-name = "bepure_windows_client"
+name = "virtue_windows_client"
 path = "src/lib.rs"
 
 [[bin]]
-name = "bepure-service"
-path = "src/bin/bepure-service.rs"
+name = "virtue-service"
+path = "src/bin/virtue-service.rs"
 
 [[bin]]
-name = "bepure-tray"
-path = "src/bin/bepure-tray.rs"
+name = "virtue-tray"
+path = "src/bin/virtue-tray.rs"
 
 [dependencies]
 anyhow = "1"
-bepure-client-core = { path = "../core" }
+virtue-client-core = { path = "../core" }
 chrono = { version = "0.4", features = ["clock", "serde"] }
 hostname = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }

@@ -1,4 +1,4 @@
-package codes.anb.bepure
+package codes.anb.virtue
 
 import android.Manifest
 import android.content.Context
@@ -12,7 +12,7 @@ import android.provider.Settings
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import codes.anb.bepure.databinding.ActivityMainBinding
+import codes.anb.virtue.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext

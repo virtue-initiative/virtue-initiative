@@ -2,7 +2,7 @@ use std::process::{Command, Output};
 
 use anyhow::{Result, anyhow};
 
-const LOGIN_SPLIT: &str = "__BEPURE_SPLIT__";
+const LOGIN_SPLIT: &str = "__VIRTUE_SPLIT__";
 
 #[derive(Debug, Clone)]
 pub struct LoginInput {
@@ -19,11 +19,11 @@ pub enum LoggedInAction {
 
 pub fn prompt_login() -> Result<Option<LoginInput>> {
     let script = r#"
-set emailPrompt to display dialog "BePure login" default answer "" buttons {"Cancel", "Next"} default button "Next"
+set emailPrompt to display dialog "Virtue login" default answer "" buttons {"Cancel", "Next"} default button "Next"
 set emailValue to text returned of emailPrompt
 set passwordPrompt to display dialog "Password" default answer "" with hidden answer buttons {"Cancel", "Sign in"} default button "Sign in"
 set passwordValue to text returned of passwordPrompt
-return emailValue & "__BEPURE_SPLIT__" & passwordValue
+return emailValue & "__VIRTUE_SPLIT__" & passwordValue
 "#;
 
     let Some(raw) = run_script_allow_cancel(script)? else {
@@ -87,7 +87,7 @@ pub fn prompt_permission_issue_action(
             .unwrap_or("<none>")
     );
     message.push_str(
-        "\n\nScreen Recording permission appears to be missing for the BePure background service.\n\nOpen System Settings > Privacy & Security > Screen Recording, enable BePure, then click Restart daemon. Restart is required even if you selected Quit & Reopen earlier.",
+        "\n\nScreen Recording permission appears to be missing for the Virtue background service.\n\nOpen System Settings > Privacy & Security > Screen Recording, enable Virtue, then click Restart daemon. Restart is required even if you selected Quit & Reopen earlier.",
     );
 
     let escaped = apple_script_escape(&message);

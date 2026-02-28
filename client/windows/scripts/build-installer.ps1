@@ -9,9 +9,9 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $NsisScript = Join-Path $ProjectRoot "packaging\nsis\installer.nsi"
 $DistDir = Join-Path $ProjectRoot "dist"
-$OutFile = Join-Path $DistDir "bepure-windows-installer-$Version.exe"
-$BuildTargetDir = Join-Path $env:TEMP "bepure-target"
-$LocalOutFile = Join-Path $BuildTargetDir "bepure-windows-installer-$Version.exe"
+$OutFile = Join-Path $DistDir "virtue-windows-installer-$Version.exe"
+$BuildTargetDir = Join-Path $env:TEMP "virtue-target"
+$LocalOutFile = Join-Path $BuildTargetDir "virtue-windows-installer-$Version.exe"
 
 Push-Location $ProjectRoot
 try {
@@ -30,7 +30,7 @@ try {
     $env:CARGO_TARGET_DIR = $BuildTargetDir
 
     if (-not $SkipBuild) {
-        & $cargo build --release --target $Target --bin bepure-service --bin bepure-tray
+        & $cargo build --release --target $Target --bin virtue-service --bin virtue-tray
     }
 
     New-Item -ItemType Directory -Force -Path $DistDir | Out-Null

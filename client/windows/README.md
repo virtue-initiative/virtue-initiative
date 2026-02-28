@@ -1,16 +1,16 @@
-# BePure Windows Client
+# Virtue Windows Client
 
 This directory contains the Windows client implementation:
 
-- `bepure-service.exe`: Windows service that captures screenshots and uploads via `client/core`.
-- `bepure-tray.exe`: tray/login app that handles sign-in/sign-out and shared state.
+- `virtue-service.exe`: Windows service that captures screenshots and uploads via `client/core`.
+- `virtue-tray.exe`: tray/login app that handles sign-in/sign-out and shared state.
 - NSIS packaging scripts to produce a Windows installer executable.
 
 ## Layout
 
-- `src/bin/bepure-service.rs`: persistent Windows service entrypoint.
-- `src/bin/bepure-tray.rs`: tray app with login/logout UI.
-- `src/daemon.rs`: capture, queue, and upload loop using `bepure-client-core`.
+- `src/bin/virtue-service.rs`: persistent Windows service entrypoint.
+- `src/bin/virtue-tray.rs`: tray app with login/logout UI.
+- `src/daemon.rs`: capture, queue, and upload loop using `virtue-client-core`.
 - `src/capture.rs`: Windows GDI screenshot capture.
 - `packaging/nsis/installer.nsi`: installer definition.
 - `scripts/build-installer.ps1`: Windows host build + packaging script.
@@ -27,43 +27,43 @@ This directory contains the Windows client implementation:
 From WSL:
 
 ```bash
-cd /home/jeff/code/bepurev2/client/windows
+cd /home/jeff/code/virtuev2/client/windows
 ./scripts/build-installer.sh 0.1.0
 ```
 
 Or from Windows PowerShell:
 
 ```powershell
-cd \\wsl$\Ubuntu\home\jeff\code\bepurev2\client\windows
+cd \\wsl$\Ubuntu\home\jeff\code\virtuev2\client\windows
 .\scripts\build-installer.ps1 -Version 0.1.0
 ```
 
 Expected output:
 
-- `client/windows/dist/bepure-windows-installer-<version>.exe`
+- `client/windows/dist/virtue-windows-installer-<version>.exe`
 
 ## Custom API base URL
 
-The Windows client reads `BEPURE_BASE_API_URL` (same as other clients).
+The Windows client reads `VIRTUE_BASE_API_URL` (same as other clients).
 
 PowerShell example:
 
 ```powershell
-$env:BEPURE_BASE_API_URL = "https://your-api.example.com"
+$env:VIRTUE_BASE_API_URL = "https://your-api.example.com"
 ```
 
 For the Windows service, set it as a machine-level environment variable and restart the service.
 
 ## Capture interval override
 
-The Windows client supports `BEPURE_CAPTURE_INTERVAL_SECONDS`.
+The Windows client supports `VIRTUE_CAPTURE_INTERVAL_SECONDS`.
 Minimum interval is `15` seconds.
 
 ## Runtime data locations
 
 The tray app and service share state in:
 
-- `%PROGRAMDATA%\BePure\config\client_state.json`
-- `%PROGRAMDATA%\BePure\config\token_store.json`
-- `%PROGRAMDATA%\BePure\data\upload_queue.json`
-- `%PROGRAMDATA%\BePure\data\service.log`
+- `%PROGRAMDATA%\Virtue\config\client_state.json`
+- `%PROGRAMDATA%\Virtue\config\token_store.json`
+- `%PROGRAMDATA%\Virtue\data\upload_queue.json`
+- `%PROGRAMDATA%\Virtue\data\service.log`

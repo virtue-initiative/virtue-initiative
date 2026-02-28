@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "BePureAndroid"
+rootProject.name = "VirtueAndroid"
 include(":app")

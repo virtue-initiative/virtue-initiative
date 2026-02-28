@@ -1,4 +1,4 @@
-# BePure Android
+# Virtue Android
 
 Android app scaffold with Kotlin UI + foreground screenshot service, using a Rust JNI layer that reuses `client/core` for auth, scheduling policy, queueing, retries, upload flow, and image pipeline.
 
@@ -74,11 +74,11 @@ sdkmanager \
 
 ## One-time emulator (AVD) creation
 
-Create an emulator named `bepure_api35`:
+Create an emulator named `virtue_api35`:
 
 ```bash
 avdmanager create avd \
-  -n bepure_api35 \
+  -n virtue_api35 \
   -k "system-images;android-35;google_apis;x86_64" \
   -d pixel_7 \
   --force
@@ -96,7 +96,7 @@ From repo root:
 
 1. Start emulator in background.
 ```bash
-emulator -avd bepure_api35 -no-snapshot &
+emulator -avd virtue_api35 -no-snapshot &
 ```
 2. Wait until Android boot is complete.
 ```bash
@@ -112,7 +112,7 @@ cd client/android
 ```
 4. Launch app activity.
 ```bash
-adb shell am start -n codes.anb.bepure/.MainActivity
+adb shell am start -n codes.anb.virtue/.MainActivity
 ```
 
 APK output path (if you want manual install):
@@ -128,7 +128,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ## Verify app is running
 
 ```bash
-adb shell pm list packages | grep codes.anb.bepure
-adb shell pidof -s codes.anb.bepure
-adb logcat --pid "$(adb shell pidof -s codes.anb.bepure)"
+adb shell pm list packages | grep codes.anb.virtue
+adb shell pidof -s codes.anb.virtue
+adb logcat --pid "$(adb shell pidof -s codes.anb.virtue)"
 ```

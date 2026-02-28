@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "codes.anb.bepure"
+    namespace = "codes.anb.virtue"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "codes.anb.bepure"
+        applicationId = "codes.anb.virtue"
         minSdk = 29
         targetSdk = 35
         versionCode = 1

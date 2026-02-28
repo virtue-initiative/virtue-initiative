@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 use uuid::Uuid;
 
-use bepure_client_core::{
+use virtue_client_core::{
     AuthClient, BatchBlob, BatchItem, CaptureSchedulePolicy, CaptureScheduleState, ChainHasher,
     DEFAULT_CAPTURE_INTERVAL_SECONDS, FileTokenStore, ImagePipeline, TokenStore, UploadClient,
     sha256_bytes,

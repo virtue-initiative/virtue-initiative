@@ -1,4 +1,4 @@
-package codes.anb.bepure
+package codes.anb.virtue
 
 import android.content.Context
 import android.content.Intent
@@ -6,7 +6,7 @@ import android.os.Parcel
 import android.util.Base64
 
 object ProjectionPermissionStore {
-    private const val PREFS = "bepure_projection"
+    private const val PREFS = "virtue_projection"
     private const val KEY_RESULT_CODE = "result_code"
     private const val KEY_INTENT_B64 = "intent_b64"
 

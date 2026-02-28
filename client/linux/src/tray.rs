@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use ksni::blocking::TrayMethods;
 
-use bepure_client_core::{FileTokenStore, TokenStore};
+use virtue_client_core::{FileTokenStore, TokenStore};
 
 use crate::config::{ClientPaths, load_state};
 

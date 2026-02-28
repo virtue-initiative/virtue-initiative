@@ -1,6 +1,6 @@
 pub const DEFAULT_BASE_API_URL: &str = "https://api.bepure.anb.codes";
-pub const BASE_API_URL_ENV_VAR: &str = "BEPURE_BASE_API_URL";
-pub const CAPTURE_INTERVAL_SECONDS_ENV_VAR: &str = "BEPURE_CAPTURE_INTERVAL_SECONDS";
+pub const BASE_API_URL_ENV_VAR: &str = "VIRTUE_BASE_API_URL";
+pub const CAPTURE_INTERVAL_SECONDS_ENV_VAR: &str = "VIRTUE_CAPTURE_INTERVAL_SECONDS";
 pub const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
 pub const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
 pub const MIN_CAPTURE_INTERVAL_SECONDS: u64 = 15;
@@ -18,14 +18,14 @@ pub fn resolve_base_api_url() -> String {
 pub fn apply_dev_env() {
     #[cfg(debug_assertions)]
     {
-        if let Some(val) = option_env!("BEPURE_BASE_API_URL") {
-            if std::env::var("BEPURE_BASE_API_URL").is_err() {
-                unsafe { std::env::set_var("BEPURE_BASE_API_URL", val) };
+        if let Some(val) = option_env!("VIRTUE_BASE_API_URL") {
+            if std::env::var("VIRTUE_BASE_API_URL").is_err() {
+                unsafe { std::env::set_var("VIRTUE_BASE_API_URL", val) };
             }
         }
-        if let Some(val) = option_env!("BEPURE_CAPTURE_INTERVAL_SECONDS") {
-            if std::env::var("BEPURE_CAPTURE_INTERVAL_SECONDS").is_err() {
-                unsafe { std::env::set_var("BEPURE_CAPTURE_INTERVAL_SECONDS", val) };
+        if let Some(val) = option_env!("VIRTUE_CAPTURE_INTERVAL_SECONDS") {
+            if std::env::var("VIRTUE_CAPTURE_INTERVAL_SECONDS").is_err() {
+                unsafe { std::env::set_var("VIRTUE_CAPTURE_INTERVAL_SECONDS", val) };
             }
         }
     }

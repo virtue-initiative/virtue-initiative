@@ -5,7 +5,7 @@ use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use bepure_client_core::resolve_base_api_url;
+use virtue_client_core::resolve_base_api_url;
 
 #[derive(Clone)]
 pub struct ApiClient {

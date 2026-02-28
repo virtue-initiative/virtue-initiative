@@ -1,16 +1,16 @@
 [package]
-name = "bepure-mac-client"
+name = "virtue-mac-client"
 version = "0.1.0"
 edition = "2024"
-description = "BePure macOS tray client and daemon"
+description = "Virtue macOS tray client and daemon"
 
 [[bin]]
-name = "bepure-mac-client"
+name = "virtue-mac-client"
 path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
-bepure-client-core = { path = "../core" }
+virtue-client-core = { path = "../core" }
 chrono = { version = "0.4", features = ["clock", "serde"] }
 clap = { version = "4", features = ["derive"] }
 dirs = "6"

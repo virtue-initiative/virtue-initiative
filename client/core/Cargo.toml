@@ -1,11 +1,11 @@
 [package]
-name = "bepure-client-core"
+name = "virtue-client-core"
 version = "0.1.0"
 edition = "2024"
-description = "Platform-agnostic client core for BePure"
+description = "Platform-agnostic client core for Virtue"
 
 [lib]
-name = "bepure_client_core"
+name = "virtue_client_core"
 path = "src/lib.rs"
 crate-type = ["rlib", "cdylib", "staticlib"]
 

@@ -58,6 +58,6 @@ fn run_capture_command(cmd: &str, args: &[&str]) -> Result<Vec<u8>> {
 }
 
 fn temporary_capture_path() -> PathBuf {
-    let file_name = format!("bepure-capture-{}.png", Uuid::new_v4());
+    let file_name = format!("virtue-capture-{}.png", Uuid::new_v4());
     std::env::temp_dir().join(file_name)
 }

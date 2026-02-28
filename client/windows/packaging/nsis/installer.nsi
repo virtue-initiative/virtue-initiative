@@ -1,7 +1,7 @@
 Unicode true
 
-!define APP_NAME "BePure"
-!define SERVICE_NAME "BePureCaptureService"
+!define APP_NAME "Virtue"
+!define SERVICE_NAME "VirtueCaptureService"
 !ifndef PRODUCT_VERSION
 !define PRODUCT_VERSION "0.1.0"
 !endif
@@ -9,13 +9,13 @@ Unicode true
 !define BUILD_TARGET_DIR "..\\..\\target"
 !endif
 !ifndef OUTFILE
-!define OUTFILE "bepure-windows-installer-${PRODUCT_VERSION}.exe"
+!define OUTFILE "virtue-windows-installer-${PRODUCT_VERSION}.exe"
 !endif
 
 Name "${APP_NAME}"
 OutFile "${OUTFILE}"
-InstallDir "$PROGRAMFILES64\\BePure"
-InstallDirRegKey HKLM "Software\\BePure" "InstallDir"
+InstallDir "$PROGRAMFILES64\\Virtue"
+InstallDirRegKey HKLM "Software\\Virtue" "InstallDir"
 RequestExecutionLevel admin
 
 Page directory
@@ -25,45 +25,45 @@ UninstPage instfiles
 
 Section "Install"
   SetOutPath "$INSTDIR"
-  WriteRegStr HKLM "Software\\BePure" "InstallDir" "$INSTDIR"
+  WriteRegStr HKLM "Software\\Virtue" "InstallDir" "$INSTDIR"
 
   ; Ensure old tray instances are gone before replacing binaries/restarting tray.
-  nsExec::ExecToLog '"$SYSDIR\\taskkill.exe" /F /T /IM "bepure-tray.exe"'
+  nsExec::ExecToLog '"$SYSDIR\\taskkill.exe" /F /T /IM "virtue-tray.exe"'
   Sleep 1000
 
-  File "${BUILD_TARGET_DIR}\\x86_64-pc-windows-msvc\\release\\bepure-service.exe"
-  File "${BUILD_TARGET_DIR}\\x86_64-pc-windows-msvc\\release\\bepure-tray.exe"
+  File "${BUILD_TARGET_DIR}\\x86_64-pc-windows-msvc\\release\\virtue-service.exe"
+  File "${BUILD_TARGET_DIR}\\x86_64-pc-windows-msvc\\release\\virtue-tray.exe"
 
   ExpandEnvStrings $0 "%ProgramData%"
-  CreateDirectory "$0\\BePure"
-  CreateDirectory "$0\\BePure\\config"
-  CreateDirectory "$0\\BePure\\data"
+  CreateDirectory "$0\\Virtue"
+  CreateDirectory "$0\\Virtue\\config"
+  CreateDirectory "$0\\Virtue\\data"
 
-  nsExec::ExecToLog '"$SYSDIR\\cmd.exe" /C icacls "$0\\BePure" /grant *S-1-5-32-545:(OI)(CI)M /T /C'
+  nsExec::ExecToLog '"$SYSDIR\\cmd.exe" /C icacls "$0\\Virtue" /grant *S-1-5-32-545:(OI)(CI)M /T /C'
 
   nsExec::ExecToLog '"$SYSDIR\\sc.exe" stop ${SERVICE_NAME}'
   nsExec::ExecToLog '"$SYSDIR\\sc.exe" delete ${SERVICE_NAME}'
-  nsExec::ExecToLog '"$SYSDIR\\sc.exe" create ${SERVICE_NAME} binPath= "\"$INSTDIR\\bepure-service.exe\"" start= auto DisplayName= "BePure Capture Service"'
-  nsExec::ExecToLog '"$SYSDIR\\sc.exe" description ${SERVICE_NAME} "Captures screenshots and uploads via BePure core"'
+  nsExec::ExecToLog '"$SYSDIR\\sc.exe" create ${SERVICE_NAME} binPath= "\"$INSTDIR\\virtue-service.exe\"" start= auto DisplayName= "Virtue Capture Service"'
+  nsExec::ExecToLog '"$SYSDIR\\sc.exe" description ${SERVICE_NAME} "Captures screenshots and uploads via Virtue core"'
   nsExec::ExecToLog '"$SYSDIR\\sc.exe" start ${SERVICE_NAME}'
 
-  WriteRegStr HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Run" "BePureTray" '"$INSTDIR\\bepure-tray.exe"'
+  WriteRegStr HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Run" "VirtueTray" '"$INSTDIR\\virtue-tray.exe"'
 
   WriteUninstaller "$INSTDIR\\Uninstall.exe"
-  Exec '"$INSTDIR\\bepure-tray.exe"'
+  Exec '"$INSTDIR\\virtue-tray.exe"'
 SectionEnd
 
 Section "Uninstall"
   nsExec::ExecToLog '"$SYSDIR\\sc.exe" stop ${SERVICE_NAME}'
   nsExec::ExecToLog '"$SYSDIR\\sc.exe" delete ${SERVICE_NAME}'
-  nsExec::ExecToLog '"$SYSDIR\\taskkill.exe" /F /T /IM "bepure-tray.exe"'
+  nsExec::ExecToLog '"$SYSDIR\\taskkill.exe" /F /T /IM "virtue-tray.exe"'
 
-  DeleteRegValue HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Run" "BePureTray"
+  DeleteRegValue HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Run" "VirtueTray"
 
-  Delete "$INSTDIR\\bepure-service.exe"
-  Delete "$INSTDIR\\bepure-tray.exe"
+  Delete "$INSTDIR\\virtue-service.exe"
+  Delete "$INSTDIR\\virtue-tray.exe"
   Delete "$INSTDIR\\Uninstall.exe"
   RMDir "$INSTDIR"
 
-  DeleteRegKey HKLM "Software\\BePure"
+  DeleteRegKey HKLM "Software\\Virtue"
 SectionEnd

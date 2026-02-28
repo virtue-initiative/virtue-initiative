@@ -9,7 +9,7 @@ use serde_json::json;
 use tokio::time::sleep;
 use uuid::Uuid;
 
-use bepure_client_core::{
+use virtue_client_core::{
     AuthClient, BufferedUpload, CaptureSchedulePolicy, CaptureScheduleState, FileTokenStore,
     ImagePipeline, PersistentQueue, RetryPolicy, TokenStore, UploadClient,
     resolve_capture_interval_seconds,

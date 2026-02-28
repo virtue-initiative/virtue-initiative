@@ -1,4 +1,4 @@
-package codes.anb.bepure
+package codes.anb.virtue
 
 import android.content.Context
 import androidx.work.CoroutineWorker
@@ -24,7 +24,7 @@ class KeepAliveWorker(context: Context, params: WorkerParameters) : CoroutineWor
     }
 
     companion object {
-        private const val UNIQUE_NAME = "bepure-keepalive"
+        private const val UNIQUE_NAME = "virtue-keepalive"
 
         fun schedule(context: Context) {
             val request = PeriodicWorkRequestBuilder<KeepAliveWorker>(15, TimeUnit.MINUTES).build()

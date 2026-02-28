@@ -1,10 +1,10 @@
-package codes.anb.bepure
+package codes.anb.virtue
 
 import android.content.Context
 
 object NativeBridge {
     init {
-        System.loadLibrary("bepure_android_rust")
+        System.loadLibrary("virtue_android_rust")
     }
 
     @Volatile

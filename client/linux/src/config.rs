@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use bepure_client_core::{DEFAULT_BATCH_WINDOW_SECONDS, DEFAULT_CAPTURE_INTERVAL_SECONDS};
+use virtue_client_core::{DEFAULT_BATCH_WINDOW_SECONDS, DEFAULT_CAPTURE_INTERVAL_SECONDS};
 
 #[derive(Clone, Debug)]
 pub struct ClientPaths {

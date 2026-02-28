@@ -11,10 +11,10 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
-        android:name=".BePureApp"
+        android:name=".VirtueApp"
         android:allowBackup="false"
         android:icon="@android:drawable/ic_menu_camera"
-        android:label="BePure"
+        android:label="Virtue"
         android:roundIcon="@android:drawable/ic_menu_camera"
         android:supportsRtl="true"
         android:theme="@style/Theme.Bepure">
