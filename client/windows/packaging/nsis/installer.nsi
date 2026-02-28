@@ -27,6 +27,10 @@ Section "Install"
   SetOutPath "$INSTDIR"
   WriteRegStr HKLM "Software\\BePure" "InstallDir" "$INSTDIR"
 
+  ; Ensure old tray instances are gone before replacing binaries/restarting tray.
+  nsExec::ExecToLog '"$SYSDIR\\taskkill.exe" /F /T /IM "bepure-tray.exe"'
+  Sleep 1000
+
   File "${BUILD_TARGET_DIR}\\x86_64-pc-windows-msvc\\release\\bepure-service.exe"
   File "${BUILD_TARGET_DIR}\\x86_64-pc-windows-msvc\\release\\bepure-tray.exe"
 
@@ -52,6 +56,7 @@ SectionEnd
 Section "Uninstall"
   nsExec::ExecToLog '"$SYSDIR\\sc.exe" stop ${SERVICE_NAME}'
   nsExec::ExecToLog '"$SYSDIR\\sc.exe" delete ${SERVICE_NAME}'
+  nsExec::ExecToLog '"$SYSDIR\\taskkill.exe" /F /T /IM "bepure-tray.exe"'
 
   DeleteRegValue HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Run" "BePureTray"
 

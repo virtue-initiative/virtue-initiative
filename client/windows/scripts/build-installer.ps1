@@ -11,6 +11,7 @@ $NsisScript = Join-Path $ProjectRoot "packaging\nsis\installer.nsi"
 $DistDir = Join-Path $ProjectRoot "dist"
 $OutFile = Join-Path $DistDir "bepure-windows-installer-$Version.exe"
 $BuildTargetDir = Join-Path $env:TEMP "bepure-target"
+$LocalOutFile = Join-Path $BuildTargetDir "bepure-windows-installer-$Version.exe"
 
 Push-Location $ProjectRoot
 try {
@@ -52,7 +53,24 @@ try {
         throw "makensis not found. Install NSIS or add makensis.exe to PATH."
     }
 
-    & $makensis "/DPRODUCT_VERSION=$Version" "/DOUTFILE=$OutFile" "/DBUILD_TARGET_DIR=$BuildTargetDir" $NsisScript
+    if (Test-Path $LocalOutFile) {
+        Remove-Item -Force $LocalOutFile
+    }
+
+    & $makensis "/DPRODUCT_VERSION=$Version" "/DOUTFILE=$LocalOutFile" "/DBUILD_TARGET_DIR=$BuildTargetDir" $NsisScript
+    if ($LASTEXITCODE -ne 0) {
+        throw "makensis failed with exit code $LASTEXITCODE"
+    }
+
+    if (-not (Test-Path $LocalOutFile)) {
+        throw "Installer build did not produce expected file: $LocalOutFile"
+    }
+
+    if (Test-Path $OutFile) {
+        Remove-Item -Force $OutFile
+    }
+
+    Copy-Item -Force $LocalOutFile $OutFile
 
     if (-not (Test-Path $OutFile)) {
         throw "Installer build did not produce expected file: $OutFile"
