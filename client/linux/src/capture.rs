@@ -71,7 +71,7 @@ pub fn probe_backend(hint: Option<CaptureBackendHint>) -> CaptureProbe {
                 backend,
                 captured_ok: false,
                 guidance: format!(
-                    "X11 detected but capture failed: {}\nInstall one of these tools: ImageMagick (`import`) or `maim`, then rerun `bepure login`.",
+                    "X11 detected but capture failed: {}\nInstall one of these tools: ImageMagick (`import`) or `maim`, then rerun `virtue login`.",
                     err
                 ),
             },
@@ -79,7 +79,7 @@ pub fn probe_backend(hint: Option<CaptureBackendHint>) -> CaptureProbe {
         None => CaptureProbe {
             backend: None,
             captured_ok: false,
-            guidance: "No graphical session detected. Run `bepure login` from a terminal inside your desktop session so capture permissions can be tested.".to_string(),
+            guidance: "No graphical session detected. Run `virtue login` from a terminal inside your desktop session so capture permissions can be tested.".to_string(),
         },
     }
 }

@@ -1,11 +1,11 @@
 [package]
-name = "bepure-linux-client"
+name = "virtue-linux-client"
 version = "0.1.0"
 edition = "2024"
-description = "BePure Linux client"
+description = "Virtue Linux client"
 
 [[bin]]
-name = "bepure"
+name = "virtue"
 path = "src/main.rs"
 
 [dependencies]
@@ -31,14 +31,14 @@ default-features = false
 features = ["json", "rustls-tls"]
 
 [package.metadata.deb]
-name = "bepure"
-maintainer = "BePure <support@bepure.app>"
+name = "virtue"
+maintainer = "Virtue Initiative <support@bepure.app>"
 section = "utils"
 priority = "optional"
 depends = "$auto, systemd"
 assets = [
-  ["target/release/bepure", "usr/bin/bepure", "755"],
-  ["packaging/systemd/bepure.service", "usr/lib/systemd/user/bepure.service", "644"],
-  ["README.md", "usr/share/doc/bepure/README.md", "644"],
+  ["target/release/virtue", "usr/bin/virtue", "755"],
+  ["packaging/systemd/virtue.service", "usr/lib/systemd/user/virtue.service", "644"],
+  ["README.md", "usr/share/doc/virtue/README.md", "644"],
 ]
 maintainer-scripts = "packaging/debian"

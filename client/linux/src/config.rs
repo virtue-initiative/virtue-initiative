@@ -21,8 +21,8 @@ impl ClientPaths {
         let config_root = dirs::config_dir().context("failed to resolve config directory")?;
         let data_root = dirs::data_dir().context("failed to resolve data directory")?;
 
-        let config_dir = config_root.join("bepure");
-        let data_dir = data_root.join("bepure");
+        let config_dir = config_root.join("virtue");
+        let data_dir = data_root.join("virtue");
 
         Ok(Self {
             state_file: config_dir.join("client_state.json"),

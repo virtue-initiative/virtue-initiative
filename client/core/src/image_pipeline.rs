@@ -62,10 +62,9 @@ mod tests {
 
         let output = ImagePipeline.process(&input.into_inner()).expect("process");
 
-        assert_eq!(output.height, 128);
-        assert_eq!(output.width, 171); // 800/600 * 128, rounded
+        assert_eq!(output.height, 256);
+        assert_eq!(output.width, 341); // 800/600 * 256, rounded
         assert_eq!(output.content_type, "image/webp");
         assert!(!output.bytes.is_empty());
     }
 }
-

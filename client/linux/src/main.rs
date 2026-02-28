@@ -21,8 +21,8 @@ use crate::capture::{CaptureBackend, probe_backend};
 use crate::config::{CaptureBackendHint, ClientPaths, load_state, save_state};
 
 #[derive(Debug, Parser)]
-#[command(name = "bepure")]
-#[command(about = "BePure Linux client")]
+#[command(name = "virtue")]
+#[command(about = "Virtue Linux client")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -126,10 +126,10 @@ async fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
     });
     save_state(&paths.state_file, &state)?;
 
-    if prompt_yes_no("Install and start the bepure systemd user service?")? {
+    if prompt_yes_no("Install and start the virtue systemd user service?")? {
         if let Err(err) = ensure_user_service_running() {
             eprintln!(
-                "could not auto-start user service: {err}\nrun: systemctl --user daemon-reload && systemctl --user enable --now bepure.service"
+                "could not auto-start user service: {err}\nrun: systemctl --user daemon-reload && systemctl --user enable --now virtue.service"
             );
         }
     }
@@ -177,7 +177,7 @@ async fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
     state.e2ee_user_id = None;
     save_state(&paths.state_file, &state)?;
 
-    println!("Logged out. Monitoring is disabled on this device until you run `bepure login`.");
+    println!("Logged out. Monitoring is disabled on this device until you run `virtue login`.");
     Ok(())
 }
 
@@ -232,7 +232,7 @@ fn ensure_user_service_running() -> Result<()> {
     ])?;
     install_user_service_file()?;
     run_systemctl_user(&["daemon-reload"])?;
-    run_systemctl_user(&["enable", "--now", "bepure.service"])?;
+    run_systemctl_user(&["enable", "--now", "virtue.service"])?;
     Ok(())
 }
 
@@ -240,8 +240,8 @@ fn install_user_service_file() -> Result<()> {
     let exe = std::env::current_exe().context("could not determine current executable path")?;
     let exe_str = exe.to_str().context("executable path is not valid UTF-8")?;
 
-    let service_content =
-        include_str!("../packaging/systemd/bepure.service").replace("/usr/bin/bepure", exe_str);
+    let service_content = include_str!("../packaging/systemd/virtue.service")
+        .replace("/usr/bin/virtue", exe_str);
 
     let systemd_dir = dirs::config_dir()
         .context("could not determine config directory")?
@@ -250,7 +250,7 @@ fn install_user_service_file() -> Result<()> {
     std::fs::create_dir_all(&systemd_dir)
         .with_context(|| format!("could not create {}", systemd_dir.display()))?;
 
-    let dest = systemd_dir.join("bepure.service");
+    let dest = systemd_dir.join("virtue.service");
     std::fs::write(&dest, service_content)
         .with_context(|| format!("could not write {}", dest.display()))?;
 

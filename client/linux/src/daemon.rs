@@ -84,7 +84,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
             continue;
         };
         let Some(e2ee_key) = token_store.get_e2ee_key()? else {
-            eprintln!("daemon: E2EE key not set — run `bepure login` again");
+            eprintln!("daemon: E2EE key not set — run `virtue login` again");
             sleep(IDLE_RETRY_INTERVAL).await;
             continue;
         };

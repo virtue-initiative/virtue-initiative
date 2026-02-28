@@ -11,7 +11,7 @@ start_for_user() {
   fi
 
   su - "$user" -s /bin/sh -c "XDG_RUNTIME_DIR=$runtime systemctl --user daemon-reload >/dev/null 2>&1 || true"
-  su - "$user" -s /bin/sh -c "XDG_RUNTIME_DIR=$runtime systemctl --user enable --now bepure.service >/dev/null 2>&1 || true"
+  su - "$user" -s /bin/sh -c "XDG_RUNTIME_DIR=$runtime systemctl --user enable --now virtue.service >/dev/null 2>&1 || true"
 }
 
 if command -v loginctl >/dev/null 2>&1; then

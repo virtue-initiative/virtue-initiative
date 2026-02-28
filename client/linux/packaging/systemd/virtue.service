@@ -1,0 +1,14 @@
+[Unit]
+Description=Virtue Monitoring Agent
+Wants=network-online.target
+After=network-online.target graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/bin/sh -lc 'if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -z "${DISPLAY:-}" ]; then for x in /tmp/.X11-unix/X*; do [ -S "$x" ] || continue; DISPLAY=":${x##*/X}"; export DISPLAY; break; done; fi; if [ -z "${XAUTHORITY:-}" ] && [ -f "$HOME/.Xauthority" ]; then export XAUTHORITY="$HOME/.Xauthority"; fi; exec /usr/bin/virtue daemon'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
