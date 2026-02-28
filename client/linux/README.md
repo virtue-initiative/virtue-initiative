@@ -30,6 +30,38 @@ If a tray host is unavailable, monitoring continues and the daemon retries tray 
 Capture interval can be overridden with environment variable `BEPURE_CAPTURE_INTERVAL_SECONDS`.
 Minimum interval is `15` seconds.
 
+## Local API Override
+
+Use one `.deb` for both prod and local API. Override the base URL with `BEPURE_BASE_API_URL`.
+
+Set override for the background service:
+
+```bash
+mkdir -p ~/.config/systemd/user/virtue.service.d
+cat > ~/.config/systemd/user/virtue.service.d/override.conf <<'EOF'
+[Service]
+Environment=BEPURE_BASE_API_URL=http://localhost:8787
+EOF
+systemctl --user daemon-reload
+systemctl --user restart virtue.service
+```
+
+Run one-off CLI commands against local API:
+
+```bash
+BEPURE_BASE_API_URL=http://localhost:8787 virtue login
+```
+
+Revert service back to default API:
+
+```bash
+rm -f ~/.config/systemd/user/virtue.service.d/override.conf
+systemctl --user daemon-reload
+systemctl --user restart virtue.service
+```
+
+When switching API environments, run `virtue logout` then `virtue login` again.
+
 ## Wayland and X11
 
 `virtue login` runs a capture probe.

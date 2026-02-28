@@ -129,7 +129,9 @@ async fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
     });
     save_state(&paths.state_file, &state)?;
 
-    if prompt_yes_no("Install and start the virtue systemd user service?")? {
+    if !is_user_service_active("virtue.service")
+        && prompt_yes_no("Install and start the virtue systemd user service?", true)?
+    {
         if let Err(err) = ensure_user_service_running() {
             eprintln!(
                 "could not auto-start user service: {err}\nrun: systemctl --user daemon-reload && systemctl --user enable --now virtue.service"
@@ -161,7 +163,7 @@ async fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
         "Warning: logging out will send a log event indicating monitoring was turned off on this device."
     );
 
-    if !yes && !prompt_yes_no("Continue logout? [y/N]")? {
+    if !yes && !prompt_yes_no("Continue logout?", false)? {
         println!("Logout cancelled.");
         return Ok(());
     }
@@ -280,6 +282,15 @@ fn run_systemctl_user(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+fn is_user_service_active(service: &str) -> bool {
+    Command::new("systemctl")
+        .arg("--user")
+        .args(["is-active", "--quiet", service])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
 fn prompt_line(label: &str) -> Result<String> {
     print!("{label}: ");
     io::stdout().flush().context("failed flushing stdout")?;
@@ -291,17 +302,31 @@ fn prompt_line(label: &str) -> Result<String> {
     Ok(value.trim().to_string())
 }
 
-fn prompt_yes_no(prompt: &str) -> Result<bool> {
-    print!("{prompt} ");
-    io::stdout().flush().context("failed flushing stdout")?;
+fn prompt_yes_no(prompt: &str, default_yes: bool) -> Result<bool> {
+    let suffix = if default_yes { "[Y/n]" } else { "[y/N]" };
 
-    let mut value = String::new();
-    io::stdin()
-        .read_line(&mut value)
-        .context("failed reading stdin")?;
+    loop {
+        print!("{prompt} {suffix} ");
+        io::stdout().flush().context("failed flushing stdout")?;
 
-    let normalized = value.trim().to_ascii_lowercase();
-    Ok(matches!(normalized.as_str(), "y" | "yes"))
+        let mut value = String::new();
+        io::stdin()
+            .read_line(&mut value)
+            .context("failed reading stdin")?;
+
+        let normalized = value.trim().to_ascii_lowercase();
+        if normalized.is_empty() {
+            return Ok(default_yes);
+        }
+        if matches!(normalized.as_str(), "y" | "yes") {
+            return Ok(true);
+        }
+        if matches!(normalized.as_str(), "n" | "no") {
+            return Ok(false);
+        }
+
+        println!("Please answer y or n.");
+    }
 }
 
 #[derive(Deserialize)]
