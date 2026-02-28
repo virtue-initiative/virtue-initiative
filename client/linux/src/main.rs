@@ -2,6 +2,7 @@ mod api;
 mod capture;
 mod config;
 mod daemon;
+mod tray;
 
 use std::io::{self, Write};
 use std::process::{Command, ExitCode};
@@ -13,7 +14,8 @@ use clap::{Parser, Subcommand};
 use serde::Deserialize;
 
 use bepure_client_core::{
-    AuthClient, FileTokenStore, TokenStore, apply_dev_env, derive_key, resolve_capture_interval_seconds,
+    AuthClient, FileTokenStore, TokenStore, apply_dev_env, derive_key,
+    resolve_capture_interval_seconds,
 };
 
 use crate::api::ApiClient;
@@ -93,8 +95,8 @@ async fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
         .context("missing access token after login")?;
 
     // Derive and store the E2EE key.
-    let user_id = parse_jwt_sub(&access_token)
-        .context("could not extract user ID from access token")?;
+    let user_id =
+        parse_jwt_sub(&access_token).context("could not extract user ID from access token")?;
     let e2ee_password = rpassword::prompt_password("E2EE encryption password: ")?;
     let e2ee_key = derive_key(&e2ee_password, &user_id);
     token_store.set_e2ee_key(&e2ee_key)?;
@@ -119,6 +121,7 @@ async fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
 
     state.device_id = Some(registration.id.clone());
     state.monitoring_enabled = true;
+    state.email = Some(email.clone());
     state.e2ee_user_id = Some(user_id.clone());
     state.backend_hint = probe.backend.map(|backend| match backend {
         CaptureBackend::Wayland => CaptureBackendHint::Wayland,
@@ -173,6 +176,7 @@ async fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
     token_store.clear_refresh_token()?;
     token_store.clear_e2ee_key()?;
     state.monitoring_enabled = false;
+    state.email = None;
     state.device_id = None;
     state.e2ee_user_id = None;
     save_state(&paths.state_file, &state)?;
@@ -192,6 +196,7 @@ fn status(paths: ClientPaths) -> Result<()> {
     println!("logged_in: {}", logged_in);
     println!("refresh_token_present: {}", refresh_token_present);
     println!("monitoring_enabled: {}", state.monitoring_enabled);
+    println!("email: {}", state.email.as_deref().unwrap_or("<none>"));
     println!(
         "device_id: {}",
         state.device_id.as_deref().unwrap_or("<none>")
@@ -240,8 +245,8 @@ fn install_user_service_file() -> Result<()> {
     let exe = std::env::current_exe().context("could not determine current executable path")?;
     let exe_str = exe.to_str().context("executable path is not valid UTF-8")?;
 
-    let service_content = include_str!("../packaging/systemd/virtue.service")
-        .replace("/usr/bin/virtue", exe_str);
+    let service_content =
+        include_str!("../packaging/systemd/virtue.service").replace("/usr/bin/virtue", exe_str);
 
     let systemd_dir = dirs::config_dir()
         .context("could not determine config directory")?

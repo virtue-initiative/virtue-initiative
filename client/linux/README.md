@@ -17,12 +17,15 @@ Copy `.env.example` to `.env`
   - Shows login and monitoring state.
 - `virtue daemon`
   - Background worker used by systemd.
+  - On desktop sessions, it also starts a minimal tray icon with hover status.
 
 ## Service behavior
 
 The service is installed and auto-started for active desktop users by the package `postinst` script.
 Before `virtue login`, monitoring is idle because there is no token/device binding.
 After `virtue login`, captures and uploads start automatically.
+The tray icon (when available) is started and stopped by the daemon process.
+If a tray host is unavailable, monitoring continues and the daemon retries tray registration in the background.
 
 Capture interval can be overridden with environment variable `BEPURE_CAPTURE_INTERVAL_SECONDS`.
 Minimum interval is `15` seconds.

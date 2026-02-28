@@ -10,14 +10,15 @@ use tokio::time::sleep;
 use uuid::Uuid;
 
 use bepure_client_core::{
-    AuthClient, BatchBlob, BatchItem, CaptureSchedulePolicy, CaptureScheduleState,
-    ChainHasher, DEFAULT_CAPTURE_INTERVAL_SECONDS, FileTokenStore, ImagePipeline,
-    TokenStore, UploadClient, sha256_bytes,
+    AuthClient, BatchBlob, BatchItem, CaptureSchedulePolicy, CaptureScheduleState, ChainHasher,
+    DEFAULT_CAPTURE_INTERVAL_SECONDS, FileTokenStore, ImagePipeline, TokenStore, UploadClient,
+    sha256_bytes,
 };
 
 use crate::api::{ApiClient, Device};
 use crate::capture::{capture_screen, is_session_unavailable_error};
 use crate::config::{ClientPaths, load_state};
+use crate::tray;
 
 const SETTINGS_REFRESH_INTERVAL: Duration = Duration::from_secs(30 * 60);
 const IDLE_RETRY_INTERVAL: Duration = Duration::from_secs(20);
@@ -52,6 +53,7 @@ fn save_batch_buffer(path: &std::path::Path, buf: &BatchBuffer) {
 
 pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     paths.ensure_dirs()?;
+    let _tray = tray::start_daemon_tray(paths.clone());
 
     let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&paths.token_file));
     let auth_client = AuthClient::new(token_store.clone())?;
@@ -69,9 +71,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     let mut last_hash_sent: Option<DateTime<Utc>> = None;
     let mut last_image_sha256: Option<[u8; 32]> = None;
     let mut batch_buffer = load_batch_buffer(&paths.batch_buffer_file);
-    let mut batch_window_start: DateTime<Utc> = batch_buffer
-        .window_start
-        .unwrap_or_else(Utc::now);
+    let mut batch_window_start: DateTime<Utc> = batch_buffer.window_start.unwrap_or_else(Utc::now);
 
     loop {
         let state = load_state(&paths.state_file)?;
@@ -175,10 +175,9 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
             let end_time = now;
             let start_time = batch_window_start;
 
-            let start_hash = hex::decode(
-                batch_buffer.start_chain_hash_hex.as_deref().unwrap_or(""),
-            )
-            .unwrap_or_else(|_| vec![0u8; 32]);
+            let start_hash =
+                hex::decode(batch_buffer.start_chain_hash_hex.as_deref().unwrap_or(""))
+                    .unwrap_or_else(|_| vec![0u8; 32]);
             let start_hash_arr: [u8; 32] = start_hash.try_into().unwrap_or([0u8; 32]);
             let end_hash_arr = chain_hasher.latest_hash();
 

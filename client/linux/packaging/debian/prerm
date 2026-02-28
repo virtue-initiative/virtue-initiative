@@ -1,6 +1,8 @@
 #!/bin/sh
 set -e
 
+ACTION="${1:-}"
+
 stop_for_user() {
   user="$1"
   uid="$2"
@@ -11,7 +13,13 @@ stop_for_user() {
   fi
 
   su - "$user" -s /bin/sh -c "XDG_RUNTIME_DIR=$runtime systemctl --user disable --now virtue.service >/dev/null 2>&1 || true"
+  su - "$user" -s /bin/sh -c "XDG_RUNTIME_DIR=$runtime systemctl --user disable --now bepure.service >/dev/null 2>&1 || true"
 }
+
+# Keep global enable on upgrades; remove it on remove/deconfigure.
+if [ "$ACTION" = "remove" ] || [ "$ACTION" = "deconfigure" ]; then
+  systemctl --global disable virtue.service >/dev/null 2>&1 || true
+fi
 
 if command -v loginctl >/dev/null 2>&1; then
   loginctl list-users --no-legend | while read -r uid user _; do

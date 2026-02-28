@@ -10,9 +10,27 @@ start_for_user() {
     return 0
   fi
 
+  # Ensure user manager sees updated unit content from package upgrade.
   su - "$user" -s /bin/sh -c "XDG_RUNTIME_DIR=$runtime systemctl --user daemon-reload >/dev/null 2>&1 || true"
-  su - "$user" -s /bin/sh -c "XDG_RUNTIME_DIR=$runtime systemctl --user enable --now virtue.service >/dev/null 2>&1 || true"
+
+  # Legacy cleanup: avoid running both service names at once.
+  su - "$user" -s /bin/sh -c "XDG_RUNTIME_DIR=$runtime systemctl --user disable --now bepure.service >/dev/null 2>&1 || true"
+
+  # Cinnamon uses the xapp-status panel applet as the StatusNotifier host.
+  # If it's missing, the daemon can run but the tray icon has nowhere to render.
+  if [ -d /usr/share/cinnamon/applets/xapp-status@cinnamon.org ]; then
+    su - "$user" -s /bin/sh -c "export XDG_RUNTIME_DIR=$runtime; export DBUS_SESSION_BUS_ADDRESS=unix:path=$runtime/bus; applets=\$(gsettings get org.cinnamon enabled-applets 2>/dev/null || true); case \"\$applets\" in *xapp-status@cinnamon.org*) : ;; *) trimmed=\${applets%]}; if [ \"\$trimmed\" != \"\$applets\" ]; then gsettings set org.cinnamon enabled-applets \"\$trimmed, 'panel1:right:1:xapp-status@cinnamon.org:90']\" >/dev/null 2>&1 || true; fi ;; esac"
+  fi
+
+  # Ensure enabled state for this user.
+  su - "$user" -s /bin/sh -c "XDG_RUNTIME_DIR=$runtime systemctl --user enable virtue.service >/dev/null 2>&1 || true"
+
+  # Explicitly restart on upgrades so new binary/unit changes take effect now.
+  su - "$user" -s /bin/sh -c "export XDG_RUNTIME_DIR=$runtime; if systemctl --user is-active --quiet virtue.service; then systemctl --user restart virtue.service; else systemctl --user start virtue.service; fi >/dev/null 2>&1 || true"
 }
+
+# Enable globally so newly logged-in users auto-start without manual enable.
+systemctl --global enable virtue.service >/dev/null 2>&1 || true
 
 if command -v loginctl >/dev/null 2>&1; then
   loginctl list-users --no-legend | while read -r uid user _; do

@@ -49,6 +49,7 @@ pub struct ClientState {
     pub capture_interval_seconds: u64,
     /// How many seconds of captures to accumulate before uploading a batch.
     pub batch_window_seconds: u64,
+    pub email: Option<String>,
     pub device_id: Option<String>,
     pub backend_hint: Option<CaptureBackendHint>,
     /// User ID used as PBKDF2 salt for E2EE key derivation.
@@ -61,6 +62,7 @@ impl Default for ClientState {
             monitoring_enabled: false,
             capture_interval_seconds: DEFAULT_CAPTURE_INTERVAL_SECONDS,
             batch_window_seconds: DEFAULT_BATCH_WINDOW_SECONDS,
+            email: None,
             device_id: None,
             backend_hint: None,
             e2ee_user_id: None,
