@@ -181,7 +181,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
             let start_hash_arr: [u8; 32] = start_hash.try_into().unwrap_or([0u8; 32]);
             let end_hash_arr = chain_hasher.latest_hash();
 
-            let mut items = std::mem::take(&mut batch_buffer.items);
+            let items = std::mem::take(&mut batch_buffer.items);
             let blob = BatchBlob::new(items.clone());
 
             match upload_client
