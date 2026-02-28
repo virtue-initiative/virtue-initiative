@@ -56,10 +56,23 @@ async function decryptAndFlattenBatch(batch: Batch, key: CryptoKey): Promise<Log
   }));
 }
 
+function jwtSub(token: string): string | null {
+  try {
+    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+    return JSON.parse(atob(padded)).sub ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function Logs() {
   const { token } = useAuth();
   const e2ee = useE2EE();
   const { path } = useLocation();
+
+  // Own user ID derived from the JWT once
+  const ownUserId = token ? jwtSub(token) : null;
 
   const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[] | null>(null);
   const [selectedDevice, setSelectedDevice] = useState<string | null>(
@@ -78,6 +91,10 @@ export function Logs() {
   const [password, setPassword] = useState('');
   const [pwError, setPwError] = useState<string | null>(null);
   const [pwLoading, setPwLoading] = useState(false);
+
+  // The user whose key is needed: partner's userId when viewing partner logs, otherwise own
+  const activeUserId = selectedUser ?? ownUserId;
+  const activeKey = activeUserId ? e2ee.getKey(activeUserId) : null;
 
   useEffect(() => {
     if (!token) return;
@@ -98,26 +115,26 @@ export function Logs() {
       .catch((err) => setLoadError(err instanceof Error ? err.message : 'Failed to load devices'));
   }, [token]);
 
-  // Load batches when key or filter changes
+  // Load batches when the active key or filter changes
   useEffect(() => {
-    if (!e2ee.key || !token) return;
+    if (!activeKey || !token) return;
     setItems([]);
     setNextCursor(undefined);
     doLoadBatches(undefined, true);
-  }, [e2ee.key, token, selectedDevice, selectedUser]);
+  }, [activeKey, token, selectedDevice, selectedUser]);
 
   async function doLoadBatches(cursor: string | undefined, reset: boolean) {
-    if (!e2ee.key || !token) return;
+    if (!activeKey || !token) return;
     setLoading(true);
     setFetchError(null);
     try {
       const page = await api.getBatches(token, {
-        user: selectedUser ?? undefined,
+        user: selectedUser ?? ownUserId ?? undefined,
         device_id: selectedDevice ?? undefined,
         cursor,
         limit: 10,
       });
-      const nested = await Promise.allSettled(page.items.map((b) => decryptAndFlattenBatch(b, e2ee.key!)));
+      const nested = await Promise.allSettled(page.items.map((b) => decryptAndFlattenBatch(b, activeKey!)));
       const flat: LogItem[] = [];
       for (const result of nested) {
         if (result.status === 'fulfilled') {
@@ -141,15 +158,12 @@ export function Logs() {
 
   async function handlePasswordSubmit(e: Event) {
     e.preventDefault();
+    if (!activeUserId) return;
     setPwError(null);
     setPwLoading(true);
     try {
-      // JWT uses base64url (no padding, uses - and _); atob needs standard base64
-      const b64 = token!.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-      const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
-      const payload = JSON.parse(atob(padded));
-      if (!payload.sub) throw new Error('Could not determine user ID from token');
-      await e2ee.setKey(password, payload.sub);
+      await e2ee.setKey(password, activeUserId);
+      setPassword('');
     } catch (err) {
       setPwError(err instanceof Error ? err.message : 'Failed to derive key');
     } finally {
@@ -183,11 +197,15 @@ export function Logs() {
 
   return (
     <div class="logs-layout">
-      {!e2ee.key && (
+      {!activeKey && (
         <div class="pw-overlay">
           <div class="pw-card">
             <h2 class="pw-title">Decrypt logs</h2>
-            <p class="pw-desc">Enter your E2EE password to view logs.</p>
+            <p class="pw-desc">
+              {selectedUser
+                ? 'Enter the E2EE password for this user to view their logs.'
+                : 'Enter your E2EE password to view logs.'}
+            </p>
             <form class="pw-form" onSubmit={handlePasswordSubmit}>
               <input
                 type="password"

@@ -22,6 +22,9 @@ export function Home() {
   const pendingInvites = partners?.filter(
     (p) => p.role === 'partner' && p.status === 'pending',
   ) ?? [];
+  const sentRequests = partners?.filter(
+    (p) => p.role === 'owner' && p.status === 'pending',
+  ) ?? [];
 
   const monitoringYou = partners?.filter((p) => p.role === 'owner' && p.status === 'accepted') ?? [];
   const youMonitor = partners?.filter((p) => p.role === 'partner' && p.status === 'accepted') ?? [];
@@ -70,6 +73,7 @@ export function Home() {
             monitoringYou={monitoringYou}
             youMonitor={youMonitor}
             pendingInvites={pendingInvites}
+            sentRequests={sentRequests}
             token={token!}
             onChanged={reload}
           />
@@ -83,16 +87,18 @@ function PartnersList({
   monitoringYou,
   youMonitor,
   pendingInvites,
+  sentRequests,
   token,
   onChanged,
 }: {
   monitoringYou: Partner[];
   youMonitor: Partner[];
   pendingInvites: Partner[];
+  sentRequests: Partner[];
   token: string;
   onChanged: () => void;
 }) {
-  if (monitoringYou.length === 0 && youMonitor.length === 0 && pendingInvites.length === 0) {
+  if (monitoringYou.length === 0 && youMonitor.length === 0 && pendingInvites.length === 0 && sentRequests.length === 0) {
     return <p class="empty">No accountability partners yet.</p>;
   }
 
@@ -114,6 +120,16 @@ function PartnersList({
           <div class="card-grid">
             {pendingInvites.map((p) => (
               <PartnerCard key={p.id} partner={p} token={token} onDeleted={onChanged} />
+            ))}
+          </div>
+        </div>
+      )}
+      {sentRequests.length > 0 && (
+        <div>
+          <p class="partners-group-label">Sent requests</p>
+          <div class="card-grid">
+            {sentRequests.map((p) => (
+              <SentRequestCard key={p.id} partner={p} token={token} onCancelled={onChanged} />
             ))}
           </div>
         </div>
@@ -390,6 +406,50 @@ function DeviceCard({ device, token, onChanged }: { device: Device; token: strin
           </div>
         </form>
       </dialog>
+    </div>
+  );
+}
+
+function SentRequestCard({
+  partner,
+  token,
+  onCancelled,
+}: {
+  partner: Partner;
+  token: string;
+  onCancelled: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function cancel() {
+    setLoading(true);
+    setError(null);
+    try {
+      await api.deletePartner(token, partner.id);
+      onCancelled();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to cancel request');
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div class="card">
+      <div class="card-header">
+        <span class="card-name">{partner.partner_email}</span>
+        <span class="badge badge-yellow">Pending</span>
+      </div>
+      <dl class="card-meta">
+        <dt>Sent</dt>
+        <dd>{new Date(partner.created_at).toLocaleDateString()}</dd>
+      </dl>
+      {error && <p class="form-error">{error}</p>}
+      <div class="card-actions">
+        <button class="btn btn-danger btn-sm" type="button" onClick={cancel} disabled={loading}>
+          {loading ? 'Cancelling…' : 'Cancel request'}
+        </button>
+      </div>
     </div>
   );
 }
