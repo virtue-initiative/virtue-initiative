@@ -3304,7 +3304,9 @@ name = "virtue-windows-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "chrono",
+ "hex",
  "hostname",
  "image",
  "rand 0.8.5",

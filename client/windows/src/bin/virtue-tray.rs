@@ -24,6 +24,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{PCWSTR, w};
 
+use virtue_windows_client::config::ClientPaths;
+use virtue_windows_client::runtime_env::apply_runtime_env;
 use virtue_windows_client::session::SessionManager;
 use virtue_windows_client::win_text::to_wide;
 
@@ -461,6 +463,10 @@ unsafe extern "system" fn window_proc(
 }
 
 fn main() -> anyhow::Result<()> {
+    let paths = ClientPaths::discover()?;
+    paths.ensure_dirs()?;
+    apply_runtime_env(&paths);
+
     unsafe {
         let hinstance = GetModuleHandleW(None)?;
 

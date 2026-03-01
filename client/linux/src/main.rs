@@ -16,6 +16,7 @@ use serde::Deserialize;
 use virtue_client_core::{
     AuthClient, BASE_API_URL_ENV_VAR, BATCH_WINDOW_SECONDS_ENV_VAR,
     CAPTURE_INTERVAL_SECONDS_ENV_VAR, FileTokenStore, TokenStore, apply_dev_env,
+    apply_env_defaults_from_map,
     clamp_batch_window_seconds, clamp_capture_interval_seconds, derive_key, resolve_base_api_url,
     resolve_batch_window_seconds, resolve_capture_interval_seconds,
 };
@@ -246,21 +247,7 @@ fn apply_service_env_defaults(service: &str) {
     let Some(vars) = load_service_env(service) else {
         return;
     };
-
-    for key in [
-        BASE_API_URL_ENV_VAR,
-        CAPTURE_INTERVAL_SECONDS_ENV_VAR,
-        BATCH_WINDOW_SECONDS_ENV_VAR,
-    ] {
-        if std::env::var(key).is_ok() {
-            continue;
-        }
-        let Some(value) = vars.get(key) else {
-            continue;
-        };
-        // Environment values are applied only when shell env does not override.
-        unsafe { std::env::set_var(key, value) };
-    }
+    apply_env_defaults_from_map(&vars);
 }
 
 fn resolve_base_api_url_for_status(

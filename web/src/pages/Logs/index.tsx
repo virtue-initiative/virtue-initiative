@@ -5,7 +5,7 @@ import { useE2EE } from '../../context/e2ee';
 import { api, Batch, Device } from '../../api';
 import { decryptBatch, decompressGzip } from '../../crypto';
 import { decode } from '@msgpack/msgpack';
-import { LogItem } from './shared';
+import { ImageLogItem, LogItem } from './shared';
 import { LogsList } from './LogsList';
 import { LogsGallery } from './LogsGallery';
 import './style.css';
@@ -35,8 +35,10 @@ async function decryptAndFlattenBatch(batch: Batch, key: CryptoKey): Promise<Log
   const url = `${r2Base}/${batch.r2_key}`;
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`Fetch failed (${resp.status}) for ${url}`);
+
   const raw = new Uint8Array(await resp.arrayBuffer());
   if (raw.length < 13) throw new Error(`Batch blob too short for AES-GCM payload: ${url}`);
+
   const decrypted = await decryptBatch(key, raw);
   const decompressed = await decompressGzip(decrypted);
   const decoded = decode(decompressed);
@@ -44,15 +46,21 @@ async function decryptAndFlattenBatch(batch: Batch, key: CryptoKey): Promise<Log
     console.error(`[batch ${batch.id}] unexpected decoded structure:`, decoded);
     return [];
   }
+
   const blob = decoded as { version: number; items: RawBlobItem[] };
   const items = blob.items ?? [];
-  const screenshots = items.filter((item) => item.kind === 'screenshot' && item.image);
-  const skipped = items.length - screenshots.length;
-  return screenshots.map((item) => ({
+
+  return items.map((item) => ({
     id: item.id,
     taken_at: item.taken_at,
     device_id: batch.device_id,
-    image: toUint8Array(item.image)!,
+    kind: item.kind || 'unknown',
+    image: toUint8Array(item.image),
+    metadata: Array.isArray(item.metadata)
+      ? item.metadata
+          .filter((entry): entry is [string, string] => Array.isArray(entry) && entry.length === 2)
+          .map(([k, v]) => [String(k), String(v)])
+      : [],
   }));
 }
 
@@ -194,6 +202,7 @@ export function Logs() {
     : 'All logs';
 
   const isGallery = path === '/logs/gallery';
+  const galleryItems = items.filter((item): item is ImageLogItem => !!item.image);
 
   return (
     <div class="logs-layout">
@@ -274,7 +283,7 @@ export function Logs() {
 
         {isGallery ? (
           <LogsGallery
-            items={items}
+            items={galleryItems}
             loading={loading}
             hasMore={!!nextCursor}
             onLoadMore={() => doLoadBatches(nextCursor, false)}

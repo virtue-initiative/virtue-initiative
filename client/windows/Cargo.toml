@@ -19,7 +19,9 @@ path = "src/bin/virtue-tray.rs"
 [dependencies]
 anyhow = "1"
 virtue-client-core = { path = "../core" }
+base64 = "0.22"
 chrono = { version = "0.4", features = ["clock", "serde"] }
+hex = "0.4"
 hostname = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
 rand = "0.8"

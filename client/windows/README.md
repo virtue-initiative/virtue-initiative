@@ -27,14 +27,14 @@ This directory contains the Windows client implementation:
 From WSL:
 
 ```bash
-cd /home/jeff/code/virtuev2/client/windows
+cd /home/jeff/code/bepurev2/client/windows
 ./scripts/build-installer.sh 0.1.0
 ```
 
 Or from Windows PowerShell:
 
 ```powershell
-cd \\wsl$\Ubuntu\home\jeff\code\virtuev2\client\windows
+cd \\wsl$\Ubuntu\home\jeff\code\bepurev2\client\windows
 .\scripts\build-installer.ps1 -Version 0.1.0
 ```
 
@@ -52,12 +52,40 @@ PowerShell example:
 $env:VIRTUE_BASE_API_URL = "https://your-api.example.com"
 ```
 
-For the Windows service, set it as a machine-level environment variable and restart the service.
+For background capture, set it as a machine-level environment variable and restart the `VirtueCaptureUser` scheduled task (or log out/in).
+The scheduled task launches capture hidden (no console window).
 
 ## Capture interval override
 
 The Windows client supports `VIRTUE_CAPTURE_INTERVAL_SECONDS`.
 Minimum interval is `15` seconds.
+
+## Batch window override
+
+The Windows client supports `VIRTUE_BATCH_WINDOW_SECONDS`.
+Minimum window is `1` second.
+
+## Service dev override file
+
+For local/dev service overrides (similar to Linux service env overrides), place a file at:
+
+- `%PROGRAMDATA%\Virtue\config\service.dev.env`
+
+Supported keys:
+
+- `VIRTUE_BASE_API_URL`
+- `VIRTUE_CAPTURE_INTERVAL_SECONDS`
+- `VIRTUE_BATCH_WINDOW_SECONDS`
+
+Example:
+
+```env
+VIRTUE_BASE_API_URL=http://localhost:8787
+VIRTUE_CAPTURE_INTERVAL_SECONDS=120
+VIRTUE_BATCH_WINDOW_SECONDS=900
+```
+
+After editing the file, restart the `VirtueCaptureUser` scheduled task (or log out/in).
 
 ## Runtime data locations
 
@@ -65,5 +93,5 @@ The tray app and service share state in:
 
 - `%PROGRAMDATA%\Virtue\config\client_state.json`
 - `%PROGRAMDATA%\Virtue\config\token_store.json`
-- `%PROGRAMDATA%\Virtue\data\upload_queue.json`
+- `%PROGRAMDATA%\Virtue\data\batch_buffer.json`
 - `%PROGRAMDATA%\Virtue\data\service.log`

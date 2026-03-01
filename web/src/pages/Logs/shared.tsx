@@ -4,8 +4,12 @@ export interface LogItem {
   id: string;
   taken_at: number; // ms epoch
   device_id: string;
-  image: Uint8Array;
+  kind: string;
+  image?: Uint8Array;
+  metadata: [string, string][];
 }
+
+export type ImageLogItem = LogItem & { image: Uint8Array };
 
 export function LogImage({ imageBytes }: { imageBytes: Uint8Array }) {
   const [imgSrc, setImgSrc] = useState<string | null>(null);

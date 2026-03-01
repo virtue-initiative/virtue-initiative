@@ -2,10 +2,12 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use base64::Engine;
+use serde::Deserialize;
 use serde_json::json;
 use tokio::runtime::Runtime;
 
-use virtue_client_core::{AuthClient, FileTokenStore, TokenStore};
+use virtue_client_core::{AuthClient, FileTokenStore, TokenStore, derive_key};
 
 use crate::api::ApiClient;
 use crate::config::{ClientPaths, load_state, save_state};
@@ -69,9 +71,14 @@ impl SessionManager {
                 .get_access_token()?
                 .context("missing access token after login")?;
 
+            let user_id = parse_jwt_sub(&access_token)
+                .context("could not extract user ID from access token")?;
+            let e2ee_key = derive_key(password, &user_id);
+            self.token_store.set_e2ee_key(&e2ee_key)?;
+
             let registration = self
                 .api_client
-                .register_device(&access_token, device_name, "windows")
+                .register_device(&access_token, device_name)
                 .await
                 .context("device registration failed")?;
 
@@ -103,6 +110,7 @@ impl SessionManager {
             let _ = self.auth_client.logout().await;
             self.token_store.clear_access_token()?;
             self.token_store.clear_refresh_token()?;
+            self.token_store.clear_e2ee_key()?;
 
             state.monitoring_enabled = false;
             state.device_id = None;
@@ -111,4 +119,19 @@ impl SessionManager {
             Ok::<(), anyhow::Error>(())
         })
     }
+}
+
+#[derive(Deserialize)]
+struct JwtClaims {
+    sub: Option<String>,
+}
+
+fn parse_jwt_sub(token: &str) -> Option<String> {
+    let payload_segment = token.split('.').nth(1)?;
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload_segment)
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(payload_segment))
+        .ok()?;
+    let claims: JwtClaims = serde_json::from_slice(&payload).ok()?;
+    claims.sub.filter(|s| !s.is_empty())
 }

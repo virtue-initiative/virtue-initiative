@@ -1,4 +1,4 @@
-import { LogItem, LogImage } from './shared';
+import { ImageLogItem, LogImage } from './shared';
 
 export function LogsGallery({
   items,
@@ -7,14 +7,14 @@ export function LogsGallery({
   onLoadMore,
   deviceName,
 }: {
-  items: LogItem[];
+  items: ImageLogItem[];
   loading: boolean;
   hasMore: boolean;
   onLoadMore: () => void;
   deviceName: (id: string) => string;
 }) {
   if (items.length === 0 && !loading) {
-    return <p class="empty">No logs found.</p>;
+    return <p class="empty">No screenshots found.</p>;
   }
 
   return (

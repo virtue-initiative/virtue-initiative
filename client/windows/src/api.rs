@@ -26,15 +26,25 @@ impl ApiClient {
         })
     }
 
+    pub async fn get_device(&self, access_token: &str, device_id: &str) -> Result<Device> {
+        let url = format!("{}/device", self.base_url);
+        let response = self.client.get(url).bearer_auth(access_token).send().await?;
+
+        let devices: Vec<Device> = decode_json(response).await?;
+        devices
+            .into_iter()
+            .find(|d| d.id == device_id)
+            .ok_or_else(|| anyhow!("device {} not found in settings response", device_id))
+    }
+
     pub async fn register_device(
         &self,
         access_token: &str,
         name: &str,
-        platform: &str,
     ) -> Result<DeviceRegistration> {
         let request = RegisterDeviceRequest {
             name: name.to_string(),
-            platform: platform.to_string(),
+            platform: "windows".to_string(),
         };
 
         let url = format!("{}/device", self.base_url);
@@ -80,6 +90,12 @@ impl ApiClient {
 #[derive(Clone, Debug, Deserialize)]
 pub struct DeviceRegistration {
     pub id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct Device {
+    pub id: String,
+    pub enabled: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]

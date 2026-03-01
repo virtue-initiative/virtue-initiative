@@ -16,6 +16,7 @@ use windows_service::service_dispatcher;
 
 use virtue_windows_client::config::ClientPaths;
 use virtue_windows_client::daemon;
+use virtue_windows_client::runtime_env::apply_runtime_env;
 use virtue_windows_client::service_log::ServiceLogger;
 
 const SERVICE_NAME: &str = "VirtueCaptureService";
@@ -42,6 +43,7 @@ fn service_main(_arguments: Vec<OsString>) {
 fn run_service() -> Result<()> {
     let paths = ClientPaths::discover()?;
     paths.ensure_dirs()?;
+    apply_runtime_env(&paths);
     let logger = ServiceLogger::new(paths.log_file.clone());
 
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -93,6 +95,7 @@ fn run_service() -> Result<()> {
 fn run_console() -> Result<()> {
     let paths = ClientPaths::discover()?;
     paths.ensure_dirs()?;
+    apply_runtime_env(&paths);
     let logger = ServiceLogger::new(paths.log_file.clone());
     let shutdown = Arc::new(AtomicBool::new(false));
 

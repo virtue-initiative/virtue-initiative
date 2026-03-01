@@ -11,7 +11,8 @@ pub struct ClientPaths {
     pub data_dir: PathBuf,
     pub state_file: PathBuf,
     pub token_file: PathBuf,
-    pub queue_file: PathBuf,
+    pub batch_buffer_file: PathBuf,
+    pub service_env_file: PathBuf,
     pub log_file: PathBuf,
 }
 
@@ -26,7 +27,8 @@ impl ClientPaths {
         Ok(Self {
             state_file: config_dir.join("client_state.json"),
             token_file: config_dir.join("token_store.json"),
-            queue_file: data_dir.join("upload_queue.json"),
+            batch_buffer_file: data_dir.join("batch_buffer.json"),
+            service_env_file: config_dir.join("service.dev.env"),
             log_file: data_dir.join("service.log"),
             base_dir,
             config_dir,
