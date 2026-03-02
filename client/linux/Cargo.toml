@@ -17,6 +17,7 @@ clap = { version = "4", features = ["derive"] }
 dirs = "6"
 hex = "0.4"
 hostname = "0.4"
+image = { version = "0.25", default-features = false, features = ["png"] }
 ksni = { version = "0.3.3", features = ["blocking"] }
 rand = "0.8"
 rpassword = "7"

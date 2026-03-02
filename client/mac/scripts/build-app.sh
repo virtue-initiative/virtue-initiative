@@ -15,6 +15,12 @@ APP_ROOT="target/macos/${APP_NAME}"
 CONTENTS_DIR="${APP_ROOT}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_DIR="${CONTENTS_DIR}/Resources"
+ICON_SOURCE="mac/assets/AppIcon.icns"
+
+if [[ ! -f "$ICON_SOURCE" ]]; then
+  echo "Missing ${ICON_SOURCE}. Run images/generate-icons.sh first."
+  exit 1
+fi
 
 cargo build --release -p virtue-mac-client
 
@@ -22,6 +28,7 @@ rm -rf "$APP_ROOT"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
 install -m 0755 target/release/virtue-mac-client "${MACOS_DIR}/Virtue"
+install -m 0644 "$ICON_SOURCE" "${RESOURCES_DIR}/AppIcon.icns"
 
 cat > "${CONTENTS_DIR}/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -42,6 +49,8 @@ cat > "${CONTENTS_DIR}/Info.plist" <<PLIST
   <string>APPL</string>
   <key>CFBundleExecutable</key>
   <string>Virtue</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon.icns</string>
   <key>LSUIElement</key>
   <true/>
   <key>NSPrincipalClass</key>

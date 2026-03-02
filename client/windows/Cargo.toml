@@ -10,11 +10,11 @@ path = "src/lib.rs"
 
 [[bin]]
 name = "virtue-service"
-path = "src/bin/virtue-service.rs"
+path = "src/bin/bepure-service.rs"
 
 [[bin]]
 name = "virtue-tray"
-path = "src/bin/virtue-tray.rs"
+path = "src/bin/bepure-tray.rs"
 
 [dependencies]
 anyhow = "1"

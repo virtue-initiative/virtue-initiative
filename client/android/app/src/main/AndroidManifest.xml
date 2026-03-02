@@ -13,9 +13,9 @@
     <application
         android:name=".VirtueApp"
         android:allowBackup="false"
-        android:icon="@android:drawable/ic_menu_camera"
+        android:icon="@mipmap/ic_launcher"
         android:label="Virtue"
-        android:roundIcon="@android:drawable/ic_menu_camera"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Bepure">
 

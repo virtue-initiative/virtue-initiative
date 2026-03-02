@@ -188,38 +188,56 @@ impl ksni::Tray for VirtueTray {
 }
 
 fn build_icon() -> ksni::Icon {
-    let width = 16_i32;
-    let height = 16_i32;
-    let mut rgba = vec![0u8; (width * height * 4) as usize];
+    fn fallback_icon() -> ksni::Icon {
+        let width = 16_i32;
+        let height = 16_i32;
+        let mut rgba = vec![0u8; (width * height * 4) as usize];
 
-    for y in 0..height {
-        for x in 0..width {
-            let idx = ((y * width + x) * 4) as usize;
-            let dx = x - 8;
-            let dy = y - 8;
-            let dist_sq = dx * dx + dy * dy;
+        for y in 0..height {
+            for x in 0..width {
+                let idx = ((y * width + x) * 4) as usize;
+                let dx = x - 8;
+                let dy = y - 8;
+                let dist_sq = dx * dx + dy * dy;
 
-            if dist_sq <= 6 * 6 {
-                rgba[idx] = 34;
-                rgba[idx + 1] = 197;
-                rgba[idx + 2] = 94;
-                rgba[idx + 3] = 255;
-            } else {
-                rgba[idx] = 0;
-                rgba[idx + 1] = 0;
-                rgba[idx + 2] = 0;
-                rgba[idx + 3] = 0;
+                if dist_sq <= 6 * 6 {
+                    rgba[idx] = 34;
+                    rgba[idx + 1] = 197;
+                    rgba[idx + 2] = 94;
+                    rgba[idx + 3] = 255;
+                }
             }
+        }
+
+        for pixel in rgba.chunks_exact_mut(4) {
+            pixel.rotate_right(1);
+        }
+
+        ksni::Icon {
+            width,
+            height,
+            data: rgba,
         }
     }
 
-    for pixel in rgba.chunks_exact_mut(4) {
+    let decoded = match image::load_from_memory(include_bytes!("../assets/tray-icon.png")) {
+        Ok(image) => image.into_rgba8(),
+        Err(err) => {
+            eprintln!("failed to decode tray icon image: {err}");
+            return fallback_icon();
+        }
+    };
+
+    let width = decoded.width() as i32;
+    let height = decoded.height() as i32;
+    let mut argb = decoded.into_raw();
+    for pixel in argb.chunks_exact_mut(4) {
         pixel.rotate_right(1);
     }
 
     ksni::Icon {
         width,
         height,
-        data: rgba,
+        data: argb,
     }
 }

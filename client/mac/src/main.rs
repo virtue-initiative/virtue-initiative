@@ -324,30 +324,12 @@ fn collect_status(paths: &ClientPaths) -> Result<AppStatus> {
 }
 
 fn build_tray_icon() -> Result<Icon> {
-    let width = 32;
-    let height = 32;
-    let mut rgba = vec![0u8; width * height * 4];
+    let png_bytes = include_bytes!("../assets/tray-icon.png");
+    let image = image::load_from_memory(png_bytes)
+        .context("failed to decode tray icon image")?
+        .into_rgba8();
+    let (width, height) = image.dimensions();
+    let rgba = image.into_raw();
 
-    for y in 0..height {
-        for x in 0..width {
-            let idx = (y * width + x) * 4;
-            let dx = x as i32 - 16;
-            let dy = y as i32 - 16;
-            let dist_sq = dx * dx + dy * dy;
-
-            if dist_sq <= 14 * 14 {
-                rgba[idx] = 40;
-                rgba[idx + 1] = 180;
-                rgba[idx + 2] = 99;
-                rgba[idx + 3] = 255;
-            } else {
-                rgba[idx] = 0;
-                rgba[idx + 1] = 0;
-                rgba[idx + 2] = 0;
-                rgba[idx + 3] = 0;
-            }
-        }
-    }
-
-    Ok(Icon::from_rgba(rgba, width as u32, height as u32)?)
+    Icon::from_rgba(rgba, width, height).context("failed to build tray icon")
 }

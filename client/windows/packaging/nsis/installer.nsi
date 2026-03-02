@@ -20,6 +20,8 @@ OutFile "${OUTFILE}"
 InstallDir "$PROGRAMFILES64\\Virtue"
 InstallDirRegKey HKLM "Software\\Virtue" "InstallDir"
 RequestExecutionLevel admin
+Icon "..\\..\\assets\\app-icon.ico"
+UninstallIcon "..\\..\\assets\\app-icon.ico"
 
 Page directory
 Page instfiles
@@ -39,6 +41,7 @@ Section "Install"
 
   File "${BUILD_TARGET_DIR}\\x86_64-pc-windows-msvc\\release\\virtue-service.exe"
   File "${BUILD_TARGET_DIR}\\x86_64-pc-windows-msvc\\release\\virtue-tray.exe"
+  File "..\\..\\assets\\app-icon.ico"
 
   ; Launch helper to run the capture agent hidden (no console window).
   FileOpen $1 "$INSTDIR\\${CAPTURE_LAUNCHER_VBS}" w
@@ -93,6 +96,7 @@ Section "Uninstall"
   Delete "$INSTDIR\\virtue-service.exe"
   Delete "$INSTDIR\\virtue-tray.exe"
   Delete "$INSTDIR\\${CAPTURE_LAUNCHER_VBS}"
+  Delete "$INSTDIR\\app-icon.ico"
   Delete "$INSTDIR\\Uninstall.exe"
   RMDir "$INSTDIR"
 

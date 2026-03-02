@@ -14,13 +14,14 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreatePopupMenu,
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, ES_AUTOHSCROLL, ES_PASSWORD,
-    GetCursorPos, GetMessageW, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW, HMENU,
-    IDC_ARROW, IDI_APPLICATION, LoadCursorW, LoadIconW, MF_STRING, MSG, PostQuitMessage,
-    RegisterClassW, SW_HIDE, SW_SHOW, SetForegroundWindow, SetWindowLongPtrW, SetWindowTextW,
-    ShowWindow, TPM_LEFTALIGN, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WINDOW_EX_STYLE,
-    WINDOW_STYLE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CONTEXTMENU, WM_CREATE, WM_DESTROY,
-    WM_LBUTTONUP, WM_NCCREATE, WM_NCDESTROY, WM_RBUTTONUP, WNDCLASSW, WS_BORDER, WS_CHILD,
-    WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
+    GetCursorPos, GetMessageW, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW, HICON,
+    HMENU, IDC_ARROW, IDI_APPLICATION, IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE, LoadCursorW,
+    LoadIconW, LoadImageW, MF_STRING, MSG, PostQuitMessage, RegisterClassW, SW_HIDE, SW_SHOW,
+    SetForegroundWindow, SetWindowLongPtrW, SetWindowTextW, ShowWindow, TPM_LEFTALIGN,
+    TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
+    WM_CLOSE, WM_COMMAND, WM_CONTEXTMENU, WM_CREATE, WM_DESTROY, WM_LBUTTONUP, WM_NCCREATE,
+    WM_NCDESTROY, WM_RBUTTONUP, WNDCLASSW, WS_BORDER, WS_CHILD, WS_EX_CLIENTEDGE,
+    WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
 };
 use windows::core::{PCWSTR, w};
 
@@ -182,7 +183,7 @@ impl AppState {
             uID: 1,
             uFlags: NIF_MESSAGE | NIF_TIP | NIF_ICON,
             uCallbackMessage: WM_TRAYICON,
-            hIcon: LoadIconW(None, IDI_APPLICATION).unwrap_or_default(),
+            hIcon: Self::resolve_tray_icon(),
             ..Default::default()
         };
 
@@ -193,6 +194,28 @@ impl AppState {
 
         let added = Shell_NotifyIconW(NIM_ADD, &data).as_bool();
         self.tray_added = added;
+    }
+
+    unsafe fn resolve_tray_icon() -> HICON {
+        if let Ok(exe_path) = std::env::current_exe() {
+            let icon_path = exe_path.with_file_name("app-icon.ico");
+            if icon_path.exists() {
+                let icon_path_wide = to_wide(icon_path.to_string_lossy().as_ref());
+                if let Ok(handle) = LoadImageW(
+                    None,
+                    PCWSTR(icon_path_wide.as_ptr()),
+                    IMAGE_ICON,
+                    0,
+                    0,
+                    LR_LOADFROMFILE | LR_DEFAULTSIZE,
+                ) && !handle.is_invalid()
+                {
+                    return HICON(handle.0);
+                }
+            }
+        }
+
+        LoadIconW(None, IDI_APPLICATION).unwrap_or_default()
     }
 
     unsafe fn remove_tray_icon(&mut self) {
