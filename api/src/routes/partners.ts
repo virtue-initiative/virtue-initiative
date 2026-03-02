@@ -55,7 +55,7 @@ partners.post('/', authenticate, async (c) => {
 });
 
 /**
- * POST /accept-partner - Accept partner invite
+ * POST /partner/accept - Accept partner invite
  */
 partners.post('/accept', authenticate, async (c) => {
   const parsed = acceptPartnerSchema.safeParse(await c.req.json());

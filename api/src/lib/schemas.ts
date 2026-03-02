@@ -60,7 +60,7 @@ export const listHashesSchema = z.object({
 
 // Partner schemas
 export const createPartnerSchema = z.object({
-  email: z.string().email(),
+  email: z.email(),
   permissions: z
     .object({
       view_data: z.boolean().optional().default(true),
