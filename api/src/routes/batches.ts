@@ -115,24 +115,4 @@ batches.get('/', authenticate, async (c) => {
   });
 });
 
-/**
- * GET /batch/:id — Get metadata for a single batch (owner or partner with view_data).
- */
-batches.get('/:id', authenticate, async (c) => {
-  const requesterId = c.get('userId');
-  const batchId = c.req.param('id');
-
-  const batch = await findBatchById(c.env.DB, batchId);
-  if (!batch) return c.json({ error: 'Not found' }, 404);
-
-  if (batch.user_id !== requesterId) {
-    const partnership = await findAcceptedPartnership(c.env.DB, batch.user_id, requesterId);
-    if (!partnership) return c.json({ error: 'Not found' }, 404);
-    const perms = JSON.parse(partnership.permissions);
-    if (!perms.view_data) return c.json({ error: 'Not found' }, 404);
-  }
-
-  return c.json({ batch });
-});
-
 export default batches;
