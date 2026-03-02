@@ -10,7 +10,6 @@ import {
   createBatch,
   listBatches,
   findBatchById,
-  updateDeviceActivity,
   findAcceptedPartnership,
 } from '../lib/db';
 
@@ -72,8 +71,6 @@ batches.post('/', authenticate, async (c) => {
     size_bytes,
     createdAt,
   );
-
-  await updateDeviceActivity(c.env.DB, device_id, createdAt);
 
   return c.json(
     {

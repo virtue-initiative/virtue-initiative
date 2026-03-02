@@ -48,8 +48,8 @@ export async function listDevices(db: D1Database, userId: string) {
   return db
     .prepare(
       `SELECT d.id, d.name, d.platform,
-       COALESCE((SELECT client_timestamp FROM chain_hashes WHERE user_id = ? AND device_id = d.id ORDER BY client_timestamp DESC LIMIT 1), d.last_seen_at) AS last_seen_at,
-       COALESCE((SELECT created_at FROM r2_batches WHERE user_id = ? AND device_id = d.id ORDER BY created_at DESC LIMIT 1), d.last_upload_at) AS last_upload_at,
+       (SELECT client_timestamp FROM chain_hashes WHERE user_id = ? AND device_id = d.id ORDER BY client_timestamp DESC LIMIT 1) AS last_seen_at,
+       (SELECT created_at FROM r2_batches WHERE user_id = ? AND device_id = d.id ORDER BY created_at DESC LIMIT 1) AS last_upload_at,
        d.enabled
        FROM devices d WHERE d.user_id = ? ORDER BY d.created_at DESC`,
     )
@@ -95,14 +95,7 @@ export async function updateDevice(
     .run();
 }
 
-export async function updateDeviceActivity(db: D1Database, deviceId: string, timestamp: string) {
-  return db
-    .prepare('UPDATE devices SET last_seen_at = ?, last_upload_at = ? WHERE id = ?')
-    .bind(timestamp, timestamp, deviceId)
-    .run();
-}
 
-// ── Batches ──────────────────────────────────────────────────────────────────
 
 export async function createBatch(
   db: D1Database,
