@@ -48,7 +48,7 @@ export async function listDevices(db: D1Database, userId: string) {
   return db
     .prepare(
       `SELECT d.id, d.name, d.platform,
-       (SELECT client_timestamp FROM chain_hashes WHERE user_id = ? AND device_id = d.id ORDER BY client_timestamp DESC LIMIT 1) AS last_seen_at,
+       (SELECT updated_at FROM device_states WHERE user_id = ? AND device_id = d.id) AS last_seen_at,
        (SELECT created_at FROM r2_batches WHERE user_id = ? AND device_id = d.id ORDER BY created_at DESC LIMIT 1) AS last_upload_at,
        d.enabled
        FROM devices d WHERE d.user_id = ? ORDER BY d.created_at DESC`,
@@ -96,6 +96,42 @@ export async function updateDevice(
 }
 
 
+
+export async function getDeviceState(
+  db: D1Database,
+  deviceId: string,
+): Promise<{ state: ArrayBuffer; batch_start_state: ArrayBuffer | null } | null> {
+  return db
+    .prepare('SELECT state, batch_start_state FROM device_states WHERE device_id = ?')
+    .bind(deviceId)
+    .first<{ state: ArrayBuffer; batch_start_state: ArrayBuffer | null }>();
+}
+
+export async function upsertDeviceState(
+  db: D1Database,
+  deviceId: string,
+  userId: string,
+  state: ArrayBuffer,
+  updatedAt: string,
+  batchStartState?: ArrayBuffer,
+) {
+  if (batchStartState !== undefined) {
+    return db
+      .prepare(
+        `INSERT INTO device_states (device_id, user_id, state, batch_start_state, updated_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(device_id) DO UPDATE SET state = excluded.state, batch_start_state = excluded.batch_start_state, updated_at = excluded.updated_at`,
+      )
+      .bind(deviceId, userId, state, batchStartState, updatedAt)
+      .run();
+  }
+  return db
+    .prepare(
+      `INSERT INTO device_states (device_id, user_id, state, updated_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(device_id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at`,
+    )
+    .bind(deviceId, userId, state, updatedAt)
+    .run();
+}
 
 export async function createBatch(
   db: D1Database,

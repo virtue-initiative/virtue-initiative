@@ -3,7 +3,7 @@ import { useLocation } from 'preact-iso';
 import { useAuth } from '../../context/auth';
 import { useE2EE } from '../../context/e2ee';
 import { api, Batch, Device } from '../../api';
-import { decryptBatch, decompressGzip } from '../../crypto';
+import { decryptBatch, decompressGzip, verifyBatch } from '../../crypto';
 import { decode } from '@msgpack/msgpack';
 import { ImageLogItem, LogItem } from './shared';
 import { LogsList } from './LogsList';
@@ -50,7 +50,7 @@ async function decryptAndFlattenBatch(batch: Batch, key: CryptoKey): Promise<Log
   const blob = decoded as { version: number; items: RawBlobItem[] };
   const items = blob.items ?? [];
 
-  return items.map((item) => ({
+  const logItems: LogItem[] = items.map((item) => ({
     id: item.id,
     taken_at: item.taken_at,
     device_id: batch.device_id,
@@ -61,7 +61,14 @@ async function decryptAndFlattenBatch(batch: Batch, key: CryptoKey): Promise<Log
           .filter((entry): entry is [string, string] => Array.isArray(entry) && entry.length === 2)
           .map(([k, v]) => [String(k), String(v)])
       : [],
+    batch_status: 'unknown' as const,
   }));
+
+  // Verify the batch chain and stamp the result on every item.
+  const status = await verifyBatch(logItems, batch.start_chain_hash, batch.end_chain_hash).catch(
+    () => 'unknown' as const,
+  );
+  return logItems.map((item) => ({ ...item, batch_status: status }));
 }
 
 function jwtSub(token: string): string | null {

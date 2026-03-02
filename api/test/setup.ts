@@ -57,6 +57,16 @@ CREATE TABLE IF NOT EXISTS chain_hashes (
 CREATE INDEX IF NOT EXISTS idx_chain_hashes_user_device ON chain_hashes(user_id, device_id);
 CREATE INDEX IF NOT EXISTS idx_chain_hashes_client_timestamp ON chain_hashes(client_timestamp);
 
+CREATE TABLE IF NOT EXISTS device_states (
+  device_id  TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  state      BLOB NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id)   REFERENCES users(id)   ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_device_states_user_id ON device_states(user_id);
+
 CREATE TABLE IF NOT EXISTS images (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,

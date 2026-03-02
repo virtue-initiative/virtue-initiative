@@ -36,8 +36,6 @@ export const uploadBatchSchema = z.object({
   device_id: z.string().min(1),
   start_time: z.iso.datetime(),
   end_time: z.iso.datetime(),
-  start_chain_hash: z.string().regex(/^[0-9a-f]{64}$/, 'Must be a valid SHA-256 hex string'),
-  end_chain_hash: z.string().regex(/^[0-9a-f]{64}$/, 'Must be a valid SHA-256 hex string'),
   item_count: z.coerce.number().int().nonnegative(),
   size_bytes: z.coerce.number().int().nonnegative(),
 });
@@ -50,12 +48,9 @@ export const listBatchesSchema = z.object({
 });
 
 // Hash chain schemas
-export const listHashesSchema = z.object({
+export const getStateSchema = z.object({
   device_id: z.string().min(1),
-  from: z.iso.datetime(),
-  to: z.iso.datetime(),
-  cursor: z.string().optional(),
-  limit: z.coerce.number().int().positive().max(1500).optional().default(100),
+  user: z.string().optional(),
 });
 
 // Partner schemas
@@ -92,7 +87,7 @@ export type CreateDeviceInput = z.infer<typeof createDeviceSchema>;
 export type UpdateDeviceInput = z.infer<typeof updateDeviceSchema>;
 export type UploadBatchInput = z.infer<typeof uploadBatchSchema>;
 export type ListBatchesInput = z.infer<typeof listBatchesSchema>;
-export type ListHashesInput = z.infer<typeof listHashesSchema>;
+export type GetStateInput = z.infer<typeof getStateSchema>;
 export type ListDevicesInput = z.infer<typeof listDevicesSchema>;
 export type CreatePartnerInput = z.infer<typeof createPartnerSchema>;
 export type AcceptPartnerInput = z.infer<typeof acceptPartnerSchema>;

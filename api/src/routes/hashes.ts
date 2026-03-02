@@ -1,65 +1,74 @@
 import { Hono } from 'hono';
-import { v4 as uuidv4 } from 'uuid';
 import z from 'zod';
 import { Env, Variables } from '../types/bindings';
 import { authenticate } from '../middleware/auth';
-import { listHashesSchema } from '../lib/schemas';
+import { getStateSchema } from '../lib/schemas';
 import {
   findDevice,
-  createChainHash,
-  queryChainHashes,
+  getDeviceState,
+  upsertDeviceState,
   findAcceptedPartnership,
 } from '../lib/db';
 
 const hashes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
+const ZEROS = new Uint8Array(32);
+
+/** Converts a 16-byte Uint8Array to a lowercase UUID string (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx). */
+function bytesToUuid(b: Uint8Array): string {
+  const h = Array.from(b).map((x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
 /**
- * POST /hash — Upload a binary chain hash (32 bytes, application/octet-stream).
- * Headers: X-Device-ID, X-Client-Timestamp (ISO-8601)
+ * POST /hash — Upload a log's content hash; server computes and stores the new state.
+ * Body: exactly 48 bytes (application/octet-stream)
+ *   [0..16)  device_id as raw UUID bytes
+ *   [16..48) content_hash (SHA-256 of the plaintext log item)
+ *
+ * Server computes: new_state = sha256(current_state || content_hash) and stores it.
  */
 hashes.post('/', authenticate, async (c) => {
-  const deviceId = c.req.header('X-Device-ID');
-  if (!deviceId) return c.json({ error: 'X-Device-ID header required' }, 400);
+  const body = await c.req.arrayBuffer();
+  if (body.byteLength !== 48) {
+    return c.json({ error: 'Body must be exactly 48 bytes (16 device_id + 32 content_hash)' }, 400);
+  }
 
-  const clientTimestamp = c.req.header('X-Client-Timestamp');
-  if (!clientTimestamp) return c.json({ error: 'X-Client-Timestamp header required' }, 400);
-
-  const tsResult = z.iso.datetime().safeParse(clientTimestamp);
-  if (!tsResult.success) return c.json({ error: 'X-Client-Timestamp must be ISO-8601' }, 400);
+  const buf = new Uint8Array(body);
+  const deviceIdBytes = buf.slice(0, 16);
+  const contentHash = buf.slice(16, 48);
+  const deviceId = bytesToUuid(deviceIdBytes);
 
   const userId = c.get('userId');
-
   const device = await findDevice(c.env.DB, deviceId, userId);
   if (!device) return c.json({ error: 'Device not found' }, 404);
 
-  // Read raw binary body — must be exactly 32 bytes
-  const body = await c.req.arrayBuffer();
-  if (body.byteLength !== 32) {
-    return c.json({ error: 'Body must be exactly 32 bytes (SHA-256 hash)' }, 400);
-  }
+  // Retrieve current state (default to 32 zero bytes for first upload)
+  const existing = await getDeviceState(c.env.DB, deviceId);
+  const currentState = existing ? new Uint8Array(existing.state) : ZEROS;
 
-  const id = uuidv4();
-  const createdAt = new Date().toISOString();
+  // Compute new_state = sha256(current_state || content_hash)
+  const hashInput = new Uint8Array(64);
+  hashInput.set(currentState, 0);
+  hashInput.set(contentHash, 32);
+  const newState = new Uint8Array(await crypto.subtle.digest('SHA-256', hashInput));
 
-  await createChainHash(c.env.DB, id, userId, deviceId, body, clientTimestamp, createdAt);
+  const updatedAt = new Date().toISOString();
+  await upsertDeviceState(c.env.DB, deviceId, userId, newState.buffer, updatedAt);
 
-  return c.json({ id, timestamp: clientTimestamp }, 201);
+  return c.json({ ok: true }, 200);
 });
 
 /**
- * GET /hash — Query chain hashes for tamper detection.
- * Query params: device_id, from (ISO), to (ISO), cursor?, limit?
- * Partners with view_data permission can query another user's hashes via ?user=<userId>.
+ * GET /hash — Get the current rolling state for a device.
+ * Query params: device_id (required), user (optional, for partner access)
  */
 hashes.get('/', authenticate, async (c) => {
-  const parsed = listHashesSchema.safeParse(c.req.query());
+  const parsed = getStateSchema.safeParse(c.req.query());
   if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
 
   const requesterId = c.get('userId');
-  const { device_id, from, to, cursor, limit } = parsed.data;
-
-  // Optional ?user= for partner access
-  const targetUser = c.req.query('user');
+  const { device_id, user: targetUser } = parsed.data;
   const targetId = targetUser ?? requesterId;
 
   if (targetId !== requesterId) {
@@ -69,27 +78,12 @@ hashes.get('/', authenticate, async (c) => {
     if (!perms.view_data) return c.json({ error: 'Forbidden' }, 403);
   }
 
-  const { items, hasMore } = await queryChainHashes(
-    c.env.DB,
-    targetId,
-    device_id,
-    from,
-    to,
-    cursor,
-    limit,
-  );
+  const existing = await getDeviceState(c.env.DB, device_id);
+  const stateHex = existing
+    ? Buffer.from(existing.state).toString('hex')
+    : '0'.repeat(64);
 
-  // Convert raw BLOB to hex string for the client
-  const mapped = items.map((item) => ({
-    id: item.id,
-    hash_hex: Buffer.from(item.hash).toString('hex'),
-    client_timestamp: item.client_timestamp,
-  }));
-
-  return c.json({
-    items: mapped,
-    ...(hasMore && { next_cursor: items[items.length - 1].client_timestamp }),
-  });
+  return c.json({ state_hex: stateHex });
 });
 
 export default hashes;

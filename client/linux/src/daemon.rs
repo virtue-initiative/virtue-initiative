@@ -10,9 +10,9 @@ use tokio::time::sleep;
 use uuid::Uuid;
 
 use virtue_client_core::{
-    AuthClient, BatchBlob, BatchItem, CaptureSchedulePolicy, CaptureScheduleState, ChainHasher,
+    AuthClient, BatchBlob, BatchItem, CaptureSchedulePolicy, CaptureScheduleState,
     FileTokenStore, ImagePipeline, TokenStore, UploadClient, resolve_batch_window_seconds,
-    resolve_capture_interval_seconds, sha256_bytes,
+    resolve_capture_interval_seconds, uuid_str_to_bytes,
 };
 
 use crate::api::{ApiClient, Device};
@@ -23,16 +23,12 @@ use crate::tray;
 const SETTINGS_REFRESH_INTERVAL: Duration = Duration::from_secs(30 * 60);
 const IDLE_RETRY_INTERVAL: Duration = Duration::from_secs(20);
 const SESSION_UNAVAILABLE_LOG_INTERVAL: Duration = Duration::from_secs(5 * 60);
-/// Send a chain hash every minute.
-const HASH_INTERVAL_SECONDS: u64 = 60;
 
 /// Persisted batch buffer — the current hour's items, saved to disk across restarts.
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct BatchBuffer {
     items: Vec<BatchItem>,
     window_start: Option<DateTime<Utc>>,
-    /// Hex of the first chain hash in this window.
-    start_chain_hash_hex: Option<String>,
 }
 
 fn load_batch_buffer(path: &std::path::Path) -> BatchBuffer {
@@ -67,9 +63,6 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     let mut last_settings_fetch: Option<Instant> = None;
     let mut last_session_unavailable_log: Option<Instant> = None;
 
-    let mut chain_hasher = ChainHasher::new();
-    let mut last_hash_sent: Option<DateTime<Utc>> = None;
-    let mut last_image_sha256: Option<[u8; 32]> = None;
     let mut batch_buffer = load_batch_buffer(&paths.batch_buffer_file);
     let mut batch_window_start: DateTime<Utc> = batch_buffer.window_start.unwrap_or_else(Utc::now);
 
@@ -139,41 +132,11 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
 
         let now = Utc::now();
 
-        // ── Per-minute hash chain ──────────────────────────────────────────────
-        let should_send_hash = last_hash_sent
-            .map(|t| (now - t).num_seconds() >= HASH_INTERVAL_SECONDS as i64)
-            .unwrap_or(true);
-
-        if should_send_hash {
-            let unix_minute = now.timestamp() as u64 / HASH_INTERVAL_SECONDS;
-            let hash = chain_hasher.next(last_image_sha256.as_ref(), unix_minute);
-            last_image_sha256 = None; // consume — used once per minute
-
-            // Record the start hash for this batch window.
-            if batch_buffer.start_chain_hash_hex.is_none() {
-                batch_buffer.start_chain_hash_hex = Some(hex::encode(chain_hasher.start_hash()));
-            }
-
-            if let Err(e) = upload_client
-                .upload_hash(&access_token, &device_id, &hash, now)
-                .await
-            {
-                eprintln!("failed to upload chain hash: {e}");
-            }
-            last_hash_sent = Some(now);
-        }
-
         // ── Batch flush ────────────────────────────────────────────────────────
         let window_age_secs = (now - batch_window_start).num_seconds() as u64;
         if window_age_secs >= resolve_batch_window_seconds() && !batch_buffer.items.is_empty() {
             let end_time = now;
             let start_time = batch_window_start;
-
-            let start_hash =
-                hex::decode(batch_buffer.start_chain_hash_hex.as_deref().unwrap_or(""))
-                    .unwrap_or_else(|_| vec![0u8; 32]);
-            let start_hash_arr: [u8; 32] = start_hash.try_into().unwrap_or([0u8; 32]);
-            let end_hash_arr = chain_hasher.latest_hash();
 
             let items = std::mem::take(&mut batch_buffer.items);
             let blob = BatchBlob::new(items.clone());
@@ -185,15 +148,12 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
                     &blob,
                     start_time,
                     end_time,
-                    &start_hash_arr,
-                    &end_hash_arr,
                     &e2ee_key,
                 )
                 .await
             {
                 Ok(resp) => {
                     eprintln!("batch uploaded: {}", resp.batch.id);
-                    chain_hasher.reset_for_new_batch();
                     batch_buffer = BatchBuffer::default();
                     batch_window_start = now;
                 }
@@ -236,6 +196,14 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
                         ("error".to_string(), err.to_string()),
                     ],
                 };
+                if let Some(device_id_bytes) = uuid_str_to_bytes(&device_id) {
+                    if let Err(e) = upload_client
+                        .upload_hash(&access_token, &device_id_bytes, &item.sha256())
+                        .await
+                    {
+                        eprintln!("failed to upload content hash: {e}");
+                    }
+                }
                 batch_buffer.items.push(item);
                 if batch_buffer.window_start.is_none() {
                     batch_buffer.window_start = Some(batch_window_start);
@@ -260,15 +228,21 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
                         ("error".to_string(), err.to_string()),
                     ],
                 };
+                if let Some(device_id_bytes) = uuid_str_to_bytes(&device_id) {
+                    if let Err(e) = upload_client
+                        .upload_hash(&access_token, &device_id_bytes, &item.sha256())
+                        .await
+                    {
+                        eprintln!("failed to upload content hash: {e}");
+                    }
+                }
                 batch_buffer.items.push(item);
                 save_batch_buffer(&paths.batch_buffer_file, &batch_buffer);
                 continue;
             }
         };
 
-        // Store the SHA-256 for the hash chain (consumed by next hash tick).
-        last_image_sha256 = Some(sha256_bytes(&processed.bytes));
-
+        // Build the item first so the hash covers all fields.
         let item = BatchItem {
             id: Uuid::new_v4().to_string(),
             taken_at: now.timestamp_millis(),
@@ -276,6 +250,18 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
             image: Some(processed.bytes),
             metadata: vec![],
         };
+
+        // Upload the content hash (covers all item fields) immediately after capture.
+        if let Some(device_id_bytes) = uuid_str_to_bytes(&device_id) {
+            let content_hash = item.sha256();
+            if let Err(e) = upload_client
+                .upload_hash(&access_token, &device_id_bytes, &content_hash)
+                .await
+            {
+                eprintln!("failed to upload content hash: {e}");
+            }
+        }
+
         batch_buffer.items.push(item);
         if batch_buffer.window_start.is_none() {
             batch_buffer.window_start = Some(batch_window_start);

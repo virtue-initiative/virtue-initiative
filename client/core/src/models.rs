@@ -15,6 +15,9 @@ pub struct TokenResponse {
 #[derive(Clone, Debug, Deserialize)]
 pub struct BatchUploadResponse {
     pub batch: UploadedBatch,
+    /// Random 32-byte state (hex) set by the server at batch boundary.
+    /// Use this to seed the StateHasher for the next batch.
+    pub new_state_hex: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -26,8 +29,14 @@ pub struct UploadedBatch {
     pub created_at: DateTime<Utc>,
 }
 
+/// Response from POST /hash — server verified and accepted the new state.
 #[derive(Clone, Debug, Deserialize)]
 pub struct HashUploadResponse {
-    pub id: String,
-    pub timestamp: String,
+    pub ok: bool,
+}
+
+/// Response from GET /hash — the current rolling state for a device.
+#[derive(Clone, Debug, Deserialize)]
+pub struct StateResponse {
+    pub state_hex: String,
 }

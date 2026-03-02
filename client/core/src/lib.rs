@@ -146,12 +146,12 @@ pub use auth::{AuthClient, AuthClientConfig};
 pub use batch::{BatchBlob, BatchItem};
 pub use crypto::{decrypt, derive_key, encrypt};
 pub use error::{CoreError, CoreResult};
-pub use hash_chain::ChainHasher;
+pub use hash_chain::chain_step;
 pub use image_pipeline::{ImagePipeline, ProcessedImage};
 pub use schedule::{CaptureSchedulePolicy, CaptureScheduleState, RetryPolicy};
 pub use token_store::{FileTokenStore, MemoryTokenStore, TokenStore};
 pub use tray_icon::build_default_tray_icon_rgba;
-pub use upload::{UploadClient, UploadClientConfig, sha256_bytes, sha256_hex};
+pub use upload::{UploadClient, UploadClientConfig, sha256_bytes, sha256_hex, uuid_str_to_bytes};
 
 #[cfg(test)]
 mod tests {

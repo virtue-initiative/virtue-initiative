@@ -403,6 +403,24 @@
   font-weight: 600;
 }
 
+.verify-badge {
+  border-radius: 4px;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.verify-badge--failed {
+  background: #ef4444;
+  color: #fff;
+}
+
+.gallery-item--unverified {
+  outline: 2px solid #ef4444;
+  outline-offset: -2px;
+}
+
 /* Password overlay */
 
 .pw-overlay {

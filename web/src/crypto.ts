@@ -62,18 +62,86 @@ export async function decompressGzip(data: Uint8Array): Promise<Uint8Array> {
   return result;
 }
 
-// SHA-256(prevHash[32] || imageSha256OrZeros[32] || unixMinute_le_u64[8])
-// unixMinute = floor(unix_epoch_seconds / 60), written as little-endian u64
-export async function computeChainHash(
-  prevHash: Uint8Array,
-  imageSha256OrZeros: Uint8Array,
-  unixMinute: bigint,
+// SHA-256(currentState[32] || contentHash[32])
+// currentState: rolling state from the server (or 32 zero bytes initially)
+// contentHash:  SHA-256 of the plaintext log item being recorded
+export async function computeNewState(
+  currentState: Uint8Array,
+  contentHash: Uint8Array,
 ): Promise<Uint8Array> {
-  const buf = new Uint8Array(32 + 32 + 8);
-  buf.set(prevHash, 0);
-  buf.set(imageSha256OrZeros, 32);
-  const view = new DataView(buf.buffer);
-  view.setBigUint64(64, unixMinute, true); // little-endian
+  const buf = new Uint8Array(64);
+  buf.set(currentState, 0);
+  buf.set(contentHash, 32);
   const hash = await crypto.subtle.digest('SHA-256', buf);
   return new Uint8Array(hash);
+}
+
+const ZEROS_HEX = '0'.repeat(64);
+
+export type BatchVerification = 'verified' | 'failed' | 'unknown';
+
+/**
+ * Verify the hash chain for a batch.
+ *
+ * Every item advances the chain (including missed captures):
+ *   new_state = sha256(current_state || sha256(id[16] || taken_at_le[8] || kind_utf8 || image_bytes || meta_k1 || meta_v1 || ...))
+ *
+ * If the final state matches end_chain_hash the batch is verified.
+ * Returns 'unknown' when the server has no state tracking (both hashes are zeros).
+ */
+export async function verifyBatch(
+  items: { id: string; image?: Uint8Array; taken_at: number; kind: string; metadata: [string, string][] }[],
+  startChainHash: string,
+  endChainHash: string,
+): Promise<BatchVerification> {
+  if (startChainHash === ZEROS_HEX && endChainHash === ZEROS_HEX) return 'unknown';
+
+  const sortedItems = [...items].sort((a, b) => a.taken_at - b.taken_at);
+
+  // Convert startChainHash hex to bytes
+  const startBytes = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) {
+    startBytes[i] = parseInt(startChainHash.slice(i * 2, i * 2 + 2), 16);
+  }
+
+  const enc = new TextEncoder();
+
+  let state = startBytes;
+  for (const item of sortedItems) {
+    // Replicate BatchItem::sha256():
+    //   id[16] || taken_at_le[8] || kind_utf8 || image_bytes || meta_k || meta_v ...
+    const idHex = item.id.replace(/-/g, '');
+    const idBytes = new Uint8Array(16);
+    for (let i = 0; i < 16; i++) idBytes[i] = parseInt(idHex.slice(i * 2, i * 2 + 2), 16);
+
+    const takenAtBytes = new Uint8Array(8);
+    const dv = new DataView(takenAtBytes.buffer);
+    // taken_at is ms epoch as i64 little-endian; JS numbers are safe up to 2^53
+    const lo = item.taken_at >>> 0;
+    const hi = Math.floor(item.taken_at / 0x100000000);
+    dv.setUint32(0, lo, true);
+    dv.setUint32(4, hi, true);
+
+    const kindBytes = enc.encode(item.kind);
+    const imageBytes = item.image ?? new Uint8Array(0);
+    const metaParts: Uint8Array[] = [];
+    for (const [k, v] of item.metadata) {
+      metaParts.push(enc.encode(k), enc.encode(v));
+    }
+
+    const totalLen = idBytes.length + takenAtBytes.length + kindBytes.length + imageBytes.length
+      + metaParts.reduce((s, p) => s + p.length, 0);
+    const buf = new Uint8Array(totalLen);
+    let off = 0;
+    for (const part of [idBytes, takenAtBytes, kindBytes, imageBytes, ...metaParts]) {
+      buf.set(part, off);
+      off += part.length;
+    }
+
+    const contentHash = new Uint8Array(await crypto.subtle.digest('SHA-256', buf));
+    state = await computeNewState(state, contentHash);
+  }
+
+  const computedHex = Array.from(state).map((b) => b.toString(16).padStart(2, '0')).join('');
+  return computedHex === endChainHash ? 'verified' : 'failed';
 }

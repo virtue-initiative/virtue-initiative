@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'preact/hooks';
+import { BatchVerification } from '../../crypto';
 
 export interface LogItem {
   id: string;
@@ -7,6 +8,7 @@ export interface LogItem {
   kind: string;
   image?: Uint8Array;
   metadata: [string, string][];
+  batch_status: BatchVerification;
 }
 
 export type ImageLogItem = LogItem & { image: Uint8Array };

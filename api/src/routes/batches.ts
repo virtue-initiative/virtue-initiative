@@ -11,14 +11,18 @@ import {
   listBatches,
   findBatchById,
   findAcceptedPartnership,
+  getDeviceState,
+  upsertDeviceState,
 } from '../lib/db';
 
 const batches = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 /**
  * POST /batch — Upload an encrypted, compressed 1-hour batch blob.
- * Multipart form fields: file, device_id, start_time, end_time,
- *   start_chain_hash, end_chain_hash, item_count, size_bytes
+ * Multipart form fields: file, device_id, start_time, end_time, item_count, size_bytes
+ *
+ * start_chain_hash and end_chain_hash are taken from the stored device state —
+ * the client no longer supplies them.
  */
 batches.post('/', authenticate, async (c) => {
   let formData: FormData;
@@ -37,19 +41,25 @@ batches.post('/', authenticate, async (c) => {
     device_id: formData.get('device_id'),
     start_time: formData.get('start_time'),
     end_time: formData.get('end_time'),
-    start_chain_hash: formData.get('start_chain_hash'),
-    end_chain_hash: formData.get('end_chain_hash'),
     item_count: formData.get('item_count'),
     size_bytes: formData.get('size_bytes'),
   });
   if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
 
   const userId = c.get('userId');
-  const { device_id, start_time, end_time, start_chain_hash, end_chain_hash, item_count, size_bytes } =
-    parsed.data;
+  const { device_id, start_time, end_time, item_count, size_bytes } = parsed.data;
 
   const device = await findDevice(c.env.DB, device_id, userId);
   if (!device) return c.json({ error: 'Device not found' }, 404);
+
+  // Derive start/end chain hashes from server-stored device state.
+  const deviceState = await getDeviceState(c.env.DB, device_id);
+  const endChainHash = deviceState
+    ? Buffer.from(deviceState.state).toString('hex')
+    : '0'.repeat(64);
+  const startChainHash = deviceState?.batch_start_state
+    ? Buffer.from(deviceState.batch_start_state).toString('hex')
+    : '0'.repeat(64);
 
   const batchId = uuidv4();
   const r2Key = `user/${userId}/batches/${batchId}.enc`;
@@ -65,12 +75,18 @@ batches.post('/', authenticate, async (c) => {
     r2Key,
     start_time,
     end_time,
-    start_chain_hash,
-    end_chain_hash,
+    startChainHash,
+    endChainHash,
     item_count,
     size_bytes,
     createdAt,
   );
+
+  // Reset device state to random bytes at batch boundary.
+  // Store the same value as both the new current state and the next batch's start state.
+  const newStateBytes = crypto.getRandomValues(new Uint8Array(32));
+  await upsertDeviceState(c.env.DB, device_id, userId, newStateBytes.buffer, createdAt, newStateBytes.buffer);
+  const newStateHex = Buffer.from(newStateBytes).toString('hex');
 
   return c.json(
     {
@@ -81,6 +97,7 @@ batches.post('/', authenticate, async (c) => {
         end_time,
         created_at: createdAt,
       },
+      new_state_hex: newStateHex,
     },
     201,
   );

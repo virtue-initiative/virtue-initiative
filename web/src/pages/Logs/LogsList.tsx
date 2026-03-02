@@ -38,6 +38,11 @@ export function LogsList({
               <div class="log-row-top">
                 <span class="log-type">{humanizeKind(item.kind)}</span>
                 <span class="log-device">{deviceName(item.device_id)}</span>
+                {item.batch_status === 'failed' && (
+                  <span class="verify-badge verify-badge--failed" title="Batch hash chain verification failed — data may have been tampered with">
+                    ⚠ Unverified
+                  </span>
+                )}
                 <span class="log-time">
                   {new Date(item.taken_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                 </span>

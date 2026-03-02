@@ -27,9 +27,7 @@ export interface BatchPage {
 }
 
 export interface ChainHash {
-  id: string;
-  hash_hex: string;
-  client_timestamp: string;
+  state_hex: string;
 }
 
 export interface BatchBlobItem {
@@ -130,13 +128,10 @@ export const api = {
     return req<BatchPage>(`/batch${query ? `?${query}` : ''}`, {}, token);
   },
 
-  getChainHashes: (token: string, params: { device_id: string; from: string; to: string; cursor?: string; limit?: number }) => {
+  getDeviceState: (token: string, deviceId: string, user?: string) => {
     const qs = new URLSearchParams();
-    qs.set('device_id', params.device_id);
-    qs.set('from', params.from);
-    qs.set('to', params.to);
-    if (params.cursor) qs.set('cursor', params.cursor);
-    if (params.limit) qs.set('limit', String(params.limit));
-    return req<{ items: ChainHash[] }>(`/hash?${qs.toString()}`, {}, token);
+    qs.set('device_id', deviceId);
+    if (user) qs.set('user', user);
+    return req<{ state_hex: string }>(`/hash?${qs.toString()}`, {}, token);
   },
 };

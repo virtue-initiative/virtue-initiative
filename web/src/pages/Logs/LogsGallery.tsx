@@ -22,9 +22,9 @@ export function LogsGallery({
       <div class="gallery-grid">
         {items.map((item) => (
           <div
-            class="gallery-item"
+            class={`gallery-item${item.batch_status === 'failed' ? ' gallery-item--unverified' : ''}`}
             key={item.id}
-            title={`${deviceName(item.device_id)} — ${new Date(item.taken_at).toLocaleTimeString()}`}
+            title={`${deviceName(item.device_id)} — ${new Date(item.taken_at).toLocaleTimeString()}${item.batch_status === 'failed' ? ' ⚠ Unverified' : ''}`}
           >
             <LogImage imageBytes={item.image} />
           </div>
