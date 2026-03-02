@@ -6,6 +6,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
 use tokio::runtime::Builder;
+use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE};
+use windows::Win32::System::Threading::CreateMutexW;
+use windows::core::w;
 
 use windows_service::define_windows_service;
 use windows_service::service::{
@@ -20,6 +23,7 @@ use virtue_windows_client::runtime_env::apply_runtime_env;
 use virtue_windows_client::service_log::ServiceLogger;
 
 const SERVICE_NAME: &str = "VirtueCaptureService";
+const CONSOLE_INSTANCE_MUTEX_NAME: windows::core::PCWSTR = w!("Local\\VirtueCaptureConsole");
 
 define_windows_service!(ffi_service_main, service_main);
 
@@ -98,11 +102,16 @@ fn run_console() -> Result<()> {
     apply_runtime_env(&paths);
     let logger = ServiceLogger::new(paths.log_file.clone());
     let shutdown = Arc::new(AtomicBool::new(false));
+    let instance = acquire_console_instance_mutex()?;
+    let Some(instance) = instance else {
+        logger.info("console instance already running; exiting duplicate");
+        return Ok(());
+    };
 
     logger.info("running in console mode");
 
     let runtime = Builder::new_multi_thread().enable_all().build()?;
-    runtime.block_on(async {
+    let result = runtime.block_on(async {
         tokio::select! {
             result = daemon::run_daemon(shutdown.clone(), &logger) => {
                 result
@@ -117,5 +126,18 @@ fn run_console() -> Result<()> {
                 }
             }
         }
-    })
+    });
+    let _ = unsafe { CloseHandle(instance) };
+    result
+}
+
+fn acquire_console_instance_mutex() -> Result<Option<HANDLE>> {
+    unsafe {
+        let handle = CreateMutexW(None, false, CONSOLE_INSTANCE_MUTEX_NAME)?;
+        if GetLastError() == ERROR_ALREADY_EXISTS {
+            let _ = CloseHandle(handle);
+            return Ok(None);
+        }
+        Ok(Some(handle))
+    }
 }

@@ -31,6 +31,9 @@ try {
 
     if (-not $SkipBuild) {
         & $cargo build --release --target $Target --bin virtue-service --bin virtue-tray
+        if ($LASTEXITCODE -ne 0) {
+            throw "cargo build failed with exit code $LASTEXITCODE"
+        }
     }
 
     New-Item -ItemType Directory -Force -Path $DistDir | Out-Null

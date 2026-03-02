@@ -139,6 +139,7 @@ pub mod models;
 pub mod queue;
 pub mod schedule;
 pub mod token_store;
+pub mod tray_icon;
 pub mod upload;
 
 pub use auth::{AuthClient, AuthClientConfig};
@@ -149,6 +150,7 @@ pub use hash_chain::ChainHasher;
 pub use image_pipeline::{ImagePipeline, ProcessedImage};
 pub use schedule::{CaptureSchedulePolicy, CaptureScheduleState, RetryPolicy};
 pub use token_store::{FileTokenStore, MemoryTokenStore, TokenStore};
+pub use tray_icon::build_default_tray_icon_rgba;
 pub use upload::{UploadClient, UploadClientConfig, sha256_bytes, sha256_hex};
 
 #[cfg(test)]

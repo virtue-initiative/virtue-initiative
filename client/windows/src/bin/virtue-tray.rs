@@ -3,32 +3,39 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::ptr::null_mut;
+use std::sync::OnceLock;
 
 use tokio::runtime::Builder;
 
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows::Win32::Foundation::{
+    CloseHandle, ERROR_ALREADY_EXISTS, HANDLE, HWND, LPARAM, LRESULT, POINT, WPARAM,
+};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::Shell::{
     NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreatePopupMenu,
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, ES_AUTOHSCROLL, ES_PASSWORD,
-    GetCursorPos, GetMessageW, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW, HICON,
-    HMENU, IDC_ARROW, IDI_APPLICATION, IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE, LoadCursorW,
-    LoadIconW, LoadImageW, MF_STRING, MSG, PostQuitMessage, RegisterClassW, SW_HIDE, SW_SHOW,
-    SetForegroundWindow, SetWindowLongPtrW, SetWindowTextW, ShowWindow, TPM_LEFTALIGN,
-    TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
-    WM_CLOSE, WM_COMMAND, WM_CONTEXTMENU, WM_CREATE, WM_DESTROY, WM_LBUTTONUP, WM_NCCREATE,
-    WM_NCDESTROY, WM_RBUTTONUP, WNDCLASSW, WS_BORDER, WS_CHILD, WS_EX_CLIENTEDGE,
-    WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
+    CreateIcon, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow, DispatchMessageW,
+    ES_AUTOHSCROLL, ES_PASSWORD, GetCursorPos, GetMessageW, GetWindowLongPtrW,
+    GetWindowTextLengthW, GetWindowTextW, HICON, HMENU, IDC_ARROW, IDI_APPLICATION, KillTimer,
+    IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE, LoadCursorW, LoadIconW, LoadImageW, MF_STRING,
+    MSG, PostQuitMessage, RegisterClassW, SW_HIDE, SW_SHOW, SetForegroundWindow,
+    SetWindowLongPtrW, SetWindowTextW, SetTimer, ShowWindow, TPM_LEFTALIGN, TPM_RIGHTBUTTON,
+    TrackPopupMenu, TranslateMessage,
+    WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CONTEXTMENU, WM_CREATE,
+    WM_DESTROY, WM_LBUTTONUP, WM_NCCREATE, WM_NCDESTROY, WM_RBUTTONUP, WM_TIMER, WNDCLASSW,
+    WS_BORDER, WS_CHILD, WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
 };
 use windows::core::{PCWSTR, w};
 
 use virtue_windows_client::config::ClientPaths;
 use virtue_windows_client::runtime_env::apply_runtime_env;
+use virtue_windows_client::service_log::ServiceLogger;
 use virtue_windows_client::session::SessionManager;
 use virtue_windows_client::win_text::to_wide;
+use virtue_client_core::build_default_tray_icon_rgba;
 
 const WINDOW_CLASS: PCWSTR = w!("VirtueTrayWindow");
 const WINDOW_TITLE: PCWSTR = w!("Virtue");
@@ -40,8 +47,12 @@ const ID_LOGOUT_BUTTON: isize = 1004;
 
 const ID_TRAY_OPEN: u16 = 2001;
 const ID_TRAY_EXIT: u16 = 2002;
+const TRAY_RETRY_TIMER_ID: usize = 1;
+const TRAY_RETRY_INTERVAL_MS: u32 = 2000;
+const TRAY_INSTANCE_MUTEX_NAME: PCWSTR = w!("Local\\VirtueTrayInstance");
 
 const WM_TRAYICON: u32 = WM_APP + 1;
+static TASKBAR_CREATED_MSG: OnceLock<u32> = OnceLock::new();
 
 struct AppState {
     hwnd: HWND,
@@ -51,13 +62,19 @@ struct AppState {
     login_button: HWND,
     logout_button: HWND,
     tray_added: bool,
+    tray_add_logged: bool,
+    tray_add_warned: bool,
+    tray_icon: HICON,
     tray_menu: HMENU,
+    logger: ServiceLogger,
     runtime: tokio::runtime::Runtime,
     session: SessionManager,
 }
 
 impl AppState {
     fn new() -> anyhow::Result<Self> {
+        let session = SessionManager::new()?;
+        let logger = ServiceLogger::new(session.paths.log_file.clone());
         Ok(Self {
             hwnd: HWND(null_mut()),
             status_label: HWND(null_mut()),
@@ -66,9 +83,13 @@ impl AppState {
             login_button: HWND(null_mut()),
             logout_button: HWND(null_mut()),
             tray_added: false,
+            tray_add_logged: false,
+            tray_add_warned: false,
+            tray_icon: HICON(null_mut()),
             tray_menu: HMENU(null_mut()),
+            logger,
             runtime: Builder::new_multi_thread().enable_all().build()?,
-            session: SessionManager::new()?,
+            session,
         })
     }
 
@@ -183,7 +204,7 @@ impl AppState {
             uID: 1,
             uFlags: NIF_MESSAGE | NIF_TIP | NIF_ICON,
             uCallbackMessage: WM_TRAYICON,
-            hIcon: Self::resolve_tray_icon(),
+            hIcon: self.ensure_tray_icon(),
             ..Default::default()
         };
 
@@ -194,6 +215,28 @@ impl AppState {
 
         let added = Shell_NotifyIconW(NIM_ADD, &data).as_bool();
         self.tray_added = added;
+        if added {
+            if !self.tray_add_logged {
+                self.logger.info("tray icon registered");
+                self.tray_add_logged = true;
+            }
+            if self.tray_add_warned {
+                self.logger.info("tray icon registration recovered");
+                self.tray_add_warned = false;
+            }
+            let _ = KillTimer(Some(self.hwnd), TRAY_RETRY_TIMER_ID);
+        } else {
+            if !self.tray_add_warned {
+                self.logger.warn("tray icon registration failed; retrying");
+                self.tray_add_warned = true;
+            }
+            let _ = SetTimer(
+                Some(self.hwnd),
+                TRAY_RETRY_TIMER_ID,
+                TRAY_RETRY_INTERVAL_MS,
+                None,
+            );
+        }
     }
 
     unsafe fn resolve_tray_icon() -> HICON {
@@ -215,7 +258,7 @@ impl AppState {
             }
         }
 
-        LoadIconW(None, IDI_APPLICATION).unwrap_or_default()
+        create_green_circle_icon().unwrap_or_else(|| LoadIconW(None, IDI_APPLICATION).unwrap_or_default())
     }
 
     unsafe fn remove_tray_icon(&mut self) {
@@ -232,6 +275,24 @@ impl AppState {
 
         let _ = Shell_NotifyIconW(NIM_DELETE, &data);
         self.tray_added = false;
+        self.tray_add_logged = false;
+    }
+
+    unsafe fn ensure_tray_icon(&mut self) -> HICON {
+        if !self.tray_icon.0.is_null() {
+            return self.tray_icon;
+        }
+
+        self.tray_icon = Self::resolve_tray_icon();
+        self.tray_icon
+    }
+
+    unsafe fn destroy_tray_icon(&mut self) {
+        if self.tray_icon.0.is_null() {
+            return;
+        }
+        let _ = DestroyIcon(self.tray_icon);
+        self.tray_icon = HICON(null_mut());
     }
 
     unsafe fn on_login(&mut self) {
@@ -381,6 +442,53 @@ fn loword(value: usize) -> u16 {
     (value & 0xFFFF) as u16
 }
 
+unsafe fn create_green_circle_icon() -> Option<HICON> {
+    let (width, height, rgba) = build_default_tray_icon_rgba();
+    if width == 0 || height == 0 {
+        return None;
+    }
+
+    let mut xor_bits = vec![0u8; (width * height * 4) as usize];
+    let and_stride = ((width + 31) / 32) * 4;
+    let mut and_bits = vec![0u8; (and_stride * height) as usize];
+
+    for y in 0..height as usize {
+        for x in 0..width as usize {
+            let src = (y * width as usize + x) * 4;
+            let dst = src;
+            let r = rgba[src];
+            let g = rgba[src + 1];
+            let b = rgba[src + 2];
+            let a = rgba[src + 3];
+
+            // Win32 expects BGRA bytes for 32bpp XOR icon data.
+            xor_bits[dst] = b;
+            xor_bits[dst + 1] = g;
+            xor_bits[dst + 2] = r;
+            xor_bits[dst + 3] = a;
+
+            // 1 bit in the AND mask marks transparent pixels.
+            if a == 0 {
+                let mask_index = y * and_stride as usize + (x / 8);
+                and_bits[mask_index] |= 0x80u8 >> (x % 8);
+            }
+        }
+    }
+
+    let icon = CreateIcon(
+        None,
+        width as i32,
+        height as i32,
+        1,
+        32,
+        and_bits.as_ptr(),
+        xor_bits.as_ptr(),
+    )
+    .ok()?;
+
+    if icon.0.is_null() { None } else { Some(icon) }
+}
+
 unsafe fn app_state_mut(hwnd: HWND) -> Option<&'static mut AppState> {
     let ptr = GetWindowLongPtrW(hwnd, windows::Win32::UI::WindowsAndMessaging::GWLP_USERDATA)
         as *mut AppState;
@@ -393,6 +501,16 @@ unsafe extern "system" fn window_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    if let Some(taskbar_created) = TASKBAR_CREATED_MSG.get() {
+        if msg == *taskbar_created {
+            if let Some(state) = app_state_mut(hwnd) {
+                state.tray_added = false;
+                state.add_tray_icon();
+            }
+            return LRESULT(0);
+        }
+    }
+
     match msg {
         WM_NCCREATE => {
             let create = &*(lparam.0 as *const CREATESTRUCTW);
@@ -452,6 +570,14 @@ unsafe extern "system" fn window_proc(
                 }
             }
         }
+        WM_TIMER => {
+            if wparam.0 == TRAY_RETRY_TIMER_ID {
+                if let Some(state) = app_state_mut(hwnd) {
+                    state.add_tray_icon();
+                }
+                return LRESULT(0);
+            }
+        }
         WM_CLOSE => {
             if let Some(state) = app_state_mut(hwnd) {
                 state.hide_window();
@@ -461,6 +587,7 @@ unsafe extern "system" fn window_proc(
         WM_DESTROY => {
             if let Some(state) = app_state_mut(hwnd) {
                 state.remove_tray_icon();
+                state.destroy_tray_icon();
             }
             PostQuitMessage(0);
             return LRESULT(0);
@@ -489,8 +616,22 @@ fn main() -> anyhow::Result<()> {
     let paths = ClientPaths::discover()?;
     paths.ensure_dirs()?;
     apply_runtime_env(&paths);
+    let startup_logger = ServiceLogger::new(paths.log_file.clone());
+    startup_logger.info("tray process starting");
+
+    let instance_mutex = acquire_tray_instance_mutex()?;
+    let Some(instance_mutex) = instance_mutex else {
+        startup_logger.info("tray process already running; exiting duplicate");
+        return Ok(());
+    };
 
     unsafe {
+        let taskbar_created_msg =
+            windows::Win32::UI::WindowsAndMessaging::RegisterWindowMessageW(w!("TaskbarCreated"));
+        if taskbar_created_msg != 0 {
+            let _ = TASKBAR_CREATED_MSG.set(taskbar_created_msg);
+        }
+
         let hinstance = GetModuleHandleW(None)?;
 
         let class = WNDCLASSW {
@@ -514,7 +655,7 @@ fn main() -> anyhow::Result<()> {
             WINDOW_EX_STYLE(0),
             WINDOW_CLASS,
             WINDOW_TITLE,
-            WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            WS_OVERLAPPEDWINDOW,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             430,
@@ -525,7 +666,7 @@ fn main() -> anyhow::Result<()> {
             Some(app_ptr.cast()),
         )?;
 
-        let _ = ShowWindow(hwnd, SW_SHOW);
+        let _ = ShowWindow(hwnd, SW_HIDE);
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).into() {
@@ -534,5 +675,18 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    let _ = unsafe { CloseHandle(instance_mutex) };
+    startup_logger.info("tray process exiting");
     Ok(())
+}
+
+fn acquire_tray_instance_mutex() -> anyhow::Result<Option<HANDLE>> {
+    unsafe {
+        let handle = CreateMutexW(None, false, TRAY_INSTANCE_MUTEX_NAME)?;
+        if windows::Win32::Foundation::GetLastError() == ERROR_ALREADY_EXISTS {
+            let _ = CloseHandle(handle);
+            return Ok(None);
+        }
+        Ok(Some(handle))
+    }
 }

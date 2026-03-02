@@ -1,4 +1,5 @@
 use std::fs;
+use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -9,6 +10,9 @@ use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 use uuid::Uuid;
+use windows::Win32::Foundation::{CloseHandle, ERROR_FILE_NOT_FOUND, HANDLE};
+use windows::Win32::System::Threading::{MUTEX_MODIFY_STATE, OpenMutexW, SYNCHRONIZE};
+use windows::core::w;
 
 use virtue_client_core::{
     AuthClient, BatchBlob, BatchItem, CaptureSchedulePolicy, CaptureScheduleState, ChainHasher,
@@ -22,7 +26,9 @@ use crate::config::{ClientPaths, load_state};
 use crate::service_log::ServiceLogger;
 
 const SETTINGS_REFRESH_INTERVAL: Duration = Duration::from_secs(30 * 60);
-const IDLE_RETRY_INTERVAL: Duration = Duration::from_secs(20);
+const SETTINGS_FETCH_RETRY_INTERVAL: Duration = Duration::from_secs(30);
+const IDLE_RETRY_INTERVAL: Duration = Duration::from_secs(30);
+const TRAY_ENSURE_INTERVAL: Duration = Duration::from_secs(30);
 const HASH_INTERVAL_SECONDS: u64 = 60;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -63,17 +69,38 @@ pub async fn run_daemon(shutdown: Arc<AtomicBool>, logger: &ServiceLogger) -> Re
     let mut warned_missing_e2ee = false;
     let mut device_settings: Option<Device> = None;
     let mut last_settings_fetch: Option<Instant> = None;
+    let mut last_settings_attempt: Option<Instant> = None;
     let mut chain_hasher = ChainHasher::new();
     let mut last_hash_sent: Option<DateTime<Utc>> = None;
     let mut last_image_sha256: Option<[u8; 32]> = None;
     let mut batch_buffer = load_batch_buffer(&paths.batch_buffer_file);
     let mut batch_window_start: DateTime<Utc> = batch_buffer.window_start.unwrap_or_else(Utc::now);
+    let mut last_tray_ensure: Option<Instant> = None;
 
     logger.info("capture daemon started");
 
     while !shutdown.load(Ordering::SeqCst) {
-        let state = load_state(&paths.state_file)?;
-        let Some(mut access_token) = token_store.get_access_token()? else {
+        let state = match load_state(&paths.state_file) {
+            Ok(state) => state,
+            Err(err) => {
+                logger.warn(&format!("state read failed: {err:#}"));
+                if interruptible_sleep(IDLE_RETRY_INTERVAL, &shutdown).await {
+                    break;
+                }
+                continue;
+            }
+        };
+
+        let Some(mut access_token) = (match token_store.get_access_token() {
+            Ok(token) => token,
+            Err(err) => {
+                logger.warn(&format!("token read failed: {err:#}"));
+                if interruptible_sleep(IDLE_RETRY_INTERVAL, &shutdown).await {
+                    break;
+                }
+                continue;
+            }
+        }) else {
             if interruptible_sleep(IDLE_RETRY_INTERVAL, &shutdown).await {
                 break;
             }
@@ -85,7 +112,16 @@ pub async fn run_daemon(shutdown: Arc<AtomicBool>, logger: &ServiceLogger) -> Re
             }
             continue;
         };
-        let Some(e2ee_key) = token_store.get_e2ee_key()? else {
+        let Some(e2ee_key) = (match token_store.get_e2ee_key() {
+            Ok(key) => key,
+            Err(err) => {
+                logger.warn(&format!("e2ee key read failed: {err:#}"));
+                if interruptible_sleep(IDLE_RETRY_INTERVAL, &shutdown).await {
+                    break;
+                }
+                continue;
+            }
+        }) else {
             if !warned_missing_e2ee {
                 logger.warn("E2EE key not set; sign in again to derive and store it");
                 warned_missing_e2ee = true;
@@ -104,6 +140,14 @@ pub async fn run_daemon(shutdown: Arc<AtomicBool>, logger: &ServiceLogger) -> Re
             continue;
         }
 
+        let should_ensure_tray = last_tray_ensure
+            .map(|t| t.elapsed() >= TRAY_ENSURE_INTERVAL)
+            .unwrap_or(true);
+        if should_ensure_tray {
+            ensure_tray_running(logger);
+            last_tray_ensure = Some(Instant::now());
+        }
+
         match auth_client
             .refresh_access_token_if_needed(Duration::from_secs(120))
             .await
@@ -114,17 +158,20 @@ pub async fn run_daemon(shutdown: Arc<AtomicBool>, logger: &ServiceLogger) -> Re
             Ok(None) => {}
             Err(err) => {
                 logger.warn(&format!("token refresh failed: {err}"));
-                if interruptible_sleep(IDLE_RETRY_INTERVAL, &shutdown).await {
-                    break;
-                }
-                continue;
+                // Keep capturing even if the API is temporarily unreachable.
             }
         }
 
-        let needs_refresh = last_settings_fetch
+        let attempt_settings_refresh = match last_settings_attempt {
+            Some(last) => last.elapsed() >= SETTINGS_FETCH_RETRY_INTERVAL,
+            None => true,
+        };
+        let needs_settings_refresh = last_settings_fetch
             .map(|t| t.elapsed() >= SETTINGS_REFRESH_INTERVAL)
             .unwrap_or(true);
-        if needs_refresh {
+
+        if attempt_settings_refresh && (device_settings.is_none() || needs_settings_refresh) {
+            last_settings_attempt = Some(Instant::now());
             match api_client.get_device(&access_token, &device_id).await {
                 Ok(settings) => {
                     device_settings = Some(settings);
@@ -132,25 +179,16 @@ pub async fn run_daemon(shutdown: Arc<AtomicBool>, logger: &ServiceLogger) -> Re
                 }
                 Err(err) => {
                     logger.warn(&format!("device settings fetch failed: {err}"));
-                    if interruptible_sleep(IDLE_RETRY_INTERVAL, &shutdown).await {
-                        break;
-                    }
-                    continue;
                 }
             }
         }
 
-        let settings = match device_settings.as_ref() {
-            Some(settings) => settings,
-            None => {
-                if interruptible_sleep(IDLE_RETRY_INTERVAL, &shutdown).await {
-                    break;
-                }
-                continue;
-            }
-        };
+        let capture_enabled = device_settings
+            .as_ref()
+            .map(|settings| settings.enabled)
+            .unwrap_or(state.monitoring_enabled);
 
-        if !settings.enabled {
+        if !capture_enabled {
             if interruptible_sleep(IDLE_RETRY_INTERVAL, &shutdown).await {
                 break;
             }
@@ -316,4 +354,47 @@ async fn interruptible_sleep(duration: Duration, shutdown: &Arc<AtomicBool>) -> 
     }
 
     shutdown.load(Ordering::SeqCst)
+}
+
+fn ensure_tray_running(logger: &ServiceLogger) {
+    if is_tray_running() {
+        return;
+    }
+
+    let tray_path = match std::env::current_exe() {
+        Ok(path) => path.with_file_name("virtue-tray.exe"),
+        Err(err) => {
+            logger.warn(&format!("cannot resolve tray path from current exe: {err}"));
+            return;
+        }
+    };
+
+    if !tray_path.exists() {
+        logger.warn(&format!("tray executable missing: {}", tray_path.display()));
+        return;
+    }
+
+    match Command::new(&tray_path).spawn() {
+        Ok(_) => logger.info("tray process launch requested by daemon"),
+        Err(err) => logger.warn(&format!("failed to launch tray process: {err}")),
+    }
+}
+
+fn is_tray_running() -> bool {
+    // Use the tray mutex as the canonical process-liveness signal.
+    unsafe {
+        let handle: Result<HANDLE, _> = OpenMutexW(
+            SYNCHRONIZE | MUTEX_MODIFY_STATE,
+            false,
+            w!("Local\\VirtueTrayInstance"),
+        );
+
+        match handle {
+            Ok(handle) => {
+                let _ = CloseHandle(handle);
+                true
+            }
+            Err(err) => err.code() != ERROR_FILE_NOT_FOUND.into(),
+        }
+    }
 }

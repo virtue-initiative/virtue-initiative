@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use ksni::blocking::TrayMethods;
 
-use virtue_client_core::{FileTokenStore, TokenStore};
+use virtue_client_core::{FileTokenStore, TokenStore, build_default_tray_icon_rgba};
 
 use crate::config::{ClientPaths, load_state};
 
@@ -189,33 +189,13 @@ impl ksni::Tray for VirtueTray {
 
 fn build_icon() -> ksni::Icon {
     fn fallback_icon() -> ksni::Icon {
-        let width = 16_i32;
-        let height = 16_i32;
-        let mut rgba = vec![0u8; (width * height * 4) as usize];
-
-        for y in 0..height {
-            for x in 0..width {
-                let idx = ((y * width + x) * 4) as usize;
-                let dx = x - 8;
-                let dy = y - 8;
-                let dist_sq = dx * dx + dy * dy;
-
-                if dist_sq <= 6 * 6 {
-                    rgba[idx] = 34;
-                    rgba[idx + 1] = 197;
-                    rgba[idx + 2] = 94;
-                    rgba[idx + 3] = 255;
-                }
-            }
-        }
-
+        let (width, height, mut rgba) = build_default_tray_icon_rgba();
         for pixel in rgba.chunks_exact_mut(4) {
             pixel.rotate_right(1);
         }
-
         ksni::Icon {
-            width,
-            height,
+            width: width as i32,
+            height: height as i32,
             data: rgba,
         }
     }

@@ -52,8 +52,11 @@ PowerShell example:
 $env:VIRTUE_BASE_API_URL = "https://your-api.example.com"
 ```
 
-For background capture, set it as a machine-level environment variable and restart the `VirtueCaptureUser` scheduled task (or log out/in).
-The scheduled task launches capture hidden (no console window).
+For background capture, set it as a machine-level environment variable and log out/in.
+Capture and tray are launched from machine startup Run keys (`HKLM`):
+- `VirtueCapture` starts hidden capture (`virtue-service.exe --console` via `wscript`).
+- `VirtueTray` starts the tray app.
+The installer also creates all-users Startup-folder shortcuts as a fallback.
 
 ## Capture interval override
 
@@ -85,7 +88,7 @@ VIRTUE_CAPTURE_INTERVAL_SECONDS=120
 VIRTUE_BATCH_WINDOW_SECONDS=900
 ```
 
-After editing the file, restart the `VirtueCaptureUser` scheduled task (or log out/in).
+After editing the file, log out/in (or restart the `virtue-service.exe --console` process).
 
 ## Runtime data locations
 
@@ -95,3 +98,11 @@ The tray app and service share state in:
 - `%PROGRAMDATA%\Virtue\config\token_store.json`
 - `%PROGRAMDATA%\Virtue\data\batch_buffer.json`
 - `%PROGRAMDATA%\Virtue\data\service.log`
+
+Installer upgrades keep these files intact. On first upgrade from older `BePure`
+installs, the installer migrates compatible state files from `%PROGRAMDATA%\BePure`
+if the corresponding `%PROGRAMDATA%\Virtue` file is missing.
+
+When API/network is unavailable, the daemon keeps capturing locally and retries
+token/settings/upload operations periodically (every ~30 seconds for control-plane calls).
+While the daemon is running, it also periodically ensures the tray process is running.
