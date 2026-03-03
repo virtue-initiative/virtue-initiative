@@ -41,7 +41,7 @@ export async function decompressGzip(data: Uint8Array): Promise<Uint8Array> {
   const writer = ds.writable.getWriter();
   const reader = ds.readable.getReader();
 
-  const input = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+  const input = Uint8Array.from(data);
   await writer.write(input);
   await writer.close();
 

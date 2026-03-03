@@ -17,6 +17,16 @@ import {
 
 const batches = new Hono<{ Bindings: Env; Variables: Variables }>();
 
+function isArrayBufferReadable(
+  value: unknown,
+): value is { arrayBuffer: () => Promise<ArrayBuffer> } {
+  return (
+    typeof value === 'object'
+    && value !== null
+    && typeof Reflect.get(value, 'arrayBuffer') === 'function'
+  );
+}
+
 /**
  * POST /batch — Upload an encrypted, compressed 1-hour batch blob.
  * Multipart form fields: file, device_id, start_time, end_time, item_count, size_bytes
@@ -32,11 +42,10 @@ batches.post('/', authenticate, async (c) => {
     return c.json({ error: 'Expected multipart/form-data' }, 400);
   }
 
-  const fileValue = formData.get('file');
-  if (!fileValue || typeof fileValue === 'string') {
+  const file = formData.get('file');
+  if (!isArrayBufferReadable(file)) {
     return c.json({ error: { fieldErrors: { file: ['Required'] } } }, 400);
   }
-  const file = fileValue as File;
 
   const parsed = uploadBatchSchema.safeParse({
     device_id: formData.get('device_id'),
