@@ -66,7 +66,7 @@ export const createPartnerSchema = z.object({
 
 export const acceptPartnerSchema = z.object({
   id: z.string().min(1),
-  encryptedE2EEKey: z.string().optional(),
+  encrypted_key: z.string().optional(),
 });
 
 export const updatePartnerSchema = z.object({
@@ -75,7 +75,10 @@ export const updatePartnerSchema = z.object({
   }),
 });
 
-// Settings schemas
+// E2EE key schemas
+export const setE2EEKeySchema = z.object({
+  encrypted_key: z.string().min(1),
+});
 export const settingsSchema = z.object({
   name: z.string().optional(),
   timezone: z.string().optional(),
@@ -92,5 +95,6 @@ export type GetStateInput = z.infer<typeof getStateSchema>;
 export type ListDevicesInput = z.infer<typeof listDevicesSchema>;
 export type CreatePartnerInput = z.infer<typeof createPartnerSchema>;
 export type AcceptPartnerInput = z.infer<typeof acceptPartnerSchema>;
+export type SetE2EEKeyInput = z.infer<typeof setE2EEKeySchema>;
 export type UpdatePartnerInput = z.infer<typeof updatePartnerSchema>;
 export type SettingsInput = z.infer<typeof settingsSchema>;

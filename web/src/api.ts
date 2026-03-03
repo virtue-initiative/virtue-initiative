@@ -113,10 +113,10 @@ export const api = {
       body: JSON.stringify({ email, permissions }),
     }, token),
 
-  acceptPartner: (token: string, id: string, encryptedE2EEKey?: string) =>
+  acceptPartner: (token: string, id: string, encryptedKey?: string) =>
     req<{ id: string }>('/partner/accept', {
       method: 'POST',
-      body: JSON.stringify({ id, ...(encryptedE2EEKey ? { encryptedE2EEKey } : {}) }),
+      body: JSON.stringify({ id, ...(encryptedKey ? { encrypted_key: encryptedKey } : {}) }),
     }, token),
 
   deletePartner: (token: string, id: string) =>
