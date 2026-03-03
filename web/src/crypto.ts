@@ -1,3 +1,20 @@
+import { argon2id } from 'hash-wasm';
+
+// Hashes the password with argon2id before sending to the server.
+// Uses lowercased email as a deterministic salt so login is reproducible.
+// NOTE: the original (unhashed) password must still be used for the wrapping key.
+export async function hashPasswordForAuth(password: string, email: string): Promise<string> {
+  return argon2id({
+    password,
+    salt: email.toLowerCase(),
+    iterations: 3,
+    memorySize: 65536,
+    hashLength: 32,
+    parallelism: 1,
+    outputType: 'hex',
+  });
+}
+
 // Encrypts data with AES-GCM: returns nonce(12 bytes) || ciphertext+tag
 export async function encryptData(key: CryptoKey, data: Uint8Array): Promise<Uint8Array> {
   const nonce = crypto.getRandomValues(new Uint8Array(12));
