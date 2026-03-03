@@ -91,9 +91,9 @@ export const api = {
     req<{ encrypted_key: string | null }>('/e2ee', {}, token),
 
   setE2EEKey: (token: string, encryptedKey: string) =>
-    req<{ message: string }>('/e2ee', {
+    req<{ encrypted_key: string }>('/e2ee', {
       method: 'POST',
-      body: JSON.stringify({ encryptedE2EEKey: encryptedKey }),
+      body: JSON.stringify({ encrypted_key: encryptedKey }),
     }, token),
 
   getDevices: (token: string, params?: { user?: string }) => {
