@@ -46,7 +46,7 @@ export interface Partner {
   permissions: { view_data: boolean };
   role: 'owner' | 'partner';
   created_at: string;
-  e2ee_key: string | null;
+  encryptedE2EEKey: string | null;
 }
 
 const BASE = (import.meta as any).env?.VITE_API_URL ?? 'http://localhost:8787';
@@ -88,12 +88,12 @@ export const api = {
   logout: (token: string) => req<void>('/logout', { method: 'POST' }, token),
 
   getE2EEKey: (token: string) =>
-    req<{ encrypted_key: string | null }>('/e2ee', {}, token),
+    req<{ encryptedE2EEKey: string | null }>('/e2ee', {}, token),
 
   setE2EEKey: (token: string, encryptedKey: string) =>
-    req<{ encrypted_key: string }>('/e2ee', {
+    req<{ encryptedE2EEKey: string }>('/e2ee', {
       method: 'POST',
-      body: JSON.stringify({ encrypted_key: encryptedKey }),
+      body: JSON.stringify({ encryptedE2EEKey: encryptedKey }),
     }, token),
 
   getDevices: (token: string, params?: { user?: string }) => {
@@ -116,7 +116,7 @@ export const api = {
   acceptPartner: (token: string, id: string, encryptedKey?: string) =>
     req<{ id: string }>('/partner/accept', {
       method: 'POST',
-      body: JSON.stringify({ id, ...(encryptedKey ? { encrypted_key: encryptedKey } : {}) }),
+      body: JSON.stringify({ id, ...(encryptedKey ? { encryptedE2EEKey: encryptedKey } : {}) }),
     }, token),
 
   deletePartner: (token: string, id: string) =>

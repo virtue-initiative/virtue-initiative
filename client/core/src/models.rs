@@ -44,5 +44,6 @@ pub struct StateResponse {
 /// Response from GET /e2ee — the user's encrypted E2EE key blob (base64), or null.
 #[derive(Clone, Debug, Deserialize)]
 pub struct E2EEKeyResponse {
-    pub encrypted_key: Option<String>,
+    #[serde(rename = "encryptedE2EEKey")]
+    pub encrypted_e2ee_key: Option<String>,
 }

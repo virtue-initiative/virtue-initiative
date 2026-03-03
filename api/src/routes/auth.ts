@@ -104,17 +104,17 @@ auth.post('/token', async (c) => {
 auth.post('/e2ee', authenticate, async (c) => {
   const parsed = setE2EEKeySchema.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
-  const { encrypted_key } = parsed.data;
-  const decoded = Uint8Array.fromBase64(encrypted_key);
+  const { encryptedE2EEKey } = parsed.data;
+  const decoded = Uint8Array.fromBase64(encryptedE2EEKey);
   await updateUser(c.env.DB, c.get('userId'), { e2ee_key: decoded.buffer });
-  return c.json({ encrypted_key });
+  return c.json({ encryptedE2EEKey });
 });
 
 auth.get('/e2ee', authenticate, async (c) => {
   const userId = c.get('userId');
   const user = await findUserById(c.env.DB, userId);
-  if (!user?.e2ee_key) return c.json({ encrypted_key: null });
-  return c.json({ encrypted_key: new Uint8Array(user.e2ee_key).toBase64() });
+  if (!user?.e2ee_key) return c.json({ encryptedE2EEKey: null });
+  return c.json({ encryptedE2EEKey: new Uint8Array(user.e2ee_key).toBase64() });
 });
 
 export default auth;
