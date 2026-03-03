@@ -1,10 +1,8 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use base64::Engine;
 use serde::Deserialize;
-use serde_json::json;
 use tokio::runtime::Runtime;
 
 use virtue_client_core::{AuthClient, FileTokenStore, TokenStore, derive_key};
@@ -94,19 +92,6 @@ impl SessionManager {
     pub fn logout_blocking(&self, runtime: &Runtime) -> Result<()> {
         runtime.block_on(async {
             let mut state = load_state(&self.paths.state_file)?;
-            let access_token = self.token_store.get_access_token()?;
-
-            if let (Some(token), Some(device_id)) =
-                (access_token.as_deref(), state.device_id.as_deref())
-            {
-                let mut metadata = BTreeMap::new();
-                metadata.insert("reason".to_string(), json!("user_logout"));
-                let _ = self
-                    .api_client
-                    .send_log(token, "manual_override", device_id, None, metadata)
-                    .await;
-            }
-
             let _ = self.auth_client.logout().await;
             self.token_store.clear_access_token()?;
             self.token_store.clear_refresh_token()?;
