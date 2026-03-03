@@ -6,7 +6,8 @@ import { Env, Variables } from '../types/bindings';
 import { hashPassword, verifyPassword } from '../lib/password';
 import { generateAccessToken, generateRefreshToken, verifyJWT } from '../lib/jwt';
 import { signupSchema, loginSchema } from '../lib/schemas';
-import { findUserByEmail, createUser } from '../lib/db';
+import { findUserByEmail, createUser, updateUser, findUserById } from '../lib/db';
+import { authenticate } from '../middleware/auth';
 
 const ACCESS_EXPIRY = 60 * 60;
 const REFRESH_EXPIRY = 365 * 24 * 60 * 60;
@@ -98,6 +99,24 @@ auth.post('/token', async (c) => {
   } catch {
     return c.json({ error: 'Invalid or expired refresh token' }, 401);
   }
+});
+
+auth.post('/e2ee', authenticate, async (c) => {
+  const userId = c.get('userId');
+  const { encryptedE2EEKey } = await c.req.json();
+  const decoded = Uint8Array.fromBase64(encryptedE2EEKey);
+
+  // Store the encrypted E2EE key in the database
+  updateUser(c.env.DB, userId, { e2ee_key: decoded.buffer });
+
+  return c.json({ message: 'E2EE key updated' });
+});
+
+auth.get('/e2ee', authenticate, async (c) => {
+  const userId = c.get('userId');
+  const user = await findUserById(c.env.DB, userId);
+  if (!user?.e2ee_key) return c.json({ encrypted_key: null });
+  return c.json({ encrypted_key: new Uint8Array(user.e2ee_key).toBase64() });
 });
 
 export default auth;

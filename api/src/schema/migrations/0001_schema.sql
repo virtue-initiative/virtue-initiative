@@ -5,6 +5,7 @@ CREATE TABLE users (
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   name TEXT,
+  e2ee_key BLOB,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
@@ -82,6 +83,7 @@ CREATE TABLE partners (
   permissions TEXT NOT NULL, -- JSON: { "view_data": true }
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  e2ee_key BLOB,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (partner_user_id) REFERENCES users(id) ON DELETE CASCADE,
   UNIQUE(user_id, partner_user_id)

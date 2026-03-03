@@ -62,12 +62,17 @@ partners.post('/accept', authenticate, async (c) => {
   if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
 
   const userId = c.get('userId');
-  const { id } = parsed.data;
+  const { id, encryptedE2EEKey } = parsed.data;
 
   const partnership = await findPartnerInvite(c.env.DB, id, userId);
   if (!partnership) return c.json({ error: 'Partnership invite not found' }, 404);
 
-  await acceptPartner(c.env.DB, id, new Date().toISOString());
+  let e2eeKey: ArrayBuffer | undefined;
+  if (encryptedE2EEKey) {
+    e2eeKey = Uint8Array.fromBase64(encryptedE2EEKey).buffer;
+  }
+
+  await acceptPartner(c.env.DB, id, new Date().toISOString(), e2eeKey);
 
   return c.json({ id });
 });
@@ -89,6 +94,7 @@ partners.get('/', authenticate, async (c) => {
       status: string;
       permissions: string;
       created_at: string;
+      e2ee_key: ArrayBuffer | null;
     }) => ({
       id: p.id,
       partner_user_id: p.partner_user_id,
@@ -97,6 +103,7 @@ partners.get('/', authenticate, async (c) => {
       permissions: JSON.parse(p.permissions),
       role,
       created_at: p.created_at,
+      e2ee_key: p.e2ee_key ? new Uint8Array(p.e2ee_key).toBase64() : null,
     });
 
   return c.json([...owned.map(map('owner')), ...asPartner.map(map('partner'))]);

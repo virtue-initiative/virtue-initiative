@@ -27,6 +27,39 @@ export async function createUser(
     .run();
 }
 
+export async function updateUser(
+  d1: D1Database,
+  userId: string,
+  fields: { email?: string; password_hash?: string; name?: string | null, e2ee_key?: ArrayBuffer},
+) {
+  const updates: string[] = [];
+  const params: (string | number | null | ArrayBuffer)[] = [];
+
+  if (fields.email !== undefined) {
+    updates.push('email = ?');
+    params.push(fields.email);
+  }
+  if (fields.password_hash !== undefined) {
+    updates.push('password_hash = ?');
+    params.push(fields.password_hash);
+  }
+  if (fields.name !== undefined) {
+    updates.push('name = ?');
+    params.push(fields.name);
+  }
+  if (fields.e2ee_key !== undefined) {
+    updates.push('e2ee_key = ?');
+    params.push(fields.e2ee_key);
+  }
+
+  params.push(userId);
+
+  return d1
+    .prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`)
+    .bind(...params)
+    .run();
+}
+
 export async function createDevice(
   db: D1Database,
   id: string,
@@ -311,7 +344,7 @@ export async function queryChainHashes(
 // ── Partners ──────────────────────────────────────────────────────────────────
 
 export async function findUserById(db: D1Database, userId: string) {
-  return db.prepare('SELECT id FROM users WHERE id = ?').bind(userId).first<{ id: string }>();
+  return db.prepare('SELECT id, e2ee_key FROM users WHERE id = ?').bind(userId).first<{ id: string; e2ee_key: ArrayBuffer | null }>();
 }
 
 export async function createPartner(
@@ -345,7 +378,13 @@ export async function findPartnerInvite(db: D1Database, partnerId: string, userI
     .first<{ id: string }>();
 }
 
-export async function acceptPartner(db: D1Database, id: string, updatedAt: string) {
+export async function acceptPartner(db: D1Database, id: string, updatedAt: string, e2eeKey?: ArrayBuffer) {
+  if (e2eeKey !== undefined) {
+    return db
+      .prepare(`UPDATE partners SET status = 'accepted', e2ee_key = ?, updated_at = ? WHERE id = ?`)
+      .bind(e2eeKey, updatedAt, id)
+      .run();
+  }
   return db
     .prepare(`UPDATE partners SET status = 'accepted', updated_at = ? WHERE id = ?`)
     .bind(updatedAt, id)
@@ -356,7 +395,7 @@ export async function listPartners(db: D1Database, userId: string) {
   const [owned, asPartner] = await Promise.all([
     db
       .prepare(
-        `SELECT p.id, p.partner_user_id as partner_user_id, u.email as partner_email, p.status, p.permissions, p.created_at
+        `SELECT p.id, p.partner_user_id as partner_user_id, u.email as partner_email, p.status, p.permissions, p.created_at, p.e2ee_key
        FROM partners p JOIN users u ON p.partner_user_id = u.id
        WHERE p.user_id = ?`,
       )
@@ -368,10 +407,11 @@ export async function listPartners(db: D1Database, userId: string) {
         status: string;
         permissions: string;
         created_at: string;
+        e2ee_key: ArrayBuffer | null;
       }>(),
     db
       .prepare(
-        `SELECT p.id, p.user_id as partner_user_id, u.email as partner_email, p.status, p.permissions, p.created_at
+        `SELECT p.id, p.user_id as partner_user_id, u.email as partner_email, p.status, p.permissions, p.created_at, p.e2ee_key
        FROM partners p JOIN users u ON p.user_id = u.id
        WHERE p.partner_user_id = ?`,
       )
@@ -383,6 +423,7 @@ export async function listPartners(db: D1Database, userId: string) {
         status: string;
         permissions: string;
         created_at: string;
+        e2ee_key: ArrayBuffer | null;
       }>(),
   ]);
   return { owned: owned.results, asPartner: asPartner.results };
