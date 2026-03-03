@@ -40,3 +40,9 @@ pub struct HashUploadResponse {
 pub struct StateResponse {
     pub state_hex: String,
 }
+
+/// Response from GET /e2ee — the user's encrypted E2EE key blob (base64), or null.
+#[derive(Clone, Debug, Deserialize)]
+pub struct E2EEKeyResponse {
+    pub encrypted_key: Option<String>,
+}

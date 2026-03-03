@@ -6,8 +6,9 @@ use reqwest::header::{COOKIE, HeaderValue, SET_COOKIE};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
+use crate::crypto::{derive_key, decrypt};
 use crate::error::{CoreError, CoreResult};
-use crate::models::{LoginRequest, TokenResponse};
+use crate::models::{E2EEKeyResponse, LoginRequest, TokenResponse};
 use crate::resolve_base_api_url;
 use crate::token_store::TokenStore;
 
@@ -128,6 +129,48 @@ impl AuthClient {
         self.token_store.clear_access_token()?;
         self.token_store.clear_refresh_token()?;
         Ok(())
+    }
+
+    /// Fetch the encrypted E2EE key from `GET /e2ee`, decrypt it with a wrapping key
+    /// derived from the login password and user ID, and store the result.
+    pub async fn fetch_and_decrypt_e2ee_key(
+        &self,
+        access_token: &str,
+        password: &str,
+        user_id: &str,
+    ) -> CoreResult<[u8; 32]> {
+        let url = format!("{}/e2ee", self.config.base_url);
+        let response = self
+            .client
+            .get(url)
+            .bearer_auth(access_token)
+            .send()
+            .await?;
+
+        let e2ee_resp: E2EEKeyResponse = decode_response(response).await?;
+
+        let encrypted_b64 = e2ee_resp.encrypted_key.ok_or_else(|| {
+            CoreError::TokenStore("no E2EE key stored on server; please sign in via the web app first".to_string())
+        })?;
+
+        let encrypted = base64::engine::general_purpose::STANDARD
+            .decode(&encrypted_b64)
+            .map_err(|e| CoreError::Crypto(format!("base64 decode failed: {e}")))?;
+
+        let wrapping_key = derive_key(password, user_id);
+        let raw = decrypt(&wrapping_key, &encrypted)?;
+
+        if raw.len() != 32 {
+            return Err(CoreError::Crypto(format!(
+                "expected 32-byte E2EE key, got {}",
+                raw.len()
+            )));
+        }
+
+        let mut key = [0u8; 32];
+        key.copy_from_slice(&raw);
+        self.token_store.set_e2ee_key(&key)?;
+        Ok(key)
     }
 }
 

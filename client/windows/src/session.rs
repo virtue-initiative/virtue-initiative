@@ -5,7 +5,7 @@ use base64::Engine;
 use serde::Deserialize;
 use tokio::runtime::Runtime;
 
-use virtue_client_core::{AuthClient, FileTokenStore, TokenStore, derive_key};
+use virtue_client_core::{AuthClient, FileTokenStore, TokenStore};
 
 use crate::api::ApiClient;
 use crate::config::{ClientPaths, load_state, save_state};
@@ -73,8 +73,10 @@ impl SessionManager {
 
             let user_id = parse_jwt_sub(&access_token)
                 .context("could not extract user ID from access token")?;
-            let e2ee_key = derive_key(password, &user_id);
-            self.token_store.set_e2ee_key(&e2ee_key)?;
+            self.auth_client
+                .fetch_and_decrypt_e2ee_key(&access_token, password, &user_id)
+                .await
+                .context("could not retrieve E2EE key from server")?;
 
             let registration = self
                 .api_client
