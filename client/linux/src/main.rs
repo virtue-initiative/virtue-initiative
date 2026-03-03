@@ -17,7 +17,7 @@ use virtue_client_core::{
     AuthClient, BASE_API_URL_ENV_VAR, BATCH_WINDOW_SECONDS_ENV_VAR,
     CAPTURE_INTERVAL_SECONDS_ENV_VAR, FileTokenStore, TokenStore, apply_dev_env,
     apply_env_defaults_from_map,
-    clamp_batch_window_seconds, clamp_capture_interval_seconds, derive_key, resolve_base_api_url,
+    clamp_batch_window_seconds, clamp_capture_interval_seconds, resolve_base_api_url,
     resolve_batch_window_seconds, resolve_capture_interval_seconds,
 };
 
@@ -93,12 +93,13 @@ async fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
         .get_access_token()?
         .context("missing access token after login")?;
 
-    // Derive and store the E2EE key.
+    // Fetch and store the E2EE key from the server (set up via the web app at signup).
     let user_id =
         parse_jwt_sub(&access_token).context("could not extract user ID from access token")?;
-    let e2ee_password = rpassword::prompt_password("E2EE encryption password: ")?;
-    let e2ee_key = derive_key(&e2ee_password, &user_id);
-    token_store.set_e2ee_key(&e2ee_key)?;
+    auth_client
+        .fetch_and_decrypt_e2ee_key(&access_token, &password, &user_id)
+        .await
+        .context("could not retrieve E2EE key from server")?;
 
     let probe = probe_backend(None);
     println!("{}", probe.guidance);
