@@ -2,7 +2,7 @@ import { useState } from 'preact/hooks';
 import { useAuth } from '../../context/auth';
 import { useE2EE } from '../../context/e2ee';
 import { api } from '../../api';
-import { deriveKey, deriveWrappingKey, encryptData, decryptBatch } from '../../crypto';
+import { deriveKey, encryptData, decryptBatch } from '../../crypto';
 import './style.css';
 
 function jwtSub(token: string): string | null {
@@ -16,7 +16,7 @@ function jwtSub(token: string): string | null {
 }
 
 export function Auth() {
-  const { login, signup } = useAuth();
+  const { login, signup, wrappingKey } = useAuth();
   const e2ee = useE2EE();
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
@@ -35,7 +35,7 @@ export function Auth() {
     try {
       if (mode === 'login') {
         const { access_token, userId } = await login(email, password);
-        await restoreE2EEKeys(access_token, userId, password);
+        await restoreE2EEKeys(access_token, userId);
       } else {
         if (password !== confirm) {
           setError('Passwords do not match');
@@ -48,7 +48,7 @@ export function Auth() {
           return;
         }
         const { access_token, userId } = await signup(email, password, name || undefined);
-        await setupE2EEKey(access_token, userId, password, e2eePassword);
+        await setupE2EEKey(access_token, userId, e2eePassword);
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
@@ -57,19 +57,19 @@ export function Auth() {
     }
   }
 
-  async function setupE2EEKey(token: string, uid: string, loginPassword: string, e2eePass: string) {
+  async function setupE2EEKey(token: string, uid: string, e2eePass: string) {
+    if (!wrappingKey) throw new Error('Wrapping key not available');
     // Derive the E2EE key and store in localStorage
     const e2eeKey = await deriveKey(e2eePass, uid, true);
     const rawE2EE = new Uint8Array(await crypto.subtle.exportKey('raw', e2eeKey));
     await e2ee.setKeyFromBytes(rawE2EE.buffer, uid);
     // Encrypt it with the wrapping key and upload to server
-    const wrappingKey = await deriveWrappingKey(loginPassword, uid);
     const encrypted = await encryptData(wrappingKey, rawE2EE);
     await api.setE2EEKey(token, encrypted.toBase64());
   }
 
-  async function restoreE2EEKeys(token: string, uid: string, loginPassword: string) {
-    const wrappingKey = await deriveWrappingKey(loginPassword, uid);
+  async function restoreE2EEKeys(token: string, uid: string) {
+    if (!wrappingKey) return;
     // Restore own E2EE key
     const { encrypted_key } = await api.getE2EEKey(token);
     if (encrypted_key) {
