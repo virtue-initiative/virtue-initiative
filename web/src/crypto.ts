@@ -41,8 +41,9 @@ export async function decompressGzip(data: Uint8Array): Promise<Uint8Array> {
   const writer = ds.writable.getWriter();
   const reader = ds.readable.getReader();
 
-  writer.write(data);
-  writer.close();
+  const input = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+  await writer.write(input);
+  await writer.close();
 
   const chunks: Uint8Array[] = [];
   let totalLength = 0;
@@ -106,7 +107,7 @@ export async function verifyBatch(
 
   const enc = new TextEncoder();
 
-  let state = startBytes;
+  let state: Uint8Array = startBytes;
   for (const item of sortedItems) {
     // Replicate BatchItem::sha256():
     //   id[16] || taken_at_le[8] || kind_utf8 || image_bytes || meta_k || meta_v ...

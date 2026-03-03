@@ -32,10 +32,11 @@ batches.post('/', authenticate, async (c) => {
     return c.json({ error: 'Expected multipart/form-data' }, 400);
   }
 
-  const file = formData.get('file');
-  if (!(file instanceof File)) {
+  const fileValue = formData.get('file');
+  if (!fileValue || typeof fileValue === 'string') {
     return c.json({ error: { fieldErrors: { file: ['Required'] } } }, 400);
   }
+  const file = fileValue as File;
 
   const parsed = uploadBatchSchema.safeParse({
     device_id: formData.get('device_id'),

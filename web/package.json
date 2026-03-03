@@ -5,6 +5,7 @@
 		"dev": "vite",
 		"build": "vite build",
 		"preview": "vite preview",
+		"typecheck": "tsc -p tsconfig.lint.json --noEmit",
 		"deploy": "npm run build && wrangler deploy"
 	},
 	"dependencies": {

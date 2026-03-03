@@ -25,6 +25,10 @@ function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+function bytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
 export function E2EEProvider({ children }: { children: preact.ComponentChildren }) {
   const [keys, setKeys] = useState<Record<string, CryptoKey>>({});
 
@@ -43,7 +47,7 @@ export function E2EEProvider({ children }: { children: preact.ComponentChildren 
     Promise.all(
       entries.map(([uid, hex]) =>
         crypto.subtle
-          .importKey('raw', hexToBytes(hex), { name: 'AES-GCM' }, false, ['decrypt'])
+          .importKey('raw', bytesToArrayBuffer(hexToBytes(hex)), { name: 'AES-GCM' }, false, ['decrypt'])
           .then((ck) => [uid, ck] as [string, CryptoKey])
           .catch(() => {
             localStorage.removeItem(LS_PREFIX + uid);
