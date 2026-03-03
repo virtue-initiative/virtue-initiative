@@ -48,10 +48,10 @@ export function Header() {
     <header class="site-header">
       <a href="/" class="header-brand">The Virtue Initiative</a>
       <nav class="header-toolbar">
-        <a href="/" class={`header-control header-control-flat ${isActive('/') ? 'is-active' : ''}`}>Dashboard</a>
-        <a href="/logs" class={`header-control header-control-flat ${isActive('/logs') ? 'is-active' : ''}`}>Logs</a>
+        <a href="/" class={`control control-flat ${isActive('/') ? 'is-active' : ''}`}>Dashboard</a>
+        <a href="/logs" class={`control control-flat ${isActive('/logs') ? 'is-active' : ''}`}>Logs</a>
         <button
-          class="header-control header-icon-button"
+          class="control control-icon"
           onClick={toggle}
           type="button"
           aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
@@ -59,7 +59,7 @@ export function Header() {
         >
           {dark ? <SunIcon /> : <MoonIcon />}
         </button>
-        <button class="header-control" onClick={logout} type="button">
+        <button class="control" onClick={logout} type="button">
           Log out
         </button>
       </nav>
