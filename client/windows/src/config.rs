@@ -46,9 +46,11 @@ impl ClientPaths {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ClientState {
     pub monitoring_enabled: bool,
     pub device_id: Option<String>,
+    pub email: Option<String>,
 }
 
 impl Default for ClientState {
@@ -56,6 +58,7 @@ impl Default for ClientState {
         Self {
             monitoring_enabled: false,
             device_id: None,
+            email: None,
         }
     }
 }

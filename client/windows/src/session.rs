@@ -22,6 +22,7 @@ pub struct SessionManager {
 pub struct SessionStatus {
     pub logged_in: bool,
     pub device_id: Option<String>,
+    pub email: Option<String>,
 }
 
 impl SessionManager {
@@ -48,6 +49,7 @@ impl SessionManager {
         Ok(SessionStatus {
             logged_in,
             device_id: state.device_id,
+            email: state.email,
         })
     }
 
@@ -83,6 +85,7 @@ impl SessionManager {
             let mut state = load_state(&self.paths.state_file)?;
             state.device_id = Some(registration.id.clone());
             state.monitoring_enabled = true;
+            state.email = Some(email.to_string());
             save_state(&self.paths.state_file, &state)?;
 
             Ok::<String, anyhow::Error>(registration.id)
@@ -99,6 +102,7 @@ impl SessionManager {
 
             state.monitoring_enabled = false;
             state.device_id = None;
+            state.email = None;
             save_state(&self.paths.state_file, &state)?;
 
             Ok::<(), anyhow::Error>(())

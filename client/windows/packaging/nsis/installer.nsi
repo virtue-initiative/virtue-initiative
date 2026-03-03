@@ -37,6 +37,7 @@ Section "Install"
 
   ; Ensure old tray instances are gone before replacing binaries/restarting tray.
   nsExec::ExecToLog '"$SYSDIR\\taskkill.exe" /F /T /IM "virtue-tray.exe"'
+  nsExec::ExecToLog '"$SYSDIR\\taskkill.exe" /F /T /IM "virtue-auth-ui.exe"'
   nsExec::ExecToLog '"$SYSDIR\\taskkill.exe" /F /T /IM "bepure-tray.exe"'
   nsExec::ExecToLog '"$SYSDIR\\taskkill.exe" /F /T /IM "virtue-service.exe"'
   nsExec::ExecToLog '"$SYSDIR\\taskkill.exe" /F /T /IM "bepure-service.exe"'
@@ -44,6 +45,7 @@ Section "Install"
 
   File "${BUILD_TARGET_DIR}\\x86_64-pc-windows-msvc\\release\\virtue-service.exe"
   File "${BUILD_TARGET_DIR}\\x86_64-pc-windows-msvc\\release\\virtue-tray.exe"
+  File "${BUILD_TARGET_DIR}\\x86_64-pc-windows-msvc\\release\\virtue-auth-ui.exe"
   File "..\\..\\assets\\app-icon.ico"
 
   ; Launch helper to run the capture agent hidden (no console window).
@@ -132,6 +134,7 @@ Section "Uninstall"
   nsExec::ExecToLog '"$SYSDIR\\sc.exe" stop ${LEGACY_SERVICE_NAME}'
   nsExec::ExecToLog '"$SYSDIR\\sc.exe" delete ${LEGACY_SERVICE_NAME}'
   nsExec::ExecToLog '"$SYSDIR\\taskkill.exe" /F /T /IM "virtue-tray.exe"'
+  nsExec::ExecToLog '"$SYSDIR\\taskkill.exe" /F /T /IM "virtue-auth-ui.exe"'
   nsExec::ExecToLog '"$SYSDIR\\taskkill.exe" /F /T /IM "bepure-tray.exe"'
   nsExec::ExecToLog '"$SYSDIR\\taskkill.exe" /F /T /IM "virtue-service.exe"'
   nsExec::ExecToLog '"$SYSDIR\\taskkill.exe" /F /T /IM "bepure-service.exe"'
@@ -160,6 +163,7 @@ Section "Uninstall"
   Delete "$INSTDIR\\bepure-tray.exe"
   Delete "$INSTDIR\\virtue-service.exe"
   Delete "$INSTDIR\\virtue-tray.exe"
+  Delete "$INSTDIR\\virtue-auth-ui.exe"
   Delete "$INSTDIR\\${CAPTURE_LAUNCHER_VBS}"
   Delete "$INSTDIR\\app-icon.ico"
   Delete "$INSTDIR\\Uninstall.exe"
