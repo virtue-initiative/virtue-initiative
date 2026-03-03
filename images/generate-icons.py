@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 from typing import Iterable
 
@@ -12,6 +14,49 @@ TRIM_ALPHA_THRESHOLD = 2
 
 def rel(path: Path, root: Path) -> str:
     return str(path.relative_to(root))
+
+
+def parse_hex_color(value: str) -> tuple[int, int, int]:
+    raw = value.strip()
+    if raw.startswith("#"):
+        raw = raw[1:]
+    if len(raw) == 3:
+        raw = "".join(ch * 2 for ch in raw)
+    if re.fullmatch(r"[0-9a-fA-F]{6}", raw) is None:
+        raise ValueError(f"expected #RRGGBB, got {value!r}")
+    return tuple(int(raw[i : i + 2], 16) for i in (0, 2, 4))
+
+
+def load_theme_color(root: Path) -> tuple[int, int, int]:
+    theme_path = root / "theme.json"
+    if not theme_path.exists():
+        raise SystemExit(f"missing theme file: {theme_path}")
+
+    try:
+        with theme_path.open("r", encoding="utf-8") as handle:
+            theme = json.load(handle)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"invalid JSON in {theme_path}: {exc}") from exc
+
+    app_theme = theme.get("app")
+    if not isinstance(app_theme, dict):
+        raise SystemExit(f"missing app object in {theme_path}")
+
+    color_value = app_theme.get("primaryColor")
+    if not isinstance(color_value, str):
+        raise SystemExit(f"missing app.primaryColor string in {theme_path}")
+
+    try:
+        return parse_hex_color(color_value)
+    except ValueError as exc:
+        raise SystemExit(f"invalid app.primaryColor in {theme_path}: {exc}") from exc
+
+
+def recolor_with_theme(raw: Image.Image, rgb: tuple[int, int, int]) -> Image.Image:
+    alpha = raw.getchannel("A")
+    recolored = Image.new("RGBA", raw.size, (*rgb, 0))
+    recolored.putalpha(alpha)
+    return recolored
 
 
 def save_png(master: Image.Image, path: Path, size: int) -> None:
@@ -34,8 +79,9 @@ def save_icns(master: Image.Image, path: Path, sizes: Iterable[int]) -> None:
     out.save(path, format="ICNS", sizes=[(size, size) for size in sorted_sizes])
 
 
-def preprocess_logo(raw_path: Path, out_path: Path) -> Image.Image:
+def preprocess_logo(raw_path: Path, out_path: Path, theme_rgb: tuple[int, int, int]) -> Image.Image:
     raw = Image.open(raw_path).convert("RGBA")
+    raw = recolor_with_theme(raw, theme_rgb)
     alpha = raw.getchannel("A")
     mask = alpha.point(
         lambda x: 255 if x >= TRIM_ALPHA_THRESHOLD else 0,
@@ -71,11 +117,12 @@ def main() -> None:
     images_dir = root / "images"
     raw_path = images_dir / "logo-raw.png"
     prepped_path = images_dir / "logo-prepped.png"
+    theme_rgb = load_theme_color(root)
 
     if not raw_path.exists():
         raise SystemExit(f"missing source image: {raw_path}")
 
-    master = preprocess_logo(raw_path, prepped_path)
+    master = preprocess_logo(raw_path, prepped_path, theme_rgb)
 
     outputs: list[Path] = [prepped_path]
 
