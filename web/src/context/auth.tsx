@@ -1,7 +1,7 @@
 import { createContext } from 'preact';
 import { useContext, useState, useEffect, useCallback } from 'preact/hooks';
 import { api } from '../api';
-import { deriveWrappingKey } from '../crypto';
+import { deriveWrappingKey, hashPasswordForAuth } from '../crypto';
 
 interface AuthState {
   token: string | null;
@@ -43,7 +43,8 @@ export function AuthProvider({ children }: { children: preact.ComponentChildren 
   }, []);
 
   const login = useCallback(async (email: string, pw: string) => {
-    const res = await api.login(email, pw);
+    const pwHash = await hashPasswordForAuth(pw, email);
+    const res = await api.login(email, pwHash);
     const uid = jwtSub(res.access_token)!;
     setToken(res.access_token);
     setUserId(uid);
@@ -52,7 +53,8 @@ export function AuthProvider({ children }: { children: preact.ComponentChildren 
   }, []);
 
   const signup = useCallback(async (email: string, pw: string, name?: string) => {
-    const res = await api.signup(email, pw, name);
+    const pwHash = await hashPasswordForAuth(pw, email);
+    const res = await api.signup(email, pwHash, name);
     const uid = (res.user as { id: string }).id;
     setToken(res.access_token);
     setUserId(uid);
