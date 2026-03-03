@@ -74,7 +74,10 @@ impl SessionManager {
             let user_id = parse_jwt_sub(&access_token)
                 .context("could not extract user ID from access token")?;
             self.auth_client
-                .fetch_and_decrypt_e2ee_key(&access_token, password, &user_id)
+                .store_wrapping_key(password, &user_id)
+                .context("could not store wrapping key")?;
+            self.auth_client
+                .fetch_and_decrypt_e2ee_key(&access_token)
                 .await
                 .context("could not retrieve E2EE key from server")?;
 
@@ -101,6 +104,7 @@ impl SessionManager {
             self.token_store.clear_access_token()?;
             self.token_store.clear_refresh_token()?;
             self.token_store.clear_e2ee_key()?;
+            self.token_store.clear_wrapping_key()?;
 
             state.monitoring_enabled = false;
             state.device_id = None;

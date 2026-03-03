@@ -63,6 +63,13 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     let mut last_settings_fetch: Option<Instant> = None;
     let mut last_session_unavailable_log: Option<Instant> = None;
 
+    // Re-fetch the E2EE key from the server on each daemon startup.
+    if let Some(access_token) = token_store.get_access_token()? {
+        if let Err(err) = auth_client.fetch_and_decrypt_e2ee_key(&access_token).await {
+            eprintln!("daemon: could not fetch E2EE key on startup: {err:#}");
+        }
+    }
+
     let mut batch_buffer = load_batch_buffer(&paths.batch_buffer_file);
     let mut batch_window_start: DateTime<Utc> = batch_buffer.window_start.unwrap_or_else(Utc::now);
 

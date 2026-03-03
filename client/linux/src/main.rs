@@ -93,11 +93,14 @@ async fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
         .get_access_token()?
         .context("missing access token after login")?;
 
-    // Fetch and store the E2EE key from the server (set up via the web app at signup).
+    // Store the wrapping key (derived from login password) and fetch the E2EE key from server.
     let user_id =
         parse_jwt_sub(&access_token).context("could not extract user ID from access token")?;
     auth_client
-        .fetch_and_decrypt_e2ee_key(&access_token, &password, &user_id)
+        .store_wrapping_key(&password, &user_id)
+        .context("could not store wrapping key")?;
+    auth_client
+        .fetch_and_decrypt_e2ee_key(&access_token)
         .await
         .context("could not retrieve E2EE key from server")?;
 
@@ -176,6 +179,7 @@ async fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
     token_store.clear_access_token()?;
     token_store.clear_refresh_token()?;
     token_store.clear_e2ee_key()?;
+    token_store.clear_wrapping_key()?;
     state.monitoring_enabled = false;
     state.email = None;
     state.device_id = None;

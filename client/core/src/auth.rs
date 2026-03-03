@@ -131,14 +131,22 @@ impl AuthClient {
         Ok(())
     }
 
-    /// Fetch the encrypted E2EE key from `GET /e2ee`, decrypt it with a wrapping key
-    /// derived from the login password and user ID, and store the result.
-    pub async fn fetch_and_decrypt_e2ee_key(
-        &self,
-        access_token: &str,
-        password: &str,
-        user_id: &str,
-    ) -> CoreResult<[u8; 32]> {
+    /// Derive a wrapping key from the login password and user ID, and persist it in the token store.
+    /// Call this once at login; the wrapping key is used by `fetch_and_decrypt_e2ee_key` on restart.
+    pub fn store_wrapping_key(&self, password: &str, user_id: &str) -> CoreResult<()> {
+        let wrapping_key = derive_key(password, user_id);
+        self.token_store.set_wrapping_key(&wrapping_key)
+    }
+
+    /// Fetch the encrypted E2EE key from `GET /e2ee`, decrypt it with the stored wrapping key,
+    /// and persist the result. Call at login and on each daemon restart.
+    pub async fn fetch_and_decrypt_e2ee_key(&self, access_token: &str) -> CoreResult<[u8; 32]> {
+        let wrapping_key = self.token_store.get_wrapping_key()?.ok_or_else(|| {
+            CoreError::TokenStore(
+                "wrapping key not found; please sign in again".to_string(),
+            )
+        })?;
+
         let url = format!("{}/e2ee", self.config.base_url);
         let response = self
             .client
@@ -157,7 +165,6 @@ impl AuthClient {
             .decode(&encrypted_b64)
             .map_err(|e| CoreError::Crypto(format!("base64 decode failed: {e}")))?;
 
-        let wrapping_key = derive_key(password, user_id);
         let raw = decrypt(&wrapping_key, &encrypted)?;
 
         if raw.len() != 32 {
