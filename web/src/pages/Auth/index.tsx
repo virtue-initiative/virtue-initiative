@@ -71,18 +71,18 @@ export function Auth() {
   async function restoreE2EEKeys(token: string, uid: string) {
     if (!wrappingKey) return;
     // Restore own E2EE key
-    const { encrypted_key } = await api.getE2EEKey(token);
-    if (encrypted_key) {
-      const rawE2EE = await decryptBatch(wrappingKey, Uint8Array.fromBase64(encrypted_key));
+    const { encryptedE2EEKey } = await api.getE2EEKey(token);
+    if (encryptedE2EEKey) {
+      const rawE2EE = await decryptBatch(wrappingKey, Uint8Array.fromBase64(encryptedE2EEKey));
       await e2ee.setKeyFromBytes(rawE2EE.buffer, uid);
     }
     // Restore partner E2EE keys
     const partners = await api.getPartners(token);
     await Promise.all(
       partners
-        .filter((p) => p.status === 'accepted' && p.permissions.view_data && p.e2ee_key)
+        .filter((p) => p.status === 'accepted' && p.permissions.view_data && p.encryptedE2EEKey)
         .map(async (p) => {
-          const rawKey = await decryptBatch(wrappingKey, Uint8Array.fromBase64(p.e2ee_key!));
+          const rawKey = await decryptBatch(wrappingKey, Uint8Array.fromBase64(p.encryptedE2EEKey!));
           await e2ee.setKeyFromBytes(rawKey.buffer, p.partner_user_id);
         }),
     );

@@ -157,7 +157,7 @@ impl AuthClient {
 
         let e2ee_resp: E2EEKeyResponse = decode_response(response).await?;
 
-        let encrypted_b64 = e2ee_resp.encrypted_key.ok_or_else(|| {
+        let encrypted_b64 = e2ee_resp.encrypted_e2ee_key.ok_or_else(|| {
             CoreError::TokenStore("no E2EE key stored on server; please sign in via the web app first".to_string())
         })?;
 
