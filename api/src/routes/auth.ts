@@ -103,13 +103,13 @@ auth.post('/token', async (c) => {
 
 auth.post('/e2ee', authenticate, async (c) => {
   const userId = c.get('userId');
-  const { encryptedE2EEKey } = await c.req.json();
-  const decoded = Uint8Array.fromBase64(encryptedE2EEKey);
-
-  // Store the encrypted E2EE key in the database
-  updateUser(c.env.DB, userId, { e2ee_key: decoded.buffer });
-
-  return c.json({ message: 'E2EE key updated' });
+  const body = await c.req.json();
+  if (typeof body?.encrypted_key !== 'string' || !body.encrypted_key) {
+    return c.json({ error: 'encrypted_key is required' }, 400);
+  }
+  const decoded = Uint8Array.fromBase64(body.encrypted_key);
+  await updateUser(c.env.DB, userId, { e2ee_key: decoded.buffer });
+  return c.json({ encrypted_key: body.encrypted_key });
 });
 
 auth.get('/e2ee', authenticate, async (c) => {
