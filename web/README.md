@@ -13,3 +13,9 @@
 -   `npm run build` - Builds for production, emitting to `dist/`. Prerenders all found routes in app to static HTML
 
 -   `npm run preview` - Starts a server at http://localhost:4173/ to test production build locally
+
+## Iconography
+
+- The web app uses [Heroicons](https://heroicons.com/) as the icon style baseline.
+- Current theme toggle icons (moon/sun) are Heroicons-based SVGs in `src/components/Header.tsx`.
+- For new UI icons, prefer Heroicons for visual consistency.
