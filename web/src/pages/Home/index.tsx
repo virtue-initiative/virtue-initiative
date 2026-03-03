@@ -3,7 +3,7 @@ import { useLocation } from 'preact-iso';
 import { useAuth } from '../../context/auth';
 import { useE2EE } from '../../context/e2ee';
 import { api, Device, Partner } from '../../api';
-import { deriveKey, deriveWrappingKey, encryptData } from '../../crypto';
+import { deriveKey, encryptData } from '../../crypto';
 import './style.css';
 import { Button } from '../../components/Button';
 
@@ -238,9 +238,9 @@ function PendingInviteCard({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [e2eePass, setE2EEPass] = useState('');
-  const [ownPass, setOwnPass] = useState('');
 
   const needsE2EE = partner.permissions.view_data;
+  const { wrappingKey } = useAuth();
 
   async function accept(ev: Event) {
     ev.preventDefault();
@@ -248,13 +248,12 @@ function PendingInviteCard({
     setError(null);
     try {
       let encryptedE2EEKey: string | undefined;
-      if (needsE2EE && userId) {
+      if (needsE2EE && userId && wrappingKey) {
         // Derive the monitored user's E2EE key and store locally
         const e2eeKey = await deriveKey(e2eePass, partner.partner_user_id, true);
         const rawE2EE = new Uint8Array(await crypto.subtle.exportKey('raw', e2eeKey));
         await e2ee.setKeyFromBytes(rawE2EE.buffer, partner.partner_user_id);
         // Encrypt it with own wrapping key for server storage
-        const wrappingKey = await deriveWrappingKey(ownPass, userId);
         const encrypted = await encryptData(wrappingKey, rawE2EE);
         encryptedE2EEKey = encrypted.toBase64();
       }
@@ -289,17 +288,6 @@ function PendingInviteCard({
                 value={e2eePass}
                 onInput={(e) => setE2EEPass((e.target as HTMLInputElement).value)}
                 placeholder="Shared encryption password"
-                required
-              />
-            </div>
-            <div class="field">
-              <label for={`own-${partner.id}`}>Your account password</label>
-              <input
-                id={`own-${partner.id}`}
-                type="password"
-                value={ownPass}
-                onInput={(e) => setOwnPass((e.target as HTMLInputElement).value)}
-                placeholder="Your login password"
                 required
               />
             </div>

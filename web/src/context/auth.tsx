@@ -1,11 +1,12 @@
 import { createContext } from 'preact';
 import { useContext, useState, useEffect, useCallback } from 'preact/hooks';
 import { api } from '../api';
+import { deriveWrappingKey } from '../crypto';
 
 interface AuthState {
   token: string | null;
   userId: string | null;
-  password: string | null;
+  wrappingKey: CryptoKey | null;
   ready: boolean;
   login: (email: string, password: string) => Promise<{ access_token: string; userId: string }>;
   signup: (email: string, password: string, name?: string) => Promise<{ access_token: string; userId: string }>;
@@ -17,7 +18,7 @@ const AuthContext = createContext<AuthState>(null as unknown as AuthState);
 export function AuthProvider({ children }: { children: preact.ComponentChildren }) {
   const [token, setToken] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
-  const [password, setPassword] = useState<string | null>(null);
+  const [wrappingKey, setWrappingKey] = useState<CryptoKey | null>(null);
   const [ready, setReady] = useState(false);
 
   function jwtSub(t: string): string | null {
@@ -43,29 +44,31 @@ export function AuthProvider({ children }: { children: preact.ComponentChildren 
 
   const login = useCallback(async (email: string, pw: string) => {
     const res = await api.login(email, pw);
+    const uid = jwtSub(res.access_token)!;
     setToken(res.access_token);
-    setUserId(jwtSub(res.access_token));
-    setPassword(pw);
-    return { access_token: res.access_token, userId: jwtSub(res.access_token)! };
+    setUserId(uid);
+    setWrappingKey(await deriveWrappingKey(pw, uid));
+    return { access_token: res.access_token, userId: uid };
   }, []);
 
   const signup = useCallback(async (email: string, pw: string, name?: string) => {
     const res = await api.signup(email, pw, name);
+    const uid = (res.user as { id: string }).id;
     setToken(res.access_token);
-    setUserId(jwtSub(res.access_token));
-    setPassword(pw);
-    return { access_token: res.access_token, userId: (res.user as { id: string }).id };
+    setUserId(uid);
+    setWrappingKey(await deriveWrappingKey(pw, uid));
+    return { access_token: res.access_token, userId: uid };
   }, []);
 
   const logout = useCallback(async () => {
     if (token) await api.logout(token).catch(() => {});
     setToken(null);
     setUserId(null);
-    setPassword(null);
+    setWrappingKey(null);
   }, [token]);
 
   return (
-    <AuthContext.Provider value={{ token, userId, password, ready, login, signup, logout }}>
+    <AuthContext.Provider value={{ token, userId, wrappingKey, ready, login, signup, logout }}>
       {children}
     </AuthContext.Provider>
   );
