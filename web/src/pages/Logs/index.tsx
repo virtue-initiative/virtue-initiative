@@ -103,10 +103,6 @@ export function Logs() {
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  const [password, setPassword] = useState('');
-  const [pwError, setPwError] = useState<string | null>(null);
-  const [pwLoading, setPwLoading] = useState(false);
-
   // The user whose key is needed: partner's userId when viewing partner logs, otherwise own
   const activeUserId = selectedUser ?? ownUserId;
   const activeKey = activeUserId ? e2ee.getKey(activeUserId) : null;
@@ -139,8 +135,7 @@ export function Logs() {
   }, [activeKey, token, selectedDevice, selectedUser]);
 
   async function doLoadBatches(cursor: string | undefined, reset: boolean) {
-    if (!activeKey || !token) return;
-    setLoading(true);
+    if (!activeKey || !token) return;    setLoading(true);
     setFetchError(null);
     try {
       const page = await api.getBatches(token, {
@@ -168,21 +163,6 @@ export function Logs() {
       setFetchError(err instanceof Error ? err.message : 'Failed to load logs');
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function handlePasswordSubmit(e: Event) {
-    e.preventDefault();
-    if (!activeUserId) return;
-    setPwError(null);
-    setPwLoading(true);
-    try {
-      await e2ee.setKey(password, activeUserId);
-      setPassword('');
-    } catch (err) {
-      setPwError(err instanceof Error ? err.message : 'Failed to derive key');
-    } finally {
-      setPwLoading(false);
     }
   }
 
@@ -214,33 +194,6 @@ export function Logs() {
   return (
     <div class="logs-page">
       <div class="logs-layout">
-        {!activeKey && (
-          <div class="pw-overlay">
-            <div class="pw-card">
-              <h2 class="pw-title">Decrypt logs</h2>
-              <p class="pw-desc">
-                {selectedUser
-                  ? 'Enter the E2EE password for this user to view their logs.'
-                  : 'Enter your E2EE password to view logs.'}
-              </p>
-              <form class="pw-form" onSubmit={handlePasswordSubmit}>
-                <input
-                  type="password"
-                  value={password}
-                  onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
-                  placeholder="Decryption password"
-                  required
-                  autoFocus
-                />
-                <button class="btn btn-primary" type="submit" disabled={pwLoading}>
-                  {pwLoading ? 'Unlocking…' : 'Unlock'}
-                </button>
-                {pwError && <p class="form-error">{pwError}</p>}
-              </form>
-            </div>
-          </div>
-        )}
-
         <aside class="logs-sidebar">
           {loadError && <p class="sidebar-loading">{loadError}</p>}
           {deviceGroups === null && !loadError && <p class="sidebar-loading">Loading…</p>}

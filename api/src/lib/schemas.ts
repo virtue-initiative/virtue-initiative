@@ -66,6 +66,7 @@ export const createPartnerSchema = z.object({
 
 export const acceptPartnerSchema = z.object({
   id: z.string().min(1),
+  encryptedE2EEKey: z.string().optional(),
 });
 
 export const updatePartnerSchema = z.object({

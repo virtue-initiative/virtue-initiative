@@ -46,6 +46,7 @@ export interface Partner {
   permissions: { view_data: boolean };
   role: 'owner' | 'partner';
   created_at: string;
+  e2ee_key: string | null;
 }
 
 const BASE = (import.meta as any).env?.VITE_API_URL ?? 'http://localhost:8787';
@@ -86,6 +87,15 @@ export const api = {
 
   logout: (token: string) => req<void>('/logout', { method: 'POST' }, token),
 
+  getE2EEKey: (token: string) =>
+    req<{ encrypted_key: string | null }>('/e2ee', {}, token),
+
+  setE2EEKey: (token: string, encryptedKey: string) =>
+    req<{ message: string }>('/e2ee', {
+      method: 'POST',
+      body: JSON.stringify({ encryptedE2EEKey: encryptedKey }),
+    }, token),
+
   getDevices: (token: string, params?: { user?: string }) => {
     const qs = params?.user ? `?user=${encodeURIComponent(params.user)}` : '';
     return req<Device[]>(`/device${qs}`, {}, token);
@@ -103,10 +113,10 @@ export const api = {
       body: JSON.stringify({ email, permissions }),
     }, token),
 
-  acceptPartner: (token: string, id: string) =>
+  acceptPartner: (token: string, id: string, encryptedE2EEKey?: string) =>
     req<{ id: string }>('/partner/accept', {
       method: 'POST',
-      body: JSON.stringify({ id }),
+      body: JSON.stringify({ id, ...(encryptedE2EEKey ? { encryptedE2EEKey } : {}) }),
     }, token),
 
   deletePartner: (token: string, id: string) =>

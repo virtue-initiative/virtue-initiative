@@ -1,3 +1,27 @@
+// Encrypts data with AES-GCM: returns nonce(12 bytes) || ciphertext+tag
+export async function encryptData(key: CryptoKey, data: Uint8Array): Promise<Uint8Array> {
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, key, data);
+  const result = new Uint8Array(12 + ciphertext.byteLength);
+  result.set(nonce, 0);
+  result.set(new Uint8Array(ciphertext), 12);
+  return result;
+}
+
+// Derives a 256-bit AES-GCM wrapping key (encrypt+decrypt) from password+userId
+// Same PBKDF2 parameters as deriveKey
+export async function deriveWrappingKey(password: string, userId: string): Promise<CryptoKey> {
+  const enc = new TextEncoder();
+  const baseKey = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: enc.encode(userId), iterations: 100_000, hash: 'SHA-256' },
+    baseKey,
+    { name: 'AES-GCM', length: 256 },
+    true,
+    ['encrypt', 'decrypt'],
+  );
+}
+
 // Derives a 256-bit AES-GCM key from password using PBKDF2-HMAC-SHA256
 // salt = UTF-8 bytes of userId, 100_000 iterations
 export async function deriveKey(password: string, userId: string, extractable = false): Promise<CryptoKey> {

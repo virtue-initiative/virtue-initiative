@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { useAuth } from '../../context/auth';
+import { useE2EE } from '../../context/e2ee';
 import { api, Device, Partner } from '../../api';
+import { deriveKey, deriveWrappingKey, encryptData } from '../../crypto';
 import './style.css';
 import { Button } from '../../components/Button';
 
@@ -231,14 +233,32 @@ function PendingInviteCard({
   token: string;
   onAccepted: () => void;
 }) {
+  const { userId } = useAuth();
+  const e2ee = useE2EE();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [e2eePass, setE2EEPass] = useState('');
+  const [ownPass, setOwnPass] = useState('');
 
-  async function accept() {
+  const needsE2EE = partner.permissions.view_data;
+
+  async function accept(ev: Event) {
+    ev.preventDefault();
     setLoading(true);
     setError(null);
     try {
-      await api.acceptPartner(token, partner.id);
+      let encryptedE2EEKey: string | undefined;
+      if (needsE2EE && userId) {
+        // Derive the monitored user's E2EE key and store locally
+        const e2eeKey = await deriveKey(e2eePass, partner.partner_user_id, true);
+        const rawE2EE = new Uint8Array(await crypto.subtle.exportKey('raw', e2eeKey));
+        await e2ee.setKeyFromBytes(rawE2EE.buffer, partner.partner_user_id);
+        // Encrypt it with own wrapping key for server storage
+        const wrappingKey = await deriveWrappingKey(ownPass, userId);
+        const encrypted = await encryptData(wrappingKey, rawE2EE);
+        encryptedE2EEKey = encrypted.toBase64();
+      }
+      await api.acceptPartner(token, partner.id, encryptedE2EEKey);
       onAccepted();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to accept');
@@ -258,10 +278,38 @@ function PendingInviteCard({
           ? ' with access to your encrypted activity data.'
           : '.'}
       </p>
-      {error && <p class="form-error">{error}</p>}
-      <button class="btn btn-primary btn-sm" onClick={accept} disabled={loading} type="button">
-        {loading ? 'Accepting…' : 'Accept invite'}
-      </button>
+      <form onSubmit={accept}>
+        {needsE2EE && (
+          <>
+            <div class="field" style="margin-top:0.75rem">
+              <label for={`e2ee-${partner.id}`}>Their E2EE password</label>
+              <input
+                id={`e2ee-${partner.id}`}
+                type="password"
+                value={e2eePass}
+                onInput={(e) => setE2EEPass((e.target as HTMLInputElement).value)}
+                placeholder="Shared encryption password"
+                required
+              />
+            </div>
+            <div class="field">
+              <label for={`own-${partner.id}`}>Your account password</label>
+              <input
+                id={`own-${partner.id}`}
+                type="password"
+                value={ownPass}
+                onInput={(e) => setOwnPass((e.target as HTMLInputElement).value)}
+                placeholder="Your login password"
+                required
+              />
+            </div>
+          </>
+        )}
+        {error && <p class="form-error">{error}</p>}
+        <button class="btn btn-primary btn-sm" type="submit" disabled={loading} style="margin-top:0.5rem">
+          {loading ? 'Accepting…' : 'Accept invite'}
+        </button>
+      </form>
     </div>
   );
 }

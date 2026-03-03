@@ -6,6 +6,7 @@ interface E2EEState {
   keys: Record<string, CryptoKey>;
   getKey(userId: string): CryptoKey | null;
   setKey(password: string, userId: string): Promise<void>;
+  setKeyFromBytes(rawBytes: ArrayBuffer, userId: string): Promise<void>;
   clearKey(userId?: string): void;
 }
 
@@ -69,6 +70,12 @@ export function E2EEProvider({ children }: { children: preact.ComponentChildren 
     setKeys((prev) => ({ ...prev, [uid]: usableKey }));
   }, []);
 
+  const setKeyFromBytes = useCallback(async (rawBytes: ArrayBuffer, uid: string) => {
+    localStorage.setItem(LS_PREFIX + uid, bytesToHex(new Uint8Array(rawBytes)));
+    const usableKey = await crypto.subtle.importKey('raw', rawBytes, { name: 'AES-GCM' }, false, ['decrypt']);
+    setKeys((prev) => ({ ...prev, [uid]: usableKey }));
+  }, []);
+
   const clearKey = useCallback((userId?: string) => {
     if (userId) {
       localStorage.removeItem(LS_PREFIX + userId);
@@ -87,7 +94,7 @@ export function E2EEProvider({ children }: { children: preact.ComponentChildren 
   }, []);
 
   return (
-    <E2EEContext.Provider value={{ keys, getKey, setKey, clearKey }}>
+    <E2EEContext.Provider value={{ keys, getKey, setKey, setKeyFromBytes, clearKey }}>
       {children}
     </E2EEContext.Provider>
   );
