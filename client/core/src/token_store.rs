@@ -16,6 +16,9 @@ pub trait TokenStore: Send + Sync {
     fn get_e2ee_key(&self) -> CoreResult<Option<[u8; 32]>>;
     fn set_e2ee_key(&self, key: &[u8; 32]) -> CoreResult<()>;
     fn clear_e2ee_key(&self) -> CoreResult<()>;
+    fn get_wrapping_key(&self) -> CoreResult<Option<[u8; 32]>>;
+    fn set_wrapping_key(&self, key: &[u8; 32]) -> CoreResult<()>;
+    fn clear_wrapping_key(&self) -> CoreResult<()>;
 }
 
 #[derive(Debug, Default)]
@@ -87,7 +90,7 @@ impl TokenStore for MemoryTokenStore {
             .tokens
             .lock()
             .map_err(|_| CoreError::TokenStore("memory token lock poisoned".to_string()))?;
-        parse_e2ee_key_hex(guard.e2ee_key_hex.as_deref())
+        parse_key_hex(guard.e2ee_key_hex.as_deref(), "e2ee_key_hex")
     }
 
     fn set_e2ee_key(&self, key: &[u8; 32]) -> CoreResult<()> {
@@ -107,6 +110,32 @@ impl TokenStore for MemoryTokenStore {
         guard.e2ee_key_hex = None;
         Ok(())
     }
+
+    fn get_wrapping_key(&self) -> CoreResult<Option<[u8; 32]>> {
+        let guard = self
+            .tokens
+            .lock()
+            .map_err(|_| CoreError::TokenStore("memory token lock poisoned".to_string()))?;
+        parse_key_hex(guard.wrapping_key_hex.as_deref(), "wrapping_key_hex")
+    }
+
+    fn set_wrapping_key(&self, key: &[u8; 32]) -> CoreResult<()> {
+        let mut guard = self
+            .tokens
+            .lock()
+            .map_err(|_| CoreError::TokenStore("memory token lock poisoned".to_string()))?;
+        guard.wrapping_key_hex = Some(hex::encode(key));
+        Ok(())
+    }
+
+    fn clear_wrapping_key(&self) -> CoreResult<()> {
+        let mut guard = self
+            .tokens
+            .lock()
+            .map_err(|_| CoreError::TokenStore("memory token lock poisoned".to_string()))?;
+        guard.wrapping_key_hex = None;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -118,8 +147,10 @@ pub struct FileTokenStore {
 struct StoredToken {
     access_token: Option<String>,
     refresh_token: Option<String>,
-    /// AES-256 key as lowercase hex (64 chars). Derived from the user's E2EE password.
+    /// AES-256 E2EE key as lowercase hex (64 chars). Fetched from server on each restart.
     e2ee_key_hex: Option<String>,
+    /// AES-256 wrapping key as lowercase hex (64 chars). Derived from login password + user ID.
+    wrapping_key_hex: Option<String>,
 }
 
 impl FileTokenStore {
@@ -192,7 +223,7 @@ impl TokenStore for FileTokenStore {
 
     fn get_e2ee_key(&self) -> CoreResult<Option<[u8; 32]>> {
         let stored = self.read_token_file()?;
-        parse_e2ee_key_hex(stored.e2ee_key_hex.as_deref())
+        parse_key_hex(stored.e2ee_key_hex.as_deref(), "e2ee_key_hex")
     }
 
     fn set_e2ee_key(&self, key: &[u8; 32]) -> CoreResult<()> {
@@ -206,15 +237,32 @@ impl TokenStore for FileTokenStore {
         stored.e2ee_key_hex = None;
         self.write_token_file(&stored)
     }
+
+    fn get_wrapping_key(&self) -> CoreResult<Option<[u8; 32]>> {
+        let stored = self.read_token_file()?;
+        parse_key_hex(stored.wrapping_key_hex.as_deref(), "wrapping_key_hex")
+    }
+
+    fn set_wrapping_key(&self, key: &[u8; 32]) -> CoreResult<()> {
+        let mut stored = self.read_token_file()?;
+        stored.wrapping_key_hex = Some(hex::encode(key));
+        self.write_token_file(&stored)
+    }
+
+    fn clear_wrapping_key(&self) -> CoreResult<()> {
+        let mut stored = self.read_token_file()?;
+        stored.wrapping_key_hex = None;
+        self.write_token_file(&stored)
+    }
 }
 
-fn parse_e2ee_key_hex(hex_str: Option<&str>) -> CoreResult<Option<[u8; 32]>> {
+fn parse_key_hex(hex_str: Option<&str>, field: &str) -> CoreResult<Option<[u8; 32]>> {
     let Some(s) = hex_str else { return Ok(None) };
     let bytes = hex::decode(s)
-        .map_err(|e| CoreError::TokenStore(format!("invalid e2ee_key_hex: {e}")))?;
+        .map_err(|e| CoreError::TokenStore(format!("invalid {field}: {e}")))?;
     let arr: [u8; 32] = bytes
         .try_into()
-        .map_err(|_| CoreError::TokenStore("e2ee_key_hex must be 32 bytes".to_string()))?;
+        .map_err(|_| CoreError::TokenStore(format!("{field} must be 32 bytes")))?;
     Ok(Some(arr))
 }
 

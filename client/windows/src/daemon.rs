@@ -74,6 +74,13 @@ pub async fn run_daemon(shutdown: Arc<AtomicBool>, logger: &ServiceLogger) -> Re
 
     logger.info("capture daemon started");
 
+    // Re-fetch the E2EE key from the server on each daemon startup.
+    if let Some(access_token) = token_store.get_access_token().ok().flatten() {
+        if let Err(err) = auth_client.fetch_and_decrypt_e2ee_key(&access_token).await {
+            logger.warn(&format!("could not fetch E2EE key on startup: {err:#}"));
+        }
+    }
+
     while !shutdown.load(Ordering::SeqCst) {
         let state = match load_state(&paths.state_file) {
             Ok(state) => state,
