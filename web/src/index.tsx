@@ -22,15 +22,17 @@ function AppShell() {
 
   return (
     <LocationProvider>
-      <Header />
-      <main>
-        <Router>
-          <Route path="/" component={Home} />
-          <Route path="/logs" component={Logs} />
-          <Route path="/logs/gallery" component={Logs} />
-          <Route default component={NotFound} />
-        </Router>
-      </main>
+      <div class="app-shell">
+        <Header />
+        <main class="app-main">
+          <Router>
+            <Route path="/" component={Home} />
+            <Route path="/logs" component={Logs} />
+            <Route path="/logs/gallery" component={Logs} />
+            <Route default component={NotFound} />
+          </Router>
+        </main>
+      </div>
     </LocationProvider>
   );
 }
@@ -52,4 +54,3 @@ if (typeof window !== 'undefined') {
 export async function prerender(data) {
   return await ssr(<App {...data} />);
 }
-

@@ -212,100 +212,102 @@ export function Logs() {
   const galleryItems = items.filter((item): item is ImageLogItem => !!item.image);
 
   return (
-    <div class="logs-layout">
-      {!activeKey && (
-        <div class="pw-overlay">
-          <div class="pw-card">
-            <h2 class="pw-title">Decrypt logs</h2>
-            <p class="pw-desc">
-              {selectedUser
-                ? 'Enter the E2EE password for this user to view their logs.'
-                : 'Enter your E2EE password to view logs.'}
-            </p>
-            <form class="pw-form" onSubmit={handlePasswordSubmit}>
-              <input
-                type="password"
-                value={password}
-                onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
-                placeholder="Decryption password"
-                required
-                autoFocus
-              />
-              <button class="btn btn-primary" type="submit" disabled={pwLoading}>
-                {pwLoading ? 'Unlocking…' : 'Unlock'}
-              </button>
-              {pwError && <p class="form-error">{pwError}</p>}
-            </form>
-          </div>
-        </div>
-      )}
-
-      <aside class="logs-sidebar">
-        {loadError && <p class="sidebar-loading">{loadError}</p>}
-        {deviceGroups === null && !loadError && <p class="sidebar-loading">Loading…</p>}
-        {deviceGroups?.map((group) => (
-          <div class="sidebar-group" key={group.label}>
-            <p class="sidebar-group-label">{group.label}</p>
-            <ul class="device-list">
-              <li>
-                <button
-                  class={`device-btn${selectedUser === group.userId && selectedDevice === null ? ' active' : ''}`}
-                  onClick={() => select(group.userId, null)}
-                  type="button"
-                >
-                  All
+    <div class="logs-page">
+      <div class="logs-layout">
+        {!activeKey && (
+          <div class="pw-overlay">
+            <div class="pw-card">
+              <h2 class="pw-title">Decrypt logs</h2>
+              <p class="pw-desc">
+                {selectedUser
+                  ? 'Enter the E2EE password for this user to view their logs.'
+                  : 'Enter your E2EE password to view logs.'}
+              </p>
+              <form class="pw-form" onSubmit={handlePasswordSubmit}>
+                <input
+                  type="password"
+                  value={password}
+                  onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
+                  placeholder="Decryption password"
+                  required
+                  autoFocus
+                />
+                <button class="btn btn-primary" type="submit" disabled={pwLoading}>
+                  {pwLoading ? 'Unlocking…' : 'Unlock'}
                 </button>
-              </li>
-              {group.devices.map((d) => (
-                <li key={d.id}>
+                {pwError && <p class="form-error">{pwError}</p>}
+              </form>
+            </div>
+          </div>
+        )}
+
+        <aside class="logs-sidebar">
+          {loadError && <p class="sidebar-loading">{loadError}</p>}
+          {deviceGroups === null && !loadError && <p class="sidebar-loading">Loading…</p>}
+          {deviceGroups?.map((group) => (
+            <div class="sidebar-group" key={group.label}>
+              <p class="sidebar-group-label">{group.label}</p>
+              <ul class="device-list">
+                <li>
                   <button
-                    class={`device-btn${selectedDevice === d.id ? ' active' : ''}`}
-                    onClick={() => select(group.userId, d.id)}
+                    class={`device-btn${selectedUser === group.userId && selectedDevice === null ? ' active' : ''}`}
+                    onClick={() => select(group.userId, null)}
                     type="button"
                   >
-                    <span class={`dot ${d.status === 'online' ? 'dot-green' : 'dot-gray'}`} />
-                    {d.name}
+                    All
                   </button>
                 </li>
-              ))}
-            </ul>
+                {group.devices.map((d) => (
+                  <li key={d.id}>
+                    <button
+                      class={`device-btn${selectedDevice === d.id ? ' active' : ''}`}
+                      onClick={() => select(group.userId, d.id)}
+                      type="button"
+                    >
+                      <span class={`dot ${d.status === 'online' ? 'dot-green' : 'dot-gray'}`} />
+                      {d.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </aside>
+
+        <section class="logs-main">
+          <div class="logs-header">
+            <h1>{title}</h1>
+            <div class="view-tabs">
+              <a class={`view-tab${!isGallery ? ' active' : ''}`} href="/logs">
+                List
+              </a>
+              <a class={`view-tab${isGallery ? ' active' : ''}`} href="/logs/gallery">
+                Gallery
+              </a>
+            </div>
           </div>
-        ))}
-      </aside>
 
-      <section class="logs-main">
-        <div class="logs-header">
-          <h1>{title}</h1>
-          <div class="view-tabs">
-            <a class={`view-tab${!isGallery ? ' active' : ''}`} href="/logs">
-              List
-            </a>
-            <a class={`view-tab${isGallery ? ' active' : ''}`} href="/logs/gallery">
-              Gallery
-            </a>
-          </div>
-        </div>
+          {fetchError && <p class="error-banner">{fetchError}</p>}
 
-        {fetchError && <p class="error-banner">{fetchError}</p>}
-
-        {isGallery ? (
-          <LogsGallery
-            items={galleryItems}
-            loading={loading}
-            hasMore={!!nextCursor}
-            onLoadMore={() => doLoadBatches(nextCursor, false)}
-            deviceName={deviceName}
-          />
-        ) : (
-          <LogsList
-            items={items}
-            loading={loading}
-            hasMore={!!nextCursor}
-            onLoadMore={() => doLoadBatches(nextCursor, false)}
-            deviceName={deviceName}
-          />
-        )}
-      </section>
+          {isGallery ? (
+            <LogsGallery
+              items={galleryItems}
+              loading={loading}
+              hasMore={!!nextCursor}
+              onLoadMore={() => doLoadBatches(nextCursor, false)}
+              deviceName={deviceName}
+            />
+          ) : (
+            <LogsList
+              items={items}
+              loading={loading}
+              hasMore={!!nextCursor}
+              onLoadMore={() => doLoadBatches(nextCursor, false)}
+              deviceName={deviceName}
+            />
+          )}
+        </section>
+      </div>
     </div>
   );
 }

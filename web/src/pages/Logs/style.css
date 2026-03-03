@@ -1,11 +1,19 @@
+.logs-page {
+  flex: 1;
+  width: 100%;
+  max-width: 1100px;
+  min-height: 0;
+  display: flex;
+  justify-content: center;
+  padding: 2rem 1rem;
+  box-sizing: border-box;
+}
+
 .logs-layout {
   display: flex;
   width: 100%;
-  max-width: 1100px;
-  padding: 2rem 1rem;
-  box-sizing: border-box;
+  min-height: 0;
   gap: 1.75rem;
-  align-items: flex-start;
   text-align: left;
 }
 
@@ -14,8 +22,11 @@
 .logs-sidebar {
   width: 200px;
   flex-shrink: 0;
-  position: sticky;
-  top: 1rem;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding-right: 0.25rem;
 }
 
 .logs-sidebar h2 {
@@ -100,6 +111,11 @@
 .logs-main {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding-right: 0.25rem;
 }
 
 .logs-header {
@@ -336,13 +352,24 @@
 /* Responsive */
 
 @media (max-width: 600px) {
+  .logs-page {
+    padding: 1rem;
+  }
+
   .logs-layout {
     flex-direction: column;
+    min-height: auto;
   }
 
   .logs-sidebar {
     width: 100%;
-    position: static;
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .logs-main {
+    overflow: visible;
+    padding-right: 0;
   }
 
   .device-list {
