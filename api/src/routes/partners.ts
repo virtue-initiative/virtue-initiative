@@ -62,14 +62,14 @@ partners.post('/accept', authenticate, async (c) => {
   if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
 
   const userId = c.get('userId');
-  const { id, encryptedE2EEKey } = parsed.data;
+  const { id, encrypted_key } = parsed.data;
 
   const partnership = await findPartnerInvite(c.env.DB, id, userId);
   if (!partnership) return c.json({ error: 'Partnership invite not found' }, 404);
 
   let e2eeKey: ArrayBuffer | undefined;
-  if (encryptedE2EEKey) {
-    e2eeKey = Uint8Array.fromBase64(encryptedE2EEKey).buffer;
+  if (encrypted_key) {
+    e2eeKey = Uint8Array.fromBase64(encrypted_key).buffer;
   }
 
   await acceptPartner(c.env.DB, id, new Date().toISOString(), e2eeKey);

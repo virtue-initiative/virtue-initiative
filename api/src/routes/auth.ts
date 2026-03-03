@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Env, Variables } from '../types/bindings';
 import { hashPassword, verifyPassword } from '../lib/password';
 import { generateAccessToken, generateRefreshToken, verifyJWT } from '../lib/jwt';
-import { signupSchema, loginSchema } from '../lib/schemas';
+import { signupSchema, loginSchema, setE2EEKeySchema } from '../lib/schemas';
 import { findUserByEmail, createUser, updateUser, findUserById } from '../lib/db';
 import { authenticate } from '../middleware/auth';
 
@@ -102,14 +102,12 @@ auth.post('/token', async (c) => {
 });
 
 auth.post('/e2ee', authenticate, async (c) => {
-  const userId = c.get('userId');
-  const body = await c.req.json();
-  if (typeof body?.encrypted_key !== 'string' || !body.encrypted_key) {
-    return c.json({ error: 'encrypted_key is required' }, 400);
-  }
-  const decoded = Uint8Array.fromBase64(body.encrypted_key);
-  await updateUser(c.env.DB, userId, { e2ee_key: decoded.buffer });
-  return c.json({ encrypted_key: body.encrypted_key });
+  const parsed = setE2EEKeySchema.safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
+  const { encrypted_key } = parsed.data;
+  const decoded = Uint8Array.fromBase64(encrypted_key);
+  await updateUser(c.env.DB, c.get('userId'), { e2ee_key: decoded.buffer });
+  return c.json({ encrypted_key });
 });
 
 auth.get('/e2ee', authenticate, async (c) => {
