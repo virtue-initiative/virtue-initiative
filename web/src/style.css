@@ -48,7 +48,16 @@ body {
   min-height: 100vh;
 }
 
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
 header {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -134,10 +143,14 @@ header a.nav-active {
   border-color: #fca5a5;
 }
 
-main {
+.app-main {
   flex: auto;
+  min-height: 0;
   display: flex;
   justify-content: center;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
 }
 
 /* Shared components */
@@ -223,4 +236,3 @@ main {
   color: var(--text-muted);
   font-size: 0.95rem;
 }
-
