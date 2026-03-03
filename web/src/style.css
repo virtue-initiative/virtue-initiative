@@ -192,6 +192,24 @@ a.header-brand:hover {
   font-weight: 600;
   cursor: pointer;
   transition: opacity 0.15s;
+
+  &.text-icon {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+
+    & .icon {
+      width: 1.3em;
+      height: 1.3em;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    & .text {
+      display: inline;
+    }
+  }
 }
 
 .btn:disabled {
