@@ -1,4 +1,4 @@
--- BePure API schema
+-- Virtue Initiative API schema
 
 CREATE TABLE users (
   id TEXT PRIMARY KEY,
@@ -16,14 +16,27 @@ CREATE TABLE devices (
   name TEXT NOT NULL,
   platform TEXT NOT NULL,
   avg_interval_seconds INTEGER NOT NULL DEFAULT 300,
-  last_seen_at TEXT,
-  last_upload_at TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE INDEX idx_devices_user_id ON devices(user_id);
+
+-- Per-device rolling state for the new hash verification system.
+-- new_state = sha256(current_state || content_hash) is verified on each log upload.
+-- State resets to random bytes after each batch upload (returned to client).
+CREATE TABLE device_states (
+  device_id  TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  state      BLOB NOT NULL,  -- raw 32 bytes (current rolling state)
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  batch_start_state BLOB,
+  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id)   REFERENCES users(id)   ON DELETE CASCADE
+);
+
+CREATE INDEX idx_device_states_user_id ON device_states(user_id);
 
 -- Encrypted 1-hour batch blobs stored in R2
 CREATE TABLE r2_batches (

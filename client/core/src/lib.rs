@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-pub const DEFAULT_BASE_API_URL: &str = "https://api.bepure.anb.codes";
+pub const DEFAULT_BASE_API_URL: &str = "https://api.virtueinitiative.org";
 pub const BASE_API_URL_ENV_VAR: &str = "VIRTUE_BASE_API_URL";
 pub const CAPTURE_INTERVAL_SECONDS_ENV_VAR: &str = "VIRTUE_CAPTURE_INTERVAL_SECONDS";
 pub const BATCH_WINDOW_SECONDS_ENV_VAR: &str = "VIRTUE_BATCH_WINDOW_SECONDS";
