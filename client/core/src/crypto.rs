@@ -2,6 +2,7 @@ use aes_gcm::{
     Aes256Gcm, Key, Nonce,
     aead::{Aead, AeadCore, KeyInit, OsRng},
 };
+use argon2::{Algorithm, Argon2, Params, Version};
 use pbkdf2::pbkdf2_hmac;
 use sha2::Sha256;
 
@@ -9,6 +10,21 @@ use crate::error::{CoreError, CoreResult};
 
 const PBKDF2_ITERATIONS: u32 = 100_000;
 const NONCE_LEN: usize = 12;
+
+/// Hash the password with argon2id before sending to the server.
+/// Uses the lowercased email as a deterministic salt — matches the web client exactly.
+/// NOTE: use the original (unhashed) password for the wrapping key.
+pub fn hash_password_for_auth(password: &str, email: &str) -> CoreResult<String> {
+    let salt = email.to_lowercase();
+    let params = Params::new(65536, 3, 1, Some(32))
+        .map_err(|e| CoreError::Crypto(format!("argon2 params error: {e}")))?;
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let mut output = [0u8; 32];
+    argon2
+        .hash_password_into(password.as_bytes(), salt.as_bytes(), &mut output)
+        .map_err(|e| CoreError::Crypto(format!("argon2 hash error: {e}")))?;
+    Ok(hex::encode(output))
+}
 
 /// Derive a 32-byte AES key from the user's E2EE password and their user ID (used as salt).
 pub fn derive_key(password: &str, user_id: &str) -> [u8; 32] {

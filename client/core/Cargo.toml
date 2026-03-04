@@ -11,6 +11,7 @@ crate-type = ["rlib", "cdylib", "staticlib"]
 
 [dependencies]
 aes-gcm = "0.10"
+argon2 = "0.5"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["clock", "serde"] }
 flate2 = "1"
