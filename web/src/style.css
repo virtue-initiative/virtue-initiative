@@ -10,6 +10,10 @@
   --bg-subtle: #f3f2ef;
   --border: #e0ddd8;
   --accent: #1a8a50;
+  --control-border-hover: #c9c5bf;
+  --control-active-bg: var(--bg-subtle);
+  --control-active-border: #bfd8c9;
+  --control-active-text: var(--accent);
 
   color: var(--text);
   background-color: var(--bg);
@@ -28,6 +32,10 @@
   --bg-subtle: #1e2421;
   --border: #2c332e;
   --accent: #22a862;
+  --control-border-hover: #3f4c44;
+  --control-active-bg: #16251c;
+  --control-active-border: #1f4a33;
+  --control-active-text: #8ee7b5;
   color: var(--text);
   background-color: var(--bg);
 }
@@ -36,7 +44,6 @@
 [data-theme="dark"] .badge-gray   { background: #1f2937; color: #9ca3af; }
 [data-theme="dark"] .badge-yellow { background: #2d1f07; color: #fbbf24; }
 [data-theme="dark"] .error-banner { background: #3b0a0a; color: #fca5a5; }
-[data-theme="dark"] .header-logout:hover { background: #3b0a0a; color: #fca5a5; border-color: #7f1d1d; }
 
 body {
   margin: 0;
@@ -56,7 +63,7 @@ body {
   overflow: hidden;
 }
 
-header {
+.site-header {
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -80,67 +87,63 @@ a.header-brand:hover {
   letter-spacing: 0.02em;
 }
 
-header nav {
+.header-toolbar {
   display: flex;
   align-items: center;
   gap: 0.5rem;
 }
 
-header a {
+.control {
+  box-sizing: border-box;
+  height: 2.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text-muted);
-  padding: 0.5rem 0.75rem;
+  padding: 0 0.8rem;
   text-decoration: none;
-  font-size: 0.9rem;
-  font-weight: 500;
-  border-radius: 6px;
-  transition: background 0.12s, color 0.12s;
-}
-
-header a:hover {
-  background: var(--bg-subtle);
-  color: var(--text);
-}
-
-header a.nav-active {
-  background: var(--bg-subtle);
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.btn-theme {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-muted);
-  border-radius: 6px;
-  padding: 0.35rem 0.6rem;
-  font-size: 1rem;
-  line-height: 1;
-  cursor: pointer;
-  transition: border-color 0.12s, color 0.12s;
-}
-
-.btn-theme:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.header-logout {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-muted);
-  padding: 0.4rem 0.85rem;
-  margin-left: 0.5rem;
-  cursor: pointer;
   font-size: 0.875rem;
   font-weight: 500;
+  border: 1px solid var(--border);
   border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
 
-.header-logout:hover {
-  background: #fee2e2;
-  color: #b91c1c;
-  border-color: #fca5a5;
+.control:hover {
+  background: var(--bg-subtle);
+  color: var(--text);
+  border-color: var(--control-border-hover);
+}
+
+.control.is-active {
+  background: var(--control-active-bg);
+  color: var(--control-active-text);
+  font-weight: 600;
+  border-color: var(--control-active-border);
+}
+
+.control-flat {
+  border-color: transparent;
+}
+
+.control-flat:hover {
+  border-color: transparent;
+}
+
+.control-flat.is-active {
+  border-color: transparent;
+}
+
+.control-icon {
+  width: 2.25rem;
+  padding: 0;
+}
+
+.control-icon svg {
+  width: 1.1rem;
+  height: 1.1rem;
 }
 
 .app-main {
