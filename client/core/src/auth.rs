@@ -6,7 +6,7 @@ use reqwest::header::{COOKIE, HeaderValue, SET_COOKIE};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
-use crate::crypto::{derive_key, decrypt};
+use crate::crypto::{derive_key, decrypt, hash_password_for_auth};
 use crate::error::{CoreError, CoreResult};
 use crate::models::{E2EEKeyResponse, LoginRequest, TokenResponse};
 use crate::resolve_base_api_url;
@@ -60,7 +60,8 @@ impl AuthClient {
     }
 
     pub async fn login(&self, email: &str, password: &str) -> CoreResult<TokenResponse> {
-        let payload = LoginRequest { email, password };
+        let pw_hash = hash_password_for_auth(password, email)?;
+        let payload = LoginRequest { email, password: &pw_hash };
         let url = format!("{}/login", self.config.base_url);
         let response = self.client.post(url).json(&payload).send().await?;
         let set_cookie_headers = collect_set_cookie_headers(&response);
