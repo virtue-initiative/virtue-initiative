@@ -132,12 +132,11 @@ async fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
 
     if !is_user_service_active("virtue.service")
         && prompt_yes_no("Install and start the virtue systemd user service?", true)?
+        && let Err(err) = ensure_user_service_running()
     {
-        if let Err(err) = ensure_user_service_running() {
-            eprintln!(
-                "could not auto-start user service: {err}\nrun: systemctl --user daemon-reload && systemctl --user enable --now virtue.service"
-            );
-        }
+        eprintln!(
+            "could not auto-start user service: {err}\nrun: systemctl --user daemon-reload && systemctl --user enable --now virtue.service"
+        );
     }
 
     println!("Logged in. Device id: {}", registration.id);

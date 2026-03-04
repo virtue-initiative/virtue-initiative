@@ -55,7 +55,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     let auth_client = AuthClient::new(token_store.clone())?;
     let upload_client = UploadClient::new()?;
     let api_client = ApiClient::new()?;
-    let pipeline = ImagePipeline::default();
+    let pipeline = ImagePipeline;
 
     let mut schedule_state = CaptureScheduleState::default();
     let mut last_cycle_success = true;
@@ -64,10 +64,10 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     let mut last_session_unavailable_log: Option<Instant> = None;
 
     // Re-fetch the E2EE key from the server on each daemon startup.
-    if let Some(access_token) = token_store.get_access_token()? {
-        if let Err(err) = auth_client.fetch_and_decrypt_e2ee_key(&access_token).await {
-            eprintln!("daemon: could not fetch E2EE key on startup: {err:#}");
-        }
+    if let Some(access_token) = token_store.get_access_token()?
+        && let Err(err) = auth_client.fetch_and_decrypt_e2ee_key(&access_token).await
+    {
+        eprintln!("daemon: could not fetch E2EE key on startup: {err:#}");
     }
 
     let mut batch_buffer = load_batch_buffer(&paths.batch_buffer_file);
@@ -203,13 +203,12 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
                         ("error".to_string(), err.to_string()),
                     ],
                 };
-                if let Some(device_id_bytes) = uuid_str_to_bytes(&device_id) {
-                    if let Err(e) = upload_client
+                if let Some(device_id_bytes) = uuid_str_to_bytes(&device_id)
+                    && let Err(e) = upload_client
                         .upload_hash(&access_token, &device_id_bytes, &item.sha256())
                         .await
-                    {
-                        eprintln!("failed to upload content hash: {e}");
-                    }
+                {
+                    eprintln!("failed to upload content hash: {e}");
                 }
                 batch_buffer.items.push(item);
                 if batch_buffer.window_start.is_none() {
@@ -235,13 +234,12 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
                         ("error".to_string(), err.to_string()),
                     ],
                 };
-                if let Some(device_id_bytes) = uuid_str_to_bytes(&device_id) {
-                    if let Err(e) = upload_client
+                if let Some(device_id_bytes) = uuid_str_to_bytes(&device_id)
+                    && let Err(e) = upload_client
                         .upload_hash(&access_token, &device_id_bytes, &item.sha256())
                         .await
-                    {
-                        eprintln!("failed to upload content hash: {e}");
-                    }
+                {
+                    eprintln!("failed to upload content hash: {e}");
                 }
                 batch_buffer.items.push(item);
                 save_batch_buffer(&paths.batch_buffer_file, &batch_buffer);

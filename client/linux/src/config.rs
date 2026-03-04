@@ -39,7 +39,7 @@ impl ClientPaths {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ClientState {
     pub monitoring_enabled: bool,
     pub email: Option<String>,
@@ -47,18 +47,6 @@ pub struct ClientState {
     pub backend_hint: Option<CaptureBackendHint>,
     /// User ID used as PBKDF2 salt for E2EE key derivation.
     pub e2ee_user_id: Option<String>,
-}
-
-impl Default for ClientState {
-    fn default() -> Self {
-        Self {
-            monitoring_enabled: false,
-            email: None,
-            device_id: None,
-            backend_hint: None,
-            e2ee_user_id: None,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]

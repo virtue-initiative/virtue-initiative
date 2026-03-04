@@ -25,6 +25,10 @@ jobs:
         run: cargo clippy -p virtue-client-core --all-targets -- -D warnings
         working-directory: client
 
+      - name: Rust lint (Linux client)
+        run: cargo clippy -p virtue-linux-client --all-targets -- -D warnings
+        working-directory: client
+
       - name: Rust format check (Android)
         run: cargo fmt --all --manifest-path android/rust/Cargo.toml -- --check
         working-directory: client
