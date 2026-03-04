@@ -1,6 +1,8 @@
-# BePure API
+# Virtue Initiative API Spec
 
-This document reflects the API currently implemented in `api/src/routes`.
+**This document is written primarily by AI and may not be completely up to date.**
+
+This document reflects the API currently implemented in `src/routes`.
 
 Base URL examples:
 
@@ -167,63 +169,33 @@ Response `200`: `{ "batch": { ...all fields... } }`
 
 ## Hash Chain
 
-Clients push a SHA-256 chain hash every minute (binary, 32 bytes).  
-Chain construction: `hash[i] = SHA-256(hash[i-1] || minute_data[i])`.  
-The web client fetches hashes for a time range and re-verifies the chain to detect tampering.
+For every buffered log, clients send the SHA-256 hash of the log in binary. This is then stored with the device like so.
+
+```
+current = sha256(current || content_hash)
+```
+
+When a batch is uploaded, the starting and current hash is stored with the
+batch so that the web client can verify it once it decrypts it.
 
 All hash endpoints require `Authorization: Bearer <token>`.
 
 ### `POST /hash`
 
-Upload a binary chain hash.
+Upload a content hash using binary
 
 - **Content-Type**: `application/octet-stream`
-- **Body**: exactly 32 bytes (raw SHA-256 hash)
-- **Headers**:
-  - `X-Device-ID: <device_uuid>`
-  - `X-Client-Timestamp: <ISO-8601>`
-
-Rate-limited to **1 request per 60 seconds per device**.
-
-Response `201`:
-
-```json
-{ "id": "uuid", "timestamp": "2026-01-01T00:01:00.000Z" }
-```
-
-Rate-limit response `429`:
-
-```json
-{ "error": "Too many requests", "retry_after_seconds": 42 }
-```
+- **Body**: `[device_id:16B][content_hash:32B]`
 
 ### `GET /hash`
 
-Query chain hashes for a time range.
+Gets the latest hash
 
 Query params:
 
 | Param       | Required | Description                                          |
 | ----------- | -------- | ---------------------------------------------------- |
 | `device_id` | ✓        | Device UUID                                          |
-| `from`      | ✓        | ISO-8601 start (inclusive)                           |
-| `to`        | ✓        | ISO-8601 end (inclusive)                             |
-| `user`      | –        | Target user ID (partner access requires `view_data`) |
-| `cursor`    | –        | Pagination cursor (client_timestamp of last item)    |
-| `limit`     | –        | Max results (default 100, max 1500)                  |
-
-Response `200`:
-
-```json
-{
-  "items": [{ "id", "hash_hex", "client_timestamp" }],
-  "next_cursor": "..."
-}
-```
-
-`hash_hex` is the 64-character hex encoding of the raw 32-byte hash.
-
----
 
 ## Partners
 
