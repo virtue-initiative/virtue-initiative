@@ -134,7 +134,11 @@ impl UploadClient {
         access_token: &str,
         device_id: &str,
     ) -> CoreResult<StateResponse> {
-        let url = format!("{}/hash?device_id={}", self.config.effective_hash_base_url(), device_id);
+        let url = format!(
+            "{}/hash?device_id={}",
+            self.config.effective_hash_base_url(),
+            device_id
+        );
         let response = self
             .client
             .get(url)

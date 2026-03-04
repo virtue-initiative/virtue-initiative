@@ -5,8 +5,8 @@ use base64::Engine;
 use serde::Deserialize;
 use tokio::runtime::Runtime;
 
-use virtue_client_core::{AuthClient, ApiClient, FileTokenStore, TokenStore};
 use crate::config::{ClientPaths, load_state, save_state};
+use virtue_client_core::{ApiClient, AuthClient, FileTokenStore, TokenStore};
 
 #[derive(Clone)]
 pub struct SessionManager {
