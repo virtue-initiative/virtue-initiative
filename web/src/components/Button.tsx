@@ -1,4 +1,4 @@
-export function Button({ children, onClick, className, icon }: { children: preact.VNode; onClick: () => void; className?: string; icon?: preact.VNode }) {
+export function Button({ children, onClick, className, icon }: { children: preact.ComponentChildren; onClick: () => void; className?: string; icon?: preact.VNode }) {
   if (icon) {
     return (
       <button class={`btn text-icon ${className}`} onClick={onClick} type="button">
