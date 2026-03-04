@@ -10,6 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.lint.json --noEmit",
+    "prettier:check": "cd .. && git ls-files -z -- api | grep -zE '\\.(ts|tsx|cts|mts|js|jsx|cjs|mjs|json|json5|jsonc|css|scss|html|md|mdx|yml|yaml)$' | xargs -0 -r npx --prefix api prettier --check",
+    "prettier:write": "cd .. && git ls-files -z -- api | grep -zE '\\.(ts|tsx|cts|mts|js|jsx|cjs|mjs|json|json5|jsonc|css|scss|html|md|mdx|yml|yaml)$' | xargs -0 -r npx --prefix api prettier --write",
     "db:migrate": "wrangler d1 migrations apply bepure-db",
     "db:migrate:local": "wrangler d1 migrations apply bepure-db --local",
     "format": "prettier --write \"src/**/*.{ts,json}\"",

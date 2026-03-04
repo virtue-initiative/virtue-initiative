@@ -1,191 +1,238 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>The Virtue Initiative</title>
-  <link rel="stylesheet" href="style.css" />
-  <script>document.documentElement.setAttribute('data-theme',localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'));</script>
-</head>
-<body>
-  <header>
-    <div class="container">
-      <div class="header-top">
-        <a href="/" class="wordmark">The Virtue Initiative</a>
-        <div class="header-actions">
-          <button class="btn-theme" id="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode"></button>
-          <a href='https://app.virtueinitiative.org' class="btn-login nolink">Login / Sign up</a>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>The Virtue Initiative</title>
+    <link rel="stylesheet" href="style.css" />
+    <script>
+      document.documentElement.setAttribute(
+        "data-theme",
+        localStorage.getItem("theme") ||
+          (matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light"),
+      );
+    </script>
+  </head>
+  <body>
+    <header>
+      <div class="container">
+        <div class="header-top">
+          <a href="/" class="wordmark">The Virtue Initiative</a>
+          <div class="header-actions">
+            <button
+              class="btn-theme"
+              id="theme-toggle"
+              onclick="toggleTheme()"
+              aria-label="Toggle dark mode"
+            ></button>
+            <a href="https://app.virtueinitiative.org" class="btn-login nolink"
+              >Login / Sign up</a
+            >
+          </div>
         </div>
+        <p class="tagline">
+          Providing free tools and resources for accountability
+        </p>
       </div>
-      <p class="tagline">Providing free tools and resources for accountability</p>
-    </div>
-  </header>
+    </header>
 
-  <main class="container">
+    <main class="container">
+      <section id="about">
+        <h2>About</h2>
+        <p>
+          The Virtue Initiative is an organization that offers a free
+          accountability app for your devices. We were founded when we saw the
+          lack of a non-commercial and free app in this space. While we believe
+          accountability is something worth paying for, we do not want money to
+          be the reason someone stays stuck in a pornography addiction.
+        </p>
 
-    <section id="about">
-      <h2>About</h2>
-      <p>
+        <p>
+          Our mission is to develop free technology and resources to support
+          ending pornography addiction. We know what it's like to feel stuck,
+          and we want to provide tools to support you, and we don't want the
+          price to be yet another excuse not to deal with pornography. It's
+          already hard enough.
+        </p>
 
-        The Virtue Initiative is an organization that offers a free accountability app for
-        your devices. We were founded when we saw the lack of a non-commercial
-        and free app in this space. While we believe accountability is
-        something worth paying for, we do not want money to be the reason
-        someone stays stuck in a pornography addiction.
+        <p>
+          Our vision is to see the Christian church and the world freed from
+          pornography. There are billions of dollars made by keeping men and
+          women stuck in addiction. For many people, it starts from a young age
+          and it's hard to give up, even if they desperately want to. We want to
+          provide tools to provide support and make it easier.
+        </p>
 
-      </p>
+        <p>
+          The Virtue Initiative began in February 2026 when we started looking
+          at accountability apps. There were a few options but most of them cost
+          around $15/month. One of us being a full time student, we knew that
+          could be a blocker and we thought we could do better. Our goal is to
+          fundraise all our funds and offer the app for free. We believe this is
+          a big enough issue that people will be willing to donate and support
+          the mission of developing technology and resources for ending
+          pornography addiction.
+        </p>
 
-      <p>
+        <p>
+          Hopefully you're willing to join us on this mission. If you've been or
+          know someone who's been struggling to break free from porn,
+          <a href="https://app.virtueinitiative.org">sign up</a> now or send
+          this to them. You might also want to read
+          <a href="https://help.virtueinitiative.org/help/tips">
+            this page on tips to beat the addiction.
+          </a>
+        </p>
 
-        Our mission is to develop free technology and resources to support
-        ending pornography addiction. We know what it's like to feel stuck, and
-        we want to provide tools to support you, and we don't want the price to
-        be yet another excuse not to deal with pornography. It's already hard
-        enough.
+        <p>
+          If you wish to support us monetarily, you can donate (at some point).
+          If you have any questions, feel free to contact us at
+          <a href="mailto:help@virtueinitiative.org"
+            >help@virtueinitiative.org</a
+          >
+        </p>
+      </section>
 
-      </p>
+      <section id="how-it-works">
+        <h2>How it works</h2>
+        <ol>
+          <li>
+            <a href="https://app.virtueinitiative.org">Create an account</a>
+          </li>
+          <li>
+            <a href="https://help.virtueinitiative.org/help/installation"
+              >Install the The Virtue Initiative client</a
+            >
+            on one or more of your devices.
+          </li>
+          <li>
+            Invite an accountability partner by email. They will need to create
+            an account.
+          </li>
+          <li>
+            The client runs in the background, capturing periodic blurry
+            screenshots and uploading them securely.
+          </li>
+          <li>
+            Your partner logs in to the web portal to review your activity log
+            and screenshots.
+          </li>
+        </ol>
+        <a
+          href="https://help.virtueinitiative.org/help/getting-started"
+          class="btn-help nolink"
+          >Learn more</a
+        >
+      </section>
 
-      <p>
+      <section id="platforms">
+        <h2>Currently supported platforms &amp; features</h2>
+        <p>
+          We are working hard to support more platforms and features. Below is
+          the current features supported by platform. As you can probably tell,
+          this is still an alpha stage project.
+        </p>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Feature</th>
+                <th>Windows</th>
+                <th>macOS</th>
+                <th>Linux</th>
+                <th>Android</th>
+                <th>iOS</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Periodic screenshots</td>
+                <td class="no">✗</td>
+                <td class="no">✗</td>
+                <td class="yes">✔</td>
+                <td class="no">✗</td>
+                <td class="no">✗</td>
+              </tr>
+              <tr>
+                <td>Runs as a background service</td>
+                <td class="no">✗</td>
+                <td class="no">✗</td>
+                <td class="yes">✔</td>
+                <td class="no">✗</td>
+                <td class="no">✗</td>
+              </tr>
+              <tr>
+                <td>Detects shutdowns</td>
+                <td class="no">✗</td>
+                <td class="no">✗</td>
+                <td class="yes">✔</td>
+                <td class="no">✗</td>
+                <td class="no">✗</td>
+              </tr>
+              <tr>
+                <td>Detects tampering</td>
+                <td class="no">✗</td>
+                <td class="no">✗</td>
+                <td class="no">✗</td>
+                <td class="no">✗</td>
+                <td class="no">✗</td>
+              </tr>
+              <tr>
+                <td>Captures web history</td>
+                <td class="no">✗</td>
+                <td class="no">✗</td>
+                <td class="no">✗</td>
+                <td class="no">✗</td>
+                <td class="no">✗</td>
+              </tr>
+              <tr>
+                <td>Image risk classification</td>
+                <td class="no">✗</td>
+                <td class="no">✗</td>
+                <td class="no">✗</td>
+                <td class="no">✗</td>
+                <td class="no">✗</td>
+              </tr>
+              <tr>
+                <td>End-to-end encryption</td>
+                <td class="no">✗</td>
+                <td class="no">✗</td>
+                <td class="no">✗</td>
+                <td class="no">✗</td>
+                <td class="no">✗</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
 
-        Our vision is to see the Christian church and the world freed from
-        pornography. There are billions of dollars made by keeping men and
-        women stuck in addiction. For many people, it starts from a young age
-        and it's hard to give up, even if they desperately want to. We want to
-        provide tools to provide support and make it easier.
-
-      </p>
-
-      <p>
-
-        The Virtue Initiative began in February 2026 when we started looking at accountability
-        apps. There were a few options but most of them cost around $15/month.
-        One of us being a full time student, we knew that could be a blocker
-        and we thought we could do better. Our goal is to fundraise all our
-        funds and offer the app for free. We believe this is a big enough issue
-        that people will be willing to donate and support the mission of
-        developing technology and resources for ending pornography addiction.
-
-      </p>
-
-      <p>
-
-        Hopefully you're willing to join us on this mission. If you've been or
-        know someone who's been struggling to break free from porn, <a
-        href="https://app.virtueinitiative.org">sign up</a> now or send this to
-        them. You might also want to read
-        <a href="https://help.virtueinitiative.org/help/tips"> this page on tips to beat the addiction. </a>
-
-      </p>
-
-      <p>If you wish to support us monetarily, you can donate (at some point).
-      If you have any questions, feel free to contact us at <a
-      href="mailto:help@virtueinitiative.org">help@virtueinitiative.org</a></p>
-
-    </section>
-
-    <section id="how-it-works">
-      <h2>How it works</h2>
-      <ol>
-        <li><a href="https://app.virtueinitiative.org">Create an account</a></li>
-        <li><a href="https://help.virtueinitiative.org/help/installation">Install the The Virtue Initiative client</a> on one or more of your devices.</li>
-        <li>Invite an accountability partner by email. They will need to create an account.</li>
-        <li>The client runs in the background, capturing periodic blurry screenshots and uploading them securely.</li>
-        <li>Your partner logs in to the web portal to review your activity log and screenshots.</li>
-      </ol>
-      <a href='https://help.virtueinitiative.org/help/getting-started' class="btn-help nolink">Learn more</a>
-    </section>
-
-    <section id="platforms">
-      <h2>Currently supported platforms &amp; features</h2>
-      <p> We are working hard to support more platforms and features. Below is the current features supported by platform. As you can probably tell, this is still an alpha stage project.</p>
-      <div class="table-wrapper">
-        <table>
-          <thead>
-            <tr>
-              <th>Feature</th>
-              <th>Windows</th>
-              <th>macOS</th>
-              <th>Linux</th>
-              <th>Android</th>
-              <th>iOS</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Periodic screenshots</td>
-              <td class="no">✗</td>
-              <td class="no">✗</td>
-              <td class="yes">✔</td>
-              <td class="no">✗</td>
-              <td class="no">✗</td>
-            </tr>
-            <tr>
-              <td>Runs as a background service</td>
-              <td class="no">✗</td>
-              <td class="no">✗</td>
-              <td class="yes">✔</td>
-              <td class="no">✗</td>
-              <td class="no">✗</td>
-            </tr>
-            <tr>
-              <td>Detects shutdowns</td>
-              <td class="no">✗</td>
-              <td class="no">✗</td>
-              <td class="yes">✔</td>
-              <td class="no">✗</td>
-              <td class="no">✗</td>
-            </tr>
-            <tr>
-              <td>Detects tampering</td>
-              <td class="no">✗</td>
-              <td class="no">✗</td>
-              <td class="no">✗</td>
-              <td class="no">✗</td>
-              <td class="no">✗</td>
-            </tr>
-            <tr>
-              <td>Captures web history</td>
-              <td class="no">✗</td>
-              <td class="no">✗</td>
-              <td class="no">✗</td>
-              <td class="no">✗</td>
-              <td class="no">✗</td>
-            </tr>
-            <tr>
-              <td>Image risk classification</td>
-              <td class="no">✗</td>
-              <td class="no">✗</td>
-              <td class="no">✗</td>
-              <td class="no">✗</td>
-              <td class="no">✗</td>
-            </tr>
-            <tr>
-              <td>End-to-end encryption</td>
-              <td class="no">✗</td>
-              <td class="no">✗</td>
-              <td class="no">✗</td>
-              <td class="no">✗</td>
-              <td class="no">✗</td>
-            </tr>
-          </tbody>
-        </table>
+    <footer>
+      <div class="container">
+        <p>
+          The Virtue Initiative is a non-profit project. Free to use, forever.
+          &nbsp;·&nbsp; <a href="/privacy.html">Privacy Policy</a> &nbsp;·&nbsp;
+          <a href="/terms.html">Terms of Use</a>
+        </p>
       </div>
-    </section>
-
-  </main>
-
-  <footer>
-    <div class="container">
-      <p>The Virtue Initiative is a non-profit project. Free to use, forever. &nbsp;·&nbsp; <a href="/privacy.html">Privacy Policy</a> &nbsp;·&nbsp; <a href="/terms.html">Terms of Use</a></p>
-    </div>
-  </footer>  <script>
-    function toggleTheme() {
-      var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', next);
-      localStorage.setItem('theme', next);
-      document.getElementById('theme-toggle').textContent = next === 'dark' ? '☀' : '🌙';
-    }
-    document.getElementById('theme-toggle').textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀' : '🌙';
-  </script>
-</body>
+    </footer>
+    <script>
+      function toggleTheme() {
+        var next =
+          document.documentElement.getAttribute("data-theme") === "dark"
+            ? "light"
+            : "dark";
+        document.documentElement.setAttribute("data-theme", next);
+        localStorage.setItem("theme", next);
+        document.getElementById("theme-toggle").textContent =
+          next === "dark" ? "☀" : "🌙";
+      }
+      document.getElementById("theme-toggle").textContent =
+        document.documentElement.getAttribute("data-theme") === "dark"
+          ? "☀"
+          : "🌙";
+    </script>
+  </body>
 </html>

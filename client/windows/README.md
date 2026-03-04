@@ -54,9 +54,10 @@ $env:VIRTUE_BASE_API_URL = "https://your-api.example.com"
 
 For background capture, set it as a machine-level environment variable and log out/in.
 Capture and tray are launched from machine startup Run keys (`HKLM`):
+
 - `VirtueCapture` starts hidden capture (`virtue-service.exe --console` via `wscript`).
 - `VirtueTray` starts the tray app.
-The installer also creates all-users Startup-folder shortcuts as a fallback.
+  The installer also creates all-users Startup-folder shortcuts as a fallback.
 
 ## Capture interval override
 

@@ -38,8 +38,16 @@ describe('POST /partner', () => {
     const { token } = await signupAndGetToken('dave@example.com');
     await signupAndGetToken('eve@example.com');
     const payload = JSON.stringify({ email: 'eve@example.com', permissions: {} });
-    await SELF.fetch(`${BASE}/partner`, { method: 'POST', headers: authHeaders(token), body: payload });
-    const res = await SELF.fetch(`${BASE}/partner`, { method: 'POST', headers: authHeaders(token), body: payload });
+    await SELF.fetch(`${BASE}/partner`, {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: payload,
+    });
+    const res = await SELF.fetch(`${BASE}/partner`, {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: payload,
+    });
     expect(res.status).toBe(409);
   });
 });
@@ -86,14 +94,18 @@ describe('GET /partner', () => {
       body: JSON.stringify({ email: 'bob3@example.com', permissions: {} }),
     });
 
-    const aliceList = (await (await SELF.fetch(`${BASE}/partner`, {
-      headers: { Authorization: `Bearer ${aliceToken}` },
-    })).json()) as Array<{ role: string }>;
+    const aliceList = (await (
+      await SELF.fetch(`${BASE}/partner`, {
+        headers: { Authorization: `Bearer ${aliceToken}` },
+      })
+    ).json()) as Array<{ role: string }>;
     expect(aliceList.some((p) => p.role === 'owner')).toBe(true);
 
-    const bobList = (await (await SELF.fetch(`${BASE}/partner`, {
-      headers: { Authorization: `Bearer ${bobToken}` },
-    })).json()) as Array<{ role: string }>;
+    const bobList = (await (
+      await SELF.fetch(`${BASE}/partner`, {
+        headers: { Authorization: `Bearer ${bobToken}` },
+      })
+    ).json()) as Array<{ role: string }>;
     expect(bobList.some((p) => p.role === 'partner')).toBe(true);
   });
 });
@@ -149,4 +161,3 @@ describe('DELETE /partner/:id', () => {
     expect(res.status).toBe(404);
   });
 });
-

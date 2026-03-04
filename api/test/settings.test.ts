@@ -8,7 +8,9 @@ beforeEach(clearDB);
 describe('GET /settings', () => {
   it('returns defaults when no settings have been saved', async () => {
     const { token } = await signupAndGetToken('alice@example.com');
-    const res = await SELF.fetch(`${BASE}/settings`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await SELF.fetch(`${BASE}/settings`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { timezone: string; retention_days: number };
     expect(body.timezone).toBe('UTC');
@@ -51,7 +53,7 @@ describe('POST /settings', () => {
     });
     const body = (await res.json()) as { timezone: string; retention_days: number };
     expect(body.timezone).toBe('Europe/London'); // preserved
-    expect(body.retention_days).toBe(14);         // updated
+    expect(body.retention_days).toBe(14); // updated
   });
 
   it('persists settings so GET returns the saved values', async () => {
@@ -61,9 +63,10 @@ describe('POST /settings', () => {
       headers: authHeaders(token),
       body: JSON.stringify({ timezone: 'Asia/Tokyo' }),
     });
-    const res = await SELF.fetch(`${BASE}/settings`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await SELF.fetch(`${BASE}/settings`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     const body = (await res.json()) as { timezone: string };
     expect(body.timezone).toBe('Asia/Tokyo');
   });
 });
-

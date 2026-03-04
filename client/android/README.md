@@ -95,22 +95,29 @@ emulator -list-avds
 From repo root:
 
 1. Start emulator in background.
+
 ```bash
 emulator -avd virtue_api35 -no-snapshot &
 ```
+
 2. Wait until Android boot is complete.
+
 ```bash
 adb wait-for-device
 until adb shell getprop sys.boot_completed | tr -d '\r' | grep -q "^1$"; do sleep 1; done
 adb shell input keyevent 82
 ```
+
 3. Build and install debug app.
+
 ```bash
 cd client/android
 ./gradlew :app:assembleDebug
 ./gradlew :app:installDebug
 ```
+
 4. Launch app activity.
+
 ```bash
 adb shell am start -n codes.anb.virtue/.MainActivity
 ```

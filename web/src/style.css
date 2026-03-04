@@ -1,5 +1,10 @@
 :root {
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
@@ -40,10 +45,22 @@
   background-color: var(--bg);
 }
 
-[data-theme="dark"] .badge-green  { background: #14532d; color: #4ade80; }
-[data-theme="dark"] .badge-gray   { background: #1f2937; color: #9ca3af; }
-[data-theme="dark"] .badge-yellow { background: #2d1f07; color: #fbbf24; }
-[data-theme="dark"] .error-banner { background: #3b0a0a; color: #fca5a5; }
+[data-theme="dark"] .badge-green {
+  background: #14532d;
+  color: #4ade80;
+}
+[data-theme="dark"] .badge-gray {
+  background: #1f2937;
+  color: #9ca3af;
+}
+[data-theme="dark"] .badge-yellow {
+  background: #2d1f07;
+  color: #fbbf24;
+}
+[data-theme="dark"] .error-banner {
+  background: #3b0a0a;
+  color: #fca5a5;
+}
 
 body {
   margin: 0;
@@ -108,7 +125,10 @@ a.header-brand:hover {
   border-radius: 6px;
   background: transparent;
   cursor: pointer;
-  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  transition:
+    background 0.12s,
+    color 0.12s,
+    border-color 0.12s;
 }
 
 .control:hover {
@@ -234,9 +254,18 @@ a.header-brand:hover {
   flex-shrink: 0;
 }
 
-.badge-green  { background: #dcfce7; color: #1a8a50; }
-.badge-gray   { background: #f3f4f6; color: #6b7280; }
-.badge-yellow { background: #fef9c3; color: #a16207; }
+.badge-green {
+  background: #dcfce7;
+  color: #1a8a50;
+}
+.badge-gray {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+.badge-yellow {
+  background: #fef9c3;
+  color: #a16207;
+}
 
 .error-banner {
   background: #fee2e2;
@@ -247,7 +276,9 @@ a.header-brand:hover {
   margin: 0 0 1rem;
 }
 
-.muted { color: var(--text-muted); }
+.muted {
+  color: var(--text-muted);
+}
 
 .splash {
   display: flex;

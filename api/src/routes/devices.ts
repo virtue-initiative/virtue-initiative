@@ -4,7 +4,13 @@ import { v4 as uuidv4 } from 'uuid';
 import { Env, Variables } from '../types/bindings';
 import { authenticate } from '../middleware/auth';
 import { createDeviceSchema, updateDeviceSchema, listDevicesSchema } from '../lib/schemas';
-import { createDevice, listDevices, findDevice, updateDevice, findAcceptedPartnership } from '../lib/db';
+import {
+  createDevice,
+  listDevices,
+  findDevice,
+  updateDevice,
+  findAcceptedPartnership,
+} from '../lib/db';
 
 const devices = new Hono<{ Bindings: Env; Variables: Variables }>();
 const ONLINE_WINDOW_MINUTES = 10;

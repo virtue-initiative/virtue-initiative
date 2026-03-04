@@ -1,14 +1,14 @@
-import { useState } from 'preact/hooks';
-import { useAuth } from '../../context/auth';
-import { useE2EE } from '../../context/e2ee';
-import { api } from '../../api';
-import { deriveKey, encryptData, decryptBatch } from '../../crypto';
-import './style.css';
+import { useState } from "preact/hooks";
+import { useAuth } from "../../context/auth";
+import { useE2EE } from "../../context/e2ee";
+import { api } from "../../api";
+import { deriveKey, encryptData, decryptBatch } from "../../crypto";
+import "./style.css";
 
 function jwtSub(token: string): string | null {
   try {
-    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+    const b64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
     return JSON.parse(atob(padded)).sub ?? null;
   } catch {
     return null;
@@ -18,13 +18,13 @@ function jwtSub(token: string): string | null {
 export function Auth() {
   const { login, signup } = useAuth();
   const e2ee = useE2EE();
-  const [mode, setMode] = useState<'login' | 'signup'>('login');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirm, setConfirm] = useState('');
-  const [name, setName] = useState('');
-  const [e2eePassword, setE2EEPassword] = useState('');
-  const [confirmE2EE, setConfirmE2EE] = useState('');
+  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [name, setName] = useState("");
+  const [e2eePassword, setE2EEPassword] = useState("");
+  const [confirmE2EE, setConfirmE2EE] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -33,34 +33,49 @@ export function Auth() {
     setError(null);
     setLoading(true);
     try {
-      if (mode === 'login') {
-        const { access_token, userId, wrappingKey: wk } = await login(email, password);
+      if (mode === "login") {
+        const {
+          access_token,
+          userId,
+          wrappingKey: wk,
+        } = await login(email, password);
         await restoreE2EEKeys(access_token, userId, wk);
       } else {
         if (password !== confirm) {
-          setError('Passwords do not match');
+          setError("Passwords do not match");
           setLoading(false);
           return;
         }
         if (e2eePassword !== confirmE2EE) {
-          setError('E2EE passwords do not match');
+          setError("E2EE passwords do not match");
           setLoading(false);
           return;
         }
-        const { access_token, userId, wrappingKey: wk } = await signup(email, password, name || undefined);
+        const {
+          access_token,
+          userId,
+          wrappingKey: wk,
+        } = await signup(email, password, name || undefined);
         await setupE2EEKey(access_token, userId, e2eePassword, wk);
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Something went wrong');
+      setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setLoading(false);
     }
   }
 
-  async function setupE2EEKey(token: string, uid: string, e2eePass: string, wk: CryptoKey) {
+  async function setupE2EEKey(
+    token: string,
+    uid: string,
+    e2eePass: string,
+    wk: CryptoKey,
+  ) {
     // Derive the E2EE key and store in localStorage
     const e2eeKey = await deriveKey(e2eePass, uid, true);
-    const rawE2EE = new Uint8Array(await crypto.subtle.exportKey('raw', e2eeKey));
+    const rawE2EE = new Uint8Array(
+      await crypto.subtle.exportKey("raw", e2eeKey),
+    );
     await e2ee.setKeyFromBytes(rawE2EE.buffer, uid);
     // Encrypt it with the wrapping key and upload to server
     const encrypted = await encryptData(wk, rawE2EE);
@@ -71,16 +86,27 @@ export function Auth() {
     // Restore own E2EE key
     const { encryptedE2EEKey } = await api.getE2EEKey(token);
     if (encryptedE2EEKey) {
-      const rawE2EE = await decryptBatch(wk, Uint8Array.fromBase64(encryptedE2EEKey));
+      const rawE2EE = await decryptBatch(
+        wk,
+        Uint8Array.fromBase64(encryptedE2EEKey),
+      );
       await e2ee.setKeyFromBytes(rawE2EE.buffer, uid);
     }
     // Restore partner E2EE keys
     const partners = await api.getPartners(token);
     await Promise.all(
       partners
-        .filter((p) => p.status === 'accepted' && p.permissions.view_data && p.encryptedE2EEKey)
+        .filter(
+          (p) =>
+            p.status === "accepted" &&
+            p.permissions.view_data &&
+            p.encryptedE2EEKey,
+        )
         .map(async (p) => {
-          const rawKey = await decryptBatch(wk, Uint8Array.fromBase64(p.encryptedE2EEKey!));
+          const rawKey = await decryptBatch(
+            wk,
+            Uint8Array.fromBase64(p.encryptedE2EEKey!),
+          );
           await e2ee.setKeyFromBytes(rawKey.buffer, p.partner_user_id);
         }),
     );
@@ -94,15 +120,27 @@ export function Auth() {
 
         <div class="auth-tabs">
           <button
-            class={`auth-tab ${mode === 'login' ? 'active' : ''}`}
-            onClick={() => { setMode('login'); setError(null); setConfirm(''); setE2EEPassword(''); setConfirmE2EE(''); }}
+            class={`auth-tab ${mode === "login" ? "active" : ""}`}
+            onClick={() => {
+              setMode("login");
+              setError(null);
+              setConfirm("");
+              setE2EEPassword("");
+              setConfirmE2EE("");
+            }}
             type="button"
           >
             Log in
           </button>
           <button
-            class={`auth-tab ${mode === 'signup' ? 'active' : ''}`}
-            onClick={() => { setMode('signup'); setError(null); setConfirm(''); setE2EEPassword(''); setConfirmE2EE(''); }}
+            class={`auth-tab ${mode === "signup" ? "active" : ""}`}
+            onClick={() => {
+              setMode("signup");
+              setError(null);
+              setConfirm("");
+              setE2EEPassword("");
+              setConfirmE2EE("");
+            }}
             type="button"
           >
             Sign up
@@ -110,7 +148,7 @@ export function Auth() {
         </div>
 
         <form class="auth-form" onSubmit={handleSubmit}>
-          {mode === 'signup' && (
+          {mode === "signup" && (
             <div class="field">
               <label for="name">Name (optional)</label>
               <input
@@ -138,26 +176,30 @@ export function Auth() {
           </div>
 
           <div class="field">
-              <label for="password">Password</label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
-                placeholder={mode === 'signup' ? 'Min. 8 characters' : '••••••••'}
-                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                required
-              />
-            </div>
+            <label for="password">Password</label>
+            <input
+              id="password"
+              type="password"
+              value={password}
+              onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
+              placeholder={mode === "signup" ? "Min. 8 characters" : "••••••••"}
+              autoComplete={
+                mode === "login" ? "current-password" : "new-password"
+              }
+              required
+            />
+          </div>
 
-          {mode === 'signup' && (
+          {mode === "signup" && (
             <div class="field">
               <label for="confirm">Confirm password</label>
               <input
                 id="confirm"
                 type="password"
                 value={confirm}
-                onInput={(e) => setConfirm((e.target as HTMLInputElement).value)}
+                onInput={(e) =>
+                  setConfirm((e.target as HTMLInputElement).value)
+                }
                 placeholder="••••••••"
                 autoComplete="new-password"
                 required
@@ -165,7 +207,7 @@ export function Auth() {
             </div>
           )}
 
-          {mode === 'signup' && (
+          {mode === "signup" && (
             <>
               <div class="field">
                 <label for="e2ee-password">E2EE password</label>
@@ -173,7 +215,9 @@ export function Auth() {
                   id="e2ee-password"
                   type="password"
                   value={e2eePassword}
-                  onInput={(e) => setE2EEPassword((e.target as HTMLInputElement).value)}
+                  onInput={(e) =>
+                    setE2EEPassword((e.target as HTMLInputElement).value)
+                  }
                   placeholder="Encryption password"
                   autoComplete="new-password"
                   required
@@ -185,7 +229,9 @@ export function Auth() {
                   id="confirm-e2ee"
                   type="password"
                   value={confirmE2EE}
-                  onInput={(e) => setConfirmE2EE((e.target as HTMLInputElement).value)}
+                  onInput={(e) =>
+                    setConfirmE2EE((e.target as HTMLInputElement).value)
+                  }
                   placeholder="••••••••"
                   autoComplete="new-password"
                   required
@@ -197,7 +243,11 @@ export function Auth() {
           {error && <p class="auth-error">{error}</p>}
 
           <button class="btn btn-primary" type="submit" disabled={loading}>
-            {loading ? 'Please wait…' : mode === 'login' ? 'Log in' : 'Create account'}
+            {loading
+              ? "Please wait…"
+              : mode === "login"
+                ? "Log in"
+                : "Create account"}
           </button>
         </form>
       </div>

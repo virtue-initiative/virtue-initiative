@@ -21,9 +21,9 @@ function isArrayBufferReadable(
   value: unknown,
 ): value is { arrayBuffer: () => Promise<ArrayBuffer> } {
   return (
-    typeof value === 'object'
-    && value !== null
-    && typeof Reflect.get(value, 'arrayBuffer') === 'function'
+    typeof value === 'object' &&
+    value !== null &&
+    typeof Reflect.get(value, 'arrayBuffer') === 'function'
   );
 }
 
@@ -95,7 +95,14 @@ batches.post('/', authenticate, async (c) => {
   // Reset device state to random bytes at batch boundary.
   // Store the same value as both the new current state and the next batch's start state.
   const newStateBytes = crypto.getRandomValues(new Uint8Array(32));
-  await upsertDeviceState(c.env.DB, device_id, userId, newStateBytes.buffer, createdAt, newStateBytes.buffer);
+  await upsertDeviceState(
+    c.env.DB,
+    device_id,
+    userId,
+    newStateBytes.buffer,
+    createdAt,
+    newStateBytes.buffer,
+  );
   const newStateHex = Buffer.from(newStateBytes).toString('hex');
 
   return c.json(

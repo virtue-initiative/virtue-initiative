@@ -1,6 +1,6 @@
-import { useLocation } from 'preact-iso';
-import { useAuth } from '../context/auth';
-import { useDarkMode } from '../hooks/useDarkMode';
+import { useLocation } from "preact-iso";
+import { useAuth } from "../context/auth";
+import { useDarkMode } from "../hooks/useDarkMode";
 
 function MoonIcon() {
   return (
@@ -42,20 +42,32 @@ export function Header() {
   if (!ready || !token) return null;
 
   const isActive = (path: string) =>
-    path === '/' ? url === '/' : url.startsWith(path);
+    path === "/" ? url === "/" : url.startsWith(path);
 
   return (
     <header class="site-header">
-      <a href="/" class="header-brand">The Virtue Initiative</a>
+      <a href="/" class="header-brand">
+        The Virtue Initiative
+      </a>
       <nav class="header-toolbar">
-        <a href="/" class={`control control-flat ${isActive('/') ? 'is-active' : ''}`}>Dashboard</a>
-        <a href="/logs" class={`control control-flat ${isActive('/logs') ? 'is-active' : ''}`}>Logs</a>
+        <a
+          href="/"
+          class={`control control-flat ${isActive("/") ? "is-active" : ""}`}
+        >
+          Dashboard
+        </a>
+        <a
+          href="/logs"
+          class={`control control-flat ${isActive("/logs") ? "is-active" : ""}`}
+        >
+          Logs
+        </a>
         <button
           class="control control-icon"
           onClick={toggle}
           type="button"
-          aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
-          title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+          aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
+          title={dark ? "Switch to light mode" : "Switch to dark mode"}
         >
           {dark ? <SunIcon /> : <MoonIcon />}
         </button>

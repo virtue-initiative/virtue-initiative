@@ -1,14 +1,20 @@
-import { LocationProvider, Router, Route, hydrate, prerender as ssr } from 'preact-iso';
+import {
+  LocationProvider,
+  Router,
+  Route,
+  hydrate,
+  prerender as ssr,
+} from "preact-iso";
 
-import { AuthProvider, useAuth } from './context/auth';
-import { E2EEProvider } from './context/e2ee';
-import { Header } from './components/Header';
-import { Home } from './pages/Home/index';
-import { Logs } from './pages/Logs/index';
-import { Auth } from './pages/Auth/index';
-import { Settings } from './pages/Settings/index';
-import { NotFound } from './pages/_404';
-import './style.css';
+import { AuthProvider, useAuth } from "./context/auth";
+import { E2EEProvider } from "./context/e2ee";
+import { Header } from "./components/Header";
+import { Home } from "./pages/Home/index";
+import { Logs } from "./pages/Logs/index";
+import { Auth } from "./pages/Auth/index";
+import { Settings } from "./pages/Settings/index";
+import { NotFound } from "./pages/_404";
+import "./style.css";
 
 function AppShell() {
   const { token, ready } = useAuth();
@@ -49,8 +55,8 @@ export function App() {
   );
 }
 
-if (typeof window !== 'undefined') {
-  hydrate(<App />, document.getElementById('app'));
+if (typeof window !== "undefined") {
+  hydrate(<App />, document.getElementById("app"));
 }
 
 export async function prerender(data) {

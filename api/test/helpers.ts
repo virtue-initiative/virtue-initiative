@@ -6,7 +6,7 @@ export const BASE = 'http://localhost';
 /** Sign up a user and return the access token + user id */
 export async function signupAndGetToken(
   email: string,
-  password = 'password123'
+  password = 'password123',
 ): Promise<{ token: string; userId: string }> {
   const res = await SELF.fetch(`${BASE}/signup`, {
     method: 'POST',

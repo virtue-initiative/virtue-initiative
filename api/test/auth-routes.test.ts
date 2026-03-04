@@ -13,7 +13,10 @@ describe('POST /signup', () => {
       body: JSON.stringify({ email: 'alice@example.com', password: 'password123' }),
     });
     expect(res.status).toBe(201);
-    const body = (await res.json()) as { access_token: string; user: { id: string; email: string } };
+    const body = (await res.json()) as {
+      access_token: string;
+      user: { id: string; email: string };
+    };
     expect(body.access_token).toBeTruthy();
     expect(body.user.email).toBe('alice@example.com');
   });

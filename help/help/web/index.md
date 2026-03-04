@@ -6,4 +6,3 @@ sidebar_position: 1
 
 This section contains instructions for doing things on the [Virtue Initiative
 webapp](https://app.virtueinitiative.org).
-

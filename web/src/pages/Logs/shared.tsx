@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'preact/hooks';
-import { BatchVerification } from '../../crypto';
+import { useState, useEffect } from "preact/hooks";
+import { BatchVerification } from "../../crypto";
 
 export interface LogItem {
   id: string;
@@ -19,7 +19,9 @@ export function LogImage({ imageBytes }: { imageBytes: Uint8Array }) {
 
   useEffect(() => {
     const imageData = Uint8Array.from(imageBytes);
-    const url = URL.createObjectURL(new Blob([imageData], { type: 'image/webp' }));
+    const url = URL.createObjectURL(
+      new Blob([imageData], { type: "image/webp" }),
+    );
     setImgSrc(url);
     return () => URL.revokeObjectURL(url);
   }, [imageBytes]);
@@ -28,12 +30,22 @@ export function LogImage({ imageBytes }: { imageBytes: Uint8Array }) {
 
   return (
     <>
-      <button class="log-thumb-btn" type="button" onClick={() => setOpen(true)} aria-label="View screenshot">
+      <button
+        class="log-thumb-btn"
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label="View screenshot"
+      >
         <img class="log-thumb" src={imgSrc} alt="screenshot" loading="lazy" />
       </button>
       {open && (
         <div class="img-overlay" onClick={() => setOpen(false)}>
-          <img class="img-full" src={imgSrc} alt="screenshot" onClick={(e) => e.stopPropagation()} />
+          <img
+            class="img-full"
+            src={imgSrc}
+            alt="screenshot"
+            onClick={(e) => e.stopPropagation()}
+          />
         </div>
       )}
     </>

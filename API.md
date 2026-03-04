@@ -3,6 +3,7 @@
 This document reflects the API currently implemented in `api/src/routes`.
 
 Base URL examples:
+
 - Local: `http://127.0.0.1:8787`
 - Production: your deployed Workers URL
 
@@ -23,7 +24,12 @@ All timestamps are ISO-8601 UTC strings.
 Validation errors (Zod treeified):
 
 ```json
-{ "error": { "errors": [], "properties": { "email": { "errors": ["Invalid email"] } } } }
+{
+  "error": {
+    "errors": [],
+    "properties": { "email": { "errors": ["Invalid email"] } }
+  }
+}
 ```
 
 ---
@@ -41,22 +47,28 @@ Validation errors (Zod treeified):
 ## Auth
 
 ### `POST /signup`
+
 ```json
 { "email": "user@example.com", "password": "password123", "name": "Optional" }
 ```
+
 Response `201`: `{ "user": { "id", "email", "created_at" }, "access_token" }`
 
 ### `POST /login`
+
 ```json
 { "email": "user@example.com", "password": "password123" }
 ```
+
 Response `200`: `{ "user": { "id", "email" }, "access_token" }`
 Sets `refresh_token` httpOnly cookie.
 
 ### `POST /logout`
+
 Clears the refresh token cookie. Response `200`.
 
 ### `POST /token`
+
 Refreshes the access token using the `refresh_token` cookie.
 Response `200`: `{ "access_token" }`
 
@@ -67,22 +79,28 @@ Response `200`: `{ "access_token" }`
 All device endpoints require `Authorization: Bearer <token>`.
 
 ### `POST /device`
+
 ```json
 { "name": "My Phone", "platform": "android" }
 ```
+
 Response `201`: `{ "id": "uuid", "created_at": "..." }`
 
 ### `GET /device`
+
 List devices. Optional query: `?user=<userId>` (requires accepted partnership).
 Response `200`: `{ "devices": [...] }`
 
 ### `PATCH /device/:id`
+
 ```json
 { "name": "New Name", "enabled": true }
 ```
+
 Response `200`: `{ "updated": true }`
 
 ### `DELETE /device/:id`
+
 Response `200`: `{ "deleted": true }`
 
 ---
@@ -99,18 +117,19 @@ All batch endpoints require `Authorization: Bearer <token>`.
 
 Upload a 1-hour encrypted batch. Multipart form:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `file` | binary | Encrypted + compressed batch blob |
-| `device_id` | string | Device UUID |
-| `start_time` | ISO-8601 | Start of the batch window |
-| `end_time` | ISO-8601 | End of the batch window |
+| Field              | Type        | Description                                   |
+| ------------------ | ----------- | --------------------------------------------- |
+| `file`             | binary      | Encrypted + compressed batch blob             |
+| `device_id`        | string      | Device UUID                                   |
+| `start_time`       | ISO-8601    | Start of the batch window                     |
+| `end_time`         | ISO-8601    | End of the batch window                       |
 | `start_chain_hash` | 64-char hex | SHA-256 of the first chain hash in this block |
-| `end_chain_hash` | 64-char hex | SHA-256 of the last chain hash in this block |
-| `item_count` | integer | Number of log+image items in the batch |
-| `size_bytes` | integer | Uncompressed plaintext size |
+| `end_chain_hash`   | 64-char hex | SHA-256 of the last chain hash in this block  |
+| `item_count`       | integer     | Number of log+image items in the batch        |
+| `size_bytes`       | integer     | Uncompressed plaintext size                   |
 
 Response `201`:
+
 ```json
 {
   "batch": {
@@ -130,6 +149,7 @@ The encrypted blob is publicly accessible at the R2 bucket's public URL using `r
 List batches. Query params: `device_id?`, `user?` (partner access), `cursor?`, `limit?` (max 100).
 
 Response `200`:
+
 ```json
 {
   "items": [{ "id", "device_id", "r2_key", "start_time", "end_time", "start_chain_hash", "end_chain_hash", "item_count", "size_bytes", "created_at" }],
@@ -166,11 +186,13 @@ Upload a binary chain hash.
 Rate-limited to **1 request per 60 seconds per device**.
 
 Response `201`:
+
 ```json
 { "id": "uuid", "timestamp": "2026-01-01T00:01:00.000Z" }
 ```
 
 Rate-limit response `429`:
+
 ```json
 { "error": "Too many requests", "retry_after_seconds": 42 }
 ```
@@ -181,16 +203,17 @@ Query chain hashes for a time range.
 
 Query params:
 
-| Param | Required | Description |
-|-------|----------|-------------|
-| `device_id` | ✓ | Device UUID |
-| `from` | ✓ | ISO-8601 start (inclusive) |
-| `to` | ✓ | ISO-8601 end (inclusive) |
-| `user` | – | Target user ID (partner access requires `view_data`) |
-| `cursor` | – | Pagination cursor (client_timestamp of last item) |
-| `limit` | – | Max results (default 100, max 1500) |
+| Param       | Required | Description                                          |
+| ----------- | -------- | ---------------------------------------------------- |
+| `device_id` | ✓        | Device UUID                                          |
+| `from`      | ✓        | ISO-8601 start (inclusive)                           |
+| `to`        | ✓        | ISO-8601 end (inclusive)                             |
+| `user`      | –        | Target user ID (partner access requires `view_data`) |
+| `cursor`    | –        | Pagination cursor (client_timestamp of last item)    |
+| `limit`     | –        | Max results (default 100, max 1500)                  |
 
 Response `200`:
+
 ```json
 {
   "items": [{ "id", "hash_hex", "client_timestamp" }],
@@ -205,30 +228,41 @@ Response `200`:
 ## Partners
 
 ### `POST /partner`
+
 Invite a partner by email.
+
 ```json
 { "email": "partner@example.com", "permissions": { "view_data": true } }
 ```
+
 Response `201`: `{ "partner": { "id", "partner_email", "status", "permissions", "created_at" } }`
 
 ### `GET /partner`
+
 List all partnerships (owned + as partner). Response `200`: `{ "owned": [...], "asPartner": [...] }`
 
 ### `POST /partner/accept`
+
 Accept a pending invite.
+
 ```json
 { "id": "<partner_record_id>" }
 ```
+
 Response `200`: `{ "accepted": true }`
 
 ### `PATCH /partner/:id`
+
 Update permissions (owner only).
+
 ```json
 { "permissions": { "view_data": true } }
 ```
+
 Response `200`: `{ "updated": true }`
 
 ### `DELETE /partner/:id`
+
 Remove a partnership. Either party can delete. Response `200`: `{ "deleted": true }`
 
 ---
@@ -236,10 +270,13 @@ Remove a partnership. Either party can delete. Response `200`: `{ "deleted": tru
 ## Settings
 
 ### `GET /settings`
+
 Response `200`: `{ "settings": { "name", "timezone", "retention_days" } }`
 
 ### `PUT /settings`
+
 ```json
 { "name": "Alice", "timezone": "America/New_York", "retention_days": 90 }
 ```
+
 Response `200`: `{ "updated": true }`

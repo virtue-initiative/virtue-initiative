@@ -24,5 +24,3 @@ systems](/help/removing-access/filtering).
 
 Implementing some of or all of these greatly helps in fighting against
 pornography.
-
-
