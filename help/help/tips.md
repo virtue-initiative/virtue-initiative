@@ -11,16 +11,16 @@ Here are some tips/steps on how to beat porn addition.
    help.
 2. **Do not give up**. It's tempting to just give up, and you might feel like
    you'll never get over it, but it is possible so keep going.
-3. [**Remove access**](/help/removing-access). Get rid of as many avenues to
+3. [**Remove access**](/removing-access). Get rid of as many avenues to
    porn as you can. This might mean [disabling the web
-   browser](/help/removing-access/disable-browser) on your phone, [setting up
-   filters](/help/removing-access/filtering), or getting rid of your phone all
+   browser](/removing-access/disable-browser) on your phone, [setting up
+   filters](/removing-access/filtering), or getting rid of your phone all
    together. This has limits, but does help.
 4. **Avoid situations** where you are tempted or **limit** your time spent in
    them (a timer can help with this).
 5. **Monitor access**. If you can't remove access, monitor it. That's where the
    screenshot software or other monitoring software comes in. Since it's the
-   21st century, at some point, you probably will need access the internet.
+   21st century, at some point you probably will need access to the internet.
    Remember, this is only one brick in your wall against the addiction, but
    it's still important.
 6. **Be patient with yourself**. This isn't an addiction that goes away
