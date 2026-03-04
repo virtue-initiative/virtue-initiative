@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Env, Variables } from '../types/bindings';
 import { hashPassword, verifyPassword } from '../lib/password';
 import { generateAccessToken, generateRefreshToken, verifyJWT } from '../lib/jwt';
-import { signupSchema, loginSchema, setE2EEKeySchema } from '../lib/schemas';
+import { signupSchema, loginSchema, setE2EEKeySchema, updateMeSchema } from '../lib/schemas';
 import { findUserByEmail, createUser, updateUser, findUserById } from '../lib/db';
 import { authenticate } from '../middleware/auth';
 
@@ -115,6 +115,25 @@ auth.get('/e2ee', authenticate, async (c) => {
   const user = await findUserById(c.env.DB, userId);
   if (!user?.e2ee_key) return c.json({ encryptedE2EEKey: null });
   return c.json({ encryptedE2EEKey: new Uint8Array(user.e2ee_key).toBase64() });
+});
+
+/**
+ * GET /me - Get current user profile
+ */
+auth.get('/me', authenticate, async (c) => {
+  const user = await findUserById(c.env.DB, c.get('userId'));
+  if (!user) return c.json({ error: 'User not found' }, 404);
+  return c.json({ id: user.id, email: user.email, name: user.name });
+});
+
+/**
+ * PATCH /me - Update current user profile (name)
+ */
+auth.patch('/me', authenticate, async (c) => {
+  const parsed = updateMeSchema.safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
+  await updateUser(c.env.DB, c.get('userId'), parsed.data);
+  return c.json({ ok: true });
 });
 
 export default auth;
