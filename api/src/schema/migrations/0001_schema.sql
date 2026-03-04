@@ -44,7 +44,7 @@ CREATE TABLE r2_batches (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   device_id TEXT NOT NULL,
-  r2_key TEXT NOT NULL UNIQUE,
+  batch_url TEXT NOT NULL UNIQUE,
   start_time TEXT NOT NULL,
   end_time TEXT NOT NULL,
   start_chain_hash TEXT NOT NULL, -- hex SHA-256
