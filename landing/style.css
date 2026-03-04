@@ -1,4 +1,6 @@
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
@@ -190,7 +192,8 @@ thead tr {
   background: var(--bg-subtle, #f3f2ef);
 }
 
-th, td {
+th,
+td {
   padding: 0.65rem 1rem;
   text-align: left;
   border-bottom: 1px solid var(--border);

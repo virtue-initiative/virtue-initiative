@@ -42,7 +42,7 @@ These test the crypto utilities directly, with no HTTP layer or database:
 
 ### All other test files (stubs)
 
-The remaining files contain `expect(true).toBe(true)` placeholders. They exist to document what *should* be covered but aren't yet.
+The remaining files contain `expect(true).toBe(true)` placeholders. They exist to document what _should_ be covered but aren't yet.
 
 ## Why No Integration Tests?
 

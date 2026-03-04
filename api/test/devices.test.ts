@@ -41,7 +41,9 @@ describe('POST /device', () => {
 describe('GET /device', () => {
   it('returns an empty list for a new user', async () => {
     const { token } = await signupAndGetToken('carol@example.com');
-    const res = await SELF.fetch(`${BASE}/device`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await SELF.fetch(`${BASE}/device`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual([]);
   });
@@ -53,7 +55,9 @@ describe('GET /device', () => {
       headers: authHeaders(token),
       body: JSON.stringify({ name: 'iPhone', platform: 'ios' }),
     });
-    const res = await SELF.fetch(`${BASE}/device`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await SELF.fetch(`${BASE}/device`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     const body = (await res.json()) as Array<{ name: string; platform: string; status: string }>;
     expect(body).toHaveLength(1);
     expect(body[0].name).toBe('iPhone');
@@ -87,7 +91,9 @@ describe('PATCH /device/:id', () => {
     expect(body.updated).toBe(true);
 
     // Verify the change persisted
-    const listRes = await SELF.fetch(`${BASE}/device`, { headers: { Authorization: `Bearer ${token}` } });
+    const listRes = await SELF.fetch(`${BASE}/device`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     const devices = (await listRes.json()) as Array<{ id: string; name: string; enabled: boolean }>;
     const updated = devices.find((d) => d.id === id);
     expect(updated?.name).toBe('New Name');

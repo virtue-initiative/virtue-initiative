@@ -29,4 +29,3 @@ Here are some tips/steps on how to beat porn addition.
 
 Each of these things is one line of defense. Combined, they give you a much
 better chance of resisting than any one individually.
-

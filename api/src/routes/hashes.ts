@@ -3,12 +3,7 @@ import z from 'zod';
 import { Env, Variables } from '../types/bindings';
 import { authenticate } from '../middleware/auth';
 import { getStateSchema } from '../lib/schemas';
-import {
-  findDevice,
-  getDeviceState,
-  upsertDeviceState,
-  findAcceptedPartnership,
-} from '../lib/db';
+import { findDevice, getDeviceState, upsertDeviceState, findAcceptedPartnership } from '../lib/db';
 
 const hashes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -16,7 +11,9 @@ const ZEROS = new Uint8Array(32);
 
 /** Converts a 16-byte Uint8Array to a lowercase UUID string (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx). */
 function bytesToUuid(b: Uint8Array): string {
-  const h = Array.from(b).map((x) => x.toString(16).padStart(2, '0')).join('');
+  const h = Array.from(b)
+    .map((x) => x.toString(16).padStart(2, '0'))
+    .join('');
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
@@ -79,9 +76,7 @@ hashes.get('/', authenticate, async (c) => {
   }
 
   const existing = await getDeviceState(c.env.DB, device_id);
-  const stateHex = existing
-    ? Buffer.from(existing.state).toString('hex')
-    : '0'.repeat(64);
+  const stateHex = existing ? Buffer.from(existing.state).toString('hex') : '0'.repeat(64);
 
   return c.json({ state_hex: stateHex });
 });

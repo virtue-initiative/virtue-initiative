@@ -56,5 +56,11 @@
   font-size: 0.875rem;
 }
 
-[data-theme="dark"] .settings-error  { background: #3b0a0a; color: #fca5a5; }
-[data-theme="dark"] .settings-success { background: #052e16; color: #4ade80; }
+[data-theme="dark"] .settings-error {
+  background: #3b0a0a;
+  color: #fca5a5;
+}
+[data-theme="dark"] .settings-success {
+  background: #052e16;
+  color: #4ade80;
+}

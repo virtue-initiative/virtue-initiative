@@ -1,14 +1,14 @@
-import { useState, useEffect } from 'preact/hooks';
-import { useLocation } from 'preact-iso';
-import { useAuth } from '../../context/auth';
-import { useE2EE } from '../../context/e2ee';
-import { api, Batch, Device } from '../../api';
-import { decryptBatch, decompressGzip, verifyBatch } from '../../crypto';
-import { decode } from '@msgpack/msgpack';
-import { ImageLogItem, LogItem } from './shared';
-import { LogsList } from './LogsList';
-import { LogsGallery } from './LogsGallery';
-import './style.css';
+import { useState, useEffect } from "preact/hooks";
+import { useLocation } from "preact-iso";
+import { useAuth } from "../../context/auth";
+import { useE2EE } from "../../context/e2ee";
+import { api, Batch, Device } from "../../api";
+import { decryptBatch, decompressGzip, verifyBatch } from "../../crypto";
+import { decode } from "@msgpack/msgpack";
+import { ImageLogItem, LogItem } from "./shared";
+import { LogsList } from "./LogsList";
+import { LogsGallery } from "./LogsGallery";
+import "./style.css";
 
 interface DeviceGroup {
   label: string;
@@ -24,25 +24,35 @@ interface RawBlobItem {
   metadata: [string, string][];
 }
 
-function toUint8Array(val: Uint8Array | number[] | undefined): Uint8Array | undefined {
+function toUint8Array(
+  val: Uint8Array | number[] | undefined,
+): Uint8Array | undefined {
   if (!val) return undefined;
   if (val instanceof Uint8Array) return val;
   return new Uint8Array(val);
 }
 
-async function decryptAndFlattenBatch(batch: Batch, key: CryptoKey): Promise<LogItem[]> {
-  const r2Base = (import.meta as any).env?.VITE_R2_URL ?? '';
+async function decryptAndFlattenBatch(
+  batch: Batch,
+  key: CryptoKey,
+): Promise<LogItem[]> {
+  const r2Base = (import.meta as any).env?.VITE_R2_URL ?? "";
   const url = `${r2Base}/${batch.r2_key}`;
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`Fetch failed (${resp.status}) for ${url}`);
 
   const raw = new Uint8Array(await resp.arrayBuffer());
-  if (raw.length < 13) throw new Error(`Batch blob too short for AES-GCM payload: ${url}`);
+  if (raw.length < 13)
+    throw new Error(`Batch blob too short for AES-GCM payload: ${url}`);
 
   const decrypted = await decryptBatch(key, raw);
   const decompressed = await decompressGzip(decrypted);
   const decoded = decode(decompressed);
-  if (!decoded || typeof decoded !== 'object' || !('items' in (decoded as object))) {
+  if (
+    !decoded ||
+    typeof decoded !== "object" ||
+    !("items" in (decoded as object))
+  ) {
     console.error(`[batch ${batch.id}] unexpected decoded structure:`, decoded);
     return [];
   }
@@ -54,27 +64,32 @@ async function decryptAndFlattenBatch(batch: Batch, key: CryptoKey): Promise<Log
     id: item.id,
     taken_at: item.taken_at,
     device_id: batch.device_id,
-    kind: item.kind || 'unknown',
+    kind: item.kind || "unknown",
     image: toUint8Array(item.image),
     metadata: Array.isArray(item.metadata)
       ? item.metadata
-          .filter((entry): entry is [string, string] => Array.isArray(entry) && entry.length === 2)
+          .filter(
+            (entry): entry is [string, string] =>
+              Array.isArray(entry) && entry.length === 2,
+          )
           .map(([k, v]) => [String(k), String(v)])
       : [],
-    batch_status: 'unknown' as const,
+    batch_status: "unknown" as const,
   }));
 
   // Verify the batch chain and stamp the result on every item.
-  const status = await verifyBatch(logItems, batch.start_chain_hash, batch.end_chain_hash).catch(
-    () => 'unknown' as const,
-  );
+  const status = await verifyBatch(
+    logItems,
+    batch.start_chain_hash,
+    batch.end_chain_hash,
+  ).catch(() => "unknown" as const);
   return logItems.map((item) => ({ ...item, batch_status: status }));
 }
 
 function jwtSub(token: string): string | null {
   try {
-    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+    const b64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
     return JSON.parse(atob(padded)).sub ?? null;
   } catch {
     return null;
@@ -87,12 +102,13 @@ function lastBlockLabel(isoStr: string): string {
   const hrs = diffMs / 3_600_000;
   if (hrs < 24) {
     const mins = Math.floor(diffMs / 60_000);
-    if (mins < 1) return 'last block received just now';
-    if (mins < 60) return `last block received ${mins} minute${mins === 1 ? '' : 's'} ago`;
+    if (mins < 1) return "last block received just now";
+    if (mins < 60)
+      return `last block received ${mins} minute${mins === 1 ? "" : "s"} ago`;
     const h = Math.floor(mins / 60);
-    return `last block received ${h} hour${h === 1 ? '' : 's'} ago`;
+    return `last block received ${h} hour${h === 1 ? "" : "s"} ago`;
   }
-  return `last block received on ${date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`;
+  return `last block received on ${date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}`;
 }
 
 export function Logs() {
@@ -104,11 +120,11 @@ export function Logs() {
   const ownUserId = token ? jwtSub(token) : null;
 
   const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[] | null>(null);
-  const [selectedDevice, setSelectedDevice] = useState<string | null>(
-    () => new URLSearchParams(window.location.search).get('device_id'),
+  const [selectedDevice, setSelectedDevice] = useState<string | null>(() =>
+    new URLSearchParams(window.location.search).get("device_id"),
   );
-  const [selectedUser, setSelectedUser] = useState<string | null>(
-    () => new URLSearchParams(window.location.search).get('user'),
+  const [selectedUser, setSelectedUser] = useState<string | null>(() =>
+    new URLSearchParams(window.location.search).get("user"),
   );
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -116,7 +132,11 @@ export function Logs() {
   const [nextCursor, setNextCursor] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  const [batchStats, setBatchStats] = useState<{ decrypted: number; failed: number; lastTime: string | null }>({ decrypted: 0, failed: 0, lastTime: null });
+  const [batchStats, setBatchStats] = useState<{
+    decrypted: number;
+    failed: number;
+    lastTime: string | null;
+  }>({ decrypted: 0, failed: 0, lastTime: null });
 
   // The user whose key is needed: partner's userId when viewing partner logs, otherwise own
   const activeUserId = selectedUser ?? ownUserId;
@@ -126,19 +146,31 @@ export function Logs() {
     if (!token) return;
     Promise.all([api.getDevices(token), api.getPartners(token)])
       .then(async ([myDevices, partners]) => {
-        const monitored = partners.filter((p) => p.role === 'partner' && p.status === 'accepted');
+        const monitored = partners.filter(
+          (p) => p.role === "partner" && p.status === "accepted",
+        );
         const partnerGroups = await Promise.all(
           monitored.map(async (p) => {
-            const devs = await api.getDevices(token, { user: p.partner_user_id }).catch(() => [] as Device[]);
-            return { label: p.partner_email, userId: p.partner_user_id, devices: devs };
+            const devs = await api
+              .getDevices(token, { user: p.partner_user_id })
+              .catch(() => [] as Device[]);
+            return {
+              label: p.partner_email,
+              userId: p.partner_user_id,
+              devices: devs,
+            };
           }),
         );
         setDeviceGroups([
-          { label: 'My devices', userId: null, devices: myDevices },
+          { label: "My devices", userId: null, devices: myDevices },
           ...partnerGroups,
         ]);
       })
-      .catch((err) => setLoadError(err instanceof Error ? err.message : 'Failed to load devices'));
+      .catch((err) =>
+        setLoadError(
+          err instanceof Error ? err.message : "Failed to load devices",
+        ),
+      );
   }, [token]);
 
   // Load batches when the active key or filter changes
@@ -151,7 +183,8 @@ export function Logs() {
   }, [activeKey, token, selectedDevice, selectedUser]);
 
   async function doLoadBatches(cursor: string | undefined, reset: boolean) {
-    if (!activeKey || !token) return;    setLoading(true);
+    if (!activeKey || !token) return;
+    setLoading(true);
     setFetchError(null);
     try {
       const page = await api.getBatches(token, {
@@ -160,16 +193,18 @@ export function Logs() {
         cursor,
         limit: 10,
       });
-      const nested = await Promise.allSettled(page.items.map((b) => decryptAndFlattenBatch(b, activeKey!)));
+      const nested = await Promise.allSettled(
+        page.items.map((b) => decryptAndFlattenBatch(b, activeKey!)),
+      );
       const flat: LogItem[] = [];
       let pageDecrypted = 0;
       let pageFaild = 0;
       for (const result of nested) {
-        if (result.status === 'fulfilled') {
+        if (result.status === "fulfilled") {
           flat.push(...result.value);
           pageDecrypted++;
         } else {
-          console.error('[logs] failed to decrypt batch:', result.reason);
+          console.error("[logs] failed to decrypt batch:", result.reason);
           pageFaild++;
         }
       }
@@ -180,7 +215,13 @@ export function Logs() {
       setBatchStats((prev) => ({
         decrypted: (reset ? 0 : prev.decrypted) + pageDecrypted,
         failed: (reset ? 0 : prev.failed) + pageFaild,
-        lastTime: pageLastTime && (!prev.lastTime || reset || pageLastTime > prev.lastTime) ? pageLastTime : reset ? pageLastTime : prev.lastTime,
+        lastTime:
+          pageLastTime &&
+          (!prev.lastTime || reset || pageLastTime > prev.lastTime)
+            ? pageLastTime
+            : reset
+              ? pageLastTime
+              : prev.lastTime,
       }));
       setItems((prev) => {
         const combined = reset ? flat : [...prev, ...flat];
@@ -188,51 +229,59 @@ export function Logs() {
       });
       setNextCursor(page.next_cursor);
     } catch (err) {
-      console.error('[logs] load failed:', err);
-      setFetchError(err instanceof Error ? err.message : 'Failed to load logs');
+      console.error("[logs] load failed:", err);
+      setFetchError(err instanceof Error ? err.message : "Failed to load logs");
     } finally {
       setLoading(false);
     }
   }
 
   const allDevices = deviceGroups?.flatMap((g) => g.devices) ?? [];
-  const deviceName = (id: string) => allDevices.find((d) => d.id === id)?.name ?? id.slice(0, 8) + '…';
+  const deviceName = (id: string) =>
+    allDevices.find((d) => d.id === id)?.name ?? id.slice(0, 8) + "…";
   const groupLabel = (userId: string) =>
-    deviceGroups?.find((g) => g.userId === userId)?.label ?? userId.slice(0, 8) + '…';
+    deviceGroups?.find((g) => g.userId === userId)?.label ??
+    userId.slice(0, 8) + "…";
 
   function select(userId: string | null, deviceId: string | null) {
     setSelectedUser(userId);
     setSelectedDevice(deviceId);
     const qs = new URLSearchParams(window.location.search);
-    if (deviceId) qs.set('device_id', deviceId); else qs.delete('device_id');
-    if (userId) qs.set('user', userId); else qs.delete('user');
+    if (deviceId) qs.set("device_id", deviceId);
+    else qs.delete("device_id");
+    if (userId) qs.set("user", userId);
+    else qs.delete("user");
     const search = qs.toString();
-    const newUrl = window.location.pathname + (search ? `?${search}` : '');
-    window.history.replaceState(null, '', newUrl);
+    const newUrl = window.location.pathname + (search ? `?${search}` : "");
+    window.history.replaceState(null, "", newUrl);
   }
 
   const title = selectedDevice
-    ? `${selectedUser ? groupLabel(selectedUser) + ' — ' : ''}${deviceName(selectedDevice)}`
+    ? `${selectedUser ? groupLabel(selectedUser) + " — " : ""}${deviceName(selectedDevice)}`
     : selectedUser
-    ? `${groupLabel(selectedUser)}'s logs`
-    : 'All logs';
+      ? `${groupLabel(selectedUser)}'s logs`
+      : "All logs";
 
-  const isGallery = path === '/logs/gallery';
-  const galleryItems = items.filter((item): item is ImageLogItem => !!item.image);
+  const isGallery = path === "/logs/gallery";
+  const galleryItems = items.filter(
+    (item): item is ImageLogItem => !!item.image,
+  );
 
   return (
     <div class="logs-page">
       <div class="logs-layout">
         <aside class="logs-sidebar">
           {loadError && <p class="sidebar-loading">{loadError}</p>}
-          {deviceGroups === null && !loadError && <p class="sidebar-loading">Loading…</p>}
+          {deviceGroups === null && !loadError && (
+            <p class="sidebar-loading">Loading…</p>
+          )}
           {deviceGroups?.map((group) => (
             <div class="sidebar-group" key={group.label}>
               <p class="sidebar-group-label">{group.label}</p>
               <ul class="device-list">
                 <li>
                   <button
-                    class={`device-btn${selectedUser === group.userId && selectedDevice === null ? ' active' : ''}`}
+                    class={`device-btn${selectedUser === group.userId && selectedDevice === null ? " active" : ""}`}
                     onClick={() => select(group.userId, null)}
                     type="button"
                   >
@@ -242,11 +291,13 @@ export function Logs() {
                 {group.devices.map((d) => (
                   <li key={d.id}>
                     <button
-                      class={`device-btn${selectedDevice === d.id ? ' active' : ''}`}
+                      class={`device-btn${selectedDevice === d.id ? " active" : ""}`}
                       onClick={() => select(group.userId, d.id)}
                       type="button"
                     >
-                      <span class={`dot ${d.status === 'online' ? 'dot-green' : 'dot-gray'}`} />
+                      <span
+                        class={`dot ${d.status === "online" ? "dot-green" : "dot-gray"}`}
+                      />
                       {d.name}
                     </button>
                   </li>
@@ -260,10 +311,13 @@ export function Logs() {
           <div class="logs-header">
             <h1>{title}</h1>
             <div class="view-tabs">
-              <a class={`view-tab${!isGallery ? ' active' : ''}`} href="/logs">
+              <a class={`view-tab${!isGallery ? " active" : ""}`} href="/logs">
                 List
               </a>
-              <a class={`view-tab${isGallery ? ' active' : ''}`} href="/logs/gallery">
+              <a
+                class={`view-tab${isGallery ? " active" : ""}`}
+                href="/logs/gallery"
+              >
                 Gallery
               </a>
             </div>
@@ -273,9 +327,12 @@ export function Logs() {
 
           {activeKey && (batchStats.decrypted > 0 || batchStats.failed > 0) && (
             <p class="logs-summary">
-              {batchStats.decrypted} block{batchStats.decrypted === 1 ? '' : 's'} decrypted
-              {batchStats.failed > 0 && `, ${batchStats.failed} couldn't be decrypted`}
-              {batchStats.lastTime && `, ${lastBlockLabel(batchStats.lastTime)}`}
+              {batchStats.decrypted} block
+              {batchStats.decrypted === 1 ? "" : "s"} decrypted
+              {batchStats.failed > 0 &&
+                `, ${batchStats.failed} couldn't be decrypted`}
+              {batchStats.lastTime &&
+                `, ${lastBlockLabel(batchStats.lastTime)}`}
             </p>
           )}
 

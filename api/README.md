@@ -217,6 +217,7 @@ curl -H "X-API-Key: <device-api-key>" \
 ## Database Schema
 
 ### Users
+
 - `id` (TEXT, PK)
 - `email` (TEXT, UNIQUE)
 - `password_hash` (TEXT)
@@ -224,6 +225,7 @@ curl -H "X-API-Key: <device-api-key>" \
 - `created_at` (TEXT)
 
 ### Devices
+
 - `id` (TEXT, PK)
 - `user_id` (TEXT, FK)
 - `name` (TEXT)
@@ -235,6 +237,7 @@ curl -H "X-API-Key: <device-api-key>" \
 - `created_at` (TEXT)
 
 ### Images
+
 - `id` (TEXT, PK)
 - `user_id` (TEXT, FK)
 - `device_id` (TEXT, FK)
@@ -247,6 +250,7 @@ curl -H "X-API-Key: <device-api-key>" \
 - `created_at` (TEXT)
 
 ### Logs
+
 - `id` (TEXT, PK)
 - `user_id` (TEXT, FK)
 - `device_id` (TEXT, FK)
@@ -256,6 +260,7 @@ curl -H "X-API-Key: <device-api-key>" \
 - `created_at` (TEXT)
 
 ### Partners
+
 - `id` (TEXT, PK)
 - `user_id` (TEXT, FK)
 - `partner_user_id` (TEXT, FK)
@@ -265,6 +270,7 @@ curl -H "X-API-Key: <device-api-key>" \
 - `updated_at` (TEXT)
 
 ### Settings
+
 - `user_id` (TEXT, PK, FK)
 - `name` (TEXT)
 - `timezone` (TEXT)

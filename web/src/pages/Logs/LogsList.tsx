@@ -1,8 +1,8 @@
-import { Fragment } from 'preact';
-import { LogItem, LogImage } from './shared';
+import { Fragment } from "preact";
+import { LogItem, LogImage } from "./shared";
 
 function humanizeKind(kind: string): string {
-  return kind.replace(/_/g, ' ');
+  return kind.replace(/_/g, " ");
 }
 
 export function LogsList({
@@ -38,13 +38,20 @@ export function LogsList({
               <div class="log-row-top">
                 <span class="log-type">{humanizeKind(item.kind)}</span>
                 <span class="log-device">{deviceName(item.device_id)}</span>
-                {item.batch_status === 'failed' && (
-                  <span class="verify-badge verify-badge--failed" title="Batch hash chain verification failed — data may have been tampered with">
+                {item.batch_status === "failed" && (
+                  <span
+                    class="verify-badge verify-badge--failed"
+                    title="Batch hash chain verification failed — data may have been tampered with"
+                  >
                     ⚠ Unverified
                   </span>
                 )}
                 <span class="log-time">
-                  {new Date(item.taken_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  {new Date(item.taken_at).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                  })}
                 </span>
               </div>
               <p class="log-device" style="margin:0.15rem 0 0.4rem;">
@@ -66,7 +73,11 @@ export function LogsList({
       </div>
       {loading && <p class="logs-loading">Loading…</p>}
       {!loading && hasMore && (
-        <button class="btn btn-primary btn-sm load-more" onClick={onLoadMore} type="button">
+        <button
+          class="btn btn-primary btn-sm load-more"
+          onClick={onLoadMore}
+          type="button"
+        >
           Load more
         </button>
       )}

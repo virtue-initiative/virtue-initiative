@@ -20,14 +20,16 @@
   --ifm-toc-border-color: #e0ddd8;
   --ifm-color-emphasis-300: #e0ddd8;
 
-  --ifm-font-family-base: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --ifm-heading-font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --ifm-font-family-base:
+    system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --ifm-heading-font-family:
+    system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 
   --ifm-code-font-size: 95%;
   --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.08);
 }
 
-[data-theme='dark'] {
+[data-theme="dark"] {
   --ifm-color-primary: #22a862;
   --ifm-color-primary-dark: #1e9657;
   --ifm-color-primary-darker: #1b8d52;

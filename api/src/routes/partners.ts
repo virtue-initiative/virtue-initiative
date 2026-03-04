@@ -3,7 +3,12 @@ import { Hono } from 'hono';
 import { v4 as uuidv4 } from 'uuid';
 import { Env, Variables } from '../types/bindings';
 import { authenticate } from '../middleware/auth';
-import { createPartnerSchema, acceptPartnerSchema, updatePartnerSchema, putPartnerSchema } from '../lib/schemas';
+import {
+  createPartnerSchema,
+  acceptPartnerSchema,
+  updatePartnerSchema,
+  putPartnerSchema,
+} from '../lib/schemas';
 import {
   findUserByEmail,
   findPartnerByUsers,

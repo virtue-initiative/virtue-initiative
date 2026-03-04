@@ -30,7 +30,7 @@ export async function createUser(
 export async function updateUser(
   d1: D1Database,
   userId: string,
-  fields: { email?: string; password_hash?: string; name?: string | null, e2ee_key?: ArrayBuffer},
+  fields: { email?: string; password_hash?: string; name?: string | null; e2ee_key?: ArrayBuffer },
 ) {
   const updates: string[] = [];
   const params: (string | number | null | ArrayBuffer)[] = [];
@@ -128,8 +128,6 @@ export async function updateDevice(
     .run();
 }
 
-
-
 export async function getDeviceState(
   db: D1Database,
   deviceId: string,
@@ -188,8 +186,17 @@ export async function createBatch(
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
-      id, userId, deviceId, r2Key, startTime, endTime,
-      startChainHash, endChainHash, itemCount, sizeBytes, createdAt,
+      id,
+      userId,
+      deviceId,
+      r2Key,
+      startTime,
+      endTime,
+      startChainHash,
+      endChainHash,
+      itemCount,
+      sizeBytes,
+      createdAt,
     )
     .run();
 }
@@ -200,8 +207,7 @@ export async function listBatches(
   filters: { device_id?: string; cursor?: string },
   limit: number,
 ) {
-  let query =
-    `SELECT id, device_id, r2_key, start_time, end_time,
+  let query = `SELECT id, device_id, r2_key, start_time, end_time,
             start_chain_hash, end_chain_hash, item_count, size_bytes, created_at
      FROM r2_batches WHERE user_id = ?`;
   const params: (string | number)[] = [userId];
@@ -240,10 +246,7 @@ export async function listBatches(
   };
 }
 
-export async function findBatchById(
-  db: D1Database,
-  batchId: string,
-) {
+export async function findBatchById(db: D1Database, batchId: string) {
   return db
     .prepare(
       `SELECT id, user_id, device_id, r2_key, start_time, end_time,
@@ -310,8 +313,7 @@ export async function queryChainHashes(
   cursor: string | undefined,
   limit: number,
 ) {
-  let query =
-    `SELECT id, hash, client_timestamp, created_at
+  let query = `SELECT id, hash, client_timestamp, created_at
      FROM chain_hashes
      WHERE user_id = ? AND device_id = ?
        AND client_timestamp >= ? AND client_timestamp <= ?`;
@@ -344,7 +346,10 @@ export async function queryChainHashes(
 // ── Partners ──────────────────────────────────────────────────────────────────
 
 export async function findUserById(db: D1Database, userId: string) {
-  return db.prepare('SELECT id, email, name, e2ee_key FROM users WHERE id = ?').bind(userId).first<{ id: string; email: string; name: string | null; e2ee_key: ArrayBuffer | null }>();
+  return db
+    .prepare('SELECT id, email, name, e2ee_key FROM users WHERE id = ?')
+    .bind(userId)
+    .first<{ id: string; email: string; name: string | null; e2ee_key: ArrayBuffer | null }>();
 }
 
 export async function createPartner(
@@ -378,7 +383,12 @@ export async function findPartnerInvite(db: D1Database, partnerId: string, userI
     .first<{ id: string }>();
 }
 
-export async function acceptPartner(db: D1Database, id: string, updatedAt: string, e2eeKey?: ArrayBuffer) {
+export async function acceptPartner(
+  db: D1Database,
+  id: string,
+  updatedAt: string,
+  e2eeKey?: ArrayBuffer,
+) {
   if (e2eeKey !== undefined) {
     return db
       .prepare(`UPDATE partners SET status = 'accepted', e2ee_key = ?, updated_at = ? WHERE id = ?`)
@@ -429,14 +439,23 @@ export async function listPartners(db: D1Database, userId: string) {
   return { owned: owned.results, asPartner: asPartner.results };
 }
 
-export async function findPartnerByPartnerUser(db: D1Database, partnerId: string, partnerUserId: string) {
+export async function findPartnerByPartnerUser(
+  db: D1Database,
+  partnerId: string,
+  partnerUserId: string,
+) {
   return db
     .prepare('SELECT id FROM partners WHERE id = ? AND partner_user_id = ? AND status = ?')
     .bind(partnerId, partnerUserId, 'accepted')
     .first<{ id: string }>();
 }
 
-export async function updatePartnerE2EEKey(db: D1Database, partnerId: string, e2eeKey: ArrayBuffer, updatedAt: string) {
+export async function updatePartnerE2EEKey(
+  db: D1Database,
+  partnerId: string,
+  e2eeKey: ArrayBuffer,
+  updatedAt: string,
+) {
   return db
     .prepare('UPDATE partners SET e2ee_key = ?, updated_at = ? WHERE id = ?')
     .bind(e2eeKey, updatedAt, partnerId)
@@ -468,13 +487,15 @@ export async function deletePartner(db: D1Database, partnerId: string) {
 
 export async function findPartnerByEitherParty(db: D1Database, partnerId: string, userId: string) {
   return db
-    .prepare(`
+    .prepare(
+      `
       SELECT p.id, u1.email as owner_email, u2.email as partner_email
       FROM partners p
       JOIN users u1 ON p.user_id = u1.id
       JOIN users u2 ON p.partner_user_id = u2.id
       WHERE p.id = ? AND (p.user_id = ? OR p.partner_user_id = ?)
-    `)
+    `,
+    )
     .bind(partnerId, userId, userId)
     .first<{ id: string; owner_email: string; partner_email: string }>();
 }

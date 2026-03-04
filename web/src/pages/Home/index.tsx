@@ -1,11 +1,11 @@
-import { useState, useEffect, useRef } from 'preact/hooks';
-import { useLocation } from 'preact-iso';
-import { useAuth } from '../../context/auth';
-import { useE2EE } from '../../context/e2ee';
-import { api, Device, Partner } from '../../api';
-import { deriveKey, encryptData, decryptBatch } from '../../crypto';
-import './style.css';
-import { Button } from '../../components/Button';
+import { useState, useEffect, useRef } from "preact/hooks";
+import { useLocation } from "preact-iso";
+import { useAuth } from "../../context/auth";
+import { useE2EE } from "../../context/e2ee";
+import { api, Device, Partner } from "../../api";
+import { deriveKey, encryptData, decryptBatch } from "../../crypto";
+import "./style.css";
+import { Button } from "../../components/Button";
 
 export function Home() {
   const { token } = useAuth();
@@ -16,21 +16,29 @@ export function Home() {
   function reload() {
     if (!token) return;
     Promise.all([api.getDevices(token), api.getPartners(token)])
-      .then(([d, p]) => { setDevices(d); setPartners(p); })
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load data'));
+      .then(([d, p]) => {
+        setDevices(d);
+        setPartners(p);
+      })
+      .catch((err) =>
+        setError(err instanceof Error ? err.message : "Failed to load data"),
+      );
   }
 
   useEffect(reload, [token]);
 
-  const pendingInvites = partners?.filter(
-    (p) => p.role === 'partner' && p.status === 'pending',
-  ) ?? [];
-  const sentRequests = partners?.filter(
-    (p) => p.role === 'owner' && p.status === 'pending',
-  ) ?? [];
+  const pendingInvites =
+    partners?.filter((p) => p.role === "partner" && p.status === "pending") ??
+    [];
+  const sentRequests =
+    partners?.filter((p) => p.role === "owner" && p.status === "pending") ?? [];
 
-  const monitoringYou = partners?.filter((p) => p.role === 'owner' && p.status === 'accepted') ?? [];
-  const youMonitor = partners?.filter((p) => p.role === 'partner' && p.status === 'accepted') ?? [];
+  const monitoringYou =
+    partners?.filter((p) => p.role === "owner" && p.status === "accepted") ??
+    [];
+  const youMonitor =
+    partners?.filter((p) => p.role === "partner" && p.status === "accepted") ??
+    [];
 
   return (
     <div class="dashboard">
@@ -41,7 +49,12 @@ export function Home() {
           <h2>Pending invites</h2>
           <div class="card-grid">
             {pendingInvites.map((p) => (
-              <PendingInviteCard key={p.id} partner={p} token={token!} onAccepted={reload} />
+              <PendingInviteCard
+                key={p.id}
+                partner={p}
+                token={token!}
+                onAccepted={reload}
+              />
             ))}
           </div>
         </section>
@@ -55,14 +68,22 @@ export function Home() {
           <p class="empty">No devices registered yet.</p>
         ) : (
           <div class="card-grid">
-            {devices.map((d) => <DeviceCard key={d.id} device={d} token={token!} onChanged={reload} />)}
+            {devices.map((d) => (
+              <DeviceCard
+                key={d.id}
+                device={d}
+                token={token!}
+                onChanged={reload}
+              />
+            ))}
           </div>
         )}
       </section>
 
-      {youMonitor.length > 0 && youMonitor.map((p) => (
-        <PartnerDevicesSection key={p.id} partner={p} token={token!} />
-      ))}
+      {youMonitor.length > 0 &&
+        youMonitor.map((p) => (
+          <PartnerDevicesSection key={p.id} partner={p} token={token!} />
+        ))}
 
       <section class="dash-section">
         <div class="section-header">
@@ -101,7 +122,12 @@ function PartnersList({
   token: string;
   onChanged: () => void;
 }) {
-  if (monitoringYou.length === 0 && youMonitor.length === 0 && pendingInvites.length === 0 && sentRequests.length === 0) {
+  if (
+    monitoringYou.length === 0 &&
+    youMonitor.length === 0 &&
+    pendingInvites.length === 0 &&
+    sentRequests.length === 0
+  ) {
     return <p class="empty">No accountability partners yet.</p>;
   }
 
@@ -112,7 +138,12 @@ function PartnersList({
           <p class="partners-group-label">Monitoring you</p>
           <div class="card-grid">
             {monitoringYou.map((p) => (
-              <PartnerCard key={p.id} partner={p} token={token} onDeleted={onChanged} />
+              <PartnerCard
+                key={p.id}
+                partner={p}
+                token={token}
+                onDeleted={onChanged}
+              />
             ))}
           </div>
         </div>
@@ -122,7 +153,12 @@ function PartnersList({
           <p class="partners-group-label">Pending invites</p>
           <div class="card-grid">
             {pendingInvites.map((p) => (
-              <PartnerCard key={p.id} partner={p} token={token} onDeleted={onChanged} />
+              <PartnerCard
+                key={p.id}
+                partner={p}
+                token={token}
+                onDeleted={onChanged}
+              />
             ))}
           </div>
         </div>
@@ -132,7 +168,12 @@ function PartnersList({
           <p class="partners-group-label">Sent requests</p>
           <div class="card-grid">
             {sentRequests.map((p) => (
-              <SentRequestCard key={p.id} partner={p} token={token} onCancelled={onChanged} />
+              <SentRequestCard
+                key={p.id}
+                partner={p}
+                token={token}
+                onCancelled={onChanged}
+              />
             ))}
           </div>
         </div>
@@ -143,22 +184,37 @@ function PartnersList({
 
 function UserPlusIcon() {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="stroke-width: 1.5">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M18 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM3 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 9.374 21c-2.331 0-4.512-.645-6.374-1.766Z" />
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      style="stroke-width: 1.5"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M18 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM3 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 9.374 21c-2.331 0-4.512-.645-6.374-1.766Z"
+      />
     </svg>
-  )
+  );
 }
 
-
-function InviteButton({ token, onInvited }: { token: string; onInvited: () => void }) {
-  const [email, setEmail] = useState('');
+function InviteButton({
+  token,
+  onInvited,
+}: {
+  token: string;
+  onInvited: () => void;
+}) {
+  const [email, setEmail] = useState("");
   const [viewData, setViewData] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   function open() {
-    setEmail('');
+    setEmail("");
     setError(null);
     dialogRef.current?.showModal();
   }
@@ -177,7 +233,7 @@ function InviteButton({ token, onInvited }: { token: string; onInvited: () => vo
       dialogRef.current?.close();
       onInvited();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send invite');
+      setError(err instanceof Error ? err.message : "Failed to send invite");
     } finally {
       setLoading(false);
     }
@@ -185,10 +241,20 @@ function InviteButton({ token, onInvited }: { token: string; onInvited: () => vo
 
   return (
     <>
-      <Button className="btn-primary btn-sm" onClick={open} icon={<UserPlusIcon/>}>
+      <Button
+        className="btn-primary btn-sm"
+        onClick={open}
+        icon={<UserPlusIcon />}
+      >
         Invite partner
       </Button>
-      <dialog ref={dialogRef} class="invite-dialog" onClick={(e) => { if (e.target === dialogRef.current) close(); }}>
+      <dialog
+        ref={dialogRef}
+        class="invite-dialog"
+        onClick={(e) => {
+          if (e.target === dialogRef.current) close();
+        }}
+      >
         <h3 class="dialog-title">Invite a partner</h3>
         <form onSubmit={handleSubmit}>
           <div class="field">
@@ -205,14 +271,24 @@ function InviteButton({ token, onInvited }: { token: string; onInvited: () => vo
           </div>
           <div class="invite-perms">
             <label class="checkbox-label">
-              <input type="checkbox" checked={viewData} onChange={(e) => setViewData((e.target as HTMLInputElement).checked)} />
+              <input
+                type="checkbox"
+                checked={viewData}
+                onChange={(e) =>
+                  setViewData((e.target as HTMLInputElement).checked)
+                }
+              />
               Can view data
             </label>
           </div>
           {error && <p class="form-error">{error}</p>}
           <div class="invite-actions">
-            <button class="btn btn-primary btn-sm" type="submit" disabled={loading}>
-              {loading ? 'Sending…' : 'Send invite'}
+            <button
+              class="btn btn-primary btn-sm"
+              type="submit"
+              disabled={loading}
+            >
+              {loading ? "Sending…" : "Send invite"}
             </button>
             <button class="btn btn-ghost btn-sm" type="button" onClick={close}>
               Cancel
@@ -237,7 +313,7 @@ function PendingInviteCard({
   const e2ee = useE2EE();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [e2eePass, setE2EEPass] = useState('');
+  const [e2eePass, setE2EEPass] = useState("");
 
   const needsE2EE = partner.permissions.view_data;
   const { wrappingKey } = useAuth();
@@ -250,8 +326,14 @@ function PendingInviteCard({
       let encryptedE2EEKey: string | undefined;
       if (needsE2EE && userId && wrappingKey) {
         // Derive the monitored user's E2EE key and store locally
-        const e2eeKey = await deriveKey(e2eePass, partner.partner_user_id, true);
-        const rawE2EE = new Uint8Array(await crypto.subtle.exportKey('raw', e2eeKey));
+        const e2eeKey = await deriveKey(
+          e2eePass,
+          partner.partner_user_id,
+          true,
+        );
+        const rawE2EE = new Uint8Array(
+          await crypto.subtle.exportKey("raw", e2eeKey),
+        );
         await e2ee.setKeyFromBytes(rawE2EE.buffer, partner.partner_user_id);
         // Encrypt it with own wrapping key for server storage
         const encrypted = await encryptData(wrappingKey, rawE2EE);
@@ -260,7 +342,7 @@ function PendingInviteCard({
       await api.acceptPartner(token, partner.id, encryptedE2EEKey);
       onAccepted();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to accept');
+      setError(err instanceof Error ? err.message : "Failed to accept");
       setLoading(false);
     }
   }
@@ -274,8 +356,8 @@ function PendingInviteCard({
       <p class="invite-desc">
         Invited you as an accountability partner
         {partner.permissions.view_data
-          ? ' with access to your encrypted activity data.'
-          : '.'}
+          ? " with access to your encrypted activity data."
+          : "."}
       </p>
       <form onSubmit={accept}>
         {needsE2EE && (
@@ -286,7 +368,9 @@ function PendingInviteCard({
                 id={`e2ee-${partner.id}`}
                 type="password"
                 value={e2eePass}
-                onInput={(e) => setE2EEPass((e.target as HTMLInputElement).value)}
+                onInput={(e) =>
+                  setE2EEPass((e.target as HTMLInputElement).value)
+                }
                 placeholder="Shared encryption password"
                 required
               />
@@ -294,45 +378,66 @@ function PendingInviteCard({
           </>
         )}
         {error && <p class="form-error">{error}</p>}
-        <button class="btn btn-primary btn-sm" type="submit" disabled={loading} style="margin-top:0.5rem">
-          {loading ? 'Accepting…' : 'Accept invite'}
+        <button
+          class="btn btn-primary btn-sm"
+          type="submit"
+          disabled={loading}
+          style="margin-top:0.5rem"
+        >
+          {loading ? "Accepting…" : "Accept invite"}
         </button>
       </form>
     </div>
   );
 }
 
-function PartnerDevicesSection({ partner, token }: { partner: Partner; token: string }) {
+function PartnerDevicesSection({
+  partner,
+  token,
+}: {
+  partner: Partner;
+  token: string;
+}) {
   const { wrappingKey } = useAuth();
   const e2ee = useE2EE();
   const { route } = useLocation();
   const [devices, setDevices] = useState<Device[] | null>(null);
   const editKeyDialogRef = useRef<HTMLDialogElement>(null);
-  const [e2eePass, setE2EEPass] = useState('');
+  const [e2eePass, setE2EEPass] = useState("");
   const [e2eeKeyError, setE2EEKeyError] = useState<string | null>(null);
   const [e2eeKeySaving, setE2EEKeySaving] = useState(false);
 
   useEffect(() => {
-    api.getDevices(token, { user: partner.partner_user_id })
+    api
+      .getDevices(token, { user: partner.partner_user_id })
       .then(setDevices)
       .catch(() => setDevices([]));
   }, [partner.partner_user_id, token]);
 
   async function saveE2EEKey(ev: Event) {
     ev.preventDefault();
-    if (!wrappingKey) { setE2EEKeyError('Session expired — please log out and back in.'); return; }
+    if (!wrappingKey) {
+      setE2EEKeyError("Session expired — please log out and back in.");
+      return;
+    }
     setE2EEKeyError(null);
     setE2EEKeySaving(true);
     try {
       const e2eeKey = await deriveKey(e2eePass, partner.partner_user_id, true);
-      const rawE2EE = new Uint8Array(await crypto.subtle.exportKey('raw', e2eeKey));
+      const rawE2EE = new Uint8Array(
+        await crypto.subtle.exportKey("raw", e2eeKey),
+      );
       await e2ee.setKeyFromBytes(rawE2EE.buffer, partner.partner_user_id);
       const encrypted = await encryptData(wrappingKey, rawE2EE);
-      await api.putPartner(token, partner.id, { encryptedE2EEKey: encrypted.toBase64() });
-      setE2EEPass('');
+      await api.putPartner(token, partner.id, {
+        encryptedE2EEKey: encrypted.toBase64(),
+      });
+      setE2EEPass("");
       editKeyDialogRef.current?.close();
     } catch (err) {
-      setE2EEKeyError(err instanceof Error ? err.message : 'Failed to update key');
+      setE2EEKeyError(
+        err instanceof Error ? err.message : "Failed to update key",
+      );
     } finally {
       setE2EEKeySaving(false);
     }
@@ -347,7 +452,11 @@ function PartnerDevicesSection({ partner, token }: { partner: Partner; token: st
             <button
               class="btn btn-ghost btn-sm"
               type="button"
-              onClick={() => { setE2EEPass(''); setE2EEKeyError(null); editKeyDialogRef.current?.showModal(); }}
+              onClick={() => {
+                setE2EEPass("");
+                setE2EEKeyError(null);
+                editKeyDialogRef.current?.showModal();
+              }}
             >
               Edit key
             </button>
@@ -371,20 +480,33 @@ function PartnerDevicesSection({ partner, token }: { partner: Partner; token: st
             <div class="card" key={d.id}>
               <div class="card-header">
                 <span class="card-name">{d.name}</span>
-                <span class={`badge ${d.status === 'online' ? 'badge-green' : 'badge-gray'}`}>
-                  {d.status === 'online' ? 'Online' : 'Offline'}
+                <span
+                  class={`badge ${d.status === "online" ? "badge-green" : "badge-gray"}`}
+                >
+                  {d.status === "online" ? "Online" : "Offline"}
                 </span>
               </div>
               <dl class="card-meta">
-                <dt>Platform</dt><dd>{d.platform}</dd>
-                <dt>Last seen</dt><dd>{d.last_seen_at ? relativeTime(d.last_seen_at) : 'Never'}</dd>
-                <dt>Last upload</dt><dd>{d.last_upload_at ? relativeTime(d.last_upload_at) : 'Never'}</dd>
+                <dt>Platform</dt>
+                <dd>{d.platform}</dd>
+                <dt>Last seen</dt>
+                <dd>
+                  {d.last_seen_at ? relativeTime(d.last_seen_at) : "Never"}
+                </dd>
+                <dt>Last upload</dt>
+                <dd>
+                  {d.last_upload_at ? relativeTime(d.last_upload_at) : "Never"}
+                </dd>
               </dl>
               <div class="card-actions">
                 <button
                   class="btn btn-ghost btn-sm"
                   type="button"
-                  onClick={() => route(`/logs?user=${partner.partner_user_id}&device_id=${d.id}`)}
+                  onClick={() =>
+                    route(
+                      `/logs?user=${partner.partner_user_id}&device_id=${d.id}`,
+                    )
+                  }
                 >
                   View logs
                 </button>
@@ -394,9 +516,18 @@ function PartnerDevicesSection({ partner, token }: { partner: Partner; token: st
         </div>
       )}
 
-      <dialog ref={editKeyDialogRef} class="invite-dialog" onClick={(e) => { if (e.target === editKeyDialogRef.current) editKeyDialogRef.current?.close(); }}>
+      <dialog
+        ref={editKeyDialogRef}
+        class="invite-dialog"
+        onClick={(e) => {
+          if (e.target === editKeyDialogRef.current)
+            editKeyDialogRef.current?.close();
+        }}
+      >
         <h3 class="dialog-title">Update encryption key</h3>
-        <p class="invite-desc">Enter the current E2EE password for {partner.partner_email}.</p>
+        <p class="invite-desc">
+          Enter the current E2EE password for {partner.partner_email}.
+        </p>
         <form onSubmit={saveE2EEKey}>
           <div class="field">
             <label for={`edit-e2ee-${partner.id}`}>Their E2EE password</label>
@@ -404,7 +535,10 @@ function PartnerDevicesSection({ partner, token }: { partner: Partner; token: st
               id={`edit-e2ee-${partner.id}`}
               type="password"
               value={e2eePass}
-              onInput={(e) => { setE2EEPass((e.target as HTMLInputElement).value); setE2EEKeyError(null); }}
+              onInput={(e) => {
+                setE2EEPass((e.target as HTMLInputElement).value);
+                setE2EEKeyError(null);
+              }}
               placeholder="Shared encryption password"
               required
               autoFocus
@@ -412,10 +546,18 @@ function PartnerDevicesSection({ partner, token }: { partner: Partner; token: st
           </div>
           {e2eeKeyError && <p class="form-error">{e2eeKeyError}</p>}
           <div class="invite-actions">
-            <button class="btn btn-primary btn-sm" type="submit" disabled={e2eeKeySaving}>
-              {e2eeKeySaving ? 'Saving…' : 'Save'}
+            <button
+              class="btn btn-primary btn-sm"
+              type="submit"
+              disabled={e2eeKeySaving}
+            >
+              {e2eeKeySaving ? "Saving…" : "Save"}
             </button>
-            <button class="btn btn-ghost btn-sm" type="button" onClick={() => editKeyDialogRef.current?.close()}>
+            <button
+              class="btn btn-ghost btn-sm"
+              type="button"
+              onClick={() => editKeyDialogRef.current?.close()}
+            >
               Cancel
             </button>
           </div>
@@ -425,9 +567,17 @@ function PartnerDevicesSection({ partner, token }: { partner: Partner; token: st
   );
 }
 
-function DeviceCard({ device, token, onChanged }: { device: Device; token: string; onChanged: () => void }) {
+function DeviceCard({
+  device,
+  token,
+  onChanged,
+}: {
+  device: Device;
+  token: string;
+  onChanged: () => void;
+}) {
   const { route } = useLocation();
-  const online = device.status === 'online';
+  const online = device.status === "online";
   const [name, setName] = useState(device.name);
   const [enabled, setEnabled] = useState(device.enabled);
   const [saving, setSaving] = useState(false);
@@ -453,7 +603,7 @@ function DeviceCard({ device, token, onChanged }: { device: Device; token: strin
       dialogRef.current?.close();
       onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save');
+      setError(err instanceof Error ? err.message : "Failed to save");
     } finally {
       setSaving(false);
     }
@@ -463,18 +613,29 @@ function DeviceCard({ device, token, onChanged }: { device: Device; token: strin
     <div class="card">
       <div class="card-header">
         <span class="card-name">{device.name}</span>
-        <span class={`badge ${online ? 'badge-green' : 'badge-gray'}`}>
-          {online ? 'Online' : 'Offline'}
+        <span class={`badge ${online ? "badge-green" : "badge-gray"}`}>
+          {online ? "Online" : "Offline"}
         </span>
       </div>
       <dl class="card-meta">
         <dt>Platform</dt>
         <dd>{device.platform}</dd>
         <dt>Last seen</dt>
-        <dd>{device.last_seen_at ? relativeTime(device.last_seen_at) : 'Never'}</dd>
+        <dd>
+          {device.last_seen_at ? relativeTime(device.last_seen_at) : "Never"}
+        </dd>
         <dt>Last upload</dt>
-        <dd>{device.last_upload_at ? relativeTime(device.last_upload_at) : 'Never'}</dd>
-        {!device.enabled && <><dt>Status</dt><dd class="muted">Disabled</dd></>}
+        <dd>
+          {device.last_upload_at
+            ? relativeTime(device.last_upload_at)
+            : "Never"}
+        </dd>
+        {!device.enabled && (
+          <>
+            <dt>Status</dt>
+            <dd class="muted">Disabled</dd>
+          </>
+        )}
       </dl>
       <div class="card-actions">
         <button
@@ -489,7 +650,13 @@ function DeviceCard({ device, token, onChanged }: { device: Device; token: strin
         </button>
       </div>
 
-      <dialog ref={dialogRef} class="invite-dialog" onClick={(e) => { if (e.target === dialogRef.current) dialogRef.current?.close(); }}>
+      <dialog
+        ref={dialogRef}
+        class="invite-dialog"
+        onClick={(e) => {
+          if (e.target === dialogRef.current) dialogRef.current?.close();
+        }}
+      >
         <h3 class="dialog-title">Edit device</h3>
         <form onSubmit={handleSave}>
           <div class="field">
@@ -503,15 +670,29 @@ function DeviceCard({ device, token, onChanged }: { device: Device; token: strin
             />
           </div>
           <label class="checkbox-label">
-            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled((e.target as HTMLInputElement).checked)} />
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) =>
+                setEnabled((e.target as HTMLInputElement).checked)
+              }
+            />
             Enabled
           </label>
           {error && <p class="form-error">{error}</p>}
           <div class="invite-actions">
-            <button class="btn btn-primary btn-sm" type="submit" disabled={saving}>
-              {saving ? 'Saving…' : 'Save'}
+            <button
+              class="btn btn-primary btn-sm"
+              type="submit"
+              disabled={saving}
+            >
+              {saving ? "Saving…" : "Save"}
             </button>
-            <button class="btn btn-ghost btn-sm" type="button" onClick={() => dialogRef.current?.close()}>
+            <button
+              class="btn btn-ghost btn-sm"
+              type="button"
+              onClick={() => dialogRef.current?.close()}
+            >
               Cancel
             </button>
           </div>
@@ -540,7 +721,7 @@ function SentRequestCard({
       await api.deletePartner(token, partner.id);
       onCancelled();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to cancel request');
+      setError(err instanceof Error ? err.message : "Failed to cancel request");
       setLoading(false);
     }
   }
@@ -557,8 +738,13 @@ function SentRequestCard({
       </dl>
       {error && <p class="form-error">{error}</p>}
       <div class="card-actions">
-        <button class="btn btn-danger btn-sm" type="button" onClick={cancel} disabled={loading}>
-          {loading ? 'Cancelling…' : 'Cancel request'}
+        <button
+          class="btn btn-danger btn-sm"
+          type="button"
+          onClick={cancel}
+          disabled={loading}
+        >
+          {loading ? "Cancelling…" : "Cancel request"}
         </button>
       </div>
     </div>
@@ -587,14 +773,14 @@ function PartnerCard({
       deleteDialogRef.current?.close();
       onDeleted();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to remove partner');
+      setError(err instanceof Error ? err.message : "Failed to remove partner");
       setLoading(false);
     }
   }
 
   // role='owner': they monitor me (I invited them)
   // role='partner': I monitor them (they invited me)
-  const isMonitoringMe = partner.role === 'owner';
+  const isMonitoringMe = partner.role === "owner";
 
   return (
     <div class="card">
@@ -623,35 +809,68 @@ function PartnerCard({
         </button>
       </div>
 
-      <dialog ref={infoDialogRef} class="invite-dialog" onClick={(e) => { if (e.target === infoDialogRef.current) infoDialogRef.current?.close(); }}>
+      <dialog
+        ref={infoDialogRef}
+        class="invite-dialog"
+        onClick={(e) => {
+          if (e.target === infoDialogRef.current)
+            infoDialogRef.current?.close();
+        }}
+      >
         <h3 class="dialog-title">{partner.partner_email}</h3>
         <dl class="card-meta">
           <dt>Role</dt>
-          <dd>{isMonitoringMe ? 'Monitoring you' : 'You are monitoring them'}</dd>
+          <dd>
+            {isMonitoringMe ? "Monitoring you" : "You are monitoring them"}
+          </dd>
           <dt>Can view data</dt>
-          <dd>{partner.permissions.view_data ? 'Yes' : 'No'}</dd>
+          <dd>{partner.permissions.view_data ? "Yes" : "No"}</dd>
           <dt>Since</dt>
           <dd>{new Date(partner.created_at).toLocaleDateString()}</dd>
         </dl>
         <div class="invite-actions" style="margin-top:1rem">
-          <button class="btn btn-ghost btn-sm" type="button" onClick={() => infoDialogRef.current?.close()}>
+          <button
+            class="btn btn-ghost btn-sm"
+            type="button"
+            onClick={() => infoDialogRef.current?.close()}
+          >
             Close
           </button>
         </div>
       </dialog>
 
-      <dialog ref={deleteDialogRef} class="invite-dialog" onClick={(e) => { if (e.target === deleteDialogRef.current) deleteDialogRef.current?.close(); }}>
+      <dialog
+        ref={deleteDialogRef}
+        class="invite-dialog"
+        onClick={(e) => {
+          if (e.target === deleteDialogRef.current)
+            deleteDialogRef.current?.close();
+        }}
+      >
         <h3 class="dialog-title">Remove partner?</h3>
         <p class="invite-desc">
-          Are you sure you want to remove <strong>{partner.partner_email}</strong> as an
-          accountability partner? They will be notified by email.
+          Are you sure you want to remove{" "}
+          <strong>{partner.partner_email}</strong> as an accountability partner?
+          They will be notified by email.
         </p>
         {error && <p class="form-error">{error}</p>}
         <div class="invite-actions">
-          <button class="btn btn-danger btn-sm" type="button" onClick={confirmDelete} disabled={loading}>
-            {loading ? 'Removing…' : 'Yes, remove'}
+          <button
+            class="btn btn-danger btn-sm"
+            type="button"
+            onClick={confirmDelete}
+            disabled={loading}
+          >
+            {loading ? "Removing…" : "Yes, remove"}
           </button>
-          <button class="btn btn-ghost btn-sm" type="button" onClick={() => { deleteDialogRef.current?.close(); setError(null); }}>
+          <button
+            class="btn btn-ghost btn-sm"
+            type="button"
+            onClick={() => {
+              deleteDialogRef.current?.close();
+              setError(null);
+            }}
+          >
             Cancel
           </button>
         </div>
@@ -663,7 +882,7 @@ function PartnerCard({
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'Just now';
+  if (mins < 1) return "Just now";
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
