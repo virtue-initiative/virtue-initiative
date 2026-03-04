@@ -15,6 +15,9 @@ export interface Env {
   // Optional override for the hash upload server base URL (e.g. a dedicated worker).
   // Falls back to the current API origin if not set.
   HASH_SERVER_URL?: string;
+
+  // Public base URL for R2 batch blobs (e.g. https://r2.example.com)
+  R2_URL: string;
 }
 
 // Variables stored in context

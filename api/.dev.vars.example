@@ -6,3 +6,6 @@ JWT_SECRET=your-super-secret-key-change-this-in-production
 
 # Allowed CORS origin (web app URL)
 CORS_ORIGIN=http://localhost:5173
+
+# Public base URL for R2 batch blobs
+R2_URL=http://localhost:8787/r2
