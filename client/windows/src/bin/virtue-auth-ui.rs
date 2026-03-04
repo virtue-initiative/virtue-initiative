@@ -185,7 +185,8 @@ fn main() -> Result<()> {
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "windows-device".to_string());
 
-        match login_session.login_blocking(login_runtime.as_ref(), &email, &password, &device_name) {
+        match login_session.login_blocking(login_runtime.as_ref(), &email, &password, &device_name)
+        {
             Ok(_) => {
                 window.set_logged_in(true);
                 window.set_account_email(email.clone().into());

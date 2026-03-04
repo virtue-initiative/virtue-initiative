@@ -258,8 +258,8 @@ impl TokenStore for FileTokenStore {
 
 fn parse_key_hex(hex_str: Option<&str>, field: &str) -> CoreResult<Option<[u8; 32]>> {
     let Some(s) = hex_str else { return Ok(None) };
-    let bytes = hex::decode(s)
-        .map_err(|e| CoreError::TokenStore(format!("invalid {field}: {e}")))?;
+    let bytes =
+        hex::decode(s).map_err(|e| CoreError::TokenStore(format!("invalid {field}: {e}")))?;
     let arr: [u8; 32] = bytes
         .try_into()
         .map_err(|_| CoreError::TokenStore(format!("{field} must be 32 bytes")))?;

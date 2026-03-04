@@ -6,11 +6,32 @@ on:
 
 jobs:
   ts-and-prettier:
-    name: TypeScript and Prettier
+    name: Lint and Format
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust format check (workspace)
+        run: cargo fmt --all -- --check
+        working-directory: client
+
+      - name: Rust lint (core)
+        run: cargo clippy -p virtue-client-core --all-targets -- -D warnings
+        working-directory: client
+
+      - name: Rust lint (Linux client)
+        run: cargo clippy -p virtue-linux-client --all-targets -- -D warnings
+        working-directory: client
+
+      - name: Rust format check (Android)
+        run: cargo fmt --all --manifest-path android/rust/Cargo.toml -- --check
+        working-directory: client
 
       - name: Setup Node
         uses: actions/setup-node@v4

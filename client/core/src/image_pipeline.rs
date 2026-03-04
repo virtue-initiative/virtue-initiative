@@ -22,8 +22,13 @@ impl ImagePipeline {
     pub fn process(&self, input: &[u8]) -> CoreResult<ProcessedImage> {
         let decoded = image::load_from_memory(input)?;
         let (orig_width, orig_height) = decoded.dimensions();
-        let target_width = (orig_width as f32 * TARGET_HEIGHT as f32 / orig_height as f32).round() as u32;
-        let working = decoded.resize_exact(target_width, TARGET_HEIGHT, image::imageops::FilterType::Lanczos3);
+        let target_width =
+            (orig_width as f32 * TARGET_HEIGHT as f32 / orig_height as f32).round() as u32;
+        let working = decoded.resize_exact(
+            target_width,
+            TARGET_HEIGHT,
+            image::imageops::FilterType::Lanczos3,
+        );
 
         let rgba = working.to_rgba8();
         let (width, height) = working.dimensions();

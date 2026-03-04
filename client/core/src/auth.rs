@@ -6,7 +6,7 @@ use reqwest::header::{COOKIE, HeaderValue, SET_COOKIE};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
-use crate::crypto::{derive_key, decrypt, hash_password_for_auth};
+use crate::crypto::{decrypt, derive_key, hash_password_for_auth};
 use crate::error::{CoreError, CoreResult};
 use crate::models::{E2EEKeyResponse, LoginRequest, TokenResponse};
 use crate::resolve_base_api_url;
@@ -61,7 +61,10 @@ impl AuthClient {
 
     pub async fn login(&self, email: &str, password: &str) -> CoreResult<TokenResponse> {
         let pw_hash = hash_password_for_auth(password, email)?;
-        let payload = LoginRequest { email, password: &pw_hash };
+        let payload = LoginRequest {
+            email,
+            password: &pw_hash,
+        };
         let url = format!("{}/login", self.config.base_url);
         let response = self.client.post(url).json(&payload).send().await?;
         let set_cookie_headers = collect_set_cookie_headers(&response);
@@ -143,9 +146,7 @@ impl AuthClient {
     /// and persist the result. Call at login and on each daemon restart.
     pub async fn fetch_and_decrypt_e2ee_key(&self, access_token: &str) -> CoreResult<[u8; 32]> {
         let wrapping_key = self.token_store.get_wrapping_key()?.ok_or_else(|| {
-            CoreError::TokenStore(
-                "wrapping key not found; please sign in again".to_string(),
-            )
+            CoreError::TokenStore("wrapping key not found; please sign in again".to_string())
         })?;
 
         let url = format!("{}/e2ee", self.config.base_url);
@@ -159,7 +160,9 @@ impl AuthClient {
         let e2ee_resp: E2EEKeyResponse = decode_response(response).await?;
 
         let encrypted_b64 = e2ee_resp.encrypted_e2ee_key.ok_or_else(|| {
-            CoreError::TokenStore("no E2EE key stored on server; please sign in via the web app first".to_string())
+            CoreError::TokenStore(
+                "no E2EE key stored on server; please sign in via the web app first".to_string(),
+            )
         })?;
 
         let encrypted = base64::engine::general_purpose::STANDARD

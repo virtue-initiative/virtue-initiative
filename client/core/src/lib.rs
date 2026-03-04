@@ -28,20 +28,20 @@ pub fn resolve_base_api_url() -> String {
 pub fn apply_dev_env() {
     #[cfg(debug_assertions)]
     {
-        if let Some(val) = option_env!("VIRTUE_BASE_API_URL") {
-            if std::env::var("VIRTUE_BASE_API_URL").is_err() {
-                unsafe { std::env::set_var("VIRTUE_BASE_API_URL", val) };
-            }
+        if let Some(val) = option_env!("VIRTUE_BASE_API_URL")
+            && std::env::var("VIRTUE_BASE_API_URL").is_err()
+        {
+            unsafe { std::env::set_var("VIRTUE_BASE_API_URL", val) };
         }
-        if let Some(val) = option_env!("VIRTUE_CAPTURE_INTERVAL_SECONDS") {
-            if std::env::var("VIRTUE_CAPTURE_INTERVAL_SECONDS").is_err() {
-                unsafe { std::env::set_var("VIRTUE_CAPTURE_INTERVAL_SECONDS", val) };
-            }
+        if let Some(val) = option_env!("VIRTUE_CAPTURE_INTERVAL_SECONDS")
+            && std::env::var("VIRTUE_CAPTURE_INTERVAL_SECONDS").is_err()
+        {
+            unsafe { std::env::set_var("VIRTUE_CAPTURE_INTERVAL_SECONDS", val) };
         }
-        if let Some(val) = option_env!("VIRTUE_BATCH_WINDOW_SECONDS") {
-            if std::env::var("VIRTUE_BATCH_WINDOW_SECONDS").is_err() {
-                unsafe { std::env::set_var("VIRTUE_BATCH_WINDOW_SECONDS", val) };
-            }
+        if let Some(val) = option_env!("VIRTUE_BATCH_WINDOW_SECONDS")
+            && std::env::var("VIRTUE_BATCH_WINDOW_SECONDS").is_err()
+        {
+            unsafe { std::env::set_var("VIRTUE_BATCH_WINDOW_SECONDS", val) };
         }
     }
 }
@@ -91,12 +91,11 @@ fn parse_env_file_contents(contents: &str) -> HashMap<String, String> {
         }
 
         let mut value = raw_value.trim().to_string();
-        if (value.starts_with('"') && value.ends_with('"'))
-            || (value.starts_with('\'') && value.ends_with('\''))
+        if ((value.starts_with('"') && value.ends_with('"'))
+            || (value.starts_with('\'') && value.ends_with('\'')))
+            && value.len() >= 2
         {
-            if value.len() >= 2 {
-                value = value[1..value.len() - 1].to_string();
-            }
+            value = value[1..value.len() - 1].to_string();
         }
 
         vars.insert(key.to_string(), value);
@@ -179,7 +178,9 @@ mod tests {
             Some("120")
         );
         assert_eq!(
-            parsed.get("VIRTUE_BATCH_WINDOW_SECONDS").map(String::as_str),
+            parsed
+                .get("VIRTUE_BATCH_WINDOW_SECONDS")
+                .map(String::as_str),
             Some("900")
         );
     }

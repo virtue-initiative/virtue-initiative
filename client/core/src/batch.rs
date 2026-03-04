@@ -30,10 +30,10 @@ impl BatchItem {
                     id_bytes[i] = b;
                 }
             }
-            h.update(&id_bytes);
+            h.update(id_bytes);
         }
         // taken_at: 8-byte little-endian i64
-        h.update(&self.taken_at.to_le_bytes());
+        h.update(self.taken_at.to_le_bytes());
         // kind: raw UTF-8
         h.update(self.kind.as_bytes());
         // image: raw bytes (or nothing for missed captures)
@@ -65,13 +65,12 @@ impl BatchBlob {
 
     /// Encode: msgpack → gzip → AES-256-GCM.
     pub fn encode_encrypted(&self, key: &[u8; 32]) -> crate::CoreResult<Vec<u8>> {
-        use std::io::Write;
         use flate2::Compression;
         use flate2::write::GzEncoder;
+        use std::io::Write;
 
-        let msgpack = rmp_serde::to_vec_named(self).map_err(|e| {
-            crate::CoreError::Serialization(e.to_string())
-        })?;
+        let msgpack = rmp_serde::to_vec_named(self)
+            .map_err(|e| crate::CoreError::Serialization(e.to_string()))?;
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(&msgpack)?;
@@ -82,8 +81,8 @@ impl BatchBlob {
 
     /// Decode: AES-256-GCM → gzip → msgpack.
     pub fn decode_encrypted(data: &[u8], key: &[u8; 32]) -> crate::CoreResult<Self> {
-        use std::io::Read;
         use flate2::read::GzDecoder;
+        use std::io::Read;
 
         let compressed = crate::crypto::decrypt(key, data)?;
 
@@ -91,8 +90,6 @@ impl BatchBlob {
         let mut msgpack = Vec::new();
         decoder.read_to_end(&mut msgpack)?;
 
-        rmp_serde::from_slice(&msgpack).map_err(|e| {
-            crate::CoreError::Serialization(e.to_string())
-        })
+        rmp_serde::from_slice(&msgpack).map_err(|e| crate::CoreError::Serialization(e.to_string()))
     }
 }

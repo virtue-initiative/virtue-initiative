@@ -4,11 +4,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
-use jni::JNIEnv;
 use jni::objects::{JByteArray, JClass, JString};
 use jni::sys::{jboolean, jlong, jstring};
+use jni::JNIEnv;
 use once_cell::sync::OnceCell;
 use rand::thread_rng;
 use reqwest::Client;
@@ -18,9 +18,9 @@ use tokio::runtime::Runtime;
 use uuid::Uuid;
 
 use virtue_client_core::{
-    AuthClient, BufferedUpload, CaptureSchedulePolicy, CaptureScheduleState, FileTokenStore,
-    ImagePipeline, PersistentQueue, RetryPolicy, TokenStore, UploadClient, resolve_base_api_url,
-    resolve_capture_interval_seconds,
+    resolve_base_api_url, resolve_capture_interval_seconds, AuthClient, BufferedUpload,
+    CaptureSchedulePolicy, CaptureScheduleState, FileTokenStore, ImagePipeline, PersistentQueue,
+    RetryPolicy, TokenStore, UploadClient,
 };
 
 static CORE: OnceCell<AndroidCore> = OnceCell::new();

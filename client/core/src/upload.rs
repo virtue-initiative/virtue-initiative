@@ -66,8 +66,14 @@ impl UploadClient {
 
         let form = Form::new()
             .text("device_id", device_id.to_string())
-            .text("start_time", start_time.to_rfc3339_opts(SecondsFormat::Millis, true))
-            .text("end_time", end_time.to_rfc3339_opts(SecondsFormat::Millis, true))
+            .text(
+                "start_time",
+                start_time.to_rfc3339_opts(SecondsFormat::Millis, true),
+            )
+            .text(
+                "end_time",
+                end_time.to_rfc3339_opts(SecondsFormat::Millis, true),
+            )
             .text("item_count", item_count.to_string())
             .text("size_bytes", size_bytes.to_string())
             .part("file", file_part);
