@@ -3,7 +3,7 @@ import { useLocation } from 'preact-iso';
 import { useAuth } from '../../context/auth';
 import { useE2EE } from '../../context/e2ee';
 import { api, Device, Partner } from '../../api';
-import { deriveKey, encryptData } from '../../crypto';
+import { deriveKey, encryptData, decryptBatch } from '../../crypto';
 import './style.css';
 import { Button } from '../../components/Button';
 
@@ -303,8 +303,14 @@ function PendingInviteCard({
 }
 
 function PartnerDevicesSection({ partner, token }: { partner: Partner; token: string }) {
+  const { wrappingKey } = useAuth();
+  const e2ee = useE2EE();
   const { route } = useLocation();
   const [devices, setDevices] = useState<Device[] | null>(null);
+  const editKeyDialogRef = useRef<HTMLDialogElement>(null);
+  const [e2eePass, setE2EEPass] = useState('');
+  const [e2eeKeyError, setE2EEKeyError] = useState<string | null>(null);
+  const [e2eeKeySaving, setE2EEKeySaving] = useState(false);
 
   useEffect(() => {
     api.getDevices(token, { user: partner.partner_user_id })
@@ -312,17 +318,48 @@ function PartnerDevicesSection({ partner, token }: { partner: Partner; token: st
       .catch(() => setDevices([]));
   }, [partner.partner_user_id, token]);
 
+  async function saveE2EEKey(ev: Event) {
+    ev.preventDefault();
+    if (!wrappingKey) { setE2EEKeyError('Session expired — please log out and back in.'); return; }
+    setE2EEKeyError(null);
+    setE2EEKeySaving(true);
+    try {
+      const e2eeKey = await deriveKey(e2eePass, partner.partner_user_id, true);
+      const rawE2EE = new Uint8Array(await crypto.subtle.exportKey('raw', e2eeKey));
+      await e2ee.setKeyFromBytes(rawE2EE.buffer, partner.partner_user_id);
+      const encrypted = await encryptData(wrappingKey, rawE2EE);
+      await api.putPartner(token, partner.id, { encryptedE2EEKey: encrypted.toBase64() });
+      setE2EEPass('');
+      editKeyDialogRef.current?.close();
+    } catch (err) {
+      setE2EEKeyError(err instanceof Error ? err.message : 'Failed to update key');
+    } finally {
+      setE2EEKeySaving(false);
+    }
+  }
+
   return (
     <section class="dash-section">
       <div class="section-header">
         <h2>{partner.partner_email}'s devices</h2>
-        <button
-          class="btn btn-ghost btn-sm"
-          type="button"
-          onClick={() => route(`/logs?user=${partner.partner_user_id}`)}
-        >
-          View logs
-        </button>
+        <div style="display:flex;gap:0.5rem">
+          {partner.permissions.view_data && (
+            <button
+              class="btn btn-ghost btn-sm"
+              type="button"
+              onClick={() => { setE2EEPass(''); setE2EEKeyError(null); editKeyDialogRef.current?.showModal(); }}
+            >
+              Edit key
+            </button>
+          )}
+          <button
+            class="btn btn-ghost btn-sm"
+            type="button"
+            onClick={() => route(`/logs?user=${partner.partner_user_id}`)}
+          >
+            View logs
+          </button>
+        </div>
       </div>
       {devices === null ? (
         <p class="loading">Loading…</p>
@@ -356,6 +393,34 @@ function PartnerDevicesSection({ partner, token }: { partner: Partner; token: st
           ))}
         </div>
       )}
+
+      <dialog ref={editKeyDialogRef} class="invite-dialog" onClick={(e) => { if (e.target === editKeyDialogRef.current) editKeyDialogRef.current?.close(); }}>
+        <h3 class="dialog-title">Update encryption key</h3>
+        <p class="invite-desc">Enter the current E2EE password for {partner.partner_email}.</p>
+        <form onSubmit={saveE2EEKey}>
+          <div class="field">
+            <label for={`edit-e2ee-${partner.id}`}>Their E2EE password</label>
+            <input
+              id={`edit-e2ee-${partner.id}`}
+              type="password"
+              value={e2eePass}
+              onInput={(e) => { setE2EEPass((e.target as HTMLInputElement).value); setE2EEKeyError(null); }}
+              placeholder="Shared encryption password"
+              required
+              autoFocus
+            />
+          </div>
+          {e2eeKeyError && <p class="form-error">{e2eeKeyError}</p>}
+          <div class="invite-actions">
+            <button class="btn btn-primary btn-sm" type="submit" disabled={e2eeKeySaving}>
+              {e2eeKeySaving ? 'Saving…' : 'Save'}
+            </button>
+            <button class="btn btn-ghost btn-sm" type="button" onClick={() => editKeyDialogRef.current?.close()}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      </dialog>
     </section>
   );
 }

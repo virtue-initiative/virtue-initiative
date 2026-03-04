@@ -429,6 +429,20 @@ export async function listPartners(db: D1Database, userId: string) {
   return { owned: owned.results, asPartner: asPartner.results };
 }
 
+export async function findPartnerByPartnerUser(db: D1Database, partnerId: string, partnerUserId: string) {
+  return db
+    .prepare('SELECT id FROM partners WHERE id = ? AND partner_user_id = ? AND status = ?')
+    .bind(partnerId, partnerUserId, 'accepted')
+    .first<{ id: string }>();
+}
+
+export async function updatePartnerE2EEKey(db: D1Database, partnerId: string, e2eeKey: ArrayBuffer, updatedAt: string) {
+  return db
+    .prepare('UPDATE partners SET e2ee_key = ?, updated_at = ? WHERE id = ?')
+    .bind(e2eeKey, updatedAt, partnerId)
+    .run();
+}
+
 export async function findPartnerByOwner(db: D1Database, partnerId: string, userId: string) {
   return db
     .prepare('SELECT id, permissions FROM partners WHERE id = ? AND user_id = ?')

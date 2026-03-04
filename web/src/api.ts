@@ -128,6 +128,12 @@ export const api = {
       body: JSON.stringify({ id, ...(encryptedKey ? { encryptedE2EEKey: encryptedKey } : {}) }),
     }, token),
 
+  putPartner: (token: string, id: string, fields: { encryptedE2EEKey?: string }) =>
+    req<{ id: string }>(`/partner/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(fields),
+    }, token),
+
   deletePartner: (token: string, id: string) =>
     req<void>(`/partner/${id}`, { method: 'DELETE' }, token),
 

@@ -69,6 +69,10 @@ export const acceptPartnerSchema = z.object({
   encryptedE2EEKey: z.string().optional(),
 });
 
+export const putPartnerSchema = z
+  .object({ encryptedE2EEKey: z.string().min(1).optional() })
+  .refine((d) => Object.keys(d).length > 0, { message: 'No fields to update' });
+
 export const updatePartnerSchema = z.object({
   permissions: z.object({
     view_data: z.boolean().optional(),
