@@ -24,7 +24,11 @@ impl ApiClient {
         })
     }
 
-    pub async fn get_hash_server_url(&self, access_token: &str, device_id: &str) -> CoreResult<String> {
+    pub async fn get_hash_server_url(
+        &self,
+        access_token: &str,
+        device_id: &str,
+    ) -> CoreResult<String> {
         let url = format!("{}/hash-server?deviceId={}", self.base_url, device_id);
         let response = self
             .client

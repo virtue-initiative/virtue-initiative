@@ -190,7 +190,10 @@ pub async fn run_daemon(shutdown: Arc<AtomicBool>, logger: &ServiceLogger) -> Re
             .map(|t| t.elapsed() >= SETTINGS_REFRESH_INTERVAL)
             .unwrap_or(true)
         {
-            match api_client.get_hash_server_url(&access_token, &device_id).await {
+            match api_client
+                .get_hash_server_url(&access_token, &device_id)
+                .await
+            {
                 Ok(hash_url) => {
                     match UploadClient::with_config(UploadClientConfig {
                         hash_base_url: Some(hash_url),
