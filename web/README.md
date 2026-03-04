@@ -7,12 +7,14 @@ logs.
 ## Development
 
 Set up the environment
+
 ```bash
 npm install
 cp .env.example .env.local
 ```
 
 Run the dev server
+
 ```bash
 npm run dev
 ```
@@ -29,4 +31,3 @@ npm run deploy
 - **Framework**: [Preact](https://preactjs.com/)
 - **Icons**: [Heroicons](https://heroicons.com/)
 - **Styles**: Plain CSS
-

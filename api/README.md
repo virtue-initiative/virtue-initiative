@@ -14,6 +14,7 @@ A screenshot accountability system API built on Cloudflare Workers.
 ## Development
 
 Set up the environment:
+
 ```bash
 npm install
 npm run db:migrate
@@ -40,4 +41,3 @@ npm run deploy
 ## API
 
 See the [API specification](./API.md).
-

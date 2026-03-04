@@ -193,9 +193,9 @@ Gets the latest hash
 
 Query params:
 
-| Param       | Required | Description                                          |
-| ----------- | -------- | ---------------------------------------------------- |
-| `device_id` | ✓        | Device UUID                                          |
+| Param       | Required | Description |
+| ----------- | -------- | ----------- |
+| `device_id` | ✓        | Device UUID |
 
 ## Partners
 

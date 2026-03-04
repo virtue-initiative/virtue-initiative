@@ -7,6 +7,7 @@ https://help.virtueinitiative.org. It is built using
 ## Development
 
 Set up the environment.
+
 ```bash
 npm install
 ```
@@ -22,4 +23,3 @@ npm start
 ```bash
 npm run deploy
 ```
-
