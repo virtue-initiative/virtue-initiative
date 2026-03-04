@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import { v4 as uuidv4 } from 'uuid';
 import { Env, Variables } from '../types/bindings';
 import { authenticate } from '../middleware/auth';
-import { createPartnerSchema, acceptPartnerSchema, updatePartnerSchema } from '../lib/schemas';
+import { createPartnerSchema, acceptPartnerSchema, updatePartnerSchema, putPartnerSchema } from '../lib/schemas';
 import {
   findUserByEmail,
   findPartnerByUsers,
@@ -12,8 +12,10 @@ import {
   acceptPartner,
   listPartners,
   findPartnerByOwner,
+  findPartnerByPartnerUser,
   findPartnerByEitherParty,
   updatePartnerPermissions,
+  updatePartnerE2EEKey,
   deletePartner,
 } from '../lib/db';
 import { sendPartnerDeletionEmail } from '../lib/email';
@@ -110,7 +112,28 @@ partners.get('/', authenticate, async (c) => {
 });
 
 /**
- * PATCH /partner/:id - Update partner permissions
+ * PUT /partner/:id - Update partner record (caller must be the partner_user_id)
+ */
+partners.put('/:id', authenticate, async (c) => {
+  const parsed = putPartnerSchema.safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
+
+  const userId = c.get('userId');
+  const partnerId = c.req.param('id');
+
+  const partnership = await findPartnerByPartnerUser(c.env.DB, partnerId, userId);
+  if (!partnership) return c.json({ error: 'Partnership not found' }, 404);
+
+  if (parsed.data.encryptedE2EEKey !== undefined) {
+    const e2eeKey = Uint8Array.fromBase64(parsed.data.encryptedE2EEKey).buffer;
+    await updatePartnerE2EEKey(c.env.DB, partnerId, e2eeKey, new Date().toISOString());
+  }
+
+  return c.json({ id: partnerId });
+});
+
+/**
+ * PATCH /partner/:id - Update partner permissions (caller must be the owner/user_id)
  */
 partners.patch('/:id', authenticate, async (c) => {
   const parsed = updatePartnerSchema.safeParse(await c.req.json());
