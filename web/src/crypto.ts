@@ -16,7 +16,7 @@ export async function hashPasswordForAuth(password: string, email: string): Prom
 }
 
 // Encrypts data with AES-GCM: returns nonce(12 bytes) || ciphertext+tag
-export async function encryptData(key: CryptoKey, data: Uint8Array): Promise<Uint8Array> {
+export async function encryptData(key: CryptoKey, data: Uint8Array<ArrayBuffer>): Promise<Uint8Array> {
   const nonce = crypto.getRandomValues(new Uint8Array(12));
   const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, key, data);
   const result = new Uint8Array(12 + ciphertext.byteLength);
@@ -65,7 +65,7 @@ export async function deriveKey(password: string, userId: string, extractable = 
 }
 
 // Decrypts AES-256-GCM blob: first 12 bytes = nonce, rest = ciphertext+tag
-export async function decryptBatch(key: CryptoKey, data: Uint8Array): Promise<Uint8Array> {
+export async function decryptBatch(key: CryptoKey, data: Uint8Array): Promise<Uint8Array<ArrayBuffer>> {
   const nonce = data.slice(0, 12);
   const ciphertext = data.slice(12);
   const plain = await crypto.subtle.decrypt(
