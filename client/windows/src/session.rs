@@ -5,9 +5,7 @@ use base64::Engine;
 use serde::Deserialize;
 use tokio::runtime::Runtime;
 
-use virtue_client_core::{AuthClient, FileTokenStore, TokenStore};
-
-use crate::api::ApiClient;
+use virtue_client_core::{AuthClient, ApiClient, FileTokenStore, TokenStore};
 use crate::config::{ClientPaths, load_state, save_state};
 
 #[derive(Clone)]
@@ -83,7 +81,7 @@ impl SessionManager {
 
             let registration = self
                 .api_client
-                .register_device(&access_token, device_name)
+                .register_device(&access_token, device_name, "windows")
                 .await
                 .context("device registration failed")?;
 

@@ -110,22 +110,23 @@ export async function decryptBatch(
 // Decompresses gzip using native DecompressionStream
 export async function decompressGzip(data: Uint8Array): Promise<Uint8Array> {
   const ds = new DecompressionStream("gzip");
-  const writer = ds.writable.getWriter();
-  const reader = ds.readable.getReader();
-
-  const input = Uint8Array.from(data);
-  await writer.write(input);
-  await writer.close();
 
   const chunks: Uint8Array[] = [];
-  let totalLength = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    totalLength += value.length;
-  }
+  const readPromise = (async () => {
+    const reader = ds.readable.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+  })();
 
+  const writer = ds.writable.getWriter();
+  await writer.write(Uint8Array.from(data));
+  await writer.close();
+  await readPromise;
+
+  const totalLength = chunks.reduce((s, c) => s + c.length, 0);
   const result = new Uint8Array(totalLength);
   let offset = 0;
   for (const chunk of chunks) {
@@ -174,7 +175,7 @@ export async function verifyBatch(
   endChainHash: string,
 ): Promise<BatchVerification> {
   if (startChainHash === ZEROS_HEX && endChainHash === ZEROS_HEX)
-    return "unknown";
+    return "failed";
 
   const sortedItems = [...items].sort((a, b) => a.taken_at - b.taken_at);
 

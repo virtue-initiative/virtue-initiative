@@ -11,6 +11,10 @@ export interface Env {
 
   // Allowed CORS origin (e.g. https://app.example.com). Defaults to localhost in dev.
   CORS_ORIGIN: string;
+
+  // Optional override for the hash upload server base URL (e.g. a dedicated worker).
+  // Falls back to the current API origin if not set.
+  HASH_SERVER_URL?: string;
 }
 
 // Variables stored in context

@@ -10,12 +10,11 @@ use tokio::time::sleep;
 use uuid::Uuid;
 
 use virtue_client_core::{
-    AuthClient, BatchBlob, BatchItem, CaptureSchedulePolicy, CaptureScheduleState, FileTokenStore,
-    ImagePipeline, TokenStore, UploadClient, resolve_batch_window_seconds,
-    resolve_capture_interval_seconds, uuid_str_to_bytes,
+    ApiClient, AuthClient, BatchBlob, BatchItem, CaptureSchedulePolicy, CaptureScheduleState,
+    Device, FileTokenStore, ImagePipeline, TokenStore, UploadClient, UploadClientConfig,
+    resolve_batch_window_seconds, resolve_capture_interval_seconds, uuid_str_to_bytes,
 };
 
-use crate::api::{ApiClient, Device};
 use crate::capture::{capture_screen, is_session_unavailable_error};
 use crate::config::{ClientPaths, load_state};
 use crate::tray;
@@ -53,7 +52,6 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
 
     let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&paths.token_file));
     let auth_client = AuthClient::new(token_store.clone())?;
-    let upload_client = UploadClient::new()?;
     let api_client = ApiClient::new()?;
     let pipeline = ImagePipeline;
 
@@ -69,6 +67,10 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     {
         eprintln!("daemon: could not fetch E2EE key on startup: {err:#}");
     }
+
+    // Fetch the hash server URL on startup. Falls back to the default base URL on error.
+    let mut upload_client = UploadClient::new()?;
+    let mut last_hash_server_fetch: Option<Instant> = None;
 
     let mut batch_buffer = load_batch_buffer(&paths.batch_buffer_file);
     let mut batch_window_start: DateTime<Utc> = batch_buffer.window_start.unwrap_or_else(Utc::now);
@@ -120,6 +122,23 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
                     sleep(IDLE_RETRY_INTERVAL).await;
                     continue;
                 }
+            }
+        }
+
+        // Fetch hash server URL on the same schedule as device settings.
+        if last_hash_server_fetch
+            .map(|t| t.elapsed() >= SETTINGS_REFRESH_INTERVAL)
+            .unwrap_or(true)
+        {
+            match api_client.get_hash_server_url(&access_token, &device_id).await {
+                Ok(hash_url) => {
+                    upload_client = UploadClient::with_config(UploadClientConfig {
+                        hash_base_url: Some(hash_url),
+                        ..UploadClientConfig::default()
+                    })?;
+                    last_hash_server_fetch = Some(Instant::now());
+                }
+                Err(err) => eprintln!("daemon: could not fetch hash server URL: {err:#}"),
             }
         }
 

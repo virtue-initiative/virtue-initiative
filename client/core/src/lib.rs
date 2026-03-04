@@ -128,6 +128,7 @@ pub fn resolve_batch_window_seconds() -> u64 {
         .unwrap_or_else(|| clamp_batch_window_seconds(DEFAULT_BATCH_WINDOW_SECONDS))
 }
 
+pub mod api_client;
 pub mod auth;
 pub mod batch;
 pub mod crypto;
@@ -141,6 +142,7 @@ pub mod token_store;
 pub mod tray_icon;
 pub mod upload;
 
+pub use api_client::{ApiClient, Device, DeviceRegistration};
 pub use auth::{AuthClient, AuthClientConfig};
 pub use batch::{BatchBlob, BatchItem};
 pub use crypto::{decrypt, derive_key, encrypt};

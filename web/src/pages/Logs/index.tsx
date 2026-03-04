@@ -82,7 +82,7 @@ async function decryptAndFlattenBatch(
     logItems,
     batch.start_chain_hash,
     batch.end_chain_hash,
-  ).catch(() => "unknown" as const);
+  ).catch(() => "failed" as const);
   return logItems.map((item) => ({ ...item, batch_status: status }));
 }
 
