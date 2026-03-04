@@ -1,21 +1,32 @@
-# `create-preact`
+# Web App
 
-<h2 align="center">
-  <img height="256" width="256" src="./src/assets/preact.svg">
-</h2>
+This is the web app for The Virtue Initiative. Hosted at
+https://app.virtueinitiative.org, it handles signup, partners, and viewing
+logs.
 
-<h3 align="center">Get started using Preact and Vite!</h3>
+## Development
 
-## Getting Started
+Set up the environment
+```bash
+npm install
+cp .env.example .env.local
+```
 
-- `npm run dev` - Starts a dev server at http://localhost:5173/
+Run the dev server
+```bash
+npm run dev
+```
 
-- `npm run build` - Builds for production, emitting to `dist/`. Prerenders all found routes in app to static HTML
+## Deploying
 
-- `npm run preview` - Starts a server at http://localhost:4173/ to test production build locally
+```bash
+npm run deploy
+```
 
-## Iconography
+## Stack
 
-- The web app uses [Heroicons](https://heroicons.com/) as the icon style baseline.
-- Current theme toggle icons (moon/sun) are Heroicons-based SVGs in `src/components/Header.tsx`.
-- For new UI icons, prefer Heroicons for visual consistency.
+- **Language**: Typescript
+- **Framework**: [Preact](https://preactjs.com/)
+- **Icons**: [Heroicons](https://heroicons.com/)
+- **Styles**: Plain CSS
+
