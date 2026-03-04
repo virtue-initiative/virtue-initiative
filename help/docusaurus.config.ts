@@ -36,10 +36,14 @@ const config: Config = {
       {
         docs: {
           sidebarPath: "./sidebars.ts",
-          routeBasePath: "/help",
+          routeBasePath: "/",
           path: "./help",
         },
         blog: false,
+        // blog: {
+        //   routeBasePath: "/blog",
+        //   path: "./blog",
+        // },
         theme: {
           customCss: "./src/css/custom.css",
         },

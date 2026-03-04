@@ -6,6 +6,6 @@ sidebar_position: 1
 
 Follow the installation steps for your platform
 
-- [Windows](/help/installation/windows)
-- [Mac](/help/installation/mac)
-- [Linux](/help/installation/linux)
+- [Windows](/installation/windows)
+- [Mac](/installation/mac)
+- [Linux](/installation/linux)
