@@ -73,6 +73,7 @@ batches.post('/', authenticate, async (c) => {
 
   const batchId = uuidv4();
   const r2Key = `user/${userId}/batches/${batchId}.enc`;
+  const batchUrl = `${c.env.R2_URL}/${r2Key}`;
   const createdAt = new Date().toISOString();
 
   await putObject(c.env, r2Key, await file.arrayBuffer(), 'application/octet-stream');
@@ -82,7 +83,7 @@ batches.post('/', authenticate, async (c) => {
     batchId,
     userId,
     device_id,
-    r2Key,
+    batchUrl,
     start_time,
     end_time,
     startChainHash,
@@ -109,7 +110,7 @@ batches.post('/', authenticate, async (c) => {
     {
       batch: {
         id: batchId,
-        r2_key: r2Key,
+        batch_url: batchUrl,
         start_time,
         end_time,
         created_at: createdAt,

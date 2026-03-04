@@ -36,14 +36,12 @@ async function decryptAndFlattenBatch(
   batch: Batch,
   key: CryptoKey,
 ): Promise<LogItem[]> {
-  const r2Base = (import.meta as any).env?.VITE_R2_URL ?? "";
-  const url = `${r2Base}/${batch.r2_key}`;
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`Fetch failed (${resp.status}) for ${url}`);
+  const resp = await fetch(batch.batch_url);
+  if (!resp.ok) throw new Error(`Fetch failed (${resp.status}) for ${batch.batch_url}`);
 
   const raw = new Uint8Array(await resp.arrayBuffer());
   if (raw.length < 13)
-    throw new Error(`Batch blob too short for AES-GCM payload: ${url}`);
+    throw new Error(`Batch blob too short for AES-GCM payload: ${batch.batch_url}`);
 
   const decrypted = await decryptBatch(key, raw);
   const decompressed = await decompressGzip(decrypted);

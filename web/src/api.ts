@@ -11,7 +11,7 @@ export interface Device {
 export interface Batch {
   id: string;
   device_id: string;
-  r2_key: string;
+  batch_url: string;
   start_time: string;
   end_time: string;
   start_chain_hash: string;
