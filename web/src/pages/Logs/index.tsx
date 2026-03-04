@@ -81,6 +81,20 @@ function jwtSub(token: string): string | null {
   }
 }
 
+function lastBlockLabel(isoStr: string): string {
+  const date = new Date(isoStr);
+  const diffMs = Date.now() - date.getTime();
+  const hrs = diffMs / 3_600_000;
+  if (hrs < 24) {
+    const mins = Math.floor(diffMs / 60_000);
+    if (mins < 1) return 'last block received just now';
+    if (mins < 60) return `last block received ${mins} minute${mins === 1 ? '' : 's'} ago`;
+    const h = Math.floor(mins / 60);
+    return `last block received ${h} hour${h === 1 ? '' : 's'} ago`;
+  }
+  return `last block received on ${date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`;
+}
+
 export function Logs() {
   const { token } = useAuth();
   const e2ee = useE2EE();
@@ -102,6 +116,7 @@ export function Logs() {
   const [nextCursor, setNextCursor] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [batchStats, setBatchStats] = useState<{ decrypted: number; failed: number; lastTime: string | null }>({ decrypted: 0, failed: 0, lastTime: null });
 
   const [password, setPassword] = useState('');
   const [pwError, setPwError] = useState<string | null>(null);
@@ -135,6 +150,7 @@ export function Logs() {
     if (!activeKey || !token) return;
     setItems([]);
     setNextCursor(undefined);
+    setBatchStats({ decrypted: 0, failed: 0, lastTime: null });
     doLoadBatches(undefined, true);
   }, [activeKey, token, selectedDevice, selectedUser]);
 
@@ -151,13 +167,26 @@ export function Logs() {
       });
       const nested = await Promise.allSettled(page.items.map((b) => decryptAndFlattenBatch(b, activeKey!)));
       const flat: LogItem[] = [];
+      let pageDecrypted = 0;
+      let pageFaild = 0;
       for (const result of nested) {
         if (result.status === 'fulfilled') {
           flat.push(...result.value);
+          pageDecrypted++;
         } else {
           console.error('[logs] failed to decrypt batch:', result.reason);
+          pageFaild++;
         }
       }
+      const pageLastTime = page.items.reduce<string | null>((best, b) => {
+        if (!best) return b.end_time;
+        return b.end_time > best ? b.end_time : best;
+      }, null);
+      setBatchStats((prev) => ({
+        decrypted: (reset ? 0 : prev.decrypted) + pageDecrypted,
+        failed: (reset ? 0 : prev.failed) + pageFaild,
+        lastTime: pageLastTime && (!prev.lastTime || reset || pageLastTime > prev.lastTime) ? pageLastTime : reset ? pageLastTime : prev.lastTime,
+      }));
       setItems((prev) => {
         const combined = reset ? flat : [...prev, ...flat];
         return combined.sort((a, b) => b.taken_at - a.taken_at);
@@ -288,6 +317,14 @@ export function Logs() {
           </div>
 
           {fetchError && <p class="error-banner">{fetchError}</p>}
+
+          {activeKey && (batchStats.decrypted > 0 || batchStats.failed > 0) && (
+            <p class="logs-summary">
+              {batchStats.decrypted} block{batchStats.decrypted === 1 ? '' : 's'} decrypted
+              {batchStats.failed > 0 && `, ${batchStats.failed} couldn't be decrypted`}
+              {batchStats.lastTime && `, ${lastBlockLabel(batchStats.lastTime)}`}
+            </p>
+          )}
 
           {isGallery ? (
             <LogsGallery
