@@ -344,7 +344,7 @@ export async function queryChainHashes(
 // ── Partners ──────────────────────────────────────────────────────────────────
 
 export async function findUserById(db: D1Database, userId: string) {
-  return db.prepare('SELECT id, e2ee_key FROM users WHERE id = ?').bind(userId).first<{ id: string; e2ee_key: ArrayBuffer | null }>();
+  return db.prepare('SELECT id, email, name, e2ee_key FROM users WHERE id = ?').bind(userId).first<{ id: string; email: string; name: string | null; e2ee_key: ArrayBuffer | null }>();
 }
 
 export async function createPartner(

@@ -79,6 +79,11 @@ export const updatePartnerSchema = z.object({
 export const setE2EEKeySchema = z.object({
   encryptedE2EEKey: z.string().min(1),
 });
+
+// User profile schemas
+export const updateMeSchema = z
+  .object({ name: z.string().optional() })
+  .refine((d) => Object.keys(d).length > 0, { message: 'No fields to update' });
 export const settingsSchema = z.object({
   name: z.string().optional(),
   timezone: z.string().optional(),

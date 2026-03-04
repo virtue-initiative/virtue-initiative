@@ -87,6 +87,15 @@ export const api = {
 
   logout: (token: string) => req<void>('/logout', { method: 'POST' }, token),
 
+  getMe: (token: string) =>
+    req<{ id: string; email: string; name: string | null }>('/me', {}, token),
+
+  updateMe: (token: string, fields: { name?: string }) =>
+    req<{ ok: boolean }>('/me', {
+      method: 'PATCH',
+      body: JSON.stringify(fields),
+    }, token),
+
   getE2EEKey: (token: string) =>
     req<{ encryptedE2EEKey: string | null }>('/e2ee', {}, token),
 

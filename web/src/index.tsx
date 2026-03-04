@@ -6,6 +6,7 @@ import { Header } from './components/Header';
 import { Home } from './pages/Home/index';
 import { Logs } from './pages/Logs/index';
 import { Auth } from './pages/Auth/index';
+import { Settings } from './pages/Settings/index';
 import { NotFound } from './pages/_404';
 import './style.css';
 
@@ -29,6 +30,7 @@ function AppShell() {
             <Route path="/" component={Home} />
             <Route path="/logs" component={Logs} />
             <Route path="/logs/gallery" component={Logs} />
+            <Route path="/settings" component={Settings} />
             <Route default component={NotFound} />
           </Router>
         </main>
