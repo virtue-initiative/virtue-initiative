@@ -8,8 +8,8 @@ interface AuthState {
   userId: string | null;
   wrappingKey: CryptoKey | null;
   ready: boolean;
-  login: (email: string, password: string) => Promise<{ access_token: string; userId: string }>;
-  signup: (email: string, password: string, name?: string) => Promise<{ access_token: string; userId: string }>;
+  login: (email: string, password: string) => Promise<{ access_token: string; userId: string; wrappingKey: CryptoKey }>;
+  signup: (email: string, password: string, name?: string) => Promise<{ access_token: string; userId: string; wrappingKey: CryptoKey }>;
   logout: () => Promise<void>;
 }
 
@@ -46,20 +46,22 @@ export function AuthProvider({ children }: { children: preact.ComponentChildren 
     const pwHash = await hashPasswordForAuth(pw, email);
     const res = await api.login(email, pwHash);
     const uid = jwtSub(res.access_token)!;
+    const wk = await deriveWrappingKey(pw, uid);
     setToken(res.access_token);
     setUserId(uid);
-    setWrappingKey(await deriveWrappingKey(pw, uid));
-    return { access_token: res.access_token, userId: uid };
+    setWrappingKey(wk);
+    return { access_token: res.access_token, userId: uid, wrappingKey: wk };
   }, []);
 
   const signup = useCallback(async (email: string, pw: string, name?: string) => {
     const pwHash = await hashPasswordForAuth(pw, email);
     const res = await api.signup(email, pwHash, name);
     const uid = (res.user as { id: string }).id;
+    const wk = await deriveWrappingKey(pw, uid);
     setToken(res.access_token);
     setUserId(uid);
-    setWrappingKey(await deriveWrappingKey(pw, uid));
-    return { access_token: res.access_token, userId: uid };
+    setWrappingKey(wk);
+    return { access_token: res.access_token, userId: uid, wrappingKey: wk };
   }, []);
 
   const logout = useCallback(async () => {
