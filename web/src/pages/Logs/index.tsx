@@ -37,11 +37,14 @@ async function decryptAndFlattenBatch(
   key: CryptoKey,
 ): Promise<LogItem[]> {
   const resp = await fetch(batch.batch_url);
-  if (!resp.ok) throw new Error(`Fetch failed (${resp.status}) for ${batch.batch_url}`);
+  if (!resp.ok)
+    throw new Error(`Fetch failed (${resp.status}) for ${batch.batch_url}`);
 
   const raw = new Uint8Array(await resp.arrayBuffer());
   if (raw.length < 13)
-    throw new Error(`Batch blob too short for AES-GCM payload: ${batch.batch_url}`);
+    throw new Error(
+      `Batch blob too short for AES-GCM payload: ${batch.batch_url}`,
+    );
 
   const decrypted = await decryptBatch(key, raw);
   const decompressed = await decompressGzip(decrypted);
