@@ -18,7 +18,8 @@ export function LogImage({ imageBytes }: { imageBytes: Uint8Array }) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    const url = URL.createObjectURL(new Blob([imageBytes], { type: 'image/webp' }));
+    const imageData = Uint8Array.from(imageBytes);
+    const url = URL.createObjectURL(new Blob([imageData], { type: 'image/webp' }));
     setImgSrc(url);
     return () => URL.revokeObjectURL(url);
   }, [imageBytes]);

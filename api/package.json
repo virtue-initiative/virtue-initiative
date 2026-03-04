@@ -9,6 +9,7 @@
     "deploy": "wrangler deploy",
     "test": "vitest run",
     "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.lint.json --noEmit",
     "db:migrate": "wrangler d1 migrations apply bepure-db",
     "db:migrate:local": "wrangler d1 migrations apply bepure-db --local",
     "format": "prettier --write \"src/**/*.{ts,json}\"",

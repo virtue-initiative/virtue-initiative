@@ -43,7 +43,7 @@ export function E2EEProvider({ children }: { children: preact.ComponentChildren 
     Promise.all(
       entries.map(([uid, hex]) =>
         crypto.subtle
-          .importKey('raw', hexToBytes(hex), { name: 'AES-GCM' }, false, ['decrypt'])
+          .importKey('raw', Uint8Array.from(hexToBytes(hex)), { name: 'AES-GCM' }, false, ['decrypt'])
           .then((ck) => [uid, ck] as [string, CryptoKey])
           .catch(() => {
             localStorage.removeItem(LS_PREFIX + uid);
