@@ -3,6 +3,28 @@ import { useContext, useState, useEffect, useCallback } from 'preact/hooks';
 import { api } from '../api';
 import { deriveWrappingKey, hashPasswordForAuth } from '../crypto';
 
+const WRAPPING_KEY_STORAGE = 'virtue_wrapping_key';
+
+async function saveWrappingKey(wk: CryptoKey): Promise<void> {
+  const raw = await crypto.subtle.exportKey('raw', wk);
+  localStorage.setItem(WRAPPING_KEY_STORAGE, btoa(String.fromCharCode(...new Uint8Array(raw))));
+}
+
+async function loadWrappingKey(): Promise<CryptoKey | null> {
+  const stored = localStorage.getItem(WRAPPING_KEY_STORAGE);
+  if (!stored) return null;
+  try {
+    const raw = Uint8Array.from(atob(stored), (c) => c.charCodeAt(0));
+    return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+  } catch {
+    return null;
+  }
+}
+
+function clearWrappingKey(): void {
+  localStorage.removeItem(WRAPPING_KEY_STORAGE);
+}
+
 interface AuthState {
   token: string | null;
   userId: string | null;
@@ -31,15 +53,15 @@ export function AuthProvider({ children }: { children: preact.ComponentChildren 
     }
   }
 
-  // On mount, try to restore session from the httpOnly refresh cookie
+  // On mount, try to restore session from the httpOnly refresh cookie + wrapping key from localStorage
   useEffect(() => {
-    api.refreshToken()
-      .then((res) => {
+    Promise.all([
+      api.refreshToken().then((res) => {
         setToken(res.access_token);
         setUserId(jwtSub(res.access_token));
-      })
-      .catch(() => {})
-      .finally(() => setReady(true));
+      }).catch(() => {}),
+      loadWrappingKey().then((wk) => { if (wk) setWrappingKey(wk); }).catch(() => {}),
+    ]).finally(() => setReady(true));
   }, []);
 
   const login = useCallback(async (email: string, pw: string) => {
@@ -47,6 +69,7 @@ export function AuthProvider({ children }: { children: preact.ComponentChildren 
     const res = await api.login(email, pwHash);
     const uid = jwtSub(res.access_token)!;
     const wk = await deriveWrappingKey(pw, uid);
+    await saveWrappingKey(wk);
     setToken(res.access_token);
     setUserId(uid);
     setWrappingKey(wk);
@@ -58,6 +81,7 @@ export function AuthProvider({ children }: { children: preact.ComponentChildren 
     const res = await api.signup(email, pwHash, name);
     const uid = (res.user as { id: string }).id;
     const wk = await deriveWrappingKey(pw, uid);
+    await saveWrappingKey(wk);
     setToken(res.access_token);
     setUserId(uid);
     setWrappingKey(wk);
@@ -66,6 +90,7 @@ export function AuthProvider({ children }: { children: preact.ComponentChildren 
 
   const logout = useCallback(async () => {
     if (token) await api.logout(token).catch(() => {});
+    clearWrappingKey();
     setToken(null);
     setUserId(null);
     setWrappingKey(null);

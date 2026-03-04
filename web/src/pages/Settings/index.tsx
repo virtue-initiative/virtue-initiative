@@ -2,7 +2,7 @@ import { useState, useEffect } from 'preact/hooks';
 import { useAuth } from '../../context/auth';
 import { useE2EE } from '../../context/e2ee';
 import { api } from '../../api';
-import { deriveKey, encryptData } from '../../crypto';
+import { deriveKey, deriveWrappingKey, encryptData } from '../../crypto';
 import './style.css';
 
 export function Settings() {
@@ -15,11 +15,14 @@ export function Settings() {
   const [nameSaving, setNameSaving] = useState(false);
 
   // E2EE key
+  const [currentPassword, setCurrentPassword] = useState('');
   const [newE2EEPassword, setNewE2EEPassword] = useState('');
   const [confirmE2EEPassword, setConfirmE2EEPassword] = useState('');
   const [e2eeStatus, setE2eeStatus] = useState<string | null>(null);
   const [e2eeError, setE2eeError] = useState<string | null>(null);
   const [e2eeSaving, setE2eeSaving] = useState(false);
+
+  const needsPassword = !wrappingKey;
 
   useEffect(() => {
     if (!token) return;
@@ -45,7 +48,7 @@ export function Settings() {
     e.preventDefault();
     setE2eeStatus(null);
     setE2eeError(null);
-    if (!token || !userId || !wrappingKey) {
+    if (!token || !userId) {
       setE2eeError('Not authenticated — please log out and back in.');
       return;
     }
@@ -55,13 +58,30 @@ export function Settings() {
     }
     setE2eeSaving(true);
     try {
+      // Resolve wrapping key: use stored one or derive from entered password
+      let wk = wrappingKey;
+      if (!wk) {
+        if (!currentPassword) {
+          setE2eeError('Enter your account password to proceed.');
+          return;
+        }
+        const me = await api.getMe(token);
+        wk = await deriveWrappingKey(currentPassword, userId);
+        // Verify it actually decrypts the existing key before accepting
+        const { encryptedE2EEKey } = await api.getE2EEKey(token);
+        if (encryptedE2EEKey) {
+          const { decryptBatch } = await import('../../crypto');
+          await decryptBatch(wk, Uint8Array.fromBase64(encryptedE2EEKey)); // throws if wrong
+        }
+      }
       const e2eeKey = await deriveKey(newE2EEPassword, userId, true);
       const rawE2EE = new Uint8Array(await crypto.subtle.exportKey('raw', e2eeKey));
       await e2ee.setKeyFromBytes(rawE2EE.buffer, userId);
-      const encrypted = await encryptData(wrappingKey, rawE2EE);
+      const encrypted = await encryptData(wk, rawE2EE);
       await api.setE2EEKey(token, encrypted.toBase64());
       setNewE2EEPassword('');
       setConfirmE2EEPassword('');
+      setCurrentPassword('');
       setE2eeStatus('E2EE key updated.');
     } catch (err) {
       setE2eeError(err instanceof Error ? err.message : 'Failed to update key');
@@ -104,6 +124,20 @@ export function Settings() {
           still decrypt correctly since the underlying key is regenerated from the new password.
         </p>
         <form class="settings-form" onSubmit={changeE2EEKey}>
+          {needsPassword && (
+            <div class="field">
+              <label for="current-password">Account password</label>
+              <input
+                id="current-password"
+                type="password"
+                value={currentPassword}
+                onInput={(e) => { setCurrentPassword((e.target as HTMLInputElement).value); setE2eeError(null); }}
+                placeholder="Your login password"
+                autoComplete="current-password"
+                required
+              />
+            </div>
+          )}
           <div class="field">
             <label for="new-e2ee">New E2EE password</label>
             <input
@@ -130,7 +164,7 @@ export function Settings() {
           </div>
           {e2eeError && <p class="settings-error">{e2eeError}</p>}
           {e2eeStatus && <p class="settings-success">{e2eeStatus}</p>}
-          <button class="btn btn-primary" type="submit" disabled={e2eeSaving || !wrappingKey}>
+          <button class="btn btn-primary" type="submit" disabled={e2eeSaving}>
             {e2eeSaving ? 'Updating…' : 'Update E2EE key'}
           </button>
         </form>
