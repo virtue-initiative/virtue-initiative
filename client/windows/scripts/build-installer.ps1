@@ -30,7 +30,13 @@ try {
     $env:CARGO_TARGET_DIR = $BuildTargetDir
 
     if (-not $SkipBuild) {
-        & $cargo build --release --target $Target --bin virtue-service --bin virtue-tray
+        # WSL/UNC timestamp edge cases can produce stale binaries; clean first for determinism.
+        & $cargo clean --target $Target
+        if ($LASTEXITCODE -ne 0) {
+            throw "cargo clean failed with exit code $LASTEXITCODE"
+        }
+
+        & $cargo build --release --target $Target --bin virtue-service --bin virtue-tray --bin virtue-auth-ui
         if ($LASTEXITCODE -ne 0) {
             throw "cargo build failed with exit code $LASTEXITCODE"
         }

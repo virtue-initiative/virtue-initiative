@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 use uuid::Uuid;
 use windows::Win32::Foundation::{CloseHandle, ERROR_FILE_NOT_FOUND, HANDLE};
-use windows::Win32::System::Threading::{MUTEX_MODIFY_STATE, OpenMutexW, SYNCHRONIZE};
+use windows::Win32::System::Threading::{MUTEX_MODIFY_STATE, OpenMutexW};
 use windows::core::w;
 
 use virtue_client_core::{
@@ -376,7 +376,7 @@ fn is_tray_running() -> bool {
     // Use the tray mutex as the canonical process-liveness signal.
     unsafe {
         let handle: Result<HANDLE, _> = OpenMutexW(
-            SYNCHRONIZE | MUTEX_MODIFY_STATE,
+            MUTEX_MODIFY_STATE,
             false,
             w!("Local\\VirtueTrayInstance"),
         );

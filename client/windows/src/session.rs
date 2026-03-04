@@ -1,10 +1,8 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use base64::Engine;
 use serde::Deserialize;
-use serde_json::json;
 use tokio::runtime::Runtime;
 
 use virtue_client_core::{AuthClient, FileTokenStore, TokenStore, derive_key};
@@ -24,6 +22,7 @@ pub struct SessionManager {
 pub struct SessionStatus {
     pub logged_in: bool,
     pub device_id: Option<String>,
+    pub email: Option<String>,
 }
 
 impl SessionManager {
@@ -50,6 +49,7 @@ impl SessionManager {
         Ok(SessionStatus {
             logged_in,
             device_id: state.device_id,
+            email: state.email,
         })
     }
 
@@ -85,6 +85,7 @@ impl SessionManager {
             let mut state = load_state(&self.paths.state_file)?;
             state.device_id = Some(registration.id.clone());
             state.monitoring_enabled = true;
+            state.email = Some(email.to_string());
             save_state(&self.paths.state_file, &state)?;
 
             Ok::<String, anyhow::Error>(registration.id)
@@ -94,19 +95,6 @@ impl SessionManager {
     pub fn logout_blocking(&self, runtime: &Runtime) -> Result<()> {
         runtime.block_on(async {
             let mut state = load_state(&self.paths.state_file)?;
-            let access_token = self.token_store.get_access_token()?;
-
-            if let (Some(token), Some(device_id)) =
-                (access_token.as_deref(), state.device_id.as_deref())
-            {
-                let mut metadata = BTreeMap::new();
-                metadata.insert("reason".to_string(), json!("user_logout"));
-                let _ = self
-                    .api_client
-                    .send_log(token, "manual_override", device_id, None, metadata)
-                    .await;
-            }
-
             let _ = self.auth_client.logout().await;
             self.token_store.clear_access_token()?;
             self.token_store.clear_refresh_token()?;
@@ -114,6 +102,7 @@ impl SessionManager {
 
             state.monitoring_enabled = false;
             state.device_id = None;
+            state.email = None;
             save_state(&self.paths.state_file, &state)?;
 
             Ok::<(), anyhow::Error>(())

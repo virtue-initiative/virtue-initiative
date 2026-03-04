@@ -10,11 +10,15 @@ path = "src/lib.rs"
 
 [[bin]]
 name = "virtue-service"
-path = "src/bin/bepure-service.rs"
+path = "src/bin/virtue-service.rs"
 
 [[bin]]
 name = "virtue-tray"
-path = "src/bin/bepure-tray.rs"
+path = "src/bin/virtue-tray.rs"
+
+[[bin]]
+name = "virtue-auth-ui"
+path = "src/bin/virtue-auth-ui.rs"
 
 [dependencies]
 anyhow = "1"
@@ -28,6 +32,7 @@ rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+slint = { version = "1.14", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 windows-service = "0.8"
