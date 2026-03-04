@@ -12,6 +12,9 @@ use crate::resolve_base_api_url;
 #[derive(Clone, Debug)]
 pub struct UploadClientConfig {
     pub base_url: String,
+    /// Base URL used for hash upload/retrieval (`/hash` endpoints).
+    /// Falls back to `base_url` if not set.
+    pub hash_base_url: Option<String>,
     pub connect_timeout: Duration,
     pub request_timeout: Duration,
 }
@@ -20,9 +23,16 @@ impl Default for UploadClientConfig {
     fn default() -> Self {
         Self {
             base_url: resolve_base_api_url(),
+            hash_base_url: None,
             connect_timeout: Duration::from_secs(10),
             request_timeout: Duration::from_secs(60),
         }
+    }
+}
+
+impl UploadClientConfig {
+    fn effective_hash_base_url(&self) -> &str {
+        self.hash_base_url.as_deref().unwrap_or(&self.base_url)
     }
 }
 
@@ -105,7 +115,7 @@ impl UploadClient {
         body.extend_from_slice(device_id_bytes);
         body.extend_from_slice(content_hash);
 
-        let url = format!("{}/hash", self.config.base_url);
+        let url = format!("{}/hash", self.config.effective_hash_base_url());
         let response = self
             .client
             .post(url)
@@ -124,7 +134,7 @@ impl UploadClient {
         access_token: &str,
         device_id: &str,
     ) -> CoreResult<StateResponse> {
-        let url = format!("{}/hash?device_id={}", self.config.base_url, device_id);
+        let url = format!("{}/hash?device_id={}", self.config.effective_hash_base_url(), device_id);
         let response = self
             .client
             .get(url)

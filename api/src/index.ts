@@ -4,6 +4,7 @@ import { Env, Variables } from './types/bindings';
 import auth from './routes/auth';
 import batches from './routes/batches';
 import hashes from './routes/hashes';
+import hashServer from './routes/hash-server';
 import devices from './routes/devices';
 import partners from './routes/partners';
 import settings from './routes/settings';
@@ -39,6 +40,7 @@ app.route('/hash', hashes);
 app.route('/device', devices);
 app.route('/partner', partners);
 app.route('/settings', settings);
+app.route('/hash-server', hashServer);
 
 // Public R2 pass-through — blobs are E2EE encrypted so no auth needed.
 // In production replace VITE_R2_URL with the real public R2 bucket URL.

@@ -1,9 +1,9 @@
 use std::time::Duration;
 
-use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-use virtue_client_core::resolve_base_api_url;
+use crate::error::{CoreError, CoreResult};
+use crate::resolve_base_api_url;
 
 #[derive(Clone)]
 pub struct ApiClient {
@@ -12,7 +12,7 @@ pub struct ApiClient {
 }
 
 impl ApiClient {
-    pub fn new() -> Result<Self> {
+    pub fn new() -> CoreResult<Self> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(20))
             .connect_timeout(Duration::from_secs(10))
@@ -24,7 +24,20 @@ impl ApiClient {
         })
     }
 
-    pub async fn get_device(&self, access_token: &str, device_id: &str) -> Result<Device> {
+    pub async fn get_hash_server_url(&self, access_token: &str, device_id: &str) -> CoreResult<String> {
+        let url = format!("{}/hash-server?deviceId={}", self.base_url, device_id);
+        let response = self
+            .client
+            .get(url)
+            .bearer_auth(access_token)
+            .send()
+            .await?;
+
+        let body: HashServerResponse = decode_json(response).await?;
+        Ok(body.url)
+    }
+
+    pub async fn get_device(&self, access_token: &str, device_id: &str) -> CoreResult<Device> {
         let url = format!("{}/device", self.base_url);
         let response = self
             .client
@@ -37,17 +50,18 @@ impl ApiClient {
         devices
             .into_iter()
             .find(|d| d.id == device_id)
-            .ok_or_else(|| anyhow!("device {} not found in settings response", device_id))
+            .ok_or_else(|| CoreError::NotFound(format!("device {} not found", device_id)))
     }
 
     pub async fn register_device(
         &self,
         access_token: &str,
         name: &str,
-    ) -> Result<DeviceRegistration> {
+        platform: &str,
+    ) -> CoreResult<DeviceRegistration> {
         let request = RegisterDeviceRequest {
             name: name.to_string(),
-            platform: "windows".to_string(),
+            platform: platform.to_string(),
         };
 
         let url = format!("{}/device", self.base_url);
@@ -64,14 +78,14 @@ impl ApiClient {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct DeviceRegistration {
-    pub id: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
 pub struct Device {
     pub id: String,
     pub enabled: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct DeviceRegistration {
+    pub id: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -80,12 +94,16 @@ struct RegisterDeviceRequest {
     platform: String,
 }
 
-async fn decode_json<T: serde::de::DeserializeOwned>(response: reqwest::Response) -> Result<T> {
+#[derive(Clone, Debug, Deserialize)]
+struct HashServerResponse {
+    url: String,
+}
+
+async fn decode_json<T: serde::de::DeserializeOwned>(response: reqwest::Response) -> CoreResult<T> {
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        return Err(anyhow!("unexpected response {}: {}", status, body));
+        return Err(CoreError::UnexpectedResponse { status, body });
     }
-
     Ok(response.json::<T>().await?)
 }

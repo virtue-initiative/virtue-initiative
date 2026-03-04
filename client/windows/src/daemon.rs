@@ -15,12 +15,11 @@ use windows::Win32::System::Threading::{MUTEX_MODIFY_STATE, OpenMutexW};
 use windows::core::w;
 
 use virtue_client_core::{
-    AuthClient, BatchBlob, BatchItem, CaptureSchedulePolicy, CaptureScheduleState, FileTokenStore,
-    ImagePipeline, TokenStore, UploadClient, resolve_batch_window_seconds,
-    resolve_capture_interval_seconds, uuid_str_to_bytes,
+    ApiClient, AuthClient, BatchBlob, BatchItem, CaptureSchedulePolicy, CaptureScheduleState,
+    Device, FileTokenStore, ImagePipeline, TokenStore, UploadClient, UploadClientConfig,
+    resolve_batch_window_seconds, resolve_capture_interval_seconds, uuid_str_to_bytes,
 };
 
-use crate::api::{ApiClient, Device};
 use crate::capture::capture_screen_png;
 use crate::config::{ClientPaths, load_state};
 use crate::service_log::ServiceLogger;
@@ -58,7 +57,6 @@ pub async fn run_daemon(shutdown: Arc<AtomicBool>, logger: &ServiceLogger) -> Re
 
     let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&paths.token_file));
     let auth_client = AuthClient::new(token_store.clone())?;
-    let upload_client = UploadClient::new()?;
     let api_client = ApiClient::new()?;
     let pipeline = ImagePipeline::default();
 
@@ -68,6 +66,7 @@ pub async fn run_daemon(shutdown: Arc<AtomicBool>, logger: &ServiceLogger) -> Re
     let mut device_settings: Option<Device> = None;
     let mut last_settings_fetch: Option<Instant> = None;
     let mut last_settings_attempt: Option<Instant> = None;
+    let mut last_hash_server_fetch: Option<Instant> = None;
     let mut batch_buffer = load_batch_buffer(&paths.batch_buffer_file);
     let mut batch_window_start: DateTime<Utc> = batch_buffer.window_start.unwrap_or_else(Utc::now);
     let mut last_tray_ensure: Option<Instant> = None;
@@ -80,6 +79,8 @@ pub async fn run_daemon(shutdown: Arc<AtomicBool>, logger: &ServiceLogger) -> Re
             logger.warn(&format!("could not fetch E2EE key on startup: {err:#}"));
         }
     }
+
+    let mut upload_client = UploadClient::new()?;
 
     while !shutdown.load(Ordering::SeqCst) {
         let state = match load_state(&paths.state_file) {
@@ -182,6 +183,27 @@ pub async fn run_daemon(shutdown: Arc<AtomicBool>, logger: &ServiceLogger) -> Re
                 Err(err) => {
                     logger.warn(&format!("device settings fetch failed: {err}"));
                 }
+            }
+        }
+
+        if last_hash_server_fetch
+            .map(|t| t.elapsed() >= SETTINGS_REFRESH_INTERVAL)
+            .unwrap_or(true)
+        {
+            match api_client.get_hash_server_url(&access_token, &device_id).await {
+                Ok(hash_url) => {
+                    match UploadClient::with_config(UploadClientConfig {
+                        hash_base_url: Some(hash_url),
+                        ..UploadClientConfig::default()
+                    }) {
+                        Ok(client) => {
+                            upload_client = client;
+                            last_hash_server_fetch = Some(Instant::now());
+                        }
+                        Err(err) => logger.warn(&format!("failed to build upload client: {err}")),
+                    }
+                }
+                Err(err) => logger.warn(&format!("hash server URL fetch failed: {err}")),
             }
         }
 

@@ -33,6 +33,9 @@ pub enum CoreError {
     #[error("crypto error: {0}")]
     Crypto(String),
 
+    #[error("not found: {0}")]
+    NotFound(String),
+
     #[error("serialization error: {0}")]
     Serialization(String),
 }
