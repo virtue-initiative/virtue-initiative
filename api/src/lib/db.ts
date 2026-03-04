@@ -181,7 +181,7 @@ export async function createBatch(
   return db
     .prepare(
       `INSERT INTO r2_batches
-         (id, user_id, device_id, r2_key, start_time, end_time,
+         (id, user_id, device_id, batch_url, start_time, end_time,
           start_chain_hash, end_chain_hash, item_count, size_bytes, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
@@ -207,7 +207,7 @@ export async function listBatches(
   filters: { device_id?: string; cursor?: string },
   limit: number,
 ) {
-  let query = `SELECT id, device_id, r2_key AS batch_url, start_time, end_time,
+  let query = `SELECT id, device_id, batch_url, start_time, end_time,
             start_chain_hash, end_chain_hash, item_count, size_bytes, created_at
      FROM r2_batches WHERE user_id = ?`;
   const params: (string | number)[] = [userId];
@@ -249,7 +249,7 @@ export async function listBatches(
 export async function findBatchById(db: D1Database, batchId: string) {
   return db
     .prepare(
-      `SELECT id, user_id, device_id, r2_key AS batch_url, start_time, end_time,
+      `SELECT id, user_id, device_id, batch_url, start_time, end_time,
               start_chain_hash, end_chain_hash, item_count, size_bytes, created_at
        FROM r2_batches WHERE id = ?`,
     )
