@@ -15,8 +15,8 @@ use windows::Win32::System::Threading::{MUTEX_MODIFY_STATE, OpenMutexW};
 use windows::core::w;
 
 use virtue_client_core::{
-    AuthClient, BatchBlob, BatchItem, CaptureSchedulePolicy, CaptureScheduleState,
-    FileTokenStore, ImagePipeline, TokenStore, UploadClient, resolve_batch_window_seconds,
+    AuthClient, BatchBlob, BatchItem, CaptureSchedulePolicy, CaptureScheduleState, FileTokenStore,
+    ImagePipeline, TokenStore, UploadClient, resolve_batch_window_seconds,
     resolve_capture_interval_seconds, uuid_str_to_bytes,
 };
 
@@ -382,11 +382,8 @@ fn ensure_tray_running(logger: &ServiceLogger) {
 fn is_tray_running() -> bool {
     // Use the tray mutex as the canonical process-liveness signal.
     unsafe {
-        let handle: Result<HANDLE, _> = OpenMutexW(
-            MUTEX_MODIFY_STATE,
-            false,
-            w!("Local\\VirtueTrayInstance"),
-        );
+        let handle: Result<HANDLE, _> =
+            OpenMutexW(MUTEX_MODIFY_STATE, false, w!("Local\\VirtueTrayInstance"));
 
         match handle {
             Ok(handle) => {

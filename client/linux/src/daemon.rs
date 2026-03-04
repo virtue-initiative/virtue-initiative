@@ -10,8 +10,8 @@ use tokio::time::sleep;
 use uuid::Uuid;
 
 use virtue_client_core::{
-    AuthClient, BatchBlob, BatchItem, CaptureSchedulePolicy, CaptureScheduleState,
-    FileTokenStore, ImagePipeline, TokenStore, UploadClient, resolve_batch_window_seconds,
+    AuthClient, BatchBlob, BatchItem, CaptureSchedulePolicy, CaptureScheduleState, FileTokenStore,
+    ImagePipeline, TokenStore, UploadClient, resolve_batch_window_seconds,
     resolve_capture_interval_seconds, uuid_str_to_bytes,
 };
 

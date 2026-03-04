@@ -26,7 +26,12 @@ impl ApiClient {
 
     pub async fn get_device(&self, access_token: &str, device_id: &str) -> Result<Device> {
         let url = format!("{}/device", self.base_url);
-        let response = self.client.get(url).bearer_auth(access_token).send().await?;
+        let response = self
+            .client
+            .get(url)
+            .bearer_auth(access_token)
+            .send()
+            .await?;
 
         let devices: Vec<Device> = decode_json(response).await?;
         devices
@@ -56,7 +61,6 @@ impl ApiClient {
 
         decode_json(response).await
     }
-
 }
 
 #[derive(Clone, Debug, Deserialize)]

@@ -6,7 +6,6 @@ fn main() {
         filename: std::path::Path::new(".env.dev"),
         recursive_search: false,
         fail_if_missing_dotenv: false,
-        ..Default::default()
     })
     .unwrap();
 }

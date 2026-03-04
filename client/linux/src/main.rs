@@ -16,9 +16,8 @@ use serde::Deserialize;
 use virtue_client_core::{
     AuthClient, BASE_API_URL_ENV_VAR, BATCH_WINDOW_SECONDS_ENV_VAR,
     CAPTURE_INTERVAL_SECONDS_ENV_VAR, FileTokenStore, TokenStore, apply_dev_env,
-    apply_env_defaults_from_map,
-    clamp_batch_window_seconds, clamp_capture_interval_seconds, resolve_base_api_url,
-    resolve_batch_window_seconds, resolve_capture_interval_seconds,
+    apply_env_defaults_from_map, clamp_batch_window_seconds, clamp_capture_interval_seconds,
+    resolve_base_api_url, resolve_batch_window_seconds, resolve_capture_interval_seconds,
 };
 
 use crate::api::ApiClient;

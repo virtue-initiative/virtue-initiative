@@ -23,7 +23,10 @@ mod tests {
     #[test]
     fn sensitive_to_content() {
         let state = [0u8; 32];
-        assert_ne!(chain_step(&state, &[0xaau8; 32]), chain_step(&state, &[0xbbu8; 32]));
+        assert_ne!(
+            chain_step(&state, &[0xaau8; 32]),
+            chain_step(&state, &[0xbbu8; 32])
+        );
     }
 
     #[test]

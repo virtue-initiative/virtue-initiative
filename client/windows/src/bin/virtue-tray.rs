@@ -16,15 +16,14 @@ use windows::Win32::UI::Shell::{
     NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateIcon,
-    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow,
-    DispatchMessageW, GetCursorPos, GetMessageW, GetWindowLongPtrW, HICON, HMENU, IDC_ARROW,
-    IDI_APPLICATION, IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE, LoadCursorW, LoadIconW,
-    LoadImageW, MF_STRING, MSG, PostQuitMessage, RegisterClassW, SetForegroundWindow,
-    SetWindowLongPtrW, TPM_LEFTALIGN, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage,
-    WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CONTEXTMENU, WM_CREATE,
-    WM_DESTROY, WM_LBUTTONUP, WM_NCCREATE, WM_NCDESTROY, WM_RBUTTONUP, WNDCLASSW,
-    WS_OVERLAPPEDWINDOW,
+    AppendMenuW, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateIcon, CreatePopupMenu,
+    CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow, DispatchMessageW, GetCursorPos,
+    GetMessageW, GetWindowLongPtrW, HICON, HMENU, IDC_ARROW, IDI_APPLICATION, IMAGE_ICON,
+    LR_DEFAULTSIZE, LR_LOADFROMFILE, LoadCursorW, LoadIconW, LoadImageW, MF_STRING, MSG,
+    PostQuitMessage, RegisterClassW, SetForegroundWindow, SetWindowLongPtrW, TPM_LEFTALIGN,
+    TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
+    WM_CLOSE, WM_COMMAND, WM_CONTEXTMENU, WM_CREATE, WM_DESTROY, WM_LBUTTONUP, WM_NCCREATE,
+    WM_NCDESTROY, WM_RBUTTONUP, WNDCLASSW, WS_OVERLAPPEDWINDOW,
 };
 use windows::core::{PCWSTR, w};
 
@@ -131,7 +130,8 @@ impl AppState {
             }
         }
 
-        create_green_circle_icon().unwrap_or_else(|| LoadIconW(None, IDI_APPLICATION).unwrap_or_default())
+        create_green_circle_icon()
+            .unwrap_or_else(|| LoadIconW(None, IDI_APPLICATION).unwrap_or_default())
     }
 
     unsafe fn remove_tray_icon(&mut self) {
@@ -172,13 +172,17 @@ impl AppState {
         let ui_path = match std::env::current_exe() {
             Ok(path) => path.with_file_name("virtue-auth-ui.exe"),
             Err(err) => {
-                self.logger.warn(&format!("cannot resolve ui path from current exe: {err}"));
+                self.logger
+                    .warn(&format!("cannot resolve ui path from current exe: {err}"));
                 return;
             }
         };
 
         if !ui_path.exists() {
-            self.logger.warn(&format!("auth ui executable missing: {}", ui_path.display()));
+            self.logger.warn(&format!(
+                "auth ui executable missing: {}",
+                ui_path.display()
+            ));
             return;
         }
 
