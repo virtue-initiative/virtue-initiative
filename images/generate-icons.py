@@ -126,23 +126,23 @@ def main() -> None:
 
     outputs: list[Path] = [prepped_path]
 
-    web_public = root / "web" / "public"
-    save_ico(master, web_public / "favicon.ico", [16, 32, 48])
-    save_png(master, web_public / "favicon-16x16.png", 16)
-    save_png(master, web_public / "favicon-32x32.png", 32)
-    save_png(master, web_public / "apple-touch-icon.png", 180)
-    save_png(master, web_public / "android-chrome-192x192.png", 192)
-    save_png(master, web_public / "android-chrome-512x512.png", 512)
-    outputs.extend(
-        [
-            web_public / "favicon.ico",
-            web_public / "favicon-16x16.png",
-            web_public / "favicon-32x32.png",
-            web_public / "apple-touch-icon.png",
-            web_public / "android-chrome-192x192.png",
-            web_public / "android-chrome-512x512.png",
-        ]
-    )
+    for path in [root / "web" / "public", root / "help" / "static", root / "landing"]:
+        save_ico(master, path / "favicon.ico", [16, 32, 48])
+        save_png(master, path / "favicon-16x16.png", 16)
+        save_png(master, path / "favicon-32x32.png", 32)
+        save_png(master, path / "apple-touch-icon.png", 180)
+        save_png(master, path / "android-chrome-192x192.png", 192)
+        save_png(master, path / "android-chrome-512x512.png", 512)
+        outputs.extend(
+            [
+                path / "favicon.ico",
+                path / "favicon-16x16.png",
+                path / "favicon-32x32.png",
+                path / "apple-touch-icon.png",
+                path / "android-chrome-192x192.png",
+                path / "android-chrome-512x512.png",
+            ]
+        )
 
     mac_assets = root / "client" / "mac" / "assets"
     save_icns(master, mac_assets / "AppIcon.icns", [16, 32, 64, 128, 256, 512, 1024])
