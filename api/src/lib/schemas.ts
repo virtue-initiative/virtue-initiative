@@ -82,7 +82,7 @@ export const updatePartnerSchema = z.object({
 // Alert log schemas
 export const postAlertLogSchema = z.object({
   device_id: z.string().min(1),
-  taken_at: z.coerce.number().int(),
+  created_at: z.iso.datetime(),
   kind: z.string().min(1),
   metadata: z
     .array(z.tuple([z.string(), z.string()]))

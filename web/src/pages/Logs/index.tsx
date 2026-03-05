@@ -227,7 +227,7 @@ export function Logs() {
       // Map alert log entries to LogItem
       const logFlat: LogItem[] = logPage.items.map((entry: AlertLog) => ({
         id: entry.id,
-        taken_at: entry.taken_at,
+        taken_at: new Date(entry.created_at).getTime(),
         device_id: entry.device_id,
         kind: entry.kind,
         metadata: entry.metadata,

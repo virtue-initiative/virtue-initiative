@@ -23,34 +23,23 @@ logs.post('/', authenticate, async (c) => {
   if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
 
   const userId = c.get('userId');
-  const { device_id, taken_at, kind, metadata } = parsed.data;
+  const { device_id, created_at, kind, metadata } = parsed.data;
 
   const device = await findDevice(c.env.DB, device_id, userId);
   if (!device) return c.json({ error: 'Device not found' }, 404);
 
   const id = uuidv4();
-  const createdAt = new Date().toISOString();
 
-  await createAlertLog(
-    c.env.DB,
-    id,
-    userId,
-    device_id,
-    taken_at,
-    kind,
-    JSON.stringify(metadata),
-    createdAt,
-  );
+  await createAlertLog(c.env.DB, id, userId, device_id, kind, JSON.stringify(metadata), created_at);
 
   return c.json(
     {
       log: {
         id,
         device_id,
-        taken_at,
         kind,
         metadata,
-        created_at: createdAt,
+        created_at,
       },
     },
     201,
