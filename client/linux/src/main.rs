@@ -14,7 +14,7 @@ use virtue_client_core::{
     ApiClient, AuthClient, BASE_API_URL_ENV_VAR, BATCH_WINDOW_SECONDS_ENV_VAR,
     CAPTURE_INTERVAL_SECONDS_ENV_VAR, FileTokenStore, LoginCommandInput, TokenStore, apply_dev_env,
     apply_env_defaults_from_map, clamp_batch_window_seconds, clamp_capture_interval_seconds,
-    login_and_register_device, logout_and_clear_tokens, resolve_base_api_url,
+    login_and_register_device, logout_and_clear_tokens_with_alert, resolve_base_api_url,
     resolve_batch_window_seconds, resolve_capture_interval_seconds,
 };
 
@@ -155,7 +155,16 @@ async fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
 
     if access_token.is_some() || state.device_id.is_some() {
         let auth_client2 = AuthClient::new(token_store.clone())?;
-        let _ = logout_and_clear_tokens(&auth_client2, token_store.as_ref()).await;
+        let api_client = ApiClient::new()?;
+        let metadata = vec![("source".to_string(), "linux_cli".to_string())];
+        let _ = logout_and_clear_tokens_with_alert(
+            &auth_client2,
+            Some(&api_client),
+            token_store.as_ref(),
+            state.device_id.as_deref(),
+            &metadata,
+        )
+        .await;
     }
     state.monitoring_enabled = false;
     state.email = None;

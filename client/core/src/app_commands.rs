@@ -1,3 +1,4 @@
+use chrono::Utc;
 use serde::Deserialize;
 
 use base64::Engine;
@@ -45,6 +46,19 @@ pub async fn login_and_register_device(
         .register_device(&access_token, input.device_name, input.platform)
         .await?;
 
+    let _ = api_client
+        .create_alert_log(
+            &access_token,
+            &registration.id,
+            "login",
+            &[
+                ("source".to_string(), "app_command".to_string()),
+                ("platform".to_string(), input.platform.to_string()),
+            ],
+            Utc::now(),
+        )
+        .await;
+
     Ok(LoginCommandResult {
         device_id: registration.id,
         user_id,
@@ -55,6 +69,24 @@ pub async fn logout_and_clear_tokens(
     auth_client: &AuthClient,
     token_store: &dyn TokenStore,
 ) -> CoreResult<()> {
+    logout_and_clear_tokens_with_alert(auth_client, None, token_store, None, &[]).await
+}
+
+pub async fn logout_and_clear_tokens_with_alert(
+    auth_client: &AuthClient,
+    api_client: Option<&ApiClient>,
+    token_store: &dyn TokenStore,
+    device_id: Option<&str>,
+    metadata: &[(String, String)],
+) -> CoreResult<()> {
+    if let (Some(api_client), Some(device_id), Some(access_token)) =
+        (api_client, device_id, token_store.get_access_token()?)
+    {
+        let _ = api_client
+            .create_alert_log(&access_token, device_id, "logout", metadata, Utc::now())
+            .await;
+    }
+
     let _ = auth_client.logout().await;
     clear_local_tokens(token_store)
 }

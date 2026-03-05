@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
 
@@ -30,6 +31,15 @@ pub enum ServiceEvent {
     Error(String),
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DaemonAlertEvent {
+    pub kind: String,
+    pub metadata: Vec<(String, String)>,
+    pub created_at: DateTime<Utc>,
+    /// Optional explicit device ID. If omitted, daemon uses current persisted device_id.
+    pub device_id: Option<String>,
+}
+
 /// Minimal host API required by the shared service engine.
 /// UI/tray/process management are intentionally out of scope.
 #[allow(async_fn_in_trait)]
@@ -47,5 +57,10 @@ pub trait ServiceHost {
 
     fn on_loop_tick(&self) -> CoreResult<()> {
         Ok(())
+    }
+
+    /// Returns pending OS/runtime alert events and clears them from host memory.
+    fn drain_alert_events(&self) -> CoreResult<Vec<DaemonAlertEvent>> {
+        Ok(Vec::new())
     }
 }

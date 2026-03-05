@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -48,6 +49,14 @@ struct BatchBuffer {
     window_start: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PendingAlertLog {
+    kind: String,
+    metadata: Vec<(String, String)>,
+    created_at: DateTime<Utc>,
+    device_id: Option<String>,
+}
+
 fn load_batch_buffer(path: &Path) -> BatchBuffer {
     fs::read(path)
         .ok()
@@ -57,6 +66,26 @@ fn load_batch_buffer(path: &Path) -> BatchBuffer {
 
 fn save_batch_buffer(path: &Path, buf: &BatchBuffer) {
     if let Ok(bytes) = serde_json::to_vec(buf) {
+        let tmp = path.with_extension("tmp");
+        if fs::write(&tmp, bytes).is_ok() {
+            let _ = fs::rename(tmp, path);
+        }
+    }
+}
+
+fn alert_log_queue_path(batch_buffer_path: &Path) -> std::path::PathBuf {
+    batch_buffer_path.with_file_name("alert_logs_queue.json")
+}
+
+fn load_alert_log_queue(path: &Path) -> VecDeque<PendingAlertLog> {
+    fs::read(path)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+fn save_alert_log_queue(path: &Path, queue: &VecDeque<PendingAlertLog>) {
+    if let Ok(bytes) = serde_json::to_vec(queue) {
         let tmp = path.with_extension("tmp");
         if fs::write(&tmp, bytes).is_ok() {
             let _ = fs::rename(tmp, path);
@@ -85,6 +114,9 @@ pub async fn run_batch_daemon<H: ServiceHost>(
     let mut last_session_unavailable_log: Option<Instant> = None;
     let mut batch_buffer = load_batch_buffer(batch_buffer_path);
     let mut batch_window_start: DateTime<Utc> = batch_buffer.window_start.unwrap_or_else(Utc::now);
+    let alert_queue_path = alert_log_queue_path(batch_buffer_path);
+    let mut alert_queue = load_alert_log_queue(&alert_queue_path);
+    let mut stopping = false;
 
     emit_info(host, "capture daemon started");
 
@@ -97,38 +129,69 @@ pub async fn run_batch_daemon<H: ServiceHost>(
         }
     }
 
-    while !host.should_stop() {
+    loop {
         host.on_loop_tick()?;
 
         let state = match host.load_persisted_state() {
             Ok(state) => state,
             Err(err) => {
                 emit_warn(host, &format!("state read failed: {err}"));
-                if sleep_or_stop(host, config.idle_retry_interval).await? {
+                if stopping {
                     break;
+                }
+                if sleep_or_stop(host, config.idle_retry_interval).await? {
+                    stopping = true;
                 }
                 continue;
             }
         };
 
-        let Some(mut access_token) = (match token_store.get_access_token() {
+        if collect_alert_events(host, &mut alert_queue, state.device_id.as_deref())? {
+            save_alert_log_queue(&alert_queue_path, &alert_queue);
+        }
+
+        let access_token_opt = match token_store.get_access_token() {
             Ok(token) => token,
             Err(err) => {
                 emit_warn(host, &format!("token read failed: {err}"));
-                if sleep_or_stop(host, config.idle_retry_interval).await? {
+                if stopping {
                     break;
+                }
+                if sleep_or_stop(host, config.idle_retry_interval).await? {
+                    stopping = true;
                 }
                 continue;
             }
-        }) else {
+        };
+
+        if let (Some(access_token), Some(device_id)) =
+            (access_token_opt.as_deref(), state.device_id.as_deref())
+        {
+            flush_alert_log_queue(
+                host,
+                api_client,
+                access_token,
+                device_id,
+                &mut alert_queue,
+                &alert_queue_path,
+            )
+            .await;
+        }
+
+        if stopping || host.should_stop() {
+            break;
+        }
+
+        let Some(mut access_token) = access_token_opt else {
             if sleep_or_stop(host, config.idle_retry_interval).await? {
-                break;
+                stopping = true;
             }
             continue;
         };
+
         let Some(device_id) = state.device_id.clone() else {
             if sleep_or_stop(host, config.idle_retry_interval).await? {
-                break;
+                stopping = true;
             }
             continue;
         };
@@ -137,7 +200,7 @@ pub async fn run_batch_daemon<H: ServiceHost>(
             Err(err) => {
                 emit_warn(host, &format!("e2ee key read failed: {err}"));
                 if sleep_or_stop(host, config.idle_retry_interval).await? {
-                    break;
+                    stopping = true;
                 }
                 continue;
             }
@@ -150,7 +213,7 @@ pub async fn run_batch_daemon<H: ServiceHost>(
                 warned_missing_e2ee = true;
             }
             if sleep_or_stop(host, config.idle_retry_interval).await? {
-                break;
+                stopping = true;
             }
             continue;
         };
@@ -158,7 +221,7 @@ pub async fn run_batch_daemon<H: ServiceHost>(
 
         if !state.monitoring_enabled {
             if sleep_or_stop(host, config.idle_retry_interval).await? {
-                break;
+                stopping = true;
             }
             continue;
         }
@@ -173,7 +236,7 @@ pub async fn run_batch_daemon<H: ServiceHost>(
                 emit_warn(host, &format!("token refresh failed: {err}"));
                 if !config.continue_on_token_refresh_error {
                     if sleep_or_stop(host, config.idle_retry_interval).await? {
-                        break;
+                        stopping = true;
                     }
                     continue;
                 }
@@ -231,7 +294,7 @@ pub async fn run_batch_daemon<H: ServiceHost>(
             .unwrap_or(state.monitoring_enabled);
         if !capture_enabled {
             if sleep_or_stop(host, config.idle_retry_interval).await? {
-                break;
+                stopping = true;
             }
             continue;
         }
@@ -243,7 +306,8 @@ pub async fn run_batch_daemon<H: ServiceHost>(
         let mut rng = thread_rng();
         let delay = policy.next_delay(&mut schedule_state, last_cycle_success, &mut rng);
         if sleep_or_stop(host, delay).await? {
-            break;
+            stopping = true;
+            continue;
         }
 
         let now = host.now_utc();
@@ -293,7 +357,7 @@ pub async fn run_batch_daemon<H: ServiceHost>(
                     last_session_unavailable_log = Some(Instant::now());
                 }
                 if sleep_or_stop(host, config.idle_retry_interval).await? {
-                    break;
+                    stopping = true;
                 }
                 continue;
             }
@@ -381,6 +445,76 @@ fn make_missed_capture(now: DateTime<Utc>, reason: &str, error: &str) -> BatchIt
             ("reason".to_string(), reason.to_string()),
             ("error".to_string(), error.to_string()),
         ],
+    }
+}
+
+fn collect_alert_events<H: ServiceHost>(
+    host: &H,
+    queue: &mut VecDeque<PendingAlertLog>,
+    default_device_id: Option<&str>,
+) -> CoreResult<bool> {
+    let mut changed = false;
+    for event in host.drain_alert_events()? {
+        let device_id = event
+            .device_id
+            .or_else(|| default_device_id.map(ToString::to_string));
+
+        if device_id.is_none() {
+            emit_warn(
+                host,
+                &format!(
+                    "dropping alert event '{}' because no device_id is available",
+                    event.kind
+                ),
+            );
+            continue;
+        }
+
+        queue.push_back(PendingAlertLog {
+            kind: event.kind,
+            metadata: event.metadata,
+            created_at: event.created_at,
+            device_id,
+        });
+        changed = true;
+    }
+    Ok(changed)
+}
+
+async fn flush_alert_log_queue<H: ServiceHost>(
+    host: &H,
+    api_client: &ApiClient,
+    access_token: &str,
+    default_device_id: &str,
+    queue: &mut VecDeque<PendingAlertLog>,
+    queue_path: &Path,
+) {
+    while let Some(next) = queue.front().cloned() {
+        let device_id = next
+            .device_id
+            .as_deref()
+            .unwrap_or(default_device_id)
+            .to_string();
+
+        match api_client
+            .create_alert_log(
+                access_token,
+                &device_id,
+                &next.kind,
+                &next.metadata,
+                next.created_at,
+            )
+            .await
+        {
+            Ok(()) => {
+                let _ = queue.pop_front();
+                save_alert_log_queue(queue_path, queue);
+            }
+            Err(err) => {
+                emit_warn(host, &format!("alert log upload failed: {err}"));
+                break;
+            }
+        }
     }
 }
 

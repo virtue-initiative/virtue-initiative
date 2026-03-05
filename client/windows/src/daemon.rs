@@ -12,8 +12,9 @@ use windows::Win32::System::Threading::{MUTEX_MODIFY_STATE, OpenMutexW};
 use windows::core::w;
 
 use virtue_client_core::{
-    ApiClient, AuthClient, BatchDaemonConfig, CaptureOutcome, CoreError, FileTokenStore,
-    PersistedServiceState, ServiceEvent, ServiceHost, SleepOutcome, TokenStore, run_batch_daemon,
+    ApiClient, AuthClient, BatchDaemonConfig, CaptureOutcome, CoreError, DaemonAlertEvent,
+    FileTokenStore, PersistedServiceState, ServiceEvent, ServiceHost, SleepOutcome, TokenStore,
+    run_batch_daemon,
 };
 
 use crate::capture::capture_screen_png;
@@ -27,15 +28,22 @@ struct WindowsDaemonHost<'a> {
     shutdown: Arc<AtomicBool>,
     logger: &'a ServiceLogger,
     last_tray_ensure: Mutex<Option<Instant>>,
+    pending_alert_events: Arc<Mutex<Vec<DaemonAlertEvent>>>,
 }
 
 impl<'a> WindowsDaemonHost<'a> {
-    fn new(paths: ClientPaths, shutdown: Arc<AtomicBool>, logger: &'a ServiceLogger) -> Self {
+    fn new(
+        paths: ClientPaths,
+        shutdown: Arc<AtomicBool>,
+        logger: &'a ServiceLogger,
+        pending_alert_events: Arc<Mutex<Vec<DaemonAlertEvent>>>,
+    ) -> Self {
         Self {
             paths,
             shutdown,
             logger,
             last_tray_ensure: Mutex::new(None),
+            pending_alert_events,
         }
     }
 }
@@ -92,6 +100,14 @@ impl ServiceHost for WindowsDaemonHost<'_> {
         self.shutdown.load(Ordering::SeqCst)
     }
 
+    fn drain_alert_events(&self) -> virtue_client_core::CoreResult<Vec<DaemonAlertEvent>> {
+        let mut guard = self
+            .pending_alert_events
+            .lock()
+            .map_err(|_| CoreError::Platform("alert event queue lock poisoned".to_string()))?;
+        Ok(std::mem::take(&mut *guard))
+    }
+
     fn on_loop_tick(&self) -> virtue_client_core::CoreResult<()> {
         let mut guard = self
             .last_tray_ensure
@@ -111,11 +127,17 @@ impl ServiceHost for WindowsDaemonHost<'_> {
 pub async fn run_daemon(shutdown: Arc<AtomicBool>, logger: &ServiceLogger) -> Result<()> {
     let paths = ClientPaths::discover()?;
     paths.ensure_dirs()?;
+    let pending_alert_events = Arc::new(Mutex::new(vec![DaemonAlertEvent {
+        kind: "daemon_start".to_string(),
+        metadata: vec![("source".to_string(), "windows_service".to_string())],
+        created_at: Utc::now(),
+        device_id: None,
+    }]));
 
     let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&paths.token_file));
     let auth_client = AuthClient::new(token_store.clone())?;
     let api_client = ApiClient::new()?;
-    let host = WindowsDaemonHost::new(paths.clone(), shutdown, logger);
+    let host = WindowsDaemonHost::new(paths.clone(), shutdown, logger, pending_alert_events);
 
     let config = BatchDaemonConfig {
         settings_refresh_interval: Duration::from_secs(30 * 60),

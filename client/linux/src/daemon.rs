@@ -1,4 +1,6 @@
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -6,8 +8,9 @@ use chrono::Utc;
 use tokio::time::sleep;
 
 use virtue_client_core::{
-    ApiClient, AuthClient, BatchDaemonConfig, CaptureOutcome, CoreError, FileTokenStore,
-    PersistedServiceState, ServiceEvent, ServiceHost, SleepOutcome, TokenStore, run_batch_daemon,
+    ApiClient, AuthClient, BatchDaemonConfig, CaptureOutcome, CoreError, DaemonAlertEvent,
+    FileTokenStore, PersistedServiceState, ServiceEvent, ServiceHost, SleepOutcome, TokenStore,
+    run_batch_daemon,
 };
 
 use crate::capture::{capture_screen, is_session_unavailable_error};
@@ -17,11 +20,21 @@ use crate::tray;
 #[derive(Clone)]
 struct LinuxDaemonHost {
     paths: ClientPaths,
+    shutdown: Arc<AtomicBool>,
+    pending_alert_events: Arc<Mutex<Vec<DaemonAlertEvent>>>,
 }
 
 impl LinuxDaemonHost {
-    fn new(paths: ClientPaths) -> Self {
-        Self { paths }
+    fn new(
+        paths: ClientPaths,
+        shutdown: Arc<AtomicBool>,
+        pending_alert_events: Arc<Mutex<Vec<DaemonAlertEvent>>>,
+    ) -> Self {
+        Self {
+            paths,
+            shutdown,
+            pending_alert_events,
+        }
     }
 }
 
@@ -43,8 +56,20 @@ impl ServiceHost for LinuxDaemonHost {
         &self,
         duration: Duration,
     ) -> virtue_client_core::CoreResult<SleepOutcome> {
-        sleep(duration).await;
-        Ok(SleepOutcome::Elapsed)
+        let mut remaining = duration;
+        while remaining > Duration::ZERO {
+            if self.should_stop() {
+                return Ok(SleepOutcome::Interrupted);
+            }
+            let tick = remaining.min(Duration::from_secs(1));
+            sleep(tick).await;
+            remaining = remaining.saturating_sub(tick);
+        }
+        if self.should_stop() {
+            Ok(SleepOutcome::Interrupted)
+        } else {
+            Ok(SleepOutcome::Elapsed)
+        }
     }
 
     async fn capture_frame_png(&self) -> virtue_client_core::CoreResult<CaptureOutcome> {
@@ -66,16 +91,70 @@ impl ServiceHost for LinuxDaemonHost {
             ServiceEvent::Error(msg) => eprintln!("daemon: {msg}"),
         }
     }
+
+    fn should_stop(&self) -> bool {
+        self.shutdown.load(Ordering::SeqCst)
+    }
+
+    fn drain_alert_events(&self) -> virtue_client_core::CoreResult<Vec<DaemonAlertEvent>> {
+        let mut guard = self
+            .pending_alert_events
+            .lock()
+            .map_err(|_| CoreError::Platform("alert event queue lock poisoned".to_string()))?;
+        Ok(std::mem::take(&mut *guard))
+    }
 }
 
 pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     paths.ensure_dirs()?;
     let _tray = tray::start_daemon_tray(paths.clone());
 
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let pending_alert_events = Arc::new(Mutex::new(vec![DaemonAlertEvent {
+        kind: "daemon_start".to_string(),
+        metadata: vec![("source".to_string(), "linux_service".to_string())],
+        created_at: Utc::now(),
+        device_id: None,
+    }]));
+
+    {
+        let shutdown = shutdown.clone();
+        let pending_alert_events = pending_alert_events.clone();
+        tokio::spawn(async move {
+            use tokio::signal::unix::{SignalKind, signal};
+
+            let mut sigterm = match signal(SignalKind::terminate()) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            let mut sigint = signal(SignalKind::interrupt()).ok();
+
+            let signal_name = tokio::select! {
+                _ = sigterm.recv() => "SIGTERM",
+                _ = async {
+                    match sigint.as_mut() {
+                        Some(s) => s.recv().await,
+                        None => std::future::pending::<Option<()>>().await,
+                    }
+                } => "SIGINT",
+            };
+
+            if let Ok(mut guard) = pending_alert_events.lock() {
+                guard.push(DaemonAlertEvent {
+                    kind: "daemon_stop_signal".to_string(),
+                    metadata: vec![("signal".to_string(), signal_name.to_string())],
+                    created_at: Utc::now(),
+                    device_id: None,
+                });
+            }
+            shutdown.store(true, Ordering::SeqCst);
+        });
+    }
+
     let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&paths.token_file));
     let auth_client = AuthClient::new(token_store.clone())?;
     let api_client = ApiClient::new()?;
-    let host = LinuxDaemonHost::new(paths.clone());
+    let host = LinuxDaemonHost::new(paths.clone(), shutdown, pending_alert_events);
 
     let config = BatchDaemonConfig {
         settings_refresh_interval: Duration::from_secs(30 * 60),
