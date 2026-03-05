@@ -9,6 +9,10 @@ Base URL examples:
 
 All timestamps are ISO-8601 UTC strings.
 
+## Current Unimplemented Changes
+
+- Moved device specific endpoints into their own namespace `/d/`
+
 ## Authentication model
 
 - Access tokens are JWTs sent via `Authorization: Bearer <token>`.
@@ -47,7 +51,7 @@ Unhandled server errors:
 ### `GET /`
 
 ```json
-{ "name": "BePure API", "version": "1.0.0", "status": "ok" }
+{ "name": "Virtue Initiative API", "version": "1.0.0", "status": "ok" }
 ```
 
 ---
@@ -155,20 +159,6 @@ Response `200`:
 
 All device endpoints require `Authorization: Bearer <token>`.
 
-### `POST /device`
-
-Request:
-
-```json
-{ "name": "My Laptop", "platform": "linux" }
-```
-
-Response `201`:
-
-```json
-{ "id": "uuid", "created_at": "..." }
-```
-
 ### `GET /device`
 
 List devices. Optional query: `?user=<userId>` (accepted partnership required).
@@ -205,43 +195,13 @@ Response `200`:
 
 ---
 
-## Batches
+## Batches and Logs
 
 Encrypted, compressed data blobs stored in R2.
 The blob content is AES-256-GCM encrypted and gzip-compressed client-side.
 Server stores opaque bytes; decryption happens client-side with the user's E2EE key.
 
 All batch endpoints require `Authorization: Bearer <token>`.
-
-### `POST /batch`
-
-Upload an encrypted batch as multipart form.
-
-| Field        | Type     | Description                       |
-| ------------ | -------- | --------------------------------- |
-| `file`       | binary   | Encrypted + compressed batch blob |
-| `device_id`  | string   | Device UUID                       |
-| `start_time` | ISO-8601 | Start of batch window             |
-| `end_time`   | ISO-8601 | End of batch window               |
-| `item_count` | integer  | Number of items in batch blob     |
-| `size_bytes` | integer  | Uploaded encrypted payload size   |
-
-`start_chain_hash` and `end_chain_hash` are derived server-side from stored device state.
-
-Response `201`:
-
-```json
-{
-  "batch": {
-    "id": "uuid",
-    "batch_url": "https://.../user/{uid}/batches/{id}.enc",
-    "start_time": "...",
-    "end_time": "...",
-    "created_at": "..."
-  },
-  "new_state_hex": "64-char-hex"
-}
-```
 
 ### `GET /batch`
 
@@ -266,97 +226,6 @@ Response `200`:
     }
   ],
   "next_cursor": "..."
-}
-```
-
----
-
-## Hash Chain
-
-For each batch item hash upload:
-
-```
-new_state = sha256(current_state || content_hash)
-```
-
-All hash endpoints require `Authorization: Bearer <token>`.
-
-### `POST /hash`
-
-Upload a content hash as binary.
-
-- Content-Type: `application/octet-stream`
-- Body: exactly 48 bytes = `[device_id:16B][content_hash:32B]`
-
-Response `200`:
-
-```json
-{ "ok": true }
-```
-
-### `GET /hash`
-
-Get the latest rolling state.
-
-Query params:
-
-| Param       | Required | Description                 |
-| ----------- | -------- | --------------------------- |
-| `device_id` | yes      | Device UUID                 |
-| `user`      | no       | Partner-view target user ID |
-
-Response `200`:
-
-```json
-{ "state_hex": "64-char-hex" }
-```
-
----
-
-## Hash Server Discovery
-
-### `GET /hash-server` (auth required)
-
-Query params:
-
-| Param      | Required | Description |
-| ---------- | -------- | ----------- |
-| `deviceId` | yes      | Device UUID |
-
-Response `200`:
-
-```json
-{ "url": "https://hash-server.example.com" }
-```
-
----
-
-## Logs (Alert Logs)
-
-### `POST /logs` (auth required)
-
-Request:
-
-```json
-{
-  "device_id": "uuid",
-  "created_at": "...",
-  "kind": "missed_capture",
-  "metadata": [["reason", "capture_failed"]]
-}
-```
-
-Response `201`:
-
-```json
-{
-  "log": {
-    "id": "uuid",
-    "device_id": "uuid",
-    "kind": "missed_capture",
-    "metadata": [["reason", "capture_failed"]],
-    "created_at": "..."
-  }
 }
 ```
 
@@ -502,10 +371,146 @@ Response `200`:
 
 ---
 
-## Public R2 Pass-through
+## Public R2 Pass-through (primarily for dev)
 
 ### `GET /r2/*`
 
 Returns encrypted batch blob bytes from R2 (no auth required).
 
 Response content type: `application/octet-stream`.
+
+---
+
+# Device API
+
+This is a "separate" API that device clients use.
+
+## Authentication
+
+Authentication is done using a non-expiring JWT that contain the device id.
+
+## Endpoints
+
+### `POST /d/device`
+
+This creates a new device. It requires a user access token for the account
+(obtained with `/login`).
+
+Request:
+
+```json
+{ "name": "My Laptop", "platform": "linux" }
+```
+
+Response `201`:
+
+```json
+{ "id": "uuid", "created_at": "...", "token": "jwt" }
+```
+
+### `GET /d/device`
+
+Returns the device info/settings.
+
+```
+{
+    "id": "uuid",
+    "name": "My Laptop",
+    "platform": "linux",
+    "enabled": true,
+    "encryptedE2EEKey": "base64",
+    "hashServer": "https://hash-server.example.com",
+}
+```
+
+### `POST /d/batch`
+
+Upload an encrypted batch as multipart form.
+
+| Field        | Type     | Description                       |
+| ------------ | -------- | --------------------------------- |
+| `file`       | binary   | Encrypted + compressed batch blob |
+| `device_id`  | string   | Device UUID                       |
+| `start_time` | ISO-8601 | Start of batch window             |
+| `end_time`   | ISO-8601 | End of batch window               |
+| `item_count` | integer  | Number of items in batch blob     |
+| `size_bytes` | integer  | Uploaded encrypted payload size   |
+
+`start_chain_hash` and `end_chain_hash` are derived server-side from stored device state.
+
+Response `201`:
+
+```json
+{
+  "batch": {
+    "id": "uuid",
+    "batch_url": "https://.../user/{uid}/batches/{id}.enc",
+    "start_time": "...",
+    "end_time": "...",
+    "created_at": "..."
+  },
+  "new_state_hex": "64-char-hex"
+}
+```
+
+### `POST /d/logs`
+
+Adds an "alert log"
+
+Request:
+
+```json
+{
+  "created_at": "...",
+  "kind": "missed_capture",
+  "metadata": [["reason", "capture_failed"]]
+}
+```
+
+Response `201`:
+
+```json
+{
+  "log": {
+    "id": "uuid",
+    "device_id": "uuid",
+    "kind": "missed_capture",
+    "metadata": [["reason", "capture_failed"]],
+    "created_at": "..."
+  }
+}
+```
+
+## Hash Server
+
+For each batch item hash upload:
+
+```
+new_state = sha256(current_state || content_hash)
+```
+
+All hash endpoints require `Authorization: Bearer <device_jwt>`.
+
+### `POST /hash`
+
+Upload a content hash as binary.
+
+- Content-Type: `application/octet-stream`
+- Body: exactly 32 bytes = `[content_hash:32B]`
+
+Response `200`:
+
+```json
+{ "ok": true }
+```
+
+### `GET /hash`
+
+Get the latest rolling state.
+
+Response `200`:
+
+```json
+{ "state_hex": "64-char-hex" }
+```
+
