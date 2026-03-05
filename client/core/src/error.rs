@@ -38,6 +38,9 @@ pub enum CoreError {
 
     #[error("serialization error: {0}")]
     Serialization(String),
+
+    #[error("platform error: {0}")]
+    Platform(String),
 }
 
 pub type CoreResult<T> = Result<T, CoreError>;

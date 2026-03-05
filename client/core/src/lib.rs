@@ -129,8 +129,10 @@ pub fn resolve_batch_window_seconds() -> u64 {
 }
 
 pub mod api_client;
+pub mod app_commands;
 pub mod auth;
 pub mod batch;
+pub mod batch_daemon;
 pub mod crypto;
 pub mod error;
 pub mod hash_chain;
@@ -138,18 +140,27 @@ pub mod image_pipeline;
 pub mod models;
 pub mod queue;
 pub mod schedule;
+pub mod service_host;
 pub mod token_store;
 pub mod tray_icon;
 pub mod upload;
 
 pub use api_client::{ApiClient, Device, DeviceRegistration};
+pub use app_commands::{
+    LoginCommandInput, LoginCommandResult, clear_local_tokens, login_and_register_device,
+    logout_and_clear_tokens, parse_jwt_sub,
+};
 pub use auth::{AuthClient, AuthClientConfig};
 pub use batch::{BatchBlob, BatchItem};
+pub use batch_daemon::{BatchDaemonConfig, run_batch_daemon};
 pub use crypto::{decrypt, derive_key, encrypt};
 pub use error::{CoreError, CoreResult};
 pub use hash_chain::chain_step;
 pub use image_pipeline::{ImagePipeline, ProcessedImage};
 pub use schedule::{CaptureSchedulePolicy, CaptureScheduleState, RetryPolicy};
+pub use service_host::{
+    CaptureOutcome, PersistedServiceState, ServiceEvent, ServiceHost, SleepOutcome,
+};
 pub use token_store::{FileTokenStore, MemoryTokenStore, TokenStore};
 pub use tray_icon::build_default_tray_icon_rgba;
 pub use upload::{UploadClient, UploadClientConfig, sha256_bytes, sha256_hex, uuid_str_to_bytes};

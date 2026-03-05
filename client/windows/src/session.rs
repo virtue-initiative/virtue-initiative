@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use base64::Engine;
-use serde::Deserialize;
 use tokio::runtime::Runtime;
 
 use crate::config::{ClientPaths, load_state, save_state};
-use virtue_client_core::{ApiClient, AuthClient, FileTokenStore, TokenStore};
+use virtue_client_core::{
+    ApiClient, AuthClient, FileTokenStore, LoginCommandInput, TokenStore,
+    login_and_register_device, logout_and_clear_tokens,
+};
 
 #[derive(Clone)]
 pub struct SessionManager {
@@ -59,50 +60,34 @@ impl SessionManager {
         device_name: &str,
     ) -> Result<String> {
         runtime.block_on(async {
-            self.auth_client
-                .login(email, password)
-                .await
-                .context("login failed")?;
-
-            let access_token = self
-                .token_store
-                .get_access_token()?
-                .context("missing access token after login")?;
-
-            let user_id = parse_jwt_sub(&access_token)
-                .context("could not extract user ID from access token")?;
-            self.auth_client
-                .store_wrapping_key(password, &user_id)
-                .context("could not store wrapping key")?;
-            self.auth_client
-                .fetch_and_decrypt_e2ee_key(&access_token)
-                .await
-                .context("could not retrieve E2EE key from server")?;
-
-            let registration = self
-                .api_client
-                .register_device(&access_token, device_name, "windows")
-                .await
-                .context("device registration failed")?;
+            let result = login_and_register_device(
+                &self.auth_client,
+                &self.api_client,
+                self.token_store.as_ref(),
+                LoginCommandInput {
+                    email,
+                    password,
+                    device_name,
+                    platform: "windows",
+                },
+            )
+            .await
+            .context("login failed")?;
 
             let mut state = load_state(&self.paths.state_file)?;
-            state.device_id = Some(registration.id.clone());
+            state.device_id = Some(result.device_id.clone());
             state.monitoring_enabled = true;
             state.email = Some(email.to_string());
             save_state(&self.paths.state_file, &state)?;
 
-            Ok::<String, anyhow::Error>(registration.id)
+            Ok::<String, anyhow::Error>(result.device_id)
         })
     }
 
     pub fn logout_blocking(&self, runtime: &Runtime) -> Result<()> {
         runtime.block_on(async {
             let mut state = load_state(&self.paths.state_file)?;
-            let _ = self.auth_client.logout().await;
-            self.token_store.clear_access_token()?;
-            self.token_store.clear_refresh_token()?;
-            self.token_store.clear_e2ee_key()?;
-            self.token_store.clear_wrapping_key()?;
+            let _ = logout_and_clear_tokens(&self.auth_client, self.token_store.as_ref()).await;
 
             state.monitoring_enabled = false;
             state.device_id = None;
@@ -112,19 +97,4 @@ impl SessionManager {
             Ok::<(), anyhow::Error>(())
         })
     }
-}
-
-#[derive(Deserialize)]
-struct JwtClaims {
-    sub: Option<String>,
-}
-
-fn parse_jwt_sub(token: &str) -> Option<String> {
-    let payload_segment = token.split('.').nth(1)?;
-    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(payload_segment)
-        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(payload_segment))
-        .ok()?;
-    let claims: JwtClaims = serde_json::from_slice(&payload).ok()?;
-    claims.sub.filter(|s| !s.is_empty())
 }
