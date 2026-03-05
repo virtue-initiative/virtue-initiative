@@ -101,7 +101,7 @@ pub async fn run_batch_daemon<H: ServiceHost>(
     batch_buffer_path: &Path,
     config: BatchDaemonConfig,
 ) -> CoreResult<()> {
-    let pipeline = ImagePipeline::default();
+    let pipeline = ImagePipeline;
     let mut upload_client = UploadClient::new()?;
 
     let mut schedule_state = CaptureScheduleState::default();
@@ -120,13 +120,13 @@ pub async fn run_batch_daemon<H: ServiceHost>(
 
     emit_info(host, "capture daemon started");
 
-    if let Some(access_token) = token_store.get_access_token()? {
-        if let Err(err) = auth_client.fetch_and_decrypt_e2ee_key(&access_token).await {
-            emit_warn(
-                host,
-                &format!("could not fetch E2EE key on startup: {err:#}"),
-            );
-        }
+    if let Some(access_token) = token_store.get_access_token()?
+        && let Err(err) = auth_client.fetch_and_decrypt_e2ee_key(&access_token).await
+    {
+        emit_warn(
+            host,
+            &format!("could not fetch E2EE key on startup: {err:#}"),
+        );
     }
 
     loop {
