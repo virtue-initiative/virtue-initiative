@@ -2,7 +2,7 @@ import { useState, useEffect } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { useAuth } from "../../context/auth";
 import { useE2EE } from "../../context/e2ee";
-import { api, Batch, Device } from "../../api";
+import { api, Batch, Device, AlertLog } from "../../api";
 import { decryptBatch, decompressGzip, verifyBatch } from "../../crypto";
 import { decode } from "@msgpack/msgpack";
 import { ImageLogItem, LogItem } from "./shared";
@@ -174,48 +174,74 @@ export function Logs() {
       );
   }, [token]);
 
-  // Load batches when the active key or filter changes
+  // Reload when the active key or filter changes
   useEffect(() => {
     if (!activeKey || !token) return;
     setItems([]);
     setNextCursor(undefined);
     setBatchStats({ decrypted: 0, failed: 0, lastTime: null });
-    doLoadBatches(undefined, true);
+    doLoad(undefined, true);
   }, [activeKey, token, selectedDevice, selectedUser]);
 
-  async function doLoadBatches(cursor: string | undefined, reset: boolean) {
+  async function doLoad(cursor: string | undefined, reset: boolean) {
     if (!activeKey || !token) return;
     setLoading(true);
     setFetchError(null);
     try {
-      const page = await api.getBatches(token, {
-        user: selectedUser ?? ownUserId ?? undefined,
-        device_id: selectedDevice ?? undefined,
+      const userParam = selectedUser ?? ownUserId ?? undefined;
+      const deviceParam = selectedDevice ?? undefined;
+      const shared = {
+        user: userParam,
+        device_id: deviceParam,
         cursor,
         limit: 10,
-      });
+      };
+
+      const [batchPage, logPage] = await Promise.all([
+        api.getBatches(token, shared),
+        api.getLogs(token, shared),
+      ]);
+
+      // Decrypt batches
       const nested = await Promise.allSettled(
-        page.items.map((b) => decryptAndFlattenBatch(b, activeKey!)),
+        batchPage.items.map((b) => decryptAndFlattenBatch(b, activeKey!)),
       );
-      const flat: LogItem[] = [];
+      const batchFlat: LogItem[] = [];
       let pageDecrypted = 0;
-      let pageFaild = 0;
+      let pageFailed = 0;
       for (const result of nested) {
         if (result.status === "fulfilled") {
-          flat.push(...result.value);
+          batchFlat.push(
+            ...result.value.map((item) => ({
+              ...item,
+              source: "batch" as const,
+            })),
+          );
           pageDecrypted++;
         } else {
           console.error("[logs] failed to decrypt batch:", result.reason);
-          pageFaild++;
+          pageFailed++;
         }
       }
-      const pageLastTime = page.items.reduce<string | null>((best, b) => {
+
+      // Map alert log entries to LogItem
+      const logFlat: LogItem[] = logPage.items.map((entry: AlertLog) => ({
+        id: entry.id,
+        taken_at: entry.taken_at,
+        device_id: entry.device_id,
+        kind: entry.kind,
+        metadata: entry.metadata,
+        batch_status: "unknown" as const,
+        source: "log" as const,
+      }));
+
+      const pageLastTime = batchPage.items.reduce<string | null>((best, b) => {
         if (!best) return b.end_time;
         return b.end_time > best ? b.end_time : best;
       }, null);
       setBatchStats((prev) => ({
         decrypted: (reset ? 0 : prev.decrypted) + pageDecrypted,
-        failed: (reset ? 0 : prev.failed) + pageFaild,
+        failed: (reset ? 0 : prev.failed) + pageFailed,
         lastTime:
           pageLastTime &&
           (!prev.lastTime || reset || pageLastTime > prev.lastTime)
@@ -224,11 +250,29 @@ export function Logs() {
               ? pageLastTime
               : prev.lastTime,
       }));
+
+      // Merge batch items + alert log items, sort by taken_at desc
+      const merged = [...batchFlat, ...logFlat];
       setItems((prev) => {
-        const combined = reset ? flat : [...prev, ...flat];
+        const combined = reset ? merged : [...prev, ...merged];
         return combined.sort((a, b) => b.taken_at - a.taken_at);
       });
-      setNextCursor(page.next_cursor);
+
+      // Shared cursor: the oldest created_at across both pages' last items
+      const batchCursor = batchPage.next_cursor;
+      const logCursor = logPage.next_cursor;
+      if (batchCursor || logCursor) {
+        // Pick the more-recent (larger) of the two so both sources advance together
+        const next =
+          batchCursor && logCursor
+            ? batchCursor > logCursor
+              ? logCursor
+              : batchCursor
+            : (batchCursor ?? logCursor);
+        setNextCursor(next);
+      } else {
+        setNextCursor(undefined);
+      }
     } catch (err) {
       console.error("[logs] load failed:", err);
       setFetchError(err instanceof Error ? err.message : "Failed to load logs");
@@ -342,7 +386,7 @@ export function Logs() {
               items={galleryItems}
               loading={loading}
               hasMore={!!nextCursor}
-              onLoadMore={() => doLoadBatches(nextCursor, false)}
+              onLoadMore={() => doLoad(nextCursor, false)}
               deviceName={deviceName}
             />
           ) : (
@@ -350,7 +394,7 @@ export function Logs() {
               items={items}
               loading={loading}
               hasMore={!!nextCursor}
-              onLoadMore={() => doLoadBatches(nextCursor, false)}
+              onLoadMore={() => doLoad(nextCursor, false)}
               deviceName={deviceName}
             />
           )}

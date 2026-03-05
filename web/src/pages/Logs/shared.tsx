@@ -9,6 +9,7 @@ export interface LogItem {
   image?: Uint8Array;
   metadata: [string, string][];
   batch_status: BatchVerification;
+  source?: "batch" | "log";
 }
 
 export type ImageLogItem = LogItem & { image: Uint8Array };

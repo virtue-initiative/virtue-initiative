@@ -7,6 +7,7 @@ import hashes from './routes/hashes';
 import hashServer from './routes/hash-server';
 import devices from './routes/devices';
 import partners from './routes/partners';
+import logs from './routes/logs';
 import settings from './routes/settings';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -40,6 +41,7 @@ app.route('/hash', hashes);
 app.route('/device', devices);
 app.route('/partner', partners);
 app.route('/settings', settings);
+app.route('/logs', logs);
 app.route('/hash-server', hashServer);
 
 // Public R2 pass-through — blobs are E2EE encrypted so no auth needed.

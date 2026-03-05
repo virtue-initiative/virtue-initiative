@@ -13,6 +13,7 @@ import {
   findAcceptedPartnership,
   getDeviceState,
   upsertDeviceState,
+  createAlertLog,
 } from '../lib/db';
 
 const batches = new Hono<{ Bindings: Env; Variables: Variables }>();

@@ -79,6 +79,24 @@ export const updatePartnerSchema = z.object({
   }),
 });
 
+// Alert log schemas
+export const postAlertLogSchema = z.object({
+  device_id: z.string().min(1),
+  taken_at: z.coerce.number().int(),
+  kind: z.string().min(1),
+  metadata: z
+    .array(z.tuple([z.string(), z.string()]))
+    .optional()
+    .default([]),
+});
+
+export const listAlertLogsSchema = z.object({
+  device_id: z.string().min(1).optional(),
+  user: z.string().optional(),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().positive().max(100).optional().default(50),
+});
+
 // E2EE key schemas
 export const setE2EEKeySchema = z.object({
   encryptedE2EEKey: z.string().min(1),
@@ -106,4 +124,6 @@ export type CreatePartnerInput = z.infer<typeof createPartnerSchema>;
 export type AcceptPartnerInput = z.infer<typeof acceptPartnerSchema>;
 export type SetE2EEKeyInput = z.infer<typeof setE2EEKeySchema>;
 export type UpdatePartnerInput = z.infer<typeof updatePartnerSchema>;
+export type PostAlertLogInput = z.infer<typeof postAlertLogSchema>;
+export type ListAlertLogsInput = z.infer<typeof listAlertLogsSchema>;
 export type SettingsInput = z.infer<typeof settingsSchema>;

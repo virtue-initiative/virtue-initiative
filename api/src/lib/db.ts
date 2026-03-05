@@ -514,6 +514,67 @@ export async function findAcceptedPartnership(
     .first<{ permissions: string }>();
 }
 
+// ── Alert logs ────────────────────────────────────────────────────────────────
+
+export async function createAlertLog(
+  db: D1Database,
+  id: string,
+  userId: string,
+  deviceId: string,
+  takenAt: number,
+  kind: string,
+  metadata: string,
+  createdAt: string,
+) {
+  return db
+    .prepare(
+      `INSERT INTO alert_logs (id, user_id, device_id, taken_at, kind, metadata, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(id, userId, deviceId, takenAt, kind, metadata, createdAt)
+    .run();
+}
+
+export async function listAlertLogs(
+  db: D1Database,
+  userId: string,
+  filters: { device_id?: string; cursor?: string },
+  limit: number,
+) {
+  let query = `SELECT id, device_id, taken_at, kind, metadata, created_at
+     FROM alert_logs WHERE user_id = ?`;
+  const params: (string | number)[] = [userId];
+
+  if (filters.device_id) {
+    query += ' AND device_id = ?';
+    params.push(filters.device_id);
+  }
+  if (filters.cursor) {
+    query += ' AND created_at < ?';
+    params.push(filters.cursor);
+  }
+
+  query += ' ORDER BY created_at DESC LIMIT ?';
+  params.push(limit + 1);
+
+  const result = await db
+    .prepare(query)
+    .bind(...params)
+    .all<{
+      id: string;
+      device_id: string;
+      taken_at: number;
+      kind: string;
+      metadata: string;
+      created_at: string;
+    }>();
+
+  return {
+    items: result.results.slice(0, limit),
+    hasMore: result.results.length > limit,
+  };
+}
+
 export async function getSettings(db: D1Database, userId: string) {
   return db
     .prepare('SELECT data FROM settings WHERE user_id = ?')
