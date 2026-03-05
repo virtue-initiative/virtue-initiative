@@ -1,0 +1,44 @@
+name: Client Linux Checks
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  client-linux:
+    name: Client Linux
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            client -> target
+
+      - name: Rust format check (workspace)
+        run: cargo fmt --all -- --check
+        working-directory: client
+
+      - name: Rust lint (core)
+        run: cargo clippy -p virtue-client-core --all-targets -- -D warnings
+        working-directory: client
+
+      - name: Rust lint (Linux client)
+        run: cargo clippy -p virtue-linux-client --all-targets -- -D warnings
+        working-directory: client
+
+      - name: Rust tests (core)
+        run: cargo test -p virtue-client-core
+        working-directory: client
+
+      - name: Rust tests (Linux client)
+        run: cargo test -p virtue-linux-client
+        working-directory: client
