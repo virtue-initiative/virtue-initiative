@@ -10,4 +10,3 @@ vite .
 
 This is the first page people see and contains basic information about the
 mission, history and goals.
-

@@ -20,4 +20,3 @@ document.getElementById("theme-toggle").innerHTML =
   document.documentElement.getAttribute("data-theme") === "dark"
     ? SUN_SVG
     : MOON_SVG;
-
