@@ -217,14 +217,14 @@ All batch endpoints require `Authorization: Bearer <token>`.
 
 Upload an encrypted batch as multipart form.
 
-| Field        | Type     | Description                        |
-| ------------ | -------- | ---------------------------------- |
-| `file`       | binary   | Encrypted + compressed batch blob  |
-| `device_id`  | string   | Device UUID                        |
-| `start_time` | ISO-8601 | Start of batch window              |
-| `end_time`   | ISO-8601 | End of batch window                |
-| `item_count` | integer  | Number of items in batch blob      |
-| `size_bytes` | integer  | Uploaded encrypted payload size     |
+| Field        | Type     | Description                       |
+| ------------ | -------- | --------------------------------- |
+| `file`       | binary   | Encrypted + compressed batch blob |
+| `device_id`  | string   | Device UUID                       |
+| `start_time` | ISO-8601 | Start of batch window             |
+| `end_time`   | ISO-8601 | End of batch window               |
+| `item_count` | integer  | Number of items in batch blob     |
+| `size_bytes` | integer  | Uploaded encrypted payload size   |
 
 `start_chain_hash` and `end_chain_hash` are derived server-side from stored device state.
 
@@ -300,9 +300,9 @@ Get the latest rolling state.
 
 Query params:
 
-| Param       | Required | Description |
-| ----------- | -------- | ----------- |
-| `device_id` | yes      | Device UUID |
+| Param       | Required | Description                 |
+| ----------- | -------- | --------------------------- |
+| `device_id` | yes      | Device UUID                 |
 | `user`      | no       | Partner-view target user ID |
 
 Response `200`:
