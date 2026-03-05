@@ -1,0 +1,23 @@
+{
+  "name": "landing",
+  "version": "1.0.0",
+  "description": "This is the landing page. It is a simple static site with no build system. For development, we recommend running vite to get auto-refresh.",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "deploy": "wrangler deploy",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "AGPL-3.0-or-later",
+  "type": "commonjs",
+  "dependencies": {
+    "@virtueinitiative/styles": "file:../styles"
+  },
+  "devDependencies": {
+    "vite": "^7.3.1",
+    "wrangler": "^4.70.0"
+  }
+}

@@ -4,6 +4,8 @@
  * work well for content-centric websites.
  */
 
+@import "@virtueinitiative/styles/index.css";
+
 :root {
   --ifm-color-primary: #1a8a50;
   --ifm-color-primary-dark: #177a46;

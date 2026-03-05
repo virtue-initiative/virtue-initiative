@@ -1,2 +1,4 @@
 .wrangler
 .vite
+node_modules
+dist
