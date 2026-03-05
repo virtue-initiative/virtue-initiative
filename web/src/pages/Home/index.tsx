@@ -42,7 +42,7 @@ export function Home() {
 
   return (
     <div class="dashboard">
-      {error && <p class="error-banner">{error}</p>}
+      {error && <p class="alert-error">{error}</p>}
 
       {pendingInvites.length > 0 && (
         <section class="dash-section">
@@ -250,9 +250,15 @@ function InviteButton({
       </Button>
       <dialog
         ref={dialogRef}
-        class="invite-dialog"
         onClick={(e) => {
-          if (e.target === dialogRef.current) close();
+          const r = dialogRef.current!.getBoundingClientRect();
+          if (
+            e.clientX < r.left ||
+            e.clientX > r.right ||
+            e.clientY < r.top ||
+            e.clientY > r.bottom
+          )
+            close();
         }}
       >
         <h3 class="dialog-title">Invite a partner</h3>
@@ -281,7 +287,7 @@ function InviteButton({
               Can view data
             </label>
           </div>
-          {error && <p class="form-error">{error}</p>}
+          {error && <p class="alert-error">{error}</p>}
           <div class="invite-actions">
             <button
               class="btn btn-primary btn-sm"
@@ -377,7 +383,7 @@ function PendingInviteCard({
             </div>
           </>
         )}
-        {error && <p class="form-error">{error}</p>}
+        {error && <p class="alert-error">{error}</p>}
         <button
           class="btn btn-primary btn-sm"
           type="submit"
@@ -518,9 +524,14 @@ function PartnerDevicesSection({
 
       <dialog
         ref={editKeyDialogRef}
-        class="invite-dialog"
         onClick={(e) => {
-          if (e.target === editKeyDialogRef.current)
+          const r = editKeyDialogRef.current!.getBoundingClientRect();
+          if (
+            e.clientX < r.left ||
+            e.clientX > r.right ||
+            e.clientY < r.top ||
+            e.clientY > r.bottom
+          )
             editKeyDialogRef.current?.close();
         }}
       >
@@ -544,7 +555,7 @@ function PartnerDevicesSection({
               autoFocus
             />
           </div>
-          {e2eeKeyError && <p class="form-error">{e2eeKeyError}</p>}
+          {e2eeKeyError && <p class="alert-error">{e2eeKeyError}</p>}
           <div class="invite-actions">
             <button
               class="btn btn-primary btn-sm"
@@ -652,9 +663,15 @@ function DeviceCard({
 
       <dialog
         ref={dialogRef}
-        class="invite-dialog"
         onClick={(e) => {
-          if (e.target === dialogRef.current) dialogRef.current?.close();
+          const r = dialogRef.current!.getBoundingClientRect();
+          if (
+            e.clientX < r.left ||
+            e.clientX > r.right ||
+            e.clientY < r.top ||
+            e.clientY > r.bottom
+          )
+            dialogRef.current?.close();
         }}
       >
         <h3 class="dialog-title">Edit device</h3>
@@ -679,7 +696,7 @@ function DeviceCard({
             />
             Enabled
           </label>
-          {error && <p class="form-error">{error}</p>}
+          {error && <p class="alert-error">{error}</p>}
           <div class="invite-actions">
             <button
               class="btn btn-primary btn-sm"
@@ -736,7 +753,7 @@ function SentRequestCard({
         <dt>Sent</dt>
         <dd>{new Date(partner.created_at).toLocaleDateString()}</dd>
       </dl>
-      {error && <p class="form-error">{error}</p>}
+      {error && <p class="alert-error">{error}</p>}
       <div class="card-actions">
         <button
           class="btn btn-danger btn-sm"
@@ -811,7 +828,6 @@ function PartnerCard({
 
       <dialog
         ref={infoDialogRef}
-        class="invite-dialog"
         onClick={(e) => {
           if (e.target === infoDialogRef.current)
             infoDialogRef.current?.close();
@@ -841,7 +857,6 @@ function PartnerCard({
 
       <dialog
         ref={deleteDialogRef}
-        class="invite-dialog"
         onClick={(e) => {
           if (e.target === deleteDialogRef.current)
             deleteDialogRef.current?.close();
@@ -853,7 +868,7 @@ function PartnerCard({
           <strong>{partner.partner_email}</strong> as an accountability partner?
           They will be notified by email.
         </p>
-        {error && <p class="form-error">{error}</p>}
+        {error && <p class="alert-error">{error}</p>}
         <div class="invite-actions">
           <button
             class="btn btn-danger btn-sm"

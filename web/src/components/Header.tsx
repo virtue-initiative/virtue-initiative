@@ -62,6 +62,12 @@ export function Header() {
         >
           Logs
         </a>
+        <a
+          href="/settings"
+          class={`control control-flat ${isActive("/settings") ? "is-active" : ""}`}
+        >
+          Settings
+        </a>
         <button
           class="control control-icon"
           onClick={toggle}

@@ -114,7 +114,7 @@ export function Auth() {
 
   return (
     <div class="auth-page">
-      <div class="auth-card">
+      <div class="card auth-card">
         <h1 class="auth-title">The Virtue Initiative</h1>
         <p class="auth-subtitle">Accountability starts here.</p>
 
@@ -240,7 +240,7 @@ export function Auth() {
             </>
           )}
 
-          {error && <p class="auth-error">{error}</p>}
+          {error && <p class="alert-error">{error}</p>}
 
           <button class="btn btn-primary" type="submit" disabled={loading}>
             {loading

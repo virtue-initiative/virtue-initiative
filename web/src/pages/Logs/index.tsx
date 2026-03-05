@@ -324,7 +324,7 @@ export function Logs() {
             </div>
           </div>
 
-          {fetchError && <p class="error-banner">{fetchError}</p>}
+          {fetchError && <p class="alert-error">{fetchError}</p>}
 
           {activeKey && (batchStats.decrypted > 0 || batchStats.failed > 0) && (
             <p class="logs-summary">

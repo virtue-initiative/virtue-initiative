@@ -1,0 +1,47 @@
+@import "./index.css";
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  line-height: 1.5;
+}
+
+a {
+  color: var(--accent);
+}
+
+dialog {
+  border: none;
+  border-radius: 12px;
+  padding: 1.75rem;
+  width: 100%;
+  max-width: 400px;
+  margin: auto;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 8px 40px #0003;
+
+  &::backdrop {
+    background: #0006;
+    backdrop-filter: blur(2px);
+  }
+
+  & form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+  }
+}
