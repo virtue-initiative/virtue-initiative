@@ -1,4 +1,4 @@
-# BePure API Spec
+# Virtue Initiative API Spec
 
 This document reflects the API currently implemented in `api/src/routes`.
 
