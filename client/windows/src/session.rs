@@ -6,7 +6,7 @@ use tokio::runtime::Runtime;
 use crate::config::{ClientPaths, load_state, save_state};
 use virtue_client_core::{
     ApiClient, AuthClient, FileTokenStore, LoginCommandInput, TokenStore,
-    login_and_register_device, logout_and_clear_tokens,
+    login_and_register_device, logout_and_clear_tokens_with_alert,
 };
 
 #[derive(Clone)]
@@ -87,7 +87,15 @@ impl SessionManager {
     pub fn logout_blocking(&self, runtime: &Runtime) -> Result<()> {
         runtime.block_on(async {
             let mut state = load_state(&self.paths.state_file)?;
-            let _ = logout_and_clear_tokens(&self.auth_client, self.token_store.as_ref()).await;
+            let metadata = vec![("source".to_string(), "windows_ui".to_string())];
+            let _ = logout_and_clear_tokens_with_alert(
+                &self.auth_client,
+                Some(&self.api_client),
+                self.token_store.as_ref(),
+                state.device_id.as_deref(),
+                &metadata,
+            )
+            .await;
 
             state.monitoring_enabled = false;
             state.device_id = None;

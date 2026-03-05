@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, CoreResult};
@@ -79,6 +80,34 @@ impl ApiClient {
 
         decode_json(response).await
     }
+
+    pub async fn create_alert_log(
+        &self,
+        access_token: &str,
+        device_id: &str,
+        kind: &str,
+        metadata: &[(String, String)],
+        created_at: DateTime<Utc>,
+    ) -> CoreResult<()> {
+        let request = CreateAlertLogRequest {
+            device_id: device_id.to_string(),
+            kind: kind.to_string(),
+            metadata: metadata.to_vec(),
+            created_at: created_at.to_rfc3339_opts(SecondsFormat::Millis, true),
+        };
+
+        let url = format!("{}/logs", self.base_url);
+        let response = self
+            .client
+            .post(url)
+            .bearer_auth(access_token)
+            .json(&request)
+            .send()
+            .await?;
+
+        let _: CreateAlertLogResponse = decode_json(response).await?;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -98,9 +127,29 @@ struct RegisterDeviceRequest {
     platform: String,
 }
 
+#[derive(Clone, Debug, Serialize)]
+struct CreateAlertLogRequest {
+    device_id: String,
+    kind: String,
+    metadata: Vec<(String, String)>,
+    created_at: String,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 struct HashServerResponse {
     url: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct CreateAlertLogResponse {
+    #[allow(dead_code)]
+    log: CreatedAlertLog,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct CreatedAlertLog {
+    #[allow(dead_code)]
+    id: String,
 }
 
 async fn decode_json<T: serde::de::DeserializeOwned>(response: reqwest::Response) -> CoreResult<T> {

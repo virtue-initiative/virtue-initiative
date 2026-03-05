@@ -148,7 +148,7 @@ pub mod upload;
 pub use api_client::{ApiClient, Device, DeviceRegistration};
 pub use app_commands::{
     LoginCommandInput, LoginCommandResult, clear_local_tokens, login_and_register_device,
-    logout_and_clear_tokens, parse_jwt_sub,
+    logout_and_clear_tokens, logout_and_clear_tokens_with_alert, parse_jwt_sub,
 };
 pub use auth::{AuthClient, AuthClientConfig};
 pub use batch::{BatchBlob, BatchItem};
@@ -159,7 +159,8 @@ pub use hash_chain::chain_step;
 pub use image_pipeline::{ImagePipeline, ProcessedImage};
 pub use schedule::{CaptureSchedulePolicy, CaptureScheduleState, RetryPolicy};
 pub use service_host::{
-    CaptureOutcome, PersistedServiceState, ServiceEvent, ServiceHost, SleepOutcome,
+    CaptureOutcome, DaemonAlertEvent, PersistedServiceState, ServiceEvent, ServiceHost,
+    SleepOutcome,
 };
 pub use token_store::{FileTokenStore, MemoryTokenStore, TokenStore};
 pub use tray_icon::build_default_tray_icon_rgba;
