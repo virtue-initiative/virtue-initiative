@@ -23,10 +23,7 @@ pub struct BatchUploadResponse {
 #[derive(Clone, Debug, Deserialize)]
 pub struct UploadedBatch {
     pub id: String,
-    #[serde(default)]
-    pub batch_url: Option<String>,
-    #[serde(default)]
-    pub r2_key: Option<String>,
+    pub batch_url: String,
     pub start_time: DateTime<Utc>,
     pub end_time: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
@@ -70,30 +67,6 @@ mod tests {
 
         let parsed: BatchUploadResponse = serde_json::from_str(payload).expect("valid payload");
         assert_eq!(parsed.batch.id, "batch-1");
-        assert_eq!(
-            parsed.batch.batch_url.as_deref(),
-            Some("https://cdn.example.com/u/a.enc")
-        );
-    }
-
-    #[test]
-    fn batch_upload_response_accepts_r2_key_shape() {
-        let payload = r#"{
-            "batch": {
-                "id": "batch-2",
-                "r2_key": "user/abc/batches/def.enc",
-                "start_time": "2026-03-04T21:07:30.000Z",
-                "end_time": "2026-03-04T21:07:58.000Z",
-                "created_at": "2026-03-04T21:08:00.000Z"
-            },
-            "new_state_hex": "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd"
-        }"#;
-
-        let parsed: BatchUploadResponse = serde_json::from_str(payload).expect("valid payload");
-        assert_eq!(parsed.batch.id, "batch-2");
-        assert_eq!(
-            parsed.batch.r2_key.as_deref(),
-            Some("user/abc/batches/def.enc")
-        );
+        assert_eq!(parsed.batch.batch_url, "https://cdn.example.com/u/a.enc");
     }
 }
