@@ -10,6 +10,10 @@
 
     <title>The Virtue Initiative</title>
     <link rel="stylesheet" href="style.css" />
+    <style>
+      @import '@virtueinitiative/styles/index.css';
+    </style>
+
     <script>
       document.documentElement.setAttribute(
         "data-theme",
@@ -29,7 +33,6 @@
             <button
               class="btn-theme"
               id="theme-toggle"
-              onclick="toggleTheme()"
               aria-label="Toggle dark mode"
             ></button>
             <a href="https://app.virtueinitiative.org" class="btn-login nolink"
@@ -223,21 +226,6 @@
         </p>
       </div>
     </footer>
-    <script>
-      function toggleTheme() {
-        var next =
-          document.documentElement.getAttribute("data-theme") === "dark"
-            ? "light"
-            : "dark";
-        document.documentElement.setAttribute("data-theme", next);
-        localStorage.setItem("theme", next);
-        document.getElementById("theme-toggle").textContent =
-          next === "dark" ? "☀" : "🌙";
-      }
-      document.getElementById("theme-toggle").textContent =
-        document.documentElement.getAttribute("data-theme") === "dark"
-          ? "☀"
-          : "🌙";
-    </script>
+    <script src="index.js" type="module"></script>
   </body>
 </html>
