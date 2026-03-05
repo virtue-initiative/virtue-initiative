@@ -460,6 +460,11 @@
   color: #fff;
 }
 
+.verify-badge--alert {
+  background: #f59e0b;
+  color: #fff;
+}
+
 /* Password overlay */
 
 .pw-overlay {

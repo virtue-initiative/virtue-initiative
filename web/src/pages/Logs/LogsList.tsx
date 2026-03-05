@@ -38,6 +38,14 @@ export function LogsList({
               <div class="log-row-top">
                 <span class="log-type">{humanizeKind(item.kind)}</span>
                 <span class="log-device">{deviceName(item.device_id)}</span>
+                {item.source === "log" && (
+                  <span
+                    class="verify-badge verify-badge--alert"
+                    title="Immediate alert log"
+                  >
+                    ⚡ Alert
+                  </span>
+                )}
                 {item.batch_status === "failed" && (
                   <span
                     class="verify-badge verify-badge--failed"

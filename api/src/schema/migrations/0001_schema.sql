@@ -93,6 +93,23 @@ CREATE INDEX idx_partners_user_id ON partners(user_id);
 CREATE INDEX idx_partners_partner_user_id ON partners(partner_user_id);
 CREATE INDEX idx_partners_status ON partners(status);
 
+-- Non-encrypted immediate alert log entries sent directly from devices
+CREATE TABLE alert_logs (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  taken_at INTEGER NOT NULL,        -- ms epoch from client
+  kind TEXT NOT NULL,
+  metadata TEXT NOT NULL DEFAULT '[]', -- JSON: [[key, value], ...]
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_alert_logs_user_id ON alert_logs(user_id);
+CREATE INDEX idx_alert_logs_device_id ON alert_logs(device_id);
+CREATE INDEX idx_alert_logs_created_at ON alert_logs(created_at);
+
 -- Settings stored as a single JSON blob for flexibility
 CREATE TABLE settings (
   user_id TEXT PRIMARY KEY,

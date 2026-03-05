@@ -26,6 +26,20 @@ export interface BatchPage {
   next_cursor?: string;
 }
 
+export interface AlertLog {
+  id: string;
+  device_id: string;
+  taken_at: number;
+  kind: string;
+  metadata: [string, string][];
+  created_at: string;
+}
+
+export interface AlertLogPage {
+  items: AlertLog[];
+  next_cursor?: string;
+}
+
 export interface ChainHash {
   state_hex: string;
 }
@@ -207,4 +221,37 @@ export const api = {
     if (user) qs.set("user", user);
     return req<{ state_hex: string }>(`/hash?${qs.toString()}`, {}, token);
   },
+
+  getLogs: (
+    token: string,
+    params?: {
+      user?: string;
+      device_id?: string;
+      cursor?: string;
+      limit?: number;
+    },
+  ) => {
+    const qs = new URLSearchParams();
+    if (params?.user) qs.set("user", params.user);
+    if (params?.device_id) qs.set("device_id", params.device_id);
+    if (params?.cursor) qs.set("cursor", params.cursor);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const query = qs.toString();
+    return req<AlertLogPage>(`/logs${query ? `?${query}` : ""}`, {}, token);
+  },
+
+  postLog: (
+    token: string,
+    payload: {
+      device_id: string;
+      taken_at: number;
+      kind: string;
+      metadata?: [string, string][];
+    },
+  ) =>
+    req<{ log: AlertLog }>(
+      "/logs",
+      { method: "POST", body: JSON.stringify(payload) },
+      token,
+    ),
 };
