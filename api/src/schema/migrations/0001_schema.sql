@@ -98,10 +98,9 @@ CREATE TABLE alert_logs (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   device_id TEXT NOT NULL,
-  taken_at INTEGER NOT NULL,        -- ms epoch from client
   kind TEXT NOT NULL,
   metadata TEXT NOT NULL DEFAULT '[]', -- JSON: [[key, value], ...]
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  created_at TEXT NOT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
 );

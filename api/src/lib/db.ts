@@ -521,17 +521,16 @@ export async function createAlertLog(
   id: string,
   userId: string,
   deviceId: string,
-  takenAt: number,
   kind: string,
   metadata: string,
   createdAt: string,
 ) {
   return db
     .prepare(
-      `INSERT INTO alert_logs (id, user_id, device_id, taken_at, kind, metadata, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO alert_logs (id, user_id, device_id, kind, metadata, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
-    .bind(id, userId, deviceId, takenAt, kind, metadata, createdAt)
+    .bind(id, userId, deviceId, kind, metadata, createdAt)
     .run();
 }
 
@@ -541,7 +540,7 @@ export async function listAlertLogs(
   filters: { device_id?: string; cursor?: string },
   limit: number,
 ) {
-  let query = `SELECT id, device_id, taken_at, kind, metadata, created_at
+  let query = `SELECT id, device_id, kind, metadata, created_at
      FROM alert_logs WHERE user_id = ?`;
   const params: (string | number)[] = [userId];
 
@@ -563,7 +562,6 @@ export async function listAlertLogs(
     .all<{
       id: string;
       device_id: string;
-      taken_at: number;
       kind: string;
       metadata: string;
       created_at: string;

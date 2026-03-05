@@ -29,7 +29,6 @@ export interface BatchPage {
 export interface AlertLog {
   id: string;
   device_id: string;
-  taken_at: number;
   kind: string;
   metadata: [string, string][];
   created_at: string;
@@ -244,7 +243,7 @@ export const api = {
     token: string,
     payload: {
       device_id: string;
-      taken_at: number;
+      created_at: string;
       kind: string;
       metadata?: [string, string][];
     },
