@@ -110,7 +110,7 @@ export function Settings() {
     <div class="settings-page">
       <h1 class="settings-title">Settings</h1>
 
-      <section class="settings-section">
+      <section class="card settings-section">
         <h2>Profile</h2>
         <form class="settings-form" onSubmit={saveName}>
           <div class="field">
@@ -129,9 +129,7 @@ export function Settings() {
           </div>
           {nameStatus && (
             <p
-              class={
-                nameStatus === "Saved." ? "settings-success" : "settings-error"
-              }
+              class={nameStatus === "Saved." ? "alert-success" : "alert-error"}
             >
               {nameStatus}
             </p>
@@ -142,7 +140,7 @@ export function Settings() {
         </form>
       </section>
 
-      <section class="settings-section">
+      <section class="card settings-section">
         <h2>Encryption key</h2>
         {!activeWK ? (
           <>
@@ -165,7 +163,7 @@ export function Settings() {
                   required
                 />
               </div>
-              {unlockError && <p class="settings-error">{unlockError}</p>}
+              {unlockError && <p class="alert-error">{unlockError}</p>}
               <button
                 class="btn btn-primary"
                 type="submit"
@@ -215,8 +213,8 @@ export function Settings() {
                   required
                 />
               </div>
-              {e2eeError && <p class="settings-error">{e2eeError}</p>}
-              {e2eeStatus && <p class="settings-success">{e2eeStatus}</p>}
+              {e2eeError && <p class="alert-error">{e2eeError}</p>}
+              {e2eeStatus && <p class="alert-success">{e2eeStatus}</p>}
               <button
                 class="btn btn-primary"
                 type="submit"
