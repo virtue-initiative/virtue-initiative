@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "deploy": "wrangler deploy",
+    "deploy": "npm run build && wangler deploy",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
