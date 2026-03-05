@@ -57,6 +57,62 @@ struct PendingAlertLog {
     device_id: Option<String>,
 }
 
+#[derive(Debug)]
+struct RuntimeState {
+    schedule_state: CaptureScheduleState,
+    last_cycle_success: bool,
+    warned_missing_e2ee: bool,
+    device_settings: Option<Device>,
+    last_settings_fetch: Option<Instant>,
+    last_settings_attempt: Option<Instant>,
+    last_hash_server_fetch: Option<Instant>,
+    last_session_unavailable_log: Option<Instant>,
+    batch_buffer: BatchBuffer,
+    batch_window_start: DateTime<Utc>,
+    alert_queue: VecDeque<PendingAlertLog>,
+    stopping: bool,
+}
+
+impl RuntimeState {
+    fn new(batch_buffer_path: &Path) -> Self {
+        let batch_buffer = load_batch_buffer(batch_buffer_path);
+        let batch_window_start = batch_buffer.window_start.unwrap_or_else(Utc::now);
+        let alert_queue = load_alert_log_queue(&alert_log_queue_path(batch_buffer_path));
+
+        Self {
+            schedule_state: CaptureScheduleState::default(),
+            last_cycle_success: true,
+            warned_missing_e2ee: false,
+            device_settings: None,
+            last_settings_fetch: None,
+            last_settings_attempt: None,
+            last_hash_server_fetch: None,
+            last_session_unavailable_log: None,
+            batch_buffer,
+            batch_window_start,
+            alert_queue,
+            stopping: false,
+        }
+    }
+}
+
+struct CycleInputs {
+    access_token: String,
+    device_id: String,
+    e2ee_key: [u8; 32],
+}
+
+struct DaemonContext<'a, H: ServiceHost> {
+    host: &'a H,
+    token_store: &'a Arc<dyn TokenStore>,
+    auth_client: &'a AuthClient,
+    api_client: &'a ApiClient,
+    pipeline: &'a ImagePipeline,
+    batch_buffer_path: &'a Path,
+    alert_queue_path: &'a Path,
+    config: &'a BatchDaemonConfig,
+}
+
 fn load_batch_buffer(path: &Path) -> BatchBuffer {
     fs::read(path)
         .ok()
@@ -103,324 +159,501 @@ pub async fn run_batch_daemon<H: ServiceHost>(
 ) -> CoreResult<()> {
     let pipeline = ImagePipeline;
     let mut upload_client = UploadClient::new()?;
-
-    let mut schedule_state = CaptureScheduleState::default();
-    let mut last_cycle_success = true;
-    let mut warned_missing_e2ee = false;
-    let mut device_settings: Option<Device> = None;
-    let mut last_settings_fetch: Option<Instant> = None;
-    let mut last_settings_attempt: Option<Instant> = None;
-    let mut last_hash_server_fetch: Option<Instant> = None;
-    let mut last_session_unavailable_log: Option<Instant> = None;
-    let mut batch_buffer = load_batch_buffer(batch_buffer_path);
-    let mut batch_window_start: DateTime<Utc> = batch_buffer.window_start.unwrap_or_else(Utc::now);
     let alert_queue_path = alert_log_queue_path(batch_buffer_path);
-    let mut alert_queue = load_alert_log_queue(&alert_queue_path);
-    let mut stopping = false;
+    let mut runtime = RuntimeState::new(batch_buffer_path);
+    let ctx = DaemonContext {
+        host,
+        token_store: &token_store,
+        auth_client,
+        api_client,
+        pipeline: &pipeline,
+        batch_buffer_path,
+        alert_queue_path: &alert_queue_path,
+        config: &config,
+    };
 
-    emit_info(host, "capture daemon started");
+    emit_info(ctx.host, "capture daemon started");
 
     if let Some(access_token) = token_store.get_access_token()?
         && let Err(err) = auth_client.fetch_and_decrypt_e2ee_key(&access_token).await
     {
         emit_warn(
-            host,
+            ctx.host,
             &format!("could not fetch E2EE key on startup: {err:#}"),
         );
     }
 
     loop {
-        host.on_loop_tick()?;
-
-        let state = match host.load_persisted_state() {
-            Ok(state) => state,
-            Err(err) => {
-                emit_warn(host, &format!("state read failed: {err}"));
-                if stopping {
-                    break;
-                }
-                if sleep_or_stop(host, config.idle_retry_interval).await? {
-                    stopping = true;
-                }
-                continue;
-            }
-        };
-
-        if collect_alert_events(host, &mut alert_queue, state.device_id.as_deref())? {
-            save_alert_log_queue(&alert_queue_path, &alert_queue);
-        }
-
-        let access_token_opt = match token_store.get_access_token() {
-            Ok(token) => token,
-            Err(err) => {
-                emit_warn(host, &format!("token read failed: {err}"));
-                if stopping {
-                    break;
-                }
-                if sleep_or_stop(host, config.idle_retry_interval).await? {
-                    stopping = true;
-                }
-                continue;
-            }
-        };
-
-        if let (Some(access_token), Some(device_id)) =
-            (access_token_opt.as_deref(), state.device_id.as_deref())
-        {
-            flush_alert_log_queue(
-                host,
-                api_client,
-                access_token,
-                device_id,
-                &mut alert_queue,
-                &alert_queue_path,
-            )
-            .await;
-        }
-
-        if stopping || host.should_stop() {
+        let should_stop = run_iteration(&ctx, &mut upload_client, &mut runtime).await?;
+        if should_stop {
             break;
         }
-
-        let Some(mut access_token) = access_token_opt else {
-            if sleep_or_stop(host, config.idle_retry_interval).await? {
-                stopping = true;
-            }
-            continue;
-        };
-
-        let Some(device_id) = state.device_id.clone() else {
-            if sleep_or_stop(host, config.idle_retry_interval).await? {
-                stopping = true;
-            }
-            continue;
-        };
-        let Some(e2ee_key) = (match token_store.get_e2ee_key() {
-            Ok(key) => key,
-            Err(err) => {
-                emit_warn(host, &format!("e2ee key read failed: {err}"));
-                if sleep_or_stop(host, config.idle_retry_interval).await? {
-                    stopping = true;
-                }
-                continue;
-            }
-        }) else {
-            if !warned_missing_e2ee {
-                emit_warn(
-                    host,
-                    "E2EE key not set; sign in again to derive and store it",
-                );
-                warned_missing_e2ee = true;
-            }
-            if sleep_or_stop(host, config.idle_retry_interval).await? {
-                stopping = true;
-            }
-            continue;
-        };
-        warned_missing_e2ee = false;
-
-        if !state.monitoring_enabled {
-            if sleep_or_stop(host, config.idle_retry_interval).await? {
-                stopping = true;
-            }
-            continue;
-        }
-
-        match auth_client
-            .refresh_access_token_if_needed(config.token_refresh_threshold)
-            .await
-        {
-            Ok(Some(refreshed)) => access_token = refreshed.access_token,
-            Ok(None) => {}
-            Err(err) => {
-                emit_warn(host, &format!("token refresh failed: {err}"));
-                if !config.continue_on_token_refresh_error {
-                    if sleep_or_stop(host, config.idle_retry_interval).await? {
-                        stopping = true;
-                    }
-                    continue;
-                }
-            }
-        }
-
-        let attempt_settings_refresh = match last_settings_attempt {
-            Some(last) => last.elapsed() >= config.settings_fetch_retry_interval,
-            None => true,
-        };
-        let needs_settings_refresh = last_settings_fetch
-            .map(|t| t.elapsed() >= config.settings_refresh_interval)
-            .unwrap_or(true);
-
-        if attempt_settings_refresh && (device_settings.is_none() || needs_settings_refresh) {
-            last_settings_attempt = Some(Instant::now());
-            match api_client.get_device(&access_token, &device_id).await {
-                Ok(settings) => {
-                    device_settings = Some(settings);
-                    last_settings_fetch = Some(Instant::now());
-                }
-                Err(err) => emit_warn(host, &format!("device settings fetch failed: {err}")),
-            }
-        }
-
-        if last_hash_server_fetch
-            .map(|t| t.elapsed() >= config.settings_refresh_interval)
-            .unwrap_or(true)
-        {
-            match api_client
-                .get_hash_server_url(&access_token, &device_id)
-                .await
-            {
-                Ok(hash_url) => {
-                    match UploadClient::with_config(UploadClientConfig {
-                        hash_base_url: Some(hash_url),
-                        ..UploadClientConfig::default()
-                    }) {
-                        Ok(client) => {
-                            upload_client = client;
-                            last_hash_server_fetch = Some(Instant::now());
-                        }
-                        Err(err) => {
-                            emit_warn(host, &format!("failed to build upload client: {err}"))
-                        }
-                    }
-                }
-                Err(err) => emit_warn(host, &format!("hash server URL fetch failed: {err}")),
-            }
-        }
-
-        let capture_enabled = device_settings
-            .as_ref()
-            .map(|settings| settings.enabled)
-            .unwrap_or(state.monitoring_enabled);
-        if !capture_enabled {
-            if sleep_or_stop(host, config.idle_retry_interval).await? {
-                stopping = true;
-            }
-            continue;
-        }
-
-        let policy = CaptureSchedulePolicy {
-            base_interval: Duration::from_secs(resolve_capture_interval_seconds()),
-            ..CaptureSchedulePolicy::default()
-        };
-        let mut rng = thread_rng();
-        let delay = policy.next_delay(&mut schedule_state, last_cycle_success, &mut rng);
-        if sleep_or_stop(host, delay).await? {
-            stopping = true;
-            continue;
-        }
-
-        let now = host.now_utc();
-        let window_age_secs = (now - batch_window_start).num_seconds().max(0) as u64;
-        if window_age_secs >= resolve_batch_window_seconds() && !batch_buffer.items.is_empty() {
-            let end_time = now;
-            let start_time = batch_window_start;
-
-            let items = std::mem::take(&mut batch_buffer.items);
-            let blob = BatchBlob::new(items.clone());
-
-            match upload_client
-                .upload_batch(
-                    &access_token,
-                    &device_id,
-                    &blob,
-                    start_time,
-                    end_time,
-                    &e2ee_key,
-                )
-                .await
-            {
-                Ok(resp) => {
-                    emit_info(host, &format!("batch uploaded: {}", resp.batch.id));
-                    batch_buffer = BatchBuffer::default();
-                    batch_window_start = now;
-                }
-                Err(err) => {
-                    emit_warn(host, &format!("batch upload failed: {err}"));
-                    batch_buffer.items = items;
-                }
-            }
-
-            save_batch_buffer(batch_buffer_path, &batch_buffer);
-            continue;
-        }
-
-        let raw_capture = match host.capture_frame_png().await {
-            Ok(CaptureOutcome::FramePng(bytes)) => bytes,
-            Ok(CaptureOutcome::SessionUnavailable) => {
-                last_cycle_success = true;
-                let should_log = last_session_unavailable_log
-                    .map(|when| when.elapsed() >= config.session_unavailable_log_interval)
-                    .unwrap_or(true);
-                if should_log {
-                    emit_warn(host, "session unavailable for capture");
-                    last_session_unavailable_log = Some(Instant::now());
-                }
-                if sleep_or_stop(host, config.idle_retry_interval).await? {
-                    stopping = true;
-                }
-                continue;
-            }
-            Ok(CaptureOutcome::PermissionMissing) => {
-                last_cycle_success = false;
-                let item =
-                    make_missed_capture(now, "permission_missing", "capture permission missing");
-                upload_hash_for_item(host, &upload_client, &access_token, &device_id, &item).await;
-                batch_buffer.items.push(item);
-                if batch_buffer.window_start.is_none() {
-                    batch_buffer.window_start = Some(batch_window_start);
-                }
-                save_batch_buffer(batch_buffer_path, &batch_buffer);
-                continue;
-            }
-            Err(err) => {
-                last_cycle_success = false;
-                emit_warn(host, &format!("capture failed: {err}"));
-                let item = make_missed_capture(now, "capture_failed", &err.to_string());
-                upload_hash_for_item(host, &upload_client, &access_token, &device_id, &item).await;
-                batch_buffer.items.push(item);
-                if batch_buffer.window_start.is_none() {
-                    batch_buffer.window_start = Some(batch_window_start);
-                }
-                save_batch_buffer(batch_buffer_path, &batch_buffer);
-                continue;
-            }
-        };
-
-        let processed = match pipeline.process(&raw_capture) {
-            Ok(output) => output,
-            Err(err) => {
-                last_cycle_success = false;
-                emit_warn(host, &format!("image pipeline failed: {err}"));
-                let item = make_missed_capture(now, "image_pipeline_failed", &err.to_string());
-                upload_hash_for_item(host, &upload_client, &access_token, &device_id, &item).await;
-                batch_buffer.items.push(item);
-                if batch_buffer.window_start.is_none() {
-                    batch_buffer.window_start = Some(batch_window_start);
-                }
-                save_batch_buffer(batch_buffer_path, &batch_buffer);
-                continue;
-            }
-        };
-
-        let item = BatchItem {
-            id: Uuid::new_v4().to_string(),
-            taken_at: now.timestamp_millis(),
-            kind: "screenshot".to_string(),
-            image: Some(processed.bytes),
-            metadata: vec![],
-        };
-        upload_hash_for_item(host, &upload_client, &access_token, &device_id, &item).await;
-
-        batch_buffer.items.push(item);
-        if batch_buffer.window_start.is_none() {
-            batch_buffer.window_start = Some(batch_window_start);
-        }
-        save_batch_buffer(batch_buffer_path, &batch_buffer);
-        last_cycle_success = true;
     }
 
-    emit_info(host, "capture daemon stopping");
+    if !runtime.alert_queue.is_empty()
+        && let (Some(access_token), Some(device_id)) = (
+            token_store.get_access_token()?,
+            ctx.host.load_persisted_state()?.device_id,
+        )
+    {
+        flush_alert_log_queue(
+            ctx.host,
+            ctx.api_client,
+            &access_token,
+            &device_id,
+            &mut runtime.alert_queue,
+            ctx.alert_queue_path,
+        )
+        .await;
+    }
+
+    emit_info(ctx.host, "capture daemon stopping");
+    Ok(())
+}
+
+async fn run_iteration<H: ServiceHost>(
+    ctx: &DaemonContext<'_, H>,
+    upload_client: &mut UploadClient,
+    runtime: &mut RuntimeState,
+) -> CoreResult<bool> {
+    ctx.host.on_loop_tick()?;
+
+    let Some(state) = load_state_or_retry(ctx.host, ctx.config, runtime).await? else {
+        return Ok(runtime.stopping || ctx.host.should_stop());
+    };
+
+    if collect_alert_events(
+        ctx.host,
+        &mut runtime.alert_queue,
+        state.device_id.as_deref(),
+    )? {
+        save_alert_log_queue(ctx.alert_queue_path, &runtime.alert_queue);
+    }
+
+    let access_token_opt =
+        load_access_token_or_retry(ctx.host, ctx.token_store, ctx.config, runtime).await?;
+    if let (Some(access_token), Some(device_id)) =
+        (access_token_opt.as_deref(), state.device_id.as_deref())
+    {
+        flush_alert_log_queue(
+            ctx.host,
+            ctx.api_client,
+            access_token,
+            device_id,
+            &mut runtime.alert_queue,
+            ctx.alert_queue_path,
+        )
+        .await;
+    }
+
+    if runtime.stopping || ctx.host.should_stop() {
+        return Ok(true);
+    }
+
+    let Some(mut cycle) = build_cycle_inputs(
+        ctx.host,
+        ctx.token_store,
+        ctx.auth_client,
+        access_token_opt,
+        &state,
+        ctx.config,
+        runtime,
+    )
+    .await?
+    else {
+        return Ok(false);
+    };
+
+    refresh_control_plane(
+        ctx.host,
+        ctx.api_client,
+        upload_client,
+        &cycle,
+        state.monitoring_enabled,
+        ctx.config,
+        runtime,
+    )
+    .await;
+
+    if !capture_enabled(runtime, state.monitoring_enabled) {
+        mark_stop_if_sleep_interrupted(ctx.host, ctx.config.idle_retry_interval, runtime).await?;
+        return Ok(false);
+    }
+
+    if wait_for_next_capture(ctx.host, runtime).await? {
+        return Ok(false);
+    }
+
+    let now = ctx.host.now_utc();
+    if flush_batch_if_due(
+        ctx.host,
+        upload_client,
+        &cycle,
+        now,
+        ctx.batch_buffer_path,
+        runtime,
+    )
+    .await
+    {
+        return Ok(false);
+    }
+
+    process_capture(ctx, upload_client, &cycle, now, runtime).await?;
+
+    cycle.access_token.clear();
+    Ok(false)
+}
+
+async fn load_state_or_retry<H: ServiceHost>(
+    host: &H,
+    config: &BatchDaemonConfig,
+    runtime: &mut RuntimeState,
+) -> CoreResult<Option<crate::service_host::PersistedServiceState>> {
+    match host.load_persisted_state() {
+        Ok(state) => Ok(Some(state)),
+        Err(err) => {
+            emit_warn(host, &format!("state read failed: {err}"));
+            if runtime.stopping {
+                return Ok(None);
+            }
+            mark_stop_if_sleep_interrupted(host, config.idle_retry_interval, runtime).await?;
+            Ok(None)
+        }
+    }
+}
+
+async fn load_access_token_or_retry<H: ServiceHost>(
+    host: &H,
+    token_store: &Arc<dyn TokenStore>,
+    config: &BatchDaemonConfig,
+    runtime: &mut RuntimeState,
+) -> CoreResult<Option<String>> {
+    match token_store.get_access_token() {
+        Ok(token) => Ok(token),
+        Err(err) => {
+            emit_warn(host, &format!("token read failed: {err}"));
+            if runtime.stopping {
+                return Ok(None);
+            }
+            mark_stop_if_sleep_interrupted(host, config.idle_retry_interval, runtime).await?;
+            Ok(None)
+        }
+    }
+}
+
+async fn build_cycle_inputs<H: ServiceHost>(
+    host: &H,
+    token_store: &Arc<dyn TokenStore>,
+    auth_client: &AuthClient,
+    access_token_opt: Option<String>,
+    state: &crate::service_host::PersistedServiceState,
+    config: &BatchDaemonConfig,
+    runtime: &mut RuntimeState,
+) -> CoreResult<Option<CycleInputs>> {
+    let Some(mut access_token) = access_token_opt else {
+        mark_stop_if_sleep_interrupted(host, config.idle_retry_interval, runtime).await?;
+        return Ok(None);
+    };
+
+    let Some(device_id) = state.device_id.clone() else {
+        mark_stop_if_sleep_interrupted(host, config.idle_retry_interval, runtime).await?;
+        return Ok(None);
+    };
+
+    let Some(e2ee_key) = (match token_store.get_e2ee_key() {
+        Ok(key) => key,
+        Err(err) => {
+            emit_warn(host, &format!("e2ee key read failed: {err}"));
+            mark_stop_if_sleep_interrupted(host, config.idle_retry_interval, runtime).await?;
+            return Ok(None);
+        }
+    }) else {
+        if !runtime.warned_missing_e2ee {
+            emit_warn(
+                host,
+                "E2EE key not set; sign in again to derive and store it",
+            );
+            runtime.warned_missing_e2ee = true;
+        }
+        mark_stop_if_sleep_interrupted(host, config.idle_retry_interval, runtime).await?;
+        return Ok(None);
+    };
+    runtime.warned_missing_e2ee = false;
+
+    if !state.monitoring_enabled {
+        mark_stop_if_sleep_interrupted(host, config.idle_retry_interval, runtime).await?;
+        return Ok(None);
+    }
+
+    match auth_client
+        .refresh_access_token_if_needed(config.token_refresh_threshold)
+        .await
+    {
+        Ok(Some(refreshed)) => access_token = refreshed.access_token,
+        Ok(None) => {}
+        Err(err) => {
+            emit_warn(host, &format!("token refresh failed: {err}"));
+            if !config.continue_on_token_refresh_error {
+                mark_stop_if_sleep_interrupted(host, config.idle_retry_interval, runtime).await?;
+                return Ok(None);
+            }
+        }
+    }
+
+    Ok(Some(CycleInputs {
+        access_token,
+        device_id,
+        e2ee_key,
+    }))
+}
+
+async fn refresh_control_plane<H: ServiceHost>(
+    host: &H,
+    api_client: &ApiClient,
+    upload_client: &mut UploadClient,
+    cycle: &CycleInputs,
+    monitoring_enabled: bool,
+    config: &BatchDaemonConfig,
+    runtime: &mut RuntimeState,
+) {
+    let attempt_settings_refresh = match runtime.last_settings_attempt {
+        Some(last) => last.elapsed() >= config.settings_fetch_retry_interval,
+        None => true,
+    };
+    let needs_settings_refresh = runtime
+        .last_settings_fetch
+        .map(|t| t.elapsed() >= config.settings_refresh_interval)
+        .unwrap_or(true);
+
+    if attempt_settings_refresh && (runtime.device_settings.is_none() || needs_settings_refresh) {
+        runtime.last_settings_attempt = Some(Instant::now());
+        match api_client
+            .get_device(&cycle.access_token, &cycle.device_id)
+            .await
+        {
+            Ok(settings) => {
+                runtime.device_settings = Some(settings);
+                runtime.last_settings_fetch = Some(Instant::now());
+            }
+            Err(err) => emit_warn(host, &format!("device settings fetch failed: {err}")),
+        }
+    }
+
+    if runtime
+        .last_hash_server_fetch
+        .map(|t| t.elapsed() >= config.settings_refresh_interval)
+        .unwrap_or(true)
+    {
+        match api_client
+            .get_hash_server_url(&cycle.access_token, &cycle.device_id)
+            .await
+        {
+            Ok(hash_url) => match UploadClient::with_config(UploadClientConfig {
+                hash_base_url: Some(hash_url),
+                ..UploadClientConfig::default()
+            }) {
+                Ok(client) => {
+                    *upload_client = client;
+                    runtime.last_hash_server_fetch = Some(Instant::now());
+                }
+                Err(err) => emit_warn(host, &format!("failed to build upload client: {err}")),
+            },
+            Err(err) => emit_warn(host, &format!("hash server URL fetch failed: {err}")),
+        }
+    }
+
+    if runtime.device_settings.is_none() {
+        runtime.device_settings = Some(Device {
+            id: cycle.device_id.clone(),
+            enabled: monitoring_enabled,
+        });
+    }
+}
+
+fn capture_enabled(runtime: &RuntimeState, monitoring_enabled: bool) -> bool {
+    runtime
+        .device_settings
+        .as_ref()
+        .map(|settings| settings.enabled)
+        .unwrap_or(monitoring_enabled)
+}
+
+async fn wait_for_next_capture<H: ServiceHost>(
+    host: &H,
+    runtime: &mut RuntimeState,
+) -> CoreResult<bool> {
+    let policy = CaptureSchedulePolicy {
+        base_interval: Duration::from_secs(resolve_capture_interval_seconds()),
+        ..CaptureSchedulePolicy::default()
+    };
+    let mut rng = thread_rng();
+    let delay = policy.next_delay(
+        &mut runtime.schedule_state,
+        runtime.last_cycle_success,
+        &mut rng,
+    );
+    if sleep_or_stop(host, delay).await? {
+        runtime.stopping = true;
+        return Ok(true);
+    }
+    Ok(runtime.stopping || host.should_stop())
+}
+
+async fn flush_batch_if_due<H: ServiceHost>(
+    host: &H,
+    upload_client: &UploadClient,
+    cycle: &CycleInputs,
+    now: DateTime<Utc>,
+    batch_buffer_path: &Path,
+    runtime: &mut RuntimeState,
+) -> bool {
+    let window_age_secs = (now - runtime.batch_window_start).num_seconds().max(0) as u64;
+    if window_age_secs < resolve_batch_window_seconds() || runtime.batch_buffer.items.is_empty() {
+        return false;
+    }
+
+    let end_time = now;
+    let start_time = runtime.batch_window_start;
+
+    let items = std::mem::take(&mut runtime.batch_buffer.items);
+    let blob = BatchBlob::new(items.clone());
+
+    match upload_client
+        .upload_batch(
+            &cycle.access_token,
+            &cycle.device_id,
+            &blob,
+            start_time,
+            end_time,
+            &cycle.e2ee_key,
+        )
+        .await
+    {
+        Ok(resp) => {
+            emit_info(host, &format!("batch uploaded: {}", resp.batch.id));
+            runtime.batch_buffer = BatchBuffer::default();
+            runtime.batch_window_start = now;
+        }
+        Err(err) => {
+            emit_warn(host, &format!("batch upload failed: {err}"));
+            runtime.batch_buffer.items = items;
+        }
+    }
+
+    save_batch_buffer(batch_buffer_path, &runtime.batch_buffer);
+    true
+}
+
+async fn process_capture<H: ServiceHost>(
+    ctx: &DaemonContext<'_, H>,
+    upload_client: &UploadClient,
+    cycle: &CycleInputs,
+    now: DateTime<Utc>,
+    runtime: &mut RuntimeState,
+) -> CoreResult<()> {
+    let raw_capture = match ctx.host.capture_frame_png().await {
+        Ok(CaptureOutcome::FramePng(bytes)) => bytes,
+        Ok(CaptureOutcome::SessionUnavailable) => {
+            runtime.last_cycle_success = true;
+            let should_log = runtime
+                .last_session_unavailable_log
+                .map(|when| when.elapsed() >= ctx.config.session_unavailable_log_interval)
+                .unwrap_or(true);
+            if should_log {
+                emit_warn(ctx.host, "session unavailable for capture");
+                runtime.last_session_unavailable_log = Some(Instant::now());
+            }
+            if sleep_or_stop(ctx.host, ctx.config.idle_retry_interval).await? {
+                runtime.stopping = true;
+            }
+            return Ok(());
+        }
+        Ok(CaptureOutcome::PermissionMissing) => {
+            runtime.last_cycle_success = false;
+            let item = make_missed_capture(now, "permission_missing", "capture permission missing");
+            upload_hash_for_item(
+                ctx.host,
+                upload_client,
+                &cycle.access_token,
+                &cycle.device_id,
+                &item,
+            )
+            .await;
+            enqueue_batch_item(ctx.batch_buffer_path, runtime, item);
+            return Ok(());
+        }
+        Err(err) => {
+            runtime.last_cycle_success = false;
+            emit_warn(ctx.host, &format!("capture failed: {err}"));
+            let item = make_missed_capture(now, "capture_failed", &err.to_string());
+            upload_hash_for_item(
+                ctx.host,
+                upload_client,
+                &cycle.access_token,
+                &cycle.device_id,
+                &item,
+            )
+            .await;
+            enqueue_batch_item(ctx.batch_buffer_path, runtime, item);
+            return Ok(());
+        }
+    };
+
+    let processed = match ctx.pipeline.process(&raw_capture) {
+        Ok(output) => output,
+        Err(err) => {
+            runtime.last_cycle_success = false;
+            emit_warn(ctx.host, &format!("image pipeline failed: {err}"));
+            let item = make_missed_capture(now, "image_pipeline_failed", &err.to_string());
+            upload_hash_for_item(
+                ctx.host,
+                upload_client,
+                &cycle.access_token,
+                &cycle.device_id,
+                &item,
+            )
+            .await;
+            enqueue_batch_item(ctx.batch_buffer_path, runtime, item);
+            return Ok(());
+        }
+    };
+
+    let item = BatchItem {
+        id: Uuid::new_v4().to_string(),
+        taken_at: now.timestamp_millis(),
+        kind: "screenshot".to_string(),
+        image: Some(processed.bytes),
+        metadata: vec![],
+    };
+    upload_hash_for_item(
+        ctx.host,
+        upload_client,
+        &cycle.access_token,
+        &cycle.device_id,
+        &item,
+    )
+    .await;
+    enqueue_batch_item(ctx.batch_buffer_path, runtime, item);
+    runtime.last_cycle_success = true;
+    Ok(())
+}
+
+fn enqueue_batch_item(batch_buffer_path: &Path, runtime: &mut RuntimeState, item: BatchItem) {
+    runtime.batch_buffer.items.push(item);
+    if runtime.batch_buffer.window_start.is_none() {
+        runtime.batch_buffer.window_start = Some(runtime.batch_window_start);
+    }
+    save_batch_buffer(batch_buffer_path, &runtime.batch_buffer);
+}
+
+async fn mark_stop_if_sleep_interrupted<H: ServiceHost>(
+    host: &H,
+    duration: Duration,
+    runtime: &mut RuntimeState,
+) -> CoreResult<()> {
+    if sleep_or_stop(host, duration).await? {
+        runtime.stopping = true;
+    }
     Ok(())
 }
 
