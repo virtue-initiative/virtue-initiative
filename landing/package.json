@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "deploy": "npm run build && wangler deploy",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "prettier:check": "cd .. && git ls-files -z -- landing | grep -zE '\\.(ts|tsx|cts|mts|js|jsx|cjs|mjs|json|json5|jsonc|css|scss|html|md|mdx|yml|yaml)$' | xargs -0 -r npx --prefix landing prettier --check",
+    "prettier:write": "cd .. && git ls-files -z -- landing | grep -zE '\\.(ts|tsx|cts|mts|js|jsx|cjs|mjs|json|json5|jsonc|css|scss|html|md|mdx|yml|yaml)$' | xargs -0 -r npx --prefix landing prettier --write"
   },
   "keywords": [],
   "author": "",
@@ -17,6 +19,7 @@
     "@virtueinitiative/styles": "file:../styles"
   },
   "devDependencies": {
+    "prettier": "^3.8.1",
     "vite": "^7.3.1",
     "wrangler": "^4.70.0"
   }
