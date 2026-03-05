@@ -1,47 +1,69 @@
-use std::fs;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::Result;
-use chrono::{DateTime, Utc};
-use rand::thread_rng;
-use serde::{Deserialize, Serialize};
+use chrono::Utc;
 use tokio::time::sleep;
-use uuid::Uuid;
 
 use virtue_client_core::{
-    ApiClient, AuthClient, BatchBlob, BatchItem, CaptureSchedulePolicy, CaptureScheduleState,
-    Device, FileTokenStore, ImagePipeline, TokenStore, UploadClient, UploadClientConfig,
-    resolve_batch_window_seconds, resolve_capture_interval_seconds, uuid_str_to_bytes,
+    ApiClient, AuthClient, BatchDaemonConfig, CaptureOutcome, CoreError, FileTokenStore,
+    PersistedServiceState, ServiceEvent, ServiceHost, SleepOutcome, TokenStore, run_batch_daemon,
 };
 
 use crate::capture::{capture_screen, is_session_unavailable_error};
 use crate::config::{ClientPaths, load_state};
 use crate::tray;
 
-const SETTINGS_REFRESH_INTERVAL: Duration = Duration::from_secs(30 * 60);
-const IDLE_RETRY_INTERVAL: Duration = Duration::from_secs(20);
-const SESSION_UNAVAILABLE_LOG_INTERVAL: Duration = Duration::from_secs(5 * 60);
-
-/// Persisted batch buffer — the current hour's items, saved to disk across restarts.
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct BatchBuffer {
-    items: Vec<BatchItem>,
-    window_start: Option<DateTime<Utc>>,
+#[derive(Clone)]
+struct LinuxDaemonHost {
+    paths: ClientPaths,
 }
 
-fn load_batch_buffer(path: &std::path::Path) -> BatchBuffer {
-    fs::read(path)
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default()
+impl LinuxDaemonHost {
+    fn new(paths: ClientPaths) -> Self {
+        Self { paths }
+    }
 }
 
-fn save_batch_buffer(path: &std::path::Path, buf: &BatchBuffer) {
-    if let Ok(bytes) = serde_json::to_vec(buf) {
-        let tmp = path.with_extension("tmp");
-        if fs::write(&tmp, bytes).is_ok() {
-            let _ = fs::rename(tmp, path);
+impl ServiceHost for LinuxDaemonHost {
+    fn load_persisted_state(&self) -> virtue_client_core::CoreResult<PersistedServiceState> {
+        let state =
+            load_state(&self.paths.state_file).map_err(|e| CoreError::Platform(e.to_string()))?;
+        Ok(PersistedServiceState {
+            monitoring_enabled: state.monitoring_enabled,
+            device_id: state.device_id,
+        })
+    }
+
+    fn now_utc(&self) -> chrono::DateTime<Utc> {
+        Utc::now()
+    }
+
+    async fn sleep_interruptible(
+        &self,
+        duration: Duration,
+    ) -> virtue_client_core::CoreResult<SleepOutcome> {
+        sleep(duration).await;
+        Ok(SleepOutcome::Elapsed)
+    }
+
+    async fn capture_frame_png(&self) -> virtue_client_core::CoreResult<CaptureOutcome> {
+        let state =
+            load_state(&self.paths.state_file).map_err(|e| CoreError::Platform(e.to_string()))?;
+        match capture_screen(state.backend_hint) {
+            Ok(bytes) => Ok(CaptureOutcome::FramePng(bytes)),
+            Err(err) if is_session_unavailable_error(&err) => {
+                Ok(CaptureOutcome::SessionUnavailable)
+            }
+            Err(err) => Err(CoreError::Platform(err.to_string())),
+        }
+    }
+
+    fn emit_event(&self, event: ServiceEvent) {
+        match event {
+            ServiceEvent::Info(msg) => eprintln!("daemon: {msg}"),
+            ServiceEvent::Warn(msg) => eprintln!("daemon: {msg}"),
+            ServiceEvent::Error(msg) => eprintln!("daemon: {msg}"),
         }
     }
 }
@@ -53,247 +75,25 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&paths.token_file));
     let auth_client = AuthClient::new(token_store.clone())?;
     let api_client = ApiClient::new()?;
-    let pipeline = ImagePipeline;
+    let host = LinuxDaemonHost::new(paths.clone());
 
-    let mut schedule_state = CaptureScheduleState::default();
-    let mut last_cycle_success = true;
-    let mut device_settings: Option<Device> = None;
-    let mut last_settings_fetch: Option<Instant> = None;
-    let mut last_session_unavailable_log: Option<Instant> = None;
+    let config = BatchDaemonConfig {
+        settings_refresh_interval: Duration::from_secs(30 * 60),
+        settings_fetch_retry_interval: Duration::from_secs(20),
+        idle_retry_interval: Duration::from_secs(20),
+        token_refresh_threshold: Duration::from_secs(120),
+        session_unavailable_log_interval: Duration::from_secs(5 * 60),
+        continue_on_token_refresh_error: false,
+    };
 
-    // Re-fetch the E2EE key from the server on each daemon startup.
-    if let Some(access_token) = token_store.get_access_token()?
-        && let Err(err) = auth_client.fetch_and_decrypt_e2ee_key(&access_token).await
-    {
-        eprintln!("daemon: could not fetch E2EE key on startup: {err:#}");
-    }
-
-    // Fetch the hash server URL on startup. Falls back to the default base URL on error.
-    let mut upload_client = UploadClient::new()?;
-    let mut last_hash_server_fetch: Option<Instant> = None;
-
-    let mut batch_buffer = load_batch_buffer(&paths.batch_buffer_file);
-    let mut batch_window_start: DateTime<Utc> = batch_buffer.window_start.unwrap_or_else(Utc::now);
-
-    loop {
-        let state = load_state(&paths.state_file)?;
-        let Some(mut access_token) = token_store.get_access_token()? else {
-            sleep(IDLE_RETRY_INTERVAL).await;
-            continue;
-        };
-        let Some(device_id) = state.device_id.clone() else {
-            sleep(IDLE_RETRY_INTERVAL).await;
-            continue;
-        };
-        let Some(e2ee_key) = token_store.get_e2ee_key()? else {
-            eprintln!("daemon: E2EE key not set — run `virtue login` again");
-            sleep(IDLE_RETRY_INTERVAL).await;
-            continue;
-        };
-
-        if !state.monitoring_enabled {
-            sleep(IDLE_RETRY_INTERVAL).await;
-            continue;
-        }
-
-        match auth_client
-            .refresh_access_token_if_needed(Duration::from_secs(120))
-            .await
-        {
-            Ok(Some(refreshed)) => access_token = refreshed.access_token,
-            Ok(None) => {}
-            Err(_) => {
-                sleep(IDLE_RETRY_INTERVAL).await;
-                continue;
-            }
-        }
-
-        // Fetch device settings periodically.
-        let needs_refresh = last_settings_fetch
-            .map(|t| t.elapsed() >= SETTINGS_REFRESH_INTERVAL)
-            .unwrap_or(true);
-        if needs_refresh {
-            match api_client.get_device(&access_token, &device_id).await {
-                Ok(settings) => {
-                    device_settings = Some(settings);
-                    last_settings_fetch = Some(Instant::now());
-                }
-                Err(_) => {
-                    sleep(IDLE_RETRY_INTERVAL).await;
-                    continue;
-                }
-            }
-        }
-
-        // Fetch hash server URL on the same schedule as device settings.
-        if last_hash_server_fetch
-            .map(|t| t.elapsed() >= SETTINGS_REFRESH_INTERVAL)
-            .unwrap_or(true)
-        {
-            match api_client
-                .get_hash_server_url(&access_token, &device_id)
-                .await
-            {
-                Ok(hash_url) => {
-                    upload_client = UploadClient::with_config(UploadClientConfig {
-                        hash_base_url: Some(hash_url),
-                        ..UploadClientConfig::default()
-                    })?;
-                    last_hash_server_fetch = Some(Instant::now());
-                }
-                Err(err) => eprintln!("daemon: could not fetch hash server URL: {err:#}"),
-            }
-        }
-
-        let settings = device_settings.as_ref().unwrap();
-        if !settings.enabled {
-            sleep(IDLE_RETRY_INTERVAL).await;
-            continue;
-        }
-
-        let policy = CaptureSchedulePolicy {
-            base_interval: Duration::from_secs(resolve_capture_interval_seconds()),
-            ..CaptureSchedulePolicy::default()
-        };
-        let mut rng = thread_rng();
-        let delay = policy.next_delay(&mut schedule_state, last_cycle_success, &mut rng);
-        sleep(delay).await;
-
-        let now = Utc::now();
-
-        // ── Batch flush ────────────────────────────────────────────────────────
-        let window_age_secs = (now - batch_window_start).num_seconds() as u64;
-        if window_age_secs >= resolve_batch_window_seconds() && !batch_buffer.items.is_empty() {
-            let end_time = now;
-            let start_time = batch_window_start;
-
-            let items = std::mem::take(&mut batch_buffer.items);
-            let blob = BatchBlob::new(items.clone());
-
-            match upload_client
-                .upload_batch(
-                    &access_token,
-                    &device_id,
-                    &blob,
-                    start_time,
-                    end_time,
-                    &e2ee_key,
-                )
-                .await
-            {
-                Ok(resp) => {
-                    eprintln!("batch uploaded: {}", resp.batch.id);
-                    batch_buffer = BatchBuffer::default();
-                    batch_window_start = now;
-                }
-                Err(e) => {
-                    eprintln!("batch upload failed: {e}");
-                    // restore items so they aren't lost
-                    batch_buffer.items = items;
-                }
-            }
-
-            save_batch_buffer(&paths.batch_buffer_file, &batch_buffer);
-            continue;
-        }
-
-        // ── Screen capture ─────────────────────────────────────────────────────
-        let raw_capture = match capture_screen(state.backend_hint) {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                if is_session_unavailable_error(&err) {
-                    last_cycle_success = true;
-                    let should_log = last_session_unavailable_log
-                        .map(|when| when.elapsed() >= SESSION_UNAVAILABLE_LOG_INTERVAL)
-                        .unwrap_or(true);
-                    if should_log {
-                        eprintln!("session unavailable for capture: {err}");
-                        last_session_unavailable_log = Some(Instant::now());
-                    }
-                    sleep(IDLE_RETRY_INTERVAL).await;
-                    continue;
-                }
-                last_cycle_success = false;
-                eprintln!("capture failed: {err}");
-                let item = BatchItem {
-                    id: Uuid::new_v4().to_string(),
-                    taken_at: now.timestamp_millis(),
-                    kind: "missed_capture".to_string(),
-                    image: None,
-                    metadata: vec![
-                        ("reason".to_string(), "capture_failed".to_string()),
-                        ("error".to_string(), err.to_string()),
-                    ],
-                };
-                if let Some(device_id_bytes) = uuid_str_to_bytes(&device_id)
-                    && let Err(e) = upload_client
-                        .upload_hash(&access_token, &device_id_bytes, &item.sha256())
-                        .await
-                {
-                    eprintln!("failed to upload content hash: {e}");
-                }
-                batch_buffer.items.push(item);
-                if batch_buffer.window_start.is_none() {
-                    batch_buffer.window_start = Some(batch_window_start);
-                }
-                save_batch_buffer(&paths.batch_buffer_file, &batch_buffer);
-                continue;
-            }
-        };
-
-        let processed = match pipeline.process(&raw_capture) {
-            Ok(output) => output,
-            Err(err) => {
-                last_cycle_success = false;
-                eprintln!("image pipeline failed: {err}");
-                let item = BatchItem {
-                    id: Uuid::new_v4().to_string(),
-                    taken_at: now.timestamp_millis(),
-                    kind: "missed_capture".to_string(),
-                    image: None,
-                    metadata: vec![
-                        ("reason".to_string(), "image_pipeline_failed".to_string()),
-                        ("error".to_string(), err.to_string()),
-                    ],
-                };
-                if let Some(device_id_bytes) = uuid_str_to_bytes(&device_id)
-                    && let Err(e) = upload_client
-                        .upload_hash(&access_token, &device_id_bytes, &item.sha256())
-                        .await
-                {
-                    eprintln!("failed to upload content hash: {e}");
-                }
-                batch_buffer.items.push(item);
-                save_batch_buffer(&paths.batch_buffer_file, &batch_buffer);
-                continue;
-            }
-        };
-
-        // Build the item first so the hash covers all fields.
-        let item = BatchItem {
-            id: Uuid::new_v4().to_string(),
-            taken_at: now.timestamp_millis(),
-            kind: "screenshot".to_string(),
-            image: Some(processed.bytes),
-            metadata: vec![],
-        };
-
-        // Upload the content hash (covers all item fields) immediately after capture.
-        if let Some(device_id_bytes) = uuid_str_to_bytes(&device_id) {
-            let content_hash = item.sha256();
-            if let Err(e) = upload_client
-                .upload_hash(&access_token, &device_id_bytes, &content_hash)
-                .await
-            {
-                eprintln!("failed to upload content hash: {e}");
-            }
-        }
-
-        batch_buffer.items.push(item);
-        if batch_buffer.window_start.is_none() {
-            batch_buffer.window_start = Some(batch_window_start);
-        }
-        save_batch_buffer(&paths.batch_buffer_file, &batch_buffer);
-        last_cycle_success = true;
-    }
+    run_batch_daemon(
+        &host,
+        token_store,
+        &auth_client,
+        &api_client,
+        &paths.batch_buffer_file,
+        config,
+    )
+    .await
+    .map_err(Into::into)
 }

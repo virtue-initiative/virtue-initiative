@@ -8,15 +8,14 @@ use std::process::{Command, ExitCode};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use base64::Engine;
 use clap::{Parser, Subcommand};
-use serde::Deserialize;
 
 use virtue_client_core::{
     ApiClient, AuthClient, BASE_API_URL_ENV_VAR, BATCH_WINDOW_SECONDS_ENV_VAR,
-    CAPTURE_INTERVAL_SECONDS_ENV_VAR, FileTokenStore, TokenStore, apply_dev_env,
+    CAPTURE_INTERVAL_SECONDS_ENV_VAR, FileTokenStore, LoginCommandInput, TokenStore, apply_dev_env,
     apply_env_defaults_from_map, clamp_batch_window_seconds, clamp_capture_interval_seconds,
-    resolve_base_api_url, resolve_batch_window_seconds, resolve_capture_interval_seconds,
+    login_and_register_device, logout_and_clear_tokens, resolve_base_api_url,
+    resolve_batch_window_seconds, resolve_capture_interval_seconds,
 };
 
 use crate::capture::{CaptureBackend, probe_backend};
@@ -80,32 +79,7 @@ async fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
 
     let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&paths.token_file));
     let auth_client = AuthClient::new(token_store.clone())?;
-
-    auth_client
-        .login(&email, &password)
-        .await
-        .context("login failed")?;
-
-    let access_token = token_store
-        .get_access_token()?
-        .context("missing access token after login")?;
-
-    // Store the wrapping key (derived from login password) and fetch the E2EE key from server.
-    let user_id =
-        parse_jwt_sub(&access_token).context("could not extract user ID from access token")?;
-    auth_client
-        .store_wrapping_key(&password, &user_id)
-        .context("could not store wrapping key")?;
-    auth_client
-        .fetch_and_decrypt_e2ee_key(&access_token)
-        .await
-        .context("could not retrieve E2EE key from server")?;
-
-    let probe = probe_backend(None);
-    println!("{}", probe.guidance);
-
     let api_client = ApiClient::new()?;
-    let mut state = load_state(&paths.state_file)?;
 
     let host = hostname::get()
         .ok()
@@ -113,15 +87,28 @@ async fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "linux-device".to_string());
 
-    let registration = api_client
-        .register_device(&access_token, &host, "linux")
-        .await
-        .context("device registration failed")?;
+    let login_result = login_and_register_device(
+        &auth_client,
+        &api_client,
+        token_store.as_ref(),
+        LoginCommandInput {
+            email: &email,
+            password: &password,
+            device_name: &host,
+            platform: "linux",
+        },
+    )
+    .await
+    .context("login failed")?;
 
-    state.device_id = Some(registration.id.clone());
+    let probe = probe_backend(None);
+    println!("{}", probe.guidance);
+
+    let mut state = load_state(&paths.state_file)?;
+    state.device_id = Some(login_result.device_id.clone());
     state.monitoring_enabled = true;
     state.email = Some(email.clone());
-    state.e2ee_user_id = Some(user_id.clone());
+    state.e2ee_user_id = Some(login_result.user_id.clone());
     state.backend_hint = probe.backend.map(|backend| match backend {
         CaptureBackend::Wayland => CaptureBackendHint::Wayland,
         CaptureBackend::X11 => CaptureBackendHint::X11,
@@ -137,7 +124,7 @@ async fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
         );
     }
 
-    println!("Logged in. Device id: {}", registration.id);
+    println!("Logged in. Device id: {}", login_result.device_id);
     if !probe.captured_ok {
         println!(
             "Capture is not yet working; service will run and log missed captures until fixed."
@@ -166,16 +153,10 @@ async fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
         return Ok(());
     }
 
-    if let (Some(token), Some(_device_id)) = (access_token.as_deref(), state.device_id.as_deref()) {
+    if access_token.is_some() || state.device_id.is_some() {
         let auth_client2 = AuthClient::new(token_store.clone())?;
-        let _ = auth_client2.logout().await;
-        let _ = token;
+        let _ = logout_and_clear_tokens(&auth_client2, token_store.as_ref()).await;
     }
-
-    token_store.clear_access_token()?;
-    token_store.clear_refresh_token()?;
-    token_store.clear_e2ee_key()?;
-    token_store.clear_wrapping_key()?;
     state.monitoring_enabled = false;
     state.email = None;
     state.device_id = None;
@@ -395,20 +376,4 @@ fn prompt_yes_no(prompt: &str, default_yes: bool) -> Result<bool> {
 
         println!("Please answer y or n.");
     }
-}
-
-#[derive(Deserialize)]
-struct JwtClaims {
-    sub: Option<String>,
-}
-
-/// Extract the `sub` claim (user ID) from a JWT without verifying the signature.
-fn parse_jwt_sub(token: &str) -> Option<String> {
-    let payload_segment = token.split('.').nth(1)?;
-    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(payload_segment)
-        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(payload_segment))
-        .ok()?;
-    let claims: JwtClaims = serde_json::from_slice(&payload).ok()?;
-    claims.sub.filter(|s| !s.is_empty())
 }
