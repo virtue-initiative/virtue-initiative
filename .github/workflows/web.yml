@@ -1,53 +1,16 @@
-name: Lint
+name: Web Checks
 
 on:
   pull_request:
   workflow_dispatch:
 
 jobs:
-  ts-and-prettier:
-    name: Lint and Format
+  web:
+    name: Web
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - name: Cache Rust artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            client -> target
-
-      - name: Rust format check (workspace)
-        run: cargo fmt --all -- --check
-        working-directory: client
-
-      - name: Rust lint (core)
-        run: cargo clippy -p virtue-client-core --all-targets -- -D warnings
-        working-directory: client
-
-      - name: Rust lint (Linux client)
-        run: cargo clippy -p virtue-linux-client --all-targets -- -D warnings
-        working-directory: client
-
-      # Linux-runnable Rust tests only.
-      # mac/windows/android-rust are excluded from this Ubuntu job.
-      - name: Rust tests (core)
-        run: cargo test -p virtue-client-core
-        working-directory: client
-
-      - name: Rust tests (Linux client)
-        run: cargo test -p virtue-linux-client
-        working-directory: client
-
-      - name: Rust format check (Android)
-        run: cargo fmt --all --manifest-path android/rust/Cargo.toml -- --check
-        working-directory: client
 
       - name: Setup Node
         uses: actions/setup-node@v4
