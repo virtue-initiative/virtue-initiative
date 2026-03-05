@@ -4,12 +4,7 @@ import z from 'zod';
 import { Env, Variables } from '../types/bindings';
 import { authenticate } from '../middleware/auth';
 import { postAlertLogSchema, listAlertLogsSchema } from '../lib/schemas';
-import {
-  findDevice,
-  createAlertLog,
-  listAlertLogs,
-  findAcceptedPartnership,
-} from '../lib/db';
+import { findDevice, createAlertLog, listAlertLogs, findAcceptedPartnership } from '../lib/db';
 
 const logs = new Hono<{ Bindings: Env; Variables: Variables }>();
 
