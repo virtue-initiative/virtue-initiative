@@ -154,22 +154,47 @@ const ZEROS_HEX = "0".repeat(64);
 
 export type BatchVerification = "verified" | "failed" | "unknown";
 
+type BatchLogValue = string | number | boolean | Uint8Array;
+
+function appendBatchLogValue(parts: Uint8Array[], value: BatchLogValue) {
+  if (value instanceof Uint8Array) {
+    parts.push(value);
+    return;
+  }
+
+  if (typeof value === "number") {
+    const bytes = new Uint8Array(8);
+    const dv = new DataView(bytes.buffer);
+    const lo = value >>> 0;
+    const hi = Math.floor(value / 0x100000000);
+    dv.setUint32(0, lo, true);
+    dv.setUint32(4, hi, true);
+    parts.push(bytes);
+    return;
+  }
+
+  if (typeof value === "boolean") {
+    parts.push(new Uint8Array([Number(value)]));
+    return;
+  }
+
+  parts.push(new TextEncoder().encode(value));
+}
+
 /**
  * Verify the hash chain for a batch.
  *
  * Every item advances the chain (including missed captures):
- *   new_state = sha256(current_state || sha256(id[16] || taken_at_le[8] || kind_utf8 || image_bytes || meta_k1 || meta_v1 || ...))
+ *   new_state = sha256(current_state || sha256(ts_le[8] || type_utf8 || data_key || data_value || ...))
  *
  * If the final state matches end_chain_hash the batch is verified.
  * Returns 'unknown' when the server has no state tracking (both hashes are zeros).
  */
 export async function verifyBatch(
-  items: {
-    id: string;
-    image?: Uint8Array;
-    taken_at: number;
-    kind: string;
-    metadata: [string, string][];
+  events: {
+    ts: number;
+    type: string;
+    data: Record<string, BatchLogValue>;
   }[],
   startChainHash: string,
   endChainHash: string,
@@ -177,7 +202,7 @@ export async function verifyBatch(
   if (startChainHash === ZEROS_HEX && endChainHash === ZEROS_HEX)
     return "failed";
 
-  const sortedItems = [...items].sort((a, b) => a.taken_at - b.taken_at);
+  const sortedEvents = [...events].sort((a, b) => a.ts - b.ts);
 
   // Convert startChainHash hex to bytes
   const startBytes = new Uint8Array(32);
@@ -188,44 +213,32 @@ export async function verifyBatch(
   const enc = new TextEncoder();
 
   let state: Uint8Array = startBytes;
-  for (const item of sortedItems) {
+  for (const event of sortedEvents) {
     // Replicate BatchItem::sha256():
-    //   id[16] || taken_at_le[8] || kind_utf8 || image_bytes || meta_k || meta_v ...
-    const idHex = item.id.replace(/-/g, "");
-    const idBytes = new Uint8Array(16);
-    for (let i = 0; i < 16; i++)
-      idBytes[i] = parseInt(idHex.slice(i * 2, i * 2 + 2), 16);
-
-    const takenAtBytes = new Uint8Array(8);
-    const dv = new DataView(takenAtBytes.buffer);
-    // taken_at is ms epoch as i64 little-endian; JS numbers are safe up to 2^53
-    const lo = item.taken_at >>> 0;
-    const hi = Math.floor(item.taken_at / 0x100000000);
+    //   ts_le[8] || type_utf8 || data_key || data_value ...
+    const tsBytes = new Uint8Array(8);
+    const dv = new DataView(tsBytes.buffer);
+    const lo = event.ts >>> 0;
+    const hi = Math.floor(event.ts / 0x100000000);
     dv.setUint32(0, lo, true);
     dv.setUint32(4, hi, true);
 
-    const kindBytes = enc.encode(item.kind);
-    const imageBytes = item.image ?? new Uint8Array(0);
-    const metaParts: Uint8Array[] = [];
-    for (const [k, v] of item.metadata) {
-      metaParts.push(enc.encode(k), enc.encode(v));
+    const typeBytes = enc.encode(event.type);
+    const dataParts: Uint8Array[] = [];
+    for (const [key, value] of Object.entries(event.data).sort(([a], [b]) =>
+      a.localeCompare(b),
+    )) {
+      dataParts.push(enc.encode(key));
+      appendBatchLogValue(dataParts, value);
     }
 
     const totalLen =
-      idBytes.length +
-      takenAtBytes.length +
-      kindBytes.length +
-      imageBytes.length +
-      metaParts.reduce((s, p) => s + p.length, 0);
+      tsBytes.length +
+      typeBytes.length +
+      dataParts.reduce((s, p) => s + p.length, 0);
     const buf = new Uint8Array(totalLen);
     let off = 0;
-    for (const part of [
-      idBytes,
-      takenAtBytes,
-      kindBytes,
-      imageBytes,
-      ...metaParts,
-    ]) {
+    for (const part of [tsBytes, typeBytes, ...dataParts]) {
       buf.set(part, off);
       off += part.length;
     }
