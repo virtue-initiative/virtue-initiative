@@ -1,10 +1,14 @@
+use std::fs;
+use std::path::Path;
+use std::process::Command;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::Result;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 
 use virtue_client_core::{
@@ -16,6 +20,14 @@ use virtue_client_core::{
 use crate::capture::{capture_screen, is_session_unavailable_error};
 use crate::config::{ClientPaths, load_state};
 use crate::tray;
+
+const CURRENT_BOOT_ID_PATH: &str = "/proc/sys/kernel/random/boot_id";
+const PROC_STAT_PATH: &str = "/proc/stat";
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct LifecycleState {
+    last_seen_boot_id: Option<String>,
+}
 
 #[derive(Clone)]
 struct LinuxDaemonHost {
@@ -110,12 +122,16 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     let _tray = tray::start_daemon_tray(paths.clone());
 
     let shutdown = Arc::new(AtomicBool::new(false));
-    let pending_alert_events = Arc::new(Mutex::new(vec![DaemonAlertEvent {
+    let mut startup_events = vec![DaemonAlertEvent {
         kind: "daemon_start".to_string(),
         metadata: vec![("source".to_string(), "linux_service".to_string())],
         created_at: Utc::now(),
         device_id: None,
-    }]));
+    }];
+    if let Some(system_startup_event) = detect_system_startup_event(paths) {
+        startup_events.push(system_startup_event);
+    }
+    let pending_alert_events = Arc::new(Mutex::new(startup_events));
 
     {
         let shutdown = shutdown.clone();
@@ -146,6 +162,23 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
                     created_at: Utc::now(),
                     device_id: None,
                 });
+
+                let system_state = read_systemd_state();
+                let shutting_down =
+                    matches!(system_state.as_deref(), Some("stopping")) || is_shutdown_job_queued();
+                if shutting_down {
+                    let mut metadata = vec![("source".to_string(), "linux_system".to_string())];
+                    metadata.push(("signal".to_string(), signal_name.to_string()));
+                    if let Some(state) = system_state {
+                        metadata.push(("system_state".to_string(), state));
+                    }
+                    guard.push(DaemonAlertEvent {
+                        kind: "system_shutdown".to_string(),
+                        metadata,
+                        created_at: Utc::now(),
+                        device_id: None,
+                    });
+                }
             }
             shutdown.store(true, Ordering::SeqCst);
         });
@@ -175,4 +208,107 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     )
     .await
     .map_err(Into::into)
+}
+
+fn detect_system_startup_event(paths: &ClientPaths) -> Option<DaemonAlertEvent> {
+    let boot_id = read_current_boot_id()?;
+    let mut state = load_lifecycle_state(&paths.lifecycle_state_file);
+    if state.last_seen_boot_id.as_deref() == Some(boot_id.as_str()) {
+        return None;
+    }
+
+    state.last_seen_boot_id = Some(boot_id.clone());
+    if let Err(err) = save_lifecycle_state(&paths.lifecycle_state_file, &state) {
+        eprintln!(
+            "daemon: could not persist lifecycle state {}: {err}",
+            paths.lifecycle_state_file.display()
+        );
+    }
+
+    let started_at = read_system_boot_time_utc().unwrap_or_else(Utc::now);
+    Some(DaemonAlertEvent {
+        kind: "system_startup".to_string(),
+        metadata: vec![
+            ("source".to_string(), "linux_system".to_string()),
+            ("boot_id".to_string(), boot_id),
+            ("detected_by".to_string(), "boot_id_change".to_string()),
+        ],
+        created_at: started_at,
+        device_id: None,
+    })
+}
+
+fn read_current_boot_id() -> Option<String> {
+    fs::read_to_string(CURRENT_BOOT_ID_PATH)
+        .ok()
+        .map(|raw| raw.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn read_system_boot_time_utc() -> Option<DateTime<Utc>> {
+    let raw = fs::read_to_string(PROC_STAT_PATH).ok()?;
+    let seconds = raw
+        .lines()
+        .find_map(|line| line.strip_prefix("btime "))
+        .and_then(|value| value.trim().parse::<i64>().ok())?;
+    DateTime::<Utc>::from_timestamp(seconds, 0)
+}
+
+fn read_systemd_state() -> Option<String> {
+    let output = Command::new("systemctl")
+        .arg("is-system-running")
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .to_ascii_lowercase();
+    if !stdout.is_empty() {
+        return Some(stdout);
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr)
+        .trim()
+        .to_ascii_lowercase();
+    if !stderr.is_empty() {
+        return Some(stderr);
+    }
+    None
+}
+
+fn is_shutdown_job_queued() -> bool {
+    let output = match Command::new("systemctl")
+        .args(["list-jobs", "--no-legend", "--no-pager"])
+        .output()
+    {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+
+    if !output.status.success() {
+        return false;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+    stdout.lines().any(|line| {
+        line.contains("shutdown.target") && (line.contains(" start ") || line.ends_with(" start"))
+    })
+}
+
+fn load_lifecycle_state(path: &Path) -> LifecycleState {
+    fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<LifecycleState>(&bytes).ok())
+        .unwrap_or_default()
+}
+
+fn save_lifecycle_state(path: &Path, state: &LifecycleState) -> Result<()> {
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+    fs::create_dir_all(parent)?;
+    let tmp_path = path.with_extension("tmp");
+    let bytes = serde_json::to_vec_pretty(state)?;
+    fs::write(&tmp_path, bytes)?;
+    fs::rename(&tmp_path, path)?;
+    Ok(())
 }
