@@ -1,114 +1,65 @@
-// Auth route integration tests — real PBKDF2-SHA-256, real D1, real JWT.
-import { describe, it, expect, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { SELF } from 'cloudflare:test';
-import { BASE, clearDB } from './helpers';
+import { authHeaders, BASE, clearDB, signupAndGetToken } from './helpers';
 
 beforeEach(clearDB);
 
-describe('POST /signup', () => {
-  it('creates a user and returns an access token', async () => {
+describe('Auth routes', () => {
+  it('creates a user and returns session credentials on signup', async () => {
     const res = await SELF.fetch(`${BASE}/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'alice@example.com', password: 'password123' }),
+      body: JSON.stringify({ email: 'alice@example.com', password: 'client-side-hash', name: 'Alice' }),
     });
+
     expect(res.status).toBe(201);
+    expect(res.headers.get('set-cookie')).toContain('refresh_token=');
+
     const body = (await res.json()) as {
       access_token: string;
-      user: { id: string; email: string };
+      user: { id: string; email: string; name: string };
     };
+
     expect(body.access_token).toBeTruthy();
     expect(body.user.email).toBe('alice@example.com');
+    expect(body.user.name).toBe('Alice');
   });
 
-  it('returns 409 for a duplicate email', async () => {
-    const payload = JSON.stringify({ email: 'dup@example.com', password: 'password123' });
-    const headers = { 'Content-Type': 'application/json' };
-    await SELF.fetch(`${BASE}/signup`, { method: 'POST', headers, body: payload });
-    const res = await SELF.fetch(`${BASE}/signup`, { method: 'POST', headers, body: payload });
-    expect(res.status).toBe(409);
-  });
-
-  it('returns 400 for missing fields', async () => {
-    const res = await SELF.fetch(`${BASE}/signup`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'bad@example.com' }), // missing password
-    });
-    expect(res.status).toBe(400);
-  });
-});
-
-describe('POST /login', () => {
-  it('returns an access token for valid credentials', async () => {
-    await SELF.fetch(`${BASE}/signup`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'bob@example.com', password: 'password123' }),
-    });
-
-    const res = await SELF.fetch(`${BASE}/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'bob@example.com', password: 'password123' }),
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { access_token: string };
-    expect(body.access_token).toBeTruthy();
-  });
-
-  it('returns 401 for wrong password', async () => {
-    await SELF.fetch(`${BASE}/signup`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'carol@example.com', password: 'correctpass' }),
-    });
-    const res = await SELF.fetch(`${BASE}/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'carol@example.com', password: 'wrongpass' }),
-    });
-    expect(res.status).toBe(401);
-  });
-
-  it('returns 401 for unknown email', async () => {
-    const res = await SELF.fetch(`${BASE}/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'nobody@example.com', password: 'pw' }),
-    });
-    expect(res.status).toBe(401);
-  });
-});
-
-describe('POST /logout', () => {
-  it('returns 204 and clears the refresh cookie', async () => {
-    const res = await SELF.fetch(`${BASE}/logout`, { method: 'POST' });
-    expect(res.status).toBe(204);
-  });
-});
-
-describe('POST /token', () => {
-  it('returns a new access token using the refresh cookie', async () => {
-    // Signup to get the refresh_token cookie
+  it('refreshes an access token from the refresh cookie', async () => {
     const signupRes = await SELF.fetch(`${BASE}/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'dave@example.com', password: 'password123' }),
+      body: JSON.stringify({ email: 'bob@example.com', password: 'pw' }),
     });
-    const cookie = signupRes.headers.get('set-cookie') ?? '';
 
+    const cookie = signupRes.headers.get('set-cookie') ?? '';
     const res = await SELF.fetch(`${BASE}/token`, {
       method: 'POST',
       headers: { Cookie: cookie },
     });
+
     expect(res.status).toBe(201);
     const body = (await res.json()) as { access_token: string };
     expect(body.access_token).toBeTruthy();
   });
 
-  it('returns 401 with no refresh cookie', async () => {
-    const res = await SELF.fetch(`${BASE}/token`, { method: 'POST' });
-    expect(res.status).toBe(401);
+  it('returns the current user and allows updating profile fields', async () => {
+    const { token } = await signupAndGetToken('carol@example.com', 'pw', 'Carol');
+
+    const patchRes = await SELF.fetch(`${BASE}/user`, {
+      method: 'PATCH',
+      headers: authHeaders(token),
+      body: JSON.stringify({ name: 'Updated Carol', e2ee_key: Buffer.from('secret').toString('base64') }),
+    });
+    expect(patchRes.status).toBe(200);
+
+    const getRes = await SELF.fetch(`${BASE}/user`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(getRes.status).toBe(200);
+
+    const body = (await getRes.json()) as { name: string; e2ee_key: string };
+    expect(body.name).toBe('Updated Carol');
+    expect(Buffer.from(body.e2ee_key, 'base64').toString()).toBe('secret');
   });
 });

@@ -1,14 +1,12 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { Env, Variables } from './types/bindings';
 import auth from './routes/auth';
-import batches from './routes/batches';
-import hashes from './routes/hashes';
-import hashServer from './routes/hash-server';
+import data from './routes/data';
+import deviceOnly from './routes/device-only';
 import devices from './routes/devices';
+import hashes from './routes/hashes';
 import partners from './routes/partners';
-import logs from './routes/logs';
-import settings from './routes/settings';
+import { Env, Variables } from './types/bindings';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -19,58 +17,45 @@ app.use(
       const allowed = c.env.CORS_ORIGIN || 'http://localhost:5173';
       return origin === allowed ? origin : null;
     },
-    allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
   }),
 );
 
-// Health check
-app.get('/', (c) => {
-  return c.json({
-    name: 'BePure API',
+app.get('/', (c) =>
+  c.json({
+    name: 'Virtue Initiative API',
     version: '1.0.0',
     status: 'ok',
-  });
-});
+  }),
+);
 
-// Mount routes
-app.route('/', auth); // auth handles /signup, /login, /logout, /token at its own paths
-app.route('/batch', batches);
-app.route('/hash', hashes);
+app.route('/', auth);
+app.route('/', partners);
 app.route('/device', devices);
-app.route('/partner', partners);
-app.route('/settings', settings);
-app.route('/logs', logs);
-app.route('/hash-server', hashServer);
+app.route('/data', data);
+app.route('/d', deviceOnly);
+app.route('/hash', hashes);
 
-// Public R2 pass-through — blobs are E2EE encrypted so no auth needed.
-// In production replace VITE_R2_URL with the real public R2 bucket URL.
 app.get('/r2/*', async (c) => {
   const key = c.req.path.replace(/^\/r2\//, '');
-  if (!key) return c.json({ error: 'Not found' }, 404);
-  const obj = await c.env.BUCKET.get(key);
-  if (!obj) return c.json({ error: 'Not found' }, 404);
-  return new Response(obj.body, {
+  const object = await c.env.BUCKET.get(key);
+
+  if (!key || !object) {
+    return c.json({ error: 'Not found' }, 404);
+  }
+
+  return new Response(object.body, {
     headers: { 'Content-Type': 'application/octet-stream' },
   });
 });
 
-// Error handling
-app.onError((err, c) => {
-  console.error('Unhandled error:', err);
-  return c.json(
-    {
-      error: 'Internal server error',
-      message: err.message,
-    },
-    500,
-  );
+app.onError((error, c) => {
+  console.error(error);
+  return c.json({ error: 'Internal server error', details: { message: error.message } }, 500);
 });
 
-// 404 handler
-app.notFound((c) => {
-  return c.json({ error: 'Not found' }, 404);
-});
+app.notFound((c) => c.json({ error: 'Not found' }, 404));
 
 export default app;

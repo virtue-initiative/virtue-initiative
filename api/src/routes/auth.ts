@@ -1,138 +1,146 @@
-import z from 'zod';
 import { Context, Hono } from 'hono';
-import { setCookie, deleteCookie, getCookie } from 'hono/cookie';
+import { getCookie, deleteCookie, setCookie } from 'hono/cookie';
 import { v4 as uuidv4 } from 'uuid';
-import { Env, Variables } from '../types/bindings';
-import { hashPassword, verifyPassword } from '../lib/password';
-import { generateAccessToken, generateRefreshToken, verifyJWT } from '../lib/jwt';
-import { signupSchema, loginSchema, setE2EEKeySchema, updateMeSchema } from '../lib/schemas';
-import { findUserByEmail, createUser, updateUser, findUserById } from '../lib/db';
+import { z } from 'zod';
 import { authenticate } from '../middleware/auth';
-
-const ACCESS_EXPIRY = 60 * 60;
-const REFRESH_EXPIRY = 365 * 24 * 60 * 60;
+import { validateZ } from '../middleware/validation';
+import {
+  createUser,
+  findUserByEmail,
+  findUserById,
+  updateUser,
+} from '../lib/db';
+import { decodeBase64, encodeBase64 } from '../lib/encoding';
+import { generateAccessToken, generateRefreshToken, verifyJWT } from '../lib/jwt';
+import { hashPassword, verifyPassword } from '../lib/password';
+import { Env, Variables } from '../types/bindings';
 
 const auth = new Hono<{ Bindings: Env; Variables: Variables }>();
+const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
+const REFRESH_TOKEN_TTL_SECONDS = 365 * 24 * 60 * 60;
 
-async function createSession(userId: string, c: Context<{ Bindings: Env; Variables: Variables }>) {
-  const accessToken = await generateAccessToken(userId, c.env.JWT_SECRET, ACCESS_EXPIRY);
-  const refreshToken = await generateRefreshToken(userId, c.env.JWT_SECRET, REFRESH_EXPIRY);
+const signupSchema = z.object({
+  email: z.email(),
+  password: z.string().min(1),
+  name: z.string().min(1).optional(),
+});
+
+const loginSchema = z.object({
+  email: z.email(),
+  password: z.string().min(1),
+});
+
+const updateUserSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    e2ee_key: z.base64().optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
+
+async function createSession(c: Context<{ Bindings: Env; Variables: Variables }>, userId: string) {
+  const accessToken = await generateAccessToken(userId, c.env.JWT_SECRET, ACCESS_TOKEN_TTL_SECONDS);
+  const refreshToken = await generateRefreshToken(userId, c.env.JWT_SECRET, REFRESH_TOKEN_TTL_SECONDS);
 
   setCookie(c, 'refresh_token', refreshToken, {
     httpOnly: true,
-    secure: true,
     sameSite: 'Strict',
-    maxAge: REFRESH_EXPIRY,
+    secure: true,
     path: '/',
+    maxAge: REFRESH_TOKEN_TTL_SECONDS,
   });
 
   return accessToken;
 }
 
-/**
- * POST /signup - Create new user account
- */
-auth.post('/signup', async (c) => {
-  const parsed = signupSchema.safeParse(await c.req.json());
-  if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
-
-  const { email, password, name } = parsed.data;
-
+auth.post('/signup', validateZ('json', signupSchema), async (c) => {
+  const { email, password, name } = c.req.valid('json');
   const existingUser = await findUserByEmail(c.env.DB, email);
-  if (existingUser) return c.json({ error: 'User already exists' }, 409);
 
-  const passwordHash = await hashPassword(password);
+  if (existingUser) {
+    return c.json({ error: 'User already exists' }, 409);
+  }
+
   const userId = uuidv4();
-  const createdAt = new Date().toISOString();
+  const passwordHash = await hashPassword(password);
 
-  await createUser(c.env.DB, userId, email, passwordHash, name ?? null, createdAt);
-
-  const accessToken = await createSession(userId, c);
+  await createUser(c.env.DB, { id: userId, email, passwordHash, name });
+  const accessToken = await createSession(c, userId);
 
   return c.json(
-    { user: { id: userId, email, created_at: createdAt }, access_token: accessToken },
+    {
+      user: { id: userId, email, ...(name ? { name } : {}) },
+      access_token: accessToken,
+    },
     201,
   );
 });
 
-/**
- * POST /login - Authenticate user
- */
-auth.post('/login', async (c) => {
-  const parsed = loginSchema.safeParse(await c.req.json());
-  if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
-
-  const { email, password } = parsed.data;
-
+auth.post('/login', validateZ('json', loginSchema), async (c) => {
+  const { email, password } = c.req.valid('json');
   const user = await findUserByEmail(c.env.DB, email);
 
   if (!user || !(await verifyPassword(password, user.password_hash))) {
-    return c.json({ error: 'Invalid credentials' }, 401);
+    return c.json({ error: 'Unauthorized' }, 401);
   }
 
-  const accessToken = await createSession(user.id, c);
-
+  const accessToken = await createSession(c, user.id);
   return c.json({ access_token: accessToken });
 });
 
-/**
- * POST /logout - Clear refresh token
- */
 auth.post('/logout', async (c) => {
   deleteCookie(c, 'refresh_token', { path: '/' });
   return c.body(null, 204);
 });
 
-/**
- * POST /token - Refresh access token from cookie
- */
 auth.post('/token', async (c) => {
   const refreshToken = getCookie(c, 'refresh_token');
-  if (!refreshToken) return c.json({ error: 'No refresh token found' }, 401);
+
+  if (!refreshToken) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
 
   try {
     const payload = await verifyJWT(refreshToken, c.env.JWT_SECRET);
-    if (payload.type !== 'refresh') return c.json({ error: 'Invalid token type' }, 401);
 
-    const accessToken = await generateAccessToken(payload.sub, c.env.JWT_SECRET, ACCESS_EXPIRY);
+    if (payload.type !== 'refresh') {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const accessToken = await generateAccessToken(
+      payload.sub,
+      c.env.JWT_SECRET,
+      ACCESS_TOKEN_TTL_SECONDS,
+    );
+
     return c.json({ access_token: accessToken }, 201);
   } catch {
-    return c.json({ error: 'Invalid or expired refresh token' }, 401);
+    return c.json({ error: 'Unauthorized' }, 401);
   }
 });
 
-auth.post('/e2ee', authenticate, async (c) => {
-  const parsed = setE2EEKeySchema.safeParse(await c.req.json());
-  if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
-  const { encryptedE2EEKey } = parsed.data;
-  const decoded = Uint8Array.fromBase64(encryptedE2EEKey);
-  await updateUser(c.env.DB, c.get('userId'), { e2ee_key: decoded.buffer });
-  return c.json({ encryptedE2EEKey });
+auth.get('/user', authenticate('access'), async (c) => {
+  const user = await findUserById(c.env.DB, c.get('sub'));
+
+  if (!user) {
+    return c.json({ error: 'Not found' }, 404);
+  }
+
+  return c.json({
+    id: user.id,
+    email: user.email,
+    ...(user.name ? { name: user.name } : {}),
+    ...(user.e2ee_key ? { e2ee_key: encodeBase64(user.e2ee_key) } : {}),
+  });
 });
 
-auth.get('/e2ee', authenticate, async (c) => {
-  const userId = c.get('userId');
-  const user = await findUserById(c.env.DB, userId);
-  if (!user?.e2ee_key) return c.json({ encryptedE2EEKey: null });
-  return c.json({ encryptedE2EEKey: new Uint8Array(user.e2ee_key).toBase64() });
-});
+auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema), async (c) => {
+  const { name, e2ee_key } = c.req.valid('json');
 
-/**
- * GET /me - Get current user profile
- */
-auth.get('/me', authenticate, async (c) => {
-  const user = await findUserById(c.env.DB, c.get('userId'));
-  if (!user) return c.json({ error: 'User not found' }, 404);
-  return c.json({ id: user.id, email: user.email, name: user.name });
-});
+  await updateUser(c.env.DB, c.get('sub'), {
+    name,
+    e2ee_key: e2ee_key ? decodeBase64(e2ee_key) : undefined,
+  });
 
-/**
- * PATCH /me - Update current user profile (name)
- */
-auth.patch('/me', authenticate, async (c) => {
-  const parsed = updateMeSchema.safeParse(await c.req.json());
-  if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
-  await updateUser(c.env.DB, c.get('userId'), parsed.data);
   return c.json({ ok: true });
 });
 

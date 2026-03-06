@@ -1,185 +1,192 @@
-import z from 'zod';
 import { Hono } from 'hono';
 import { v4 as uuidv4 } from 'uuid';
-import { Env, Variables } from '../types/bindings';
+import { z } from 'zod';
 import { authenticate } from '../middleware/auth';
+import { validateZ } from '../middleware/validation';
 import {
-  createPartnerSchema,
-  acceptPartnerSchema,
-  updatePartnerSchema,
-  putPartnerSchema,
-} from '../lib/schemas';
-import {
-  findUserByEmail,
-  findPartnerByUsers,
-  createPartner,
-  findPartnerInvite,
   acceptPartner,
-  listPartners,
-  findPartnerByOwner,
-  findPartnerByPartnerUser,
-  findPartnerByEitherParty,
-  updatePartnerPermissions,
-  updatePartnerE2EEKey,
-  deletePartner,
+  createPartner,
+  deletePartnerById,
+  findPartnerById,
+  findPartnerInviteForOwner,
+  findUserByEmail,
+  findUserById,
+  findUserPublicKeyByEmail,
+  listIncomingPartners,
+  listOwnedPartners,
+  updatePartnerByOwner,
 } from '../lib/db';
-import { sendPartnerDeletionEmail } from '../lib/email';
+import { decodeBase64, encodeBase64 } from '../lib/encoding';
+import { Env, Variables } from '../types/bindings';
 
 const partners = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-/**
- * POST /partner - Send partner invite
- */
-partners.post('/', authenticate, async (c) => {
-  const parsed = createPartnerSchema.safeParse(await c.req.json());
-  if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
-
-  const userId = c.get('userId');
-  const { email, permissions } = parsed.data;
-
-  const partnerUser = await findUserByEmail(c.env.DB, email);
-  if (!partnerUser) return c.json({ error: 'User not found' }, 404);
-
-  const partnerUserId = partnerUser.id;
-  if (partnerUserId === userId) return c.json({ error: 'Cannot add yourself as partner' }, 400);
-
-  const existing = await findPartnerByUsers(c.env.DB, userId, partnerUserId);
-  if (existing) return c.json({ error: 'Partnership already exists' }, 409);
-
-  const partnerId = uuidv4();
-  const createdAt = new Date().toISOString();
-
-  await createPartner(
-    c.env.DB,
-    partnerId,
-    userId,
-    partnerUserId,
-    JSON.stringify(permissions),
-    createdAt,
-  );
-
-  return c.json({ id: partnerId, status: 'pending' }, 201);
+const partnerPermissionsSchema = z.object({
+  view_data: z.boolean().optional().default(true),
 });
 
-/**
- * POST /partner/accept - Accept partner invite
- */
-partners.post('/accept', authenticate, async (c) => {
-  const parsed = acceptPartnerSchema.safeParse(await c.req.json());
-  if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
+const pubKeyQuerySchema = z.object({
+  email: z.email(),
+});
 
-  const userId = c.get('userId');
-  const { id, encryptedE2EEKey } = parsed.data;
+const createPartnerSchema = z.object({
+  email: z.email(),
+  permissions: partnerPermissionsSchema.optional().default({ view_data: true }),
+  e2ee_key: z.base64().optional(),
+});
 
-  const partnership = await findPartnerInvite(c.env.DB, id, userId);
-  if (!partnership) return c.json({ error: 'Partnership invite not found' }, 404);
+const acceptPartnerSchema = z.object({
+  id: z.uuid(),
+});
 
-  let e2eeKey: ArrayBuffer | undefined;
-  if (encryptedE2EEKey) {
-    e2eeKey = Uint8Array.fromBase64(encryptedE2EEKey).buffer;
+const updatePartnerSchema = z
+  .object({
+    permissions: partnerPermissionsSchema.optional(),
+    e2ee_key: z.base64().optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
+
+partners.get('/pubkey', validateZ('query', pubKeyQuerySchema), async (c) => {
+  const { email } = c.req.valid('query');
+  const user = await findUserPublicKeyByEmail(c.env.DB, email);
+
+  if (!user?.pub_key) {
+    return c.json({ error: 'Not found' }, 404);
   }
 
-  await acceptPartner(c.env.DB, id, new Date().toISOString(), e2eeKey);
+  return c.json({ pubkey: encodeBase64(user.pub_key) });
+});
 
+partners.post('/partner', authenticate('access'), validateZ('json', createPartnerSchema), async (c) => {
+  const userId = c.get('sub');
+  const currentUser = await findUserById(c.env.DB, userId);
+  const { email, permissions, e2ee_key } = c.req.valid('json');
+
+  if (!currentUser) {
+    return c.json({ error: 'Not found' }, 404);
+  }
+
+  if (currentUser.email === email) {
+    return c.json({ error: 'Bad Request', details: { email: ['Cannot invite yourself'] } }, 400);
+  }
+
+  const partnerUser = await findUserByEmail(c.env.DB, email);
+  const existing = await findPartnerInviteForOwner(c.env.DB, userId, email, partnerUser?.id);
+
+  if (existing) {
+    return c.json({ error: 'Partnership already exists' }, 409);
+  }
+
+  const id = uuidv4();
+  const now = Date.now();
+
+  await createPartner(c.env.DB, {
+    id,
+    user_id: userId,
+    partner_user_id: partnerUser?.id,
+    partner_email: email,
+    permissions: JSON.stringify(permissions),
+    e2ee_key: e2ee_key ? decodeBase64(e2ee_key) : undefined,
+    created_at: now,
+  });
+
+  return c.json({ id, status: 'pending' }, 201);
+});
+
+partners.post('/partner/accept', authenticate('access'), validateZ('json', acceptPartnerSchema), async (c) => {
+  const userId = c.get('sub');
+  const currentUser = await findUserById(c.env.DB, userId);
+  const { id } = c.req.valid('json');
+  const invite = await findPartnerById(c.env.DB, id);
+
+  if (!currentUser || !invite || invite.status !== 'pending') {
+    return c.json({ error: 'Not found' }, 404);
+  }
+
+  if (invite.partner_user_id && invite.partner_user_id !== userId) {
+    return c.json({ error: 'Not found' }, 404);
+  }
+
+  if (invite.partner_email !== currentUser.email) {
+    return c.json({ error: 'Not found' }, 404);
+  }
+
+  await acceptPartner(c.env.DB, { id, partnerUserId: userId, updated_at: Date.now() });
   return c.json({ id });
 });
 
-/**
- * GET /partner - List partnerships
- */
-partners.get('/', authenticate, async (c) => {
-  const userId = c.get('userId');
+partners.get('/partner', authenticate('access'), async (c) => {
+  const userId = c.get('sub');
+  const [owned, incoming] = await Promise.all([
+    listOwnedPartners(c.env.DB, userId),
+    listIncomingPartners(c.env.DB, userId),
+  ]);
 
-  const { owned, asPartner } = await listPartners(c.env.DB, userId);
-
-  const map =
-    (role: string) =>
-    (p: {
-      id: string;
-      partner_user_id: string;
-      partner_email: string;
-      status: string;
-      permissions: string;
-      created_at: string;
-      e2ee_key: ArrayBuffer | null;
-    }) => ({
-      id: p.id,
-      partner_user_id: p.partner_user_id,
-      partner_email: p.partner_email,
-      status: p.status,
-      permissions: JSON.parse(p.permissions),
-      role,
-      created_at: p.created_at,
-      encryptedE2EEKey: p.e2ee_key ? new Uint8Array(p.e2ee_key).toBase64() : null,
-    });
-
-  return c.json([...owned.map(map('owner')), ...asPartner.map(map('partner'))]);
+  return c.json([
+    ...owned.map((partner) => ({
+      id: partner.id,
+      partner: {
+        ...(partner.partner_id ? { id: partner.partner_id } : {}),
+        email: partner.partner_email,
+        ...(partner.partner_name ? { name: partner.partner_name } : {}),
+      },
+      status: partner.status,
+      permissions: JSON.parse(partner.permissions) as { view_data?: boolean },
+      created_at: partner.created_at,
+      ...(partner.e2ee_key ? { e2ee_key: encodeBase64(partner.e2ee_key) } : {}),
+    })),
+    ...incoming.map((partner) => ({
+      id: partner.id,
+      partner: {
+        id: partner.owner_id,
+        email: partner.owner_email,
+        ...(partner.owner_name ? { name: partner.owner_name } : {}),
+      },
+      status: partner.status,
+      permissions: JSON.parse(partner.permissions) as { view_data?: boolean },
+      created_at: partner.created_at,
+      ...(partner.e2ee_key ? { e2ee_key: encodeBase64(partner.e2ee_key) } : {}),
+    })),
+  ]);
 });
 
-/**
- * PUT /partner/:id - Update partner record (caller must be the partner_user_id)
- */
-partners.put('/:id', authenticate, async (c) => {
-  const parsed = putPartnerSchema.safeParse(await c.req.json());
-  if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
-
-  const userId = c.get('userId');
+partners.patch('/partner/:id', authenticate('access'), validateZ('json', updatePartnerSchema), async (c) => {
   const partnerId = c.req.param('id');
+  const partnership = await findPartnerById(c.env.DB, partnerId);
 
-  const partnership = await findPartnerByPartnerUser(c.env.DB, partnerId, userId);
-  if (!partnership) return c.json({ error: 'Partnership not found' }, 404);
-
-  if (parsed.data.encryptedE2EEKey !== undefined) {
-    const e2eeKey = Uint8Array.fromBase64(parsed.data.encryptedE2EEKey).buffer;
-    await updatePartnerE2EEKey(c.env.DB, partnerId, e2eeKey, new Date().toISOString());
+  if (!partnership || partnership.user_id !== c.get('sub')) {
+    return c.json({ error: 'Not found' }, 404);
   }
 
-  return c.json({ id: partnerId });
+  const { permissions, e2ee_key } = c.req.valid('json');
+  const nextPermissions = permissions
+    ? { ...(JSON.parse(partnership.permissions) as { view_data?: boolean }), ...permissions }
+    : (JSON.parse(partnership.permissions) as { view_data?: boolean });
+
+  await updatePartnerByOwner(c.env.DB, {
+    id: partnerId,
+    ownerId: c.get('sub'),
+    permissions: permissions ? JSON.stringify(nextPermissions) : undefined,
+    e2ee_key: e2ee_key ? decodeBase64(e2ee_key) : undefined,
+    updated_at: Date.now(),
+  });
+
+  return c.json({ id: partnerId, permissions: nextPermissions });
 });
 
-/**
- * PATCH /partner/:id - Update partner permissions (caller must be the owner/user_id)
- */
-partners.patch('/:id', authenticate, async (c) => {
-  const parsed = updatePartnerSchema.safeParse(await c.req.json());
-  if (!parsed.success) return c.json({ error: z.treeifyError(parsed.error) }, 400);
-
-  const userId = c.get('userId');
+partners.delete('/partner/:id', authenticate('access'), async (c) => {
   const partnerId = c.req.param('id');
+  const partnership = await findPartnerById(c.env.DB, partnerId);
 
-  const partnership = await findPartnerByOwner(c.env.DB, partnerId, userId);
-  if (!partnership) return c.json({ error: 'Partnership not found' }, 404);
+  if (!partnership) {
+    return c.json({ error: 'Not found' }, 404);
+  }
 
-  const current = JSON.parse(partnership.permissions);
-  const merged = { ...current, ...parsed.data.permissions };
+  if (partnership.user_id !== c.get('sub') && partnership.partner_user_id !== c.get('sub')) {
+    return c.json({ error: 'Not found' }, 404);
+  }
 
-  await updatePartnerPermissions(
-    c.env.DB,
-    partnerId,
-    JSON.stringify(merged),
-    new Date().toISOString(),
-  );
-
-  return c.json({ id: partnerId, permissions: merged });
-});
-
-/**
- * DELETE /partner/:id - Revoke partner access (either party may delete)
- */
-partners.delete('/:id', authenticate, async (c) => {
-  const userId = c.get('userId');
-  const partnerId = c.req.param('id');
-
-  const partnership = await findPartnerByEitherParty(c.env.DB, partnerId, userId);
-  if (!partnership) return c.json({ error: 'Partnership not found' }, 404);
-
-  await deletePartner(c.env.DB, partnerId);
-
-  // Fire-and-forget notification emails
-  c.executionCtx.waitUntil(
-    sendPartnerDeletionEmail(c.env, partnership.owner_email, partnership.partner_email),
-  );
-
+  await deletePartnerById(c.env.DB, partnerId);
   return c.body(null, 204);
 });
 
