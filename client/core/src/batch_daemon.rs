@@ -7,8 +7,6 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 use crate::auth::AuthClient;
 use crate::batch::{BatchBlob, BatchItem};
 use crate::error::CoreResult;
@@ -608,11 +606,12 @@ async fn process_capture<H: ServiceHost>(
     };
 
     let item = BatchItem {
-        id: Uuid::new_v4().to_string(),
-        taken_at: now.timestamp_millis(),
-        kind: "screenshot".to_string(),
-        image: Some(processed.bytes),
-        metadata: vec![],
+        ts: now.timestamp_millis(),
+        type_: "image".to_string(),
+        data: std::collections::BTreeMap::from([(
+            "image".to_string(),
+            crate::batch::BatchValue::Binary(processed.bytes),
+        )]),
     };
     upload_hash_for_item(
         ctx.host,
@@ -659,14 +658,18 @@ async fn sleep_or_stop<H: ServiceHost>(host: &H, duration: Duration) -> CoreResu
 
 fn make_missed_capture(now: DateTime<Utc>, reason: &str, error: &str) -> BatchItem {
     BatchItem {
-        id: Uuid::new_v4().to_string(),
-        taken_at: now.timestamp_millis(),
-        kind: "missed_capture".to_string(),
-        image: None,
-        metadata: vec![
-            ("reason".to_string(), reason.to_string()),
-            ("error".to_string(), error.to_string()),
-        ],
+        ts: now.timestamp_millis(),
+        type_: "missed_capture".to_string(),
+        data: std::collections::BTreeMap::from([
+            (
+                "reason".to_string(),
+                crate::batch::BatchValue::String(reason.to_string()),
+            ),
+            (
+                "error".to_string(),
+                crate::batch::BatchValue::String(error.to_string()),
+            ),
+        ]),
     }
 }
 
