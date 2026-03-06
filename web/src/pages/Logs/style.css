@@ -215,6 +215,10 @@
   }
 }
 
+.gallery-day-group .gallery-grid {
+  margin-top: 0.25rem;
+}
+
 .gallery-item {
   & .log-thumb-wrap,
   & .log-thumb-btn,
