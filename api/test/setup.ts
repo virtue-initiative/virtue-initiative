@@ -95,11 +95,7 @@ const originalFetch = globalThis.fetch.bind(globalThis);
 
 globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
   const url =
-    typeof input === 'string'
-      ? input
-      : input instanceof URL
-        ? input.toString()
-        : input.url;
+    typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
 
   if (url.startsWith('http://localhost/')) {
     return SELF.fetch(input, init);

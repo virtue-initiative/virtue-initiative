@@ -23,7 +23,10 @@ export function authenticate(type: JWTType) {
       c.set('sub', payload.sub);
       await next();
     } catch (error) {
-      return c.json({ error: 'Unauthorized', details: { reason: 'Invalid or expired token' } }, 401);
+      return c.json(
+        { error: 'Unauthorized', details: { reason: 'Invalid or expired token' } },
+        401,
+      );
     }
   };
 }

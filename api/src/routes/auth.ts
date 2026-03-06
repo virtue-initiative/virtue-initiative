@@ -4,12 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { authenticate } from '../middleware/auth';
 import { validateZ } from '../middleware/validation';
-import {
-  createUser,
-  findUserByEmail,
-  findUserById,
-  updateUser,
-} from '../lib/db';
+import { createUser, findUserByEmail, findUserById, updateUser } from '../lib/db';
 import { decodeBase64, encodeBase64 } from '../lib/encoding';
 import { generateAccessToken, generateRefreshToken, verifyJWT } from '../lib/jwt';
 import { hashPassword, verifyPassword } from '../lib/password';
@@ -39,7 +34,11 @@ const updateUserSchema = z
 
 async function createSession(c: Context<{ Bindings: Env; Variables: Variables }>, userId: string) {
   const accessToken = await generateAccessToken(userId, c.env.JWT_SECRET, ACCESS_TOKEN_TTL_SECONDS);
-  const refreshToken = await generateRefreshToken(userId, c.env.JWT_SECRET, REFRESH_TOKEN_TTL_SECONDS);
+  const refreshToken = await generateRefreshToken(
+    userId,
+    c.env.JWT_SECRET,
+    REFRESH_TOKEN_TTL_SECONDS,
+  );
 
   setCookie(c, 'refresh_token', refreshToken, {
     httpOnly: true,

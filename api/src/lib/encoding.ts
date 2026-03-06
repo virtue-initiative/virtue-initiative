@@ -1,4 +1,6 @@
-export function encodeBase64(value: ArrayBuffer | Uint8Array | null | undefined): string | undefined {
+export function encodeBase64(
+  value: ArrayBuffer | Uint8Array | null | undefined,
+): string | undefined {
   if (!value) return undefined;
   const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
   return Buffer.from(bytes).toString('base64');

@@ -27,7 +27,11 @@ impl ApiClient {
         })
     }
 
-    pub async fn get_hash_server_url(&self, access_token: &str, device_id: &str) -> CoreResult<String> {
+    pub async fn get_hash_server_url(
+        &self,
+        access_token: &str,
+        device_id: &str,
+    ) -> CoreResult<String> {
         let device = self.get_device(access_token, device_id).await?;
         device.hash_base_url.ok_or_else(|| {
             CoreError::NotFound("device settings did not include hash_base_url".to_string())
@@ -45,7 +49,10 @@ impl ApiClient {
 
         let device: Device = decode_json(response).await?;
         if !device_id.is_empty() && device.id != device_id {
-            return Err(CoreError::NotFound(format!("device {} not found", device_id)));
+            return Err(CoreError::NotFound(format!(
+                "device {} not found",
+                device_id
+            )));
         }
         Ok(device)
     }

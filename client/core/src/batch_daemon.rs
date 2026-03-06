@@ -4,9 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Utc};
-use rand::thread_rng;
-use serde::{Deserialize, Serialize};
+use crate::ApiClient;
 use crate::auth::AuthClient;
 use crate::batch::{BatchBlob, BatchItem};
 use crate::error::CoreResult;
@@ -16,8 +14,10 @@ use crate::schedule::{CaptureSchedulePolicy, CaptureScheduleState};
 use crate::service_host::{CaptureOutcome, ServiceEvent, ServiceHost, SleepOutcome};
 use crate::token_store::TokenStore;
 use crate::upload::{UploadClient, UploadClientConfig};
-use crate::ApiClient;
 use crate::{resolve_batch_window_seconds, resolve_capture_interval_seconds};
+use chrono::{DateTime, Utc};
+use rand::thread_rng;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug)]
 pub struct BatchDaemonConfig {
@@ -435,7 +435,9 @@ async fn refresh_control_plane<H: ServiceHost>(
                         ..UploadClientConfig::default()
                     }) {
                         Ok(client) => *upload_client = client,
-                        Err(err) => emit_warn(host, &format!("failed to build upload client: {err}")),
+                        Err(err) => {
+                            emit_warn(host, &format!("failed to build upload client: {err}"))
+                        }
                     }
                 }
                 runtime.device_settings = Some(settings);

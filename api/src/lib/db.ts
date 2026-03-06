@@ -14,9 +14,7 @@ function parsePermissions(value: string): PartnerPermissions {
 
 export async function findUserByEmail(db: D1Database, email: string) {
   return db
-    .prepare(
-      'SELECT id, email, password_hash, name, e2ee_key, pub_key FROM users WHERE email = ?',
-    )
+    .prepare('SELECT id, email, password_hash, name, e2ee_key, pub_key FROM users WHERE email = ?')
     .bind(email)
     .first<{
       id: string;
@@ -53,7 +51,9 @@ export async function createUser(
   input: { id: string; email: string; passwordHash: string; name?: string },
 ) {
   return db
-    .prepare('INSERT INTO users (id, email, password_hash, name, created_at) VALUES (?, ?, ?, ?, ?)')
+    .prepare(
+      'INSERT INTO users (id, email, password_hash, name, created_at) VALUES (?, ?, ?, ?, ?)',
+    )
     .bind(input.id, input.email, input.passwordHash, input.name ?? null, Date.now())
     .run();
 }
@@ -566,7 +566,12 @@ export async function upsertHashState(
     .run();
 }
 
-export async function resetHashState(db: D1Database, deviceId: string, userId: string, updatedAt: number) {
+export async function resetHashState(
+  db: D1Database,
+  deviceId: string,
+  userId: string,
+  updatedAt: number,
+) {
   return upsertHashState(db, {
     device_id: deviceId,
     user_id: userId,

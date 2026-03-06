@@ -84,6 +84,9 @@ mod tests {
         let parsed: Device = serde_json::from_str(payload).expect("valid payload");
         assert_eq!(parsed.id, "device-1");
         assert_eq!(parsed.e2ee_key.as_deref(), Some("Zm9v"));
-        assert_eq!(parsed.hash_base_url.as_deref(), Some("https://hash.example.com"));
+        assert_eq!(
+            parsed.hash_base_url.as_deref(),
+            Some("https://hash.example.com")
+        );
     }
 }

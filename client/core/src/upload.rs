@@ -34,8 +34,7 @@ impl UploadClientConfig {
     fn hash_base_url(&self) -> CoreResult<&str> {
         self.hash_base_url.as_deref().ok_or_else(|| {
             CoreError::TokenStore(
-                "hash_base_url is not configured; fetch /d/device before calling /hash"
-                    .to_string(),
+                "hash_base_url is not configured; fetch /d/device before calling /hash".to_string(),
             )
         })
     }
