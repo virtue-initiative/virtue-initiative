@@ -9,15 +9,16 @@ use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::api_client::{ApiClient, Device};
 use crate::auth::AuthClient;
 use crate::batch::{BatchBlob, BatchItem};
 use crate::error::CoreResult;
 use crate::image_pipeline::ImagePipeline;
+use crate::models::Device;
 use crate::schedule::{CaptureSchedulePolicy, CaptureScheduleState};
 use crate::service_host::{CaptureOutcome, ServiceEvent, ServiceHost, SleepOutcome};
 use crate::token_store::TokenStore;
-use crate::upload::{UploadClient, UploadClientConfig, uuid_str_to_bytes};
+use crate::upload::{UploadClient, UploadClientConfig};
+use crate::ApiClient;
 use crate::{resolve_batch_window_seconds, resolve_capture_interval_seconds};
 
 #[derive(Clone, Debug)]
@@ -65,7 +66,6 @@ struct RuntimeState {
     device_settings: Option<Device>,
     last_settings_fetch: Option<Instant>,
     last_settings_attempt: Option<Instant>,
-    last_hash_server_fetch: Option<Instant>,
     last_session_unavailable_log: Option<Instant>,
     batch_buffer: BatchBuffer,
     batch_window_start: DateTime<Utc>,
@@ -86,7 +86,6 @@ impl RuntimeState {
             device_settings: None,
             last_settings_fetch: None,
             last_settings_attempt: None,
-            last_hash_server_fetch: None,
             last_session_unavailable_log: None,
             batch_buffer,
             batch_window_start,
@@ -432,6 +431,15 @@ async fn refresh_control_plane<H: ServiceHost>(
             .await
         {
             Ok(settings) => {
+                if let Some(hash_url) = settings.hash_base_url.clone() {
+                    match UploadClient::with_config(UploadClientConfig {
+                        hash_base_url: Some(hash_url),
+                        ..UploadClientConfig::default()
+                    }) {
+                        Ok(client) => *upload_client = client,
+                        Err(err) => emit_warn(host, &format!("failed to build upload client: {err}")),
+                    }
+                }
                 runtime.device_settings = Some(settings);
                 runtime.last_settings_fetch = Some(Instant::now());
             }
@@ -439,33 +447,14 @@ async fn refresh_control_plane<H: ServiceHost>(
         }
     }
 
-    if runtime
-        .last_hash_server_fetch
-        .map(|t| t.elapsed() >= config.settings_refresh_interval)
-        .unwrap_or(true)
-    {
-        match api_client
-            .get_hash_server_url(&cycle.access_token, &cycle.device_id)
-            .await
-        {
-            Ok(hash_url) => match UploadClient::with_config(UploadClientConfig {
-                hash_base_url: Some(hash_url),
-                ..UploadClientConfig::default()
-            }) {
-                Ok(client) => {
-                    *upload_client = client;
-                    runtime.last_hash_server_fetch = Some(Instant::now());
-                }
-                Err(err) => emit_warn(host, &format!("failed to build upload client: {err}")),
-            },
-            Err(err) => emit_warn(host, &format!("hash server URL fetch failed: {err}")),
-        }
-    }
-
     if runtime.device_settings.is_none() {
         runtime.device_settings = Some(Device {
             id: cycle.device_id.clone(),
+            name: String::new(),
+            platform: String::new(),
             enabled: monitoring_enabled,
+            e2ee_key: None,
+            hash_base_url: None,
         });
     }
 }
@@ -530,7 +519,7 @@ async fn flush_batch_if_due<H: ServiceHost>(
         .await
     {
         Ok(resp) => {
-            emit_info(host, &format!("batch uploaded: {}", resp.batch.id));
+            emit_info(host, &format!("batch uploaded: {}", resp.id));
             runtime.batch_buffer = BatchBuffer::default();
             runtime.batch_window_start = now;
         }
@@ -755,16 +744,11 @@ async fn upload_hash_for_item<H: ServiceHost>(
     host: &H,
     upload_client: &UploadClient,
     access_token: &str,
-    device_id: &str,
+    _device_id: &str,
     item: &BatchItem,
 ) {
-    let Some(device_id_bytes) = uuid_str_to_bytes(device_id) else {
-        emit_warn(host, "content hash upload skipped: invalid device id");
-        return;
-    };
-
     if let Err(err) = upload_client
-        .upload_hash(access_token, &device_id_bytes, &item.sha256())
+        .upload_hash(access_token, &item.sha256())
         .await
     {
         emit_warn(host, &format!("content hash upload failed: {err}"));

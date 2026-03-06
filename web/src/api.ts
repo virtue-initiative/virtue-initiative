@@ -1,9 +1,16 @@
+export interface User {
+  id: string;
+  email: string;
+  name?: string;
+  e2ee_key?: string;
+}
+
 export interface Device {
   id: string;
+  owner: string;
   name: string;
   platform: string;
-  last_seen_at: string | null;
-  last_upload_at: string | null;
+  last_upload_at: number | null;
   status: "online" | "offline";
   enabled: boolean;
 }
@@ -11,55 +18,36 @@ export interface Device {
 export interface Batch {
   id: string;
   device_id: string;
-  batch_url: string;
-  start_time: string;
-  end_time: string;
-  start_chain_hash: string;
-  end_chain_hash: string;
-  item_count: number;
-  size_bytes: number;
-  created_at: string;
+  start: number;
+  end: number;
+  end_hash: string;
+  url: string;
 }
 
-export interface BatchPage {
-  items: Batch[];
-  next_cursor?: string;
-}
-
-export interface AlertLog {
-  id: string;
+export interface DataLog {
   device_id: string;
-  kind: string;
-  metadata: [string, string][];
-  created_at: string;
+  ts: number;
+  type: string;
+  data: Record<string, unknown>;
 }
 
-export interface AlertLogPage {
-  items: AlertLog[];
-  next_cursor?: string;
-}
-
-export interface ChainHash {
-  state_hex: string;
-}
-
-export interface BatchBlobItem {
-  id: string;
-  taken_at: number;
-  kind: string;
-  image?: Uint8Array;
-  metadata: [string, string][];
+export interface DataPage {
+  batches: Batch[];
+  logs: DataLog[];
+  next_cursor?: number;
 }
 
 export interface Partner {
   id: string;
-  partner_user_id: string;
-  partner_email: string;
+  partner: {
+    id?: string;
+    email: string;
+    name?: string;
+  };
   status: "pending" | "accepted";
   permissions: { view_data: boolean };
-  role: "owner" | "partner";
-  created_at: string;
-  encryptedE2EEKey: string | null;
+  created_at: number;
+  e2ee_key?: string;
 }
 
 const BASE = (import.meta as any).env?.VITE_API_URL ?? "http://localhost:8787";
@@ -69,27 +57,40 @@ async function req<T>(
   init: RequestInit = {},
   token?: string,
 ): Promise<T> {
+  const headers = new Headers(init.headers);
+
+  if (!headers.has("Content-Type") && !(init.body instanceof FormData)) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token && { Authorization: `Bearer ${token}` }),
-      ...(init.headers as Record<string, string>),
-    },
+    headers,
   });
+
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: unknown };
-    const msg = typeof body.error === "string" ? body.error : res.statusText;
-    throw Object.assign(new Error(msg), { status: res.status });
+    const body = (await res.json().catch(() => ({}))) as {
+      error?: unknown;
+      details?: unknown;
+    };
+    const message = typeof body.error === "string" ? body.error : res.statusText;
+    throw Object.assign(new Error(message), { status: res.status, details: body.details });
   }
-  if (res.status === 204) return undefined as T;
+
+  if (res.status === 204) {
+    return undefined as T;
+  }
+
   return res.json();
 }
 
 export const api = {
-  refreshToken: () =>
-    req<{ access_token: string }>("/token", { method: "POST" }),
+  refreshToken: () => req<{ access_token: string }>("/token", { method: "POST" }),
 
   login: (email: string, password: string) =>
     req<{ access_token: string }>("/login", {
@@ -98,19 +99,21 @@ export const api = {
     }),
 
   signup: (email: string, password: string, name?: string) =>
-    req<{ access_token: string; user: object }>("/signup", {
-      method: "POST",
-      body: JSON.stringify({ email, password, ...(name ? { name } : {}) }),
-    }),
+    req<{ access_token: string; user: { id: string; email: string; name?: string } }>(
+      "/signup",
+      {
+        method: "POST",
+        body: JSON.stringify({ email, password, ...(name ? { name } : {}) }),
+      },
+    ),
 
-  logout: (token: string) => req<void>("/logout", { method: "POST" }, token),
+  logout: () => req<void>("/logout", { method: "POST" }),
 
-  getMe: (token: string) =>
-    req<{ id: string; email: string; name: string | null }>("/me", {}, token),
+  getUser: (token: string) => req<User>("/user", {}, token),
 
-  updateMe: (token: string, fields: { name?: string }) =>
+  updateUser: (token: string, fields: { name?: string; e2ee_key?: string }) =>
     req<{ ok: boolean }>(
-      "/me",
+      "/user",
       {
         method: "PATCH",
         body: JSON.stringify(fields),
@@ -118,23 +121,21 @@ export const api = {
       token,
     ),
 
-  getE2EEKey: (token: string) =>
-    req<{ encryptedE2EEKey: string | null }>("/e2ee", {}, token),
+  getDevices: (token: string) => req<Device[]>("/device", {}, token),
 
-  setE2EEKey: (token: string, encryptedKey: string) =>
-    req<{ encryptedE2EEKey: string }>(
-      "/e2ee",
+  patchDevice: (
+    token: string,
+    id: string,
+    patch: { name?: string; enabled?: boolean },
+  ) =>
+    req<{ id: string; updated: boolean }>(
+      `/device/${id}`,
       {
-        method: "POST",
-        body: JSON.stringify({ encryptedE2EEKey: encryptedKey }),
+        method: "PATCH",
+        body: JSON.stringify(patch),
       },
       token,
     ),
-
-  getDevices: (token: string, params?: { user?: string }) => {
-    const qs = params?.user ? `?user=${encodeURIComponent(params.user)}` : "";
-    return req<Device[]>(`/device${qs}`, {}, token);
-  },
 
   getPartners: (token: string) => req<Partner[]>("/partner", {}, token),
 
@@ -152,28 +153,25 @@ export const api = {
       token,
     ),
 
-  acceptPartner: (token: string, id: string, encryptedKey?: string) =>
+  acceptPartner: (token: string, id: string) =>
     req<{ id: string }>(
       "/partner/accept",
       {
         method: "POST",
-        body: JSON.stringify({
-          id,
-          ...(encryptedKey ? { encryptedE2EEKey: encryptedKey } : {}),
-        }),
+        body: JSON.stringify({ id }),
       },
       token,
     ),
 
-  putPartner: (
+  updatePartner: (
     token: string,
     id: string,
-    fields: { encryptedE2EEKey?: string },
+    fields: { permissions?: { view_data?: boolean }; e2ee_key?: string },
   ) =>
-    req<{ id: string }>(
+    req<{ id: string; permissions: { view_data?: boolean } }>(
       `/partner/${id}`,
       {
-        method: "PUT",
+        method: "PATCH",
         body: JSON.stringify(fields),
       },
       token,
@@ -182,75 +180,21 @@ export const api = {
   deletePartner: (token: string, id: string) =>
     req<void>(`/partner/${id}`, { method: "DELETE" }, token),
 
-  patchDevice: (
-    token: string,
-    id: string,
-    patch: { name?: string; enabled?: boolean },
-  ) =>
-    req<{ id: string; updated: boolean }>(
-      `/device/${id}`,
-      {
-        method: "PATCH",
-        body: JSON.stringify(patch),
-      },
-      token,
-    ),
-
-  getBatches: (
+  getData: (
     token: string,
     params?: {
       user?: string;
       device_id?: string;
-      cursor?: string;
+      cursor?: number;
       limit?: number;
     },
   ) => {
     const qs = new URLSearchParams();
     if (params?.user) qs.set("user", params.user);
     if (params?.device_id) qs.set("device_id", params.device_id);
-    if (params?.cursor) qs.set("cursor", params.cursor);
+    if (params?.cursor !== undefined) qs.set("cursor", String(params.cursor));
     if (params?.limit) qs.set("limit", String(params.limit));
     const query = qs.toString();
-    return req<BatchPage>(`/batch${query ? `?${query}` : ""}`, {}, token);
+    return req<DataPage>(`/data${query ? `?${query}` : ""}`, {}, token);
   },
-
-  getDeviceState: (token: string, deviceId: string, user?: string) => {
-    const qs = new URLSearchParams();
-    qs.set("device_id", deviceId);
-    if (user) qs.set("user", user);
-    return req<{ state_hex: string }>(`/hash?${qs.toString()}`, {}, token);
-  },
-
-  getLogs: (
-    token: string,
-    params?: {
-      user?: string;
-      device_id?: string;
-      cursor?: string;
-      limit?: number;
-    },
-  ) => {
-    const qs = new URLSearchParams();
-    if (params?.user) qs.set("user", params.user);
-    if (params?.device_id) qs.set("device_id", params.device_id);
-    if (params?.cursor) qs.set("cursor", params.cursor);
-    if (params?.limit) qs.set("limit", String(params.limit));
-    const query = qs.toString();
-    return req<AlertLogPage>(`/logs${query ? `?${query}` : ""}`, {}, token);
-  },
-
-  postLog: (
-    token: string,
-    payload: {
-      device_id: string;
-      created_at: string;
-      kind: string;
-      metadata?: [string, string][];
-    },
-  ) =>
-    req<{ log: AlertLog }>(
-      "/logs",
-      { method: "POST", body: JSON.stringify(payload) },
-      token,
-    ),
 };

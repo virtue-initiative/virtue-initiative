@@ -2,30 +2,22 @@ import { useState, useEffect } from "preact/hooks";
 import { useAuth } from "../../context/auth";
 import { useE2EE } from "../../context/e2ee";
 import { api } from "../../api";
-import {
-  deriveKey,
-  deriveWrappingKey,
-  decryptBatch,
-  encryptData,
-} from "../../crypto";
+import { deriveKey, deriveWrappingKey, decryptBatch, encryptData } from "../../crypto";
 import "./style.css";
 
 export function Settings() {
   const { token, userId, wrappingKey } = useAuth();
   const e2ee = useE2EE();
 
-  // Profile
   const [name, setName] = useState("");
   const [nameStatus, setNameStatus] = useState<string | null>(null);
   const [nameSaving, setNameSaving] = useState(false);
 
-  // Wrapping key unlock (only shown when wrappingKey is null after a stale session)
   const [unlockPassword, setUnlockPassword] = useState("");
   const [unlockError, setUnlockError] = useState<string | null>(null);
   const [unlocking, setUnlocking] = useState(false);
   const [resolvedWK, setResolvedWK] = useState<CryptoKey | null>(null);
 
-  // E2EE key change
   const [newE2EEPassword, setNewE2EEPassword] = useState("");
   const [confirmE2EEPassword, setConfirmE2EEPassword] = useState("");
   const [e2eeStatus, setE2eeStatus] = useState<string | null>(null);
@@ -36,10 +28,7 @@ export function Settings() {
 
   useEffect(() => {
     if (!token) return;
-    api
-      .getMe(token)
-      .then((me) => setName(me.name ?? ""))
-      .catch(() => {});
+    api.getUser(token).then((user) => setName(user.name ?? "")).catch(() => {});
   }, [token]);
 
   async function saveName(e: Event) {
@@ -48,7 +37,7 @@ export function Settings() {
     setNameStatus(null);
     setNameSaving(true);
     try {
-      await api.updateMe(token, { name: name.trim() || undefined });
+      await api.updateUser(token, { name: name.trim() || undefined });
       setNameStatus("Saved.");
     } catch (err) {
       setNameStatus(err instanceof Error ? err.message : "Failed to save");
@@ -64,10 +53,9 @@ export function Settings() {
     setUnlocking(true);
     try {
       const wk = await deriveWrappingKey(unlockPassword, userId);
-      // Verify by trying to decrypt the existing E2EE key blob
-      const { encryptedE2EEKey } = await api.getE2EEKey(token);
-      if (encryptedE2EEKey) {
-        await decryptBatch(wk, Uint8Array.fromBase64(encryptedE2EEKey));
+      const user = await api.getUser(token);
+      if (user.e2ee_key) {
+        await decryptBatch(wk, Uint8Array.fromBase64(user.e2ee_key));
       }
       setResolvedWK(wk);
       setUnlockPassword("");
@@ -90,12 +78,10 @@ export function Settings() {
     setE2eeSaving(true);
     try {
       const e2eeKey = await deriveKey(newE2EEPassword, userId, true);
-      const rawE2EE = new Uint8Array(
-        await crypto.subtle.exportKey("raw", e2eeKey),
-      );
+      const rawE2EE = new Uint8Array(await crypto.subtle.exportKey("raw", e2eeKey));
       await e2ee.setKeyFromBytes(rawE2EE.buffer, userId);
       const encrypted = await encryptData(activeWK, rawE2EE);
-      await api.setE2EEKey(token, encrypted.toBase64());
+      await api.updateUser(token, { e2ee_key: encrypted.toBase64() });
       setNewE2EEPassword("");
       setConfirmE2EEPassword("");
       setE2eeStatus("E2EE key updated.");
@@ -128,9 +114,7 @@ export function Settings() {
             />
           </div>
           {nameStatus && (
-            <p
-              class={nameStatus === "Saved." ? "alert-success" : "alert-error"}
-            >
+            <p class={nameStatus === "Saved." ? "alert-success" : "alert-error"}>
               {nameStatus}
             </p>
           )}
@@ -164,11 +148,7 @@ export function Settings() {
                 />
               </div>
               {unlockError && <p class="alert-error">{unlockError}</p>}
-              <button
-                class="btn btn-primary"
-                type="submit"
-                disabled={unlocking}
-              >
+              <button class="btn btn-primary" type="submit" disabled={unlocking}>
                 {unlocking ? "Verifying…" : "Unlock"}
               </button>
             </form>
@@ -177,8 +157,6 @@ export function Settings() {
           <>
             <p class="settings-hint">
               Changing your E2EE password re-encrypts your key on the server.
-              Existing logs will still decrypt correctly since the underlying
-              key is regenerated from the new password.
             </p>
             <form class="settings-form" onSubmit={changeE2EEKey}>
               <div class="field">
@@ -203,9 +181,7 @@ export function Settings() {
                   type="password"
                   value={confirmE2EEPassword}
                   onInput={(e) => {
-                    setConfirmE2EEPassword(
-                      (e.target as HTMLInputElement).value,
-                    );
+                    setConfirmE2EEPassword((e.target as HTMLInputElement).value);
                     setE2eeError(null);
                   }}
                   placeholder="••••••••"
@@ -215,11 +191,7 @@ export function Settings() {
               </div>
               {e2eeError && <p class="alert-error">{e2eeError}</p>}
               {e2eeStatus && <p class="alert-success">{e2eeStatus}</p>}
-              <button
-                class="btn btn-primary"
-                type="submit"
-                disabled={e2eeSaving}
-              >
+              <button class="btn btn-primary" type="submit" disabled={e2eeSaving}>
                 {e2eeSaving ? "Updating…" : "Update E2EE key"}
               </button>
             </form>

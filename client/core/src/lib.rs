@@ -145,7 +145,7 @@ pub mod token_store;
 pub mod tray_icon;
 pub mod upload;
 
-pub use api_client::{ApiClient, Device, DeviceRegistration};
+pub use api_client::ApiClient;
 pub use app_commands::{
     LoginCommandInput, LoginCommandResult, clear_local_tokens, login_and_register_device,
     logout_and_clear_tokens, logout_and_clear_tokens_with_alert, parse_jwt_sub,
@@ -157,6 +157,7 @@ pub use crypto::{decrypt, derive_key, encrypt};
 pub use error::{CoreError, CoreResult};
 pub use hash_chain::chain_step;
 pub use image_pipeline::{ImagePipeline, ProcessedImage};
+pub use models::{Device, DeviceRegistration};
 pub use schedule::{CaptureSchedulePolicy, CaptureScheduleState, RetryPolicy};
 pub use service_host::{
     CaptureOutcome, DaemonAlertEvent, PersistedServiceState, ServiceEvent, ServiceHost,
@@ -164,7 +165,7 @@ pub use service_host::{
 };
 pub use token_store::{FileTokenStore, MemoryTokenStore, TokenStore};
 pub use tray_icon::build_default_tray_icon_rgba;
-pub use upload::{UploadClient, UploadClientConfig, sha256_bytes, sha256_hex, uuid_str_to_bytes};
+pub use upload::{UploadClient, UploadClientConfig, sha256_bytes, sha256_hex};
 
 #[cfg(test)]
 mod tests {

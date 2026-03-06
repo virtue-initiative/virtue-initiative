@@ -1,13 +1,13 @@
-import { useState, useEffect } from "preact/hooks";
+import { decode } from "@msgpack/msgpack";
+import { useEffect, useMemo, useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
+import { api, Batch, Device, Partner } from "../../api";
+import { decryptBatch, decompressGzip } from "../../crypto";
 import { useAuth } from "../../context/auth";
 import { useE2EE } from "../../context/e2ee";
-import { api, Batch, Device, AlertLog } from "../../api";
-import { decryptBatch, decompressGzip, verifyBatch } from "../../crypto";
-import { decode } from "@msgpack/msgpack";
-import { ImageLogItem, LogItem } from "./shared";
-import { LogsList } from "./LogsList";
 import { LogsGallery } from "./LogsGallery";
+import { LogsList } from "./LogsList";
+import { ImageLogItem, LogItem } from "./shared";
 import "./style.css";
 
 interface DeviceGroup {
@@ -16,263 +16,218 @@ interface DeviceGroup {
   devices: Device[];
 }
 
-interface RawBlobItem {
-  id: string;
-  taken_at: number;
-  kind: string;
-  image?: Uint8Array | number[];
-  metadata: [string, string][];
+function toUint8Array(value: unknown): Uint8Array | undefined {
+  if (!value) return undefined;
+  if (value instanceof Uint8Array) return value;
+  if (Array.isArray(value)) return new Uint8Array(value as number[]);
+  if (typeof value === "string") {
+    try {
+      return Uint8Array.fromBase64(value);
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
 }
 
-function toUint8Array(
-  val: Uint8Array | number[] | undefined,
-): Uint8Array | undefined {
-  if (!val) return undefined;
-  if (val instanceof Uint8Array) return val;
-  return new Uint8Array(val);
+function toMetadata(data: Record<string, unknown>) {
+  return Object.entries(data)
+    .filter(([key]) => key !== "image")
+    .map(
+      ([key, value]) =>
+        [key, typeof value === "string" ? value : JSON.stringify(value)] as [string, string],
+    );
 }
 
-async function decryptAndFlattenBatch(
-  batch: Batch,
-  key: CryptoKey,
-): Promise<LogItem[]> {
-  const resp = await fetch(batch.batch_url);
-  if (!resp.ok)
-    throw new Error(`Fetch failed (${resp.status}) for ${batch.batch_url}`);
+function toMetadataEntries(value: unknown): [string, string][] {
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((entry) => {
+    if (!Array.isArray(entry) || entry.length < 2) return [];
+    const [key, rawValue] = entry;
+    if (typeof key !== "string") return [];
+    return [[key, typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)]];
+  });
+}
+
+async function decryptAndFlattenBatch(batch: Batch, key: CryptoKey): Promise<LogItem[]> {
+  const resp = await fetch(batch.url);
+  if (!resp.ok) {
+    throw new Error(`Fetch failed (${resp.status}) for ${batch.url}`);
+  }
 
   const raw = new Uint8Array(await resp.arrayBuffer());
-  if (raw.length < 13)
-    throw new Error(
-      `Batch blob too short for AES-GCM payload: ${batch.batch_url}`,
-    );
+  if (raw.length < 13) {
+    throw new Error(`Batch blob too short for AES-GCM payload: ${batch.url}`);
+  }
 
   const decrypted = await decryptBatch(key, raw);
   const decompressed = await decompressGzip(decrypted);
-  const decoded = decode(decompressed);
-  if (
-    !decoded ||
-    typeof decoded !== "object" ||
-    !("items" in (decoded as object))
-  ) {
-    console.error(`[batch ${batch.id}] unexpected decoded structure:`, decoded);
-    return [];
-  }
+  const decoded = decode(decompressed) as unknown;
+  const record = decoded && typeof decoded === "object" ? (decoded as Record<string, unknown>) : {};
+  const events = Array.isArray(record.events)
+    ? (record.events as Record<string, unknown>[])
+    : Array.isArray(record.items)
+      ? (record.items as Record<string, unknown>[])
+      : [];
 
-  const blob = decoded as { version: number; items: RawBlobItem[] };
-  const items = blob.items ?? [];
+  return events.map((event, index) => {
+    const data =
+      event.data && typeof event.data === "object"
+        ? (event.data as Record<string, unknown>)
+        : {};
+    const metadata =
+      "metadata" in event ? toMetadataEntries(event.metadata) : toMetadata(data);
+    const image =
+      toUint8Array("image" in event ? event.image : undefined) ?? toUint8Array(data.image);
 
-  const logItems: LogItem[] = items.map((item) => ({
-    id: item.id,
-    taken_at: item.taken_at,
-    device_id: batch.device_id,
-    kind: item.kind || "unknown",
-    image: toUint8Array(item.image),
-    metadata: Array.isArray(item.metadata)
-      ? item.metadata
-          .filter(
-            (entry): entry is [string, string] =>
-              Array.isArray(entry) && entry.length === 2,
-          )
-          .map(([k, v]) => [String(k), String(v)])
-      : [],
-    batch_status: "unknown" as const,
-  }));
-
-  // Verify the batch chain and stamp the result on every item.
-  const status = await verifyBatch(
-    logItems,
-    batch.start_chain_hash,
-    batch.end_chain_hash,
-  ).catch(() => "failed" as const);
-  return logItems.map((item) => ({ ...item, batch_status: status }));
-}
-
-function jwtSub(token: string): string | null {
-  try {
-    const b64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
-    return JSON.parse(atob(padded)).sub ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function lastBlockLabel(isoStr: string): string {
-  const date = new Date(isoStr);
-  const diffMs = Date.now() - date.getTime();
-  const hrs = diffMs / 3_600_000;
-  if (hrs < 24) {
-    const mins = Math.floor(diffMs / 60_000);
-    if (mins < 1) return "last block received just now";
-    if (mins < 60)
-      return `last block received ${mins} minute${mins === 1 ? "" : "s"} ago`;
-    const h = Math.floor(mins / 60);
-    return `last block received ${h} hour${h === 1 ? "" : "s"} ago`;
-  }
-  return `last block received on ${date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}`;
+    return {
+      id: typeof event.id === "string" ? event.id : `${batch.id}:${index}`,
+      taken_at:
+        typeof event.ts === "number"
+          ? event.ts
+          : typeof event.taken_at === "number"
+            ? event.taken_at
+            : batch.end,
+      device_id: batch.device_id,
+      kind:
+        typeof event.type === "string"
+          ? event.type
+          : typeof event.kind === "string"
+            ? event.kind
+            : "unknown",
+      image,
+      metadata,
+      batch_status: "unknown" as const,
+      source: "batch" as const,
+    };
+  });
 }
 
 export function Logs() {
-  const { token } = useAuth();
+  const { token, userId } = useAuth();
   const e2ee = useE2EE();
   const { path } = useLocation();
 
-  // Own user ID derived from the JWT once
-  const ownUserId = token ? jwtSub(token) : null;
-
-  const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[] | null>(null);
+  const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string | null>(() =>
     new URLSearchParams(window.location.search).get("device_id"),
   );
   const [selectedUser, setSelectedUser] = useState<string | null>(() =>
     new URLSearchParams(window.location.search).get("user"),
   );
+  const [sidebarLoading, setSidebarLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-
   const [items, setItems] = useState<LogItem[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | undefined>(undefined);
+  const [nextCursor, setNextCursor] = useState<number | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  const [batchStats, setBatchStats] = useState<{
-    decrypted: number;
-    failed: number;
-    lastTime: string | null;
-  }>({ decrypted: 0, failed: 0, lastTime: null });
+  const [batchStats, setBatchStats] = useState({ decrypted: 0, skipped: 0 });
 
-  // The user whose key is needed: partner's userId when viewing partner logs, otherwise own
-  const activeUserId = selectedUser ?? ownUserId;
+  const activeUserId = selectedUser ?? userId;
   const activeKey = activeUserId ? e2ee.getKey(activeUserId) : null;
 
   useEffect(() => {
-    if (!token) return;
-    Promise.all([api.getDevices(token), api.getPartners(token)])
-      .then(async ([myDevices, partners]) => {
-        const monitored = partners.filter(
-          (p) => p.role === "partner" && p.status === "accepted",
-        );
-        const partnerGroups = await Promise.all(
-          monitored.map(async (p) => {
-            const devs = await api
-              .getDevices(token, { user: p.partner_user_id })
-              .catch(() => [] as Device[]);
-            return {
-              label: p.partner_email,
-              userId: p.partner_user_id,
-              devices: devs,
-            };
-          }),
-        );
-        setDeviceGroups([
-          { label: "My devices", userId: null, devices: myDevices },
-          ...partnerGroups,
-        ]);
-      })
-      .catch((err) =>
-        setLoadError(
-          err instanceof Error ? err.message : "Failed to load devices",
-        ),
-      );
-  }, [token]);
+    if (!token || !userId) return;
+    setSidebarLoading(true);
+    setLoadError(null);
 
-  // Reload when the active key or filter changes
+    Promise.all([api.getDevices(token), api.getPartners(token)])
+      .then(([devices, partners]) => {
+        const labels = new Map<string, string>();
+        labels.set(userId, "My devices");
+        for (const partner of partners) {
+          if (partner.partner.id) {
+            labels.set(
+              partner.partner.id,
+              partner.partner.name ?? partner.partner.email,
+            );
+          }
+        }
+
+        const grouped = new Map<string, Device[]>();
+        for (const device of devices) {
+          const current = grouped.get(device.owner) ?? [];
+          current.push(device);
+          grouped.set(device.owner, current);
+        }
+
+        const groups = Array.from(grouped.entries())
+          .sort(([a], [b]) => (a === userId ? -1 : b === userId ? 1 : a.localeCompare(b)))
+          .map(([owner, ownerDevices]) => ({
+            label: labels.get(owner) ?? `${owner.slice(0, 8)}…`,
+            userId: owner === userId ? null : owner,
+            devices: ownerDevices,
+          }));
+
+        setDeviceGroups(groups);
+      })
+      .catch((err) => {
+        setLoadError(err instanceof Error ? err.message : "Failed to load devices");
+      })
+      .finally(() => {
+        setSidebarLoading(false);
+      });
+  }, [token, userId]);
+
   useEffect(() => {
-    if (!activeKey || !token) return;
+    if (!token) return;
     setItems([]);
     setNextCursor(undefined);
-    setBatchStats({ decrypted: 0, failed: 0, lastTime: null });
-    doLoad(undefined, true);
-  }, [activeKey, token, selectedDevice, selectedUser]);
+    setBatchStats({ decrypted: 0, skipped: 0 });
+    void doLoad(undefined, true);
+  }, [token, selectedDevice, selectedUser, activeKey]);
 
-  async function doLoad(cursor: string | undefined, reset: boolean) {
-    if (!activeKey || !token) return;
+  async function doLoad(cursor: number | undefined, reset: boolean) {
+    if (!token) return;
     setLoading(true);
     setFetchError(null);
+
     try {
-      const userParam = selectedUser ?? ownUserId ?? undefined;
-      const deviceParam = selectedDevice ?? undefined;
-      const shared = {
-        user: userParam,
-        device_id: deviceParam,
+      const page = await api.getData(token, {
+        user: selectedUser ?? undefined,
+        device_id: selectedDevice ?? undefined,
         cursor,
-        limit: 10,
-      };
+        limit: 25,
+      });
 
-      const [batchPage, logPage] = await Promise.all([
-        api.getBatches(token, shared),
-        api.getLogs(token, shared),
-      ]);
+      const decryptedBatches = activeKey
+        ? await Promise.allSettled(page.batches.map((batch) => decryptAndFlattenBatch(batch, activeKey)))
+        : [];
 
-      // Decrypt batches
-      const nested = await Promise.allSettled(
-        batchPage.items.map((b) => decryptAndFlattenBatch(b, activeKey!)),
-      );
-      const batchFlat: LogItem[] = [];
-      let pageDecrypted = 0;
-      let pageFailed = 0;
-      for (const result of nested) {
+      const batchItems: LogItem[] = [];
+      let decrypted = 0;
+      let skipped = activeKey ? 0 : page.batches.length;
+
+      for (const result of decryptedBatches) {
         if (result.status === "fulfilled") {
-          batchFlat.push(
-            ...result.value.map((item) => ({
-              ...item,
-              source: "batch" as const,
-            })),
-          );
-          pageDecrypted++;
+          batchItems.push(...result.value);
+          decrypted += 1;
         } else {
-          console.error("[logs] failed to decrypt batch:", result.reason);
-          pageFailed++;
+          skipped += 1;
+          console.error("[logs] failed to decrypt batch", result.reason);
         }
       }
 
-      // Map alert log entries to LogItem
-      const logFlat: LogItem[] = logPage.items.map((entry: AlertLog) => ({
-        id: entry.id,
-        taken_at: new Date(entry.created_at).getTime(),
+      const directLogs = page.logs.map((entry, index) => ({
+        id: `${entry.device_id}:${entry.ts}:${index}`,
+        taken_at: entry.ts,
         device_id: entry.device_id,
-        kind: entry.kind,
-        metadata: entry.metadata,
+        kind: entry.type,
+        image: toUint8Array(entry.data.image),
+        metadata: toMetadata(entry.data),
         batch_status: "unknown" as const,
         source: "log" as const,
       }));
 
-      const pageLastTime = batchPage.items.reduce<string | null>((best, b) => {
-        if (!best) return b.end_time;
-        return b.end_time > best ? b.end_time : best;
-      }, null);
+      const merged = [...batchItems, ...directLogs].sort((a, b) => b.taken_at - a.taken_at);
+
+      setItems((prev) => (reset ? merged : [...prev, ...merged]));
+      setNextCursor(page.next_cursor);
       setBatchStats((prev) => ({
-        decrypted: (reset ? 0 : prev.decrypted) + pageDecrypted,
-        failed: (reset ? 0 : prev.failed) + pageFailed,
-        lastTime:
-          pageLastTime &&
-          (!prev.lastTime || reset || pageLastTime > prev.lastTime)
-            ? pageLastTime
-            : reset
-              ? pageLastTime
-              : prev.lastTime,
+        decrypted: (reset ? 0 : prev.decrypted) + decrypted,
+        skipped: (reset ? 0 : prev.skipped) + skipped,
       }));
-
-      // Merge batch items + alert log items, sort by taken_at desc
-      const merged = [...batchFlat, ...logFlat];
-      setItems((prev) => {
-        const combined = reset ? merged : [...prev, ...merged];
-        return combined.sort((a, b) => b.taken_at - a.taken_at);
-      });
-
-      // Shared cursor: the oldest created_at across both pages' last items
-      const batchCursor = batchPage.next_cursor;
-      const logCursor = logPage.next_cursor;
-      if (batchCursor || logCursor) {
-        // Pick the more-recent (larger) of the two so both sources advance together
-        const next =
-          batchCursor && logCursor
-            ? batchCursor > logCursor
-              ? logCursor
-              : batchCursor
-            : (batchCursor ?? logCursor);
-        setNextCursor(next);
-      } else {
-        setNextCursor(undefined);
-      }
     } catch (err) {
       console.error("[logs] load failed:", err);
       setFetchError(err instanceof Error ? err.message : "Failed to load logs");
@@ -281,46 +236,46 @@ export function Logs() {
     }
   }
 
-  const allDevices = deviceGroups?.flatMap((g) => g.devices) ?? [];
-  const deviceName = (id: string) =>
-    allDevices.find((d) => d.id === id)?.name ?? id.slice(0, 8) + "…";
-  const groupLabel = (userId: string) =>
-    deviceGroups?.find((g) => g.userId === userId)?.label ??
-    userId.slice(0, 8) + "…";
+  const allDevices = useMemo(
+    () => deviceGroups.flatMap((group) => group.devices),
+    [deviceGroups],
+  );
 
-  function select(userId: string | null, deviceId: string | null) {
-    setSelectedUser(userId);
-    setSelectedDevice(deviceId);
+  const deviceName = (id: string) => allDevices.find((device) => device.id === id)?.name ?? `${id.slice(0, 8)}…`;
+  const groupLabel = (ownerId: string) =>
+    deviceGroups.find((group) => group.userId === ownerId)?.label ?? `${ownerId.slice(0, 8)}…`;
+
+  function select(user: string | null, device: string | null) {
+    setSelectedUser(user);
+    setSelectedDevice(device);
     const qs = new URLSearchParams(window.location.search);
-    if (deviceId) qs.set("device_id", deviceId);
+    if (device) qs.set("device_id", device);
     else qs.delete("device_id");
-    if (userId) qs.set("user", userId);
+    if (user) qs.set("user", user);
     else qs.delete("user");
-    const search = qs.toString();
-    const newUrl = window.location.pathname + (search ? `?${search}` : "");
-    window.history.replaceState(null, "", newUrl);
+    const query = qs.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
   }
 
   const title = selectedDevice
-    ? `${selectedUser ? groupLabel(selectedUser) + " — " : ""}${deviceName(selectedDevice)}`
+    ? `${selectedUser ? `${groupLabel(selectedUser)} — ` : ""}${deviceName(selectedDevice)}`
     : selectedUser
       ? `${groupLabel(selectedUser)}'s logs`
       : "All logs";
 
   const isGallery = path === "/logs/gallery";
-  const galleryItems = items.filter(
-    (item): item is ImageLogItem => !!item.image,
-  );
+  const galleryItems = items.filter((item): item is ImageLogItem => Boolean(item.image));
 
   return (
     <div class="logs-page">
       <div class="logs-layout">
         <aside class="logs-sidebar">
           {loadError && <p class="sidebar-loading">{loadError}</p>}
-          {deviceGroups === null && !loadError && (
-            <p class="sidebar-loading">Loading…</p>
+          {sidebarLoading && !loadError && <p class="sidebar-loading">Loading…</p>}
+          {!sidebarLoading && deviceGroups.length === 0 && !loadError && (
+            <p class="sidebar-loading">No devices yet.</p>
           )}
-          {deviceGroups?.map((group) => (
+          {deviceGroups.map((group) => (
             <div class="sidebar-group" key={group.label}>
               <p class="sidebar-group-label">{group.label}</p>
               <ul class="device-list">
@@ -333,17 +288,15 @@ export function Logs() {
                     All
                   </button>
                 </li>
-                {group.devices.map((d) => (
-                  <li key={d.id}>
+                {group.devices.map((device) => (
+                  <li key={device.id}>
                     <button
-                      class={`device-btn${selectedDevice === d.id ? " active" : ""}`}
-                      onClick={() => select(group.userId, d.id)}
+                      class={`device-btn${selectedDevice === device.id ? " active" : ""}`}
+                      onClick={() => select(group.userId, device.id)}
                       type="button"
                     >
-                      <span
-                        class={`dot ${d.status === "online" ? "dot-green" : "dot-gray"}`}
-                      />
-                      {d.name}
+                      <span class={`dot ${device.status === "online" ? "dot-green" : "dot-gray"}`} />
+                      {device.name}
                     </button>
                   </li>
                 ))}
@@ -359,25 +312,17 @@ export function Logs() {
               <a class={`view-tab${!isGallery ? " active" : ""}`} href="/logs">
                 List
               </a>
-              <a
-                class={`view-tab${isGallery ? " active" : ""}`}
-                href="/logs/gallery"
-              >
+              <a class={`view-tab${isGallery ? " active" : ""}`} href="/logs/gallery">
                 Gallery
               </a>
             </div>
           </div>
 
           {fetchError && <p class="alert-error">{fetchError}</p>}
-
-          {activeKey && (batchStats.decrypted > 0 || batchStats.failed > 0) && (
+          {(batchStats.decrypted > 0 || batchStats.skipped > 0) && (
             <p class="logs-summary">
-              {batchStats.decrypted} block
-              {batchStats.decrypted === 1 ? "" : "s"} decrypted
-              {batchStats.failed > 0 &&
-                `, ${batchStats.failed} couldn't be decrypted`}
-              {batchStats.lastTime &&
-                `, ${lastBlockLabel(batchStats.lastTime)}`}
+              {batchStats.decrypted} block{batchStats.decrypted === 1 ? "" : "s"} decrypted
+              {batchStats.skipped > 0 && `, ${batchStats.skipped} block${batchStats.skipped === 1 ? "" : "s"} unavailable`}
             </p>
           )}
 
@@ -385,16 +330,16 @@ export function Logs() {
             <LogsGallery
               items={galleryItems}
               loading={loading}
-              hasMore={!!nextCursor}
-              onLoadMore={() => doLoad(nextCursor, false)}
+              hasMore={nextCursor !== undefined}
+              onLoadMore={() => void doLoad(nextCursor, false)}
               deviceName={deviceName}
             />
           ) : (
             <LogsList
               items={items}
               loading={loading}
-              hasMore={!!nextCursor}
-              onLoadMore={() => doLoad(nextCursor, false)}
+              hasMore={nextCursor !== undefined}
+              onLoadMore={() => void doLoad(nextCursor, false)}
               deviceName={deviceName}
             />
           )}

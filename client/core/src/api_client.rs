@@ -1,9 +1,11 @@
 use std::time::Duration;
 
-use chrono::{DateTime, SecondsFormat, Utc};
-use serde::{Deserialize, Serialize};
+use chrono::{DateTime, Utc};
+use serde::Serialize;
+use serde_json::Value;
 
 use crate::error::{CoreError, CoreResult};
+use crate::models::{Device, DeviceRegistration};
 use crate::resolve_base_api_url;
 
 #[derive(Clone)]
@@ -25,25 +27,15 @@ impl ApiClient {
         })
     }
 
-    pub async fn get_hash_server_url(
-        &self,
-        access_token: &str,
-        device_id: &str,
-    ) -> CoreResult<String> {
-        let url = format!("{}/hash-server?deviceId={}", self.base_url, device_id);
-        let response = self
-            .client
-            .get(url)
-            .bearer_auth(access_token)
-            .send()
-            .await?;
-
-        let body: HashServerResponse = decode_json(response).await?;
-        Ok(body.url)
+    pub async fn get_hash_server_url(&self, access_token: &str, device_id: &str) -> CoreResult<String> {
+        let device = self.get_device(access_token, device_id).await?;
+        device.hash_base_url.ok_or_else(|| {
+            CoreError::NotFound("device settings did not include hash_base_url".to_string())
+        })
     }
 
     pub async fn get_device(&self, access_token: &str, device_id: &str) -> CoreResult<Device> {
-        let url = format!("{}/device", self.base_url);
+        let url = format!("{}/d/device", self.base_url);
         let response = self
             .client
             .get(url)
@@ -51,11 +43,11 @@ impl ApiClient {
             .send()
             .await?;
 
-        let devices: Vec<Device> = decode_json(response).await?;
-        devices
-            .into_iter()
-            .find(|d| d.id == device_id)
-            .ok_or_else(|| CoreError::NotFound(format!("device {} not found", device_id)))
+        let device: Device = decode_json(response).await?;
+        if !device_id.is_empty() && device.id != device_id {
+            return Err(CoreError::NotFound(format!("device {} not found", device_id)));
+        }
+        Ok(device)
     }
 
     pub async fn register_device(
@@ -69,7 +61,7 @@ impl ApiClient {
             platform: platform.to_string(),
         };
 
-        let url = format!("{}/device", self.base_url);
+        let url = format!("{}/d/device", self.base_url);
         let response = self
             .client
             .post(url)
@@ -84,19 +76,21 @@ impl ApiClient {
     pub async fn create_alert_log(
         &self,
         access_token: &str,
-        device_id: &str,
+        _device_id: &str,
         kind: &str,
         metadata: &[(String, String)],
         created_at: DateTime<Utc>,
     ) -> CoreResult<()> {
         let request = CreateAlertLogRequest {
-            device_id: device_id.to_string(),
-            kind: kind.to_string(),
-            metadata: metadata.to_vec(),
-            created_at: created_at.to_rfc3339_opts(SecondsFormat::Millis, true),
+            ts: created_at.timestamp_millis(),
+            type_: kind.to_string(),
+            data: metadata
+                .iter()
+                .map(|(key, value)| (key.clone(), Value::String(value.clone())))
+                .collect(),
         };
 
-        let url = format!("{}/logs", self.base_url);
+        let url = format!("{}/d/log", self.base_url);
         let response = self
             .client
             .post(url)
@@ -105,20 +99,9 @@ impl ApiClient {
             .send()
             .await?;
 
-        let _: CreateAlertLogResponse = decode_json(response).await?;
+        let _: Value = decode_json(response).await?;
         Ok(())
     }
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct Device {
-    pub id: String,
-    pub enabled: bool,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct DeviceRegistration {
-    pub id: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -129,27 +112,10 @@ struct RegisterDeviceRequest {
 
 #[derive(Clone, Debug, Serialize)]
 struct CreateAlertLogRequest {
-    device_id: String,
-    kind: String,
-    metadata: Vec<(String, String)>,
-    created_at: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct HashServerResponse {
-    url: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct CreateAlertLogResponse {
-    #[allow(dead_code)]
-    log: CreatedAlertLog,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct CreatedAlertLog {
-    #[allow(dead_code)]
-    id: String,
+    ts: i64,
+    #[serde(rename = "type")]
+    type_: String,
+    data: serde_json::Map<String, Value>,
 }
 
 async fn decode_json<T: serde::de::DeserializeOwned>(response: reqwest::Response) -> CoreResult<T> {
