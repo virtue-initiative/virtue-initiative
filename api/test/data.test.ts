@@ -86,7 +86,7 @@ describe('Data and device API routes', () => {
     expect(resetRes.status).toBe(200);
   });
 
-  it('allows an accepted partner with view_data to read another user\'s data', async () => {
+  it("allows an accepted partner with view_data to read another user's data", async () => {
     const { token: ownerToken, userId: ownerUserId } = await signupAndGetToken('owner@example.com');
     const { token: partnerToken } = await signupAndGetToken('partner@example.com');
     const device = await createDeviceForUser(ownerToken);

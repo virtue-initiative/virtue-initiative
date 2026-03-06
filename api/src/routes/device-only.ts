@@ -73,20 +73,25 @@ async function resetHashState(hashBaseUrl: string, serverToken: string) {
 /**
  * POST /d/device - Register a device using a user access token.
  */
-deviceOnly.post('/device', authenticate('access'), validateZ('json', createDeviceSchema), async (c) => {
-  const { name, platform } = c.req.valid('json');
-  const owner = c.get('sub');
-  const id = uuidv4();
+deviceOnly.post(
+  '/device',
+  authenticate('access'),
+  validateZ('json', createDeviceSchema),
+  async (c) => {
+    const { name, platform } = c.req.valid('json');
+    const owner = c.get('sub');
+    const id = uuidv4();
 
-  await createDevice(c.env.DB, { id, owner, name, platform });
+    await createDevice(c.env.DB, { id, owner, name, platform });
 
-  const [accessToken, refreshToken] = await Promise.all([
-    generateToken('device-access', id, c.env.JWT_SECRET, DEVICE_ACCESS_TOKEN_TTL_SECONDS),
-    generateToken('device-refresh', id, c.env.JWT_SECRET, DEVICE_REFRESH_TOKEN_TTL_SECONDS),
-  ]);
+    const [accessToken, refreshToken] = await Promise.all([
+      generateToken('device-access', id, c.env.JWT_SECRET, DEVICE_ACCESS_TOKEN_TTL_SECONDS),
+      generateToken('device-refresh', id, c.env.JWT_SECRET, DEVICE_REFRESH_TOKEN_TTL_SECONDS),
+    ]);
 
-  return c.json({ id, access_token: accessToken, refresh_token: refreshToken }, 201);
-});
+    return c.json({ id, access_token: accessToken, refresh_token: refreshToken }, 201);
+  },
+);
 
 /**
  * GET /d/device - Get device settings for the authenticated device.
@@ -144,70 +149,80 @@ deviceOnly.post('/token', validateZ('json', deviceTokenSchema), async (c) => {
 /**
  * POST /d/batch - Upload an encrypted batch blob for the authenticated device.
  */
-deviceOnly.post('/batch', authenticate('device-access'), validateZ('form', uploadBatchSchema), async (c) => {
-  const device = await findDeviceById(c.env.DB, c.get('sub'));
+deviceOnly.post(
+  '/batch',
+  authenticate('device-access'),
+  validateZ('form', uploadBatchSchema),
+  async (c) => {
+    const device = await findDeviceById(c.env.DB, c.get('sub'));
 
-  if (!device) {
-    return c.json({ error: 'Not found' }, 404);
-  }
+    if (!device) {
+      return c.json({ error: 'Not found' }, 404);
+    }
 
-  const { start, end, file } = c.req.valid('form');
-  const authorization = c.req.header('Authorization');
+    const { start, end, file } = c.req.valid('form');
+    const authorization = c.req.header('Authorization');
 
-  if (!authorization) {
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
+    if (!authorization) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
 
-  const hashBaseUrl = getHashBaseUrl(c.req.url, c.env.HASH_SERVER_URL);
-  const hashState = await readHashState(hashBaseUrl, authorization);
-  const endHash = encodeHex(hashState);
-  const batchId = uuidv4();
-  const key = `user/${device.owner}/batches/${batchId}.enc`;
-  const url = `${c.env.R2_URL}/${key}`;
-  const createdAt = Date.now();
+    const hashBaseUrl = getHashBaseUrl(c.req.url, c.env.HASH_SERVER_URL);
+    const hashState = await readHashState(hashBaseUrl, authorization);
+    const endHash = encodeHex(hashState);
+    const batchId = uuidv4();
+    const key = `user/${device.owner}/batches/${batchId}.enc`;
+    const url = `${c.env.R2_URL}/${key}`;
+    const createdAt = Date.now();
 
-  await putObject(c.env, key, await file.arrayBuffer(), 'application/octet-stream');
-  await createBatch(c.env.DB, {
-    id: batchId,
-    user_id: device.owner,
-    device_id: device.id,
-    url,
-    start,
-    end,
-    end_hash: endHash,
-    created_at: createdAt,
-  });
-  await resetHashState(
-    hashBaseUrl,
-    await generateToken('server', device.id, c.env.JWT_SECRET, 60),
-  );
+    await putObject(c.env, key, await file.arrayBuffer(), 'application/octet-stream');
+    await createBatch(c.env.DB, {
+      id: batchId,
+      user_id: device.owner,
+      device_id: device.id,
+      url,
+      start,
+      end,
+      end_hash: endHash,
+      created_at: createdAt,
+    });
+    await resetHashState(
+      hashBaseUrl,
+      await generateToken('server', device.id, c.env.JWT_SECRET, 60),
+    );
 
-  return c.json({ id: batchId, start, end, end_hash: endHash, url }, 201);
-});
+    return c.json({ id: batchId, start, end, end_hash: endHash, url }, 201);
+  },
+);
 
 /**
  * POST /d/log - Submit a single non-batched log item.
  */
-deviceOnly.post('/log', authenticate('device-access'), validateZ('json', deviceLogSchema), async (c) => {
-  const device = await findDeviceById(c.env.DB, c.get('sub'));
+deviceOnly.post(
+  '/log',
+  authenticate('device-access'),
+  validateZ('json', deviceLogSchema),
+  async (c) => {
+    const device = await findDeviceById(c.env.DB, c.get('sub'));
 
-  if (!device) {
-    return c.json({ error: 'Not found' }, 404);
-  }
+    if (!device) {
+      return c.json({ error: 'Not found' }, 404);
+    }
 
-  const log = c.req.valid('json');
+    const log = c.req.valid('json');
 
-  await createDeviceLog(c.env.DB, {
-    id: uuidv4(),
-    user_id: device.owner,
-    device_id: device.id,
-    ts: log.ts,
-    type: log.type,
-    data: JSON.stringify(log.data),
-    created_at: Date.now(),
-  });
+    await createDeviceLog(c.env.DB, {
+      id: uuidv4(),
+      user_id: device.owner,
+      device_id: device.id,
+      ts: log.ts,
+      type: log.type,
+      data: JSON.stringify(log.data),
+      created_at: Date.now(),
+    });
 
-  return c.json(log, 201);
-});
+    return c.json(log, 201);
+  },
+);
 
 export default deviceOnly;

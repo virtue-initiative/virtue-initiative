@@ -30,7 +30,11 @@ data.get('/', authenticate('access'), validateZ('query', listDataSchema), async 
   ]);
 
   const combined = [
-    ...batches.map((batch) => ({ created_at: batch.created_at, kind: 'batch' as const, value: batch })),
+    ...batches.map((batch) => ({
+      created_at: batch.created_at,
+      kind: 'batch' as const,
+      value: batch,
+    })),
     ...logs.map((log) => ({ created_at: log.created_at, kind: 'log' as const, value: log })),
   ].sort((a, b) => b.created_at - a.created_at);
 

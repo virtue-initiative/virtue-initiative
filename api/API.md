@@ -477,11 +477,11 @@ Response
 
 Upload an encrypted batch as multipart form.
 
-| Field        | Type     | Description                       |
-| ------------ | -------- | --------------------------------- |
-| `file`       | binary   | Encrypted + compressed batch blob |
-| `start`      | DateTime | Start of batch window             |
-| `end`        | DateTime | End of batch window               |
+| Field   | Type     | Description                       |
+| ------- | -------- | --------------------------------- |
+| `file`  | binary   | Encrypted + compressed batch blob |
+| `start` | DateTime | Start of batch window             |
+| `end`   | DateTime | End of batch window               |
 
 Response `201`:
 

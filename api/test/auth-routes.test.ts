@@ -9,7 +9,11 @@ describe('Auth routes', () => {
     const res = await SELF.fetch(`${BASE}/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'alice@example.com', password: 'client-side-hash', name: 'Alice' }),
+      body: JSON.stringify({
+        email: 'alice@example.com',
+        password: 'client-side-hash',
+        name: 'Alice',
+      }),
     });
 
     expect(res.status).toBe(201);
@@ -49,7 +53,10 @@ describe('Auth routes', () => {
     const patchRes = await SELF.fetch(`${BASE}/user`, {
       method: 'PATCH',
       headers: authHeaders(token),
-      body: JSON.stringify({ name: 'Updated Carol', e2ee_key: Buffer.from('secret').toString('base64') }),
+      body: JSON.stringify({
+        name: 'Updated Carol',
+        e2ee_key: Buffer.from('secret').toString('base64'),
+      }),
     });
     expect(patchRes.status).toBe(200);
 
