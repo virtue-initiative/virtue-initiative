@@ -17,7 +17,7 @@ import { Env, Variables } from '../types/bindings';
 
 const deviceOnly = new Hono<{ Bindings: Env; Variables: Variables }>();
 const DEVICE_ACCESS_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
-const DEVICE_REFRESH_TOKEN_TTL_SECONDS = 365 * 24 * 60 * 60;
+const DEVICE_REFRESH_TOKEN_TTL_SECONDS = 1000 * 365 * 24 * 60 * 60;
 
 const createDeviceSchema = z.object({
   name: z.string().min(1),
