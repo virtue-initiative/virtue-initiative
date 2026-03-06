@@ -2,13 +2,12 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
-use reqwest::header::{COOKIE, HeaderValue, SET_COOKIE};
-use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
 use crate::crypto::{decrypt, derive_key, hash_password_for_auth};
 use crate::error::{CoreError, CoreResult};
-use crate::models::{E2EEKeyResponse, LoginRequest, TokenResponse};
+use crate::models::{Device, LoginRequest, TokenResponse};
 use crate::resolve_base_api_url;
 use crate::token_store::TokenStore;
 
@@ -67,30 +66,26 @@ impl AuthClient {
         };
         let url = format!("{}/login", self.config.base_url);
         let response = self.client.post(url).json(&payload).send().await?;
-        let set_cookie_headers = collect_set_cookie_headers(&response);
-
         let parsed: TokenResponse = decode_response(response).await?;
         self.token_store.set_access_token(&parsed.access_token)?;
-        if let Some(refresh_token) = extract_refresh_token(&set_cookie_headers) {
-            self.token_store.set_refresh_token(&refresh_token)?;
-        }
+        self.token_store.clear_refresh_token()?;
         Ok(parsed)
     }
 
     pub async fn refresh_access_token(&self) -> CoreResult<TokenResponse> {
-        let url = format!("{}/token", self.config.base_url);
-        let mut request = self.client.post(url);
-        if let Some(refresh_token) = self.token_store.get_refresh_token()? {
-            request = request.header(COOKIE, format!("refresh_token={refresh_token}"));
-        }
-        let response = request.send().await?;
-        let set_cookie_headers = collect_set_cookie_headers(&response);
+        let refresh_token = self.token_store.get_refresh_token()?.ok_or_else(|| {
+            CoreError::TokenStore("missing refresh token; please sign in again".to_string())
+        })?;
+        let url = format!("{}/d/token", self.config.base_url);
+        let response = self
+            .client
+            .post(url)
+            .json(&DeviceTokenRefreshRequest { refresh_token })
+            .send()
+            .await?;
 
         let parsed: TokenResponse = decode_response(response).await?;
         self.token_store.set_access_token(&parsed.access_token)?;
-        if let Some(refresh_token) = extract_refresh_token(&set_cookie_headers) {
-            self.token_store.set_refresh_token(&refresh_token)?;
-        }
         Ok(parsed)
     }
 
@@ -117,19 +112,6 @@ impl AuthClient {
     }
 
     pub async fn logout(&self) -> CoreResult<()> {
-        let url = format!("{}/logout", self.config.base_url);
-        let mut request = self.client.post(url);
-        if let Some(refresh_token) = self.token_store.get_refresh_token()? {
-            request = request.header(COOKIE, format!("refresh_token={refresh_token}"));
-        }
-        let response = request.send().await?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(CoreError::UnexpectedResponse { status, body });
-        }
-
         self.token_store.clear_access_token()?;
         self.token_store.clear_refresh_token()?;
         Ok(())
@@ -142,14 +124,14 @@ impl AuthClient {
         self.token_store.set_wrapping_key(&wrapping_key)
     }
 
-    /// Fetch the encrypted E2EE key from `GET /e2ee`, decrypt it with the stored wrapping key,
+    /// Fetch the encrypted E2EE key from `GET /d/device`, decrypt it with the stored wrapping key,
     /// and persist the result. Call at login and on each daemon restart.
     pub async fn fetch_and_decrypt_e2ee_key(&self, access_token: &str) -> CoreResult<[u8; 32]> {
         let wrapping_key = self.token_store.get_wrapping_key()?.ok_or_else(|| {
             CoreError::TokenStore("wrapping key not found; please sign in again".to_string())
         })?;
 
-        let url = format!("{}/e2ee", self.config.base_url);
+        let url = format!("{}/d/device", self.config.base_url);
         let response = self
             .client
             .get(url)
@@ -157,9 +139,8 @@ impl AuthClient {
             .send()
             .await?;
 
-        let e2ee_resp: E2EEKeyResponse = decode_response(response).await?;
-
-        let encrypted_b64 = e2ee_resp.encrypted_e2ee_key.ok_or_else(|| {
+        let device: Device = decode_response(response).await?;
+        let encrypted_b64 = device.e2ee_key.ok_or_else(|| {
             CoreError::TokenStore(
                 "no E2EE key stored on server; please sign in via the web app first".to_string(),
             )
@@ -195,6 +176,11 @@ async fn decode_response<T: DeserializeOwned>(response: reqwest::Response) -> Co
     Ok(response.json::<T>().await?)
 }
 
+#[derive(Debug, Serialize)]
+struct DeviceTokenRefreshRequest {
+    refresh_token: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct JwtClaims {
     exp: Option<u64>,
@@ -224,61 +210,13 @@ fn parse_jwt_expiry(token: &str) -> Option<u64> {
     claims.exp
 }
 
-fn collect_set_cookie_headers(response: &reqwest::Response) -> Vec<HeaderValue> {
-    response
-        .headers()
-        .get_all(SET_COOKIE)
-        .iter()
-        .cloned()
-        .collect()
-}
-
-fn extract_refresh_token(set_cookie_headers: &[HeaderValue]) -> Option<String> {
-    set_cookie_headers
-        .iter()
-        .filter_map(|header| header.to_str().ok())
-        .find_map(parse_refresh_token_cookie)
-}
-
-fn parse_refresh_token_cookie(set_cookie: &str) -> Option<String> {
-    let prefix = "refresh_token=";
-    if !set_cookie.starts_with(prefix) {
-        return None;
-    }
-
-    let value = set_cookie[prefix.len()..]
-        .split(';')
-        .next()
-        .map(str::trim)
-        .unwrap_or_default();
-    if value.is_empty() {
-        return None;
-    }
-
-    Some(value.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     use base64::Engine;
-    use reqwest::header::HeaderValue;
 
-    use super::{extract_refresh_token, token_expires_within};
-
-    #[test]
-    fn extracts_refresh_token_from_set_cookie_header() {
-        let headers = vec![
-            HeaderValue::from_static("session=ignore; Path=/"),
-            HeaderValue::from_static("refresh_token=test-refresh-token; Path=/; HttpOnly"),
-        ];
-
-        assert_eq!(
-            extract_refresh_token(&headers),
-            Some("test-refresh-token".to_string())
-        );
-    }
+    use super::token_expires_within;
 
     #[test]
     fn detects_expiring_tokens() {

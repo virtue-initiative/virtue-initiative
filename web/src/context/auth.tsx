@@ -81,7 +81,6 @@ export function AuthProvider({
     }
   }
 
-  // On mount, try to restore session from the httpOnly refresh cookie + wrapping key from localStorage
   useEffect(() => {
     Promise.all([
       api
@@ -115,7 +114,7 @@ export function AuthProvider({
     async (email: string, pw: string, name?: string) => {
       const pwHash = await hashPasswordForAuth(pw, email);
       const res = await api.signup(email, pwHash, name);
-      const uid = (res.user as { id: string }).id;
+      const uid = res.user.id;
       const wk = await deriveWrappingKey(pw, uid);
       await saveWrappingKey(wk);
       setToken(res.access_token);
@@ -127,12 +126,12 @@ export function AuthProvider({
   );
 
   const logout = useCallback(async () => {
-    if (token) await api.logout(token).catch(() => {});
+    await api.logout().catch(() => {});
     clearWrappingKey();
     setToken(null);
     setUserId(null);
     setWrappingKey(null);
-  }, [token]);
+  }, []);
 
   return (
     <AuthContext.Provider

@@ -28,27 +28,26 @@ pub async fn login_and_register_device(
     token_store: &dyn TokenStore,
     input: LoginCommandInput<'_>,
 ) -> CoreResult<LoginCommandResult> {
-    auth_client.login(input.email, input.password).await?;
-
-    let access_token = token_store
-        .get_access_token()?
-        .ok_or_else(|| CoreError::TokenStore("missing access token after login".to_string()))?;
+    let login = auth_client.login(input.email, input.password).await?;
+    let access_token = login.access_token;
 
     let user_id = parse_jwt_sub(&access_token).ok_or_else(|| {
         CoreError::TokenStore("could not extract user ID from access token".to_string())
     })?;
     auth_client.store_wrapping_key(input.password, &user_id)?;
-    auth_client
-        .fetch_and_decrypt_e2ee_key(&access_token)
-        .await?;
 
     let registration = api_client
         .register_device(&access_token, input.device_name, input.platform)
         .await?;
+    token_store.set_access_token(&registration.access_token)?;
+    token_store.set_refresh_token(&registration.refresh_token)?;
+    auth_client
+        .fetch_and_decrypt_e2ee_key(&registration.access_token)
+        .await?;
 
     let _ = api_client
         .create_alert_log(
-            &access_token,
+            &registration.access_token,
             &registration.id,
             "login",
             &[
@@ -87,7 +86,7 @@ pub async fn logout_and_clear_tokens_with_alert(
             .await;
     }
 
-    let _ = auth_client.logout().await;
+    auth_client.logout().await?;
     clear_local_tokens(token_store)
 }
 
