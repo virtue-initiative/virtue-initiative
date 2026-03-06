@@ -2,7 +2,12 @@ import { useState, useEffect } from "preact/hooks";
 import { useAuth } from "../../context/auth";
 import { useE2EE } from "../../context/e2ee";
 import { api } from "../../api";
-import { deriveKey, deriveWrappingKey, decryptBatch, encryptData } from "../../crypto";
+import {
+  deriveKey,
+  deriveWrappingKey,
+  decryptBatch,
+  encryptData,
+} from "../../crypto";
 import "./style.css";
 
 export function Settings() {
@@ -28,7 +33,10 @@ export function Settings() {
 
   useEffect(() => {
     if (!token) return;
-    api.getUser(token).then((user) => setName(user.name ?? "")).catch(() => {});
+    api
+      .getUser(token)
+      .then((user) => setName(user.name ?? ""))
+      .catch(() => {});
   }, [token]);
 
   async function saveName(e: Event) {
@@ -78,7 +86,9 @@ export function Settings() {
     setE2eeSaving(true);
     try {
       const e2eeKey = await deriveKey(newE2EEPassword, userId, true);
-      const rawE2EE = new Uint8Array(await crypto.subtle.exportKey("raw", e2eeKey));
+      const rawE2EE = new Uint8Array(
+        await crypto.subtle.exportKey("raw", e2eeKey),
+      );
       await e2ee.setKeyFromBytes(rawE2EE.buffer, userId);
       const encrypted = await encryptData(activeWK, rawE2EE);
       await api.updateUser(token, { e2ee_key: encrypted.toBase64() });
@@ -114,7 +124,9 @@ export function Settings() {
             />
           </div>
           {nameStatus && (
-            <p class={nameStatus === "Saved." ? "alert-success" : "alert-error"}>
+            <p
+              class={nameStatus === "Saved." ? "alert-success" : "alert-error"}
+            >
               {nameStatus}
             </p>
           )}
@@ -148,7 +160,11 @@ export function Settings() {
                 />
               </div>
               {unlockError && <p class="alert-error">{unlockError}</p>}
-              <button class="btn btn-primary" type="submit" disabled={unlocking}>
+              <button
+                class="btn btn-primary"
+                type="submit"
+                disabled={unlocking}
+              >
                 {unlocking ? "Verifying…" : "Unlock"}
               </button>
             </form>
@@ -181,7 +197,9 @@ export function Settings() {
                   type="password"
                   value={confirmE2EEPassword}
                   onInput={(e) => {
-                    setConfirmE2EEPassword((e.target as HTMLInputElement).value);
+                    setConfirmE2EEPassword(
+                      (e.target as HTMLInputElement).value,
+                    );
                     setE2eeError(null);
                   }}
                   placeholder="••••••••"
@@ -191,7 +209,11 @@ export function Settings() {
               </div>
               {e2eeError && <p class="alert-error">{e2eeError}</p>}
               {e2eeStatus && <p class="alert-success">{e2eeStatus}</p>}
-              <button class="btn btn-primary" type="submit" disabled={e2eeSaving}>
+              <button
+                class="btn btn-primary"
+                type="submit"
+                disabled={e2eeSaving}
+              >
                 {e2eeSaving ? "Updating…" : "Update E2EE key"}
               </button>
             </form>
