@@ -6,113 +6,85 @@ CREATE TABLE users (
   password_hash TEXT NOT NULL,
   name TEXT,
   e2ee_key BLOB,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  pub_key BLOB,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
 CREATE INDEX idx_users_email ON users(email);
 
 CREATE TABLE devices (
   id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
+  owner TEXT NOT NULL,
   name TEXT NOT NULL,
   platform TEXT NOT NULL,
-  avg_interval_seconds INTEGER NOT NULL DEFAULT 300,
   enabled INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  FOREIGN KEY (owner) REFERENCES users(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_devices_user_id ON devices(user_id);
-
--- Per-device rolling state for the new hash verification system.
--- new_state = sha256(current_state || content_hash) is verified on each log upload.
--- State resets to random bytes after each batch upload (returned to client).
-CREATE TABLE device_states (
-  device_id  TEXT PRIMARY KEY,
-  user_id    TEXT NOT NULL,
-  state      BLOB NOT NULL,  -- raw 32 bytes (current rolling state)
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  batch_start_state BLOB,
-  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
-  FOREIGN KEY (user_id)   REFERENCES users(id)   ON DELETE CASCADE
-);
-
-CREATE INDEX idx_device_states_user_id ON device_states(user_id);
+CREATE INDEX idx_devices_owner ON devices(owner);
 
 -- Encrypted 1-hour batch blobs stored in R2
-CREATE TABLE r2_batches (
+CREATE TABLE batches (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   device_id TEXT NOT NULL,
-  batch_url TEXT NOT NULL UNIQUE,
-  start_time TEXT NOT NULL,
-  end_time TEXT NOT NULL,
-  start_chain_hash TEXT NOT NULL, -- hex SHA-256
-  end_chain_hash TEXT NOT NULL,   -- hex SHA-256
-  item_count INTEGER NOT NULL DEFAULT 0,
-  size_bytes INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  url TEXT NOT NULL UNIQUE,
+  start INTEGER NOT NULL,
+  "end" INTEGER NOT NULL,
+  end_hash TEXT NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_r2_batches_user_id ON r2_batches(user_id);
-CREATE INDEX idx_r2_batches_device_id ON r2_batches(device_id);
-CREATE INDEX idx_r2_batches_start_time ON r2_batches(start_time);
-
--- Per-minute binary hash chain entries for tamper detection
-CREATE TABLE chain_hashes (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  device_id TEXT NOT NULL,
-  hash BLOB NOT NULL,              -- raw 32 bytes
-  client_timestamp TEXT NOT NULL,  -- ISO-8601 from client
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
-);
-
-CREATE INDEX idx_chain_hashes_user_device ON chain_hashes(user_id, device_id);
-CREATE INDEX idx_chain_hashes_client_timestamp ON chain_hashes(client_timestamp);
+CREATE INDEX idx_batches_user_id ON batches(user_id);
+CREATE INDEX idx_batches_device_id ON batches(device_id);
+CREATE INDEX idx_batches_created_at ON batches(created_at);
 
 CREATE TABLE partners (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
-  partner_user_id TEXT NOT NULL,
+  partner_user_id TEXT,
+  partner_email TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
-  permissions TEXT NOT NULL, -- JSON: { "view_data": true }
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  permissions TEXT NOT NULL,
   e2ee_key BLOB,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (partner_user_id) REFERENCES users(id) ON DELETE CASCADE,
-  UNIQUE(user_id, partner_user_id)
+  UNIQUE(user_id, partner_email)
 );
 
 CREATE INDEX idx_partners_user_id ON partners(user_id);
 CREATE INDEX idx_partners_partner_user_id ON partners(partner_user_id);
 CREATE INDEX idx_partners_status ON partners(status);
 
--- Non-encrypted immediate alert log entries sent directly from devices
-CREATE TABLE alert_logs (
+-- Non-encrypted immediate device log entries sent directly from devices
+CREATE TABLE device_logs (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   device_id TEXT NOT NULL,
-  kind TEXT NOT NULL,
-  metadata TEXT NOT NULL DEFAULT '[]', -- JSON: [[key, value], ...]
-  created_at TEXT NOT NULL,
+  ts INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  data TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_alert_logs_user_id ON alert_logs(user_id);
-CREATE INDEX idx_alert_logs_device_id ON alert_logs(device_id);
-CREATE INDEX idx_alert_logs_created_at ON alert_logs(created_at);
+CREATE INDEX idx_device_logs_user_id ON device_logs(user_id);
+CREATE INDEX idx_device_logs_device_id ON device_logs(device_id);
+CREATE INDEX idx_device_logs_created_at ON device_logs(created_at);
 
--- Settings stored as a single JSON blob for flexibility
-CREATE TABLE settings (
-  user_id TEXT PRIMARY KEY,
-  data TEXT NOT NULL DEFAULT '{}',
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+CREATE TABLE hash_states (
+  device_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  state BLOB NOT NULL,
+  updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+CREATE INDEX idx_hash_states_user_id ON hash_states(user_id);

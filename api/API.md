@@ -9,11 +9,11 @@ Base URL examples:
 
 ## Basic Types
 
+- `OpaqueString`: A string that the client shouldn't rely on
 - `Base64`: Base64 encoded data
 - `UUID`: A uuidv4
 - `DateTime`: A ms-precision timestamp using the unix epoch.
 - `Image`: A binary webp image blob.
-- `RefreshToken`: A JWT used for refreshing the AccessToken. The `sub` is the user id.
 - `AccessToken`: A short term JWT used for authenticating with the API. The `sub` is the user id.
 - `DeviceToken`: A non-expiring JWT that a device obtains. The `sub` is the device id.
 - `Argon2Hash`: A password pre-hashed with Argon2 using the user's email + the domain as a salt
@@ -110,7 +110,6 @@ The API must allow more fields to be added to `data`
   "id": UUID,
   "start": DateTime,
   "end": DateTime,
-  "start_hash": SHA256,
   "end_hash": SHA256,
   "url": "url hosting E2EEData(Compressed(Batch))",
 }
@@ -249,12 +248,11 @@ Response `200`:
 ```js
 [
   {
-    id: 'uuid',
-    owner: 'uuid',
+    id: UUID,
+    owner: UUID,
     name: 'My Laptop',
     platform: 'linux',
-    last_seen_at: '...',
-    last_upload_at: '...',
+    last_upload_at: DateTime,
     status: 'online',
     enabled: true,
   },
@@ -421,9 +419,11 @@ This is a "separate" API that device clients use.
 
 ## Authentication
 
-Authentication is done using the `Authorization: Bearer <token>` header.
+Authentication is done using the `Authorization: Bearer <DeviceToken>` header.
 
 All endpoints other than `POST /d/device` use the device token.
+
+DeviceTokens need to be renewed using `POST /d/token` ~ every 7 days.
 
 ## Endpoints
 
@@ -441,7 +441,7 @@ Request:
 Response `201`:
 
 ```js
-{ "id": "uuid", "created_at": DateTime, "token": DeviceToken }
+{ "id": "uuid", "access_token": DeviceToken, "refresh_token": OpaqueString }
 ```
 
 ### `GET /d/device`
@@ -459,6 +459,20 @@ Returns the device info/settings.
 }
 ```
 
+### `POST /d/token`
+
+Request:
+
+```js
+{ "refresh_token": OpaqueString }
+```
+
+Response
+
+```js
+{ "access_token": DeviceToken }
+```
+
 ### `POST /d/batch`
 
 Upload an encrypted batch as multipart form.
@@ -466,19 +480,18 @@ Upload an encrypted batch as multipart form.
 | Field        | Type     | Description                       |
 | ------------ | -------- | --------------------------------- |
 | `file`       | binary   | Encrypted + compressed batch blob |
-| `start_time` | DateTime | Start of batch window             |
-| `end_time`   | DateTime | End of batch window               |
+| `start`      | DateTime | Start of batch window             |
+| `end`        | DateTime | End of batch window               |
 
 Response `201`:
 
 ```js
 {
-  "batch": BatchData,
-  "new_start_hash": SHA256
+  ...BatchData,
 }
 ```
 
-### `POST /d/logs`
+### `POST /d/log`
 
 Adds a non-batched log.
 
@@ -494,7 +507,7 @@ Response `201`:
 
 ```js
 {
-  "log": Log
+  ...Log
 }
 ```
 
@@ -514,6 +527,16 @@ Upload a content hash as binary.
 
 - Content-Type: `application/octet-stream`
 - Body: exactly 32 bytes = `[content_hash:32B]`
+
+Response `200`:
+
+```js
+{ "ok": true }
+```
+
+### `DELETE /hash`
+
+Requires a special JWT with a type of "server"
 
 Response `200`:
 

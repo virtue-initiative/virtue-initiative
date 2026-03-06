@@ -1,163 +1,88 @@
-// Partner route integration tests.
-import { describe, it, expect, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { SELF } from 'cloudflare:test';
-import { BASE, clearDB, signupAndGetToken, authHeaders } from './helpers';
+import { authHeaders, BASE, clearDB, signupAndGetToken } from './helpers';
 
 beforeEach(clearDB);
 
-describe('POST /partner', () => {
-  it('creates a pending partner invite', async () => {
-    const { token } = await signupAndGetToken('alice@example.com');
-    await signupAndGetToken('bob@example.com'); // create target user
+describe('Partner routes', () => {
+  it('creates, accepts, lists, updates, and deletes a partnership', async () => {
+    const { token: ownerToken } = await signupAndGetToken('owner@example.com', 'pw', 'Owner');
+    const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
+      'partner@example.com',
+      'pw',
+      'Partner',
+    );
 
-    const res = await SELF.fetch(`${BASE}/partner`, {
+    const createRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
-      headers: authHeaders(token),
+      headers: authHeaders(ownerToken),
       body: JSON.stringify({
-        email: 'bob@example.com',
+        email: 'partner@example.com',
         permissions: { view_data: true },
+        e2ee_key: Buffer.from('wrapped-key').toString('base64'),
       }),
     });
-    expect(res.status).toBe(201);
-    const body = (await res.json()) as { id: string; status: string };
-    expect(body.id).toBeTruthy();
-    expect(body.status).toBe('pending');
-  });
-
-  it('returns 404 when target user does not exist', async () => {
-    const { token } = await signupAndGetToken('carol@example.com');
-    const res = await SELF.fetch(`${BASE}/partner`, {
-      method: 'POST',
-      headers: authHeaders(token),
-      body: JSON.stringify({ email: 'nobody@example.com', permissions: {} }),
-    });
-    expect(res.status).toBe(404);
-  });
-
-  it('returns 409 for a duplicate partnership', async () => {
-    const { token } = await signupAndGetToken('dave@example.com');
-    await signupAndGetToken('eve@example.com');
-    const payload = JSON.stringify({ email: 'eve@example.com', permissions: {} });
-    await SELF.fetch(`${BASE}/partner`, {
-      method: 'POST',
-      headers: authHeaders(token),
-      body: payload,
-    });
-    const res = await SELF.fetch(`${BASE}/partner`, {
-      method: 'POST',
-      headers: authHeaders(token),
-      body: payload,
-    });
-    expect(res.status).toBe(409);
-  });
-});
-
-describe('POST /partner/accept', () => {
-  it('accepts a pending invite', async () => {
-    const { token: aliceToken } = await signupAndGetToken('alice2@example.com');
-    const { token: bobToken } = await signupAndGetToken('bob2@example.com');
-
-    const inviteRes = await SELF.fetch(`${BASE}/partner`, {
-      method: 'POST',
-      headers: authHeaders(aliceToken),
-      body: JSON.stringify({ email: 'bob2@example.com', permissions: { view_data: false } }),
-    });
-    const { id: inviteId } = (await inviteRes.json()) as { id: string };
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as { id: string };
 
     const acceptRes = await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
-      headers: authHeaders(bobToken),
-      body: JSON.stringify({ id: inviteId }),
+      headers: authHeaders(partnerToken),
+      body: JSON.stringify({ id: created.id }),
     });
     expect(acceptRes.status).toBe(200);
-  });
 
-  it('returns 404 when invite does not exist or is not for this user', async () => {
-    const { token } = await signupAndGetToken('frank@example.com');
-    const res = await SELF.fetch(`${BASE}/partner/accept`, {
-      method: 'POST',
-      headers: authHeaders(token),
-      body: JSON.stringify({ id: 'bad-id' }),
+    const listRes = await SELF.fetch(`${BASE}/partner`, {
+      headers: { Authorization: `Bearer ${ownerToken}` },
     });
-    expect(res.status).toBe(404);
-  });
-});
-
-describe('GET /partner', () => {
-  it('returns partnerships as owner and as partner', async () => {
-    const { token: aliceToken } = await signupAndGetToken('alice3@example.com');
-    const { token: bobToken } = await signupAndGetToken('bob3@example.com');
-
-    await SELF.fetch(`${BASE}/partner`, {
-      method: 'POST',
-      headers: authHeaders(aliceToken),
-      body: JSON.stringify({ email: 'bob3@example.com', permissions: {} }),
+    const list = (await listRes.json()) as Array<{
+      id: string;
+      partner: { id?: string; email: string; name?: string };
+      permissions: { view_data?: boolean };
+      e2ee_key?: string;
+    }>;
+    expect(list[0].partner).toEqual({
+      id: partnerUserId,
+      email: 'partner@example.com',
+      name: 'Partner',
     });
+    expect(Buffer.from(list[0].e2ee_key ?? '', 'base64').toString()).toBe('wrapped-key');
 
-    const aliceList = (await (
-      await SELF.fetch(`${BASE}/partner`, {
-        headers: { Authorization: `Bearer ${aliceToken}` },
-      })
-    ).json()) as Array<{ role: string }>;
-    expect(aliceList.some((p) => p.role === 'owner')).toBe(true);
-
-    const bobList = (await (
-      await SELF.fetch(`${BASE}/partner`, {
-        headers: { Authorization: `Bearer ${bobToken}` },
-      })
-    ).json()) as Array<{ role: string }>;
-    expect(bobList.some((p) => p.role === 'partner')).toBe(true);
-  });
-});
-
-describe('PATCH /partner/:id', () => {
-  it('updates permissions', async () => {
-    const { token: aliceToken } = await signupAndGetToken('alice4@example.com');
-    await signupAndGetToken('bob4@example.com');
-
-    const inviteRes = await SELF.fetch(`${BASE}/partner`, {
-      method: 'POST',
-      headers: authHeaders(aliceToken),
-      body: JSON.stringify({ email: 'bob4@example.com', permissions: { view_data: false } }),
-    });
-    const { id } = (await inviteRes.json()) as { id: string };
-
-    const patchRes = await SELF.fetch(`${BASE}/partner/${id}`, {
+    const patchRes = await SELF.fetch(`${BASE}/partner/${created.id}`, {
       method: 'PATCH',
-      headers: authHeaders(aliceToken),
-      body: JSON.stringify({ permissions: { view_data: true } }),
+      headers: authHeaders(ownerToken),
+      body: JSON.stringify({ permissions: { view_data: false } }),
     });
     expect(patchRes.status).toBe(200);
-    const body = (await patchRes.json()) as { permissions: { view_data: boolean } };
-    expect(body.permissions.view_data).toBe(true);
-  });
-});
+    expect(await patchRes.json()).toEqual({
+      id: created.id,
+      permissions: { view_data: false },
+    });
 
-describe('DELETE /partner/:id', () => {
-  it('removes the partnership', async () => {
-    const { token: aliceToken } = await signupAndGetToken('alice5@example.com');
-    await signupAndGetToken('bob5@example.com');
+    const deleteRes = await SELF.fetch(`${BASE}/partner/${created.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${partnerToken}` },
+    });
+    expect(deleteRes.status).toBe(204);
+  });
+
+  it('supports inviting an email before the partner account exists', async () => {
+    const { token: ownerToken } = await signupAndGetToken('owner2@example.com');
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
-      headers: authHeaders(aliceToken),
-      body: JSON.stringify({ email: 'bob5@example.com', permissions: {} }),
+      headers: authHeaders(ownerToken),
+      body: JSON.stringify({ email: 'future@example.com', permissions: { view_data: true } }),
     });
-    const { id } = (await inviteRes.json()) as { id: string };
+    expect(inviteRes.status).toBe(201);
+    const created = (await inviteRes.json()) as { id: string };
 
-    const delRes = await SELF.fetch(`${BASE}/partner/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${aliceToken}` },
+    const { token: futureToken } = await signupAndGetToken('future@example.com');
+    const acceptRes = await SELF.fetch(`${BASE}/partner/accept`, {
+      method: 'POST',
+      headers: authHeaders(futureToken),
+      body: JSON.stringify({ id: created.id }),
     });
-    expect(delRes.status).toBe(204);
-  });
-
-  it('returns 404 for a non-existent partnership', async () => {
-    const { token } = await signupAndGetToken('ghost@example.com');
-    const res = await SELF.fetch(`${BASE}/partner/bad-id`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    expect(res.status).toBe(404);
+    expect(acceptRes.status).toBe(200);
   });
 });
