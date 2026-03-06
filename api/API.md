@@ -9,6 +9,8 @@ Base URL examples:
 
 ## Basic Types
 
+- `Base64`: Base64 encoded data
+- `UUID`: A uuidv4
 - `DateTime`: A ms-precision timestamp using the unix epoch.
 - `Image`: A binary webp image blob.
 - `RefreshToken`: A JWT used for refreshing the AccessToken. The `sub` is the user id.
@@ -23,16 +25,16 @@ Base URL examples:
 
 ## Error
 
-```json
+```js
 {
   "error": "Unauthorized",
-  "details": [object]
+  "details": Object
 }
 ```
 
 Validation errors (Zod treeified):
 
-```json
+```js
 {
   "error": "Bad Request",
   "details": {
@@ -44,7 +46,7 @@ Validation errors (Zod treeified):
 
 Unhandled server errors:
 
-```json
+```js
 {
   "error": "Internal server error",
   "details": {
@@ -57,7 +59,7 @@ Unhandled server errors:
 
 Base type.
 
-```json
+```js
 {
   "ts": DateTime,
   "type": "string",
@@ -71,7 +73,7 @@ The API must allow more fields to be added to `data`
 
 ### Image
 
-```json
+```js
 {
   "ts": DateTime,
   "type": "image",
@@ -83,7 +85,7 @@ The API must allow more fields to be added to `data`
 
 ### System Event
 
-```json
+```js
 {
   "ts": DateTime,
   "type": "system_event",
@@ -95,7 +97,7 @@ The API must allow more fields to be added to `data`
 
 ## Batch
 
-```json
+```js
 {
   "events": [Log]
 }
@@ -103,13 +105,13 @@ The API must allow more fields to be added to `data`
 
 ## BatchData
 
-```json
+```js
 {
-  "id": "uuid",
+  "id": UUID,
   "start": DateTime,
   "end": DateTime,
-  "start_hash": "SHA256",
-  "end_hash": "SHA256",
+  "start_hash": SHA256,
+  "end_hash": SHA256,
   "url": "url hosting E2EEData(Compressed(Batch))",
 }
 ```
@@ -128,7 +130,7 @@ The API must allow more fields to be added to `data`
 
 ### `GET /`
 
-```json
+```js
 {
   "name": "Virtue Initiative API",
   "version": "1.0.0",
@@ -144,24 +146,24 @@ The API must allow more fields to be added to `data`
 
 Request:
 
-```json
+```js
 {
   "email": "user@example.com",
   "password": "Argon2Hash",
-  "name": "optional string"
+  "name": "string" | undefined
 }
 ```
 
 Response `201`:
 
-```json
+```js
 {
   "user": {
     "id": "uuid",
     "email": "user@example.com",
-    "name": "string" or undefined,
+    "name": "string" | undefined,
   },
-  "access_token": "AccessToken"
+  "access_token": AccessToken
 }
 ```
 
@@ -171,17 +173,17 @@ Also sets `refresh_token` httpOnly cookie.
 
 Request:
 
-```json
+```js
 {
   "email": "user@example.com",
-  "password": "Argon2Hash"
+  "password": Argon2Hash
 }
 ```
 
 Response `200`:
 
-```json
-{ "access_token": "AccessToken" }
+```js
+{ "access_token": AccessToken }
 ```
 
 Also sets `refresh_token` httpOnly cookie.
@@ -198,7 +200,7 @@ Refreshes access token using `refresh_token` cookie.
 
 Response `201`:
 
-```json
+```js
 { "access_token": "AccessToken" }
 ```
 
@@ -206,12 +208,12 @@ Response `201`:
 
 Response `200`:
 
-```json
+```js
 {
   "id": "uuid",
   "email": "user@example.com",
   "name": "string" or undefined,
-  "e2ee_key": UserEncryptedData("base64") or undefined,
+  "e2ee_key": UserEncryptedData(Binary) | undefined,
 }
 ```
 
@@ -219,16 +221,16 @@ Response `200`:
 
 Request:
 
-```json
+```js
 {
-  "name": "optional string",
-  "e2ee_key": optional UserEncryptedData("base64"),
+  "name": "string" | undefined,
+  "e2ee_key": UserEncryptedData(Binary) | undefined,
 }
 ```
 
 Response `200`:
 
-```json
+```js
 { "ok": true }
 ```
 
@@ -244,40 +246,38 @@ List devices that a user has access to.
 
 Response `200`:
 
-```json
+```js
 [
   {
-    "id": "uuid",
-    "owner": "uuid",
-    "name": "My Laptop",
-    "platform": "linux",
-    "last_seen_at": "...",
-    "last_upload_at": "...",
-    "status": "online",
-    "enabled": true
-  }
-]
+    id: 'uuid',
+    owner: 'uuid',
+    name: 'My Laptop',
+    platform: 'linux',
+    last_seen_at: '...',
+    last_upload_at: '...',
+    status: 'online',
+    enabled: true,
+  },
+];
 ```
 
 ### `PATCH /device/:id`
 
 Request:
 
-```json
+```js
 { "name": "New Name", "enabled": true }
 ```
 
 Response `200`:
 
-```json
-{ "id": "uuid", "updated": true }
+```js
+{ "id": UUID, "updated": true }
 ```
 
 ---
 
 ## Batches and Logs
-
-All batch endpoints require `Authorization: Bearer <token>`.
 
 ### `GET /data`
 
@@ -286,17 +286,17 @@ List batches and other logs. Query params: `device_id?`, `user?`, `cursor?`,
 
 Response `200`:
 
-```json
+```js
 {
   "batches": [
     {
-      "device_id": "uuid",
+      "device_id": UUID,
       ...BatchData,
     }
   ],
   "logs": [
     {
-      "device_id": "uuid",
+      "device_id": UUID,
       ...Log,
     }
   ],
@@ -318,19 +318,19 @@ Invite partner by email.
 
 Request:
 
-```json
+```js
 {
   "email": "partner@example.com",
   "permissions": { "view_data": true },
 
   // If the account already exist
-  "e2ee_key": "optional PartnerEncryptedData(binary)"
+  "e2ee_key": PartnerEncryptedData(Binary) | undefined
 }
 ```
 
 Response `201`:
 
-```json
+```js
 { "id": "uuid", "status": "pending" }
 ```
 
@@ -338,13 +338,13 @@ Response `201`:
 
 Request:
 
-```json
+```js
 { "id": "partner_record_id" }
 ```
 
 Response `200`:
 
-```json
+```js
 { "id": "partner_record_id" }
 ```
 
@@ -352,21 +352,21 @@ Response `200`:
 
 Response `200`:
 
-```json
+```js
 [
   {
-    "id": "uuid",
-    "partner": {
-      "id": "uuid",
-      "email": "partner@example.com",
-      "name": "string" or undefined,
+    id: 'uuid',
+    partner: {
+      id: 'uuid',
+      email: 'partner@example.com',
+      name: 'string' | undefined,
     },
-    "status": "accepted",
-    "permissions": { "view_data": true },
-    "created_at": DateTime,
-    "e2ee_key": "optional PartnerEncryptedData(binary)"
-  }
-]
+    status: 'accepted',
+    permissions: { view_data: true },
+    created_at: DateTime,
+    e2ee_key: PartnerEncryptedData(binary) | undefined,
+  },
+];
 ```
 
 ### `PATCH /partner/:id` (auth required)
@@ -375,17 +375,17 @@ Owner can update.
 
 Request:
 
-```json
+```js
 {
   "permissions": { "view_data": true },
-  "e2ee_key" "PartnerEncryptedData(binary)"
+  "e2ee_key" PartnerEncryptedData(Binary)
 }
 ```
 
 Response `200`:
 
-```json
-{ "id": "uuid", "permissions": { "view_data": true } }
+```js
+{ "id": UUID, "permissions": { "view_data": true } }
 ```
 
 ### `DELETE /partner/:id` (auth required)
@@ -425,27 +425,27 @@ This creates a new device. It requires a user access token for the account
 
 Request:
 
-```json
+```js
 { "name": "My Laptop", "platform": "linux" }
 ```
 
 Response `201`:
 
-```json
-{ "id": "uuid", "created_at": DateTime, "token": "jwt" }
+```js
+{ "id": "uuid", "created_at": DateTime, "token": DeviceToken }
 ```
 
 ### `GET /d/device`
 
 Returns the device info/settings.
 
-```
+```js
 {
-    "id": "uuid",
+    "id": UUID,
     "name": "My Laptop",
     "platform": "linux",
     "enabled": true,
-    "e2ee_key": "base64",
+    "e2ee_key": Base64,
     "hash_base_url": "https://hash-server.example.com",
 }
 ```
@@ -462,10 +462,10 @@ Upload an encrypted batch as multipart form.
 
 Response `201`:
 
-```json
+```js
 {
   "batch": BatchData,
-  "new_start_hash": "SHA256"
+  "new_start_hash": SHA256
 }
 ```
 
@@ -475,15 +475,15 @@ Adds a non-batched log.
 
 Request:
 
-```json
+```js
 {
-  ...Log without "id",
+  ...Log, // Without "id"
 }
 ```
 
 Response `201`:
 
-```json
+```js
 {
   "log": Log
 }
@@ -508,7 +508,7 @@ Upload a content hash as binary.
 
 Response `200`:
 
-```json
+```js
 { "ok": true }
 ```
 
@@ -520,6 +520,6 @@ Content-Type: `application/octet-stream`
 
 Response `200`
 
-```json
+```
 [hash:16B]
 ```
