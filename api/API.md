@@ -15,7 +15,7 @@ Base URL examples:
 - `DateTime`: A ms-precision timestamp using the unix epoch.
 - `Image`: A binary webp image blob.
 - `AccessToken`: A short term JWT used for authenticating with the API. The `sub` is the user id.
-- `DeviceToken`: A non-expiring JWT that a device obtains. The `sub` is the device id.
+- `DeviceToken`: A JWT that a device obtains. The `sub` is the device id.
 - `Argon2Hash`: A password pre-hashed with Argon2 using the user's email + the domain as a salt
 - `SHA256`: A hex encoded SHA256 hash
 - `UserEncryptedData(...)`: Data encrypted with a key derived from the user's id and plaintext password.
@@ -421,9 +421,14 @@ This is a "separate" API that device clients use.
 
 Authentication is done using the `Authorization: Bearer <DeviceToken>` header.
 
-All endpoints other than `POST /d/device` use the device token.
+`POST /d/device` uses a user access token.
+`POST /d/token` uses a device refresh token in the request body.
+`GET /d/device`, `POST /d/batch`, and `POST /d/log` use a device access token.
 
-DeviceTokens need to be renewed using `POST /d/token` ~ every 7 days.
+Current server defaults:
+
+- Device access token TTL: ~7 days
+- Device refresh token TTL: `1000 * 365` days (very long-lived)
 
 ## Endpoints
 
@@ -441,7 +446,7 @@ Request:
 Response `201`:
 
 ```js
-{ "id": "uuid", "access_token": DeviceToken, "refresh_token": OpaqueString }
+{ "id": "uuid", "access_token": DeviceToken, "refresh_token": DeviceToken }
 ```
 
 ### `GET /d/device`
@@ -454,7 +459,7 @@ Returns the device info/settings.
     "name": "My Laptop",
     "platform": "linux",
     "enabled": true,
-    "e2ee_key": Base64,
+    "e2ee_key": Base64 | undefined,
     "hash_base_url": "https://hash-server.example.com",
 }
 ```
@@ -464,7 +469,7 @@ Returns the device info/settings.
 Request:
 
 ```js
-{ "refresh_token": OpaqueString }
+{ "refresh_token": DeviceToken }
 ```
 
 Response
@@ -519,7 +524,8 @@ For each batch item hash upload:
 new_state = sha256(current_state || content_hash)
 ```
 
-All hash endpoints require `Authorization: Bearer <DeviceToken>`.
+`POST /hash` and `GET /hash` require `Authorization: Bearer <DeviceToken>`.
+`DELETE /hash` requires a server JWT (`type: "server"`).
 
 ### `POST /hash`
 
@@ -553,5 +559,5 @@ Content-Type: `application/octet-stream`
 Response `200`
 
 ```
-[hash:16B]
+[hash:32B]
 ```
