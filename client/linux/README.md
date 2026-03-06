@@ -26,6 +26,21 @@ Before `virtue login`, monitoring is idle because there is no token/device bindi
 After `virtue login`, captures and uploads start automatically.
 The tray icon (when available) is started and stopped by the daemon process.
 If a tray host is unavailable, monitoring continues and the daemon retries tray registration in the background.
+Linux alert logs include:
+
+- `daemon_start` / `daemon_stop_signal` for service process lifecycle.
+- `system_startup` when a new kernel boot is detected (via boot-id change).
+- `system_shutdown` when stop signal arrives while the host is in systemd `stopping` state.
+
+`system_shutdown` is best-effort: abrupt power loss, kernel panic, or very late shutdown network teardown can still prevent immediate delivery.
+
+### Lifecycle Log Distro Support
+
+- Officially supported install path: Debian/Ubuntu-family distributions using the packaged `.deb`.
+- Lifecycle logs (`system_startup` / `system_shutdown`) are supported on Linux distributions that use:
+  - `systemd` (for service lifecycle and shutdown-state detection), and
+  - procfs with `/proc/sys/kernel/random/boot_id` (startup detection).
+- Non-systemd distributions are not currently supported for system lifecycle logs.
 
 Capture/upload timing is env-driven:
 

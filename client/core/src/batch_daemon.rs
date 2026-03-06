@@ -190,11 +190,41 @@ pub async fn run_batch_daemon<H: ServiceHost>(
         }
     }
 
+    let persisted_device_id = match ctx.host.load_persisted_state() {
+        Ok(state) => state.device_id,
+        Err(err) => {
+            emit_warn(
+                ctx.host,
+                &format!("state read failed while draining shutdown alerts: {err}"),
+            );
+            None
+        }
+    };
+    let final_device_id = persisted_device_id.or_else(|| {
+        runtime
+            .device_settings
+            .as_ref()
+            .map(|settings| settings.id.clone())
+    });
+
+    if collect_alert_events(
+        ctx.host,
+        &mut runtime.alert_queue,
+        final_device_id.as_deref(),
+    )? {
+        save_alert_log_queue(ctx.alert_queue_path, &runtime.alert_queue);
+    }
+
+    let flush_device_id = final_device_id.or_else(|| {
+        runtime
+            .alert_queue
+            .iter()
+            .find_map(|item| item.device_id.as_ref().cloned())
+    });
+
     if !runtime.alert_queue.is_empty()
-        && let (Some(access_token), Some(device_id)) = (
-            token_store.get_access_token()?,
-            ctx.host.load_persisted_state()?.device_id,
-        )
+        && let (Some(access_token), Some(device_id)) =
+            (token_store.get_access_token()?, flush_device_id)
     {
         flush_alert_log_queue(
             ctx.host,
