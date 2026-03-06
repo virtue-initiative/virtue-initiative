@@ -308,11 +308,20 @@ Response `200`:
 
 ## Partners
 
+Flow
+
+1. User requests a partner
+2. Web client checks for the public key `GET /pubkey?email=me@example.com`
+3. If it's there, web client encrypts the `e2ee_key` with the public key
+4. Web client sends `POST /partner`
+5. Partner logs in or creates an account and sends `POST /partner/accept`
+6. (If the public key didn't exist) The original user runs `PUT /partner/:id` and add the encrypted e2ee key.
+
 ### `GET /pubkey?email=[email]`
 
 Gets the public key for a user (used to distribute the e2ee_key)
 
-### `POST /partner` (auth required)
+### `POST /partner`
 
 Invite partner by email.
 
@@ -334,7 +343,7 @@ Response `201`:
 { "id": "uuid", "status": "pending" }
 ```
 
-### `POST /partner/accept` (auth required)
+### `POST /partner/accept`
 
 Request:
 
@@ -348,7 +357,7 @@ Response `200`:
 { "id": "partner_record_id" }
 ```
 
-### `GET /partner` (auth required)
+### `GET /partner`
 
 Response `200`:
 
