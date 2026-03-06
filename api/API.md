@@ -181,7 +181,7 @@ Request:
 Response `200`:
 
 ```json
-{ "access_token": "AccessToken"}
+{ "access_token": "AccessToken" }
 ```
 
 Also sets `refresh_token` httpOnly cookie.
@@ -310,7 +310,7 @@ Response `200`:
 
 ### `GET /pubkey?email=[email]`
 
-Gets the public key for a user (used to distribute the e2ee\_key)
+Gets the public key for a user (used to distribute the e2ee_key)
 
 ### `POST /partner` (auth required)
 
@@ -324,7 +324,7 @@ Request:
   "permissions": { "view_data": true },
 
   // If the account already exist
-  "e2ee_key": "optional PartnerEncryptedData(binary)",
+  "e2ee_key": "optional PartnerEncryptedData(binary)"
 }
 ```
 
@@ -412,7 +412,9 @@ This is a "separate" API that device clients use.
 
 ## Authentication
 
-Authentication is done using a non-expiring JWT that contain the device id.
+Authentication is done using the `Authorization: Bearer <token>` header.
+
+All endpoints other than `POST /d/device` use the device token.
 
 ## Endpoints
 
@@ -521,4 +523,3 @@ Response `200`
 ```json
 [hash:16B]
 ```
-
