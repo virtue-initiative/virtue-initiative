@@ -21,6 +21,7 @@ jobs:
             api/package-lock.json
             web/package-lock.json
             help/package-lock.json
+            landing/package-lock.json
 
       - name: Install API dependencies
         run: npm ci
@@ -33,6 +34,10 @@ jobs:
       - name: Install Help dependencies
         run: npm ci
         working-directory: help
+
+      - name: Install Landing dependencies
+        run: npm ci
+        working-directory: landing
 
       - name: API type check
         run: npm run typecheck
@@ -61,3 +66,7 @@ jobs:
       - name: Help Prettier check
         run: npm run prettier:check
         working-directory: help
+
+      - name: Landing Prettier check
+        run: npm run prettier:check
+        working-directory: landing
