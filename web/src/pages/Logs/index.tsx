@@ -35,7 +35,10 @@ function toMetadata(data: Record<string, unknown>) {
     .filter(([key]) => key !== "image")
     .map(
       ([key, value]) =>
-        [key, typeof value === "string" ? value : JSON.stringify(value)] as [string, string],
+        [key, typeof value === "string" ? value : JSON.stringify(value)] as [
+          string,
+          string,
+        ],
     );
 }
 
@@ -46,11 +49,16 @@ function toMetadataEntries(value: unknown): [string, string][] {
     if (!Array.isArray(entry) || entry.length < 2) return [];
     const [key, rawValue] = entry;
     if (typeof key !== "string") return [];
-    return [[key, typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)]];
+    return [
+      [key, typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)],
+    ];
   });
 }
 
-async function decryptAndFlattenBatch(batch: Batch, key: CryptoKey): Promise<LogItem[]> {
+async function decryptAndFlattenBatch(
+  batch: Batch,
+  key: CryptoKey,
+): Promise<LogItem[]> {
   const resp = await fetch(batch.url);
   if (!resp.ok) {
     throw new Error(`Fetch failed (${resp.status}) for ${batch.url}`);
@@ -64,7 +72,10 @@ async function decryptAndFlattenBatch(batch: Batch, key: CryptoKey): Promise<Log
   const decrypted = await decryptBatch(key, raw);
   const decompressed = await decompressGzip(decrypted);
   const decoded = decode(decompressed) as unknown;
-  const record = decoded && typeof decoded === "object" ? (decoded as Record<string, unknown>) : {};
+  const record =
+    decoded && typeof decoded === "object"
+      ? (decoded as Record<string, unknown>)
+      : {};
   const events = Array.isArray(record.events)
     ? (record.events as Record<string, unknown>[])
     : Array.isArray(record.items)
@@ -77,9 +88,12 @@ async function decryptAndFlattenBatch(batch: Batch, key: CryptoKey): Promise<Log
         ? (event.data as Record<string, unknown>)
         : {};
     const metadata =
-      "metadata" in event ? toMetadataEntries(event.metadata) : toMetadata(data);
+      "metadata" in event
+        ? toMetadataEntries(event.metadata)
+        : toMetadata(data);
     const image =
-      toUint8Array("image" in event ? event.image : undefined) ?? toUint8Array(data.image);
+      toUint8Array("image" in event ? event.image : undefined) ??
+      toUint8Array(data.image);
 
     return {
       id: typeof event.id === "string" ? event.id : `${batch.id}:${index}`,
@@ -153,7 +167,9 @@ export function Logs() {
         }
 
         const groups = Array.from(grouped.entries())
-          .sort(([a], [b]) => (a === userId ? -1 : b === userId ? 1 : a.localeCompare(b)))
+          .sort(([a], [b]) =>
+            a === userId ? -1 : b === userId ? 1 : a.localeCompare(b),
+          )
           .map(([owner, ownerDevices]) => ({
             label: labels.get(owner) ?? `${owner.slice(0, 8)}…`,
             userId: owner === userId ? null : owner,
@@ -163,7 +179,9 @@ export function Logs() {
         setDeviceGroups(groups);
       })
       .catch((err) => {
-        setLoadError(err instanceof Error ? err.message : "Failed to load devices");
+        setLoadError(
+          err instanceof Error ? err.message : "Failed to load devices",
+        );
       })
       .finally(() => {
         setSidebarLoading(false);
@@ -192,7 +210,11 @@ export function Logs() {
       });
 
       const decryptedBatches = activeKey
-        ? await Promise.allSettled(page.batches.map((batch) => decryptAndFlattenBatch(batch, activeKey)))
+        ? await Promise.allSettled(
+            page.batches.map((batch) =>
+              decryptAndFlattenBatch(batch, activeKey),
+            ),
+          )
         : [];
 
       const batchItems: LogItem[] = [];
@@ -220,7 +242,9 @@ export function Logs() {
         source: "log" as const,
       }));
 
-      const merged = [...batchItems, ...directLogs].sort((a, b) => b.taken_at - a.taken_at);
+      const merged = [...batchItems, ...directLogs].sort(
+        (a, b) => b.taken_at - a.taken_at,
+      );
 
       setItems((prev) => (reset ? merged : [...prev, ...merged]));
       setNextCursor(page.next_cursor);
@@ -241,9 +265,11 @@ export function Logs() {
     [deviceGroups],
   );
 
-  const deviceName = (id: string) => allDevices.find((device) => device.id === id)?.name ?? `${id.slice(0, 8)}…`;
+  const deviceName = (id: string) =>
+    allDevices.find((device) => device.id === id)?.name ?? `${id.slice(0, 8)}…`;
   const groupLabel = (ownerId: string) =>
-    deviceGroups.find((group) => group.userId === ownerId)?.label ?? `${ownerId.slice(0, 8)}…`;
+    deviceGroups.find((group) => group.userId === ownerId)?.label ??
+    `${ownerId.slice(0, 8)}…`;
 
   function select(user: string | null, device: string | null) {
     setSelectedUser(user);
@@ -254,7 +280,11 @@ export function Logs() {
     if (user) qs.set("user", user);
     else qs.delete("user");
     const query = qs.toString();
-    window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${query ? `?${query}` : ""}`,
+    );
   }
 
   const title = selectedDevice
@@ -264,14 +294,18 @@ export function Logs() {
       : "All logs";
 
   const isGallery = path === "/logs/gallery";
-  const galleryItems = items.filter((item): item is ImageLogItem => Boolean(item.image));
+  const galleryItems = items.filter((item): item is ImageLogItem =>
+    Boolean(item.image),
+  );
 
   return (
     <div class="logs-page">
       <div class="logs-layout">
         <aside class="logs-sidebar">
           {loadError && <p class="sidebar-loading">{loadError}</p>}
-          {sidebarLoading && !loadError && <p class="sidebar-loading">Loading…</p>}
+          {sidebarLoading && !loadError && (
+            <p class="sidebar-loading">Loading…</p>
+          )}
           {!sidebarLoading && deviceGroups.length === 0 && !loadError && (
             <p class="sidebar-loading">No devices yet.</p>
           )}
@@ -295,7 +329,9 @@ export function Logs() {
                       onClick={() => select(group.userId, device.id)}
                       type="button"
                     >
-                      <span class={`dot ${device.status === "online" ? "dot-green" : "dot-gray"}`} />
+                      <span
+                        class={`dot ${device.status === "online" ? "dot-green" : "dot-gray"}`}
+                      />
                       {device.name}
                     </button>
                   </li>
@@ -312,7 +348,10 @@ export function Logs() {
               <a class={`view-tab${!isGallery ? " active" : ""}`} href="/logs">
                 List
               </a>
-              <a class={`view-tab${isGallery ? " active" : ""}`} href="/logs/gallery">
+              <a
+                class={`view-tab${isGallery ? " active" : ""}`}
+                href="/logs/gallery"
+              >
                 Gallery
               </a>
             </div>
@@ -321,8 +360,10 @@ export function Logs() {
           {fetchError && <p class="alert-error">{fetchError}</p>}
           {(batchStats.decrypted > 0 || batchStats.skipped > 0) && (
             <p class="logs-summary">
-              {batchStats.decrypted} block{batchStats.decrypted === 1 ? "" : "s"} decrypted
-              {batchStats.skipped > 0 && `, ${batchStats.skipped} block${batchStats.skipped === 1 ? "" : "s"} unavailable`}
+              {batchStats.decrypted} block
+              {batchStats.decrypted === 1 ? "" : "s"} decrypted
+              {batchStats.skipped > 0 &&
+                `, ${batchStats.skipped} block${batchStats.skipped === 1 ? "" : "s"} unavailable`}
             </p>
           )}
 

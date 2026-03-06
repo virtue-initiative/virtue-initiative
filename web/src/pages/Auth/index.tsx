@@ -24,10 +24,11 @@ export function Auth() {
     setLoading(true);
     try {
       if (mode === "login") {
-        const { access_token, userId, wrappingKey: wk } = await login(
-          email,
-          password,
-        );
+        const {
+          access_token,
+          userId,
+          wrappingKey: wk,
+        } = await login(email, password);
         await restoreE2EEKeys(access_token, userId, wk);
       } else {
         if (password !== confirm) {
@@ -40,11 +41,11 @@ export function Auth() {
           setLoading(false);
           return;
         }
-        const { access_token, userId, wrappingKey: wk } = await signup(
-          email,
-          password,
-          name || undefined,
-        );
+        const {
+          access_token,
+          userId,
+          wrappingKey: wk,
+        } = await signup(email, password, name || undefined);
         await setupE2EEKey(access_token, userId, e2eePassword, wk);
       }
     } catch (err: unknown) {
@@ -61,7 +62,9 @@ export function Auth() {
     wk: CryptoKey,
   ) {
     const e2eeKey = await deriveKey(e2eePass, uid, true);
-    const rawE2EE = new Uint8Array(await crypto.subtle.exportKey("raw", e2eeKey));
+    const rawE2EE = new Uint8Array(
+      await crypto.subtle.exportKey("raw", e2eeKey),
+    );
     await e2ee.setKeyFromBytes(rawE2EE.buffer, uid);
     const encrypted = await encryptData(wk, rawE2EE);
     await api.updateUser(token, { e2ee_key: encrypted.toBase64() });
@@ -70,7 +73,10 @@ export function Auth() {
   async function restoreE2EEKeys(token: string, uid: string, wk: CryptoKey) {
     const user = await api.getUser(token);
     if (user.e2ee_key) {
-      const rawE2EE = await decryptBatch(wk, Uint8Array.fromBase64(user.e2ee_key));
+      const rawE2EE = await decryptBatch(
+        wk,
+        Uint8Array.fromBase64(user.e2ee_key),
+      );
       await e2ee.setKeyFromBytes(rawE2EE.buffer, uid);
     }
 
@@ -165,7 +171,9 @@ export function Auth() {
               value={password}
               onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
               placeholder={mode === "signup" ? "Choose a password" : "••••••••"}
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
+              autoComplete={
+                mode === "login" ? "current-password" : "new-password"
+              }
               required
             />
           </div>
@@ -177,7 +185,9 @@ export function Auth() {
                 id="confirm"
                 type="password"
                 value={confirm}
-                onInput={(e) => setConfirm((e.target as HTMLInputElement).value)}
+                onInput={(e) =>
+                  setConfirm((e.target as HTMLInputElement).value)
+                }
                 placeholder="••••••••"
                 autoComplete="new-password"
                 required
@@ -193,7 +203,9 @@ export function Auth() {
                   id="e2ee-password"
                   type="password"
                   value={e2eePassword}
-                  onInput={(e) => setE2EEPassword((e.target as HTMLInputElement).value)}
+                  onInput={(e) =>
+                    setE2EEPassword((e.target as HTMLInputElement).value)
+                  }
                   placeholder="Encryption password"
                   autoComplete="new-password"
                   required
@@ -205,7 +217,9 @@ export function Auth() {
                   id="confirm-e2ee"
                   type="password"
                   value={confirmE2EE}
-                  onInput={(e) => setConfirmE2EE((e.target as HTMLInputElement).value)}
+                  onInput={(e) =>
+                    setConfirmE2EE((e.target as HTMLInputElement).value)
+                  }
                   placeholder="••••••••"
                   autoComplete="new-password"
                   required
@@ -216,8 +230,16 @@ export function Auth() {
 
           {error && <p class="alert-error">{error}</p>}
 
-          <button class="btn btn-primary auth-submit" type="submit" disabled={loading}>
-            {loading ? "Please wait…" : mode === "login" ? "Log in" : "Create account"}
+          <button
+            class="btn btn-primary auth-submit"
+            type="submit"
+            disabled={loading}
+          >
+            {loading
+              ? "Please wait…"
+              : mode === "login"
+                ? "Log in"
+                : "Create account"}
           </button>
         </form>
       </div>

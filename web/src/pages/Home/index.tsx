@@ -57,7 +57,9 @@ export function Home() {
         setPartners(partnerList);
       })
       .catch((err) =>
-        setError(err instanceof Error ? err.message : "Failed to load dashboard"),
+        setError(
+          err instanceof Error ? err.message : "Failed to load dashboard",
+        ),
       );
   }
 
@@ -151,7 +153,9 @@ export function Home() {
           <PartnerDevicesSection
             key={partner.id}
             partner={partner}
-            devices={devices.filter((device) => device.owner === partner.partner.id)}
+            devices={devices.filter(
+              (device) => device.owner === partner.partner.id,
+            )}
           />
         ))}
     </div>
@@ -200,7 +204,11 @@ function InviteButton({
 
   return (
     <>
-      <Button className="btn-primary btn-sm" onClick={open} icon={<UserPlusIcon />}>
+      <Button
+        className="btn-primary btn-sm"
+        onClick={open}
+        icon={<UserPlusIcon />}
+      >
         Invite partner
       </Button>
       <dialog ref={dialogRef}>
@@ -222,13 +230,19 @@ function InviteButton({
             <input
               type="checkbox"
               checked={viewData}
-              onChange={(e) => setViewData((e.target as HTMLInputElement).checked)}
+              onChange={(e) =>
+                setViewData((e.target as HTMLInputElement).checked)
+              }
             />
             Can view data
           </label>
           {error && <p class="alert-error">{error}</p>}
           <div class="invite-actions">
-            <button class="btn btn-primary btn-sm" type="submit" disabled={loading}>
+            <button
+              class="btn btn-primary btn-sm"
+              type="submit"
+              disabled={loading}
+            >
               {loading ? "Sending…" : "Send invite"}
             </button>
             <button class="btn btn-ghost btn-sm" type="button" onClick={close}>
@@ -284,7 +298,9 @@ function PendingPartnerCard({
   return (
     <div class="card card-highlight">
       <div class="card-header">
-        <span class="card-name">{partner.partner.name ?? partner.partner.email}</span>
+        <span class="card-name">
+          {partner.partner.name ?? partner.partner.email}
+        </span>
         <span class="badge badge-yellow">Pending</span>
       </div>
       <p class="invite-desc">
@@ -300,10 +316,20 @@ function PendingPartnerCard({
       </dl>
       {error && <p class="alert-error">{error}</p>}
       <div class="card-actions">
-        <button class="btn btn-primary btn-sm" type="button" onClick={accept} disabled={loading}>
+        <button
+          class="btn btn-primary btn-sm"
+          type="button"
+          onClick={accept}
+          disabled={loading}
+        >
           {loading ? "Working…" : "Accept"}
         </button>
-        <button class="btn btn-danger btn-sm" type="button" onClick={remove} disabled={loading}>
+        <button
+          class="btn btn-danger btn-sm"
+          type="button"
+          onClick={remove}
+          disabled={loading}
+        >
           Remove
         </button>
       </div>
@@ -339,7 +365,9 @@ function PartnerCard({
   return (
     <div class="card">
       <div class="card-header">
-        <span class="card-name">{partner.partner.name ?? partner.partner.email}</span>
+        <span class="card-name">
+          {partner.partner.name ?? partner.partner.email}
+        </span>
         <span class="badge badge-green">Accepted</span>
       </div>
       <dl class="card-meta">
@@ -359,7 +387,12 @@ function PartnerCard({
             View logs
           </button>
         )}
-        <button class="btn btn-danger btn-sm" type="button" onClick={remove} disabled={loading}>
+        <button
+          class="btn btn-danger btn-sm"
+          type="button"
+          onClick={remove}
+          disabled={loading}
+        >
           {loading ? "Removing…" : "Remove"}
         </button>
       </div>
@@ -408,10 +441,13 @@ function PartnerDevicesSection({
       {partner.permissions.view_data && partnerId && !hasKey && (
         <form class="card settings-form" onSubmit={saveKey}>
           <p class="settings-hint">
-            Enter this partner's shared E2EE password to decrypt their uploaded blocks.
+            Enter this partner's shared E2EE password to decrypt their uploaded
+            blocks.
           </p>
           <div class="field">
-            <label for={`partner-key-${partner.id}`}>Shared E2EE password</label>
+            <label for={`partner-key-${partner.id}`}>
+              Shared E2EE password
+            </label>
             <input
               id={`partner-key-${partner.id}`}
               type="password"
@@ -422,9 +458,15 @@ function PartnerDevicesSection({
             />
           </div>
           {status && (
-            <p class={status.endsWith(".") ? "alert-success" : "alert-error"}>{status}</p>
+            <p class={status.endsWith(".") ? "alert-success" : "alert-error"}>
+              {status}
+            </p>
           )}
-          <button class="btn btn-primary btn-sm" type="submit" disabled={saving}>
+          <button
+            class="btn btn-primary btn-sm"
+            type="submit"
+            disabled={saving}
+          >
             {saving ? "Saving…" : "Save password"}
           </button>
         </form>
@@ -438,7 +480,9 @@ function PartnerDevicesSection({
             <div class="card" key={device.id}>
               <div class="card-header">
                 <span class="card-name">{device.name}</span>
-                <span class={`badge ${device.status === "online" ? "badge-green" : "badge-gray"}`}>
+                <span
+                  class={`badge ${device.status === "online" ? "badge-green" : "badge-gray"}`}
+                >
                   {device.status === "online" ? "Online" : "Offline"}
                 </span>
               </div>
@@ -453,7 +497,9 @@ function PartnerDevicesSection({
                   <button
                     class="btn btn-ghost btn-sm"
                     type="button"
-                    onClick={() => route(`/logs?user=${partnerId}&device_id=${device.id}`)}
+                    onClick={() =>
+                      route(`/logs?user=${partnerId}&device_id=${device.id}`)
+                    }
                   >
                     View logs
                   </button>
@@ -509,7 +555,9 @@ function DeviceCard({
     <div class="card">
       <div class="card-header">
         <span class="card-name">{device.name}</span>
-        <span class={`badge ${device.status === "online" ? "badge-green" : "badge-gray"}`}>
+        <span
+          class={`badge ${device.status === "online" ? "badge-green" : "badge-gray"}`}
+        >
           {device.status === "online" ? "Online" : "Offline"}
         </span>
       </div>
@@ -526,7 +574,11 @@ function DeviceCard({
         )}
       </dl>
       <div class="card-actions">
-        <button class="btn btn-ghost btn-sm" type="button" onClick={() => route(`/logs?device_id=${device.id}`)}>
+        <button
+          class="btn btn-ghost btn-sm"
+          type="button"
+          onClick={() => route(`/logs?device_id=${device.id}`)}
+        >
           View logs
         </button>
         <button class="btn btn-ghost btn-sm" type="button" onClick={openEdit}>
@@ -551,16 +603,26 @@ function DeviceCard({
             <input
               type="checkbox"
               checked={enabled}
-              onChange={(e) => setEnabled((e.target as HTMLInputElement).checked)}
+              onChange={(e) =>
+                setEnabled((e.target as HTMLInputElement).checked)
+              }
             />
             Enabled
           </label>
           {error && <p class="alert-error">{error}</p>}
           <div class="invite-actions">
-            <button class="btn btn-primary btn-sm" type="submit" disabled={saving}>
+            <button
+              class="btn btn-primary btn-sm"
+              type="submit"
+              disabled={saving}
+            >
               {saving ? "Saving…" : "Save"}
             </button>
-            <button class="btn btn-ghost btn-sm" type="button" onClick={() => dialogRef.current?.close()}>
+            <button
+              class="btn btn-ghost btn-sm"
+              type="button"
+              onClick={() => dialogRef.current?.close()}
+            >
               Cancel
             </button>
           </div>

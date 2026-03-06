@@ -78,8 +78,12 @@ async function req<T>(
       error?: unknown;
       details?: unknown;
     };
-    const message = typeof body.error === "string" ? body.error : res.statusText;
-    throw Object.assign(new Error(message), { status: res.status, details: body.details });
+    const message =
+      typeof body.error === "string" ? body.error : res.statusText;
+    throw Object.assign(new Error(message), {
+      status: res.status,
+      details: body.details,
+    });
   }
 
   if (res.status === 204) {
@@ -90,7 +94,8 @@ async function req<T>(
 }
 
 export const api = {
-  refreshToken: () => req<{ access_token: string }>("/token", { method: "POST" }),
+  refreshToken: () =>
+    req<{ access_token: string }>("/token", { method: "POST" }),
 
   login: (email: string, password: string) =>
     req<{ access_token: string }>("/login", {
@@ -99,13 +104,13 @@ export const api = {
     }),
 
   signup: (email: string, password: string, name?: string) =>
-    req<{ access_token: string; user: { id: string; email: string; name?: string } }>(
-      "/signup",
-      {
-        method: "POST",
-        body: JSON.stringify({ email, password, ...(name ? { name } : {}) }),
-      },
-    ),
+    req<{
+      access_token: string;
+      user: { id: string; email: string; name?: string };
+    }>("/signup", {
+      method: "POST",
+      body: JSON.stringify({ email, password, ...(name ? { name } : {}) }),
+    }),
 
   logout: () => req<void>("/logout", { method: "POST" }),
 
