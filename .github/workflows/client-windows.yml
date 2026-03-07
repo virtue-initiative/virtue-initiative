@@ -1,0 +1,40 @@
+name: Client Windows Checks
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  client-windows:
+    name: Client Windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            client -> target
+
+      - name: Rust build smoke test (core)
+        run: cargo build -p virtue-client-core
+        working-directory: client
+
+      - name: Rust build smoke test (Windows client)
+        run: cargo build -p virtue-windows-client
+        working-directory: client
+
+      - name: Rust lint (core)
+        run: cargo clippy -p virtue-client-core --all-targets -- -D warnings
+        working-directory: client
+
+      - name: Rust lint (Windows client)
+        run: cargo clippy -p virtue-windows-client --all-targets -- -D warnings
+        working-directory: client
