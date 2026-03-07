@@ -3,9 +3,9 @@ export interface SharedState {
 }
 
 const clients = new Set<{source: MessageEventSource, origin: string}>();
-let state = JSON.parse(localStorage.getItem('shared-state') || '{}') as SharedState;
+let state = typeof window === 'undefined' ? {} : JSON.parse(localStorage.getItem('shared-state') || '{}') as SharedState;
 let initialized = false;
-let server = document.createElement('iframe');
+let server = (typeof window === 'undefined' ? undefined : document.createElement('iframe'))!;
 
 function updateServerLocalState(newState: SharedState) {
   state = {...state, ...newState};
@@ -52,7 +52,7 @@ export function startStateServer() {
 }
 
 // Client code
-let clientState = JSON.parse(localStorage.getItem('shared-state-local') || '{}') as SharedState;
+let clientState = typeof window === 'undefined' ? {} : JSON.parse(localStorage.getItem('shared-state-local') || '{}') as SharedState;
 
 function getServerLocation() {
   if (window.location.hostname === 'localhost') {

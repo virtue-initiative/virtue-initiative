@@ -8,10 +8,14 @@ import {
 
 export function useDarkMode() {
   const [dark, setDark] = useState(() => {
+    if (typeof window === "undefined") return false;
+
     return (getState().theme ?? preferredTheme()) === "dark";
   });
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+
     onStateUpdate((state) => {
       console.log("Initializing theme...", state);
       document.documentElement.setAttribute("data-theme", state.theme);
