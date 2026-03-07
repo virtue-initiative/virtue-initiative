@@ -25,7 +25,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-   :root {
+  :root {
     --control-border-hover: #3f4c44;
     --control-active-bg: #16251c;
     --control-active-border: #1f4a33;
