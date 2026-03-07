@@ -43,7 +43,7 @@ function SunIcon() {
 
 export default function ColorModeToggle() {
   const { setColorMode } = useColorMode();
-  const [theme, setTheme] = useState<string | undefined>(getState().theme);
+  const [theme, setTheme] = useState<string | undefined>(typeof window !== "undefined" ? getState().theme : "light");
 
   function applyTheme(t: string | undefined) {
     const effective = t ?? preferredTheme();
@@ -65,7 +65,7 @@ export default function ColorModeToggle() {
     };
   }, [setColorMode]);
 
-  const effectiveTheme = theme ?? preferredTheme();
+  const effectiveTheme = theme ?? typeof window !== "undefined" ? preferredTheme() : "light";
   const isDark = effectiveTheme === "dark";
 
   return (
