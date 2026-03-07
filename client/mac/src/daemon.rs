@@ -1,167 +1,154 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::Result;
 use chrono::Utc;
-use rand::thread_rng;
-use serde_json::json;
 use tokio::time::sleep;
-use uuid::Uuid;
 
 use virtue_client_core::{
-    AuthClient, BufferedUpload, CaptureSchedulePolicy, CaptureScheduleState, FileTokenStore,
-    ImagePipeline, PersistentQueue, RetryPolicy, TokenStore, UploadClient,
-    resolve_capture_interval_seconds,
+    ApiClient, AuthClient, BatchDaemonConfig, CaptureOutcome, CoreError, DaemonAlertEvent,
+    FileTokenStore, PersistedServiceState, ServiceEvent, ServiceHost, SleepOutcome, TokenStore,
+    run_batch_daemon,
 };
 
-use crate::api::ApiClient;
 use crate::capture::{capture_screen, has_screen_capture_access, request_screen_capture_access};
 use crate::config::{
     ClientPaths, ScreenshotPermissionStatus, load_daemon_status, load_state, save_daemon_status,
 };
 
-pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
-    paths.ensure_dirs()?;
+#[derive(Clone)]
+struct MacDaemonHost {
+    paths: ClientPaths,
+    permission_prompt_requested: Arc<AtomicBool>,
+    pending_alert_events: Arc<Mutex<Vec<DaemonAlertEvent>>>,
+}
 
-    let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&paths.token_file));
-    let auth_client = AuthClient::new(token_store.clone())?;
-    let queue = PersistentQueue::open(&paths.queue_file, 512)?;
-    let upload_client = UploadClient::new()?;
-    let api_client = ApiClient::new()?;
-
-    let retry_policy = RetryPolicy::default();
-    let pipeline = ImagePipeline::default();
-
-    let mut schedule_state = CaptureScheduleState::default();
-    let mut last_cycle_success = true;
-    let mut permission_prompt_requested = false;
-
-    loop {
-        let state = load_state(&paths.state_file)?;
-        let Some(mut access_token) = token_store.get_access_token()? else {
-            sleep(Duration::from_secs(20)).await;
-            continue;
-        };
-        let Some(device_id) = state.device_id.clone() else {
-            sleep(Duration::from_secs(20)).await;
-            continue;
-        };
-
-        if !state.monitoring_enabled {
-            sleep(Duration::from_secs(20)).await;
-            continue;
+impl MacDaemonHost {
+    fn new(paths: ClientPaths, pending_alert_events: Arc<Mutex<Vec<DaemonAlertEvent>>>) -> Self {
+        Self {
+            paths,
+            permission_prompt_requested: Arc::new(AtomicBool::new(false)),
+            pending_alert_events,
         }
+    }
+}
 
-        match auth_client
-            .refresh_access_token_if_needed(Duration::from_secs(120))
-            .await
-        {
-            Ok(Some(refreshed)) => {
-                access_token = refreshed.access_token;
-            }
-            Ok(None) => {}
-            Err(_) => {
-                sleep(Duration::from_secs(20)).await;
-                continue;
-            }
-        }
+impl ServiceHost for MacDaemonHost {
+    fn load_persisted_state(&self) -> virtue_client_core::CoreResult<PersistedServiceState> {
+        let state =
+            load_state(&self.paths.state_file).map_err(|e| CoreError::Platform(e.to_string()))?;
+        Ok(PersistedServiceState {
+            monitoring_enabled: state.monitoring_enabled,
+            device_id: state.device_id,
+        })
+    }
 
-        let effective_interval_seconds = resolve_capture_interval_seconds();
-        let policy = CaptureSchedulePolicy {
-            base_interval: Duration::from_secs(effective_interval_seconds),
-            ..CaptureSchedulePolicy::default()
-        };
-        let mut rng = thread_rng();
-        let delay = policy.next_delay(&mut schedule_state, last_cycle_success, &mut rng);
-        sleep(delay).await;
+    fn now_utc(&self) -> chrono::DateTime<Utc> {
+        Utc::now()
+    }
 
+    async fn sleep_interruptible(
+        &self,
+        duration: Duration,
+    ) -> virtue_client_core::CoreResult<SleepOutcome> {
+        sleep(duration).await;
+        Ok(SleepOutcome::Elapsed)
+    }
+
+    async fn capture_frame_png(&self) -> virtue_client_core::CoreResult<CaptureOutcome> {
         if !has_screen_capture_access() {
-            last_cycle_success = false;
-            if !permission_prompt_requested {
+            if !self
+                .permission_prompt_requested
+                .swap(true, Ordering::SeqCst)
+            {
                 let _ = request_screen_capture_access();
-                permission_prompt_requested = true;
             }
             let error_text = "screen recording permission missing for daemon process".to_string();
             update_daemon_status(
-                paths,
+                &self.paths,
                 ScreenshotPermissionStatus::Missing,
-                Some(error_text.clone()),
+                Some(error_text),
             );
-            let mut metadata = BTreeMap::new();
-            metadata.insert("reason".to_string(), json!("permission_missing"));
-            metadata.insert("error".to_string(), json!(error_text));
-            let _ = api_client
-                .send_log(&access_token, "missed_capture", &device_id, None, metadata)
-                .await;
-            continue;
+            return Ok(CaptureOutcome::PermissionMissing);
         }
-        permission_prompt_requested = false;
 
-        let raw_capture = match capture_screen() {
-            Ok(bytes) => bytes,
+        self.permission_prompt_requested
+            .store(false, Ordering::SeqCst);
+
+        match capture_screen() {
+            Ok(bytes) => {
+                update_daemon_status(&self.paths, ScreenshotPermissionStatus::Granted, None);
+                Ok(CaptureOutcome::FramePng(bytes))
+            }
             Err(err) => {
-                last_cycle_success = false;
                 let error_text = format!("{err:#}");
                 let screenshot_permission = if is_permission_missing_error(&error_text) {
                     ScreenshotPermissionStatus::Missing
                 } else {
                     ScreenshotPermissionStatus::Unknown
                 };
-                update_daemon_status(paths, screenshot_permission, Some(error_text.clone()));
-                let mut metadata = BTreeMap::new();
-                metadata.insert("reason".to_string(), json!("capture_failed"));
-                metadata.insert("error".to_string(), json!(error_text));
-                let _ = api_client
-                    .send_log(&access_token, "missed_capture", &device_id, None, metadata)
-                    .await;
-                continue;
-            }
-        };
-        update_daemon_status(paths, ScreenshotPermissionStatus::Granted, None);
-
-        let processed = match pipeline.process(&raw_capture) {
-            Ok(output) => output,
-            Err(err) => {
-                last_cycle_success = false;
-                let mut metadata = BTreeMap::new();
-                metadata.insert("reason".to_string(), json!("image_pipeline_failed"));
-                metadata.insert("error".to_string(), json!(format!("{err:#}")));
-                let _ = api_client
-                    .send_log(&access_token, "missed_capture", &device_id, None, metadata)
-                    .await;
-                continue;
-            }
-        };
-
-        let item = BufferedUpload::new(
-            Uuid::new_v4().to_string(),
-            device_id.clone(),
-            Utc::now(),
-            processed.content_type,
-            processed.bytes,
-            processed.sha256_hex,
-        );
-        let _ = queue.enqueue(item)?;
-
-        match upload_client
-            .process_upload_queue(&queue, &retry_policy, &access_token, 8)
-            .await
-        {
-            Ok(report) => {
-                last_cycle_success = report.last_error.is_none();
-            }
-            Err(err) => {
-                last_cycle_success = false;
-                let mut metadata = BTreeMap::new();
-                metadata.insert("reason".to_string(), json!("queue_processing_failed"));
-                metadata.insert("error".to_string(), json!(format!("{err:#}")));
-                let _ = api_client
-                    .send_log(&access_token, "missed_capture", &device_id, None, metadata)
-                    .await;
+                update_daemon_status(&self.paths, screenshot_permission, Some(error_text.clone()));
+                if screenshot_permission == ScreenshotPermissionStatus::Missing {
+                    Ok(CaptureOutcome::PermissionMissing)
+                } else {
+                    Err(CoreError::Platform(error_text))
+                }
             }
         }
     }
+
+    fn emit_event(&self, event: ServiceEvent) {
+        match event {
+            ServiceEvent::Info(msg) => eprintln!("daemon: {msg}"),
+            ServiceEvent::Warn(msg) => eprintln!("daemon: {msg}"),
+            ServiceEvent::Error(msg) => eprintln!("daemon: {msg}"),
+        }
+    }
+
+    fn drain_alert_events(&self) -> virtue_client_core::CoreResult<Vec<DaemonAlertEvent>> {
+        let mut guard = self
+            .pending_alert_events
+            .lock()
+            .map_err(|_| CoreError::Platform("alert event queue lock poisoned".to_string()))?;
+        Ok(std::mem::take(&mut *guard))
+    }
+}
+
+pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
+    paths.ensure_dirs()?;
+    let pending_alert_events = Arc::new(Mutex::new(vec![DaemonAlertEvent {
+        kind: "daemon_start".to_string(),
+        metadata: vec![("source".to_string(), "macos_launch_agent".to_string())],
+        created_at: Utc::now(),
+        device_id: None,
+    }]));
+
+    let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&paths.token_file));
+    let auth_client = AuthClient::new(token_store.clone())?;
+    let api_client = ApiClient::new()?;
+    let host = MacDaemonHost::new(paths.clone(), pending_alert_events);
+
+    let config = BatchDaemonConfig {
+        settings_refresh_interval: Duration::from_secs(30 * 60),
+        settings_fetch_retry_interval: Duration::from_secs(20),
+        idle_retry_interval: Duration::from_secs(20),
+        token_refresh_threshold: Duration::from_secs(120),
+        session_unavailable_log_interval: Duration::from_secs(5 * 60),
+        continue_on_token_refresh_error: false,
+    };
+
+    run_batch_daemon(
+        &host,
+        token_store,
+        &auth_client,
+        &api_client,
+        &paths.queue_file,
+        config,
+    )
+    .await
+    .map_err(Into::into)
 }
 
 fn update_daemon_status(
