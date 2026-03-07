@@ -45,22 +45,12 @@ impl ClientPaths {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ClientState {
     pub monitoring_enabled: bool,
     pub device_id: Option<String>,
     pub email: Option<String>,
-}
-
-impl Default for ClientState {
-    fn default() -> Self {
-        Self {
-            monitoring_enabled: false,
-            device_id: None,
-            email: None,
-        }
-    }
 }
 
 pub fn load_state(path: &Path) -> Result<ClientState> {
