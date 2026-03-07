@@ -1,4 +1,5 @@
 import { groupLogsByDay, ImageLogItem, LogImage } from "./shared";
+import { formatTime } from "../../utils/time";
 
 export function LogsGallery({
   items,
@@ -29,7 +30,7 @@ export function LogsGallery({
                 <div
                   class={`gallery-item${item.batch_status === "failed" ? " gallery-item--unverified" : ""}`}
                   key={item.id}
-                  title={`${deviceName(item.device_id)} — ${new Date(item.taken_at).toLocaleTimeString()}${item.batch_status === "failed" ? " ⚠ Unverified" : ""}`}
+                  title={`${deviceName(item.device_id)} — ${formatTime(item.taken_at)}${item.batch_status === "failed" ? " ⚠ Unverified" : ""}`}
                 >
                   <LogImage imageBytes={item.image} />
                 </div>
