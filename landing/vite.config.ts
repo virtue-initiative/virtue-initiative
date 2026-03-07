@@ -4,8 +4,7 @@ import { defineConfig } from "vite";
 export default defineConfig({
   server: {
     headers: {
-      'Content-Security-Policy': `frame-ancestors http://localhost:5174 http://localhost:3000 http://localhost:5173;`
-    }
-  }
+      "Content-Security-Policy": `frame-ancestors http://localhost:5174 http://localhost:3000 http://localhost:5173;`,
+    },
+  },
 });
-
