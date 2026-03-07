@@ -221,7 +221,7 @@ unsafe fn create_green_circle_icon() -> Option<HICON> {
     }
 
     let mut xor_bits = vec![0u8; (width * height * 4) as usize];
-    let and_stride = ((width + 31) / 32) * 4;
+    let and_stride = width.div_ceil(32) * 4;
     let mut and_bits = vec![0u8; (and_stride * height) as usize];
 
     for y in 0..height as usize {
@@ -271,14 +271,14 @@ unsafe extern "system" fn window_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    if let Some(taskbar_created) = TASKBAR_CREATED_MSG.get() {
-        if msg == *taskbar_created {
-            if let Some(state) = app_state_mut(hwnd) {
-                state.tray_added = false;
-                state.add_tray_icon();
-            }
-            return LRESULT(0);
+    if let Some(taskbar_created) = TASKBAR_CREATED_MSG.get()
+        && msg == *taskbar_created
+    {
+        if let Some(state) = app_state_mut(hwnd) {
+            state.tray_added = false;
+            state.add_tray_icon();
         }
+        return LRESULT(0);
     }
 
     match msg {
@@ -304,7 +304,7 @@ unsafe extern "system" fn window_proc(
         WM_COMMAND => {
             let command_id = loword(wparam.0);
             if let Some(state) = app_state_mut(hwnd) {
-                match command_id as u16 {
+                match command_id {
                     ID_TRAY_OPEN => {
                         state.open_auth_dialog();
                         return LRESULT(0);
