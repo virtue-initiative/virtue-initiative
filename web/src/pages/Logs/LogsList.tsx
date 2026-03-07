@@ -1,5 +1,6 @@
 import { Fragment } from "preact";
 import { groupLogsByDay, LogItem, LogImage } from "./shared";
+import { formatRelativeTimestamp, formatTime } from "../../utils/time";
 
 function humanizeKind(kind: string): string {
   return kind.replace(/_/g, " ");
@@ -61,12 +62,8 @@ export function LogsList({
                           ⚠ Unverified
                         </span>
                       )}
-                      <span class="log-time">
-                        {new Date(item.taken_at).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                          second: "2-digit",
-                        })}
+                      <span class="log-time" title={formatTime(item.taken_at)}>
+                        {formatRelativeTimestamp(item.taken_at)}
                       </span>
                     </div>
                     {item.metadata.length > 0 && (

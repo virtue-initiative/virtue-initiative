@@ -4,26 +4,8 @@ import { api, Device, Partner } from "../../api";
 import { Button } from "../../components/Button";
 import { useAuth } from "../../context/auth";
 import { useE2EE } from "../../context/e2ee";
+import { formatDate, formatRelativeTimestamp } from "../../utils/time";
 import "./style.css";
-
-function relativeTime(timestamp: number | null) {
-  if (!timestamp) return "Never";
-
-  const diffMs = Date.now() - timestamp;
-  const diffMinutes = Math.floor(diffMs / 60_000);
-
-  if (diffMinutes < 1) return "Just now";
-  if (diffMinutes < 60) {
-    return `${diffMinutes} minute${diffMinutes === 1 ? "" : "s"} ago`;
-  }
-
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) {
-    return `${diffHours} hour${diffHours === 1 ? "" : "s"} ago`;
-  }
-
-  return new Date(timestamp).toLocaleString();
-}
 
 function UserPlusIcon() {
   return (
@@ -312,7 +294,7 @@ function PendingPartnerCard({
         <dt>Email</dt>
         <dd>{partner.partner.email}</dd>
         <dt>Created</dt>
-        <dd>{new Date(partner.created_at).toLocaleDateString()}</dd>
+        <dd>{formatDate(partner.created_at)}</dd>
       </dl>
       {error && <p class="alert-error">{error}</p>}
       <div class="card-actions">
@@ -490,7 +472,7 @@ function PartnerDevicesSection({
                 <dt>Platform</dt>
                 <dd>{device.platform}</dd>
                 <dt>Last upload</dt>
-                <dd>{relativeTime(device.last_upload_at)}</dd>
+                <dd>{formatRelativeTimestamp(device.last_upload_at)}</dd>
               </dl>
               {partnerId && partner.permissions.view_data && (
                 <div class="card-actions">
@@ -565,7 +547,7 @@ function DeviceCard({
         <dt>Platform</dt>
         <dd>{device.platform}</dd>
         <dt>Last upload</dt>
-        <dd>{relativeTime(device.last_upload_at)}</dd>
+        <dd>{formatRelativeTimestamp(device.last_upload_at)}</dd>
         {!device.enabled && (
           <>
             <dt>Status</dt>

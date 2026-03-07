@@ -1,5 +1,6 @@
 import { useState, useEffect } from "preact/hooks";
 import { BatchVerification } from "../../crypto";
+import { formatDayHeading, localDateKey } from "../../utils/time";
 
 export interface LogItem {
   id: string;
@@ -20,21 +21,6 @@ export interface LogDayGroup<T extends { taken_at: number }> {
   items: T[];
 }
 
-const dayHeadingFormatter = new Intl.DateTimeFormat(undefined, {
-  weekday: "long",
-  year: "numeric",
-  month: "long",
-  day: "numeric",
-});
-
-function localDateKey(ts: number): string {
-  const date = new Date(ts);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 export function groupLogsByDay<T extends { taken_at: number }>(
   items: T[],
 ): LogDayGroup<T>[] {
@@ -47,7 +33,7 @@ export function groupLogsByDay<T extends { taken_at: number }>(
     if (!group) {
       group = {
         key,
-        label: dayHeadingFormatter.format(new Date(item.taken_at)),
+        label: formatDayHeading(item.taken_at),
         items: [],
       };
       byKey.set(key, group);
