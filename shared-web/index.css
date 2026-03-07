@@ -1,4 +1,9 @@
 :root {
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Theme */
+:root {
   --bg: #f9f9f7;
   --surface: #ffffff;
   --bg-subtle: #f3f2ef;
@@ -6,7 +11,6 @@
   --text: #1a1a1a;
   --text-muted: #6b6860;
   --accent: #1a8a50;
-  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
 [data-theme="dark"] {
@@ -17,6 +21,28 @@
   --text: #e6e3df;
   --text-muted: #9a9890;
   --accent: #22a862;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111713;
+    --surface: #1a1f1c;
+    --bg-subtle: #1e2421;
+    --border: #2c332e;
+    --text: #e6e3df;
+    --text-muted: #9a9890;
+    --accent: #22a862;
+  }
+
+  [data-theme="light"] {
+    --bg: #f9f9f7;
+    --surface: #ffffff;
+    --bg-subtle: #f3f2ef;
+    --border: #e0ddd8;
+    --text: #1a1a1a;
+    --text-muted: #6b6860;
+    --accent: #1a8a50;
+  }
 }
 
 /* Buttons */

@@ -11,15 +11,7 @@
     <title>The Virtue Initiative</title>
     <link rel="stylesheet" href="style.css" />
 
-    <script>
-      document.documentElement.setAttribute(
-        "data-theme",
-        localStorage.getItem("theme") ||
-          (matchMedia("(prefers-color-scheme: dark)").matches
-            ? "dark"
-            : "light"),
-      );
-    </script>
+    <script src="./index.ts" type="module" blocking="render"></script>
   </head>
   <body>
     <header>
@@ -219,6 +211,5 @@
         </p>
       </div>
     </footer>
-    <script src="index.js" type="module"></script>
   </body>
 </html>

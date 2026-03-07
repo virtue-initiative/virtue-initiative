@@ -1,4 +1,4 @@
-@import "@virtueinitiative/styles/base.css";
+@import "@virtueinitiative/shared-web/base.css";
 
 :root {
   font-weight: 400;
@@ -6,7 +6,11 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
 
+/* TODO: Do theming in index.css */
+
+:root {
   --control-border-hover: #c9c5bf;
   --control-active-bg: var(--bg-subtle);
   --control-active-border: #bfd8c9;
@@ -18,6 +22,22 @@
   --control-active-bg: #16251c;
   --control-active-border: #1f4a33;
   --control-active-text: #8ee7b5;
+}
+
+@media (prefers-color-scheme: dark) {
+   :root {
+    --control-border-hover: #3f4c44;
+    --control-active-bg: #16251c;
+    --control-active-border: #1f4a33;
+    --control-active-text: #8ee7b5;
+  }
+
+  [data-theme="light"] {
+    --control-border-hover: #c9c5bf;
+    --control-active-bg: var(--bg-subtle);
+    --control-active-border: #bfd8c9;
+    --control-active-text: var(--accent);
+  }
 }
 
 #app {

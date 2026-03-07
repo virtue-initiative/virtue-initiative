@@ -16,7 +16,7 @@
   "license": "AGPL-3.0-or-later",
   "type": "commonjs",
   "dependencies": {
-    "@virtueinitiative/styles": "file:../styles"
+    "@virtueinitiative/shared-web": "file:../shared-web"
   },
   "devDependencies": {
     "prettier": "^3.8.1",

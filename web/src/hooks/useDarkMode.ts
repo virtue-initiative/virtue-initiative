@@ -1,19 +1,21 @@
-import { useState, useEffect } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
+import { getState, nextTheme, onStateUpdate, preferredTheme } from "@virtueinitiative/shared-web/state";
 
 export function useDarkMode() {
   const [dark, setDark] = useState(() => {
-    const stored = localStorage.getItem("theme");
-    if (stored) return stored === "dark";
-    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+    return (getState().theme ?? preferredTheme()) === "dark";
   });
 
   useEffect(() => {
-    document.documentElement.setAttribute(
-      "data-theme",
-      dark ? "dark" : "light",
-    );
-    localStorage.setItem("theme", dark ? "dark" : "light");
-  }, [dark]);
+    onStateUpdate((state) => {
+      console.log("Initializing theme...", state);
+      document.documentElement.setAttribute(
+        "data-theme",
+        state.theme,
+      );
+      setDark((state.theme ?? preferredTheme()) === "dark");
+    });
+  }, []);
 
-  return { dark, toggle: () => setDark((d) => !d) };
+  return { dark, toggle: nextTheme };
 }
