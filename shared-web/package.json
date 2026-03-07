@@ -1,11 +1,10 @@
 {
-  "name": "@virtueinitiative/styles",
+  "name": "@virtueinitiative/shared-web",
   "version": "1.0.0",
   "description": "",
   "license": "AGPL-3.0-or-later",
   "author": "",
   "type": "commonjs",
-  "main": "index.css",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   }

@@ -12,8 +12,8 @@
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.1.3",
-    "@virtueinitiative/styles": "file:../styles",
     "dayjs": "^1.11.19",
+    "@virtueinitiative/shared-web": "file:../shared-web",
     "hash-wasm": "^4.12.0",
     "preact": "^10.26.9",
     "preact-iso": "^2.11.1",
