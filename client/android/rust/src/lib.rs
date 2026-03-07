@@ -11,16 +11,15 @@ use jni::sys::{jboolean, jlong, jstring};
 use jni::JNIEnv;
 use once_cell::sync::OnceCell;
 use rand::thread_rng;
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tokio::runtime::Runtime;
-use uuid::Uuid;
 
+use virtue_client_core::batch::BatchValue;
 use virtue_client_core::{
-    resolve_base_api_url, resolve_capture_interval_seconds, AuthClient, BufferedUpload,
-    CaptureSchedulePolicy, CaptureScheduleState, FileTokenStore, ImagePipeline, PersistentQueue,
-    RetryPolicy, TokenStore, UploadClient,
+    login_and_register_device, logout_and_clear_tokens_with_alert,
+    resolve_capture_interval_seconds, ApiClient, AuthClient, BatchBlob, BatchItem,
+    CaptureSchedulePolicy, CaptureScheduleState, FileTokenStore, ImagePipeline, LoginCommandInput,
+    TokenStore, UploadClient,
 };
 
 static CORE: OnceCell<AndroidCore> = OnceCell::new();
@@ -28,15 +27,13 @@ static CORE: OnceCell<AndroidCore> = OnceCell::new();
 struct AndroidCore {
     runtime: Runtime,
     auth_client: AuthClient,
+    api_client: ApiClient,
     token_store: Arc<dyn TokenStore>,
     upload_client: UploadClient,
-    queue: PersistentQueue,
     pipeline: ImagePipeline,
-    retry_policy: RetryPolicy,
     schedule_policy: CaptureSchedulePolicy,
     schedule_state: Mutex<CaptureScheduleState>,
     state_path: PathBuf,
-    http_client: Client,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,27 +45,6 @@ impl Default for AndroidState {
     fn default() -> Self {
         Self { device_id: None }
     }
-}
-
-#[derive(Debug, Serialize)]
-struct RegisterDeviceRequest {
-    name: String,
-    platform: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct RegisterDeviceResponse {
-    id: String,
-}
-
-#[derive(Debug, Serialize)]
-struct CreateLogRequest {
-    #[serde(rename = "type")]
-    event_type: String,
-    device_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    image_id: Option<String>,
-    metadata: BTreeMap<String, serde_json::Value>,
 }
 
 #[no_mangle]
@@ -92,36 +68,27 @@ pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeInit(
             .with_context(|| format!("failed to create data dir {data_dir}"))?;
 
         let token_file = Path::new(&config_dir).join("token_store.json");
-        let queue_file = Path::new(&data_dir).join("upload_queue.json");
         let state_file = Path::new(&config_dir).join("android_client_state.json");
 
         let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&token_file));
         let auth_client = AuthClient::new(token_store.clone())?;
+        let api_client = ApiClient::new()?;
         let upload_client = UploadClient::new()?;
-        let queue = PersistentQueue::open(&queue_file, 512)?;
-
         let runtime = Runtime::new().context("failed to build tokio runtime")?;
-        let http_client = Client::builder()
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(30))
-            .build()
-            .context("failed to build http client")?;
 
         CORE.set(AndroidCore {
             runtime,
             auth_client,
+            api_client,
             token_store,
             upload_client,
-            queue,
             pipeline: ImagePipeline::default(),
-            retry_policy: RetryPolicy::default(),
             schedule_policy: CaptureSchedulePolicy {
                 base_interval: Duration::from_secs(resolve_capture_interval_seconds()),
                 ..CaptureSchedulePolicy::default()
             },
             schedule_state: Mutex::new(CaptureScheduleState::default()),
             state_path: state_file,
-            http_client,
         })
         .map_err(|_| anyhow!("core already initialized"))?;
 
@@ -146,16 +113,21 @@ pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeLogin(
         let device_name: String = env.get_string(&device_name)?.into();
 
         core.runtime.block_on(async {
-            core.auth_client.login(&email, &password).await?;
-            let access_token = core
-                .token_store
-                .get_access_token()?
-                .ok_or_else(|| anyhow!("missing access token after login"))?;
-
-            let device_id = register_device(&core.http_client, &access_token, &device_name).await?;
+            let login = login_and_register_device(
+                &core.auth_client,
+                &core.api_client,
+                core.token_store.as_ref(),
+                LoginCommandInput {
+                    email: &email,
+                    password: &password,
+                    device_name: &device_name,
+                    platform: "android",
+                },
+            )
+            .await?;
 
             let mut state = load_state(&core.state_path)?;
-            state.device_id = Some(device_id);
+            state.device_id = Some(login.device_id);
             save_state(&core.state_path, &state)?;
 
             Ok::<(), anyhow::Error>(())
@@ -174,28 +146,16 @@ pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeLogout(
         let core = core()?;
 
         core.runtime.block_on(async {
-            let token = core.token_store.get_access_token()?;
             let state = load_state(&core.state_path)?;
-
-            if let (Some(access_token), Some(device_id)) =
-                (token.as_deref(), state.device_id.as_deref())
-            {
-                let mut metadata = BTreeMap::new();
-                metadata.insert("reason".to_string(), json!("user_logout"));
-                let _ = send_log(
-                    &core.http_client,
-                    access_token,
-                    "manual_override",
-                    device_id,
-                    None,
-                    metadata,
-                )
-                .await;
-            }
-
-            let _ = core.auth_client.logout().await;
-            core.token_store.clear_access_token()?;
-            core.token_store.clear_refresh_token()?;
+            let metadata = vec![("reason".to_string(), "user_logout".to_string())];
+            let _ = logout_and_clear_tokens_with_alert(
+                &core.auth_client,
+                Some(&core.api_client),
+                core.token_store.as_ref(),
+                state.device_id.as_deref(),
+                &metadata,
+            )
+            .await;
 
             let mut new_state = state;
             new_state.device_id = None;
@@ -289,18 +249,19 @@ pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeProcessCapture(
 
             let processed = core.pipeline.process(&bytes)?;
 
-            let item = BufferedUpload::new(
-                Uuid::new_v4().to_string(),
-                device_id,
-                Utc::now(),
-                processed.content_type,
-                processed.bytes,
-                processed.sha256_hex,
-            );
-            core.queue.enqueue(item)?;
+            let e2ee_key = core
+                .token_store
+                .get_e2ee_key()?
+                .ok_or_else(|| anyhow!("missing E2EE key; sign in again"))?;
+            let now = Utc::now();
+            let blob = BatchBlob::new(vec![BatchItem {
+                ts: now.timestamp_millis(),
+                type_: "image".to_string(),
+                data: BTreeMap::from([("image".to_string(), BatchValue::Binary(processed.bytes))]),
+            }]);
 
             core.upload_client
-                .process_upload_queue(&core.queue, &core.retry_policy, &access_token, 12)
+                .upload_batch(&access_token, &device_id, &blob, now, now, &e2ee_key)
                 .await?;
 
             Ok::<(), anyhow::Error>(())
@@ -340,21 +301,20 @@ pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeReportLog(
                 None => return Ok::<(), anyhow::Error>(()),
             };
 
-            let mut metadata = BTreeMap::new();
-            metadata.insert("reason".to_string(), json!(reason));
+            let mut metadata = vec![("reason".to_string(), reason)];
             if let Some(detail) = detail {
-                metadata.insert("detail".to_string(), json!(detail));
+                metadata.push(("detail".to_string(), detail));
             }
 
-            send_log(
-                &core.http_client,
-                &access_token,
-                &event_type,
-                &device_id,
-                None,
-                metadata,
-            )
-            .await?;
+            core.api_client
+                .create_alert_log(
+                    &access_token,
+                    &device_id,
+                    &event_type,
+                    &metadata,
+                    Utc::now(),
+                )
+                .await?;
 
             Ok::<(), anyhow::Error>(())
         })
@@ -392,64 +352,6 @@ fn save_state(path: &Path, state: &AndroidState) -> Result<()> {
     let bytes = serde_json::to_vec_pretty(state)?;
     fs::write(&tmp, bytes).with_context(|| format!("failed writing {}", tmp.display()))?;
     fs::rename(&tmp, path).with_context(|| format!("failed replacing {}", path.display()))?;
-
-    Ok(())
-}
-
-async fn register_device(client: &Client, access_token: &str, name: &str) -> Result<String> {
-    let payload = RegisterDeviceRequest {
-        name: name.to_string(),
-        platform: "android".to_string(),
-    };
-
-    let base_url = resolve_base_api_url();
-    let url = format!("{}/device", base_url);
-    let response = client
-        .post(url)
-        .bearer_auth(access_token)
-        .json(&payload)
-        .send()
-        .await?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(anyhow!("register_device failed ({status}): {body}"));
-    }
-
-    let body: RegisterDeviceResponse = response.json().await?;
-    Ok(body.id)
-}
-
-async fn send_log(
-    client: &Client,
-    access_token: &str,
-    event_type: &str,
-    device_id: &str,
-    image_id: Option<String>,
-    metadata: BTreeMap<String, serde_json::Value>,
-) -> Result<()> {
-    let payload = CreateLogRequest {
-        event_type: event_type.to_string(),
-        device_id: device_id.to_string(),
-        image_id,
-        metadata,
-    };
-
-    let base_url = resolve_base_api_url();
-    let url = format!("{}/log", base_url);
-    let response = client
-        .post(url)
-        .bearer_auth(access_token)
-        .json(&payload)
-        .send()
-        .await?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(anyhow!("send_log failed ({status}): {body}"));
-    }
 
     Ok(())
 }

@@ -84,18 +84,28 @@ class ScreenshotService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        runCatching {
-            alarmManager.setExactAndAllowWhileIdle(
-                AlarmManager.RTC_WAKEUP,
-                System.currentTimeMillis() + 5_000L,
-                pendingIntent
-            )
-        }.onFailure {
+        val triggerAtMillis = System.currentTimeMillis() + 5_000L
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) {
             alarmManager.setAndAllowWhileIdle(
                 AlarmManager.RTC_WAKEUP,
-                System.currentTimeMillis() + 15_000L,
+                triggerAtMillis + 10_000L,
                 pendingIntent
             )
+        } else {
+            runCatching {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerAtMillis,
+                    pendingIntent
+                )
+            }.onFailure {
+                alarmManager.setAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerAtMillis + 10_000L,
+                    pendingIntent
+                )
+            }
         }
         super.onTaskRemoved(rootIntent)
     }
