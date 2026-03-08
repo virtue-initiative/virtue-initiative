@@ -18,6 +18,9 @@ class KeepAliveWorker(context: Context, params: WorkerParameters) : CoroutineWor
         if (!NativeBridge.nativeIsLoggedIn()) {
             return Result.success()
         }
+        if (ProjectionPermissionStore.load(applicationContext) == null) {
+            return Result.success()
+        }
 
         ScreenshotService.startFromStoredProjection(applicationContext, "worker")
         return Result.success()

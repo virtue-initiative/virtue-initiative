@@ -50,6 +50,44 @@
                 android:hint="Password"
                 android:inputType="textPassword" />
 
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Runtime overrides (optional)"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/baseApiUrlInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:hint="VIRTUE_BASE_API_URL (e.g. http://10.0.2.2:8787)"
+                android:inputType="textUri" />
+
+            <EditText
+                android:id="@+id/captureIntervalInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:hint="VIRTUE_CAPTURE_INTERVAL_SECONDS"
+                android:inputType="number" />
+
+            <EditText
+                android:id="@+id/batchWindowInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:hint="VIRTUE_BATCH_WINDOW_SECONDS"
+                android:inputType="number" />
+
+            <Button
+                android:id="@+id/saveOverridesButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="Save overrides" />
+
             <Button
                 android:id="@+id/loginButton"
                 android:layout_width="match_parent"

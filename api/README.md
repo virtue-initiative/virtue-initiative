@@ -39,6 +39,13 @@ From a libvirt VM on the default network, this is typically reachable at:
 
 - `http://<HOST_IP>:8787` (replace `<HOST_IP>` with your Linux host IP reachable from the VM)
 
+When serving local clients from emulators/VMs (for example Android using `10.0.2.2`),
+set this in `api/.dev.vars` so `/d/batch` internal hash calls stay host-local:
+
+```bash
+HASH_SERVER_URL=http://127.0.0.1:8787
+```
+
 ## Deployment
 
 Ensure all the enviroment variables are set correctly (in `wrangler.toml` and

@@ -29,9 +29,17 @@ class MainActivity : AppCompatActivity() {
     ) { result ->
         if (result.resultCode == RESULT_OK && result.data != null) {
             val data = result.data!!
-            ProjectionPermissionStore.save(this, result.resultCode, data)
-            ScreenshotService.start(this, result.resultCode, data)
-            setStatus("Capture permission granted. Monitoring started.")
+            val persisted = ProjectionPermissionStore.save(this, result.resultCode, data)
+            val error = ScreenshotService.start(this, result.resultCode, data)
+            if (error == null) {
+                if (persisted) {
+                    setStatus("Capture permission granted. Monitoring started.")
+                } else {
+                    setStatus("Capture granted for this app session. Monitoring started.")
+                }
+            } else {
+                setStatus("Capture granted, but service failed to start: $error")
+            }
         } else {
             setStatus("Capture permission not granted.")
         }
@@ -46,17 +54,29 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        populateOverrideInputs()
+
         val initError = NativeBridge.ensureInitialized(this)
         if (initError != null) {
             setStatus("Core init failed: $initError")
         }
 
+        binding.saveOverridesButton.setOnClickListener { saveOverrides(applyNow = true, showSavedMessage = true) }
         binding.loginButton.setOnClickListener { login() }
         binding.signOutButton.setOnClickListener { logout() }
         binding.grantCaptureButton.setOnClickListener { requestCapturePermission() }
         binding.startServiceButton.setOnClickListener {
-            ScreenshotService.startFromStoredProjection(this, "manual")
-            setStatus("Requested background monitoring start")
+            if (ProjectionPermissionStore.load(this) == null) {
+                setStatus("Requesting screenshot permission...")
+                requestCapturePermission()
+                return@setOnClickListener
+            }
+            val error = ScreenshotService.startFromStoredProjection(this, "manual")
+            if (error == null) {
+                setStatus("Requested background monitoring start")
+            } else {
+                setStatus("Could not start monitoring: $error")
+            }
         }
 
         KeepAliveWorker.schedule(this)
@@ -65,6 +85,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun login() {
+        if (!saveOverrides(applyNow = true, showSavedMessage = false)) {
+            return
+        }
+
         val email = binding.emailInput.text?.toString()?.trim().orEmpty()
         val password = binding.passwordInput.text?.toString().orEmpty()
 
@@ -153,5 +177,52 @@ class MainActivity : AppCompatActivity() {
         val manufacturer = Build.MANUFACTURER.orEmpty()
         val model = Build.MODEL.orEmpty()
         return if (model.startsWith(manufacturer, ignoreCase = true)) model else "$manufacturer $model"
+    }
+
+    private fun populateOverrideInputs() {
+        val overrides = OverrideSettings.load(this)
+        binding.baseApiUrlInput.setText(overrides.baseApiUrl.orEmpty())
+        binding.captureIntervalInput.setText(overrides.captureIntervalSeconds.orEmpty())
+        binding.batchWindowInput.setText(overrides.batchWindowSeconds.orEmpty())
+    }
+
+    private fun saveOverrides(applyNow: Boolean, showSavedMessage: Boolean): Boolean {
+        val baseUrl = binding.baseApiUrlInput.text?.toString().orEmpty().trim()
+        val captureInterval = binding.captureIntervalInput.text?.toString().orEmpty().trim()
+        val batchWindow = binding.batchWindowInput.text?.toString().orEmpty().trim()
+
+        if (baseUrl.isNotEmpty() && !baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
+            setStatus("VIRTUE_BASE_API_URL must start with http:// or https://")
+            return false
+        }
+        if (captureInterval.isNotEmpty() && captureInterval.toLongOrNull()?.let { it > 0 } != true) {
+            setStatus("VIRTUE_CAPTURE_INTERVAL_SECONDS must be a positive integer")
+            return false
+        }
+        if (batchWindow.isNotEmpty() && batchWindow.toLongOrNull()?.let { it > 0 } != true) {
+            setStatus("VIRTUE_BATCH_WINDOW_SECONDS must be a positive integer")
+            return false
+        }
+
+        val values = OverrideValues(
+            baseApiUrl = baseUrl.ifEmpty { null },
+            captureIntervalSeconds = captureInterval.ifEmpty { null },
+            batchWindowSeconds = batchWindow.ifEmpty { null }
+        )
+        OverrideSettings.save(this, values)
+
+        if (applyNow) {
+            val error = NativeBridge.applyOverrides(this)
+            if (error != null) {
+                setStatus("Failed to apply overrides: $error")
+                return false
+            }
+        }
+
+        if (showSavedMessage) {
+            setStatus("Overrides saved")
+        }
+
+        return true
     }
 }

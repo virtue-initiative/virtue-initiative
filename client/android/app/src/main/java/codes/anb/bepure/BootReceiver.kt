@@ -10,6 +10,7 @@ class BootReceiver : BroadcastReceiver() {
         if (initError != null) return
 
         if (!NativeBridge.nativeIsLoggedIn()) return
+        if (ProjectionPermissionStore.load(context) == null) return
 
         KeepAliveWorker.schedule(context)
         ScreenshotService.startFromStoredProjection(context, "boot")
