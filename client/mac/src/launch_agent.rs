@@ -67,6 +67,29 @@ pub fn ensure_agent_running(paths: &ClientPaths, exe_path: &Path) -> Result<()> 
     Ok(())
 }
 
+pub fn stop_agent(paths: &ClientPaths) -> Result<()> {
+    let uid = current_uid()?;
+    let gui_domain = format!("gui/{uid}");
+    let service_id = format!("{gui_domain}/{LABEL}");
+    let plist_path = paths.launch_agent_file.display().to_string();
+
+    let by_service = run_launchctl(&["bootout", &service_id])?;
+    if by_service.success {
+        return Ok(());
+    }
+
+    let by_plist = run_launchctl(&["bootout", &gui_domain, &plist_path])?;
+    if by_plist.success || !service_is_loaded(&service_id)? {
+        return Ok(());
+    }
+
+    Err(anyhow!(
+        "failed to stop launch agent: {}; {}",
+        by_service.stderr.trim(),
+        by_plist.stderr.trim()
+    ))
+}
+
 struct LaunchctlOutput {
     success: bool,
     stderr: String,

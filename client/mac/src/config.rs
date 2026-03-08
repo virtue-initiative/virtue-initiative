@@ -12,9 +12,12 @@ pub struct ClientPaths {
     pub logs_dir: PathBuf,
     pub state_file: PathBuf,
     pub token_file: PathBuf,
-    pub queue_file: PathBuf,
+    pub batch_buffer_file: PathBuf,
+    pub lifecycle_state_file: PathBuf,
+    pub service_env_file: PathBuf,
     pub daemon_status_file: PathBuf,
     pub launch_agent_file: PathBuf,
+    legacy_upload_queue_file: PathBuf,
 }
 
 impl ClientPaths {
@@ -31,9 +34,12 @@ impl ClientPaths {
         Ok(Self {
             state_file: config_dir.join("mac_client_state.json"),
             token_file: config_dir.join("token_store.json"),
-            queue_file: data_dir.join("upload_queue.json"),
+            batch_buffer_file: data_dir.join("batch_buffer.json"),
+            lifecycle_state_file: data_dir.join("lifecycle_state.json"),
+            service_env_file: config_dir.join("service.dev.env"),
             daemon_status_file: data_dir.join("mac_daemon_status.json"),
             launch_agent_file: launch_agents_dir.join("codes.anb.virtue.daemon.plist"),
+            legacy_upload_queue_file: data_dir.join("upload_queue.json"),
             config_dir,
             data_dir,
             launch_agents_dir,
@@ -50,15 +56,30 @@ impl ClientPaths {
             .with_context(|| format!("failed to create {}", self.launch_agents_dir.display()))?;
         fs::create_dir_all(&self.logs_dir)
             .with_context(|| format!("failed to create {}", self.logs_dir.display()))?;
+
+        // Keep existing buffered batches when upgrading from the old path name.
+        if !self.batch_buffer_file.exists() && self.legacy_upload_queue_file.exists() {
+            fs::rename(&self.legacy_upload_queue_file, &self.batch_buffer_file).with_context(
+                || {
+                    format!(
+                        "failed migrating {} to {}",
+                        self.legacy_upload_queue_file.display(),
+                        self.batch_buffer_file.display()
+                    )
+                },
+            )?;
+        }
         Ok(())
     }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ClientState {
     pub monitoring_enabled: bool,
     pub device_id: Option<String>,
     pub email: Option<String>,
+    pub e2ee_user_id: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
