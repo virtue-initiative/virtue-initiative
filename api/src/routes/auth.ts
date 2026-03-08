@@ -29,6 +29,8 @@ const updateUserSchema = z
   .object({
     name: z.string().min(1).optional(),
     e2ee_key: z.base64().optional(),
+    pub_key: z.base64().optional(),
+    priv_key: z.base64().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
 
@@ -129,15 +131,19 @@ auth.get('/user', authenticate('access'), async (c) => {
     email: user.email,
     ...(user.name ? { name: user.name } : {}),
     ...(user.e2ee_key ? { e2ee_key: encodeBase64(user.e2ee_key) } : {}),
+    ...(user.pub_key ? { pub_key: encodeBase64(user.pub_key) } : {}),
+    ...(user.priv_key ? { priv_key: encodeBase64(user.priv_key) } : {}),
   });
 });
 
 auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema), async (c) => {
-  const { name, e2ee_key } = c.req.valid('json');
+  const { name, e2ee_key, pub_key, priv_key } = c.req.valid('json');
 
   await updateUser(c.env.DB, c.get('sub'), {
     name,
     e2ee_key: e2ee_key ? decodeBase64(e2ee_key) : undefined,
+    pub_key: pub_key ? decodeBase64(pub_key) : undefined,
+    priv_key: priv_key ? decodeBase64(priv_key) : undefined,
   });
 
   return c.json({ ok: true });

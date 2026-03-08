@@ -56,6 +56,8 @@ describe('Auth routes', () => {
       body: JSON.stringify({
         name: 'Updated Carol',
         e2ee_key: Buffer.from('secret').toString('base64'),
+        pub_key: Buffer.from('public-key').toString('base64'),
+        priv_key: Buffer.from('private-key').toString('base64'),
       }),
     });
     expect(patchRes.status).toBe(200);
@@ -65,8 +67,15 @@ describe('Auth routes', () => {
     });
     expect(getRes.status).toBe(200);
 
-    const body = (await getRes.json()) as { name: string; e2ee_key: string };
+    const body = (await getRes.json()) as {
+      name: string;
+      e2ee_key: string;
+      pub_key: string;
+      priv_key: string;
+    };
     expect(body.name).toBe('Updated Carol');
     expect(Buffer.from(body.e2ee_key, 'base64').toString()).toBe('secret');
+    expect(Buffer.from(body.pub_key, 'base64').toString()).toBe('public-key');
+    expect(Buffer.from(body.priv_key, 'base64').toString()).toBe('private-key');
   });
 });

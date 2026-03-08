@@ -127,14 +127,21 @@ partners.post(
 
 partners.get('/partner', authenticate('access'), async (c) => {
   const userId = c.get('sub');
+  const currentUser = await findUserById(c.env.DB, userId);
+
+  if (!currentUser) {
+    return c.json({ error: 'Not found' }, 404);
+  }
+
   const [owned, incoming] = await Promise.all([
     listOwnedPartners(c.env.DB, userId),
-    listIncomingPartners(c.env.DB, userId),
+    listIncomingPartners(c.env.DB, userId, currentUser.email),
   ]);
 
   return c.json([
     ...owned.map((partner) => ({
       id: partner.id,
+      role: 'owner' as const,
       partner: {
         ...(partner.partner_id ? { id: partner.partner_id } : {}),
         email: partner.partner_email,
@@ -147,6 +154,7 @@ partners.get('/partner', authenticate('access'), async (c) => {
     })),
     ...incoming.map((partner) => ({
       id: partner.id,
+      role: 'invitee' as const,
       partner: {
         id: partner.owner_id,
         email: partner.owner_email,
@@ -173,6 +181,10 @@ partners.patch(
     }
 
     const { permissions, e2ee_key } = c.req.valid('json');
+    const matchedPartner =
+      partnership.partner_user_id === null
+        ? await findUserByEmail(c.env.DB, partnership.partner_email)
+        : null;
     const nextPermissions = permissions
       ? { ...(JSON.parse(partnership.permissions) as { view_data?: boolean }), ...permissions }
       : (JSON.parse(partnership.permissions) as { view_data?: boolean });
@@ -180,6 +192,7 @@ partners.patch(
     await updatePartnerByOwner(c.env.DB, {
       id: partnerId,
       ownerId: c.get('sub'),
+      partner_user_id: matchedPartner?.id,
       permissions: permissions ? JSON.stringify(nextPermissions) : undefined,
       e2ee_key: e2ee_key ? decodeBase64(e2ee_key) : undefined,
       updated_at: Date.now(),
@@ -192,12 +205,17 @@ partners.patch(
 partners.delete('/partner/:id', authenticate('access'), async (c) => {
   const partnerId = c.req.param('id');
   const partnership = await findPartnerById(c.env.DB, partnerId);
+  const currentUser = await findUserById(c.env.DB, c.get('sub'));
 
-  if (!partnership) {
+  if (!partnership || !currentUser) {
     return c.json({ error: 'Not found' }, 404);
   }
 
-  if (partnership.user_id !== c.get('sub') && partnership.partner_user_id !== c.get('sub')) {
+  const canDeleteAsInvitee =
+    partnership.partner_user_id === c.get('sub') ||
+    (partnership.partner_user_id === null && partnership.partner_email === currentUser.email);
+
+  if (partnership.user_id !== c.get('sub') && !canDeleteAsInvitee) {
     return c.json({ error: 'Not found' }, 404);
   }
 

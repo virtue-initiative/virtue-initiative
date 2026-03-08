@@ -3,6 +3,8 @@ export interface User {
   email: string;
   name?: string;
   e2ee_key?: string;
+  pub_key?: string;
+  priv_key?: string;
 }
 
 export interface Device {
@@ -39,6 +41,7 @@ export interface DataPage {
 
 export interface Partner {
   id: string;
+  role: "owner" | "invitee";
   partner: {
     id?: string;
     email: string;
@@ -116,7 +119,15 @@ export const api = {
 
   getUser: (token: string) => req<User>("/user", {}, token),
 
-  updateUser: (token: string, fields: { name?: string; e2ee_key?: string }) =>
+  updateUser: (
+    token: string,
+    fields: {
+      name?: string;
+      e2ee_key?: string;
+      pub_key?: string;
+      priv_key?: string;
+    },
+  ) =>
     req<{ ok: boolean }>(
       "/user",
       {
@@ -144,16 +155,23 @@ export const api = {
 
   getPartners: (token: string) => req<Partner[]>("/partner", {}, token),
 
+  getPartnerPublicKey: async (email: string) => {
+    const qs = new URLSearchParams({ email });
+    const result = await req<{ pubkey: string }>(`/pubkey?${qs.toString()}`);
+    return result.pubkey;
+  },
+
   invitePartner: (
     token: string,
     email: string,
     permissions: { view_data: boolean },
+    e2ee_key?: string,
   ) =>
     req<{ id: string; status: string }>(
       "/partner",
       {
         method: "POST",
-        body: JSON.stringify({ email, permissions }),
+        body: JSON.stringify({ email, permissions, ...(e2ee_key ? { e2ee_key } : {}) }),
       },
       token,
     ),

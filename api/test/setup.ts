@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT,
   e2ee_key BLOB,
   pub_key BLOB,
+  priv_key BLOB,
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);

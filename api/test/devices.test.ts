@@ -55,4 +55,32 @@ describe('Main device routes', () => {
 
     expect(res.status).toBe(404);
   });
+
+  it('lists owner devices to an accepted partner with view_data', async () => {
+    const { token: ownerToken } = await signupAndGetToken('owner2@example.com');
+    const { token: partnerToken } = await signupAndGetToken('partner2@example.com');
+    const device = await createDeviceForUser(ownerToken, 'Owner Phone', 'android');
+
+    const inviteRes = await SELF.fetch(`${BASE}/partner`, {
+      method: 'POST',
+      headers: authHeaders(ownerToken),
+      body: JSON.stringify({ email: 'partner2@example.com', permissions: { view_data: true } }),
+    });
+    expect(inviteRes.status).toBe(201);
+    const invite = (await inviteRes.json()) as { id: string };
+
+    const acceptRes = await SELF.fetch(`${BASE}/partner/accept`, {
+      method: 'POST',
+      headers: authHeaders(partnerToken),
+      body: JSON.stringify({ id: invite.id }),
+    });
+    expect(acceptRes.status).toBe(200);
+
+    const beforeConfirmRes = await SELF.fetch(`${BASE}/device`, {
+      headers: { Authorization: `Bearer ${partnerToken}` },
+    });
+    expect(beforeConfirmRes.status).toBe(200);
+    const beforeConfirm = (await beforeConfirmRes.json()) as Array<{ id: string }>;
+    expect(beforeConfirm.find((item) => item.id === device.id)).toBeTruthy();
+  });
 });

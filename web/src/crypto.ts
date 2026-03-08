@@ -18,16 +18,23 @@ export async function hashPasswordForAuth(
   });
 }
 
+export function generateRandomKeyBytes(length = 32): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(new ArrayBuffer(length));
+  crypto.getRandomValues(bytes);
+  return bytes;
+}
+
 // Encrypts data with AES-GCM: returns nonce(12 bytes) || ciphertext+tag
 export async function encryptData(
   key: CryptoKey,
-  data: Uint8Array<ArrayBuffer>,
+  data: Uint8Array,
 ): Promise<Uint8Array> {
+  const payload = Uint8Array.from(data);
   const nonce = crypto.getRandomValues(new Uint8Array(12));
   const ciphertext = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv: nonce },
     key,
-    data,
+    payload,
   );
   const result = new Uint8Array(12 + ciphertext.byteLength);
   result.set(nonce, 0);
@@ -105,6 +112,70 @@ export async function decryptBatch(
     ciphertext,
   );
   return new Uint8Array(plain);
+}
+
+export async function generateSharingKeyPair(): Promise<CryptoKeyPair> {
+  return crypto.subtle.generateKey(
+    {
+      name: "RSA-OAEP",
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: "SHA-256",
+    },
+    true,
+    ["encrypt", "decrypt"],
+  );
+}
+
+export async function exportPublicKey(
+  key: CryptoKey,
+): Promise<Uint8Array<ArrayBuffer>> {
+  return new Uint8Array(await crypto.subtle.exportKey("spki", key));
+}
+
+export async function exportPrivateKey(
+  key: CryptoKey,
+): Promise<Uint8Array<ArrayBuffer>> {
+  return new Uint8Array(await crypto.subtle.exportKey("pkcs8", key));
+}
+
+export async function importPublicKey(spki: BufferSource): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
+    "spki",
+    spki,
+    { name: "RSA-OAEP", hash: "SHA-256" },
+    false,
+    ["encrypt"],
+  );
+}
+
+export async function importPrivateKey(pkcs8: BufferSource): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
+    "pkcs8",
+    pkcs8,
+    { name: "RSA-OAEP", hash: "SHA-256" },
+    false,
+    ["decrypt"],
+  );
+}
+
+export async function encryptForPublicKey(
+  spki: BufferSource,
+  data: BufferSource,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const publicKey = await importPublicKey(spki);
+  return new Uint8Array(
+    await crypto.subtle.encrypt({ name: "RSA-OAEP" }, publicKey, data),
+  );
+}
+
+export async function decryptWithPrivateKey(
+  privateKey: CryptoKey,
+  data: BufferSource,
+): Promise<Uint8Array<ArrayBuffer>> {
+  return new Uint8Array(
+    await crypto.subtle.decrypt({ name: "RSA-OAEP" }, privateKey, data),
+  );
 }
 
 // Decompresses gzip using native DecompressionStream
