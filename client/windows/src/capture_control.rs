@@ -115,15 +115,17 @@ pub fn launch_capture_in_active_session(paths: &ClientPaths) -> Result<Option<u3
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| paths.base_dir.clone());
         let current_dir = to_wide_null(current_dir_path.as_os_str());
-        let mut cmd = to_wide_null(&format!(
+        let mut cmd = to_wide_null(format!(
             "\"{}\" --mode capture --console",
             capture_exe.display()
         ));
         let mut desktop = to_wide_null("winsta0\\default");
 
-        let mut startup_info = STARTUPINFOW::default();
-        startup_info.cb = size_of::<STARTUPINFOW>() as u32;
-        startup_info.lpDesktop = PWSTR(desktop.as_mut_ptr());
+        let startup_info = STARTUPINFOW {
+            cb: size_of::<STARTUPINFOW>() as u32,
+            lpDesktop: PWSTR(desktop.as_mut_ptr()),
+            ..Default::default()
+        };
 
         let mut proc_info = PROCESS_INFORMATION::default();
         let create_result = unsafe {

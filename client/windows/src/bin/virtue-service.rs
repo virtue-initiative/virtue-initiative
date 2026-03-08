@@ -80,10 +80,10 @@ fn parse_mode() -> Option<Mode> {
         if let Some(value) = arg.strip_prefix("--mode=") {
             return Some(parse_mode_value(value));
         }
-        if arg == "--mode" {
-            if let Some(value) = args.get(i + 1) {
-                return Some(parse_mode_value(value));
-            }
+        if arg == "--mode"
+            && let Some(value) = args.get(i + 1)
+        {
+            return Some(parse_mode_value(value));
         }
     }
     None
