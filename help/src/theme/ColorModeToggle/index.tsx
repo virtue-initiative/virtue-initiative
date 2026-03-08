@@ -6,6 +6,7 @@ import {
   nextTheme,
   preferredTheme,
 } from "@virtueinitiative/shared-web/state";
+import useIsBrowser from "@docusaurus/useIsBrowser";
 
 function MoonIcon() {
   return (
@@ -42,8 +43,11 @@ function SunIcon() {
 }
 
 export default function ColorModeToggle() {
+  const browser = useIsBrowser();
   const { setColorMode } = useColorMode();
-  const [theme, setTheme] = useState<string | undefined>(typeof window !== "undefined" ? getState().theme : "light");
+  const [theme, setTheme] = useState<string | undefined>(
+    browser ? getState().theme : "light",
+  );
 
   function applyTheme(t: string | undefined) {
     const effective = t ?? preferredTheme();
@@ -51,10 +55,17 @@ export default function ColorModeToggle() {
   }
 
   useEffect(() => {
-    applyTheme(theme);
-  }, []);
+    if (!browser) return;
+    setTheme(getState().theme);
+  }, [browser]);
 
   useEffect(() => {
+    if (!browser) return;
+    applyTheme(theme);
+  }, [browser]);
+
+  useEffect(() => {
+    if (!browser) return;
     const unsubscribe = onStateUpdate((state) => {
       setTheme(state.theme);
       applyTheme(state.theme);
@@ -63,9 +74,9 @@ export default function ColorModeToggle() {
     return () => {
       if (typeof unsubscribe === "function") unsubscribe();
     };
-  }, [setColorMode]);
+  }, [setColorMode, browser]);
 
-  const effectiveTheme = theme ?? typeof window !== "undefined" ? preferredTheme() : "light";
+  const effectiveTheme = theme ?? (browser ? preferredTheme() : "light");
   const isDark = effectiveTheme === "dark";
 
   return (
