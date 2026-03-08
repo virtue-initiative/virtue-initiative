@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "codes.anb.virtue"
+    namespace = "org.virtueinitiative.virtue"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "codes.anb.virtue"
+        applicationId = "org.virtueinitiative.virtue"
         minSdk = 29
         targetSdk = 35
         versionCode = 1

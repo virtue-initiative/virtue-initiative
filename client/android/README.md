@@ -119,7 +119,7 @@ cd client/android
 4. Launch app activity.
 
 ```bash
-adb shell am start -n codes.anb.virtue/.MainActivity
+adb shell am start -n org.virtueinitiative.virtue/.MainActivity
 ```
 
 ## Local API override (same 3 vars as Linux)
@@ -151,7 +151,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ## Verify app is running
 
 ```bash
-adb shell pm list packages | grep codes.anb.virtue
-adb shell pidof -s codes.anb.virtue
-adb logcat --pid "$(adb shell pidof -s codes.anb.virtue)"
+adb shell pm list packages | grep org.virtueinitiative.virtue
+adb shell pidof -s org.virtueinitiative.virtue
+adb logcat --pid "$(adb shell pidof -s org.virtueinitiative.virtue)"
 ```

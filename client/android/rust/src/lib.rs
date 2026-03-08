@@ -52,7 +52,7 @@ struct AndroidState {
 }
 
 #[no_mangle]
-pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeInit(
+pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeInit(
     mut env: JNIEnv,
     _class: JClass,
     config_dir: JString,
@@ -113,7 +113,7 @@ pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeInit(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeSetOverrides(
+pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeSetOverrides(
     mut env: JNIEnv,
     _class: JClass,
     base_api_url: JString,
@@ -140,7 +140,7 @@ pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeSetOverrides(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeLogin(
+pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeLogin(
     mut env: JNIEnv,
     _class: JClass,
     email: JString,
@@ -186,7 +186,7 @@ pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeLogin(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeLogout(
+pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeLogout(
     mut env: JNIEnv,
     _class: JClass,
 ) -> jstring {
@@ -227,7 +227,7 @@ pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeLogout(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeIsLoggedIn(
+pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeIsLoggedIn(
     _env: JNIEnv,
     _class: JClass,
 ) -> jboolean {
@@ -245,7 +245,7 @@ pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeIsLoggedIn(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeGetDeviceId(
+pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeGetDeviceId(
     mut env: JNIEnv,
     _class: JClass,
 ) -> jstring {
@@ -262,7 +262,7 @@ pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeGetDeviceId(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeNextCaptureDelayMs(
+pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeNextCaptureDelayMs(
     _env: JNIEnv,
     _class: JClass,
     last_success: jboolean,
@@ -291,7 +291,7 @@ pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeNextCaptureDelay
 }
 
 #[no_mangle]
-pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeProcessCapture(
+pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeProcessCapture(
     mut env: JNIEnv,
     _class: JClass,
     png_bytes: JByteArray,
@@ -338,7 +338,7 @@ pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeProcessCapture(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_codes_anb_virtue_NativeBridge_nativeReportLog(
+pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeReportLog(
     mut env: JNIEnv,
     _class: JClass,
     event_type: JString,
