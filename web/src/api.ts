@@ -171,7 +171,11 @@ export const api = {
       "/partner",
       {
         method: "POST",
-        body: JSON.stringify({ email, permissions, ...(e2ee_key ? { e2ee_key } : {}) }),
+        body: JSON.stringify({
+          email,
+          permissions,
+          ...(e2ee_key ? { e2ee_key } : {}),
+        }),
       },
       token,
     ),
