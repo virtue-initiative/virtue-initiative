@@ -1,4 +1,4 @@
-package codes.anb.virtue
+package org.virtueinitiative.virtue
 
 import android.app.*
 import android.content.Context
@@ -382,8 +382,8 @@ class ScreenshotService : Service() {
 
     companion object {
         private const val TAG = "ScreenshotService"
-        private const val ACTION_START = "codes.anb.virtue.START"
-        private const val ACTION_STOP = "codes.anb.virtue.STOP"
+        private const val ACTION_START = "org.virtueinitiative.virtue.START"
+        private const val ACTION_STOP = "org.virtueinitiative.virtue.STOP"
         private const val EXTRA_RESULT_CODE = "projection_result_code"
         private const val EXTRA_RESULT_DATA = "projection_result_data"
         private const val CHANNEL_ID = "virtue_monitoring"

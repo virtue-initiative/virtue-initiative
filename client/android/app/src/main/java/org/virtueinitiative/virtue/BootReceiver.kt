@@ -1,4 +1,4 @@
-package codes.anb.virtue
+package org.virtueinitiative.virtue
 
 import android.content.BroadcastReceiver
 import android.content.Context
