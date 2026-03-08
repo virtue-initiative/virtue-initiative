@@ -35,7 +35,7 @@ struct AndroidCore {
     batch_buffer_path: PathBuf,
     dynamic: Mutex<DynamicCore>,
     daemon_state: Mutex<DaemonState>,
-    java_vm: JavaVM,
+    java_vm: Arc<JavaVM>,
 }
 
 #[derive(Clone)]
@@ -82,7 +82,7 @@ impl Default for AndroidState {
 struct AndroidDaemonHost {
     state_path: PathBuf,
     stop: Arc<AtomicBool>,
-    java_vm: JavaVM,
+    java_vm: Arc<JavaVM>,
 }
 
 impl AndroidDaemonHost {
@@ -231,7 +231,7 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeInit(
         let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&token_file));
         let runtime = Runtime::new().context("failed to build tokio runtime")?;
         let dynamic = build_dynamic(token_store.clone())?;
-        let java_vm = env.get_java_vm().context("failed to get JavaVM")?;
+        let java_vm = Arc::new(env.get_java_vm().context("failed to get JavaVM")?);
 
         CORE.set(AndroidCore {
             runtime,
