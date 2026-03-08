@@ -27,20 +27,145 @@ This directory contains the Windows client implementation:
 From WSL:
 
 ```bash
-cd /home/jeff/code/bepurev2/client/windows
-./scripts/build-installer.sh 0.1.0
+cd /home/jeff/code/virtue-initiative/client/windows
+./scripts/build-installer.sh -Version 0.1.0 -Profile Debug
 ```
 
 Or from Windows PowerShell:
 
 ```powershell
-cd \\wsl$\Ubuntu\home\jeff\code\bepurev2\client\windows
-.\scripts\build-installer.ps1 -Version 0.1.0
+cd C:\path\to\virtue-initiative\client\windows
+.\scripts\build-installer.ps1 -Version 0.1.0 -Profile Debug
 ```
 
 Expected output:
 
 - `client/windows/dist/virtue-windows-installer-<version>.exe`
+
+Useful installer build flags:
+
+- `-Profile Debug|Release` (default: `Debug`)
+- `-Clean` (opt-in, only when you need a clean rebuild)
+- `-CacheRoot C:\path\to\cache` (default: `%LOCALAPPDATA%\VirtueBuildCache`)
+
+## Windows CI smoke checks (local, cached)
+
+The CI-equivalent smoke checks run:
+
+- `cargo build -p virtue-client-core`
+- `cargo build -p virtue-windows-client`
+- `cargo clippy -p virtue-client-core --all-targets -- -D warnings`
+- `cargo clippy -p virtue-windows-client --all-targets -- -D warnings`
+
+On Windows host:
+
+```powershell
+cd C:\path\to\virtue-initiative\client
+cargo build -p virtue-client-core
+cargo build -p virtue-windows-client
+cargo clippy -p virtue-client-core --all-targets -- -D warnings
+cargo clippy -p virtue-windows-client --all-targets -- -D warnings
+```
+
+This uses persistent cache dirs under `%LOCALAPPDATA%\VirtueBuildCache` and
+enables `sccache` automatically when available.
+
+## Linux-driven remote Windows loop
+
+Prereqs:
+
+- OpenSSH server enabled on the Windows VM
+- `ssh`/`scp` available on Linux host
+- SSH alias configured (example: `win11`)
+
+If you are rebuilding from scratch, follow the full guide first:
+
+- [VM_SETUP.md](./VM_SETUP.md)
+
+Run CI smoke checks from Linux:
+
+```bash
+./client/windows/scripts/remote-windows-build.sh \
+  --build-host win11 \
+  --mode smoke
+```
+
+Run an installer build from Linux (artifact stays on Windows by default):
+
+```bash
+./client/windows/scripts/remote-windows-build.sh \
+  --build-host win11 \
+  --mode installer \
+  --version 0.1.0-dev \
+  --profile Debug
+```
+
+Optional: copy installer back to Linux if needed:
+
+```bash
+./client/windows/scripts/remote-windows-build.sh \
+  --build-host win11 \
+  --mode installer \
+  --version 0.1.0-dev \
+  --profile Debug \
+  --copy-installer-to-linux
+```
+
+Each remote run writes a full local log file under:
+
+- `client/windows/dist/remote-logs/`
+
+## libvirt / virt-manager VM setup
+
+Create a `win11` VM from ISO (manual install flow):
+
+```bash
+virt-install \
+  --name win11 \
+  --memory 4608 \
+  --vcpus 3 \
+  --cpu host-passthrough \
+  --os-variant win11 \
+  --machine q35 \
+  --disk size=120,bus=virtio \
+  --cdrom ~/isos/Win11_English_x64.iso \
+  --disk path=~/isos/virtio-win.iso,device=cdrom \
+  --network network=default,model=virtio \
+  --graphics spice \
+  --video virtio \
+  --boot uefi \
+  --noautoconsole
+```
+
+Start VM:
+
+```bash
+virsh start win11
+```
+
+Stop VM:
+
+```bash
+virsh shutdown win11
+```
+
+Force-stop VM if needed:
+
+```bash
+virsh destroy win11
+```
+
+Delete VM and disk:
+
+```bash
+virsh undefine win11 --nvram --remove-all-storage
+```
+
+Adjust CPU/RAM from `virt-manager` UI (`Open` VM -> `Show virtual hardware details`).
+
+Bootstrap script for inside-Windows setup (OpenSSH + toolchain + cache paths):
+
+- `client/windows/scripts/bootstrap-win11-build-vm.ps1`
 
 ## Custom API base URL
 

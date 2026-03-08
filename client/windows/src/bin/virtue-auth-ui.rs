@@ -6,6 +6,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use tokio::runtime::Builder;
 
+use virtue_client_core::resolve_base_api_url;
 use virtue_windows_client::config::ClientPaths;
 use virtue_windows_client::runtime_env::apply_runtime_env;
 use virtue_windows_client::service_log::ServiceLogger;
@@ -24,6 +25,7 @@ slint::slint! {
         in-out property <string> email_input;
         in-out property <string> password_input;
         in-out property <string> status_text;
+        in-out property <string> api_base_url;
 
         callback login_request(string, string);
         callback logout_request();
@@ -60,6 +62,13 @@ slint::slint! {
                         text: status_text;
                         color: #334155;
                         font-size: 14px;
+                        wrap: word-wrap;
+                    }
+
+                    Text {
+                        text: "API: " + api_base_url;
+                        color: #64748b;
+                        font-size: 12px;
                         wrap: word-wrap;
                     }
 
@@ -147,8 +156,10 @@ fn main() -> Result<()> {
 
     let ui = AuthWindow::new().map_err(|err| anyhow::anyhow!(err.to_string()))?;
     let initial = session.status()?;
+    let api_base_url = resolve_base_api_url();
 
     ui.set_logged_in(initial.logged_in);
+    ui.set_api_base_url(api_base_url.into());
     ui.set_account_email(initial.email.clone().unwrap_or_default().into());
     ui.set_email_input(initial.email.unwrap_or_default().into());
     if ui.get_logged_in() {

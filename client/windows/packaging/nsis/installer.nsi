@@ -13,6 +13,12 @@ Unicode true
 !ifndef BUILD_TARGET_DIR
 !define BUILD_TARGET_DIR "..\\..\\target"
 !endif
+!ifndef BUILD_TARGET
+!define BUILD_TARGET "x86_64-pc-windows-msvc"
+!endif
+!ifndef BUILD_PROFILE
+!define BUILD_PROFILE "release"
+!endif
 !ifndef OUTFILE
 !define OUTFILE "virtue-windows-installer-${PRODUCT_VERSION}.exe"
 !endif
@@ -43,9 +49,9 @@ Section "Install"
   nsExec::ExecToLog '"$SYSDIR\\taskkill.exe" /F /T /IM "bepure-service.exe"'
   Sleep 1000
 
-  File "${BUILD_TARGET_DIR}\\x86_64-pc-windows-msvc\\release\\virtue-service.exe"
-  File "${BUILD_TARGET_DIR}\\x86_64-pc-windows-msvc\\release\\virtue-tray.exe"
-  File "${BUILD_TARGET_DIR}\\x86_64-pc-windows-msvc\\release\\virtue-auth-ui.exe"
+  File "${BUILD_TARGET_DIR}\\${BUILD_TARGET}\\${BUILD_PROFILE}\\virtue-service.exe"
+  File "${BUILD_TARGET_DIR}\\${BUILD_TARGET}\\${BUILD_PROFILE}\\virtue-tray.exe"
+  File "${BUILD_TARGET_DIR}\\${BUILD_TARGET}\\${BUILD_PROFILE}\\virtue-auth-ui.exe"
   File "..\\..\\assets\\app-icon.ico"
 
   ; Launch helper to run the capture agent hidden (no console window).
