@@ -1,16 +1,26 @@
 param(
     [string]$Target = "x86_64-pc-windows-msvc",
     [string]$Version = "0.1.0",
-    [switch]$SkipBuild
+    [ValidateSet("Debug", "Release")]
+    [string]$Profile = "Debug",
+    [switch]$SkipBuild,
+    [switch]$Clean,
+    [string]$CacheRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
 
+if ([string]::IsNullOrWhiteSpace($CacheRoot)) {
+    $CacheRoot = Join-Path $env:LOCALAPPDATA "VirtueBuildCache"
+}
+
+$ProfileLower = $Profile.ToLowerInvariant()
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $NsisScript = Join-Path $ProjectRoot "packaging\nsis\installer.nsi"
 $DistDir = Join-Path $ProjectRoot "dist"
 $OutFile = Join-Path $DistDir "virtue-windows-installer-$Version.exe"
-$BuildTargetDir = Join-Path $env:TEMP "virtue-target"
+$BuildTargetDir = Join-Path $CacheRoot "cargo-target"
+$SccacheDir = Join-Path $CacheRoot "sccache"
 $LocalOutFile = Join-Path $BuildTargetDir "virtue-windows-installer-$Version.exe"
 
 Push-Location $ProjectRoot
@@ -26,17 +36,57 @@ try {
         throw "cargo not found. Install Rust toolchain for Windows."
     }
 
-    $env:CARGO_INCREMENTAL = "0"
+    New-Item -ItemType Directory -Force -Path $CacheRoot | Out-Null
+    New-Item -ItemType Directory -Force -Path $BuildTargetDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $SccacheDir | Out-Null
+
     $env:CARGO_TARGET_DIR = $BuildTargetDir
+    $sccacheEnabled = $false
+
+    Remove-Item Env:RUSTC_WRAPPER -ErrorAction SilentlyContinue
+    Remove-Item Env:SCCACHE_DIR -ErrorAction SilentlyContinue
+
+    $sccache = (Get-Command sccache -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+    if ($sccache) {
+        $env:RUSTC_WRAPPER = $sccache
+        $env:SCCACHE_DIR = $SccacheDir
+        if (-not $env:SCCACHE_CACHE_SIZE) {
+            $env:SCCACHE_CACHE_SIZE = "10G"
+        }
+        & $sccache --start-server | Out-Null
+        Write-Host "Using sccache: $sccache"
+        $sccacheEnabled = $true
+    } else {
+        Write-Warning "sccache not found; proceeding without compiler cache."
+    }
+
+    if ($sccacheEnabled) {
+        # sccache is incompatible with incremental mode in this setup.
+        $env:CARGO_INCREMENTAL = "0"
+    } else {
+        $env:CARGO_INCREMENTAL = if ($Profile -eq "Debug") { "1" } else { "0" }
+    }
 
     if (-not $SkipBuild) {
-        # WSL/UNC timestamp edge cases can produce stale binaries; clean first for determinism.
-        & $cargo clean --target $Target
-        if ($LASTEXITCODE -ne 0) {
-            throw "cargo clean failed with exit code $LASTEXITCODE"
+        if ($Clean) {
+            & $cargo clean --target $Target
+            if ($LASTEXITCODE -ne 0) {
+                throw "cargo clean failed with exit code $LASTEXITCODE"
+            }
         }
 
-        & $cargo build --release --target $Target --bin virtue-service --bin virtue-tray --bin virtue-auth-ui
+        $buildArgs = @(
+            "build",
+            "--target", $Target,
+            "--bin", "virtue-service",
+            "--bin", "virtue-tray",
+            "--bin", "virtue-auth-ui"
+        )
+        if ($Profile -eq "Release") {
+            $buildArgs += "--release"
+        }
+
+        & $cargo @buildArgs
         if ($LASTEXITCODE -ne 0) {
             throw "cargo build failed with exit code $LASTEXITCODE"
         }
@@ -66,7 +116,7 @@ try {
         Remove-Item -Force $LocalOutFile
     }
 
-    & $makensis "/DPRODUCT_VERSION=$Version" "/DOUTFILE=$LocalOutFile" "/DBUILD_TARGET_DIR=$BuildTargetDir" $NsisScript
+    & $makensis "/DPRODUCT_VERSION=$Version" "/DOUTFILE=$LocalOutFile" "/DBUILD_TARGET_DIR=$BuildTargetDir" "/DBUILD_TARGET=$Target" "/DBUILD_PROFILE=$ProfileLower" $NsisScript
     if ($LASTEXITCODE -ne 0) {
         throw "makensis failed with exit code $LASTEXITCODE"
     }
