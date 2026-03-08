@@ -4,6 +4,7 @@ import { useE2EE } from "../../context/e2ee";
 import { api } from "../../api";
 import { deriveKey, encryptData, decryptBatch } from "../../crypto";
 import "./style.css";
+import { ThemeButton } from "../../components/ThemeButton";
 
 export function Auth() {
   const { login, signup } = useAuth();
@@ -103,7 +104,10 @@ export function Auth() {
   return (
     <div class="auth-page">
       <div class="card auth-card">
-        <h1 class="auth-title">The Virtue Initiative</h1>
+        <div class="auth-header">
+          <h1 class="auth-title">The Virtue Initiative</h1>
+          <ThemeButton />
+        </div>
         <p class="auth-subtitle">Accountability starts here.</p>
 
         <div class="auth-tabs">
