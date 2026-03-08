@@ -12,8 +12,11 @@ import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.DisplayMetrics
+import android.util.Log
 import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -22,9 +25,14 @@ import java.io.ByteArrayOutputStream
 
 class ScreenshotService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val startLock = Any()
 
     private var captureJob: Job? = null
+    @Volatile
+    private var startInProgress = false
+    private val projectionCallbackHandler by lazy { Handler(Looper.getMainLooper()) }
     private var mediaProjection: MediaProjection? = null
+    private var projectionCallback: MediaProjection.Callback? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
 
@@ -34,6 +42,14 @@ class ScreenshotService : Service() {
         super.onCreate()
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification("Monitoring active"))
+
+        val overrides = OverrideSettings.load(this)
+        Log.i(
+            TAG,
+            "Runtime overrides: baseApiUrl=${overrides.baseApiUrl ?: "<default>"}, " +
+                "captureIntervalSeconds=${overrides.captureIntervalSeconds ?: "<default>"}, " +
+                "batchWindowSeconds=${overrides.batchWindowSeconds ?: "<default>"}"
+        )
 
         val initError = NativeBridge.ensureInitialized(this)
         if (initError != null) {
@@ -45,19 +61,18 @@ class ScreenshotService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
+                synchronized(startLock) {
+                    startInProgress = false
+                }
                 stopCaptureResources()
                 stopSelf()
                 return START_NOT_STICKY
             }
             ACTION_START -> {
-                scope.launch {
-                    startMonitoring(intent)
-                }
+                launchMonitoringIfNeeded(intent)
             }
             else -> {
-                scope.launch {
-                    startMonitoring(intent)
-                }
+                launchMonitoringIfNeeded(intent)
             }
         }
 
@@ -128,16 +143,31 @@ class ScreenshotService : Service() {
             return
         }
 
+        val initialPngBytes = runCatching { captureFrameAsPng() }.getOrNull()
+        if (initialPngBytes == null) {
+            Log.w(TAG, "Initial capture frame unavailable; will retry on schedule")
+        }
+
         updateNotification("Monitoring active")
         captureJob = scope.launch {
             var lastSuccess = true
+            var lastPngBytes: ByteArray? = initialPngBytes
             while (isActive) {
                 val delayMs = NativeBridge.nativeNextCaptureDelayMs(lastSuccess).coerceAtLeast(15_000)
+                Log.d(TAG, "Next capture in ${delayMs}ms (lastSuccess=$lastSuccess)")
                 delay(delayMs)
 
-                val pngBytes = runCatching { captureFrameAsPng() }.getOrNull()
+                val freshPngBytes = runCatching { captureFrameAsPng() }.getOrNull()
+                if (freshPngBytes != null) {
+                    lastPngBytes = freshPngBytes
+                } else if (lastPngBytes != null) {
+                    Log.w(TAG, "No fresh frame available; reusing last successful frame")
+                }
+
+                val pngBytes = freshPngBytes ?: lastPngBytes
                 if (pngBytes == null) {
                     lastSuccess = false
+                    Log.w(TAG, "Capture failed: no frame available")
                     NativeBridge.nativeReportLog("missed_capture", "capture_failed", null)
                     continue
                 }
@@ -145,7 +175,27 @@ class ScreenshotService : Service() {
                 val error = NativeBridge.nativeProcessCapture(pngBytes)
                 lastSuccess = error == null
                 if (error != null) {
+                    Log.w(TAG, "Capture processed with error: $error")
                     NativeBridge.nativeReportLog("missed_capture", "upload_or_queue_failed", error)
+                }
+            }
+        }
+    }
+
+    private fun launchMonitoringIfNeeded(intent: Intent?) {
+        synchronized(startLock) {
+            if (captureJob?.isActive == true || startInProgress) {
+                return
+            }
+            startInProgress = true
+        }
+
+        scope.launch {
+            try {
+                startMonitoring(intent)
+            } finally {
+                synchronized(startLock) {
+                    startInProgress = false
                 }
             }
         }
@@ -164,10 +214,22 @@ class ScreenshotService : Service() {
             ProjectionPermissionStore.load(this) ?: return false
         }
 
-        return runCatching {
+        val initialized = runCatching {
+            stopCaptureResources()
             mediaProjection = manager.getMediaProjection(resultCode, resultData)
+                ?: throw IllegalStateException("MediaProjection token was rejected")
+            registerProjectionCallback(mediaProjection!!)
             setupVirtualDisplay()
+        }.onFailure { err ->
+            Log.e(TAG, "Failed to initialize MediaProjection", err)
         }.isSuccess
+
+        if (!initialized) {
+            ProjectionPermissionStore.clear(this)
+            stopCaptureResources()
+        }
+
+        return initialized
     }
 
     private fun Intent.projectionDataExtra(): Intent? {
@@ -180,7 +242,7 @@ class ScreenshotService : Service() {
     }
 
     private fun setupVirtualDisplay() {
-        stopCaptureResources()
+        stopDisplayResources()
 
         val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val metrics = DisplayMetrics()
@@ -203,11 +265,44 @@ class ScreenshotService : Service() {
             imageReader?.surface,
             null,
             null
-        )
+        ) ?: throw IllegalStateException("Failed to create VirtualDisplay")
+    }
+
+    private fun registerProjectionCallback(projection: MediaProjection) {
+        unregisterProjectionCallback()
+
+        val callback = object : MediaProjection.Callback() {
+            override fun onStop() {
+                super.onStop()
+                Log.i(TAG, "MediaProjection stopped by system")
+                scope.launch {
+                    captureJob?.cancel()
+                    captureJob = null
+                    stopDisplayResources()
+                    mediaProjection = null
+                    projectionCallback = null
+                    ProjectionPermissionStore.clear(this@ScreenshotService)
+                    updateNotification("Capture permission ended")
+                    NativeBridge.nativeReportLog("missed_capture", "projection_stopped", null)
+                }
+            }
+        }
+
+        projection.registerCallback(callback, projectionCallbackHandler)
+        projectionCallback = callback
+    }
+
+    private fun unregisterProjectionCallback() {
+        val projection = mediaProjection
+        val callback = projectionCallback
+        if (projection != null && callback != null) {
+            runCatching { projection.unregisterCallback(callback) }
+        }
+        projectionCallback = null
     }
 
     private fun captureFrameAsPng(): ByteArray? {
-        repeat(12) {
+        repeat(20) {
             val image = imageReader?.acquireLatestImage()
             if (image != null) {
                 return image.use { imageToPng(image) }
@@ -244,13 +339,18 @@ class ScreenshotService : Service() {
         return output.toByteArray()
     }
 
-    private fun stopCaptureResources() {
+    private fun stopDisplayResources() {
         runCatching { virtualDisplay?.release() }
         runCatching { imageReader?.close() }
-        runCatching { mediaProjection?.stop() }
 
         virtualDisplay = null
         imageReader = null
+    }
+
+    private fun stopCaptureResources() {
+        stopDisplayResources()
+        unregisterProjectionCallback()
+        runCatching { mediaProjection?.stop() }
         mediaProjection = null
     }
 
@@ -281,6 +381,7 @@ class ScreenshotService : Service() {
     }
 
     companion object {
+        private const val TAG = "ScreenshotService"
         private const val ACTION_START = "codes.anb.virtue.START"
         private const val ACTION_STOP = "codes.anb.virtue.STOP"
         private const val EXTRA_RESULT_CODE = "projection_result_code"
@@ -288,21 +389,25 @@ class ScreenshotService : Service() {
         private const val CHANNEL_ID = "virtue_monitoring"
         private const val NOTIFICATION_ID = 1001
 
-        fun start(context: Context, resultCode: Int, data: Intent) {
+        fun start(context: Context, resultCode: Int, data: Intent): String? {
             val intent = Intent(context, ScreenshotService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_RESULT_CODE, resultCode)
                 putExtra(EXTRA_RESULT_DATA, data)
             }
-            ContextCompat.startForegroundService(context, intent)
+            return runCatching {
+                ContextCompat.startForegroundService(context, intent)
+            }.exceptionOrNull()?.message
         }
 
-        fun startFromStoredProjection(context: Context, source: String) {
+        fun startFromStoredProjection(context: Context, source: String): String? {
             val intent = Intent(context, ScreenshotService::class.java).apply {
                 action = ACTION_START
                 putExtra("source", source)
             }
-            ContextCompat.startForegroundService(context, intent)
+            return runCatching {
+                ContextCompat.startForegroundService(context, intent)
+            }.exceptionOrNull()?.message
         }
 
         fun stop(context: Context) {

@@ -122,6 +122,22 @@ cd client/android
 adb shell am start -n codes.anb.virtue/.MainActivity
 ```
 
+## Local API override (same 3 vars as Linux)
+
+The Android app supports these runtime overrides:
+
+- `VIRTUE_BASE_API_URL`
+- `VIRTUE_CAPTURE_INTERVAL_SECONDS`
+- `VIRTUE_BATCH_WINDOW_SECONDS`
+
+Set them in the login screen under "Runtime overrides (optional)" and tap `Save overrides`.
+Values are persisted and applied to the native core immediately.
+
+Important for emulator networking:
+
+- Use `http://10.0.2.2:8787` to reach an API running on your host machine at `localhost:8787`.
+- Do not use `http://localhost:8787` inside the emulator (that points to the emulator itself).
+
 APK output path (if you want manual install):
 
 - `client/android/app/build/outputs/apk/debug/app-debug.apk`
