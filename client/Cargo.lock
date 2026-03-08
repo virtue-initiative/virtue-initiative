@@ -5809,13 +5809,15 @@ name = "virtue-mac-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "block2 0.6.2",
  "chrono",
  "clap",
  "dirs",
  "hostname",
  "image",
- "rand 0.8.5",
- "reqwest",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
  "serde",
  "serde_json",
  "tao",

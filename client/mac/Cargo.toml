@@ -11,20 +11,18 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 virtue-client-core = { path = "../core" }
+block2 = "0.6"
 chrono = { version = "0.4", features = ["clock", "serde"] }
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
 hostname = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
-rand = "0.8"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSWorkspace"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSNotification", "NSOperation", "NSString", "block2"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time"] }
 tray-icon = "0.21"
 tao = "0.32"
 uuid = { version = "1", features = ["v4", "serde"] }
-
-[dependencies.reqwest]
-version = "0.12"
-default-features = false
-features = ["json", "rustls-tls"]
