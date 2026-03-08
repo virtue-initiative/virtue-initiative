@@ -107,9 +107,8 @@ describe('Partner routes', () => {
 
   it('returns stored public keys and allows owners to confirm a partner later', async () => {
     const { token: ownerToken } = await signupAndGetToken('owner3@example.com');
-    const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
-      'partner3@example.com',
-    );
+    const { token: partnerToken, userId: partnerUserId } =
+      await signupAndGetToken('partner3@example.com');
 
     await SELF.fetch(`${BASE}/user`, {
       method: 'PATCH',

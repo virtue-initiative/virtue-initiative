@@ -4,7 +4,7 @@ sidebar_position: 1
 
 # Inviting a Partner
 
-*Written by AI*
+_Written by AI_
 
 Invite your accountability partner from the dashboard's **Partners** section.
 

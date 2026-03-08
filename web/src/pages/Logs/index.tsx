@@ -143,10 +143,10 @@ export function Logs() {
   const activeKey = activeUserId ? e2ee.getKey(activeUserId) : null;
   const activePartner =
     activeUserId && activeUserId !== userId
-      ? partners.find(
+      ? (partners.find(
           (partner) =>
             partner.role === "invitee" && partner.partner.id === activeUserId,
-        ) ?? null
+        ) ?? null)
       : null;
   const missingPartnerKey = Boolean(
     activePartner && activePartner.permissions.view_data && !activeKey,
@@ -374,8 +374,8 @@ export function Logs() {
             <div class="card settings-form">
               <p class="settings-hint">
                 You do not have this partner's decryption key yet, so encrypted
-                screenshots and uploaded blocks cannot be shown. Ask the owner of
-                these logs to click <strong>Confirm partner</strong> so the
+                screenshots and uploaded blocks cannot be shown. Ask the owner
+                of these logs to click <strong>Confirm partner</strong> so the
                 encrypted sharing key is attached to your partnership.
               </p>
             </div>

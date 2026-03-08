@@ -149,7 +149,9 @@ export async function importPublicKey(spki: BufferSource): Promise<CryptoKey> {
   );
 }
 
-export async function importPrivateKey(pkcs8: BufferSource): Promise<CryptoKey> {
+export async function importPrivateKey(
+  pkcs8: BufferSource,
+): Promise<CryptoKey> {
   return crypto.subtle.importKey(
     "pkcs8",
     pkcs8,

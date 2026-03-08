@@ -194,13 +194,21 @@ function InviteButton({
             )
           ).toBase64();
         } catch (err) {
-          if (!(err instanceof Error) || (err as Error & { status?: number }).status !== 404) {
+          if (
+            !(err instanceof Error) ||
+            (err as Error & { status?: number }).status !== 404
+          ) {
             throw err;
           }
         }
       }
 
-      await api.invitePartner(token, email, { view_data: viewData }, encryptedKey);
+      await api.invitePartner(
+        token,
+        email,
+        { view_data: viewData },
+        encryptedKey,
+      );
       close();
       onInvited();
     } catch (err) {
@@ -328,7 +336,10 @@ function PendingPartnerCard({
       setAction(null);
       onChanged();
     } catch (err) {
-      if (err instanceof Error && (err as Error & { status?: number }).status === 404) {
+      if (
+        err instanceof Error &&
+        (err as Error & { status?: number }).status === 404
+      ) {
         setError("That partner has not created an account yet.");
       } else {
         setError(
@@ -451,7 +462,10 @@ function PartnerCard({
       setAction(null);
       onChanged();
     } catch (err) {
-      if (err instanceof Error && (err as Error & { status?: number }).status === 404) {
+      if (
+        err instanceof Error &&
+        (err as Error & { status?: number }).status === 404
+      ) {
         setError("That partner has not created an account yet.");
       } else {
         setError(
@@ -483,14 +497,14 @@ function PartnerCard({
         {partner.role === "invitee" &&
           partner.partner.id &&
           partner.permissions.view_data && (
-          <button
-            class="btn btn-ghost btn-sm"
-            type="button"
-            onClick={() => route(`/logs?user=${partner.partner.id}`)}
-          >
-            View logs
-          </button>
-        )}
+            <button
+              class="btn btn-ghost btn-sm"
+              type="button"
+              onClick={() => route(`/logs?user=${partner.partner.id}`)}
+            >
+              View logs
+            </button>
+          )}
         {partner.role === "owner" &&
           partner.permissions.view_data &&
           !partner.e2ee_key && (

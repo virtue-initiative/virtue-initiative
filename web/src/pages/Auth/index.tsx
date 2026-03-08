@@ -50,11 +50,7 @@ export function Auth() {
     }
   }
 
-  async function setupKeyMaterial(
-    token: string,
-    uid: string,
-    wk: CryptoKey,
-  ) {
+  async function setupKeyMaterial(token: string, uid: string, wk: CryptoKey) {
     const rawE2EE = generateRandomKeyBytes();
     const keyPair = await generateSharingKeyPair();
     const publicKey = await exportPublicKey(keyPair.publicKey);
