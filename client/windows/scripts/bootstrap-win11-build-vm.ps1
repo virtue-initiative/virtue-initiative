@@ -2,6 +2,8 @@ param(
     [string]$InstallRoot = "C:\virtue-build",
     [string]$CacheRoot = "C:\virtue-build\cache",
     [string]$ApiBaseUrl = "",
+    [string]$CaptureIntervalSeconds = "",
+    [string]$BatchWindowSeconds = "",
     [string]$AuthorizedKey = "",
     [switch]$SkipVsBuildTools,
     [switch]$SkipNsis,
@@ -278,17 +280,40 @@ function Configure-DefenderExclusions {
 }
 
 function Configure-ServiceOverride {
-    param([string]$BaseUrl)
-    if ([string]::IsNullOrWhiteSpace($BaseUrl)) {
+    param(
+        [string]$BaseUrl,
+        [string]$CaptureIntervalSeconds,
+        [string]$BatchWindowSeconds
+    )
+
+    $lines = @()
+    if (-not [string]::IsNullOrWhiteSpace($BaseUrl)) {
+        $lines += "VIRTUE_BASE_API_URL=$BaseUrl"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($CaptureIntervalSeconds)) {
+        if ($CaptureIntervalSeconds -notmatch '^\d+$') {
+            throw "CaptureIntervalSeconds must be an integer value in seconds."
+        }
+        $lines += "VIRTUE_CAPTURE_INTERVAL_SECONDS=$CaptureIntervalSeconds"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($BatchWindowSeconds)) {
+        if ($BatchWindowSeconds -notmatch '^\d+$') {
+            throw "BatchWindowSeconds must be an integer value in seconds."
+        }
+        $lines += "VIRTUE_BATCH_WINDOW_SECONDS=$BatchWindowSeconds"
+    }
+
+    if ($lines.Count -eq 0) {
         return
     }
+
     Write-Step "Writing service.dev.env for Virtue runtime API override"
     $configDir = Join-Path $env:ProgramData "Virtue\config"
     New-Item -ItemType Directory -Force -Path $configDir | Out-Null
     $file = Join-Path $configDir "service.dev.env"
-    @(
-        "VIRTUE_BASE_API_URL=$BaseUrl"
-    ) | Set-Content -Path $file -Encoding UTF8
+    $contents = $lines -join "`r`n"
+    # Use UTF-8 without BOM so runtime env parser sees exact key name on first line.
+    [System.IO.File]::WriteAllText($file, $contents, [System.Text.UTF8Encoding]::new($false))
 }
 
 function Enable-LongPaths {
@@ -309,7 +334,7 @@ Install-Nsis
 Install-Sccache
 Configure-DevPaths
 Configure-DefenderExclusions
-Configure-ServiceOverride -BaseUrl $ApiBaseUrl
+Configure-ServiceOverride -BaseUrl $ApiBaseUrl -CaptureIntervalSeconds $CaptureIntervalSeconds -BatchWindowSeconds $BatchWindowSeconds
 Enable-LongPaths
 
 Write-Step "Bootstrap complete"

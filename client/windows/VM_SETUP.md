@@ -155,14 +155,14 @@ Run bootstrap:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass -Force
-.\bootstrap-win11-build-vm.ps1 -AuthorizedKey $pub -ApiBaseUrl "http://<HOST_IP>:8787"
+.\bootstrap-win11-build-vm.ps1 -AuthorizedKey $pub -ApiBaseUrl "http://<HOST_IP>:8787" -CaptureIntervalSeconds 10 -BatchWindowSeconds 30
 ```
 
 If you are not setting SSH key right now:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass -Force
-.\bootstrap-win11-build-vm.ps1 -ApiBaseUrl "http://<HOST_IP>:8787"
+.\bootstrap-win11-build-vm.ps1 -ApiBaseUrl "http://<HOST_IP>:8787" -CaptureIntervalSeconds 10 -BatchWindowSeconds 30
 ```
 
 Reboot the VM once after bootstrap finishes.
