@@ -204,7 +204,7 @@ impl WorkspacePowerMonitor {
                         Some(NSWorkspaceWillPowerOffNotification),
                         None,
                         None,
-                        &*block,
+                        &block,
                     )
                 };
 
