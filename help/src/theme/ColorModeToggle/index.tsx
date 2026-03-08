@@ -66,14 +66,11 @@ export default function ColorModeToggle() {
 
   useEffect(() => {
     if (!browser) return;
-    const unsubscribe = onStateUpdate((state) => {
+    // TODO: Implement an unsubscribe method
+    onStateUpdate((state) => {
       setTheme(state.theme);
       applyTheme(state.theme);
     });
-
-    return () => {
-      if (typeof unsubscribe === "function") unsubscribe();
-    };
   }, [setColorMode, browser]);
 
   const effectiveTheme = theme ?? (browser ? preferredTheme() : "light");
