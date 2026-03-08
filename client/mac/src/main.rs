@@ -71,13 +71,13 @@ fn run_daemon(paths: ClientPaths) -> Result<()> {
 
 fn run_tray(paths: ClientPaths) -> Result<()> {
     let runtime = Runtime::new().context("failed to create async runtime")?;
-    if let Ok(exe) = std::env::current_exe() {
-        if let Err(err) = launch_agent::ensure_agent_running(&paths, &exe) {
-            eprintln!("warning: launch agent setup failed: {err:#}");
-            let _ = ui::show_warning(&format!(
-                "Could not start background service automatically:\n{err}"
-            ));
-        }
+    if let Ok(exe) = std::env::current_exe()
+        && let Err(err) = launch_agent::ensure_agent_running(&paths, &exe)
+    {
+        eprintln!("warning: launch agent setup failed: {err:#}");
+        let _ = ui::show_warning(&format!(
+            "Could not start background service automatically:\n{err}"
+        ));
     }
 
     let event_loop = EventLoopBuilder::<()>::with_user_event().build();
