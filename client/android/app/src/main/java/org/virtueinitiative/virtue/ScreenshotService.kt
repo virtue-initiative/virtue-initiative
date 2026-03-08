@@ -1,6 +1,11 @@
 package org.virtueinitiative.virtue
 
-import android.app.*
+import android.app.AlarmManager
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -20,26 +25,34 @@ import android.util.Log
 import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
 
 class ScreenshotService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val startLock = Any()
 
-    private var captureJob: Job? = null
     @Volatile
     private var startInProgress = false
+    private var daemonJob: Job? = null
+
     private val projectionCallbackHandler by lazy { Handler(Looper.getMainLooper()) }
     private var mediaProjection: MediaProjection? = null
     private var projectionCallback: MediaProjection.Callback? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
+    private var lastCapturedFrame: ByteArray? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
+        activeService = this
+
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification("Monitoring active"))
 
@@ -64,30 +77,27 @@ class ScreenshotService : Service() {
                 synchronized(startLock) {
                     startInProgress = false
                 }
+                stopDaemonLoop()
                 stopCaptureResources()
                 stopSelf()
                 return START_NOT_STICKY
             }
-            ACTION_START -> {
-                launchMonitoringIfNeeded(intent)
-            }
-            else -> {
-                launchMonitoringIfNeeded(intent)
-            }
+            ACTION_START -> launchMonitoringIfNeeded(intent)
+            else -> launchMonitoringIfNeeded(intent)
         }
 
         return START_STICKY
     }
 
     override fun onDestroy() {
-        captureJob?.cancel()
+        stopDaemonLoop()
         stopCaptureResources()
         scope.cancel()
+        activeService = null
         super.onDestroy()
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // Aggressive relaunch strategy: if system removes app task, ask AlarmManager to revive service.
         val restartIntent = Intent(applicationContext, ScreenshotService::class.java).apply {
             action = ACTION_START
             putExtra("source", "task_removed")
@@ -125,66 +135,9 @@ class ScreenshotService : Service() {
         super.onTaskRemoved(rootIntent)
     }
 
-    private suspend fun startMonitoring(intent: Intent?) {
-        val initError = NativeBridge.ensureInitialized(this)
-        if (initError != null) {
-            updateNotification("Core init failed")
-            return
-        }
-
-        val loadedProjection = initProjectionFromIntentOrStore(intent)
-        if (!loadedProjection) {
-            updateNotification("Need screenshot permission from app")
-            NativeBridge.nativeReportLog("missed_capture", "projection_permission_missing", null)
-            return
-        }
-
-        if (captureJob?.isActive == true) {
-            return
-        }
-
-        val initialPngBytes = runCatching { captureFrameAsPng() }.getOrNull()
-        if (initialPngBytes == null) {
-            Log.w(TAG, "Initial capture frame unavailable; will retry on schedule")
-        }
-
-        updateNotification("Monitoring active")
-        captureJob = scope.launch {
-            var lastSuccess = true
-            var lastPngBytes: ByteArray? = initialPngBytes
-            while (isActive) {
-                val delayMs = NativeBridge.nativeNextCaptureDelayMs(lastSuccess).coerceAtLeast(15_000)
-                Log.d(TAG, "Next capture in ${delayMs}ms (lastSuccess=$lastSuccess)")
-                delay(delayMs)
-
-                val freshPngBytes = runCatching { captureFrameAsPng() }.getOrNull()
-                if (freshPngBytes != null) {
-                    lastPngBytes = freshPngBytes
-                } else if (lastPngBytes != null) {
-                    Log.w(TAG, "No fresh frame available; reusing last successful frame")
-                }
-
-                val pngBytes = freshPngBytes ?: lastPngBytes
-                if (pngBytes == null) {
-                    lastSuccess = false
-                    Log.w(TAG, "Capture failed: no frame available")
-                    NativeBridge.nativeReportLog("missed_capture", "capture_failed", null)
-                    continue
-                }
-
-                val error = NativeBridge.nativeProcessCapture(pngBytes)
-                lastSuccess = error == null
-                if (error != null) {
-                    Log.w(TAG, "Capture processed with error: $error")
-                    NativeBridge.nativeReportLog("missed_capture", "upload_or_queue_failed", error)
-                }
-            }
-        }
-    }
-
     private fun launchMonitoringIfNeeded(intent: Intent?) {
         synchronized(startLock) {
-            if (captureJob?.isActive == true || startInProgress) {
+            if (startInProgress || daemonJob?.isActive == true) {
                 return
             }
             startInProgress = true
@@ -201,20 +154,60 @@ class ScreenshotService : Service() {
         }
     }
 
+    private fun startMonitoring(intent: Intent?) {
+        val initError = NativeBridge.ensureInitialized(this)
+        if (initError != null) {
+            updateNotification("Core init failed")
+            return
+        }
+
+        val hasProjection = initProjectionFromIntentOrStore(intent)
+        startDaemonLoop()
+
+        if (hasProjection) {
+            updateNotification("Monitoring active")
+        } else {
+            updateNotification("Monitoring active (grant screenshot permission in app)")
+        }
+    }
+
+    private fun startDaemonLoop() {
+        if (daemonJob?.isActive == true) {
+            return
+        }
+
+        daemonJob = scope.launch(Dispatchers.IO) {
+            val error = NativeBridge.nativeRunDaemonLoop()
+            if (error != null) {
+                Log.e(TAG, "Native daemon exited with error: $error")
+                updateNotification("Monitoring paused: $error")
+            }
+        }
+    }
+
+    private fun stopDaemonLoop() {
+        runCatching { NativeBridge.nativeStopDaemon() }
+            .exceptionOrNull()
+            ?.let { err -> Log.w(TAG, "Failed to request daemon stop", err) }
+        daemonJob?.cancel()
+        daemonJob = null
+    }
+
     private fun initProjectionFromIntentOrStore(intent: Intent?): Boolean {
         val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
         val extrasCode = intent?.getIntExtra(EXTRA_RESULT_CODE, Int.MIN_VALUE) ?: Int.MIN_VALUE
         val extrasData = intent?.projectionDataExtra()
 
-        val (resultCode, resultData) = if (extrasCode != Int.MIN_VALUE && extrasData != null) {
+        val projectionPair = if (extrasCode != Int.MIN_VALUE && extrasData != null) {
             ProjectionPermissionStore.save(this, extrasCode, extrasData)
             extrasCode to extrasData
         } else {
-            ProjectionPermissionStore.load(this) ?: return false
-        }
+            ProjectionPermissionStore.load(this)
+        } ?: return false
 
         val initialized = runCatching {
+            val (resultCode, resultData) = projectionPair
             stopCaptureResources()
             mediaProjection = manager.getMediaProjection(resultCode, resultData)
                 ?: throw IllegalStateException("MediaProjection token was rejected")
@@ -275,16 +268,11 @@ class ScreenshotService : Service() {
             override fun onStop() {
                 super.onStop()
                 Log.i(TAG, "MediaProjection stopped by system")
-                scope.launch {
-                    captureJob?.cancel()
-                    captureJob = null
-                    stopDisplayResources()
-                    mediaProjection = null
-                    projectionCallback = null
-                    ProjectionPermissionStore.clear(this@ScreenshotService)
-                    updateNotification("Capture permission ended")
-                    NativeBridge.nativeReportLog("missed_capture", "projection_stopped", null)
-                }
+                stopDisplayResources()
+                mediaProjection = null
+                projectionCallback = null
+                ProjectionPermissionStore.clear(this@ScreenshotService)
+                updateNotification("Capture permission ended")
             }
         }
 
@@ -339,6 +327,27 @@ class ScreenshotService : Service() {
         return output.toByteArray()
     }
 
+    private fun captureStatusForDaemonInternal(): Int {
+        if (mediaProjection == null || virtualDisplay == null || imageReader == null) {
+            return CAPTURE_STATUS_PERMISSION_MISSING
+        }
+        return CAPTURE_STATUS_READY
+    }
+
+    private fun capturePngForDaemonInternal(): ByteArray? {
+        if (captureStatusForDaemonInternal() != CAPTURE_STATUS_READY) {
+            return null
+        }
+
+        val fresh = runCatching { captureFrameAsPng() }.getOrNull()
+        if (fresh != null) {
+            lastCapturedFrame = fresh
+            return fresh
+        }
+
+        return lastCapturedFrame
+    }
+
     private fun stopDisplayResources() {
         runCatching { virtualDisplay?.release() }
         runCatching { imageReader?.close() }
@@ -352,6 +361,7 @@ class ScreenshotService : Service() {
         unregisterProjectionCallback()
         runCatching { mediaProjection?.stop() }
         mediaProjection = null
+        lastCapturedFrame = null
     }
 
     private fun createNotificationChannel() {
@@ -388,6 +398,24 @@ class ScreenshotService : Service() {
         private const val EXTRA_RESULT_DATA = "projection_result_data"
         private const val CHANNEL_ID = "virtue_monitoring"
         private const val NOTIFICATION_ID = 1001
+
+        private const val CAPTURE_STATUS_READY = 0
+        private const val CAPTURE_STATUS_PERMISSION_MISSING = 1
+        private const val CAPTURE_STATUS_SESSION_UNAVAILABLE = 2
+
+        @Volatile
+        private var activeService: ScreenshotService? = null
+
+        @JvmStatic
+        fun captureStatusForDaemon(): Int {
+            val service = activeService ?: return CAPTURE_STATUS_SESSION_UNAVAILABLE
+            return service.captureStatusForDaemonInternal()
+        }
+
+        @JvmStatic
+        fun capturePngForDaemon(): ByteArray? {
+            return activeService?.capturePngForDaemonInternal()
+        }
 
         fun start(context: Context, resultCode: Int, data: Intent): String? {
             val intent = Intent(context, ScreenshotService::class.java).apply {

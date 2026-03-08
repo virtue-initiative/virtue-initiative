@@ -77,7 +77,6 @@ object NativeBridge {
     external fun nativeLogout(): String?
     external fun nativeIsLoggedIn(): Boolean
     external fun nativeGetDeviceId(): String?
-    external fun nativeNextCaptureDelayMs(lastSuccess: Boolean): Long
-    external fun nativeProcessCapture(pngBytes: ByteArray): String?
-    external fun nativeReportLog(eventType: String, reason: String, detail: String?): String?
+    external fun nativeRunDaemonLoop(): String?
+    external fun nativeStopDaemon(): String?
 }
