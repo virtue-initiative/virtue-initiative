@@ -12,6 +12,7 @@ pub struct ClientPaths {
     pub state_file: PathBuf,
     pub token_file: PathBuf,
     pub batch_buffer_file: PathBuf,
+    pub lifecycle_state_file: PathBuf,
     pub service_env_file: PathBuf,
     pub log_file: PathBuf,
 }
@@ -28,6 +29,7 @@ impl ClientPaths {
             state_file: config_dir.join("client_state.json"),
             token_file: config_dir.join("token_store.json"),
             batch_buffer_file: data_dir.join("batch_buffer.json"),
+            lifecycle_state_file: data_dir.join("lifecycle_state.json"),
             service_env_file: config_dir.join("service.dev.env"),
             log_file: data_dir.join("service.log"),
             base_dir,

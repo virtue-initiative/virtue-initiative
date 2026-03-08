@@ -2,15 +2,32 @@
 
 This directory contains the Windows client implementation:
 
-- `virtue-service.exe`: Windows service that captures screenshots and uploads via `client/core`.
+- `virtue-service.exe`: shared executable with two modes:
+  - lifecycle service mode (`--mode lifecycle`) for startup/shutdown/session logs
+  - user-session capture mode (`--mode capture --console`) for screenshots/uploads
 - `virtue-tray.exe`: tray/login app that handles sign-in/sign-out and shared state.
 - NSIS packaging scripts to produce a Windows installer executable.
 
+Windows alert logs include:
+
+- `service_start` / `service_stop` for lifecycle service transitions.
+- `daemon_start` / `daemon_stop_signal` for service process lifecycle.
+- `system_startup` when a new Windows boot is detected (via boot-time change).
+- `system_shutdown` when an explicit Windows shutdown control/signal is observed.
+- `session_login` / `session_logout` from Windows session-change notifications.
+
+If Windows terminates the capture process too late in shutdown to flush logs, the
+next boot emits recovered `daemon_stop_signal`/`system_shutdown` events with
+`detected_by=next_boot_recovery`.
+
+`system_shutdown` is best-effort: abrupt power loss, forced termination, or late-shutdown networking can still prevent immediate delivery.
+
 ## Layout
 
-- `src/bin/virtue-service.rs`: persistent Windows service entrypoint.
+- `src/bin/virtue-service.rs`: mode switch + lifecycle service + capture console entrypoint.
 - `src/bin/virtue-tray.rs`: tray app with login/logout UI.
-- `src/daemon.rs`: capture, queue, and upload loop using `virtue-client-core`.
+- `src/daemon.rs`: lifecycle logging daemon (startup/shutdown/session/service events).
+- `src/capture_daemon.rs`: screenshot capture/upload daemon using `virtue-client-core`.
 - `src/capture.rs`: Windows GDI screenshot capture.
 - `packaging/nsis/installer.nsi`: installer definition.
 - `scripts/build-installer.ps1`: Windows host build + packaging script.
@@ -178,9 +195,10 @@ $env:VIRTUE_BASE_API_URL = "https://your-api.example.com"
 ```
 
 For background capture, set it as a machine-level environment variable and log out/in.
+Lifecycle logging runs from an auto-start Windows service (`VirtueLifecycleService`).
 Capture and tray are launched from machine startup Run keys (`HKLM`):
 
-- `VirtueCapture` starts hidden capture (`virtue-service.exe --console` via `wscript`).
+- `VirtueCapture` starts hidden capture (`virtue-service.exe --mode capture --console` via `wscript`).
 - `VirtueTray` starts the tray app.
   The installer also creates all-users Startup-folder shortcuts as a fallback.
 
@@ -214,7 +232,10 @@ VIRTUE_CAPTURE_INTERVAL_SECONDS=120
 VIRTUE_BATCH_WINDOW_SECONDS=900
 ```
 
-After editing the file, log out/in (or restart the `virtue-service.exe --console` process).
+After editing the file, restart the lifecycle service and/or capture process:
+
+- `sc stop VirtueLifecycleService && sc start VirtueLifecycleService`
+- or log out/in to restart capture startup entries.
 
 ## Runtime data locations
 
@@ -223,6 +244,7 @@ The tray app and service share state in:
 - `%PROGRAMDATA%\Virtue\config\client_state.json`
 - `%PROGRAMDATA%\Virtue\config\token_store.json`
 - `%PROGRAMDATA%\Virtue\data\batch_buffer.json`
+- `%PROGRAMDATA%\Virtue\data\lifecycle_state.json`
 - `%PROGRAMDATA%\Virtue\data\service.log`
 
 Installer upgrades keep these files intact. On first upgrade from older `BePure`

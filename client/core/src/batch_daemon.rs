@@ -715,20 +715,19 @@ fn collect_alert_events<H: ServiceHost>(
         let device_id = event
             .device_id
             .or_else(|| default_device_id.map(ToString::to_string));
-
+        let kind = event.kind.clone();
         if device_id.is_none() {
             emit_warn(
                 host,
                 &format!(
-                    "dropping alert event '{}' because no device_id is available",
-                    event.kind
+                    "queueing alert event '{}' without device_id until state is available",
+                    kind
                 ),
             );
-            continue;
         }
 
         queue.push_back(PendingAlertLog {
-            kind: event.kind,
+            kind,
             metadata: event.metadata,
             created_at: event.created_at,
             device_id,
