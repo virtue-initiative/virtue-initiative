@@ -29,6 +29,16 @@ npm run dev
 
 The API will be available at `http://localhost:8787`
 
+To expose the dev server to VMs on your local network (for example libvirt guests):
+
+```bash
+npm run dev -- --ip 0.0.0.0 --port 8787
+```
+
+From a libvirt VM on the default network, this is typically reachable at:
+
+- `http://<HOST_IP>:8787` (replace `<HOST_IP>` with your Linux host IP reachable from the VM)
+
 ## Deployment
 
 Ensure all the enviroment variables are set correctly (in `wrangler.toml` and

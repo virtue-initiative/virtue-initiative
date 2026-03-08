@@ -134,13 +134,15 @@ python3 -m http.server 8765 --bind 0.0.0.0
 
 Keep this running temporarily.
 
+In commands below, replace `<HOST_IP>` with your Linux host IP reachable from the VM.
+
 ## 3) Run bootstrap script in Windows (as Administrator)
 
 In the Windows VM (PowerShell as Administrator):
 
 ```powershell
 cd $env:TEMP
-Invoke-WebRequest -Uri "http://192.168.122.1:8765/bootstrap-win11-build-vm.ps1" -OutFile ".\bootstrap-win11-build-vm.ps1"
+Invoke-WebRequest -Uri "http://<HOST_IP>:8765/bootstrap-win11-build-vm.ps1" -OutFile ".\bootstrap-win11-build-vm.ps1"
 ```
 
 If you want SSH key auth immediately, paste your Linux public key:
@@ -153,14 +155,14 @@ Run bootstrap:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass -Force
-.\bootstrap-win11-build-vm.ps1 -AuthorizedKey $pub -ApiBaseUrl "http://192.168.122.1:8787"
+.\bootstrap-win11-build-vm.ps1 -AuthorizedKey $pub -ApiBaseUrl "http://<HOST_IP>:8787"
 ```
 
 If you are not setting SSH key right now:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass -Force
-.\bootstrap-win11-build-vm.ps1 -ApiBaseUrl "http://192.168.122.1:8787"
+.\bootstrap-win11-build-vm.ps1 -ApiBaseUrl "http://<HOST_IP>:8787"
 ```
 
 Reboot the VM once after bootstrap finishes.
