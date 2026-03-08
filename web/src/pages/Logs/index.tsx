@@ -124,6 +124,7 @@ export function Logs() {
   const { path } = useLocation();
 
   const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[]>([]);
+  const [partners, setPartners] = useState<Partner[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string | null>(() =>
     new URLSearchParams(window.location.search).get("device_id"),
   );
@@ -140,6 +141,16 @@ export function Logs() {
 
   const activeUserId = selectedUser ?? userId;
   const activeKey = activeUserId ? e2ee.getKey(activeUserId) : null;
+  const activePartner =
+    activeUserId && activeUserId !== userId
+      ? partners.find(
+          (partner) =>
+            partner.role === "invitee" && partner.partner.id === activeUserId,
+        ) ?? null
+      : null;
+  const missingPartnerKey = Boolean(
+    activePartner && activePartner.permissions.view_data && !activeKey,
+  );
 
   useEffect(() => {
     if (!token || !userId) return;
@@ -148,6 +159,7 @@ export function Logs() {
 
     Promise.all([api.getDevices(token), api.getPartners(token)])
       .then(([devices, partners]) => {
+        setPartners(partners);
         const labels = new Map<string, string>();
         labels.set(userId, "My devices");
         for (const partner of partners) {
@@ -358,6 +370,16 @@ export function Logs() {
           </div>
 
           {fetchError && <p class="alert-error">{fetchError}</p>}
+          {missingPartnerKey && (
+            <div class="card settings-form">
+              <p class="settings-hint">
+                You do not have this partner's decryption key yet, so encrypted
+                screenshots and uploaded blocks cannot be shown. Ask the owner of
+                these logs to click <strong>Confirm partner</strong> so the
+                encrypted sharing key is attached to your partnership.
+              </p>
+            </div>
+          )}
           {(batchStats.decrypted > 0 || batchStats.skipped > 0) && (
             <p class="logs-summary">
               {batchStats.decrypted} block

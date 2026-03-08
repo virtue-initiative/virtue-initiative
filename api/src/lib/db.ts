@@ -14,7 +14,9 @@ function parsePermissions(value: string): PartnerPermissions {
 
 export async function findUserByEmail(db: D1Database, email: string) {
   return db
-    .prepare('SELECT id, email, password_hash, name, e2ee_key, pub_key FROM users WHERE email = ?')
+    .prepare(
+      'SELECT id, email, password_hash, name, e2ee_key, pub_key, priv_key FROM users WHERE email = ?',
+    )
     .bind(email)
     .first<{
       id: string;
@@ -23,12 +25,13 @@ export async function findUserByEmail(db: D1Database, email: string) {
       name: string | null;
       e2ee_key: ArrayBuffer | null;
       pub_key: ArrayBuffer | null;
+      priv_key: ArrayBuffer | null;
     }>();
 }
 
 export async function findUserById(db: D1Database, userId: string) {
   return db
-    .prepare('SELECT id, email, name, e2ee_key, pub_key FROM users WHERE id = ?')
+    .prepare('SELECT id, email, name, e2ee_key, pub_key, priv_key FROM users WHERE id = ?')
     .bind(userId)
     .first<{
       id: string;
@@ -36,6 +39,7 @@ export async function findUserById(db: D1Database, userId: string) {
       name: string | null;
       e2ee_key: ArrayBuffer | null;
       pub_key: ArrayBuffer | null;
+      priv_key: ArrayBuffer | null;
     }>();
 }
 
@@ -61,7 +65,7 @@ export async function createUser(
 export async function updateUser(
   db: D1Database,
   userId: string,
-  fields: { name?: string; e2ee_key?: ArrayBuffer },
+  fields: { name?: string; e2ee_key?: ArrayBuffer; pub_key?: ArrayBuffer; priv_key?: ArrayBuffer },
 ) {
   const updates: string[] = [];
   const params: (string | ArrayBuffer | null)[] = [];
@@ -74,6 +78,16 @@ export async function updateUser(
   if (fields.e2ee_key !== undefined) {
     updates.push('e2ee_key = ?');
     params.push(fields.e2ee_key);
+  }
+
+  if (fields.pub_key !== undefined) {
+    updates.push('pub_key = ?');
+    params.push(fields.pub_key);
+  }
+
+  if (fields.priv_key !== undefined) {
+    updates.push('priv_key = ?');
+    params.push(fields.priv_key);
   }
 
   if (updates.length === 0) {
@@ -460,10 +474,10 @@ export async function listOwnedPartners(db: D1Database, ownerId: string) {
     .prepare(
       `SELECT p.id, p.status, p.permissions, p.created_at, p.e2ee_key, p.partner_email,
               u.id AS partner_id, u.name AS partner_name
-       FROM partners p
-       LEFT JOIN users u ON u.id = p.partner_user_id
-       WHERE p.user_id = ?
-       ORDER BY p.created_at DESC`,
+        FROM partners p
+        LEFT JOIN users u ON u.id = p.partner_user_id OR (p.partner_user_id IS NULL AND u.email = p.partner_email)
+        WHERE p.user_id = ?
+        ORDER BY p.created_at DESC`,
     )
     .bind(ownerId)
     .all<{
@@ -480,17 +494,21 @@ export async function listOwnedPartners(db: D1Database, ownerId: string) {
   return result.results;
 }
 
-export async function listIncomingPartners(db: D1Database, partnerUserId: string) {
+export async function listIncomingPartners(
+  db: D1Database,
+  partnerUserId: string,
+  partnerEmail: string,
+) {
   const result = await db
     .prepare(
       `SELECT p.id, p.status, p.permissions, p.created_at, p.e2ee_key,
               u.id AS owner_id, u.email AS owner_email, u.name AS owner_name
-       FROM partners p
-       JOIN users u ON u.id = p.user_id
-       WHERE p.partner_user_id = ?
-       ORDER BY p.created_at DESC`,
+        FROM partners p
+        JOIN users u ON u.id = p.user_id
+        WHERE p.partner_user_id = ? OR (p.partner_user_id IS NULL AND p.partner_email = ?)
+        ORDER BY p.created_at DESC`,
     )
-    .bind(partnerUserId)
+    .bind(partnerUserId, partnerEmail)
     .all<{
       id: string;
       status: string;
@@ -510,6 +528,7 @@ export async function updatePartnerByOwner(
   input: {
     id: string;
     ownerId: string;
+    partner_user_id?: string;
     permissions?: string;
     e2ee_key?: ArrayBuffer;
     updated_at: number;
@@ -521,6 +540,11 @@ export async function updatePartnerByOwner(
   if (input.permissions !== undefined) {
     updates.push('permissions = ?');
     params.push(input.permissions);
+  }
+
+  if (input.partner_user_id !== undefined) {
+    updates.push('partner_user_id = ?');
+    params.push(input.partner_user_id);
   }
 
   if (input.e2ee_key !== undefined) {

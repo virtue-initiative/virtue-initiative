@@ -1,10 +1,22 @@
 import { createContext } from "preact";
 import { useContext, useState, useEffect, useCallback } from "preact/hooks";
-import { deriveKey } from "../crypto";
+import { api } from "../api";
+import {
+  decryptBatch,
+  decryptWithPrivateKey,
+  deriveKey,
+  encryptData,
+  exportPrivateKey,
+  exportPublicKey,
+  generateSharingKeyPair,
+  importPrivateKey,
+} from "../crypto";
+import { useAuth } from "./auth";
 
 interface E2EEState {
   keys: Record<string, CryptoKey>;
   getKey(userId: string): CryptoKey | null;
+  getKeyBytes(userId: string): Uint8Array | null;
   setKey(password: string, userId: string): Promise<void>;
   setKeyFromBytes(rawBytes: ArrayBuffer, userId: string): Promise<void>;
   clearKey(userId?: string): void;
@@ -28,53 +40,27 @@ function bytesToHex(bytes: Uint8Array): string {
     .join("");
 }
 
+function getStoredKeyBytes(userId: string): Uint8Array<ArrayBuffer> | null {
+  const hex = localStorage.getItem(LS_PREFIX + userId);
+  return hex ? Uint8Array.from(hexToBytes(hex)) : null;
+}
+
 export function E2EEProvider({
   children,
 }: {
   children: preact.ComponentChildren;
 }) {
+  const { token, userId, wrappingKey } = useAuth();
   const [keys, setKeys] = useState<Record<string, CryptoKey>>({});
-
-  // On mount, restore all per-user keys from localStorage
-  useEffect(() => {
-    const entries: Array<[string, string]> = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k?.startsWith(LS_PREFIX)) {
-        const uid = k.slice(LS_PREFIX.length);
-        const hex = localStorage.getItem(k)!;
-        entries.push([uid, hex]);
-      }
-    }
-    if (entries.length === 0) return;
-    Promise.all(
-      entries.map(([uid, hex]) =>
-        crypto.subtle
-          .importKey(
-            "raw",
-            Uint8Array.from(hexToBytes(hex)),
-            { name: "AES-GCM" },
-            false,
-            ["decrypt"],
-          )
-          .then((ck) => [uid, ck] as [string, CryptoKey])
-          .catch(() => {
-            localStorage.removeItem(LS_PREFIX + uid);
-            return null;
-          }),
-      ),
-    ).then((results) => {
-      const loaded: Record<string, CryptoKey> = {};
-      for (const r of results) {
-        if (r) loaded[r[0]] = r[1];
-      }
-      setKeys(loaded);
-    });
-  }, []);
 
   const getKey = useCallback(
     (userId: string): CryptoKey | null => keys[userId] ?? null,
     [keys],
+  );
+
+  const getKeyBytes = useCallback(
+    (userId: string) => getStoredKeyBytes(userId),
+    [],
   );
 
   const setKey = useCallback(async (password: string, uid: string) => {
@@ -126,9 +112,93 @@ export function E2EEProvider({
     }
   }, []);
 
+  useEffect(() => {
+    if (!token || !userId || !wrappingKey) {
+      clearKey();
+      return;
+    }
+
+    let cancelled = false;
+
+    async function restoreKeyMaterial() {
+      try {
+        clearKey();
+
+        const user = await api.getUser(token);
+        if (cancelled) return;
+
+        if (user.e2ee_key) {
+          const rawE2EE = await decryptBatch(
+            wrappingKey,
+            Uint8Array.fromBase64(user.e2ee_key),
+          );
+          if (!cancelled) {
+            await setKeyFromBytes(rawE2EE.buffer, userId);
+          }
+        }
+
+        let privateKeyBytes: Uint8Array<ArrayBuffer> | null = null;
+        if (user.priv_key) {
+          privateKeyBytes = await decryptBatch(
+            wrappingKey,
+            Uint8Array.fromBase64(user.priv_key),
+          );
+        }
+
+        if (!user.pub_key || !user.priv_key) {
+          const keyPair = await generateSharingKeyPair();
+          const publicKeyBytes = await exportPublicKey(keyPair.publicKey);
+          privateKeyBytes = await exportPrivateKey(keyPair.privateKey);
+          const encryptedPrivateKey = await encryptData(
+            wrappingKey,
+            privateKeyBytes,
+          );
+          await api.updateUser(token, {
+            pub_key: publicKeyBytes.toBase64(),
+            priv_key: encryptedPrivateKey.toBase64(),
+          });
+        }
+
+        if (!privateKeyBytes || cancelled) return;
+
+        const privateKey = await importPrivateKey(privateKeyBytes);
+        const partners = await api.getPartners(token);
+
+        await Promise.all(
+          partners
+            .filter(
+              (partner) =>
+                partner.role === "invitee" &&
+                partner.status === "accepted" &&
+                partner.permissions.view_data &&
+                partner.e2ee_key &&
+                partner.partner.id,
+            )
+            .map(async (partner) => {
+              const rawKey = await decryptWithPrivateKey(
+                privateKey,
+                Uint8Array.fromBase64(partner.e2ee_key!),
+              );
+              if (!cancelled) {
+                await setKeyFromBytes(rawKey.buffer, partner.partner.id!);
+              }
+            }),
+        );
+      } catch (err) {
+        console.error("Failed to restore E2EE key material", err);
+      }
+    }
+
+    void restoreKeyMaterial();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clearKey, token, userId, wrappingKey, setKeyFromBytes]);
+
   return (
     <E2EEContext.Provider
-      value={{ keys, getKey, setKey, setKeyFromBytes, clearKey }}
+      value={{ keys, getKey, getKeyBytes, setKey, setKeyFromBytes, clearKey }}
     >
       {children}
     </E2EEContext.Provider>

@@ -84,6 +84,10 @@
   color: var(--text-muted);
 }
 
+.partner-key-notice {
+  margin-bottom: 1rem;
+}
+
 .card-delete {
   margin-top: 0.85rem;
 }

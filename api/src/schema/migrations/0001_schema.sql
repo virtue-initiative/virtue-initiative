@@ -7,6 +7,7 @@ CREATE TABLE users (
   name TEXT,
   e2ee_key BLOB,
   pub_key BLOB,
+  priv_key BLOB,
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
