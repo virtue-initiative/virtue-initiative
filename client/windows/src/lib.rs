@@ -1,4 +1,6 @@
 pub mod capture;
+pub mod capture_control;
+pub mod capture_daemon;
 pub mod config;
 pub mod daemon;
 pub mod runtime_env;
