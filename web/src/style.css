@@ -110,12 +110,16 @@
     background: var(--bg-subtle);
     color: var(--text);
     border-color: var(--control-border-hover);
+    text-decoration: none;
   }
 
   &.is-active {
     background: var(--control-active-bg);
     color: var(--control-active-text);
-    font-weight: 600;
+
+    /* Fake bold that doesn't change container size */
+    text-shadow: 0px 0px 1px var(--control-active-text);
+
     border-color: var(--control-active-border);
   }
 
