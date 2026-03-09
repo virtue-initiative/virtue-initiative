@@ -1,0 +1,35 @@
+name: Client iOS Checks
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  client-ios:
+    name: Client iOS
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            client -> target
+            client/ios/rust -> target
+
+      - name: Rust build smoke test (core)
+        run: cargo build -p virtue-client-core
+        working-directory: client
+
+      - name: Rust build smoke test (iOS bridge)
+        run: cargo build --manifest-path Cargo.toml
+        working-directory: client/ios/rust
+
+      - name: iOS app build smoke test (simulator)
+        run: ./scripts/build-ios.sh --destination "generic/platform=iOS Simulator" --derived-data .derived-data-ci-ios
+        working-directory: client/ios
