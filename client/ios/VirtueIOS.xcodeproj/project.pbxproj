@@ -1,0 +1,547 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0AFE31F0286592AC45E0F760 /* NativeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC5C926E46F575E39B52F4F5 /* NativeBridge.swift */; };
+		224EC8F88AE6F6E1A0BD9705 /* VirtueIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2360D5FD87E7DDC76809DCF /* VirtueIOSApp.swift */; };
+		2B519D76DE9CC56A244D58F9 /* MonitoringCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35759B57C5B754C19376FDAE /* MonitoringCoordinator.swift */; };
+		38E0ADE81FEC69951521C875 /* VirtueSafariWebExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 661F7F078331870B6674485C /* VirtueSafariWebExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		5C71E4A88C099972E4D426E7 /* VirtueShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9318D22E92C9D6BC594C78C /* VirtueShared.swift */; };
+		7F4EA4FFA9294C1404A5197E /* SafariWebExtensionHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BD5B034516AECD2FC30C5BB /* SafariWebExtensionHandler.swift */; };
+		B99E69BF65320433BEB44DFE /* CaptureCallbacks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EB2097040279F2D68D63571 /* CaptureCallbacks.swift */; };
+		BBBFFA2BF80D57AE03825FD8 /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 883C68547A16351396259AB7 /* manifest.json */; };
+		C5414D7CE65F599E9999F4AA /* background.js in Resources */ = {isa = PBXBuildFile; fileRef = 79294B334D6E1BC723B66893 /* background.js */; };
+		D71AC5E78D4C54DBC7C85940 /* content.js in Resources */ = {isa = PBXBuildFile; fileRef = 11C2314DE20A2FE8644630C0 /* content.js */; };
+		EF4DAF33BF771649BCEFE118 /* VirtueShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9318D22E92C9D6BC594C78C /* VirtueShared.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		8CB06F90560F43EB5EF63FBA /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8BD8A09F9EE01C285122BD59 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FDED61B08ABE68F5776BBD5B;
+			remoteInfo = VirtueSafariWebExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		D5AD654696B2A0B41266279F /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				38E0ADE81FEC69951521C875 /* VirtueSafariWebExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		11C2314DE20A2FE8644630C0 /* content.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = content.js; sourceTree = "<group>"; };
+		1EF8E39BDF57FBA718622D6E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		35759B57C5B754C19376FDAE /* MonitoringCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringCoordinator.swift; sourceTree = "<group>"; };
+		3BD5B034516AECD2FC30C5BB /* SafariWebExtensionHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafariWebExtensionHandler.swift; sourceTree = "<group>"; };
+		661F7F078331870B6674485C /* VirtueSafariWebExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = VirtueSafariWebExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		6EB2097040279F2D68D63571 /* CaptureCallbacks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureCallbacks.swift; sourceTree = "<group>"; };
+		78E4221B4364750675B94A46 /* VirtueSafariWebExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = VirtueSafariWebExtension.entitlements; sourceTree = "<group>"; };
+		79294B334D6E1BC723B66893 /* background.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = background.js; sourceTree = "<group>"; };
+		883C68547A16351396259AB7 /* manifest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = manifest.json; sourceTree = "<group>"; };
+		B9318D22E92C9D6BC594C78C /* VirtueShared.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtueShared.swift; sourceTree = "<group>"; };
+		DFC6D4D2C5FC6F4FA7F6FF50 /* VirtueIOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = VirtueIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EC5C926E46F575E39B52F4F5 /* NativeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBridge.swift; sourceTree = "<group>"; };
+		F2360D5FD87E7DDC76809DCF /* VirtueIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtueIOSApp.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		379DEDAE2970DCD87D3D54C7 /* app */ = {
+			isa = PBXGroup;
+			children = (
+				EBDF7F1676FFB9988776E0AF /* SafariWebExtension */,
+				E623F115E3F991AF7ECB9324 /* Shared */,
+				DDEAC77C25DAC6787ACDF8BC /* Sources */,
+			);
+			path = app;
+			sourceTree = "<group>";
+		};
+		9419D8721662713567AE4D77 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				DFC6D4D2C5FC6F4FA7F6FF50 /* VirtueIOS.app */,
+				661F7F078331870B6674485C /* VirtueSafariWebExtension.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		DC1506F572C0750454AD2001 = {
+			isa = PBXGroup;
+			children = (
+				379DEDAE2970DCD87D3D54C7 /* app */,
+				9419D8721662713567AE4D77 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		DDEAC77C25DAC6787ACDF8BC /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				6EB2097040279F2D68D63571 /* CaptureCallbacks.swift */,
+				35759B57C5B754C19376FDAE /* MonitoringCoordinator.swift */,
+				EC5C926E46F575E39B52F4F5 /* NativeBridge.swift */,
+				F2360D5FD87E7DDC76809DCF /* VirtueIOSApp.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		E623F115E3F991AF7ECB9324 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				B9318D22E92C9D6BC594C78C /* VirtueShared.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		EBDF7F1676FFB9988776E0AF /* SafariWebExtension */ = {
+			isa = PBXGroup;
+			children = (
+				1EF8E39BDF57FBA718622D6E /* Info.plist */,
+				3BD5B034516AECD2FC30C5BB /* SafariWebExtensionHandler.swift */,
+				78E4221B4364750675B94A46 /* VirtueSafariWebExtension.entitlements */,
+				F24C234EC63F6585C4380899 /* Resources */,
+			);
+			path = SafariWebExtension;
+			sourceTree = "<group>";
+		};
+		F24C234EC63F6585C4380899 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				79294B334D6E1BC723B66893 /* background.js */,
+				11C2314DE20A2FE8644630C0 /* content.js */,
+				883C68547A16351396259AB7 /* manifest.json */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A8906368AA90029446143401 /* VirtueIOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 22FBCA39101D3189160EEA17 /* Build configuration list for PBXNativeTarget "VirtueIOS" */;
+			buildPhases = (
+				D19AE8956C6E8E5B451A006A /* Build Rust Bridge */,
+				37BACE470EAB0E171F70F193 /* Sources */,
+				D5AD654696B2A0B41266279F /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				8724952A718E9D684A3A3F9D /* PBXTargetDependency */,
+			);
+			name = VirtueIOS;
+			packageProductDependencies = (
+			);
+			productName = VirtueIOS;
+			productReference = DFC6D4D2C5FC6F4FA7F6FF50 /* VirtueIOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+		FDED61B08ABE68F5776BBD5B /* VirtueSafariWebExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 35EB300C046AF967D5F2FD1C /* Build configuration list for PBXNativeTarget "VirtueSafariWebExtension" */;
+			buildPhases = (
+				64E779F781B25BB66C280ACA /* Build Rust Bridge */,
+				3299AAC08B87AE2E8DB27633 /* Sources */,
+				555BD503AEDB00768DC7A842 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = VirtueSafariWebExtension;
+			packageProductDependencies = (
+			);
+			productName = VirtueSafariWebExtension;
+			productReference = 661F7F078331870B6674485C /* VirtueSafariWebExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		8BD8A09F9EE01C285122BD59 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					A8906368AA90029446143401 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					FDED61B08ABE68F5776BBD5B = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 522EC027A00C1C53F94DEC4F /* Build configuration list for PBXProject "VirtueIOS" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = DC1506F572C0750454AD2001;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A8906368AA90029446143401 /* VirtueIOS */,
+				FDED61B08ABE68F5776BBD5B /* VirtueSafariWebExtension */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		555BD503AEDB00768DC7A842 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C5414D7CE65F599E9999F4AA /* background.js in Resources */,
+				D71AC5E78D4C54DBC7C85940 /* content.js in Resources */,
+				BBBFFA2BF80D57AE03825FD8 /* manifest.json in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		64E779F781B25BB66C280ACA /* Build Rust Bridge */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build Rust Bridge";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "#!/bin/sh\nset -eu\n\nSCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\nROOT_DIR=\"${SRCROOT:-$(cd \"$SCRIPT_DIR/..\" && pwd)}\"\nRUST_DIR=\"$ROOT_DIR/rust\"\nMANIFEST_PATH=\"$RUST_DIR/Cargo.toml\"\nLIB_NAME=\"libvirtue_ios_rust.a\"\n\nif [ \"${PLATFORM_NAME:-}\" != \"iphoneos\" ] && [ \"${PLATFORM_NAME:-}\" != \"iphonesimulator\" ]; then\n  echo \"Unsupported PLATFORM_NAME='${PLATFORM_NAME:-}'\" >&2\n  exit 1\nfi\n\nPROFILE_DIR=\"debug\"\nCARGO_EXTRA=\"\"\nif [ \"${CONFIGURATION:-Debug}\" = \"Release\" ]; then\n  PROFILE_DIR=\"release\"\n  CARGO_EXTRA=\"--release\"\nfi\n\nLIB_DEST=\"$BUILT_PRODUCTS_DIR/$LIB_NAME\"\nrm -f \"$LIB_DEST\"\n\nbuild_target() {\n  target=\"$1\"\n  rustup target add \"$target\" >/dev/null 2>&1 || true\n  if [ -n \"$CARGO_EXTRA\" ]; then\n    cargo build --manifest-path \"$MANIFEST_PATH\" --target \"$target\" $CARGO_EXTRA\n  else\n    cargo build --manifest-path \"$MANIFEST_PATH\" --target \"$target\"\n  fi\n}\n\nif [ \"${PLATFORM_NAME:-}\" = \"iphoneos\" ]; then\n  local_target=\"aarch64-apple-ios\"\n  echo \"Building Rust bridge for target: ${local_target} (config: ${CONFIGURATION:-Debug})\"\n  build_target \"$local_target\"\n  cp \"$RUST_DIR/target/$local_target/$PROFILE_DIR/$LIB_NAME\" \"$LIB_DEST\"\nelse\n  LIB_INPUTS=\"\"\n  LIB_COUNT=0\n\n  case \" ${ARCHS:-} \" in\n    *\" arm64 \"*)\n    arm_target=\"aarch64-apple-ios-sim\"\n    echo \"Building Rust bridge for target: ${arm_target} (config: ${CONFIGURATION:-Debug})\"\n    build_target \"$arm_target\"\n    LIB_INPUTS=\"$LIB_INPUTS $RUST_DIR/target/$arm_target/$PROFILE_DIR/$LIB_NAME\"\n    LIB_COUNT=$((LIB_COUNT + 1))\n    ;;\n  esac\n\n  case \" ${ARCHS:-} \" in\n    *\" x86_64 \"*)\n    x86_target=\"x86_64-apple-ios\"\n    echo \"Building Rust bridge for target: ${x86_target} (config: ${CONFIGURATION:-Debug})\"\n    build_target \"$x86_target\"\n    LIB_INPUTS=\"$LIB_INPUTS $RUST_DIR/target/$x86_target/$PROFILE_DIR/$LIB_NAME\"\n    LIB_COUNT=$((LIB_COUNT + 1))\n    ;;\n  esac\n\n  if [ \"$LIB_COUNT\" -eq 0 ]; then\n    echo \"No supported simulator arch found in ARCHS='${ARCHS:-}'\" >&2\n    exit 1\n  fi\n\n  if [ \"$LIB_COUNT\" -eq 1 ]; then\n    # shellcheck disable=SC2086\n    set -- $LIB_INPUTS\n    cp \"$1\" \"$LIB_DEST\"\n  else\n    # shellcheck disable=SC2086\n    lipo -create $LIB_INPUTS -output \"$LIB_DEST\"\n  fi\nfi\n\necho \"Prepared Rust bridge library -> $LIB_DEST\"\n";
+		};
+		D19AE8956C6E8E5B451A006A /* Build Rust Bridge */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build Rust Bridge";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "#!/bin/sh\nset -eu\n\nSCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\nROOT_DIR=\"${SRCROOT:-$(cd \"$SCRIPT_DIR/..\" && pwd)}\"\nRUST_DIR=\"$ROOT_DIR/rust\"\nMANIFEST_PATH=\"$RUST_DIR/Cargo.toml\"\nLIB_NAME=\"libvirtue_ios_rust.a\"\n\nif [ \"${PLATFORM_NAME:-}\" != \"iphoneos\" ] && [ \"${PLATFORM_NAME:-}\" != \"iphonesimulator\" ]; then\n  echo \"Unsupported PLATFORM_NAME='${PLATFORM_NAME:-}'\" >&2\n  exit 1\nfi\n\nPROFILE_DIR=\"debug\"\nCARGO_EXTRA=\"\"\nif [ \"${CONFIGURATION:-Debug}\" = \"Release\" ]; then\n  PROFILE_DIR=\"release\"\n  CARGO_EXTRA=\"--release\"\nfi\n\nLIB_DEST=\"$BUILT_PRODUCTS_DIR/$LIB_NAME\"\nrm -f \"$LIB_DEST\"\n\nbuild_target() {\n  target=\"$1\"\n  rustup target add \"$target\" >/dev/null 2>&1 || true\n  if [ -n \"$CARGO_EXTRA\" ]; then\n    cargo build --manifest-path \"$MANIFEST_PATH\" --target \"$target\" $CARGO_EXTRA\n  else\n    cargo build --manifest-path \"$MANIFEST_PATH\" --target \"$target\"\n  fi\n}\n\nif [ \"${PLATFORM_NAME:-}\" = \"iphoneos\" ]; then\n  local_target=\"aarch64-apple-ios\"\n  echo \"Building Rust bridge for target: ${local_target} (config: ${CONFIGURATION:-Debug})\"\n  build_target \"$local_target\"\n  cp \"$RUST_DIR/target/$local_target/$PROFILE_DIR/$LIB_NAME\" \"$LIB_DEST\"\nelse\n  LIB_INPUTS=\"\"\n  LIB_COUNT=0\n\n  case \" ${ARCHS:-} \" in\n    *\" arm64 \"*)\n    arm_target=\"aarch64-apple-ios-sim\"\n    echo \"Building Rust bridge for target: ${arm_target} (config: ${CONFIGURATION:-Debug})\"\n    build_target \"$arm_target\"\n    LIB_INPUTS=\"$LIB_INPUTS $RUST_DIR/target/$arm_target/$PROFILE_DIR/$LIB_NAME\"\n    LIB_COUNT=$((LIB_COUNT + 1))\n    ;;\n  esac\n\n  case \" ${ARCHS:-} \" in\n    *\" x86_64 \"*)\n    x86_target=\"x86_64-apple-ios\"\n    echo \"Building Rust bridge for target: ${x86_target} (config: ${CONFIGURATION:-Debug})\"\n    build_target \"$x86_target\"\n    LIB_INPUTS=\"$LIB_INPUTS $RUST_DIR/target/$x86_target/$PROFILE_DIR/$LIB_NAME\"\n    LIB_COUNT=$((LIB_COUNT + 1))\n    ;;\n  esac\n\n  if [ \"$LIB_COUNT\" -eq 0 ]; then\n    echo \"No supported simulator arch found in ARCHS='${ARCHS:-}'\" >&2\n    exit 1\n  fi\n\n  if [ \"$LIB_COUNT\" -eq 1 ]; then\n    # shellcheck disable=SC2086\n    set -- $LIB_INPUTS\n    cp \"$1\" \"$LIB_DEST\"\n  else\n    # shellcheck disable=SC2086\n    lipo -create $LIB_INPUTS -output \"$LIB_DEST\"\n  fi\nfi\n\necho \"Prepared Rust bridge library -> $LIB_DEST\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		3299AAC08B87AE2E8DB27633 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7F4EA4FFA9294C1404A5197E /* SafariWebExtensionHandler.swift in Sources */,
+				5C71E4A88C099972E4D426E7 /* VirtueShared.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		37BACE470EAB0E171F70F193 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B99E69BF65320433BEB44DFE /* CaptureCallbacks.swift in Sources */,
+				2B519D76DE9CC56A244D58F9 /* MonitoringCoordinator.swift in Sources */,
+				0AFE31F0286592AC45E0F760 /* NativeBridge.swift in Sources */,
+				224EC8F88AE6F6E1A0BD9705 /* VirtueIOSApp.swift in Sources */,
+				EF4DAF33BF771649BCEFE118 /* VirtueShared.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		8724952A718E9D684A3A3F9D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FDED61B08ABE68F5776BBD5B /* VirtueSafariWebExtension */;
+			targetProxy = 8CB06F90560F43EB5EF63FBA /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		29D21B04D6077BF9D7234F34 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = app/VirtueIOS.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = app/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				OTHER_LDFLAGS = "$(inherited) -lvirtue_ios_rust";
+				PRODUCT_BUNDLE_IDENTIFIER = "$(VIRTUE_APP_BUNDLE_ID)";
+				PRODUCT_NAME = VirtueIOS;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		6CE7DBAF133BBF37BD2F8FF0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = app/SafariWebExtension/VirtueSafariWebExtension.entitlements;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = app/SafariWebExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				OTHER_LDFLAGS = "$(inherited) -lvirtue_ios_rust";
+				PRODUCT_BUNDLE_IDENTIFIER = "$(VIRTUE_APP_BUNDLE_ID).broadcast";
+				PRODUCT_NAME = VirtueSafariWebExtension;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		93F5DF84253C8102BEF2160B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = app/VirtueIOS.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = app/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				OTHER_LDFLAGS = "$(inherited) -lvirtue_ios_rust";
+				PRODUCT_BUNDLE_IDENTIFIER = "$(VIRTUE_APP_BUNDLE_ID)";
+				PRODUCT_NAME = VirtueIOS;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		C3377E5260E3386FE0A50527 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LIBRARY_SEARCH_PATHS = "$(inherited) $(BUILT_PRODUCTS_DIR) $(TARGET_BUILD_DIR)";
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				VIRTUE_APP_BUNDLE_ID = org.virtueinitiative.virtueios;
+			};
+			name = Debug;
+		};
+		C9F179D0BB2D32C9F454B311 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LIBRARY_SEARCH_PATHS = "$(inherited) $(BUILT_PRODUCTS_DIR) $(TARGET_BUILD_DIR)";
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				VIRTUE_APP_BUNDLE_ID = org.virtueinitiative.virtueios;
+			};
+			name = Release;
+		};
+		CB24E335C6A10F7650049E05 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = app/SafariWebExtension/VirtueSafariWebExtension.entitlements;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = app/SafariWebExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				OTHER_LDFLAGS = "$(inherited) -lvirtue_ios_rust";
+				PRODUCT_BUNDLE_IDENTIFIER = "$(VIRTUE_APP_BUNDLE_ID).broadcast";
+				PRODUCT_NAME = VirtueSafariWebExtension;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		22FBCA39101D3189160EEA17 /* Build configuration list for PBXNativeTarget "VirtueIOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				93F5DF84253C8102BEF2160B /* Debug */,
+				29D21B04D6077BF9D7234F34 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		35EB300C046AF967D5F2FD1C /* Build configuration list for PBXNativeTarget "VirtueSafariWebExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CB24E335C6A10F7650049E05 /* Debug */,
+				6CE7DBAF133BBF37BD2F8FF0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		522EC027A00C1C53F94DEC4F /* Build configuration list for PBXProject "VirtueIOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C3377E5260E3386FE0A50527 /* Debug */,
+				C9F179D0BB2D32C9F454B311 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 8BD8A09F9EE01C285122BD59 /* Project object */;
+}
