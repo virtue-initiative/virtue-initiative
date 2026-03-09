@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Virtue Safari Capture",
+  "description": "Capture Safari tab screenshots for Virtue monitoring.",
+  "version": "0.1.0",
+  "permissions": [
+    "activeTab",
+    "nativeMessaging",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "browser_specific_settings": {
+    "safari": {
+      "strict_min_version": "16.0"
+    }
+  }
+}
