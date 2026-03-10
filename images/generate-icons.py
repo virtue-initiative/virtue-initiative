@@ -3,13 +3,34 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 from PIL import Image
 
 BORDER_RATIO = 0.06
 TRIM_ALPHA_THRESHOLD = 2
+IOS_APP_ICON_SPECS = (
+    {"idiom": "iphone", "size": "20x20", "scale": "2x", "pixels": 40},
+    {"idiom": "iphone", "size": "20x20", "scale": "3x", "pixels": 60},
+    {"idiom": "iphone", "size": "29x29", "scale": "2x", "pixels": 58},
+    {"idiom": "iphone", "size": "29x29", "scale": "3x", "pixels": 87},
+    {"idiom": "iphone", "size": "40x40", "scale": "2x", "pixels": 80},
+    {"idiom": "iphone", "size": "40x40", "scale": "3x", "pixels": 120},
+    {"idiom": "iphone", "size": "60x60", "scale": "2x", "pixels": 120},
+    {"idiom": "iphone", "size": "60x60", "scale": "3x", "pixels": 180},
+    {"idiom": "ipad", "size": "20x20", "scale": "1x", "pixels": 20},
+    {"idiom": "ipad", "size": "20x20", "scale": "2x", "pixels": 40},
+    {"idiom": "ipad", "size": "29x29", "scale": "1x", "pixels": 29},
+    {"idiom": "ipad", "size": "29x29", "scale": "2x", "pixels": 58},
+    {"idiom": "ipad", "size": "40x40", "scale": "1x", "pixels": 40},
+    {"idiom": "ipad", "size": "40x40", "scale": "2x", "pixels": 80},
+    {"idiom": "ipad", "size": "76x76", "scale": "1x", "pixels": 76},
+    {"idiom": "ipad", "size": "76x76", "scale": "2x", "pixels": 152},
+    {"idiom": "ipad", "size": "83.5x83.5", "scale": "2x", "pixels": 167},
+    {"idiom": "ios-marketing", "size": "1024x1024", "scale": "1x", "pixels": 1024},
+)
 
 
 def rel(path: Path, root: Path) -> str:
@@ -25,6 +46,13 @@ def parse_hex_color(value: str) -> tuple[int, int, int]:
     if re.fullmatch(r"[0-9a-fA-F]{6}", raw) is None:
         raise ValueError(f"expected #RRGGBB, got {value!r}")
     return tuple(int(raw[i : i + 2], 16) for i in (0, 2, 4))
+
+
+def save_json(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+        handle.write("\n")
 
 
 def load_theme_color(root: Path) -> tuple[int, int, int]:
@@ -77,6 +105,58 @@ def save_icns(master: Image.Image, path: Path, sizes: Iterable[int]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     out = master.resize((sorted_sizes[-1], sorted_sizes[-1]), Image.Resampling.LANCZOS)
     out.save(path, format="ICNS", sizes=[(size, size) for size in sorted_sizes])
+
+
+def ios_icon_filename(spec: dict[str, str | int]) -> str:
+    idiom = str(spec["idiom"]).replace("ios-", "")
+    size = str(spec["size"])
+    scale = str(spec["scale"])
+    return f"Icon-App-{idiom}-{size}@{scale}.png"
+
+
+def save_ios_app_icons(master: Image.Image, assets_dir: Path) -> list[Path]:
+    app_icon_dir = assets_dir / "AppIcon.appiconset"
+    outputs = [assets_dir / "Contents.json", app_icon_dir / "Contents.json"]
+
+    if app_icon_dir.exists():
+        shutil.rmtree(app_icon_dir)
+
+    save_json(
+        assets_dir / "Contents.json",
+        {
+            "info": {
+                "author": "xcode",
+                "version": 1,
+            }
+        },
+    )
+
+    contents_images = []
+    for spec in IOS_APP_ICON_SPECS:
+        filename = ios_icon_filename(spec)
+        target_path = app_icon_dir / filename
+        save_png(master, target_path, int(spec["pixels"]))
+        outputs.append(target_path)
+        contents_images.append(
+            {
+                "filename": filename,
+                "idiom": str(spec["idiom"]),
+                "scale": str(spec["scale"]),
+                "size": str(spec["size"]),
+            }
+        )
+
+    save_json(
+        app_icon_dir / "Contents.json",
+        {
+            "images": contents_images,
+            "info": {
+                "author": "xcode",
+                "version": 1,
+            },
+        },
+    )
+    return outputs
 
 
 def preprocess_logo(raw_path: Path, out_path: Path, theme_rgb: tuple[int, int, int]) -> Image.Image:
@@ -171,6 +251,9 @@ def main() -> None:
         save_png(master, android_base / bucket / "ic_launcher_round.png", size)
         outputs.append(android_base / bucket / "ic_launcher.png")
         outputs.append(android_base / bucket / "ic_launcher_round.png")
+
+    ios_assets = root / "client" / "ios" / "app" / "Assets.xcassets"
+    outputs.extend(save_ios_app_icons(master, ios_assets))
 
     print("Generated icon assets:")
     for path in outputs:
