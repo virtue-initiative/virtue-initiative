@@ -38,3 +38,10 @@ jobs:
       - name: Rust lint (Windows client)
         run: cargo clippy -p virtue-windows-client --all-targets -- -D warnings
         working-directory: client
+
+      - name: Install NSIS
+        run: choco install nsis -y
+
+      - name: Build Windows installer
+        run: ./windows/scripts/build-installer.ps1 -Profile Debug
+        working-directory: client

@@ -42,3 +42,7 @@ jobs:
       - name: Rust tests (Linux client)
         run: cargo test -p virtue-linux-client
         working-directory: client
+
+      - name: Build Linux .deb package
+        run: ./linux/scripts/build-deb.sh
+        working-directory: client
