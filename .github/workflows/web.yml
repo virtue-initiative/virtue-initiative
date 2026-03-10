@@ -70,3 +70,15 @@ jobs:
       - name: Landing Prettier check
         run: npm run prettier:check
         working-directory: landing
+
+      - name: Web build
+        run: npm run build
+        working-directory: web
+
+      - name: Help build
+        run: npm run build
+        working-directory: help
+
+      - name: Landing build
+        run: npm run build
+        working-directory: landing
