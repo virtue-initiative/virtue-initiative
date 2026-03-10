@@ -10,6 +10,7 @@
 		0AFE31F0286592AC45E0F760 /* NativeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC5C926E46F575E39B52F4F5 /* NativeBridge.swift */; };
 		224EC8F88AE6F6E1A0BD9705 /* VirtueIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2360D5FD87E7DDC76809DCF /* VirtueIOSApp.swift */; };
 		2B519D76DE9CC56A244D58F9 /* MonitoringCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35759B57C5B754C19376FDAE /* MonitoringCoordinator.swift */; };
+		4AA0C870B95E4DCEB0D0F4C1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7C54F4AB2583277E1661D57B /* Assets.xcassets */; };
 		38E0ADE81FEC69951521C875 /* VirtueSafariWebExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 661F7F078331870B6674485C /* VirtueSafariWebExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		5C71E4A88C099972E4D426E7 /* VirtueShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9318D22E92C9D6BC594C78C /* VirtueShared.swift */; };
 		7F4EA4FFA9294C1404A5197E /* SafariWebExtensionHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BD5B034516AECD2FC30C5BB /* SafariWebExtensionHandler.swift */; };
@@ -51,6 +52,7 @@
 		3BD5B034516AECD2FC30C5BB /* SafariWebExtensionHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafariWebExtensionHandler.swift; sourceTree = "<group>"; };
 		661F7F078331870B6674485C /* VirtueSafariWebExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = VirtueSafariWebExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		6EB2097040279F2D68D63571 /* CaptureCallbacks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureCallbacks.swift; sourceTree = "<group>"; };
+		7C54F4AB2583277E1661D57B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		78E4221B4364750675B94A46 /* VirtueSafariWebExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = VirtueSafariWebExtension.entitlements; sourceTree = "<group>"; };
 		79294B334D6E1BC723B66893 /* background.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = background.js; sourceTree = "<group>"; };
 		883C68547A16351396259AB7 /* manifest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = manifest.json; sourceTree = "<group>"; };
@@ -64,6 +66,7 @@
 		379DEDAE2970DCD87D3D54C7 /* app */ = {
 			isa = PBXGroup;
 			children = (
+				7C54F4AB2583277E1661D57B /* Assets.xcassets */,
 				EBDF7F1676FFB9988776E0AF /* SafariWebExtension */,
 				E623F115E3F991AF7ECB9324 /* Shared */,
 				DDEAC77C25DAC6787ACDF8BC /* Sources */,
@@ -137,6 +140,7 @@
 			buildPhases = (
 				D19AE8956C6E8E5B451A006A /* Build Rust Bridge */,
 				37BACE470EAB0E171F70F193 /* Sources */,
+				A1C92C4E79985862BD5B9D32 /* Resources */,
 				D5AD654696B2A0B41266279F /* Embed Foundation Extensions */,
 			);
 			buildRules = (
@@ -210,6 +214,14 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		A1C92C4E79985862BD5B9D32 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4AA0C870B95E4DCEB0D0F4C1 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		555BD503AEDB00768DC7A842 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;

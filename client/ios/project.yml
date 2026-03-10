@@ -27,6 +27,8 @@ targets:
     sources:
       - path: app/Sources
       - path: app/Shared
+    resources:
+      - path: app/Assets.xcassets
     dependencies:
       - target: VirtueSafariWebExtension
         embed: true

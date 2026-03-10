@@ -36,3 +36,5 @@ Generated targets:
 - `client/windows/assets/app-icon.png`
 - `client/android/app/src/main/res/mipmap-*/ic_launcher.png`
 - `client/android/app/src/main/res/mipmap-*/ic_launcher_round.png`
+- `client/ios/app/Assets.xcassets/Contents.json`
+- `client/ios/app/Assets.xcassets/AppIcon.appiconset/*`
