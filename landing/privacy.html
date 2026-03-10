@@ -43,71 +43,100 @@
     <main class="container">
       <section class="legal">
         <h1>Privacy Policy</h1>
-        <p class="legal-date">Last updated: February 2026</p>
+        <p class="legal-date">Last updated: March 2026</p>
 
         <h2>1. Overview</h2>
         <p>
           The Virtue Initiative is a non-profit pornography accountability
           application. This policy describes what data we collect, how we use
-          it, and your rights regarding that data. We do not sell, advertise
-          with, or monetize your personal data in any way.
+          it, how it is protected, and your rights regarding that data. We do
+          not sell, advertise with, or monetize your personal data.
         </p>
 
         <h2>2. Data we collect</h2>
-        <p>We collect the minimum data necessary to provide the service:</p>
+        <p>We collect the data needed to provide the service:</p>
         <ul>
           <li>
             <strong>Account information</strong> — your email address and an
             optional display name, provided at sign-up.
           </li>
           <li>
-            <strong>Screenshots</strong> — periodic screenshots captured by the
-            The Virtue Initiative client installed on your devices. These are
-            uploaded to our servers and stored for the retention period you
-            configure (default: 30 days).
+            <strong>Encrypted screenshot data</strong> — screenshots and other
+            encrypted monitoring batches captured by The Virtue Initiative
+            clients installed on your devices. These batches may include
+            screenshots and related encrypted event data.
           </li>
           <li>
             <strong>Device metadata</strong> — the name, platform, and activity
             timestamps of each device you register.
           </li>
           <li>
-            <strong>Activity logs</strong> — records of capture events
-            (including any missed captures) associated with your devices.
+            <strong>Device and monitoring logs</strong> — unencrypted log
+            messages sent by clients to report operational and accountability
+            events, such as capture failures, monitoring state changes,
+            startup/shutdown or session events, and similar client-reported
+            status information.
           </li>
           <li>
             <strong>Partner relationships</strong> — the email addresses of
             accountability partners you invite, and the permissions you grant
             them.
           </li>
+          <li>
+            <strong>Encryption and sharing records</strong> — encrypted key
+            material and related records needed to restore your encrypted data
+            and share access with authorized accountability partners.
+          </li>
+          <li>
+            <strong>Authentication and session data</strong> — access tokens,
+            refresh tokens, registered device tokens, and similar session data
+            needed to keep you signed in and connect devices to your account.
+          </li>
+          <li>
+            <strong>Local device/browser storage</strong> — clients may store
+            local credentials, encryption keys, or configuration values on your
+            device or in your browser so the service can continue operating
+            after restart.
+          </li>
         </ul>
 
         <h2>3. How we use your data</h2>
         <p>
-          Your data is used solely to provide the The Virtue Initiative service:
+          We use your data to provide and secure The Virtue Initiative service:
         </p>
         <ul>
           <li>
-            Screenshots and activity logs are made accessible to the
-            accountability partners you have explicitly invited and granted
-            access to.
+            Clients may capture screenshots, monitor device or system state, and
+            send logs or encrypted batches to our servers as part of the
+            accountability service.
           </li>
           <li>
-            Account and device data is used to authenticate you and operate the
-            service.
+            Encrypted screenshot data is stored and later delivered so you and
+            the accountability partners you explicitly authorize can view it
+            with the appropriate decryption keys.
           </li>
           <li>
-            We do not analyze, process, or view your screenshots for any purpose
-            other than storing and serving them to you and your authorized
-            partners.
+            Unencrypted device and monitoring logs are used to show activity and
+            operational status to authorized users and partners.
+          </li>
+          <li>
+            Account, device, partner, and session data is used to authenticate
+            you, operate registered clients, and manage sharing permissions.
+          </li>
+          <li>
+            We do not use your screenshots or logs for advertising, profiling,
+            or model training.
           </li>
         </ul>
 
         <h2>4. Data retention</h2>
         <p>
-          Screenshots and logs are automatically deleted after your configured
-          retention period (default 30 days, adjustable in account settings).
-          You may delete your account and all associated data at any time by
-          contacting us at
+          We do not currently offer self-service retention controls or promise
+          automatic deletion after a fixed number of days. Data is retained
+          while needed to operate the service unless and until it is deleted by
+          us as part of maintenance or in response to a deletion request. You
+          may request deletion of your account and associated data by contacting
+          us at
           <a href="mailto:help@virtueinitiative.org"
             >help@virtueinitiative.org</a
           >.
@@ -115,18 +144,24 @@
 
         <h2>5. Data sharing</h2>
         <p>
-          We do not sell or share your data with third parties. Your screenshots
-          and logs are only accessible to you and the accountability partners
-          you have explicitly authorized. We use Cloudflare infrastructure (R2
-          object storage, Workers) to store and serve data; Cloudflare's own
-          privacy policy governs their handling of infrastructure-level data.
+          We do not sell your personal data. We share your data only as needed
+          to operate the service, including with accountability partners you
+          explicitly authorize and with infrastructure providers that host or
+          deliver service data. We use Cloudflare infrastructure, including
+          Workers, D1, and R2 object storage, and Cloudflare's own privacy
+          policy governs their handling of infrastructure-level data.
         </p>
 
         <h2>6. Security</h2>
         <p>
-          Data is transmitted over HTTPS. Screenshots are stored in a private
-          object store accessible only via authenticated API requests. Passwords
-          are hashed and never stored in plaintext.
+          Data is transmitted over HTTPS. Encrypted screenshot batches are
+          encrypted client-side before upload. Those encrypted blobs may be
+          retrievable from storage if their URLs are known, but they are
+          intended to be unreadable without the relevant encryption keys.
+          Device and monitoring logs, account records, partner records, and
+          other service metadata are stored server-side and are intended to be
+          accessible only through authorized account access. Passwords are
+          hashed and are not stored in plaintext.
         </p>
 
         <h2>7. Children</h2>
@@ -142,7 +177,7 @@
           data at any time by contacting us at
           <a href="mailto:help@virtueinitiative.org"
             >help@virtueinitiative.org</a
-          >. We will respond within 30 days.
+          >. We will make reasonable efforts to respond within 30 days.
         </p>
 
         <h2>9. Changes to this policy</h2>
