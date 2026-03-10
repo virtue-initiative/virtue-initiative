@@ -38,3 +38,7 @@ jobs:
       - name: Rust lint (macOS client)
         run: cargo clippy -p virtue-mac-client --all-targets -- -D warnings
         working-directory: client
+
+      - name: Build macOS app bundle and DMG
+        run: ./mac/scripts/build-dmg.sh
+        working-directory: client
