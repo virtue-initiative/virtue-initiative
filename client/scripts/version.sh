@@ -58,15 +58,30 @@ virtue_git_short_hash() {
   git -C "${VIRTUE_REPO_ROOT}" rev-parse --short HEAD
 }
 
+virtue_build_date() {
+  if [[ -n "${VIRTUE_BUILD_DATE:-}" ]]; then
+    printf '%s\n' "${VIRTUE_BUILD_DATE}"
+    return 0
+  fi
+
+  date -u +%Y-%m-%d
+}
+
+virtue_release_tag() {
+  printf '%s-dev\n' "$(virtue_base_version)"
+}
+
 virtue_build_label() {
-  printf '%s-%s\n' "$(virtue_base_version)" "$(virtue_git_short_hash)"
+  printf '%s-%s-%s\n' "$(virtue_release_tag)" "$(virtue_build_date)" "$(virtue_git_short_hash)"
 }
 
 virtue_print_env() {
   printf 'VIRTUE_BASE_VERSION=%s\n' "$(virtue_base_version)"
   printf 'VIRTUE_ANDROID_VERSION_CODE=%s\n' "$(virtue_android_version_code)"
   printf 'VIRTUE_APPLE_BUILD_NUMBER=%s\n' "$(virtue_apple_build_number)"
+  printf 'VIRTUE_BUILD_DATE=%s\n' "$(virtue_build_date)"
   printf 'VIRTUE_GIT_SHORT_HASH=%s\n' "$(virtue_git_short_hash)"
+  printf 'VIRTUE_RELEASE_TAG=%s\n' "$(virtue_release_tag)"
   printf 'VIRTUE_BUILD_LABEL=%s\n' "$(virtue_build_label)"
 }
 

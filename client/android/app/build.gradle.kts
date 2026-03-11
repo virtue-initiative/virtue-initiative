@@ -1,3 +1,6 @@
+import java.time.ZoneOffset
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import java.util.Properties
 
 plugins {
@@ -20,6 +23,8 @@ fun loadVersionInfo(clientRoot: File): VersionInfo {
         ?: error("VERSION missing from ${versionFile.absolutePath}")
     val androidVersionCode = properties.getProperty("ANDROID_VERSION_CODE")?.toInt()
         ?: error("ANDROID_VERSION_CODE missing from ${versionFile.absolutePath}")
+    val buildDate = System.getenv("VIRTUE_BUILD_DATE")
+        ?: ZonedDateTime.now(ZoneOffset.UTC).format(DateTimeFormatter.ISO_LOCAL_DATE)
     val gitShortHash = System.getenv("VIRTUE_GIT_SHORT_HASH")
         ?: System.getenv("GITHUB_SHA")?.take(7)
         ?: run {
@@ -42,7 +47,7 @@ fun loadVersionInfo(clientRoot: File): VersionInfo {
 
     return VersionInfo(
         baseVersion = baseVersion,
-        buildLabel = "$baseVersion-$gitShortHash",
+        buildLabel = "$baseVersion-dev-$buildDate-$gitShortHash",
         androidVersionCode = androidVersionCode
     )
 }

@@ -1,6 +1,6 @@
 [package]
 name = "virtue-client-core"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 description = "Platform-agnostic client core for Virtue"
 
@@ -34,4 +34,5 @@ webp = "0.3.1"
 tempfile = "3"
 
 [build-dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 dotenv-build = "0.1.1"

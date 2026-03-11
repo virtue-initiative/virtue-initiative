@@ -210,12 +210,12 @@ The full run log is saved on Linux under:
   --build-host win11 \
   --mode installer \
   --profile Debug \
-  --version 0.1.0-dev
+  --version 0.0.1-dev
 ```
 
 By default, the installer remains on the Windows VM at:
 
-- `C:\virtue-build\src\client\windows\dist\virtue-windows-installer-0.1.0-dev.exe`
+- `C:\virtue-build\src\client\windows\dist\virtue-windows-installer-0.0.1-dev.exe`
 
 If you also want a Linux copy:
 
@@ -224,10 +224,10 @@ If you also want a Linux copy:
   --build-host win11 \
   --mode installer \
   --profile Debug \
-  --version 0.1.0-dev \
+  --version 0.0.1-dev \
   --copy-installer-to-linux
 ```
 
 That copies to:
 
-- `client/windows/dist/remote/virtue-windows-installer-0.1.0-dev.exe`
+- `client/windows/dist/remote/virtue-windows-installer-0.0.1-dev.exe`

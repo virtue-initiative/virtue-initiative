@@ -18,7 +18,7 @@ Options:
   --cache-root <win-path>         Remote cache root. Default: C:/virtue-build/cache
   --target <triple>               Rust target for installer mode. Default: x86_64-pc-windows-msvc
   --profile <Debug|Release>       Installer profile. Default: Debug
-  --version <version>             Installer version. Default: 0.1.0-dev
+  --version <version>             Installer version. Default: 0.0.1-dev
   --clean                         Run cargo clean before installer build
   --skip-sync                     Reuse remote source tree without uploading local client/
   --log-dir <dir>                 Local directory for full remote run logs.
@@ -65,7 +65,7 @@ BUILD_ROOT="C:/virtue-build"
 CACHE_ROOT="C:/virtue-build/cache"
 TARGET="x86_64-pc-windows-msvc"
 PROFILE="Debug"
-VERSION="0.1.0-dev"
+VERSION="0.0.1-dev"
 CLEAN=0
 SKIP_SYNC=0
 LOCAL_DIST="$REPO_ROOT/client/windows/dist/remote"

@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use chrono::Utc;
+
 fn main() {
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("manifest dir"));
     let client_root = manifest_dir
@@ -18,6 +20,7 @@ fn main() {
     println!("cargo:rerun-if-changed=.env.dev");
     println!("cargo:rerun-if-changed={}", version_file.display());
     println!("cargo:rerun-if-env-changed=VIRTUE_GIT_SHORT_HASH");
+    println!("cargo:rerun-if-env-changed=VIRTUE_BUILD_DATE");
     println!("cargo:rerun-if-env-changed=VIRTUE_BUILD_LABEL");
     println!("cargo:rerun-if-env-changed=GITHUB_SHA");
     emit_git_rerun_hints(&repo_root);
@@ -41,9 +44,10 @@ fn main() {
         );
     }
 
+    let build_date = resolve_build_date();
     let git_short_hash = resolve_git_short_hash(&repo_root);
     let build_label = std::env::var("VIRTUE_BUILD_LABEL")
-        .unwrap_or_else(|_| format!("{base_version}-{git_short_hash}"));
+        .unwrap_or_else(|_| format!("{base_version}-dev-{build_date}-{git_short_hash}"));
 
     println!("cargo:rustc-env=VIRTUE_BASE_VERSION={base_version}");
     println!("cargo:rustc-env=VIRTUE_GIT_SHORT_HASH={git_short_hash}");
@@ -93,6 +97,14 @@ fn resolve_git_short_hash(repo_root: &Path) -> String {
         .expect("git hash should be utf-8")
         .trim()
         .to_string()
+}
+
+fn resolve_build_date() -> String {
+    if let Ok(date) = std::env::var("VIRTUE_BUILD_DATE") {
+        return date;
+    }
+
+    Utc::now().format("%Y-%m-%d").to_string()
 }
 
 fn emit_git_rerun_hints(repo_root: &Path) {

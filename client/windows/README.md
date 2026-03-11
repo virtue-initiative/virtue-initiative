@@ -45,14 +45,14 @@ From WSL:
 
 ```bash
 cd /home/jeff/code/virtue-initiative/client/windows
-./scripts/build-installer.sh -Version 0.1.0 -Profile Debug
+./scripts/build-installer.sh -Version 0.0.1 -Profile Debug
 ```
 
 Or from Windows PowerShell:
 
 ```powershell
 cd C:\path\to\virtue-initiative\client\windows
-.\scripts\build-installer.ps1 -Version 0.1.0 -Profile Debug
+.\scripts\build-installer.ps1 -Version 0.0.1 -Profile Debug
 ```
 
 Expected output:
@@ -113,7 +113,7 @@ Run an installer build from Linux (artifact stays on Windows by default):
 ./client/windows/scripts/remote-windows-build.sh \
   --build-host win11 \
   --mode installer \
-  --version 0.1.0-dev \
+  --version 0.0.1-dev \
   --profile Debug
 ```
 
@@ -123,7 +123,7 @@ Optional: copy installer back to Linux if needed:
 ./client/windows/scripts/remote-windows-build.sh \
   --build-host win11 \
   --mode installer \
-  --version 0.1.0-dev \
+  --version 0.0.1-dev \
   --profile Debug \
   --copy-installer-to-linux
 ```
