@@ -2,6 +2,17 @@ import Foundation
 
 enum VirtueShared {
     static let appGroupID = "group.org.virtueinitiative.virtueios"
+    static let buildLabel: String = {
+        if let buildLabel = Bundle.main.object(forInfoDictionaryKey: "VirtueBuildLabel") as? String {
+            return buildLabel
+        }
+        if let marketingVersion =
+            Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        {
+            return marketingVersion
+        }
+        return "0.1.0"
+    }()
 
     static let baseApiUrlKey = "VIRTUE_BASE_API_URL"
     static let captureIntervalKey = "VIRTUE_CAPTURE_INTERVAL_SECONDS"

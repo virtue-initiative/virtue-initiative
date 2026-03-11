@@ -1,7 +1,13 @@
 name: Client iOS Checks
 
+permissions:
+  contents: write
+
 on:
   pull_request:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -30,6 +36,48 @@ jobs:
         run: cargo build --manifest-path Cargo.toml
         working-directory: client/ios/rust
 
+      - name: Resolve version info
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: version
+        shell: bash
+        run: |
+          source ./scripts/version.sh
+          echo "build_label=$(virtue_build_label)" >> "$GITHUB_OUTPUT"
+        working-directory: client
+
       - name: iOS app build smoke test (simulator)
         run: ./scripts/build-ios.sh --destination "generic/platform=iOS Simulator" --derived-data .derived-data-ci-ios
+        working-directory: client/ios
+
+      - name: Build iOS app bundle (release, unsigned)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: ./scripts/build-ios.sh --destination "generic/platform=iOS" --configuration Release --derived-data .derived-data-ci-ios-release --code-signing-allowed NO
+        working-directory: client/ios
+
+      - name: Package iOS app bundle
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          mkdir -p dist
+          app_path=".derived-data-ci-ios-release/Build/Products/Release-iphoneos/VirtueIOS.app"
+          if [[ ! -d "${app_path}" ]]; then
+            echo "Built iOS app bundle not found: ${app_path}" >&2
+            exit 1
+          fi
+          ditto -c -k --sequesterRsrc --keepParent "${app_path}" "dist/VirtueIOS-${{ steps.version.outputs.build_label }}.zip"
+        working-directory: client/ios
+
+      - name: Upload iOS app bundle artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: virtue-ios-${{ steps.version.outputs.build_label }}
+          path: client/ios/dist/VirtueIOS-${{ steps.version.outputs.build_label }}.zip
+
+      - name: Publish iOS prerelease asset
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ../scripts/publish-prerelease.sh "${{ steps.version.outputs.build_label }}" "dist/VirtueIOS-${{ steps.version.outputs.build_label }}.zip"
         working-directory: client/ios

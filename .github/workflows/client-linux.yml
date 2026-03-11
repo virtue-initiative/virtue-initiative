@@ -1,7 +1,13 @@
 name: Client Linux Checks
 
+permissions:
+  contents: write
+
 on:
   pull_request:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -45,4 +51,29 @@ jobs:
 
       - name: Build Linux .deb package
         run: ./linux/scripts/build-deb.sh
+        working-directory: client
+
+      - name: Resolve version info
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: version
+        shell: bash
+        run: |
+          source ./scripts/version.sh
+          echo "build_label=$(virtue_build_label)" >> "$GITHUB_OUTPUT"
+          echo "arch=$(dpkg --print-architecture)" >> "$GITHUB_OUTPUT"
+        working-directory: client
+
+      - name: Upload Linux installer artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: virtue-linux-${{ steps.version.outputs.build_label }}
+          path: client/target/debian/virtue_${{ steps.version.outputs.build_label }}_${{ steps.version.outputs.arch }}.deb
+
+      - name: Publish Linux prerelease asset
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/publish-prerelease.sh "${{ steps.version.outputs.build_label }}" "target/debian/virtue_${{ steps.version.outputs.build_label }}_${{ steps.version.outputs.arch }}.deb"
         working-directory: client

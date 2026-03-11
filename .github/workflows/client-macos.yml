@@ -1,7 +1,13 @@
 name: Client macOS Checks
 
+permissions:
+  contents: write
+
 on:
   pull_request:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -41,4 +47,28 @@ jobs:
 
       - name: Build macOS app bundle and DMG
         run: ./mac/scripts/build-dmg.sh
+        working-directory: client
+
+      - name: Resolve version info
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: version
+        shell: bash
+        run: |
+          source ./scripts/version.sh
+          echo "build_label=$(virtue_build_label)" >> "$GITHUB_OUTPUT"
+        working-directory: client
+
+      - name: Upload macOS installer artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: virtue-macos-${{ steps.version.outputs.build_label }}
+          path: client/target/macos/Virtue-${{ steps.version.outputs.build_label }}.dmg
+
+      - name: Publish macOS prerelease asset
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/publish-prerelease.sh "${{ steps.version.outputs.build_label }}" "target/macos/Virtue-${{ steps.version.outputs.build_label }}.dmg"
         working-directory: client

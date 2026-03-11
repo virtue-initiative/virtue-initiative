@@ -24,6 +24,9 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Virtue iOS")
                     .font(.largeTitle.weight(.bold))
+                Text("Build \(VirtueShared.buildLabel)")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
 
                 indicatorPanel
 

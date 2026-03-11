@@ -24,7 +24,7 @@ Unicode true
 !define OUTFILE "virtue-windows-installer-${PRODUCT_VERSION}.exe"
 !endif
 
-Name "${APP_NAME}"
+Name "${APP_NAME} ${PRODUCT_VERSION}"
 OutFile "${OUTFILE}"
 InstallDir "$PROGRAMFILES64\\Virtue"
 InstallDirRegKey HKLM "Software\\Virtue" "InstallDir"

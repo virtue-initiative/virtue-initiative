@@ -6,7 +6,7 @@ PS_SCRIPT="$SCRIPT_DIR/build-installer.ps1"
 WIN_PS_SCRIPT="$(wslpath -w "$PS_SCRIPT")"
 
 if [[ $# -eq 0 ]]; then
-  ARGS=(-Version "0.1.0")
+  ARGS=()
 elif [[ "${1:-}" != -* ]]; then
   ARGS=(-Version "$1" "${@:2}")
 else

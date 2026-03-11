@@ -144,6 +144,7 @@ pub mod service_host;
 pub mod token_store;
 pub mod tray_icon;
 pub mod upload;
+pub mod version;
 
 pub use api_client::ApiClient;
 pub use app_commands::{
@@ -166,6 +167,7 @@ pub use service_host::{
 pub use token_store::{FileTokenStore, MemoryTokenStore, TokenStore};
 pub use tray_icon::build_default_tray_icon_rgba;
 pub use upload::{UploadClient, UploadClientConfig, sha256_bytes, sha256_hex};
+pub use version::{BASE_VERSION, BUILD_LABEL, GIT_SHORT_HASH};
 
 #[cfg(test)]
 mod tests {

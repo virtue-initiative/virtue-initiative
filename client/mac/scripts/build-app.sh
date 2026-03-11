@@ -9,7 +9,11 @@ fi
 CLIENT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$CLIENT_ROOT"
 
-VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' mac/Cargo.toml | head -n1)"
+source "${CLIENT_ROOT}/scripts/version.sh"
+
+BASE_VERSION="$(virtue_base_version)"
+BUILD_LABEL="$(virtue_build_label)"
+APPLE_BUILD_NUMBER="$(virtue_apple_build_number)"
 APP_NAME="Virtue.app"
 APP_ROOT="target/macos/${APP_NAME}"
 CONTENTS_DIR="${APP_ROOT}/Contents"
@@ -42,9 +46,11 @@ cat > "${CONTENTS_DIR}/Info.plist" <<PLIST
   <key>CFBundleIdentifier</key>
   <string>codes.anb.virtue.mac</string>
   <key>CFBundleVersion</key>
-  <string>${VERSION}</string>
+  <string>${APPLE_BUILD_NUMBER}</string>
   <key>CFBundleShortVersionString</key>
-  <string>${VERSION}</string>
+  <string>${BASE_VERSION}</string>
+  <key>VirtueBuildLabel</key>
+  <string>${BUILD_LABEL}</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleExecutable</key>

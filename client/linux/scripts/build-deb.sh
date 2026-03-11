@@ -4,14 +4,17 @@ set -euo pipefail
 CLIENT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$CLIENT_ROOT"
 
-VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' linux/Cargo.toml | head -n1)"
+source "${CLIENT_ROOT}/scripts/version.sh"
+
+BASE_VERSION="$(virtue_base_version)"
+BUILD_LABEL="$(virtue_build_label)"
 ARCH="$(dpkg --print-architecture)"
 PKG_NAME="virtue"
 
 cargo build --release -p virtue-linux-client
 
-PKG_DIR="target/debian/${PKG_NAME}_${VERSION}_${ARCH}"
-OUT_DEB="target/debian/${PKG_NAME}_${VERSION}_${ARCH}.deb"
+PKG_DIR="target/debian/${PKG_NAME}_${BUILD_LABEL}_${ARCH}"
+OUT_DEB="target/debian/${PKG_NAME}_${BUILD_LABEL}_${ARCH}.deb"
 
 rm -rf "$PKG_DIR" "$OUT_DEB"
 mkdir -p "$PKG_DIR/DEBIAN"
@@ -27,7 +30,7 @@ install -m 0755 linux/packaging/debian/prerm "$PKG_DIR/DEBIAN/prerm"
 
 cat > "$PKG_DIR/DEBIAN/control" <<CONTROL
 Package: $PKG_NAME
-Version: $VERSION
+Version: $BASE_VERSION
 Section: utils
 Priority: optional
 Architecture: $ARCH

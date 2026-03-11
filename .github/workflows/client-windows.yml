@@ -1,7 +1,13 @@
 name: Client Windows Checks
 
+permissions:
+  contents: write
+
 on:
   pull_request:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -42,6 +48,37 @@ jobs:
       - name: Install NSIS
         run: choco install nsis -y
 
-      - name: Build Windows installer
+      - name: Build Windows installer (debug)
+        if: github.event_name != 'push' || github.ref != 'refs/heads/main'
         run: ./windows/scripts/build-installer.ps1 -Profile Debug
+        working-directory: client
+
+      - name: Resolve version info
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: version
+        shell: pwsh
+        working-directory: client/windows
+        run: |
+          . ./scripts/Get-VersionInfo.ps1
+          $info = Get-VirtueVersionInfo
+          "build_label=$($info.BuildLabel)" >> $env:GITHUB_OUTPUT
+
+      - name: Build Windows installer (release)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: ./windows/scripts/build-installer.ps1 -Profile Release -Version "${{ steps.version.outputs.build_label }}"
+        working-directory: client
+
+      - name: Upload Windows installer artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: virtue-windows-${{ steps.version.outputs.build_label }}
+          path: client/windows/dist/virtue-windows-installer-${{ steps.version.outputs.build_label }}.exe
+
+      - name: Publish Windows prerelease asset
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/publish-prerelease.sh "${{ steps.version.outputs.build_label }}" "windows/dist/virtue-windows-installer-${{ steps.version.outputs.build_label }}.exe"
         working-directory: client
