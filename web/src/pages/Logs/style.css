@@ -367,14 +367,11 @@
 }
 
 .img-full {
-  width: auto;
+  width: 100%;
   height: 100%;
-  max-width: 100%;
-  max-height: 100%;
-  border-radius: 18px;
   display: block;
-  pointer-events: auto;
-  box-shadow: 0 8px 60px #0008;
+  pointer-events: none;
+  object-fit: contain;
 }
 
 /* Misc */
