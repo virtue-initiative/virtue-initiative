@@ -5755,7 +5755,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "virtue-client-core"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -5782,7 +5782,7 @@ dependencies = [
 
 [[package]]
 name = "virtue-linux-client"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "base64",
@@ -5806,7 +5806,7 @@ dependencies = [
 
 [[package]]
 name = "virtue-mac-client"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "block2 0.6.2",
@@ -5829,7 +5829,7 @@ dependencies = [
 
 [[package]]
 name = "virtue-windows-client"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "base64",

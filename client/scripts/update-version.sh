@@ -17,6 +17,37 @@ replace_line() {
   perl -0pi -e "s/${pattern}/${replacement}/gm" "$file"
 }
 
+replace_lockfile_version() {
+  local file="$1"
+  local package_name="$2"
+  local tmp_file
+
+  tmp_file="$(mktemp)"
+  awk -v package_name="${package_name}" -v version="${BASE_VERSION}" '
+    /^\[\[package\]\]$/ {
+      in_package = 1
+      package_matches = 0
+      print
+      next
+    }
+
+    in_package && /^name = "/ {
+      package_matches = ($0 == "name = \"" package_name "\"")
+      print
+      next
+    }
+
+    in_package && package_matches && /^version = "/ {
+      print "version = \"" version "\""
+      package_matches = 0
+      next
+    }
+
+    { print }
+  ' "$file" > "${tmp_file}"
+  mv "${tmp_file}" "$file"
+}
+
 replace_package_version() {
   local file="$1"
   local tmp_file
@@ -56,6 +87,13 @@ cargo_files=(
 for cargo_file in "${cargo_files[@]}"; do
   replace_package_version "$cargo_file"
 done
+
+replace_lockfile_version "${CLIENT_ROOT}/Cargo.lock" "virtue-client-core"
+replace_lockfile_version "${CLIENT_ROOT}/Cargo.lock" "virtue-linux-client"
+replace_lockfile_version "${CLIENT_ROOT}/Cargo.lock" "virtue-mac-client"
+replace_lockfile_version "${CLIENT_ROOT}/Cargo.lock" "virtue-windows-client"
+replace_lockfile_version "${CLIENT_ROOT}/android/rust/Cargo.lock" "virtue-android-rust"
+replace_lockfile_version "${CLIENT_ROOT}/android/rust/Cargo.lock" "virtue-client-core"
 
 replace_line \
   "${CLIENT_ROOT}/ios/project.yml" \

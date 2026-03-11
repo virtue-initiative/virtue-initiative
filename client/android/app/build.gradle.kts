@@ -121,6 +121,8 @@ val buildRustRelease by tasks.registering(Exec::class) {
         """
         export ANDROID_SDK_ROOT="${'$'}{ANDROID_SDK_ROOT:-${'$'}HOME/Android/Sdk}"
         export ANDROID_HOME="${'$'}ANDROID_SDK_ROOT"
+        export ANDROID_NDK_ROOT="${'$'}{ANDROID_NDK_ROOT:-${'$'}ANDROID_SDK_ROOT/ndk/26.1.10909125}"
+        export ANDROID_NDK_HOME="${'$'}ANDROID_NDK_ROOT"
         export PATH="${'$'}HOME/.cargo/bin:${'$'}PATH"
         cargo ndk -t arm64-v8a -t x86_64 -o app/src/main/jniLibs build --release --locked --manifest-path rust/Cargo.toml
         """.trimIndent()
