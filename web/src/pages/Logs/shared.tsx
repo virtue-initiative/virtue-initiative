@@ -47,7 +47,6 @@ export function groupLogsByDay<T extends { taken_at: number }>(
 
 export function LogImage({ imageBytes }: { imageBytes: Uint8Array }) {
   const [imgSrc, setImgSrc] = useState<string | null>(null);
-  const [imgAspect, setImgAspect] = useState(1);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -69,27 +68,17 @@ export function LogImage({ imageBytes }: { imageBytes: Uint8Array }) {
         onClick={() => setOpen(true)}
         aria-label="View screenshot"
       >
-        <img
-          class="log-thumb"
-          src={imgSrc}
-          alt="screenshot"
-          loading="lazy"
-          onLoad={(e) => {
-            const target = e.currentTarget as HTMLImageElement;
-            if (target.naturalWidth > 0 && target.naturalHeight > 0) {
-              setImgAspect(target.naturalWidth / target.naturalHeight);
-            }
-          }}
-        />
+        <img class="log-thumb" src={imgSrc} alt="screenshot" loading="lazy" />
       </button>
       {open && (
         <div class="img-overlay" onClick={() => setOpen(false)}>
-          <div
-            class="img-full-frame"
-            style={{ "--img-aspect": `${imgAspect}` }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <img class="img-full" src={imgSrc} alt="screenshot" />
+          <div class="img-full-frame">
+            <img
+              class="img-full"
+              src={imgSrc}
+              alt="screenshot"
+              onClick={(e) => e.stopPropagation()}
+            />
           </div>
         </div>
       )}
