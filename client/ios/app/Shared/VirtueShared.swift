@@ -11,7 +11,7 @@ enum VirtueShared {
         {
             return marketingVersion
         }
-        return "0.1.0"
+        return "0.0.0"
     }()
 
     static let baseApiUrlKey = "VIRTUE_BASE_API_URL"

@@ -59,6 +59,7 @@ jobs:
         shell: bash
         run: |
           source ./scripts/version.sh
+          echo "release_tag=$(virtue_release_tag)" >> "$GITHUB_OUTPUT"
           echo "build_label=$(virtue_build_label)" >> "$GITHUB_OUTPUT"
           echo "arch=$(dpkg --print-architecture)" >> "$GITHUB_OUTPUT"
         working-directory: client
@@ -75,5 +76,5 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./scripts/publish-prerelease.sh "${{ steps.version.outputs.build_label }}" "target/debian/virtue_${{ steps.version.outputs.build_label }}_${{ steps.version.outputs.arch }}.deb"
+        run: ./scripts/publish-prerelease.sh "${{ steps.version.outputs.release_tag }}" "${{ steps.version.outputs.build_label }}" "target/debian/virtue_${{ steps.version.outputs.build_label }}_${{ steps.version.outputs.arch }}.deb"
         working-directory: client

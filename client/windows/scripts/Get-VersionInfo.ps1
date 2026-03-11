@@ -47,6 +47,14 @@ function Get-GitShortHash {
     return $hash.Trim()
 }
 
+function Get-BuildDate {
+    if ($env:VIRTUE_BUILD_DATE) {
+        return $env:VIRTUE_BUILD_DATE
+    }
+
+    return [DateTime]::UtcNow.ToString("yyyy-MM-dd")
+}
+
 function Get-VirtueVersionInfo {
     param(
         [string]$ClientRoot = (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)),
@@ -56,14 +64,18 @@ function Get-VirtueVersionInfo {
     $baseVersion = Get-VersionProperty -ClientRoot $ClientRoot -Key "VERSION"
     $androidVersionCode = [int](Get-VersionProperty -ClientRoot $ClientRoot -Key "ANDROID_VERSION_CODE")
     $appleBuildNumber = [int](Get-VersionProperty -ClientRoot $ClientRoot -Key "APPLE_BUILD_NUMBER")
+    $buildDate = Get-BuildDate
     $gitShortHash = Get-GitShortHash -RepoRoot $RepoRoot
-    $buildLabel = "$baseVersion-$gitShortHash"
+    $releaseTag = "$baseVersion-dev"
+    $buildLabel = "$releaseTag-$buildDate-$gitShortHash"
 
     [pscustomobject]@{
         BaseVersion = $baseVersion
         AndroidVersionCode = $androidVersionCode
         AppleBuildNumber = $appleBuildNumber
+        BuildDate = $buildDate
         GitShortHash = $gitShortHash
+        ReleaseTag = $releaseTag
         BuildLabel = $buildLabel
     }
 }
