@@ -16,7 +16,9 @@ slint::slint! {
     import { Button, LineEdit, VerticalBox, HorizontalBox } from "std-widgets.slint";
 
     export component AuthWindow inherits Window {
-        title: "Virtue";
+        in property <string> build_label;
+
+        title: "Virtue " + build_label;
         width: 420px;
         height: 320px;
 
@@ -56,6 +58,12 @@ slint::slint! {
                         color: #0f172a;
                         font-size: 24px;
                         font-weight: 700;
+                    }
+
+                    Text {
+                        text: "Build " + build_label;
+                        color: #64748b;
+                        font-size: 12px;
                     }
 
                     Text {
@@ -143,6 +151,10 @@ fn main() -> Result<()> {
     paths.ensure_dirs()?;
     apply_runtime_env(&paths);
     let logger = ServiceLogger::new(paths.log_file.clone());
+    logger.info(&format!(
+        "auth ui starting ({})",
+        virtue_client_core::BUILD_LABEL
+    ));
 
     // Force software rendering: winit backend expects "software"/"sw" renderer names.
     slint::BackendSelector::new()
@@ -158,6 +170,7 @@ fn main() -> Result<()> {
     let initial = session.status()?;
     let api_base_url = resolve_base_api_url();
 
+    ui.set_build_label(virtue_client_core::BUILD_LABEL.into());
     ui.set_logged_in(initial.logged_in);
     ui.set_api_base_url(api_base_url.into());
     ui.set_account_email(initial.email.clone().unwrap_or_default().into());
@@ -236,7 +249,10 @@ fn main() -> Result<()> {
 
     match ui.run().map_err(|err| anyhow::anyhow!(err.to_string())) {
         Ok(()) => {
-            logger.info("auth ui closed");
+            logger.info(&format!(
+                "auth ui closed ({})",
+                virtue_client_core::BUILD_LABEL
+            ));
             Ok(())
         }
         Err(err) => {

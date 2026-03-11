@@ -1,7 +1,53 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
+
+data class VersionInfo(
+    val baseVersion: String,
+    val buildLabel: String,
+    val androidVersionCode: Int
+)
+
+fun loadVersionInfo(clientRoot: File): VersionInfo {
+    val versionFile = clientRoot.resolve("version.properties")
+    val properties = Properties()
+    versionFile.inputStream().use { properties.load(it) }
+
+    val baseVersion = properties.getProperty("VERSION")
+        ?: error("VERSION missing from ${versionFile.absolutePath}")
+    val androidVersionCode = properties.getProperty("ANDROID_VERSION_CODE")?.toInt()
+        ?: error("ANDROID_VERSION_CODE missing from ${versionFile.absolutePath}")
+    val gitShortHash = System.getenv("VIRTUE_GIT_SHORT_HASH")
+        ?: System.getenv("GITHUB_SHA")?.take(7)
+        ?: run {
+            val process = ProcessBuilder(
+                "git",
+                "-C",
+                clientRoot.parentFile.absolutePath,
+                "rev-parse",
+                "--short",
+                "HEAD"
+            )
+                .redirectErrorStream(true)
+                .start()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
+            check(process.waitFor() == 0) {
+                "git rev-parse failed while loading Android version info: $output"
+            }
+            output
+        }
+
+    return VersionInfo(
+        baseVersion = baseVersion,
+        buildLabel = "$baseVersion-$gitShortHash",
+        androidVersionCode = androidVersionCode
+    )
+}
+
+val versionInfo = loadVersionInfo(rootDir.parentFile)
 
 android {
     namespace = "org.virtueinitiative.virtue"
@@ -11,8 +57,10 @@ android {
         applicationId = "org.virtueinitiative.virtue"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = versionInfo.androidVersionCode
+        versionName = versionInfo.buildLabel
+        buildConfigField("String", "VIRTUE_BUILD_LABEL", "\"${versionInfo.buildLabel}\"")
+        buildConfigField("String", "VIRTUE_BASE_VERSION", "\"${versionInfo.baseVersion}\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -37,6 +85,7 @@ android {
     }
 
     buildFeatures {
+        buildConfig = true
         viewBinding = true
     }
 

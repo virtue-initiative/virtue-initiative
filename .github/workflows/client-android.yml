@@ -1,7 +1,13 @@
 name: Client Android Checks
 
+permissions:
+  contents: write
+
 on:
   pull_request:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -62,6 +68,48 @@ jobs:
             cargo install cargo-ndk --locked
           fi
 
+      - name: Resolve version info
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: version
+        shell: bash
+        run: |
+          source ./scripts/version.sh
+          echo "build_label=$(virtue_build_label)" >> "$GITHUB_OUTPUT"
+        working-directory: client
+
       - name: Android lint + build (debug)
         run: ./gradlew --no-daemon :app:lintDebug :app:assembleDebug
+        working-directory: client/android
+
+      - name: Android build (release)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: ./gradlew --no-daemon :app:assembleRelease
+        working-directory: client/android
+
+      - name: Package Android artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          mkdir -p dist
+          apk_path="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n1)"
+          if [[ -z "${apk_path}" ]]; then
+            echo "Release APK not found" >&2
+            exit 1
+          fi
+          cp "${apk_path}" "dist/virtue-android-${{ steps.version.outputs.build_label }}.apk"
+        working-directory: client/android
+
+      - name: Upload Android artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: virtue-android-${{ steps.version.outputs.build_label }}
+          path: client/android/dist/virtue-android-${{ steps.version.outputs.build_label }}.apk
+
+      - name: Publish Android prerelease asset
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ../scripts/publish-prerelease.sh "${{ steps.version.outputs.build_label }}" "dist/virtue-android-${{ steps.version.outputs.build_label }}.apk"
         working-directory: client/android

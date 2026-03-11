@@ -1,6 +1,6 @@
 param(
     [string]$Target = "x86_64-pc-windows-msvc",
-    [string]$Version = "0.1.0",
+    [string]$Version = "",
     [ValidateSet("Debug", "Release")]
     [string]$Profile = "Debug",
     [switch]$SkipBuild,
@@ -9,6 +9,14 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+$VersionHelper = Join-Path $PSScriptRoot "Get-VersionInfo.ps1"
+. $VersionHelper
+
+$VersionInfo = Get-VirtueVersionInfo
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $Version = $VersionInfo.BuildLabel
+}
 
 if ([string]::IsNullOrWhiteSpace($CacheRoot)) {
     $CacheRoot = Join-Path $env:LOCALAPPDATA "VirtueBuildCache"

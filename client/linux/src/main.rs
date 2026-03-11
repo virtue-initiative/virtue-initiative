@@ -21,9 +21,12 @@ use virtue_client_core::{
 use crate::capture::{CaptureBackend, probe_backend};
 use crate::config::{CaptureBackendHint, ClientPaths, load_state, save_state};
 
+const BUILD_LABEL: &str = virtue_client_core::BUILD_LABEL;
+
 #[derive(Debug, Parser)]
 #[command(name = "virtue")]
 #[command(about = "Virtue Linux client")]
+#[command(version = BUILD_LABEL)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

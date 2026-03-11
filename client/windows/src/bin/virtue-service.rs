@@ -109,6 +109,7 @@ fn run_lifecycle_service() -> Result<()> {
     paths.ensure_dirs()?;
     apply_runtime_env(&paths);
     let logger = Arc::new(ServiceLogger::new(paths.log_file.clone()));
+    logger.info(&format!("build {}", virtue_client_core::BUILD_LABEL));
 
     let shutdown = Arc::new(AtomicBool::new(false));
     let stop_signal = shutdown.clone();
@@ -207,6 +208,7 @@ fn run_lifecycle_console() -> Result<()> {
     paths.ensure_dirs()?;
     apply_runtime_env(&paths);
     let logger = Arc::new(ServiceLogger::new(paths.log_file.clone()));
+    logger.info(&format!("build {}", virtue_client_core::BUILD_LABEL));
     let shutdown = Arc::new(AtomicBool::new(false));
     let stop_reason = Arc::new(Mutex::new(None));
     let pending_alert_events = Arc::new(Mutex::new(Vec::<DaemonAlertEvent>::new()));
@@ -286,6 +288,7 @@ fn run_capture_console() -> Result<()> {
     paths.ensure_dirs()?;
     apply_runtime_env(&paths);
     let logger = Arc::new(ServiceLogger::new(paths.log_file.clone()));
+    logger.info(&format!("build {}", virtue_client_core::BUILD_LABEL));
     let shutdown = Arc::new(AtomicBool::new(false));
     let instance = acquire_console_instance_mutex(capture_control::CAPTURE_INSTANCE_MUTEX_NAME)?;
     let Some(instance) = instance else {

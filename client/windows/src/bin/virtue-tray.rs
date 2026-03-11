@@ -89,7 +89,7 @@ impl AppState {
             ..Default::default()
         };
 
-        let tip = to_wide("Virtue");
+        let tip = to_wide(&format!("Virtue {}", virtue_client_core::BUILD_LABEL));
         for (idx, ch) in tip.iter().take(data.szTip.len()).enumerate() {
             data.szTip[idx] = *ch;
         }
@@ -369,6 +369,7 @@ fn main() -> anyhow::Result<()> {
     apply_runtime_env(&paths);
     let startup_logger = Arc::new(ServiceLogger::new(paths.log_file.clone()));
     startup_logger.info("tray process starting");
+    startup_logger.info(&format!("build {}", virtue_client_core::BUILD_LABEL));
 
     let instance_mutex = acquire_tray_instance_mutex()?;
     let Some(instance_mutex) = instance_mutex else {

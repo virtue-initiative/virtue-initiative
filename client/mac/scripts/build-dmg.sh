@@ -12,9 +12,11 @@ cd "$CLIENT_ROOT"
 
 "${SCRIPT_DIR}/build-app.sh"
 
-VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' mac/Cargo.toml | head -n1)"
+source "${CLIENT_ROOT}/scripts/version.sh"
+
+BUILD_LABEL="$(virtue_build_label)"
 APP_NAME="Virtue.app"
-DMG_NAME="Virtue-${VERSION}.dmg"
+DMG_NAME="Virtue-${BUILD_LABEL}.dmg"
 DMG_PATH="target/macos/${DMG_NAME}"
 STAGING_DIR="target/macos/dmg-staging"
 

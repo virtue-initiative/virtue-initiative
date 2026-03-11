@@ -53,6 +53,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        binding.versionText.text = "Build ${BuildConfig.VIRTUE_BUILD_LABEL}"
 
         populateOverrideInputs()
 

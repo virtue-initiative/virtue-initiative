@@ -27,9 +27,12 @@ use virtue_client_core::{
     resolve_batch_window_seconds, resolve_capture_interval_seconds,
 };
 
+const BUILD_LABEL: &str = virtue_client_core::BUILD_LABEL;
+
 #[derive(Debug, Parser)]
 #[command(name = "virtue-mac-client")]
 #[command(about = "Virtue macOS tray client")]
+#[command(version = BUILD_LABEL)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -90,7 +93,7 @@ fn run_tray(paths: ClientPaths) -> Result<()> {
     menu.append(&close_item)?;
 
     let _tray_icon = TrayIconBuilder::new()
-        .with_tooltip("Virtue")
+        .with_tooltip(format!("Virtue {BUILD_LABEL}"))
         .with_icon(build_tray_icon()?)
         .with_menu_on_left_click(false)
         .with_menu(Box::new(menu))
@@ -158,6 +161,7 @@ fn open_app_dialog(paths: &ClientPaths, runtime: &Runtime) -> Result<()> {
         let device_id = app_status.device_id.as_deref().unwrap_or("<unknown>");
         let action = if app_status.screenshot_permission == ScreenshotPermissionStatus::Missing {
             ui::prompt_permission_issue_action(
+                BUILD_LABEL,
                 email,
                 device_id,
                 app_status.screenshot_permission.as_str(),
@@ -166,6 +170,7 @@ fn open_app_dialog(paths: &ClientPaths, runtime: &Runtime) -> Result<()> {
             )?
         } else {
             ui::prompt_logged_in_action(
+                BUILD_LABEL,
                 email,
                 device_id,
                 app_status.screenshot_permission.as_str(),
@@ -188,7 +193,7 @@ fn open_app_dialog(paths: &ClientPaths, runtime: &Runtime) -> Result<()> {
         return Ok(());
     }
 
-    let Some(input) = ui::prompt_login()? else {
+    let Some(input) = ui::prompt_login(BUILD_LABEL)? else {
         return Ok(());
     };
 

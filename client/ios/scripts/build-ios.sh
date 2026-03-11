@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IOS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+CLIENT_ROOT="$(cd "${IOS_DIR}/.." && pwd)"
 PROJECT_PATH="$IOS_DIR/VirtueIOS.xcodeproj"
 SCHEME="VirtueIOS"
 CONFIGURATION="Debug"
@@ -10,6 +11,13 @@ DERIVED_DATA_PATH="$IOS_DIR/.derived-data"
 DESTINATION="generic/platform=iOS Simulator"
 TEAM_ID="${TEAM_ID:-}"
 BUNDLE_ID="${BUNDLE_ID:-org.virtueinitiative.virtueios}"
+CODE_SIGNING_ALLOWED="${CODE_SIGNING_ALLOWED:-YES}"
+
+source "${CLIENT_ROOT}/scripts/version.sh"
+
+MARKETING_VERSION="$(virtue_base_version)"
+CURRENT_PROJECT_VERSION="$(virtue_apple_build_number)"
+VIRTUE_BUILD_LABEL="$(virtue_build_label)"
 
 usage() {
   cat <<EOF
@@ -21,6 +29,7 @@ Options:
   --bundle-id <bundle identifier>          Default: ${BUNDLE_ID}
   --configuration <Debug|Release>          Default: ${CONFIGURATION}
   --derived-data <path>                    Default: ${DERIVED_DATA_PATH}
+  --code-signing-allowed <YES|NO>          Default: ${CODE_SIGNING_ALLOWED}
 EOF
 }
 
@@ -46,6 +55,10 @@ while [[ $# -gt 0 ]]; do
       DERIVED_DATA_PATH="$2"
       shift 2
       ;;
+    --code-signing-allowed)
+      CODE_SIGNING_ALLOWED="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -65,6 +78,10 @@ ARGS=(
   -destination "$DESTINATION"
   -derivedDataPath "$DERIVED_DATA_PATH"
   VIRTUE_APP_BUNDLE_ID="$BUNDLE_ID"
+  MARKETING_VERSION="$MARKETING_VERSION"
+  CURRENT_PROJECT_VERSION="$CURRENT_PROJECT_VERSION"
+  VIRTUE_BUILD_LABEL="$VIRTUE_BUILD_LABEL"
+  CODE_SIGNING_ALLOWED="$CODE_SIGNING_ALLOWED"
 )
 
 if [[ -n "$TEAM_ID" ]]; then
