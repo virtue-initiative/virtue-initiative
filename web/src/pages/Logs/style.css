@@ -358,22 +358,22 @@
 }
 
 .img-full-frame {
-  --img-aspect: 1;
-
-  width: min(
-    calc(100vw - 2rem),
-    calc((100vh - 2rem) * var(--img-aspect))
-  );
-  aspect-ratio: var(--img-aspect);
-  cursor: default;
+  width: calc(100vw - 2rem);
+  height: calc(100vh - 2rem);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
 }
 
 .img-full {
-  width: 100%;
+  width: auto;
   height: 100%;
+  max-width: 100%;
+  max-height: 100%;
   border-radius: 18px;
   display: block;
-  object-fit: contain;
+  pointer-events: auto;
   box-shadow: 0 8px 60px #0008;
 }
 
