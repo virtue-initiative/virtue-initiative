@@ -203,16 +203,8 @@
 
 .gallery-grid {
   display: grid;
-  grid-template-columns: repeat(12, 1fr);
-  gap: 4px;
-
-  @media (max-width: 900px) {
-    grid-template-columns: repeat(6, 1fr);
-  }
-
-  @media (max-width: 600px) {
-    grid-template-columns: repeat(3, 1fr);
-  }
+  grid-template-columns: repeat(auto-fill, 72px);
+  gap: 0.6rem;
 }
 
 .gallery-day-group .gallery-grid {
@@ -220,34 +212,16 @@
 }
 
 .gallery-item {
+  width: 72px;
+  height: 72px;
+  aspect-ratio: 1;
+
   & .log-thumb-wrap,
   & .log-thumb-btn,
-  & .log-thumb {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-    border-radius: 3px;
-  }
-
-  & .log-thumb-btn {
-    border: none;
-    border-radius: 3px;
-    aspect-ratio: 16/9;
-    overflow: hidden;
-  }
-
-  & .log-thumb {
-    aspect-ratio: 16/9;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
+  & .log-thumb,
   & .log-thumb-status {
     width: 100%;
-    aspect-ratio: 16/9;
-    font-size: 0.65rem;
+    height: 100%;
   }
 }
 
@@ -332,20 +306,26 @@
 }
 
 .log-thumb-btn {
+  width: 72px;
+  height: 72px;
   background: none;
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0;
   cursor: pointer;
   overflow: hidden;
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-subtle);
 }
 
 .log-thumb {
   display: block;
-  width: 72px;
-  height: 72px;
-  object-fit: cover;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: var(--bg-subtle);
 }
 
 .log-thumb-status {
@@ -368,22 +348,33 @@
 .img-overlay {
   position: fixed;
   inset: 0;
-  background: #000a;
+  background: #0006;
+  backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 100;
-  cursor: zoom-out;
+  cursor: default;
+}
+
+.img-full-frame {
+  --img-aspect: 1;
+
+  width: min(
+    calc(100vw - 2rem),
+    calc((100vh - 2rem) * var(--img-aspect))
+  );
+  aspect-ratio: var(--img-aspect);
+  cursor: default;
 }
 
 .img-full {
-  width: 90vw;
-  max-height: 90vh;
-  height: auto;
-  border-radius: 8px;
-  cursor: default;
-  box-shadow: 0 8px 60px #0008;
+  width: 100%;
+  height: 100%;
+  border-radius: 18px;
   display: block;
+  object-fit: contain;
+  box-shadow: 0 8px 60px #0008;
 }
 
 /* Misc */
