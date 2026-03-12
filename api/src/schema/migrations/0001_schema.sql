@@ -1,7 +1,7 @@
 -- Virtue Initiative API schema
 
 CREATE TABLE users (
-  id TEXT PRIMARY KEY,
+  id BLOB PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   name TEXT,
@@ -15,8 +15,8 @@ CREATE TABLE users (
 CREATE INDEX idx_users_email ON users(email);
 
 CREATE TABLE devices (
-  id TEXT PRIMARY KEY,
-  owner TEXT NOT NULL,
+  id BLOB PRIMARY KEY,
+  owner BLOB NOT NULL,
   name TEXT NOT NULL,
   platform TEXT NOT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
@@ -28,9 +28,9 @@ CREATE INDEX idx_devices_owner ON devices(owner);
 
 -- Encrypted 1-hour batch blobs stored in R2
 CREATE TABLE batches (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  device_id TEXT NOT NULL,
+  id BLOB PRIMARY KEY,
+  user_id BLOB NOT NULL,
+  device_id BLOB NOT NULL,
   url TEXT NOT NULL UNIQUE,
   start INTEGER NOT NULL,
   "end" INTEGER NOT NULL,
@@ -45,9 +45,9 @@ CREATE INDEX idx_batches_device_id ON batches(device_id);
 CREATE INDEX idx_batches_created_at ON batches(created_at);
 
 CREATE TABLE partners (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  partner_user_id TEXT,
+  id BLOB PRIMARY KEY,
+  user_id BLOB NOT NULL,
+  partner_user_id BLOB,
   partner_email TEXT NOT NULL,
   invite_token_hash TEXT UNIQUE,
   invite_expires_at INTEGER,
@@ -67,7 +67,7 @@ CREATE INDEX idx_partners_status ON partners(status);
 CREATE INDEX idx_partners_invite_expires_at ON partners(invite_expires_at);
 
 CREATE TABLE partner_notification_preferences (
-  partnership_id TEXT PRIMARY KEY,
+  partnership_id BLOB PRIMARY KEY,
   digest_cadence TEXT NOT NULL DEFAULT 'daily',
   immediate_tamper_severity TEXT NOT NULL DEFAULT 'critical',
   send_digest INTEGER NOT NULL DEFAULT 1,
@@ -81,9 +81,9 @@ CREATE INDEX idx_partner_notification_preferences_digest_cadence
 
 -- Non-encrypted immediate device log entries sent directly from devices
 CREATE TABLE device_logs (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  device_id TEXT NOT NULL,
+  id BLOB PRIMARY KEY,
+  user_id BLOB NOT NULL,
+  device_id BLOB NOT NULL,
   ts INTEGER NOT NULL,
   type TEXT NOT NULL,
   data TEXT NOT NULL DEFAULT '{}',
@@ -99,8 +99,8 @@ CREATE INDEX idx_device_logs_created_at ON device_logs(created_at);
 CREATE INDEX idx_device_logs_risk ON device_logs(risk);
 
 CREATE TABLE email_tokens (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
+  id BLOB PRIMARY KEY,
+  user_id BLOB NOT NULL,
   email TEXT NOT NULL,
   purpose TEXT NOT NULL,
   token_hash TEXT NOT NULL UNIQUE,
@@ -116,8 +116,8 @@ CREATE INDEX idx_email_tokens_purpose ON email_tokens(purpose);
 CREATE INDEX idx_email_tokens_expires_at ON email_tokens(expires_at);
 
 CREATE TABLE hash_states (
-  device_id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
+  device_id BLOB PRIMARY KEY,
+  user_id BLOB NOT NULL,
   state BLOB NOT NULL,
   updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
   FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,

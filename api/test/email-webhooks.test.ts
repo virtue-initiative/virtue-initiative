@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { env, SELF } from 'cloudflare:test';
-import { BASE, clearDB, markUserEmailVerified, signupAndGetToken } from './helpers';
+import { BASE, clearDB, markUserEmailVerified, signupAndGetToken, uuidToBytes } from './helpers';
 
 beforeEach(clearDB);
 
@@ -27,7 +27,7 @@ describe('Email webhooks', () => {
     expect(await res.json()).toEqual({ ok: true, updated: 1 });
 
     const user = await env.DB.prepare('SELECT email_verified FROM users WHERE id = ?')
-      .bind(userId)
+      .bind(uuidToBytes(userId))
       .first<{ email_verified: number }>();
     expect(user?.email_verified).toBe(0);
   });
@@ -54,7 +54,7 @@ describe('Email webhooks', () => {
     expect(await res.json()).toEqual({ ok: true, updated: 1 });
 
     const user = await env.DB.prepare('SELECT email_verified FROM users WHERE id = ?')
-      .bind(userId)
+      .bind(uuidToBytes(userId))
       .first<{ email_verified: number }>();
     expect(user?.email_verified).toBe(0);
   });

@@ -2,7 +2,7 @@ import { env, SELF } from 'cloudflare:test';
 
 const schema = `
 CREATE TABLE IF NOT EXISTS users (
-  id TEXT PRIMARY KEY,
+  id BLOB PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   name TEXT,
@@ -15,8 +15,8 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 
 CREATE TABLE IF NOT EXISTS devices (
-  id TEXT PRIMARY KEY,
-  owner TEXT NOT NULL,
+  id BLOB PRIMARY KEY,
+  owner BLOB NOT NULL,
   name TEXT NOT NULL,
   platform TEXT NOT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
@@ -26,9 +26,9 @@ CREATE TABLE IF NOT EXISTS devices (
 CREATE INDEX IF NOT EXISTS idx_devices_owner ON devices(owner);
 
 CREATE TABLE IF NOT EXISTS batches (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  device_id TEXT NOT NULL,
+  id BLOB PRIMARY KEY,
+  user_id BLOB NOT NULL,
+  device_id BLOB NOT NULL,
   url TEXT NOT NULL UNIQUE,
   start INTEGER NOT NULL,
   end INTEGER NOT NULL,
@@ -42,9 +42,9 @@ CREATE INDEX IF NOT EXISTS idx_batches_device_id ON batches(device_id);
 CREATE INDEX IF NOT EXISTS idx_batches_created_at ON batches(created_at);
 
 CREATE TABLE IF NOT EXISTS partners (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  partner_user_id TEXT,
+  id BLOB PRIMARY KEY,
+  user_id BLOB NOT NULL,
+  partner_user_id BLOB,
   partner_email TEXT NOT NULL,
   invite_token_hash TEXT UNIQUE,
   invite_expires_at INTEGER,
@@ -63,7 +63,7 @@ CREATE INDEX IF NOT EXISTS idx_partners_status ON partners(status);
 CREATE INDEX IF NOT EXISTS idx_partners_invite_expires_at ON partners(invite_expires_at);
 
 CREATE TABLE IF NOT EXISTS partner_notification_preferences (
-  partnership_id TEXT PRIMARY KEY,
+  partnership_id BLOB PRIMARY KEY,
   digest_cadence TEXT NOT NULL DEFAULT 'daily',
   immediate_tamper_severity TEXT NOT NULL DEFAULT 'critical',
   send_digest INTEGER NOT NULL DEFAULT 1,
@@ -73,9 +73,9 @@ CREATE TABLE IF NOT EXISTS partner_notification_preferences (
 );
 
 CREATE TABLE IF NOT EXISTS device_logs (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  device_id TEXT NOT NULL,
+  id BLOB PRIMARY KEY,
+  user_id BLOB NOT NULL,
+  device_id BLOB NOT NULL,
   ts INTEGER NOT NULL,
   type TEXT NOT NULL,
   data TEXT NOT NULL,
@@ -90,8 +90,8 @@ CREATE INDEX IF NOT EXISTS idx_device_logs_created_at ON device_logs(created_at)
 CREATE INDEX IF NOT EXISTS idx_device_logs_risk ON device_logs(risk);
 
 CREATE TABLE IF NOT EXISTS email_tokens (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
+  id BLOB PRIMARY KEY,
+  user_id BLOB NOT NULL,
   email TEXT NOT NULL,
   purpose TEXT NOT NULL,
   token_hash TEXT NOT NULL UNIQUE,
@@ -102,8 +102,8 @@ CREATE TABLE IF NOT EXISTS email_tokens (
 );
 
 CREATE TABLE IF NOT EXISTS hash_states (
-  device_id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
+  device_id BLOB PRIMARY KEY,
+  user_id BLOB NOT NULL,
   state BLOB NOT NULL,
   updated_at INTEGER NOT NULL,
   FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
