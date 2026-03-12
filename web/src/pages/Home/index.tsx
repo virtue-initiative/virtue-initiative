@@ -26,6 +26,18 @@ function UserPlusIcon() {
   );
 }
 
+function relationshipSummary(partner: Partner) {
+  return partner.role === "invitee"
+    ? "You are monitoring this person."
+    : "This person is monitoring you.";
+}
+
+function dataAccessLabel(partner: Partner) {
+  return partner.role === "invitee"
+    ? "You can view their data"
+    : "They can view your data";
+}
+
 export function Home() {
   const { token, userId } = useAuth();
   const [devices, setDevices] = useState<Device[]>([]);
@@ -217,7 +229,7 @@ function InviteButton({
                 setViewData((e.target as HTMLInputElement).checked)
               }
             />
-            Can view data
+            This partner can view your encrypted activity data
           </label>
           {error && <p class="alert-error">{error}</p>}
           <div class="invite-actions">
@@ -273,15 +285,17 @@ function PendingPartnerCard({
       <p class="invite-desc">
         {partner.role === "invitee"
           ? partner.permissions.view_data
-            ? "This relationship includes access to encrypted activity data."
-            : "This relationship does not include data access."
+            ? "You have been invited to monitor this person. Once you accept, you will be able to view their encrypted activity data."
+            : "You have been invited to support this person, but this relationship does not include access to their activity data."
           : partner.permissions.view_data
-            ? "The partner invite is waiting for acceptance. After they accept the email link, you can confirm them to attach the encrypted access key."
-            : "This relationship does not include data access."}
+            ? "You invited this person to monitor your account. After they accept the email link, click Confirm partner to share the encrypted key they need to view your logs."
+            : "You invited this person, but this relationship does not include access to your activity data."}
       </p>
       <dl class="card-meta">
         <dt>Email</dt>
         <dd>{partner.partner.email}</dd>
+        <dt>Relationship</dt>
+        <dd>{relationshipSummary(partner)}</dd>
         <dt>Created</dt>
         <dd>{formatDate(partner.created_at)}</dd>
       </dl>
@@ -375,7 +389,9 @@ function PartnerCard({
       <dl class="card-meta">
         <dt>Email</dt>
         <dd>{partner.partner.email}</dd>
-        <dt>Can view data</dt>
+        <dt>Relationship</dt>
+        <dd>{relationshipSummary(partner)}</dd>
+        <dt>{dataAccessLabel(partner)}</dt>
         <dd>{partner.permissions.view_data ? "Yes" : "No"}</dd>
       </dl>
       {error && <p class="alert-error">{error}</p>}
@@ -438,10 +454,10 @@ function PartnerDevicesSection({
       {partner.permissions.view_data && partnerId && !hasKey && (
         <div class="card settings-form partner-key-notice">
           <p class="settings-hint">
-            You can browse this partner's devices now, but encrypted screenshots
-            and uploaded blocks cannot be decrypted yet. Ask the owner of these
-            logs to click <strong>Confirm partner</strong> if they invited you
-            before your account existed.
+            You are monitoring this partner now, but encrypted screenshots and
+            uploaded blocks cannot be decrypted yet. Ask the person you monitor
+            to click <strong>Confirm partner</strong> if they invited you before
+            your account existed.
           </p>
         </div>
       )}

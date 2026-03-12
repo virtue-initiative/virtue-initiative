@@ -252,11 +252,11 @@ export function Auth() {
             </p>
             {resetRequiresKeyRotation && (
               <p class="alert-error">
-                Resetting your password will generate fresh encryption keys.
-                Previously uploaded logs will remain inaccessible, and you
-                should sign back in on your Virtue clients so future uploads use
-                the new keys. Partners who already monitor this account will
-                keep access to new logs automatically.
+                Resetting your password will generate a new end-to-end
+                encryption key for this account. Previously uploaded logs will
+                remain inaccessible, and you should sign back in on your Virtue
+                clients so future uploads use the new keys. Partners who already
+                monitor this account will keep access to new logs automatically.
               </p>
             )}
           </>
@@ -270,17 +270,24 @@ export function Auth() {
 
         <form class="auth-form" onSubmit={handleSubmit}>
           {mode === "signup" && (
-            <div class="field">
-              <label for="name">Name (optional)</label>
-              <input
-                id="name"
-                type="text"
-                value={name}
-                onInput={(e) => setName((e.target as HTMLInputElement).value)}
-                placeholder="Your name"
-                autoComplete="name"
-              />
-            </div>
+            <>
+              <div class="field">
+                <label for="name">Name (optional)</label>
+                <input
+                  id="name"
+                  type="text"
+                  value={name}
+                  onInput={(e) => setName((e.target as HTMLInputElement).value)}
+                  placeholder="Your name"
+                  autoComplete="name"
+                />
+              </div>
+              <p class="settings-hint">
+                During sign-up, Virtue creates an end-to-end encryption key for
+                your account. It protects your uploaded logs, screenshots, and
+                blocks so only you and partners you approve can decrypt them.
+              </p>
+            </>
           )}
 
           <div class="field">
