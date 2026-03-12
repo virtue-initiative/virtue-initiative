@@ -46,7 +46,10 @@ export const helpSidebar: HelpNavItem[] = [
 ];
 
 function flatten(items: HelpNavItem[]): HelpNavItem[] {
-  return items.flatMap((item) => [item, ...(item.items ? flatten(item.items) : [])]);
+  return items.flatMap((item) => [
+    item,
+    ...(item.items ? flatten(item.items) : []),
+  ]);
 }
 
 export const flatHelpSidebar = flatten(helpSidebar);

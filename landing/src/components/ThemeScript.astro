@@ -11,7 +11,7 @@
   let SUN_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:1.1rem;height:1.1rem"><path d="M12 3v2.25M12 18.75V21M5.636 5.636l1.591 1.591M16.773 16.773l1.591 1.591M3 12h2.25M18.75 12H21M5.636 18.364l1.591-1.591M16.773 7.227l1.591-1.591M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z"/></svg>';
 
-  function applyTheme(theme) {
+  function applyTheme(theme: string | undefined) {
     if (theme === "dark" || theme === "light") {
       document.documentElement.setAttribute("data-theme", theme);
     } else {
@@ -19,11 +19,12 @@
     }
   }
 
-  function setThemeToggle(theme) {
+  function setThemeToggle(theme: string | undefined) {
     let toggle = document.getElementById("theme-toggle");
     if (!toggle) return;
 
-    let resolvedTheme = (theme ?? preferredTheme()) === "dark" ? "dark" : "light";
+    let resolvedTheme =
+      (theme ?? preferredTheme()) === "dark" ? "dark" : "light";
 
     toggle.innerHTML = resolvedTheme === "dark" ? SUN_SVG : MOON_SVG;
     toggle.setAttribute(
@@ -37,7 +38,9 @@
   }
 
   function onReady() {
-    document.getElementById("theme-toggle")?.addEventListener("click", nextTheme);
+    document
+      .getElementById("theme-toggle")
+      ?.addEventListener("click", nextTheme);
 
     onStateUpdate((state) => {
       applyTheme(state.theme);
