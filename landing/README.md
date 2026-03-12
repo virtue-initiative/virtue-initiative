@@ -1,12 +1,25 @@
 # Landing Page
 
-This is the landing page. It is a simple static site with no build system. For
-development, we recommend running vite to get auto-refresh.
+This is the Astro landing site for `virtueinitiative.org`.
 
 ```bash
-npm install -g vite # optional, if you don't have vite
-vite .
+npm install
+npm run dev
 ```
 
-This is the first page people see and contains basic information about the
-mission, history and goals.
+`npm run dev` and `npm run build` both refresh the baked release data used by
+`/download` before starting.
+
+To refresh the baked release data manually:
+
+```bash
+npm run sync-release-data
+```
+
+Important routes:
+
+- `/`
+- `/download`
+- `/privacy`
+- `/terms`
+- `/state-iframe.html`

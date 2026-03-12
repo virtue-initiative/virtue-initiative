@@ -1,0 +1,213 @@
+---
+import LaptopIcon from "../components/icons/LaptopIcon.astro";
+import MobileIcon from "../components/icons/MobileIcon.astro";
+import releaseData from "../data/releases.json";
+import SiteLayout from "../layouts/SiteLayout.astro";
+
+type ReleaseAsset = {
+  name: string;
+  browser_download_url: string;
+};
+
+type Release = {
+  name: string | null;
+  tag_name: string;
+  html_url: string;
+  published_at: string | null;
+  assets: ReleaseAsset[];
+};
+
+type Platform = {
+  label: string;
+  detail: string;
+  kind: "laptop" | "mobile";
+  matches: (assetName: string) => boolean;
+};
+
+const platforms: Platform[] = [
+  {
+    label: "Linux",
+    detail: ".deb package",
+    kind: "laptop",
+    matches: (assetName) => /\.deb$/i.test(assetName) && /^virtue_/i.test(assetName),
+  },
+  {
+    label: "macOS",
+    detail: ".dmg installer",
+    kind: "laptop",
+    matches: (assetName) => /\.dmg$/i.test(assetName) && /^Virtue-/i.test(assetName),
+  },
+  {
+    label: "Windows",
+    detail: ".exe installer",
+    kind: "laptop",
+    matches: (assetName) =>
+      /\.exe$/i.test(assetName) && /windows-installer/i.test(assetName),
+  },
+  {
+    label: "Android",
+    detail: ".apk package",
+    kind: "mobile",
+    matches: (assetName) => /\.apk$/i.test(assetName) && /android/i.test(assetName),
+  },
+  {
+    label: "iOS",
+    detail: ".zip app bundle",
+    kind: "mobile",
+    matches: (assetName) => /\.zip$/i.test(assetName) && /^VirtueIOS/i.test(assetName),
+  },
+];
+
+function formatDate(value: string | null) {
+  if (!value) return "Unpublished";
+
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function findPlatformAsset(release: Release, platform: Platform) {
+  return release.assets.find((asset) => platform.matches(asset.name)) ?? null;
+}
+
+const stableRelease = releaseData.stableRelease as Release | null;
+const prereleaseRelease = releaseData.prereleaseRelease as Release | null;
+---
+
+<SiteLayout
+  pageTitle="Downloads"
+  tagline="Download Virtue for your devices"
+>
+  <section class="download-hero">
+    <h2>Downloads</h2>
+    <p>
+      Choose the latest stable release when available. If you want the most
+      recent builds before a full release, use the development section below.
+    </p>
+    <div class="section-actions">
+      <a
+        href="/help/installation"
+        class="btn btn-outline"
+      >
+        Installation guide
+      </a>
+    </div>
+  </section>
+
+  <section>
+    <h2>Latest stable release</h2>
+    <div class="release-card">
+      {stableRelease ? (
+        <>
+          <div class="release-card-header">
+            <div>
+              <h3>{stableRelease.name || stableRelease.tag_name}</h3>
+            </div>
+            <a class="btn btn-ghost btn-sm" href={stableRelease.html_url}>
+              View on GitHub
+            </a>
+          </div>
+          <div class="release-card-meta">
+            <span>Tag: {stableRelease.tag_name}</span>
+            <span>Published: {formatDate(stableRelease.published_at)}</span>
+          </div>
+          <div class="release-card-body">
+            <div class="download-grid">
+              {platforms.map((platform) => {
+                const asset = findPlatformAsset(stableRelease, platform);
+                const Icon = platform.kind === "laptop" ? LaptopIcon : MobileIcon;
+
+                return asset ? (
+                  <a
+                    class="btn btn-outline text-icon download-button"
+                    href={asset.browser_download_url}
+                  >
+                    <span class="icon"><Icon /></span>
+                    <span class="download-button-content">
+                      <span class="download-button-label">{platform.label}</span>
+                      <span class="download-button-detail">{platform.detail}</span>
+                    </span>
+                  </a>
+                ) : (
+                  <span
+                    class="btn btn-ghost text-icon download-button-unavailable"
+                    aria-disabled="true"
+                  >
+                    <span class="icon"><Icon /></span>
+                    <span class="download-button-content">
+                      <span class="download-button-label">{platform.label}</span>
+                      <span class="download-button-detail">{platform.detail}</span>
+                    </span>
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      ) : (
+        <div class="release-card-body">
+          <p>Coming soon.</p>
+        </div>
+      )}
+    </div>
+  </section>
+
+  <section>
+    <h2>Latest development release</h2>
+    <div class="release-card">
+      {prereleaseRelease ? (
+        <>
+          <div class="release-card-header">
+            <div>
+              <h3>{prereleaseRelease.name || prereleaseRelease.tag_name}</h3>
+            </div>
+            <a class="btn btn-ghost btn-sm" href={prereleaseRelease.html_url}>
+              View on GitHub
+            </a>
+          </div>
+          <div class="release-card-meta">
+            <span>Tag: {prereleaseRelease.tag_name}</span>
+            <span>Published: {formatDate(prereleaseRelease.published_at)}</span>
+          </div>
+          <div class="release-card-body">
+            <div class="download-grid">
+              {platforms.map((platform) => {
+                const asset = findPlatformAsset(prereleaseRelease, platform);
+                const Icon = platform.kind === "laptop" ? LaptopIcon : MobileIcon;
+
+                return asset ? (
+                  <a
+                    class="btn btn-outline text-icon download-button"
+                    href={asset.browser_download_url}
+                  >
+                    <span class="icon"><Icon /></span>
+                    <span class="download-button-content">
+                      <span class="download-button-label">{platform.label}</span>
+                      <span class="download-button-detail">{platform.detail}</span>
+                    </span>
+                  </a>
+                ) : (
+                  <span
+                    class="btn btn-ghost text-icon download-button-unavailable"
+                    aria-disabled="true"
+                  >
+                    <span class="icon"><Icon /></span>
+                    <span class="download-button-content">
+                      <span class="download-button-label">{platform.label}</span>
+                      <span class="download-button-detail">{platform.detail}</span>
+                    </span>
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      ) : (
+        <div class="release-card-body">
+          <p>Coming soon.</p>
+        </div>
+      )}
+    </div>
+  </section>
+</SiteLayout>

@@ -11,7 +11,7 @@ jobs:
 
     strategy:
       matrix:
-        project: [web, api, help, landing]
+        project: [web, api, landing]
 
     defaults:
       run:
@@ -28,6 +28,8 @@ jobs:
 
       - run: npm ci
       - run: npm run build
+        env:
+          GITHUB_TOKEN: ${{ matrix.project == 'landing' && github.token || '' }}
 
       - uses: cloudflare/wrangler-action@v3
         with:

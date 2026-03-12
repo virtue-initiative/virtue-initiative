@@ -206,7 +206,7 @@ def main() -> None:
 
     outputs: list[Path] = [prepped_path]
 
-    for path in [root / "web" / "public", root / "help" / "static", root / "landing"]:
+    for path in [root / "web" / "public", root / "landing"]:
         save_ico(master, path / "favicon.ico", [16, 32, 48])
         save_png(master, path / "favicon-16x16.png", 16)
         save_png(master, path / "favicon-32x32.png", 32)

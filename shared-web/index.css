@@ -11,6 +11,10 @@
   --text: #1a1a1a;
   --text-muted: #6b6860;
   --accent: #1a8a50;
+  --control-border-hover: #c9c5bf;
+  --control-active-bg: var(--bg-subtle);
+  --control-active-border: #bfd8c9;
+  --control-active-text: var(--accent);
 }
 
 [data-theme="dark"] {
@@ -21,6 +25,10 @@
   --text: #e6e3df;
   --text-muted: #9a9890;
   --accent: #22a862;
+  --control-border-hover: #3f4c44;
+  --control-active-bg: #16251c;
+  --control-active-border: #1f4a33;
+  --control-active-text: #8ee7b5;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -32,6 +40,10 @@
     --text: #e6e3df;
     --text-muted: #9a9890;
     --accent: #22a862;
+    --control-border-hover: #3f4c44;
+    --control-active-bg: #16251c;
+    --control-active-border: #1f4a33;
+    --control-active-text: #8ee7b5;
   }
 
   [data-theme="light"] {
@@ -42,6 +54,10 @@
     --text: #1a1a1a;
     --text-muted: #6b6860;
     --accent: #1a8a50;
+    --control-border-hover: #c9c5bf;
+    --control-active-bg: var(--bg-subtle);
+    --control-active-border: #bfd8c9;
+    --control-active-text: var(--accent);
   }
 }
 
@@ -153,6 +169,60 @@
   &:hover {
     border-color: var(--accent);
     color: var(--accent);
+  }
+}
+
+.control {
+  box-sizing: border-box;
+  height: 2.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  padding: 0 0.8rem;
+  text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    color 0.12s,
+    border-color 0.12s;
+
+  &:hover {
+    background: var(--bg-subtle);
+    color: var(--text);
+    border-color: var(--control-border-hover);
+    text-decoration: none;
+  }
+
+  &.is-active {
+    background: var(--control-active-bg);
+    color: var(--control-active-text);
+    text-shadow: 0px 0px 1px var(--control-active-text);
+    border-color: var(--control-active-border);
+  }
+
+  &.control-flat {
+    border-color: transparent;
+
+    &:hover,
+    &.is-active {
+      border-color: transparent;
+    }
+  }
+
+  &.control-icon {
+    width: 2.25rem;
+    padding: 0;
+
+    & svg {
+      width: 1.1rem;
+      height: 1.1rem;
+    }
   }
 }
 

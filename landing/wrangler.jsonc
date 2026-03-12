@@ -1,7 +1,9 @@
 {
   "name": "virtueinitiative-landing",
   "compatibility_date": "2026-02-23",
+  "main": "@astrojs/cloudflare/entrypoints/server",
   "assets": {
-    "directory": "./dist",
-  },
+    "binding": "ASSETS",
+    "directory": "./dist"
+  }
 }

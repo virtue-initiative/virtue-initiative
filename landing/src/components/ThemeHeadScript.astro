@@ -1,0 +1,35 @@
+<script is:inline>
+  (() => {
+    const THEME_COOKIE_NAME = "virtue-theme";
+
+    function readCookie(name) {
+      const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+      return match ? decodeURIComponent(match[1]) : undefined;
+    }
+
+    function readStoredTheme(key) {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return undefined;
+
+        const parsed = JSON.parse(raw);
+        return parsed?.theme === "dark" || parsed?.theme === "light"
+          ? parsed.theme
+          : undefined;
+      } catch {
+        return undefined;
+      }
+    }
+
+    const theme =
+      readCookie(THEME_COOKIE_NAME) ??
+      readStoredTheme("shared-state-local") ??
+      readStoredTheme("shared-state");
+
+    if (theme === "dark" || theme === "light") {
+      document.documentElement.setAttribute("data-theme", theme);
+    } else {
+      document.documentElement.removeAttribute("data-theme");
+    }
+  })();
+</script>

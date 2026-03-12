@@ -2,19 +2,109 @@ export interface SharedState {
   theme?: string;
 }
 
+const THEME_COOKIE_NAME = "virtue-theme";
+const THEME_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+
+function normalizeTheme(theme: unknown): string | undefined {
+  return theme === "dark" || theme === "light" ? theme : undefined;
+}
+
+function normalizeState(nextState: SharedState): SharedState {
+  const normalizedState = { ...nextState };
+  const theme = normalizeTheme(nextState.theme);
+
+  if (theme === undefined) {
+    delete normalizedState.theme;
+    return normalizedState;
+  }
+
+  normalizedState.theme = theme;
+  return normalizedState;
+}
+
+function parseState(raw: string | null): SharedState {
+  if (!raw) return {};
+
+  try {
+    return normalizeState(JSON.parse(raw) as SharedState);
+  } catch {
+    return {};
+  }
+}
+
+function getThemeCookieDomain(hostname: string) {
+  if (
+    hostname === "virtueinitiative.org" ||
+    hostname.endsWith(".virtueinitiative.org")
+  ) {
+    return ".virtueinitiative.org";
+  }
+
+  return undefined;
+}
+
+function readThemeCookie() {
+  if (typeof document === "undefined") return undefined;
+
+  const match = document.cookie.match(
+    new RegExp(`(?:^|; )${THEME_COOKIE_NAME}=([^;]*)`),
+  );
+  return normalizeTheme(match ? decodeURIComponent(match[1]) : undefined);
+}
+
+function syncThemeCookie(theme: unknown) {
+  if (typeof document === "undefined" || typeof window === "undefined") return;
+
+  const attributes = ["Path=/", "SameSite=Lax"];
+  const domain = getThemeCookieDomain(window.location.hostname);
+
+  if (domain) {
+    attributes.push(`Domain=${domain}`);
+  }
+
+  if (window.location.protocol === "https:") {
+    attributes.push("Secure");
+  }
+
+  const normalizedTheme = normalizeTheme(theme);
+
+  if (normalizedTheme === undefined) {
+    document.cookie = `${THEME_COOKIE_NAME}=; ${attributes.join("; ")}; Max-Age=0`;
+    return;
+  }
+
+  document.cookie =
+    `${THEME_COOKIE_NAME}=${encodeURIComponent(normalizedTheme)}; ` +
+    `${attributes.join("; ")}; Max-Age=${THEME_COOKIE_MAX_AGE_SECONDS}`;
+}
+
+function loadState(storageKey: string) {
+  if (typeof window === "undefined") return {};
+
+  const state = parseState(localStorage.getItem(storageKey));
+  const cookieTheme = readThemeCookie();
+
+  if (state.theme !== undefined || cookieTheme === undefined) {
+    return state;
+  }
+
+  return { ...state, theme: cookieTheme };
+}
+
 const clients = new Set<{ source: MessageEventSource; origin: string }>();
 let state =
   typeof window === "undefined"
     ? {}
-    : (JSON.parse(localStorage.getItem("shared-state") || "{}") as SharedState);
+    : loadState("shared-state");
 let initialized = false;
 let server = (
   typeof window === "undefined" ? undefined : document.createElement("iframe")
 )!;
 
 function updateServerLocalState(newState: SharedState) {
-  state = { ...state, ...newState };
+  state = normalizeState({ ...state, ...newState });
   localStorage.setItem("shared-state", JSON.stringify(state));
+  syncThemeCookie(state.theme);
 }
 
 function handleStateChange(newState: SharedState) {
@@ -31,13 +121,13 @@ function handleStateChange(newState: SharedState) {
 export function startStateServer() {
   console.log("Starting shared state server", state);
 
-  state = JSON.parse(
-    localStorage.getItem("shared-state") || "{}",
-  ) as SharedState;
+  state = loadState("shared-state");
+  syncThemeCookie(state.theme);
 
   window.addEventListener("storage", (event) => {
-    if (event.key === "shared-state" && event.newValue) {
-      state = JSON.parse(event.newValue) as SharedState;
+    if (event.key === "shared-state") {
+      state = parseState(event.newValue);
+      syncThemeCookie(state.theme);
       handleStateChange(state);
     }
   });
@@ -68,9 +158,7 @@ export function startStateServer() {
 let clientState =
   typeof window === "undefined"
     ? {}
-    : (JSON.parse(
-        localStorage.getItem("shared-state-local") || "{}",
-      ) as SharedState);
+    : loadState("shared-state-local");
 
 function getServerLocation() {
   if (window.location.hostname === "localhost") {
@@ -83,6 +171,7 @@ function getServerLocation() {
 export function onStateUpdate(callback: (state: SharedState) => void) {
   if (!initialized) {
     initialized = true;
+    syncThemeCookie(clientState.theme);
     server.style.display = "none";
     server.hidden = true;
     server.src = getServerLocation();
@@ -102,16 +191,18 @@ export function onStateUpdate(callback: (state: SharedState) => void) {
     if (!data || typeof data !== "object") return;
 
     if (data.type === "state-change") {
-      clientState = data.state;
-      localStorage.setItem("shared-state-local", JSON.stringify(data.state));
-      callback(data.state);
+      clientState = normalizeState(data.state as SharedState);
+      localStorage.setItem("shared-state-local", JSON.stringify(clientState));
+      syncThemeCookie(clientState.theme);
+      callback(clientState);
     }
   });
 }
 
 export function updateState(newState: Partial<SharedState>) {
-  clientState = { ...clientState, ...newState };
+  clientState = normalizeState({ ...clientState, ...newState });
   localStorage.setItem("shared-state-local", JSON.stringify(clientState));
+  syncThemeCookie(clientState.theme);
   server.contentWindow?.postMessage(
     { type: "state-update", state: newState },
     getServerLocation(),

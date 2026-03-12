@@ -1,4 +1,6 @@
 .wrangler
+.astro
 .vite
 node_modules
 dist
+src/data/releases.json
