@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -90,7 +90,8 @@ function missingPlatforms(release) {
       (platform) =>
         !release.assets.some(
           (asset) =>
-            platform.matches(asset.name) && assetMatchesCurrentBuild(asset.name),
+            platform.matches(asset.name) &&
+            assetMatchesCurrentBuild(asset.name),
         ),
     )
     .map((platform) => platform.label);
@@ -123,7 +124,7 @@ async function sleep(ms) {
   });
 }
 
-async function main() {
+export async function syncReleaseData() {
   const deadline = Date.now() + TIMEOUT_MS;
   let latestPrerelease = null;
   let latestStableRelease = null;
@@ -190,7 +191,9 @@ async function main() {
     } else {
       console.log(
         `Latest prerelease for ${
-          EXPECTED_SHORT_SHA ?? latestPrerelease?.target_commitish ?? "current build"
+          EXPECTED_SHORT_SHA ??
+          latestPrerelease?.target_commitish ??
+          "current build"
         } is not complete yet. Missing: ${missing.join(", ")}. Polling again in ${
           INTERVAL_MS / 1000
         }s (${remainingSeconds}s remaining).`,
@@ -209,7 +212,12 @@ async function main() {
   );
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+if (
+  process.argv[1] &&
+  pathToFileURL(process.argv[1]).href === import.meta.url
+) {
+  syncReleaseData().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

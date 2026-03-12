@@ -27,13 +27,9 @@ jobs:
           cache-dependency-path: ${{ matrix.project }}/package-lock.json
 
       - run: npm ci
-      - run: npm run build
+      - run: npm run deploy
         env:
           GITHUB_TOKEN: ${{ matrix.project == 'landing' && github.token || '' }}
-
-      - uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: ${{ matrix.project }}
-          command: deploy
+          VIRTUE_REQUIRE_RELEASE_SYNC: ${{ matrix.project == 'landing' && '1' || '' }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
