@@ -43,45 +43,49 @@ const theme = normalizeThemeCookie(Astro.cookies.get(THEME_COOKIE_NAME)?.value);
           Help
         </a>
 
-        {helpSidebar.map((section) =>
-          section.items ? (
-            <div class="help-sidebar-group">
-              <div
+        {
+          helpSidebar.map((section) =>
+            section.items ? (
+              <div class="help-sidebar-group">
+                <div
+                  class:list={[
+                    "help-sidebar-group-title",
+                    {
+                      active: section.items.some(
+                        (item) => item.href === currentPath,
+                      ),
+                    },
+                  ]}
+                >
+                  {section.label}
+                </div>
+                <div class="help-sidebar-group-links">
+                  {section.items.map((item) => (
+                    <a
+                      href={item.href}
+                      class:list={[
+                        "help-sidebar-link",
+                        { active: item.href === currentPath },
+                      ]}
+                    >
+                      {item.label}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <a
+                href={section.href}
                 class:list={[
-                  "help-sidebar-group-title",
-                  {
-                    active: section.items.some((item) => item.href === currentPath),
-                  },
+                  "help-sidebar-link",
+                  { active: section.href === currentPath },
                 ]}
               >
                 {section.label}
-              </div>
-              <div class="help-sidebar-group-links">
-                {section.items.map((item) => (
-                  <a
-                    href={item.href}
-                    class:list={[
-                      "help-sidebar-link",
-                      { active: item.href === currentPath },
-                    ]}
-                  >
-                    {item.label}
-                  </a>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <a
-              href={section.href}
-              class:list={[
-                "help-sidebar-link",
-                { active: section.href === currentPath },
-              ]}
-            >
-              {section.label}
-            </a>
-          ),
-        )}
+              </a>
+            ),
+          )
+        }
       </aside>
 
       <div class="help-content">

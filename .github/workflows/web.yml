@@ -46,6 +46,10 @@ jobs:
         run: npm run typecheck
         working-directory: web
 
+      - name: Landing type check
+        run: npm run typecheck
+        working-directory: landing
+
       - name: API Prettier check
         run: npm run prettier:check
         working-directory: api

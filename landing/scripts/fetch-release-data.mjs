@@ -15,11 +15,13 @@ const INTERVAL_MS = 30 * 1000;
 const expectedPlatforms = [
   {
     label: "Linux",
-    matches: (assetName) => /\.deb$/i.test(assetName) && /^virtue_/i.test(assetName),
+    matches: (assetName) =>
+      /\.deb$/i.test(assetName) && /^virtue_/i.test(assetName),
   },
   {
     label: "macOS",
-    matches: (assetName) => /\.dmg$/i.test(assetName) && /^Virtue-/i.test(assetName),
+    matches: (assetName) =>
+      /\.dmg$/i.test(assetName) && /^Virtue-/i.test(assetName),
   },
   {
     label: "Windows",
@@ -28,11 +30,13 @@ const expectedPlatforms = [
   },
   {
     label: "Android",
-    matches: (assetName) => /\.apk$/i.test(assetName) && /android/i.test(assetName),
+    matches: (assetName) =>
+      /\.apk$/i.test(assetName) && /android/i.test(assetName),
   },
   {
     label: "iOS",
-    matches: (assetName) => /\.zip$/i.test(assetName) && /^VirtueIOS/i.test(assetName),
+    matches: (assetName) =>
+      /\.zip$/i.test(assetName) && /^VirtueIOS/i.test(assetName),
   },
 ];
 
@@ -102,14 +106,18 @@ async function main() {
   let latestStableRelease = null;
 
   while (Date.now() <= deadline) {
-    const releases = (await fetchReleases()).filter((release) => !release.draft);
+    const releases = (await fetchReleases()).filter(
+      (release) => !release.draft,
+    );
 
     latestStableRelease =
-      releases.filter((release) => !release.prerelease).sort(byNewestPublished)[0] ??
-      null;
+      releases
+        .filter((release) => !release.prerelease)
+        .sort(byNewestPublished)[0] ?? null;
     latestPrerelease =
-      releases.filter((release) => release.prerelease).sort(byNewestPublished)[0] ??
-      null;
+      releases
+        .filter((release) => release.prerelease)
+        .sort(byNewestPublished)[0] ?? null;
 
     const missing = missingPlatforms(latestPrerelease);
 
@@ -134,7 +142,10 @@ async function main() {
       return;
     }
 
-    const remainingSeconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+    const remainingSeconds = Math.max(
+      0,
+      Math.ceil((deadline - Date.now()) / 1000),
+    );
     console.log(
       `Latest prerelease is not complete yet. Missing: ${missing.join(", ")}. Polling again in ${INTERVAL_MS / 1000}s (${remainingSeconds}s remaining).`,
     );

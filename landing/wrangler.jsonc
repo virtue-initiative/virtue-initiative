@@ -4,6 +4,6 @@
   "main": "@astrojs/cloudflare/entrypoints/server",
   "assets": {
     "binding": "ASSETS",
-    "directory": "./dist"
-  }
+    "directory": "./dist",
+  },
 }
