@@ -1,6 +1,7 @@
 export interface User {
   id: string;
   email: string;
+  email_verified: boolean;
   name?: string;
   e2ee_key?: string;
   pub_key?: string;
@@ -31,6 +32,7 @@ export interface DataLog {
   ts: number;
   type: string;
   data: Record<string, unknown>;
+  risk?: number;
 }
 
 export interface DataPage {
@@ -51,6 +53,41 @@ export interface Partner {
   permissions: { view_data: boolean };
   created_at: number;
   e2ee_key?: string;
+}
+
+export interface NotificationPreference {
+  partnership_id: string;
+  status: "pending" | "accepted";
+  monitored_user: {
+    id: string;
+    email: string;
+    name?: string;
+  };
+  digest_cadence: "daily" | "twice_weekly" | "weekly" | "none";
+  immediate_tamper_severity: "warning" | "critical";
+  send_digest: boolean;
+}
+
+export interface PartnerInviteValidation {
+  ok: boolean;
+  partnership_id: string;
+  owner: {
+    id: string;
+    email: string;
+    name?: string;
+  };
+}
+
+export interface PasswordResetValidation {
+  ok: boolean;
+  email: string;
+  user_id: string;
+  key_rotation_required: boolean;
+  partner_access_targets: Array<{
+    partnership_id: string;
+    partner_email: string;
+    partner_pub_key?: string;
+  }>;
 }
 
 const BASE = (import.meta as any).env?.VITE_API_URL ?? "http://localhost:8787";
@@ -109,7 +146,12 @@ export const api = {
   signup: (email: string, password: string, name?: string) =>
     req<{
       access_token: string;
-      user: { id: string; email: string; name?: string };
+      user: {
+        id: string;
+        email: string;
+        name?: string;
+        email_verified: boolean;
+      };
     }>("/signup", {
       method: "POST",
       body: JSON.stringify({ email, password, ...(name ? { name } : {}) }),
@@ -137,6 +179,46 @@ export const api = {
       token,
     ),
 
+  requestVerificationEmail: (token: string) =>
+    req<{ ok: boolean; already_verified?: boolean }>(
+      "/verify-email/request",
+      { method: "POST" },
+      token,
+    ),
+
+  verifyEmail: (token: string) =>
+    req<{ ok: boolean }>("/verify-email", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
+
+  requestPasswordReset: (email: string) =>
+    req<void>("/password-reset/request", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  validatePasswordResetToken: (token: string) =>
+    req<PasswordResetValidation>("/password-reset/validate", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
+
+  resetPassword: (
+    token: string,
+    password: string,
+    wrappedKeys?: {
+      e2ee_key?: string;
+      pub_key?: string;
+      priv_key?: string;
+      partner_access_keys?: Array<{ partnership_id: string; e2ee_key: string }>;
+    },
+  ) =>
+    req<{ ok: boolean }>("/password-reset", {
+      method: "POST",
+      body: JSON.stringify({ token, password, ...(wrappedKeys ?? {}) }),
+    }),
+
   getDevices: (token: string) => req<Device[]>("/device", {}, token),
 
   patchDevice: (
@@ -152,6 +234,9 @@ export const api = {
       },
       token,
     ),
+
+  deleteDevice: (token: string, id: string) =>
+    req<void>(`/device/${id}`, { method: "DELETE" }, token),
 
   getPartners: (token: string) => req<Partner[]>("/partner", {}, token),
 
@@ -180,12 +265,18 @@ export const api = {
       token,
     ),
 
-  acceptPartner: (token: string, id: string) =>
+  validatePartnerInvite: (inviteToken: string) =>
+    req<PartnerInviteValidation>("/partner/invite/validate", {
+      method: "POST",
+      body: JSON.stringify({ token: inviteToken }),
+    }),
+
+  acceptPartnerInvite: (token: string, inviteToken: string) =>
     req<{ id: string }>(
-      "/partner/accept",
+      "/partner/invite/accept",
       {
         method: "POST",
-        body: JSON.stringify({ id }),
+        body: JSON.stringify({ token: inviteToken }),
       },
       token,
     ),
@@ -206,6 +297,33 @@ export const api = {
 
   deletePartner: (token: string, id: string) =>
     req<void>(`/partner/${id}`, { method: "DELETE" }, token),
+
+  getNotificationPreferences: (token: string) =>
+    req<NotificationPreference[]>("/notifications/preferences", {}, token),
+
+  updateNotificationPreference: (
+    token: string,
+    id: string,
+    patch: Partial<
+      Pick<
+        NotificationPreference,
+        "digest_cadence" | "immediate_tamper_severity" | "send_digest"
+      >
+    >,
+  ) =>
+    req<{
+      partnership_id: string;
+      digest_cadence: "none" | "daily" | "twice_weekly" | "weekly";
+      immediate_tamper_severity: "warning" | "critical";
+      send_digest: boolean;
+    }>(
+      `/notifications/preferences/${id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      },
+      token,
+    ),
 
   getData: (
     token: string,

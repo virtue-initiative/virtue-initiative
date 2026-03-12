@@ -88,7 +88,7 @@ export function Home() {
       <section class="dash-section">
         <div class="section-header">
           <h2>Partners</h2>
-          <InviteButton token={token!} userId={userId!} onInvited={reload} />
+          <InviteButton token={token!} onInvited={reload} />
         </div>
 
         {pendingPartners.length === 0 && acceptedPartners.length === 0 ? (
@@ -147,14 +147,11 @@ export function Home() {
 
 function InviteButton({
   token,
-  userId,
   onInvited,
 }: {
   token: string;
-  userId: string;
   onInvited: () => void;
 }) {
-  const e2ee = useE2EE();
   const [email, setEmail] = useState("");
   const [viewData, setViewData] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -178,37 +175,7 @@ function InviteButton({
     setError(null);
     setLoading(true);
     try {
-      let encryptedKey: string | undefined;
-      if (viewData) {
-        const ownKeyBytes = e2ee.getKeyBytes(userId);
-        if (!ownKeyBytes) {
-          throw new Error("Your encryption key is not ready yet.");
-        }
-
-        try {
-          const pubkey = await api.getPartnerPublicKey(email);
-          encryptedKey = (
-            await encryptForPublicKey(
-              Uint8Array.fromBase64(pubkey),
-              Uint8Array.from(ownKeyBytes),
-            )
-          ).toBase64();
-        } catch (err) {
-          if (
-            !(err instanceof Error) ||
-            (err as Error & { status?: number }).status !== 404
-          ) {
-            throw err;
-          }
-        }
-      }
-
-      await api.invitePartner(
-        token,
-        email,
-        { view_data: viewData },
-        encryptedKey,
-      );
+      await api.invitePartner(token, email, { view_data: viewData });
       close();
       onInvited();
     } catch (err) {
@@ -280,28 +247,8 @@ function PendingPartnerCard({
   token: string;
   onChanged: () => void;
 }) {
-  const { userId } = useAuth();
-  const e2ee = useE2EE();
-  const [action, setAction] = useState<"accept" | "confirm" | "remove" | null>(
-    null,
-  );
+  const [action, setAction] = useState<"remove" | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  async function accept() {
-    setAction("accept");
-    setError(null);
-    try {
-      await api.acceptPartner(token, partner.id);
-      onChanged();
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Only the invited partner can accept this request.",
-      );
-      setAction(null);
-    }
-  }
 
   async function remove() {
     setAction("remove");
@@ -311,43 +258,6 @@ function PendingPartnerCard({
       onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to remove request");
-      setAction(null);
-    }
-  }
-
-  async function confirmPartner() {
-    if (!userId) return;
-    setAction("confirm");
-    setError(null);
-    try {
-      const ownKeyBytes = e2ee.getKeyBytes(userId);
-      if (!ownKeyBytes) {
-        throw new Error("Your encryption key is not ready yet.");
-      }
-
-      const pubkey = await api.getPartnerPublicKey(partner.partner.email);
-      const encryptedKey = await encryptForPublicKey(
-        Uint8Array.fromBase64(pubkey),
-        Uint8Array.from(ownKeyBytes),
-      );
-      await api.updatePartner(token, partner.id, {
-        e2ee_key: encryptedKey.toBase64(),
-      });
-      setAction(null);
-      onChanged();
-    } catch (err) {
-      if (
-        err instanceof Error &&
-        (err as Error & { status?: number }).status === 404
-      ) {
-        setError("That partner has not created an account yet.");
-      } else {
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Failed to confirm partner encryption",
-        );
-      }
       setAction(null);
     }
   }
@@ -366,9 +276,7 @@ function PendingPartnerCard({
             ? "This relationship includes access to encrypted activity data."
             : "This relationship does not include data access."
           : partner.permissions.view_data
-            ? partner.e2ee_key
-              ? "The partner invite is waiting for acceptance. Their encrypted access key is ready."
-              : "The partner invite is waiting for acceptance. Confirm the partner after they sign up to attach the encrypted access key."
+            ? "The partner invite is waiting for acceptance. After they accept the email link, you can confirm them to attach the encrypted access key."
             : "This relationship does not include data access."}
       </p>
       <dl class="card-meta">
@@ -379,28 +287,6 @@ function PendingPartnerCard({
       </dl>
       {error && <p class="alert-error">{error}</p>}
       <div class="card-actions">
-        {partner.role === "invitee" ? (
-          <button
-            class="btn btn-primary btn-sm"
-            type="button"
-            onClick={accept}
-            disabled={action !== null}
-          >
-            {action === "accept" ? "Working…" : "Accept"}
-          </button>
-        ) : (
-          partner.permissions.view_data &&
-          !partner.e2ee_key && (
-            <button
-              class="btn btn-primary btn-sm"
-              type="button"
-              onClick={confirmPartner}
-              disabled={action !== null}
-            >
-              {action === "confirm" ? "Confirming…" : "Confirm partner"}
-            </button>
-          )
-        )}
         <button
           class="btn btn-danger btn-sm"
           type="button"
@@ -614,6 +500,7 @@ function DeviceCard({
   const [name, setName] = useState(device.name);
   const [enabled, setEnabled] = useState(device.enabled);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
 
@@ -636,6 +523,28 @@ function DeviceCard({
       setError(err instanceof Error ? err.message : "Failed to save");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (
+      !confirm(
+        `Delete device "${device.name}"? This removes its logs and uploads.`,
+      )
+    ) {
+      return;
+    }
+
+    setDeleting(true);
+    setError(null);
+    try {
+      await api.deleteDevice(token, device.id);
+      dialogRef.current?.close();
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete device");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -702,14 +611,23 @@ function DeviceCard({
             <button
               class="btn btn-primary btn-sm"
               type="submit"
-              disabled={saving}
+              disabled={saving || deleting}
             >
               {saving ? "Saving…" : "Save"}
+            </button>
+            <button
+              class="btn btn-danger btn-sm"
+              type="button"
+              onClick={handleDelete}
+              disabled={saving || deleting}
+            >
+              {deleting ? "Deleting…" : "Delete device"}
             </button>
             <button
               class="btn btn-ghost btn-sm"
               type="button"
               onClick={() => dialogRef.current?.close()}
+              disabled={saving || deleting}
             >
               Cancel
             </button>

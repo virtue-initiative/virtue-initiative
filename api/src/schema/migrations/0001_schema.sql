@@ -5,6 +5,7 @@ CREATE TABLE users (
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   name TEXT,
+  email_verified INTEGER NOT NULL DEFAULT 0,
   e2ee_key BLOB,
   pub_key BLOB,
   priv_key BLOB,
@@ -48,6 +49,8 @@ CREATE TABLE partners (
   user_id TEXT NOT NULL,
   partner_user_id TEXT,
   partner_email TEXT NOT NULL,
+  invite_token_hash TEXT UNIQUE,
+  invite_expires_at INTEGER,
   status TEXT NOT NULL DEFAULT 'pending',
   permissions TEXT NOT NULL,
   e2ee_key BLOB,
@@ -61,6 +64,20 @@ CREATE TABLE partners (
 CREATE INDEX idx_partners_user_id ON partners(user_id);
 CREATE INDEX idx_partners_partner_user_id ON partners(partner_user_id);
 CREATE INDEX idx_partners_status ON partners(status);
+CREATE INDEX idx_partners_invite_expires_at ON partners(invite_expires_at);
+
+CREATE TABLE partner_notification_preferences (
+  partnership_id TEXT PRIMARY KEY,
+  digest_cadence TEXT NOT NULL DEFAULT 'daily',
+  immediate_tamper_severity TEXT NOT NULL DEFAULT 'critical',
+  send_digest INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  FOREIGN KEY (partnership_id) REFERENCES partners(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_partner_notification_preferences_digest_cadence
+  ON partner_notification_preferences(digest_cadence);
 
 -- Non-encrypted immediate device log entries sent directly from devices
 CREATE TABLE device_logs (
@@ -70,6 +87,7 @@ CREATE TABLE device_logs (
   ts INTEGER NOT NULL,
   type TEXT NOT NULL,
   data TEXT NOT NULL DEFAULT '{}',
+  risk REAL,
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
@@ -78,6 +96,24 @@ CREATE TABLE device_logs (
 CREATE INDEX idx_device_logs_user_id ON device_logs(user_id);
 CREATE INDEX idx_device_logs_device_id ON device_logs(device_id);
 CREATE INDEX idx_device_logs_created_at ON device_logs(created_at);
+CREATE INDEX idx_device_logs_risk ON device_logs(risk);
+
+CREATE TABLE email_tokens (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  email TEXT NOT NULL,
+  purpose TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at INTEGER NOT NULL,
+  consumed_at INTEGER,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_email_tokens_user_id ON email_tokens(user_id);
+CREATE INDEX idx_email_tokens_email ON email_tokens(email);
+CREATE INDEX idx_email_tokens_purpose ON email_tokens(purpose);
+CREATE INDEX idx_email_tokens_expires_at ON email_tokens(expires_at);
 
 CREATE TABLE hash_states (
   device_id TEXT PRIMARY KEY,

@@ -13,3 +13,13 @@ R2_URL=http://localhost:8787/r2
 # Hash API base URL used by /d/batch server-side hash state calls.
 # For local dev this must be server-reachable, not emulator alias hostnames.
 HASH_SERVER_URL=http://127.0.0.1:8787
+
+# Can be changed to SES
+EMAIL_DELIVERY_MODE=log
+
+# AWS credentials for SES
+# AWS_ACCESS_KEY_ID=
+# AWS_SECRET_ACCESS_KEY=
+# AWS_REGION=us-east-1
+
+

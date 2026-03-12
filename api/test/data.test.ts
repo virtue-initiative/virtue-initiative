@@ -6,6 +6,7 @@ import {
   clearDB,
   createDeviceForUser,
   createServerToken,
+  listEmailDeliveries,
   signupAndGetToken,
 } from './helpers';
 
@@ -96,11 +97,16 @@ describe('Data and device API routes', () => {
       headers: authHeaders(ownerToken),
       body: JSON.stringify({ email: 'partner@example.com', permissions: { view_data: true } }),
     });
-    const invite = (await inviteRes.json()) as { id: string };
-    await SELF.fetch(`${BASE}/partner/accept`, {
+    await inviteRes.json();
+    const inviteDelivery = (await listEmailDeliveries()).find(
+      (delivery) =>
+        delivery.kind === 'partner_invite' && delivery.recipient_email === 'partner@example.com',
+    );
+    const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
+    await SELF.fetch(`${BASE}/partner/invite/accept`, {
       method: 'POST',
       headers: authHeaders(partnerToken),
-      body: JSON.stringify({ id: invite.id }),
+      body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
 
     await SELF.fetch(`${BASE}/d/log`, {

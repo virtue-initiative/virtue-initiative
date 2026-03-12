@@ -25,3 +25,15 @@ JWT_ACCESS_EXPIRY = "15m"
 JWT_REFRESH_EXPIRY = "7d"
 CORS_ORIGIN = "https://app.virtueinitiative.org"
 R2_URL = "https://r2.virtueinitiative.org"
+APP_URL = "https://app.virtueinitiative.org"
+APP_NAME = "Virtue Initiative"
+AWS_SES_REGION = "us-east-1"
+AWS_SES_FROM_EMAIL = "no-reply@virtueinitiative.org"
+SES_FROM_NAME = "Virtue Initiative"
+EMAIL_DELIVERY_MODE = "ses"
+DEFAULT_CAPTURE_INTERVAL_SECONDS = "300"
+TAMPER_WARNING_GAP_HOURS = "2"
+TAMPER_CRITICAL_GAP_HOURS = "4"
+
+[triggers]
+crons = ["5 8 * * *"]
