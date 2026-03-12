@@ -7,7 +7,7 @@ on:
   pull_request:
   push:
     branches:
-      - fix-deploy
+      - main
   workflow_dispatch:
 
 jobs:
@@ -50,7 +50,7 @@ jobs:
         working-directory: client
 
       - name: Resolve version info
-        if: github.event_name == 'push' && github.ref == 'refs/heads/fix-deploy'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: version
         shell: bash
         run: |
@@ -60,14 +60,14 @@ jobs:
         working-directory: client
 
       - name: Upload macOS installer artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/fix-deploy'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: virtue-macos-${{ steps.version.outputs.build_label }}
           path: client/target/macos/Virtue-${{ steps.version.outputs.build_label }}.dmg
 
       - name: Publish macOS prerelease asset
-        if: github.event_name == 'push' && github.ref == 'refs/heads/fix-deploy'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}

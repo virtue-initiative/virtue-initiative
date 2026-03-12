@@ -7,7 +7,7 @@ on:
   pull_request:
   push:
     branches:
-      - fix-deploy
+      - main
   workflow_dispatch:
 
 jobs:
@@ -37,7 +37,7 @@ jobs:
         working-directory: client/ios/rust
 
       - name: Resolve version info
-        if: github.event_name == 'push' && github.ref == 'refs/heads/fix-deploy'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: version
         shell: bash
         run: |
@@ -51,12 +51,12 @@ jobs:
         working-directory: client/ios
 
       - name: Build iOS app bundle (release, unsigned)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/fix-deploy'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: ./scripts/build-ios.sh --destination "generic/platform=iOS" --configuration Release --derived-data .derived-data-ci-ios-release --code-signing-allowed NO
         working-directory: client/ios
 
       - name: Package iOS app bundle
-        if: github.event_name == 'push' && github.ref == 'refs/heads/fix-deploy'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash
         run: |
           mkdir -p dist
@@ -69,14 +69,14 @@ jobs:
         working-directory: client/ios
 
       - name: Upload iOS app bundle artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/fix-deploy'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: virtue-ios-${{ steps.version.outputs.build_label }}
           path: client/ios/dist/VirtueIOS-${{ steps.version.outputs.build_label }}.zip
 
       - name: Publish iOS prerelease asset
-        if: github.event_name == 'push' && github.ref == 'refs/heads/fix-deploy'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
