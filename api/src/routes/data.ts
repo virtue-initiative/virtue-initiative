@@ -59,6 +59,7 @@ data.get('/', authenticate('access'), validateZ('query', listDataSchema), async 
         ts: item.value.ts,
         type: item.value.type,
         data: JSON.parse(item.value.data) as Record<string, unknown>,
+        ...(item.value.risk !== null ? { risk: item.value.risk } : {}),
       })),
     ...(nextCursor !== undefined ? { next_cursor: nextCursor } : {}),
   });

@@ -27,3 +27,7 @@ export async function objectExists(env: Env, key: string): Promise<boolean> {
 export async function getObject(env: Env, key: string): Promise<R2ObjectBody | null> {
   return env.BUCKET.get(key);
 }
+
+export async function deleteObject(env: Env, key: string): Promise<void> {
+  await env.BUCKET.delete(key);
+}

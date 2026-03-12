@@ -1,17 +1,29 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { SELF } from 'cloudflare:test';
-import { authHeaders, BASE, clearDB, signupAndGetToken } from './helpers';
+import {
+  authHeaders,
+  BASE,
+  clearDB,
+  listEmailDeliveries,
+  markUserEmailVerified,
+  signupAndGetToken,
+} from './helpers';
 
 beforeEach(clearDB);
 
 describe('Partner routes', () => {
   it('creates, accepts, lists, updates, and deletes a partnership', async () => {
-    const { token: ownerToken } = await signupAndGetToken('owner@example.com', 'pw', 'Owner');
+    const { token: ownerToken, userId: ownerUserId } = await signupAndGetToken(
+      'owner@example.com',
+      'pw',
+      'Owner',
+    );
     const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
       'partner@example.com',
       'pw',
       'Partner',
     );
+    await markUserEmailVerified(ownerUserId);
 
     const createRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
@@ -24,13 +36,24 @@ describe('Partner routes', () => {
     });
     expect(createRes.status).toBe(201);
     const created = (await createRes.json()) as { id: string };
+    const afterInviteDeliveries = await listEmailDeliveries();
+    const inviteDelivery = afterInviteDeliveries.find(
+      (delivery) => delivery.kind === 'partner_invite',
+    );
+    expect(inviteDelivery).toBeTruthy();
+    const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
+    expect(inviteDelivery?.text).toContain('partner_invite_token=');
 
-    const acceptRes = await SELF.fetch(`${BASE}/partner/accept`, {
+    const acceptRes = await SELF.fetch(`${BASE}/partner/invite/accept`, {
       method: 'POST',
       headers: authHeaders(partnerToken),
-      body: JSON.stringify({ id: created.id }),
+      body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
     expect(acceptRes.status).toBe(200);
+    const deliveries = await listEmailDeliveries();
+    const acceptedDelivery = deliveries.find((delivery) => delivery.kind === 'partner_accepted');
+    expect(acceptedDelivery).toBeTruthy();
+    expect(acceptedDelivery?.text).toContain('http://localhost:5173');
 
     const listRes = await SELF.fetch(`${BASE}/partner`, {
       headers: { Authorization: `Bearer ${ownerToken}` },
@@ -48,7 +71,7 @@ describe('Partner routes', () => {
       email: 'partner@example.com',
       name: 'Partner',
     });
-    expect(Buffer.from(owned?.e2ee_key ?? '', 'base64').toString()).toBe('wrapped-key');
+    expect(owned?.e2ee_key).toBeUndefined();
 
     const patchRes = await SELF.fetch(`${BASE}/partner/${created.id}`, {
       method: 'PATCH',
@@ -69,7 +92,9 @@ describe('Partner routes', () => {
   });
 
   it('supports inviting an email before the partner account exists', async () => {
-    const { token: ownerToken } = await signupAndGetToken('owner2@example.com');
+    const { token: ownerToken, userId: ownerUserId } =
+      await signupAndGetToken('owner2@example.com');
+    await markUserEmailVerified(ownerUserId);
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
@@ -78,37 +103,53 @@ describe('Partner routes', () => {
     });
     expect(inviteRes.status).toBe(201);
     const created = (await inviteRes.json()) as { id: string };
+    const inviteDelivery = (await listEmailDeliveries()).find(
+      (delivery) =>
+        delivery.kind === 'partner_invite' && delivery.recipient_email === 'future@example.com',
+    );
+    const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
 
-    const { token: futureToken } = await signupAndGetToken('future@example.com');
+    const { token: futureToken } = await signupAndGetToken('accepted@example.com');
 
-    const incomingRes = await SELF.fetch(`${BASE}/partner`, {
-      headers: { Authorization: `Bearer ${futureToken}` },
+    const validateRes = await SELF.fetch(`${BASE}/partner/invite/validate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
-    expect(incomingRes.status).toBe(200);
-    const incoming = (await incomingRes.json()) as Array<{
+    expect(validateRes.status).toBe(200);
+    expect(await validateRes.json()).toMatchObject({
+      ok: true,
+      partnership_id: created.id,
+      owner: { email: 'owner2@example.com' },
+    });
+
+    const acceptRes = await SELF.fetch(`${BASE}/partner/invite/accept`, {
+      method: 'POST',
+      headers: authHeaders(futureToken),
+      body: JSON.stringify({ token: inviteMetadata.inviteToken }),
+    });
+    expect(acceptRes.status).toBe(200);
+
+    const ownerPartnersRes = await SELF.fetch(`${BASE}/partner`, {
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    });
+    const ownerPartners = (await ownerPartnersRes.json()) as Array<{
       id: string;
       role: 'owner' | 'invitee';
       partner: { email: string };
       status: 'pending' | 'accepted';
     }>;
-    expect(incoming).toHaveLength(1);
-    expect(incoming[0]?.id).toBe(created.id);
-    expect(incoming[0]?.role).toBe('invitee');
-    expect(incoming[0]?.status).toBe('pending');
-    expect(incoming[0]?.partner.email).toBe('owner2@example.com');
-
-    const acceptRes = await SELF.fetch(`${BASE}/partner/accept`, {
-      method: 'POST',
-      headers: authHeaders(futureToken),
-      body: JSON.stringify({ id: created.id }),
-    });
-    expect(acceptRes.status).toBe(200);
+    const owned = ownerPartners.find((partner) => partner.id === created.id);
+    expect(owned?.partner.email).toBe('accepted@example.com');
+    expect(owned?.status).toBe('accepted');
   });
 
   it('returns stored public keys and allows owners to confirm a partner later', async () => {
-    const { token: ownerToken } = await signupAndGetToken('owner3@example.com');
+    const { token: ownerToken, userId: ownerUserId } =
+      await signupAndGetToken('owner3@example.com');
     const { token: partnerToken, userId: partnerUserId } =
       await signupAndGetToken('partner3@example.com');
+    await markUserEmailVerified(ownerUserId);
 
     await SELF.fetch(`${BASE}/user`, {
       method: 'PATCH',
@@ -128,6 +169,17 @@ describe('Partner routes', () => {
     });
     expect(createRes.status).toBe(201);
     const created = (await createRes.json()) as { id: string };
+    const inviteDelivery = (await listEmailDeliveries()).find(
+      (delivery) =>
+        delivery.kind === 'partner_invite' && delivery.recipient_email === 'partner3@example.com',
+    );
+    const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
+
+    await SELF.fetch(`${BASE}/partner/invite/accept`, {
+      method: 'POST',
+      headers: authHeaders(partnerToken),
+      body: JSON.stringify({ token: inviteMetadata.inviteToken }),
+    });
 
     const pubKeyRes = await SELF.fetch(`${BASE}/pubkey?email=partner3@example.com`);
     expect(pubKeyRes.status).toBe(200);
@@ -158,5 +210,37 @@ describe('Partner routes', () => {
     expect(owned?.partner.id).toBe(partnerUserId);
     expect(owned?.partner.email).toBe('partner3@example.com');
     expect(Buffer.from(owned?.e2ee_key ?? '', 'base64').toString()).toBe('encrypted-owner-key');
+  });
+
+  it('prevents accepting your own invite link', async () => {
+    const { token: ownerToken, userId: ownerUserId } =
+      await signupAndGetToken('owner4@example.com');
+    await markUserEmailVerified(ownerUserId);
+
+    const createRes = await SELF.fetch(`${BASE}/partner`, {
+      method: 'POST',
+      headers: authHeaders(ownerToken),
+      body: JSON.stringify({
+        email: 'someone-else@example.com',
+        permissions: { view_data: true },
+      }),
+    });
+    expect(createRes.status).toBe(201);
+    const inviteDelivery = (await listEmailDeliveries()).find(
+      (delivery) =>
+        delivery.kind === 'partner_invite' &&
+        delivery.recipient_email === 'someone-else@example.com',
+    );
+    const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
+
+    const acceptRes = await SELF.fetch(`${BASE}/partner/invite/accept`, {
+      method: 'POST',
+      headers: authHeaders(ownerToken),
+      body: JSON.stringify({ token: inviteMetadata.inviteToken }),
+    });
+    expect(acceptRes.status).toBe(409);
+    expect(await acceptRes.json()).toEqual({
+      error: 'You cannot accept your own partner invite',
+    });
   });
 });

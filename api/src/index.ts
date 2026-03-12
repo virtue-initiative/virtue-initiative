@@ -4,8 +4,11 @@ import auth from './routes/auth';
 import data from './routes/data';
 import deviceOnly from './routes/device-only';
 import devices from './routes/devices';
+import emailWebhooks from './routes/email-webhooks';
 import hashes from './routes/hashes';
+import notifications from './routes/notifications';
 import partners from './routes/partners';
+import { runNotificationSchedule } from './lib/scheduler';
 import { Env, Variables } from './types/bindings';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -32,7 +35,9 @@ app.get('/', (c) =>
 );
 
 app.route('/', auth);
+app.route('/', notifications);
 app.route('/', partners);
+app.route('/', emailWebhooks);
 app.route('/device', devices);
 app.route('/data', data);
 app.route('/d', deviceOnly);
@@ -58,4 +63,9 @@ app.onError((error, c) => {
 
 app.notFound((c) => c.json({ error: 'Not found' }, 404));
 
-export default app;
+export default {
+  fetch: app.fetch,
+  scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(runNotificationSchedule(env, controller.scheduledTime));
+  },
+};

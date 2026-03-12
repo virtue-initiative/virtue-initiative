@@ -4,15 +4,35 @@ import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { authenticate } from '../middleware/auth';
 import { validateZ } from '../middleware/validation';
-import { createUser, findUserByEmail, findUserById, updateUser } from '../lib/db';
+import {
+  clearPartnerAccessKeysForUser,
+  createEmailToken,
+  createUser,
+  findEmailTokenByHash,
+  findUserByEmail,
+  findUserById,
+  invalidateEmailTokens,
+  listPartnerAccessTargetsForOwner,
+  updateUser,
+  updatePartnerAccessKeys,
+  consumeEmailToken,
+} from '../lib/db';
+import {
+  renderEmailVerificationTemplate,
+  renderPasswordResetTemplate,
+} from '../lib/email/templates';
+import { sendEmail } from '../lib/email';
 import { decodeBase64, encodeBase64 } from '../lib/encoding';
+import { EMAIL_VERIFICATION_TTL_MS, PASSWORD_RESET_TTL_MS } from '../lib/email-domain';
 import { generateAccessToken, generateRefreshToken, verifyJWT } from '../lib/jwt';
 import { hashPassword, verifyPassword } from '../lib/password';
+import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
 
 const auth = new Hono<{ Bindings: Env; Variables: Variables }>();
 const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 const REFRESH_TOKEN_TTL_SECONDS = 365 * 24 * 60 * 60;
+const LOCAL_WEB_URL = 'http://localhost:5173';
 
 const signupSchema = z.object({
   email: z.email(),
@@ -23,6 +43,34 @@ const signupSchema = z.object({
 const loginSchema = z.object({
   email: z.email(),
   password: z.string().min(1),
+});
+
+const verifyEmailSchema = z.object({
+  token: z.string().min(1),
+});
+
+const passwordResetRequestSchema = z.object({
+  email: z.email(),
+});
+
+const passwordResetValidateSchema = z.object({
+  token: z.string().min(1),
+});
+
+const passwordResetSchema = z.object({
+  token: z.string().min(1),
+  password: z.string().min(1),
+  e2ee_key: z.base64().optional(),
+  pub_key: z.base64().optional(),
+  priv_key: z.base64().optional(),
+  partner_access_keys: z
+    .array(
+      z.object({
+        partnership_id: z.string().min(1),
+        e2ee_key: z.base64(),
+      }),
+    )
+    .optional(),
 });
 
 const updateUserSchema = z
@@ -53,6 +101,105 @@ async function createSession(c: Context<{ Bindings: Env; Variables: Variables }>
   return accessToken;
 }
 
+function getAppUrl(c: Context<{ Bindings: Env; Variables: Variables }>) {
+  const requestUrl = new URL(c.req.url);
+  if (requestUrl.hostname === 'localhost' || requestUrl.hostname === '127.0.0.1') {
+    return LOCAL_WEB_URL;
+  }
+
+  return c.env.APP_URL;
+}
+
+async function issueEmailToken(
+  db: D1Database,
+  user: { id: string; email: string },
+  purpose: 'email_verification' | 'password_reset',
+  ttlMs: number,
+) {
+  await invalidateEmailTokens(db, user.id, purpose);
+  const token = generateOpaqueToken();
+  const now = Date.now();
+  await createEmailToken(db, {
+    id: uuidv4(),
+    user_id: user.id,
+    email: user.email,
+    purpose,
+    token_hash: hashOpaqueToken(token),
+    expires_at: now + ttlMs,
+    created_at: now,
+  });
+  return token;
+}
+
+async function sendVerificationEmail(
+  c: Context<{ Bindings: Env; Variables: Variables }>,
+  user: { id: string; email: string; name?: string | null },
+) {
+  const token = await issueEmailToken(
+    c.env.DB,
+    user,
+    'email_verification',
+    EMAIL_VERIFICATION_TTL_MS,
+  );
+  const verifyUrl = `${getAppUrl(c)}/?verify_email_token=${encodeURIComponent(token)}`;
+  const email = renderEmailVerificationTemplate({
+    appName: c.env.APP_NAME,
+    appUrl: getAppUrl(c),
+    recipientName: user.name,
+    verifyUrl,
+  });
+
+  await sendEmail({
+    env: c.env,
+    db: c.env.DB,
+    kind: 'email_verification',
+    recipient: user.email,
+    subject: email.subject,
+    text: email.text,
+    html: email.html,
+    related_user_id: user.id,
+    metadata: { purpose: 'email_verification', verifyUrl },
+  });
+}
+
+async function sendPasswordResetEmail(
+  c: Context<{ Bindings: Env; Variables: Variables }>,
+  user: { id: string; email: string; name?: string | null },
+) {
+  const token = await issueEmailToken(c.env.DB, user, 'password_reset', PASSWORD_RESET_TTL_MS);
+  const resetUrl = `${getAppUrl(c)}/?reset_password_token=${encodeURIComponent(token)}`;
+  const email = renderPasswordResetTemplate({
+    appName: c.env.APP_NAME,
+    appUrl: getAppUrl(c),
+    recipientName: user.name,
+    resetUrl,
+  });
+
+  await sendEmail({
+    env: c.env,
+    db: c.env.DB,
+    kind: 'password_reset',
+    recipient: user.email,
+    subject: email.subject,
+    text: email.text,
+    html: email.html,
+    related_user_id: user.id,
+    metadata: { purpose: 'password_reset', resetUrl },
+  });
+}
+
+async function getValidTokenRecord(
+  db: D1Database,
+  rawToken: string,
+  purpose: 'email_verification' | 'password_reset',
+) {
+  const token = await findEmailTokenByHash(db, hashOpaqueToken(rawToken), purpose);
+  if (!token || token.consumed_at || token.expires_at < Date.now()) {
+    return null;
+  }
+  return token;
+}
+
 auth.post('/signup', validateZ('json', signupSchema), async (c) => {
   const { email, password, name } = c.req.valid('json');
   const existingUser = await findUserByEmail(c.env.DB, email);
@@ -65,11 +212,12 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
   const passwordHash = await hashPassword(password);
 
   await createUser(c.env.DB, { id: userId, email, passwordHash, name });
+  await sendVerificationEmail(c, { id: userId, email, name });
   const accessToken = await createSession(c, userId);
 
   return c.json(
     {
-      user: { id: userId, email, ...(name ? { name } : {}) },
+      user: { id: userId, email, email_verified: false, ...(name ? { name } : {}) },
       access_token: accessToken,
     },
     201,
@@ -129,6 +277,7 @@ auth.get('/user', authenticate('access'), async (c) => {
   return c.json({
     id: user.id,
     email: user.email,
+    email_verified: user.email_verified === 1,
     ...(user.name ? { name: user.name } : {}),
     ...(user.e2ee_key ? { e2ee_key: encodeBase64(user.e2ee_key) } : {}),
     ...(user.pub_key ? { pub_key: encodeBase64(user.pub_key) } : {}),
@@ -145,6 +294,123 @@ auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema),
     pub_key: pub_key ? decodeBase64(pub_key) : undefined,
     priv_key: priv_key ? decodeBase64(priv_key) : undefined,
   });
+
+  return c.json({ ok: true });
+});
+
+auth.post('/verify-email', validateZ('json', verifyEmailSchema), async (c) => {
+  const { token } = c.req.valid('json');
+  const record = await getValidTokenRecord(c.env.DB, token, 'email_verification');
+
+  if (!record) {
+    return c.json({ error: 'Invalid or expired token' }, 400);
+  }
+
+  await updateUser(c.env.DB, record.user_id, { email_verified: true });
+  await consumeEmailToken(c.env.DB, record.id, Date.now());
+  await invalidateEmailTokens(c.env.DB, record.user_id, 'email_verification');
+
+  return c.json({ ok: true, email: record.email });
+});
+
+auth.post('/verify-email/request', authenticate('access'), async (c) => {
+  const user = await findUserById(c.env.DB, c.get('sub'));
+
+  if (!user) {
+    return c.json({ error: 'Not found' }, 404);
+  }
+
+  if (user.email_verified === 1) {
+    return c.json({ ok: true, already_verified: true });
+  }
+
+  await sendVerificationEmail(c, user);
+  return c.json({ ok: true });
+});
+
+auth.post('/password-reset/request', validateZ('json', passwordResetRequestSchema), async (c) => {
+  const { email } = c.req.valid('json');
+  const user = await findUserByEmail(c.env.DB, email);
+
+  if (user) {
+    await sendPasswordResetEmail(c, user);
+  }
+
+  return c.body(null, 204);
+});
+
+auth.post('/password-reset/validate', validateZ('json', passwordResetValidateSchema), async (c) => {
+  const { token } = c.req.valid('json');
+  const record = await getValidTokenRecord(c.env.DB, token, 'password_reset');
+
+  if (!record) {
+    return c.json({ error: 'Invalid or expired token' }, 400);
+  }
+
+  const user = await findUserById(c.env.DB, record.user_id);
+  if (!user) {
+    return c.json({ error: 'Invalid or expired token' }, 400);
+  }
+
+  return c.json({
+    ok: true,
+    email: record.email,
+    user_id: record.user_id,
+    key_rotation_required: Boolean(user.e2ee_key || user.pub_key || user.priv_key),
+    partner_access_targets: (await listPartnerAccessTargetsForOwner(c.env.DB, record.user_id)).map(
+      (target) => ({
+        partnership_id: target.id,
+        partner_email: target.partner_email!,
+        ...(target.partner_pub_key
+          ? { partner_pub_key: encodeBase64(target.partner_pub_key) }
+          : {}),
+      }),
+    ),
+  });
+});
+
+auth.post('/password-reset', validateZ('json', passwordResetSchema), async (c) => {
+  const { token, password, e2ee_key, pub_key, priv_key, partner_access_keys } = c.req.valid('json');
+  const record = await getValidTokenRecord(c.env.DB, token, 'password_reset');
+
+  if (!record) {
+    return c.json({ error: 'Invalid or expired token' }, 400);
+  }
+
+  const user = await findUserById(c.env.DB, record.user_id);
+  if (!user) {
+    return c.json({ error: 'Invalid or expired token' }, 400);
+  }
+
+  const keyRotationRequired = Boolean(user.e2ee_key || user.pub_key || user.priv_key);
+  if (keyRotationRequired && (!e2ee_key || !pub_key || !priv_key)) {
+    return c.json(
+      { error: 'New encrypted key material must be generated during password reset' },
+      400,
+    );
+  }
+
+  await updateUser(c.env.DB, record.user_id, {
+    password_hash: await hashPassword(password),
+    ...(e2ee_key ? { e2ee_key: decodeBase64(e2ee_key) } : {}),
+    ...(pub_key ? { pub_key: decodeBase64(pub_key) } : {}),
+    ...(priv_key ? { priv_key: decodeBase64(priv_key) } : {}),
+  });
+  if (keyRotationRequired) {
+    await clearPartnerAccessKeysForUser(c.env.DB, record.user_id);
+    if (partner_access_keys?.length) {
+      await updatePartnerAccessKeys(
+        c.env.DB,
+        record.user_id,
+        partner_access_keys.map((key) => ({
+          partnership_id: key.partnership_id,
+          e2ee_key: decodeBase64(key.e2ee_key),
+        })),
+      );
+    }
+  }
+  await consumeEmailToken(c.env.DB, record.id, Date.now());
+  await invalidateEmailTokens(c.env.DB, record.user_id, 'password_reset');
 
   return c.json({ ok: true });
 });

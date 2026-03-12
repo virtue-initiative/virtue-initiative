@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Context, Hono } from 'hono';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { authenticate } from '../middleware/auth';
@@ -13,9 +13,20 @@ import {
 import { encodeBase64, encodeHex } from '../lib/encoding';
 import { generateToken, verifyJWT } from '../lib/jwt';
 import { putObject } from '../lib/r2';
+import { classifyDeviceLogEvent, notifyPartnersAboutRiskLog } from '../lib/tamper';
 import { Env, Variables } from '../types/bindings';
 
 const deviceOnly = new Hono<{ Bindings: Env; Variables: Variables }>();
+const LOCAL_WEB_URL = 'http://localhost:5173';
+
+function getAppUrl(c: Context<{ Bindings: Env; Variables: Variables }>) {
+  const requestUrl = new URL(c.req.url);
+  if (requestUrl.hostname === 'localhost' || requestUrl.hostname === '127.0.0.1') {
+    return LOCAL_WEB_URL;
+  }
+
+  return c.env.APP_URL;
+}
 const DEVICE_ACCESS_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
 const DEVICE_REFRESH_TOKEN_TTL_SECONDS = 1000 * 365 * 24 * 60 * 60;
 
@@ -210,16 +221,38 @@ deviceOnly.post(
     }
 
     const log = c.req.valid('json');
+    const classified = classifyDeviceLogEvent({
+      userId: device.owner,
+      deviceId: device.id,
+      type: log.type,
+      ts: log.ts,
+      data: log.data,
+    });
+    const logId = uuidv4();
 
     await createDeviceLog(c.env.DB, {
-      id: uuidv4(),
+      id: logId,
       user_id: device.owner,
       device_id: device.id,
       ts: log.ts,
       type: log.type,
       data: JSON.stringify(log.data),
+      risk: classified?.risk ?? null,
       created_at: Date.now(),
     });
+
+    if (classified) {
+      await notifyPartnersAboutRiskLog(c.env.DB, c.env, {
+        logId,
+        appUrl: getAppUrl(c),
+        userId: classified.userId,
+        severity: classified.severity,
+        risk: classified.risk,
+        title: classified.title,
+        details: classified.details ?? null,
+        happenedAt: classified.happenedAt,
+      });
+    }
 
     return c.json(log, 201);
   },

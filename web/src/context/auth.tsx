@@ -56,6 +56,7 @@ interface AuthState {
     userId: string;
     wrappingKey: CryptoKey;
   }>;
+  rememberWrappingKey: (wrappingKey: CryptoKey) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -133,9 +134,26 @@ export function AuthProvider({
     setWrappingKey(null);
   }, []);
 
+  const rememberWrappingKey = useCallback(
+    async (nextWrappingKey: CryptoKey) => {
+      await saveWrappingKey(nextWrappingKey);
+      setWrappingKey(nextWrappingKey);
+    },
+    [],
+  );
+
   return (
     <AuthContext.Provider
-      value={{ token, userId, wrappingKey, ready, login, signup, logout }}
+      value={{
+        token,
+        userId,
+        wrappingKey,
+        ready,
+        login,
+        signup,
+        rememberWrappingKey,
+        logout,
+      }}
     >
       {children}
     </AuthContext.Provider>

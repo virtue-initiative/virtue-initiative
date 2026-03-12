@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { SELF } from 'cloudflare:test';
-import { authHeaders, BASE, clearDB, createDeviceForUser, signupAndGetToken } from './helpers';
+import {
+  authHeaders,
+  BASE,
+  clearDB,
+  createDeviceForUser,
+  listEmailDeliveries,
+  markUserEmailVerified,
+  signupAndGetToken,
+} from './helpers';
 
 beforeEach(clearDB);
 
@@ -58,7 +66,9 @@ describe('Main device routes', () => {
 
   it('lists owner devices to an accepted partner with view_data', async () => {
     const { token: ownerToken } = await signupAndGetToken('owner2@example.com');
-    const { token: partnerToken } = await signupAndGetToken('partner2@example.com');
+    const { token: partnerToken, userId: partnerUserId } =
+      await signupAndGetToken('partner2@example.com');
+    await markUserEmailVerified(partnerUserId);
     const device = await createDeviceForUser(ownerToken, 'Owner Phone', 'android');
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
@@ -67,12 +77,17 @@ describe('Main device routes', () => {
       body: JSON.stringify({ email: 'partner2@example.com', permissions: { view_data: true } }),
     });
     expect(inviteRes.status).toBe(201);
-    const invite = (await inviteRes.json()) as { id: string };
+    await inviteRes.json();
+    const inviteDelivery = (await listEmailDeliveries()).find(
+      (delivery) =>
+        delivery.kind === 'partner_invite' && delivery.recipient_email === 'partner2@example.com',
+    );
+    const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
 
-    const acceptRes = await SELF.fetch(`${BASE}/partner/accept`, {
+    const acceptRes = await SELF.fetch(`${BASE}/partner/invite/accept`, {
       method: 'POST',
       headers: authHeaders(partnerToken),
-      body: JSON.stringify({ id: invite.id }),
+      body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
     expect(acceptRes.status).toBe(200);
 
@@ -82,5 +97,70 @@ describe('Main device routes', () => {
     expect(beforeConfirmRes.status).toBe(200);
     const beforeConfirm = (await beforeConfirmRes.json()) as Array<{ id: string }>;
     expect(beforeConfirm.find((item) => item.id === device.id)).toBeTruthy();
+  });
+
+  it('deletes an owned device and sends a notification email', async () => {
+    const { token, userId } = await signupAndGetToken('delete-device@example.com');
+    await markUserEmailVerified(userId);
+    const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
+      'delete-device-partner@example.com',
+    );
+    await markUserEmailVerified(partnerUserId);
+    const device = await createDeviceForUser(token, 'Delete Me', 'linux');
+
+    const inviteRes = await SELF.fetch(`${BASE}/partner`, {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify({
+        email: 'delete-device-partner@example.com',
+        permissions: { view_data: true },
+      }),
+    });
+    expect(inviteRes.status).toBe(201);
+    await inviteRes.json();
+    const inviteDelivery = (await listEmailDeliveries()).find(
+      (delivery) =>
+        delivery.kind === 'partner_invite' &&
+        delivery.recipient_email === 'delete-device-partner@example.com',
+    );
+    const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
+
+    const acceptRes = await SELF.fetch(`${BASE}/partner/invite/accept`, {
+      method: 'POST',
+      headers: authHeaders(partnerToken),
+      body: JSON.stringify({ token: inviteMetadata.inviteToken }),
+    });
+    expect(acceptRes.status).toBe(200);
+
+    const deleteRes = await SELF.fetch(`${BASE}/device/${device.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(deleteRes.status).toBe(204);
+
+    const listRes = await SELF.fetch(`${BASE}/device`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const list = (await listRes.json()) as Array<{ id: string }>;
+    expect(list.find((item) => item.id === device.id)).toBeUndefined();
+
+    const deliveries = await listEmailDeliveries();
+    const deletionEmails = deliveries.filter((delivery) => delivery.kind === 'device_deleted');
+    expect(deletionEmails).toHaveLength(2);
+    expect(
+      deletionEmails.some((delivery) => delivery.recipient_email === 'delete-device@example.com'),
+    ).toBe(true);
+    expect(
+      deletionEmails.some(
+        (delivery) => delivery.recipient_email === 'delete-device-partner@example.com',
+      ),
+    ).toBe(true);
+    expect(
+      deletionEmails.some(
+        (delivery) =>
+          delivery.recipient_email === 'delete-device-partner@example.com' &&
+          delivery.text.includes('deleted the device "Delete Me"'),
+      ),
+    ).toBe(true);
   });
 });

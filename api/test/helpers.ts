@@ -1,5 +1,6 @@
 import { env, SELF } from 'cloudflare:test';
 import { generateToken } from '../src/lib/jwt';
+import { clearMockEmailDeliveries, listMockEmailDeliveries } from '../src/lib/email';
 
 export const BASE = 'http://localhost';
 
@@ -51,7 +52,53 @@ export async function createServerToken(deviceId: string) {
   return generateToken('server', deviceId, env.JWT_SECRET, 60);
 }
 
+export async function listEmailDeliveries() {
+  return listMockEmailDeliveries();
+}
+
+export async function latestEmailToken(purpose: 'email_verification' | 'password_reset') {
+  return env.DB.prepare(
+    `SELECT id, user_id, email, purpose, token_hash, expires_at, consumed_at, created_at
+     FROM email_tokens
+     WHERE purpose = ?
+     ORDER BY created_at DESC
+     LIMIT 1`,
+  )
+    .bind(purpose)
+    .first<{
+      id: string;
+      user_id: string;
+      email: string;
+      purpose: string;
+      token_hash: string;
+      expires_at: number;
+      consumed_at: number | null;
+      created_at: number;
+    }>();
+}
+
+export async function markUserEmailVerified(userId: string) {
+  await env.DB.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').bind(userId).run();
+}
+
+export function extractTokenFromDelivery(
+  delivery: { metadata: string; text: string },
+  param: string,
+) {
+  const metadata = JSON.parse(delivery.metadata) as Record<string, string>;
+  const url = Object.values(metadata).find((value) => value.includes?.(`?${param}=`));
+  if (url) {
+    return new URL(url).searchParams.get(param);
+  }
+
+  const match = delivery.text.match(new RegExp(`${param}=([^\\s]+)`));
+  return match ? decodeURIComponent(match[1] ?? '') : null;
+}
+
 export async function clearDB(): Promise<void> {
+  clearMockEmailDeliveries();
+  await env.DB.prepare('DELETE FROM email_tokens').run();
+  await env.DB.prepare('DELETE FROM partner_notification_preferences').run();
   await env.DB.prepare('DELETE FROM hash_states').run();
   await env.DB.prepare('DELETE FROM device_logs').run();
   await env.DB.prepare('DELETE FROM batches').run();
