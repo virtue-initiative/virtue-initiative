@@ -6,6 +6,7 @@
     "predev": "npm run sync-release-data",
     "dev": "astro dev",
     "sync-release-data": "node ./scripts/fetch-release-data.mjs",
+    "pretypecheck": "npm run sync-release-data",
     "typecheck": "astro check",
     "prebuild": "npm run sync-release-data",
     "build": "astro build",
