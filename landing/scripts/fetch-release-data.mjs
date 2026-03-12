@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -123,7 +123,7 @@ async function sleep(ms) {
   });
 }
 
-async function main() {
+export async function syncReleaseData() {
   const deadline = Date.now() + TIMEOUT_MS;
   let latestPrerelease = null;
   let latestStableRelease = null;
@@ -209,7 +209,9 @@ async function main() {
   );
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  syncReleaseData().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}
