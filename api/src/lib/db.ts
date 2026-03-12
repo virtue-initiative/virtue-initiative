@@ -96,6 +96,8 @@ export type PartnerPermissions = {
   view_data?: boolean;
 };
 
+export type SessionType = 'web' | 'device';
+
 export function parsePermissions(value: string): PartnerPermissions {
   return JSON.parse(value) as PartnerPermissions;
 }
@@ -1153,6 +1155,72 @@ export async function consumeEmailToken(db: D1Database, tokenId: string, consume
     .prepare('UPDATE email_tokens SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL')
     .bind(consumedAt, uuidToBytes(tokenId))
     .run();
+}
+
+export async function createSessionRecord(
+  db: D1Database,
+  input: {
+    id: string;
+    session_type: SessionType;
+    user_id?: string;
+    device_id?: string;
+    refresh_token_hash: string;
+    expires_at: number;
+    created_at: number;
+  },
+) {
+  return db
+    .prepare(
+      `INSERT INTO sessions (
+         id, session_type, user_id, device_id, refresh_token_hash, expires_at, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      input.id,
+      input.session_type,
+      input.user_id ?? null,
+      input.device_id ?? null,
+      input.refresh_token_hash,
+      input.expires_at,
+      input.created_at,
+    )
+    .run();
+}
+
+export async function findSessionByRefreshTokenHash(
+  db: D1Database,
+  refreshTokenHash: string,
+  sessionType: SessionType,
+) {
+  return db
+    .prepare(
+      `SELECT id, session_type, user_id, device_id, refresh_token_hash, expires_at, created_at
+       FROM sessions
+       WHERE refresh_token_hash = ? AND session_type = ?`,
+    )
+    .bind(refreshTokenHash, sessionType)
+    .first<{
+      id: string;
+      session_type: SessionType;
+      user_id: string | null;
+      device_id: string | null;
+      refresh_token_hash: string;
+      expires_at: number;
+      created_at: number;
+    }>();
+}
+
+export async function deleteSessionByRefreshTokenHash(
+  db: D1Database,
+  refreshTokenHash: string,
+  sessionType?: SessionType,
+) {
+  return sessionType
+    ? db
+        .prepare('DELETE FROM sessions WHERE refresh_token_hash = ? AND session_type = ?')
+        .bind(refreshTokenHash, sessionType)
+        .run()
+    : db.prepare('DELETE FROM sessions WHERE refresh_token_hash = ?').bind(refreshTokenHash).run();
 }
 
 export async function listDigestEligiblePartnerships(db: D1Database) {

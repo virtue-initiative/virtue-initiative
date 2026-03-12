@@ -44,6 +44,28 @@ describe('Auth routes', () => {
     expect(storedUser).toBeTruthy();
     expect(new Uint8Array(storedUser!.id)).toHaveLength(16);
 
+    const session = await env.DB.prepare(
+      `SELECT session_type, user_id, device_id, expires_at
+       FROM sessions
+       WHERE user_id = ?
+       ORDER BY created_at DESC
+       LIMIT 1`,
+    )
+      .bind(body.user.id)
+      .first<{
+        session_type: string;
+        user_id: string | null;
+        device_id: string | null;
+        expires_at: number;
+      }>();
+
+    expect(session).toMatchObject({
+      session_type: 'web',
+      user_id: body.user.id,
+      device_id: null,
+    });
+    expect(session?.expires_at).toBeGreaterThan(Date.now());
+
     const deliveries = await listEmailDeliveries();
     expect(deliveries).toHaveLength(1);
     expect(deliveries[0]).toMatchObject({
@@ -74,6 +96,13 @@ describe('Auth routes', () => {
     expect(res.status).toBe(201);
     const body = (await res.json()) as { access_token: string };
     expect(body.access_token).toBeTruthy();
+
+    const sessionCount = await env.DB.prepare(
+      `SELECT COUNT(*) as count
+       FROM sessions
+       WHERE session_type = 'web'`,
+    ).first<{ count: number }>();
+    expect(sessionCount?.count).toBe(1);
   });
 
   it('returns the current user and allows updating profile fields', async () => {

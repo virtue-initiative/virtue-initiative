@@ -7,13 +7,17 @@ import {
   createBatch,
   createDevice,
   createDeviceLog,
+  createSessionRecord,
   findDeviceById,
+  findSessionByRefreshTokenHash,
   findUserById,
+  deleteSessionByRefreshTokenHash,
 } from '../lib/db';
 import { encodeBase64, encodeHex } from '../lib/encoding';
-import { generateToken, verifyJWT } from '../lib/jwt';
+import { generateToken } from '../lib/jwt';
 import { putObject } from '../lib/r2';
 import { classifyDeviceLogEvent, notifyPartnersAboutRiskLog } from '../lib/tamper';
+import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
 
 const deviceOnly = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -81,6 +85,25 @@ async function resetHashState(hashBaseUrl: string, serverToken: string) {
   }
 }
 
+async function createDeviceSession(
+  c: Context<{ Bindings: Env; Variables: Variables }>,
+  deviceId: string,
+) {
+  const refreshToken = generateOpaqueToken();
+  const now = Date.now();
+
+  await createSessionRecord(c.env.DB, {
+    id: uuidv4(),
+    session_type: 'device',
+    device_id: deviceId,
+    refresh_token_hash: hashOpaqueToken(refreshToken),
+    expires_at: now + DEVICE_REFRESH_TOKEN_TTL_SECONDS * 1000,
+    created_at: now,
+  });
+
+  return refreshToken;
+}
+
 /**
  * POST /d/device - Register a device using a user access token.
  */
@@ -97,7 +120,7 @@ deviceOnly.post(
 
     const [accessToken, refreshToken] = await Promise.all([
       generateToken('device-access', id, c.env.JWT_SECRET, DEVICE_ACCESS_TOKEN_TTL_SECONDS),
-      generateToken('device-refresh', id, c.env.JWT_SECRET, DEVICE_REFRESH_TOKEN_TTL_SECONDS),
+      createDeviceSession(c, id),
     ]);
 
     return c.json({ id, access_token: accessToken, refresh_token: refreshToken }, 201);
@@ -132,29 +155,34 @@ deviceOnly.get('/device', authenticate('device-access'), async (c) => {
 deviceOnly.post('/token', validateZ('json', deviceTokenSchema), async (c) => {
   const { refresh_token } = c.req.valid('json');
 
-  try {
-    const payload = await verifyJWT(refresh_token, c.env.JWT_SECRET);
+  const session = await findSessionByRefreshTokenHash(
+    c.env.DB,
+    hashOpaqueToken(refresh_token),
+    'device',
+  );
 
-    if (payload.type !== 'device-refresh') {
-      return c.json({ error: 'Unauthorized' }, 401);
-    }
-
-    const device = await findDeviceById(c.env.DB, payload.sub);
-    if (!device) {
-      return c.json({ error: 'Not found' }, 404);
-    }
-
-    const accessToken = await generateToken(
-      'device-access',
-      payload.sub,
-      c.env.JWT_SECRET,
-      DEVICE_ACCESS_TOKEN_TTL_SECONDS,
-    );
-
-    return c.json({ access_token: accessToken });
-  } catch (error) {
+  if (!session || !session.device_id) {
     return c.json({ error: 'Unauthorized' }, 401);
   }
+
+  if (session.expires_at < Date.now()) {
+    await deleteSessionByRefreshTokenHash(c.env.DB, session.refresh_token_hash, 'device');
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const device = await findDeviceById(c.env.DB, session.device_id);
+  if (!device) {
+    return c.json({ error: 'Not found' }, 404);
+  }
+
+  const accessToken = await generateToken(
+    'device-access',
+    session.device_id,
+    c.env.JWT_SECRET,
+    DEVICE_ACCESS_TOKEN_TTL_SECONDS,
+  );
+
+  return c.json({ access_token: accessToken });
 });
 
 /**
