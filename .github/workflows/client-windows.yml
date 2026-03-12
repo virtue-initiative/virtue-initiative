@@ -7,7 +7,7 @@ on:
   pull_request:
   push:
     branches:
-      - main
+      - fix-deploy
   workflow_dispatch:
 
 jobs:
@@ -49,12 +49,12 @@ jobs:
         run: choco install nsis -y
 
       - name: Build Windows installer (debug)
-        if: github.event_name != 'push' || github.ref != 'refs/heads/main'
+        if: github.event_name != 'push' || github.ref != 'refs/heads/fix-deploy'
         run: ./windows/scripts/build-installer.ps1 -Profile Debug
         working-directory: client
 
       - name: Resolve version info
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/fix-deploy'
         id: version
         shell: pwsh
         working-directory: client/windows
@@ -65,19 +65,19 @@ jobs:
           "build_label=$($info.BuildLabel)" >> $env:GITHUB_OUTPUT
 
       - name: Build Windows installer (release)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/fix-deploy'
         run: ./windows/scripts/build-installer.ps1 -Profile Release -Version "${{ steps.version.outputs.build_label }}"
         working-directory: client
 
       - name: Upload Windows installer artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/fix-deploy'
         uses: actions/upload-artifact@v4
         with:
           name: virtue-windows-${{ steps.version.outputs.build_label }}
           path: client/windows/dist/virtue-windows-installer-${{ steps.version.outputs.build_label }}.exe
 
       - name: Publish Windows prerelease asset
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/fix-deploy'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
