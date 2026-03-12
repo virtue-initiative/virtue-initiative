@@ -1,0 +1,94 @@
+---
+import Footer from "../components/Footer.astro";
+import Header from "../components/Header.astro";
+import ThemeHeadScript from "../components/ThemeHeadScript.astro";
+import ThemeScript from "../components/ThemeScript.astro";
+import { helpSidebar } from "../help/navigation";
+import "../styles/global.css";
+import { normalizeThemeCookie, THEME_COOKIE_NAME } from "../theme";
+
+interface Props {
+  currentPath: string;
+  pageTitle?: string;
+}
+
+const { currentPath, pageTitle = "Help" } = Astro.props;
+const title = `${pageTitle} - The Virtue Initiative`;
+const theme = normalizeThemeCookie(Astro.cookies.get(THEME_COOKIE_NAME)?.value);
+---
+
+<!doctype html>
+<html lang="en" data-theme={theme}>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <ThemeHeadScript />
+    <title>{title}</title>
+  </head>
+  <body class="help-page">
+    <Header tagline="Guides and docs for The Virtue Initiative" />
+    <main class="help-main">
+      <aside class="help-sidebar">
+        <a
+          href="/help"
+          class:list={[
+            "help-sidebar-home",
+            { active: currentPath === "/help" },
+          ]}
+        >
+          Help
+        </a>
+
+        {helpSidebar.map((section) =>
+          section.items ? (
+            <div class="help-sidebar-group">
+              <div
+                class:list={[
+                  "help-sidebar-group-title",
+                  {
+                    active: section.items.some((item) => item.href === currentPath),
+                  },
+                ]}
+              >
+                {section.label}
+              </div>
+              <div class="help-sidebar-group-links">
+                {section.items.map((item) => (
+                  <a
+                    href={item.href}
+                    class:list={[
+                      "help-sidebar-link",
+                      { active: item.href === currentPath },
+                    ]}
+                  >
+                    {item.label}
+                  </a>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <a
+              href={section.href}
+              class:list={[
+                "help-sidebar-link",
+                { active: section.href === currentPath },
+              ]}
+            >
+              {section.label}
+            </a>
+          ),
+        )}
+      </aside>
+
+      <div class="help-content">
+        <slot />
+      </div>
+    </main>
+    <Footer />
+    <ThemeScript />
+  </body>
+</html>

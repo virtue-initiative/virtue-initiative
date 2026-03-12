@@ -10,10 +10,9 @@ more information about the current state.
 ## Structure
 
 - [`/web`](./web) contains the code for the main web app. (https://app.virtueinitiative.org)
-- [`/landing`](./landing) contains the code for the landing page. (https://virtueinitiative.org)
+- [`/landing`](./landing) contains the code for the landing page and help pages. (https://virtueinitiative.org)
 - [`/client`](./client) contains subdirectories containing the code for the various desktop/mobile monitoring apps.
 - [`/api`](./api) contains the API code that runs on Cloudflare workers. (https://api.virtueinitiative.org)
-- [`/help`](./help) contains the various help pages for our site. (https://help.virtueinitiative.org)
 
 ## Local Development
 
@@ -28,20 +27,13 @@ be at http://localhost:5173.
   `http://localhost:8787` (often using an environment variable
   `VIRTUE_BASE_API_URL=http://localhost:8787`)
 
-If you intend to work on the help page. You just need that one site.
-
-```
-cd help
-npm install
-npm start
-```
-
-Same thing for the landing page, although there is no npm. You just need to
-have `vite` installed (`npm install -g vite`).
+If you intend to work on the landing page or help pages, you just need that one
+site.
 
 ```
 cd landing
-vite .
+npm install
+npm run dev
 ```
 
 More information about each component can be found in their respective
@@ -54,7 +46,6 @@ If you are interested in contributing, you can reach out to us at
 pull request.
 
 AI is permitted for writing code, but in general not permitted for writing
-text. All issues or pull requests should be human-written and all help pages
-etc. should also be human written, but the code itself can be generated with
-AI (but it still will be human reviewed).
-
+text. All issues or pull requests should be human-written and site copy should
+also be human written, but the code itself can be generated with AI (but it
+still will be human reviewed).

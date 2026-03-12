@@ -1,0 +1,26 @@
+---
+interface Props {
+  tagline?: string;
+}
+
+const { tagline } = Astro.props;
+---
+
+<header>
+  <div class="container">
+    <div class="header-top">
+      <a href="/" class="wordmark">The Virtue Initiative</a>
+      <div class="header-actions">
+        <button
+          class="control control-icon"
+          id="theme-toggle"
+          aria-label="Toggle dark mode"
+        ></button>
+        <a href="https://app.virtueinitiative.org" class="btn btn-primary">
+          Login / Sign up
+        </a>
+      </div>
+    </div>
+    {tagline && <p class="tagline">{tagline}</p>}
+  </div>
+</header>

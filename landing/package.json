@@ -1,12 +1,15 @@
 {
   "name": "landing",
   "version": "1.0.0",
-  "description": "This is the landing page. It is a simple static site with no build system. For development, we recommend running vite to get auto-refresh.",
-  "main": "index.js",
+  "description": "Astro landing site for virtueinitiative.org.",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "deploy": "npm run build && wrangler deploy",
+    "predev": "npm run sync-release-data",
+    "dev": "astro dev",
+    "sync-release-data": "node ./scripts/fetch-release-data.mjs",
+    "prebuild": "npm run sync-release-data",
+    "build": "astro build",
+    "deploy": "npm run build && wrangler deploy --config dist/server/wrangler.json",
+    "preview": "astro preview",
     "test": "echo \"Error: no test specified\" && exit 1",
     "prettier:check": "cd .. && git ls-files -z -- landing | grep -zE '\\.(ts|tsx|cts|mts|js|jsx|cjs|mjs|json|json5|jsonc|css|scss|html|md|mdx|yml|yaml)$' | xargs -0 -r npx --prefix landing prettier --check",
     "prettier:write": "cd .. && git ls-files -z -- landing | grep -zE '\\.(ts|tsx|cts|mts|js|jsx|cjs|mjs|json|json5|jsonc|css|scss|html|md|mdx|yml|yaml)$' | xargs -0 -r npx --prefix landing prettier --write"
@@ -16,7 +19,9 @@
   "license": "AGPL-3.0-or-later",
   "type": "commonjs",
   "dependencies": {
-    "@virtueinitiative/shared-web": "file:../shared-web"
+    "@astrojs/cloudflare": "^13.1.0",
+    "@virtueinitiative/shared-web": "file:../shared-web",
+    "astro": "^6.0.3"
   },
   "devDependencies": {
     "prettier": "^3.8.1",

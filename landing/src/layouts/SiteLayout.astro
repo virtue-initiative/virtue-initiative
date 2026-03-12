@@ -1,0 +1,41 @@
+---
+import Footer from "../components/Footer.astro";
+import Header from "../components/Header.astro";
+import ThemeHeadScript from "../components/ThemeHeadScript.astro";
+import ThemeScript from "../components/ThemeScript.astro";
+import "../styles/global.css";
+import { normalizeThemeCookie, THEME_COOKIE_NAME } from "../theme";
+
+interface Props {
+  pageTitle?: string;
+  tagline?: string;
+}
+
+const { pageTitle, tagline } = Astro.props;
+const title = pageTitle
+  ? `${pageTitle} - The Virtue Initiative`
+  : "The Virtue Initiative";
+const theme = normalizeThemeCookie(Astro.cookies.get(THEME_COOKIE_NAME)?.value);
+---
+
+<!doctype html>
+<html lang="en" data-theme={theme}>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <ThemeHeadScript />
+    <title>{title}</title>
+  </head>
+  <body>
+    <Header tagline={tagline} />
+    <main class="container">
+      <slot />
+    </main>
+    <Footer />
+    <ThemeScript />
+  </body>
+</html>
