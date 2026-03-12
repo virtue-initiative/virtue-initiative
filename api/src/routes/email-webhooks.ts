@@ -14,18 +14,18 @@ const snsEnvelopeSchema = z.object({
 
 function extractComplaintOrBounceEmails(message: string) {
   const parsed = JSON.parse(message) as {
-    notificationType?: string;
+    eventType?: string;
     bounce?: { bouncedRecipients?: Array<{ emailAddress?: string }> };
     complaint?: { complainedRecipients?: Array<{ emailAddress?: string }> };
   };
 
-  if (parsed.notificationType === 'Bounce') {
+  if (parsed.eventType === 'Bounce') {
     return (parsed.bounce?.bouncedRecipients ?? [])
       .map((recipient) => recipient.emailAddress?.trim().toLowerCase())
       .filter(Boolean) as string[];
   }
 
-  if (parsed.notificationType === 'Complaint') {
+  if (parsed.eventType === 'Complaint') {
     return (parsed.complaint?.complainedRecipients ?? [])
       .map((recipient) => recipient.emailAddress?.trim().toLowerCase())
       .filter(Boolean) as string[];
@@ -35,7 +35,8 @@ function extractComplaintOrBounceEmails(message: string) {
 }
 
 emailWebhooks.post('/email/sns', async (c) => {
-  const body = snsEnvelopeSchema.parse(await c.req.json());
+  const data = await c.req.json();
+  const body = snsEnvelopeSchema.parse(data);
 
   if (body.Type === 'SubscriptionConfirmation' && body.SubscribeURL) {
     await fetch(body.SubscribeURL);
