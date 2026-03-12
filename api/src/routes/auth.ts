@@ -6,9 +6,12 @@ import { authenticate } from '../middleware/auth';
 import { validateZ } from '../middleware/validation';
 import {
   clearPartnerAccessKeysForUser,
+  createSessionRecord,
   createEmailToken,
   createUser,
+  deleteSessionByRefreshTokenHash,
   findEmailTokenByHash,
+  findSessionByRefreshTokenHash,
   findUserByEmail,
   findUserById,
   invalidateEmailTokens,
@@ -24,7 +27,7 @@ import {
 import { sendEmail } from '../lib/email';
 import { decodeBase64, encodeBase64 } from '../lib/encoding';
 import { EMAIL_VERIFICATION_TTL_MS, PASSWORD_RESET_TTL_MS } from '../lib/email-domain';
-import { generateAccessToken, generateRefreshToken, verifyJWT } from '../lib/jwt';
+import { generateAccessToken } from '../lib/jwt';
 import { hashPassword, verifyPassword } from '../lib/password';
 import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
@@ -84,11 +87,17 @@ const updateUserSchema = z
 
 async function createSession(c: Context<{ Bindings: Env; Variables: Variables }>, userId: string) {
   const accessToken = await generateAccessToken(userId, c.env.JWT_SECRET, ACCESS_TOKEN_TTL_SECONDS);
-  const refreshToken = await generateRefreshToken(
-    userId,
-    c.env.JWT_SECRET,
-    REFRESH_TOKEN_TTL_SECONDS,
-  );
+  const refreshToken = generateOpaqueToken();
+  const now = Date.now();
+
+  await createSessionRecord(c.env.DB, {
+    id: uuidv4(),
+    session_type: 'web',
+    user_id: userId,
+    refresh_token_hash: hashOpaqueToken(refreshToken),
+    expires_at: now + REFRESH_TOKEN_TTL_SECONDS * 1000,
+    created_at: now,
+  });
 
   setCookie(c, 'refresh_token', refreshToken, {
     httpOnly: true,
@@ -237,6 +246,10 @@ auth.post('/login', validateZ('json', loginSchema), async (c) => {
 });
 
 auth.post('/logout', async (c) => {
+  const refreshToken = getCookie(c, 'refresh_token');
+  if (refreshToken) {
+    await deleteSessionByRefreshTokenHash(c.env.DB, hashOpaqueToken(refreshToken), 'web');
+  }
   deleteCookie(c, 'refresh_token', { path: '/' });
   return c.body(null, 204);
 });
@@ -248,23 +261,28 @@ auth.post('/token', async (c) => {
     return c.json({ error: 'Unauthorized' }, 401);
   }
 
-  try {
-    const payload = await verifyJWT(refreshToken, c.env.JWT_SECRET);
+  const session = await findSessionByRefreshTokenHash(
+    c.env.DB,
+    hashOpaqueToken(refreshToken),
+    'web',
+  );
 
-    if (payload.type !== 'refresh') {
-      return c.json({ error: 'Unauthorized' }, 401);
-    }
-
-    const accessToken = await generateAccessToken(
-      payload.sub,
-      c.env.JWT_SECRET,
-      ACCESS_TOKEN_TTL_SECONDS,
-    );
-
-    return c.json({ access_token: accessToken }, 201);
-  } catch {
+  if (!session || !session.user_id) {
     return c.json({ error: 'Unauthorized' }, 401);
   }
+
+  if (session.expires_at < Date.now()) {
+    await deleteSessionByRefreshTokenHash(c.env.DB, session.refresh_token_hash, 'web');
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const accessToken = await generateAccessToken(
+    session.user_id,
+    c.env.JWT_SECRET,
+    ACCESS_TOKEN_TTL_SECONDS,
+  );
+
+  return c.json({ access_token: accessToken }, 201);
 });
 
 auth.get('/user', authenticate('access'), async (c) => {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { SELF } from 'cloudflare:test';
+import { SELF, env } from 'cloudflare:test';
 import {
   authHeaders,
   BASE,
@@ -16,6 +16,28 @@ describe('Data and device API routes', () => {
   it('handles device registration, token refresh, log upload, batch upload, and data listing', async () => {
     const { token: userToken } = await signupAndGetToken('alice@example.com');
     const device = await createDeviceForUser(userToken, 'Phone', 'ios');
+
+    const session = await env.DB.prepare(
+      `SELECT session_type, user_id, device_id, expires_at
+       FROM sessions
+       WHERE device_id = ?
+       ORDER BY created_at DESC
+       LIMIT 1`,
+    )
+      .bind(device.id)
+      .first<{
+        session_type: string;
+        user_id: string | null;
+        device_id: string | null;
+        expires_at: number;
+      }>();
+
+    expect(session).toMatchObject({
+      session_type: 'device',
+      user_id: null,
+      device_id: device.id,
+    });
+    expect(session?.expires_at).toBeGreaterThan(Date.now());
 
     const deviceInfoRes = await SELF.fetch(`${BASE}/d/device`, {
       headers: { Authorization: `Bearer ${device.access_token}` },

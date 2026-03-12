@@ -115,6 +115,27 @@ CREATE INDEX idx_email_tokens_email ON email_tokens(email);
 CREATE INDEX idx_email_tokens_purpose ON email_tokens(purpose);
 CREATE INDEX idx_email_tokens_expires_at ON email_tokens(expires_at);
 
+CREATE TABLE sessions (
+  id TEXT PRIMARY KEY,
+  session_type TEXT NOT NULL,
+  user_id TEXT,
+  device_id TEXT,
+  refresh_token_hash TEXT NOT NULL UNIQUE,
+  expires_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
+  CHECK (session_type IN ('web', 'device')),
+  CHECK (
+    (session_type = 'web' AND user_id IS NOT NULL AND device_id IS NULL) OR
+    (session_type = 'device' AND device_id IS NOT NULL AND user_id IS NULL)
+  )
+);
+
+CREATE INDEX idx_sessions_user_id ON sessions(user_id);
+CREATE INDEX idx_sessions_device_id ON sessions(device_id);
+CREATE INDEX idx_sessions_expires_at ON sessions(expires_at);
+
 CREATE TABLE hash_states (
   device_id BLOB PRIMARY KEY,
   user_id BLOB NOT NULL,
