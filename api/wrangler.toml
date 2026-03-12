@@ -37,3 +37,9 @@ TAMPER_CRITICAL_GAP_HOURS = "4"
 
 [triggers]
 crons = ["5 8 * * *"]
+
+[observability]
+[observability.logs]
+enabled = true
+invocation_logs = true
+
