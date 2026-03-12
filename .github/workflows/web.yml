@@ -49,6 +49,8 @@ jobs:
       - name: Landing type check
         run: npm run typecheck
         working-directory: landing
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: API Prettier check
         run: npm run prettier:check
@@ -69,3 +71,5 @@ jobs:
       - name: Landing build
         run: npm run build
         working-directory: landing
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

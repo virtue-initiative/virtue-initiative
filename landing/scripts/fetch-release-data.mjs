@@ -10,7 +10,14 @@ const outputPath = path.join(projectRoot, "src", "data", "releases.json");
 const GITHUB_RELEASES_URL =
   "https://api.github.com/repos/virtue-initiative/virtue-initiative/releases?per_page=20";
 const TIMEOUT_MS = 20 * 60 * 1000;
-const INTERVAL_MS = 30 * 1000;
+const AUTHENTICATED_INTERVAL_MS = 30 * 1000;
+const UNAUTHENTICATED_INTERVAL_MS = 60 * 1000;
+const EXPECTED_SHA = process.env.GITHUB_SHA?.toLowerCase() ?? null;
+const EXPECTED_SHORT_SHA = EXPECTED_SHA?.slice(0, 7) ?? null;
+const HAS_GITHUB_TOKEN = Boolean(process.env.GITHUB_TOKEN);
+const INTERVAL_MS = HAS_GITHUB_TOKEN
+  ? AUTHENTICATED_INTERVAL_MS
+  : UNAUTHENTICATED_INTERVAL_MS;
 
 const expectedPlatforms = [
   {
@@ -55,11 +62,24 @@ function pickReleaseFields(release) {
     tag_name: release.tag_name,
     html_url: release.html_url,
     published_at: release.published_at,
+    target_commitish: release.target_commitish,
     assets: release.assets.map((asset) => ({
       name: asset.name,
       browser_download_url: asset.browser_download_url,
     })),
   };
+}
+
+function assetMatchesCurrentBuild(assetName) {
+  if (!EXPECTED_SHORT_SHA) return true;
+
+  return assetName.toLowerCase().includes(EXPECTED_SHORT_SHA);
+}
+
+function releaseTargetsCurrentCommit(release) {
+  if (!release || !EXPECTED_SHA) return true;
+
+  return String(release.target_commitish ?? "").toLowerCase() === EXPECTED_SHA;
 }
 
 function missingPlatforms(release) {
@@ -68,7 +88,10 @@ function missingPlatforms(release) {
   return expectedPlatforms
     .filter(
       (platform) =>
-        !release.assets.some((asset) => platform.matches(asset.name)),
+        !release.assets.some(
+          (asset) =>
+            platform.matches(asset.name) && assetMatchesCurrentBuild(asset.name),
+        ),
     )
     .map((platform) => platform.label);
 }
@@ -105,6 +128,12 @@ async function main() {
   let latestPrerelease = null;
   let latestStableRelease = null;
 
+  console.log(
+    `Polling GitHub releases every ${INTERVAL_MS / 1000}s (${
+      HAS_GITHUB_TOKEN ? "authenticated" : "unauthenticated"
+    })${EXPECTED_SHORT_SHA ? ` for commit ${EXPECTED_SHORT_SHA}` : ""}.`,
+  );
+
   while (Date.now() <= deadline) {
     const releases = (await fetchReleases()).filter(
       (release) => !release.draft,
@@ -119,9 +148,10 @@ async function main() {
         .filter((release) => release.prerelease)
         .sort(byNewestPublished)[0] ?? null;
 
-    const missing = missingPlatforms(latestPrerelease);
+    const matchesCommit = releaseTargetsCurrentCommit(latestPrerelease);
+    const missing = matchesCommit ? missingPlatforms(latestPrerelease) : [];
 
-    if (missing.length === 0) {
+    if (matchesCommit && missing.length === 0) {
       await mkdir(path.dirname(outputPath), { recursive: true });
       await writeFile(
         outputPath,
@@ -146,15 +176,35 @@ async function main() {
       0,
       Math.ceil((deadline - Date.now()) / 1000),
     );
-    console.log(
-      `Latest prerelease is not complete yet. Missing: ${missing.join(", ")}. Polling again in ${INTERVAL_MS / 1000}s (${remainingSeconds}s remaining).`,
-    );
+
+    if (!matchesCommit) {
+      console.log(
+        `Latest prerelease ${
+          latestPrerelease?.tag_name ?? "none"
+        } does not target the current commit yet. Expected ${
+          EXPECTED_SHORT_SHA ?? "current sha"
+        }, got ${latestPrerelease?.target_commitish ?? "none"}. Polling again in ${
+          INTERVAL_MS / 1000
+        }s (${remainingSeconds}s remaining).`,
+      );
+    } else {
+      console.log(
+        `Latest prerelease for ${
+          EXPECTED_SHORT_SHA ?? latestPrerelease?.target_commitish ?? "current build"
+        } is not complete yet. Missing: ${missing.join(", ")}. Polling again in ${
+          INTERVAL_MS / 1000
+        }s (${remainingSeconds}s remaining).`,
+      );
+    }
+
     await sleep(INTERVAL_MS);
   }
 
   throw new Error(
     `Timed out after ${TIMEOUT_MS / 60000} minutes waiting for a complete prerelease. Latest prerelease: ${
       latestPrerelease?.tag_name ?? "none"
+    }. Target commit: ${latestPrerelease?.target_commitish ?? "none"}. Expected commit: ${
+      EXPECTED_SHA ?? "not specified"
     }. Missing: ${missingPlatforms(latestPrerelease).join(", ") || "unknown"}.`,
   );
 }
