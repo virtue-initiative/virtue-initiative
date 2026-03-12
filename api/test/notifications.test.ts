@@ -8,6 +8,7 @@ import {
   listEmailDeliveries,
   markUserEmailVerified,
   signupAndGetToken,
+  uuidToBytes,
 } from './helpers';
 
 beforeEach(clearDB);
@@ -121,7 +122,7 @@ describe('Notification routes and tamper alerts', () => {
     const storedLog = await env.DB.prepare(
       'SELECT risk FROM device_logs WHERE device_id = ? ORDER BY created_at DESC LIMIT 1',
     )
-      .bind(device.id)
+      .bind(uuidToBytes(device.id))
       .first<{ risk: number | null }>();
     expect(storedLog?.risk).toBe(1);
 

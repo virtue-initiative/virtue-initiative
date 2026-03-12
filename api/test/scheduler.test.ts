@@ -9,9 +9,14 @@ import {
   listEmailDeliveries,
   markUserEmailVerified,
   signupAndGetToken,
+  uuidToBytes,
 } from './helpers';
 
 beforeEach(clearDB);
+
+const DAILY_BATCH_ID = '00000000-0000-4000-8000-000000000001';
+const DAILY_RISK_LOG_ID = '00000000-0000-4000-8000-000000000002';
+const TWICE_WEEKLY_BATCH_ID = '00000000-0000-4000-8000-000000000003';
 
 describe('Notification scheduler', () => {
   it('sends a daily digest and mentions devices with no logs without creating gap alerts', async () => {
@@ -54,7 +59,7 @@ describe('Notification scheduler', () => {
     const device = await createDeviceForUser(ownerToken, 'Digest Device', 'linux');
     const silentDevice = await createDeviceForUser(ownerToken, 'Silent Device', 'linux');
     await env.DB.prepare('UPDATE devices SET created_at = ? WHERE id IN (?, ?)')
-      .bind(previousDayStart, device.id, silentDevice.id)
+      .bind(previousDayStart, uuidToBytes(device.id), uuidToBytes(silentDevice.id))
       .run();
 
     await env.DB.prepare(
@@ -62,9 +67,9 @@ describe('Notification scheduler', () => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
-        'batch-1',
-        ownerId,
-        device.id,
+        uuidToBytes(DAILY_BATCH_ID),
+        uuidToBytes(ownerId),
+        uuidToBytes(device.id),
         'https://example.com/batch-1.enc',
         previousDayStart,
         previousDayMid,
@@ -78,9 +83,9 @@ describe('Notification scheduler', () => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
-        'risk-log-1',
-        ownerId,
-        device.id,
+        uuidToBytes(DAILY_RISK_LOG_ID),
+        uuidToBytes(ownerId),
+        uuidToBytes(device.id),
         previousDayMid,
         'system_shutdown',
         JSON.stringify({ title: 'Monitoring interruption detected' }),
@@ -151,9 +156,9 @@ describe('Notification scheduler', () => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
-        'batch-twice',
-        ownerId,
-        device.id,
+        uuidToBytes(TWICE_WEEKLY_BATCH_ID),
+        uuidToBytes(ownerId),
+        uuidToBytes(device.id),
         'https://example.com/batch-twice.enc',
         sundayStart,
         mondayMid,

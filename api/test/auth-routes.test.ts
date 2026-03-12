@@ -8,6 +8,7 @@ import {
   listEmailDeliveries,
   markUserEmailVerified,
   signupAndGetToken,
+  uuidToBytes,
 } from './helpers';
 import { verifyPassword } from '../src/lib/password';
 beforeEach(clearDB);
@@ -36,6 +37,12 @@ describe('Auth routes', () => {
     expect(body.user.email).toBe('alice@example.com');
     expect(body.user.name).toBe('Alice');
     expect(body.user.email_verified).toBe(false);
+
+    const storedUser = await env.DB.prepare('SELECT id FROM users WHERE email = ?')
+      .bind('alice@example.com')
+      .first<{ id: ArrayBuffer }>();
+    expect(storedUser).toBeTruthy();
+    expect(new Uint8Array(storedUser!.id)).toHaveLength(16);
 
     const deliveries = await listEmailDeliveries();
     expect(deliveries).toHaveLength(1);
@@ -229,7 +236,7 @@ describe('Auth routes', () => {
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
     await env.DB.prepare('UPDATE partners SET e2ee_key = ? WHERE id = ?')
-      .bind(Buffer.from('shared-access-key'), invite.id)
+      .bind(Buffer.from('shared-access-key'), uuidToBytes(invite.id))
       .run();
 
     await SELF.fetch(`${BASE}/password-reset/request`, {
@@ -305,7 +312,7 @@ describe('Auth routes', () => {
     expect(Buffer.from(storedUser!.priv_key).toString()).toBe('rotated-private');
 
     const sharedAccess = await env.DB.prepare('SELECT e2ee_key FROM partners WHERE id = ?')
-      .bind(invite.id)
+      .bind(uuidToBytes(invite.id))
       .first<{ e2ee_key: ArrayBuffer | null }>();
     expect(Buffer.from(sharedAccess?.e2ee_key ?? new ArrayBuffer(0)).toString()).toBe(
       'rotated-shared-access',
