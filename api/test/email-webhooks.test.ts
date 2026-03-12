@@ -15,7 +15,7 @@ describe('Email webhooks', () => {
       body: JSON.stringify({
         Type: 'Notification',
         Message: JSON.stringify({
-          notificationType: 'Bounce',
+          eventType: 'Bounce',
           bounce: {
             bouncedRecipients: [{ emailAddress: 'bounce@example.com' }],
           },
@@ -42,7 +42,7 @@ describe('Email webhooks', () => {
       body: JSON.stringify({
         Type: 'Notification',
         Message: JSON.stringify({
-          notificationType: 'Complaint',
+          eventType: 'Complaint',
           complaint: {
             complainedRecipients: [{ emailAddress: 'complaint@example.com' }],
           },
