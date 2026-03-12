@@ -92,11 +92,41 @@ export interface PasswordResetValidation {
 
 const BASE = (import.meta as any).env?.VITE_API_URL ?? "http://localhost:8787";
 
+type ReauthHandler = () => Promise<string | null>;
+
+interface RequestOptions {
+  allowReauth?: boolean;
+  retrying?: boolean;
+}
+
+let reauthHandler: ReauthHandler | null = null;
+let reauthInFlight: Promise<string | null> | null = null;
+
+export function setReauthHandler(handler: ReauthHandler | null) {
+  reauthHandler = handler;
+}
+
+async function tryReauth() {
+  if (!reauthHandler) {
+    return null;
+  }
+
+  if (!reauthInFlight) {
+    reauthInFlight = reauthHandler().finally(() => {
+      reauthInFlight = null;
+    });
+  }
+
+  return reauthInFlight;
+}
+
 async function req<T>(
   path: string,
   init: RequestInit = {},
   token?: string,
+  options: RequestOptions = {},
 ): Promise<T> {
+  const { allowReauth = Boolean(token), retrying = false } = options;
   const headers = new Headers(init.headers);
 
   if (!headers.has("Content-Type") && !(init.body instanceof FormData)) {
@@ -114,6 +144,17 @@ async function req<T>(
   });
 
   if (!res.ok) {
+    if (res.status === 401 && token && allowReauth && !retrying) {
+      const refreshedToken = await tryReauth();
+
+      if (refreshedToken) {
+        return req<T>(path, init, refreshedToken, {
+          allowReauth,
+          retrying: true,
+        });
+      }
+    }
+
     const body = (await res.json().catch(() => ({}))) as {
       error?: unknown;
       details?: unknown;
@@ -135,7 +176,9 @@ async function req<T>(
 
 export const api = {
   refreshToken: () =>
-    req<{ access_token: string }>("/token", { method: "POST" }),
+    req<{ access_token: string }>("/token", { method: "POST" }, undefined, {
+      allowReauth: false,
+    }),
 
   login: (email: string, password: string) =>
     req<{ access_token: string }>("/login", {

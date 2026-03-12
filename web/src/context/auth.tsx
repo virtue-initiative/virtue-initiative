@@ -1,6 +1,6 @@
 import { createContext } from "preact";
 import { useContext, useState, useEffect, useCallback } from "preact/hooks";
-import { api } from "../api";
+import { api, setReauthHandler } from "../api";
 import { deriveWrappingKey, hashPasswordForAuth } from "../crypto";
 
 const WRAPPING_KEY_STORAGE = "virtue_wrapping_key";
@@ -126,6 +126,19 @@ export function AuthProvider({
     [],
   );
 
+  const refresh = useCallback(async () => {
+    const res = await api.refreshToken();
+    const uid = jwtSub(res.access_token);
+
+    if (!uid) {
+      throw new Error("Refreshed access token is missing a subject");
+    }
+
+    setToken(res.access_token);
+    setUserId(uid);
+    return res.access_token;
+  }, []);
+
   const logout = useCallback(async () => {
     await api.logout().catch(() => {});
     clearWrappingKey();
@@ -141,6 +154,22 @@ export function AuthProvider({
     },
     [],
   );
+
+  useEffect(() => {
+    setReauthHandler(async () => {
+      try {
+        return await refresh();
+      } catch {
+        clearWrappingKey();
+        setToken(null);
+        setUserId(null);
+        setWrappingKey(null);
+        return null;
+      }
+    });
+
+    return () => setReauthHandler(null);
+  }, [refresh]);
 
   return (
     <AuthContext.Provider
