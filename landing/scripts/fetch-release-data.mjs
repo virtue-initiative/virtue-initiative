@@ -90,7 +90,8 @@ function missingPlatforms(release) {
       (platform) =>
         !release.assets.some(
           (asset) =>
-            platform.matches(asset.name) && assetMatchesCurrentBuild(asset.name),
+            platform.matches(asset.name) &&
+            assetMatchesCurrentBuild(asset.name),
         ),
     )
     .map((platform) => platform.label);
@@ -190,7 +191,9 @@ export async function syncReleaseData() {
     } else {
       console.log(
         `Latest prerelease for ${
-          EXPECTED_SHORT_SHA ?? latestPrerelease?.target_commitish ?? "current build"
+          EXPECTED_SHORT_SHA ??
+          latestPrerelease?.target_commitish ??
+          "current build"
         } is not complete yet. Missing: ${missing.join(", ")}. Polling again in ${
           INTERVAL_MS / 1000
         }s (${remainingSeconds}s remaining).`,
@@ -209,7 +212,10 @@ export async function syncReleaseData() {
   );
 }
 
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+if (
+  process.argv[1] &&
+  pathToFileURL(process.argv[1]).href === import.meta.url
+) {
   syncReleaseData().catch((error) => {
     console.error(error);
     process.exit(1);
