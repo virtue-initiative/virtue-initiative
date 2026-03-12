@@ -166,7 +166,8 @@ export function Settings() {
 
         {preferences.length === 0 ? (
           <p class="settings-hint">
-            Accept a partner invite to configure email notifications.
+            Accept a partner invite to configure email notifications for the
+            people you monitor.
           </p>
         ) : (
           <div class="settings-list">
@@ -174,6 +175,7 @@ export function Settings() {
               <div class="settings-item" key={preference.partnership_id}>
                 <div class="settings-item-header">
                   <strong>
+                    Monitoring{" "}
                     {preference.monitored_user.name ??
                       preference.monitored_user.email}
                   </strong>

@@ -373,10 +373,11 @@ export function Logs() {
           {missingPartnerKey && (
             <div class="card settings-form">
               <p class="settings-hint">
-                You do not have this partner's decryption key yet, so encrypted
-                screenshots and uploaded blocks cannot be shown. Ask the owner
-                of these logs to click <strong>Confirm partner</strong> so the
-                encrypted sharing key is attached to your partnership.
+                You are monitoring this person, but you do not have their
+                decryption key yet, so encrypted screenshots and uploaded blocks
+                cannot be shown. Ask the owner of these logs to click{" "}
+                <strong>Confirm partner</strong> so the encrypted sharing key is
+                attached to your partnership.
               </p>
             </div>
           )}
