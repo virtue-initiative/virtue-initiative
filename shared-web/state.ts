@@ -92,10 +92,7 @@ function loadState(storageKey: string) {
 }
 
 const clients = new Set<{ source: MessageEventSource; origin: string }>();
-let state =
-  typeof window === "undefined"
-    ? {}
-    : loadState("shared-state");
+let state = typeof window === "undefined" ? {} : loadState("shared-state");
 let initialized = false;
 let server = (
   typeof window === "undefined" ? undefined : document.createElement("iframe")
@@ -156,9 +153,7 @@ export function startStateServer() {
 
 // Client code
 let clientState =
-  typeof window === "undefined"
-    ? {}
-    : loadState("shared-state-local");
+  typeof window === "undefined" ? {} : loadState("shared-state-local");
 
 function getServerLocation() {
   if (window.location.hostname === "localhost") {
