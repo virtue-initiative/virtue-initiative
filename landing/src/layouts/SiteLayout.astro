@@ -32,7 +32,7 @@ const theme = normalizeThemeCookie(Astro.cookies.get(THEME_COOKIE_NAME)?.value);
   </head>
   <body>
     <Header tagline={tagline} />
-    <main class="container">
+    <main class="site-main">
       <slot />
     </main>
     <Footer />
