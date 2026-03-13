@@ -316,11 +316,7 @@ export function Auth() {
                 onInput={(e) =>
                   setPassword((e.target as HTMLInputElement).value)
                 }
-                placeholder={
-                  mode === "signup" || mode === "reset"
-                    ? "Choose a password"
-                    : "••••••••"
-                }
+                placeholder="Choose a password"
                 autoComplete={
                   mode === "login" ? "current-password" : "new-password"
                 }
@@ -340,7 +336,7 @@ export function Auth() {
                 onInput={(e) =>
                   setConfirm((e.target as HTMLInputElement).value)
                 }
-                placeholder="••••••••"
+                placeholder="Retype your password"
                 autoComplete="new-password"
                 required
                 disabled={mode === "reset" && !resetTokenValid}
