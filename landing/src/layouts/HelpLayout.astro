@@ -35,39 +35,41 @@ const rootLinks = [{ label: "Help", href: "/help" }, ...helpSidebar];
     <main class="help-main">
       <aside class="help-sidebar">
         <ul class="help-sidebar-list">
-          {rootLinks.map((item) => (
-            <li>
-              {item.href && (
-                <a
-                  href={item.href}
-                  class:list={[
-                    "help-sidebar-item",
-                    { active: item.href === currentPath },
-                  ]}
-                >
-                  {item.label}
-                </a>
-              )}
-              {item.items && item.items.length > 0 && (
-                <ul class="help-sidebar-sublist">
-                  {item.items.map((child) => (
-                    <li>
-                      <a
-                        href={child.href}
-                        class:list={[
-                          "help-sidebar-item",
-                          "help-sidebar-item-child",
-                          { active: child.href === currentPath },
-                        ]}
-                      >
-                        {child.label}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </li>
-          ))}
+          {
+            rootLinks.map((item) => (
+              <li>
+                {item.href && (
+                  <a
+                    href={item.href}
+                    class:list={[
+                      "help-sidebar-item",
+                      { active: item.href === currentPath },
+                    ]}
+                  >
+                    {item.label}
+                  </a>
+                )}
+                {item.items && item.items.length > 0 && (
+                  <ul class="help-sidebar-sublist">
+                    {item.items.map((child) => (
+                      <li>
+                        <a
+                          href={child.href}
+                          class:list={[
+                            "help-sidebar-item",
+                            "help-sidebar-item-child",
+                            { active: child.href === currentPath },
+                          ]}
+                        >
+                          {child.label}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            ))
+          }
         </ul>
       </aside>
 
