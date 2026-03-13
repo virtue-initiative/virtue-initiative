@@ -15,6 +15,7 @@ interface Props {
 const { currentPath, pageTitle = "Help" } = Astro.props;
 const title = `${pageTitle} - The Virtue Initiative`;
 const theme = normalizeThemeCookie(Astro.cookies.get(THEME_COOKIE_NAME)?.value);
+const rootLinks = [{ label: "Help", href: "/help" }, ...helpSidebar];
 ---
 
 <!doctype html>
@@ -33,59 +34,41 @@ const theme = normalizeThemeCookie(Astro.cookies.get(THEME_COOKIE_NAME)?.value);
     <Header tagline="Guides and docs for The Virtue Initiative" />
     <main class="help-main">
       <aside class="help-sidebar">
-        <a
-          href="/help"
-          class:list={[
-            "help-sidebar-home",
-            { active: currentPath === "/help" },
-          ]}
-        >
-          Help
-        </a>
-
-        {
-          helpSidebar.map((section) =>
-            section.items ? (
-              <div class="help-sidebar-group">
-                <div
+        <ul class="help-sidebar-list">
+          {rootLinks.map((item) => (
+            <li>
+              {item.href && (
+                <a
+                  href={item.href}
                   class:list={[
-                    "help-sidebar-group-title",
-                    {
-                      active: section.items.some(
-                        (item) => item.href === currentPath,
-                      ),
-                    },
+                    "help-sidebar-item",
+                    { active: item.href === currentPath },
                   ]}
                 >
-                  {section.label}
-                </div>
-                <div class="help-sidebar-group-links">
-                  {section.items.map((item) => (
-                    <a
-                      href={item.href}
-                      class:list={[
-                        "help-sidebar-link",
-                        { active: item.href === currentPath },
-                      ]}
-                    >
-                      {item.label}
-                    </a>
+                  {item.label}
+                </a>
+              )}
+              {item.items && item.items.length > 0 && (
+                <ul class="help-sidebar-sublist">
+                  {item.items.map((child) => (
+                    <li>
+                      <a
+                        href={child.href}
+                        class:list={[
+                          "help-sidebar-item",
+                          "help-sidebar-item-child",
+                          { active: child.href === currentPath },
+                        ]}
+                      >
+                        {child.label}
+                      </a>
+                    </li>
                   ))}
-                </div>
-              </div>
-            ) : (
-              <a
-                href={section.href}
-                class:list={[
-                  "help-sidebar-link",
-                  { active: section.href === currentPath },
-                ]}
-              >
-                {section.label}
-              </a>
-            ),
-          )
-        }
+                </ul>
+              )}
+            </li>
+          ))}
+        </ul>
       </aside>
 
       <div class="help-content">

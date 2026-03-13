@@ -11,8 +11,8 @@ export const helpSidebar: HelpNavItem[] = [
   },
   {
     label: "Installation",
+    href: "/help/installation",
     items: [
-      { label: "Overview", href: "/help/installation" },
       { label: "Windows", href: "/help/installation/windows" },
       { label: "Mac", href: "/help/installation/mac" },
       { label: "Linux", href: "/help/installation/linux" },
@@ -22,8 +22,8 @@ export const helpSidebar: HelpNavItem[] = [
   },
   {
     label: "Removing Access",
+    href: "/help/removing-access",
     items: [
-      { label: "Overview", href: "/help/removing-access" },
       { label: "Whitelisting", href: "/help/removing-access/whitelisting" },
       { label: "Filtering", href: "/help/removing-access/filtering" },
       {
@@ -38,8 +38,8 @@ export const helpSidebar: HelpNavItem[] = [
   },
   {
     label: "Web",
+    href: "/help/web",
     items: [
-      { label: "Overview", href: "/help/web" },
       { label: "Inviting a Partner", href: "/help/web/inviting-a-partner" },
     ],
   },

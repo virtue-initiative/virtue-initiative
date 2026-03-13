@@ -1,17 +1,33 @@
 @import "@virtueinitiative/shared-web/base.css";
 
+:root {
+  --site-shell-max: 960px;
+  --help-shell-max: 1120px;
+  --site-sidebar-width: 240px;
+  --site-layout-gap: 2rem;
+  --site-content-max: 800px;
+}
+
 body {
   line-height: 1.65;
 }
 
 .container {
-  max-width: 800px;
+  max-width: var(--site-shell-max);
   margin: 0 auto;
   padding: 0 1.5rem;
 }
 
+.help-page .container {
+  max-width: var(--help-shell-max);
+}
+
 header {
   padding: 3rem 0 2.5rem;
+}
+
+.help-page header {
+  padding-bottom: 1.5rem;
 }
 
 .header-top {
@@ -45,17 +61,28 @@ header {
   text-decoration: none;
 }
 
+.wordmark:hover {
+  text-decoration: none;
+}
+
 .tagline {
   margin-top: 0.4rem;
   color: var(--text-muted);
   font-size: 1rem;
 }
 
-main {
-  padding: 3rem 0 4rem;
+.site-main {
+  max-width: var(--site-shell-max);
+  margin: 0 auto;
+  padding: 2rem 0 4rem;
   display: flex;
   flex-direction: column;
   gap: 3rem;
+  padding-inline: 1.5rem;
+}
+
+.site-main > * {
+  min-width: 0;
 }
 
 section {
@@ -298,6 +325,7 @@ footer {
   & p {
     color: var(--text-muted);
     font-size: 0.875rem;
+    text-align: center;
   }
 
   & a {
@@ -312,76 +340,63 @@ footer {
 }
 
 .help-main {
-  max-width: 1180px;
+  max-width: var(--help-shell-max);
   margin: 0 auto;
-  padding: 2rem 1.5rem 4rem;
+  padding: 0.75rem 1.5rem 2rem;
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
-  gap: 2rem;
+  grid-template-columns: var(--site-sidebar-width) minmax(0, var(--site-content-max));
+  justify-content: center;
+  gap: var(--site-layout-gap);
   align-items: start;
 }
 
 .help-sidebar {
   position: sticky;
   top: 1.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  padding: 1rem;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
+  min-width: 0;
 }
 
-.help-sidebar-home,
-.help-sidebar-link {
+.help-sidebar-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.help-sidebar-sublist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.help-sidebar-item {
   display: block;
-  padding: 0.45rem 0.6rem;
-  border-radius: 8px;
+  width: 100%;
+  padding: 0.45rem 0.65rem;
+  border-radius: 6px;
   color: var(--text);
-  font-size: 0.95rem;
+  font-size: 0.875rem;
   text-decoration: none;
+  transition: background 0.12s;
 }
 
-.help-sidebar-home {
-  font-weight: 700;
-}
-
-.help-sidebar-home:hover,
-.help-sidebar-link:hover {
+.help-sidebar-item:hover {
   background: var(--bg-subtle);
   text-decoration: none;
 }
 
-.help-sidebar-home.active,
-.help-sidebar-link.active {
-  background: var(--bg-subtle);
-  color: var(--accent);
+.help-sidebar-item.active {
+  background: var(--accent);
+  color: #fff;
 }
 
-.help-sidebar-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-}
-
-.help-sidebar-group-title {
-  font-size: 0.82rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-  padding: 0 0.6rem;
-}
-
-.help-sidebar-group-title.active {
-  color: var(--accent);
-}
-
-.help-sidebar-group-links {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
+.help-sidebar-item-child {
+  padding-left: 1.65rem;
 }
 
 .help-content {
@@ -389,10 +404,7 @@ footer {
 }
 
 .help-content-card {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
-  padding: 2rem;
+  padding: 0;
 }
 
 .help-doc {
@@ -401,13 +413,21 @@ footer {
   gap: 1rem;
 
   & h1 {
-    font-size: 2rem;
-    line-height: 1.15;
+    font-size: 1.15rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.5rem;
   }
 
   & h2 {
-    font-size: 1.25rem;
-    margin-top: 1rem;
+    font-size: 1rem;
+    font-weight: 600;
+    margin-top: 1.75rem;
+    color: var(--text);
   }
 
   & h3 {
@@ -453,6 +473,10 @@ footer {
 }
 
 @media (max-width: 960px) {
+  .site-main {
+    gap: 2.5rem;
+  }
+
   .help-main {
     grid-template-columns: 1fr;
   }
@@ -462,6 +486,6 @@ footer {
   }
 
   .help-content-card {
-    padding: 1.5rem;
+    padding: 0;
   }
 }
