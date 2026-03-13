@@ -107,13 +107,14 @@ export async function findUserByEmail(db: D1Database, email: string) {
     password_hash: string;
     name: string | null;
     email_verified: number;
+    email_bounced_at: number | null;
     e2ee_key: ArrayBuffer | null;
     pub_key: ArrayBuffer | null;
     priv_key: ArrayBuffer | null;
   }>(
     db
       .prepare(
-        'SELECT id, email, password_hash, name, email_verified, e2ee_key, pub_key, priv_key FROM users WHERE email = ?',
+        'SELECT id, email, password_hash, name, email_verified, email_bounced_at, e2ee_key, pub_key, priv_key FROM users WHERE email = ?',
       )
       .bind(email),
     ['id'],
@@ -126,13 +127,14 @@ export async function findUserById(db: D1Database, userId: string) {
     email: string;
     name: string | null;
     email_verified: number;
+    email_bounced_at: number | null;
     e2ee_key: ArrayBuffer | null;
     pub_key: ArrayBuffer | null;
     priv_key: ArrayBuffer | null;
   }>(
     db
       .prepare(
-        'SELECT id, email, name, email_verified, e2ee_key, pub_key, priv_key FROM users WHERE id = ?',
+        'SELECT id, email, name, email_verified, email_bounced_at, e2ee_key, pub_key, priv_key FROM users WHERE id = ?',
       )
       .bind(uuidToBytes(userId)),
     ['id'],
@@ -162,6 +164,24 @@ export async function markUsersUnverifiedByEmails(db: D1Database, emails: string
     .run();
 }
 
+export async function markUsersEmailBouncedByEmails(db: D1Database, emails: string[]) {
+  const normalized = Array.from(
+    new Set(emails.map((email) => email.trim().toLowerCase()).filter(Boolean)),
+  );
+  if (normalized.length === 0) {
+    return null;
+  }
+
+  return db
+    .prepare(
+      `UPDATE users
+       SET email_bounced_at = ?
+       WHERE lower(email) IN (${placeholders(normalized.length)})`,
+    )
+    .bind(Date.now(), ...normalized)
+    .run();
+}
+
 export async function createUser(
   db: D1Database,
   input: { id: string; email: string; passwordHash: string; name?: string },
@@ -178,9 +198,11 @@ export async function updateUser(
   db: D1Database,
   userId: string,
   fields: {
+    email?: string;
     name?: string;
     password_hash?: string;
     email_verified?: boolean;
+    email_bounced_at?: number | null;
     e2ee_key?: ArrayBuffer;
     pub_key?: ArrayBuffer;
     priv_key?: ArrayBuffer;
@@ -188,6 +210,11 @@ export async function updateUser(
 ) {
   const updates: string[] = [];
   const params: (string | number | ArrayBuffer | null)[] = [];
+
+  if (fields.email !== undefined) {
+    updates.push('email = ?');
+    params.push(fields.email);
+  }
 
   if (fields.name !== undefined) {
     updates.push('name = ?');
@@ -202,6 +229,11 @@ export async function updateUser(
   if (fields.email_verified !== undefined) {
     updates.push('email_verified = ?');
     params.push(fields.email_verified ? 1 : 0);
+  }
+
+  if (fields.email_bounced_at !== undefined) {
+    updates.push('email_bounced_at = ?');
+    params.push(fields.email_bounced_at);
   }
 
   if (fields.e2ee_key !== undefined) {

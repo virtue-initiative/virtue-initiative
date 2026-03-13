@@ -26,10 +26,13 @@ describe('Email webhooks', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, updated: 1 });
 
-    const user = await env.DB.prepare('SELECT email_verified FROM users WHERE id = ?')
+    const user = await env.DB.prepare(
+      'SELECT email_verified, email_bounced_at FROM users WHERE id = ?',
+    )
       .bind(uuidToBytes(userId))
-      .first<{ email_verified: number }>();
+      .first<{ email_verified: number; email_bounced_at: number | null }>();
     expect(user?.email_verified).toBe(0);
+    expect(typeof user?.email_bounced_at).toBe('number');
   });
 
   it('marks users unverified on SNS complaint notifications', async () => {
@@ -53,9 +56,12 @@ describe('Email webhooks', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, updated: 1 });
 
-    const user = await env.DB.prepare('SELECT email_verified FROM users WHERE id = ?')
+    const user = await env.DB.prepare(
+      'SELECT email_verified, email_bounced_at FROM users WHERE id = ?',
+    )
       .bind(uuidToBytes(userId))
-      .first<{ email_verified: number }>();
+      .first<{ email_verified: number; email_bounced_at: number | null }>();
     expect(user?.email_verified).toBe(0);
+    expect(user?.email_bounced_at).toBeNull();
   });
 });

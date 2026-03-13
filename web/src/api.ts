@@ -2,6 +2,7 @@ export interface User {
   id: string;
   email: string;
   email_verified: boolean;
+  email_bounced_at: number | null;
   name?: string;
   e2ee_key?: string;
   pub_key?: string;
@@ -207,6 +208,7 @@ export const api = {
   updateUser: (
     token: string,
     fields: {
+      email?: string;
       name?: string;
       e2ee_key?: string;
       pub_key?: string;

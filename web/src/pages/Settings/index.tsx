@@ -8,6 +8,7 @@ export function Settings() {
 
   const [user, setUser] = useState<User | null>(null);
   const [preferences, setPreferences] = useState<NotificationPreference[]>([]);
+  const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [nameStatus, setNameStatus] = useState<string | null>(null);
   const [verificationStatus, setVerificationStatus] = useState<string | null>(
@@ -26,6 +27,7 @@ export function Settings() {
       api.getNotificationPreferences(token),
     ]);
     setUser(nextUser);
+    setEmail(nextUser.email);
     setName(nextUser.name ?? "");
     setPreferences(nextPreferences);
   }
@@ -40,8 +42,17 @@ export function Settings() {
     setNameStatus(null);
     setNameSaving(true);
     try {
-      await api.updateUser(token, { name: name.trim() || undefined });
-      setNameStatus("Saved.");
+      const nextEmail = email.trim().toLowerCase();
+      const emailChanged = user ? nextEmail !== user.email : false;
+      await api.updateUser(token, {
+        email: emailChanged ? nextEmail : undefined,
+        name: name.trim() || undefined,
+      });
+      setNameStatus(
+        emailChanged
+          ? "Profile saved. Please verify your new email address."
+          : "Saved.",
+      );
       await reload();
     } catch (err) {
       setNameStatus(err instanceof Error ? err.message : "Failed to save");
@@ -111,9 +122,28 @@ export function Settings() {
               autoComplete="name"
             />
           </div>
+          <div class="field">
+            <label for="settings-email">Email</label>
+            <input
+              id="settings-email"
+              type="email"
+              value={email}
+              onInput={(e) => {
+                setEmail((e.target as HTMLInputElement).value);
+                setNameStatus(null);
+              }}
+              placeholder="you@example.com"
+              autoComplete="email"
+              required
+            />
+          </div>
           {nameStatus && (
             <p
-              class={nameStatus === "Saved." ? "alert-success" : "alert-error"}
+              class={
+                nameStatus.toLowerCase().includes("saved")
+                  ? "alert-success"
+                  : "alert-error"
+              }
             >
               {nameStatus}
             </p>
@@ -133,6 +163,12 @@ export function Settings() {
         </p>
         {!user?.email_verified && (
           <>
+            {Boolean(user?.email_bounced_at) && (
+              <p class="alert-error">
+                Your last verification email bounced. Update your email above
+                before requesting another verification email.
+              </p>
+            )}
             {verificationStatus && (
               <p
                 class={
@@ -148,7 +184,7 @@ export function Settings() {
             <button
               class="btn btn-primary"
               type="button"
-              disabled={verificationSending}
+              disabled={verificationSending || Boolean(user?.email_bounced_at)}
               onClick={resendVerificationEmail}
             >
               {verificationSending ? "Sending…" : "Resend verification email"}

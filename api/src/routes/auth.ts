@@ -75,6 +75,7 @@ const passwordResetSchema = z.object({
 
 const updateUserSchema = z
   .object({
+    email: z.email().optional(),
     name: z.string().min(1).optional(),
     e2ee_key: z.base64().optional(),
     pub_key: z.base64().optional(),
@@ -278,6 +279,7 @@ auth.get('/user', authenticate('access'), async (c) => {
     id: user.id,
     email: user.email,
     email_verified: user.email_verified === 1,
+    email_bounced_at: user.email_bounced_at,
     ...(user.name ? { name: user.name } : {}),
     ...(user.e2ee_key ? { e2ee_key: encodeBase64(user.e2ee_key) } : {}),
     ...(user.pub_key ? { pub_key: encodeBase64(user.pub_key) } : {}),
@@ -286,9 +288,27 @@ auth.get('/user', authenticate('access'), async (c) => {
 });
 
 auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema), async (c) => {
-  const { name, e2ee_key, pub_key, priv_key } = c.req.valid('json');
+  const userId = c.get('sub');
+  const { email, name, e2ee_key, pub_key, priv_key } = c.req.valid('json');
+  const normalizedEmail = email?.trim().toLowerCase();
+  const user = await findUserById(c.env.DB, userId);
 
-  await updateUser(c.env.DB, c.get('sub'), {
+  if (!user) {
+    return c.json({ error: 'User account not found' }, 404);
+  }
+
+  const emailChanged = Boolean(normalizedEmail && normalizedEmail !== user.email);
+  if (emailChanged) {
+    const existingUser = await findUserByEmail(c.env.DB, normalizedEmail!);
+    if (existingUser && existingUser.id !== userId) {
+      return c.json({ error: 'Email is already in use' }, 409);
+    }
+  }
+
+  await updateUser(c.env.DB, userId, {
+    ...(emailChanged
+      ? { email: normalizedEmail, email_verified: false, email_bounced_at: null }
+      : {}),
     name,
     e2ee_key: e2ee_key ? decodeBase64(e2ee_key) : undefined,
     pub_key: pub_key ? decodeBase64(pub_key) : undefined,
@@ -306,7 +326,7 @@ auth.post('/verify-email', validateZ('json', verifyEmailSchema), async (c) => {
     return c.json({ error: 'Invalid or expired token' }, 400);
   }
 
-  await updateUser(c.env.DB, record.user_id, { email_verified: true });
+  await updateUser(c.env.DB, record.user_id, { email_verified: true, email_bounced_at: null });
   await consumeEmailToken(c.env.DB, record.id, Date.now());
   await invalidateEmailTokens(c.env.DB, record.user_id, 'email_verification');
 
@@ -322,6 +342,16 @@ auth.post('/verify-email/request', authenticate('access'), async (c) => {
 
   if (user.email_verified === 1) {
     return c.json({ ok: true, already_verified: true });
+  }
+
+  if (user.email_bounced_at) {
+    return c.json(
+      {
+        error:
+          'Your last verification email bounced. Please update your email address before requesting another verification email.',
+      },
+      409,
+    );
   }
 
   await sendVerificationEmail(c, user);
