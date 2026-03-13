@@ -1178,8 +1178,8 @@ export async function createSessionRecord(
     .bind(
       input.id,
       input.session_type,
-      input.user_id ?? null,
-      input.device_id ?? null,
+      input.user_id ? uuidToBytes(input.user_id) : null,
+      input.device_id ? uuidToBytes(input.device_id) : null,
       input.refresh_token_hash,
       input.expires_at,
       input.created_at,
@@ -1192,22 +1192,24 @@ export async function findSessionByRefreshTokenHash(
   refreshTokenHash: string,
   sessionType: SessionType,
 ) {
-  return db
-    .prepare(
-      `SELECT id, session_type, user_id, device_id, refresh_token_hash, expires_at, created_at
-       FROM sessions
-       WHERE refresh_token_hash = ? AND session_type = ?`,
-    )
-    .bind(refreshTokenHash, sessionType)
-    .first<{
-      id: string;
-      session_type: SessionType;
-      user_id: string | null;
-      device_id: string | null;
-      refresh_token_hash: string;
-      expires_at: number;
-      created_at: number;
-    }>();
+  return firstWithUuidFields<{
+    id: string;
+    session_type: SessionType;
+    user_id: string | null;
+    device_id: string | null;
+    refresh_token_hash: string;
+    expires_at: number;
+    created_at: number;
+  }>(
+    db
+      .prepare(
+        `SELECT id, session_type, user_id, device_id, refresh_token_hash, expires_at, created_at
+         FROM sessions
+         WHERE refresh_token_hash = ? AND session_type = ?`,
+      )
+      .bind(refreshTokenHash, sessionType),
+    ['user_id', 'device_id'],
+  );
 }
 
 export async function deleteSessionByRefreshTokenHash(
