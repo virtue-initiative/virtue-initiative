@@ -8,6 +8,6 @@ export const validateZ = <T extends z.ZodTypeAny, Target extends keyof Validatio
 ) =>
   zValidator(target, schema, (result, c) => {
     if (!result.success) {
-      return c.json({ error: 'Bad Request', details: z.treeifyError(result.error) }, 400);
+      return c.json({ error: 'Invalid request data', details: z.treeifyError(result.error) }, 400);
     }
   });
