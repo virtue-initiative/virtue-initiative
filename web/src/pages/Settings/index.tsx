@@ -149,7 +149,7 @@ export function Settings() {
             </p>
           )}
           <button class="btn btn-primary" type="submit" disabled={nameSaving}>
-            {nameSaving ? "Saving…" : "Save name"}
+            {nameSaving ? "Saving…" : "Save"}
           </button>
         </form>
       </section>
