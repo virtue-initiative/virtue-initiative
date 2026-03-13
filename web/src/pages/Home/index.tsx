@@ -4,7 +4,15 @@ import { api, Device, Partner } from "../../api";
 import { Button } from "../../components/Button";
 import { useAuth } from "../../context/auth";
 import { useE2EE } from "../../context/e2ee";
-import { encryptForPublicKey } from "../../crypto";
+import {
+  encryptData,
+  encryptForPublicKey,
+  generateRandomKeyBytes,
+} from "../../crypto";
+import {
+  encodeE2EEKeyRanges,
+  rotateE2EEKeyRanges,
+} from "../../lib/e2ee-keyring";
 import { formatDate, formatRelativeTimestamp } from "../../utils/time";
 import "./style.css";
 
@@ -323,7 +331,7 @@ function PartnerCard({
   token: string;
   onChanged: () => void;
 }) {
-  const { userId } = useAuth();
+  const { userId, wrappingKey } = useAuth();
   const e2ee = useE2EE();
   const { route } = useLocation();
   const [action, setAction] = useState<"confirm" | "remove" | null>(null);
@@ -334,6 +342,54 @@ function PartnerCard({
     setError(null);
     try {
       await api.deletePartner(token, partner.id);
+      if (
+        partner.role === "owner" &&
+        partner.permissions.view_data &&
+        userId &&
+        wrappingKey
+      ) {
+        const currentRanges = e2ee.getKeyRanges(userId);
+        const currentKeyBytes = e2ee.getKeyBytes(userId);
+        if (currentRanges.length > 0 && currentKeyBytes) {
+          const rotatedAt = Date.now();
+          const nextKeyBytes = generateRandomKeyBytes();
+          const nextRanges = rotateE2EEKeyRanges(
+            currentRanges,
+            nextKeyBytes,
+            rotatedAt,
+          );
+          const encryptedKeyPayload = await encryptData(
+            wrappingKey,
+            encodeE2EEKeyRanges(nextRanges),
+          );
+          await api.updateUser(token, {
+            e2ee_key: encryptedKeyPayload.toBase64(),
+          });
+          await e2ee.setKeyRanges(nextRanges, userId);
+
+          const remainingPartners = await api.getPartners(token);
+          const recipients = remainingPartners.filter(
+            (item) =>
+              item.role === "owner" &&
+              item.status === "accepted" &&
+              item.permissions.view_data &&
+              item.partner.id,
+          );
+
+          await Promise.all(
+            recipients.map(async (item) => {
+              const pubkey = await api.getPartnerPublicKey(item.partner.email);
+              const encryptedKey = await encryptForPublicKey(
+                Uint8Array.fromBase64(pubkey),
+                nextKeyBytes,
+              );
+              await api.updatePartner(token, item.id, {
+                e2ee_key: encryptedKey.toBase64(),
+              });
+            }),
+          );
+        }
+      }
       onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to remove partner");

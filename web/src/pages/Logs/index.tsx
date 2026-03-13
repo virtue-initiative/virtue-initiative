@@ -57,7 +57,7 @@ function toMetadataEntries(value: unknown): [string, string][] {
 
 async function decryptAndFlattenBatch(
   batch: Batch,
-  key: CryptoKey,
+  keyBytes: Uint8Array,
 ): Promise<LogItem[]> {
   const resp = await fetch(batch.url);
   if (!resp.ok) {
@@ -69,6 +69,14 @@ async function decryptAndFlattenBatch(
     throw new Error(`Batch blob too short for AES-GCM payload: ${batch.url}`);
   }
 
+  const keyMaterial = Uint8Array.from(keyBytes);
+  const key = await crypto.subtle.importKey(
+    "raw",
+    keyMaterial,
+    { name: "AES-GCM" },
+    false,
+    ["decrypt"],
+  );
   const decrypted = await decryptBatch(key, raw);
   const decompressed = await decompressGzip(decrypted);
   const decoded = decode(decompressed) as unknown;
@@ -140,7 +148,7 @@ export function Logs() {
   const [batchStats, setBatchStats] = useState({ decrypted: 0, skipped: 0 });
 
   const activeUserId = selectedUser ?? userId;
-  const activeKey = activeUserId ? e2ee.getKey(activeUserId) : null;
+  const activeKeyBytes = activeUserId ? e2ee.getKeyBytes(activeUserId) : null;
   const activePartner =
     activeUserId && activeUserId !== userId
       ? (partners.find(
@@ -149,7 +157,7 @@ export function Logs() {
         ) ?? null)
       : null;
   const missingPartnerKey = Boolean(
-    activePartner && activePartner.permissions.view_data && !activeKey,
+    activePartner && activePartner.permissions.view_data && !activeKeyBytes,
   );
 
   useEffect(() => {
@@ -206,7 +214,7 @@ export function Logs() {
     setNextCursor(undefined);
     setBatchStats({ decrypted: 0, skipped: 0 });
     void doLoad(undefined, true);
-  }, [token, selectedDevice, selectedUser, activeKey]);
+  }, [token, selectedDevice, selectedUser, activeUserId, activeKeyBytes]);
 
   async function doLoad(cursor: number | undefined, reset: boolean) {
     if (!token) return;
@@ -221,17 +229,23 @@ export function Logs() {
         limit: 25,
       });
 
-      const decryptedBatches = activeKey
+      const decryptedBatches = activeUserId
         ? await Promise.allSettled(
-            page.batches.map((batch) =>
-              decryptAndFlattenBatch(batch, activeKey),
-            ),
+            page.batches.map(async (batch) => {
+              const keyBytes =
+                e2ee.getKeyBytesForTimestamp(activeUserId, batch.end) ??
+                activeKeyBytes;
+              if (!keyBytes) {
+                throw new Error("No E2EE key available for batch timestamp");
+              }
+              return decryptAndFlattenBatch(batch, keyBytes);
+            }),
           )
         : [];
 
       const batchItems: LogItem[] = [];
       let decrypted = 0;
-      let skipped = activeKey ? 0 : page.batches.length;
+      let skipped = activeUserId && activeKeyBytes ? 0 : page.batches.length;
 
       for (const result of decryptedBatches) {
         if (result.status === "fulfilled") {

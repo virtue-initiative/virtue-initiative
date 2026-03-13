@@ -12,6 +12,7 @@ import {
   generateSharingKeyPair,
   hashPasswordForAuth,
 } from "../../crypto";
+import { E2EEKeyRange, encodeE2EEKeyRanges } from "../../lib/e2ee-keyring";
 import "./style.css";
 import { ThemeButton } from "../../components/ThemeButton";
 
@@ -143,11 +144,17 @@ export function Auth() {
 
   async function setupKeyMaterial(token: string, uid: string, wk: CryptoKey) {
     const rawE2EE = generateRandomKeyBytes();
+    const initialRanges: E2EEKeyRange[] = [
+      { start: 0, end: null, key: rawE2EE },
+    ];
     const keyPair = await generateSharingKeyPair();
     const publicKey = await exportPublicKey(keyPair.publicKey);
     const privateKey = await exportPrivateKey(keyPair.privateKey);
     await e2ee.setKeyFromBytes(rawE2EE.buffer, uid);
-    const encryptedE2EE = await encryptData(wk, rawE2EE);
+    const encryptedE2EE = await encryptData(
+      wk,
+      encodeE2EEKeyRanges(initialRanges),
+    );
     const encryptedPrivate = await encryptData(wk, privateKey);
     await api.updateUser(token, {
       e2ee_key: encryptedE2EE.toBase64(),
@@ -167,6 +174,10 @@ export function Auth() {
 
     const wrappingKey = await deriveWrappingKey(newPassword, resetUserId);
     const rawE2EE = generateRandomKeyBytes();
+    const rotatedAt = Date.now();
+    const rotatedRanges: E2EEKeyRange[] = [
+      { start: rotatedAt, end: null, key: rawE2EE },
+    ];
     const sharingKeyPair = await generateSharingKeyPair();
     const publicKey = await exportPublicKey(sharingKeyPair.publicKey);
     const privateKey = await exportPrivateKey(sharingKeyPair.privateKey);
@@ -187,7 +198,9 @@ export function Auth() {
     return {
       wrappingKey,
       payload: {
-        e2ee_key: (await encryptData(wrappingKey, rawE2EE)).toBase64(),
+        e2ee_key: (
+          await encryptData(wrappingKey, encodeE2EEKeyRanges(rotatedRanges))
+        ).toBase64(),
         pub_key: publicKey.toBase64(),
         priv_key: (await encryptData(wrappingKey, privateKey)).toBase64(),
         partner_access_keys: partnerAccessKeys,
