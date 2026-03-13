@@ -8,6 +8,7 @@ import {
   createServerToken,
   listEmailDeliveries,
   signupAndGetToken,
+  uuidToBytes,
 } from './helpers';
 
 beforeEach(clearDB);
@@ -18,24 +19,24 @@ describe('Data and device API routes', () => {
     const device = await createDeviceForUser(userToken, 'Phone', 'ios');
 
     const session = await env.DB.prepare(
-      `SELECT session_type, user_id, device_id, expires_at
+      `SELECT session_type, user_id, lower(hex(device_id)) as device_id_hex, expires_at
        FROM sessions
        WHERE device_id = ?
        ORDER BY created_at DESC
        LIMIT 1`,
     )
-      .bind(device.id)
+      .bind(uuidToBytes(device.id))
       .first<{
         session_type: string;
         user_id: string | null;
-        device_id: string | null;
+        device_id_hex: string | null;
         expires_at: number;
       }>();
 
     expect(session).toMatchObject({
       session_type: 'device',
       user_id: null,
-      device_id: device.id,
+      device_id_hex: device.id.replaceAll('-', ''),
     });
     expect(session?.expires_at).toBeGreaterThan(Date.now());
 

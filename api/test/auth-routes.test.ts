@@ -45,23 +45,23 @@ describe('Auth routes', () => {
     expect(new Uint8Array(storedUser!.id)).toHaveLength(16);
 
     const session = await env.DB.prepare(
-      `SELECT session_type, user_id, device_id, expires_at
+      `SELECT session_type, lower(hex(user_id)) as user_id_hex, device_id, expires_at
        FROM sessions
        WHERE user_id = ?
        ORDER BY created_at DESC
        LIMIT 1`,
     )
-      .bind(body.user.id)
+      .bind(uuidToBytes(body.user.id))
       .first<{
         session_type: string;
-        user_id: string | null;
+        user_id_hex: string | null;
         device_id: string | null;
         expires_at: number;
       }>();
 
     expect(session).toMatchObject({
       session_type: 'web',
-      user_id: body.user.id,
+      user_id_hex: body.user.id.replaceAll('-', ''),
       device_id: null,
     });
     expect(session?.expires_at).toBeGreaterThan(Date.now());
