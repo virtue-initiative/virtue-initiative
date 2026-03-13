@@ -216,7 +216,8 @@
   }
 
   &.control-icon {
-    width: 2.25rem;
+    width: 2.75rem;
+    min-width: 2.75rem;
     padding: 0;
 
     & svg {
@@ -252,6 +253,15 @@
       border-color: var(--accent);
     }
   }
+}
+
+input[type="password"]:-webkit-autofill,
+input[type="password"]:-webkit-autofill:hover,
+input[type="password"]:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--text);
+  -webkit-box-shadow: 0 0 0 1000px var(--bg) inset;
+  box-shadow: 0 0 0 1000px var(--bg) inset;
+  caret-color: var(--text);
 }
 
 /* Badges */

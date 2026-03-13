@@ -239,7 +239,7 @@ auth.post('/login', validateZ('json', loginSchema), async (c) => {
   const user = await findUserByEmail(c.env.DB, email);
 
   if (!user || !(await verifyPassword(password, user.password_hash))) {
-    return c.json({ error: 'Unauthorized' }, 401);
+    return c.json({ error: 'Invalid email or password' }, 401);
   }
 
   const accessToken = await createSession(c, user.id);
@@ -259,7 +259,7 @@ auth.post('/token', async (c) => {
   const refreshToken = getCookie(c, 'refresh_token');
 
   if (!refreshToken) {
-    return c.json({ error: 'Unauthorized' }, 401);
+    return c.json({ error: 'Session expired. Please log in again.' }, 401);
   }
 
   const session = await findSessionByRefreshTokenHash(
@@ -290,7 +290,7 @@ auth.get('/user', authenticate('access'), async (c) => {
   const user = await findUserById(c.env.DB, c.get('sub'));
 
   if (!user) {
-    return c.json({ error: 'Not found' }, 404);
+    return c.json({ error: 'User account not found' }, 404);
   }
 
   return c.json({
@@ -355,7 +355,7 @@ auth.post('/verify-email/request', authenticate('access'), async (c) => {
   const user = await findUserById(c.env.DB, c.get('sub'));
 
   if (!user) {
-    return c.json({ error: 'Not found' }, 404);
+    return c.json({ error: 'User account not found' }, 404);
   }
 
   if (user.email_verified === 1) {

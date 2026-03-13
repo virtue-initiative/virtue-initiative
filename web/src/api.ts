@@ -103,6 +103,48 @@ interface RequestOptions {
 let reauthHandler: ReauthHandler | null = null;
 let reauthInFlight: Promise<string | null> | null = null;
 
+function firstValidationMessage(details: unknown): string | null {
+  if (!details) {
+    return null;
+  }
+
+  if (Array.isArray(details)) {
+    for (const item of details) {
+      if (typeof item === "string" && item.trim()) {
+        return item;
+      }
+      const nested = firstValidationMessage(item);
+      if (nested) {
+        return nested;
+      }
+    }
+    return null;
+  }
+
+  if (typeof details === "object") {
+    const record = details as Record<string, unknown>;
+
+    if (Array.isArray(record.errors)) {
+      const topError = record.errors.find(
+        (error): error is string =>
+          typeof error === "string" && error.trim().length > 0,
+      );
+      if (topError) {
+        return topError;
+      }
+    }
+
+    for (const value of Object.values(record)) {
+      const nested = firstValidationMessage(value);
+      if (nested) {
+        return nested;
+      }
+    }
+  }
+
+  return null;
+}
+
 export function setReauthHandler(handler: ReauthHandler | null) {
   reauthHandler = handler;
 }
@@ -160,8 +202,19 @@ async function req<T>(
       error?: unknown;
       details?: unknown;
     };
-    const message =
-      typeof body.error === "string" ? body.error : res.statusText;
+    let message = typeof body.error === "string" ? body.error : res.statusText;
+
+    if (message === "Bad Request") {
+      const validationMessage = firstValidationMessage(body.details);
+      message = validationMessage
+        ? `Invalid request: ${validationMessage}`
+        : "Invalid request data";
+    } else if (message === "Unauthorized") {
+      message = "Your session is invalid or expired. Please log in again.";
+    } else if (message === "Not found") {
+      message = "Requested resource was not found.";
+    }
+
     throw Object.assign(new Error(message), {
       status: res.status,
       details: body.details,
