@@ -106,7 +106,7 @@ describe('Auth routes', () => {
   });
 
   it('returns the current user and allows updating profile fields', async () => {
-    const { token } = await signupAndGetToken('carol@example.com', 'pw', 'Carol');
+    const { token, userId } = await signupAndGetToken('carol@example.com', 'pw', 'Carol');
 
     const patchRes = await SELF.fetch(`${BASE}/user`, {
       method: 'PATCH',
@@ -137,6 +137,26 @@ describe('Auth routes', () => {
     expect(Buffer.from(body.e2ee_key, 'base64').toString()).toBe('secret');
     expect(Buffer.from(body.pub_key, 'base64').toString()).toBe('public-key');
     expect(Buffer.from(body.priv_key, 'base64').toString()).toBe('private-key');
+
+    await markUserEmailVerified(userId);
+    const updateEmailRes = await SELF.fetch(`${BASE}/user`, {
+      method: 'PATCH',
+      headers: authHeaders(token),
+      body: JSON.stringify({ email: 'carol-new@example.com' }),
+    });
+    expect(updateEmailRes.status).toBe(200);
+
+    const updatedUserRes = await SELF.fetch(`${BASE}/user`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const updatedBody = (await updatedUserRes.json()) as {
+      email: string;
+      email_verified: boolean;
+      email_bounced_at: number | null;
+    };
+    expect(updatedBody.email).toBe('carol-new@example.com');
+    expect(updatedBody.email_verified).toBe(false);
+    expect(updatedBody.email_bounced_at).toBeNull();
   });
 
   it('verifies email tokens and marks the user as verified', async () => {
@@ -170,6 +190,24 @@ describe('Auth routes', () => {
     expect(resendRes.status).toBe(200);
     const deliveries = await listEmailDeliveries();
     expect(deliveries.filter((delivery) => delivery.kind === 'email_verification')).toHaveLength(2);
+  });
+
+  it('blocks verification resend requests after a bounced delivery', async () => {
+    const { token, userId } = await signupAndGetToken('bounced-resend@example.com', 'pw');
+    await env.DB.prepare('UPDATE users SET email_bounced_at = ? WHERE id = ?')
+      .bind(Date.now(), uuidToBytes(userId))
+      .run();
+
+    const resendRes = await SELF.fetch(`${BASE}/verify-email/request`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(resendRes.status).toBe(409);
+    expect(await resendRes.json()).toEqual({
+      error:
+        'Your last verification email bounced. Please update your email address before requesting another verification email.',
+    });
   });
 
   it('requests and applies password resets', async () => {

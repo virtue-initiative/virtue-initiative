@@ -6,6 +6,7 @@ CREATE TABLE users (
   password_hash TEXT NOT NULL,
   name TEXT,
   email_verified INTEGER NOT NULL DEFAULT 0,
+  email_bounced_at INTEGER,
   e2ee_key BLOB,
   pub_key BLOB,
   priv_key BLOB,

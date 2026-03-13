@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { markUsersUnverifiedByEmails } from '../lib/db';
+import { markUsersEmailBouncedByEmails, markUsersUnverifiedByEmails } from '../lib/db';
 import { Env, Variables } from '../types/bindings';
 
 const emailWebhooks = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -19,19 +19,24 @@ function extractComplaintOrBounceEmails(message: string) {
     complaint?: { complainedRecipients?: Array<{ emailAddress?: string }> };
   };
 
-  if (parsed.eventType === 'Bounce') {
-    return (parsed.bounce?.bouncedRecipients ?? [])
-      .map((recipient) => recipient.emailAddress?.trim().toLowerCase())
-      .filter(Boolean) as string[];
-  }
+  const bouncedEmails =
+    parsed.eventType === 'Bounce'
+      ? ((parsed.bounce?.bouncedRecipients ?? [])
+          .map((recipient) => recipient.emailAddress?.trim().toLowerCase())
+          .filter(Boolean) as string[])
+      : [];
 
-  if (parsed.eventType === 'Complaint') {
-    return (parsed.complaint?.complainedRecipients ?? [])
-      .map((recipient) => recipient.emailAddress?.trim().toLowerCase())
-      .filter(Boolean) as string[];
-  }
+  const complaintEmails =
+    parsed.eventType === 'Complaint'
+      ? ((parsed.complaint?.complainedRecipients ?? [])
+          .map((recipient) => recipient.emailAddress?.trim().toLowerCase())
+          .filter(Boolean) as string[])
+      : [];
 
-  return [];
+  return {
+    bouncedEmails,
+    complaintEmails,
+  };
 }
 
 emailWebhooks.post('/email/sns', async (c) => {
@@ -47,10 +52,12 @@ emailWebhooks.post('/email/sns', async (c) => {
     return c.json({ ok: true });
   }
 
-  const emails = extractComplaintOrBounceEmails(body.Message);
-  await markUsersUnverifiedByEmails(c.env.DB, emails);
+  const { bouncedEmails, complaintEmails } = extractComplaintOrBounceEmails(body.Message);
+  const impactedEmails = Array.from(new Set([...bouncedEmails, ...complaintEmails]));
+  await markUsersUnverifiedByEmails(c.env.DB, impactedEmails);
+  await markUsersEmailBouncedByEmails(c.env.DB, bouncedEmails);
 
-  return c.json({ ok: true, updated: emails.length });
+  return c.json({ ok: true, updated: impactedEmails.length });
 });
 
 export default emailWebhooks;
