@@ -344,7 +344,10 @@ footer {
   margin: 0 auto;
   padding: 0.75rem 1.5rem 2rem;
   display: grid;
-  grid-template-columns: var(--site-sidebar-width) minmax(0, var(--site-content-max));
+  grid-template-columns: var(--site-sidebar-width) minmax(
+      0,
+      var(--site-content-max)
+    );
   justify-content: center;
   gap: var(--site-layout-gap);
   align-items: start;
