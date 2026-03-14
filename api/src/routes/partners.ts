@@ -69,9 +69,7 @@ const updateWatchingSchema = z
   })
   .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
 
-function toPublicNotificationCadence(
-  emailFrequency: string | null | undefined,
-) {
+function toPublicNotificationCadence(emailFrequency: string | null | undefined) {
   if (!emailFrequency || !publicNotificationCadences.includes(emailFrequency as never)) {
     return 'daily' as const;
   }

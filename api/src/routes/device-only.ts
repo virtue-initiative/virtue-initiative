@@ -307,8 +307,7 @@ deviceOnly.post(
           providedTitle && providedTitle.trim().length > 0
             ? providedTitle
             : `Device reported ${log.type.replaceAll('_', ' ')}.`,
-        details:
-          providedDetails && providedDetails.trim().length > 0 ? providedDetails : null,
+        details: providedDetails && providedDetails.trim().length > 0 ? providedDetails : null,
         happenedAt: log.ts,
       });
     }

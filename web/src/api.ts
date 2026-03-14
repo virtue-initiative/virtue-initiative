@@ -339,7 +339,8 @@ export const api = {
   deleteDevice: (token: string, id: string) =>
     req<void>(`/device/${id}`, { method: "DELETE" }, token),
 
-  getPartners: (token: string) => req<PartnerRelationships>("/partner", {}, token),
+  getPartners: (token: string) =>
+    req<PartnerRelationships>("/partner", {}, token),
 
   getPartnerPublicKey: async (email: string) => {
     const qs = new URLSearchParams({ email });
@@ -347,11 +348,7 @@ export const api = {
     return result.pubkey;
   },
 
-  invitePartner: (
-    token: string,
-    email: string,
-    e2ee_key?: string,
-  ) =>
+  invitePartner: (token: string, email: string, e2ee_key?: string) =>
     req<{ id: string; status: string }>(
       "/partner",
       {
@@ -380,11 +377,7 @@ export const api = {
       token,
     ),
 
-  updateWatcher: (
-    token: string,
-    id: string,
-    fields: { e2ee_key?: string },
-  ) =>
+  updateWatcher: (token: string, id: string, fields: { e2ee_key?: string }) =>
     req<void>(
       `/partner/watcher/${id}`,
       {

@@ -99,7 +99,7 @@ async function decryptAndFlattenBatch(
       id: typeof event.id === "string" ? event.id : `${batch.id}:${index}`,
       taken_at:
         typeof event.ts === "number"
-            ? event.ts
+          ? event.ts
           : typeof event.taken_at === "number"
             ? event.taken_at
             : batch.end_time,

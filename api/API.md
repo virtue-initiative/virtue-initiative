@@ -390,15 +390,15 @@ Response `200`:
 ```js
 [
   {
-    "id": UUID,
-    "owner": UUID,
-    "name": "My Laptop",
-    "platform": "linux",
-    "last_upload_at": DateTime | null,
-    "status": "online" | "offline",
-    "enabled": true
-  }
-]
+    id: UUID,
+    owner: UUID,
+    name: 'My Laptop',
+    platform: 'linux',
+    last_upload_at: DateTime | null,
+    status: 'online' | 'offline',
+    enabled: true,
+  },
+];
 ```
 
 ### `PATCH /device/:id`

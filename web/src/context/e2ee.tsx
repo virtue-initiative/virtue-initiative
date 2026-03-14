@@ -168,7 +168,9 @@ export function E2EEProvider({
           partners.watching
             .filter(
               (partner) =>
-                partner.status === "accepted" && partner.e2ee_key && partner.user.id,
+                partner.status === "accepted" &&
+                partner.e2ee_key &&
+                partner.user.id,
             )
             .map(async (partner) => {
               const rawKey = await decryptWithPrivateKey(
