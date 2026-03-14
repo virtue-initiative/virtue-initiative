@@ -121,7 +121,7 @@ devices.delete('/:id', authenticate('access'), async (c) => {
     const email = renderDeviceDeletedTemplate({
       appName: c.env.APP_NAME,
       appUrl: getAppUrl(c.req.url, c.env),
-      recipientName: target.partner_name,
+      recipientName: target.watcher_name,
       deviceName: device.name,
       devicePlatform: device.platform,
       ownerName: owner?.name,
@@ -132,7 +132,7 @@ devices.delete('/:id', authenticate('access'), async (c) => {
       env: c.env,
       db: c.env.DB,
       kind: 'device_deleted',
-      recipient: target.partner_email,
+      recipient: target.watcher_email,
       subject: email.subject,
       text: email.text,
       html: email.html,

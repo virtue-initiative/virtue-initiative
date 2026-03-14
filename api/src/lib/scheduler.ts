@@ -107,10 +107,10 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
     }
 
     const [batches, riskLogs, deviceLogs, devices] = await Promise.all([
-      listBatchWindowsForUser(env.DB, partnership.user_id, window.start, window.end),
-      listRiskDeviceLogsForUser(env.DB, partnership.user_id, window.start, window.end),
-      listDeviceLogsForUser(env.DB, partnership.user_id, window.start, window.end),
-      listEnabledDevicesForUser(env.DB, partnership.user_id),
+      listBatchWindowsForUser(env.DB, partnership.watching_user_id, window.start, window.end),
+      listRiskDeviceLogsForUser(env.DB, partnership.watching_user_id, window.start, window.end),
+      listDeviceLogsForUser(env.DB, partnership.watching_user_id, window.start, window.end),
+      listEnabledDevicesForUser(env.DB, partnership.watching_user_id),
     ]);
 
     const approxScreenshotCount = countApproximateScreenshots(
@@ -123,8 +123,8 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
     const email = renderPartnerDigestTemplate({
       cadence: emailFrequency,
       appName: env.APP_NAME,
-      ownerName: partnership.owner_name,
-      ownerEmail: partnership.owner_email,
+      ownerName: partnership.watching_user_name,
+      ownerEmail: partnership.watching_user_email,
       approxScreenshotCount,
       tamperCounts,
       missingLogDays,
@@ -135,11 +135,11 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
       env,
       db: env.DB,
       kind: emailFrequency === 'weekly' ? 'weekly_digest' : 'daily_digest',
-      recipient: partnership.partner_email,
+      recipient: partnership.watcher_email,
       subject: email.subject,
       text: email.text,
       html: email.html,
-      related_user_id: partnership.user_id,
+      related_user_id: partnership.watching_user_id,
       related_partnership_id: partnership.partnership_id,
       metadata: {
         email_frequency: emailFrequency,

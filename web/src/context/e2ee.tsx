@@ -165,14 +165,10 @@ export function E2EEProvider({
         const partners = await api.getPartners(token);
 
         await Promise.all(
-          partners
+          partners.watching
             .filter(
               (partner) =>
-                partner.role === "invitee" &&
-                partner.status === "accepted" &&
-                partner.permissions.view_data &&
-                partner.e2ee_key &&
-                partner.partner.id,
+                partner.status === "accepted" && partner.e2ee_key && partner.user.id,
             )
             .map(async (partner) => {
               const rawKey = await decryptWithPrivateKey(
@@ -180,7 +176,7 @@ export function E2EEProvider({
                 Uint8Array.fromBase64(partner.e2ee_key!),
               );
               if (!cancelled) {
-                await setKeyFromBytes(rawKey.buffer, partner.partner.id!);
+                await setKeyFromBytes(rawKey.buffer, partner.user.id);
               }
             }),
         );

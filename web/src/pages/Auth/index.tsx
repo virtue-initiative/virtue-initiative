@@ -50,8 +50,6 @@ export function Auth() {
   const [loading, setLoading] = useState(false);
   const [resetTokenValid, setResetTokenValid] = useState(!resetToken);
   const [resetUserId, setResetUserId] = useState("");
-  const [resetRequiresKeyRotation, setResetRequiresKeyRotation] =
-    useState(false);
   const [resetPartnerTargets, setResetPartnerTargets] = useState<
     Array<{
       partnership_id: string;
@@ -68,7 +66,6 @@ export function Auth() {
       .then((result) => {
         setEmail(result.email);
         setResetUserId(result.user_id);
-        setResetRequiresKeyRotation(result.key_rotation_required);
         setResetPartnerTargets(result.partner_access_targets);
         setResetTokenValid(true);
         setError(null);
@@ -129,9 +126,7 @@ export function Auth() {
           await rememberWrappingKey(rotatedKeys.wrappingKey);
         }
         setStatus(
-          resetRequiresKeyRotation
-            ? "Password updated. Older encrypted logs will stay unavailable, but once you sign in again your Virtue clients can resume uploading with fresh keys. Partners already monitoring this account will keep access to new logs automatically."
-            : "Password updated. You can log in now.",
+          "Password updated. Older encrypted logs will stay unavailable, but once you sign in again your Virtue clients can resume uploading with fresh keys. Partners already monitoring this account will keep access to new logs automatically.",
         );
         setPassword("");
         setConfirm("");
@@ -163,10 +158,6 @@ export function Auth() {
   }
 
   async function buildResetKeyMaterial(newPassword: string) {
-    if (!resetRequiresKeyRotation) {
-      return undefined;
-    }
-
     if (!resetUserId) {
       throw new Error("Reset token is missing account context");
     }
@@ -256,15 +247,13 @@ export function Auth() {
             <p class="settings-hint">
               Choose a new password to complete the reset for the account below.
             </p>
-            {resetRequiresKeyRotation && (
-              <p class="alert-error">
-                Resetting your password will generate a new end-to-end
-                encryption key for this account. Previously uploaded logs will
-                remain inaccessible, and you should sign back in on your Virtue
-                clients so future uploads use the new keys. Partners who already
-                monitor this account will keep access to new logs automatically.
-              </p>
-            )}
+            <p class="alert-error">
+              Resetting your password will generate a new end-to-end encryption
+              key for this account. Previously uploaded logs will remain
+              inaccessible, and you should sign back in on your Virtue clients
+              so future uploads use the new keys. Partners who already monitor
+              this account will keep access to new logs automatically.
+            </p>
           </>
         )}
         {inviteToken && (

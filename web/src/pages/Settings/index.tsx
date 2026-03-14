@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import { api, NotificationPreference, User } from "../../api";
+import { api, User, WatchingPartner } from "../../api";
 import { useAuth } from "../../context/auth";
 import "./style.css";
 
@@ -7,7 +7,7 @@ export function Settings() {
   const { token } = useAuth();
 
   const [user, setUser] = useState<User | null>(null);
-  const [preferences, setPreferences] = useState<NotificationPreference[]>([]);
+  const [watching, setWatching] = useState<WatchingPartner[]>([]);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [nameStatus, setNameStatus] = useState<string | null>(null);
@@ -22,14 +22,14 @@ export function Settings() {
 
   async function reload() {
     if (!token) return;
-    const [nextUser, nextPreferences] = await Promise.all([
+    const [nextUser, nextPartners] = await Promise.all([
       api.getUser(token),
-      api.getNotificationPreferences(token),
+      api.getPartners(token),
     ]);
     setUser(nextUser);
     setEmail(nextUser.email);
     setName(nextUser.name ?? "");
-    setPreferences(nextPreferences);
+    setWatching(nextPartners.watching);
   }
 
   useEffect(() => {
@@ -85,7 +85,7 @@ export function Settings() {
   async function updatePreference(
     partnershipId: string,
     patch: Partial<
-      Pick<NotificationPreference, "email_frequency" | "immediate_tamper_severity">
+      Pick<WatchingPartner, "digest_cadence" | "immediate_tamper_severity">
     >,
   ) {
     if (!token) return;
@@ -197,63 +197,66 @@ export function Settings() {
           person you monitor.
         </p>
 
-        {preferences.length === 0 ? (
+        {watching.length === 0 ? (
           <p class="settings-hint">
             Accept a partner invite to configure email notifications for the
             people you monitor.
           </p>
         ) : (
           <div class="settings-list">
-            {preferences.map((preference) => (
-              <div class="settings-item" key={preference.partnership_id}>
+            {watching.map((partner) => (
+              <div class="settings-item" key={partner.id}>
                 <div class="settings-item-header">
                   <strong>
-                    Monitoring{" "}
-                    {preference.monitored_user.name ??
-                      preference.monitored_user.email}
+                    Monitoring {partner.user.name ?? partner.user.email}
                   </strong>
-                  <span class="settings-badge">{preference.status}</span>
+                  <span class="settings-badge">{partner.status}</span>
                 </div>
-                <div class="settings-preference-grid">
-                  <label class="field settings-inline-field">
-                    <span>Email frequency</span>
-                    <select
-                      class="settings-select"
-                      value={preference.email_frequency}
-                      onChange={(e) =>
-                        updatePreference(preference.partnership_id, {
-                          email_frequency: (e.target as HTMLSelectElement)
-                            .value as NotificationPreference["email_frequency"],
-                        }).catch(() => {})
-                      }
-                      disabled={savingPreferenceId === preference.partnership_id}
-                    >
-                      <option value="none">No emails</option>
-                      <option value="alerts-only">Alerts only</option>
-                      <option value="daily">Daily digest and alerts</option>
-                      <option value="weekly">Weekly digest and alerts</option>
-                    </select>
-                  </label>
-                  <label class="field settings-inline-field">
-                    <span>Immediate tamper emails</span>
-                    <select
-                      class="settings-select"
-                      value={preference.immediate_tamper_severity}
-                      onChange={(e) =>
-                        updatePreference(preference.partnership_id, {
-                          immediate_tamper_severity: (
-                            e.target as HTMLSelectElement
-                          )
-                            .value as NotificationPreference["immediate_tamper_severity"],
-                        }).catch(() => {})
-                      }
-                      disabled={savingPreferenceId === preference.partnership_id}
-                    >
-                      <option value="critical">Critical only</option>
-                      <option value="warning">Warning and critical</option>
-                    </select>
-                  </label>
-                </div>
+                {partner.status === "accepted" && (
+                  <div class="settings-preference-grid">
+                    <label class="field settings-inline-field">
+                      <span>Email notifications</span>
+                      <select
+                        class="settings-select"
+                        value={partner.digest_cadence}
+                        onChange={(e) =>
+                          updatePreference(partner.id, {
+                            digest_cadence: (e.target as HTMLSelectElement)
+                              .value as WatchingPartner["digest_cadence"],
+                          }).catch(() => {})
+                        }
+                        disabled={savingPreferenceId === partner.id}
+                      >
+                        <option value="none">None</option>
+                        <option value="alerts-only">Alerts only</option>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                      </select>
+                    </label>
+                    <label class="field settings-inline-field">
+                      <span>Immediate tamper emails</span>
+                      <select
+                        class="settings-select"
+                        value={partner.immediate_tamper_severity}
+                        onChange={(e) =>
+                          updatePreference(partner.id, {
+                            immediate_tamper_severity: (
+                              e.target as HTMLSelectElement
+                            )
+                              .value as WatchingPartner["immediate_tamper_severity"],
+                          }).catch(() => {})
+                        }
+                        disabled={
+                          savingPreferenceId === partner.id ||
+                          partner.digest_cadence === "none"
+                        }
+                      >
+                        <option value="critical">Critical only</option>
+                        <option value="warning">Warning and critical</option>
+                      </select>
+                    </label>
+                  </div>
+                )}
               </div>
             ))}
           </div>

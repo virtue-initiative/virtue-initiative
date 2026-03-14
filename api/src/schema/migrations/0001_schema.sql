@@ -47,23 +47,22 @@ CREATE INDEX idx_batches_created_at ON batches(created_at);
 
 CREATE TABLE partners (
   id BLOB PRIMARY KEY,
-  user_id BLOB NOT NULL,
-  partner_user_id BLOB,
-  partner_email TEXT NOT NULL,
+  watching_user_id BLOB NOT NULL,
+  watcher_user_id BLOB,
+  watcher_email TEXT NOT NULL,
   invite_token_id BLOB UNIQUE,
   status TEXT NOT NULL DEFAULT 'pending',
-  permissions TEXT NOT NULL,
   e2ee_key BLOB,
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (partner_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (watching_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (watcher_user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (invite_token_id) REFERENCES email_tokens(id) ON DELETE SET NULL,
-  UNIQUE(user_id, partner_email)
+  UNIQUE(watching_user_id, watcher_email)
 );
 
-CREATE INDEX idx_partners_user_id ON partners(user_id);
-CREATE INDEX idx_partners_partner_user_id ON partners(partner_user_id);
+CREATE INDEX idx_partners_watching_user_id ON partners(watching_user_id);
+CREATE INDEX idx_partners_watcher_user_id ON partners(watcher_user_id);
 CREATE INDEX idx_partners_status ON partners(status);
 
 CREATE TABLE partner_preferences (
