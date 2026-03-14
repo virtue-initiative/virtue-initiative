@@ -111,6 +111,14 @@ jobs:
           name: virtue-android-${{ steps.version.outputs.build_label }}
           path: client/android/dist/virtue-android-${{ steps.version.outputs.build_label }}.apk
 
+      - name: Clear existing Android prerelease assets
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ../scripts/clear-prerelease-assets.sh "${{ steps.version.outputs.release_tag }}" "virtue-android-*.apk"
+        working-directory: client/android
+
       - name: Publish Android prerelease asset
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash

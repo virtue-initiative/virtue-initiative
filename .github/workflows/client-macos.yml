@@ -66,6 +66,14 @@ jobs:
           name: virtue-macos-${{ steps.version.outputs.build_label }}
           path: client/target/macos/Virtue-${{ steps.version.outputs.build_label }}.dmg
 
+      - name: Clear existing macOS prerelease assets
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/clear-prerelease-assets.sh "${{ steps.version.outputs.release_tag }}" "Virtue-*.dmg"
+        working-directory: client
+
       - name: Publish macOS prerelease asset
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash

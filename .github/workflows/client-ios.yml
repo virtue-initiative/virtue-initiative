@@ -75,6 +75,14 @@ jobs:
           name: virtue-ios-${{ steps.version.outputs.build_label }}
           path: client/ios/dist/VirtueIOS-${{ steps.version.outputs.build_label }}.zip
 
+      - name: Clear existing iOS prerelease assets
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ../scripts/clear-prerelease-assets.sh "${{ steps.version.outputs.release_tag }}" "VirtueIOS-*.zip"
+        working-directory: client/ios
+
       - name: Publish iOS prerelease asset
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash

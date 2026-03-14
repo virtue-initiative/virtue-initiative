@@ -71,6 +71,14 @@ jobs:
           name: virtue-linux-${{ steps.version.outputs.build_label }}
           path: client/target/debian/virtue_${{ steps.version.outputs.build_label }}_${{ steps.version.outputs.arch }}.deb
 
+      - name: Clear existing Linux prerelease assets
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/clear-prerelease-assets.sh "${{ steps.version.outputs.release_tag }}" "virtue_*_${{ steps.version.outputs.arch }}.deb"
+        working-directory: client
+
       - name: Publish Linux prerelease asset
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash
