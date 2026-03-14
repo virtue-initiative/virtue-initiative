@@ -26,6 +26,7 @@ CREATE TABLE devices (
 );
 
 CREATE INDEX idx_devices_owner ON devices(owner);
+CREATE INDEX idx_devices_id ON devices(id);
 
 -- Encrypted 1-hour batch blobs stored in R2
 CREATE TABLE batches (
@@ -33,8 +34,8 @@ CREATE TABLE batches (
   user_id BLOB NOT NULL,
   device_id BLOB NOT NULL,
   url TEXT NOT NULL UNIQUE,
-  start INTEGER NOT NULL,
-  "end" INTEGER NOT NULL,
+  start_time INTEGER NOT NULL,
+  end_time INTEGER NOT NULL,
   end_hash TEXT NOT NULL,
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -42,7 +43,6 @@ CREATE TABLE batches (
 );
 
 CREATE INDEX idx_batches_user_id ON batches(user_id);
-CREATE INDEX idx_batches_device_id ON batches(device_id);
 CREATE INDEX idx_batches_created_at ON batches(created_at);
 
 CREATE TABLE partners (
@@ -50,8 +50,7 @@ CREATE TABLE partners (
   user_id BLOB NOT NULL,
   partner_user_id BLOB,
   partner_email TEXT NOT NULL,
-  invite_token_hash TEXT UNIQUE,
-  invite_expires_at INTEGER,
+  invite_token_id BLOB UNIQUE,
   status TEXT NOT NULL DEFAULT 'pending',
   permissions TEXT NOT NULL,
   e2ee_key BLOB,
@@ -59,26 +58,26 @@ CREATE TABLE partners (
   updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (partner_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (invite_token_id) REFERENCES email_tokens(id) ON DELETE SET NULL,
   UNIQUE(user_id, partner_email)
 );
 
 CREATE INDEX idx_partners_user_id ON partners(user_id);
 CREATE INDEX idx_partners_partner_user_id ON partners(partner_user_id);
 CREATE INDEX idx_partners_status ON partners(status);
-CREATE INDEX idx_partners_invite_expires_at ON partners(invite_expires_at);
 
-CREATE TABLE partner_notification_preferences (
+CREATE TABLE partner_preferences (
   partnership_id BLOB PRIMARY KEY,
-  digest_cadence TEXT NOT NULL DEFAULT 'daily',
+  email_frequency TEXT NOT NULL DEFAULT 'daily',
   immediate_tamper_severity TEXT NOT NULL DEFAULT 'critical',
-  send_digest INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  FOREIGN KEY (partnership_id) REFERENCES partners(id) ON DELETE CASCADE
+  FOREIGN KEY (partnership_id) REFERENCES partners(id) ON DELETE CASCADE,
+  CHECK (email_frequency IN ('none', 'alerts-only', 'daily', 'weekly'))
 );
 
-CREATE INDEX idx_partner_notification_preferences_digest_cadence
-  ON partner_notification_preferences(digest_cadence);
+CREATE INDEX idx_partner_preferences_email_frequency
+  ON partner_preferences(email_frequency);
 
 -- Non-encrypted immediate device log entries sent directly from devices
 CREATE TABLE device_logs (
@@ -97,11 +96,10 @@ CREATE TABLE device_logs (
 CREATE INDEX idx_device_logs_user_id ON device_logs(user_id);
 CREATE INDEX idx_device_logs_device_id ON device_logs(device_id);
 CREATE INDEX idx_device_logs_created_at ON device_logs(created_at);
-CREATE INDEX idx_device_logs_risk ON device_logs(risk);
 
 CREATE TABLE email_tokens (
   id BLOB PRIMARY KEY,
-  user_id BLOB NOT NULL,
+  user_id BLOB,
   email TEXT NOT NULL,
   purpose TEXT NOT NULL,
   token_hash TEXT NOT NULL UNIQUE,
@@ -116,34 +114,28 @@ CREATE INDEX idx_email_tokens_email ON email_tokens(email);
 CREATE INDEX idx_email_tokens_purpose ON email_tokens(purpose);
 CREATE INDEX idx_email_tokens_expires_at ON email_tokens(expires_at);
 
-CREATE TABLE sessions (
-  id TEXT PRIMARY KEY,
-  session_type TEXT NOT NULL,
-  user_id TEXT,
-  device_id TEXT,
-  refresh_token_hash TEXT NOT NULL UNIQUE,
+CREATE TABLE user_sessions (
+  refresh_token_hash BLOB PRIMARY KEY,
+  user_id BLOB NOT NULL,
   expires_at INTEGER NOT NULL,
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
-  CHECK (session_type IN ('web', 'device')),
-  CHECK (
-    (session_type = 'web' AND user_id IS NOT NULL AND device_id IS NULL) OR
-    (session_type = 'device' AND device_id IS NOT NULL AND user_id IS NULL)
-  )
-);
-
-CREATE INDEX idx_sessions_user_id ON sessions(user_id);
-CREATE INDEX idx_sessions_device_id ON sessions(device_id);
-CREATE INDEX idx_sessions_expires_at ON sessions(expires_at);
-
-CREATE TABLE hash_states (
-  device_id BLOB PRIMARY KEY,
-  user_id BLOB NOT NULL,
-  state BLOB NOT NULL,
-  updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_hash_states_user_id ON hash_states(user_id);
+CREATE TABLE device_sessions (
+  refresh_token_hash BLOB PRIMARY KEY,
+  device_id BLOB NOT NULL,
+  expires_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_user_sessions_user_id ON user_sessions(user_id);
+CREATE INDEX idx_device_sessions_device_id ON device_sessions(device_id);
+
+CREATE TABLE hash_states (
+  device_id BLOB PRIMARY KEY,
+  state BLOB NOT NULL,
+  updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
+);

@@ -85,10 +85,7 @@ export function Settings() {
   async function updatePreference(
     partnershipId: string,
     patch: Partial<
-      Pick<
-        NotificationPreference,
-        "digest_cadence" | "immediate_tamper_severity" | "send_digest"
-      >
+      Pick<NotificationPreference, "email_frequency" | "immediate_tamper_severity">
     >,
   ) {
     if (!token) return;
@@ -217,67 +214,46 @@ export function Settings() {
                   </strong>
                   <span class="settings-badge">{preference.status}</span>
                 </div>
-                <label class="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={preference.send_digest}
-                    onChange={(e) =>
-                      updatePreference(preference.partnership_id, {
-                        send_digest: (e.target as HTMLInputElement).checked,
-                      }).catch(() => {})
-                    }
-                    disabled={savingPreferenceId === preference.partnership_id}
-                  />
-                  <span>Receive emails</span>
-                </label>
-                {preference.send_digest && (
-                  <div class="settings-preference-grid">
-                    <label class="field settings-inline-field">
-                      <span>Digest cadence</span>
-                      <select
-                        class="settings-select"
-                        value={preference.digest_cadence}
-                        onChange={(e) =>
-                          updatePreference(preference.partnership_id, {
-                            digest_cadence: (e.target as HTMLSelectElement)
-                              .value as NotificationPreference["digest_cadence"],
-                          }).catch(() => {})
-                        }
-                        disabled={
-                          savingPreferenceId === preference.partnership_id
-                        }
-                      >
-                        <option value="none">None</option>
-                        <option value="daily">Daily</option>
-                        <option value="twice_weekly">
-                          Twice a week (Sunday and Wednesday)
-                        </option>
-                        <option value="weekly">Weekly</option>
-                      </select>
-                    </label>
-                    <label class="field settings-inline-field">
-                      <span>Immediate tamper emails</span>
-                      <select
-                        class="settings-select"
-                        value={preference.immediate_tamper_severity}
-                        onChange={(e) =>
-                          updatePreference(preference.partnership_id, {
-                            immediate_tamper_severity: (
-                              e.target as HTMLSelectElement
-                            )
-                              .value as NotificationPreference["immediate_tamper_severity"],
-                          }).catch(() => {})
-                        }
-                        disabled={
-                          savingPreferenceId === preference.partnership_id
-                        }
-                      >
-                        <option value="critical">Critical only</option>
-                        <option value="warning">Warning and critical</option>
-                      </select>
-                    </label>
-                  </div>
-                )}
+                <div class="settings-preference-grid">
+                  <label class="field settings-inline-field">
+                    <span>Email frequency</span>
+                    <select
+                      class="settings-select"
+                      value={preference.email_frequency}
+                      onChange={(e) =>
+                        updatePreference(preference.partnership_id, {
+                          email_frequency: (e.target as HTMLSelectElement)
+                            .value as NotificationPreference["email_frequency"],
+                        }).catch(() => {})
+                      }
+                      disabled={savingPreferenceId === preference.partnership_id}
+                    >
+                      <option value="none">No emails</option>
+                      <option value="alerts-only">Alerts only</option>
+                      <option value="daily">Daily digest and alerts</option>
+                      <option value="weekly">Weekly digest and alerts</option>
+                    </select>
+                  </label>
+                  <label class="field settings-inline-field">
+                    <span>Immediate tamper emails</span>
+                    <select
+                      class="settings-select"
+                      value={preference.immediate_tamper_severity}
+                      onChange={(e) =>
+                        updatePreference(preference.partnership_id, {
+                          immediate_tamper_severity: (
+                            e.target as HTMLSelectElement
+                          )
+                            .value as NotificationPreference["immediate_tamper_severity"],
+                        }).catch(() => {})
+                      }
+                      disabled={savingPreferenceId === preference.partnership_id}
+                    >
+                      <option value="critical">Critical only</option>
+                      <option value="warning">Warning and critical</option>
+                    </select>
+                  </label>
+                </div>
               </div>
             ))}
           </div>

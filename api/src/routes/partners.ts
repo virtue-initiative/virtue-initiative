@@ -5,7 +5,9 @@ import { authenticate } from '../middleware/auth';
 import { validateZ } from '../middleware/validation';
 import {
   acceptPartner,
+  consumeEmailToken,
   createPartner,
+  createEmailToken,
   findPartnerByInviteTokenHash,
   findPartnerById,
   findPartnerInviteForOwner,
@@ -16,12 +18,12 @@ import {
   listOwnedPartners,
   updatePartnerByOwner,
   deletePartnerById,
-  upsertPartnerNotificationPreference,
+  upsertPartnerPreference,
 } from '../lib/db';
 import { renderPartnerAcceptedTemplate, renderPartnerInviteTemplate } from '../lib/email/templates';
 import { PARTNER_INVITE_TTL_MS } from '../lib/email-domain';
 import { sendEmail } from '../lib/email';
-import { DEFAULT_DIGEST_CADENCE, DEFAULT_IMMEDIATE_TAMPER_SEVERITY } from '../lib/email-domain';
+import { DEFAULT_EMAIL_FREQUENCY, DEFAULT_IMMEDIATE_TAMPER_SEVERITY } from '../lib/email-domain';
 import { decodeBase64, encodeBase64 } from '../lib/encoding';
 import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
@@ -98,24 +100,34 @@ partners.post(
     }
 
     const id = uuidv4();
+    const inviteTokenId = uuidv4();
     const now = Date.now();
     const inviteToken = generateOpaqueToken();
+    const inviteTokenHash = hashOpaqueToken(inviteToken);
+
+    await createEmailToken(c.env.DB, {
+      id: inviteTokenId,
+      user_id: null,
+      email,
+      purpose: 'partner_invite',
+      token_hash: inviteTokenHash,
+      expires_at: now + PARTNER_INVITE_TTL_MS,
+      created_at: now,
+    });
 
     await createPartner(c.env.DB, {
       id,
       user_id: userId,
       partner_email: email,
-      invite_token_hash: hashOpaqueToken(inviteToken),
-      invite_expires_at: now + PARTNER_INVITE_TTL_MS,
+      invite_token_id: inviteTokenId,
       permissions: JSON.stringify(permissions),
       e2ee_key: undefined,
       created_at: now,
     });
-    await upsertPartnerNotificationPreference(c.env.DB, {
+    await upsertPartnerPreference(c.env.DB, {
       partnership_id: id,
-      digest_cadence: DEFAULT_DIGEST_CADENCE,
+      email_frequency: DEFAULT_EMAIL_FREQUENCY,
       immediate_tamper_severity: DEFAULT_IMMEDIATE_TAMPER_SEVERITY,
-      send_digest: true,
       updated_at: now,
     });
 
@@ -150,6 +162,7 @@ partners.post('/partner/invite/validate', validateZ('json', inviteTokenSchema), 
   if (
     !invite ||
     invite.status !== 'pending' ||
+    invite.invite_consumed_at ||
     !invite.invite_expires_at ||
     invite.invite_expires_at < Date.now()
   ) {
@@ -186,7 +199,11 @@ partners.post(
       return c.json({ error: 'Invalid or expired invite' }, 400);
     }
 
-    if (!invite.invite_expires_at || invite.invite_expires_at < Date.now()) {
+    if (
+      invite.invite_consumed_at ||
+      !invite.invite_expires_at ||
+      invite.invite_expires_at < Date.now()
+    ) {
       return c.json({ error: 'Invalid or expired invite' }, 400);
     }
 
@@ -205,6 +222,9 @@ partners.post(
       partnerEmail: currentUser.email,
       updated_at: Date.now(),
     });
+    if (invite.invite_token_id) {
+      await consumeEmailToken(c.env.DB, invite.invite_token_id, Date.now());
+    }
 
     const owner = await findUserById(c.env.DB, invite.user_id);
     if (owner) {

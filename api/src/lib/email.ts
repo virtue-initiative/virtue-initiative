@@ -67,11 +67,7 @@ export async function sendEmail(input: SendEmailInput) {
   }
 
   if (input.env.EMAIL_DELIVERY_MODE !== 'ses') {
-    console.info('email delivery skipped', {
-      kind: input.kind,
-      recipient: input.recipient,
-      subject: input.subject,
-    });
+    console.info('email delivery skipped', input);
     mockEmailOutbox.push({
       kind: input.kind,
       recipient_email: input.recipient,
