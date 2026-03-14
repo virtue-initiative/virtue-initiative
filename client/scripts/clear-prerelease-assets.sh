@@ -24,20 +24,20 @@ if ! command -v gh >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! gh release view "${TAG}" >/dev/null 2>&1; then
+if ! gh release view "${TAG}" -R "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
   exit 0
 fi
 
 while IFS=$'\t' read -r asset_id asset_name; do
-  [[ -n "${asset_id}" ]] || continue
+  [[ -n "${asset_name}" ]] || continue
 
   if [[ "${asset_name}" == ${ASSET_GLOB} ]]; then
-    gh api \
-      --method DELETE \
-      "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" >/dev/null
+    echo "Removing prerelease asset: ${asset_name}"
+    gh release delete-asset "${TAG}" "${asset_name}" --yes -R "${GITHUB_REPOSITORY}" >/dev/null
   fi
 done < <(
-  gh api \
-    "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+  gh release view "${TAG}" \
+    -R "${GITHUB_REPOSITORY}" \
+    --json assets \
     --template '{{range .assets}}{{printf "%v\t%s\n" .id .name}}{{end}}'
 )
