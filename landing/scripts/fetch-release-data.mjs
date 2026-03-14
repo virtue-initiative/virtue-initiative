@@ -54,6 +54,23 @@ function byNewestPublished(left, right) {
   );
 }
 
+function latestAssetTimestamp(release) {
+  if (!release?.assets?.length) return release?.published_at ?? null;
+
+  const latest = release.assets.reduce((currentLatest, asset) => {
+    const candidate = asset.updated_at ?? asset.created_at ?? null;
+
+    if (!candidate) return currentLatest;
+    if (!currentLatest) return candidate;
+
+    return new Date(candidate).getTime() > new Date(currentLatest).getTime()
+      ? candidate
+      : currentLatest;
+  }, null);
+
+  return latest ?? release.published_at ?? null;
+}
+
 function pickReleaseFields(release) {
   if (!release) return null;
 
@@ -62,6 +79,7 @@ function pickReleaseFields(release) {
     tag_name: release.tag_name,
     html_url: release.html_url,
     published_at: release.published_at,
+    latest_asset_at: latestAssetTimestamp(release),
     target_commitish: release.target_commitish,
     assets: release.assets.map((asset) => ({
       name: asset.name,
