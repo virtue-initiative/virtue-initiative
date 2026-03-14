@@ -137,7 +137,9 @@ export function Home() {
           <PartnerDevicesSection
             key={partner.id}
             partner={partner}
-            devices={devices.filter((device) => device.owner === partner.user.id)}
+            devices={devices.filter(
+              (device) => device.owner === partner.user.id,
+            )}
           />
         ))}
     </div>

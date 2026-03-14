@@ -247,10 +247,7 @@ export function renderPartnerDigestTemplate(input: {
   appUrl: string;
 }) {
   const owner = input.ownerName?.trim() || input.ownerEmail;
-  const periodLabel =
-    input.cadence === 'weekly'
-      ? 'Weekly'
-      : 'Daily';
+  const periodLabel = input.cadence === 'weekly' ? 'Weekly' : 'Daily';
   const lines = [
     `${periodLabel} accountability summary for ${owner}`,
     '',

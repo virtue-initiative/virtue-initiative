@@ -365,7 +365,9 @@ export async function canViewUserData(db: D1Database, ownerId: string, requester
   if (ownerId === requesterId) return true;
 
   const partnership = await db
-    .prepare("SELECT id FROM partners WHERE watching_user_id = ? AND watcher_user_id = ? AND status = 'accepted'")
+    .prepare(
+      "SELECT id FROM partners WHERE watching_user_id = ? AND watcher_user_id = ? AND status = 'accepted'",
+    )
     .bind(uuidToBytes(ownerId), uuidToBytes(requesterId))
     .first<{ id: ArrayBuffer }>();
 
@@ -699,10 +701,9 @@ export async function listDeviceLogsForUser(
 
 export async function findPartnerInviteForOwner(db: D1Database, ownerId: string, email: string) {
   return firstWithUuidFields<{ id: string }>(
-    db.prepare('SELECT id FROM partners WHERE watching_user_id = ? AND watcher_email = ?').bind(
-      uuidToBytes(ownerId),
-      email,
-    ),
+    db
+      .prepare('SELECT id FROM partners WHERE watching_user_id = ? AND watcher_email = ?')
+      .bind(uuidToBytes(ownerId), email),
     ['id'],
   );
 }
@@ -1190,7 +1191,12 @@ export async function createSessionRecord(
         `INSERT INTO user_sessions (refresh_token_hash, user_id, expires_at, created_at)
          VALUES (?, ?, ?, ?)`,
       )
-      .bind(input.refresh_token_hash, uuidToBytes(input.user_id!), input.expires_at, input.created_at)
+      .bind(
+        input.refresh_token_hash,
+        uuidToBytes(input.user_id!),
+        input.expires_at,
+        input.created_at,
+      )
       .run();
   }
 
@@ -1269,8 +1275,14 @@ export async function deleteSessionByRefreshTokenHash(
       .run();
   }
 
-  await db.prepare('DELETE FROM user_sessions WHERE refresh_token_hash = ?').bind(refreshTokenHash).run();
-  return db.prepare('DELETE FROM device_sessions WHERE refresh_token_hash = ?').bind(refreshTokenHash).run();
+  await db
+    .prepare('DELETE FROM user_sessions WHERE refresh_token_hash = ?')
+    .bind(refreshTokenHash)
+    .run();
+  return db
+    .prepare('DELETE FROM device_sessions WHERE refresh_token_hash = ?')
+    .bind(refreshTokenHash)
+    .run();
 }
 
 export async function listDigestEligiblePartnerships(db: D1Database) {
