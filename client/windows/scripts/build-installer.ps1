@@ -24,10 +24,20 @@ if ([string]::IsNullOrWhiteSpace($CacheRoot)) {
 
 $ProfileLower = $Profile.ToLowerInvariant()
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
+$WorkspaceTargetDir = Join-Path $ProjectRoot "target"
 $NsisScript = Join-Path $ProjectRoot "packaging\nsis\installer.nsi"
 $DistDir = Join-Path $ProjectRoot "dist"
 $OutFile = Join-Path $DistDir "virtue-windows-installer-$Version.exe"
-$BuildTargetDir = Join-Path $CacheRoot "cargo-target"
+
+if (-not [string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
+    $BuildTargetDir = $env:CARGO_TARGET_DIR
+} elseif ($env:GITHUB_ACTIONS -eq "true") {
+    # Reuse the target dir restored by rust-cache in CI.
+    $BuildTargetDir = $WorkspaceTargetDir
+} else {
+    $BuildTargetDir = Join-Path $CacheRoot "cargo-target"
+}
+
 $SccacheDir = Join-Path $CacheRoot "sccache"
 $LocalOutFile = Join-Path $BuildTargetDir "virtue-windows-installer-$Version.exe"
 
