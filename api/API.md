@@ -268,7 +268,24 @@ Response `200`:
 }
 ```
 
-### `POST /verify-email`
+### `POST /email-verification`
+
+Auth required.
+
+Sends a verification email.
+
+Response `200`:
+
+```js
+{
+  "ok": true,
+  "already_verified": true | undefined
+}
+```
+
+### `POST /email-verification/validate`
+
+Validates a token from a verification email.
 
 Request:
 
@@ -287,20 +304,9 @@ Response `200`:
 }
 ```
 
-### `POST /verify-email/request`
+### `POST /password-reset`
 
-Auth required.
-
-Response `200`:
-
-```js
-{
-  "ok": true,
-  "already_verified": true | undefined
-}
-```
-
-### `POST /password-reset/request`
+Sends a password reset request.
 
 Request:
 
@@ -313,6 +319,8 @@ Request:
 Response: `204 No Content`
 
 ### `POST /password-reset/validate`
+
+Gets information about a password reset request.
 
 Request:
 
@@ -329,7 +337,6 @@ Response `200`:
   "ok": true,
   "email": "user@example.com",
   "user_id": UUID,
-  "key_rotation_required": true,
   "partner_access_targets": [
     {
       "partnership_id": UUID,
@@ -340,7 +347,9 @@ Response `200`:
 }
 ```
 
-### `POST /password-reset`
+### `POST /password-reset/finalize`
+
+Finishes a password reset.
 
 Request:
 
@@ -489,9 +498,6 @@ Request:
 ```js
 {
   "email": "partner@example.com",
-  "permissions": {
-    "view_data": true
-  },
   "e2ee_key": Base64 | undefined
 }
 ```
@@ -505,7 +511,7 @@ Response `201`:
 }
 ```
 
-### `POST /partner/invite/validate`
+### `POST /partner/validate`
 
 Validates an invite token before login or signup.
 
@@ -531,7 +537,7 @@ Response `200`:
 }
 ```
 
-### `POST /partner/invite/accept`
+### `POST /partner/accept`
 
 Auth required.
 
@@ -560,105 +566,73 @@ Auth required.
 Response `200`:
 
 ```js
-[
-  {
-    "id": UUID,
-    "role": "owner" | "invitee",
-    "partner": {
-      "id": UUID | undefined,
-      "email": "partner@example.com",
-      "name": "Partner Name" | undefined
+{
+  "watching": [
+    {
+      "id": UUID,
+      "user": {
+        "id": UUID,
+        "email": "partner@example.com",
+        "name": "Partner Name" | undefined,
+      },
+      "status": "pending" | "accepted",
+      "e2ee_key": Base64 | undefined,
     },
-    "status": "pending" | "accepted",
-    "permissions": {
-      "view_data": true
-    },
-    "created_at": DateTime,
-    "e2ee_key": Base64 | undefined
-  }
-]
+  ],
+  "watchers": [
+    {
+      "id": UUID,
+      "user": {
+        "id": UUID | undefined,
+        "email": "partner@example.com",
+        "name": "Partner Name" | undefined,
+      },
+      "status": "pending" | "accepted",
+    }
+  ],
+}
 ```
 
-### `PATCH /partner/:id`
+### `PATCH /partner/watcher/:id`
 
-Auth required. Only the owner side may update.
+Auth required. Updates the key the watcher will use to decrypt your logs.
 
 Request:
 
 ```js
 {
-  "permissions": {
-    "view_data": true
-  } | undefined,
   "e2ee_key": Base64 | undefined
 }
 ```
 
-Response `200`:
+Response `204 No Content`
 
-```js
-{
-  "id": UUID,
-  "permissions": {
-    "view_data": true
-  }
-}
-```
+### `PATCH /partner/watching/:id`
 
-### `DELETE /partner/:id`
-
-Auth required. Either the owner or the invitee side may delete if authorized.
-
-Response: `204 No Content`
-
-## Notifications
-
-### `GET /notifications/preferences`
-
-Auth required.
-
-Lists notification preferences for partnerships where the current user is the invitee / monitoring partner.
-
-Response `200`:
-
-```js
-[
-  {
-    "partnership_id": UUID,
-    "status": "pending" | "accepted",
-    "monitored_user": {
-      "id": UUID,
-      "email": "owner@example.com",
-      "name": "Owner Name" | undefined
-    },
-    "email_frequency": "none" | "alerts-only" | "daily" | "weekly",
-    "immediate_tamper_severity": "warning" | "critical"
-  }
-]
-```
-
-### `PATCH /notifications/preferences/:id`
-
-Auth required.
+Auth required. Updates the user's notification preferences
 
 Request:
 
 ```js
 {
-  "email_frequency": "none" | "alerts-only" | "daily" | "weekly" | undefined,
-  "immediate_tamper_severity": "warning" | "critical" | undefined
+  "digest_cadence": "none" | "alerts-only" | "daily" | "weekly" | undefined,
+  "immediate_tamper_severity": "warning" | "critical" | undefined,
 }
 ```
 
-Response `200`:
+Response `204 No Content`
 
-```js
-{
-  "partnership_id": UUID,
-  "email_frequency": "none" | "alerts-only" | "daily" | "weekly",
-  "immediate_tamper_severity": "warning" | "critical"
-}
-```
+### `DELETE /partner/watcher/:id`
+
+Auth required. Deletes a watcher.
+
+Response: `204 No Content`
+
+### `DELETE /partner/watching/:id`
+
+Auth required. Deletes a person you're watching.
+
+Response: `204 No Content`
 
 ## Email Webhooks
 
@@ -795,10 +769,11 @@ Request:
 {
   "ts": DateTime,
   "type": "service_stop",
-  "risk": 1 | undefined,
+  "risk": 0.2 | undefined,
   "data": {
-    "title": "Monitoring stopped unexpectedly" | undefined,
-    "details": "..." | undefined
+    "title": "Optional title" | undefined,
+    "details": "Optional details" | undefined
+    // ... other options are accepted
   }
 }
 ```

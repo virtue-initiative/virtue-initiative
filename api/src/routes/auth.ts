@@ -335,7 +335,7 @@ auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema),
   return c.json({ ok: true });
 });
 
-auth.post('/verify-email', validateZ('json', verifyEmailSchema), async (c) => {
+auth.post('/email-verification/validate', validateZ('json', verifyEmailSchema), async (c) => {
   const { token } = c.req.valid('json');
   const record = await getValidTokenRecord(c.env.DB, token, 'email_verification');
 
@@ -350,7 +350,7 @@ auth.post('/verify-email', validateZ('json', verifyEmailSchema), async (c) => {
   return c.json({ ok: true, email: record.email });
 });
 
-auth.post('/verify-email/request', authenticate('access'), async (c) => {
+auth.post('/email-verification', authenticate('access'), async (c) => {
   const user = await findUserById(c.env.DB, c.get('sub'));
 
   if (!user) {
@@ -375,7 +375,7 @@ auth.post('/verify-email/request', authenticate('access'), async (c) => {
   return c.json({ ok: true });
 });
 
-auth.post('/password-reset/request', validateZ('json', passwordResetRequestSchema), async (c) => {
+auth.post('/password-reset', validateZ('json', passwordResetRequestSchema), async (c) => {
   const { email } = c.req.valid('json');
   const user = await findUserByEmail(c.env.DB, email);
 
@@ -403,20 +403,19 @@ auth.post('/password-reset/validate', validateZ('json', passwordResetValidateSch
     ok: true,
     email: record.email,
     user_id: record.user_id,
-    key_rotation_required: Boolean(user.e2ee_key || user.pub_key || user.priv_key),
     partner_access_targets: (await listPartnerAccessTargetsForOwner(c.env.DB, record.user_id)).map(
       (target) => ({
         partnership_id: target.id,
-        partner_email: target.partner_email!,
-        ...(target.partner_pub_key
-          ? { partner_pub_key: encodeBase64(target.partner_pub_key) }
+        partner_email: target.watcher_email!,
+        ...(target.watcher_pub_key
+          ? { partner_pub_key: encodeBase64(target.watcher_pub_key) }
           : {}),
       }),
     ),
   });
 });
 
-auth.post('/password-reset', validateZ('json', passwordResetSchema), async (c) => {
+auth.post('/password-reset/finalize', validateZ('json', passwordResetSchema), async (c) => {
   const { token, password, e2ee_key, pub_key, priv_key, partner_access_keys } = c.req.valid('json');
   const record = await getValidTokenRecord(c.env.DB, token, 'password_reset');
 
@@ -429,8 +428,8 @@ auth.post('/password-reset', validateZ('json', passwordResetSchema), async (c) =
     return c.json({ error: 'Invalid or expired token' }, 400);
   }
 
-  const keyRotationRequired = Boolean(user.e2ee_key || user.pub_key || user.priv_key);
-  if (keyRotationRequired && (!e2ee_key || !pub_key || !priv_key)) {
+  const rotatingKeys = Boolean(e2ee_key || pub_key || priv_key || partner_access_keys?.length);
+  if (rotatingKeys && (!e2ee_key || !pub_key || !priv_key)) {
     return c.json(
       { error: 'New encrypted key material must be generated during password reset' },
       400,
@@ -443,7 +442,7 @@ auth.post('/password-reset', validateZ('json', passwordResetSchema), async (c) =
     ...(pub_key ? { pub_key: decodeBase64(pub_key) } : {}),
     ...(priv_key ? { priv_key: decodeBase64(priv_key) } : {}),
   });
-  if (keyRotationRequired) {
+  if (rotatingKeys) {
     await clearPartnerAccessKeysForUser(c.env.DB, record.user_id);
     if (partner_access_keys?.length) {
       await updatePartnerAccessKeys(

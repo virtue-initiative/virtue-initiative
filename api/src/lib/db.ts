@@ -92,15 +92,7 @@ function placeholders(count: number) {
   return Array.from({ length: count }, () => '?').join(', ');
 }
 
-export type PartnerPermissions = {
-  view_data?: boolean;
-};
-
 export type SessionType = 'web' | 'device';
-
-export function parsePermissions(value: string): PartnerPermissions {
-  return JSON.parse(value) as PartnerPermissions;
-}
 
 export async function findUserByEmail(db: D1Database, email: string) {
   return firstWithUuidFields<{
@@ -357,34 +349,27 @@ export async function deleteDeviceById(db: D1Database, deviceId: string) {
 }
 
 export async function listVisibleOwnerIds(db: D1Database, requesterId: string) {
-  const partnerships = await allWithUuidFields<{ user_id: string; permissions: string }>(
+  const partnerships = await allWithUuidFields<{ watching_user_id: string }>(
     db
       .prepare(
-        "SELECT user_id, permissions FROM partners WHERE partner_user_id = ? AND status = 'accepted'",
+        "SELECT watching_user_id FROM partners WHERE watcher_user_id = ? AND status = 'accepted'",
       )
       .bind(uuidToBytes(requesterId)),
-    ['user_id'],
+    ['watching_user_id'],
   );
 
-  return [
-    requesterId,
-    ...partnerships
-      .filter((row) => parsePermissions(row.permissions).view_data)
-      .map((row) => row.user_id),
-  ];
+  return [requesterId, ...partnerships.map((row) => row.watching_user_id)];
 }
 
 export async function canViewUserData(db: D1Database, ownerId: string, requesterId: string) {
   if (ownerId === requesterId) return true;
 
   const partnership = await db
-    .prepare(
-      "SELECT permissions FROM partners WHERE user_id = ? AND partner_user_id = ? AND status = 'accepted'",
-    )
+    .prepare("SELECT id FROM partners WHERE watching_user_id = ? AND watcher_user_id = ? AND status = 'accepted'")
     .bind(uuidToBytes(ownerId), uuidToBytes(requesterId))
-    .first<{ permissions: string }>();
+    .first<{ id: ArrayBuffer }>();
 
-  return partnership ? Boolean(parsePermissions(partnership.permissions).view_data) : false;
+  return Boolean(partnership);
 }
 
 export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
@@ -714,9 +699,10 @@ export async function listDeviceLogsForUser(
 
 export async function findPartnerInviteForOwner(db: D1Database, ownerId: string, email: string) {
   return firstWithUuidFields<{ id: string }>(
-    db
-      .prepare('SELECT id FROM partners WHERE user_id = ? AND partner_email = ?')
-      .bind(uuidToBytes(ownerId), email),
+    db.prepare('SELECT id FROM partners WHERE watching_user_id = ? AND watcher_email = ?').bind(
+      uuidToBytes(ownerId),
+      email,
+    ),
     ['id'],
   );
 }
@@ -725,10 +711,9 @@ export async function createPartner(
   db: D1Database,
   input: {
     id: string;
-    user_id: string;
-    partner_email: string;
+    watching_user_id: string;
+    watcher_email: string;
     invite_token_id: string;
-    permissions: string;
     e2ee_key?: ArrayBuffer;
     created_at: number;
   },
@@ -736,16 +721,15 @@ export async function createPartner(
   return db
     .prepare(
       `INSERT INTO partners (
-        id, user_id, partner_user_id, partner_email, invite_token_id,
-        status, permissions, e2ee_key, created_at, updated_at
-      ) VALUES (?, ?, NULL, ?, ?, 'pending', ?, ?, ?, ?)`,
+        id, watching_user_id, watcher_user_id, watcher_email, invite_token_id,
+        status, e2ee_key, created_at, updated_at
+      ) VALUES (?, ?, NULL, ?, ?, 'pending', ?, ?, ?)`,
     )
     .bind(
       uuidToBytes(input.id),
-      uuidToBytes(input.user_id),
-      input.partner_email,
+      uuidToBytes(input.watching_user_id),
+      input.watcher_email,
       uuidToBytes(input.invite_token_id),
-      input.permissions,
       input.e2ee_key ?? null,
       input.created_at,
       input.created_at,
@@ -756,14 +740,13 @@ export async function createPartner(
 export async function findPartnerById(db: D1Database, partnerId: string) {
   return firstWithUuidFields<{
     id: string;
-    user_id: string;
-    partner_user_id: string | null;
-    partner_email: string;
+    watching_user_id: string;
+    watcher_user_id: string | null;
+    watcher_email: string;
     invite_token_id: string | null;
     invite_expires_at: number | null;
     invite_consumed_at: number | null;
     status: string;
-    permissions: string;
     e2ee_key: ArrayBuffer | null;
     created_at: number;
     updated_at: number;
@@ -771,14 +754,13 @@ export async function findPartnerById(db: D1Database, partnerId: string) {
     db
       .prepare(
         `SELECT p.id,
-                p.user_id,
-                p.partner_user_id,
-                p.partner_email,
+                p.watching_user_id,
+                p.watcher_user_id,
+                p.watcher_email,
                 p.invite_token_id,
                 et.expires_at AS invite_expires_at,
                 et.consumed_at AS invite_consumed_at,
                 p.status,
-                p.permissions,
                 p.e2ee_key,
                 p.created_at,
                 p.updated_at
@@ -787,21 +769,20 @@ export async function findPartnerById(db: D1Database, partnerId: string) {
          WHERE p.id = ?`,
       )
       .bind(uuidToBytes(partnerId)),
-    ['id', 'user_id', 'partner_user_id', 'invite_token_id'],
+    ['id', 'watching_user_id', 'watcher_user_id', 'invite_token_id'],
   );
 }
 
 export async function findPartnerByInviteTokenHash(db: D1Database, tokenHash: string) {
   return firstWithUuidFields<{
     id: string;
-    user_id: string;
-    partner_user_id: string | null;
-    partner_email: string;
+    watching_user_id: string;
+    watcher_user_id: string | null;
+    watcher_email: string;
     invite_token_id: string | null;
     invite_expires_at: number | null;
     invite_consumed_at: number | null;
     status: string;
-    permissions: string;
     e2ee_key: ArrayBuffer | null;
     created_at: number;
     updated_at: number;
@@ -809,14 +790,13 @@ export async function findPartnerByInviteTokenHash(db: D1Database, tokenHash: st
     db
       .prepare(
         `SELECT p.id,
-                p.user_id,
-                p.partner_user_id,
-                p.partner_email,
+                p.watching_user_id,
+                p.watcher_user_id,
+                p.watcher_email,
                 p.invite_token_id,
                 et.expires_at AS invite_expires_at,
                 et.consumed_at AS invite_consumed_at,
                 p.status,
-                p.permissions,
                 p.e2ee_key,
                 p.created_at,
                 p.updated_at
@@ -825,7 +805,7 @@ export async function findPartnerByInviteTokenHash(db: D1Database, tokenHash: st
          WHERE et.token_hash = ? AND et.purpose = 'partner_invite'`,
       )
       .bind(tokenHash),
-    ['id', 'user_id', 'partner_user_id', 'invite_token_id'],
+    ['id', 'watching_user_id', 'watcher_user_id', 'invite_token_id'],
   );
 }
 
@@ -836,8 +816,8 @@ export async function findPartnerForOwnerAndUser(
   excludeId?: string,
 ) {
   const query = excludeId
-    ? 'SELECT id FROM partners WHERE user_id = ? AND partner_user_id = ? AND id != ?'
-    : 'SELECT id FROM partners WHERE user_id = ? AND partner_user_id = ?';
+    ? 'SELECT id FROM partners WHERE watching_user_id = ? AND watcher_user_id = ? AND id != ?'
+    : 'SELECT id FROM partners WHERE watching_user_id = ? AND watcher_user_id = ?';
   const prepared = db.prepare(query);
   return firstWithUuidFields<{ id: string }>(
     excludeId
@@ -849,18 +829,18 @@ export async function findPartnerForOwnerAndUser(
 
 export async function acceptPartner(
   db: D1Database,
-  input: { id: string; partnerUserId: string; partnerEmail: string; updated_at: number },
+  input: { id: string; watcherUserId: string; watcherEmail: string; updated_at: number },
 ) {
   return db
     .prepare(
       `UPDATE partners
-       SET partner_user_id = ?, partner_email = ?, invite_token_id = NULL,
+       SET watcher_user_id = ?, watcher_email = ?, invite_token_id = NULL,
            status = 'accepted', e2ee_key = NULL, updated_at = ?
        WHERE id = ?`,
     )
     .bind(
-      uuidToBytes(input.partnerUserId),
-      input.partnerEmail,
+      uuidToBytes(input.watcherUserId),
+      input.watcherEmail,
       input.updated_at,
       uuidToBytes(input.id),
     )
@@ -871,24 +851,23 @@ export async function listOwnedPartners(db: D1Database, ownerId: string) {
   return allWithUuidFields<{
     id: string;
     status: string;
-    permissions: string;
     created_at: number;
     e2ee_key: ArrayBuffer | null;
-    partner_email: string;
-    partner_id: string | null;
-    partner_name: string | null;
+    watcher_email: string;
+    watcher_id: string | null;
+    watcher_name: string | null;
   }>(
     db
       .prepare(
-        `SELECT p.id, p.status, p.permissions, p.created_at, p.e2ee_key, p.partner_email,
-                 u.id AS partner_id, u.name AS partner_name
+        `SELECT p.id, p.status, p.created_at, p.e2ee_key, p.watcher_email,
+                 u.id AS watcher_id, u.name AS watcher_name
            FROM partners p
-           LEFT JOIN users u ON u.id = p.partner_user_id
-           WHERE p.user_id = ?
+           LEFT JOIN users u ON u.id = p.watcher_user_id
+           WHERE p.watching_user_id = ?
            ORDER BY p.created_at DESC`,
       )
       .bind(uuidToBytes(ownerId)),
-    ['id', 'partner_id'],
+    ['id', 'watcher_id'],
   );
 }
 
@@ -896,24 +875,27 @@ export async function listIncomingPartners(db: D1Database, partnerUserId: string
   return allWithUuidFields<{
     id: string;
     status: string;
-    permissions: string;
     created_at: number;
     e2ee_key: ArrayBuffer | null;
-    owner_id: string;
-    owner_email: string;
-    owner_name: string | null;
+    watching_user_id: string;
+    watching_user_email: string;
+    watching_user_name: string | null;
+    email_frequency: string | null;
+    immediate_tamper_severity: string | null;
   }>(
     db
       .prepare(
-        `SELECT p.id, p.status, p.permissions, p.created_at, p.e2ee_key,
-                u.id AS owner_id, u.email AS owner_email, u.name AS owner_name
+        `SELECT p.id, p.status, p.created_at, p.e2ee_key,
+                u.id AS watching_user_id, u.email AS watching_user_email, u.name AS watching_user_name,
+                pref.email_frequency, pref.immediate_tamper_severity
           FROM partners p
-          JOIN users u ON u.id = p.user_id
-          WHERE p.partner_user_id = ?
+          JOIN users u ON u.id = p.watching_user_id
+          LEFT JOIN partner_preferences pref ON pref.partnership_id = p.id
+          WHERE p.watcher_user_id = ?
           ORDER BY p.created_at DESC`,
       )
       .bind(uuidToBytes(partnerUserId)),
-    ['id', 'owner_id'],
+    ['id', 'watching_user_id'],
   );
 }
 
@@ -922,18 +904,12 @@ export async function updatePartnerByOwner(
   input: {
     id: string;
     ownerId: string;
-    permissions?: string;
     e2ee_key?: ArrayBuffer;
     updated_at: number;
   },
 ) {
   const updates: string[] = ['updated_at = ?'];
   const params: (string | number | ArrayBuffer | null)[] = [input.updated_at];
-
-  if (input.permissions !== undefined) {
-    updates.push('permissions = ?');
-    params.push(input.permissions);
-  }
 
   if (input.e2ee_key !== undefined) {
     updates.push('e2ee_key = ?');
@@ -943,7 +919,7 @@ export async function updatePartnerByOwner(
   params.push(uuidToBytes(input.id), uuidToBytes(input.ownerId));
 
   return db
-    .prepare(`UPDATE partners SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`)
+    .prepare(`UPDATE partners SET ${updates.join(', ')} WHERE id = ? AND watching_user_id = ?`)
     .bind(...params)
     .run();
 }
@@ -985,9 +961,9 @@ export async function listNotificationPreferencesForPartner(db: D1Database, part
   return allWithUuidFields<{
     partnership_id: string;
     status: string;
-    owner_id: string;
-    owner_email: string;
-    owner_name: string | null;
+    watching_user_id: string;
+    watching_user_email: string;
+    watching_user_name: string | null;
     email_frequency: string | null;
     immediate_tamper_severity: string | null;
   }>(
@@ -995,19 +971,19 @@ export async function listNotificationPreferencesForPartner(db: D1Database, part
       .prepare(
         `SELECT p.id AS partnership_id,
                  p.status,
-                 owner.id AS owner_id,
-                 owner.email AS owner_email,
-                 owner.name AS owner_name,
+                 owner.id AS watching_user_id,
+                 owner.email AS watching_user_email,
+                 owner.name AS watching_user_name,
                  pref.email_frequency,
                  pref.immediate_tamper_severity
           FROM partners p
-          JOIN users owner ON owner.id = p.user_id
+          JOIN users owner ON owner.id = p.watching_user_id
           LEFT JOIN partner_preferences pref ON pref.partnership_id = p.id
-          WHERE p.partner_user_id = ?
+          WHERE p.watcher_user_id = ?
           ORDER BY p.created_at DESC`,
       )
       .bind(uuidToBytes(partnerUserId)),
-    ['partnership_id', 'owner_id'],
+    ['partnership_id', 'watching_user_id'],
   );
 }
 
@@ -1015,15 +991,15 @@ export async function updatePartnerNotificationPreference(
   db: D1Database,
   input: {
     partnership_id: string;
-    partner_user_id: string;
+    watcher_user_id: string;
     email_frequency?: string;
     immediate_tamper_severity?: string;
     updated_at: number;
   },
 ) {
   const partnership = await db
-    .prepare('SELECT id FROM partners WHERE id = ? AND partner_user_id = ?')
-    .bind(uuidToBytes(input.partnership_id), uuidToBytes(input.partner_user_id))
+    .prepare('SELECT id FROM partners WHERE id = ? AND watcher_user_id = ?')
+    .bind(uuidToBytes(input.partnership_id), uuidToBytes(input.watcher_user_id))
     .first<{ id: string }>();
 
   if (!partnership) {
@@ -1060,7 +1036,7 @@ export async function updatePartnerNotificationPreference(
 
 export async function clearPartnerAccessKeysForUser(db: D1Database, partnerUserId: string) {
   return db
-    .prepare('UPDATE partners SET e2ee_key = NULL WHERE partner_user_id = ?')
+    .prepare('UPDATE partners SET e2ee_key = NULL WHERE watcher_user_id = ?')
     .bind(uuidToBytes(partnerUserId))
     .run();
 }
@@ -1068,30 +1044,25 @@ export async function clearPartnerAccessKeysForUser(db: D1Database, partnerUserI
 export async function listPartnerAccessTargetsForOwner(db: D1Database, ownerId: string) {
   const result = await allWithUuidFields<{
     id: string;
-    permissions: string;
-    partner_user_id: string | null;
-    partner_email: string | null;
-    partner_pub_key: ArrayBuffer | null;
+    watcher_user_id: string | null;
+    watcher_email: string | null;
+    watcher_pub_key: ArrayBuffer | null;
   }>(
     db
       .prepare(
         `SELECT p.id,
-                p.permissions,
-                p.partner_user_id,
-                recipient.email AS partner_email,
-                recipient.pub_key AS partner_pub_key
+                p.watcher_user_id,
+                recipient.email AS watcher_email,
+                recipient.pub_key AS watcher_pub_key
          FROM partners p
-         LEFT JOIN users recipient ON recipient.id = p.partner_user_id
-         WHERE p.user_id = ? AND p.status = 'accepted'`,
+         LEFT JOIN users recipient ON recipient.id = p.watcher_user_id
+         WHERE p.watching_user_id = ? AND p.status = 'accepted'`,
       )
       .bind(uuidToBytes(ownerId)),
-    ['id', 'partner_user_id'],
+    ['id', 'watcher_user_id'],
   );
 
-  return result.filter(
-    (row) =>
-      parsePermissions(row.permissions).view_data && row.partner_user_id && row.partner_email,
-  );
+  return result.filter((row) => row.watcher_user_id && row.watcher_email);
 }
 
 export async function updatePartnerAccessKeys(
@@ -1101,7 +1072,9 @@ export async function updatePartnerAccessKeys(
 ) {
   for (const key of keys) {
     await db
-      .prepare('UPDATE partners SET e2ee_key = ?, updated_at = ? WHERE id = ? AND user_id = ?')
+      .prepare(
+        'UPDATE partners SET e2ee_key = ?, updated_at = ? WHERE id = ? AND watching_user_id = ?',
+      )
       .bind(key.e2ee_key, Date.now(), uuidToBytes(key.partnership_id), uuidToBytes(ownerId))
       .run();
   }
@@ -1110,27 +1083,27 @@ export async function updatePartnerAccessKeys(
 export async function listAcceptedNotificationTargetsForUser(db: D1Database, userId: string) {
   return allWithUuidFields<{
     partnership_id: string;
-    partner_email: string;
-    partner_user_id: string | null;
-    partner_name: string | null;
+    watcher_email: string;
+    watcher_user_id: string | null;
+    watcher_name: string | null;
     email_frequency: string | null;
     immediate_tamper_severity: string | null;
   }>(
     db
       .prepare(
         `SELECT p.id AS partnership_id,
-                recipient.email AS partner_email,
-                recipient.id AS partner_user_id,
-                recipient.name AS partner_name,
+                recipient.email AS watcher_email,
+                recipient.id AS watcher_user_id,
+                recipient.name AS watcher_name,
                 pref.email_frequency,
                 pref.immediate_tamper_severity
           FROM partners p
-          JOIN users recipient ON recipient.id = p.partner_user_id
+          JOIN users recipient ON recipient.id = p.watcher_user_id
           LEFT JOIN partner_preferences pref ON pref.partnership_id = p.id
-          WHERE p.user_id = ? AND p.status = 'accepted'`,
+          WHERE p.watching_user_id = ? AND p.status = 'accepted'`,
       )
       .bind(uuidToBytes(userId)),
-    ['partnership_id', 'partner_user_id'],
+    ['partnership_id', 'watcher_user_id'],
   );
 }
 
@@ -1303,28 +1276,28 @@ export async function deleteSessionByRefreshTokenHash(
 export async function listDigestEligiblePartnerships(db: D1Database) {
   return allWithUuidFields<{
     partnership_id: string;
-    user_id: string;
-    partner_email: string;
-    owner_email: string;
-    owner_name: string | null;
+    watching_user_id: string;
+    watcher_email: string;
+    watching_user_email: string;
+    watching_user_name: string | null;
     email_frequency: string | null;
     immediate_tamper_severity: string | null;
   }>(
     db.prepare(
       `SELECT p.id AS partnership_id,
-              p.user_id,
-              recipient.email AS partner_email,
-              owner.email AS owner_email,
-              owner.name AS owner_name,
+              p.watching_user_id,
+              recipient.email AS watcher_email,
+              owner.email AS watching_user_email,
+              owner.name AS watching_user_name,
               pref.email_frequency,
               pref.immediate_tamper_severity
         FROM partners p
-        JOIN users owner ON owner.id = p.user_id
-        JOIN users recipient ON recipient.id = p.partner_user_id
+        JOIN users owner ON owner.id = p.watching_user_id
+        JOIN users recipient ON recipient.id = p.watcher_user_id
         LEFT JOIN partner_preferences pref ON pref.partnership_id = p.id
         WHERE p.status = 'accepted'`,
     ),
-    ['partnership_id', 'user_id'],
+    ['partnership_id', 'watching_user_id'],
   );
 }
 

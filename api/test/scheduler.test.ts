@@ -39,7 +39,6 @@ describe('Notification scheduler', () => {
       headers: authHeaders(ownerToken),
       body: JSON.stringify({
         email: 'digest-partner@example.com',
-        permissions: { view_data: true },
       }),
     });
     const invite = (await inviteRes.json()) as { id: string };
@@ -50,7 +49,7 @@ describe('Notification scheduler', () => {
     );
     const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
 
-    await SELF.fetch(`${BASE}/partner/invite/accept`, {
+    await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
       headers: authHeaders(partnerToken),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
@@ -108,9 +107,9 @@ describe('Notification scheduler', () => {
   });
 
   it('sends weekly digests on Monday', async () => {
-    const now = Date.UTC(2026, 0, 12, 8, 0, 0);
-    const weekStart = Date.UTC(2026, 0, 5, 0, 0, 0);
-    const weekMid = Date.UTC(2026, 0, 8, 12, 0, 0);
+    const now = Date.UTC(2026, 0, 5, 8, 0, 0);
+    const previousWeekStart = Date.UTC(2025, 11, 29, 0, 0, 0);
+    const sundayMid = Date.UTC(2026, 0, 4, 12, 0, 0);
 
     const { token: ownerToken, userId: ownerId } = await signupAndGetToken(
       'twice-owner@example.com',
@@ -127,7 +126,6 @@ describe('Notification scheduler', () => {
       headers: authHeaders(ownerToken),
       body: JSON.stringify({
         email: 'twice-partner@example.com',
-        permissions: { view_data: true },
       }),
     });
     const inviteDelivery = (await listEmailDeliveries()).find(
@@ -137,17 +135,17 @@ describe('Notification scheduler', () => {
     );
     const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
 
-    await SELF.fetch(`${BASE}/partner/invite/accept`, {
+    await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
       headers: authHeaders(partnerToken),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
 
     const invite = (await inviteRes.json()) as { id: string };
-    await SELF.fetch(`${BASE}/notifications/preferences/${invite.id}`, {
+    await SELF.fetch(`${BASE}/partner/watching/${invite.id}`, {
       method: 'PATCH',
       headers: authHeaders(partnerToken),
-      body: JSON.stringify({ email_frequency: 'weekly' }),
+      body: JSON.stringify({ digest_cadence: 'weekly' }),
     });
 
     const device = await createDeviceForUser(ownerToken, 'Twice Device', 'linux');
@@ -160,10 +158,10 @@ describe('Notification scheduler', () => {
         uuidToBytes(ownerId),
         uuidToBytes(device.id),
         'https://example.com/batch-twice.enc',
-        weekStart,
-        weekMid,
+        previousWeekStart,
+        sundayMid,
         'hash-twice',
-        weekMid,
+        sundayMid,
       )
       .run();
 

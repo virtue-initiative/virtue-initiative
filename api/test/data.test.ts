@@ -114,7 +114,7 @@ describe('Data and device API routes', () => {
     expect(resetRes.status).toBe(200);
   });
 
-  it("allows an accepted partner with view_data to read another user's data", async () => {
+  it("allows an accepted partner to read another user's data", async () => {
     const { token: ownerToken, userId: ownerUserId } = await signupAndGetToken('owner@example.com');
     const { token: partnerToken } = await signupAndGetToken('partner@example.com');
     const device = await createDeviceForUser(ownerToken);
@@ -122,7 +122,7 @@ describe('Data and device API routes', () => {
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
       headers: authHeaders(ownerToken),
-      body: JSON.stringify({ email: 'partner@example.com', permissions: { view_data: true } }),
+      body: JSON.stringify({ email: 'partner@example.com' }),
     });
     await inviteRes.json();
     const inviteDelivery = (await listEmailDeliveries()).find(
@@ -130,7 +130,7 @@ describe('Data and device API routes', () => {
         delivery.kind === 'partner_invite' && delivery.recipient_email === 'partner@example.com',
     );
     const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
-    await SELF.fetch(`${BASE}/partner/invite/accept`, {
+    await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
       headers: authHeaders(partnerToken),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),

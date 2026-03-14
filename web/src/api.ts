@@ -42,30 +42,35 @@ export interface DataPage {
   next_cursor?: number;
 }
 
-export interface Partner {
+export interface WatchingPartner {
   id: string;
-  role: "owner" | "invitee";
-  partner: {
+  user: {
+    id: string;
+    email: string;
+    name?: string;
+  };
+  status: "pending" | "accepted";
+  digest_cadence: "none" | "alerts-only" | "daily" | "weekly";
+  immediate_tamper_severity: "warning" | "critical";
+  created_at?: number;
+  e2ee_key?: string;
+}
+
+export interface WatcherPartner {
+  id: string;
+  user: {
     id?: string;
     email: string;
     name?: string;
   };
   status: "pending" | "accepted";
-  permissions: { view_data: boolean };
-  created_at: number;
+  created_at?: number;
   e2ee_key?: string;
 }
 
-export interface NotificationPreference {
-  partnership_id: string;
-  status: "pending" | "accepted";
-  monitored_user: {
-    id: string;
-    email: string;
-    name?: string;
-  };
-  email_frequency: "none" | "alerts-only" | "daily" | "weekly";
-  immediate_tamper_severity: "warning" | "critical";
+export interface PartnerRelationships {
+  watching: WatchingPartner[];
+  watchers: WatcherPartner[];
 }
 
 export interface PartnerInviteValidation {
@@ -82,7 +87,6 @@ export interface PasswordResetValidation {
   ok: boolean;
   email: string;
   user_id: string;
-  key_rotation_required: boolean;
   partner_access_targets: Array<{
     partnership_id: string;
     partner_email: string;
@@ -278,19 +282,19 @@ export const api = {
 
   requestVerificationEmail: (token: string) =>
     req<{ ok: boolean; already_verified?: boolean }>(
-      "/verify-email/request",
+      "/email-verification",
       { method: "POST" },
       token,
     ),
 
   verifyEmail: (token: string) =>
-    req<{ ok: boolean }>("/verify-email", {
+    req<{ ok: boolean; email: string }>("/email-verification/validate", {
       method: "POST",
       body: JSON.stringify({ token }),
     }),
 
   requestPasswordReset: (email: string) =>
-    req<void>("/password-reset/request", {
+    req<void>("/password-reset", {
       method: "POST",
       body: JSON.stringify({ email }),
     }),
@@ -311,7 +315,7 @@ export const api = {
       partner_access_keys?: Array<{ partnership_id: string; e2ee_key: string }>;
     },
   ) =>
-    req<{ ok: boolean }>("/password-reset", {
+    req<{ ok: boolean }>("/password-reset/finalize", {
       method: "POST",
       body: JSON.stringify({ token, password, ...(wrappedKeys ?? {}) }),
     }),
@@ -335,7 +339,7 @@ export const api = {
   deleteDevice: (token: string, id: string) =>
     req<void>(`/device/${id}`, { method: "DELETE" }, token),
 
-  getPartners: (token: string) => req<Partner[]>("/partner", {}, token),
+  getPartners: (token: string) => req<PartnerRelationships>("/partner", {}, token),
 
   getPartnerPublicKey: async (email: string) => {
     const qs = new URLSearchParams({ email });
@@ -346,7 +350,6 @@ export const api = {
   invitePartner: (
     token: string,
     email: string,
-    permissions: { view_data: boolean },
     e2ee_key?: string,
   ) =>
     req<{ id: string; status: string }>(
@@ -355,7 +358,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify({
           email,
-          permissions,
           ...(e2ee_key ? { e2ee_key } : {}),
         }),
       },
@@ -363,14 +365,14 @@ export const api = {
     ),
 
   validatePartnerInvite: (inviteToken: string) =>
-    req<PartnerInviteValidation>("/partner/invite/validate", {
+    req<PartnerInviteValidation>("/partner/validate", {
       method: "POST",
       body: JSON.stringify({ token: inviteToken }),
     }),
 
   acceptPartnerInvite: (token: string, inviteToken: string) =>
     req<{ id: string }>(
-      "/partner/invite/accept",
+      "/partner/accept",
       {
         method: "POST",
         body: JSON.stringify({ token: inviteToken }),
@@ -378,13 +380,13 @@ export const api = {
       token,
     ),
 
-  updatePartner: (
+  updateWatcher: (
     token: string,
     id: string,
-    fields: { permissions?: { view_data?: boolean }; e2ee_key?: string },
+    fields: { e2ee_key?: string },
   ) =>
-    req<{ id: string; permissions: { view_data?: boolean } }>(
-      `/partner/${id}`,
+    req<void>(
+      `/partner/watcher/${id}`,
       {
         method: "PATCH",
         body: JSON.stringify(fields),
@@ -392,25 +394,21 @@ export const api = {
       token,
     ),
 
-  deletePartner: (token: string, id: string) =>
-    req<void>(`/partner/${id}`, { method: "DELETE" }, token),
+  deleteWatcher: (token: string, id: string) =>
+    req<void>(`/partner/watcher/${id}`, { method: "DELETE" }, token),
 
-  getNotificationPreferences: (token: string) =>
-    req<NotificationPreference[]>("/notifications/preferences", {}, token),
+  deleteWatching: (token: string, id: string) =>
+    req<void>(`/partner/watching/${id}`, { method: "DELETE" }, token),
 
   updateNotificationPreference: (
     token: string,
     id: string,
     patch: Partial<
-      Pick<NotificationPreference, "email_frequency" | "immediate_tamper_severity">
+      Pick<WatchingPartner, "digest_cadence" | "immediate_tamper_severity">
     >,
   ) =>
-    req<{
-      partnership_id: string;
-      email_frequency: "none" | "alerts-only" | "daily" | "weekly";
-      immediate_tamper_severity: "warning" | "critical";
-    }>(
-      `/notifications/preferences/${id}`,
+    req<void>(
+      `/partner/watching/${id}`,
       {
         method: "PATCH",
         body: JSON.stringify(patch),
