@@ -9,7 +9,10 @@ const { tagline } = Astro.props;
 <header>
   <div class="container">
     <div class="header-top">
-      <a href="/" class="wordmark">The Virtue Initiative</a>
+      <div class="header-copy">
+        <a href="/" class="wordmark">The Virtue Initiative</a>
+        {tagline && <p class="tagline">{tagline}</p>}
+      </div>
       <div class="header-actions">
         <button
           class="control control-icon"
@@ -20,6 +23,5 @@ const { tagline } = Astro.props;
         </a>
       </div>
     </div>
-    {tagline && <p class="tagline">{tagline}</p>}
   </div>
 </header>

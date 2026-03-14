@@ -12,6 +12,8 @@
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  width: 100%;
+  overflow-x: hidden;
 }
 
 .app-shell {
@@ -19,7 +21,9 @@
   flex-direction: column;
   min-height: 100vh;
   height: 100dvh;
-  overflow: hidden;
+  width: 100%;
+  overflow-x: hidden;
+  overflow-y: hidden;
 }
 
 .site-header {
@@ -27,9 +31,18 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 0.75rem 1rem;
   background-color: var(--surface);
   border-bottom: 1px solid var(--border);
   padding: 0.5rem 1.25rem;
+}
+
+.header-brand-row {
+  min-height: 2.25rem;
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .header-brand {
@@ -37,6 +50,7 @@
   font-weight: 700;
   font-size: 1.1rem;
   letter-spacing: 0.02em;
+  line-height: 1.1;
 
   a& {
     text-decoration: none;
@@ -52,11 +66,26 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.header-nav-group,
+.header-action-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.header-action-group .control-icon {
+  width: 2.25rem;
+  min-width: 2.25rem;
+  height: 2.25rem;
 }
 
 .app-main {
   flex: auto;
   min-height: 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -68,4 +97,37 @@
 .global-alert {
   width: min(680px, calc(100% - 2rem));
   margin: 1rem auto 0;
+}
+
+@media (max-width: 720px) {
+  #app {
+    min-height: 100svh;
+  }
+
+  .app-shell {
+    height: auto;
+    min-height: 100svh;
+    overflow-x: hidden;
+    overflow-y: visible;
+  }
+
+  .site-header {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .header-brand-row {
+    width: 100%;
+  }
+
+  .header-toolbar {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .app-main {
+    overflow-x: hidden;
+    overflow-y: visible;
+  }
 }

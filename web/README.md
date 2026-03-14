@@ -19,6 +19,9 @@ Run the dev server
 npm run dev
 ```
 
+For testing the local web app from another device over HTTPS, see
+[HTTPS-DEVICE-TESTING.md](./HTTPS-DEVICE-TESTING.md).
+
 ## Deploying
 
 ```bash
