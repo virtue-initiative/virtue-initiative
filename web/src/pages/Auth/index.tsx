@@ -345,7 +345,7 @@ export function Auth() {
             </div>
           )}
 
-          {(mode === "signup") && (
+          {mode === "signup" && (
             <p class="settings-hint">
               During sign-up, Virtue creates an end-to-end encryption key for
               your account. It protects your uploaded logs, screenshots, and
