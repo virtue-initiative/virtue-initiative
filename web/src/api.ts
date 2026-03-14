@@ -22,8 +22,8 @@ export interface Device {
 export interface Batch {
   id: string;
   device_id: string;
-  start: number;
-  end: number;
+  start_time: number;
+  end_time: number;
   end_hash: string;
   url: string;
 }
@@ -64,9 +64,8 @@ export interface NotificationPreference {
     email: string;
     name?: string;
   };
-  digest_cadence: "daily" | "twice_weekly" | "weekly" | "none";
+  email_frequency: "none" | "alerts-only" | "daily" | "weekly";
   immediate_tamper_severity: "warning" | "critical";
-  send_digest: boolean;
 }
 
 export interface PartnerInviteValidation {
@@ -403,17 +402,13 @@ export const api = {
     token: string,
     id: string,
     patch: Partial<
-      Pick<
-        NotificationPreference,
-        "digest_cadence" | "immediate_tamper_severity" | "send_digest"
-      >
+      Pick<NotificationPreference, "email_frequency" | "immediate_tamper_severity">
     >,
   ) =>
     req<{
       partnership_id: string;
-      digest_cadence: "none" | "daily" | "twice_weekly" | "weekly";
+      email_frequency: "none" | "alerts-only" | "daily" | "weekly";
       immediate_tamper_severity: "warning" | "critical";
-      send_digest: boolean;
     }>(
       `/notifications/preferences/${id}`,
       {

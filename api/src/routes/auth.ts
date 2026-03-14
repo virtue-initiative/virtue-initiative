@@ -92,7 +92,6 @@ async function createSession(c: Context<{ Bindings: Env; Variables: Variables }>
   const now = Date.now();
 
   await createSessionRecord(c.env.DB, {
-    id: uuidv4(),
     session_type: 'web',
     user_id: userId,
     refresh_token_hash: hashOpaqueToken(refreshToken),
@@ -204,10 +203,10 @@ async function getValidTokenRecord(
   purpose: 'email_verification' | 'password_reset',
 ) {
   const token = await findEmailTokenByHash(db, hashOpaqueToken(rawToken), purpose);
-  if (!token || token.consumed_at || token.expires_at < Date.now()) {
+  if (!token || !token.user_id || token.consumed_at || token.expires_at < Date.now()) {
     return null;
   }
-  return token;
+  return { ...token, user_id: token.user_id };
 }
 
 auth.post('/signup', validateZ('json', signupSchema), async (c) => {

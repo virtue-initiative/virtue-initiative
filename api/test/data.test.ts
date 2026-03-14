@@ -19,23 +19,19 @@ describe('Data and device API routes', () => {
     const device = await createDeviceForUser(userToken, 'Phone', 'ios');
 
     const session = await env.DB.prepare(
-      `SELECT session_type, user_id, lower(hex(device_id)) as device_id_hex, expires_at
-       FROM sessions
+      `SELECT lower(hex(device_id)) as device_id_hex, expires_at
+       FROM device_sessions
        WHERE device_id = ?
        ORDER BY created_at DESC
        LIMIT 1`,
     )
       .bind(uuidToBytes(device.id))
       .first<{
-        session_type: string;
-        user_id: string | null;
         device_id_hex: string | null;
         expires_at: number;
       }>();
 
     expect(session).toMatchObject({
-      session_type: 'device',
-      user_id: null,
       device_id_hex: device.id.replaceAll('-', ''),
     });
     expect(session?.expires_at).toBeGreaterThan(Date.now());
@@ -60,8 +56,8 @@ describe('Data and device API routes', () => {
     expect(logRes.status).toBe(201);
 
     const form = new FormData();
-    form.set('start', '1710000000000');
-    form.set('end', '1710003600000');
+    form.set('start_time', '1710000000000');
+    form.set('end_time', '1710003600000');
     form.set('file', new File([new Uint8Array([1, 2, 3])], 'batch.enc'));
     const batchRes = await SELF.fetch(`${BASE}/d/batch`, {
       method: 'POST',
@@ -69,10 +65,18 @@ describe('Data and device API routes', () => {
       body: form,
     });
     expect(batchRes.status).toBe(201);
-    const batch = (await batchRes.json()) as { id: string; end_hash: string; url: string };
+    const batch = (await batchRes.json()) as {
+      id: string;
+      end_hash: string;
+      url: string;
+      start_time: number;
+      end_time: number;
+    };
     expect(batch.id).toBeTruthy();
     expect(batch.end_hash).toHaveLength(64);
     expect(batch.url).toContain('/user/');
+    expect(batch.start_time).toBe(1710000000000);
+    expect(batch.end_time).toBe(1710003600000);
 
     const hashReadRes = await SELF.fetch(`${BASE}/hash`, {
       headers: { Authorization: `Bearer ${device.access_token}` },

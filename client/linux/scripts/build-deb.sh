@@ -13,10 +13,11 @@ PKG_NAME="virtue"
 
 cargo build --release -p virtue-linux-client
 
+
 PKG_DIR="target/debian/${PKG_NAME}_${BUILD_LABEL}_${ARCH}"
 OUT_DEB="target/debian/${PKG_NAME}_${BUILD_LABEL}_${ARCH}.deb"
 
-rm -rf "$PKG_DIR" "$OUT_DEB"
+rm -rf "target/debian"
 mkdir -p "$PKG_DIR/DEBIAN"
 mkdir -p "$PKG_DIR/usr/bin"
 mkdir -p "$PKG_DIR/usr/lib/systemd/user"

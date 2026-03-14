@@ -33,8 +33,8 @@ pub struct Device {
 #[derive(Clone, Debug, Deserialize)]
 pub struct BatchUploadResponse {
     pub id: String,
-    pub start: i64,
-    pub end: i64,
+    pub start_time: i64,
+    pub end_time: i64,
     pub end_hash: String,
     pub url: String,
 }
@@ -59,8 +59,8 @@ mod tests {
     fn batch_upload_response_accepts_device_batch_shape() {
         let payload = r#"{
             "id": "batch-1",
-            "start": 1741122450000,
-            "end": 1741122478000,
+            "start_time": 1741122450000,
+            "end_time": 1741122478000,
             "end_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "url": "https://cdn.example.com/u/a.enc"
         }"#;

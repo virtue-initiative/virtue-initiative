@@ -16,7 +16,7 @@ import {
 import { encodeBase64, encodeHex } from '../lib/encoding';
 import { generateToken } from '../lib/jwt';
 import { putObject } from '../lib/r2';
-import { classifyDeviceLogEvent, notifyPartnersAboutRiskLog } from '../lib/tamper';
+import { notifyPartnersAboutRiskLog, riskToSeverity } from '../lib/tamper';
 import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
 
@@ -44,8 +44,8 @@ const deviceTokenSchema = z.object({
 });
 
 const uploadBatchSchema = z.object({
-  start: z.coerce.number().int().nonnegative(),
-  end: z.coerce.number().int().nonnegative(),
+  start_time: z.coerce.number().int().nonnegative(),
+  end_time: z.coerce.number().int().nonnegative(),
   file: z
     .instanceof(File)
     .refine((file) => file.size > 0, { message: 'File is empty' })
@@ -55,6 +55,7 @@ const uploadBatchSchema = z.object({
 const deviceLogSchema = z.object({
   ts: z.number().int().nonnegative(),
   type: z.string().min(1),
+  risk: z.number().min(0).max(1).optional(),
   data: z.record(z.string(), z.unknown()).optional().default({}),
 });
 
@@ -93,7 +94,6 @@ async function createDeviceSession(
   const now = Date.now();
 
   await createSessionRecord(c.env.DB, {
-    id: uuidv4(),
     session_type: 'device',
     device_id: deviceId,
     refresh_token_hash: hashOpaqueToken(refreshToken),
@@ -199,7 +199,7 @@ deviceOnly.post(
       return c.json({ error: 'Not found' }, 404);
     }
 
-    const { start, end, file } = c.req.valid('form');
+    const { start_time, end_time, file } = c.req.valid('form');
     const authorization = c.req.header('Authorization');
 
     if (!authorization) {
@@ -220,8 +220,8 @@ deviceOnly.post(
       user_id: device.owner,
       device_id: device.id,
       url,
-      start,
-      end,
+      start_time,
+      end_time,
       end_hash: endHash,
       created_at: createdAt,
     });
@@ -230,7 +230,7 @@ deviceOnly.post(
       await generateToken('server', device.id, c.env.JWT_SECRET, 60),
     );
 
-    return c.json({ id: batchId, start, end, end_hash: endHash, url }, 201);
+    return c.json({ id: batchId, start_time, end_time, end_hash: endHash, url }, 201);
   },
 );
 
@@ -249,13 +249,7 @@ deviceOnly.post(
     }
 
     const log = c.req.valid('json');
-    const classified = classifyDeviceLogEvent({
-      userId: device.owner,
-      deviceId: device.id,
-      type: log.type,
-      ts: log.ts,
-      data: log.data,
-    });
+    const severity = riskToSeverity(log.risk);
     const logId = uuidv4();
 
     await createDeviceLog(c.env.DB, {
@@ -265,20 +259,29 @@ deviceOnly.post(
       ts: log.ts,
       type: log.type,
       data: JSON.stringify(log.data),
-      risk: classified?.risk ?? null,
+      risk: log.risk ?? null,
       created_at: Date.now(),
     });
 
-    if (classified) {
+    if (severity && log.risk != null) {
+      const title =
+        typeof log.data.title === 'string' && log.data.title.trim().length > 0
+          ? log.data.title
+          : `Device reported ${log.type.replaceAll('_', ' ')}.`;
+      const details =
+        typeof log.data.details === 'string' && log.data.details.trim().length > 0
+          ? log.data.details
+          : null;
+
       await notifyPartnersAboutRiskLog(c.env.DB, c.env, {
         logId,
         appUrl: getAppUrl(c),
-        userId: classified.userId,
-        severity: classified.severity,
-        risk: classified.risk,
-        title: classified.title,
-        details: classified.details ?? null,
-        happenedAt: classified.happenedAt,
+        userId: device.owner,
+        severity,
+        risk: log.risk,
+        title,
+        details,
+        happenedAt: log.ts,
       });
     }
 

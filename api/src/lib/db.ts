@@ -403,7 +403,7 @@ export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
   }>(
     db
       .prepare(
-        `SELECT d.id, d.owner, d.name, d.platform, d.enabled, d.created_at, MAX(b.end) AS last_upload_at
+        `SELECT d.id, d.owner, d.name, d.platform, d.enabled, d.created_at, MAX(b.end_time) AS last_upload_at
          FROM devices d
          LEFT JOIN batches b ON b.device_id = d.id
          WHERE d.owner IN (${placeholders(ownerIds.length)})
@@ -428,7 +428,7 @@ export async function listEnabledDevicesWithLastUpload(db: D1Database) {
     owner_name: string | null;
   }>(
     db.prepare(
-      `SELECT d.id, d.owner, d.name, d.platform, d.enabled, d.created_at, MAX(b.end) AS last_upload_at,
+      `SELECT d.id, d.owner, d.name, d.platform, d.enabled, d.created_at, MAX(b.end_time) AS last_upload_at,
               u.email AS owner_email, u.name AS owner_name
        FROM devices d
        JOIN users u ON u.id = d.owner
@@ -469,15 +469,15 @@ export async function createBatch(
     user_id: string;
     device_id: string;
     url: string;
-    start: number;
-    end: number;
+    start_time: number;
+    end_time: number;
     end_hash: string;
     created_at: number;
   },
 ) {
   return db
     .prepare(
-      `INSERT INTO batches (id, user_id, device_id, url, start, end, end_hash, created_at)
+      `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
@@ -485,8 +485,8 @@ export async function createBatch(
       uuidToBytes(input.user_id),
       uuidToBytes(input.device_id),
       input.url,
-      input.start,
-      input.end,
+      input.start_time,
+      input.end_time,
       input.end_hash,
       input.created_at,
     )
@@ -535,7 +535,7 @@ export async function listBatches(
   }
 
   const params: SqlValue[] = ownerIds.map(uuidToBytes);
-  let query = `SELECT id, user_id, device_id, url, start, end, end_hash, created_at
+  let query = `SELECT id, user_id, device_id, url, start_time, end_time, end_hash, created_at
                FROM batches
                WHERE user_id IN (${placeholders(ownerIds.length)})`;
 
@@ -557,8 +557,8 @@ export async function listBatches(
     user_id: string;
     device_id: string;
     url: string;
-    start: number;
-    end: number;
+    start_time: number;
+    end_time: number;
     end_hash: string;
     created_at: number;
   }>(db.prepare(query).bind(...params), ['id', 'user_id', 'device_id']);
@@ -570,13 +570,13 @@ export async function listBatchWindowsForUser(
   windowStart: number,
   windowEnd: number,
 ) {
-  return allWithUuidFields<{ id: string; device_id: string; start: number; end: number }>(
+  return allWithUuidFields<{ id: string; device_id: string; start_time: number; end_time: number }>(
     db
       .prepare(
-        `SELECT id, device_id, start, end
+        `SELECT id, device_id, start_time, end_time
          FROM batches
-         WHERE user_id = ? AND end > ? AND start < ?
-         ORDER BY start ASC`,
+         WHERE user_id = ? AND end_time > ? AND start_time < ?
+         ORDER BY start_time ASC`,
       )
       .bind(uuidToBytes(userId), windowStart, windowEnd),
     ['id', 'device_id'],
@@ -727,8 +727,7 @@ export async function createPartner(
     id: string;
     user_id: string;
     partner_email: string;
-    invite_token_hash: string;
-    invite_expires_at: number;
+    invite_token_id: string;
     permissions: string;
     e2ee_key?: ArrayBuffer;
     created_at: number;
@@ -737,16 +736,15 @@ export async function createPartner(
   return db
     .prepare(
       `INSERT INTO partners (
-        id, user_id, partner_user_id, partner_email, invite_token_hash, invite_expires_at,
+        id, user_id, partner_user_id, partner_email, invite_token_id,
         status, permissions, e2ee_key, created_at, updated_at
-      ) VALUES (?, ?, NULL, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
+      ) VALUES (?, ?, NULL, ?, ?, 'pending', ?, ?, ?, ?)`,
     )
     .bind(
       uuidToBytes(input.id),
       uuidToBytes(input.user_id),
       input.partner_email,
-      input.invite_token_hash,
-      input.invite_expires_at,
+      uuidToBytes(input.invite_token_id),
       input.permissions,
       input.e2ee_key ?? null,
       input.created_at,
@@ -761,8 +759,9 @@ export async function findPartnerById(db: D1Database, partnerId: string) {
     user_id: string;
     partner_user_id: string | null;
     partner_email: string;
-    invite_token_hash: string | null;
+    invite_token_id: string | null;
     invite_expires_at: number | null;
+    invite_consumed_at: number | null;
     status: string;
     permissions: string;
     e2ee_key: ArrayBuffer | null;
@@ -771,12 +770,24 @@ export async function findPartnerById(db: D1Database, partnerId: string) {
   }>(
     db
       .prepare(
-        `SELECT id, user_id, partner_user_id, partner_email, invite_token_hash, invite_expires_at,
-                status, permissions, e2ee_key, created_at, updated_at
-         FROM partners WHERE id = ?`,
+        `SELECT p.id,
+                p.user_id,
+                p.partner_user_id,
+                p.partner_email,
+                p.invite_token_id,
+                et.expires_at AS invite_expires_at,
+                et.consumed_at AS invite_consumed_at,
+                p.status,
+                p.permissions,
+                p.e2ee_key,
+                p.created_at,
+                p.updated_at
+         FROM partners p
+         LEFT JOIN email_tokens et ON et.id = p.invite_token_id
+         WHERE p.id = ?`,
       )
       .bind(uuidToBytes(partnerId)),
-    ['id', 'user_id', 'partner_user_id'],
+    ['id', 'user_id', 'partner_user_id', 'invite_token_id'],
   );
 }
 
@@ -786,8 +797,9 @@ export async function findPartnerByInviteTokenHash(db: D1Database, tokenHash: st
     user_id: string;
     partner_user_id: string | null;
     partner_email: string;
-    invite_token_hash: string | null;
+    invite_token_id: string | null;
     invite_expires_at: number | null;
+    invite_consumed_at: number | null;
     status: string;
     permissions: string;
     e2ee_key: ArrayBuffer | null;
@@ -796,13 +808,24 @@ export async function findPartnerByInviteTokenHash(db: D1Database, tokenHash: st
   }>(
     db
       .prepare(
-        `SELECT id, user_id, partner_user_id, partner_email, invite_token_hash, invite_expires_at,
-                status, permissions, e2ee_key, created_at, updated_at
-         FROM partners
-         WHERE invite_token_hash = ?`,
+        `SELECT p.id,
+                p.user_id,
+                p.partner_user_id,
+                p.partner_email,
+                p.invite_token_id,
+                et.expires_at AS invite_expires_at,
+                et.consumed_at AS invite_consumed_at,
+                p.status,
+                p.permissions,
+                p.e2ee_key,
+                p.created_at,
+                p.updated_at
+         FROM partners p
+         JOIN email_tokens et ON et.id = p.invite_token_id
+         WHERE et.token_hash = ? AND et.purpose = 'partner_invite'`,
       )
       .bind(tokenHash),
-    ['id', 'user_id', 'partner_user_id'],
+    ['id', 'user_id', 'partner_user_id', 'invite_token_id'],
   );
 }
 
@@ -831,7 +854,7 @@ export async function acceptPartner(
   return db
     .prepare(
       `UPDATE partners
-       SET partner_user_id = ?, partner_email = ?, invite_token_hash = NULL, invite_expires_at = NULL,
+       SET partner_user_id = ?, partner_email = ?, invite_token_id = NULL,
            status = 'accepted', e2ee_key = NULL, updated_at = ?
        WHERE id = ?`,
     )
@@ -929,32 +952,29 @@ export async function deletePartnerById(db: D1Database, partnerId: string) {
   return db.prepare('DELETE FROM partners WHERE id = ?').bind(uuidToBytes(partnerId)).run();
 }
 
-export async function upsertPartnerNotificationPreference(
+export async function upsertPartnerPreference(
   db: D1Database,
   input: {
     partnership_id: string;
-    digest_cadence: string;
+    email_frequency: string;
     immediate_tamper_severity: string;
-    send_digest: boolean;
     updated_at: number;
   },
 ) {
   return db
     .prepare(
-      `INSERT INTO partner_notification_preferences (
-         partnership_id, digest_cadence, immediate_tamper_severity, send_digest, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO partner_preferences (
+         partnership_id, email_frequency, immediate_tamper_severity, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(partnership_id) DO UPDATE SET
-         digest_cadence = excluded.digest_cadence,
+         email_frequency = excluded.email_frequency,
          immediate_tamper_severity = excluded.immediate_tamper_severity,
-         send_digest = excluded.send_digest,
          updated_at = excluded.updated_at`,
     )
     .bind(
       uuidToBytes(input.partnership_id),
-      input.digest_cadence,
+      input.email_frequency,
       input.immediate_tamper_severity,
-      input.send_digest ? 1 : 0,
       input.updated_at,
       input.updated_at,
     )
@@ -968,9 +988,8 @@ export async function listNotificationPreferencesForPartner(db: D1Database, part
     owner_id: string;
     owner_email: string;
     owner_name: string | null;
-    digest_cadence: string | null;
+    email_frequency: string | null;
     immediate_tamper_severity: string | null;
-    send_digest: number | null;
   }>(
     db
       .prepare(
@@ -979,12 +998,11 @@ export async function listNotificationPreferencesForPartner(db: D1Database, part
                  owner.id AS owner_id,
                  owner.email AS owner_email,
                  owner.name AS owner_name,
-                 pref.digest_cadence,
-                 pref.immediate_tamper_severity,
-                 pref.send_digest
+                 pref.email_frequency,
+                 pref.immediate_tamper_severity
           FROM partners p
           JOIN users owner ON owner.id = p.user_id
-          LEFT JOIN partner_notification_preferences pref ON pref.partnership_id = p.id
+          LEFT JOIN partner_preferences pref ON pref.partnership_id = p.id
           WHERE p.partner_user_id = ?
           ORDER BY p.created_at DESC`,
       )
@@ -998,9 +1016,8 @@ export async function updatePartnerNotificationPreference(
   input: {
     partnership_id: string;
     partner_user_id: string;
-    digest_cadence?: string;
+    email_frequency?: string;
     immediate_tamper_severity?: string;
-    send_digest?: boolean;
     updated_at: number;
   },
 ) {
@@ -1015,33 +1032,29 @@ export async function updatePartnerNotificationPreference(
 
   const current = await db
     .prepare(
-      'SELECT digest_cadence, immediate_tamper_severity, send_digest FROM partner_notification_preferences WHERE partnership_id = ?',
+      'SELECT email_frequency, immediate_tamper_severity FROM partner_preferences WHERE partnership_id = ?',
     )
     .bind(uuidToBytes(input.partnership_id))
     .first<{
-      digest_cadence: string;
+      email_frequency: string;
       immediate_tamper_severity: string;
-      send_digest: number;
     }>();
 
-  const digestCadence = input.digest_cadence ?? current?.digest_cadence ?? 'daily';
+  const emailFrequency = input.email_frequency ?? current?.email_frequency ?? 'daily';
   const severity =
     input.immediate_tamper_severity ?? current?.immediate_tamper_severity ?? 'critical';
-  const sendDigest = input.send_digest ?? (current ? current.send_digest === 1 : true);
 
-  await upsertPartnerNotificationPreference(db, {
+  await upsertPartnerPreference(db, {
     partnership_id: input.partnership_id,
-    digest_cadence: digestCadence,
+    email_frequency: emailFrequency,
     immediate_tamper_severity: severity,
-    send_digest: sendDigest,
     updated_at: input.updated_at,
   });
 
   return {
     partnership_id: input.partnership_id,
-    digest_cadence: digestCadence,
+    email_frequency: emailFrequency,
     immediate_tamper_severity: severity,
-    send_digest: sendDigest,
   };
 }
 
@@ -1100,9 +1113,8 @@ export async function listAcceptedNotificationTargetsForUser(db: D1Database, use
     partner_email: string;
     partner_user_id: string | null;
     partner_name: string | null;
-    digest_cadence: string | null;
+    email_frequency: string | null;
     immediate_tamper_severity: string | null;
-    send_digest: number | null;
   }>(
     db
       .prepare(
@@ -1110,12 +1122,11 @@ export async function listAcceptedNotificationTargetsForUser(db: D1Database, use
                 recipient.email AS partner_email,
                 recipient.id AS partner_user_id,
                 recipient.name AS partner_name,
-                pref.digest_cadence,
-                pref.immediate_tamper_severity,
-                pref.send_digest
+                pref.email_frequency,
+                pref.immediate_tamper_severity
           FROM partners p
           JOIN users recipient ON recipient.id = p.partner_user_id
-          LEFT JOIN partner_notification_preferences pref ON pref.partnership_id = p.id
+          LEFT JOIN partner_preferences pref ON pref.partnership_id = p.id
           WHERE p.user_id = ? AND p.status = 'accepted'`,
       )
       .bind(uuidToBytes(userId)),
@@ -1127,7 +1138,7 @@ export async function createEmailToken(
   db: D1Database,
   input: {
     id: string;
-    user_id: string;
+    user_id?: string | null;
     email: string;
     purpose: string;
     token_hash: string;
@@ -1142,7 +1153,7 @@ export async function createEmailToken(
     )
     .bind(
       uuidToBytes(input.id),
-      uuidToBytes(input.user_id),
+      input.user_id ? uuidToBytes(input.user_id) : null,
       input.email,
       input.purpose,
       input.token_hash,
@@ -1172,7 +1183,7 @@ export async function findEmailTokenByHash(db: D1Database, tokenHash: string, pu
   const prepared = db.prepare(query);
   return firstWithUuidFields<{
     id: string;
-    user_id: string;
+    user_id: string | null;
     email: string;
     purpose: string;
     token_hash: string;
@@ -1192,7 +1203,6 @@ export async function consumeEmailToken(db: D1Database, tokenId: string, consume
 export async function createSessionRecord(
   db: D1Database,
   input: {
-    id: string;
     session_type: SessionType;
     user_id?: string;
     device_id?: string;
@@ -1201,18 +1211,24 @@ export async function createSessionRecord(
     created_at: number;
   },
 ) {
+  if (input.session_type === 'web') {
+    return db
+      .prepare(
+        `INSERT INTO user_sessions (refresh_token_hash, user_id, expires_at, created_at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .bind(input.refresh_token_hash, uuidToBytes(input.user_id!), input.expires_at, input.created_at)
+      .run();
+  }
+
   return db
     .prepare(
-      `INSERT INTO sessions (
-         id, session_type, user_id, device_id, refresh_token_hash, expires_at, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO device_sessions (refresh_token_hash, device_id, expires_at, created_at)
+       VALUES (?, ?, ?, ?)`,
     )
     .bind(
-      input.id,
-      input.session_type,
-      input.user_id ? uuidToBytes(input.user_id) : null,
-      input.device_id ? uuidToBytes(input.device_id) : null,
       input.refresh_token_hash,
+      uuidToBytes(input.device_id!),
       input.expires_at,
       input.created_at,
     )
@@ -1224,23 +1240,40 @@ export async function findSessionByRefreshTokenHash(
   refreshTokenHash: string,
   sessionType: SessionType,
 ) {
+  if (sessionType === 'web') {
+    return firstWithUuidFields<{
+      user_id: string;
+      device_id: null;
+      refresh_token_hash: string;
+      expires_at: number;
+      created_at: number;
+    }>(
+      db
+        .prepare(
+          `SELECT user_id, NULL AS device_id, refresh_token_hash, expires_at, created_at
+           FROM user_sessions
+           WHERE refresh_token_hash = ?`,
+        )
+        .bind(refreshTokenHash),
+      ['user_id'],
+    );
+  }
+
   return firstWithUuidFields<{
-    id: string;
-    session_type: SessionType;
-    user_id: string | null;
-    device_id: string | null;
+    user_id: null;
+    device_id: string;
     refresh_token_hash: string;
     expires_at: number;
     created_at: number;
   }>(
     db
       .prepare(
-        `SELECT id, session_type, user_id, device_id, refresh_token_hash, expires_at, created_at
-         FROM sessions
-         WHERE refresh_token_hash = ? AND session_type = ?`,
+        `SELECT NULL AS user_id, device_id, refresh_token_hash, expires_at, created_at
+         FROM device_sessions
+         WHERE refresh_token_hash = ?`,
       )
-      .bind(refreshTokenHash, sessionType),
-    ['user_id', 'device_id'],
+      .bind(refreshTokenHash),
+    ['device_id'],
   );
 }
 
@@ -1249,12 +1282,22 @@ export async function deleteSessionByRefreshTokenHash(
   refreshTokenHash: string,
   sessionType?: SessionType,
 ) {
-  return sessionType
-    ? db
-        .prepare('DELETE FROM sessions WHERE refresh_token_hash = ? AND session_type = ?')
-        .bind(refreshTokenHash, sessionType)
-        .run()
-    : db.prepare('DELETE FROM sessions WHERE refresh_token_hash = ?').bind(refreshTokenHash).run();
+  if (sessionType === 'web') {
+    return db
+      .prepare('DELETE FROM user_sessions WHERE refresh_token_hash = ?')
+      .bind(refreshTokenHash)
+      .run();
+  }
+
+  if (sessionType === 'device') {
+    return db
+      .prepare('DELETE FROM device_sessions WHERE refresh_token_hash = ?')
+      .bind(refreshTokenHash)
+      .run();
+  }
+
+  await db.prepare('DELETE FROM user_sessions WHERE refresh_token_hash = ?').bind(refreshTokenHash).run();
+  return db.prepare('DELETE FROM device_sessions WHERE refresh_token_hash = ?').bind(refreshTokenHash).run();
 }
 
 export async function listDigestEligiblePartnerships(db: D1Database) {
@@ -1264,9 +1307,8 @@ export async function listDigestEligiblePartnerships(db: D1Database) {
     partner_email: string;
     owner_email: string;
     owner_name: string | null;
-    digest_cadence: string | null;
+    email_frequency: string | null;
     immediate_tamper_severity: string | null;
-    send_digest: number | null;
   }>(
     db.prepare(
       `SELECT p.id AS partnership_id,
@@ -1274,13 +1316,12 @@ export async function listDigestEligiblePartnerships(db: D1Database) {
               recipient.email AS partner_email,
               owner.email AS owner_email,
               owner.name AS owner_name,
-              pref.digest_cadence,
-              pref.immediate_tamper_severity,
-              pref.send_digest
+              pref.email_frequency,
+              pref.immediate_tamper_severity
         FROM partners p
         JOIN users owner ON owner.id = p.user_id
         JOIN users recipient ON recipient.id = p.partner_user_id
-        LEFT JOIN partner_notification_preferences pref ON pref.partnership_id = p.id
+        LEFT JOIN partner_preferences pref ON pref.partnership_id = p.id
         WHERE p.status = 'accepted'`,
     ),
     ['partnership_id', 'user_id'],
@@ -1290,40 +1331,33 @@ export async function listDigestEligiblePartnerships(db: D1Database) {
 export async function getHashState(db: D1Database, deviceId: string) {
   return firstWithUuidFields<{
     device_id: string;
-    user_id: string;
     state: ArrayBuffer;
     updated_at: number;
   }>(
     db
-      .prepare('SELECT device_id, user_id, state, updated_at FROM hash_states WHERE device_id = ?')
+      .prepare('SELECT device_id, state, updated_at FROM hash_states WHERE device_id = ?')
       .bind(uuidToBytes(deviceId)),
-    ['device_id', 'user_id'],
+    ['device_id'],
   );
 }
 
 export async function upsertHashState(
   db: D1Database,
-  input: { device_id: string; user_id: string; state: ArrayBuffer; updated_at: number },
+  input: { device_id: string; state: ArrayBuffer; updated_at: number },
 ) {
   return db
     .prepare(
-      `INSERT INTO hash_states (device_id, user_id, state, updated_at)
-       VALUES (?, ?, ?, ?)
+      `INSERT INTO hash_states (device_id, state, updated_at)
+       VALUES (?, ?, ?)
        ON CONFLICT(device_id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at`,
     )
-    .bind(uuidToBytes(input.device_id), uuidToBytes(input.user_id), input.state, input.updated_at)
+    .bind(uuidToBytes(input.device_id), input.state, input.updated_at)
     .run();
 }
 
-export async function resetHashState(
-  db: D1Database,
-  deviceId: string,
-  userId: string,
-  updatedAt: number,
-) {
+export async function resetHashState(db: D1Database, deviceId: string, updatedAt: number) {
   return upsertHashState(db, {
     device_id: deviceId,
-    user_id: userId,
     state: new Uint8Array(32).buffer,
     updated_at: updatedAt,
   });
