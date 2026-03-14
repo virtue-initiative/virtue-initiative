@@ -1,4 +1,4 @@
-import { DEFAULT_DIGEST_CADENCE, DigestCadence, TamperSeverity } from './email-domain';
+import { DEFAULT_EMAIL_FREQUENCY, DigestFrequency, TamperSeverity } from './email-domain';
 import {
   listBatchWindowsForUser,
   listDeviceLogsForUser,
@@ -31,21 +31,6 @@ function getWeeklyWindow(now: number) {
   return { start: end - 7 * 24 * 60 * 60 * 1000, end };
 }
 
-function getTwiceWeeklyWindow(now: number) {
-  const end = startOfUtcDay(now);
-  const day = new Date(end).getUTCDay();
-
-  if (day === 0) {
-    return { start: end - 4 * 24 * 60 * 60 * 1000, end };
-  }
-
-  if (day === 3) {
-    return { start: end - 3 * 24 * 60 * 60 * 1000, end };
-  }
-
-  return null;
-}
-
 function isWeeklyRun(now: number) {
   return new Date(now).getUTCDay() === 1;
 }
@@ -70,20 +55,12 @@ function summarizeTamperCounts(events: Array<{ risk: number | null }>) {
   return counts;
 }
 
-function getCadenceWindow(cadence: DigestCadence, now: number) {
+function getCadenceWindow(cadence: DigestFrequency, now: number) {
   if (cadence === 'weekly') {
     return isWeeklyRun(now) ? getWeeklyWindow(now) : null;
   }
 
-  if (cadence === 'twice_weekly') {
-    return getTwiceWeeklyWindow(now);
-  }
-
-  if (cadence === 'daily') {
-    return getDailyWindow(now);
-  }
-
-  return null;
+  return getDailyWindow(now);
 }
 
 function collectMissingLogDays(
@@ -119,16 +96,12 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
   const partnerships = await listDigestEligiblePartnerships(env.DB);
 
   for (const partnership of partnerships) {
-    if ((partnership.send_digest ?? 1) !== 1) {
+    const emailFrequency = partnership.email_frequency ?? DEFAULT_EMAIL_FREQUENCY;
+    if (emailFrequency !== 'daily' && emailFrequency !== 'weekly') {
       continue;
     }
 
-    const cadence = (partnership.digest_cadence ?? DEFAULT_DIGEST_CADENCE) as DigestCadence;
-    if (cadence === 'none') {
-      continue;
-    }
-
-    const window = getCadenceWindow(cadence, now);
+    const window = getCadenceWindow(emailFrequency, now);
     if (!window) {
       continue;
     }
@@ -148,7 +121,7 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
     const tamperCounts = summarizeTamperCounts(riskLogs);
     const missingLogDays = collectMissingLogDays(devices, deviceLogs, window.start, window.end);
     const email = renderPartnerDigestTemplate({
-      cadence,
+      cadence: emailFrequency,
       appName: env.APP_NAME,
       ownerName: partnership.owner_name,
       ownerEmail: partnership.owner_email,
@@ -161,12 +134,7 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
     await sendEmail({
       env,
       db: env.DB,
-      kind:
-        cadence === 'weekly'
-          ? 'weekly_digest'
-          : cadence === 'twice_weekly'
-            ? 'twice_weekly_digest'
-            : 'daily_digest',
+      kind: emailFrequency === 'weekly' ? 'weekly_digest' : 'daily_digest',
       recipient: partnership.partner_email,
       subject: email.subject,
       text: email.text,
@@ -174,7 +142,7 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
       related_user_id: partnership.user_id,
       related_partnership_id: partnership.partnership_id,
       metadata: {
-        cadence,
+        email_frequency: emailFrequency,
         windowStart: window.start,
         windowEnd: window.end,
         missingLogDays,

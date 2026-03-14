@@ -102,7 +102,7 @@ async function decryptAndFlattenBatch(
           ? event.ts
           : typeof event.taken_at === "number"
             ? event.taken_at
-            : batch.end,
+            : batch.end_time,
       device_id: batch.device_id,
       kind:
         typeof event.type === "string"

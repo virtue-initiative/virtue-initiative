@@ -26,7 +26,6 @@ hashes.post('/', authenticate('device-access'), async (c) => {
   const nextState = await crypto.subtle.digest('SHA-256', hashInput);
   await upsertHashState(c.env.DB, {
     device_id: device.id,
-    user_id: device.owner,
     state: nextState,
     updated_at: Date.now(),
   });
@@ -49,7 +48,7 @@ hashes.delete('/', authenticate('server'), async (c) => {
     return c.json({ error: 'Not found' }, 404);
   }
 
-  await resetHashState(c.env.DB, device.id, device.owner, Date.now());
+  await resetHashState(c.env.DB, device.id, Date.now());
   return c.json({ ok: true });
 });
 

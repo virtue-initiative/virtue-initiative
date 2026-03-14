@@ -77,8 +77,8 @@ impl UploadClient {
             .mime_str("application/octet-stream")?;
 
         let form = Form::new()
-            .text("start", start_time.timestamp_millis().to_string())
-            .text("end", end_time.timestamp_millis().to_string())
+            .text("start_time", start_time.timestamp_millis().to_string())
+            .text("end_time", end_time.timestamp_millis().to_string())
             .part("file", file_part);
 
         let url = format!("{}/d/batch", self.config.base_url);

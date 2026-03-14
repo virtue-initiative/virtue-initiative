@@ -50,33 +50,29 @@ describe('Notification routes and tamper alerts', () => {
     expect(listRes.status).toBe(200);
     const list = (await listRes.json()) as Array<{
       partnership_id: string;
-      digest_cadence: string;
+      email_frequency: string;
       immediate_tamper_severity: string;
-      send_digest: boolean;
     }>;
     expect(list[0]).toMatchObject({
       partnership_id: created.id,
       monitored_user: { email: 'notify-owner@example.com' },
-      digest_cadence: 'daily',
+      email_frequency: 'daily',
       immediate_tamper_severity: 'critical',
-      send_digest: true,
     });
 
     const patchRes = await SELF.fetch(`${BASE}/notifications/preferences/${created.id}`, {
       method: 'PATCH',
       headers: authHeaders(partnerToken),
       body: JSON.stringify({
-        digest_cadence: 'twice_weekly',
+        email_frequency: 'alerts-only',
         immediate_tamper_severity: 'warning',
-        send_digest: false,
       }),
     });
     expect(patchRes.status).toBe(200);
     expect(await patchRes.json()).toEqual({
       partnership_id: created.id,
-      digest_cadence: 'twice_weekly',
+      email_frequency: 'alerts-only',
       immediate_tamper_severity: 'warning',
-      send_digest: false,
     });
   });
 
@@ -114,7 +110,7 @@ describe('Notification routes and tamper alerts', () => {
     const logRes = await SELF.fetch(`${BASE}/d/log`, {
       method: 'POST',
       headers: authHeaders(device.access_token),
-      body: JSON.stringify({ ts: Date.now(), type: 'service_stop', data: {} }),
+      body: JSON.stringify({ ts: Date.now(), type: 'service_stop', risk: 1, data: {} }),
     });
 
     expect(logRes.status).toBe(201);
@@ -165,7 +161,7 @@ describe('Notification routes and tamper alerts', () => {
     await SELF.fetch(`${BASE}/notifications/preferences/${created.id}`, {
       method: 'PATCH',
       headers: authHeaders(partnerToken),
-      body: JSON.stringify({ send_digest: false }),
+      body: JSON.stringify({ email_frequency: 'none' }),
     });
 
     const device = await createDeviceForUser(ownerToken, 'Muted Device', 'linux');
@@ -173,7 +169,7 @@ describe('Notification routes and tamper alerts', () => {
     const logRes = await SELF.fetch(`${BASE}/d/log`, {
       method: 'POST',
       headers: authHeaders(device.access_token),
-      body: JSON.stringify({ ts: Date.now(), type: 'service_stop', data: {} }),
+      body: JSON.stringify({ ts: Date.now(), type: 'service_stop', risk: 1, data: {} }),
     });
 
     expect(logRes.status).toBe(201);
@@ -213,7 +209,7 @@ describe('Notification routes and tamper alerts', () => {
     const logRes = await SELF.fetch(`${BASE}/d/log`, {
       method: 'POST',
       headers: authHeaders(device.access_token),
-      body: JSON.stringify({ ts: Date.now(), type: 'service_stop', data: {} }),
+      body: JSON.stringify({ ts: Date.now(), type: 'service_stop', risk: 1, data: {} }),
     });
 
     expect(logRes.status).toBe(201);

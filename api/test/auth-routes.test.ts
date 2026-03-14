@@ -45,24 +45,20 @@ describe('Auth routes', () => {
     expect(new Uint8Array(storedUser!.id)).toHaveLength(16);
 
     const session = await env.DB.prepare(
-      `SELECT session_type, lower(hex(user_id)) as user_id_hex, device_id, expires_at
-       FROM sessions
+      `SELECT lower(hex(user_id)) as user_id_hex, expires_at
+       FROM user_sessions
        WHERE user_id = ?
        ORDER BY created_at DESC
        LIMIT 1`,
     )
       .bind(uuidToBytes(body.user.id))
       .first<{
-        session_type: string;
         user_id_hex: string | null;
-        device_id: string | null;
         expires_at: number;
       }>();
 
     expect(session).toMatchObject({
-      session_type: 'web',
       user_id_hex: body.user.id.replaceAll('-', ''),
-      device_id: null,
     });
     expect(session?.expires_at).toBeGreaterThan(Date.now());
 
@@ -99,8 +95,7 @@ describe('Auth routes', () => {
 
     const sessionCount = await env.DB.prepare(
       `SELECT COUNT(*) as count
-       FROM sessions
-       WHERE session_type = 'web'`,
+       FROM user_sessions`,
     ).first<{ count: number }>();
     expect(sessionCount?.count).toBe(1);
   });
