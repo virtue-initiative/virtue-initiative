@@ -199,11 +199,7 @@ function InviteButton({
 
   return (
     <>
-      <Button
-        className="btn-primary btn-sm"
-        onClick={open}
-        icon={<UserPlusIcon />}
-      >
+      <Button className="btn-primary" onClick={open} icon={<UserPlusIcon />}>
         Invite partner
       </Button>
       <dialog ref={dialogRef}>
@@ -233,14 +229,10 @@ function InviteButton({
           </label>
           {error && <p class="alert-error">{error}</p>}
           <div class="invite-actions">
-            <button
-              class="btn btn-primary btn-sm"
-              type="submit"
-              disabled={loading}
-            >
+            <button class="btn btn-primary" type="submit" disabled={loading}>
               {loading ? "Sending…" : "Send invite"}
             </button>
-            <button class="btn btn-ghost btn-sm" type="button" onClick={close}>
+            <button class="btn btn-ghost" type="button" onClick={close}>
               Cancel
             </button>
           </div>
@@ -302,7 +294,7 @@ function PendingPartnerCard({
       {error && <p class="alert-error">{error}</p>}
       <div class="card-actions">
         <button
-          class="btn btn-danger btn-sm"
+          class="btn btn-danger"
           type="button"
           onClick={remove}
           disabled={action !== null}
@@ -400,7 +392,7 @@ function PartnerCard({
           partner.partner.id &&
           partner.permissions.view_data && (
             <button
-              class="btn btn-ghost btn-sm"
+              class="btn btn-ghost"
               type="button"
               onClick={() => route(`/logs?user=${partner.partner.id}`)}
             >
@@ -411,7 +403,7 @@ function PartnerCard({
           partner.permissions.view_data &&
           !partner.e2ee_key && (
             <button
-              class="btn btn-primary btn-sm"
+              class="btn btn-primary"
               type="button"
               onClick={confirmPartner}
               disabled={action !== null}
@@ -420,7 +412,7 @@ function PartnerCard({
             </button>
           )}
         <button
-          class="btn btn-danger btn-sm"
+          class="btn btn-danger"
           type="button"
           onClick={remove}
           disabled={action !== null}
@@ -485,7 +477,7 @@ function PartnerDevicesSection({
               {partnerId && partner.permissions.view_data && (
                 <div class="card-actions">
                   <button
-                    class="btn btn-ghost btn-sm"
+                    class="btn btn-ghost"
                     type="button"
                     onClick={() =>
                       route(`/logs?user=${partnerId}&device_id=${device.id}`)
@@ -588,13 +580,13 @@ function DeviceCard({
       </dl>
       <div class="card-actions">
         <button
-          class="btn btn-ghost btn-sm"
+          class="btn btn-ghost"
           type="button"
           onClick={() => route(`/logs?device_id=${device.id}`)}
         >
           View logs
         </button>
-        <button class="btn btn-ghost btn-sm" type="button" onClick={openEdit}>
+        <button class="btn btn-ghost" type="button" onClick={openEdit}>
           Edit
         </button>
       </div>
@@ -625,14 +617,14 @@ function DeviceCard({
           {error && <p class="alert-error">{error}</p>}
           <div class="invite-actions">
             <button
-              class="btn btn-primary btn-sm"
+              class="btn btn-primary"
               type="submit"
               disabled={saving || deleting}
             >
               {saving ? "Saving…" : "Save"}
             </button>
             <button
-              class="btn btn-danger btn-sm"
+              class="btn btn-danger"
               type="button"
               onClick={handleDelete}
               disabled={saving || deleting}
@@ -640,7 +632,7 @@ function DeviceCard({
               {deleting ? "Deleting…" : "Delete device"}
             </button>
             <button
-              class="btn btn-ghost btn-sm"
+              class="btn btn-ghost"
               type="button"
               onClick={() => dialogRef.current?.close()}
               disabled={saving || deleting}

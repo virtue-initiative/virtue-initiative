@@ -42,7 +42,7 @@ export function LogsGallery({
       {loading && <p class="logs-loading">Loading…</p>}
       {!loading && hasMore && (
         <button
-          class="btn btn-primary btn-sm load-more"
+          class="btn btn-primary load-more"
           onClick={onLoadMore}
           type="button"
         >

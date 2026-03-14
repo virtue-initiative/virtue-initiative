@@ -190,6 +190,7 @@
   &:hover {
     color: var(--text);
     background: none;
+    text-decoration: none;
   }
 
   &.active {

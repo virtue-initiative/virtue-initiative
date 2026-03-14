@@ -13,34 +13,40 @@ export function Header() {
 
   return (
     <header class="site-header">
-      <a href="/" class="header-brand">
-        The Virtue Initiative
-      </a>
+      <div class="header-brand-row">
+        <a href="/" class="header-brand">
+          The Virtue Initiative
+        </a>
+      </div>
       <nav class="header-toolbar">
-        <a
-          href="/"
-          class={`control control-flat ${isActive("/") ? "is-active" : ""}`}
-        >
-          Dashboard
-        </a>
-        <a
-          href="/logs"
-          class={`control control-flat ${isActive("/logs") ? "is-active" : ""}`}
-        >
-          Logs
-        </a>
-        <a
-          href="/settings"
-          class={`control control-flat ${isActive("/settings") ? "is-active" : ""}`}
-        >
-          Settings
-        </a>
+        <div class="header-nav-group">
+          <a
+            href="/"
+            class={`control control-flat ${isActive("/") ? "is-active" : ""}`}
+          >
+            Dashboard
+          </a>
+          <a
+            href="/logs"
+            class={`control control-flat ${isActive("/logs") ? "is-active" : ""}`}
+          >
+            Logs
+          </a>
+          <a
+            href="/settings"
+            class={`control control-flat ${isActive("/settings") ? "is-active" : ""}`}
+          >
+            Settings
+          </a>
+        </div>
 
-        <ThemeButton />
+        <div class="header-action-group">
+          <ThemeButton />
 
-        <button class="control" onClick={logout} type="button">
-          Log out
-        </button>
+          <button class="control" onClick={logout} type="button">
+            Log out
+          </button>
+        </div>
       </nav>
     </header>
   );

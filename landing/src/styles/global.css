@@ -32,15 +32,35 @@ header {
 
 .header-top {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
+}
+
+.header-copy {
+  min-width: 0;
 }
 
 .header-actions {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.header-actions .btn,
+.header-actions .control {
+  height: 2.75rem;
+}
+
+.header-actions .btn {
+  display: inline-flex;
+  align-items: center;
+}
+
+.header-actions .control-icon {
+  width: 2.75rem;
+  min-width: 2.75rem;
 }
 
 .btn-help {
@@ -54,9 +74,11 @@ header {
 }
 
 .wordmark {
+  display: inline-block;
   font-size: 2rem;
   font-weight: 700;
   letter-spacing: -0.5px;
+  line-height: 1.1;
   color: var(--text);
   text-decoration: none;
 }
@@ -69,6 +91,17 @@ header {
   margin-top: 0.4rem;
   color: var(--text-muted);
   font-size: 1rem;
+}
+
+@media (max-width: 720px) {
+  .header-top {
+    flex-direction: column;
+  }
+
+  .header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
 }
 
 .site-main {

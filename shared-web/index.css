@@ -1,5 +1,7 @@
 :root {
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --button-height: 2.25rem;
+  --button-padding-x: 0.8rem;
 }
 
 /* Theme */
@@ -64,12 +66,17 @@
 /* Buttons */
 
 .btn {
-  display: inline-block;
-  padding: 0.6rem 1.25rem;
-  border: none;
-  border-radius: 7px;
-  font-size: 0.95rem;
+  box-sizing: border-box;
+  min-height: var(--button-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--button-padding-x);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 0.875rem;
   font-weight: 600;
+  line-height: 1;
   cursor: pointer;
   text-decoration: none;
   transition: opacity 0.15s;
@@ -149,8 +156,9 @@
 }
 
 .btn-sm {
-  padding: 0.4rem 0.9rem;
-  font-size: 0.85rem;
+  min-height: 1.9rem;
+  padding: 0 0.65rem;
+  font-size: 0.8125rem;
 }
 
 .btn-icon {
@@ -174,7 +182,7 @@
 
 .control {
   box-sizing: border-box;
-  height: 2.25rem;
+  height: var(--button-height);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -225,6 +233,7 @@
       height: 1.1rem;
     }
   }
+
 }
 
 /* Form field */
