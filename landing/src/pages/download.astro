@@ -14,6 +14,7 @@ type Release = {
   tag_name: string;
   html_url: string;
   published_at: string | null;
+  latest_asset_at?: string | null;
   assets: ReleaseAsset[];
 };
 
@@ -77,6 +78,8 @@ function findPlatformAsset(release: Release, platform: Platform) {
 
 const stableRelease = releaseData.stableRelease as Release | null;
 const prereleaseRelease = releaseData.prereleaseRelease as Release | null;
+const prereleaseTimestamp =
+  prereleaseRelease?.latest_asset_at ?? prereleaseRelease?.published_at ?? null;
 ---
 
 <SiteLayout pageTitle="Downloads" tagline="Download Virtue for your devices">
@@ -183,7 +186,7 @@ const prereleaseRelease = releaseData.prereleaseRelease as Release | null;
             <div class="release-card-meta">
               <span>Tag: {prereleaseRelease.tag_name}</span>
               <span>
-                Published: {formatDate(prereleaseRelease.published_at)}
+                Latest build: {formatDate(prereleaseTimestamp)}
               </span>
             </div>
             <div class="release-card-body">
