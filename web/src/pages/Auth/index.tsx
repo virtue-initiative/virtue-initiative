@@ -288,11 +288,6 @@ export function Auth() {
                   autoComplete="name"
                 />
               </div>
-              <p class="settings-hint">
-                During sign-up, Virtue creates an end-to-end encryption key for
-                your account. It protects your uploaded logs, screenshots, and
-                blocks so only you and partners you approve can decrypt them.
-              </p>
             </>
           )}
 
@@ -348,6 +343,14 @@ export function Auth() {
                 disabled={mode === "reset" && !resetTokenValid}
               />
             </div>
+          )}
+
+          {(mode === "signup") && (
+            <p class="settings-hint">
+              During sign-up, Virtue creates an end-to-end encryption key for
+              your account. It protects your uploaded logs, screenshots, and
+              blocks so only you and partners you approve can decrypt them.
+            </p>
           )}
 
           {status && <p class="alert-success">{status}</p>}
