@@ -30,7 +30,6 @@ describe('Partner routes', () => {
       headers: authHeaders(ownerToken),
       body: JSON.stringify({
         email: 'partner@example.com',
-        permissions: { view_data: true },
         e2ee_key: Buffer.from('wrapped-key').toString('base64'),
       }),
     });
@@ -44,7 +43,7 @@ describe('Partner routes', () => {
     const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
     expect(inviteDelivery?.text).toContain('partner_invite_token=');
 
-    const acceptRes = await SELF.fetch(`${BASE}/partner/invite/accept`, {
+    const acceptRes = await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
       headers: authHeaders(partnerToken),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
@@ -58,33 +57,29 @@ describe('Partner routes', () => {
     const listRes = await SELF.fetch(`${BASE}/partner`, {
       headers: { Authorization: `Bearer ${ownerToken}` },
     });
-    const list = (await listRes.json()) as Array<{
-      id: string;
-      role: 'owner' | 'invitee';
-      partner: { id?: string; email: string; name?: string };
-      permissions: { view_data?: boolean };
-      e2ee_key?: string;
-    }>;
-    const owned = list.find((partner) => partner.role === 'owner');
-    expect(owned?.partner).toEqual({
+    const list = (await listRes.json()) as {
+      watchers: Array<{
+        id: string;
+        user: { id?: string; email: string; name?: string };
+        e2ee_key?: string;
+      }>;
+    };
+    const owned = list.watchers.find((partner) => partner.id === created.id);
+    expect(owned?.user).toEqual({
       id: partnerUserId,
       email: 'partner@example.com',
       name: 'Partner',
     });
     expect(owned?.e2ee_key).toBeUndefined();
 
-    const patchRes = await SELF.fetch(`${BASE}/partner/${created.id}`, {
+    const patchRes = await SELF.fetch(`${BASE}/partner/watcher/${created.id}`, {
       method: 'PATCH',
       headers: authHeaders(ownerToken),
-      body: JSON.stringify({ permissions: { view_data: false } }),
+      body: JSON.stringify({ e2ee_key: Buffer.from('owner-share-key').toString('base64') }),
     });
-    expect(patchRes.status).toBe(200);
-    expect(await patchRes.json()).toEqual({
-      id: created.id,
-      permissions: { view_data: false },
-    });
+    expect(patchRes.status).toBe(204);
 
-    const deleteRes = await SELF.fetch(`${BASE}/partner/${created.id}`, {
+    const deleteRes = await SELF.fetch(`${BASE}/partner/watching/${created.id}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${partnerToken}` },
     });
@@ -99,7 +94,7 @@ describe('Partner routes', () => {
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
       headers: authHeaders(ownerToken),
-      body: JSON.stringify({ email: 'future@example.com', permissions: { view_data: true } }),
+      body: JSON.stringify({ email: 'future@example.com' }),
     });
     expect(inviteRes.status).toBe(201);
     const created = (await inviteRes.json()) as { id: string };
@@ -111,7 +106,7 @@ describe('Partner routes', () => {
 
     const { token: futureToken } = await signupAndGetToken('accepted@example.com');
 
-    const validateRes = await SELF.fetch(`${BASE}/partner/invite/validate`, {
+    const validateRes = await SELF.fetch(`${BASE}/partner/validate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
@@ -123,7 +118,7 @@ describe('Partner routes', () => {
       owner: { email: 'owner2@example.com' },
     });
 
-    const acceptRes = await SELF.fetch(`${BASE}/partner/invite/accept`, {
+    const acceptRes = await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
       headers: authHeaders(futureToken),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
@@ -133,14 +128,15 @@ describe('Partner routes', () => {
     const ownerPartnersRes = await SELF.fetch(`${BASE}/partner`, {
       headers: { Authorization: `Bearer ${ownerToken}` },
     });
-    const ownerPartners = (await ownerPartnersRes.json()) as Array<{
-      id: string;
-      role: 'owner' | 'invitee';
-      partner: { email: string };
-      status: 'pending' | 'accepted';
-    }>;
-    const owned = ownerPartners.find((partner) => partner.id === created.id);
-    expect(owned?.partner.email).toBe('accepted@example.com');
+    const ownerPartners = (await ownerPartnersRes.json()) as {
+      watchers: Array<{
+        id: string;
+        user: { email: string };
+        status: 'pending' | 'accepted';
+      }>;
+    };
+    const owned = ownerPartners.watchers.find((partner) => partner.id === created.id);
+    expect(owned?.user.email).toBe('accepted@example.com');
     expect(owned?.status).toBe('accepted');
   });
 
@@ -164,7 +160,6 @@ describe('Partner routes', () => {
       headers: authHeaders(ownerToken),
       body: JSON.stringify({
         email: 'partner3@example.com',
-        permissions: { view_data: true },
       }),
     });
     expect(createRes.status).toBe(201);
@@ -175,7 +170,7 @@ describe('Partner routes', () => {
     );
     const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
 
-    await SELF.fetch(`${BASE}/partner/invite/accept`, {
+    await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
       headers: authHeaders(partnerToken),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
@@ -187,28 +182,28 @@ describe('Partner routes', () => {
       pubkey: Buffer.from('partner-public-key').toString('base64'),
     });
 
-    const patchRes = await SELF.fetch(`${BASE}/partner/${created.id}`, {
+    const patchRes = await SELF.fetch(`${BASE}/partner/watcher/${created.id}`, {
       method: 'PATCH',
       headers: authHeaders(ownerToken),
       body: JSON.stringify({
         e2ee_key: Buffer.from('encrypted-owner-key').toString('base64'),
       }),
     });
-    expect(patchRes.status).toBe(200);
+    expect(patchRes.status).toBe(204);
 
     const listRes = await SELF.fetch(`${BASE}/partner`, {
       headers: { Authorization: `Bearer ${ownerToken}` },
     });
-    const list = (await listRes.json()) as Array<{
-      id: string;
-      role: 'owner' | 'invitee';
-      partner: { id?: string; email: string };
-      e2ee_key?: string;
-    }>;
-    const owned = list.find((partner) => partner.id === created.id);
-    expect(owned?.role).toBe('owner');
-    expect(owned?.partner.id).toBe(partnerUserId);
-    expect(owned?.partner.email).toBe('partner3@example.com');
+    const list = (await listRes.json()) as {
+      watchers: Array<{
+        id: string;
+        user: { id?: string; email: string };
+        e2ee_key?: string;
+      }>;
+    };
+    const owned = list.watchers.find((partner) => partner.id === created.id);
+    expect(owned?.user.id).toBe(partnerUserId);
+    expect(owned?.user.email).toBe('partner3@example.com');
     expect(Buffer.from(owned?.e2ee_key ?? '', 'base64').toString()).toBe('encrypted-owner-key');
   });
 
@@ -222,7 +217,6 @@ describe('Partner routes', () => {
       headers: authHeaders(ownerToken),
       body: JSON.stringify({
         email: 'someone-else@example.com',
-        permissions: { view_data: true },
       }),
     });
     expect(createRes.status).toBe(201);
@@ -233,7 +227,7 @@ describe('Partner routes', () => {
     );
     const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
 
-    const acceptRes = await SELF.fetch(`${BASE}/partner/invite/accept`, {
+    const acceptRes = await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
       headers: authHeaders(ownerToken),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),

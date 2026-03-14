@@ -47,8 +47,8 @@ data.get('/', authenticate('access'), validateZ('query', listDataSchema), async 
       .map((item) => ({
         device_id: item.value.device_id,
         id: item.value.id,
-        start: item.value.start,
-        end: item.value.end,
+        start_time: item.value.start_time,
+        end_time: item.value.end_time,
         end_hash: item.value.end_hash,
         url: item.value.url,
       })),

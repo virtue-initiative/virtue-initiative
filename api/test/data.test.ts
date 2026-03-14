@@ -19,23 +19,19 @@ describe('Data and device API routes', () => {
     const device = await createDeviceForUser(userToken, 'Phone', 'ios');
 
     const session = await env.DB.prepare(
-      `SELECT session_type, user_id, lower(hex(device_id)) as device_id_hex, expires_at
-       FROM sessions
+      `SELECT lower(hex(device_id)) as device_id_hex, expires_at
+       FROM device_sessions
        WHERE device_id = ?
        ORDER BY created_at DESC
        LIMIT 1`,
     )
       .bind(uuidToBytes(device.id))
       .first<{
-        session_type: string;
-        user_id: string | null;
         device_id_hex: string | null;
         expires_at: number;
       }>();
 
     expect(session).toMatchObject({
-      session_type: 'device',
-      user_id: null,
       device_id_hex: device.id.replaceAll('-', ''),
     });
     expect(session?.expires_at).toBeGreaterThan(Date.now());
@@ -60,8 +56,8 @@ describe('Data and device API routes', () => {
     expect(logRes.status).toBe(201);
 
     const form = new FormData();
-    form.set('start', '1710000000000');
-    form.set('end', '1710003600000');
+    form.set('start_time', '1710000000000');
+    form.set('end_time', '1710003600000');
     form.set('file', new File([new Uint8Array([1, 2, 3])], 'batch.enc'));
     const batchRes = await SELF.fetch(`${BASE}/d/batch`, {
       method: 'POST',
@@ -69,10 +65,18 @@ describe('Data and device API routes', () => {
       body: form,
     });
     expect(batchRes.status).toBe(201);
-    const batch = (await batchRes.json()) as { id: string; end_hash: string; url: string };
+    const batch = (await batchRes.json()) as {
+      id: string;
+      end_hash: string;
+      url: string;
+      start_time: number;
+      end_time: number;
+    };
     expect(batch.id).toBeTruthy();
     expect(batch.end_hash).toHaveLength(64);
     expect(batch.url).toContain('/user/');
+    expect(batch.start_time).toBe(1710000000000);
+    expect(batch.end_time).toBe(1710003600000);
 
     const hashReadRes = await SELF.fetch(`${BASE}/hash`, {
       headers: { Authorization: `Bearer ${device.access_token}` },
@@ -110,7 +114,7 @@ describe('Data and device API routes', () => {
     expect(resetRes.status).toBe(200);
   });
 
-  it("allows an accepted partner with view_data to read another user's data", async () => {
+  it("allows an accepted partner to read another user's data", async () => {
     const { token: ownerToken, userId: ownerUserId } = await signupAndGetToken('owner@example.com');
     const { token: partnerToken } = await signupAndGetToken('partner@example.com');
     const device = await createDeviceForUser(ownerToken);
@@ -118,7 +122,7 @@ describe('Data and device API routes', () => {
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
       headers: authHeaders(ownerToken),
-      body: JSON.stringify({ email: 'partner@example.com', permissions: { view_data: true } }),
+      body: JSON.stringify({ email: 'partner@example.com' }),
     });
     await inviteRes.json();
     const inviteDelivery = (await listEmailDeliveries()).find(
@@ -126,7 +130,7 @@ describe('Data and device API routes', () => {
         delivery.kind === 'partner_invite' && delivery.recipient_email === 'partner@example.com',
     );
     const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
-    await SELF.fetch(`${BASE}/partner/invite/accept`, {
+    await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
       headers: authHeaders(partnerToken),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),

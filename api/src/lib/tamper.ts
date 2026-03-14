@@ -1,5 +1,5 @@
 import {
-  DEFAULT_DIGEST_CADENCE,
+  DEFAULT_EMAIL_FREQUENCY,
   DEFAULT_IMMEDIATE_TAMPER_SEVERITY,
   normalizeImmediateTamperSeverity,
   TamperSeverity,
@@ -9,21 +9,6 @@ import { findUserById, listAcceptedNotificationTargetsForUser } from './db';
 import { sendEmail } from './email';
 import { renderTamperAlertTemplate } from './email/templates';
 import { Env } from '../types/bindings';
-
-export interface ClassifiedRiskEvent {
-  userId: string;
-  deviceId?: string | null;
-  severity: TamperSeverity;
-  risk: number;
-  kind: string;
-  title: string;
-  details?: string | null;
-  happenedAt: number;
-}
-
-const criticalLogTypes = new Set(['service_stop', 'daemon_stop_signal']);
-const warningLogTypes = new Set(['system_shutdown', 'system_startup', 'session_logout']);
-const infoLogTypes = new Set(['session_login']);
 
 export function riskToSeverity(risk: number | null | undefined): TamperSeverity | null {
   if (risk == null) {
@@ -43,94 +28,6 @@ export function riskToSeverity(risk: number | null | undefined): TamperSeverity 
   }
 
   return null;
-}
-
-export function classifyDeviceLogEvent(input: {
-  userId: string;
-  deviceId: string;
-  type: string;
-  ts: number;
-  data?: Record<string, unknown>;
-}): ClassifiedRiskEvent | null {
-  if (criticalLogTypes.has(input.type)) {
-    return {
-      userId: input.userId,
-      deviceId: input.deviceId,
-      severity: 'critical',
-      risk: 1,
-      kind: input.type,
-      title: 'Monitoring stopped unexpectedly',
-      details: `Device reported ${input.type.replaceAll('_', ' ')}.`,
-      happenedAt: input.ts,
-    };
-  }
-
-  if (warningLogTypes.has(input.type)) {
-    return {
-      userId: input.userId,
-      deviceId: input.deviceId,
-      severity: 'warning',
-      risk: 0.7,
-      kind: input.type,
-      title: 'Monitoring interruption detected',
-      details: `Device reported ${input.type.replaceAll('_', ' ')}.`,
-      happenedAt: input.ts,
-    };
-  }
-
-  if (infoLogTypes.has(input.type)) {
-    return {
-      userId: input.userId,
-      deviceId: input.deviceId,
-      severity: 'info',
-      risk: 0.3,
-      kind: input.type,
-      title: 'Monitoring session changed',
-      details: `Device reported ${input.type.replaceAll('_', ' ')}.`,
-      happenedAt: input.ts,
-    };
-  }
-
-  return null;
-}
-
-export function classifyUploadGap(input: {
-  userId: string;
-  deviceId: string;
-  deviceName: string;
-  gapMs: number;
-  now: number;
-  warningHours: number;
-  criticalHours: number;
-}): (ClassifiedRiskEvent & { dedupeWindowStart: number; dedupeWindowEnd: number }) | null {
-  const warningMs = input.warningHours * 60 * 60 * 1000;
-  const criticalMs = input.criticalHours * 60 * 60 * 1000;
-  if (input.gapMs < warningMs) {
-    return null;
-  }
-
-  const severity: TamperSeverity = input.gapMs >= criticalMs ? 'critical' : 'warning';
-  const risk = severity === 'critical' ? 0.95 : 0.7;
-  const bucketMs = severity === 'critical' ? criticalMs : warningMs;
-  const bucket = Math.floor(input.now / Math.max(bucketMs, 1));
-  const dedupeWindowStart = bucket * bucketMs;
-  const dedupeWindowEnd = dedupeWindowStart + bucketMs;
-
-  return {
-    userId: input.userId,
-    deviceId: input.deviceId,
-    severity,
-    risk,
-    kind: 'upload_gap',
-    title:
-      severity === 'critical'
-        ? `Long screenshot upload gap on ${input.deviceName}`
-        : `Screenshot upload delay on ${input.deviceName}`,
-    details: `No uploaded screenshot batch has been seen for ${Math.round(input.gapMs / (60 * 60 * 1000))} hour(s).`,
-    happenedAt: input.now,
-    dedupeWindowStart,
-    dedupeWindowEnd,
-  };
 }
 
 export async function notifyPartnersAboutRiskLog(
@@ -154,7 +51,7 @@ export async function notifyPartnersAboutRiskLog(
 
   const targets = await listAcceptedNotificationTargetsForUser(db, input.userId);
   for (const target of targets) {
-    if ((target.send_digest ?? 1) !== 1) {
+    if ((target.email_frequency ?? DEFAULT_EMAIL_FREQUENCY) === 'none') {
       continue;
     }
 
@@ -180,14 +77,14 @@ export async function notifyPartnersAboutRiskLog(
       env,
       db,
       kind: 'tamper_alert',
-      recipient: target.partner_email,
+      recipient: target.watcher_email,
       subject: email.subject,
       text: email.text,
       html: email.html,
       related_user_id: input.userId,
       related_partnership_id: target.partnership_id,
       metadata: {
-        cadence: target.digest_cadence ?? DEFAULT_DIGEST_CADENCE,
+        email_frequency: target.email_frequency ?? DEFAULT_EMAIL_FREQUENCY,
         logId: input.logId,
         risk: input.risk,
         severity: input.severity,

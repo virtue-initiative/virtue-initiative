@@ -31,46 +31,43 @@ CREATE TABLE IF NOT EXISTS batches (
   user_id BLOB NOT NULL,
   device_id BLOB NOT NULL,
   url TEXT NOT NULL UNIQUE,
-  start INTEGER NOT NULL,
-  end INTEGER NOT NULL,
+  start_time INTEGER NOT NULL,
+  end_time INTEGER NOT NULL,
   end_hash TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_batches_user_id ON batches(user_id);
-CREATE INDEX IF NOT EXISTS idx_batches_device_id ON batches(device_id);
 CREATE INDEX IF NOT EXISTS idx_batches_created_at ON batches(created_at);
 
 CREATE TABLE IF NOT EXISTS partners (
   id BLOB PRIMARY KEY,
-  user_id BLOB NOT NULL,
-  partner_user_id BLOB,
-  partner_email TEXT NOT NULL,
-  invite_token_hash TEXT UNIQUE,
-  invite_expires_at INTEGER,
+  watching_user_id BLOB NOT NULL,
+  watcher_user_id BLOB,
+  watcher_email TEXT NOT NULL,
+  invite_token_id BLOB UNIQUE,
   status TEXT NOT NULL,
-  permissions TEXT NOT NULL,
   e2ee_key BLOB,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (partner_user_id) REFERENCES users(id) ON DELETE CASCADE,
-  UNIQUE (user_id, partner_email)
+  FOREIGN KEY (watching_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (watcher_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (invite_token_id) REFERENCES email_tokens(id) ON DELETE SET NULL,
+  UNIQUE (watching_user_id, watcher_email)
 );
-CREATE INDEX IF NOT EXISTS idx_partners_user_id ON partners(user_id);
-CREATE INDEX IF NOT EXISTS idx_partners_partner_user_id ON partners(partner_user_id);
+CREATE INDEX IF NOT EXISTS idx_partners_watching_user_id ON partners(watching_user_id);
+CREATE INDEX IF NOT EXISTS idx_partners_watcher_user_id ON partners(watcher_user_id);
 CREATE INDEX IF NOT EXISTS idx_partners_status ON partners(status);
-CREATE INDEX IF NOT EXISTS idx_partners_invite_expires_at ON partners(invite_expires_at);
 
-CREATE TABLE IF NOT EXISTS partner_notification_preferences (
+CREATE TABLE IF NOT EXISTS partner_preferences (
   partnership_id BLOB PRIMARY KEY,
-  digest_cadence TEXT NOT NULL DEFAULT 'daily',
+  email_frequency TEXT NOT NULL DEFAULT 'daily',
   immediate_tamper_severity TEXT NOT NULL DEFAULT 'critical',
-  send_digest INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  FOREIGN KEY (partnership_id) REFERENCES partners(id) ON DELETE CASCADE
+  FOREIGN KEY (partnership_id) REFERENCES partners(id) ON DELETE CASCADE,
+  CHECK (email_frequency IN ('none', 'alerts-only', 'daily', 'weekly'))
 );
 
 CREATE TABLE IF NOT EXISTS device_logs (
@@ -92,7 +89,7 @@ CREATE INDEX IF NOT EXISTS idx_device_logs_risk ON device_logs(risk);
 
 CREATE TABLE IF NOT EXISTS email_tokens (
   id BLOB PRIMARY KEY,
-  user_id BLOB NOT NULL,
+  user_id BLOB,
   email TEXT NOT NULL,
   purpose TEXT NOT NULL,
   token_hash TEXT NOT NULL UNIQUE,
@@ -102,35 +99,30 @@ CREATE TABLE IF NOT EXISTS email_tokens (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS sessions (
-  id TEXT PRIMARY KEY,
-  session_type TEXT NOT NULL,
-  user_id TEXT,
-  device_id TEXT,
-  refresh_token_hash TEXT NOT NULL UNIQUE,
+CREATE TABLE IF NOT EXISTS user_sessions (
+  refresh_token_hash TEXT PRIMARY KEY,
+  user_id BLOB NOT NULL,
   expires_at INTEGER NOT NULL,
   created_at INTEGER NOT NULL,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
-  CHECK (session_type IN ('web', 'device')),
-  CHECK (
-    (session_type = 'web' AND user_id IS NOT NULL AND device_id IS NULL) OR
-    (session_type = 'device' AND device_id IS NOT NULL AND user_id IS NULL)
-  )
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_sessions_device_id ON sessions(device_id);
-CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS device_sessions (
+  refresh_token_hash TEXT PRIMARY KEY,
+  device_id BLOB NOT NULL,
+  expires_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_device_sessions_device_id ON device_sessions(device_id);
 
 CREATE TABLE IF NOT EXISTS hash_states (
   device_id BLOB PRIMARY KEY,
-  user_id BLOB NOT NULL,
   state BLOB NOT NULL,
   updated_at INTEGER NOT NULL,
-  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS idx_hash_states_user_id ON hash_states(user_id);
 `;
 
 const statements = schema

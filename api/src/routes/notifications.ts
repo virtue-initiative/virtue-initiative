@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
-  digestCadences,
+  emailFrequencies,
   immediateTamperSeverities,
   normalizeImmediateTamperSeverity,
 } from '../lib/email-domain';
@@ -17,9 +17,8 @@ const notifications = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 const updatePreferenceSchema = z
   .object({
-    digest_cadence: z.enum(digestCadences).optional(),
+    email_frequency: z.enum(emailFrequencies).optional(),
     immediate_tamper_severity: z.enum(immediateTamperSeverities).optional(),
-    send_digest: z.boolean().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
 
@@ -30,15 +29,14 @@ notifications.get('/notifications/preferences', authenticate('access'), async (c
       partnership_id: preference.partnership_id,
       status: preference.status,
       monitored_user: {
-        id: preference.owner_id,
-        email: preference.owner_email,
-        ...(preference.owner_name ? { name: preference.owner_name } : {}),
+        id: preference.watching_user_id,
+        email: preference.watching_user_email,
+        ...(preference.watching_user_name ? { name: preference.watching_user_name } : {}),
       },
-      digest_cadence: preference.digest_cadence ?? 'daily',
+      email_frequency: preference.email_frequency ?? 'daily',
       immediate_tamper_severity: normalizeImmediateTamperSeverity(
         preference.immediate_tamper_severity,
       ),
-      send_digest: preference.send_digest == null ? true : preference.send_digest === 1,
     })),
   );
 });
@@ -50,7 +48,7 @@ notifications.patch(
   async (c) => {
     const result = await updatePartnerNotificationPreference(c.env.DB, {
       partnership_id: c.req.param('id'),
-      partner_user_id: c.get('sub'),
+      watcher_user_id: c.get('sub'),
       updated_at: Date.now(),
       ...c.req.valid('json'),
     });

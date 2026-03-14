@@ -27,7 +27,6 @@ describe('Notification routes and tamper alerts', () => {
       headers: authHeaders(ownerToken),
       body: JSON.stringify({
         email: 'notify-partner@example.com',
-        permissions: { view_data: true },
       }),
     });
     const created = (await createRes.json()) as { id: string };
@@ -38,45 +37,55 @@ describe('Notification routes and tamper alerts', () => {
     );
     const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
 
-    await SELF.fetch(`${BASE}/partner/invite/accept`, {
+    await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
       headers: authHeaders(partnerToken),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
 
-    const listRes = await SELF.fetch(`${BASE}/notifications/preferences`, {
+    const listRes = await SELF.fetch(`${BASE}/partner`, {
       headers: { Authorization: `Bearer ${partnerToken}` },
     });
     expect(listRes.status).toBe(200);
-    const list = (await listRes.json()) as Array<{
-      partnership_id: string;
-      digest_cadence: string;
-      immediate_tamper_severity: string;
-      send_digest: boolean;
-    }>;
-    expect(list[0]).toMatchObject({
-      partnership_id: created.id,
-      monitored_user: { email: 'notify-owner@example.com' },
+    const list = (await listRes.json()) as {
+      watching: Array<{
+        id: string;
+        user: { email: string };
+        digest_cadence: string;
+        immediate_tamper_severity: string;
+      }>;
+    };
+    expect(list.watching[0]).toMatchObject({
+      id: created.id,
+      user: { email: 'notify-owner@example.com' },
       digest_cadence: 'daily',
       immediate_tamper_severity: 'critical',
-      send_digest: true,
     });
 
-    const patchRes = await SELF.fetch(`${BASE}/notifications/preferences/${created.id}`, {
+    const patchRes = await SELF.fetch(`${BASE}/partner/watching/${created.id}`, {
       method: 'PATCH',
       headers: authHeaders(partnerToken),
       body: JSON.stringify({
-        digest_cadence: 'twice_weekly',
+        digest_cadence: 'alerts-only',
         immediate_tamper_severity: 'warning',
-        send_digest: false,
       }),
     });
-    expect(patchRes.status).toBe(200);
-    expect(await patchRes.json()).toEqual({
-      partnership_id: created.id,
-      digest_cadence: 'twice_weekly',
+    expect(patchRes.status).toBe(204);
+
+    const updatedRes = await SELF.fetch(`${BASE}/partner`, {
+      headers: { Authorization: `Bearer ${partnerToken}` },
+    });
+    const updated = (await updatedRes.json()) as {
+      watching: Array<{
+        id: string;
+        digest_cadence: string;
+        immediate_tamper_severity: string;
+      }>;
+    };
+    expect(updated.watching[0]).toMatchObject({
+      id: created.id,
+      digest_cadence: 'alerts-only',
       immediate_tamper_severity: 'warning',
-      send_digest: false,
     });
   });
 
@@ -93,7 +102,6 @@ describe('Notification routes and tamper alerts', () => {
       headers: authHeaders(ownerToken),
       body: JSON.stringify({
         email: 'alerts-partner@example.com',
-        permissions: { view_data: true },
       }),
     });
     await inviteRes.json();
@@ -104,7 +112,7 @@ describe('Notification routes and tamper alerts', () => {
     );
     const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
 
-    await SELF.fetch(`${BASE}/partner/invite/accept`, {
+    await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
       headers: authHeaders(partnerToken),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
@@ -114,7 +122,7 @@ describe('Notification routes and tamper alerts', () => {
     const logRes = await SELF.fetch(`${BASE}/d/log`, {
       method: 'POST',
       headers: authHeaders(device.access_token),
-      body: JSON.stringify({ ts: Date.now(), type: 'service_stop', data: {} }),
+      body: JSON.stringify({ ts: Date.now(), type: 'service_stop', risk: 1, data: {} }),
     });
 
     expect(logRes.status).toBe(201);
@@ -146,7 +154,6 @@ describe('Notification routes and tamper alerts', () => {
       headers: authHeaders(ownerToken),
       body: JSON.stringify({
         email: 'mute-partner@example.com',
-        permissions: { view_data: true },
       }),
     });
     const created = (await createRes.json()) as { id: string };
@@ -157,15 +164,15 @@ describe('Notification routes and tamper alerts', () => {
     );
     const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
 
-    await SELF.fetch(`${BASE}/partner/invite/accept`, {
+    await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
       headers: authHeaders(partnerToken),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
-    await SELF.fetch(`${BASE}/notifications/preferences/${created.id}`, {
+    await SELF.fetch(`${BASE}/partner/watching/${created.id}`, {
       method: 'PATCH',
       headers: authHeaders(partnerToken),
-      body: JSON.stringify({ send_digest: false }),
+      body: JSON.stringify({ digest_cadence: 'none' }),
     });
 
     const device = await createDeviceForUser(ownerToken, 'Muted Device', 'linux');
@@ -173,7 +180,7 @@ describe('Notification routes and tamper alerts', () => {
     const logRes = await SELF.fetch(`${BASE}/d/log`, {
       method: 'POST',
       headers: authHeaders(device.access_token),
-      body: JSON.stringify({ ts: Date.now(), type: 'service_stop', data: {} }),
+      body: JSON.stringify({ ts: Date.now(), type: 'service_stop', risk: 1, data: {} }),
     });
 
     expect(logRes.status).toBe(201);
@@ -191,7 +198,6 @@ describe('Notification routes and tamper alerts', () => {
       headers: authHeaders(ownerToken),
       body: JSON.stringify({
         email: 'unverified-partner@example.com',
-        permissions: { view_data: true },
       }),
     });
     await inviteRes.json();
@@ -202,7 +208,7 @@ describe('Notification routes and tamper alerts', () => {
     );
     const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
 
-    await SELF.fetch(`${BASE}/partner/invite/accept`, {
+    await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
       headers: authHeaders(partnerToken),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
@@ -213,7 +219,7 @@ describe('Notification routes and tamper alerts', () => {
     const logRes = await SELF.fetch(`${BASE}/d/log`, {
       method: 'POST',
       headers: authHeaders(device.access_token),
-      body: JSON.stringify({ ts: Date.now(), type: 'service_stop', data: {} }),
+      body: JSON.stringify({ ts: Date.now(), type: 'service_stop', risk: 1, data: {} }),
     });
 
     expect(logRes.status).toBe(201);

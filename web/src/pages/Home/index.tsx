@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
-import { api, Device, Partner } from "../../api";
+import { api, Device, WatchingPartner, WatcherPartner } from "../../api";
 import { Button } from "../../components/Button";
 import { useAuth } from "../../context/auth";
 import { useE2EE } from "../../context/e2ee";
@@ -26,22 +26,17 @@ function UserPlusIcon() {
   );
 }
 
-function relationshipSummary(partner: Partner) {
-  return partner.role === "invitee"
+function relationshipSummary(partner: WatchingPartner | WatcherPartner) {
+  return "user" in partner && "digest_cadence" in partner
     ? "You are monitoring this person."
     : "This person is monitoring you.";
-}
-
-function dataAccessLabel(partner: Partner) {
-  return partner.role === "invitee"
-    ? "You can view their data"
-    : "They can view your data";
 }
 
 export function Home() {
   const { token, userId } = useAuth();
   const [devices, setDevices] = useState<Device[]>([]);
-  const [partners, setPartners] = useState<Partner[]>([]);
+  const [watching, setWatching] = useState<WatchingPartner[]>([]);
+  const [watchers, setWatchers] = useState<WatcherPartner[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   function reload() {
@@ -49,7 +44,8 @@ export function Home() {
     Promise.all([api.getDevices(token), api.getPartners(token)])
       .then(([deviceList, partnerList]) => {
         setDevices(deviceList);
-        setPartners(partnerList);
+        setWatching(partnerList.watching);
+        setWatchers(partnerList.watchers);
       })
       .catch((err) =>
         setError(
@@ -64,13 +60,21 @@ export function Home() {
     () => devices.filter((device) => device.owner === userId),
     [devices, userId],
   );
-  const acceptedPartners = useMemo(
-    () => partners.filter((partner) => partner.status === "accepted"),
-    [partners],
+  const acceptedWatching = useMemo(
+    () => watching.filter((partner) => partner.status === "accepted"),
+    [watching],
   );
-  const pendingPartners = useMemo(
-    () => partners.filter((partner) => partner.status === "pending"),
-    [partners],
+  const pendingWatching = useMemo(
+    () => watching.filter((partner) => partner.status === "pending"),
+    [watching],
+  );
+  const acceptedWatchers = useMemo(
+    () => watchers.filter((partner) => partner.status === "accepted"),
+    [watchers],
+  );
+  const pendingWatchers = useMemo(
+    () => watchers.filter((partner) => partner.status === "pending"),
+    [watchers],
   );
 
   return (
@@ -103,57 +107,105 @@ export function Home() {
           <InviteButton token={token!} onInvited={reload} />
         </div>
 
-        {pendingPartners.length === 0 && acceptedPartners.length === 0 ? (
+        {watching.length === 0 && watchers.length === 0 ? (
           <p class="empty">No accountability partners yet.</p>
         ) : (
-          <>
-            {pendingPartners.length > 0 && (
-              <>
-                <p class="partners-group-label">Pending relationships</p>
-                <div class="card-grid">
-                  {pendingPartners.map((partner) => (
-                    <PendingPartnerCard
-                      key={partner.id}
-                      partner={partner}
-                      token={token!}
-                      onChanged={reload}
-                    />
-                  ))}
-                </div>
-              </>
-            )}
-
-            {acceptedPartners.length > 0 && (
-              <>
-                <p class="partners-group-label">Accepted partners</p>
-                <div class="card-grid">
-                  {acceptedPartners.map((partner) => (
-                    <PartnerCard
-                      key={partner.id}
-                      partner={partner}
-                      token={token!}
-                      onChanged={reload}
-                    />
-                  ))}
-                </div>
-              </>
-            )}
-          </>
+          <div class="partners-split">
+            <PartnerArea
+              title="Watching"
+              subtitle="People you can monitor and review."
+              pending={pendingWatching}
+              accepted={acceptedWatching}
+              token={token!}
+              onChanged={reload}
+            />
+            <PartnerArea
+              title="Watchers"
+              subtitle="People who can monitor your account."
+              pending={pendingWatchers}
+              accepted={acceptedWatchers}
+              token={token!}
+              onChanged={reload}
+            />
+          </div>
         )}
       </section>
 
-      {acceptedPartners
-        .filter((partner) => partner.role === "invitee" && partner.partner.id)
+      {acceptedWatching
+        .filter((partner) => partner.user.id)
         .map((partner) => (
           <PartnerDevicesSection
             key={partner.id}
             partner={partner}
             devices={devices.filter(
-              (device) => device.owner === partner.partner.id,
+              (device) => device.owner === partner.user.id,
             )}
           />
         ))}
     </div>
+  );
+}
+
+function PartnerArea({
+  title,
+  subtitle,
+  pending,
+  accepted,
+  token,
+  onChanged,
+}: {
+  title: string;
+  subtitle: string;
+  pending: Array<WatchingPartner | WatcherPartner>;
+  accepted: Array<WatchingPartner | WatcherPartner>;
+  token: string;
+  onChanged: () => void;
+}) {
+  return (
+    <section class="partners-panel">
+      <div class="partners-panel-header">
+        <h3>{title}</h3>
+        <p>{subtitle}</p>
+      </div>
+
+      {pending.length === 0 && accepted.length === 0 ? (
+        <p class="empty">{`No ${title.toLowerCase()} relationships yet.`}</p>
+      ) : (
+        <>
+          {pending.length > 0 && (
+            <>
+              <p class="partners-group-label">Pending</p>
+              <div class="card-grid">
+                {pending.map((partner) => (
+                  <PendingPartnerCard
+                    key={partner.id}
+                    partner={partner}
+                    token={token}
+                    onChanged={onChanged}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+
+          {accepted.length > 0 && (
+            <>
+              <p class="partners-group-label">Accepted</p>
+              <div class="card-grid">
+                {accepted.map((partner) => (
+                  <PartnerCard
+                    key={partner.id}
+                    partner={partner}
+                    token={token}
+                    onChanged={onChanged}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 
@@ -165,14 +217,12 @@ function InviteButton({
   onInvited: () => void;
 }) {
   const [email, setEmail] = useState("");
-  const [viewData, setViewData] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   function open() {
     setEmail("");
-    setViewData(true);
     setError(null);
     dialogRef.current?.showModal();
   }
@@ -187,7 +237,7 @@ function InviteButton({
     setError(null);
     setLoading(true);
     try {
-      await api.invitePartner(token, email, { view_data: viewData });
+      await api.invitePartner(token, email);
       close();
       onInvited();
     } catch (err) {
@@ -217,16 +267,6 @@ function InviteButton({
               autoFocus
             />
           </div>
-          <label class="checkbox-label">
-            <input
-              type="checkbox"
-              checked={viewData}
-              onChange={(e) =>
-                setViewData((e.target as HTMLInputElement).checked)
-              }
-            />
-            This partner can view your encrypted activity data
-          </label>
           {error && <p class="alert-error">{error}</p>}
           <div class="invite-actions">
             <button class="btn btn-primary" type="submit" disabled={loading}>
@@ -247,7 +287,7 @@ function PendingPartnerCard({
   token,
   onChanged,
 }: {
-  partner: Partner;
+  partner: WatchingPartner | WatcherPartner;
   token: string;
   onChanged: () => void;
 }) {
@@ -258,7 +298,9 @@ function PendingPartnerCard({
     setAction("remove");
     setError(null);
     try {
-      await api.deletePartner(token, partner.id);
+      await ("digest_cadence" in partner
+        ? api.deleteWatching(token, partner.id)
+        : api.deleteWatcher(token, partner.id));
       onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to remove request");
@@ -269,27 +311,21 @@ function PendingPartnerCard({
   return (
     <div class="card card-highlight">
       <div class="card-header">
-        <span class="card-name">
-          {partner.partner.name ?? partner.partner.email}
-        </span>
+        <span class="card-name">{partner.user.name ?? partner.user.email}</span>
         <span class="badge badge-yellow">Pending</span>
       </div>
       <p class="invite-desc">
-        {partner.role === "invitee"
-          ? partner.permissions.view_data
-            ? "You have been invited to monitor this person. Once you accept, you will be able to view their encrypted activity data."
-            : "You have been invited to support this person, but this relationship does not include access to their activity data."
-          : partner.permissions.view_data
-            ? "You invited this person to monitor your account. After they accept the email link, click Confirm partner to share the encrypted key they need to view your logs."
-            : "You invited this person, but this relationship does not include access to your activity data."}
+        {"digest_cadence" in partner
+          ? "You have been invited to monitor this person. Once you accept, you will be able to view their encrypted activity data."
+          : "You invited this person to monitor your account. After they accept the email link, click Confirm partner to share the encrypted key they need to view your logs."}
       </p>
       <dl class="card-meta">
         <dt>Email</dt>
-        <dd>{partner.partner.email}</dd>
+        <dd>{partner.user.email}</dd>
         <dt>Relationship</dt>
         <dd>{relationshipSummary(partner)}</dd>
         <dt>Created</dt>
-        <dd>{formatDate(partner.created_at)}</dd>
+        <dd>{formatDate(partner.created_at ?? Date.now())}</dd>
       </dl>
       {error && <p class="alert-error">{error}</p>}
       <div class="card-actions">
@@ -311,7 +347,7 @@ function PartnerCard({
   token,
   onChanged,
 }: {
-  partner: Partner;
+  partner: WatchingPartner | WatcherPartner;
   token: string;
   onChanged: () => void;
 }) {
@@ -325,7 +361,9 @@ function PartnerCard({
     setAction("remove");
     setError(null);
     try {
-      await api.deletePartner(token, partner.id);
+      await ("digest_cadence" in partner
+        ? api.deleteWatching(token, partner.id)
+        : api.deleteWatcher(token, partner.id));
       onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to remove partner");
@@ -343,12 +381,12 @@ function PartnerCard({
         throw new Error("Your encryption key is not ready yet.");
       }
 
-      const pubkey = await api.getPartnerPublicKey(partner.partner.email);
+      const pubkey = await api.getPartnerPublicKey(partner.user.email);
       const encryptedKey = await encryptForPublicKey(
         Uint8Array.fromBase64(pubkey),
         Uint8Array.from(ownKeyBytes),
       );
-      await api.updatePartner(token, partner.id, {
+      await api.updateWatcher(token, partner.id, {
         e2ee_key: encryptedKey.toBase64(),
       });
       setAction(null);
@@ -373,44 +411,36 @@ function PartnerCard({
   return (
     <div class="card">
       <div class="card-header">
-        <span class="card-name">
-          {partner.partner.name ?? partner.partner.email}
-        </span>
+        <span class="card-name">{partner.user.name ?? partner.user.email}</span>
         <span class="badge badge-green">Accepted</span>
       </div>
       <dl class="card-meta">
         <dt>Email</dt>
-        <dd>{partner.partner.email}</dd>
+        <dd>{partner.user.email}</dd>
         <dt>Relationship</dt>
         <dd>{relationshipSummary(partner)}</dd>
-        <dt>{dataAccessLabel(partner)}</dt>
-        <dd>{partner.permissions.view_data ? "Yes" : "No"}</dd>
       </dl>
       {error && <p class="alert-error">{error}</p>}
       <div class="card-actions">
-        {partner.role === "invitee" &&
-          partner.partner.id &&
-          partner.permissions.view_data && (
-            <button
-              class="btn btn-ghost"
-              type="button"
-              onClick={() => route(`/logs?user=${partner.partner.id}`)}
-            >
-              View logs
-            </button>
-          )}
-        {partner.role === "owner" &&
-          partner.permissions.view_data &&
-          !partner.e2ee_key && (
-            <button
-              class="btn btn-primary"
-              type="button"
-              onClick={confirmPartner}
-              disabled={action !== null}
-            >
-              {action === "confirm" ? "Confirming…" : "Confirm partner"}
-            </button>
-          )}
+        {"digest_cadence" in partner && partner.user.id && (
+          <button
+            class="btn btn-ghost"
+            type="button"
+            onClick={() => route(`/logs?user=${partner.user.id}`)}
+          >
+            View logs
+          </button>
+        )}
+        {!("digest_cadence" in partner) && !partner.e2ee_key && (
+          <button
+            class="btn btn-primary"
+            type="button"
+            onClick={confirmPartner}
+            disabled={action !== null}
+          >
+            {action === "confirm" ? "Confirming…" : "Confirm partner"}
+          </button>
+        )}
         <button
           class="btn btn-danger"
           type="button"
@@ -428,22 +458,22 @@ function PartnerDevicesSection({
   partner,
   devices,
 }: {
-  partner: Partner;
+  partner: WatchingPartner;
   devices: Device[];
 }) {
   const { route } = useLocation();
   const e2ee = useE2EE();
 
-  const partnerId = partner.partner.id;
-  const hasKey = partnerId ? Boolean(e2ee.getKey(partnerId)) : false;
+  const partnerId = partner.user.id;
+  const hasKey = Boolean(e2ee.getKey(partnerId));
 
   return (
     <section class="dash-section">
       <div class="section-header">
-        <h2>{partner.partner.name ?? partner.partner.email}</h2>
+        <h2>{partner.user.name ?? partner.user.email}</h2>
       </div>
 
-      {partner.permissions.view_data && partnerId && !hasKey && (
+      {!hasKey && (
         <div class="card settings-form partner-key-notice">
           <p class="settings-hint">
             You are monitoring this partner now, but encrypted screenshots and
@@ -474,19 +504,17 @@ function PartnerDevicesSection({
                 <dt>Last upload</dt>
                 <dd>{formatRelativeTimestamp(device.last_upload_at)}</dd>
               </dl>
-              {partnerId && partner.permissions.view_data && (
-                <div class="card-actions">
-                  <button
-                    class="btn btn-ghost"
-                    type="button"
-                    onClick={() =>
-                      route(`/logs?user=${partnerId}&device_id=${device.id}`)
-                    }
-                  >
-                    View logs
-                  </button>
-                </div>
-              )}
+              <div class="card-actions">
+                <button
+                  class="btn btn-ghost"
+                  type="button"
+                  onClick={() =>
+                    route(`/logs?user=${partnerId}&device_id=${device.id}`)
+                  }
+                >
+                  View logs
+                </button>
+              </div>
             </div>
           ))}
         </div>

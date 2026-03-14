@@ -1,7 +1,7 @@
 import { decode } from "@msgpack/msgpack";
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
-import { api, Batch, Device, Partner } from "../../api";
+import { api, Batch, Device, WatchingPartner } from "../../api";
 import { decryptBatch, decompressGzip } from "../../crypto";
 import { useAuth } from "../../context/auth";
 import { useE2EE } from "../../context/e2ee";
@@ -102,7 +102,7 @@ async function decryptAndFlattenBatch(
           ? event.ts
           : typeof event.taken_at === "number"
             ? event.taken_at
-            : batch.end,
+            : batch.end_time,
       device_id: batch.device_id,
       kind:
         typeof event.type === "string"
@@ -124,7 +124,7 @@ export function Logs() {
   const { path } = useLocation();
 
   const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[]>([]);
-  const [partners, setPartners] = useState<Partner[]>([]);
+  const [partners, setPartners] = useState<WatchingPartner[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string | null>(() =>
     new URLSearchParams(window.location.search).get("device_id"),
   );
@@ -143,14 +143,9 @@ export function Logs() {
   const activeKey = activeUserId ? e2ee.getKey(activeUserId) : null;
   const activePartner =
     activeUserId && activeUserId !== userId
-      ? (partners.find(
-          (partner) =>
-            partner.role === "invitee" && partner.partner.id === activeUserId,
-        ) ?? null)
+      ? (partners.find((partner) => partner.user.id === activeUserId) ?? null)
       : null;
-  const missingPartnerKey = Boolean(
-    activePartner && activePartner.permissions.view_data && !activeKey,
-  );
+  const missingPartnerKey = Boolean(activePartner && !activeKey);
 
   useEffect(() => {
     if (!token || !userId) return;
@@ -159,16 +154,11 @@ export function Logs() {
 
     Promise.all([api.getDevices(token), api.getPartners(token)])
       .then(([devices, partners]) => {
-        setPartners(partners);
+        setPartners(partners.watching);
         const labels = new Map<string, string>();
         labels.set(userId, "My devices");
-        for (const partner of partners) {
-          if (partner.partner.id) {
-            labels.set(
-              partner.partner.id,
-              partner.partner.name ?? partner.partner.email,
-            );
-          }
+        for (const partner of partners.watching) {
+          labels.set(partner.user.id, partner.user.name ?? partner.user.email);
         }
 
         const grouped = new Map<string, Device[]>();

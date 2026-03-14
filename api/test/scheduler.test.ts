@@ -16,7 +16,7 @@ beforeEach(clearDB);
 
 const DAILY_BATCH_ID = '00000000-0000-4000-8000-000000000001';
 const DAILY_RISK_LOG_ID = '00000000-0000-4000-8000-000000000002';
-const TWICE_WEEKLY_BATCH_ID = '00000000-0000-4000-8000-000000000003';
+const WEEKLY_BATCH_ID = '00000000-0000-4000-8000-000000000003';
 
 describe('Notification scheduler', () => {
   it('sends a daily digest and mentions devices with no logs without creating gap alerts', async () => {
@@ -39,7 +39,6 @@ describe('Notification scheduler', () => {
       headers: authHeaders(ownerToken),
       body: JSON.stringify({
         email: 'digest-partner@example.com',
-        permissions: { view_data: true },
       }),
     });
     const invite = (await inviteRes.json()) as { id: string };
@@ -50,7 +49,7 @@ describe('Notification scheduler', () => {
     );
     const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
 
-    await SELF.fetch(`${BASE}/partner/invite/accept`, {
+    await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
       headers: authHeaders(partnerToken),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
@@ -63,7 +62,7 @@ describe('Notification scheduler', () => {
       .run();
 
     await env.DB.prepare(
-      `INSERT INTO batches (id, user_id, device_id, url, start, end, end_hash, created_at)
+      `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
@@ -107,10 +106,10 @@ describe('Notification scheduler', () => {
     expect(deliveries.some((delivery) => delivery.kind === 'tamper_alert')).toBe(false);
   });
 
-  it('sends twice-weekly digests on Wednesday', async () => {
-    const now = Date.UTC(2026, 0, 7, 8, 0, 0);
-    const sundayStart = Date.UTC(2026, 0, 4, 0, 0, 0);
-    const mondayMid = Date.UTC(2026, 0, 5, 12, 0, 0);
+  it('sends weekly digests on Monday', async () => {
+    const now = Date.UTC(2026, 0, 5, 8, 0, 0);
+    const previousWeekStart = Date.UTC(2025, 11, 29, 0, 0, 0);
+    const sundayMid = Date.UTC(2026, 0, 4, 12, 0, 0);
 
     const { token: ownerToken, userId: ownerId } = await signupAndGetToken(
       'twice-owner@example.com',
@@ -127,7 +126,6 @@ describe('Notification scheduler', () => {
       headers: authHeaders(ownerToken),
       body: JSON.stringify({
         email: 'twice-partner@example.com',
-        permissions: { view_data: true },
       }),
     });
     const inviteDelivery = (await listEmailDeliveries()).find(
@@ -137,40 +135,40 @@ describe('Notification scheduler', () => {
     );
     const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
 
-    await SELF.fetch(`${BASE}/partner/invite/accept`, {
+    await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
       headers: authHeaders(partnerToken),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
 
     const invite = (await inviteRes.json()) as { id: string };
-    await SELF.fetch(`${BASE}/notifications/preferences/${invite.id}`, {
+    await SELF.fetch(`${BASE}/partner/watching/${invite.id}`, {
       method: 'PATCH',
       headers: authHeaders(partnerToken),
-      body: JSON.stringify({ digest_cadence: 'twice_weekly' }),
+      body: JSON.stringify({ digest_cadence: 'weekly' }),
     });
 
     const device = await createDeviceForUser(ownerToken, 'Twice Device', 'linux');
     await env.DB.prepare(
-      `INSERT INTO batches (id, user_id, device_id, url, start, end, end_hash, created_at)
+      `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
-        uuidToBytes(TWICE_WEEKLY_BATCH_ID),
+        uuidToBytes(WEEKLY_BATCH_ID),
         uuidToBytes(ownerId),
         uuidToBytes(device.id),
         'https://example.com/batch-twice.enc',
-        sundayStart,
-        mondayMid,
+        previousWeekStart,
+        sundayMid,
         'hash-twice',
-        mondayMid,
+        sundayMid,
       )
       .run();
 
     await runNotificationSchedule(env, now);
 
     const deliveries = await listEmailDeliveries();
-    const digestDelivery = deliveries.find((delivery) => delivery.kind === 'twice_weekly_digest');
+    const digestDelivery = deliveries.find((delivery) => delivery.kind === 'weekly_digest');
     expect(digestDelivery?.recipient_email).toBe('twice-partner@example.com');
   });
 });

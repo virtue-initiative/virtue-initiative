@@ -5,7 +5,10 @@ import { authenticate } from '../middleware/auth';
 import { validateZ } from '../middleware/validation';
 import {
   acceptPartner,
+  consumeEmailToken,
   createPartner,
+  createEmailToken,
+  deletePartnerById,
   findPartnerByInviteTokenHash,
   findPartnerById,
   findPartnerInviteForOwner,
@@ -15,13 +18,13 @@ import {
   listIncomingPartners,
   listOwnedPartners,
   updatePartnerByOwner,
-  deletePartnerById,
-  upsertPartnerNotificationPreference,
+  updatePartnerNotificationPreference,
+  upsertPartnerPreference,
 } from '../lib/db';
 import { renderPartnerAcceptedTemplate, renderPartnerInviteTemplate } from '../lib/email/templates';
 import { PARTNER_INVITE_TTL_MS } from '../lib/email-domain';
 import { sendEmail } from '../lib/email';
-import { DEFAULT_DIGEST_CADENCE, DEFAULT_IMMEDIATE_TAMPER_SEVERITY } from '../lib/email-domain';
+import { DEFAULT_EMAIL_FREQUENCY, DEFAULT_IMMEDIATE_TAMPER_SEVERITY } from '../lib/email-domain';
 import { decodeBase64, encodeBase64 } from '../lib/encoding';
 import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
@@ -38,17 +41,12 @@ function getAppUrl(c: Context<{ Bindings: Env; Variables: Variables }>) {
   return c.env.APP_URL;
 }
 
-const partnerPermissionsSchema = z.object({
-  view_data: z.boolean().optional().default(true),
-});
-
 const pubKeyQuerySchema = z.object({
   email: z.email(),
 });
 
 const createPartnerSchema = z.object({
   email: z.email(),
-  permissions: partnerPermissionsSchema.optional().default({ view_data: true }),
   e2ee_key: z.base64().optional(),
 });
 
@@ -56,12 +54,28 @@ const inviteTokenSchema = z.object({
   token: z.string().min(1),
 });
 
-const updatePartnerSchema = z
+const updateWatcherSchema = z
   .object({
-    permissions: partnerPermissionsSchema.optional(),
     e2ee_key: z.base64().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
+
+const publicNotificationCadences = ['none', 'alerts-only', 'daily', 'weekly'] as const;
+
+const updateWatchingSchema = z
+  .object({
+    digest_cadence: z.enum(publicNotificationCadences).optional(),
+    immediate_tamper_severity: z.enum(['warning', 'critical']).optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
+
+function toPublicNotificationCadence(emailFrequency: string | null | undefined) {
+  if (!emailFrequency || !publicNotificationCadences.includes(emailFrequency as never)) {
+    return 'daily' as const;
+  }
+
+  return emailFrequency as (typeof publicNotificationCadences)[number];
+}
 
 partners.get('/pubkey', validateZ('query', pubKeyQuerySchema), async (c) => {
   const { email } = c.req.valid('query');
@@ -81,7 +95,7 @@ partners.post(
   async (c) => {
     const userId = c.get('sub');
     const currentUser = await findUserById(c.env.DB, userId);
-    const { email, permissions } = c.req.valid('json');
+    const { email } = c.req.valid('json');
 
     if (!currentUser) {
       return c.json({ error: 'Not found' }, 404);
@@ -98,24 +112,33 @@ partners.post(
     }
 
     const id = uuidv4();
+    const inviteTokenId = uuidv4();
     const now = Date.now();
     const inviteToken = generateOpaqueToken();
+    const inviteTokenHash = hashOpaqueToken(inviteToken);
+
+    await createEmailToken(c.env.DB, {
+      id: inviteTokenId,
+      user_id: null,
+      email,
+      purpose: 'partner_invite',
+      token_hash: inviteTokenHash,
+      expires_at: now + PARTNER_INVITE_TTL_MS,
+      created_at: now,
+    });
 
     await createPartner(c.env.DB, {
       id,
-      user_id: userId,
-      partner_email: email,
-      invite_token_hash: hashOpaqueToken(inviteToken),
-      invite_expires_at: now + PARTNER_INVITE_TTL_MS,
-      permissions: JSON.stringify(permissions),
+      watching_user_id: userId,
+      watcher_email: email,
+      invite_token_id: inviteTokenId,
       e2ee_key: undefined,
       created_at: now,
     });
-    await upsertPartnerNotificationPreference(c.env.DB, {
+    await upsertPartnerPreference(c.env.DB, {
       partnership_id: id,
-      digest_cadence: DEFAULT_DIGEST_CADENCE,
+      email_frequency: DEFAULT_EMAIL_FREQUENCY,
       immediate_tamper_severity: DEFAULT_IMMEDIATE_TAMPER_SEVERITY,
-      send_digest: true,
       updated_at: now,
     });
 
@@ -143,20 +166,21 @@ partners.post(
   },
 );
 
-partners.post('/partner/invite/validate', validateZ('json', inviteTokenSchema), async (c) => {
+partners.post('/partner/validate', validateZ('json', inviteTokenSchema), async (c) => {
   const { token } = c.req.valid('json');
   const invite = await findPartnerByInviteTokenHash(c.env.DB, hashOpaqueToken(token));
 
   if (
     !invite ||
     invite.status !== 'pending' ||
+    invite.invite_consumed_at ||
     !invite.invite_expires_at ||
     invite.invite_expires_at < Date.now()
   ) {
     return c.json({ error: 'Invalid or expired invite' }, 400);
   }
 
-  const owner = await findUserById(c.env.DB, invite.user_id);
+  const owner = await findUserById(c.env.DB, invite.watching_user_id);
   if (!owner) {
     return c.json({ error: 'Invalid or expired invite' }, 400);
   }
@@ -173,7 +197,7 @@ partners.post('/partner/invite/validate', validateZ('json', inviteTokenSchema), 
 });
 
 partners.post(
-  '/partner/invite/accept',
+  '/partner/accept',
   authenticate('access'),
   validateZ('json', inviteTokenSchema),
   async (c) => {
@@ -186,27 +210,39 @@ partners.post(
       return c.json({ error: 'Invalid or expired invite' }, 400);
     }
 
-    if (!invite.invite_expires_at || invite.invite_expires_at < Date.now()) {
+    if (
+      invite.invite_consumed_at ||
+      !invite.invite_expires_at ||
+      invite.invite_expires_at < Date.now()
+    ) {
       return c.json({ error: 'Invalid or expired invite' }, 400);
     }
 
-    if (invite.user_id === userId) {
+    if (invite.watching_user_id === userId) {
       return c.json({ error: 'You cannot accept your own partner invite' }, 409);
     }
 
-    const existing = await findPartnerForOwnerAndUser(c.env.DB, invite.user_id, userId, invite.id);
+    const existing = await findPartnerForOwnerAndUser(
+      c.env.DB,
+      invite.watching_user_id,
+      userId,
+      invite.id,
+    );
     if (existing) {
       return c.json({ error: 'Partnership already exists' }, 409);
     }
 
     await acceptPartner(c.env.DB, {
       id: invite.id,
-      partnerUserId: userId,
-      partnerEmail: currentUser.email,
+      watcherUserId: userId,
+      watcherEmail: currentUser.email,
       updated_at: Date.now(),
     });
+    if (invite.invite_token_id) {
+      await consumeEmailToken(c.env.DB, invite.invite_token_id, Date.now());
+    }
 
-    const owner = await findUserById(c.env.DB, invite.user_id);
+    const owner = await findUserById(c.env.DB, invite.watching_user_id);
     if (owner) {
       const acceptedEmail = renderPartnerAcceptedTemplate({
         partnerName: currentUser.name,
@@ -245,66 +281,96 @@ partners.get('/partner', authenticate('access'), async (c) => {
     listIncomingPartners(c.env.DB, userId),
   ]);
 
-  return c.json([
-    ...owned.map((partner) => ({
+  return c.json({
+    watching: incoming.map((partner) => ({
       id: partner.id,
-      role: 'owner' as const,
-      partner: {
-        ...(partner.partner_id ? { id: partner.partner_id } : {}),
-        email: partner.partner_email,
-        ...(partner.partner_name ? { name: partner.partner_name } : {}),
+      user: {
+        id: partner.watching_user_id,
+        email: partner.watching_user_email,
+        ...(partner.watching_user_name ? { name: partner.watching_user_name } : {}),
       },
       status: partner.status,
-      permissions: JSON.parse(partner.permissions) as { view_data?: boolean },
+      digest_cadence: toPublicNotificationCadence(partner.email_frequency),
+      immediate_tamper_severity:
+        partner.immediate_tamper_severity === 'warning' ? 'warning' : 'critical',
       created_at: partner.created_at,
       ...(partner.e2ee_key ? { e2ee_key: encodeBase64(partner.e2ee_key) } : {}),
     })),
-    ...incoming.map((partner) => ({
+    watchers: owned.map((partner) => ({
       id: partner.id,
-      role: 'invitee' as const,
-      partner: {
-        id: partner.owner_id,
-        email: partner.owner_email,
-        ...(partner.owner_name ? { name: partner.owner_name } : {}),
+      user: {
+        ...(partner.watcher_id ? { id: partner.watcher_id } : {}),
+        email: partner.watcher_email,
+        ...(partner.watcher_name ? { name: partner.watcher_name } : {}),
       },
       status: partner.status,
-      permissions: JSON.parse(partner.permissions) as { view_data?: boolean },
       created_at: partner.created_at,
       ...(partner.e2ee_key ? { e2ee_key: encodeBase64(partner.e2ee_key) } : {}),
     })),
-  ]);
+  });
 });
 
 partners.patch(
-  '/partner/:id',
+  '/partner/watcher/:id',
   authenticate('access'),
-  validateZ('json', updatePartnerSchema),
+  validateZ('json', updateWatcherSchema),
   async (c) => {
     const partnerId = c.req.param('id');
     const partnership = await findPartnerById(c.env.DB, partnerId);
 
-    if (!partnership || partnership.user_id !== c.get('sub')) {
+    if (!partnership || partnership.watching_user_id !== c.get('sub')) {
       return c.json({ error: 'Not found' }, 404);
     }
 
-    const { permissions, e2ee_key } = c.req.valid('json');
-    const nextPermissions = permissions
-      ? { ...(JSON.parse(partnership.permissions) as { view_data?: boolean }), ...permissions }
-      : (JSON.parse(partnership.permissions) as { view_data?: boolean });
+    const { e2ee_key } = c.req.valid('json');
 
     await updatePartnerByOwner(c.env.DB, {
       id: partnerId,
       ownerId: c.get('sub'),
-      permissions: permissions ? JSON.stringify(nextPermissions) : undefined,
       e2ee_key: e2ee_key ? decodeBase64(e2ee_key) : undefined,
       updated_at: Date.now(),
     });
 
-    return c.json({ id: partnerId, permissions: nextPermissions });
+    return c.body(null, 204);
   },
 );
 
-partners.delete('/partner/:id', authenticate('access'), async (c) => {
+partners.patch(
+  '/partner/watching/:id',
+  authenticate('access'),
+  validateZ('json', updateWatchingSchema),
+  async (c) => {
+    const { digest_cadence, immediate_tamper_severity } = c.req.valid('json');
+
+    const result = await updatePartnerNotificationPreference(c.env.DB, {
+      partnership_id: c.req.param('id'),
+      watcher_user_id: c.get('sub'),
+      updated_at: Date.now(),
+      ...(digest_cadence ? { email_frequency: digest_cadence } : {}),
+      ...(immediate_tamper_severity ? { immediate_tamper_severity } : {}),
+    });
+
+    if (!result) {
+      return c.json({ error: 'Not found' }, 404);
+    }
+
+    return c.body(null, 204);
+  },
+);
+
+partners.delete('/partner/watcher/:id', authenticate('access'), async (c) => {
+  const partnerId = c.req.param('id');
+  const partnership = await findPartnerById(c.env.DB, partnerId);
+
+  if (!partnership || partnership.watching_user_id !== c.get('sub')) {
+    return c.json({ error: 'Not found' }, 404);
+  }
+
+  await deletePartnerById(c.env.DB, partnerId);
+  return c.body(null, 204);
+});
+
+partners.delete('/partner/watching/:id', authenticate('access'), async (c) => {
   const partnerId = c.req.param('id');
   const partnership = await findPartnerById(c.env.DB, partnerId);
   const currentUser = await findUserById(c.env.DB, c.get('sub'));
@@ -313,11 +379,11 @@ partners.delete('/partner/:id', authenticate('access'), async (c) => {
     return c.json({ error: 'Not found' }, 404);
   }
 
-  const canDeleteAsInvitee =
-    partnership.partner_user_id === c.get('sub') ||
-    (partnership.partner_user_id === null && partnership.partner_email === currentUser.email);
+  const canDelete =
+    partnership.watcher_user_id === c.get('sub') ||
+    (partnership.watcher_user_id === null && partnership.watcher_email === currentUser.email);
 
-  if (partnership.user_id !== c.get('sub') && !canDeleteAsInvitee) {
+  if (!canDelete) {
     return c.json({ error: 'Not found' }, 404);
   }
 

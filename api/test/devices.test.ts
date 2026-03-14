@@ -64,7 +64,7 @@ describe('Main device routes', () => {
     expect(res.status).toBe(404);
   });
 
-  it('lists owner devices to an accepted partner with view_data', async () => {
+  it('lists owner devices to an accepted partner', async () => {
     const { token: ownerToken } = await signupAndGetToken('owner2@example.com');
     const { token: partnerToken, userId: partnerUserId } =
       await signupAndGetToken('partner2@example.com');
@@ -74,7 +74,7 @@ describe('Main device routes', () => {
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
       headers: authHeaders(ownerToken),
-      body: JSON.stringify({ email: 'partner2@example.com', permissions: { view_data: true } }),
+      body: JSON.stringify({ email: 'partner2@example.com' }),
     });
     expect(inviteRes.status).toBe(201);
     await inviteRes.json();
@@ -84,7 +84,7 @@ describe('Main device routes', () => {
     );
     const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
 
-    const acceptRes = await SELF.fetch(`${BASE}/partner/invite/accept`, {
+    const acceptRes = await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
       headers: authHeaders(partnerToken),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
@@ -113,7 +113,6 @@ describe('Main device routes', () => {
       headers: authHeaders(token),
       body: JSON.stringify({
         email: 'delete-device-partner@example.com',
-        permissions: { view_data: true },
       }),
     });
     expect(inviteRes.status).toBe(201);
@@ -125,7 +124,7 @@ describe('Main device routes', () => {
     );
     const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
 
-    const acceptRes = await SELF.fetch(`${BASE}/partner/invite/accept`, {
+    const acceptRes = await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
       headers: authHeaders(partnerToken),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),

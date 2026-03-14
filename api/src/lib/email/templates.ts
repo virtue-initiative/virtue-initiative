@@ -1,4 +1,4 @@
-import { DigestCadence, TamperSeverity } from '../email-domain';
+import { DigestFrequency, TamperSeverity } from '../email-domain';
 
 function escapeHtml(value: string) {
   return value
@@ -237,7 +237,7 @@ export function renderTamperAlertTemplate(input: {
 }
 
 export function renderPartnerDigestTemplate(input: {
-  cadence: Exclude<DigestCadence, 'none'>;
+  cadence: DigestFrequency;
   ownerName?: string | null;
   ownerEmail: string;
   approxScreenshotCount: number;
@@ -247,12 +247,7 @@ export function renderPartnerDigestTemplate(input: {
   appUrl: string;
 }) {
   const owner = input.ownerName?.trim() || input.ownerEmail;
-  const periodLabel =
-    input.cadence === 'weekly'
-      ? 'Weekly'
-      : input.cadence === 'twice_weekly'
-        ? 'Twice-weekly'
-        : 'Daily';
+  const periodLabel = input.cadence === 'weekly' ? 'Weekly' : 'Daily';
   const lines = [
     `${periodLabel} accountability summary for ${owner}`,
     '',

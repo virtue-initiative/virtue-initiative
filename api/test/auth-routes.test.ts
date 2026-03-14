@@ -45,24 +45,20 @@ describe('Auth routes', () => {
     expect(new Uint8Array(storedUser!.id)).toHaveLength(16);
 
     const session = await env.DB.prepare(
-      `SELECT session_type, lower(hex(user_id)) as user_id_hex, device_id, expires_at
-       FROM sessions
+      `SELECT lower(hex(user_id)) as user_id_hex, expires_at
+       FROM user_sessions
        WHERE user_id = ?
        ORDER BY created_at DESC
        LIMIT 1`,
     )
       .bind(uuidToBytes(body.user.id))
       .first<{
-        session_type: string;
         user_id_hex: string | null;
-        device_id: string | null;
         expires_at: number;
       }>();
 
     expect(session).toMatchObject({
-      session_type: 'web',
       user_id_hex: body.user.id.replaceAll('-', ''),
-      device_id: null,
     });
     expect(session?.expires_at).toBeGreaterThan(Date.now());
 
@@ -99,8 +95,7 @@ describe('Auth routes', () => {
 
     const sessionCount = await env.DB.prepare(
       `SELECT COUNT(*) as count
-       FROM sessions
-       WHERE session_type = 'web'`,
+       FROM user_sessions`,
     ).first<{ count: number }>();
     expect(sessionCount?.count).toBe(1);
   });
@@ -165,7 +160,7 @@ describe('Auth routes', () => {
     const metadata = JSON.parse(deliveries[0]!.metadata) as { verifyUrl: string };
     const verifyToken = new URL(metadata.verifyUrl).searchParams.get('verify_email_token');
 
-    const verifyRes = await SELF.fetch(`${BASE}/verify-email`, {
+    const verifyRes = await SELF.fetch(`${BASE}/email-verification/validate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token: verifyToken }),
@@ -182,7 +177,7 @@ describe('Auth routes', () => {
   it('resends verification emails for authenticated unverified users', async () => {
     const { token } = await signupAndGetToken('resend@example.com', 'pw');
 
-    const resendRes = await SELF.fetch(`${BASE}/verify-email/request`, {
+    const resendRes = await SELF.fetch(`${BASE}/email-verification`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -198,7 +193,7 @@ describe('Auth routes', () => {
       .bind(Date.now(), uuidToBytes(userId))
       .run();
 
-    const resendRes = await SELF.fetch(`${BASE}/verify-email/request`, {
+    const resendRes = await SELF.fetch(`${BASE}/email-verification`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -214,7 +209,7 @@ describe('Auth routes', () => {
     const { userId } = await signupAndGetToken('reset@example.com', 'old-password', 'Reset User');
     await markUserEmailVerified(userId);
 
-    const requestRes = await SELF.fetch(`${BASE}/password-reset/request`, {
+    const requestRes = await SELF.fetch(`${BASE}/password-reset`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: 'reset@example.com' }),
@@ -237,11 +232,10 @@ describe('Auth routes', () => {
       ok: true,
       email: 'reset@example.com',
       user_id: userId,
-      key_rotation_required: false,
       partner_access_targets: [],
     });
 
-    const resetRes = await SELF.fetch(`${BASE}/password-reset`, {
+    const resetRes = await SELF.fetch(`${BASE}/password-reset/finalize`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token: resetToken, password: 'new-password-hash' }),
@@ -286,7 +280,6 @@ describe('Auth routes', () => {
       headers: authHeaders(token),
       body: JSON.stringify({
         email: 'shared-owner@example.com',
-        permissions: { view_data: true },
       }),
     });
     const invite = (await inviteRes.json()) as { id: string };
@@ -297,7 +290,7 @@ describe('Auth routes', () => {
     );
     const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
 
-    await SELF.fetch(`${BASE}/partner/invite/accept`, {
+    await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
       headers: authHeaders(ownerToken),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
@@ -306,7 +299,7 @@ describe('Auth routes', () => {
       .bind(Buffer.from('shared-access-key'), uuidToBytes(invite.id))
       .run();
 
-    await SELF.fetch(`${BASE}/password-reset/request`, {
+    await SELF.fetch(`${BASE}/password-reset`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: 'secure-reset@example.com' }),
@@ -326,7 +319,6 @@ describe('Auth routes', () => {
       ok: true,
       email: 'secure-reset@example.com',
       user_id: userId,
-      key_rotation_required: true,
       partner_access_targets: [
         {
           partnership_id: invite.id,
@@ -336,14 +328,18 @@ describe('Auth routes', () => {
       ],
     });
 
-    const missingWrapRes = await SELF.fetch(`${BASE}/password-reset`, {
+    const missingWrapRes = await SELF.fetch(`${BASE}/password-reset/finalize`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: resetToken, password: 'new-password-hash' }),
+      body: JSON.stringify({
+        token: resetToken,
+        password: 'new-password-hash',
+        e2ee_key: Buffer.from('rotated-e2ee').toString('base64'),
+      }),
     });
     expect(missingWrapRes.status).toBe(400);
 
-    const resetRes = await SELF.fetch(`${BASE}/password-reset`, {
+    const resetRes = await SELF.fetch(`${BASE}/password-reset/finalize`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

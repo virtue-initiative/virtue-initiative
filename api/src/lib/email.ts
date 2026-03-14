@@ -66,11 +66,14 @@ export async function sendEmail(input: SendEmailInput) {
     return { id: `skipped-${id}` };
   }
 
-  if (input.env.EMAIL_DELIVERY_MODE !== 'ses') {
-    console.info('email delivery skipped', {
+  if (input.env.EMAIL_DELIVERY_MODE === 'log') {
+    console.info('email delivery logged', {
       kind: input.kind,
       recipient: input.recipient,
       subject: input.subject,
+      text: input.text,
+      html: input.html,
+      metadata: input.metadata ?? {},
     });
     mockEmailOutbox.push({
       kind: input.kind,

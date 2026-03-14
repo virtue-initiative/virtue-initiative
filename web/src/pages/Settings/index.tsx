@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import { api, NotificationPreference, User } from "../../api";
+import { api, User, WatchingPartner } from "../../api";
 import { useAuth } from "../../context/auth";
 import "./style.css";
 
@@ -7,7 +7,7 @@ export function Settings() {
   const { token } = useAuth();
 
   const [user, setUser] = useState<User | null>(null);
-  const [preferences, setPreferences] = useState<NotificationPreference[]>([]);
+  const [watching, setWatching] = useState<WatchingPartner[]>([]);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [nameStatus, setNameStatus] = useState<string | null>(null);
@@ -22,14 +22,14 @@ export function Settings() {
 
   async function reload() {
     if (!token) return;
-    const [nextUser, nextPreferences] = await Promise.all([
+    const [nextUser, nextPartners] = await Promise.all([
       api.getUser(token),
-      api.getNotificationPreferences(token),
+      api.getPartners(token),
     ]);
     setUser(nextUser);
     setEmail(nextUser.email);
     setName(nextUser.name ?? "");
-    setPreferences(nextPreferences);
+    setWatching(nextPartners.watching);
   }
 
   useEffect(() => {
@@ -85,10 +85,7 @@ export function Settings() {
   async function updatePreference(
     partnershipId: string,
     patch: Partial<
-      Pick<
-        NotificationPreference,
-        "digest_cadence" | "immediate_tamper_severity" | "send_digest"
-      >
+      Pick<WatchingPartner, "digest_cadence" | "immediate_tamper_severity">
     >,
   ) {
     if (!token) return;
@@ -200,58 +197,39 @@ export function Settings() {
           person you monitor.
         </p>
 
-        {preferences.length === 0 ? (
+        {watching.length === 0 ? (
           <p class="settings-hint">
             Accept a partner invite to configure email notifications for the
             people you monitor.
           </p>
         ) : (
           <div class="settings-list">
-            {preferences.map((preference) => (
-              <div class="settings-item" key={preference.partnership_id}>
+            {watching.map((partner) => (
+              <div class="settings-item" key={partner.id}>
                 <div class="settings-item-header">
                   <strong>
-                    Monitoring{" "}
-                    {preference.monitored_user.name ??
-                      preference.monitored_user.email}
+                    Monitoring {partner.user.name ?? partner.user.email}
                   </strong>
-                  <span class="settings-badge">{preference.status}</span>
+                  <span class="settings-badge">{partner.status}</span>
                 </div>
-                <label class="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={preference.send_digest}
-                    onChange={(e) =>
-                      updatePreference(preference.partnership_id, {
-                        send_digest: (e.target as HTMLInputElement).checked,
-                      }).catch(() => {})
-                    }
-                    disabled={savingPreferenceId === preference.partnership_id}
-                  />
-                  <span>Receive emails</span>
-                </label>
-                {preference.send_digest && (
+                {partner.status === "accepted" && (
                   <div class="settings-preference-grid">
                     <label class="field settings-inline-field">
-                      <span>Digest cadence</span>
+                      <span>Email notifications</span>
                       <select
                         class="settings-select"
-                        value={preference.digest_cadence}
+                        value={partner.digest_cadence}
                         onChange={(e) =>
-                          updatePreference(preference.partnership_id, {
+                          updatePreference(partner.id, {
                             digest_cadence: (e.target as HTMLSelectElement)
-                              .value as NotificationPreference["digest_cadence"],
+                              .value as WatchingPartner["digest_cadence"],
                           }).catch(() => {})
                         }
-                        disabled={
-                          savingPreferenceId === preference.partnership_id
-                        }
+                        disabled={savingPreferenceId === partner.id}
                       >
                         <option value="none">None</option>
+                        <option value="alerts-only">Alerts only</option>
                         <option value="daily">Daily</option>
-                        <option value="twice_weekly">
-                          Twice a week (Sunday and Wednesday)
-                        </option>
                         <option value="weekly">Weekly</option>
                       </select>
                     </label>
@@ -259,17 +237,18 @@ export function Settings() {
                       <span>Immediate tamper emails</span>
                       <select
                         class="settings-select"
-                        value={preference.immediate_tamper_severity}
+                        value={partner.immediate_tamper_severity}
                         onChange={(e) =>
-                          updatePreference(preference.partnership_id, {
+                          updatePreference(partner.id, {
                             immediate_tamper_severity: (
                               e.target as HTMLSelectElement
                             )
-                              .value as NotificationPreference["immediate_tamper_severity"],
+                              .value as WatchingPartner["immediate_tamper_severity"],
                           }).catch(() => {})
                         }
                         disabled={
-                          savingPreferenceId === preference.partnership_id
+                          savingPreferenceId === partner.id ||
+                          partner.digest_cadence === "none"
                         }
                       >
                         <option value="critical">Critical only</option>

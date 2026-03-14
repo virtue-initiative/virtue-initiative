@@ -108,7 +108,7 @@ export async function latestEmailToken(purpose: 'email_verification' | 'password
     .bind(purpose)
     .first<{
       id: ArrayBuffer;
-      user_id: ArrayBuffer;
+      user_id: ArrayBuffer | null;
       email: string;
       purpose: string;
       token_hash: string;
@@ -124,7 +124,7 @@ export async function latestEmailToken(purpose: 'email_verification' | 'password
   return {
     ...token,
     id: bytesToUuid(token.id),
-    user_id: bytesToUuid(token.user_id),
+    user_id: token.user_id ? bytesToUuid(token.user_id) : null,
   };
 }
 
@@ -151,8 +151,9 @@ export function extractTokenFromDelivery(
 export async function clearDB(): Promise<void> {
   clearMockEmailDeliveries();
   await env.DB.prepare('DELETE FROM email_tokens').run();
-  await env.DB.prepare('DELETE FROM sessions').run();
-  await env.DB.prepare('DELETE FROM partner_notification_preferences').run();
+  await env.DB.prepare('DELETE FROM user_sessions').run();
+  await env.DB.prepare('DELETE FROM device_sessions').run();
+  await env.DB.prepare('DELETE FROM partner_preferences').run();
   await env.DB.prepare('DELETE FROM hash_states').run();
   await env.DB.prepare('DELETE FROM device_logs').run();
   await env.DB.prepare('DELETE FROM batches').run();

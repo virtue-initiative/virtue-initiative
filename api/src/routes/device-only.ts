@@ -8,20 +8,23 @@ import {
   createDevice,
   createDeviceLog,
   createSessionRecord,
+  getHashState,
   findDeviceById,
   findSessionByRefreshTokenHash,
   findUserById,
   deleteSessionByRefreshTokenHash,
+  resetHashState as resetStoredHashState,
 } from '../lib/db';
 import { encodeBase64, encodeHex } from '../lib/encoding';
 import { generateToken } from '../lib/jwt';
 import { putObject } from '../lib/r2';
-import { classifyDeviceLogEvent, notifyPartnersAboutRiskLog } from '../lib/tamper';
+import { notifyPartnersAboutRiskLog, riskToSeverity } from '../lib/tamper';
 import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
 
 const deviceOnly = new Hono<{ Bindings: Env; Variables: Variables }>();
 const LOCAL_WEB_URL = 'http://localhost:5173';
+const ZERO_STATE = new Uint8Array(32);
 
 function getAppUrl(c: Context<{ Bindings: Env; Variables: Variables }>) {
   const requestUrl = new URL(c.req.url);
@@ -44,8 +47,8 @@ const deviceTokenSchema = z.object({
 });
 
 const uploadBatchSchema = z.object({
-  start: z.coerce.number().int().nonnegative(),
-  end: z.coerce.number().int().nonnegative(),
+  start_time: z.coerce.number().int().nonnegative(),
+  end_time: z.coerce.number().int().nonnegative(),
   file: z
     .instanceof(File)
     .refine((file) => file.size > 0, { message: 'File is empty' })
@@ -55,14 +58,30 @@ const uploadBatchSchema = z.object({
 const deviceLogSchema = z.object({
   ts: z.number().int().nonnegative(),
   type: z.string().min(1),
+  risk: z.number().min(0).max(1).optional(),
   data: z.record(z.string(), z.unknown()).optional().default({}),
 });
 
-function getHashBaseUrl(requestUrl: string, configuredUrl?: string) {
+function getConfiguredHashBaseUrl(env: Env) {
+  const trimmed = env.HASH_SERVER_URL?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function getHashBaseUrl(requestUrl: string, configuredUrl: string | null) {
   return configuredUrl ?? new URL(requestUrl).origin;
 }
 
-async function readHashState(hashBaseUrl: string, authorization: string) {
+async function readHashState(
+  c: Context<{ Bindings: Env; Variables: Variables }>,
+  deviceId: string,
+  authorization: string,
+  hashBaseUrl: string | null,
+) {
+  if (!hashBaseUrl) {
+    const state = await getHashState(c.env.DB, deviceId);
+    return state ? state.state : ZERO_STATE.buffer;
+  }
+
   const response = await fetch(`${hashBaseUrl}/hash`, {
     headers: { Authorization: authorization },
   });
@@ -74,7 +93,17 @@ async function readHashState(hashBaseUrl: string, authorization: string) {
   return response.arrayBuffer();
 }
 
-async function resetHashState(hashBaseUrl: string, serverToken: string) {
+async function resetHashState(
+  c: Context<{ Bindings: Env; Variables: Variables }>,
+  device: { id: string; owner: string },
+  hashBaseUrl: string | null,
+  serverToken: string,
+) {
+  if (!hashBaseUrl) {
+    await resetStoredHashState(c.env.DB, device.id, Date.now());
+    return;
+  }
+
   const response = await fetch(`${hashBaseUrl}/hash`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${serverToken}` },
@@ -93,7 +122,6 @@ async function createDeviceSession(
   const now = Date.now();
 
   await createSessionRecord(c.env.DB, {
-    id: uuidv4(),
     session_type: 'device',
     device_id: deviceId,
     refresh_token_hash: hashOpaqueToken(refreshToken),
@@ -145,7 +173,7 @@ deviceOnly.get('/device', authenticate('device-access'), async (c) => {
     platform: device.platform,
     enabled: device.enabled === 1,
     ...(user?.e2ee_key ? { e2ee_key: encodeBase64(user.e2ee_key) } : {}),
-    hash_base_url: getHashBaseUrl(c.req.url, c.env.HASH_SERVER_URL),
+    hash_base_url: getHashBaseUrl(c.req.url, getConfiguredHashBaseUrl(c.env)),
   });
 });
 
@@ -199,15 +227,15 @@ deviceOnly.post(
       return c.json({ error: 'Not found' }, 404);
     }
 
-    const { start, end, file } = c.req.valid('form');
+    const { start_time, end_time, file } = c.req.valid('form');
     const authorization = c.req.header('Authorization');
 
     if (!authorization) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
-    const hashBaseUrl = getHashBaseUrl(c.req.url, c.env.HASH_SERVER_URL);
-    const hashState = await readHashState(hashBaseUrl, authorization);
+    const configuredHashBaseUrl = getConfiguredHashBaseUrl(c.env);
+    const hashState = await readHashState(c, device.id, authorization, configuredHashBaseUrl);
     const endHash = encodeHex(hashState);
     const batchId = uuidv4();
     const key = `user/${device.owner}/batches/${batchId}.enc`;
@@ -220,17 +248,19 @@ deviceOnly.post(
       user_id: device.owner,
       device_id: device.id,
       url,
-      start,
-      end,
+      start_time,
+      end_time,
       end_hash: endHash,
       created_at: createdAt,
     });
     await resetHashState(
-      hashBaseUrl,
+      c,
+      device,
+      configuredHashBaseUrl,
       await generateToken('server', device.id, c.env.JWT_SECRET, 60),
     );
 
-    return c.json({ id: batchId, start, end, end_hash: endHash, url }, 201);
+    return c.json({ id: batchId, start_time, end_time, end_hash: endHash, url }, 201);
   },
 );
 
@@ -249,13 +279,10 @@ deviceOnly.post(
     }
 
     const log = c.req.valid('json');
-    const classified = classifyDeviceLogEvent({
-      userId: device.owner,
-      deviceId: device.id,
-      type: log.type,
-      ts: log.ts,
-      data: log.data,
-    });
+    const providedTitle = typeof log.data.title === 'string' ? log.data.title : undefined;
+    const providedDetails = typeof log.data.details === 'string' ? log.data.details : undefined;
+    const computedRisk = log.risk ?? null;
+    const computedSeverity = riskToSeverity(computedRisk);
     const logId = uuidv4();
 
     await createDeviceLog(c.env.DB, {
@@ -265,24 +292,27 @@ deviceOnly.post(
       ts: log.ts,
       type: log.type,
       data: JSON.stringify(log.data),
-      risk: classified?.risk ?? null,
+      risk: computedRisk,
       created_at: Date.now(),
     });
 
-    if (classified) {
+    if (computedSeverity && computedRisk != null) {
       await notifyPartnersAboutRiskLog(c.env.DB, c.env, {
         logId,
         appUrl: getAppUrl(c),
-        userId: classified.userId,
-        severity: classified.severity,
-        risk: classified.risk,
-        title: classified.title,
-        details: classified.details ?? null,
-        happenedAt: classified.happenedAt,
+        userId: device.owner,
+        severity: computedSeverity,
+        risk: computedRisk,
+        title:
+          providedTitle && providedTitle.trim().length > 0
+            ? providedTitle
+            : `Device reported ${log.type.replaceAll('_', ' ')}.`,
+        details: providedDetails && providedDetails.trim().length > 0 ? providedDetails : null,
+        happenedAt: log.ts,
       });
     }
 
-    return c.json(log, 201);
+    return c.json({ ...log, ...(computedRisk != null ? { risk: computedRisk } : {}) }, 201);
   },
 );
 
