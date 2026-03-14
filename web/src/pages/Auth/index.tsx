@@ -36,9 +36,7 @@ export function Auth() {
   }, []);
   const requestedSignupMode = useMemo(() => {
     if (typeof window === "undefined") return false;
-    const searchParams = new URLSearchParams(window.location.search);
-    const rawSignup = searchParams.get("signup");
-    return rawSignup === "1" || rawSignup === "true";
+    return window.location.hash === "#signup";
   }, []);
   const [mode, setMode] = useState<AuthMode>(
     resetToken ? "reset" : requestedSignupMode ? "signup" : "login",
