@@ -24,7 +24,8 @@ if ([string]::IsNullOrWhiteSpace($CacheRoot)) {
 
 $ProfileLower = $Profile.ToLowerInvariant()
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$WorkspaceTargetDir = Join-Path $ProjectRoot "target"
+$WorkspaceRoot = Split-Path -Parent $ProjectRoot
+$WorkspaceTargetDir = Join-Path $WorkspaceRoot "target"
 $NsisScript = Join-Path $ProjectRoot "packaging\nsis\installer.nsi"
 $DistDir = Join-Path $ProjectRoot "dist"
 $OutFile = Join-Path $DistDir "virtue-windows-installer-$Version.exe"
