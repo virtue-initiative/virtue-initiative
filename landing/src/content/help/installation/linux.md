@@ -30,4 +30,3 @@ To start the service again, run `systemctl --user start virtue.service`.
 
 Run `sudo apt remove virtue` to uninstall the package. **Note that the service
 will log an alert as it shuts down.**
-
