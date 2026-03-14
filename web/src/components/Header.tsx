@@ -4,12 +4,12 @@ import { ThemeButton } from "./ThemeButton";
 
 export function Header() {
   const { token, ready, logout } = useAuth();
-  const { url } = useLocation();
+  const { path: currentPath } = useLocation();
 
   if (!ready || !token) return null;
 
-  const isActive = (path: string) =>
-    path === "/" ? url === "/" : url.startsWith(path);
+  const isActive = (routePath: string) =>
+    routePath === "/" ? currentPath === "/" : currentPath.startsWith(routePath);
 
   return (
     <header class="site-header">

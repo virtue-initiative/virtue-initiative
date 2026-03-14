@@ -101,6 +101,13 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      flex-shrink: 0;
+    }
+
+    & .icon > svg {
+      width: 100%;
+      height: 100%;
+      display: block;
     }
   }
 }
@@ -233,7 +240,6 @@
       height: 1.1rem;
     }
   }
-
 }
 
 /* Form field */
@@ -253,7 +259,7 @@
     border: 1px solid var(--border);
     border-radius: 7px;
     padding: 0.55rem 0.75rem;
-    font-size: 0.95rem;
+    font-size: 1rem;
     color: var(--text);
     outline: none;
     transition: border-color 0.15s;

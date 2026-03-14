@@ -12,6 +12,8 @@
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  width: 100%;
+  overflow-x: hidden;
 }
 
 .app-shell {
@@ -19,7 +21,9 @@
   flex-direction: column;
   min-height: 100vh;
   height: 100dvh;
-  overflow: hidden;
+  width: 100%;
+  overflow-x: hidden;
+  overflow-y: hidden;
 }
 
 .site-header {
@@ -81,6 +85,7 @@
 .app-main {
   flex: auto;
   min-height: 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -102,7 +107,8 @@
   .app-shell {
     height: auto;
     min-height: 100svh;
-    overflow: visible;
+    overflow-x: hidden;
+    overflow-y: visible;
   }
 
   .site-header {
@@ -121,6 +127,7 @@
   }
 
   .app-main {
-    overflow: visible;
+    overflow-x: hidden;
+    overflow-y: visible;
   }
 }
