@@ -8,8 +8,8 @@ screenshots on your device and then uploads them in a secure encrypted batch
 about once an hour.
 
 > Note: On iOS the screenshots can only be captured inside the browser app
-> (Apple limitations). We have specific instructions on how to block
-> downloading other browsers and such on iOS.
+> (Apple limitations). We will have specific instructions on how to block
+> downloading other browsers iOS.
 
 At the end of each day (or each week), any partners you've added will receive
 an email reminding them to review your screenshots. If they see anything
