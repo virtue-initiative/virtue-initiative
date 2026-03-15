@@ -11,7 +11,7 @@
     "typecheck": "astro check",
     "prebuild": "npm run prepare-release-data",
     "build": "astro build",
-    "deploy": "npm run build && wrangler deploy --config dist/server/wrangler.json",
+    "deploy": "npm run build && wrangler pages deploy dist --project-name virtueinitiative-landing",
     "preview": "astro preview",
     "test": "echo \"Error: no test specified\" && exit 1",
     "prettier:check": "git ls-files -z -- . | grep -zE '\\.(astro|ts|tsx|cts|mts|js|jsx|cjs|mjs|json|json5|jsonc|css|scss|html|md|mdx|yml|yaml)$' | xargs -0 -r prettier --plugin prettier-plugin-astro --check",
@@ -22,7 +22,6 @@
   "license": "AGPL-3.0-or-later",
   "type": "commonjs",
   "dependencies": {
-    "@astrojs/cloudflare": "^13.1.0",
     "@virtueinitiative/shared-web": "file:../shared-web",
     "astro": "^6.0.3"
   },

@@ -4,7 +4,6 @@ import Header from "../components/Header.astro";
 import ThemeHeadScript from "../components/ThemeHeadScript.astro";
 import ThemeScript from "../components/ThemeScript.astro";
 import "../styles/global.css";
-import { normalizeThemeCookie, THEME_COOKIE_NAME } from "../theme";
 
 interface Props {
   pageTitle?: string;
@@ -15,11 +14,10 @@ const { pageTitle, tagline } = Astro.props;
 const title = pageTitle
   ? `${pageTitle} - The Virtue Initiative`
   : "The Virtue Initiative";
-const theme = normalizeThemeCookie(Astro.cookies.get(THEME_COOKIE_NAME)?.value);
 ---
 
 <!doctype html>
-<html lang="en" data-theme={theme}>
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

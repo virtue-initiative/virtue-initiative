@@ -3,48 +3,36 @@ import type { MarkdownInstance } from "astro";
 import HelpLayout from "../../layouts/HelpLayout.astro";
 import { findHelpItem } from "../../help/navigation";
 
-function routePathFromKey(key: string) {
-  return key
-    .replace("../../content/help/", "")
-    .replace(/\.md$/, "")
-    .replace(/\/index$/, "");
+export function getStaticPaths() {
+  return Object.entries(
+    import.meta.glob<MarkdownInstance<Record<string, never>>>(
+      "../../content/help/**/*.md",
+      { eager: true },
+    ),
+  ).map(([key, module]) => {
+    const routePath = key
+      .replace("../../content/help/", "")
+      .replace(/\.md$/, "")
+      .replace(/\/index$/, "");
+
+    return {
+      params: {
+        slug: routePath,
+      },
+      props: {
+        currentPath: `/help/${routePath}`,
+        Content: module.default,
+      },
+    };
+  });
 }
 
-const slug = Astro.params.slug ?? "";
-const currentPath = `/help/${slug}`.replace(/\/+$/, "") || "/help";
-const docs = Object.entries(
-  import.meta.glob<MarkdownInstance<Record<string, never>>>(
-    "../../content/help/**/*.md",
-    { eager: true },
-  ),
-).map(([key, module]) => ({
-  routePath: `/help/${routePathFromKey(key)}`,
-  Content: module.default,
-}));
-const entry = docs.find((doc) => doc.routePath === currentPath);
+const { currentPath, Content } = Astro.props;
 const currentItem = findHelpItem(currentPath);
-
-if (!entry) {
-  Astro.response.status = 404;
-}
 ---
 
 <HelpLayout currentPath={currentPath} pageTitle={currentItem?.label ?? "Help"}>
-  {
-    entry?.Content ? (
-      <article class="help-content-card help-doc">
-        <entry.Content />
-      </article>
-    ) : (
-      <article class="help-content-card help-doc">
-        <h1>Page not found</h1>
-        <p>The help article you requested does not exist.</p>
-        <div class="section-actions">
-          <a href="/help" class="btn btn-primary">
-            Back to Help
-          </a>
-        </div>
-      </article>
-    )
-  }
+  <article class="help-content-card help-doc">
+    <Content />
+  </article>
 </HelpLayout>
