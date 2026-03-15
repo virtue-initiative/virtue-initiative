@@ -1,6 +1,8 @@
 <script is:inline>
   (() => {
     const THEME_COOKIE_NAME = "virtue-theme";
+    const STORAGE_KEYS = ["shared-state-local", "shared-state"];
+    const root = document.documentElement;
 
     function readCookie(name) {
       const match = document.cookie.match(
@@ -23,15 +25,49 @@
       }
     }
 
-    const theme =
-      readCookie(THEME_COOKIE_NAME) ??
-      readStoredTheme("shared-state-local") ??
-      readStoredTheme("shared-state");
+    function getTheme() {
+      const cookieTheme = readCookie(THEME_COOKIE_NAME);
+      if (cookieTheme === "dark" || cookieTheme === "light") {
+        return cookieTheme;
+      }
 
-    if (theme === "dark" || theme === "light") {
-      document.documentElement.setAttribute("data-theme", theme);
-    } else {
-      document.documentElement.removeAttribute("data-theme");
+      for (const key of STORAGE_KEYS) {
+        const storedTheme = readStoredTheme(key);
+        if (storedTheme === "dark" || storedTheme === "light") {
+          return storedTheme;
+        }
+      }
+
+      return window.matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light";
     }
+
+    const theme = getTheme();
+    root.setAttribute("data-theme", theme);
+    root.style.colorScheme = theme;
   })();
 </script>
+<style is:inline>
+  html {
+    background: #f9f9f7;
+    color: #1a1a1a;
+  }
+
+  html[data-theme="dark"] {
+    background: #111713;
+    color: #e6e3df;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    html {
+      background: #111713;
+      color: #e6e3df;
+    }
+
+    html[data-theme="light"] {
+      background: #f9f9f7;
+      color: #1a1a1a;
+    }
+  }
+</style>

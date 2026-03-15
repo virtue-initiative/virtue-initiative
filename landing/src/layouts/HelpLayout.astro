@@ -5,7 +5,6 @@ import ThemeHeadScript from "../components/ThemeHeadScript.astro";
 import ThemeScript from "../components/ThemeScript.astro";
 import { helpSidebar } from "../help/navigation";
 import "../styles/global.css";
-import { normalizeThemeCookie, THEME_COOKIE_NAME } from "../theme";
 
 interface Props {
   currentPath: string;
@@ -14,12 +13,11 @@ interface Props {
 
 const { currentPath, pageTitle = "Help" } = Astro.props;
 const title = `${pageTitle} - The Virtue Initiative`;
-const theme = normalizeThemeCookie(Astro.cookies.get(THEME_COOKIE_NAME)?.value);
 const rootLinks = [{ label: "Help", href: "/help" }, ...helpSidebar];
 ---
 
 <!doctype html>
-<html lang="en" data-theme={theme}>
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
