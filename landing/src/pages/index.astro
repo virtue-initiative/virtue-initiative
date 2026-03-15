@@ -1,5 +1,7 @@
 ---
 import SiteLayout from "../layouts/SiteLayout.astro";
+import CheckIcon from "../components/icons/CheckIcon.astro";
+import MinusIcon from "../components/icons/MinusIcon.astro";
 ---
 
 <SiteLayout tagline="Providing free tools and resources for accountability">
@@ -89,7 +91,7 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     <p>
       We are working hard to support more platforms and features. Below is the
       current features supported by platform. As you can probably tell, this is
-      still an alpha stage project.
+      still a beta stage project.
     </p>
     <div class="table-wrapper">
       <table>
@@ -99,69 +101,84 @@ import SiteLayout from "../layouts/SiteLayout.astro";
             <th>Windows</th>
             <th>macOS</th>
             <th>Linux</th>
-            <th>Android</th>
+            <th>
+              Android<sup><a href="#platform-footnote-1">1</a></sup>
+            </th>
             <th>iOS</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <td>Periodic screenshots</td>
-            <td class="no">✗</td>
-            <td class="no">✗</td>
-            <td class="yes">✔</td>
-            <td class="no">✗</td>
-            <td class="no">✗</td>
-          </tr>
-          <tr>
-            <td>Runs as a background service</td>
-            <td class="no">✗</td>
-            <td class="no">✗</td>
-            <td class="yes">✔</td>
-            <td class="no">✗</td>
-            <td class="no">✗</td>
+            <td class="yes"><CheckIcon /></td>
+            <td class="yes"><CheckIcon /></td>
+            <td class="yes"><CheckIcon /></td>
+            <td class="yes"><CheckIcon /></td>
+            <td class="no"><MinusIcon /></td>
           </tr>
           <tr>
             <td>Detects shutdowns</td>
-            <td class="no">✗</td>
-            <td class="no">✗</td>
-            <td class="yes">✔</td>
-            <td class="no">✗</td>
-            <td class="no">✗</td>
-          </tr>
-          <tr>
-            <td>Detects tampering</td>
-            <td class="no">✗</td>
-            <td class="no">✗</td>
-            <td class="no">✗</td>
-            <td class="no">✗</td>
-            <td class="no">✗</td>
-          </tr>
-          <tr>
-            <td>Captures web history</td>
-            <td class="no">✗</td>
-            <td class="no">✗</td>
-            <td class="no">✗</td>
-            <td class="no">✗</td>
-            <td class="no">✗</td>
-          </tr>
-          <tr>
-            <td>Image risk classification</td>
-            <td class="no">✗</td>
-            <td class="no">✗</td>
-            <td class="no">✗</td>
-            <td class="no">✗</td>
-            <td class="no">✗</td>
+            <td class="yes"><CheckIcon /></td>
+            <td class="yes"><CheckIcon /></td>
+            <td class="yes"><CheckIcon /></td>
+            <td class="yes"><CheckIcon /></td>
+            <td class="no"><MinusIcon /></td>
           </tr>
           <tr>
             <td>End-to-end encryption</td>
-            <td class="no">✗</td>
-            <td class="no">✗</td>
-            <td class="yes">✔</td>
-            <td class="no">✗</td>
-            <td class="no">✗</td>
+            <td class="yes"><CheckIcon /></td>
+            <td class="yes"><CheckIcon /></td>
+            <td class="yes"><CheckIcon /></td>
+            <td class="yes"><CheckIcon /></td>
+            <td class="no"><MinusIcon /></td>
+          </tr>
+          <tr>
+            <td>Daily/weekly email reports</td>
+            <td class="yes"><CheckIcon /></td>
+            <td class="yes"><CheckIcon /></td>
+            <td class="yes"><CheckIcon /></td>
+            <td class="yes"><CheckIcon /></td>
+            <td class="no"><MinusIcon /></td>
+          </tr>
+          <tr>
+            <td>Immediate email alerts</td>
+            <td class="no"><MinusIcon /></td>
+            <td class="no"><MinusIcon /></td>
+            <td class="no"><MinusIcon /></td>
+            <td class="no"><MinusIcon /></td>
+            <td class="no"><MinusIcon /></td>
+          </tr>
+          <tr>
+            <td>Detects tampering</td>
+            <td class="no"><MinusIcon /></td>
+            <td class="no"><MinusIcon /></td>
+            <td class="no"><MinusIcon /></td>
+            <td class="no"><MinusIcon /></td>
+            <td class="no"><MinusIcon /></td>
+          </tr>
+          <tr>
+            <td>Captures web history</td>
+            <td class="no"><MinusIcon /></td>
+            <td class="no"><MinusIcon /></td>
+            <td class="no"><MinusIcon /></td>
+            <td class="no"><MinusIcon /></td>
+            <td class="no"><MinusIcon /></td>
+          </tr>
+          <tr>
+            <td>Image risk classification</td>
+            <td class="no"><MinusIcon /></td>
+            <td class="no"><MinusIcon /></td>
+            <td class="no"><MinusIcon /></td>
+            <td class="no"><MinusIcon /></td>
+            <td class="no"><MinusIcon /></td>
           </tr>
         </tbody>
       </table>
+    </div>
+    <div class="table-footnotes">
+      <p id="platform-footnote-1">
+        <sup>1</sup> Android currently requires sideloading the app.
+      </p>
     </div>
   </section>
 </SiteLayout>

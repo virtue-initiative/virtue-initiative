@@ -21,6 +21,10 @@ export const helpSidebar: HelpNavItem[] = [
     ],
   },
   {
+    label: "How it works",
+    href: "/help/how-it-works",
+  },
+  {
     label: "Removing Access",
     href: "/help/removing-access",
     items: [
@@ -41,6 +45,17 @@ export const helpSidebar: HelpNavItem[] = [
     href: "/help/web",
     items: [
       { label: "Inviting a Partner", href: "/help/web/inviting-a-partner" },
+    ],
+  },
+  {
+    label: "Developer",
+    href: "/help/developer",
+    items: [
+      { label: "Testing", href: "/help/developer/testing" },
+      {
+        label: "Developer Overrides",
+        href: "/help/developer/overrides",
+      },
     ],
   },
 ];

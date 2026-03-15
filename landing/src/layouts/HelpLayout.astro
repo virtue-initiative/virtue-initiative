@@ -3,7 +3,7 @@ import Footer from "../components/Footer.astro";
 import Header from "../components/Header.astro";
 import ThemeHeadScript from "../components/ThemeHeadScript.astro";
 import ThemeScript from "../components/ThemeScript.astro";
-import { helpSidebar } from "../help/navigation";
+import { helpSidebar, type HelpNavItem } from "../help/navigation";
 import "../styles/global.css";
 
 interface Props {
@@ -14,6 +14,16 @@ interface Props {
 const { currentPath, pageTitle = "Help" } = Astro.props;
 const title = `${pageTitle} - The Virtue Initiative`;
 const rootLinks = [{ label: "Help", href: "/help" }, ...helpSidebar];
+
+function sectionContainsPath(item: HelpNavItem, pathname: string): boolean {
+  if (item.href === pathname) {
+    return true;
+  }
+
+  return (
+    item.items?.some((child) => sectionContainsPath(child, pathname)) ?? false
+  );
+}
 ---
 
 <!doctype html>
@@ -36,34 +46,54 @@ const rootLinks = [{ label: "Help", href: "/help" }, ...helpSidebar];
           {
             rootLinks.map((item) => (
               <li>
-                {item.href && (
-                  <a
-                    href={item.href}
-                    class:list={[
-                      "help-sidebar-item",
-                      { active: item.href === currentPath },
-                    ]}
+                {item.items && item.items.length > 0 ? (
+                  <details
+                    class="help-sidebar-section"
+                    open={sectionContainsPath(item, currentPath)}
                   >
-                    {item.label}
-                  </a>
-                )}
-                {item.items && item.items.length > 0 && (
-                  <ul class="help-sidebar-sublist">
-                    {item.items.map((child) => (
-                      <li>
+                    <summary class="help-sidebar-section-summary">
+                      {item.href && (
                         <a
-                          href={child.href}
+                          href={item.href}
                           class:list={[
                             "help-sidebar-item",
-                            "help-sidebar-item-child",
-                            { active: child.href === currentPath },
+                            { active: item.href === currentPath },
                           ]}
                         >
-                          {child.label}
+                          {item.label}
                         </a>
-                      </li>
-                    ))}
-                  </ul>
+                      )}
+                      <span class="help-sidebar-toggle" aria-hidden="true" />
+                    </summary>
+                    <ul class="help-sidebar-sublist">
+                      {item.items.map((child) => (
+                        <li>
+                          <a
+                            href={child.href}
+                            class:list={[
+                              "help-sidebar-item",
+                              "help-sidebar-item-child",
+                              { active: child.href === currentPath },
+                            ]}
+                          >
+                            {child.label}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : (
+                  item.href && (
+                    <a
+                      href={item.href}
+                      class:list={[
+                        "help-sidebar-item",
+                        { active: item.href === currentPath },
+                      ]}
+                    >
+                      {item.label}
+                    </a>
+                  )
                 )}
               </li>
             ))
