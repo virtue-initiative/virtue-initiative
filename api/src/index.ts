@@ -8,16 +8,20 @@ import emailWebhooks from './routes/email-webhooks';
 import hashes from './routes/hashes';
 import notifications from './routes/notifications';
 import partners from './routes/partners';
+import { stripApiBasePath } from './lib/base-path';
 import { runNotificationSchedule } from './lib/scheduler';
 import { Env, Variables } from './types/bindings';
 
-const app = new Hono<{ Bindings: Env; Variables: Variables }>();
+const app = new Hono<{ Bindings: Env; Variables: Variables }>({
+  getPath: (request, options) =>
+    stripApiBasePath(new URL(request.url).pathname, options?.env?.API_BASE_PATH),
+});
 
 app.use(
   '/*',
   cors({
     origin: (origin, c) => {
-      const allowed = c.env.CORS_ORIGIN || 'http://localhost:5173';
+      const allowed = new URL(c.env.APP_URL || 'http://localhost:5173').origin;
       return origin === allowed ? origin : null;
     },
     allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],

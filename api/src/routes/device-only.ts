@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { authenticate } from '../middleware/auth';
 import { validateZ } from '../middleware/validation';
+import { getRequestApiBaseUrl } from '../lib/base-path';
 import {
   createBatch,
   createDevice,
@@ -67,8 +68,8 @@ function getConfiguredHashBaseUrl(env: Env) {
   return trimmed ? trimmed : null;
 }
 
-function getHashBaseUrl(requestUrl: string, configuredUrl: string | null) {
-  return configuredUrl ?? new URL(requestUrl).origin;
+function getHashBaseUrl(requestUrl: string, env: Env) {
+  return getConfiguredHashBaseUrl(env) ?? getRequestApiBaseUrl(requestUrl, env.API_BASE_PATH);
 }
 
 async function readHashState(
@@ -173,7 +174,7 @@ deviceOnly.get('/device', authenticate('device-access'), async (c) => {
     platform: device.platform,
     enabled: device.enabled === 1,
     ...(user?.e2ee_key ? { e2ee_key: encodeBase64(user.e2ee_key) } : {}),
-    hash_base_url: getHashBaseUrl(c.req.url, getConfiguredHashBaseUrl(c.env)),
+    hash_base_url: getHashBaseUrl(c.req.url, c.env),
   });
 });
 

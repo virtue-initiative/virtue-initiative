@@ -4,8 +4,15 @@
 # JWT Secret - Use a strong random string
 JWT_SECRET=your-super-secret-key-change-this-in-production
 
-# Allowed CORS origin (web app URL)
-CORS_ORIGIN=http://localhost:5173
+# Web app URL. Its origin is also used for CORS.
+APP_URL=http://localhost:5173
+
+# App name used in outbound emails.
+APP_NAME=Virtue Initiative
+
+# Optional path prefix that the worker should also accept.
+# Example: /api makes both https://api.example.com/login and https://example.com/api/login work.
+API_BASE_PATH=/api
 
 # Public base URL for R2 batch blobs
 R2_URL=http://localhost:8787/r2
@@ -21,5 +28,3 @@ EMAIL_DELIVERY_MODE=log
 # AWS_ACCESS_KEY_ID=
 # AWS_SECRET_ACCESS_KEY=
 # AWS_REGION=us-east-1
-
-
