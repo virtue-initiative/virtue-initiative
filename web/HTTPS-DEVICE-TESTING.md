@@ -77,7 +77,7 @@ Set the API to allow the tunneled web origin and to emit tunneled R2 URLs:
 [`api/.dev.vars`](../api/.dev.vars)
 
 ```env
-CORS_ORIGIN=https://<web-tunnel-host>
+APP_URL=https://<web-tunnel-host>
 R2_URL=https://<api-tunnel-host>/r2
 ```
 

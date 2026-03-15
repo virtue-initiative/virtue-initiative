@@ -29,6 +29,10 @@ npm run dev
 
 The API will be available at `http://localhost:8787`
 
+With `API_BASE_PATH=/api`, the same worker will also accept `http://localhost:8787/api/*`
+and strip that prefix before routing. That matches production setups where both
+`api.virtueinitiative.org/*` and `virtueinitiative.org/api/*` point to the same worker.
+
 To expose the dev server to VMs on your local network (for example libvirt guests):
 
 ```bash
@@ -54,6 +58,15 @@ using `wrangler secret put`) and run
 ```bash
 npm run deploy
 ```
+
+Cloudflare still needs both hostnames/routes pointed at this worker. `API_BASE_PATH`
+only makes the `/api` prefix optional once the request reaches the worker; it does not
+create the Cloudflare route itself.
+
+`APP_URL` is the single source for both outbound web links and the allowed CORS origin.
+
+If you manage Cloudflare Transform Rules outside this repo, a zone-level URL Rewrite Rule
+that rewrites `/api/*` to `/*` can replace this Worker-side prefix handling.
 
 ## API
 

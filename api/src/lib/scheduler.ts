@@ -11,10 +11,7 @@ import { renderPartnerDigestTemplate } from './email/templates';
 import { riskToSeverity } from './tamper';
 import { Env } from '../types/bindings';
 
-function getCaptureIntervalMs(env: Env) {
-  const seconds = Number.parseInt(env.DEFAULT_CAPTURE_INTERVAL_SECONDS, 10);
-  return (Number.isFinite(seconds) && seconds > 0 ? seconds : 300) * 1000;
-}
+const DEFAULT_CAPTURE_INTERVAL_MS = 300 * 1000;
 
 function startOfUtcDay(timestamp: number) {
   const date = new Date(timestamp);
@@ -92,7 +89,6 @@ function collectMissingLogDays(
 }
 
 export async function runNotificationSchedule(env: Env, now = Date.now()) {
-  const captureIntervalMs = getCaptureIntervalMs(env);
   const partnerships = await listDigestEligiblePartnerships(env.DB);
 
   for (const partnership of partnerships) {
@@ -116,7 +112,7 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
     const approxScreenshotCount = countApproximateScreenshots(
       batches.length,
       riskLogs.length,
-      captureIntervalMs,
+      DEFAULT_CAPTURE_INTERVAL_MS,
     );
     const tamperCounts = summarizeTamperCounts(riskLogs);
     const missingLogDays = collectMissingLogDays(devices, deviceLogs, window.start, window.end);
