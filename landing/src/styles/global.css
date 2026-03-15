@@ -506,6 +506,29 @@ footer {
       border-radius: 0;
     }
   }
+
+  & blockquote {
+    margin: 0.25rem 0;
+    padding: 0.9rem 1rem 0.9rem 1.1rem;
+    border-left: 4px solid var(--accent);
+    border-radius: 0 10px 10px 0;
+    background:
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--accent) 10%, transparent),
+        transparent 55%
+      ),
+      var(--bg-subtle);
+    color: var(--text);
+
+    & p {
+      margin: 0;
+    }
+
+    & p + p {
+      margin-top: 0.75rem;
+    }
+  }
 }
 
 @media (max-width: 960px) {

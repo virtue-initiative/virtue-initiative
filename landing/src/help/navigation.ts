@@ -21,6 +21,10 @@ export const helpSidebar: HelpNavItem[] = [
     ],
   },
   {
+    label: "How it works",
+    href: "/help/how-it-works",
+  },
+  {
     label: "Removing Access",
     href: "/help/removing-access",
     items: [
