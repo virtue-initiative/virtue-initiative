@@ -54,7 +54,7 @@ mod tests {
 
     use image::{DynamicImage, ImageFormat, Rgb, RgbImage};
 
-    use super::ImagePipeline;
+    use super::{ImagePipeline, TARGET_SMALL_DIM};
 
     #[test]
     fn resizes_so_small_dimension_matches_target() {
@@ -69,9 +69,10 @@ mod tests {
             .expect("encode input");
 
         let output = ImagePipeline.process(&input.into_inner()).expect("process");
+        let expected_width = (800.0_f32 / 600.0_f32 * TARGET_SMALL_DIM as f32).round() as u32;
 
-        assert_eq!(output.height, 256);
-        assert_eq!(output.width, 341); // 800/600 * 256, rounded
+        assert_eq!(output.height, TARGET_SMALL_DIM);
+        assert_eq!(output.width, expected_width);
         assert_eq!(output.content_type, "image/webp");
         assert!(!output.bytes.is_empty());
     }
@@ -89,9 +90,10 @@ mod tests {
             .expect("encode input");
 
         let output = ImagePipeline.process(&input.into_inner()).expect("process");
+        let expected_height = (800.0_f32 / 600.0_f32 * TARGET_SMALL_DIM as f32).round() as u32;
 
-        assert_eq!(output.width, 256);
-        assert_eq!(output.height, 341); // 800/600 * 256, rounded
+        assert_eq!(output.width, TARGET_SMALL_DIM);
+        assert_eq!(output.height, expected_height);
         assert_eq!(output.content_type, "image/webp");
         assert!(!output.bytes.is_empty());
     }
