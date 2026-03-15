@@ -47,6 +47,17 @@ export const helpSidebar: HelpNavItem[] = [
       { label: "Inviting a Partner", href: "/help/web/inviting-a-partner" },
     ],
   },
+  {
+    label: "Developer",
+    href: "/help/developer",
+    items: [
+      { label: "Testing", href: "/help/developer/testing" },
+      {
+        label: "Developer Overrides",
+        href: "/help/developer/overrides",
+      },
+    ],
+  },
 ];
 
 function flatten(items: HelpNavItem[]): HelpNavItem[] {
