@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="22.73848mm"
+   height="28.103165mm"
+   viewBox="0 0 22.73848 28.103165"
+   version="1.1"
+   id="svg5"
+   inkscape:version="1.2.2 (b0a8486541, 2022-12-01)"
+   sodipodi:docname="logo-ideas.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview7"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="mm"
+     showgrid="false"
+     inkscape:zoom="2.0351299"
+     inkscape:cx="469.25752"
+     inkscape:cy="938.51504"
+     inkscape:window-width="1918"
+     inkscape:window-height="1059"
+     inkscape:window-x="0"
+     inkscape:window-y="19"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer1" />
+  <defs
+     id="defs2">
+    <inkscape:path-effect
+       effect="fill_between_many"
+       method="originald"
+       linkedpaths="#path236-5-2-1-3,0,1"
+       id="path-effect1229-73-2"
+       is_visible="true"
+       lpeversion="0"
+       join="true"
+       close="true"
+       autoreverse="true" />
+  </defs>
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1"
+     transform="translate(-158.45082,-253.87925)">
+    <g
+       id="g936">
+      <path
+         inkscape:original-d="M 0,0"
+         inkscape:path-effect="#path-effect1229-73-2"
+         d="m 147.20773,185.92859 13.83658,61.7445 1.67776,-60.51967 z"
+         id="path1231-6-4"
+         class="UnoptimicedTransforms"
+         transform="matrix(0.44156349,0,0,0.44156349,93.868921,172.19963)" />
+      <path
+         id="path236-5-2-1-3"
+         style="fill:#00bf00;fill-opacity:1;stroke:#00bf00;stroke-width:1.90083;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:1;paint-order:markers stroke fill"
+         class="UnoptimicedTransforms"
+         d="m 147.20773,185.92859 13.83658,61.7445 1.67776,-60.51967 z"
+         sodipodi:nodetypes="cccc"
+         transform="matrix(0.44156349,0,0,0.44156349,93.868921,172.19963)" />
+      <path
+         style="fill:#005d00;fill-opacity:1;stroke:#005d00;stroke-width:0.839412;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
+         d="m 170.48525,281.08944 -4.76537,-26.25024 -0.7398,26.71832 z"
+         id="path236-3-3-9-29-0"
+         sodipodi:nodetypes="cccc" />
+      <path
+         style="fill:#00bf00;fill-opacity:1;stroke:#00bf00;stroke-width:0.700761;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
+         d="m 176.44149,255.29514 -6.9497,24.20213 11.3468,-20.76097 z"
+         id="path236-6-5-1-3-7"
+         sodipodi:nodetypes="cccc" />
+      <path
+         style="fill:#009b00;fill-opacity:1;stroke:#009b00;stroke-width:0.70032;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
+         d="m 173.40463,280.90329 7.43464,-22.18277 -12.43085,22.6311 z"
+         id="path236-3-7-6-2-1-8"
+         sodipodi:nodetypes="cccc" />
+    </g>
+  </g>
+</svg>
