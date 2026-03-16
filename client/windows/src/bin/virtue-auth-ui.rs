@@ -151,10 +151,7 @@ fn main() -> Result<()> {
     paths.ensure_dirs()?;
     apply_runtime_env(&paths);
     let logger = ServiceLogger::new(paths.log_file.clone());
-    logger.info(&format!(
-        "auth ui starting ({})",
-        virtue_core::BUILD_LABEL
-    ));
+    logger.info(&format!("auth ui starting ({})", virtue_core::BUILD_LABEL));
 
     // Force software rendering: winit backend expects "software"/"sw" renderer names.
     slint::BackendSelector::new()
@@ -249,10 +246,7 @@ fn main() -> Result<()> {
 
     match ui.run().map_err(|err| anyhow::anyhow!(err.to_string())) {
         Ok(()) => {
-            logger.info(&format!(
-                "auth ui closed ({})",
-                virtue_core::BUILD_LABEL
-            ));
+            logger.info(&format!("auth ui closed ({})", virtue_core::BUILD_LABEL));
             Ok(())
         }
         Err(err) => {
