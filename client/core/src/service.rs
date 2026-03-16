@@ -76,13 +76,16 @@ impl<P: PlatformHooks> MonitorService<P> {
         };
 
         let _ = service.refresh_batch_key_from_settings();
-        let _ = service.refresh_device_settings();
+        if service.device_credentials.is_some() {
+            let _ = service.refresh_device_settings();
+        }
         service.persist_state()?;
         Ok(service)
     }
 
     pub fn loop_iteration(&mut self) -> CoreResult<LoopOutcome> {
         self.ensure_running()?;
+        self.reload_persisted_state()?;
 
         let now_ms = self.platform.get_time_utc_ms()?;
         self.status.last_loop_at_ms = Some(now_ms);
@@ -406,6 +409,20 @@ impl<P: PlatformHooks> MonitorService<P> {
             device_credentials: self.device_credentials.clone(),
             wrapping_key_base64: self.wrapping_key_base64.clone(),
         })
+    }
+
+    fn reload_persisted_state(&mut self) -> CoreResult<()> {
+        let auth_state = self.storage.load_auth_state()?;
+        self.user_id = auth_state.user_id;
+        self.user_access_token = auth_state.user_access_token;
+        self.wrapping_key_base64 = auth_state.wrapping_key_base64;
+        self.device_credentials = auth_state.device_credentials;
+
+        self.device_settings = self.storage.load_device_settings()?;
+        self.pending_requests = self.storage.load_pending_requests()?;
+        self.batch_buffer = self.storage.load_batch_buffer()?;
+        self.refresh_batch_key_from_settings()?;
+        Ok(())
     }
 
     fn ensure_running(&self) -> CoreResult<()> {

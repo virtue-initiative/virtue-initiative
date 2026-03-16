@@ -1198,12 +1198,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dotenv-build"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4547f16c17f6051a12cdb8c62b803f94bee6807c74aa7c530b30b737df981fc"
-
-[[package]]
 name = "downcast-rs"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2575,6 +2569,7 @@ checksum = "e6506c6c10786659413faa717ceebcb8f70731c0a60cbae39795fdf114519c1a"
 dependencies = [
  "bytemuck",
  "byteorder-lite",
+ "image-webp",
  "moxcms",
  "num-traits",
  "png 0.18.1",
@@ -4279,6 +4274,7 @@ dependencies = [
  "bytes",
  "cookie",
  "cookie_store",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "http",
@@ -5754,54 +5750,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "virtue-client-core"
-version = "0.0.1"
-dependencies = [
- "aes-gcm",
- "argon2",
- "base64",
- "chrono",
- "dotenv-build",
- "flate2",
- "hex",
- "hmac",
- "image",
- "pbkdf2",
- "rand 0.8.5",
- "reqwest",
- "rmp-serde",
- "serde",
- "serde_bytes",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror 2.0.18",
- "uuid",
- "webp",
-]
-
-[[package]]
 name = "virtue-linux-client"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "base64",
  "chrono",
  "clap",
  "dirs",
- "hex",
  "hostname",
  "image",
  "ksni",
- "rand 0.8.5",
- "reqwest",
  "rpassword",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
  "tokio",
- "uuid",
- "virtue-client-core",
+ "virtue_core",
 ]
 
 [[package]]
@@ -5824,7 +5787,7 @@ dependencies = [
  "tokio",
  "tray-icon",
  "uuid",
- "virtue-client-core",
+ "virtue_core",
 ]
 
 [[package]]
@@ -5844,9 +5807,30 @@ dependencies = [
  "slint",
  "tokio",
  "uuid",
- "virtue-client-core",
+ "virtue_core",
  "windows 0.62.2",
  "windows-service",
+]
+
+[[package]]
+name = "virtue_core"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "argon2",
+ "base64",
+ "flate2",
+ "hex",
+ "image",
+ "pbkdf2",
+ "reqwest",
+ "rmp-serde",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+ "webp",
 ]
 
 [[package]]

@@ -1,16 +1,26 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use virtue_core::Config;
+
+pub const BASE_API_URL_ENV_VAR: &str = "VIRTUE_BASE_API_URL";
+pub const CAPTURE_INTERVAL_SECONDS_ENV_VAR: &str = "VIRTUE_CAPTURE_INTERVAL_SECONDS";
+pub const BATCH_WINDOW_SECONDS_ENV_VAR: &str = "VIRTUE_BATCH_WINDOW_SECONDS";
+
+const DEFAULT_BASE_API_URL: &str = "https://api.virtueinitiative.org";
+const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
+const MIN_CAPTURE_INTERVAL_SECONDS: u64 = 15;
+const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
 
 #[derive(Clone, Debug)]
 pub struct ClientPaths {
     pub config_dir: PathBuf,
     pub data_dir: PathBuf,
-    pub state_file: PathBuf,
-    pub token_file: PathBuf,
-    pub batch_buffer_file: PathBuf,
+    pub state_dir: PathBuf,
+    pub client_state_file: PathBuf,
     pub lifecycle_state_file: PathBuf,
 }
 
@@ -23,9 +33,8 @@ impl ClientPaths {
         let data_dir = data_root.join("virtue");
 
         Ok(Self {
-            state_file: config_dir.join("client_state.json"),
-            token_file: config_dir.join("token_store.json"),
-            batch_buffer_file: data_dir.join("batch_buffer.json"),
+            state_dir: config_dir.join("core"),
+            client_state_file: config_dir.join("client_state.json"),
             lifecycle_state_file: data_dir.join("lifecycle_state.json"),
             config_dir,
             data_dir,
@@ -37,18 +46,15 @@ impl ClientPaths {
             .with_context(|| format!("failed to create {}", self.config_dir.display()))?;
         fs::create_dir_all(&self.data_dir)
             .with_context(|| format!("failed to create {}", self.data_dir.display()))?;
+        fs::create_dir_all(&self.state_dir)
+            .with_context(|| format!("failed to create {}", self.state_dir.display()))?;
         Ok(())
     }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ClientState {
-    pub monitoring_enabled: bool,
-    pub email: Option<String>,
-    pub device_id: Option<String>,
     pub backend_hint: Option<CaptureBackendHint>,
-    /// User ID used as PBKDF2 salt for E2EE key derivation.
-    pub e2ee_user_id: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -86,4 +92,53 @@ pub fn save_state(path: &Path, state: &ClientState) -> Result<()> {
         .with_context(|| format!("failed replacing {} with {}", path.display(), tmp.display()))?;
 
     Ok(())
+}
+
+pub fn build_core_config(paths: &ClientPaths) -> Config {
+    let device_name = hostname::get()
+        .ok()
+        .and_then(|value| value.into_string().ok())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "linux-device".to_string());
+
+    Config::new(
+        resolve_base_api_url(),
+        device_name,
+        "linux",
+        paths.state_dir.clone(),
+        Duration::from_secs(resolve_capture_interval_seconds()),
+        Duration::from_secs(resolve_batch_window_seconds()),
+    )
+}
+
+pub fn resolve_base_api_url() -> String {
+    std::env::var(BASE_API_URL_ENV_VAR)
+        .ok()
+        .map(|value| value.trim().trim_end_matches('/').to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_BASE_API_URL.to_string())
+}
+
+pub fn resolve_capture_interval_seconds() -> u64 {
+    std::env::var(CAPTURE_INTERVAL_SECONDS_ENV_VAR)
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(clamp_capture_interval_seconds)
+        .unwrap_or(DEFAULT_CAPTURE_INTERVAL_SECONDS)
+}
+
+pub fn resolve_batch_window_seconds() -> u64 {
+    std::env::var(BATCH_WINDOW_SECONDS_ENV_VAR)
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(clamp_batch_window_seconds)
+        .unwrap_or(DEFAULT_BATCH_WINDOW_SECONDS)
+}
+
+pub fn clamp_capture_interval_seconds(value: u64) -> u64 {
+    value.max(MIN_CAPTURE_INTERVAL_SECONDS)
+}
+
+pub fn clamp_batch_window_seconds(value: u64) -> u64 {
+    value.max(1)
 }

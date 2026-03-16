@@ -2,119 +2,30 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+use std::time::Instant;
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
+use tokio::sync::mpsc;
 use tokio::time::sleep;
+use virtue_core::{LogEntry, MonitorService};
 
-use virtue_client_core::{
-    ApiClient, AuthClient, BatchDaemonConfig, CaptureOutcome, CoreError, DaemonAlertEvent,
-    FileTokenStore, PersistedServiceState, ServiceEvent, ServiceHost, SleepOutcome, TokenStore,
-    run_batch_daemon,
-};
-
-use crate::capture::{capture_screen, is_session_unavailable_error};
-use crate::config::{ClientPaths, load_state};
+use crate::capture::{LinuxPlatformHooks, is_session_unavailable_text};
+use crate::config::{ClientPaths, build_core_config};
 use crate::tray;
 
 const CURRENT_BOOT_ID_PATH: &str = "/proc/sys/kernel/random/boot_id";
 const PROC_STAT_PATH: &str = "/proc/stat";
+const SESSION_UNAVAILABLE_LOG_INTERVAL: Duration = Duration::from_secs(5 * 60);
+const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct LifecycleState {
     last_seen_boot_id: Option<String>,
-}
-
-#[derive(Clone)]
-struct LinuxDaemonHost {
-    paths: ClientPaths,
-    shutdown: Arc<AtomicBool>,
-    pending_alert_events: Arc<Mutex<Vec<DaemonAlertEvent>>>,
-}
-
-impl LinuxDaemonHost {
-    fn new(
-        paths: ClientPaths,
-        shutdown: Arc<AtomicBool>,
-        pending_alert_events: Arc<Mutex<Vec<DaemonAlertEvent>>>,
-    ) -> Self {
-        Self {
-            paths,
-            shutdown,
-            pending_alert_events,
-        }
-    }
-}
-
-impl ServiceHost for LinuxDaemonHost {
-    fn load_persisted_state(&self) -> virtue_client_core::CoreResult<PersistedServiceState> {
-        let state =
-            load_state(&self.paths.state_file).map_err(|e| CoreError::Platform(e.to_string()))?;
-        Ok(PersistedServiceState {
-            monitoring_enabled: state.monitoring_enabled,
-            device_id: state.device_id,
-        })
-    }
-
-    fn now_utc(&self) -> chrono::DateTime<Utc> {
-        Utc::now()
-    }
-
-    async fn sleep_interruptible(
-        &self,
-        duration: Duration,
-    ) -> virtue_client_core::CoreResult<SleepOutcome> {
-        let mut remaining = duration;
-        while remaining > Duration::ZERO {
-            if self.should_stop() {
-                return Ok(SleepOutcome::Interrupted);
-            }
-            let tick = remaining.min(Duration::from_secs(1));
-            sleep(tick).await;
-            remaining = remaining.saturating_sub(tick);
-        }
-        if self.should_stop() {
-            Ok(SleepOutcome::Interrupted)
-        } else {
-            Ok(SleepOutcome::Elapsed)
-        }
-    }
-
-    async fn capture_frame_png(&self) -> virtue_client_core::CoreResult<CaptureOutcome> {
-        let state =
-            load_state(&self.paths.state_file).map_err(|e| CoreError::Platform(e.to_string()))?;
-        match capture_screen(state.backend_hint) {
-            Ok(bytes) => Ok(CaptureOutcome::FramePng(bytes)),
-            Err(err) if is_session_unavailable_error(&err) => {
-                Ok(CaptureOutcome::SessionUnavailable)
-            }
-            Err(err) => Err(CoreError::Platform(err.to_string())),
-        }
-    }
-
-    fn emit_event(&self, event: ServiceEvent) {
-        match event {
-            ServiceEvent::Info(msg) => eprintln!("daemon: {msg}"),
-            ServiceEvent::Warn(msg) => eprintln!("daemon: {msg}"),
-            ServiceEvent::Error(msg) => eprintln!("daemon: {msg}"),
-        }
-    }
-
-    fn should_stop(&self) -> bool {
-        self.shutdown.load(Ordering::SeqCst)
-    }
-
-    fn drain_alert_events(&self) -> virtue_client_core::CoreResult<Vec<DaemonAlertEvent>> {
-        let mut guard = self
-            .pending_alert_events
-            .lock()
-            .map_err(|_| CoreError::Platform("alert event queue lock poisoned".to_string()))?;
-        Ok(std::mem::take(&mut *guard))
-    }
 }
 
 pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
@@ -122,95 +33,67 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     let _tray = tray::start_daemon_tray(paths.clone());
 
     let shutdown = Arc::new(AtomicBool::new(false));
-    let mut startup_events = vec![DaemonAlertEvent {
-        kind: "daemon_start".to_string(),
-        metadata: vec![("source".to_string(), "linux_service".to_string())],
-        created_at: Utc::now(),
-        device_id: None,
-    }];
-    if let Some(system_startup_event) = detect_system_startup_event(paths) {
-        startup_events.push(system_startup_event);
+    let mut service = MonitorService::setup(
+        build_core_config(paths),
+        LinuxPlatformHooks::new(paths.clone()),
+    )?;
+
+    emit_log(
+        &mut service,
+        "daemon_start",
+        &[("source", "linux_service")],
+        Utc::now(),
+    );
+    if let Some(startup_event) = detect_system_startup_event(paths) {
+        emit_log_entry(&mut service, startup_event);
     }
-    let pending_alert_events = Arc::new(Mutex::new(startup_events));
 
-    {
-        let shutdown = shutdown.clone();
-        let pending_alert_events = pending_alert_events.clone();
-        tokio::spawn(async move {
-            use tokio::signal::unix::{SignalKind, signal};
+    let (signal_tx, mut signal_rx) = mpsc::unbounded_channel::<String>();
+    spawn_signal_handler(shutdown.clone(), signal_tx);
 
-            let mut sigterm = match signal(SignalKind::terminate()) {
-                Ok(s) => s,
-                Err(_) => return,
-            };
-            let mut sigint = signal(SignalKind::interrupt()).ok();
+    let mut last_session_unavailable_log: Option<Instant> = None;
+    loop {
+        if shutdown.load(Ordering::SeqCst) {
+            break;
+        }
 
-            let signal_name = tokio::select! {
-                _ = sigterm.recv() => "SIGTERM",
-                _ = async {
-                    match sigint.as_mut() {
-                        Some(s) => s.recv().await,
-                        None => std::future::pending::<Option<()>>().await,
-                    }
-                } => "SIGINT",
-            };
-
-            if let Ok(mut guard) = pending_alert_events.lock() {
-                guard.push(DaemonAlertEvent {
-                    kind: "daemon_stop_signal".to_string(),
-                    metadata: vec![("signal".to_string(), signal_name.to_string())],
-                    created_at: Utc::now(),
-                    device_id: None,
-                });
-
-                let system_state = read_systemd_state();
-                let shutting_down =
-                    matches!(system_state.as_deref(), Some("stopping")) || is_shutdown_job_queued();
-                if shutting_down {
-                    let mut metadata = vec![("source".to_string(), "linux_system".to_string())];
-                    metadata.push(("signal".to_string(), signal_name.to_string()));
-                    if let Some(state) = system_state {
-                        metadata.push(("system_state".to_string(), state));
-                    }
-                    guard.push(DaemonAlertEvent {
-                        kind: "system_shutdown".to_string(),
-                        metadata,
-                        created_at: Utc::now(),
-                        device_id: None,
-                    });
-                }
+        let sleep_duration = match service.loop_iteration() {
+            Ok(outcome) => {
+                last_session_unavailable_log = None;
+                duration_until(outcome.next_run_at_ms)
             }
-            shutdown.store(true, Ordering::SeqCst);
-        });
+            Err(err) => {
+                let message = err.to_string();
+                if is_session_unavailable_text(&message) {
+                    let should_log = last_session_unavailable_log
+                        .is_none_or(|last| last.elapsed() >= SESSION_UNAVAILABLE_LOG_INTERVAL);
+                    if should_log {
+                        eprintln!("daemon: capture session unavailable: {message}");
+                        last_session_unavailable_log = Some(Instant::now());
+                    }
+                } else {
+                    eprintln!("daemon: {message}");
+                }
+                ERROR_RETRY_INTERVAL
+            }
+        };
+
+        tokio::select! {
+            signal = signal_rx.recv() => {
+                if let Some(signal_name) = signal {
+                    emit_shutdown_logs(&mut service, &signal_name);
+                }
+                break;
+            }
+            _ = sleep_interruptible(&shutdown, sleep_duration) => {}
+        }
     }
 
-    let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&paths.token_file));
-    let auth_client = AuthClient::new(token_store.clone())?;
-    let api_client = ApiClient::new()?;
-    let host = LinuxDaemonHost::new(paths.clone(), shutdown, pending_alert_events);
-
-    let config = BatchDaemonConfig {
-        settings_refresh_interval: Duration::from_secs(30 * 60),
-        settings_fetch_retry_interval: Duration::from_secs(20),
-        idle_retry_interval: Duration::from_secs(20),
-        token_refresh_threshold: Duration::from_secs(120),
-        session_unavailable_log_interval: Duration::from_secs(5 * 60),
-        continue_on_token_refresh_error: false,
-    };
-
-    run_batch_daemon(
-        &host,
-        token_store,
-        &auth_client,
-        &api_client,
-        &paths.batch_buffer_file,
-        config,
-    )
-    .await
-    .map_err(Into::into)
+    let _ = service.shutdown();
+    Ok(())
 }
 
-fn detect_system_startup_event(paths: &ClientPaths) -> Option<DaemonAlertEvent> {
+fn detect_system_startup_event(paths: &ClientPaths) -> Option<LogEntry> {
     let boot_id = read_current_boot_id()?;
     let mut state = load_lifecycle_state(&paths.lifecycle_state_file);
     if state.last_seen_boot_id.as_deref() == Some(boot_id.as_str()) {
@@ -226,16 +109,15 @@ fn detect_system_startup_event(paths: &ClientPaths) -> Option<DaemonAlertEvent> 
     }
 
     let started_at = read_system_boot_time_utc().unwrap_or_else(Utc::now);
-    Some(DaemonAlertEvent {
-        kind: "system_startup".to_string(),
-        metadata: vec![
-            ("source".to_string(), "linux_system".to_string()),
-            ("boot_id".to_string(), boot_id),
-            ("detected_by".to_string(), "boot_id_change".to_string()),
+    Some(log_entry(
+        "system_startup",
+        &[
+            ("source", "linux_system"),
+            ("boot_id", boot_id.as_str()),
+            ("detected_by", "boot_id_change"),
         ],
-        created_at: started_at,
-        device_id: None,
-    })
+        started_at,
+    ))
 }
 
 fn read_current_boot_id() -> Option<String> {
@@ -311,4 +193,115 @@ fn save_lifecycle_state(path: &Path, state: &LifecycleState) -> Result<()> {
     fs::write(&tmp_path, bytes)?;
     fs::rename(&tmp_path, path)?;
     Ok(())
+}
+
+fn spawn_signal_handler(shutdown: Arc<AtomicBool>, signal_tx: mpsc::UnboundedSender<String>) {
+    tokio::spawn(async move {
+        use tokio::signal::unix::{SignalKind, signal};
+
+        let mut sigterm = match signal(SignalKind::terminate()) {
+            Ok(signal) => signal,
+            Err(_) => return,
+        };
+        let mut sigint = signal(SignalKind::interrupt()).ok();
+
+        let signal_name = tokio::select! {
+            _ = sigterm.recv() => "SIGTERM",
+            _ = async {
+                match sigint.as_mut() {
+                    Some(signal) => signal.recv().await,
+                    None => std::future::pending::<Option<()>>().await,
+                }
+            } => "SIGINT",
+        };
+
+        shutdown.store(true, Ordering::SeqCst);
+        let _ = signal_tx.send(signal_name.to_string());
+    });
+}
+
+async fn sleep_interruptible(shutdown: &Arc<AtomicBool>, duration: Duration) {
+    let mut remaining = duration;
+    while remaining > Duration::ZERO && !shutdown.load(Ordering::SeqCst) {
+        let tick = remaining.min(Duration::from_secs(1));
+        sleep(tick).await;
+        remaining = remaining.saturating_sub(tick);
+    }
+}
+
+fn duration_until(next_run_at_ms: i64) -> Duration {
+    let now_ms = Utc::now().timestamp_millis();
+    let delta_ms = next_run_at_ms.saturating_sub(now_ms);
+    Duration::from_millis(delta_ms.max(0) as u64)
+}
+
+fn emit_shutdown_logs(service: &mut MonitorService<LinuxPlatformHooks>, signal_name: &str) {
+    emit_log(
+        service,
+        "daemon_stop_signal",
+        &[("signal", signal_name)],
+        Utc::now(),
+    );
+
+    let system_state = read_systemd_state();
+    let shutting_down =
+        matches!(system_state.as_deref(), Some("stopping")) || is_shutdown_job_queued();
+    if shutting_down {
+        let mut metadata = vec![
+            ("source".to_string(), "linux_system".to_string()),
+            ("signal".to_string(), signal_name.to_string()),
+        ];
+        if let Some(system_state) = system_state {
+            metadata.push(("system_state".to_string(), system_state));
+        }
+        emit_log_entry(
+            service,
+            LogEntry {
+                ts_ms: Utc::now().timestamp_millis(),
+                kind: "system_shutdown".to_string(),
+                risk: None,
+                data: metadata_value_owned(metadata),
+            },
+        );
+    }
+}
+
+fn emit_log(
+    service: &mut MonitorService<LinuxPlatformHooks>,
+    kind: &str,
+    metadata: &[(&str, &str)],
+    created_at: DateTime<Utc>,
+) {
+    emit_log_entry(service, log_entry(kind, metadata, created_at));
+}
+
+fn emit_log_entry(service: &mut MonitorService<LinuxPlatformHooks>, entry: LogEntry) {
+    if let Err(err) = service.send_log(entry) {
+        eprintln!("daemon: could not send log event: {err}");
+    }
+}
+
+fn log_entry(kind: &str, metadata: &[(&str, &str)], created_at: DateTime<Utc>) -> LogEntry {
+    LogEntry {
+        ts_ms: created_at.timestamp_millis(),
+        kind: kind.to_string(),
+        risk: None,
+        data: metadata_value(metadata),
+    }
+}
+
+fn metadata_value(metadata: &[(&str, &str)]) -> Value {
+    let mut object = Map::new();
+    for (key, value) in metadata {
+        object.insert((*key).to_string(), Value::String((*value).to_string()));
+    }
+    Value::Object(object)
+}
+
+fn metadata_value_owned(metadata: Vec<(String, String)>) -> Value {
+    let mut object = Map::new();
+    for (key, value) in metadata {
+        object.insert(key, Value::String(value));
+    }
+    Value::Object(object)
 }

@@ -22,7 +22,7 @@ path = "src/bin/virtue-auth-ui.rs"
 
 [dependencies]
 anyhow = "1"
-virtue-client-core = { path = "../core" }
+virtue_client_core = { package = "virtue_core", path = "../core" }
 base64 = "0.22"
 chrono = { version = "0.4", features = ["clock", "serde"] }
 hex = "0.4"

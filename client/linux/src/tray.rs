@@ -4,10 +4,9 @@ use std::thread;
 use std::time::Duration;
 
 use ksni::blocking::TrayMethods;
+use virtue_core::storage::FileStateStore;
 
-use virtue_client_core::{FileTokenStore, TokenStore, build_default_tray_icon_rgba};
-
-use crate::config::{ClientPaths, load_state};
+use crate::config::ClientPaths;
 
 const TOOLTIP_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
 const RETRY_INTERVAL: Duration = Duration::from_secs(30);
@@ -31,7 +30,7 @@ pub fn start_daemon_tray(paths: ClientPaths) -> Option<DaemonTray> {
     if std::env::var("VIRTUE_DISABLE_TRAY")
         .ok()
         .as_deref()
-        .is_some_and(|v| matches!(v, "1" | "true" | "TRUE" | "yes" | "YES"))
+        .is_some_and(|value| matches!(value, "1" | "true" | "TRUE" | "yes" | "YES"))
     {
         return None;
     }
@@ -115,26 +114,25 @@ fn run_one_tray_session(paths: &ClientPaths, shutdown: &Arc<AtomicBool>) -> anyh
 }
 
 fn build_tooltip(paths: &ClientPaths) -> String {
-    let state = load_state(&paths.state_file).ok();
-    let token_store = FileTokenStore::new(&paths.token_file);
-    let has_token = token_store
-        .get_access_token()
-        .ok()
-        .and_then(|token| token)
-        .is_some();
-
-    let logged_in = state
+    let store = FileStateStore::new(&paths.state_dir).ok();
+    let auth = store
         .as_ref()
-        .map(|s| s.monitoring_enabled && s.device_id.is_some())
-        .unwrap_or(false)
-        && has_token;
+        .and_then(|store| store.load_auth_state().ok());
+    let settings = store
+        .as_ref()
+        .and_then(|store| store.load_device_settings().ok())
+        .flatten();
 
-    if logged_in {
-        let email = state
-            .as_ref()
-            .and_then(|s| s.email.as_deref())
-            .unwrap_or("<unknown>");
-        format!("Logged in as {email}. Run 'virtue' from a terminal to configure.")
+    if auth
+        .as_ref()
+        .and_then(|auth| auth.device_credentials.as_ref())
+        .is_some()
+    {
+        if settings.as_ref().is_some_and(|settings| !settings.enabled) {
+            "Signed in, but monitoring is disabled by device settings.".to_string()
+        } else {
+            "Signed in. Run 'virtue status' from a terminal for details.".to_string()
+        }
     } else {
         "Not signed in. Run 'virtue login' from a terminal.".to_string()
     }
@@ -189,14 +187,16 @@ impl ksni::Tray for VirtueTray {
 
 fn build_icon() -> ksni::Icon {
     fn fallback_icon() -> ksni::Icon {
-        let (width, height, mut rgba) = build_default_tray_icon_rgba();
-        for pixel in rgba.chunks_exact_mut(4) {
-            pixel.rotate_right(1);
+        let width = 16_i32;
+        let height = 16_i32;
+        let mut argb = vec![0_u8; (width * height * 4) as usize];
+        for pixel in argb.chunks_exact_mut(4) {
+            pixel.copy_from_slice(&[0xff, 0x20, 0x20, 0x20]);
         }
         ksni::Icon {
-            width: width as i32,
-            height: height as i32,
-            data: rgba,
+            width,
+            height,
+            data: argb,
         }
     }
 

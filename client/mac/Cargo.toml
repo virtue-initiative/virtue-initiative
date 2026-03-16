@@ -10,7 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
-virtue-client-core = { path = "../core" }
+virtue_client_core = { package = "virtue_core", path = "../core" }
 block2 = "0.6"
 chrono = { version = "0.4", features = ["clock", "serde"] }
 clap = { version = "4", features = ["derive"] }

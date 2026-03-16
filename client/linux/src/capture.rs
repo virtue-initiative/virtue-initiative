@@ -1,8 +1,10 @@
 use std::process::{Command, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
+use virtue_core::{CoreError, CoreResult, PlatformHooks, Screenshot};
 
-use crate::config::CaptureBackendHint;
+use crate::config::{CaptureBackendHint, ClientPaths, load_state};
 
 #[derive(Clone, Copy, Debug)]
 pub enum CaptureBackend {
@@ -94,8 +96,8 @@ pub fn capture_screen(hint: Option<CaptureBackendHint>) -> Result<Vec<u8>> {
     }
 }
 
-pub fn is_session_unavailable_error(err: &anyhow::Error) -> bool {
-    let text = err.to_string().to_ascii_lowercase();
+pub fn is_session_unavailable_text(text: &str) -> bool {
+    let text = text.to_ascii_lowercase();
     text.contains("no graphical session detected")
         || text.contains("x11 display unavailable")
         || text.contains("unable to open x server")
@@ -208,4 +210,37 @@ fn run_capture_command(
     }
 
     Ok(output.stdout)
+}
+
+#[derive(Clone)]
+pub struct LinuxPlatformHooks {
+    paths: ClientPaths,
+}
+
+impl LinuxPlatformHooks {
+    pub fn new(paths: ClientPaths) -> Self {
+        Self { paths }
+    }
+}
+
+impl PlatformHooks for LinuxPlatformHooks {
+    fn take_screenshot(&self) -> CoreResult<Screenshot> {
+        let state = load_state(&self.paths.client_state_file)
+            .map_err(|err| CoreError::CommandFailed(err.to_string()))?;
+        let bytes = capture_screen(state.backend_hint)
+            .map_err(|err| CoreError::CommandFailed(err.to_string()))?;
+        Ok(Screenshot {
+            captured_at_ms: self.get_time_utc_ms()?,
+            bytes,
+            content_type: "image/png".to_string(),
+        })
+    }
+
+    fn get_time_utc_ms(&self) -> CoreResult<i64> {
+        let duration = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|err| CoreError::CommandFailed(err.to_string()))?;
+        i64::try_from(duration.as_millis())
+            .map_err(|_| CoreError::InvalidState("system clock overflow"))
+    }
 }
