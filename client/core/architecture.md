@@ -1,11 +1,6 @@
-# Overall Client Architecture
+# Overall Core Architecture
 
-This workspace contains a Rust client implementation for Virtue screenshot monitoring.
-
-It is split into:
-
-- `./core`: cross-platform library that owns all policy and almost all behavior
-- `./linux`: Linux process wrapper that provides X11 screenshot capture and process lifecycle wiring
+This folder contains a Rust core implementation for Virtue screenshot monitoring.
 
 The main design rule is:
 
@@ -15,10 +10,10 @@ The main design rule is:
 ## Workspace Layout
 
 ```text
-clientv2/
-  Cargo.toml
-  architecture.md
+client/
   core/
+    architecture.md
+    Cargo.toml
     src/
       api.rs
       batch.rs
@@ -31,8 +26,7 @@ clientv2/
       service.rs
       storage.rs
   linux/
-    src/
-      main.rs
+    ...
 ```
 
 ## Public Surface
@@ -309,26 +303,6 @@ Additional important details from the existing system:
 - `POST /hash` sends exactly 32 bytes with `application/octet-stream`
 - hash uploads may target `device_settings.hash_base_url` when present
 
-## Linux Client
-
-The Linux client is X11-first for now.
-
-Its responsibilities are:
-
-- build config from env/defaults
-- provide UTC time
-- capture the root X11 window
-- hand screenshot bytes to `core`
-- optionally run the service loop
-
-To remain minimal while still producing web-compatible batch images:
-
-1. capture X11 root window using `xwd`
-2. convert captured image to `image/webp`
-3. pass WebP bytes into `core`
-
-This keeps the batch payload compatible with the web viewer, which currently renders images as `image/webp`.
-
 ## Implementation Notes
 
 ### Password hashing
@@ -383,15 +357,3 @@ The web app expects:
 - persist state
 - mark status as no longer running
 
-## Expected Next State
-
-When this architecture is fully implemented:
-
-- a Linux client can log in and register itself
-- screenshots are captured as WebP
-- plaintext screenshot events are buffered in `core`
-- `core` builds gzip+msgpack payloads
-- `core` encrypts only the final batch blob
-- hash uploads are compatible with the web verifier
-- failed uploads survive restarts
-- device access tokens refresh automatically on 401
