@@ -1,38 +1,21 @@
 [package]
-name = "virtue-client-core"
-version = "0.0.1"
+name = "virtue_core"
+version = "0.1.0"
 edition = "2024"
-description = "Platform-agnostic client core for Virtue"
-
-[lib]
-name = "virtue_client_core"
-path = "src/lib.rs"
-crate-type = ["rlib", "cdylib", "staticlib"]
 
 [dependencies]
 aes-gcm = "0.10"
 argon2 = "0.5"
 base64 = "0.22"
-chrono = { version = "0.4", features = ["clock", "serde"] }
-flate2 = "1"
+flate2 = "1.1"
 hex = "0.4"
-hmac = "0.12"
-image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
-pbkdf2 = { version = "0.12", features = ["hmac"] }
-rand = "0.8"
-reqwest = { version = "0.12", default-features = false, features = ["cookies", "json", "multipart", "rustls-tls"] }
-rmp-serde = "1"
-serde = { version = "1", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+pbkdf2 = "0.12"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "cookies", "json", "multipart", "rustls-tls"] }
+rmp-serde = "1.3"
+serde = { version = "1.0", features = ["derive"] }
 serde_bytes = "0.11"
-serde_json = "1"
+serde_json = "1.0"
 sha2 = "0.10"
-thiserror = "2"
-uuid = { version = "1", features = ["v4"] }
-webp = "0.3.1"
-
-[dev-dependencies]
-tempfile = "3"
-
-[build-dependencies]
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
-dotenv-build = "0.1.1"
+thiserror = "2.0"
+webp = "0.3"
