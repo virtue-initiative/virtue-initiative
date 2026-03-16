@@ -31,7 +31,8 @@ pub struct MonitorService<P> {
 }
 
 impl<P: PlatformHooks> MonitorService<P> {
-    pub fn setup(config: Config, platform: P) -> CoreResult<Self> {
+    pub fn setup(mut config: Config, platform: P) -> CoreResult<Self> {
+        config.refresh_from_runtime_file()?;
         let api = ApiClient::new(&config)?;
         let storage = FileStateStore::new(&config.state_dir)?;
         let auth_state = storage.load_auth_state()?;
@@ -85,6 +86,7 @@ impl<P: PlatformHooks> MonitorService<P> {
 
     pub fn loop_iteration(&mut self) -> CoreResult<LoopOutcome> {
         self.ensure_running()?;
+        self.refresh_runtime_config()?;
         self.reload_persisted_state()?;
 
         let now_ms = self.platform.get_time_utc_ms()?;
@@ -422,6 +424,15 @@ impl<P: PlatformHooks> MonitorService<P> {
         self.pending_requests = self.storage.load_pending_requests()?;
         self.batch_buffer = self.storage.load_batch_buffer()?;
         self.refresh_batch_key_from_settings()?;
+        Ok(())
+    }
+
+    fn refresh_runtime_config(&mut self) -> CoreResult<()> {
+        let previous_base_url = self.config.api_base_url.clone();
+        self.config.refresh_from_runtime_file()?;
+        if self.config.api_base_url != previous_base_url {
+            self.api = ApiClient::new(&self.config)?;
+        }
         Ok(())
     }
 

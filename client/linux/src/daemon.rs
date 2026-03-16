@@ -33,10 +33,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     let _tray = tray::start_daemon_tray(paths.clone());
 
     let shutdown = Arc::new(AtomicBool::new(false));
-    let mut service = MonitorService::setup(
-        build_core_config(paths),
-        LinuxPlatformHooks::new(paths.clone()),
-    )?;
+    let mut service = MonitorService::setup(build_core_config(paths), LinuxPlatformHooks::new())?;
 
     emit_log(
         &mut service,

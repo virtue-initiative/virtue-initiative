@@ -54,6 +54,37 @@ get_time_utc_ms() -> Result<i64>
 
 Everything else belongs to `core`.
 
+## Config Model
+
+`Config` contains:
+
+- `api_base_url`
+- `device_name`
+- `platform_name`
+- `state_dir`
+- `runtime_config_file`
+- `screenshot_interval`
+- `batch_interval`
+
+`runtime_config_file` is optional. When present, `core` treats it as a small JSON override file owned by the platform crate.
+
+Currently supported override keys:
+
+```text
+{
+  api_base_url?: string,
+  capture_interval_seconds?: integer,
+  batch_window_seconds?: integer
+}
+```
+
+The override file is applied:
+
+- once during `MonitorService::setup()`
+- again at the start of every `loop_iteration()`
+
+That means platform crates do not need to restart the daemon just to change API base URL or timing overrides.
+
 ## Core State Model
 
 `core` persists its own restart-safe state under `Config.state_dir`.
@@ -68,6 +99,8 @@ Current files:
 - `errors.log`: local append-only operational error log
 
 `core` should be able to restart and continue uploading without platform-specific recovery logic.
+
+The runtime config override file is not part of the core state store. It is read separately from `Config.runtime_config_file`.
 
 ## Device/Auth Model
 
@@ -226,23 +259,25 @@ The client does not compute server state itself, but it must produce compatible 
 
 `loop_iteration()` should:
 
-1. get current UTC time
-2. write/update current status
-3. retry queued failed requests
-4. if screenshot interval elapsed:
+1. reload runtime config overrides from `Config.runtime_config_file`
+2. reload persisted auth, settings, retry queue, and batch buffer state
+3. get current UTC time
+4. write/update current status
+5. retry queued failed requests
+6. if screenshot interval elapsed:
    - capture screenshot through platform hooks
    - normalize it into a batch event
    - compute its plaintext content hash
    - append event to `batch_buffer.json`
    - attempt `POST /hash`
-5. if batch interval elapsed and buffered events exist:
+7. if batch interval elapsed and buffered events exist:
    - build batch payload
    - MessagePack encode
    - gzip compress
    - AES-GCM encrypt
    - attempt `POST /d/batch`
-6. persist all updated state
-7. return the next due time
+8. persist all updated state
+9. return the next due time
 
 ## Retry Model
 
@@ -356,4 +391,3 @@ The web app expects:
 - attempt to upload a shutdown log
 - persist state
 - mark status as no longer running
-

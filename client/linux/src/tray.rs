@@ -27,14 +27,6 @@ impl Drop for DaemonTray {
 }
 
 pub fn start_daemon_tray(paths: ClientPaths) -> Option<DaemonTray> {
-    if std::env::var("VIRTUE_DISABLE_TRAY")
-        .ok()
-        .as_deref()
-        .is_some_and(|value| matches!(value, "1" | "true" | "TRUE" | "yes" | "YES"))
-    {
-        return None;
-    }
-
     let shutdown = Arc::new(AtomicBool::new(false));
     let worker = spawn_tray_worker(paths, shutdown.clone());
 
