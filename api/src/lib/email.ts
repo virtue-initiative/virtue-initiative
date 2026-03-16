@@ -33,6 +33,11 @@ interface SendEmailInput extends EmailContent {
 
 let sesClient: SESv2Client | null = null;
 const mockEmailOutbox: MockEmailDelivery[] = [];
+const FROM_DISPLAY_NAME = 'The Virtue Initiative';
+
+function withDisplayName(fromEmail: string) {
+  return fromEmail.includes('<') ? fromEmail : `${FROM_DISPLAY_NAME} <${fromEmail}>`;
+}
 
 function getSesClient(env: Env) {
   if (!sesClient) {
@@ -90,7 +95,7 @@ export async function sendEmail(input: SendEmailInput) {
   try {
     const response = await getSesClient(input.env).send(
       new SendEmailCommand({
-        FromEmailAddress: input.env.AWS_SES_FROM_EMAIL,
+        FromEmailAddress: withDisplayName(input.env.AWS_SES_FROM_EMAIL),
         Destination: { ToAddresses: [input.recipient] },
         Content: {
           Simple: {
