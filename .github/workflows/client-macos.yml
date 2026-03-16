@@ -31,19 +31,19 @@ jobs:
             client -> target
 
       - name: Rust build smoke test (core)
-        run: cargo build -p virtue-client-core
+        run: cargo build -p virtue-core
         working-directory: client
 
       - name: Rust build smoke test (macOS client)
-        run: cargo build -p virtue-mac-client
+        run: cargo build -p virtue-mac
         working-directory: client
 
       - name: Rust lint (core)
-        run: cargo clippy -p virtue-client-core --all-targets -- -D warnings
+        run: cargo clippy -p virtue-core --all-targets -- -D warnings
         working-directory: client
 
       - name: Rust lint (macOS client)
-        run: cargo clippy -p virtue-mac-client --all-targets -- -D warnings
+        run: cargo clippy -p virtue-mac --all-targets -- -D warnings
         working-directory: client
 
       - name: Build macOS app bundle and DMG

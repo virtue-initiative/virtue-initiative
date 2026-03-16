@@ -1,16 +1,16 @@
 [package]
-name = "virtue-mac-client"
+name = "virtue-mac"
 version = "0.0.1"
 edition = "2024"
 description = "Virtue macOS tray client and daemon"
 
 [[bin]]
-name = "virtue-mac-client"
+name = "virtue-mac"
 path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
-virtue_client_core = { package = "virtue_core", path = "../core" }
+virtue_core = { package = "virtue-core", path = "../core" }
 block2 = "0.6"
 chrono = { version = "0.4", features = ["clock", "serde"] }
 clap = { version = "4", features = ["derive"] }

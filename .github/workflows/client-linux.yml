@@ -35,19 +35,19 @@ jobs:
         working-directory: client
 
       - name: Rust lint (core)
-        run: cargo clippy -p virtue-client-core --all-targets -- -D warnings
+        run: cargo clippy -p virtue-core --all-targets -- -D warnings
         working-directory: client
 
       - name: Rust lint (Linux client)
-        run: cargo clippy -p virtue-linux-client --all-targets -- -D warnings
+        run: cargo clippy -p virtue-linux --all-targets -- -D warnings
         working-directory: client
 
       - name: Rust tests (core)
-        run: cargo test -p virtue-client-core
+        run: cargo test -p virtue-core
         working-directory: client
 
       - name: Rust tests (Linux client)
-        run: cargo test -p virtue-linux-client
+        run: cargo test -p virtue-linux
         working-directory: client
 
       - name: Build Linux .deb package

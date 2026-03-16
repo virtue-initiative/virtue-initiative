@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use tokio::runtime::Runtime;
 
 use crate::config::{ClientPaths, load_state, save_state};
-use virtue_client_core::{
+use virtue_core::{
     ApiClient, AuthClient, FileTokenStore, LoginCommandInput, TokenStore,
     login_and_register_device, logout_and_clear_tokens_with_alert,
 };

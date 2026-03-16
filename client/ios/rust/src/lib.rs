@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use tokio::runtime::{Builder, Runtime};
 use tokio::time::sleep;
 
-use virtue_client_core::{
+use virtue_core::{
     apply_dev_env, login_and_register_device, logout_and_clear_tokens_with_alert, run_batch_daemon,
     ApiClient, AuthClient, BatchDaemonConfig, CaptureOutcome, CoreError, FileTokenStore,
     LoginCommandInput, PersistedServiceState, ServiceEvent, ServiceHost,
@@ -120,7 +120,7 @@ impl IosDaemonHost {
 }
 
 impl ServiceHost for IosDaemonHost {
-    fn load_persisted_state(&self) -> virtue_client_core::CoreResult<PersistedServiceState> {
+    fn load_persisted_state(&self) -> virtue_core::CoreResult<PersistedServiceState> {
         let state =
             load_state(&self.state_path).map_err(|err| CoreError::Platform(err.to_string()))?;
         Ok(PersistedServiceState {
@@ -136,7 +136,7 @@ impl ServiceHost for IosDaemonHost {
     async fn sleep_interruptible(
         &self,
         duration: Duration,
-    ) -> virtue_client_core::CoreResult<SleepOutcome> {
+    ) -> virtue_core::CoreResult<SleepOutcome> {
         let mut remaining = duration;
         while remaining > Duration::ZERO {
             if self.should_stop() {
@@ -154,7 +154,7 @@ impl ServiceHost for IosDaemonHost {
         }
     }
 
-    async fn capture_frame_png(&self) -> virtue_client_core::CoreResult<CaptureOutcome> {
+    async fn capture_frame_png(&self) -> virtue_core::CoreResult<CaptureOutcome> {
         match self.capture_status() {
             CAPTURE_STATUS_READY => {
                 let png = self.capture_png()?;

@@ -1,4 +1,4 @@
-use virtue_client_core::{apply_dev_env, apply_env_defaults_from_map, load_env_file};
+use virtue_core::{apply_dev_env, apply_env_defaults_from_map, load_env_file};
 
 use crate::config::ClientPaths;
 

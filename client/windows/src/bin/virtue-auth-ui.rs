@@ -6,11 +6,11 @@ use std::sync::Arc;
 use anyhow::Result;
 use tokio::runtime::Builder;
 
-use virtue_client_core::resolve_base_api_url;
-use virtue_windows_client::config::ClientPaths;
-use virtue_windows_client::runtime_env::apply_runtime_env;
-use virtue_windows_client::service_log::ServiceLogger;
-use virtue_windows_client::session::SessionManager;
+use virtue_core::resolve_base_api_url;
+use virtue_windows::config::ClientPaths;
+use virtue_windows::runtime_env::apply_runtime_env;
+use virtue_windows::service_log::ServiceLogger;
+use virtue_windows::session::SessionManager;
 
 slint::slint! {
     import { Button, LineEdit, VerticalBox, HorizontalBox } from "std-widgets.slint";
@@ -153,7 +153,7 @@ fn main() -> Result<()> {
     let logger = ServiceLogger::new(paths.log_file.clone());
     logger.info(&format!(
         "auth ui starting ({})",
-        virtue_client_core::BUILD_LABEL
+        virtue_core::BUILD_LABEL
     ));
 
     // Force software rendering: winit backend expects "software"/"sw" renderer names.
@@ -170,7 +170,7 @@ fn main() -> Result<()> {
     let initial = session.status()?;
     let api_base_url = resolve_base_api_url();
 
-    ui.set_build_label(virtue_client_core::BUILD_LABEL.into());
+    ui.set_build_label(virtue_core::BUILD_LABEL.into());
     ui.set_logged_in(initial.logged_in);
     ui.set_api_base_url(api_base_url.into());
     ui.set_account_email(initial.email.clone().unwrap_or_default().into());
@@ -251,7 +251,7 @@ fn main() -> Result<()> {
         Ok(()) => {
             logger.info(&format!(
                 "auth ui closed ({})",
-                virtue_client_core::BUILD_LABEL
+                virtue_core::BUILD_LABEL
             ));
             Ok(())
         }

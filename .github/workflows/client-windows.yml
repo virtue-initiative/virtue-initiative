@@ -32,19 +32,19 @@ jobs:
             client -> target
 
       - name: Rust build smoke test (core)
-        run: cargo build --target x86_64-pc-windows-msvc -p virtue-client-core
+        run: cargo build --target x86_64-pc-windows-msvc -p virtue-core
         working-directory: client
 
       - name: Rust build smoke test (Windows client)
-        run: cargo build --target x86_64-pc-windows-msvc -p virtue-windows-client
+        run: cargo build --target x86_64-pc-windows-msvc -p virtue-windows
         working-directory: client
 
       - name: Rust lint (core)
-        run: cargo clippy --target x86_64-pc-windows-msvc -p virtue-client-core --all-targets -- -D warnings
+        run: cargo clippy --target x86_64-pc-windows-msvc -p virtue-core --all-targets -- -D warnings
         working-directory: client
 
       - name: Rust lint (Windows client)
-        run: cargo clippy --target x86_64-pc-windows-msvc -p virtue-windows-client --all-targets -- -D warnings
+        run: cargo clippy --target x86_64-pc-windows-msvc -p virtue-windows --all-targets -- -D warnings
         working-directory: client
 
       - name: Install NSIS

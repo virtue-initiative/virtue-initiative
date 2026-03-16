@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 use windows::Win32::System::SystemInformation::GetTickCount64;
 
-use virtue_client_core::{
+use virtue_core::{
     ApiClient, AuthClient, BatchDaemonConfig, CaptureOutcome, CoreError, DaemonAlertEvent,
     FileTokenStore, PersistedServiceState, ServiceEvent, ServiceHost, SleepOutcome, TokenStore,
     run_batch_daemon,
@@ -292,7 +292,7 @@ impl<'a> WindowsLifecycleHost<'a> {
 }
 
 impl ServiceHost for WindowsLifecycleHost<'_> {
-    fn load_persisted_state(&self) -> virtue_client_core::CoreResult<PersistedServiceState> {
+    fn load_persisted_state(&self) -> virtue_core::CoreResult<PersistedServiceState> {
         let state =
             load_state(&self.paths.state_file).map_err(|e| CoreError::Platform(e.to_string()))?;
         Ok(PersistedServiceState {
@@ -309,7 +309,7 @@ impl ServiceHost for WindowsLifecycleHost<'_> {
     async fn sleep_interruptible(
         &self,
         duration: Duration,
-    ) -> virtue_client_core::CoreResult<SleepOutcome> {
+    ) -> virtue_core::CoreResult<SleepOutcome> {
         let mut remaining = duration;
         while remaining > Duration::ZERO {
             if self.should_stop() {
@@ -326,7 +326,7 @@ impl ServiceHost for WindowsLifecycleHost<'_> {
         }
     }
 
-    async fn capture_frame_png(&self) -> virtue_client_core::CoreResult<CaptureOutcome> {
+    async fn capture_frame_png(&self) -> virtue_core::CoreResult<CaptureOutcome> {
         Ok(CaptureOutcome::SessionUnavailable)
     }
 
@@ -347,12 +347,12 @@ impl ServiceHost for WindowsLifecycleHost<'_> {
         stop
     }
 
-    fn on_loop_tick(&self) -> virtue_client_core::CoreResult<()> {
+    fn on_loop_tick(&self) -> virtue_core::CoreResult<()> {
         self.supervise_capture_process();
         Ok(())
     }
 
-    fn drain_alert_events(&self) -> virtue_client_core::CoreResult<Vec<DaemonAlertEvent>> {
+    fn drain_alert_events(&self) -> virtue_core::CoreResult<Vec<DaemonAlertEvent>> {
         let mut guard = self
             .pending_alert_events
             .lock()

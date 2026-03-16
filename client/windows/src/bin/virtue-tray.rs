@@ -27,11 +27,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{PCWSTR, w};
 
-use virtue_client_core::build_default_tray_icon_rgba;
-use virtue_windows_client::config::ClientPaths;
-use virtue_windows_client::runtime_env::apply_runtime_env;
-use virtue_windows_client::service_log::ServiceLogger;
-use virtue_windows_client::win_text::to_wide;
+use virtue_core::build_default_tray_icon_rgba;
+use virtue_windows::config::ClientPaths;
+use virtue_windows::runtime_env::apply_runtime_env;
+use virtue_windows::service_log::ServiceLogger;
+use virtue_windows::win_text::to_wide;
 
 const WINDOW_CLASS: PCWSTR = w!("VirtueTrayWindow");
 const WINDOW_TITLE: PCWSTR = w!("Virtue");
@@ -89,7 +89,7 @@ impl AppState {
             ..Default::default()
         };
 
-        let tip = to_wide(&format!("Virtue {}", virtue_client_core::BUILD_LABEL));
+        let tip = to_wide(&format!("Virtue {}", virtue_core::BUILD_LABEL));
         for (idx, ch) in tip.iter().take(data.szTip.len()).enumerate() {
             data.szTip[idx] = *ch;
         }
@@ -369,7 +369,7 @@ fn main() -> anyhow::Result<()> {
     apply_runtime_env(&paths);
     let startup_logger = Arc::new(ServiceLogger::new(paths.log_file.clone()));
     startup_logger.info("tray process starting");
-    startup_logger.info(&format!("build {}", virtue_client_core::BUILD_LABEL));
+    startup_logger.info(&format!("build {}", virtue_core::BUILD_LABEL));
 
     let instance_mutex = acquire_tray_instance_mutex()?;
     let Some(instance_mutex) = instance_mutex else {

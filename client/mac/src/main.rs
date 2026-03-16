@@ -21,16 +21,16 @@ use crate::config::{
     ClientPaths, ScreenshotPermissionStatus, load_daemon_status, load_state, save_state,
 };
 use crate::runtime_env::apply_runtime_env;
-use virtue_client_core::{
+use virtue_core::{
     ApiClient, AuthClient, FileTokenStore, LoginCommandInput, TokenStore,
     login_and_register_device, logout_and_clear_tokens_with_alert, resolve_base_api_url,
     resolve_batch_window_seconds, resolve_capture_interval_seconds,
 };
 
-const BUILD_LABEL: &str = virtue_client_core::BUILD_LABEL;
+const BUILD_LABEL: &str = virtue_core::BUILD_LABEL;
 
 #[derive(Debug, Parser)]
-#[command(name = "virtue-mac-client")]
+#[command(name = "virtue-mac")]
 #[command(about = "Virtue macOS tray client")]
 #[command(version = BUILD_LABEL)]
 struct Cli {

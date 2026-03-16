@@ -11,7 +11,7 @@ use windows::Win32::Foundation::{CloseHandle, ERROR_FILE_NOT_FOUND, HANDLE};
 use windows::Win32::System::Threading::{MUTEX_MODIFY_STATE, OpenMutexW};
 use windows::core::w;
 
-use virtue_client_core::{
+use virtue_core::{
     ApiClient, AuthClient, BatchDaemonConfig, CaptureOutcome, CoreError, FileTokenStore,
     PersistedServiceState, ServiceEvent, ServiceHost, SleepOutcome, TokenStore, run_batch_daemon,
 };
@@ -42,7 +42,7 @@ impl<'a> WindowsCaptureHost<'a> {
 }
 
 impl ServiceHost for WindowsCaptureHost<'_> {
-    fn load_persisted_state(&self) -> virtue_client_core::CoreResult<PersistedServiceState> {
+    fn load_persisted_state(&self) -> virtue_core::CoreResult<PersistedServiceState> {
         let state =
             load_state(&self.paths.state_file).map_err(|e| CoreError::Platform(e.to_string()))?;
         Ok(PersistedServiceState {
@@ -58,7 +58,7 @@ impl ServiceHost for WindowsCaptureHost<'_> {
     async fn sleep_interruptible(
         &self,
         duration: Duration,
-    ) -> virtue_client_core::CoreResult<SleepOutcome> {
+    ) -> virtue_core::CoreResult<SleepOutcome> {
         let mut remaining = duration;
         while remaining > Duration::ZERO {
             if self.should_stop() {
@@ -75,7 +75,7 @@ impl ServiceHost for WindowsCaptureHost<'_> {
         }
     }
 
-    async fn capture_frame_png(&self) -> virtue_client_core::CoreResult<CaptureOutcome> {
+    async fn capture_frame_png(&self) -> virtue_core::CoreResult<CaptureOutcome> {
         capture_screen_png()
             .map(CaptureOutcome::FramePng)
             .map_err(|e| CoreError::Platform(e.to_string()))
@@ -94,7 +94,7 @@ impl ServiceHost for WindowsCaptureHost<'_> {
             || capture_control::is_capture_stop_requested(&self.paths)
     }
 
-    fn on_loop_tick(&self) -> virtue_client_core::CoreResult<()> {
+    fn on_loop_tick(&self) -> virtue_core::CoreResult<()> {
         let mut guard = self
             .last_tray_ensure
             .lock()

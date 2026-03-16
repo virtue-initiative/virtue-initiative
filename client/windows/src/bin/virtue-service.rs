@@ -21,13 +21,13 @@ use windows_service::service::{
 use windows_service::service_control_handler::{self, ServiceControlHandlerResult};
 use windows_service::service_dispatcher;
 
-use virtue_client_core::DaemonAlertEvent;
-use virtue_windows_client::capture_control;
-use virtue_windows_client::capture_daemon;
-use virtue_windows_client::config::ClientPaths;
-use virtue_windows_client::daemon;
-use virtue_windows_client::runtime_env::apply_runtime_env;
-use virtue_windows_client::service_log::ServiceLogger;
+use virtue_core::DaemonAlertEvent;
+use virtue_windows::capture_control;
+use virtue_windows::capture_daemon;
+use virtue_windows::config::ClientPaths;
+use virtue_windows::daemon;
+use virtue_windows::runtime_env::apply_runtime_env;
+use virtue_windows::service_log::ServiceLogger;
 
 const SERVICE_NAME: &str = "VirtueLifecycleService";
 const LIFECYCLE_INSTANCE_MUTEX_NAME: windows::core::PCWSTR = w!("Local\\VirtueLifecycleConsole");
@@ -109,7 +109,7 @@ fn run_lifecycle_service() -> Result<()> {
     paths.ensure_dirs()?;
     apply_runtime_env(&paths);
     let logger = Arc::new(ServiceLogger::new(paths.log_file.clone()));
-    logger.info(&format!("build {}", virtue_client_core::BUILD_LABEL));
+    logger.info(&format!("build {}", virtue_core::BUILD_LABEL));
 
     let shutdown = Arc::new(AtomicBool::new(false));
     let stop_signal = shutdown.clone();
@@ -208,7 +208,7 @@ fn run_lifecycle_console() -> Result<()> {
     paths.ensure_dirs()?;
     apply_runtime_env(&paths);
     let logger = Arc::new(ServiceLogger::new(paths.log_file.clone()));
-    logger.info(&format!("build {}", virtue_client_core::BUILD_LABEL));
+    logger.info(&format!("build {}", virtue_core::BUILD_LABEL));
     let shutdown = Arc::new(AtomicBool::new(false));
     let stop_reason = Arc::new(Mutex::new(None));
     let pending_alert_events = Arc::new(Mutex::new(Vec::<DaemonAlertEvent>::new()));
@@ -288,7 +288,7 @@ fn run_capture_console() -> Result<()> {
     paths.ensure_dirs()?;
     apply_runtime_env(&paths);
     let logger = Arc::new(ServiceLogger::new(paths.log_file.clone()));
-    logger.info(&format!("build {}", virtue_client_core::BUILD_LABEL));
+    logger.info(&format!("build {}", virtue_core::BUILD_LABEL));
     let shutdown = Arc::new(AtomicBool::new(false));
     let instance = acquire_console_instance_mutex(capture_control::CAPTURE_INSTANCE_MUTEX_NAME)?;
     let Some(instance) = instance else {

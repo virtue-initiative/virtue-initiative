@@ -66,7 +66,7 @@ If captures fail, grant permission under:
 From `client/`:
 
 ```bash
-cargo build --release -p virtue-mac-client
+cargo build --release -p virtue-mac
 ```
 
 ## Build `.app`

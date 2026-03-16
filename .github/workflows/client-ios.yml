@@ -30,7 +30,7 @@ jobs:
             client/ios/rust -> target
 
       - name: Rust build smoke test (core)
-        run: cargo build -p virtue-client-core
+        run: cargo build -p virtue-core
         working-directory: client
 
       - name: Rust build smoke test (iOS bridge)

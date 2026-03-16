@@ -1,5 +1,5 @@
 [package]
-name = "virtue-linux-client"
+name = "virtue-linux"
 version = "0.0.1"
 edition = "2024"
 description = "Virtue Linux client"
@@ -20,7 +20,7 @@ rpassword = "7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time"] }
-virtue_core = { path = "../core" }
+virtue_core = { package = "virtue-core", path = "../core" }
 
 [package.metadata.deb]
 name = "virtue"

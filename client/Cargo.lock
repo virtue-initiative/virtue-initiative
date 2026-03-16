@@ -5750,7 +5750,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "virtue-linux-client"
+name = "virtue-core"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "argon2",
+ "base64",
+ "flate2",
+ "hex",
+ "image",
+ "pbkdf2",
+ "reqwest",
+ "rmp-serde",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+ "webp",
+]
+
+[[package]]
+name = "virtue-linux"
 version = "0.0.1"
 dependencies = [
  "anyhow",
@@ -5764,11 +5785,11 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "virtue_core",
+ "virtue-core",
 ]
 
 [[package]]
-name = "virtue-mac-client"
+name = "virtue-mac"
 version = "0.0.1"
 dependencies = [
  "anyhow",
@@ -5787,11 +5808,11 @@ dependencies = [
  "tokio",
  "tray-icon",
  "uuid",
- "virtue_core",
+ "virtue-core",
 ]
 
 [[package]]
-name = "virtue-windows-client"
+name = "virtue-windows"
 version = "0.0.1"
 dependencies = [
  "anyhow",
@@ -5807,30 +5828,9 @@ dependencies = [
  "slint",
  "tokio",
  "uuid",
- "virtue_core",
+ "virtue-core",
  "windows 0.62.2",
  "windows-service",
-]
-
-[[package]]
-name = "virtue_core"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "argon2",
- "base64",
- "flate2",
- "hex",
- "image",
- "pbkdf2",
- "reqwest",
- "rmp-serde",
- "serde",
- "serde_bytes",
- "serde_json",
- "sha2",
- "thiserror 2.0.18",
- "webp",
 ]
 
 [[package]]
