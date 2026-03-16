@@ -313,7 +313,9 @@ export function Logs() {
           )}
           {deviceGroups.map((group) => (
             <div class="sidebar-group" key={group.label}>
-              <p class="sidebar-group-label">{group.label}</p>
+              <p class="sidebar-group-label" title={group.label}>
+                {group.label}
+              </p>
               <ul class="device-list">
                 <li>
                   <button
@@ -321,7 +323,7 @@ export function Logs() {
                     onClick={() => select(group.userId, null)}
                     type="button"
                   >
-                    All
+                    <span class="device-btn-label">All</span>
                   </button>
                 </li>
                 {group.devices.map((device) => (
@@ -330,11 +332,12 @@ export function Logs() {
                       class={`device-btn${selectedDevice === device.id ? " active" : ""}`}
                       onClick={() => select(group.userId, device.id)}
                       type="button"
+                      title={device.name}
                     >
                       <span
                         class={`dot ${device.status === "online" ? "dot-green" : "dot-gray"}`}
                       />
-                      {device.name}
+                      <span class="device-btn-label">{device.name}</span>
                     </button>
                   </li>
                 ))}

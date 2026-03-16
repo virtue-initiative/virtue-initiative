@@ -31,8 +31,10 @@
 .logs-sidebar {
   width: 200px;
   flex-shrink: 0;
+  min-width: 0;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   padding-right: 0.25rem;
@@ -55,6 +57,7 @@
 
 .sidebar-group {
   margin-top: 1rem;
+  min-width: 0;
 }
 
 .sidebar-group-label {
@@ -64,6 +67,9 @@
   text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .device-list {
@@ -81,8 +87,14 @@
   }
 }
 
+.device-list li {
+  min-width: 0;
+}
+
 .device-btn {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   background: transparent;
   border: none;
   border-radius: 6px;
@@ -94,6 +106,7 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  overflow: hidden;
   transition: background 0.12s;
 
   &:hover {
@@ -112,7 +125,15 @@
 
   @media (max-width: 600px) {
     width: auto;
+    max-width: 100%;
   }
+}
+
+.device-btn-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dot {
