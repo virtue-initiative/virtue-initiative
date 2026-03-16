@@ -1,13 +1,9 @@
 #![cfg(target_os = "windows")]
 #![windows_subsystem = "windows"]
 
-use std::sync::Arc;
-
 use anyhow::Result;
-use tokio::runtime::Builder;
 
-use virtue_core::resolve_base_api_url;
-use virtue_windows::config::ClientPaths;
+use virtue_windows::config::{ClientPaths, build_core_config};
 use virtue_windows::runtime_env::apply_runtime_env;
 use virtue_windows::service_log::ServiceLogger;
 use virtue_windows::session::SessionManager;
@@ -146,14 +142,15 @@ slint::slint! {
     }
 }
 
+const BUILD_LABEL: &str = env!("CARGO_PKG_VERSION");
+
 fn main() -> Result<()> {
     let paths = ClientPaths::discover()?;
     paths.ensure_dirs()?;
     apply_runtime_env(&paths);
     let logger = ServiceLogger::new(paths.log_file.clone());
-    logger.info(&format!("auth ui starting ({})", virtue_core::BUILD_LABEL));
+    logger.info(&format!("auth ui starting ({BUILD_LABEL})"));
 
-    // Force software rendering: winit backend expects "software"/"sw" renderer names.
     slint::BackendSelector::new()
         .backend_name("winit".to_string())
         .renderer_name("software".to_string())
@@ -161,15 +158,15 @@ fn main() -> Result<()> {
         .map_err(|err| anyhow::anyhow!(err.to_string()))?;
 
     let session = SessionManager::new()?;
-    let runtime = Arc::new(Builder::new_multi_thread().enable_all().build()?);
 
     let ui = AuthWindow::new().map_err(|err| anyhow::anyhow!(err.to_string()))?;
     let initial = session.status()?;
-    let api_base_url = resolve_base_api_url();
+    let mut core_config = build_core_config(&paths);
+    core_config.refresh_from_runtime_file()?;
 
-    ui.set_build_label(virtue_core::BUILD_LABEL.into());
+    ui.set_build_label(BUILD_LABEL.into());
     ui.set_logged_in(initial.logged_in);
-    ui.set_api_base_url(api_base_url.into());
+    ui.set_api_base_url(core_config.api_base_url.clone().into());
     ui.set_account_email(initial.email.clone().unwrap_or_default().into());
     ui.set_email_input(initial.email.unwrap_or_default().into());
     if ui.get_logged_in() {
@@ -184,7 +181,6 @@ fn main() -> Result<()> {
 
     let login_weak = ui.as_weak();
     let login_session = session.clone();
-    let login_runtime = runtime.clone();
     ui.on_login_request(move |email, password| {
         let email = email.trim().to_string();
         let password = password.to_string();
@@ -206,8 +202,7 @@ fn main() -> Result<()> {
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "windows-device".to_string());
 
-        match login_session.login_blocking(login_runtime.as_ref(), &email, &password, &device_name)
-        {
+        match login_session.login_blocking(&email, &password, &device_name) {
             Ok(_) => {
                 window.set_logged_in(true);
                 window.set_account_email(email.clone().into());
@@ -223,7 +218,6 @@ fn main() -> Result<()> {
 
     let logout_weak = ui.as_weak();
     let logout_session = session.clone();
-    let logout_runtime = runtime.clone();
     ui.on_logout_request(move || {
         let Some(window) = logout_weak.upgrade() else {
             return;
@@ -231,7 +225,7 @@ fn main() -> Result<()> {
 
         window.set_status_text("Signing out...".into());
 
-        match logout_session.logout_blocking(logout_runtime.as_ref()) {
+        match logout_session.logout_blocking() {
             Ok(()) => {
                 window.set_logged_in(false);
                 window.set_account_email("".into());
@@ -246,7 +240,7 @@ fn main() -> Result<()> {
 
     match ui.run().map_err(|err| anyhow::anyhow!(err.to_string())) {
         Ok(()) => {
-            logger.info(&format!("auth ui closed ({})", virtue_core::BUILD_LABEL));
+            logger.info(&format!("auth ui closed ({BUILD_LABEL})"));
             Ok(())
         }
         Err(err) => {

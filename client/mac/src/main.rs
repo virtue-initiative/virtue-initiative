@@ -6,28 +6,24 @@ mod runtime_env;
 mod ui;
 
 use std::process::ExitCode;
-use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use chrono::Utc;
 use clap::{Parser, Subcommand};
 use tao::event::{Event, StartCause};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
-use tokio::runtime::Runtime;
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use virtue_core::storage::FileStateStore;
+use virtue_core::{AuthState, LogEntry, MonitorService, ServiceStatus};
 
+use crate::capture::MacPlatformHooks;
 use crate::config::{
-    ClientPaths, ScreenshotPermissionStatus, load_daemon_status, load_state, save_state,
+    ClientPaths, ScreenshotPermissionStatus, build_core_config, load_daemon_status,
 };
 use crate::runtime_env::apply_runtime_env;
-use virtue_core::{
-    ApiClient, AuthClient, FileTokenStore, LoginCommandInput, TokenStore,
-    login_and_register_device, logout_and_clear_tokens_with_alert, resolve_base_api_url,
-    resolve_batch_window_seconds, resolve_capture_interval_seconds,
-};
 
-const BUILD_LABEL: &str = virtue_core::BUILD_LABEL;
+const BUILD_LABEL: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Parser)]
 #[command(name = "virtue-mac")]
@@ -61,19 +57,16 @@ fn run() -> Result<()> {
     apply_runtime_env(&paths);
 
     match cli.command {
-        Some(Commands::Daemon) => run_daemon(paths),
+        Some(Commands::Daemon) => {
+            let runtime = tokio::runtime::Runtime::new().context("failed to create runtime")?;
+            runtime.block_on(daemon::run_daemon(&paths))
+        }
         Some(Commands::Status) => status(paths),
         None => run_tray(paths),
     }
 }
 
-fn run_daemon(paths: ClientPaths) -> Result<()> {
-    let runtime = Runtime::new().context("failed to create async runtime")?;
-    runtime.block_on(daemon::run_daemon(&paths))
-}
-
 fn run_tray(paths: ClientPaths) -> Result<()> {
-    let runtime = Runtime::new().context("failed to create async runtime")?;
     if let Ok(exe) = std::env::current_exe()
         && let Err(err) = launch_agent::ensure_agent_running(&paths, &exe)
     {
@@ -100,8 +93,7 @@ fn run_tray(paths: ClientPaths) -> Result<()> {
         .build()
         .context("failed to build tray icon")?;
 
-    // Opening the app bundle should immediately show the current auth/status dialog.
-    if let Err(err) = open_app_dialog(&paths, &runtime) {
+    if let Err(err) = open_app_dialog(&paths) {
         eprintln!("initial dialog failed: {err:#}");
         let _ = ui::show_error(&format!("Operation failed:\n{err}"));
     }
@@ -109,13 +101,11 @@ fn run_tray(paths: ClientPaths) -> Result<()> {
     event_loop.run(move |event, _event_loop_target, control_flow| {
         *control_flow = ControlFlow::Wait;
 
-        if matches!(event, Event::NewEvents(StartCause::Init)) {
-            // No-op. This match keeps startup behavior explicit.
-        }
+        if matches!(event, Event::NewEvents(StartCause::Init)) {}
 
         while let Ok(menu_event) = MenuEvent::receiver().try_recv() {
             if menu_event.id == close_item.id() {
-                if let Err(err) = close_tray_and_service(&paths, &runtime) {
+                if let Err(err) = close_tray_and_service(&paths) {
                     eprintln!("close failed: {err:#}");
                     let _ = ui::show_error(&format!("Could not close background service:\n{err}"));
                     continue;
@@ -125,7 +115,7 @@ fn run_tray(paths: ClientPaths) -> Result<()> {
             }
 
             if menu_event.id == open_item.id()
-                && let Err(err) = open_app_dialog(&paths, &runtime)
+                && let Err(err) = open_app_dialog(&paths)
             {
                 eprintln!("open dialog failed: {err:#}");
                 let _ = ui::show_error(&format!("Operation failed:\n{err}"));
@@ -138,7 +128,7 @@ fn run_tray(paths: ClientPaths) -> Result<()> {
                 button_state: MouseButtonState::Up,
                 ..
             } = tray_event
-                && let Err(err) = open_app_dialog(&paths, &runtime)
+                && let Err(err) = open_app_dialog(&paths)
             {
                 eprintln!("open dialog failed: {err:#}");
                 let _ = ui::show_error(&format!("Operation failed:\n{err}"));
@@ -147,14 +137,14 @@ fn run_tray(paths: ClientPaths) -> Result<()> {
     });
 }
 
-fn close_tray_and_service(paths: &ClientPaths, runtime: &Runtime) -> Result<()> {
-    if let Err(err) = runtime.block_on(send_close_alert(paths)) {
+fn close_tray_and_service(paths: &ClientPaths) -> Result<()> {
+    if let Err(err) = send_close_alert(paths) {
         eprintln!("warning: could not send close alert: {err:#}");
     }
     launch_agent::stop_agent(paths).context("failed to stop background service")
 }
 
-fn open_app_dialog(paths: &ClientPaths, runtime: &Runtime) -> Result<()> {
+fn open_app_dialog(paths: &ClientPaths) -> Result<()> {
     let app_status = collect_status(paths)?;
     if app_status.logged_in {
         let email = app_status.email.as_deref().unwrap_or("<unknown>");
@@ -185,7 +175,7 @@ fn open_app_dialog(paths: &ClientPaths, runtime: &Runtime) -> Result<()> {
                 ui::show_info("Background service restarted.")?;
             }
             Some(ui::LoggedInAction::Logout) => {
-                runtime.block_on(logout(paths))?;
+                logout(paths)?;
                 ui::show_info("Signed out. Monitoring disabled on this device.")?;
             }
             _ => {}
@@ -197,7 +187,7 @@ fn open_app_dialog(paths: &ClientPaths, runtime: &Runtime) -> Result<()> {
         return Ok(());
     };
 
-    let device_id = runtime.block_on(login(paths, &input.email, &input.password))?;
+    let device_id = login(paths, &input.email, &input.password)?;
     ui::show_info(&format!("Signed in.\nDevice id: {device_id}"))?;
     Ok(())
 }
@@ -207,136 +197,87 @@ fn restart_daemon(paths: &ClientPaths) -> Result<()> {
     launch_agent::ensure_agent_running(paths, &exe).context("failed to restart background service")
 }
 
-async fn login(paths: &ClientPaths, email: &str, password: &str) -> Result<String> {
-    let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&paths.token_file));
-    let auth_client = AuthClient::new(token_store.clone())?;
-    let host = hostname::get()
-        .ok()
-        .and_then(|s| s.into_string().ok())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "mac-device".to_string());
+fn login(paths: &ClientPaths, email: &str, password: &str) -> Result<String> {
+    let mut service = MonitorService::setup(build_core_config(paths), MacPlatformHooks::new())?;
+    let login_result = service.login(email, password).context("login failed")?;
+    Ok(login_result
+        .device
+        .as_ref()
+        .map(|device| device.device_id.clone())
+        .unwrap_or_else(|| "<unknown>".to_string()))
+}
 
-    let api_client = ApiClient::new()?;
-    let login_result = login_and_register_device(
-        &auth_client,
-        &api_client,
-        token_store.as_ref(),
-        LoginCommandInput {
-            email,
-            password,
-            device_name: &host,
-            platform: "macos",
-        },
-    )
-    .await
-    .context("login failed")?;
+fn logout(paths: &ClientPaths) -> Result<()> {
+    let mut service = MonitorService::setup(build_core_config(paths), MacPlatformHooks::new())?;
+    service.logout()
+}
 
-    let mut new_state = load_state(&paths.state_file)?;
-    new_state.device_id = Some(login_result.device_id.clone());
-    new_state.monitoring_enabled = true;
-    new_state.email = Some(email.to_string());
-    new_state.e2ee_user_id = Some(login_result.user_id);
-    save_state(&paths.state_file, &new_state)?;
-
-    if let Ok(exe) = std::env::current_exe() {
-        launch_agent::ensure_agent_running(paths, &exe)?;
+fn send_close_alert(paths: &ClientPaths) -> Result<()> {
+    let store = FileStateStore::new(&paths.state_dir)?;
+    let auth = store.load_auth_state()?;
+    if auth.device_credentials.is_none() {
+        return Ok(());
     }
 
-    Ok(login_result.device_id)
-}
-
-async fn logout(paths: &ClientPaths) -> Result<()> {
-    let mut state = load_state(&paths.state_file)?;
-    let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&paths.token_file));
-    let auth_client = AuthClient::new(token_store.clone())?;
-    let api_client = ApiClient::new()?;
-    let metadata = vec![("source".to_string(), "mac_ui".to_string())];
-    let _ = logout_and_clear_tokens_with_alert(
-        &auth_client,
-        Some(&api_client),
-        token_store.as_ref(),
-        state.device_id.as_deref(),
-        &metadata,
-    )
-    .await;
-
-    state.monitoring_enabled = false;
-    state.device_id = None;
-    state.email = None;
-    state.e2ee_user_id = None;
-    save_state(&paths.state_file, &state)?;
-    Ok(())
-}
-
-async fn send_close_alert(paths: &ClientPaths) -> Result<()> {
-    let state = load_state(&paths.state_file)?;
-    let Some(device_id) = state.device_id.as_deref() else {
-        return Ok(());
-    };
-
-    let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&paths.token_file));
-    let Some(access_token) = token_store.get_access_token()? else {
-        return Ok(());
-    };
-
-    let api_client = ApiClient::new()?;
-    let metadata = vec![
-        ("source".to_string(), "mac_tray_menu".to_string()),
-        ("reason".to_string(), "tray_close_requested".to_string()),
-    ];
-
-    let _ = api_client
-        .create_alert_log(
-            &access_token,
-            device_id,
-            "manual_override",
-            &metadata,
-            Utc::now(),
-        )
-        .await;
+    let mut service = MonitorService::setup(build_core_config(paths), MacPlatformHooks::new())?;
+    let _ = service.send_log(LogEntry {
+        ts_ms: Utc::now().timestamp_millis(),
+        kind: "manual_override".to_string(),
+        risk: None,
+        data: serde_json::json!({
+            "source": "mac_tray_menu",
+            "reason": "tray_close_requested",
+        }),
+    });
     Ok(())
 }
 
 fn status(paths: ClientPaths) -> Result<()> {
-    let app_status = collect_status(&paths)?;
+    let store = FileStateStore::new(&paths.state_dir)?;
+    let auth = store.load_auth_state()?;
+    let service_status = load_service_status(&store, &auth)?;
+    let device_settings = store.load_device_settings()?;
+    let daemon_status = load_daemon_status(&paths.daemon_status_file)?;
+    let mut config = build_core_config(&paths);
+    config.refresh_from_runtime_file()?;
 
-    println!("state: {}", app_status.state_label());
-    println!("logged_in: {}", app_status.logged_in);
-    println!("monitoring_enabled: {}", app_status.monitoring_enabled);
-    println!("email: {}", app_status.email.as_deref().unwrap_or("<none>"));
+    println!("logged_in: {}", auth.device_credentials.is_some());
+    println!("running: {}", service_status.is_running);
     println!(
         "device_id: {}",
-        app_status.device_id.as_deref().unwrap_or("<none>")
+        service_status.device_id.as_deref().unwrap_or("<none>")
+    );
+    println!(
+        "device_enabled: {}",
+        device_settings
+            .as_ref()
+            .map(|settings| settings.enabled.to_string())
+            .unwrap_or_else(|| "<unknown>".to_string())
     );
     println!(
         "screenshot_permission: {}",
-        app_status.screenshot_permission.as_str()
+        daemon_status.screenshot_permission.as_str()
     );
     println!(
         "daemon_last_error: {}",
-        app_status.daemon_last_error.as_deref().unwrap_or("<none>")
+        daemon_status.last_error.as_deref().unwrap_or("<none>")
     );
     println!(
         "daemon_status_updated_at: {}",
-        app_status
-            .daemon_status_updated_at
-            .as_deref()
-            .unwrap_or("<none>")
+        daemon_status.updated_at.as_deref().unwrap_or("<none>")
     );
     println!(
         "capture_interval_seconds: {}",
-        resolve_capture_interval_seconds()
+        config.screenshot_interval.as_secs()
     );
-    println!("batch_window_seconds: {}", resolve_batch_window_seconds());
-    println!("base_api_url: {}", resolve_base_api_url());
-    println!("timestamp: {}", Utc::now().to_rfc3339());
+    println!("batch_window_seconds: {}", config.batch_interval.as_secs());
+    println!("base_api_url: {}", config.api_base_url);
     Ok(())
 }
 
 #[derive(Debug)]
 struct AppStatus {
     logged_in: bool,
-    monitoring_enabled: bool,
     email: Option<String>,
     device_id: Option<String>,
     screenshot_permission: ScreenshotPermissionStatus,
@@ -344,33 +285,38 @@ struct AppStatus {
     daemon_status_updated_at: Option<String>,
 }
 
-impl AppStatus {
-    fn state_label(&self) -> &'static str {
-        if !self.logged_in {
-            "logged_out"
-        } else if self.screenshot_permission == ScreenshotPermissionStatus::Missing {
-            "permissions_required"
-        } else {
-            "ok"
-        }
-    }
-}
-
 fn collect_status(paths: &ClientPaths) -> Result<AppStatus> {
-    let state = load_state(&paths.state_file)?;
-    let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&paths.token_file));
-    let logged_in = token_store.get_access_token()?.is_some() && state.device_id.is_some();
+    let store = FileStateStore::new(&paths.state_dir)?;
+    let auth = store.load_auth_state()?;
     let daemon_status = load_daemon_status(&paths.daemon_status_file)?;
 
     Ok(AppStatus {
-        logged_in,
-        monitoring_enabled: state.monitoring_enabled,
-        email: state.email,
-        device_id: state.device_id,
+        logged_in: auth.device_credentials.is_some(),
+        email: None,
+        device_id: auth
+            .device_credentials
+            .as_ref()
+            .map(|device| device.device_id.clone()),
         screenshot_permission: daemon_status.screenshot_permission,
         daemon_last_error: daemon_status.last_error,
         daemon_status_updated_at: daemon_status.updated_at,
     })
+}
+
+fn load_service_status(store: &FileStateStore, auth: &AuthState) -> Result<ServiceStatus> {
+    let pending_request_count = store.load_pending_requests()?.len();
+    Ok(store.load_status()?.unwrap_or(ServiceStatus {
+        is_authenticated: auth.device_credentials.is_some(),
+        is_running: false,
+        device_id: auth
+            .device_credentials
+            .as_ref()
+            .map(|device| device.device_id.clone()),
+        last_loop_at_ms: None,
+        last_screenshot_at_ms: None,
+        last_batch_at_ms: None,
+        pending_request_count,
+    }))
 }
 
 fn build_tray_icon() -> Result<Icon> {

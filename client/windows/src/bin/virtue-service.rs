@@ -6,7 +6,6 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
-use chrono::Utc;
 use tokio::runtime::Builder;
 use tokio::signal::windows::{ctrl_break, ctrl_c, ctrl_close, ctrl_logoff, ctrl_shutdown};
 use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE};
@@ -15,13 +14,11 @@ use windows::core::w;
 
 use windows_service::define_windows_service;
 use windows_service::service::{
-    ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
-    ServiceType, SessionChangeReason,
+    ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus, ServiceType,
 };
 use windows_service::service_control_handler::{self, ServiceControlHandlerResult};
 use windows_service::service_dispatcher;
 
-use virtue_core::DaemonAlertEvent;
 use virtue_windows::capture_control;
 use virtue_windows::capture_daemon;
 use virtue_windows::config::ClientPaths;
@@ -31,6 +28,7 @@ use virtue_windows::service_log::ServiceLogger;
 
 const SERVICE_NAME: &str = "VirtueLifecycleService";
 const LIFECYCLE_INSTANCE_MUTEX_NAME: windows::core::PCWSTR = w!("Local\\VirtueLifecycleConsole");
+const BUILD_LABEL: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Mode {
@@ -109,20 +107,17 @@ fn run_lifecycle_service() -> Result<()> {
     paths.ensure_dirs()?;
     apply_runtime_env(&paths);
     let logger = Arc::new(ServiceLogger::new(paths.log_file.clone()));
-    logger.info(&format!("build {}", virtue_core::BUILD_LABEL));
+    logger.info(&format!("build {BUILD_LABEL}"));
 
     let shutdown = Arc::new(AtomicBool::new(false));
     let stop_signal = shutdown.clone();
     let stop_reason = Arc::new(Mutex::new(None));
     let stop_reason_for_handler = stop_reason.clone();
-    let pending_alert_events = Arc::new(Mutex::new(Vec::<DaemonAlertEvent>::new()));
-    let pending_alert_events_for_handler = pending_alert_events.clone();
-    let logger_for_handler = logger.clone();
 
     let status_handle =
         service_control_handler::register(SERVICE_NAME, move |event| match event {
             ServiceControl::Stop => {
-                set_stop_reason_if_empty(
+                daemon::set_stop_reason_if_empty(
                     &stop_reason_for_handler,
                     daemon::StopReason::ServiceControlStop,
                 );
@@ -130,7 +125,7 @@ fn run_lifecycle_service() -> Result<()> {
                 ServiceControlHandlerResult::NoError
             }
             ServiceControl::Preshutdown => {
-                set_stop_reason_if_empty(
+                daemon::set_stop_reason_if_empty(
                     &stop_reason_for_handler,
                     daemon::StopReason::ServiceControlPreshutdown,
                 );
@@ -138,23 +133,11 @@ fn run_lifecycle_service() -> Result<()> {
                 ServiceControlHandlerResult::NoError
             }
             ServiceControl::Shutdown => {
-                set_stop_reason_if_empty(
+                daemon::set_stop_reason_if_empty(
                     &stop_reason_for_handler,
                     daemon::StopReason::ServiceControlShutdown,
                 );
                 stop_signal.store(true, Ordering::SeqCst);
-                ServiceControlHandlerResult::NoError
-            }
-            ServiceControl::SessionChange(param) => {
-                if let Some(alert) =
-                    map_session_change_alert(param.reason, param.notification.session_id)
-                {
-                    daemon::push_alert_event(
-                        &pending_alert_events_for_handler,
-                        alert,
-                        &logger_for_handler,
-                    );
-                }
                 ServiceControlHandlerResult::NoError
             }
             ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
@@ -164,9 +147,7 @@ fn run_lifecycle_service() -> Result<()> {
     status_handle.set_service_status(ServiceStatus {
         service_type: ServiceType::OWN_PROCESS,
         current_state: ServiceState::Running,
-        controls_accepted: ServiceControlAccept::STOP
-            | ServiceControlAccept::PRESHUTDOWN
-            | ServiceControlAccept::SESSION_CHANGE,
+        controls_accepted: ServiceControlAccept::STOP | ServiceControlAccept::PRESHUTDOWN,
         exit_code: ServiceExitCode::Win32(0),
         checkpoint: 0,
         wait_hint: std::time::Duration::default(),
@@ -177,13 +158,7 @@ fn run_lifecycle_service() -> Result<()> {
 
     let runtime = Builder::new_multi_thread().enable_all().build()?;
     let daemon_result = runtime.block_on(async {
-        daemon::run_daemon(
-            shutdown.clone(),
-            stop_reason.clone(),
-            pending_alert_events.clone(),
-            logger.as_ref(),
-        )
-        .await
+        daemon::run_daemon(shutdown.clone(), stop_reason.clone(), logger.as_ref()).await
     });
 
     if let Err(err) = &daemon_result {
@@ -208,10 +183,9 @@ fn run_lifecycle_console() -> Result<()> {
     paths.ensure_dirs()?;
     apply_runtime_env(&paths);
     let logger = Arc::new(ServiceLogger::new(paths.log_file.clone()));
-    logger.info(&format!("build {}", virtue_core::BUILD_LABEL));
+    logger.info(&format!("build {BUILD_LABEL}"));
     let shutdown = Arc::new(AtomicBool::new(false));
     let stop_reason = Arc::new(Mutex::new(None));
-    let pending_alert_events = Arc::new(Mutex::new(Vec::<DaemonAlertEvent>::new()));
     let instance = acquire_console_instance_mutex(LIFECYCLE_INSTANCE_MUTEX_NAME)?;
     let Some(instance) = instance else {
         logger.info("lifecycle console instance already running; exiting duplicate");
@@ -247,32 +221,16 @@ fn run_lifecycle_console() -> Result<()> {
             };
 
             tokio::select! {
-                _ = sig_ctrl_c.recv() => {
-                    set_stop_reason_if_empty(&stop_reason_for_signals, daemon::StopReason::ConsoleCtrlC);
-                }
-                _ = sig_ctrl_break.recv() => {
-                    set_stop_reason_if_empty(&stop_reason_for_signals, daemon::StopReason::ConsoleCtrlBreak);
-                }
-                _ = sig_ctrl_close.recv() => {
-                    set_stop_reason_if_empty(&stop_reason_for_signals, daemon::StopReason::ConsoleCtrlClose);
-                }
-                _ = sig_ctrl_logoff.recv() => {
-                    set_stop_reason_if_empty(&stop_reason_for_signals, daemon::StopReason::ConsoleCtrlLogoff);
-                }
-                _ = sig_ctrl_shutdown.recv() => {
-                    set_stop_reason_if_empty(&stop_reason_for_signals, daemon::StopReason::ConsoleCtrlShutdown);
-                }
+                _ = sig_ctrl_c.recv() => daemon::set_stop_reason_if_empty(&stop_reason_for_signals, daemon::StopReason::ConsoleCtrlC),
+                _ = sig_ctrl_break.recv() => daemon::set_stop_reason_if_empty(&stop_reason_for_signals, daemon::StopReason::ConsoleCtrlBreak),
+                _ = sig_ctrl_close.recv() => daemon::set_stop_reason_if_empty(&stop_reason_for_signals, daemon::StopReason::ConsoleCtrlClose),
+                _ = sig_ctrl_logoff.recv() => daemon::set_stop_reason_if_empty(&stop_reason_for_signals, daemon::StopReason::ConsoleCtrlLogoff),
+                _ = sig_ctrl_shutdown.recv() => daemon::set_stop_reason_if_empty(&stop_reason_for_signals, daemon::StopReason::ConsoleCtrlShutdown),
             }
             shutdown_for_signals.store(true, Ordering::SeqCst);
         });
 
-        let daemon_result = daemon::run_daemon(
-            shutdown.clone(),
-            stop_reason.clone(),
-            pending_alert_events.clone(),
-            logger.as_ref(),
-        )
-        .await;
+        let daemon_result = daemon::run_daemon(shutdown.clone(), stop_reason.clone(), logger.as_ref()).await;
 
         signal_task.abort();
         let _ = signal_task.await;
@@ -288,7 +246,7 @@ fn run_capture_console() -> Result<()> {
     paths.ensure_dirs()?;
     apply_runtime_env(&paths);
     let logger = Arc::new(ServiceLogger::new(paths.log_file.clone()));
-    logger.info(&format!("build {}", virtue_core::BUILD_LABEL));
+    logger.info(&format!("build {BUILD_LABEL}"));
     let shutdown = Arc::new(AtomicBool::new(false));
     let instance = acquire_console_instance_mutex(capture_control::CAPTURE_INSTANCE_MUTEX_NAME)?;
     let Some(instance) = instance else {
@@ -344,45 +302,13 @@ fn run_capture_console() -> Result<()> {
     result
 }
 
-fn map_session_change_alert(
-    reason: SessionChangeReason,
-    session_id: u32,
-) -> Option<DaemonAlertEvent> {
-    let kind = match reason {
-        SessionChangeReason::SessionLogon => "session_login",
-        SessionChangeReason::SessionLogoff => "session_logout",
-        _ => return None,
-    };
-
-    Some(DaemonAlertEvent {
-        kind: kind.to_string(),
-        metadata: vec![
-            ("source".to_string(), "windows_service".to_string()),
-            ("session_id".to_string(), session_id.to_string()),
-        ],
-        created_at: Utc::now(),
-        device_id: None,
-    })
-}
-
-fn set_stop_reason_if_empty(
-    stop_reason: &Arc<Mutex<Option<daemon::StopReason>>>,
-    reason: daemon::StopReason,
-) {
-    if let Ok(mut guard) = stop_reason.lock()
-        && guard.is_none()
-    {
-        *guard = Some(reason);
-    }
-}
-
 fn acquire_console_instance_mutex(name: windows::core::PCWSTR) -> Result<Option<HANDLE>> {
-    unsafe {
-        let handle = CreateMutexW(None, false, name)?;
-        if GetLastError() == ERROR_ALREADY_EXISTS {
-            let _ = CloseHandle(handle);
-            return Ok(None);
-        }
+    let handle = unsafe { CreateMutexW(None, false, name)? };
+    let last_error = unsafe { GetLastError() };
+    if last_error == ERROR_ALREADY_EXISTS {
+        let _ = unsafe { CloseHandle(handle) };
+        Ok(None)
+    } else {
         Ok(Some(handle))
     }
 }

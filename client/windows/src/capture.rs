@@ -1,6 +1,8 @@
 use std::io::Cursor;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
+use virtue_core::{CoreError, CoreResult, PlatformHooks, Screenshot};
 
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Gdi::{
@@ -13,7 +15,6 @@ use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_
 
 #[cfg(target_os = "windows")]
 pub fn capture_screen_png() -> Result<Vec<u8>> {
-    // GDI resources are process-global; this scope ensures every acquired handle is released.
     unsafe {
         let width = GetSystemMetrics(SM_CXSCREEN);
         let height = GetSystemMetrics(SM_CYSCREEN);
@@ -111,4 +112,33 @@ pub fn capture_screen_png() -> Result<Vec<u8>> {
 #[cfg(not(target_os = "windows"))]
 pub fn capture_screen_png() -> Result<Vec<u8>> {
     Err(anyhow!("windows capture is only supported on Windows"))
+}
+
+#[derive(Clone)]
+pub struct WindowsPlatformHooks;
+
+impl WindowsPlatformHooks {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl PlatformHooks for WindowsPlatformHooks {
+    fn take_screenshot(&self) -> CoreResult<Screenshot> {
+        let bytes =
+            capture_screen_png().map_err(|err| CoreError::CommandFailed(err.to_string()))?;
+        Ok(Screenshot {
+            captured_at_ms: self.get_time_utc_ms()?,
+            bytes,
+            content_type: "image/png".to_string(),
+        })
+    }
+
+    fn get_time_utc_ms(&self) -> CoreResult<i64> {
+        let duration = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|err| CoreError::CommandFailed(err.to_string()))?;
+        i64::try_from(duration.as_millis())
+            .map_err(|_| CoreError::InvalidState("system clock overflow"))
+    }
 }

@@ -3,25 +3,21 @@ use std::fs;
 use std::os::raw::{c_char, c_int};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::Mutex;
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
-use chrono::Utc;
 use once_cell::sync::OnceCell;
-use serde::{Deserialize, Serialize};
-use tokio::runtime::{Builder, Runtime};
-use tokio::time::sleep;
-
-use virtue_core::{
-    apply_dev_env, login_and_register_device, logout_and_clear_tokens_with_alert, run_batch_daemon,
-    ApiClient, AuthClient, BatchDaemonConfig, CaptureOutcome, CoreError, FileTokenStore,
-    LoginCommandInput, PersistedServiceState, ServiceEvent, ServiceHost,
-    SleepOutcome, TokenStore, BASE_API_URL_ENV_VAR, BATCH_WINDOW_SECONDS_ENV_VAR,
-    CAPTURE_INTERVAL_SECONDS_ENV_VAR,
-};
+use virtue_core::storage::FileStateStore;
+use virtue_core::{Config, CoreError, CoreResult, MonitorService, PlatformHooks, Screenshot};
 
 static CORE: OnceCell<IosCore> = OnceCell::new();
+
+const DEFAULT_BASE_API_URL: &str = "https://api.virtueinitiative.org";
+const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
+const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
+const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
 
 const CAPTURE_STATUS_READY: c_int = 0;
 const CAPTURE_STATUS_PERMISSION_MISSING: c_int = 1;
@@ -34,63 +30,17 @@ unsafe extern "C" {
 }
 
 struct IosCore {
-    runtime: Runtime,
-    token_store: Arc<dyn TokenStore>,
-    state_path: PathBuf,
-    batch_buffer_path: PathBuf,
-    dynamic: Mutex<DynamicCore>,
-    daemon_state: Mutex<DaemonState>,
+    state_dir: PathBuf,
+    runtime_config_file: PathBuf,
+    stop: AtomicBool,
+    daemon_running: Mutex<bool>,
 }
 
 #[derive(Clone)]
-struct DynamicCore {
-    auth_client: AuthClient,
-    api_client: ApiClient,
-}
+struct IosPlatformHooks;
 
-struct DaemonState {
-    running: bool,
-    stop: Arc<AtomicBool>,
-}
-
-impl Default for DaemonState {
-    fn default() -> Self {
-        Self {
-            running: false,
-            stop: Arc::new(AtomicBool::new(false)),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct IosState {
-    #[serde(default = "default_monitoring_enabled")]
-    monitoring_enabled: bool,
-    device_id: Option<String>,
-}
-
-fn default_monitoring_enabled() -> bool {
-    true
-}
-
-impl Default for IosState {
-    fn default() -> Self {
-        Self {
-            monitoring_enabled: default_monitoring_enabled(),
-            device_id: None,
-        }
-    }
-}
-
-#[derive(Clone)]
-struct IosDaemonHost {
-    state_path: PathBuf,
-    stop: Arc<AtomicBool>,
-}
-
-impl IosDaemonHost {
+impl IosPlatformHooks {
     fn capture_status(&self) -> c_int {
-        // SAFETY: exported by the iOS app binary; no pointer parameters.
         unsafe { virtue_ios_capture_status() }
     }
 
@@ -98,86 +48,53 @@ impl IosDaemonHost {
         let mut ptr: *const u8 = std::ptr::null();
         let mut len: usize = 0;
 
-        // SAFETY: callback writes pointer/length pair into valid out parameters.
         let rc = unsafe { virtue_ios_capture_png_write(&mut ptr, &mut len) };
         if rc != 0 {
-            return Err(CoreError::Platform(format!(
+            return Err(CoreError::CommandFailed(format!(
                 "capture callback returned error code {rc}"
             )));
         }
         if ptr.is_null() || len == 0 {
-            return Err(CoreError::Platform(
+            return Err(CoreError::CommandFailed(
                 "capture callback returned empty frame".to_string(),
             ));
         }
 
-        // SAFETY: callback guarantees pointer is valid for len bytes until release.
         let bytes = unsafe { std::slice::from_raw_parts(ptr, len).to_vec() };
-        // SAFETY: pointer came from virtue_ios_capture_png_write and must be released by callback.
         unsafe { virtue_ios_capture_png_release(ptr, len) };
         Ok(bytes)
     }
 }
 
-impl ServiceHost for IosDaemonHost {
-    fn load_persisted_state(&self) -> virtue_core::CoreResult<PersistedServiceState> {
-        let state =
-            load_state(&self.state_path).map_err(|err| CoreError::Platform(err.to_string()))?;
-        Ok(PersistedServiceState {
-            monitoring_enabled: state.monitoring_enabled,
-            device_id: state.device_id,
-        })
-    }
-
-    fn now_utc(&self) -> chrono::DateTime<Utc> {
-        Utc::now()
-    }
-
-    async fn sleep_interruptible(
-        &self,
-        duration: Duration,
-    ) -> virtue_core::CoreResult<SleepOutcome> {
-        let mut remaining = duration;
-        while remaining > Duration::ZERO {
-            if self.should_stop() {
-                return Ok(SleepOutcome::Interrupted);
-            }
-            let tick = remaining.min(Duration::from_secs(1));
-            sleep(tick).await;
-            remaining = remaining.saturating_sub(tick);
-        }
-
-        if self.should_stop() {
-            Ok(SleepOutcome::Interrupted)
-        } else {
-            Ok(SleepOutcome::Elapsed)
-        }
-    }
-
-    async fn capture_frame_png(&self) -> virtue_core::CoreResult<CaptureOutcome> {
+impl PlatformHooks for IosPlatformHooks {
+    fn take_screenshot(&self) -> CoreResult<Screenshot> {
         match self.capture_status() {
             CAPTURE_STATUS_READY => {
-                let png = self.capture_png()?;
-                Ok(CaptureOutcome::FramePng(png))
+                let bytes = self.capture_png()?;
+                Ok(Screenshot {
+                    captured_at_ms: self.get_time_utc_ms()?,
+                    bytes,
+                    content_type: "image/png".to_string(),
+                })
             }
-            CAPTURE_STATUS_PERMISSION_MISSING => Ok(CaptureOutcome::PermissionMissing),
-            CAPTURE_STATUS_SESSION_UNAVAILABLE => Ok(CaptureOutcome::SessionUnavailable),
-            other => Err(CoreError::Platform(format!(
+            CAPTURE_STATUS_PERMISSION_MISSING => Err(CoreError::CommandFailed(
+                "capture permission missing".to_string(),
+            )),
+            CAPTURE_STATUS_SESSION_UNAVAILABLE => Err(CoreError::CommandFailed(
+                "capture session unavailable".to_string(),
+            )),
+            other => Err(CoreError::CommandFailed(format!(
                 "unexpected capture status code: {other}"
             ))),
         }
     }
 
-    fn emit_event(&self, event: ServiceEvent) {
-        match event {
-            ServiceEvent::Info(msg) => eprintln!("ios-daemon: {msg}"),
-            ServiceEvent::Warn(msg) => eprintln!("ios-daemon: {msg}"),
-            ServiceEvent::Error(msg) => eprintln!("ios-daemon: {msg}"),
-        }
-    }
-
-    fn should_stop(&self) -> bool {
-        self.stop.load(Ordering::SeqCst)
+    fn get_time_utc_ms(&self) -> CoreResult<i64> {
+        let duration = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|err| CoreError::CommandFailed(err.to_string()))?;
+        i64::try_from(duration.as_millis())
+            .map_err(|_| CoreError::InvalidState("system clock overflow"))
     }
 }
 
@@ -196,40 +113,28 @@ pub extern "C" fn virtue_ios_native_init(
         let capture_interval_seconds = c_string_or_empty(capture_interval_seconds);
         let batch_window_seconds = c_string_or_empty(batch_window_seconds);
 
-        apply_dev_env();
-        apply_overrides(
-            &base_api_url,
-            &capture_interval_seconds,
-            &batch_window_seconds,
-        );
-
-        if let Some(core) = CORE.get() {
-            refresh_dynamic(core)?;
-            return Ok(());
-        }
-
         fs::create_dir_all(&config_dir)
             .with_context(|| format!("failed to create config dir {config_dir}"))?;
         fs::create_dir_all(&data_dir)
             .with_context(|| format!("failed to create data dir {data_dir}"))?;
 
-        let token_file = Path::new(&config_dir).join("token_store.json");
-        let state_file = Path::new(&config_dir).join("ios_client_state.json");
-        let batch_buffer_file = Path::new(&data_dir).join("batch_buffer.json");
+        let runtime_config_file = Path::new(&config_dir).join("config.json");
+        write_runtime_overrides(
+            &runtime_config_file,
+            &base_api_url,
+            &capture_interval_seconds,
+            &batch_window_seconds,
+        )?;
 
-        let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&token_file));
-        let runtime = Runtime::new().context("failed to build tokio runtime")?;
-        let dynamic = build_dynamic(token_store.clone())?;
-
-        CORE.set(IosCore {
-            runtime,
-            token_store,
-            state_path: state_file,
-            batch_buffer_path: batch_buffer_file,
-            dynamic: Mutex::new(dynamic),
-            daemon_state: Mutex::new(DaemonState::default()),
-        })
-        .map_err(|_| anyhow!("core already initialized"))?;
+        if CORE.get().is_none() {
+            CORE.set(IosCore {
+                state_dir: PathBuf::from(data_dir),
+                runtime_config_file,
+                stop: AtomicBool::new(false),
+                daemon_running: Mutex::new(false),
+            })
+            .map_err(|_| anyhow!("core already initialized"))?;
+        }
 
         Ok(())
     })();
@@ -244,19 +149,17 @@ pub extern "C" fn virtue_ios_native_set_overrides(
     batch_window_seconds: *const c_char,
 ) -> *mut c_char {
     let result = (|| -> Result<()> {
+        let core = core()?;
         let base_api_url = c_string_or_empty(base_api_url);
         let capture_interval_seconds = c_string_or_empty(capture_interval_seconds);
         let batch_window_seconds = c_string_or_empty(batch_window_seconds);
 
-        apply_overrides(
+        write_runtime_overrides(
+            &core.runtime_config_file,
             &base_api_url,
             &capture_interval_seconds,
             &batch_window_seconds,
-        );
-
-        let core = core()?;
-        refresh_dynamic(core)?;
-        Ok(())
+        )
     })();
 
     into_c_result(result)
@@ -269,39 +172,15 @@ pub extern "C" fn virtue_ios_native_login(
     device_name: *const c_char,
 ) -> *mut c_char {
     let result = (|| -> Result<()> {
-        let core = core()?;
         let email = c_string_or_empty(email);
         let password = c_string_or_empty(password);
         let device_name = c_string_or_empty(device_name);
+        let core = core()?;
 
-        let (auth_client, api_client) = {
-            let dynamic = core
-                .dynamic
-                .lock()
-                .map_err(|_| anyhow!("dynamic core lock poisoned"))?;
-            (dynamic.auth_client.clone(), dynamic.api_client.clone())
-        };
-
-        core.runtime.block_on(async {
-            let login = login_and_register_device(
-                &auth_client,
-                &api_client,
-                core.token_store.as_ref(),
-                LoginCommandInput {
-                    email: &email,
-                    password: &password,
-                    device_name: &device_name,
-                    platform: "ios",
-                },
-            )
-            .await?;
-
-            let mut state = load_state(&core.state_path)?;
-            state.monitoring_enabled = true;
-            state.device_id = Some(login.device_id);
-            save_state(&core.state_path, &state)?;
-            Ok::<(), anyhow::Error>(())
-        })
+        let mut service =
+            MonitorService::setup(build_core_config(core, &device_name), IosPlatformHooks)?;
+        service.login(&email, &password)?;
+        Ok(())
     })();
 
     into_c_result(result)
@@ -311,98 +190,60 @@ pub extern "C" fn virtue_ios_native_login(
 pub extern "C" fn virtue_ios_native_logout() -> *mut c_char {
     let result = (|| -> Result<()> {
         let core = core()?;
-
-        let (auth_client, api_client) = {
-            let dynamic = core
-                .dynamic
-                .lock()
-                .map_err(|_| anyhow!("dynamic core lock poisoned"))?;
-            (dynamic.auth_client.clone(), dynamic.api_client.clone())
-        };
-
-        core.runtime.block_on(async {
-            let mut state = load_state(&core.state_path)?;
-            let metadata = vec![
-                ("source".to_string(), "ios".to_string()),
-                ("reason".to_string(), "user_logout".to_string()),
-            ];
-
-            let _ = logout_and_clear_tokens_with_alert(
-                &auth_client,
-                Some(&api_client),
-                core.token_store.as_ref(),
-                state.device_id.as_deref(),
-                &metadata,
-            )
-            .await;
-
-            state.monitoring_enabled = false;
-            state.device_id = None;
-            save_state(&core.state_path, &state)?;
-            Ok::<(), anyhow::Error>(())
-        })
+        let mut service =
+            MonitorService::setup(build_core_config(core, "ios-device"), IosPlatformHooks)?;
+        service.logout()?;
+        Ok(())
     })();
 
     into_c_result(result)
 }
 
 #[no_mangle]
+pub extern "C" fn virtue_ios_native_is_logged_in() -> bool {
+    core()
+        .and_then(|core| Ok(FileStateStore::new(&core.state_dir)?.load_auth_state()?))
+        .map(|auth| auth.device_credentials.is_some())
+        .unwrap_or(false)
+}
+
+#[no_mangle]
+pub extern "C" fn virtue_ios_native_get_device_id() -> *mut c_char {
+    let device_id = core()
+        .and_then(|core| Ok(FileStateStore::new(&core.state_dir)?.load_auth_state()?))
+        .ok()
+        .and_then(|auth| auth.device_credentials.map(|device| device.device_id));
+
+    match device_id {
+        Some(value) => CString::new(value)
+            .map(CString::into_raw)
+            .unwrap_or(std::ptr::null_mut()),
+        None => std::ptr::null_mut(),
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn virtue_ios_native_run_daemon_loop() -> *mut c_char {
     let result = (|| -> Result<()> {
         let core = core()?;
-
-        let stop_signal = {
-            let mut daemon_state = core
-                .daemon_state
+        {
+            let mut guard = core
+                .daemon_running
                 .lock()
                 .map_err(|_| anyhow!("daemon state lock poisoned"))?;
-            if daemon_state.running {
-                return Ok(());
+            if *guard {
+                return Err(anyhow!("daemon already running"));
             }
-            daemon_state.running = true;
-            daemon_state.stop.store(false, Ordering::SeqCst);
-            daemon_state.stop.clone()
-        };
-
-        let run_result = (|| -> Result<()> {
-            let host = IosDaemonHost {
-                state_path: core.state_path.clone(),
-                stop: stop_signal,
-            };
-            let auth_client = AuthClient::new(core.token_store.clone())?;
-            let api_client = ApiClient::new()?;
-            let config = BatchDaemonConfig {
-                settings_refresh_interval: Duration::from_secs(30 * 60),
-                settings_fetch_retry_interval: Duration::from_secs(20),
-                idle_retry_interval: Duration::from_secs(20),
-                token_refresh_threshold: Duration::from_secs(120),
-                session_unavailable_log_interval: Duration::from_secs(5 * 60),
-                continue_on_token_refresh_error: false,
-            };
-
-            let daemon_runtime = Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .context("failed to build daemon runtime")?;
-
-            daemon_runtime
-                .block_on(run_batch_daemon(
-                    &host,
-                    core.token_store.clone(),
-                    &auth_client,
-                    &api_client,
-                    &core.batch_buffer_path,
-                    config,
-                ))
-                .map_err(Into::into)
-        })();
-
-        if let Ok(mut daemon_state) = core.daemon_state.lock() {
-            daemon_state.running = false;
-            daemon_state.stop.store(false, Ordering::SeqCst);
+            *guard = true;
         }
+        core.stop.store(false, Ordering::SeqCst);
 
-        run_result
+        let daemon_result = run_daemon_loop(core);
+
+        if let Ok(mut guard) = core.daemon_running.lock() {
+            *guard = false;
+        }
+        daemon_result
     })();
 
     into_c_result(result)
@@ -412,11 +253,7 @@ pub extern "C" fn virtue_ios_native_run_daemon_loop() -> *mut c_char {
 pub extern "C" fn virtue_ios_native_stop_daemon() -> *mut c_char {
     let result = (|| -> Result<()> {
         let core = core()?;
-        let daemon_state = core
-            .daemon_state
-            .lock()
-            .map_err(|_| anyhow!("daemon state lock poisoned"))?;
-        daemon_state.stop.store(true, Ordering::SeqCst);
+        core.stop.store(true, Ordering::SeqCst);
         Ok(())
     })();
 
@@ -424,148 +261,123 @@ pub extern "C" fn virtue_ios_native_stop_daemon() -> *mut c_char {
 }
 
 #[no_mangle]
-pub extern "C" fn virtue_ios_native_is_logged_in() -> bool {
-    let result = (|| -> Result<bool> {
-        let core = core()?;
-        let token = core.token_store.get_access_token()?;
-        let state = load_state(&core.state_path)?;
-        Ok(token.is_some() && state.device_id.is_some())
-    })();
-
-    matches!(result, Ok(true))
-}
-
-#[no_mangle]
-pub extern "C" fn virtue_ios_native_get_device_id() -> *mut c_char {
-    let result = (|| -> Result<Option<String>> {
-        let core = core()?;
-        let state = load_state(&core.state_path)?;
-        Ok(state.device_id)
-    })();
-
-    match result {
-        Ok(Some(device_id)) => to_c_string_ptr(&device_id),
-        _ => std::ptr::null_mut(),
-    }
-}
-
-#[no_mangle]
 pub extern "C" fn virtue_ios_free_string(value: *mut c_char) {
     if value.is_null() {
         return;
     }
-    // SAFETY: value must be a pointer previously returned by CString::into_raw in this crate.
     unsafe {
         let _ = CString::from_raw(value);
     }
 }
 
-fn core() -> Result<&'static IosCore> {
-    CORE.get()
-        .ok_or_else(|| anyhow!("native core not initialized"))
-}
+fn run_daemon_loop(core: &IosCore) -> Result<()> {
+    let mut service =
+        MonitorService::setup(build_core_config(core, "ios-device"), IosPlatformHooks)?;
 
-fn build_dynamic(token_store: Arc<dyn TokenStore>) -> Result<DynamicCore> {
-    Ok(DynamicCore {
-        auth_client: AuthClient::new(token_store.clone())?,
-        api_client: ApiClient::new()?,
-    })
-}
+    while !core.stop.load(Ordering::SeqCst) {
+        let sleep_duration = match service.loop_iteration() {
+            Ok(outcome) => duration_until(outcome.next_run_at_ms),
+            Err(err) => {
+                eprintln!("ios-daemon: {err}");
+                ERROR_RETRY_INTERVAL
+            }
+        };
+        sleep_interruptible(&core.stop, sleep_duration);
+    }
 
-fn refresh_dynamic(core: &IosCore) -> Result<()> {
-    let mut dynamic = core
-        .dynamic
-        .lock()
-        .map_err(|_| anyhow!("dynamic core lock poisoned"))?;
-    *dynamic = build_dynamic(core.token_store.clone())?;
+    let _ = service.shutdown();
     Ok(())
 }
 
-fn apply_overrides(base_api_url: &str, capture_interval_seconds: &str, batch_window_seconds: &str) {
-    set_or_remove_env(BASE_API_URL_ENV_VAR, normalize_base_url(base_api_url));
-    set_or_remove_env(
-        CAPTURE_INTERVAL_SECONDS_ENV_VAR,
-        normalize_numeric(capture_interval_seconds),
-    );
-    set_or_remove_env(
-        BATCH_WINDOW_SECONDS_ENV_VAR,
-        normalize_numeric(batch_window_seconds),
-    );
-}
-
-fn normalize_base_url(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(trimmed.trim_end_matches('/').to_string())
-}
-
-fn normalize_numeric(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(trimmed.to_string())
-}
-
-fn set_or_remove_env(key: &str, value: Option<String>) {
-    match value {
-        Some(v) => unsafe { std::env::set_var(key, v) },
-        None => unsafe { std::env::remove_var(key) },
+fn sleep_interruptible(stop: &AtomicBool, duration: Duration) {
+    let mut remaining = duration;
+    while remaining > Duration::ZERO && !stop.load(Ordering::SeqCst) {
+        let tick = remaining.min(Duration::from_secs(1));
+        thread::sleep(tick);
+        remaining = remaining.saturating_sub(tick);
     }
 }
 
-fn load_state(path: &Path) -> Result<IosState> {
-    if !path.exists() {
-        return Ok(IosState::default());
-    }
-
-    let raw = fs::read(path).with_context(|| format!("failed reading {}", path.display()))?;
-    if raw.is_empty() {
-        return Ok(IosState::default());
-    }
-
-    serde_json::from_slice(&raw).with_context(|| format!("failed parsing {}", path.display()))
+fn duration_until(next_run_at_ms: i64) -> Duration {
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(next_run_at_ms);
+    let delta_ms = next_run_at_ms.saturating_sub(now_ms);
+    Duration::from_millis(delta_ms.max(0) as u64)
 }
 
-fn save_state(path: &Path, state: &IosState) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed creating {}", parent.display()))?;
+fn build_core_config(core: &IosCore, device_name: &str) -> Config {
+    Config::new(
+        DEFAULT_BASE_API_URL,
+        device_name,
+        "ios",
+        core.state_dir.clone(),
+        Some(core.runtime_config_file.clone()),
+        Duration::from_secs(DEFAULT_CAPTURE_INTERVAL_SECONDS),
+        Duration::from_secs(DEFAULT_BATCH_WINDOW_SECONDS),
+    )
+}
+
+fn write_runtime_overrides(
+    path: &Path,
+    base_api_url: &str,
+    capture_interval_seconds: &str,
+    batch_window_seconds: &str,
+) -> Result<()> {
+    let mut payload = serde_json::Map::new();
+    if !base_api_url.trim().is_empty() {
+        payload.insert(
+            "api_base_url".to_string(),
+            serde_json::Value::String(base_api_url.trim().to_string()),
+        );
+    }
+    if !capture_interval_seconds.trim().is_empty() {
+        payload.insert(
+            "capture_interval_seconds".to_string(),
+            serde_json::Value::Number(parse_u64(capture_interval_seconds)?.into()),
+        );
+    }
+    if !batch_window_seconds.trim().is_empty() {
+        payload.insert(
+            "batch_window_seconds".to_string(),
+            serde_json::Value::Number(parse_u64(batch_window_seconds)?.into()),
+        );
     }
 
+    let bytes = serde_json::to_vec_pretty(&serde_json::Value::Object(payload))?;
     let tmp = path.with_extension("tmp");
-    let bytes = serde_json::to_vec_pretty(state)?;
     fs::write(&tmp, bytes).with_context(|| format!("failed writing {}", tmp.display()))?;
-    fs::rename(&tmp, path).with_context(|| format!("failed replacing {}", path.display()))?;
-
+    fs::rename(&tmp, path)
+        .with_context(|| format!("failed replacing {} with {}", path.display(), tmp.display()))?;
     Ok(())
 }
 
-fn c_string_or_empty(value: *const c_char) -> String {
-    if value.is_null() {
+fn parse_u64(value: &str) -> Result<u64> {
+    value
+        .trim()
+        .parse::<u64>()
+        .with_context(|| format!("invalid integer override: {value}"))
+}
+
+fn core() -> Result<&'static IosCore> {
+    CORE.get().ok_or_else(|| anyhow!("core not initialized"))
+}
+
+fn c_string_or_empty(ptr: *const c_char) -> String {
+    if ptr.is_null() {
         return String::new();
     }
-    // SAFETY: pointer must reference a valid NUL-terminated string for the duration of this call.
-    unsafe { CStr::from_ptr(value) }
+    unsafe { CStr::from_ptr(ptr) }
         .to_string_lossy()
         .into_owned()
 }
 
 fn into_c_result(result: Result<()>) -> *mut c_char {
     match result {
-        Ok(_) => std::ptr::null_mut(),
-        Err(err) => to_c_string_ptr(&err.to_string()),
-    }
-}
-
-fn to_c_string_ptr(value: &str) -> *mut c_char {
-    let sanitized = value.replace('\0', " ");
-    match CString::new(sanitized) {
-        Ok(cstr) => cstr.into_raw(),
-        Err(_) => CString::new("failed to encode string")
-            .expect("CString::new on static string cannot fail")
-            .into_raw(),
+        Ok(()) => std::ptr::null_mut(),
+        Err(err) => CString::new(err.to_string())
+            .map(CString::into_raw)
+            .unwrap_or(std::ptr::null_mut()),
     }
 }

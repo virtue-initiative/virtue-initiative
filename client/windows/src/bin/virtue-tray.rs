@@ -27,7 +27,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{PCWSTR, w};
 
-use virtue_core::build_default_tray_icon_rgba;
 use virtue_windows::config::ClientPaths;
 use virtue_windows::runtime_env::apply_runtime_env;
 use virtue_windows::service_log::ServiceLogger;
@@ -35,6 +34,7 @@ use virtue_windows::win_text::to_wide;
 
 const WINDOW_CLASS: PCWSTR = w!("VirtueTrayWindow");
 const WINDOW_TITLE: PCWSTR = w!("Virtue");
+const BUILD_LABEL: &str = env!("CARGO_PKG_VERSION");
 
 const ID_TRAY_OPEN: u16 = 2001;
 const ID_TRAY_EXIT: u16 = 2002;
@@ -89,7 +89,7 @@ impl AppState {
             ..Default::default()
         };
 
-        let tip = to_wide(&format!("Virtue {}", virtue_core::BUILD_LABEL));
+        let tip = to_wide(&format!("Virtue {BUILD_LABEL}"));
         for (idx, ch) in tip.iter().take(data.szTip.len()).enumerate() {
             data.szTip[idx] = *ch;
         }
@@ -216,10 +216,6 @@ fn loword(value: usize) -> u16 {
 
 unsafe fn create_green_circle_icon() -> Option<HICON> {
     let (width, height, rgba) = build_default_tray_icon_rgba();
-    if width == 0 || height == 0 {
-        return None;
-    }
-
     let mut xor_bits = vec![0u8; (width * height * 4) as usize];
     let and_stride = width.div_ceil(32) * 4;
     let mut and_bits = vec![0u8; (and_stride * height) as usize];
@@ -257,6 +253,29 @@ unsafe fn create_green_circle_icon() -> Option<HICON> {
     .ok()?;
 
     if icon.0.is_null() { None } else { Some(icon) }
+}
+
+fn build_default_tray_icon_rgba() -> (u32, u32, Vec<u8>) {
+    let width = 16u32;
+    let height = 16u32;
+    let mut rgba = vec![0u8; (width * height * 4) as usize];
+
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f32 - 7.5;
+            let dy = y as f32 - 7.5;
+            let dist = (dx * dx + dy * dy).sqrt();
+            let idx = ((y * width + x) * 4) as usize;
+            if dist <= 6.0 {
+                rgba[idx] = 0x28;
+                rgba[idx + 1] = 0xa7;
+                rgba[idx + 2] = 0x45;
+                rgba[idx + 3] = 0xff;
+            }
+        }
+    }
+
+    (width, height, rgba)
 }
 
 unsafe fn app_state_mut(hwnd: HWND) -> Option<&'static mut AppState> {
@@ -317,28 +336,28 @@ unsafe extern "system" fn window_proc(
                 }
             }
         }
-        WM_TRAYICON => {
-            if let Some(state) = app_state_mut(hwnd) {
-                match lparam.0 as u32 {
-                    WM_LBUTTONUP => {
-                        state.open_auth_dialog();
-                        return LRESULT(0);
-                    }
-                    WM_RBUTTONUP | WM_CONTEXTMENU => {
-                        state.show_tray_menu();
-                        return LRESULT(0);
-                    }
-                    _ => {}
+        WM_TRAYICON => match lparam.0 as u32 {
+            WM_LBUTTONUP => {
+                if let Some(state) = app_state_mut(hwnd) {
+                    state.open_auth_dialog();
                 }
+                return LRESULT(0);
             }
-        }
+            WM_RBUTTONUP | WM_CONTEXTMENU => {
+                if let Some(state) = app_state_mut(hwnd) {
+                    state.show_tray_menu();
+                }
+                return LRESULT(0);
+            }
+            _ => {}
+        },
         WM_CLOSE => {
+            let _ = DestroyWindow(hwnd);
             return LRESULT(0);
         }
         WM_DESTROY => {
             if let Some(state) = app_state_mut(hwnd) {
                 state.remove_tray_icon();
-                state.destroy_tray_icon();
             }
             PostQuitMessage(0);
             return LRESULT(0);
@@ -348,7 +367,9 @@ unsafe extern "system" fn window_proc(
                 GetWindowLongPtrW(hwnd, windows::Win32::UI::WindowsAndMessaging::GWLP_USERDATA)
                     as *mut AppState;
             if !ptr.is_null() {
-                let _ = Box::from_raw(ptr);
+                let mut boxed = Box::from_raw(ptr);
+                boxed.remove_tray_icon();
+                boxed.destroy_tray_icon();
                 let _ = SetWindowLongPtrW(
                     hwnd,
                     windows::Win32::UI::WindowsAndMessaging::GWLP_USERDATA,
@@ -367,76 +388,66 @@ fn main() -> anyhow::Result<()> {
     let paths = ClientPaths::discover()?;
     paths.ensure_dirs()?;
     apply_runtime_env(&paths);
-    let startup_logger = Arc::new(ServiceLogger::new(paths.log_file.clone()));
-    startup_logger.info("tray process starting");
-    startup_logger.info(&format!("build {}", virtue_core::BUILD_LABEL));
 
-    let instance_mutex = acquire_tray_instance_mutex()?;
-    let Some(instance_mutex) = instance_mutex else {
-        startup_logger.info("tray process already running; exiting duplicate");
+    let startup_logger = Arc::new(ServiceLogger::new(paths.log_file.clone()));
+    startup_logger.info(&format!("build {BUILD_LABEL}"));
+
+    let instance = unsafe { CreateMutexW(None, false, TRAY_INSTANCE_MUTEX_NAME)? };
+    let last_error = unsafe { windows::Win32::Foundation::GetLastError() };
+    if last_error == ERROR_ALREADY_EXISTS {
+        let _ = unsafe { CloseHandle(instance) };
+        startup_logger.info("tray instance already running");
         return Ok(());
+    }
+
+    let hinstance = unsafe { GetModuleHandleW(None)? };
+    let class = WNDCLASSW {
+        hCursor: unsafe { LoadCursorW(None, IDC_ARROW)? },
+        hInstance: hinstance.into(),
+        lpszClassName: WINDOW_CLASS,
+        style: CS_HREDRAW | CS_VREDRAW,
+        lpfnWndProc: Some(window_proc),
+        ..Default::default()
     };
 
     unsafe {
-        let taskbar_created_msg =
-            windows::Win32::UI::WindowsAndMessaging::RegisterWindowMessageW(w!("TaskbarCreated"));
-        if taskbar_created_msg != 0 {
-            let _ = TASKBAR_CREATED_MSG.set(taskbar_created_msg);
-        }
+        RegisterClassW(&class);
+    }
 
-        let hinstance = GetModuleHandleW(None)?;
+    let taskbar_created = unsafe {
+        windows::Win32::UI::WindowsAndMessaging::RegisterWindowMessageW(w!("TaskbarCreated"))
+    };
+    let _ = TASKBAR_CREATED_MSG.set(taskbar_created);
 
-        let class = WNDCLASSW {
-            style: CS_HREDRAW | CS_VREDRAW,
-            lpfnWndProc: Some(window_proc),
-            hInstance: hinstance.into(),
-            hCursor: LoadCursorW(None, IDC_ARROW)?,
-            lpszClassName: WINDOW_CLASS,
-            ..Default::default()
-        };
+    let state = Box::new(AppState::new(startup_logger.clone()));
+    let state_ptr = Box::into_raw(state);
 
-        let atom = RegisterClassW(&class);
-        if atom == 0 {
-            return Err(anyhow::anyhow!("RegisterClassW failed"));
-        }
-
-        let app = Box::new(AppState::new(startup_logger.clone()));
-        let app_ptr = Box::into_raw(app);
-
-        let _hwnd = CreateWindowExW(
-            WINDOW_EX_STYLE(0),
+    let hwnd = unsafe {
+        CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
             WINDOW_CLASS,
             WINDOW_TITLE,
             WINDOW_STYLE(WS_OVERLAPPEDWINDOW.0),
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            10,
-            10,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
             None,
             None,
             Some(hinstance.into()),
-            Some(app_ptr.cast()),
-        )?;
+            Some(state_ptr.cast()),
+        )
+    }?;
 
-        let mut msg = MSG::default();
-        while GetMessageW(&mut msg, None, 0, 0).into() {
-            let _ = TranslateMessage(&msg);
-            DispatchMessageW(&msg);
-        }
-    }
-
-    let _ = unsafe { CloseHandle(instance_mutex) };
-    startup_logger.info("tray process exiting");
-    Ok(())
-}
-
-fn acquire_tray_instance_mutex() -> anyhow::Result<Option<HANDLE>> {
+    let mut message = MSG::default();
     unsafe {
-        let handle = CreateMutexW(None, false, TRAY_INSTANCE_MUTEX_NAME)?;
-        if windows::Win32::Foundation::GetLastError() == ERROR_ALREADY_EXISTS {
-            let _ = CloseHandle(handle);
-            return Ok(None);
+        while GetMessageW(&mut message, None, 0, 0).into() {
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
         }
-        Ok(Some(handle))
+        let _ = DestroyWindow(hwnd);
+        let _ = CloseHandle(instance);
     }
+
+    Ok(())
 }
