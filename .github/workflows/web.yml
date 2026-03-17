@@ -2,6 +2,9 @@ name: Web Checks
 
 on:
   pull_request:
+  push:
+    branches:
+      - staging
   workflow_dispatch:
 
 jobs:
