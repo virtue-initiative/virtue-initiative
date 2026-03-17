@@ -5,7 +5,7 @@ export default defineWorkersConfig({
     setupFiles: ['./test/setup.ts'],
     poolOptions: {
       workers: {
-        wrangler: { configPath: './wrangler.toml' },
+        wrangler: { configPath: './wrangler.json', environment: 'staging' },
         miniflare: {
           bindings: {
             JWT_SECRET: 'test-secret-key-for-testing-only',
