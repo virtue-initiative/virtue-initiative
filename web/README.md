@@ -25,7 +25,7 @@ For testing the local web app from another device over HTTPS, see
 ## Deploying
 
 ```bash
-npm run deploy
+npm run deploy:prod
 ```
 
 ## Stack

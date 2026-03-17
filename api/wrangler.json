@@ -1,0 +1,98 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "virtueinitiative-api",
+	"main": "src/index.ts",
+	"compatibility_date": "2024-12-01",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"workers_dev": false,
+	"dev": {
+		"port": 8787
+	},
+	"triggers": {
+		"crons": [
+			"5 8 * * *"
+		]
+	},
+	"observability": {
+		"logs": {
+			"enabled": true,
+			"invocation_logs": true
+		}
+	},
+	"env": {
+		"prod": {
+			"name": "virtueinitiative-api",
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "virtueinitiative-db",
+					"database_id": "ff636ee0-a8f9-44a1-8a16-f0a162cf1c73",
+					"migrations_dir": "src/schema/migrations"
+				}
+			],
+			"r2_buckets": [
+				{
+					"binding": "BUCKET",
+					"bucket_name": "virtueinitiative-images"
+				}
+			],
+			"vars": {
+				"JWT_ACCESS_EXPIRY": "15m",
+				"JWT_REFRESH_EXPIRY": "7d",
+				"API_BASE_PATH": "/api",
+				"R2_URL": "https://r2.virtueinitiative.org",
+				"APP_URL": "https://app.virtueinitiative.org",
+				"APP_NAME": "Virtue Initiative",
+				"AWS_SES_REGION": "us-east-1",
+				"AWS_SES_FROM_EMAIL": "notifications@virtueinitiative.org",
+				"EMAIL_DELIVERY_MODE": "ses"
+			},
+			"routes": [
+				{
+					"pattern": "api.virtueinitiative.org/*",
+					"zone_name": "virtueinitiative.org"
+				},
+				{
+					"pattern": "app.virtueinitiative.org/api/*",
+					"zone_name": "virtueinitiative.org"
+				}
+			]
+		},
+		"staging": {
+			"name": "virtue-initiative-staging-api",
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "virtue-initiative-staging-db",
+					"database_id": "78d30d1f-d33e-4f39-8e69-1339e3016065",
+					"migrations_dir": "src/schema/migrations"
+				}
+			],
+			"r2_buckets": [
+				{
+					"binding": "BUCKET",
+					"bucket_name": "virtue-initiative-staging-images"
+				}
+			],
+			"vars": {
+				"JWT_ACCESS_EXPIRY": "15m",
+				"JWT_REFRESH_EXPIRY": "7d",
+				"API_BASE_PATH": "/api",
+				"R2_URL": "https://staging.r2.virtueinitiative.org",
+				"APP_URL": "https://staging.app.virtueinitiative.org",
+				"APP_NAME": "Virtue Initiative",
+				"AWS_SES_REGION": "us-east-1",
+				"AWS_SES_FROM_EMAIL": "notifications@virtueinitiative.org",
+				"EMAIL_DELIVERY_MODE": "ses"
+			},
+			"routes": [
+				{
+					"pattern": "staging.app.virtueinitiative.org/api/*",
+					"zone_name": "virtueinitiative.org"
+				}
+			]
+		}
+	}
+}

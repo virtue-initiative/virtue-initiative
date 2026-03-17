@@ -29,6 +29,9 @@ npm run dev
 
 The API will be available at `http://localhost:8787`
 
+`npm run dev` uses the `staging` environment config, but Wrangler serves D1 and
+R2 locally in development so it does not touch the real staging resources.
+
 With `API_BASE_PATH=/api`, the same worker will also accept `http://localhost:8787/api/*`
 and strip that prefix before routing. That matches production setups where both
 `api.virtueinitiative.org/*` and `virtueinitiative.org/api/*` point to the same worker.
@@ -52,11 +55,11 @@ HASH_SERVER_URL=http://127.0.0.1:8787
 
 ## Deployment
 
-Ensure all the enviroment variables are set correctly (in `wrangler.toml` and
+Ensure all the enviroment variables are set correctly (in `wrangler.json` and
 using `wrangler secret put`) and run
 
 ```bash
-npm run deploy
+npm run deploy:prod
 ```
 
 Cloudflare still needs both hostnames/routes pointed at this worker. `API_BASE_PATH`

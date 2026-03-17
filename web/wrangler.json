@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "virtueinitiative-web",
+  "compatibility_date": "2026-02-23",
+  "workers_dev": false,
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  },
+  "env": {
+    "prod": {
+      "name": "virtueinitiative-web",
+      "routes": [
+        {
+          "pattern": "app.virtueinitiative.org",
+          "custom_domain": true
+        }
+      ]
+    },
+    "staging": {
+      "name": "virtue-initiative-staging-web",
+      "routes": [
+        {
+          "pattern": "staging.app.virtueinitiative.org",
+          "custom_domain": true
+        }
+      ]
+    }
+  }
+}

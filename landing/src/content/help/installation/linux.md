@@ -4,7 +4,7 @@ sidebar_position: 3
 
 # Linux installation
 
-If you do not yet have one, first [create an account](https://app.virtueinitiative.org/#signup).
+If you do not yet have one, first [create an account](/signup).
 
 Download the Linux `.deb` file from the [downloads](/download) page.
 

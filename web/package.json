@@ -8,7 +8,8 @@
     "typecheck": "tsc -p tsconfig.lint.json --noEmit",
     "prettier:check": "cd .. && git ls-files -z -- web | grep -zE '\\.(ts|tsx|cts|mts|js|jsx|cjs|mjs|json|json5|jsonc|css|scss|html|md|mdx|yml|yaml)$' | xargs -0 -r npx --prefix api prettier --check",
     "prettier:write": "cd .. && git ls-files -z -- web | grep -zE '\\.(ts|tsx|cts|mts|js|jsx|cjs|mjs|json|json5|jsonc|css|scss|html|md|mdx|yml|yaml)$' | xargs -0 -r npx --prefix api prettier --write",
-    "deploy": "npm run build && wrangler deploy"
+    "deploy:prod": "npm run build && wrangler deploy --env prod",
+    "deploy:staging": "vite build --mode staging && wrangler deploy --env staging"
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.1.3",

@@ -1,9 +1,8 @@
 name: Deploy
 
 on:
-  workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, staging]
 
 jobs:
   deploy:
@@ -27,7 +26,7 @@ jobs:
           cache-dependency-path: ${{ matrix.project }}/package-lock.json
 
       - run: npm ci
-      - run: npm run deploy
+      - run: npm run ${{ github.ref_name == 'main' && 'deploy:prod' || 'deploy:staging' }}
         env:
           GITHUB_TOKEN: ${{ matrix.project == 'landing' && github.token || '' }}
           VIRTUE_REQUIRE_RELEASE_SYNC: ${{ matrix.project == 'landing' && '1' || '' }}

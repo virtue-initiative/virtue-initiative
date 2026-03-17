@@ -21,18 +21,21 @@ export function getStaticPaths() {
       },
       props: {
         currentPath: `/help/${routePath}`,
-        Content: module.default,
+        entry: module,
       },
     };
   });
 }
 
-const { currentPath, Content } = Astro.props;
+const APP_URL = import.meta.env.PUBLIC_APP_URL || "http://localhost:5173";
+const SIGNUP_URL = `${APP_URL}#signup`;
+const { currentPath, entry } = Astro.props;
 const currentItem = findHelpItem(currentPath);
+const contentHtml = (await entry.compiledContent())
+  .replaceAll('href="/app"', `href="${APP_URL}"`)
+  .replaceAll('href="/signup"', `href="${SIGNUP_URL}"`);
 ---
 
 <HelpLayout currentPath={currentPath} pageTitle={currentItem?.label ?? "Help"}>
-  <article class="help-content-card help-doc">
-    <Content />
-  </article>
+  <article class="help-content-card help-doc" set:html={contentHtml} />
 </HelpLayout>
