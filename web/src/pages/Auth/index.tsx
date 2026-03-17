@@ -16,6 +16,7 @@ import "./style.css";
 import { ThemeButton } from "../../components/ThemeButton";
 
 type AuthMode = "login" | "signup" | "forgot" | "reset";
+const GLOBAL_MESSAGE_KEY = "virtue_global_link_message";
 
 export function Auth() {
   const { login, signup, rememberWrappingKey } = useAuth();
@@ -104,7 +105,19 @@ export function Auth() {
           await api.acceptPartnerInvite(access_token, inviteToken);
           clearUrlToken("partner_invite_token");
         }
-        setStatus("Account created. Please verify your email address.");
+        if (typeof window !== "undefined") {
+          window.sessionStorage.setItem(
+            GLOBAL_MESSAGE_KEY,
+            JSON.stringify({
+              message:
+                "Account created. Please check your email and spam folder for a verification email.",
+              isError: false,
+            }),
+          );
+        }
+        setStatus(
+          "Account created. Please check your email and spam folder for a verification email.",
+        );
       } else if (mode === "forgot") {
         await api.requestPasswordReset(email);
         setStatus("If that email exists, a reset link has been sent.");
@@ -306,7 +319,13 @@ export function Auth() {
                 onInput={(e) =>
                   setPassword((e.target as HTMLInputElement).value)
                 }
-                placeholder="Choose a password"
+                placeholder={
+                  mode === "login"
+                    ? "Enter your password"
+                    : mode === "reset"
+                      ? "Choose a new password"
+                      : "Choose a password"
+                }
                 autoComplete={
                   mode === "login" ? "current-password" : "new-password"
                 }

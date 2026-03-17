@@ -7,12 +7,14 @@ export function LogsGallery({
   hasMore,
   onLoadMore,
   deviceName,
+  fullscreen,
 }: {
   items: ImageLogItem[];
   loading: boolean;
   hasMore: boolean;
   onLoadMore: () => void;
   deviceName: (id: string) => string;
+  fullscreen: boolean;
 }) {
   if (items.length === 0 && !loading) {
     return <p class="empty">No screenshots found.</p>;
@@ -25,7 +27,9 @@ export function LogsGallery({
         {dayGroups.map((group) => (
           <section class="logs-day-group gallery-day-group" key={group.key}>
             <h2 class="section-heading">{group.label}</h2>
-            <div class="gallery-grid">
+            <div
+              class={`gallery-grid${fullscreen ? " gallery-grid--fullscreen" : ""}`}
+            >
               {group.items.map((item) => (
                 <div
                   class={`gallery-item${item.batch_status === "failed" ? " gallery-item--unverified" : ""}`}

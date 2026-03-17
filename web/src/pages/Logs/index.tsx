@@ -16,6 +16,42 @@ interface DeviceGroup {
   devices: Device[];
 }
 
+function ExpandIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth={1.5}
+      stroke="currentColor"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15"
+      />
+    </svg>
+  );
+}
+
+function ExitFullscreenIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth={1.5}
+      stroke="currentColor"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M9 9V4.5M9 9H4.5M9 9 3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5 5.25 5.25"
+      />
+    </svg>
+  );
+}
+
 function toUint8Array(value: unknown): Uint8Array | undefined {
   if (!value) return undefined;
   if (value instanceof Uint8Array) return value;
@@ -138,6 +174,7 @@ export function Logs() {
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [batchStats, setBatchStats] = useState({ decrypted: 0, skipped: 0 });
+  const [galleryFullscreen, setGalleryFullscreen] = useState(false);
 
   const activeUserId = selectedUser ?? userId;
   const activeKey = activeUserId ? e2ee.getKey(activeUserId) : null;
@@ -289,76 +326,102 @@ export function Logs() {
     );
   }
 
-  const title = selectedDevice
-    ? `${selectedUser ? `${groupLabel(selectedUser)} — ` : ""}${deviceName(selectedDevice)}`
-    : selectedUser
-      ? `${groupLabel(selectedUser)}'s logs`
-      : "All logs";
+  const title = selectedUser ? `${groupLabel(selectedUser)}'s logs` : "My logs";
 
   const isGallery = path === "/logs/gallery";
   const galleryItems = items.filter((item): item is ImageLogItem =>
     Boolean(item.image),
   );
+  useEffect(() => {
+    if (!isGallery) {
+      setGalleryFullscreen(false);
+    }
+  }, [isGallery]);
 
   return (
-    <div class="logs-page">
+    <div
+      class={`logs-page${isGallery && galleryFullscreen ? " logs-page--gallery-fullscreen" : ""}`}
+    >
       <div class="logs-layout">
-        <aside class="logs-sidebar">
-          {loadError && <p class="sidebar-loading">{loadError}</p>}
-          {sidebarLoading && !loadError && (
-            <p class="sidebar-loading">Loading…</p>
-          )}
-          {!sidebarLoading && deviceGroups.length === 0 && !loadError && (
-            <p class="sidebar-loading">No devices yet.</p>
-          )}
-          {deviceGroups.map((group) => (
-            <div class="sidebar-group" key={group.label}>
-              <p class="sidebar-group-label" title={group.label}>
-                {group.label}
-              </p>
-              <ul class="device-list">
-                <li>
-                  <button
-                    class={`device-btn${selectedUser === group.userId && selectedDevice === null ? " active" : ""}`}
-                    onClick={() => select(group.userId, null)}
-                    type="button"
-                  >
-                    <span class="device-btn-label">All</span>
-                  </button>
-                </li>
-                {group.devices.map((device) => (
-                  <li key={device.id}>
+        {!(isGallery && galleryFullscreen) && (
+          <aside class="logs-sidebar">
+            {loadError && <p class="sidebar-loading">{loadError}</p>}
+            {sidebarLoading && !loadError && (
+              <p class="sidebar-loading">Loading…</p>
+            )}
+            {!sidebarLoading && deviceGroups.length === 0 && !loadError && (
+              <div class="sidebar-group">
+                <p class="sidebar-group-label">My devices</p>
+                <p class="sidebar-loading">No devices registered yet.</p>
+              </div>
+            )}
+            {deviceGroups.map((group) => (
+              <div class="sidebar-group" key={group.label}>
+                <p class="sidebar-group-label" title={group.label}>
+                  {group.label}
+                </p>
+                <ul class="device-list">
+                  <li>
                     <button
-                      class={`device-btn${selectedDevice === device.id ? " active" : ""}`}
-                      onClick={() => select(group.userId, device.id)}
+                      class={`device-btn${selectedUser === group.userId && selectedDevice === null ? " active" : ""}`}
+                      onClick={() => select(group.userId, null)}
                       type="button"
-                      title={device.name}
                     >
-                      <span
-                        class={`dot ${device.status === "online" ? "dot-green" : "dot-gray"}`}
-                      />
-                      <span class="device-btn-label">{device.name}</span>
+                      <span class="device-btn-label">All</span>
                     </button>
                   </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </aside>
+                  {group.devices.map((device) => (
+                    <li key={device.id}>
+                      <button
+                        class={`device-btn${selectedDevice === device.id ? " active" : ""}`}
+                        onClick={() => select(group.userId, device.id)}
+                        type="button"
+                        title={device.name}
+                      >
+                        <span
+                          class={`dot ${device.status === "online" ? "dot-green" : "dot-gray"}`}
+                        />
+                        <span class="device-btn-label">{device.name}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </aside>
+        )}
 
         <section class="logs-main">
           <div class="logs-header">
             <h1>{title}</h1>
-            <div class="view-tabs">
-              <a class={`view-tab${!isGallery ? " active" : ""}`} href="/logs">
-                List
-              </a>
-              <a
-                class={`view-tab${isGallery ? " active" : ""}`}
-                href="/logs/gallery"
+            <div class="logs-header-actions">
+              <button
+                class={`btn btn-ghost btn-sm logs-fullscreen-btn${isGallery ? "" : " logs-fullscreen-btn--hidden"}`}
+                type="button"
+                onClick={() => setGalleryFullscreen((prev) => !prev)}
+                aria-label={
+                  galleryFullscreen ? "Exit fullscreen" : "Fullscreen"
+                }
+                title={galleryFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                disabled={!isGallery}
+                tabIndex={isGallery ? 0 : -1}
               >
-                Gallery
-              </a>
+                {galleryFullscreen ? <ExitFullscreenIcon /> : <ExpandIcon />}
+              </button>
+              <div class="view-tabs">
+                <a
+                  class={`view-tab${!isGallery ? " active" : ""}`}
+                  href="/logs"
+                >
+                  List
+                </a>
+                <a
+                  class={`view-tab${isGallery ? " active" : ""}`}
+                  href="/logs/gallery"
+                >
+                  Gallery
+                </a>
+              </div>
             </div>
           </div>
 
@@ -390,6 +453,7 @@ export function Logs() {
               hasMore={nextCursor !== undefined}
               onLoadMore={() => void doLoad(nextCursor, false)}
               deviceName={deviceName}
+              fullscreen={galleryFullscreen}
             />
           ) : (
             <LogsList
