@@ -47,7 +47,7 @@ if (!accountId) {
   console.log(`Using account: ${data.result[0].name} (${accountId})`);
 }
 
-const BUCKET_NAME = 'virtueinitiative-images';
+const BUCKET_NAME = process.argv[2] === 'prod' ? 'virtueinitiative-images' : 'virtueinitiative-staging-images'
 const BASE = `https://api.cloudflare.com/client/v4/accounts/${accountId}/r2/buckets/${BUCKET_NAME}`;
 let totalDeleted = 0;
 let cursor;

@@ -61,19 +61,19 @@
 			]
 		},
 		"staging": {
-			"name": "virtue-initiative-staging-api",
+			"name": "virtueinitiative-staging-api",
 			"d1_databases": [
 				{
 					"binding": "DB",
-					"database_name": "virtue-initiative-staging-db",
-					"database_id": "78d30d1f-d33e-4f39-8e69-1339e3016065",
+					"database_name": "virtueinitiative-staging-db",
+					"database_id": "9ec06359-1165-48bc-a73a-a870d9082980",
 					"migrations_dir": "src/schema/migrations"
 				}
 			],
 			"r2_buckets": [
 				{
 					"binding": "BUCKET",
-					"bucket_name": "virtue-initiative-staging-images"
+					"bucket_name": "virtueinitiative-staging-images"
 				}
 			],
 			"vars": {

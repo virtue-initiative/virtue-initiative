@@ -17,7 +17,7 @@
       ]
     },
     "staging": {
-      "name": "virtue-initiative-staging-landing",
+      "name": "virtueinitiative-staging-landing",
       "routes": [
         {
           "pattern": "staging.virtueinitiative.org",

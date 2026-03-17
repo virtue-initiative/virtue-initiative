@@ -18,7 +18,7 @@
       ]
     },
     "staging": {
-      "name": "virtue-initiative-staging-web",
+      "name": "virtueinitiative-staging-web",
       "routes": [
         {
           "pattern": "staging.app.virtueinitiative.org",
