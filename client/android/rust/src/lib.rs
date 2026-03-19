@@ -11,8 +11,12 @@ use jni::objects::{JByteArray, JClass, JString};
 use jni::sys::{jboolean, jstring};
 use jni::{JNIEnv, JavaVM};
 use once_cell::sync::OnceCell;
+use serde::de::DeserializeOwned;
 use virtue_core::storage::FileStateStore;
-use virtue_core::{Config, CoreError, CoreResult, MonitorService, PlatformHooks, Screenshot};
+use virtue_core::{
+    AuthState, BatchBufferState, Config, CoreError, CoreResult, DeviceSettings, MonitorService,
+    PendingRequest, PlatformHooks, Screenshot, ServiceStatus,
+};
 
 static CORE: OnceCell<AndroidCore> = OnceCell::new();
 
@@ -137,6 +141,7 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeInit(
             .with_context(|| format!("failed to create config dir {config_dir}"))?;
         fs::create_dir_all(&data_dir)
             .with_context(|| format!("failed to create data dir {data_dir}"))?;
+        sanitize_state_dir(Path::new(&data_dir))?;
 
         let runtime_config_file = Path::new(&config_dir).join("config.json");
         write_runtime_overrides(
@@ -398,6 +403,34 @@ fn parse_u64(value: &str) -> Result<u64> {
         .trim()
         .parse::<u64>()
         .with_context(|| format!("invalid integer override: {value}"))
+}
+
+fn sanitize_state_dir(root: &Path) -> Result<()> {
+    sanitize_json_file::<AuthState>(root, "auth.json")?;
+    sanitize_json_file::<BatchBufferState>(root, "batch_buffer.json")?;
+    sanitize_json_file::<Vec<PendingRequest>>(root, "pending_requests.json")?;
+    sanitize_json_file::<ServiceStatus>(root, "status.json")?;
+    sanitize_json_file::<Option<DeviceSettings>>(root, "device_settings.json")?;
+    Ok(())
+}
+
+fn sanitize_json_file<T: DeserializeOwned>(root: &Path, name: &str) -> Result<()> {
+    let path = root.join(name);
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let bytes = fs::read(&path).with_context(|| format!("failed reading {}", path.display()))?;
+    if bytes.is_empty() {
+        return Ok(());
+    }
+
+    if serde_json::from_slice::<T>(&bytes).is_ok() {
+        return Ok(());
+    }
+
+    fs::remove_file(&path).with_context(|| format!("failed removing {}", path.display()))?;
+    Ok(())
 }
 
 fn core() -> Result<&'static AndroidCore> {
