@@ -6,13 +6,13 @@ import { findHelpItem } from "../../help/navigation";
 export function getStaticPaths() {
   return Object.entries(
     import.meta.glob<MarkdownInstance<Record<string, never>>>(
-      "../../content/help/**/*.md",
+      "../../content/help/**/*.md*",
       { eager: true },
     ),
   ).map(([key, module]) => {
     const routePath = key
       .replace("../../content/help/", "")
-      .replace(/\.md$/, "")
+      .replace(/\.mdx?$/, "")
       .replace(/\/index$/, "");
 
     return {
