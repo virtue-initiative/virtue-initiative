@@ -58,7 +58,7 @@ export const helpSidebar: HelpNavItem[] = [
       },
       {
         label: "Security and Encryption",
-        href: "/help/developer/crypto",
+        href: "/help/developer/security",
       },
     ],
   },
