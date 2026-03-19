@@ -4,6 +4,7 @@ use std::ffi::OsString;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
 
 use anyhow::Result;
 use tokio::runtime::Builder;
@@ -156,10 +157,7 @@ fn run_lifecycle_service() -> Result<()> {
 
     logger.info("lifecycle service started");
 
-    let runtime = Builder::new_multi_thread().enable_all().build()?;
-    let daemon_result = runtime.block_on(async {
-        daemon::run_daemon(shutdown.clone(), stop_reason.clone(), logger.as_ref()).await
-    });
+    let daemon_result = daemon::run_daemon(shutdown.clone(), stop_reason.clone(), logger.as_ref());
 
     if let Err(err) = &daemon_result {
         logger.error(&format!("lifecycle daemon failed: {err:#}"));
@@ -193,12 +191,45 @@ fn run_lifecycle_console() -> Result<()> {
     };
 
     logger.info("running lifecycle in console mode");
+    spawn_lifecycle_console_signal_listener(shutdown.clone(), stop_reason.clone());
+    let result = daemon::run_daemon(shutdown.clone(), stop_reason.clone(), logger.as_ref());
 
-    let runtime = Builder::new_multi_thread().enable_all().build()?;
-    let result = runtime.block_on(async {
-        let shutdown_for_signals = shutdown.clone();
-        let stop_reason_for_signals = stop_reason.clone();
-        let signal_task = tokio::spawn(async move {
+    let _ = unsafe { CloseHandle(instance) };
+    result
+}
+
+fn run_capture_console() -> Result<()> {
+    let paths = ClientPaths::discover()?;
+    paths.ensure_dirs()?;
+    apply_runtime_env(&paths);
+    let logger = Arc::new(ServiceLogger::new(paths.log_file.clone()));
+    logger.info(&format!("build {BUILD_LABEL}"));
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let instance = acquire_console_instance_mutex(capture_control::CAPTURE_INSTANCE_MUTEX_NAME)?;
+    let Some(instance) = instance else {
+        logger.info("capture console instance already running; exiting duplicate");
+        return Ok(());
+    };
+
+    logger.info("running capture in console mode");
+    spawn_capture_console_signal_listener(shutdown.clone());
+    let result = capture_daemon::run_daemon(shutdown.clone(), logger.as_ref());
+
+    let _ = unsafe { CloseHandle(instance) };
+    result
+}
+
+fn spawn_lifecycle_console_signal_listener(
+    shutdown: Arc<AtomicBool>,
+    stop_reason: Arc<Mutex<Option<daemon::StopReason>>>,
+) {
+    thread::spawn(move || {
+        let runtime = match Builder::new_current_thread().enable_all().build() {
+            Ok(runtime) => runtime,
+            Err(_) => return,
+        };
+
+        runtime.block_on(async move {
             let mut sig_ctrl_c = match ctrl_c() {
                 Ok(sig) => sig,
                 Err(_) => return,
@@ -221,45 +252,26 @@ fn run_lifecycle_console() -> Result<()> {
             };
 
             tokio::select! {
-                _ = sig_ctrl_c.recv() => daemon::set_stop_reason_if_empty(&stop_reason_for_signals, daemon::StopReason::ConsoleCtrlC),
-                _ = sig_ctrl_break.recv() => daemon::set_stop_reason_if_empty(&stop_reason_for_signals, daemon::StopReason::ConsoleCtrlBreak),
-                _ = sig_ctrl_close.recv() => daemon::set_stop_reason_if_empty(&stop_reason_for_signals, daemon::StopReason::ConsoleCtrlClose),
-                _ = sig_ctrl_logoff.recv() => daemon::set_stop_reason_if_empty(&stop_reason_for_signals, daemon::StopReason::ConsoleCtrlLogoff),
-                _ = sig_ctrl_shutdown.recv() => daemon::set_stop_reason_if_empty(&stop_reason_for_signals, daemon::StopReason::ConsoleCtrlShutdown),
+                _ = sig_ctrl_c.recv() => daemon::set_stop_reason_if_empty(&stop_reason, daemon::StopReason::ConsoleCtrlC),
+                _ = sig_ctrl_break.recv() => daemon::set_stop_reason_if_empty(&stop_reason, daemon::StopReason::ConsoleCtrlBreak),
+                _ = sig_ctrl_close.recv() => daemon::set_stop_reason_if_empty(&stop_reason, daemon::StopReason::ConsoleCtrlClose),
+                _ = sig_ctrl_logoff.recv() => daemon::set_stop_reason_if_empty(&stop_reason, daemon::StopReason::ConsoleCtrlLogoff),
+                _ = sig_ctrl_shutdown.recv() => daemon::set_stop_reason_if_empty(&stop_reason, daemon::StopReason::ConsoleCtrlShutdown),
             }
-            shutdown_for_signals.store(true, Ordering::SeqCst);
+
+            shutdown.store(true, Ordering::SeqCst);
         });
-
-        let daemon_result = daemon::run_daemon(shutdown.clone(), stop_reason.clone(), logger.as_ref()).await;
-
-        signal_task.abort();
-        let _ = signal_task.await;
-        daemon_result
     });
-
-    let _ = unsafe { CloseHandle(instance) };
-    result
 }
 
-fn run_capture_console() -> Result<()> {
-    let paths = ClientPaths::discover()?;
-    paths.ensure_dirs()?;
-    apply_runtime_env(&paths);
-    let logger = Arc::new(ServiceLogger::new(paths.log_file.clone()));
-    logger.info(&format!("build {BUILD_LABEL}"));
-    let shutdown = Arc::new(AtomicBool::new(false));
-    let instance = acquire_console_instance_mutex(capture_control::CAPTURE_INSTANCE_MUTEX_NAME)?;
-    let Some(instance) = instance else {
-        logger.info("capture console instance already running; exiting duplicate");
-        return Ok(());
-    };
+fn spawn_capture_console_signal_listener(shutdown: Arc<AtomicBool>) {
+    thread::spawn(move || {
+        let runtime = match Builder::new_current_thread().enable_all().build() {
+            Ok(runtime) => runtime,
+            Err(_) => return,
+        };
 
-    logger.info("running capture in console mode");
-
-    let runtime = Builder::new_multi_thread().enable_all().build()?;
-    let result = runtime.block_on(async {
-        let shutdown_for_signals = shutdown.clone();
-        let signal_task = tokio::spawn(async move {
+        runtime.block_on(async move {
             let mut sig_ctrl_c = match ctrl_c() {
                 Ok(sig) => sig,
                 Err(_) => return,
@@ -288,18 +300,10 @@ fn run_capture_console() -> Result<()> {
                 _ = sig_ctrl_logoff.recv() => {}
                 _ = sig_ctrl_shutdown.recv() => {}
             }
-            shutdown_for_signals.store(true, Ordering::SeqCst);
+
+            shutdown.store(true, Ordering::SeqCst);
         });
-
-        let daemon_result = capture_daemon::run_daemon(shutdown.clone(), logger.as_ref()).await;
-
-        signal_task.abort();
-        let _ = signal_task.await;
-        daemon_result
     });
-
-    let _ = unsafe { CloseHandle(instance) };
-    result
 }
 
 fn acquire_console_instance_mutex(name: windows::core::PCWSTR) -> Result<Option<HANDLE>> {

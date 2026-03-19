@@ -3,6 +3,7 @@ name = "virtue-windows"
 version = "0.0.1"
 edition = "2024"
 description = "Virtue Windows client"
+build = "build.rs"
 
 [lib]
 name = "virtue_windows"
@@ -35,7 +36,12 @@ serde_json = "1"
 slint = { version = "1.14", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+winit = "0.30.13"
+i-slint-backend-winit = "1.15.1"
 windows-service = "0.8"
+
+[build-dependencies]
+winresource = "0.1"
 
 [dependencies.windows]
 version = "0.62"

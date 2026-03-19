@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 use windows::Win32::Foundation::{
-    CloseHandle, ERROR_ALREADY_EXISTS, HANDLE, HWND, LPARAM, LRESULT, POINT, WPARAM,
+    CloseHandle, ERROR_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, WPARAM,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::CreateMutexW;
@@ -442,7 +442,7 @@ fn main() -> anyhow::Result<()> {
     let mut message = MSG::default();
     unsafe {
         while GetMessageW(&mut message, None, 0, 0).into() {
-            TranslateMessage(&message);
+            let _ = TranslateMessage(&message);
             DispatchMessageW(&message);
         }
         let _ = DestroyWindow(hwnd);

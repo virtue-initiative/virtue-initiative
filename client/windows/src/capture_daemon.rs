@@ -1,11 +1,11 @@
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use chrono::Utc;
-use tokio::time::sleep;
 use windows::Win32::Foundation::{CloseHandle, ERROR_FILE_NOT_FOUND, HANDLE};
 use windows::Win32::System::Threading::{MUTEX_MODIFY_STATE, OpenMutexW};
 use windows::core::w;
@@ -20,7 +20,7 @@ use crate::service_log::ServiceLogger;
 const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
 const TRAY_ENSURE_INTERVAL: Duration = Duration::from_secs(30);
 
-pub async fn run_daemon(shutdown: Arc<AtomicBool>, logger: &ServiceLogger) -> Result<()> {
+pub fn run_daemon(shutdown: Arc<AtomicBool>, logger: &ServiceLogger) -> Result<()> {
     let paths = ClientPaths::discover()?;
     paths.ensure_dirs()?;
 
@@ -46,7 +46,7 @@ pub async fn run_daemon(shutdown: Arc<AtomicBool>, logger: &ServiceLogger) -> Re
             }
         };
 
-        sleep_interruptible(&shutdown, &paths, sleep_duration).await;
+        sleep_interruptible(&shutdown, &paths, sleep_duration);
     }
 
     let _ = service.shutdown();
@@ -57,11 +57,11 @@ fn should_stop(shutdown: &Arc<AtomicBool>, paths: &ClientPaths) -> bool {
     shutdown.load(Ordering::SeqCst) || capture_control::is_capture_stop_requested(paths)
 }
 
-async fn sleep_interruptible(shutdown: &Arc<AtomicBool>, paths: &ClientPaths, duration: Duration) {
+fn sleep_interruptible(shutdown: &Arc<AtomicBool>, paths: &ClientPaths, duration: Duration) {
     let mut remaining = duration;
     while remaining > Duration::ZERO && !should_stop(shutdown, paths) {
         let tick = remaining.min(Duration::from_secs(1));
-        sleep(tick).await;
+        thread::sleep(tick);
         remaining = remaining.saturating_sub(tick);
     }
 }

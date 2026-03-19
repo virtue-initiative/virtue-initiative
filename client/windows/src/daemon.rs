@@ -1,12 +1,16 @@
+use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use chrono::Utc;
-use tokio::time::sleep;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use virtue_core::{CoreError, CoreResult, LogEntry, MonitorService, PlatformHooks, Screenshot};
+use windows::Win32::System::SystemInformation::GetTickCount64;
 
 use crate::capture_control;
 use crate::config::{ClientPaths, build_core_config};
@@ -51,6 +55,11 @@ impl StopReason {
 const CAPTURE_SUPERVISOR_INTERVAL: Duration = Duration::from_secs(10);
 const CAPTURE_RESTART_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct LifecycleState {
+    last_seen_boot_id: Option<String>,
+}
+
 #[derive(Debug, Default)]
 struct CaptureSupervisorState {
     last_check: Option<Instant>,
@@ -78,7 +87,7 @@ impl PlatformHooks for LifecyclePlatformHooks {
     }
 }
 
-pub async fn run_daemon(
+pub fn run_daemon(
     shutdown: Arc<AtomicBool>,
     stop_reason: Arc<Mutex<Option<StopReason>>>,
     logger: &ServiceLogger,
@@ -92,6 +101,9 @@ pub async fn run_daemon(
         "daemon_start",
         &[("source", "windows_service")],
     );
+    if let Some(startup_event) = detect_system_startup_event(&paths) {
+        emit_log_entry(&paths, logger, startup_event);
+    }
 
     let mut supervisor = CaptureSupervisorState::default();
     loop {
@@ -100,7 +112,7 @@ pub async fn run_daemon(
         }
 
         supervise_capture_process(&paths, logger, &mut supervisor);
-        sleep_interruptible(&shutdown, Duration::from_secs(1)).await;
+        sleep_interruptible(&shutdown, Duration::from_secs(1));
     }
 
     let reason = stop_reason
@@ -138,7 +150,47 @@ pub fn set_stop_reason_if_empty(target: &Arc<Mutex<Option<StopReason>>>, reason:
     }
 }
 
+fn detect_system_startup_event(paths: &ClientPaths) -> Option<LogEntry> {
+    let (boot_id, started_at) = current_boot_marker()?;
+    let mut state = load_lifecycle_state(&paths.lifecycle_state_file);
+    if state.last_seen_boot_id.as_deref() == Some(boot_id.as_str()) {
+        return None;
+    }
+
+    state.last_seen_boot_id = Some(boot_id.clone());
+    if let Err(err) = save_lifecycle_state(&paths.lifecycle_state_file, &state) {
+        eprintln!(
+            "daemon: could not persist lifecycle state {}: {err}",
+            paths.lifecycle_state_file.display()
+        );
+    }
+
+    Some(LogEntry {
+        ts_ms: started_at.timestamp_millis(),
+        kind: "system_startup".to_string(),
+        risk: None,
+        data: metadata_value(&[
+            ("source", "windows_system"),
+            ("boot_id", boot_id.as_str()),
+            ("detected_by", "boot_time_change"),
+        ]),
+    })
+}
+
 fn emit_log(paths: &ClientPaths, logger: &ServiceLogger, kind: &str, metadata: &[(&str, &str)]) {
+    emit_log_entry(
+        paths,
+        logger,
+        LogEntry {
+            ts_ms: Utc::now().timestamp_millis(),
+            kind: kind.to_string(),
+            risk: None,
+            data: metadata_value(metadata),
+        },
+    );
+}
+
+fn emit_log_entry(paths: &ClientPaths, logger: &ServiceLogger, entry: LogEntry) {
     let mut service = match MonitorService::setup(build_core_config(paths), LifecyclePlatformHooks)
     {
         Ok(service) => service,
@@ -148,24 +200,52 @@ fn emit_log(paths: &ClientPaths, logger: &ServiceLogger, kind: &str, metadata: &
         }
     };
 
-    let data = metadata
-        .iter()
-        .map(|(key, value)| {
-            (
-                (*key).to_string(),
-                serde_json::Value::String((*value).to_string()),
-            )
-        })
-        .collect::<serde_json::Map<_, _>>();
-
-    if let Err(err) = service.send_log(LogEntry {
-        ts_ms: Utc::now().timestamp_millis(),
-        kind: kind.to_string(),
-        risk: None,
-        data: serde_json::Value::Object(data),
-    }) {
+    let kind = entry.kind.clone();
+    if let Err(err) = service.send_log(entry) {
         logger.warn(&format!("failed to queue lifecycle log {kind}: {err:#}"));
     }
+}
+
+fn metadata_value(metadata: &[(&str, &str)]) -> serde_json::Value {
+    serde_json::Value::Object(
+        metadata
+            .iter()
+            .map(|(key, value)| {
+                (
+                    (*key).to_string(),
+                    serde_json::Value::String((*value).to_string()),
+                )
+            })
+            .collect::<serde_json::Map<_, _>>(),
+    )
+}
+
+fn current_boot_marker() -> Option<(String, DateTime<Utc>)> {
+    let now = Utc::now();
+    let uptime_ms = unsafe { GetTickCount64() };
+    let uptime_ms = i64::try_from(uptime_ms).ok()?;
+    let started_at = now - chrono::TimeDelta::milliseconds(uptime_ms);
+    let boot_id = started_at.timestamp_millis().to_string();
+    Some((boot_id, started_at))
+}
+
+fn load_lifecycle_state(path: &Path) -> LifecycleState {
+    fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<LifecycleState>(&bytes).ok())
+        .unwrap_or_default()
+}
+
+fn save_lifecycle_state(path: &Path, state: &LifecycleState) -> Result<()> {
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+    fs::create_dir_all(parent)?;
+    let tmp_path = path.with_extension("tmp");
+    let bytes = serde_json::to_vec_pretty(state)?;
+    fs::write(&tmp_path, bytes)?;
+    fs::rename(&tmp_path, path)?;
+    Ok(())
 }
 
 fn supervise_capture_process(
@@ -217,11 +297,11 @@ fn supervise_capture_process(
     }
 }
 
-async fn sleep_interruptible(shutdown: &Arc<AtomicBool>, duration: Duration) {
+fn sleep_interruptible(shutdown: &Arc<AtomicBool>, duration: Duration) {
     let mut remaining = duration;
     while remaining > Duration::ZERO && !shutdown.load(Ordering::SeqCst) {
         let tick = remaining.min(Duration::from_secs(1));
-        sleep(tick).await;
+        thread::sleep(tick);
         remaining = remaining.saturating_sub(tick);
     }
 }

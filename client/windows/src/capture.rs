@@ -123,6 +123,12 @@ impl WindowsPlatformHooks {
     }
 }
 
+impl Default for WindowsPlatformHooks {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PlatformHooks for WindowsPlatformHooks {
     fn take_screenshot(&self) -> CoreResult<Screenshot> {
         let bytes =

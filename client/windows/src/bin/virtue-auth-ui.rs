@@ -2,6 +2,10 @@
 #![windows_subsystem = "windows"]
 
 use anyhow::Result;
+use i_slint_backend_winit::WinitWindowAccessor;
+use winit::dpi::PhysicalSize;
+use winit::platform::windows::{IconExtWindows, WindowExtWindows};
+use winit::window::Icon;
 
 use virtue_windows::config::{ClientPaths, build_core_config};
 use virtue_windows::runtime_env::apply_runtime_env;
@@ -160,6 +164,7 @@ fn main() -> Result<()> {
     let session = SessionManager::new()?;
 
     let ui = AuthWindow::new().map_err(|err| anyhow::anyhow!(err.to_string()))?;
+    configure_taskbar_icon(&ui);
     let initial = session.status()?;
     let mut core_config = build_core_config(&paths);
     core_config.refresh_from_runtime_file()?;
@@ -248,4 +253,32 @@ fn main() -> Result<()> {
             Err(err)
         }
     }
+}
+
+fn configure_taskbar_icon(ui: &AuthWindow) {
+    let ui_weak = ui.as_weak();
+    let _ = slint::spawn_local(async move {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+
+        let Ok(winit_window) = ui.window().winit_window().await else {
+            return;
+        };
+
+        let Ok(exe_path) = std::env::current_exe() else {
+            return;
+        };
+        let icon_path = exe_path.with_file_name("app-icon.ico");
+        if !icon_path.exists() {
+            return;
+        }
+
+        let Ok(icon) = Icon::from_path(&icon_path, Some(PhysicalSize::new(256, 256))) else {
+            return;
+        };
+
+        winit_window.set_taskbar_icon(Some(icon.clone()));
+        winit_window.set_window_icon(Some(icon));
+    });
 }

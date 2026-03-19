@@ -17,6 +17,7 @@ pub struct ClientPaths {
     pub data_dir: PathBuf,
     pub state_dir: PathBuf,
     pub runtime_config_file: PathBuf,
+    pub lifecycle_state_file: PathBuf,
     pub ui_state_file: PathBuf,
     pub log_file: PathBuf,
 }
@@ -32,6 +33,7 @@ impl ClientPaths {
         Ok(Self {
             state_dir: data_dir.clone(),
             runtime_config_file: config_dir.join("config.json"),
+            lifecycle_state_file: data_dir.join("lifecycle_state.json"),
             ui_state_file: config_dir.join("ui_state.json"),
             log_file: data_dir.join("service.log"),
             base_dir,
