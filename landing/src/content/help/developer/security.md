@@ -124,3 +124,7 @@ before being sent to the server.
 - Emails might currently be able to be guessed, either in the login flow or in
   the invite flow.
 
+## Flow diagram
+
+![Security flow](./security-flow.svg)
+
