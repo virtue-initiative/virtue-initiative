@@ -10,7 +10,6 @@ use std::process::ExitCode;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use clap::{Parser, Subcommand};
-use tao::event::{Event, StartCause};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -99,10 +98,8 @@ fn run_tray(paths: ClientPaths) -> Result<()> {
         let _ = ui::show_error(&format!("Operation failed:\n{err}"));
     }
 
-    event_loop.run(move |event, _event_loop_target, control_flow| {
+    event_loop.run(move |_event, _event_loop_target, control_flow| {
         *control_flow = ControlFlow::Wait;
-
-        if matches!(event, Event::NewEvents(StartCause::Init)) {}
 
         while let Ok(menu_event) = MenuEvent::receiver().try_recv() {
             if menu_event.id == close_item.id() {
