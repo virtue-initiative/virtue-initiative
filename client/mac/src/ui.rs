@@ -59,7 +59,9 @@ return emailValue & "__VIRTUE_SPLIT__" & passwordValue
     Ok(Some(LoginInput { email, password }))
 }
 
-pub fn prompt_logged_in_action(details: &LoggedInDialogDetails<'_>) -> Result<Option<LoggedInAction>> {
+pub fn prompt_logged_in_action(
+    details: &LoggedInDialogDetails<'_>,
+) -> Result<Option<LoggedInAction>> {
     let message = format!(
         "Version: {}\nSigned in as {}.\nDevice id: {}\nMonitoring: {}\nPending requests: {}\nAPI: {}\n\nDaemon status:\nScreen Recording permission: {}\nLast status update: {}\nLast daemon error: {}",
         details.build_label,

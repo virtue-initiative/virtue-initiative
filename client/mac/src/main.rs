@@ -307,7 +307,10 @@ fn collect_status(paths: &ClientPaths) -> Result<AppStatus> {
 
     let monitor_summary = if auth.device_credentials.is_none() {
         "signed out".to_string()
-    } else if device_settings.as_ref().is_some_and(|settings| !settings.enabled) {
+    } else if device_settings
+        .as_ref()
+        .is_some_and(|settings| !settings.enabled)
+    {
         "disabled by device settings".to_string()
     } else if service_status.is_running {
         "active".to_string()
