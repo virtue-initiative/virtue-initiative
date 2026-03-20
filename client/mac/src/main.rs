@@ -19,7 +19,8 @@ use virtue_core::{AuthState, LogEntry, MonitorService, ServiceStatus};
 
 use crate::capture::MacPlatformHooks;
 use crate::config::{
-    ClientPaths, ScreenshotPermissionStatus, build_core_config, load_daemon_status,
+    ClientPaths, ClientState, ScreenshotPermissionStatus, build_core_config, load_daemon_status,
+    load_state, save_state,
 };
 use crate::runtime_env::apply_runtime_env;
 
@@ -149,24 +150,21 @@ fn open_app_dialog(paths: &ClientPaths) -> Result<()> {
     if app_status.logged_in {
         let email = app_status.email.as_deref().unwrap_or("<unknown>");
         let device_id = app_status.device_id.as_deref().unwrap_or("<unknown>");
+        let dialog_details = ui::LoggedInDialogDetails {
+            build_label: BUILD_LABEL,
+            email,
+            device_id,
+            monitor_summary: &app_status.monitor_summary,
+            pending_request_count: app_status.pending_request_count,
+            base_api_url: &app_status.base_api_url,
+            screenshot_permission: app_status.screenshot_permission.as_str(),
+            daemon_status_updated_at: app_status.daemon_status_updated_at.as_deref(),
+            daemon_last_error: app_status.daemon_last_error.as_deref(),
+        };
         let action = if app_status.screenshot_permission == ScreenshotPermissionStatus::Missing {
-            ui::prompt_permission_issue_action(
-                BUILD_LABEL,
-                email,
-                device_id,
-                app_status.screenshot_permission.as_str(),
-                app_status.daemon_status_updated_at.as_deref(),
-                app_status.daemon_last_error.as_deref(),
-            )?
+            ui::prompt_permission_issue_action(&dialog_details)?
         } else {
-            ui::prompt_logged_in_action(
-                BUILD_LABEL,
-                email,
-                device_id,
-                app_status.screenshot_permission.as_str(),
-                app_status.daemon_status_updated_at.as_deref(),
-                app_status.daemon_last_error.as_deref(),
-            )?
+            ui::prompt_logged_in_action(&dialog_details)?
         };
 
         match action {
@@ -183,7 +181,7 @@ fn open_app_dialog(paths: &ClientPaths) -> Result<()> {
         return Ok(());
     }
 
-    let Some(input) = ui::prompt_login(BUILD_LABEL)? else {
+    let Some(input) = ui::prompt_login(BUILD_LABEL, app_status.email.as_deref())? else {
         return Ok(());
     };
 
@@ -200,6 +198,12 @@ fn restart_daemon(paths: &ClientPaths) -> Result<()> {
 fn login(paths: &ClientPaths, email: &str, password: &str) -> Result<String> {
     let mut service = MonitorService::setup(build_core_config(paths), MacPlatformHooks::new())?;
     let login_result = service.login(email, password).context("login failed")?;
+    save_state(
+        &paths.ui_state_file,
+        &ClientState {
+            email: Some(email.to_string()),
+        },
+    )?;
     Ok(login_result
         .device
         .as_ref()
@@ -209,7 +213,9 @@ fn login(paths: &ClientPaths, email: &str, password: &str) -> Result<String> {
 
 fn logout(paths: &ClientPaths) -> Result<()> {
     let mut service = MonitorService::setup(build_core_config(paths), MacPlatformHooks::new())?;
-    service.logout()
+    service.logout()?;
+    save_state(&paths.ui_state_file, &ClientState { email: None })?;
+    Ok(())
 }
 
 fn send_close_alert(paths: &ClientPaths) -> Result<()> {
@@ -243,6 +249,10 @@ fn status(paths: ClientPaths) -> Result<()> {
 
     println!("logged_in: {}", auth.device_credentials.is_some());
     println!("running: {}", service_status.is_running);
+    println!(
+        "pending_request_count: {}",
+        service_status.pending_request_count
+    );
     println!(
         "device_id: {}",
         service_status.device_id.as_deref().unwrap_or("<none>")
@@ -280,6 +290,9 @@ struct AppStatus {
     logged_in: bool,
     email: Option<String>,
     device_id: Option<String>,
+    monitor_summary: String,
+    pending_request_count: usize,
+    base_api_url: String,
     screenshot_permission: ScreenshotPermissionStatus,
     daemon_last_error: Option<String>,
     daemon_status_updated_at: Option<String>,
@@ -287,16 +300,34 @@ struct AppStatus {
 
 fn collect_status(paths: &ClientPaths) -> Result<AppStatus> {
     let store = FileStateStore::new(&paths.state_dir)?;
+    let state = load_state(&paths.ui_state_file)?;
     let auth = store.load_auth_state()?;
+    let service_status = load_service_status(&store, &auth)?;
+    let device_settings = store.load_device_settings()?;
     let daemon_status = load_daemon_status(&paths.daemon_status_file)?;
+    let mut config = build_core_config(paths);
+    config.refresh_from_runtime_file()?;
+
+    let monitor_summary = if auth.device_credentials.is_none() {
+        "signed out".to_string()
+    } else if device_settings.as_ref().is_some_and(|settings| !settings.enabled) {
+        "disabled by device settings".to_string()
+    } else if service_status.is_running {
+        "active".to_string()
+    } else {
+        "background service not running".to_string()
+    };
 
     Ok(AppStatus {
         logged_in: auth.device_credentials.is_some(),
-        email: None,
+        email: state.email,
         device_id: auth
             .device_credentials
             .as_ref()
             .map(|device| device.device_id.clone()),
+        monitor_summary,
+        pending_request_count: service_status.pending_request_count,
+        base_api_url: config.api_base_url,
         screenshot_permission: daemon_status.screenshot_permission,
         daemon_last_error: daemon_status.last_error,
         daemon_status_updated_at: daemon_status.updated_at,

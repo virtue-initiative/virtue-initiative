@@ -75,12 +75,6 @@ impl MacPlatformHooks {
 
 impl PlatformHooks for MacPlatformHooks {
     fn take_screenshot(&self) -> CoreResult<Screenshot> {
-        if !has_screen_capture_access() {
-            return Err(CoreError::CommandFailed(
-                "screen recording permission missing".to_string(),
-            ));
-        }
-
         let bytes = capture_screen().map_err(|err| CoreError::CommandFailed(err.to_string()))?;
         Ok(Screenshot {
             captured_at_ms: self.get_time_utc_ms()?,
