@@ -2,17 +2,27 @@
 import type { MarkdownInstance } from "astro";
 import HelpLayout from "../../layouts/HelpLayout.astro";
 import { findHelpItem } from "../../help/navigation";
+import { APP_URL } from "../../lib/app-url";
+
+type HelpEntry = {
+  Content: any;
+  compiledContent?: MarkdownInstance<Record<string, never>>["compiledContent"];
+};
+
+function hasCompiledContent(entry: HelpEntry): entry is Required<HelpEntry> {
+  return typeof entry.compiledContent === "function";
+}
 
 export function getStaticPaths() {
   return Object.entries(
-    import.meta.glob<MarkdownInstance<Record<string, never>>>(
-      "../../content/help/**/*.md",
-      { eager: true },
-    ),
+    import.meta.glob("../../content/help/**/*.md*", { eager: true }) as Record<
+      string,
+      HelpEntry
+    >,
   ).map(([key, module]) => {
     const routePath = key
       .replace("../../content/help/", "")
-      .replace(/\.md$/, "")
+      .replace(/\.mdx?$/, "")
       .replace(/\/index$/, "");
 
     return {
@@ -27,15 +37,25 @@ export function getStaticPaths() {
   });
 }
 
-const APP_URL = import.meta.env.PUBLIC_APP_URL || "http://localhost:5173";
 const SIGNUP_URL = `${APP_URL}#signup`;
 const { currentPath, entry } = Astro.props;
 const currentItem = findHelpItem(currentPath);
-const contentHtml = (await entry.compiledContent())
-  .replaceAll('href="/app"', `href="${APP_URL}"`)
-  .replaceAll('href="/signup"', `href="${SIGNUP_URL}"`);
+const contentHtml = hasCompiledContent(entry)
+  ? (await entry.compiledContent())
+      .replaceAll('href="/app"', `href="${APP_URL}"`)
+      .replaceAll('href="/signup"', `href="${SIGNUP_URL}"`)
+  : null;
+const EntryContent = entry.Content;
 ---
 
 <HelpLayout currentPath={currentPath} pageTitle={currentItem?.label ?? "Help"}>
-  <article class="help-content-card help-doc" set:html={contentHtml} />
+  {
+    contentHtml ? (
+      <article class="help-content-card help-doc" set:html={contentHtml} />
+    ) : (
+      <article class="help-content-card help-doc">
+        <EntryContent />
+      </article>
+    )
+  }
 </HelpLayout>

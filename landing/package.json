@@ -23,6 +23,7 @@
   "license": "AGPL-3.0-or-later",
   "type": "commonjs",
   "dependencies": {
+    "@astrojs/mdx": "^5.0.2",
     "@virtueinitiative/shared-web": "file:../shared-web",
     "astro": "^6.0.3"
   },
