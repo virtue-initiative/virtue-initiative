@@ -124,9 +124,8 @@ describe('Data and device API routes', () => {
 
   it("returns the accepted partner's batch envelope and owner logs", async () => {
     const { token: ownerToken, userId: ownerUserId } = await signupAndGetToken('owner@example.com');
-    const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
-      'partner@example.com',
-    );
+    const { token: partnerToken, userId: partnerUserId } =
+      await signupAndGetToken('partner@example.com');
     const device = await createDeviceForUser(ownerToken);
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
@@ -189,9 +188,12 @@ describe('Data and device API routes', () => {
       Buffer.from('owner-envelope').toString('base64'),
     );
 
-    const partnerDataRes = await SELF.fetch(`${BASE}/data?user=${encodeURIComponent(ownerUserId)}`, {
-      headers: { Authorization: `Bearer ${partnerToken}` },
-    });
+    const partnerDataRes = await SELF.fetch(
+      `${BASE}/data?user=${encodeURIComponent(ownerUserId)}`,
+      {
+        headers: { Authorization: `Bearer ${partnerToken}` },
+      },
+    );
     expect(partnerDataRes.status).toBe(200);
     const partnerData = (await partnerDataRes.json()) as {
       batches: Array<{ encrypted_key: string }>;

@@ -105,8 +105,9 @@ describe('Auth routes', () => {
       }>();
     expect(storedUser).toBeTruthy();
     expect(new Uint8Array(storedUser!.id)).toHaveLength(16);
-    expect(await verifyPasswordAuth(Buffer.from(password_auth, 'base64'), storedUser!.password_hash))
-      .toBe(true);
+    expect(
+      await verifyPasswordAuth(Buffer.from(password_auth, 'base64'), storedUser!.password_hash),
+    ).toBe(true);
     expect(Buffer.from(storedUser!.password_salt).toString('base64')).toBe(password_salt);
     expect(Buffer.from(storedUser!.pub_key).toString('base64')).toBe(pub_key);
     expect(Buffer.from(storedUser!.priv_key).toString('base64')).toBe(priv_key);
@@ -339,8 +340,9 @@ describe('Auth routes', () => {
         priv_key: ArrayBuffer;
       }>();
     expect(storedUser).toBeTruthy();
-    expect(await verifyPasswordAuth(Buffer.from(newPasswordAuth, 'base64'), storedUser!.password_hash))
-      .toBe(true);
+    expect(
+      await verifyPasswordAuth(Buffer.from(newPasswordAuth, 'base64'), storedUser!.password_hash),
+    ).toBe(true);
     expect(Buffer.from(storedUser!.password_salt).toString('base64')).toBe(newPasswordSalt);
     expect(Buffer.from(storedUser!.pub_key).toString('base64')).toBe(newPubKey);
     expect(Buffer.from(storedUser!.priv_key).toString('base64')).toBe(newPrivKey);

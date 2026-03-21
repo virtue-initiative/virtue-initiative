@@ -1,6 +1,6 @@
 #!/bin/bash
 
-pushd $(dirname $0) > /dev/null
+pushd "$(dirname $0)/.." > /dev/null
 
 pushd web && npm run prettier:write && popd > /dev/null
 pushd api && npm run prettier:write && popd > /dev/null

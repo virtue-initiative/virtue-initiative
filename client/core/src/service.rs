@@ -5,9 +5,9 @@ use crate::crypto::{CryptoEngine, prepare_screenshot_event};
 use crate::error::{CoreError, CoreResult};
 use crate::image_pipeline::ImagePipeline;
 use crate::model::{
-    AuthState, BatchBufferState, BatchRecipient, BatchUpload, BufferedScreenshot, DeviceCredentials,
-    DeviceSettings, LogEntry, LoginStatus, LoopOutcome, PendingRequest, RequestDisposition,
-    RequestKind, Screenshot, ServiceStatus,
+    AuthState, BatchBufferState, BatchRecipient, BatchUpload, BufferedScreenshot,
+    DeviceCredentials, DeviceSettings, LogEntry, LoginStatus, LoopOutcome, PendingRequest,
+    RequestDisposition, RequestKind, Screenshot, ServiceStatus,
 };
 use crate::platform::PlatformHooks;
 use crate::storage::FileStateStore;

@@ -4,18 +4,19 @@ use argon2::{Algorithm, Argon2, Params, Version};
 use base64::Engine;
 use hkdf::Hkdf;
 use hpke::{
-    Deserializable, Serializable,
+    Deserializable, OpModeS, Serializable,
     aead::AesGcm256,
     kdf::HkdfSha256,
     kem::{Kem as KemTrait, X25519HkdfSha256},
     setup_sender,
-    OpModeS,
 };
 use rand_core::{OsRng as HpkeOsRng, TryRngCore};
 use sha2::{Digest, Sha256};
 
 use crate::error::{CoreError, CoreResult};
-use crate::model::{BatchEvent, BatchEventData, BatchRecipient, BufferedScreenshot, HashParams, Screenshot};
+use crate::model::{
+    BatchEvent, BatchEventData, BatchRecipient, BufferedScreenshot, HashParams, Screenshot,
+};
 
 type HpkeKem = X25519HkdfSha256;
 type HpkeKdf = HkdfSha256;
@@ -25,7 +26,11 @@ type HpkeAead = AesGcm256;
 pub struct CryptoEngine;
 
 impl CryptoEngine {
-    pub fn encrypt_batch_blob(&self, batch_key: &[u8; 32], plaintext: &[u8]) -> CoreResult<Vec<u8>> {
+    pub fn encrypt_batch_blob(
+        &self,
+        batch_key: &[u8; 32],
+        plaintext: &[u8],
+    ) -> CoreResult<Vec<u8>> {
         let cipher = Aes256Gcm::new_from_slice(batch_key)
             .map_err(|_| CoreError::Crypto("invalid AES-256-GCM key"))?;
         let mut nonce_bytes = [0_u8; 12];
@@ -52,8 +57,8 @@ impl CryptoEngine {
         recipient: &BatchRecipient,
         batch_key: &[u8; 32],
     ) -> CoreResult<String> {
-        let public_key_bytes = base64::engine::general_purpose::STANDARD
-            .decode(&recipient.pub_key_base64)?;
+        let public_key_bytes =
+            base64::engine::general_purpose::STANDARD.decode(&recipient.pub_key_base64)?;
         let public_key = <HpkeKem as KemTrait>::PublicKey::from_bytes(&public_key_bytes)
             .map_err(|_| CoreError::Crypto("invalid X25519 public key"))?;
         let mut csprng = HpkeOsRng.unwrap_err();

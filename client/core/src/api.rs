@@ -1,9 +1,9 @@
+use base64::Engine;
 use reqwest::Method;
 use reqwest::blocking::multipart::{Form, Part};
 use reqwest::blocking::{Client, RequestBuilder, Response};
 use serde::Deserialize;
 use serde::Serialize;
-use base64::Engine;
 
 use crate::config::Config;
 use crate::crypto::derive_password_auth;
@@ -48,8 +48,8 @@ impl ApiClient {
                 .query(&[("email", username)])
                 .send()?,
         )?;
-        let password_salt = base64::engine::general_purpose::STANDARD
-            .decode(material.password_salt)?;
+        let password_salt =
+            base64::engine::general_purpose::STANDARD.decode(material.password_salt)?;
         let password_auth = derive_password_auth(password, &password_salt, &material.params)?;
 
         let response: LoginResponse = self.send_json(

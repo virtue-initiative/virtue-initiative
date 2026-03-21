@@ -10,9 +10,7 @@ const HPKE_SUITE = new CipherSuite({
   aead: new Aes256Gcm(),
 });
 
-function toUint8Array(
-  value: ArrayBufferLike | ArrayBufferView,
-): Uint8Array {
+function toUint8Array(value: ArrayBufferLike | ArrayBufferView): Uint8Array {
   if (value instanceof Uint8Array) {
     return Uint8Array.from(value);
   }
@@ -142,7 +140,9 @@ export async function decryptBatch(
 export async function generateUserKeyPair() {
   const keyPair = await HPKE_SUITE.kem.generateKeyPair();
   return {
-    publicKey: new Uint8Array(await HPKE_SUITE.kem.serializePublicKey(keyPair.publicKey)),
+    publicKey: new Uint8Array(
+      await HPKE_SUITE.kem.serializePublicKey(keyPair.publicKey),
+    ),
     privateKey: new Uint8Array(
       await HPKE_SUITE.kem.serializePrivateKey(keyPair.privateKey),
     ),

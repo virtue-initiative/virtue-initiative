@@ -98,7 +98,7 @@ Returns the current client password-derivation settings.
 Response `200`:
 
 ```js
-HashParams
+HashParams;
 ```
 
 ### `GET /user/login-material?email=user@example.com`
@@ -190,7 +190,7 @@ Requires a user `AccessToken`.
 Response `200`:
 
 ```js
-User
+User;
 ```
 
 ### `PATCH /user`

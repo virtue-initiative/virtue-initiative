@@ -183,6 +183,7 @@ the batch.
 <div set:html={SecurityFlow} />
 
 {/* CODE_REFERENCES:START */}
+
 ## Code references
 
 The links and snippets below are generated from the current tree by `node scripts/check-code-references.js`. They currently point at Git ref `main`.
@@ -256,7 +257,9 @@ Source: [`web/src/crypto.ts:L142-L151`](https://github.com/virtue-initiative/vir
 export async function generateUserKeyPair() {
   const keyPair = await HPKE_SUITE.kem.generateKeyPair();
   return {
-    publicKey: new Uint8Array(await HPKE_SUITE.kem.serializePublicKey(keyPair.publicKey)),
+    publicKey: new Uint8Array(
+      await HPKE_SUITE.kem.serializePublicKey(keyPair.publicKey),
+    ),
     privateKey: new Uint8Array(
       await HPKE_SUITE.kem.serializePrivateKey(keyPair.privateKey),
     ),
@@ -295,7 +298,10 @@ Source: [`api/src/lib/password.ts:L35-L38`](https://github.com/virtue-initiative
 
 ```ts
 export async function hashPasswordAuth(passwordAuth: ArrayBuffer | Uint8Array) {
-  const hashBuffer = await crypto.subtle.digest('SHA-256', toBytes(passwordAuth));
+  const hashBuffer = await crypto.subtle.digest(
+    "SHA-256",
+    toBytes(passwordAuth),
+  );
   return bytesToHex(new Uint8Array(hashBuffer));
 }
 ```
@@ -381,4 +387,5 @@ Source: [`client/core/src/batch.rs:L24-L63`](https://github.com/virtue-initiativ
         })
     }
 ```
+
 {/* CODE_REFERENCES:END */}

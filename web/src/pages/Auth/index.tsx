@@ -77,10 +77,11 @@ export function Auth() {
         if (password !== confirm) {
           throw new Error("Passwords do not match");
         }
-        const {
-          access_token,
-          privateKey,
-        } = await signup(email, password, name || undefined);
+        const { access_token, privateKey } = await signup(
+          email,
+          password,
+          name || undefined,
+        );
         e2ee.setPrivateKey(privateKey);
         if (typeof window !== "undefined") {
           window.sessionStorage.setItem(

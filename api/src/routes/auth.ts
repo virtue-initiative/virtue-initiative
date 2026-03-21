@@ -260,19 +260,15 @@ async function getValidTokenRecord(
 
 auth.get('/current-hash-params', async (c) => c.json(buildHashParamsResponse()));
 
-auth.get(
-  '/user/login-material',
-  validateZ('query', loginMaterialQuerySchema),
-  async (c) => {
-    const { email } = c.req.valid('query');
-    const user = await findUserByEmail(c.env.DB, email.trim().toLowerCase());
+auth.get('/user/login-material', validateZ('query', loginMaterialQuerySchema), async (c) => {
+  const { email } = c.req.valid('query');
+  const user = await findUserByEmail(c.env.DB, email.trim().toLowerCase());
 
-    return c.json({
-      password_salt: encodeBase64(user?.password_salt ?? generatePasswordSalt()),
-      params: buildHashParamsResponse(),
-    });
-  },
-);
+  return c.json({
+    password_salt: encodeBase64(user?.password_salt ?? generatePasswordSalt()),
+    params: buildHashParamsResponse(),
+  });
+});
 
 auth.post('/signup', validateZ('json', signupSchema), async (c) => {
   const { email, password_auth, password_salt, pub_key, priv_key, name } = c.req.valid('json');
@@ -315,7 +311,12 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
 
   return c.json(
     {
-      user: { id: userId, email: normalizedEmail, email_verified: false, ...(name ? { name } : {}) },
+      user: {
+        id: userId,
+        email: normalizedEmail,
+        email_verified: false,
+        ...(name ? { name } : {}),
+      },
       access_token: accessToken,
     },
     201,
