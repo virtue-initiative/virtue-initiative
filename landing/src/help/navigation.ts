@@ -56,10 +56,6 @@ export const helpSidebar: HelpNavItem[] = [
         label: "Developer Overrides",
         href: "/help/developer/overrides",
       },
-      {
-        label: "Security and Encryption",
-        href: "/help/developer/security",
-      },
     ],
   },
 ];
