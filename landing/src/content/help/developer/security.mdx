@@ -1,4 +1,4 @@
-import SecurityFlow from './security-flow.svg?raw';
+import SecurityFlow from "./security-flow.svg?raw";
 
 # Cryptography and security
 
@@ -13,6 +13,7 @@ The main goal of this project is to send screenshots and logs from client
 devices to partners.
 
 Our sensitive data:
+
 - User email and password
 - User private/public keypair
 - Low quality screenshot batches
@@ -20,20 +21,20 @@ Our sensitive data:
 
 Data storage:
 
-| Item            | Place   | Format                                                                 | Access           |
-|-----------------|---------|------------------------------------------------------------------------|------------------|
-| Password        | Server  | `HKDF-SHA256("auth", Argon2id(pwd, salt, params))`                     | None             |
-| Email           | Server  | Plaintext                                                              | Partners         |
-| Private Key     | Server  | `AES-256-GCM(HKDF-SHA256("key", Argon2id(...), salt))`                 | User             |
-| Private Key     | Browser | Plaintext                                                              | Browser          |
-| Private Key     | Device  | Plaintext                                                              | Device           |
-| Public Key      | Server  | Plaintext (X25519)                                                     | Anyone           |
-| Batch List      | Server  | Plaintext                                                              | Partners         |
-| Batch Key       | Server  | `HPKE(DHKEM(X25519), HKDF-SHA256, AES-256-GCM)`                        | Partners         |
-| Batches         | Server  | `AES-256-GCM(batch_key)`                                               | Anyone with UUID |
-| Latest Batch    | Device  | Plaintext                                                              | Device           |
-| Logs            | Server  | Plaintext                                                              | Partners         |
-| Logs            | Device  | Plaintext                                                              | Device           |
+| Item         | Place   | Format                                                 | Access           |
+| ------------ | ------- | ------------------------------------------------------ | ---------------- |
+| Password     | Server  | `HKDF-SHA256("auth", Argon2id(pwd, salt, params))`     | None             |
+| Email        | Server  | Plaintext                                              | Partners         |
+| Private Key  | Server  | `AES-256-GCM(HKDF-SHA256("key", Argon2id(...), salt))` | User             |
+| Private Key  | Browser | Plaintext                                              | Browser          |
+| Private Key  | Device  | Plaintext                                              | Device           |
+| Public Key   | Server  | Plaintext (X25519)                                     | Anyone           |
+| Batch List   | Server  | Plaintext                                              | Partners         |
+| Batch Key    | Server  | `HPKE(DHKEM(X25519), HKDF-SHA256, AES-256-GCM)`        | Partners         |
+| Batches      | Server  | `AES-256-GCM(batch_key)`                               | Anyone with UUID |
+| Latest Batch | Device  | Plaintext                                              | Device           |
+| Logs         | Server  | Plaintext                                              | Partners         |
+| Logs         | Device  | Plaintext                                              | Device           |
 
 ## Details
 
@@ -74,12 +75,12 @@ private key and decrypts it with `AES-256-GCM(HKDF-SHA256("key",
 Argon2id(...)))`. Finally, it stores the private key locally (if it is the
 browser, it stores it as a non-exportable WebCrypto key).
 
-### Emails
+### Email addresses
 
-Emails are uploaded to the server on signup/login and can be viewed by
+Email addresses are uploaded to the server on signup/login and can be viewed by
 partners. They are stored in plaintext.
 
-### Private Key
+### Private key
 
 This key is created on signup using X25519 and encrypted with the password
 based key (see **Passwords**) before being sent to the server. It is stored in
@@ -92,7 +93,7 @@ This key is recreated on a password reset.
 
 See the **Passwords** section for more information.
 
-### Public Key
+### Public key
 
 This key is generated alongside the private key on signup using X25519. It is
 uploaded in plaintext to the server. The devices download a list of all the
@@ -119,7 +120,6 @@ encryption keys
   partner2: HPKE(encrypted batch key)
   ...
 ```
-
 
 The encrypted batch key for each user is encrypted with their public key using
 `HPKE(DHKEM(X25519), HKDF-SHA256, AES-256-GCM)`.
@@ -180,7 +180,4 @@ the batch.
 
 ## Flow diagram
 
-
 <div set:html={SecurityFlow} />
-
-
