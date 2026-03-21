@@ -93,7 +93,7 @@ function toMetadataEntries(value: unknown): [string, string][] {
 
 async function decryptAndFlattenBatch(
   batch: Batch,
-  key: CryptoKey,
+  openBatchKey: (encryptedKey: string) => Promise<CryptoKey>,
 ): Promise<LogItem[]> {
   const resp = await fetch(batch.url);
   if (!resp.ok) {
@@ -105,7 +105,8 @@ async function decryptAndFlattenBatch(
     throw new Error(`Batch blob too short for AES-GCM payload: ${batch.url}`);
   }
 
-  const decrypted = await decryptBatch(key, raw);
+  const batchKey = await openBatchKey(batch.encrypted_key);
+  const decrypted = await decryptBatch(batchKey, raw);
   const decompressed = await decompressGzip(decrypted);
   const decoded = decode(decompressed) as unknown;
   const record =
@@ -177,12 +178,7 @@ export function Logs() {
   const [galleryFullscreen, setGalleryFullscreen] = useState(false);
 
   const activeUserId = selectedUser ?? userId;
-  const activeKey = activeUserId ? e2ee.getKey(activeUserId) : null;
-  const activePartner =
-    activeUserId && activeUserId !== userId
-      ? (partners.find((partner) => partner.user.id === activeUserId) ?? null)
-      : null;
-  const missingPartnerKey = Boolean(activePartner && !activeKey);
+  const activePrivateKey = e2ee.privateKey;
 
   useEffect(() => {
     if (!token || !userId) return;
@@ -228,12 +224,12 @@ export function Logs() {
   }, [token, userId]);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || !e2ee.ready) return;
     setItems([]);
     setNextCursor(undefined);
     setBatchStats({ decrypted: 0, skipped: 0 });
     void doLoad(undefined, true);
-  }, [token, selectedDevice, selectedUser, activeKey]);
+  }, [token, selectedDevice, selectedUser, activePrivateKey, e2ee.ready]);
 
   async function doLoad(cursor: number | undefined, reset: boolean) {
     if (!token) return;
@@ -248,17 +244,17 @@ export function Logs() {
         limit: 25,
       });
 
-      const decryptedBatches = activeKey
+      const decryptedBatches = activePrivateKey
         ? await Promise.allSettled(
             page.batches.map((batch) =>
-              decryptAndFlattenBatch(batch, activeKey),
+              decryptAndFlattenBatch(batch, e2ee.unwrapEncryptedBatchKey),
             ),
           )
         : [];
 
       const batchItems: LogItem[] = [];
       let decrypted = 0;
-      let skipped = activeKey ? 0 : page.batches.length;
+      let skipped = activePrivateKey ? 0 : page.batches.length;
 
       for (const result of decryptedBatches) {
         if (result.status === "fulfilled") {
@@ -426,17 +422,6 @@ export function Logs() {
           </div>
 
           {fetchError && <p class="alert-error">{fetchError}</p>}
-          {missingPartnerKey && (
-            <div class="card settings-form">
-              <p class="settings-hint">
-                You are monitoring this person, but you do not have their
-                decryption key yet, so encrypted screenshots and uploaded blocks
-                cannot be shown. Ask the owner of these logs to click{" "}
-                <strong>Confirm partner</strong> so the encrypted sharing key is
-                attached to your partnership.
-              </p>
-            </div>
-          )}
           {(batchStats.decrypted > 0 || batchStats.skipped > 0) && (
             <p class="logs-summary">
               {batchStats.decrypted} block

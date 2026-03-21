@@ -5,7 +5,6 @@ import { z } from 'zod';
 import { authenticate } from '../middleware/auth';
 import { validateZ } from '../middleware/validation';
 import {
-  clearPartnerAccessKeysForUser,
   createSessionRecord,
   createEmailToken,
   createUser,
@@ -15,9 +14,7 @@ import {
   findUserByEmail,
   findUserById,
   invalidateEmailTokens,
-  listPartnerAccessTargetsForOwner,
   updateUser,
-  updatePartnerAccessKeys,
   consumeEmailToken,
 } from '../lib/db';
 import {
@@ -28,7 +25,13 @@ import { sendEmail } from '../lib/email';
 import { decodeBase64, encodeBase64 } from '../lib/encoding';
 import { EMAIL_VERIFICATION_TTL_MS, PASSWORD_RESET_TTL_MS } from '../lib/email-domain';
 import { generateAccessToken } from '../lib/jwt';
-import { hashPassword, verifyPassword } from '../lib/password';
+import {
+  CURRENT_HASH_PARAMS,
+  HASH_PARAMS_VERSION,
+  generatePasswordSalt,
+  hashPasswordAuth,
+  verifyPasswordAuth,
+} from '../lib/password';
 import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
 
@@ -39,13 +42,20 @@ const LOCAL_WEB_URL = 'http://localhost:5173';
 
 const signupSchema = z.object({
   email: z.email(),
-  password: z.string().min(1),
+  password_auth: z.base64(),
+  password_salt: z.base64(),
+  pub_key: z.base64(),
+  priv_key: z.base64(),
   name: z.string().min(1).optional(),
+});
+
+const loginMaterialQuerySchema = z.object({
+  email: z.email(),
 });
 
 const loginSchema = z.object({
   email: z.email(),
-  password: z.string().min(1),
+  password_auth: z.base64(),
 });
 
 const verifyEmailSchema = z.object({
@@ -62,29 +72,68 @@ const passwordResetValidateSchema = z.object({
 
 const passwordResetSchema = z.object({
   token: z.string().min(1),
-  password: z.string().min(1),
-  e2ee_key: z.base64().optional(),
-  pub_key: z.base64().optional(),
-  priv_key: z.base64().optional(),
-  partner_access_keys: z
-    .array(
-      z.object({
-        partnership_id: z.string().min(1),
-        e2ee_key: z.base64(),
-      }),
-    )
-    .optional(),
+  password_auth: z.base64(),
+  password_salt: z.base64(),
+  pub_key: z.base64(),
+  priv_key: z.base64(),
 });
 
 const updateUserSchema = z
   .object({
     email: z.email().optional(),
     name: z.string().min(1).optional(),
-    e2ee_key: z.base64().optional(),
     pub_key: z.base64().optional(),
     priv_key: z.base64().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
+
+function buildHashParamsResponse() {
+  return {
+    version: CURRENT_HASH_PARAMS.version,
+    algorithm: CURRENT_HASH_PARAMS.algorithm,
+    memory_cost_kib: CURRENT_HASH_PARAMS.memory_cost_kib,
+    time_cost: CURRENT_HASH_PARAMS.time_cost,
+    parallelism: CURRENT_HASH_PARAMS.parallelism,
+    salt_length: CURRENT_HASH_PARAMS.salt_length,
+    hkdf_hash: CURRENT_HASH_PARAMS.hkdf_hash,
+  };
+}
+
+function decodeRequiredBase64(value: string, field: string) {
+  const decoded = decodeBase64(value);
+  if (new Uint8Array(decoded).byteLength === 0) {
+    throw new Error(`${field} must not be empty`);
+  }
+  return decoded;
+}
+
+function decodePasswordSalt(value: string) {
+  const decoded = decodeRequiredBase64(value, 'password_salt');
+  if (new Uint8Array(decoded).byteLength !== CURRENT_HASH_PARAMS.salt_length) {
+    throw new Error(`password_salt must be ${CURRENT_HASH_PARAMS.salt_length} bytes`);
+  }
+  return decoded;
+}
+
+function decodePasswordAuth(value: string) {
+  const decoded = decodeRequiredBase64(value, 'password_auth');
+  if (new Uint8Array(decoded).byteLength !== 32) {
+    throw new Error('password_auth must be 32 bytes');
+  }
+  return decoded;
+}
+
+function decodePublicKey(value: string) {
+  const decoded = decodeRequiredBase64(value, 'pub_key');
+  if (new Uint8Array(decoded).byteLength !== 32) {
+    throw new Error('pub_key must be 32 bytes');
+  }
+  return decoded;
+}
+
+function badRequest(c: Context<{ Bindings: Env; Variables: Variables }>, message: string) {
+  return c.json({ error: 'Bad Request', details: { errors: [message] } }, 400);
+}
 
 async function createSession(c: Context<{ Bindings: Env; Variables: Variables }>, userId: string) {
   const accessToken = await generateAccessToken(userId, c.env.JWT_SECRET, ACCESS_TOKEN_TTL_SECONDS);
@@ -209,24 +258,64 @@ async function getValidTokenRecord(
   return { ...token, user_id: token.user_id };
 }
 
+auth.get('/current-hash-params', async (c) => c.json(buildHashParamsResponse()));
+
+auth.get(
+  '/user/login-material',
+  validateZ('query', loginMaterialQuerySchema),
+  async (c) => {
+    const { email } = c.req.valid('query');
+    const user = await findUserByEmail(c.env.DB, email.trim().toLowerCase());
+
+    return c.json({
+      password_salt: encodeBase64(user?.password_salt ?? generatePasswordSalt()),
+      params: buildHashParamsResponse(),
+    });
+  },
+);
+
 auth.post('/signup', validateZ('json', signupSchema), async (c) => {
-  const { email, password, name } = c.req.valid('json');
-  const existingUser = await findUserByEmail(c.env.DB, email);
+  const { email, password_auth, password_salt, pub_key, priv_key, name } = c.req.valid('json');
+  const normalizedEmail = email.trim().toLowerCase();
+  const existingUser = await findUserByEmail(c.env.DB, normalizedEmail);
 
   if (existingUser) {
     return c.json({ error: 'User already exists' }, 409);
   }
 
-  const userId = uuidv4();
-  const passwordHash = await hashPassword(password);
+  let decodedPasswordAuth: ArrayBuffer;
+  let decodedPasswordSalt: ArrayBuffer;
+  let decodedPublicKey: ArrayBuffer;
+  let decodedPrivateKey: ArrayBuffer;
 
-  await createUser(c.env.DB, { id: userId, email, passwordHash, name });
-  await sendVerificationEmail(c, { id: userId, email, name });
+  try {
+    decodedPasswordAuth = decodePasswordAuth(password_auth);
+    decodedPasswordSalt = decodePasswordSalt(password_salt);
+    decodedPublicKey = decodePublicKey(pub_key);
+    decodedPrivateKey = decodeRequiredBase64(priv_key, 'priv_key');
+  } catch (error) {
+    return badRequest(c, error instanceof Error ? error.message : 'Invalid signup payload');
+  }
+
+  const userId = uuidv4();
+  const passwordHash = await hashPasswordAuth(decodedPasswordAuth);
+
+  await createUser(c.env.DB, {
+    id: userId,
+    email: normalizedEmail,
+    passwordHash,
+    passwordSalt: decodedPasswordSalt,
+    passwordParamsVersion: HASH_PARAMS_VERSION,
+    pub_key: decodedPublicKey,
+    priv_key: decodedPrivateKey,
+    name,
+  });
+  await sendVerificationEmail(c, { id: userId, email: normalizedEmail, name });
   const accessToken = await createSession(c, userId);
 
   return c.json(
     {
-      user: { id: userId, email, email_verified: false, ...(name ? { name } : {}) },
+      user: { id: userId, email: normalizedEmail, email_verified: false, ...(name ? { name } : {}) },
       access_token: accessToken,
     },
     201,
@@ -234,10 +323,18 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
 });
 
 auth.post('/login', validateZ('json', loginSchema), async (c) => {
-  const { email, password } = c.req.valid('json');
-  const user = await findUserByEmail(c.env.DB, email);
+  const { email, password_auth } = c.req.valid('json');
+  const normalizedEmail = email.trim().toLowerCase();
+  const user = await findUserByEmail(c.env.DB, normalizedEmail);
 
-  if (!user || !(await verifyPassword(password, user.password_hash))) {
+  let decodedPasswordAuth: ArrayBuffer;
+  try {
+    decodedPasswordAuth = decodePasswordAuth(password_auth);
+  } catch {
+    return c.json({ error: 'Invalid email or password' }, 401);
+  }
+
+  if (!user || !(await verifyPasswordAuth(decodedPasswordAuth, user.password_hash))) {
     return c.json({ error: 'Invalid email or password' }, 401);
   }
 
@@ -298,7 +395,6 @@ auth.get('/user', authenticate('access'), async (c) => {
     email_verified: user.email_verified === 1,
     email_bounced_at: user.email_bounced_at,
     ...(user.name ? { name: user.name } : {}),
-    ...(user.e2ee_key ? { e2ee_key: encodeBase64(user.e2ee_key) } : {}),
     ...(user.pub_key ? { pub_key: encodeBase64(user.pub_key) } : {}),
     ...(user.priv_key ? { priv_key: encodeBase64(user.priv_key) } : {}),
   });
@@ -306,7 +402,7 @@ auth.get('/user', authenticate('access'), async (c) => {
 
 auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema), async (c) => {
   const userId = c.get('sub');
-  const { email, name, e2ee_key, pub_key, priv_key } = c.req.valid('json');
+  const { email, name, pub_key, priv_key } = c.req.valid('json');
   const normalizedEmail = email?.trim().toLowerCase();
   const user = await findUserById(c.env.DB, userId);
 
@@ -322,14 +418,23 @@ auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema),
     }
   }
 
+  let decodedPublicKey: ArrayBuffer | undefined;
+  let decodedPrivateKey: ArrayBuffer | undefined;
+
+  try {
+    decodedPublicKey = pub_key ? decodePublicKey(pub_key) : undefined;
+    decodedPrivateKey = priv_key ? decodeRequiredBase64(priv_key, 'priv_key') : undefined;
+  } catch (error) {
+    return badRequest(c, error instanceof Error ? error.message : 'Invalid user update payload');
+  }
+
   await updateUser(c.env.DB, userId, {
     ...(emailChanged
       ? { email: normalizedEmail, email_verified: false, email_bounced_at: null }
       : {}),
     name,
-    e2ee_key: e2ee_key ? decodeBase64(e2ee_key) : undefined,
-    pub_key: pub_key ? decodeBase64(pub_key) : undefined,
-    priv_key: priv_key ? decodeBase64(priv_key) : undefined,
+    pub_key: decodedPublicKey,
+    priv_key: decodedPrivateKey,
   });
 
   return c.json({ ok: true });
@@ -377,7 +482,7 @@ auth.post('/email-verification', authenticate('access'), async (c) => {
 
 auth.post('/password-reset', validateZ('json', passwordResetRequestSchema), async (c) => {
   const { email } = c.req.valid('json');
-  const user = await findUserByEmail(c.env.DB, email);
+  const user = await findUserByEmail(c.env.DB, email.trim().toLowerCase());
 
   if (user) {
     await sendPasswordResetEmail(c, user);
@@ -402,21 +507,11 @@ auth.post('/password-reset/validate', validateZ('json', passwordResetValidateSch
   return c.json({
     ok: true,
     email: record.email,
-    user_id: record.user_id,
-    partner_access_targets: (await listPartnerAccessTargetsForOwner(c.env.DB, record.user_id)).map(
-      (target) => ({
-        partnership_id: target.id,
-        partner_email: target.watcher_email!,
-        ...(target.watcher_pub_key
-          ? { partner_pub_key: encodeBase64(target.watcher_pub_key) }
-          : {}),
-      }),
-    ),
   });
 });
 
 auth.post('/password-reset/finalize', validateZ('json', passwordResetSchema), async (c) => {
-  const { token, password, e2ee_key, pub_key, priv_key, partner_access_keys } = c.req.valid('json');
+  const { token, password_auth, password_salt, pub_key, priv_key } = c.req.valid('json');
   const record = await getValidTokenRecord(c.env.DB, token, 'password_reset');
 
   if (!record) {
@@ -428,33 +523,27 @@ auth.post('/password-reset/finalize', validateZ('json', passwordResetSchema), as
     return c.json({ error: 'Invalid or expired token' }, 400);
   }
 
-  const rotatingKeys = Boolean(e2ee_key || pub_key || priv_key || partner_access_keys?.length);
-  if (rotatingKeys && (!e2ee_key || !pub_key || !priv_key)) {
-    return c.json(
-      { error: 'New encrypted key material must be generated during password reset' },
-      400,
-    );
+  let decodedPasswordAuth: ArrayBuffer;
+  let decodedPasswordSalt: ArrayBuffer;
+  let decodedPublicKey: ArrayBuffer;
+  let decodedPrivateKey: ArrayBuffer;
+
+  try {
+    decodedPasswordAuth = decodePasswordAuth(password_auth);
+    decodedPasswordSalt = decodePasswordSalt(password_salt);
+    decodedPublicKey = decodePublicKey(pub_key);
+    decodedPrivateKey = decodeRequiredBase64(priv_key, 'priv_key');
+  } catch (error) {
+    return badRequest(c, error instanceof Error ? error.message : 'Invalid password reset payload');
   }
 
   await updateUser(c.env.DB, record.user_id, {
-    password_hash: await hashPassword(password),
-    ...(e2ee_key ? { e2ee_key: decodeBase64(e2ee_key) } : {}),
-    ...(pub_key ? { pub_key: decodeBase64(pub_key) } : {}),
-    ...(priv_key ? { priv_key: decodeBase64(priv_key) } : {}),
+    password_hash: await hashPasswordAuth(decodedPasswordAuth),
+    password_salt: decodedPasswordSalt,
+    password_params_version: HASH_PARAMS_VERSION,
+    pub_key: decodedPublicKey,
+    priv_key: decodedPrivateKey,
   });
-  if (rotatingKeys) {
-    await clearPartnerAccessKeysForUser(c.env.DB, record.user_id);
-    if (partner_access_keys?.length) {
-      await updatePartnerAccessKeys(
-        c.env.DB,
-        record.user_id,
-        partner_access_keys.map((key) => ({
-          partnership_id: key.partnership_id,
-          e2ee_key: decodeBase64(key.e2ee_key),
-        })),
-      );
-    }
-  }
   await consumeEmailToken(c.env.DB, record.id, Date.now());
   await invalidateEmailTokens(c.env.DB, record.user_id, 'password_reset');
 

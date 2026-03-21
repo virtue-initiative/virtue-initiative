@@ -181,3 +181,204 @@ the batch.
 ## Flow diagram
 
 <div set:html={SecurityFlow} />
+
+{/* CODE_REFERENCES:START */}
+## Code references
+
+The links and snippets below are generated from the current tree by `node scripts/check-code-references.js`. They currently point at Git ref `main`.
+
+### Browser password derivation
+
+Argon2id output is split into `passwordAuth` and the AES wrapping key with HKDF-SHA256.
+
+Source: [`web/src/crypto.ts:L85-L112`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/crypto.ts#L85-L112)
+
+```ts
+export async function derivePasswordMaterial(
+  password: string,
+  passwordSalt: Uint8Array,
+  params: HashParams,
+) {
+  const argonOutput = await argon2id({
+    password,
+    salt: passwordSalt,
+    iterations: params.time_cost,
+    memorySize: params.memory_cost_kib,
+    hashLength: 32,
+    parallelism: params.parallelism,
+    outputType: "binary",
+  });
+  const passwordAuth = await hkdfSha256("auth", argonOutput);
+  const wrappingKeyBytes = await hkdfSha256("key", argonOutput);
+  const wrappingKey = await importAesKey(
+    wrappingKeyBytes,
+    ["encrypt", "decrypt"],
+    true,
+  );
+
+  return {
+    argonOutput,
+    passwordAuth,
+    wrappingKey,
+  };
+}
+```
+
+### Browser private-key wrapping
+
+The web client encrypts the private key locally with AES-GCM before upload.
+
+Source: [`web/src/crypto.ts:L114-L126`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/crypto.ts#L114-L126)
+
+```ts
+export async function encryptData(
+  key: CryptoKey,
+  data: Uint8Array,
+): Promise<Uint8Array> {
+  const payload = Uint8Array.from(data);
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: nonce },
+    key,
+    payload,
+  );
+  return concatBytes(nonce, new Uint8Array(ciphertext));
+}
+```
+
+### Browser X25519 key generation
+
+The web app generates the user keypair from the HPKE suite's X25519 KEM.
+
+Source: [`web/src/crypto.ts:L142-L151`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/crypto.ts#L142-L151)
+
+```ts
+export async function generateUserKeyPair() {
+  const keyPair = await HPKE_SUITE.kem.generateKeyPair();
+  return {
+    publicKey: new Uint8Array(await HPKE_SUITE.kem.serializePublicKey(keyPair.publicKey)),
+    privateKey: new Uint8Array(
+      await HPKE_SUITE.kem.serializePrivateKey(keyPair.privateKey),
+    ),
+    privateKeyHandle: keyPair.privateKey,
+  };
+}
+```
+
+### Browser batch-key unwrapping
+
+Batch access envelopes are opened with HPKE and imported back into WebCrypto as AES keys.
+
+Source: [`web/src/crypto.ts:L159-L171`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/crypto.ts#L159-L171)
+
+```ts
+export async function unwrapBatchKey(
+  privateKey: CryptoKey,
+  encryptedKey: BufferSource,
+) {
+  const envelope = toUint8Array(encryptedKey);
+  const enc = envelope.slice(0, HPKE_SUITE.kem.encSize);
+  const ct = envelope.slice(HPKE_SUITE.kem.encSize);
+  const rawKey = new Uint8Array(
+    await HPKE_SUITE.open({ recipientKey: privateKey, enc }, ct),
+  );
+
+  return importAesKey(rawKey, ["decrypt"]);
+}
+```
+
+### API password-auth hashing
+
+The server stores `SHA-256(password_auth)` instead of the raw client-derived bytes.
+
+Source: [`api/src/lib/password.ts:L35-L38`](https://github.com/virtue-initiative/virtue-initiative/blob/main/api/src/lib/password.ts#L35-L38)
+
+```ts
+export async function hashPasswordAuth(passwordAuth: ArrayBuffer | Uint8Array) {
+  const hashBuffer = await crypto.subtle.digest('SHA-256', toBytes(passwordAuth));
+  return bytesToHex(new Uint8Array(hashBuffer));
+}
+```
+
+### Native client password derivation
+
+The Rust client matches the browser flow with Argon2id and HKDF-SHA256("auth").
+
+Source: [`client/core/src/crypto.rs:L77-L100`](https://github.com/virtue-initiative/virtue-initiative/blob/main/client/core/src/crypto.rs#L77-L100)
+
+```rs
+pub fn derive_password_auth(
+    password: &str,
+    password_salt: &[u8],
+    params: &HashParams,
+) -> CoreResult<[u8; 32]> {
+    let argon_params = Params::new(
+        params.memory_cost_kib,
+        params.time_cost,
+        params.parallelism,
+        Some(32),
+    )
+    .map_err(|_| CoreError::InvalidState("invalid argon2 parameters"))?;
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, argon_params);
+    let mut argon_output = [0_u8; 32];
+    argon2
+        .hash_password_into(password.as_bytes(), password_salt, &mut argon_output)
+        .map_err(|err| CoreError::Argon2(err.to_string()))?;
+
+    let hkdf = Hkdf::<Sha256>::new(None, &argon_output);
+    let mut password_auth = [0_u8; 32];
+    hkdf.expand(b"auth", &mut password_auth)
+        .map_err(|_| CoreError::Crypto("HKDF expand failed"))?;
+    Ok(password_auth)
+}
+```
+
+### Native client batch upload encryption
+
+Each batch gets a fresh AES key, then the client HPKE-wraps that key for every recipient.
+
+Source: [`client/core/src/batch.rs:L24-L63`](https://github.com/virtue-initiative/virtue-initiative/blob/main/client/core/src/batch.rs#L24-L63)
+
+```rs
+    pub fn build_upload(
+        buffer: &BatchBufferState,
+        crypto: &CryptoEngine,
+        recipients: &[BatchRecipient],
+        end_time_ms: i64,
+    ) -> CoreResult<BatchUpload> {
+        let first = buffer.screenshots.first().ok_or(CoreError::InvalidState(
+            "cannot build a batch from an empty buffer",
+        ))?;
+        if recipients.is_empty() {
+            return Err(CoreError::InvalidState(
+                "cannot build a batch without any recipients",
+            ));
+        }
+
+        let events: Vec<&BatchEvent> = buffer.screenshots.iter().map(|item| &item.event).collect();
+        let msgpack = rmp_serde::to_vec_named(&BatchEnvelope { events })?;
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&msgpack)?;
+        let gzipped = encoder.finish()?;
+        let batch_key = crypto.generate_batch_key();
+        let encrypted = crypto.encrypt_batch_blob(&batch_key, &gzipped)?;
+        let access_keys = recipients
+            .iter()
+            .map(|recipient| {
+                Ok(crate::model::BatchAccessKey {
+                    user_id: recipient.user_id.clone(),
+                    hpke_key_base64: crypto.wrap_batch_key_for_recipient(recipient, &batch_key)?,
+                })
+            })
+            .collect::<CoreResult<Vec<_>>>()?;
+
+        Ok(BatchUpload {
+            start_time_ms: first.event.ts,
+            end_time_ms,
+            bytes: encrypted,
+            access_keys,
+        })
+    }
+```
+{/* CODE_REFERENCES:END */}

@@ -3,14 +3,10 @@ import { useAuth } from "../../context/auth";
 import { useE2EE } from "../../context/e2ee";
 import { api } from "../../api";
 import {
-  deriveWrappingKey,
+  derivePasswordMaterial,
   encryptData,
-  encryptForPublicKey,
-  exportPrivateKey,
-  exportPublicKey,
   generateRandomKeyBytes,
-  generateSharingKeyPair,
-  hashPasswordForAuth,
+  generateUserKeyPair,
 } from "../../crypto";
 import "./style.css";
 import { ThemeButton } from "../../components/ThemeButton";
@@ -50,14 +46,6 @@ export function Auth() {
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [resetTokenValid, setResetTokenValid] = useState(!resetToken);
-  const [resetUserId, setResetUserId] = useState("");
-  const [resetPartnerTargets, setResetPartnerTargets] = useState<
-    Array<{
-      partnership_id: string;
-      partner_email: string;
-      partner_pub_key?: string;
-    }>
-  >([]);
 
   useEffect(() => {
     if (!resetToken) return;
@@ -66,8 +54,6 @@ export function Auth() {
       .validatePasswordResetToken(resetToken)
       .then((result) => {
         setEmail(result.email);
-        setResetUserId(result.user_id);
-        setResetPartnerTargets(result.partner_access_targets);
         setResetTokenValid(true);
         setError(null);
       })
@@ -86,25 +72,16 @@ export function Auth() {
 
     try {
       if (mode === "login") {
-        const { access_token } = await login(email, password);
-        if (inviteToken) {
-          await api.acceptPartnerInvite(access_token, inviteToken);
-          clearUrlToken("partner_invite_token");
-        }
+        await login(email, password);
       } else if (mode === "signup") {
         if (password !== confirm) {
           throw new Error("Passwords do not match");
         }
         const {
           access_token,
-          userId,
-          wrappingKey: wk,
+          privateKey,
         } = await signup(email, password, name || undefined);
-        await setupKeyMaterial(access_token, userId, wk);
-        if (inviteToken) {
-          await api.acceptPartnerInvite(access_token, inviteToken);
-          clearUrlToken("partner_invite_token");
-        }
+        e2ee.setPrivateKey(privateKey);
         if (typeof window !== "undefined") {
           window.sessionStorage.setItem(
             GLOBAL_MESSAGE_KEY,
@@ -131,15 +108,12 @@ export function Auth() {
         if (password !== confirm) {
           throw new Error("Passwords do not match");
         }
-        const passwordHash = await hashPasswordForAuth(password, email);
         const rotatedKeys = await buildResetKeyMaterial(password);
-        await api.resetPassword(resetToken, passwordHash, rotatedKeys?.payload);
-        if (rotatedKeys && resetUserId) {
-          e2ee.clearKey();
-          await rememberWrappingKey(rotatedKeys.wrappingKey);
-        }
+        await api.resetPassword(resetToken, rotatedKeys.payload);
+        e2ee.clearKey();
+        await rememberWrappingKey(rotatedKeys.wrappingKey);
         setStatus(
-          "Password updated. Older encrypted logs will stay unavailable, but once you sign in again your Virtue clients can resume uploading with fresh keys. Partners already monitoring this account will keep access to new logs automatically.",
+          "Password updated. Older encrypted batches will stay unavailable after this key rotation, and new uploads will use the new keypair after you sign in again.",
         );
         setPassword("");
         setConfirm("");
@@ -155,52 +129,25 @@ export function Auth() {
     }
   }
 
-  async function setupKeyMaterial(token: string, uid: string, wk: CryptoKey) {
-    const rawE2EE = generateRandomKeyBytes();
-    const keyPair = await generateSharingKeyPair();
-    const publicKey = await exportPublicKey(keyPair.publicKey);
-    const privateKey = await exportPrivateKey(keyPair.privateKey);
-    await e2ee.setKeyFromBytes(rawE2EE.buffer, uid);
-    const encryptedE2EE = await encryptData(wk, rawE2EE);
-    const encryptedPrivate = await encryptData(wk, privateKey);
-    await api.updateUser(token, {
-      e2ee_key: encryptedE2EE.toBase64(),
-      pub_key: publicKey.toBase64(),
-      priv_key: encryptedPrivate.toBase64(),
-    });
-  }
-
   async function buildResetKeyMaterial(newPassword: string) {
-    if (!resetUserId) {
-      throw new Error("Reset token is missing account context");
-    }
-
-    const wrappingKey = await deriveWrappingKey(newPassword, resetUserId);
-    const rawE2EE = generateRandomKeyBytes();
-    const sharingKeyPair = await generateSharingKeyPair();
-    const publicKey = await exportPublicKey(sharingKeyPair.publicKey);
-    const privateKey = await exportPrivateKey(sharingKeyPair.privateKey);
-    const partnerAccessKeys = await Promise.all(
-      resetPartnerTargets
-        .filter((target) => target.partner_pub_key)
-        .map(async (target) => ({
-          partnership_id: target.partnership_id,
-          e2ee_key: (
-            await encryptForPublicKey(
-              Uint8Array.fromBase64(target.partner_pub_key!),
-              rawE2EE,
-            )
-          ).toBase64(),
-        })),
+    const params = await api.getCurrentHashParams();
+    const passwordSalt = generateRandomKeyBytes(params.salt_length);
+    const { passwordAuth, wrappingKey } = await derivePasswordMaterial(
+      newPassword,
+      passwordSalt,
+      params,
     );
+    const keyPair = await generateUserKeyPair();
 
     return {
       wrappingKey,
       payload: {
-        e2ee_key: (await encryptData(wrappingKey, rawE2EE)).toBase64(),
-        pub_key: publicKey.toBase64(),
-        priv_key: (await encryptData(wrappingKey, privateKey)).toBase64(),
-        partner_access_keys: partnerAccessKeys,
+        password_auth: passwordAuth.toBase64(),
+        password_salt: passwordSalt.toBase64(),
+        pub_key: keyPair.publicKey.toBase64(),
+        priv_key: (
+          await encryptData(wrappingKey, keyPair.privateKey)
+        ).toBase64(),
       },
     };
   }
@@ -261,11 +208,10 @@ export function Auth() {
               Choose a new password to complete the reset for the account below.
             </p>
             <p class="alert-error">
-              Resetting your password will generate a new end-to-end encryption
-              key for this account. Previously uploaded logs will remain
+              Resetting your password will generate a new encryption keypair for
+              this account. Previously uploaded batches will remain
               inaccessible, and you should sign back in on your Virtue clients
-              so future uploads use the new keys. Partners who already monitor
-              this account will keep access to new logs automatically.
+              so future uploads use the new keys.
             </p>
           </>
         )}

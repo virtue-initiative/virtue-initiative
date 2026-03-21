@@ -7,6 +7,20 @@ import { Env, Variables } from '../types/bindings';
 
 const data = new Hono<{ Bindings: Env; Variables: Variables }>();
 
+function getEncryptedKeyForUser(rawAccessKeys: string, userId: string) {
+  try {
+    const payload = JSON.parse(rawAccessKeys) as {
+      keys?: Array<{ user_id?: string; hpke_key?: string }>;
+    };
+    return (
+      payload.keys?.find((key) => key.user_id === userId && typeof key.hpke_key === 'string')
+        ?.hpke_key ?? null
+    );
+  } catch {
+    return null;
+  }
+}
+
 const listDataSchema = z.object({
   device_id: z.uuid().optional(),
   user: z.uuid().optional(),
@@ -44,14 +58,23 @@ data.get('/', authenticate('access'), validateZ('query', listDataSchema), async 
   return c.json({
     batches: page
       .filter((item) => item.kind === 'batch')
-      .map((item) => ({
-        device_id: item.value.device_id,
-        id: item.value.id,
-        start_time: item.value.start_time,
-        end_time: item.value.end_time,
-        end_hash: item.value.end_hash,
-        url: item.value.url,
-      })),
+      .map((item) => {
+        const encryptedKey = getEncryptedKeyForUser(item.value.access_keys, requesterId);
+        if (!encryptedKey) {
+          return null;
+        }
+
+        return {
+          device_id: item.value.device_id,
+          id: item.value.id,
+          start_time: item.value.start_time,
+          end_time: item.value.end_time,
+          end_hash: item.value.end_hash,
+          url: item.value.url,
+          encrypted_key: encryptedKey,
+        };
+      })
+      .filter((item) => item !== null),
     logs: page
       .filter((item) => item.kind === 'log')
       .map((item) => ({

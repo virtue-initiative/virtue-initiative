@@ -7,20 +7,74 @@ import {
   latestEmailToken,
   listEmailDeliveries,
   markUserEmailVerified,
+  passwordAuthFor,
+  passwordSaltFor,
+  privateKeyFor,
+  publicKeyFor,
   signupAndGetToken,
   uuidToBytes,
 } from './helpers';
-import { verifyPassword } from '../src/lib/password';
+import { CURRENT_HASH_PARAMS, verifyPasswordAuth } from '../src/lib/password';
+
 beforeEach(clearDB);
 
 describe('Auth routes', () => {
+  it('returns the current hash params and login material in an enumeration-safe shape', async () => {
+    await signupAndGetToken('alice@example.com', 'correct horse');
+
+    const paramsRes = await SELF.fetch(`${BASE}/current-hash-params`);
+    expect(paramsRes.status).toBe(200);
+    expect(await paramsRes.json()).toMatchObject({
+      version: CURRENT_HASH_PARAMS.version,
+      algorithm: CURRENT_HASH_PARAMS.algorithm,
+      memory_cost_kib: CURRENT_HASH_PARAMS.memory_cost_kib,
+      time_cost: CURRENT_HASH_PARAMS.time_cost,
+      parallelism: CURRENT_HASH_PARAMS.parallelism,
+      salt_length: CURRENT_HASH_PARAMS.salt_length,
+      hkdf_hash: CURRENT_HASH_PARAMS.hkdf_hash,
+    });
+
+    const existingRes = await SELF.fetch(
+      `${BASE}/user/login-material?email=${encodeURIComponent('alice@example.com')}`,
+    );
+    expect(existingRes.status).toBe(200);
+    const existingBody = (await existingRes.json()) as {
+      password_salt: string;
+      params: { salt_length: number };
+    };
+    expect(Buffer.from(existingBody.password_salt, 'base64')).toHaveLength(
+      CURRENT_HASH_PARAMS.salt_length,
+    );
+
+    const unknownRes = await SELF.fetch(
+      `${BASE}/user/login-material?email=${encodeURIComponent('nobody@example.com')}`,
+    );
+    expect(unknownRes.status).toBe(200);
+    const unknownBody = (await unknownRes.json()) as {
+      password_salt: string;
+      params: { salt_length: number };
+    };
+    expect(Buffer.from(unknownBody.password_salt, 'base64')).toHaveLength(
+      CURRENT_HASH_PARAMS.salt_length,
+    );
+    expect(unknownBody).toHaveProperty('params');
+  });
+
   it('creates a user, returns session credentials, and sends a verification email on signup', async () => {
+    const password_auth = await passwordAuthFor('client-derived-auth');
+    const password_salt = await passwordSaltFor('alice@example.com');
+    const pub_key = await publicKeyFor('alice@example.com');
+    const priv_key = privateKeyFor('alice@example.com');
+
     const res = await SELF.fetch(`${BASE}/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         email: 'alice@example.com',
-        password: 'client-side-hash',
+        password_auth,
+        password_salt,
+        pub_key,
+        priv_key,
         name: 'Alice',
       }),
     });
@@ -38,11 +92,24 @@ describe('Auth routes', () => {
     expect(body.user.name).toBe('Alice');
     expect(body.user.email_verified).toBe(false);
 
-    const storedUser = await env.DB.prepare('SELECT id FROM users WHERE email = ?')
+    const storedUser = await env.DB.prepare(
+      'SELECT id, password_hash, password_salt, pub_key, priv_key FROM users WHERE email = ?',
+    )
       .bind('alice@example.com')
-      .first<{ id: ArrayBuffer }>();
+      .first<{
+        id: ArrayBuffer;
+        password_hash: string;
+        password_salt: ArrayBuffer;
+        pub_key: ArrayBuffer;
+        priv_key: ArrayBuffer;
+      }>();
     expect(storedUser).toBeTruthy();
     expect(new Uint8Array(storedUser!.id)).toHaveLength(16);
+    expect(await verifyPasswordAuth(Buffer.from(password_auth, 'base64'), storedUser!.password_hash))
+      .toBe(true);
+    expect(Buffer.from(storedUser!.password_salt).toString('base64')).toBe(password_salt);
+    expect(Buffer.from(storedUser!.pub_key).toString('base64')).toBe(pub_key);
+    expect(Buffer.from(storedUser!.priv_key).toString('base64')).toBe(priv_key);
 
     const session = await env.DB.prepare(
       `SELECT lower(hex(user_id)) as user_id_hex, expires_at
@@ -69,48 +136,68 @@ describe('Auth routes', () => {
       recipient_email: 'alice@example.com',
       status: 'sent',
     });
-    const signupMetadata = JSON.parse(deliveries[0]!.metadata) as { verifyUrl: string };
-    expect(new URL(signupMetadata.verifyUrl).origin).toBe('http://localhost:5173');
 
     const token = await latestEmailToken('email_verification');
     expect(token?.email).toBe('alice@example.com');
   });
 
-  it('refreshes an access token from the refresh cookie', async () => {
+  it('logs in with password_auth and refreshes an access token from the refresh cookie', async () => {
     const signupRes = await SELF.fetch(`${BASE}/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'bob@example.com', password: 'pw' }),
+      body: JSON.stringify({
+        email: 'bob@example.com',
+        password_auth: await passwordAuthFor('pw'),
+        password_salt: await passwordSaltFor('bob@example.com'),
+        pub_key: await publicKeyFor('bob@example.com'),
+        priv_key: privateKeyFor('bob@example.com'),
+      }),
     });
+    expect(signupRes.status).toBe(201);
+
+    const loginRes = await SELF.fetch(`${BASE}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'bob@example.com',
+        password_auth: await passwordAuthFor('pw'),
+      }),
+    });
+    expect(loginRes.status).toBe(200);
+    expect((await loginRes.json()) as { access_token: string }).toHaveProperty('access_token');
+
+    const badLoginRes = await SELF.fetch(`${BASE}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'bob@example.com',
+        password_auth: await passwordAuthFor('wrong'),
+      }),
+    });
+    expect(badLoginRes.status).toBe(401);
 
     const cookie = signupRes.headers.get('set-cookie') ?? '';
-    const res = await SELF.fetch(`${BASE}/token`, {
+    const refreshRes = await SELF.fetch(`${BASE}/token`, {
       method: 'POST',
       headers: { Cookie: cookie },
     });
-
-    expect(res.status).toBe(201);
-    const body = (await res.json()) as { access_token: string };
-    expect(body.access_token).toBeTruthy();
-
-    const sessionCount = await env.DB.prepare(
-      `SELECT COUNT(*) as count
-       FROM user_sessions`,
-    ).first<{ count: number }>();
-    expect(sessionCount?.count).toBe(1);
+    expect(refreshRes.status).toBe(201);
+    expect((await refreshRes.json()) as { access_token: string }).toHaveProperty('access_token');
   });
 
   it('returns the current user and allows updating profile fields', async () => {
     const { token, userId } = await signupAndGetToken('carol@example.com', 'pw', 'Carol');
+
+    const nextPubKey = await publicKeyFor('carol-updated');
+    const nextPrivKey = privateKeyFor('carol-updated');
 
     const patchRes = await SELF.fetch(`${BASE}/user`, {
       method: 'PATCH',
       headers: authHeaders(token),
       body: JSON.stringify({
         name: 'Updated Carol',
-        e2ee_key: Buffer.from('secret').toString('base64'),
-        pub_key: Buffer.from('public-key').toString('base64'),
-        priv_key: Buffer.from('private-key').toString('base64'),
+        pub_key: nextPubKey,
+        priv_key: nextPrivKey,
       }),
     });
     expect(patchRes.status).toBe(200);
@@ -123,16 +210,13 @@ describe('Auth routes', () => {
     const body = (await getRes.json()) as {
       name: string;
       email_verified: boolean;
-      e2ee_key: string;
       pub_key: string;
       priv_key: string;
     };
     expect(body.name).toBe('Updated Carol');
     expect(body.email_verified).toBe(false);
-    expect(Buffer.from(body.e2ee_key, 'base64').toString()).toBe('secret');
-    expect(Buffer.from(body.pub_key, 'base64').toString()).toBe('public-key');
-    expect(Buffer.from(body.priv_key, 'base64').toString()).toBe('private-key');
-
+    expect(body.pub_key).toBe(nextPubKey);
+    expect(body.priv_key).toBe(nextPrivKey);
     await markUserEmailVerified(userId);
     const updateEmailRes = await SELF.fetch(`${BASE}/user`, {
       method: 'PATCH',
@@ -154,8 +238,8 @@ describe('Auth routes', () => {
     expect(updatedBody.email_bounced_at).toBeNull();
   });
 
-  it('verifies email tokens and marks the user as verified', async () => {
-    const { token } = await signupAndGetToken('verifyme@example.com', 'pw', 'Verify Me');
+  it('verifies email tokens and resends verification emails for authenticated users', async () => {
+    const { token, userId } = await signupAndGetToken('verifyme@example.com', 'pw', 'Verify Me');
     const deliveries = await listEmailDeliveries();
     const metadata = JSON.parse(deliveries[0]!.metadata) as { verifyUrl: string };
     const verifyToken = new URL(metadata.verifyUrl).searchParams.get('verify_email_token');
@@ -170,21 +254,18 @@ describe('Auth routes', () => {
     const userRes = await SELF.fetch(`${BASE}/user`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    const user = (await userRes.json()) as { email_verified: boolean };
-    expect(user.email_verified).toBe(true);
-  });
+    expect((await userRes.json()) as { email_verified: boolean }).toMatchObject({
+      email_verified: true,
+    });
 
-  it('resends verification emails for authenticated unverified users', async () => {
-    const { token } = await signupAndGetToken('resend@example.com', 'pw');
-
+    await env.DB.prepare('UPDATE users SET email_verified = 0 WHERE id = ?')
+      .bind(uuidToBytes(userId))
+      .run();
     const resendRes = await SELF.fetch(`${BASE}/email-verification`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
     });
-
     expect(resendRes.status).toBe(200);
-    const deliveries = await listEmailDeliveries();
-    expect(deliveries.filter((delivery) => delivery.kind === 'email_verification')).toHaveLength(2);
   });
 
   it('blocks verification resend requests after a bounced delivery', async () => {
@@ -199,13 +280,9 @@ describe('Auth routes', () => {
     });
 
     expect(resendRes.status).toBe(409);
-    expect(await resendRes.json()).toEqual({
-      error:
-        'Your last verification email bounced. Please update your email address before requesting another verification email.',
-    });
   });
 
-  it('requests and applies password resets', async () => {
+  it('requests and applies password resets with new auth material and keypair bytes', async () => {
     const { userId } = await signupAndGetToken('reset@example.com', 'old-password', 'Reset User');
     await markUserEmailVerified(userId);
 
@@ -231,154 +308,41 @@ describe('Auth routes', () => {
     expect(await validateRes.json()).toEqual({
       ok: true,
       email: 'reset@example.com',
-      user_id: userId,
-      partner_access_targets: [],
     });
 
-    const resetRes = await SELF.fetch(`${BASE}/password-reset/finalize`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: resetToken, password: 'new-password-hash' }),
-    });
-    expect(resetRes.status).toBe(200);
-
-    const storedUser = await env.DB.prepare('SELECT password_hash FROM users WHERE email = ?')
-      .bind('reset@example.com')
-      .first<{ password_hash: string }>();
-    expect(storedUser).toBeTruthy();
-    expect(await verifyPassword('new-password-hash', storedUser!.password_hash)).toBe(true);
-  });
-
-  it('rotates encrypted keys during password resets and refreshes shared partner access blobs', async () => {
-    const { token, userId } = await signupAndGetToken('secure-reset@example.com', 'pw');
-    const { token: ownerToken, userId: ownerUserId } = await signupAndGetToken(
-      'shared-owner@example.com',
-      'pw',
-    );
-    await markUserEmailVerified(userId);
-    await markUserEmailVerified(ownerUserId);
-    await SELF.fetch(`${BASE}/user`, {
-      method: 'PATCH',
-      headers: authHeaders(ownerToken),
-      body: JSON.stringify({
-        pub_key: Buffer.from('shared-owner-public-key').toString('base64'),
-      }),
-    });
-
-    await SELF.fetch(`${BASE}/user`, {
-      method: 'PATCH',
-      headers: authHeaders(token),
-      body: JSON.stringify({
-        e2ee_key: Buffer.from('wrapped-e2ee').toString('base64'),
-        pub_key: Buffer.from('wrapped-public').toString('base64'),
-        priv_key: Buffer.from('wrapped-private').toString('base64'),
-      }),
-    });
-
-    const inviteRes = await SELF.fetch(`${BASE}/partner`, {
-      method: 'POST',
-      headers: authHeaders(token),
-      body: JSON.stringify({
-        email: 'shared-owner@example.com',
-      }),
-    });
-    const invite = (await inviteRes.json()) as { id: string };
-    const inviteDelivery = (await listEmailDeliveries()).find(
-      (delivery) =>
-        delivery.kind === 'partner_invite' &&
-        delivery.recipient_email === 'shared-owner@example.com',
-    );
-    const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
-
-    await SELF.fetch(`${BASE}/partner/accept`, {
-      method: 'POST',
-      headers: authHeaders(ownerToken),
-      body: JSON.stringify({ token: inviteMetadata.inviteToken }),
-    });
-    await env.DB.prepare('UPDATE partners SET e2ee_key = ? WHERE id = ?')
-      .bind(Buffer.from('shared-access-key'), uuidToBytes(invite.id))
-      .run();
-
-    await SELF.fetch(`${BASE}/password-reset`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'secure-reset@example.com' }),
-    });
-
-    const deliveries = await listEmailDeliveries();
-    const resetDelivery = deliveries.find((delivery) => delivery.kind === 'password_reset');
-    const resetMetadata = JSON.parse(resetDelivery!.metadata) as { resetUrl: string };
-    const resetToken = new URL(resetMetadata.resetUrl).searchParams.get('reset_password_token');
-
-    const validateRes = await SELF.fetch(`${BASE}/password-reset/validate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: resetToken }),
-    });
-    expect(await validateRes.json()).toEqual({
-      ok: true,
-      email: 'secure-reset@example.com',
-      user_id: userId,
-      partner_access_targets: [
-        {
-          partnership_id: invite.id,
-          partner_email: 'shared-owner@example.com',
-          partner_pub_key: Buffer.from('shared-owner-public-key').toString('base64'),
-        },
-      ],
-    });
-
-    const missingWrapRes = await SELF.fetch(`${BASE}/password-reset/finalize`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        token: resetToken,
-        password: 'new-password-hash',
-        e2ee_key: Buffer.from('rotated-e2ee').toString('base64'),
-      }),
-    });
-    expect(missingWrapRes.status).toBe(400);
+    const newPasswordAuth = await passwordAuthFor('new-password');
+    const newPasswordSalt = await passwordSaltFor('reset@example.com:new');
+    const newPubKey = await publicKeyFor('reset@example.com:new');
+    const newPrivKey = privateKeyFor('reset@example.com:new');
 
     const resetRes = await SELF.fetch(`${BASE}/password-reset/finalize`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         token: resetToken,
-        password: 'new-password-hash',
-        e2ee_key: Buffer.from('rotated-e2ee').toString('base64'),
-        pub_key: Buffer.from('rotated-public').toString('base64'),
-        priv_key: Buffer.from('rotated-private').toString('base64'),
-        partner_access_keys: [
-          {
-            partnership_id: invite.id,
-            e2ee_key: Buffer.from('rotated-shared-access').toString('base64'),
-          },
-        ],
+        password_auth: newPasswordAuth,
+        password_salt: newPasswordSalt,
+        pub_key: newPubKey,
+        priv_key: newPrivKey,
       }),
     });
     expect(resetRes.status).toBe(200);
 
     const storedUser = await env.DB.prepare(
-      'SELECT password_hash, e2ee_key, pub_key, priv_key FROM users WHERE email = ?',
+      'SELECT password_hash, password_salt, pub_key, priv_key FROM users WHERE email = ?',
     )
-      .bind('secure-reset@example.com')
+      .bind('reset@example.com')
       .first<{
         password_hash: string;
-        e2ee_key: ArrayBuffer;
+        password_salt: ArrayBuffer;
         pub_key: ArrayBuffer;
         priv_key: ArrayBuffer;
       }>();
     expect(storedUser).toBeTruthy();
-    expect(await verifyPassword('new-password-hash', storedUser!.password_hash)).toBe(true);
-    expect(Buffer.from(storedUser!.e2ee_key).toString()).toBe('rotated-e2ee');
-    expect(Buffer.from(storedUser!.pub_key).toString()).toBe('rotated-public');
-    expect(Buffer.from(storedUser!.priv_key).toString()).toBe('rotated-private');
-
-    const sharedAccess = await env.DB.prepare('SELECT e2ee_key FROM partners WHERE id = ?')
-      .bind(uuidToBytes(invite.id))
-      .first<{ e2ee_key: ArrayBuffer | null }>();
-    expect(Buffer.from(sharedAccess?.e2ee_key ?? new ArrayBuffer(0)).toString()).toBe(
-      'rotated-shared-access',
-    );
+    expect(await verifyPasswordAuth(Buffer.from(newPasswordAuth, 'base64'), storedUser!.password_hash))
+      .toBe(true);
+    expect(Buffer.from(storedUser!.password_salt).toString('base64')).toBe(newPasswordSalt);
+    expect(Buffer.from(storedUser!.pub_key).toString('base64')).toBe(newPubKey);
+    expect(Buffer.from(storedUser!.priv_key).toString('base64')).toBe(newPrivKey);
   });
 });

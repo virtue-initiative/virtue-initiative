@@ -1,7 +1,12 @@
 import { createContext } from "preact";
 import { useContext, useState, useEffect, useCallback } from "preact/hooks";
 import { api, setReauthHandler } from "../api";
-import { deriveWrappingKey, hashPasswordForAuth } from "../crypto";
+import {
+  derivePasswordMaterial,
+  encryptData,
+  generateRandomKeyBytes,
+  generateUserKeyPair,
+} from "../crypto";
 
 const WRAPPING_KEY_STORAGE = "virtue_wrapping_key";
 
@@ -55,6 +60,7 @@ interface AuthState {
     access_token: string;
     userId: string;
     wrappingKey: CryptoKey;
+    privateKey: CryptoKey;
   }>;
   rememberWrappingKey: (wrappingKey: CryptoKey) => Promise<void>;
   logout: () => Promise<void>;
@@ -100,10 +106,14 @@ export function AuthProvider({
   }, []);
 
   const login = useCallback(async (email: string, pw: string) => {
-    const pwHash = await hashPasswordForAuth(pw, email);
-    const res = await api.login(email, pwHash);
+    const material = await api.getLoginMaterial(email);
+    const { passwordAuth, wrappingKey: wk } = await derivePasswordMaterial(
+      pw,
+      Uint8Array.fromBase64(material.password_salt),
+      material.params,
+    );
+    const res = await api.login(email, passwordAuth.toBase64());
     const uid = jwtSub(res.access_token)!;
-    const wk = await deriveWrappingKey(pw, uid);
     await saveWrappingKey(wk);
     setToken(res.access_token);
     setUserId(uid);
@@ -113,15 +123,33 @@ export function AuthProvider({
 
   const signup = useCallback(
     async (email: string, pw: string, name?: string) => {
-      const pwHash = await hashPasswordForAuth(pw, email);
-      const res = await api.signup(email, pwHash, name);
+      const params = await api.getCurrentHashParams();
+      const passwordSalt = generateRandomKeyBytes(params.salt_length);
+      const { passwordAuth, wrappingKey: wk } = await derivePasswordMaterial(
+        pw,
+        passwordSalt,
+        params,
+      );
+      const keyPair = await generateUserKeyPair();
+      const encryptedPrivateKey = await encryptData(wk, keyPair.privateKey);
+      const res = await api.signup(email, {
+        password_auth: passwordAuth.toBase64(),
+        password_salt: passwordSalt.toBase64(),
+        pub_key: keyPair.publicKey.toBase64(),
+        priv_key: encryptedPrivateKey.toBase64(),
+        ...(name ? { name } : {}),
+      });
       const uid = res.user.id;
-      const wk = await deriveWrappingKey(pw, uid);
       await saveWrappingKey(wk);
       setToken(res.access_token);
       setUserId(uid);
       setWrappingKey(wk);
-      return { access_token: res.access_token, userId: uid, wrappingKey: wk };
+      return {
+        access_token: res.access_token,
+        userId: uid,
+        wrappingKey: wk,
+        privateKey: keyPair.privateKeyHandle,
+      };
     },
     [],
   );
