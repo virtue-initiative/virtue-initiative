@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import shutil
@@ -114,9 +115,18 @@ def ios_icon_filename(spec: dict[str, str | int]) -> str:
     return f"Icon-App-{idiom}-{size}@{scale}.png"
 
 
+def flatten_onto_background(
+    image: Image.Image, background_rgb: tuple[int, int, int]
+) -> Image.Image:
+    base = Image.new("RGBA", image.size, (*background_rgb, 255))
+    base.alpha_composite(image)
+    return base
+
+
 def save_ios_app_icons(master: Image.Image, assets_dir: Path) -> list[Path]:
     app_icon_dir = assets_dir / "AppIcon.appiconset"
     outputs = [assets_dir / "Contents.json", app_icon_dir / "Contents.json"]
+    ios_master = flatten_onto_background(master, (255, 255, 255))
 
     if app_icon_dir.exists():
         shutil.rmtree(app_icon_dir)
@@ -135,7 +145,7 @@ def save_ios_app_icons(master: Image.Image, assets_dir: Path) -> list[Path]:
     for spec in IOS_APP_ICON_SPECS:
         filename = ios_icon_filename(spec)
         target_path = app_icon_dir / filename
-        save_png(master, target_path, int(spec["pixels"]))
+        save_png(ios_master, target_path, int(spec["pixels"]))
         outputs.append(target_path)
         contents_images.append(
             {
@@ -159,7 +169,9 @@ def save_ios_app_icons(master: Image.Image, assets_dir: Path) -> list[Path]:
     return outputs
 
 
-def preprocess_logo(raw_path: Path, out_path: Path, theme_rgb: tuple[int, int, int]) -> Image.Image:
+def preprocess_logo(
+    raw_path: Path, out_path: Path | None, theme_rgb: tuple[int, int, int]
+) -> Image.Image:
     raw = Image.open(raw_path).convert("RGBA")
     raw = recolor_with_theme(raw, theme_rgb)
     alpha = raw.getchannel("A")
@@ -187,12 +199,25 @@ def preprocess_logo(raw_path: Path, out_path: Path, theme_rgb: tuple[int, int, i
     y = (side - scaled_size[1]) // 2
     canvas.paste(trimmed, (x, y), trimmed)
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    canvas.save(out_path, format="PNG", optimize=True)
+    if out_path is not None:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        canvas.save(out_path, format="PNG", optimize=True)
     return canvas
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--target",
+        choices=("all", "ios"),
+        default="all",
+        help="Limit generated outputs to a specific target set.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
     root = Path(__file__).resolve().parent.parent
     images_dir = root / "images"
     raw_path = images_dir / "logo-raw.png"
@@ -202,55 +227,60 @@ def main() -> None:
     if not raw_path.exists():
         raise SystemExit(f"missing source image: {raw_path}")
 
-    master = preprocess_logo(raw_path, prepped_path, theme_rgb)
+    master = preprocess_logo(
+        raw_path,
+        prepped_path if args.target == "all" else None,
+        theme_rgb,
+    )
 
-    outputs: list[Path] = [prepped_path]
+    outputs: list[Path] = [prepped_path] if args.target == "all" else []
 
-    for path in [root / "web" / "public", root / "landing" / "public"]:
-        save_ico(master, path / "favicon.ico", [16, 32, 48])
-        save_png(master, path / "favicon-16x16.png", 16)
-        save_png(master, path / "favicon-32x32.png", 32)
-        save_png(master, path / "apple-touch-icon.png", 180)
-        save_png(master, path / "android-chrome-192x192.png", 192)
-        save_png(master, path / "android-chrome-512x512.png", 512)
-        outputs.extend(
-            [
-                path / "favicon.ico",
-                path / "favicon-16x16.png",
-                path / "favicon-32x32.png",
-                path / "apple-touch-icon.png",
-                path / "android-chrome-192x192.png",
-                path / "android-chrome-512x512.png",
-            ]
-        )
+    if args.target == "all":
+        for path in [root / "web" / "public", root / "landing" / "public"]:
+            save_ico(master, path / "favicon.ico", [16, 32, 48])
+            save_png(master, path / "favicon-16x16.png", 16)
+            save_png(master, path / "favicon-32x32.png", 32)
+            save_png(master, path / "apple-touch-icon.png", 180)
+            save_png(master, path / "android-chrome-192x192.png", 192)
+            save_png(master, path / "android-chrome-512x512.png", 512)
+            outputs.extend(
+                [
+                    path / "favicon.ico",
+                    path / "favicon-16x16.png",
+                    path / "favicon-32x32.png",
+                    path / "apple-touch-icon.png",
+                    path / "android-chrome-192x192.png",
+                    path / "android-chrome-512x512.png",
+                ]
+            )
 
-    mac_assets = root / "client" / "mac" / "assets"
-    save_icns(master, mac_assets / "AppIcon.icns", [16, 32, 64, 128, 256, 512, 1024])
-    save_png(master, mac_assets / "tray-icon.png", 32)
-    outputs.extend([mac_assets / "AppIcon.icns", mac_assets / "tray-icon.png"])
+        mac_assets = root / "client" / "mac" / "assets"
+        save_icns(master, mac_assets / "AppIcon.icns", [16, 32, 64, 128, 256, 512, 1024])
+        save_png(master, mac_assets / "tray-icon.png", 32)
+        outputs.extend([mac_assets / "AppIcon.icns", mac_assets / "tray-icon.png"])
 
-    linux_assets = root / "client" / "linux" / "assets"
-    save_png(master, linux_assets / "tray-icon.png", 32)
-    outputs.append(linux_assets / "tray-icon.png")
+        linux_assets = root / "client" / "linux" / "assets"
+        save_png(master, linux_assets / "tray-icon.png", 32)
+        outputs.append(linux_assets / "tray-icon.png")
 
-    windows_assets = root / "client" / "windows" / "assets"
-    save_ico(master, windows_assets / "app-icon.ico", [16, 24, 32, 40, 48, 64, 128, 256])
-    save_png(master, windows_assets / "app-icon.png", 256)
-    outputs.extend([windows_assets / "app-icon.ico", windows_assets / "app-icon.png"])
+        windows_assets = root / "client" / "windows" / "assets"
+        save_ico(master, windows_assets / "app-icon.ico", [16, 24, 32, 40, 48, 64, 128, 256])
+        save_png(master, windows_assets / "app-icon.png", 256)
+        outputs.extend([windows_assets / "app-icon.ico", windows_assets / "app-icon.png"])
 
-    android_base = root / "client" / "android" / "app" / "src" / "main" / "res"
-    android_sizes = {
-        "mipmap-mdpi": 48,
-        "mipmap-hdpi": 72,
-        "mipmap-xhdpi": 96,
-        "mipmap-xxhdpi": 144,
-        "mipmap-xxxhdpi": 192,
-    }
-    for bucket, size in android_sizes.items():
-        save_png(master, android_base / bucket / "ic_launcher.png", size)
-        save_png(master, android_base / bucket / "ic_launcher_round.png", size)
-        outputs.append(android_base / bucket / "ic_launcher.png")
-        outputs.append(android_base / bucket / "ic_launcher_round.png")
+        android_base = root / "client" / "android" / "app" / "src" / "main" / "res"
+        android_sizes = {
+            "mipmap-mdpi": 48,
+            "mipmap-hdpi": 72,
+            "mipmap-xhdpi": 96,
+            "mipmap-xxhdpi": 144,
+            "mipmap-xxxhdpi": 192,
+        }
+        for bucket, size in android_sizes.items():
+            save_png(master, android_base / bucket / "ic_launcher.png", size)
+            save_png(master, android_base / bucket / "ic_launcher_round.png", size)
+            outputs.append(android_base / bucket / "ic_launcher.png")
+            outputs.append(android_base / bucket / "ic_launcher_round.png")
 
     ios_assets = root / "client" / "ios" / "app" / "Assets.xcassets"
     outputs.extend(save_ios_app_icons(master, ios_assets))
