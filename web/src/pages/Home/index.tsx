@@ -3,8 +3,6 @@ import { useLocation } from "preact-iso";
 import { api, Device, WatchingPartner, WatcherPartner } from "../../api";
 import { Button } from "../../components/Button";
 import { useAuth } from "../../context/auth";
-import { useE2EE } from "../../context/e2ee";
-import { encryptForPublicKey } from "../../crypto";
 import { formatDate, formatRelativeTimestamp } from "../../utils/time";
 import "./style.css";
 
@@ -317,7 +315,7 @@ function PendingPartnerCard({
       <p class="invite-desc">
         {"digest_cadence" in partner
           ? "You have been invited to monitor this person. Once you accept, you will be able to view their encrypted activity data."
-          : "You invited this person to monitor your account. After they accept the email link, click Confirm partner to share the encrypted key they need to view your logs."}
+          : "You invited this person to monitor your account. Once they accept and have an account, new uploads will include them automatically."}
       </p>
       <dl class="card-meta">
         <dt>Email</dt>
@@ -351,10 +349,8 @@ function PartnerCard({
   token: string;
   onChanged: () => void;
 }) {
-  const { userId } = useAuth();
-  const e2ee = useE2EE();
   const { route } = useLocation();
-  const [action, setAction] = useState<"confirm" | "remove" | null>(null);
+  const [action, setAction] = useState<"remove" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function remove() {
@@ -367,43 +363,6 @@ function PartnerCard({
       onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to remove partner");
-      setAction(null);
-    }
-  }
-
-  async function confirmPartner() {
-    if (!userId) return;
-    setAction("confirm");
-    setError(null);
-    try {
-      const ownKeyBytes = e2ee.getKeyBytes(userId);
-      if (!ownKeyBytes) {
-        throw new Error("Your encryption key is not ready yet.");
-      }
-
-      const pubkey = await api.getPartnerPublicKey(partner.user.email);
-      const encryptedKey = await encryptForPublicKey(
-        Uint8Array.fromBase64(pubkey),
-        Uint8Array.from(ownKeyBytes),
-      );
-      await api.updateWatcher(token, partner.id, {
-        e2ee_key: encryptedKey.toBase64(),
-      });
-      setAction(null);
-      onChanged();
-    } catch (err) {
-      if (
-        err instanceof Error &&
-        (err as Error & { status?: number }).status === 404
-      ) {
-        setError("That partner has not created an account yet.");
-      } else {
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Failed to confirm partner encryption",
-        );
-      }
       setAction(null);
     }
   }
@@ -431,16 +390,6 @@ function PartnerCard({
             View logs
           </button>
         )}
-        {!("digest_cadence" in partner) && !partner.e2ee_key && (
-          <button
-            class="btn btn-primary"
-            type="button"
-            onClick={confirmPartner}
-            disabled={action !== null}
-          >
-            {action === "confirm" ? "Confirming…" : "Confirm partner"}
-          </button>
-        )}
         <button
           class="btn btn-danger"
           type="button"
@@ -462,27 +411,13 @@ function PartnerDevicesSection({
   devices: Device[];
 }) {
   const { route } = useLocation();
-  const e2ee = useE2EE();
-
   const partnerId = partner.user.id;
-  const hasKey = Boolean(e2ee.getKey(partnerId));
 
   return (
     <section class="dash-section">
       <div class="section-header">
         <h2>{partner.user.name ?? partner.user.email}</h2>
       </div>
-
-      {!hasKey && (
-        <div class="card settings-form partner-key-notice">
-          <p class="settings-hint">
-            You are monitoring this partner now, but encrypted screenshots and
-            uploaded blocks cannot be decrypted yet. Ask the person you monitor
-            to click <strong>Confirm partner</strong> if they invited you before
-            your account existed.
-          </p>
-        </div>
-      )}
 
       {devices.length === 0 ? (
         <p class="empty">No devices registered.</p>

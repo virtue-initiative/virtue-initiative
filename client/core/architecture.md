@@ -92,7 +92,7 @@ That means platform crates do not need to restart the daemon just to change API 
 Current files:
 
 - `status.json`: last known runtime status
-- `auth.json`: user id, user token, stored wrapping key, and device credentials
+- `auth.json`: user access token and device credentials
 - `device_settings.json`: latest device settings returned by `GET /d/device`
 - `pending_requests.json`: retry queue
 - `batch_buffer.json`: buffered plaintext screenshot events waiting for batch upload
@@ -115,25 +115,19 @@ The service primarily depends on device credentials after login. User refresh-co
 The device settings response is important because it provides:
 
 - `enabled`
-- encrypted `e2ee_key`
+- `owner` public key
+- accepted partner public keys
 - `hash_base_url`
 
-The actual batch encryption key is restored when device settings are fetched.
-
-Instead, login restores it using the same flow as the web app:
+Login authenticates with the same password-derived flow as the web app:
 
 1. log in with the argon2id-hashed password
-2. parse `userId` from the returned access token `sub`
-3. derive a wrapping key with PBKDF2-HMAC-SHA256 using:
-   - password = original plaintext password
-   - salt = UTF-8 user id
-   - iterations = 100,000
-4. persist that wrapping key locally
-5. call `GET /d/device`
-6. decrypt `device_settings.e2ee_key` as `nonce[12] || ciphertext+tag` using the stored wrapping key
-7. keep the decrypted 32-byte batch encryption key in runtime memory for whole-batch encryption
+2. persist the returned user access token
+3. register the device and persist device credentials
+4. call `GET /d/device`
+5. cache the recipient public keys used for per-upload batch-key wrapping
 
-On restart, the client restores the stored wrapping key from `auth.json` and decrypts the cached or freshly fetched `device_settings.e2ee_key` again.
+The core runtime does not persist a reusable batch key. Each upload generates a fresh random AES-256-GCM batch key and wraps it separately for the owner and each accepted partner using HPKE.
 
 ## Screenshot Model
 
@@ -210,7 +204,7 @@ events -> msgpack -> gzip
 
 ### Encryption
 
-After compression, the whole blob is encrypted with AES-256-GCM using the device `e2ee_key`.
+After compression, the whole blob is encrypted with a fresh random AES-256-GCM batch key.
 
 Serialized wire format:
 
@@ -218,7 +212,16 @@ Serialized wire format:
 nonce[12 bytes] || ciphertext_plus_tag
 ```
 
-This matches the web app `encryptData()` / `decryptBatch()` format.
+For upload, the client also builds per-recipient HPKE envelopes for that batch key:
+
+```text
+owner: HPKE(public_key, batch_key)
+partner_1: HPKE(public_key, batch_key)
+partner_2: HPKE(public_key, batch_key)
+...
+```
+
+Those envelopes are sent alongside the blob in the `access_keys` form field for `POST /d/batch`.
 
 ### Upload
 

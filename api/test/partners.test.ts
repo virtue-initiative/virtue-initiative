@@ -12,7 +12,7 @@ import {
 beforeEach(clearDB);
 
 describe('Partner routes', () => {
-  it('creates, accepts, lists, updates, and deletes a partnership', async () => {
+  it('creates, accepts, lists, and deletes a partnership without shared-key fields', async () => {
     const { token: ownerToken, userId: ownerUserId } = await signupAndGetToken(
       'owner@example.com',
       'pw',
@@ -28,20 +28,15 @@ describe('Partner routes', () => {
     const createRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
       headers: authHeaders(ownerToken),
-      body: JSON.stringify({
-        email: 'partner@example.com',
-        e2ee_key: Buffer.from('wrapped-key').toString('base64'),
-      }),
+      body: JSON.stringify({ email: 'partner@example.com' }),
     });
     expect(createRes.status).toBe(201);
     const created = (await createRes.json()) as { id: string };
-    const afterInviteDeliveries = await listEmailDeliveries();
-    const inviteDelivery = afterInviteDeliveries.find(
+
+    const inviteDelivery = (await listEmailDeliveries()).find(
       (delivery) => delivery.kind === 'partner_invite',
     );
-    expect(inviteDelivery).toBeTruthy();
     const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
-    expect(inviteDelivery?.text).toContain('partner_invite_token=');
 
     const acceptRes = await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
@@ -49,35 +44,40 @@ describe('Partner routes', () => {
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
     expect(acceptRes.status).toBe(200);
-    const deliveries = await listEmailDeliveries();
-    const acceptedDelivery = deliveries.find((delivery) => delivery.kind === 'partner_accepted');
-    expect(acceptedDelivery).toBeTruthy();
-    expect(acceptedDelivery?.text).toContain('http://localhost:5173');
 
-    const listRes = await SELF.fetch(`${BASE}/partner`, {
+    const ownerListRes = await SELF.fetch(`${BASE}/partner`, {
       headers: { Authorization: `Bearer ${ownerToken}` },
     });
-    const list = (await listRes.json()) as {
+    const ownerList = (await ownerListRes.json()) as {
       watchers: Array<{
         id: string;
         user: { id?: string; email: string; name?: string };
-        e2ee_key?: string;
+        status: 'pending' | 'accepted';
       }>;
     };
-    const owned = list.watchers.find((partner) => partner.id === created.id);
-    expect(owned?.user).toEqual({
-      id: partnerUserId,
-      email: 'partner@example.com',
-      name: 'Partner',
+    expect(ownerList.watchers.find((partner) => partner.id === created.id)).toMatchObject({
+      id: created.id,
+      user: {
+        id: partnerUserId,
+        email: 'partner@example.com',
+        name: 'Partner',
+      },
+      status: 'accepted',
     });
-    expect(owned?.e2ee_key).toBeUndefined();
 
-    const patchRes = await SELF.fetch(`${BASE}/partner/watcher/${created.id}`, {
-      method: 'PATCH',
-      headers: authHeaders(ownerToken),
-      body: JSON.stringify({ e2ee_key: Buffer.from('owner-share-key').toString('base64') }),
+    const partnerListRes = await SELF.fetch(`${BASE}/partner`, {
+      headers: { Authorization: `Bearer ${partnerToken}` },
     });
-    expect(patchRes.status).toBe(204);
+    const partnerList = (await partnerListRes.json()) as {
+      watching: Array<{
+        id: string;
+        user: { id: string; email: string; name?: string };
+        status: 'pending' | 'accepted';
+      }>;
+    };
+    expect(partnerList.watching.find((partner) => partner.id === created.id)?.user.id).toBe(
+      ownerUserId,
+    );
 
     const deleteRes = await SELF.fetch(`${BASE}/partner/watching/${created.id}`, {
       method: 'DELETE',
@@ -138,73 +138,6 @@ describe('Partner routes', () => {
     const owned = ownerPartners.watchers.find((partner) => partner.id === created.id);
     expect(owned?.user.email).toBe('accepted@example.com');
     expect(owned?.status).toBe('accepted');
-  });
-
-  it('returns stored public keys and allows owners to confirm a partner later', async () => {
-    const { token: ownerToken, userId: ownerUserId } =
-      await signupAndGetToken('owner3@example.com');
-    const { token: partnerToken, userId: partnerUserId } =
-      await signupAndGetToken('partner3@example.com');
-    await markUserEmailVerified(ownerUserId);
-
-    await SELF.fetch(`${BASE}/user`, {
-      method: 'PATCH',
-      headers: authHeaders(partnerToken),
-      body: JSON.stringify({
-        pub_key: Buffer.from('partner-public-key').toString('base64'),
-      }),
-    });
-
-    const createRes = await SELF.fetch(`${BASE}/partner`, {
-      method: 'POST',
-      headers: authHeaders(ownerToken),
-      body: JSON.stringify({
-        email: 'partner3@example.com',
-      }),
-    });
-    expect(createRes.status).toBe(201);
-    const created = (await createRes.json()) as { id: string };
-    const inviteDelivery = (await listEmailDeliveries()).find(
-      (delivery) =>
-        delivery.kind === 'partner_invite' && delivery.recipient_email === 'partner3@example.com',
-    );
-    const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
-
-    await SELF.fetch(`${BASE}/partner/accept`, {
-      method: 'POST',
-      headers: authHeaders(partnerToken),
-      body: JSON.stringify({ token: inviteMetadata.inviteToken }),
-    });
-
-    const pubKeyRes = await SELF.fetch(`${BASE}/pubkey?email=partner3@example.com`);
-    expect(pubKeyRes.status).toBe(200);
-    expect(await pubKeyRes.json()).toEqual({
-      pubkey: Buffer.from('partner-public-key').toString('base64'),
-    });
-
-    const patchRes = await SELF.fetch(`${BASE}/partner/watcher/${created.id}`, {
-      method: 'PATCH',
-      headers: authHeaders(ownerToken),
-      body: JSON.stringify({
-        e2ee_key: Buffer.from('encrypted-owner-key').toString('base64'),
-      }),
-    });
-    expect(patchRes.status).toBe(204);
-
-    const listRes = await SELF.fetch(`${BASE}/partner`, {
-      headers: { Authorization: `Bearer ${ownerToken}` },
-    });
-    const list = (await listRes.json()) as {
-      watchers: Array<{
-        id: string;
-        user: { id?: string; email: string };
-        e2ee_key?: string;
-      }>;
-    };
-    const owned = list.watchers.find((partner) => partner.id === created.id);
-    expect(owned?.user.id).toBe(partnerUserId);
-    expect(owned?.user.email).toBe('partner3@example.com');
-    expect(Buffer.from(owned?.e2ee_key ?? '', 'base64').toString()).toBe('encrypted-owner-key');
   });
 
   it('prevents accepting your own invite link', async () => {

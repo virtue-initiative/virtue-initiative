@@ -1,21 +1,77 @@
+import { Aes256Gcm, CipherSuite, HkdfSha256 } from "@hpke/core";
+import { DhkemX25519HkdfSha256 } from "@hpke/dhkem-x25519";
 import { argon2id } from "hash-wasm";
+import type { HashParams } from "./api";
 
-// Hashes the password with argon2id before sending to the server.
-// Uses lowercased email as a deterministic salt so login is reproducible.
-// NOTE: the original (unhashed) password must still be used for the wrapping key.
-export async function hashPasswordForAuth(
-  password: string,
-  email: string,
-): Promise<string> {
-  return argon2id({
-    password,
-    salt: email.toLowerCase(),
-    iterations: 3,
-    memorySize: 65536,
-    hashLength: 32,
-    parallelism: 1,
-    outputType: "hex",
-  });
+const textEncoder = new TextEncoder();
+const HPKE_SUITE = new CipherSuite({
+  kem: new DhkemX25519HkdfSha256(),
+  kdf: new HkdfSha256(),
+  aead: new Aes256Gcm(),
+});
+
+function toUint8Array(value: ArrayBufferLike | ArrayBufferView): Uint8Array {
+  if (value instanceof Uint8Array) {
+    return Uint8Array.from(value);
+  }
+
+  if (ArrayBuffer.isView(value)) {
+    return Uint8Array.from(
+      new Uint8Array(value.buffer, value.byteOffset, value.byteLength),
+    );
+  }
+
+  return Uint8Array.from(new Uint8Array(value));
+}
+
+function concatBytes(...parts: Uint8Array[]) {
+  const totalLength = parts.reduce((sum, part) => sum + part.length, 0);
+  const output = new Uint8Array(totalLength);
+  let offset = 0;
+
+  for (const part of parts) {
+    output.set(part, offset);
+    offset += part.length;
+  }
+
+  return output;
+}
+
+async function hkdfSha256(label: string, ikm: Uint8Array) {
+  const rawKey = new Uint8Array(ikm.length);
+  rawKey.set(ikm);
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    rawKey,
+    "HKDF",
+    false,
+    ["deriveBits"],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: new Uint8Array(),
+      info: textEncoder.encode(label),
+    },
+    keyMaterial,
+    256,
+  );
+  return new Uint8Array(bits);
+}
+
+async function importAesKey(
+  rawKey: BufferSource,
+  usages: KeyUsage[],
+  extractable = false,
+) {
+  return crypto.subtle.importKey(
+    "raw",
+    rawKey,
+    { name: "AES-GCM", length: 256 },
+    extractable,
+    usages,
+  );
 }
 
 export function generateRandomKeyBytes(length = 32): Uint8Array<ArrayBuffer> {
@@ -24,7 +80,35 @@ export function generateRandomKeyBytes(length = 32): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
-// Encrypts data with AES-GCM: returns nonce(12 bytes) || ciphertext+tag
+export async function derivePasswordMaterial(
+  password: string,
+  passwordSalt: Uint8Array,
+  params: HashParams,
+) {
+  const argonOutput = await argon2id({
+    password,
+    salt: passwordSalt,
+    iterations: params.time_cost,
+    memorySize: params.memory_cost_kib,
+    hashLength: 32,
+    parallelism: params.parallelism,
+    outputType: "binary",
+  });
+  const passwordAuth = await hkdfSha256("auth", argonOutput);
+  const wrappingKeyBytes = await hkdfSha256("key", argonOutput);
+  const wrappingKey = await importAesKey(
+    wrappingKeyBytes,
+    ["encrypt", "decrypt"],
+    true,
+  );
+
+  return {
+    argonOutput,
+    passwordAuth,
+    wrappingKey,
+  };
+}
+
 export async function encryptData(
   key: CryptoKey,
   data: Uint8Array,
@@ -36,70 +120,9 @@ export async function encryptData(
     key,
     payload,
   );
-  const result = new Uint8Array(12 + ciphertext.byteLength);
-  result.set(nonce, 0);
-  result.set(new Uint8Array(ciphertext), 12);
-  return result;
+  return concatBytes(nonce, new Uint8Array(ciphertext));
 }
 
-// Derives a 256-bit AES-GCM wrapping key (encrypt+decrypt) from password+userId
-// Same PBKDF2 parameters as deriveKey
-export async function deriveWrappingKey(
-  password: string,
-  userId: string,
-): Promise<CryptoKey> {
-  const enc = new TextEncoder();
-  const baseKey = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(password),
-    "PBKDF2",
-    false,
-    ["deriveKey"],
-  );
-  return crypto.subtle.deriveKey(
-    {
-      name: "PBKDF2",
-      salt: enc.encode(userId),
-      iterations: 100_000,
-      hash: "SHA-256",
-    },
-    baseKey,
-    { name: "AES-GCM", length: 256 },
-    true,
-    ["encrypt", "decrypt"],
-  );
-}
-
-// Derives a 256-bit AES-GCM key from password using PBKDF2-HMAC-SHA256
-// salt = UTF-8 bytes of userId, 100_000 iterations
-export async function deriveKey(
-  password: string,
-  userId: string,
-  extractable = false,
-): Promise<CryptoKey> {
-  const enc = new TextEncoder();
-  const baseKey = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(password),
-    "PBKDF2",
-    false,
-    ["deriveKey"],
-  );
-  return crypto.subtle.deriveKey(
-    {
-      name: "PBKDF2",
-      salt: enc.encode(userId),
-      iterations: 100_000,
-      hash: "SHA-256",
-    },
-    baseKey,
-    { name: "AES-GCM", length: 256 },
-    extractable,
-    ["decrypt"],
-  );
-}
-
-// Decrypts AES-256-GCM blob: first 12 bytes = nonce, rest = ciphertext+tag
 export async function decryptBatch(
   key: CryptoKey,
   data: Uint8Array,
@@ -114,70 +137,50 @@ export async function decryptBatch(
   return new Uint8Array(plain);
 }
 
-export async function generateSharingKeyPair(): Promise<CryptoKeyPair> {
-  return crypto.subtle.generateKey(
-    {
-      name: "RSA-OAEP",
-      modulusLength: 2048,
-      publicExponent: new Uint8Array([1, 0, 1]),
-      hash: "SHA-256",
-    },
-    true,
-    ["encrypt", "decrypt"],
-  );
+export async function generateUserKeyPair() {
+  const keyPair = await HPKE_SUITE.kem.generateKeyPair();
+  return {
+    publicKey: new Uint8Array(
+      await HPKE_SUITE.kem.serializePublicKey(keyPair.publicKey),
+    ),
+    privateKey: new Uint8Array(
+      await HPKE_SUITE.kem.serializePrivateKey(keyPair.privateKey),
+    ),
+    privateKeyHandle: keyPair.privateKey,
+  };
 }
 
-export async function exportPublicKey(
-  key: CryptoKey,
-): Promise<Uint8Array<ArrayBuffer>> {
-  return new Uint8Array(await crypto.subtle.exportKey("spki", key));
-}
-
-export async function exportPrivateKey(
-  key: CryptoKey,
-): Promise<Uint8Array<ArrayBuffer>> {
-  return new Uint8Array(await crypto.subtle.exportKey("pkcs8", key));
-}
-
-export async function importPublicKey(spki: BufferSource): Promise<CryptoKey> {
-  return crypto.subtle.importKey(
-    "spki",
-    spki,
-    { name: "RSA-OAEP", hash: "SHA-256" },
-    false,
-    ["encrypt"],
-  );
-}
-
-export async function importPrivateKey(
-  pkcs8: BufferSource,
+export async function importUserPrivateKey(
+  privateKeyBytes: BufferSource,
 ): Promise<CryptoKey> {
-  return crypto.subtle.importKey(
-    "pkcs8",
-    pkcs8,
-    { name: "RSA-OAEP", hash: "SHA-256" },
-    false,
-    ["decrypt"],
+  return HPKE_SUITE.kem.deserializePrivateKey(privateKeyBytes);
+}
+
+export async function unwrapBatchKey(
+  privateKey: CryptoKey,
+  encryptedKey: BufferSource,
+) {
+  const envelope = toUint8Array(encryptedKey);
+  const enc = envelope.slice(0, HPKE_SUITE.kem.encSize);
+  const ct = envelope.slice(HPKE_SUITE.kem.encSize);
+  const rawKey = new Uint8Array(
+    await HPKE_SUITE.open({ recipientKey: privateKey, enc }, ct),
   );
+
+  return importAesKey(rawKey, ["decrypt"]);
 }
 
 export async function encryptForPublicKey(
-  spki: BufferSource,
+  publicKeyBytes: BufferSource,
   data: BufferSource,
 ): Promise<Uint8Array<ArrayBuffer>> {
-  const publicKey = await importPublicKey(spki);
-  return new Uint8Array(
-    await crypto.subtle.encrypt({ name: "RSA-OAEP" }, publicKey, data),
+  const recipientPublicKey =
+    await HPKE_SUITE.kem.deserializePublicKey(publicKeyBytes);
+  const { enc, ct } = await HPKE_SUITE.seal(
+    { recipientPublicKey },
+    toUint8Array(data),
   );
-}
-
-export async function decryptWithPrivateKey(
-  privateKey: CryptoKey,
-  data: BufferSource,
-): Promise<Uint8Array<ArrayBuffer>> {
-  return new Uint8Array(
-    await crypto.subtle.decrypt({ name: "RSA-OAEP" }, privateKey, data),
-  );
+  return concatBytes(new Uint8Array(enc), new Uint8Array(ct));
 }
 
 // Decompresses gzip using native DecompressionStream

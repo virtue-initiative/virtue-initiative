@@ -1,3 +1,4 @@
+use base64::Engine;
 use reqwest::Method;
 use reqwest::blocking::multipart::{Form, Part};
 use reqwest::blocking::{Client, RequestBuilder, Response};
@@ -5,9 +6,9 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::config::Config;
-use crate::crypto::hash_password_for_auth;
+use crate::crypto::derive_password_auth;
 use crate::error::{CoreError, CoreResult};
-use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, LogEntry};
+use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, HashParams, LogEntry};
 
 #[derive(Debug, Clone)]
 pub struct ApiClient {
@@ -28,13 +29,28 @@ impl ApiClient {
         #[derive(Serialize)]
         struct LoginRequest<'a> {
             email: &'a str,
-            password: String,
+            password_auth: String,
         }
 
         #[derive(Deserialize)]
         struct LoginResponse {
             access_token: String,
         }
+
+        #[derive(Deserialize)]
+        struct LoginMaterialResponse {
+            password_salt: String,
+            params: HashParams,
+        }
+
+        let material: LoginMaterialResponse = self.expect_json(
+            self.request(Method::GET, None, "/user/login-material", None)
+                .query(&[("email", username)])
+                .send()?,
+        )?;
+        let password_salt =
+            base64::engine::general_purpose::STANDARD.decode(material.password_salt)?;
+        let password_auth = derive_password_auth(password, &password_salt, &material.params)?;
 
         let response: LoginResponse = self.send_json(
             Method::POST,
@@ -43,7 +59,7 @@ impl ApiClient {
             None,
             Some(&LoginRequest {
                 email: username,
-                password: hash_password_for_auth(password, username)?,
+                password_auth: base64::engine::general_purpose::STANDARD.encode(password_auth),
             }),
         )?;
         Ok(response.access_token)
@@ -94,8 +110,15 @@ impl ApiClient {
             name: String,
             platform: String,
             enabled: bool,
-            e2ee_key: Option<String>,
+            owner: Option<DeviceRecipientResponse>,
+            partners: Vec<DeviceRecipientResponse>,
             hash_base_url: Option<String>,
+        }
+
+        #[derive(Deserialize)]
+        struct DeviceRecipientResponse {
+            user_id: String,
+            pub_key: String,
         }
 
         let response: DeviceSettingsResponse = self.send_json(
@@ -110,7 +133,18 @@ impl ApiClient {
             name: response.name,
             platform: response.platform,
             enabled: response.enabled,
-            e2ee_key_base64: response.e2ee_key,
+            owner: response.owner.map(|owner| crate::model::BatchRecipient {
+                user_id: owner.user_id,
+                pub_key_base64: owner.pub_key,
+            }),
+            partners: response
+                .partners
+                .into_iter()
+                .map(|partner| crate::model::BatchRecipient {
+                    user_id: partner.user_id,
+                    pub_key_base64: partner.pub_key,
+                })
+                .collect(),
             hash_base_url: response.hash_base_url,
         })
     }
@@ -137,13 +171,35 @@ impl ApiClient {
     }
 
     pub fn upload_batch(&self, device_access_token: &str, batch: &BatchUpload) -> CoreResult<()> {
+        #[derive(Serialize)]
+        struct AccessKeysPayload<'a> {
+            keys: Vec<AccessKeyEntry<'a>>,
+        }
+
+        #[derive(Serialize)]
+        struct AccessKeyEntry<'a> {
+            user_id: &'a str,
+            hpke_key: &'a str,
+        }
+
         let part = Part::bytes(batch.bytes.clone())
             .file_name("batch.enc")
             .mime_str("application/octet-stream")?;
+        let access_keys = serde_json::to_string(&AccessKeysPayload {
+            keys: batch
+                .access_keys
+                .iter()
+                .map(|entry| AccessKeyEntry {
+                    user_id: &entry.user_id,
+                    hpke_key: &entry.hpke_key_base64,
+                })
+                .collect(),
+        })?;
         let form = Form::new()
             .part("file", part)
             .text("start_time", batch.start_time_ms.to_string())
-            .text("end_time", batch.end_time_ms.to_string());
+            .text("end_time", batch.end_time_ms.to_string())
+            .text("access_keys", access_keys);
 
         self.send_form(Method::POST, None, "/d/batch", device_access_token, form)
     }

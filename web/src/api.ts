@@ -4,9 +4,23 @@ export interface User {
   email_verified: boolean;
   email_bounced_at: number | null;
   name?: string;
-  e2ee_key?: string;
   pub_key?: string;
   priv_key?: string;
+}
+
+export interface HashParams {
+  version: string;
+  algorithm: string;
+  memory_cost_kib: number;
+  time_cost: number;
+  parallelism: number;
+  salt_length: number;
+  hkdf_hash: string;
+}
+
+export interface LoginMaterial {
+  password_salt: string;
+  params: HashParams;
 }
 
 export interface Device {
@@ -26,6 +40,7 @@ export interface Batch {
   end_time: number;
   end_hash: string;
   url: string;
+  encrypted_key: string;
 }
 
 export interface DataLog {
@@ -53,7 +68,6 @@ export interface WatchingPartner {
   digest_cadence: "none" | "alerts-only" | "daily" | "weekly";
   immediate_tamper_severity: "warning" | "critical";
   created_at?: number;
-  e2ee_key?: string;
 }
 
 export interface WatcherPartner {
@@ -65,7 +79,6 @@ export interface WatcherPartner {
   };
   status: "pending" | "accepted";
   created_at?: number;
-  e2ee_key?: string;
 }
 
 export interface PartnerRelationships {
@@ -86,12 +99,6 @@ export interface PartnerInviteValidation {
 export interface PasswordResetValidation {
   ok: boolean;
   email: string;
-  user_id: string;
-  partner_access_targets: Array<{
-    partnership_id: string;
-    partner_email: string;
-    partner_pub_key?: string;
-  }>;
 }
 
 const BASE = (import.meta as any).env?.VITE_API_URL ?? "http://localhost:8787";
@@ -237,13 +244,29 @@ export const api = {
       allowReauth: false,
     }),
 
-  login: (email: string, password: string) =>
+  getCurrentHashParams: () => req<HashParams>("/current-hash-params"),
+
+  getLoginMaterial: (email: string) => {
+    const qs = new URLSearchParams({ email });
+    return req<LoginMaterial>(`/user/login-material?${qs.toString()}`);
+  },
+
+  login: (email: string, password_auth: string) =>
     req<{ access_token: string }>("/login", {
       method: "POST",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password_auth }),
     }),
 
-  signup: (email: string, password: string, name?: string) =>
+  signup: (
+    email: string,
+    payload: {
+      password_auth: string;
+      password_salt: string;
+      pub_key: string;
+      priv_key: string;
+      name?: string;
+    },
+  ) =>
     req<{
       access_token: string;
       user: {
@@ -254,7 +277,7 @@ export const api = {
       };
     }>("/signup", {
       method: "POST",
-      body: JSON.stringify({ email, password, ...(name ? { name } : {}) }),
+      body: JSON.stringify({ email, ...payload }),
     }),
 
   logout: () => req<void>("/logout", { method: "POST" }),
@@ -266,7 +289,6 @@ export const api = {
     fields: {
       email?: string;
       name?: string;
-      e2ee_key?: string;
       pub_key?: string;
       priv_key?: string;
     },
@@ -307,17 +329,16 @@ export const api = {
 
   resetPassword: (
     token: string,
-    password: string,
-    wrappedKeys?: {
-      e2ee_key?: string;
+    payload: {
+      password_auth: string;
+      password_salt: string;
       pub_key?: string;
       priv_key?: string;
-      partner_access_keys?: Array<{ partnership_id: string; e2ee_key: string }>;
     },
   ) =>
     req<{ ok: boolean }>("/password-reset/finalize", {
       method: "POST",
-      body: JSON.stringify({ token, password, ...(wrappedKeys ?? {}) }),
+      body: JSON.stringify({ token, ...payload }),
     }),
 
   getDevices: (token: string) => req<Device[]>("/device", {}, token),
@@ -342,21 +363,12 @@ export const api = {
   getPartners: (token: string) =>
     req<PartnerRelationships>("/partner", {}, token),
 
-  getPartnerPublicKey: async (email: string) => {
-    const qs = new URLSearchParams({ email });
-    const result = await req<{ pubkey: string }>(`/pubkey?${qs.toString()}`);
-    return result.pubkey;
-  },
-
-  invitePartner: (token: string, email: string, e2ee_key?: string) =>
+  invitePartner: (token: string, email: string) =>
     req<{ id: string; status: string }>(
       "/partner",
       {
         method: "POST",
-        body: JSON.stringify({
-          email,
-          ...(e2ee_key ? { e2ee_key } : {}),
-        }),
+        body: JSON.stringify({ email }),
       },
       token,
     ),
@@ -373,16 +385,6 @@ export const api = {
       {
         method: "POST",
         body: JSON.stringify({ token: inviteToken }),
-      },
-      token,
-    ),
-
-  updateWatcher: (token: string, id: string, fields: { e2ee_key?: string }) =>
-    req<void>(
-      `/partner/watcher/${id}`,
-      {
-        method: "PATCH",
-        body: JSON.stringify(fields),
       },
       token,
     ),
