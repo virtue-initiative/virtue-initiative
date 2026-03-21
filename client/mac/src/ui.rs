@@ -17,11 +17,24 @@ pub enum LoggedInAction {
     Logout,
 }
 
-pub fn prompt_login(build_label: &str) -> Result<Option<LoginInput>> {
+pub struct LoggedInDialogDetails<'a> {
+    pub build_label: &'a str,
+    pub email: &'a str,
+    pub device_id: &'a str,
+    pub monitor_summary: &'a str,
+    pub pending_request_count: usize,
+    pub base_api_url: &'a str,
+    pub screenshot_permission: &'a str,
+    pub daemon_status_updated_at: Option<&'a str>,
+    pub daemon_last_error: Option<&'a str>,
+}
+
+pub fn prompt_login(build_label: &str, default_email: Option<&str>) -> Result<Option<LoginInput>> {
     let title = apple_script_escape(&format!("Virtue login ({build_label})"));
+    let default_email = apple_script_escape(default_email.unwrap_or_default());
     let script = format!(
         r#"
-set emailPrompt to display dialog "{title}" default answer "" buttons {{"Cancel", "Next"}} default button "Next"
+set emailPrompt to display dialog "{title}" default answer "{default_email}" buttons {{"Cancel", "Next"}} default button "Next"
 set emailValue to text returned of emailPrompt
 set passwordPrompt to display dialog "Password" default answer "" with hidden answer buttons {{"Cancel", "Sign in"}} default button "Sign in"
 set passwordValue to text returned of passwordPrompt
@@ -47,17 +60,20 @@ return emailValue & "__VIRTUE_SPLIT__" & passwordValue
 }
 
 pub fn prompt_logged_in_action(
-    build_label: &str,
-    email: &str,
-    device_id: &str,
-    screenshot_permission: &str,
-    daemon_status_updated_at: Option<&str>,
-    daemon_last_error: Option<&str>,
+    details: &LoggedInDialogDetails<'_>,
 ) -> Result<Option<LoggedInAction>> {
     let message = format!(
-        "Version: {build_label}\nSigned in as {email}.\nDevice id: {device_id}\n\nDaemon status:\nScreen Recording permission: {screenshot_permission}\nLast status update: {}\nLast daemon error: {}",
-        daemon_status_updated_at.unwrap_or("<none>"),
-        daemon_last_error
+        "Version: {}\nSigned in as {}.\nDevice id: {}\nMonitoring: {}\nPending requests: {}\nAPI: {}\n\nDaemon status:\nScreen Recording permission: {}\nLast status update: {}\nLast daemon error: {}",
+        details.build_label,
+        details.email,
+        details.device_id,
+        details.monitor_summary,
+        details.pending_request_count,
+        details.base_api_url,
+        details.screenshot_permission,
+        details.daemon_status_updated_at.unwrap_or("<none>"),
+        details
+            .daemon_last_error
             .filter(|value| !value.trim().is_empty())
             .unwrap_or("<none>")
     );
@@ -77,17 +93,20 @@ return button returned of dialogResult
 }
 
 pub fn prompt_permission_issue_action(
-    build_label: &str,
-    email: &str,
-    device_id: &str,
-    screenshot_permission: &str,
-    daemon_status_updated_at: Option<&str>,
-    last_error: Option<&str>,
+    details: &LoggedInDialogDetails<'_>,
 ) -> Result<Option<LoggedInAction>> {
     let mut message = format!(
-        "Version: {build_label}\nSigned in as {email}.\nDevice id: {device_id}\n\nDaemon status:\nScreen Recording permission: {screenshot_permission}\nLast status update: {}\nLast daemon error: {}",
-        daemon_status_updated_at.unwrap_or("<none>"),
-        last_error
+        "Version: {}\nSigned in as {}.\nDevice id: {}\nMonitoring: {}\nPending requests: {}\nAPI: {}\n\nDaemon status:\nScreen Recording permission: {}\nLast status update: {}\nLast daemon error: {}",
+        details.build_label,
+        details.email,
+        details.device_id,
+        details.monitor_summary,
+        details.pending_request_count,
+        details.base_api_url,
+        details.screenshot_permission,
+        details.daemon_status_updated_at.unwrap_or("<none>"),
+        details
+            .daemon_last_error
             .filter(|value| !value.trim().is_empty())
             .unwrap_or("<none>")
     );

@@ -1,91 +1,55 @@
-use std::collections::BTreeMap;
+use std::io::Write;
 
-use serde::{Deserialize, Serialize};
+use flate2::Compression;
+use flate2::write::GzEncoder;
+use serde::Serialize;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum BatchValue {
-    String(String),
-    Integer(i64),
-    Boolean(bool),
-    #[serde(with = "serde_bytes")]
-    Binary(Vec<u8>),
-}
+use crate::crypto::CryptoEngine;
+use crate::error::{CoreError, CoreResult};
+use crate::model::{BatchBufferState, BatchEvent, BatchUpload, BufferedScreenshot};
 
-/// A single captured item within a batch.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BatchItem {
-    /// Unix timestamp in milliseconds.
-    pub ts: i64,
-    /// Event type, matching the API log shape.
-    #[serde(rename = "type")]
-    pub type_: String,
-    /// Event payload, matching the API log `data` object shape.
-    pub data: BTreeMap<String, BatchValue>,
-}
+#[derive(Debug, Default, Clone)]
+pub struct BatchBuilder;
 
-impl BatchItem {
-    /// Hash all item fields deterministically:
-    ///   ts_le[8] || type_utf8 || data_key || data_value || ...
-    pub fn sha256(&self) -> [u8; 32] {
-        use sha2::{Digest, Sha256};
-        let mut h = Sha256::new();
-        h.update(self.ts.to_le_bytes());
-        h.update(self.type_.as_bytes());
-        for (key, value) in &self.data {
-            h.update(key.as_bytes());
-            match value {
-                BatchValue::String(value) => h.update(value.as_bytes()),
-                BatchValue::Integer(value) => h.update(value.to_le_bytes()),
-                BatchValue::Boolean(value) => h.update([u8::from(*value)]),
-                BatchValue::Binary(value) => h.update(value),
-            }
-        }
-        h.finalize().into()
-    }
-}
-
-/// The top-level structure serialised as MessagePack inside each R2 blob
-/// (after gzip compression and AES-256-GCM encryption).
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BatchBlob {
-    /// Format version — currently 1.
-    pub version: u8,
-    pub events: Vec<BatchItem>,
-}
-
-impl BatchBlob {
-    pub fn new(events: Vec<BatchItem>) -> Self {
-        Self { version: 1, events }
+impl BatchBuilder {
+    pub fn push_screenshot(
+        buffer: &mut BatchBufferState,
+        screenshot: BufferedScreenshot,
+    ) -> CoreResult<()> {
+        buffer.screenshots.push(screenshot);
+        buffer.screenshots.sort_by_key(|item| item.event.ts);
+        Ok(())
     }
 
-    /// Encode: msgpack → gzip → AES-256-GCM.
-    pub fn encode_encrypted(&self, key: &[u8; 32]) -> crate::CoreResult<Vec<u8>> {
-        use flate2::Compression;
-        use flate2::write::GzEncoder;
-        use std::io::Write;
-
-        let msgpack = rmp_serde::to_vec_named(self)
-            .map_err(|e| crate::CoreError::Serialization(e.to_string()))?;
+    pub fn build_upload(
+        buffer: &BatchBufferState,
+        crypto: &CryptoEngine,
+        end_time_ms: i64,
+    ) -> CoreResult<BatchUpload> {
+        let first = buffer.screenshots.first().ok_or(CoreError::InvalidState(
+            "cannot build a batch from an empty buffer",
+        ))?;
+        let events: Vec<&BatchEvent> = buffer.screenshots.iter().map(|item| &item.event).collect();
+        let msgpack = rmp_serde::to_vec_named(&BatchEnvelope { events })?;
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(&msgpack)?;
-        let compressed = encoder.finish()?;
+        let gzipped = encoder.finish()?;
+        let encrypted = crypto.encrypt_batch_blob(&gzipped)?;
 
-        crate::crypto::encrypt(key, &compressed)
+        Ok(BatchUpload {
+            start_time_ms: first.event.ts,
+            end_time_ms,
+            bytes: encrypted,
+        })
     }
 
-    /// Decode: AES-256-GCM → gzip → msgpack.
-    pub fn decode_encrypted(data: &[u8], key: &[u8; 32]) -> crate::CoreResult<Self> {
-        use flate2::read::GzDecoder;
-        use std::io::Read;
-
-        let compressed = crate::crypto::decrypt(key, data)?;
-
-        let mut decoder = GzDecoder::new(&compressed[..]);
-        let mut msgpack = Vec::new();
-        decoder.read_to_end(&mut msgpack)?;
-
-        rmp_serde::from_slice(&msgpack).map_err(|e| crate::CoreError::Serialization(e.to_string()))
+    pub fn clear(buffer: &mut BatchBufferState) {
+        buffer.screenshots.clear();
     }
+}
+
+#[derive(Serialize)]
+struct BatchEnvelope<'a> {
+    events: Vec<&'a BatchEvent>,
 }

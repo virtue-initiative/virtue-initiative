@@ -8,6 +8,7 @@ Source image:
 Regeneration:
 
 - `./images/generate-icons.sh`
+- `./images/generate-icons.sh --target ios` to regenerate only the iOS app icon set
 
 Requirements:
 
@@ -19,6 +20,7 @@ What the script does:
 - Recolors `logo-raw.png` to that theme color, preserving alpha.
 - Crops transparent margins from `logo-raw.png` using a tiny alpha-noise threshold.
 - Builds a square, centered `images/logo-prepped.png` with a small transparent border.
+- Flattens iOS app icons onto a white background so they do not render with a dark fill behind transparent areas.
 - Generates and overwrites derived icons used by web and client targets.
 
 Generated targets:

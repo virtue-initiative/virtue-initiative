@@ -1198,12 +1198,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dotenv-build"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4547f16c17f6051a12cdb8c62b803f94bee6807c74aa7c530b30b737df981fc"
-
-[[package]]
 name = "downcast-rs"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2575,6 +2569,7 @@ checksum = "e6506c6c10786659413faa717ceebcb8f70731c0a60cbae39795fdf114519c1a"
 dependencies = [
  "bytemuck",
  "byteorder-lite",
+ "image-webp",
  "moxcms",
  "num-traits",
  "png 0.18.1",
@@ -4279,6 +4274,7 @@ dependencies = [
  "bytes",
  "cookie",
  "cookie_store",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "http",
@@ -5358,6 +5354,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "toml"
+version = "1.0.6+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "399b1124a3c9e16766831c6bba21e50192572cdd98706ea114f9502509686ffc"
+dependencies = [
+ "indexmap",
+ "serde_core",
+ "serde_spanned 1.0.4",
+ "toml_datetime 1.0.1+spec-1.1.0",
+ "toml_parser",
+ "toml_writer",
+ "winnow 0.7.14",
+]
+
+[[package]]
 name = "toml_datetime"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5371,6 +5382,15 @@ name = "toml_datetime"
 version = "0.7.5+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92e1cfed4a3038bc5a127e35a2d360f145e1f4b971b551a2ba5fd7aedf7e1347"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
+name = "toml_datetime"
+version = "1.0.1+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b320e741db58cac564e26c607d3cc1fdc4a88fd36c879568c07856ed83ff3e9"
 dependencies = [
  "serde_core",
 ]
@@ -5754,58 +5774,46 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "virtue-client-core"
-version = "0.0.1"
+name = "virtue-core"
+version = "0.1.0"
 dependencies = [
  "aes-gcm",
  "argon2",
  "base64",
- "chrono",
- "dotenv-build",
  "flate2",
  "hex",
- "hmac",
  "image",
  "pbkdf2",
- "rand 0.8.5",
  "reqwest",
  "rmp-serde",
  "serde",
  "serde_bytes",
  "serde_json",
  "sha2",
- "tempfile",
  "thiserror 2.0.18",
- "uuid",
  "webp",
 ]
 
 [[package]]
-name = "virtue-linux-client"
+name = "virtue-linux"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "base64",
  "chrono",
  "clap",
  "dirs",
- "hex",
  "hostname",
  "image",
  "ksni",
- "rand 0.8.5",
- "reqwest",
  "rpassword",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
  "tokio",
- "uuid",
- "virtue-client-core",
+ "virtue-core",
 ]
 
 [[package]]
-name = "virtue-mac-client"
+name = "virtue-mac"
 version = "0.0.1"
 dependencies = [
  "anyhow",
@@ -5824,11 +5832,11 @@ dependencies = [
  "tokio",
  "tray-icon",
  "uuid",
- "virtue-client-core",
+ "virtue-core",
 ]
 
 [[package]]
-name = "virtue-windows-client"
+name = "virtue-windows"
 version = "0.0.1"
 dependencies = [
  "anyhow",
@@ -5836,6 +5844,7 @@ dependencies = [
  "chrono",
  "hex",
  "hostname",
+ "i-slint-backend-winit",
  "image",
  "rand 0.8.5",
  "reqwest",
@@ -5844,9 +5853,11 @@ dependencies = [
  "slint",
  "tokio",
  "uuid",
- "virtue-client-core",
+ "virtue-core",
  "windows 0.62.2",
  "windows-service",
+ "winit",
+ "winresource",
 ]
 
 [[package]]
@@ -6874,6 +6885,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a5364e9d77fcdeeaa6062ced926ee3381faa2ee02d3eb83a5c27a8825540829"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "winresource"
+version = "0.1.31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0986a8b1d586b7d3e4fe3d9ea39fb451ae22869dcea4aa109d287a374d866087"
+dependencies = [
+ "toml 1.0.6+spec-1.1.0",
+ "version_check",
 ]
 
 [[package]]

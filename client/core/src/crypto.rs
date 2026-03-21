@@ -1,92 +1,114 @@
-use aes_gcm::{
-    Aes256Gcm, Key, Nonce,
-    aead::{Aead, AeadCore, KeyInit, OsRng},
-};
+use aes_gcm::aead::{Aead, KeyInit, OsRng, rand_core::RngCore};
+use aes_gcm::{Aes256Gcm, Nonce};
 use argon2::{Algorithm, Argon2, Params, Version};
-use pbkdf2::pbkdf2_hmac;
-use sha2::Sha256;
+use base64::Engine;
+use pbkdf2::pbkdf2_hmac_array;
+use sha2::{Digest, Sha256};
 
 use crate::error::{CoreError, CoreResult};
+use crate::model::{BatchEvent, BatchEventData, BufferedScreenshot, Screenshot};
 
-const PBKDF2_ITERATIONS: u32 = 100_000;
-const NONCE_LEN: usize = 12;
+#[derive(Debug, Clone)]
+pub struct CryptoEngine {
+    key_bytes: [u8; 32],
+}
 
-/// Hash the password with argon2id before sending to the server.
-/// Uses the lowercased email as a deterministic salt — matches the web client exactly.
-/// NOTE: use the original (unhashed) password for the wrapping key.
+impl CryptoEngine {
+    pub fn from_base64(e2ee_key_base64: &str) -> CoreResult<Self> {
+        let raw = base64::engine::general_purpose::STANDARD.decode(e2ee_key_base64)?;
+        let key_bytes: [u8; 32] = raw
+            .try_into()
+            .map_err(|_| CoreError::InvalidState("e2ee_key must be 32 bytes"))?;
+        Ok(Self { key_bytes })
+    }
+
+    pub fn encrypt_batch_blob(&self, plaintext: &[u8]) -> CoreResult<Vec<u8>> {
+        let cipher = Aes256Gcm::new_from_slice(&self.key_bytes)
+            .map_err(|_| CoreError::Crypto("invalid AES-256-GCM key"))?;
+        let mut nonce_bytes = [0_u8; 12];
+        OsRng.fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from_slice(&nonce_bytes);
+        let ciphertext = cipher
+            .encrypt(nonce, plaintext)
+            .map_err(|_| CoreError::Crypto("AES-256-GCM encryption failed"))?;
+
+        let mut out = Vec::with_capacity(12 + ciphertext.len());
+        out.extend_from_slice(&nonce_bytes);
+        out.extend_from_slice(&ciphertext);
+        Ok(out)
+    }
+
+    pub fn decrypt_blob(&self, encrypted: &[u8]) -> CoreResult<Vec<u8>> {
+        if encrypted.len() < 13 {
+            return Err(CoreError::InvalidState(
+                "AES-GCM payload must be nonce[12] || ciphertext+tag",
+            ));
+        }
+
+        let cipher = Aes256Gcm::new_from_slice(&self.key_bytes)
+            .map_err(|_| CoreError::Crypto("invalid AES-256-GCM key"))?;
+        let nonce = Nonce::from_slice(&encrypted[..12]);
+        cipher
+            .decrypt(nonce, &encrypted[12..])
+            .map_err(|_| CoreError::Crypto("AES-256-GCM decryption failed"))
+    }
+}
+
 pub fn hash_password_for_auth(password: &str, email: &str) -> CoreResult<String> {
-    let salt = email.to_lowercase();
-    let params = Params::new(65536, 3, 1, Some(32))
-        .map_err(|e| CoreError::Crypto(format!("argon2 params error: {e}")))?;
+    let params = Params::new(65_536, 3, 1, Some(32))
+        .map_err(|_| CoreError::InvalidState("invalid argon2 parameters"))?;
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-    let mut output = [0u8; 32];
+    let salt = email.to_lowercase();
+    let mut output = [0_u8; 32];
     argon2
         .hash_password_into(password.as_bytes(), salt.as_bytes(), &mut output)
-        .map_err(|e| CoreError::Crypto(format!("argon2 hash error: {e}")))?;
+        .map_err(|err| CoreError::Argon2(err.to_string()))?;
     Ok(hex::encode(output))
 }
 
-/// Derive a 32-byte AES key from the user's E2EE password and their user ID (used as salt).
-pub fn derive_key(password: &str, user_id: &str) -> [u8; 32] {
-    let mut key = [0u8; 32];
-    pbkdf2_hmac::<Sha256>(
-        password.as_bytes(),
-        user_id.as_bytes(),
-        PBKDF2_ITERATIONS,
-        &mut key,
-    );
-    key
+pub fn prepare_screenshot_event(screenshot: Screenshot) -> BufferedScreenshot {
+    let event = BatchEvent {
+        ts: screenshot.captured_at_ms,
+        kind: "screenshot".to_string(),
+        data: BatchEventData {
+            image: screenshot.bytes,
+            content_type: screenshot.content_type,
+        },
+    };
+
+    BufferedScreenshot {
+        content_hash: compute_event_hash(&event),
+        event,
+    }
 }
 
-/// Encrypt plaintext with AES-256-GCM.
-/// Output format: `[12-byte nonce][ciphertext + 16-byte tag]`.
-pub fn encrypt(key: &[u8; 32], plaintext: &[u8]) -> CoreResult<Vec<u8>> {
-    let aes_key = Key::<Aes256Gcm>::from_slice(key);
-    let cipher = Aes256Gcm::new(aes_key);
-    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
-
-    let ciphertext = cipher
-        .encrypt(&nonce, plaintext)
-        .map_err(|e| CoreError::Crypto(e.to_string()))?;
-
-    let mut out = Vec::with_capacity(NONCE_LEN + ciphertext.len());
-    out.extend_from_slice(&nonce);
-    out.extend_from_slice(&ciphertext);
-    Ok(out)
+pub fn derive_wrapping_key(password: &str, user_id: &str) -> [u8; 32] {
+    pbkdf2_hmac_array::<Sha256, 32>(password.as_bytes(), user_id.as_bytes(), 100_000)
 }
 
-/// Decrypt data produced by [`encrypt`].
-pub fn decrypt(key: &[u8; 32], data: &[u8]) -> CoreResult<Vec<u8>> {
-    if data.len() < NONCE_LEN {
-        return Err(CoreError::Crypto("ciphertext too short".to_string()));
-    }
-    let aes_key = Key::<Aes256Gcm>::from_slice(key);
-    let cipher = Aes256Gcm::new(aes_key);
-    let nonce = Nonce::from_slice(&data[..NONCE_LEN]);
+pub fn compute_event_hash(event: &BatchEvent) -> [u8; 32] {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&(event.ts as u64).to_le_bytes());
+    bytes.extend_from_slice(event.kind.as_bytes());
 
-    cipher
-        .decrypt(nonce, &data[NONCE_LEN..])
-        .map_err(|e| CoreError::Crypto(e.to_string()))
+    let mut fields = vec![
+        ("content_type", BatchValue::String(&event.data.content_type)),
+        ("image", BatchValue::Bytes(&event.data.image)),
+    ];
+    fields.sort_by(|(left, _), (right, _)| left.cmp(right));
+
+    for (key, value) in fields {
+        bytes.extend_from_slice(key.as_bytes());
+        match value {
+            BatchValue::String(value) => bytes.extend_from_slice(value.as_bytes()),
+            BatchValue::Bytes(value) => bytes.extend_from_slice(value),
+        }
+    }
+
+    Sha256::digest(bytes).into()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{decrypt, derive_key, encrypt};
-
-    #[test]
-    fn round_trip() {
-        let key = derive_key("hunter2", "user-123");
-        let plaintext = b"hello world";
-        let ciphertext = encrypt(&key, plaintext).unwrap();
-        let recovered = decrypt(&key, &ciphertext).unwrap();
-        assert_eq!(recovered, plaintext);
-    }
-
-    #[test]
-    fn wrong_key_fails() {
-        let key1 = derive_key("password1", "user-1");
-        let key2 = derive_key("password2", "user-1");
-        let ct = encrypt(&key1, b"secret").unwrap();
-        assert!(decrypt(&key2, &ct).is_err());
-    }
+enum BatchValue<'a> {
+    String(&'a str),
+    Bytes(&'a [u8]),
 }

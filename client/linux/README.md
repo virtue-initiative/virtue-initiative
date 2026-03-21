@@ -1,15 +1,10 @@
 # Virtue Linux Client
 
-## Development
-
-Copy `.env.example` to `.env`
-
 ## Commands
 
 - `virtue login`
   - Prompts for email/password.
   - Registers a device with the API and stores `device_id`.
-  - Enables and starts the user service (`virtue.service`).
 - `virtue logout`
   - Warns that a log event is sent to indicate monitoring was turned off.
   - Clears local auth/device state and disables monitoring.
@@ -42,46 +37,40 @@ Linux alert logs include:
   - procfs with `/proc/sys/kernel/random/boot_id` (startup detection).
 - Non-systemd distributions are not currently supported for system lifecycle logs.
 
-Capture/upload timing is env-driven:
+Capture/upload timing is file-driven through `~/.config/virtue/config.json`.
 
-- `VIRTUE_CAPTURE_INTERVAL_SECONDS` (default `300`, minimum `15`)
-- `VIRTUE_BATCH_WINDOW_SECONDS` (default `3600`)
+Supported keys:
 
-`virtue status` prints the effective values currently in use.
+- `api_base_url`
+- `capture_interval_seconds` (default `300`, minimum `15`)
+- `batch_window_seconds` (default `3600`, minimum `1`)
 
-## Local API Override
+`virtue status` prints the current CLI-resolved values.
 
-Use one `.deb` for both prod and local API. Override values through a systemd user override file.
+## Runtime Config
 
-Set override for the background service:
+Use one `.deb` for both prod and local API. Override values through `~/.config/virtue/config.json`.
 
 ```bash
-mkdir -p ~/.config/systemd/user/virtue.service.d
-cat > ~/.config/systemd/user/virtue.service.d/override.conf <<'EOF'
-[Service]
-Environment=VIRTUE_BASE_API_URL=http://localhost:8787
-Environment=VIRTUE_CAPTURE_INTERVAL_SECONDS=120
-Environment=VIRTUE_BATCH_WINDOW_SECONDS=900
+mkdir -p ~/.config/virtue
+cat > ~/.config/virtue/config.json <<'EOF'
+{
+  "api_base_url": "http://localhost:8787",
+  "capture_interval_seconds": 120,
+  "batch_window_seconds": 900
+}
 EOF
-systemctl --user daemon-reload
-systemctl --user restart virtue.service
-```
-
-Run one-off CLI commands against local API:
-
-```bash
-VIRTUE_BASE_API_URL=http://localhost:8787 virtue login
 ```
 
 Revert service back to default API:
 
 ```bash
-rm -f ~/.config/systemd/user/virtue.service.d/override.conf
-systemctl --user daemon-reload
-systemctl --user restart virtue.service
+rm -f ~/.config/virtue/config.json
 ```
 
-When switching API environments, run `virtue logout` then `virtue login` again.
+The core reloads this file during daemon operation, so runtime changes do not require a service restart.
+
+The client uses `XDG_CONFIG_HOME` and `XDG_STATE_HOME` when those variables are set. Otherwise it falls back to `~/.config/virtue/config.json` for config and `~/.local/state/virtue` for mutable state.
 
 ## Wayland and X11
 

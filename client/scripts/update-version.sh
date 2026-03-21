@@ -88,12 +88,12 @@ for cargo_file in "${cargo_files[@]}"; do
   replace_package_version "$cargo_file"
 done
 
-replace_lockfile_version "${CLIENT_ROOT}/Cargo.lock" "virtue-client-core"
-replace_lockfile_version "${CLIENT_ROOT}/Cargo.lock" "virtue-linux-client"
-replace_lockfile_version "${CLIENT_ROOT}/Cargo.lock" "virtue-mac-client"
-replace_lockfile_version "${CLIENT_ROOT}/Cargo.lock" "virtue-windows-client"
-replace_lockfile_version "${CLIENT_ROOT}/android/rust/Cargo.lock" "virtue-android-rust"
-replace_lockfile_version "${CLIENT_ROOT}/android/rust/Cargo.lock" "virtue-client-core"
+replace_lockfile_version "${CLIENT_ROOT}/Cargo.lock" "virtue-core"
+replace_lockfile_version "${CLIENT_ROOT}/Cargo.lock" "virtue-linux"
+replace_lockfile_version "${CLIENT_ROOT}/Cargo.lock" "virtue-mac"
+replace_lockfile_version "${CLIENT_ROOT}/Cargo.lock" "virtue-windows"
+replace_lockfile_version "${CLIENT_ROOT}/android/rust/Cargo.lock" "virtue-android"
+replace_lockfile_version "${CLIENT_ROOT}/android/rust/Cargo.lock" "virtue-core"
 
 replace_line \
   "${CLIENT_ROOT}/ios/project.yml" \

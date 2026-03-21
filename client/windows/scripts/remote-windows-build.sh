@@ -252,24 +252,24 @@ try {
             \$env:CARGO_INCREMENTAL = "1"
         }
 
-        cargo build -p virtue-client-core
+        cargo build -p virtue-core
         if (\$LASTEXITCODE -ne 0) {
-            throw "cargo build -p virtue-client-core failed with exit code \$LASTEXITCODE"
+            throw "cargo build -p virtue-core failed with exit code \$LASTEXITCODE"
         }
 
-        cargo build -p virtue-windows-client
+        cargo build -p virtue-windows
         if (\$LASTEXITCODE -ne 0) {
-            throw "cargo build -p virtue-windows-client failed with exit code \$LASTEXITCODE"
+            throw "cargo build -p virtue-windows failed with exit code \$LASTEXITCODE"
         }
 
-        cargo clippy -p virtue-client-core --all-targets -- -D warnings
+        cargo clippy -p virtue-core --all-targets -- -D warnings
         if (\$LASTEXITCODE -ne 0) {
-            throw "cargo clippy -p virtue-client-core failed with exit code \$LASTEXITCODE"
+            throw "cargo clippy -p virtue-core failed with exit code \$LASTEXITCODE"
         }
 
-        cargo clippy -p virtue-windows-client --all-targets -- -D warnings
+        cargo clippy -p virtue-windows --all-targets -- -D warnings
         if (\$LASTEXITCODE -ne 0) {
-            throw "cargo clippy -p virtue-windows-client failed with exit code \$LASTEXITCODE"
+            throw "cargo clippy -p virtue-windows failed with exit code \$LASTEXITCODE"
         }
     } elseif (\$mode -eq "installer") {
         \$script = Join-Path \$clientDir "windows\\scripts\\build-installer.ps1"

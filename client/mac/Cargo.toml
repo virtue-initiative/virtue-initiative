@@ -1,16 +1,16 @@
 [package]
-name = "virtue-mac-client"
+name = "virtue-mac"
 version = "0.0.1"
 edition = "2024"
 description = "Virtue macOS tray client and daemon"
 
 [[bin]]
-name = "virtue-mac-client"
+name = "virtue-mac"
 path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
-virtue-client-core = { path = "../core" }
+virtue_core = { package = "virtue-core", path = "../core" }
 block2 = "0.6"
 chrono = { version = "0.4", features = ["clock", "serde"] }
 clap = { version = "4", features = ["derive"] }
@@ -19,7 +19,7 @@ hostname = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSWorkspace"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSNotification", "NSOperation", "NSString", "block2"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSDate", "NSNotification", "NSOperation", "NSRunLoop", "NSString", "block2"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time"] }
