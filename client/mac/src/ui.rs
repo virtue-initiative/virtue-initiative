@@ -284,22 +284,16 @@ where
     let sign_in_button = button(
         mtm,
         "Sign in",
-        270.0,
-        14.0,
-        90.0,
-        28.0,
-        &*controller,
+        NSRect::new(NSPoint::new(270.0, 14.0), NSSize::new(90.0, 28.0)),
+        &controller,
         sel!(submit:),
         Some("\r"),
     );
     let cancel_button = button(
         mtm,
         "Cancel",
-        366.0,
-        14.0,
-        74.0,
-        28.0,
-        &*controller,
+        NSRect::new(NSPoint::new(366.0, 14.0), NSSize::new(74.0, 28.0)),
+        &controller,
         sel!(cancel:),
         None,
     );
@@ -367,7 +361,6 @@ fn show_action_window(
     let controller = ActionWindowController::new(mtm);
 
     let window_height = if emphasize_restart { 450.0 } else { 360.0 };
-    let message_y = if emphasize_restart { 74.0 } else { 74.0 };
     let message_height = if emphasize_restart { 350.0 } else { 260.0 };
 
     let window = build_window(mtm, title, 620.0, window_height)?;
@@ -375,37 +368,28 @@ fn show_action_window(
         .contentView()
         .context("window must have content view")?;
 
-    let message_label = wrapping_label(mtm, message, 20.0, message_y, 580.0, message_height);
+    let message_label = wrapping_label(mtm, message, 20.0, 74.0, 580.0, message_height);
     let close_button = button(
         mtm,
         "Close",
-        224.0,
-        18.0,
-        120.0,
-        28.0,
-        &*controller,
+        NSRect::new(NSPoint::new(224.0, 18.0), NSSize::new(120.0, 28.0)),
+        &controller,
         sel!(closeWindow:),
         if emphasize_restart { None } else { Some("\r") },
     );
     let restart_button = button(
         mtm,
         "Restart daemon",
-        352.0,
-        18.0,
-        120.0,
-        28.0,
-        &*controller,
+        NSRect::new(NSPoint::new(352.0, 18.0), NSSize::new(120.0, 28.0)),
+        &controller,
         sel!(restartDaemon:),
         if emphasize_restart { Some("\r") } else { None },
     );
     let logout_button = button(
         mtm,
         "Logout",
-        480.0,
-        18.0,
-        120.0,
-        28.0,
-        &*controller,
+        NSRect::new(NSPoint::new(480.0, 18.0), NSSize::new(120.0, 28.0)),
+        &controller,
         sel!(logout:),
         None,
     );
@@ -530,18 +514,12 @@ fn secure_input(
 fn button(
     mtm: MainThreadMarker,
     title: &str,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
+    frame: NSRect,
     target: &AnyObject,
     action: objc2::runtime::Sel,
     key_equivalent: Option<&str>,
 ) -> Retained<NSButton> {
-    let button = NSButton::initWithFrame(
-        NSButton::alloc(mtm),
-        NSRect::new(NSPoint::new(x, y), NSSize::new(width, height)),
-    );
+    let button = NSButton::initWithFrame(NSButton::alloc(mtm), frame);
     button.setTitle(&NSString::from_str(title));
     unsafe {
         button.setTarget(Some(target));
