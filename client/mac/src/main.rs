@@ -14,7 +14,7 @@ use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use virtue_core::storage::FileStateStore;
-use virtue_core::{AuthState, LogEntry, MonitorService, ServiceStatus};
+use virtue_core::{AuthState, CoreError, LogEntry, MonitorService, ServiceStatus};
 
 use crate::capture::MacPlatformHooks;
 use crate::config::{
@@ -178,11 +178,13 @@ fn open_app_dialog(paths: &ClientPaths) -> Result<()> {
         return Ok(());
     }
 
-    let Some(input) = ui::prompt_login(BUILD_LABEL, app_status.email.as_deref())? else {
+    let Some(device_id) = ui::prompt_login(BUILD_LABEL, app_status.email.as_deref(), |input| {
+        login(paths, &input.email, &input.password).map_err(|err| login_error_message(&err))
+    })?
+    else {
         return Ok(());
     };
 
-    let device_id = login(paths, &input.email, &input.password)?;
     ui::show_info(&format!("Signed in.\nDevice id: {device_id}"))?;
     Ok(())
 }
@@ -206,6 +208,25 @@ fn login(paths: &ClientPaths, email: &str, password: &str) -> Result<String> {
         .as_ref()
         .map(|device| device.device_id.clone())
         .unwrap_or_else(|| "<unknown>".to_string()))
+}
+
+fn login_error_message(err: &anyhow::Error) -> String {
+    for cause in err.chain() {
+        if let Some(core_err) = cause.downcast_ref::<CoreError>() {
+            if core_err.is_unauthorized() || core_err.is_bad_request() {
+                return "Login failed. Check your email and password and try again.".to_string();
+            }
+
+            return format!("Login failed: {core_err}");
+        }
+    }
+
+    match err.root_cause().to_string() {
+        message if message.trim().is_empty() || message == "login failed" => {
+            "Login failed. Try again.".to_string()
+        }
+        message => format!("Login failed: {message}"),
+    }
 }
 
 fn logout(paths: &ClientPaths) -> Result<()> {
