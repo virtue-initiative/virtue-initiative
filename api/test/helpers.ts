@@ -4,6 +4,26 @@ import { clearMockEmailDeliveries, listMockEmailDeliveries } from '../src/lib/em
 
 export const BASE = 'http://localhost';
 
+async function sha256Bytes(input: string) {
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input)));
+}
+
+export async function passwordAuthFor(password: string) {
+  return Buffer.from(await sha256Bytes(`auth:${password}`)).toString('base64');
+}
+
+export async function passwordSaltFor(seed: string) {
+  return Buffer.from((await sha256Bytes(`salt:${seed}`)).slice(0, 16)).toString('base64');
+}
+
+export async function publicKeyFor(seed: string) {
+  return Buffer.from(await sha256Bytes(`pub:${seed}`)).toString('base64');
+}
+
+export function privateKeyFor(seed: string) {
+  return Buffer.from(`priv:${seed}`).toString('base64');
+}
+
 export function uuidToBytes(uuid: string): ArrayBuffer {
   const normalized = normalizeUuidString(uuid);
   const hex = normalized.replace(/-/g, '');
@@ -50,10 +70,21 @@ export async function signupAndGetToken(
   password = 'password123',
   name?: string,
 ): Promise<{ token: string; userId: string }> {
+  const password_auth = await passwordAuthFor(password);
+  const password_salt = await passwordSaltFor(email);
+  const pub_key = await publicKeyFor(email);
+  const priv_key = privateKeyFor(email);
   const res = await SELF.fetch(`${BASE}/signup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password, ...(name ? { name } : {}) }),
+    body: JSON.stringify({
+      email,
+      password_auth,
+      password_salt,
+      pub_key,
+      priv_key,
+      ...(name ? { name } : {}),
+    }),
   });
 
   if (!res.ok) {

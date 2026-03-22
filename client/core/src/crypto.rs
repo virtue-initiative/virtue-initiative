@@ -1,32 +1,40 @@
-use aes_gcm::aead::{Aead, KeyInit, OsRng, rand_core::RngCore};
+use aes_gcm::aead::{Aead, KeyInit, OsRng as AesOsRng, rand_core::RngCore};
 use aes_gcm::{Aes256Gcm, Nonce};
 use argon2::{Algorithm, Argon2, Params, Version};
 use base64::Engine;
-use pbkdf2::pbkdf2_hmac_array;
+use hkdf::Hkdf;
+use hpke::{
+    Deserializable, OpModeS, Serializable,
+    aead::AesGcm256,
+    kdf::HkdfSha256,
+    kem::{Kem as KemTrait, X25519HkdfSha256},
+    setup_sender,
+};
+use rand_core::{OsRng as HpkeOsRng, TryRngCore};
 use sha2::{Digest, Sha256};
 
 use crate::error::{CoreError, CoreResult};
-use crate::model::{BatchEvent, BatchEventData, BufferedScreenshot, Screenshot};
+use crate::model::{
+    BatchEvent, BatchEventData, BatchRecipient, BufferedScreenshot, HashParams, Screenshot,
+};
 
-#[derive(Debug, Clone)]
-pub struct CryptoEngine {
-    key_bytes: [u8; 32],
-}
+type HpkeKem = X25519HkdfSha256;
+type HpkeKdf = HkdfSha256;
+type HpkeAead = AesGcm256;
+
+#[derive(Debug, Clone, Default)]
+pub struct CryptoEngine;
 
 impl CryptoEngine {
-    pub fn from_base64(e2ee_key_base64: &str) -> CoreResult<Self> {
-        let raw = base64::engine::general_purpose::STANDARD.decode(e2ee_key_base64)?;
-        let key_bytes: [u8; 32] = raw
-            .try_into()
-            .map_err(|_| CoreError::InvalidState("e2ee_key must be 32 bytes"))?;
-        Ok(Self { key_bytes })
-    }
-
-    pub fn encrypt_batch_blob(&self, plaintext: &[u8]) -> CoreResult<Vec<u8>> {
-        let cipher = Aes256Gcm::new_from_slice(&self.key_bytes)
+    pub fn encrypt_batch_blob(
+        &self,
+        batch_key: &[u8; 32],
+        plaintext: &[u8],
+    ) -> CoreResult<Vec<u8>> {
+        let cipher = Aes256Gcm::new_from_slice(batch_key)
             .map_err(|_| CoreError::Crypto("invalid AES-256-GCM key"))?;
         let mut nonce_bytes = [0_u8; 12];
-        OsRng.fill_bytes(&mut nonce_bytes);
+        AesOsRng.fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
         let ciphertext = cipher
             .encrypt(nonce, plaintext)
@@ -38,32 +46,62 @@ impl CryptoEngine {
         Ok(out)
     }
 
-    pub fn decrypt_blob(&self, encrypted: &[u8]) -> CoreResult<Vec<u8>> {
-        if encrypted.len() < 13 {
-            return Err(CoreError::InvalidState(
-                "AES-GCM payload must be nonce[12] || ciphertext+tag",
-            ));
-        }
+    pub fn generate_batch_key(&self) -> [u8; 32] {
+        let mut batch_key = [0_u8; 32];
+        AesOsRng.fill_bytes(&mut batch_key);
+        batch_key
+    }
 
-        let cipher = Aes256Gcm::new_from_slice(&self.key_bytes)
-            .map_err(|_| CoreError::Crypto("invalid AES-256-GCM key"))?;
-        let nonce = Nonce::from_slice(&encrypted[..12]);
-        cipher
-            .decrypt(nonce, &encrypted[12..])
-            .map_err(|_| CoreError::Crypto("AES-256-GCM decryption failed"))
+    pub fn wrap_batch_key_for_recipient(
+        &self,
+        recipient: &BatchRecipient,
+        batch_key: &[u8; 32],
+    ) -> CoreResult<String> {
+        let public_key_bytes =
+            base64::engine::general_purpose::STANDARD.decode(&recipient.pub_key_base64)?;
+        let public_key = <HpkeKem as KemTrait>::PublicKey::from_bytes(&public_key_bytes)
+            .map_err(|_| CoreError::Crypto("invalid X25519 public key"))?;
+        let mut csprng = HpkeOsRng.unwrap_err();
+        let (encapped_key, mut sender) = setup_sender::<HpkeAead, HpkeKdf, HpkeKem, _>(
+            &OpModeS::Base,
+            &public_key,
+            b"",
+            &mut csprng,
+        )
+        .map_err(|_| CoreError::Crypto("HPKE setup failed"))?;
+        let ciphertext = sender
+            .seal(batch_key, b"")
+            .map_err(|_| CoreError::Crypto("HPKE encryption failed"))?;
+        let mut envelope = Vec::with_capacity(encapped_key.to_bytes().len() + ciphertext.len());
+        envelope.extend_from_slice(encapped_key.to_bytes().as_slice());
+        envelope.extend_from_slice(&ciphertext);
+        Ok(base64::engine::general_purpose::STANDARD.encode(envelope))
     }
 }
 
-pub fn hash_password_for_auth(password: &str, email: &str) -> CoreResult<String> {
-    let params = Params::new(65_536, 3, 1, Some(32))
-        .map_err(|_| CoreError::InvalidState("invalid argon2 parameters"))?;
-    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-    let salt = email.to_lowercase();
-    let mut output = [0_u8; 32];
+pub fn derive_password_auth(
+    password: &str,
+    password_salt: &[u8],
+    params: &HashParams,
+) -> CoreResult<[u8; 32]> {
+    let argon_params = Params::new(
+        params.memory_cost_kib,
+        params.time_cost,
+        params.parallelism,
+        Some(32),
+    )
+    .map_err(|_| CoreError::InvalidState("invalid argon2 parameters"))?;
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, argon_params);
+    let mut argon_output = [0_u8; 32];
     argon2
-        .hash_password_into(password.as_bytes(), salt.as_bytes(), &mut output)
+        .hash_password_into(password.as_bytes(), password_salt, &mut argon_output)
         .map_err(|err| CoreError::Argon2(err.to_string()))?;
-    Ok(hex::encode(output))
+
+    let hkdf = Hkdf::<Sha256>::new(None, &argon_output);
+    let mut password_auth = [0_u8; 32];
+    hkdf.expand(b"auth", &mut password_auth)
+        .map_err(|_| CoreError::Crypto("HKDF expand failed"))?;
+    Ok(password_auth)
 }
 
 pub fn prepare_screenshot_event(screenshot: Screenshot) -> BufferedScreenshot {
@@ -80,10 +118,6 @@ pub fn prepare_screenshot_event(screenshot: Screenshot) -> BufferedScreenshot {
         content_hash: compute_event_hash(&event),
         event,
     }
-}
-
-pub fn derive_wrapping_key(password: &str, user_id: &str) -> [u8; 32] {
-    pbkdf2_hmac_array::<Sha256, 32>(password.as_bytes(), user_id.as_bytes(), 100_000)
 }
 
 pub fn compute_event_hash(event: &BatchEvent) -> [u8; 32] {

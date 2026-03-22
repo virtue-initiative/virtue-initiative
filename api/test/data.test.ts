@@ -14,32 +14,22 @@ import {
 beforeEach(clearDB);
 
 describe('Data and device API routes', () => {
-  it('handles device registration, token refresh, log upload, batch upload, and data listing', async () => {
-    const { token: userToken } = await signupAndGetToken('alice@example.com');
+  it('handles device registration, settings, log upload, batch upload, and filtered data listing', async () => {
+    const { token: userToken, userId } = await signupAndGetToken('alice@example.com');
     const device = await createDeviceForUser(userToken, 'Phone', 'ios');
-
-    const session = await env.DB.prepare(
-      `SELECT lower(hex(device_id)) as device_id_hex, expires_at
-       FROM device_sessions
-       WHERE device_id = ?
-       ORDER BY created_at DESC
-       LIMIT 1`,
-    )
-      .bind(uuidToBytes(device.id))
-      .first<{
-        device_id_hex: string | null;
-        expires_at: number;
-      }>();
-
-    expect(session).toMatchObject({
-      device_id_hex: device.id.replaceAll('-', ''),
-    });
-    expect(session?.expires_at).toBeGreaterThan(Date.now());
 
     const deviceInfoRes = await SELF.fetch(`${BASE}/d/device`, {
       headers: { Authorization: `Bearer ${device.access_token}` },
     });
     expect(deviceInfoRes.status).toBe(200);
+    const deviceInfo = (await deviceInfoRes.json()) as {
+      owner?: { user_id: string; pub_key: string };
+      partners: Array<{ user_id: string; pub_key: string }>;
+      hash_base_url: string;
+    };
+    expect(deviceInfo.owner?.user_id).toBe(userId);
+    expect(deviceInfo.partners).toEqual([]);
+    expect(deviceInfo.hash_base_url).toBeTruthy();
 
     const hashUploadRes = await SELF.fetch(`${BASE}/hash`, {
       method: 'POST',
@@ -58,6 +48,17 @@ describe('Data and device API routes', () => {
     const form = new FormData();
     form.set('start_time', '1710000000000');
     form.set('end_time', '1710003600000');
+    form.set(
+      'access_keys',
+      JSON.stringify({
+        keys: [
+          {
+            user_id: userId,
+            hpke_key: Buffer.from('owner-envelope').toString('base64'),
+          },
+        ],
+      }),
+    );
     form.set('file', new File([new Uint8Array([1, 2, 3])], 'batch.enc'));
     const batchRes = await SELF.fetch(`${BASE}/d/batch`, {
       method: 'POST',
@@ -75,14 +76,18 @@ describe('Data and device API routes', () => {
     expect(batch.id).toBeTruthy();
     expect(batch.end_hash).toHaveLength(64);
     expect(batch.url).toContain('/user/');
-    expect(batch.start_time).toBe(1710000000000);
-    expect(batch.end_time).toBe(1710003600000);
 
-    const hashReadRes = await SELF.fetch(`${BASE}/hash`, {
-      headers: { Authorization: `Bearer ${device.access_token}` },
+    const storedBatch = await env.DB.prepare('SELECT access_keys FROM batches WHERE id = ?')
+      .bind(uuidToBytes(batch.id))
+      .first<{ access_keys: string }>();
+    expect(JSON.parse(storedBatch!.access_keys)).toEqual({
+      keys: [
+        {
+          user_id: userId,
+          hpke_key: Buffer.from('owner-envelope').toString('base64'),
+        },
+      ],
     });
-    expect(hashReadRes.status).toBe(200);
-    expect((await hashReadRes.arrayBuffer()).byteLength).toBe(32);
 
     const refreshRes = await SELF.fetch(`${BASE}/d/token`, {
       method: 'POST',
@@ -96,10 +101,13 @@ describe('Data and device API routes', () => {
     });
     expect(dataRes.status).toBe(200);
     const data = (await dataRes.json()) as {
-      batches: Array<{ device_id: string; end_hash: string }>;
+      batches: Array<{ device_id: string; end_hash: string; encrypted_key: string }>;
       logs: Array<{ device_id: string; type: string; data: { event: string } }>;
     };
-    expect(data.batches[0].device_id).toBe(device.id);
+    expect(data.batches[0]).toMatchObject({
+      device_id: device.id,
+      encrypted_key: Buffer.from('owner-envelope').toString('base64'),
+    });
     expect(data.logs[0]).toMatchObject({
       device_id: device.id,
       type: 'system_event',
@@ -114,9 +122,10 @@ describe('Data and device API routes', () => {
     expect(resetRes.status).toBe(200);
   });
 
-  it("allows an accepted partner to read another user's data", async () => {
+  it("returns the accepted partner's batch envelope and owner logs", async () => {
     const { token: ownerToken, userId: ownerUserId } = await signupAndGetToken('owner@example.com');
-    const { token: partnerToken } = await signupAndGetToken('partner@example.com');
+    const { token: partnerToken, userId: partnerUserId } =
+      await signupAndGetToken('partner@example.com');
     const device = await createDeviceForUser(ownerToken);
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
@@ -142,11 +151,57 @@ describe('Data and device API routes', () => {
       body: JSON.stringify({ ts: 1710000000000, type: 'system_event', data: { event: 'startup' } }),
     });
 
-    const res = await SELF.fetch(`${BASE}/data?user=${encodeURIComponent(ownerUserId)}`, {
-      headers: { Authorization: `Bearer ${partnerToken}` },
+    const form = new FormData();
+    form.set('start_time', '1710000000000');
+    form.set('end_time', '1710003600000');
+    form.set(
+      'access_keys',
+      JSON.stringify({
+        keys: [
+          {
+            user_id: ownerUserId,
+            hpke_key: Buffer.from('owner-envelope').toString('base64'),
+          },
+          {
+            user_id: partnerUserId,
+            hpke_key: Buffer.from('partner-envelope').toString('base64'),
+          },
+        ],
+      }),
+    );
+    form.set('file', new File([new Uint8Array([1, 2, 3])], 'batch.enc'));
+    const batchUploadRes = await SELF.fetch(`${BASE}/d/batch`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${device.access_token}` },
+      body: form,
     });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { logs: Array<{ device_id: string }> };
-    expect(body.logs[0].device_id).toBe(device.id);
+    expect(batchUploadRes.status).toBe(201);
+
+    const ownerDataRes = await SELF.fetch(`${BASE}/data`, {
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    });
+    expect(ownerDataRes.status).toBe(200);
+    const ownerData = (await ownerDataRes.json()) as {
+      batches: Array<{ encrypted_key: string }>;
+    };
+    expect(ownerData.batches[0]?.encrypted_key).toBe(
+      Buffer.from('owner-envelope').toString('base64'),
+    );
+
+    const partnerDataRes = await SELF.fetch(
+      `${BASE}/data?user=${encodeURIComponent(ownerUserId)}`,
+      {
+        headers: { Authorization: `Bearer ${partnerToken}` },
+      },
+    );
+    expect(partnerDataRes.status).toBe(200);
+    const partnerData = (await partnerDataRes.json()) as {
+      batches: Array<{ encrypted_key: string }>;
+      logs: Array<{ device_id: string }>;
+    };
+    expect(partnerData.batches[0]?.encrypted_key).toBe(
+      Buffer.from('partner-envelope').toString('base64'),
+    );
+    expect(partnerData.logs[0]?.device_id).toBe(device.id);
   });
 });

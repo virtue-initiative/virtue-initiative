@@ -99,16 +99,20 @@ export async function findUserByEmail(db: D1Database, email: string) {
     id: string;
     email: string;
     password_hash: string;
+    password_salt: ArrayBuffer;
+    password_params_version: string;
     name: string | null;
     email_verified: number;
     email_bounced_at: number | null;
-    e2ee_key: ArrayBuffer | null;
     pub_key: ArrayBuffer | null;
     priv_key: ArrayBuffer | null;
   }>(
     db
       .prepare(
-        'SELECT id, email, password_hash, name, email_verified, email_bounced_at, e2ee_key, pub_key, priv_key FROM users WHERE email = ?',
+        `SELECT id, email, password_hash, password_salt, password_params_version,
+                name, email_verified, email_bounced_at, pub_key, priv_key
+         FROM users
+         WHERE email = ?`,
       )
       .bind(email),
     ['id'],
@@ -122,13 +126,12 @@ export async function findUserById(db: D1Database, userId: string) {
     name: string | null;
     email_verified: number;
     email_bounced_at: number | null;
-    e2ee_key: ArrayBuffer | null;
     pub_key: ArrayBuffer | null;
     priv_key: ArrayBuffer | null;
   }>(
     db
       .prepare(
-        'SELECT id, email, name, email_verified, email_bounced_at, e2ee_key, pub_key, priv_key FROM users WHERE id = ?',
+        'SELECT id, email, name, email_verified, email_bounced_at, pub_key, priv_key FROM users WHERE id = ?',
       )
       .bind(uuidToBytes(userId)),
     ['id'],
@@ -178,13 +181,35 @@ export async function markUsersEmailBouncedByEmails(db: D1Database, emails: stri
 
 export async function createUser(
   db: D1Database,
-  input: { id: string; email: string; passwordHash: string; name?: string },
+  input: {
+    id: string;
+    email: string;
+    passwordHash: string;
+    passwordSalt: ArrayBuffer;
+    passwordParamsVersion: string;
+    pub_key: ArrayBuffer;
+    priv_key: ArrayBuffer;
+    name?: string;
+  },
 ) {
   return db
     .prepare(
-      'INSERT INTO users (id, email, password_hash, name, email_verified, created_at) VALUES (?, ?, ?, ?, 0, ?)',
+      `INSERT INTO users (
+        id, email, password_hash, password_salt, password_params_version,
+        name, email_verified, pub_key, priv_key, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
     )
-    .bind(uuidToBytes(input.id), input.email, input.passwordHash, input.name ?? null, Date.now())
+    .bind(
+      uuidToBytes(input.id),
+      input.email,
+      input.passwordHash,
+      input.passwordSalt,
+      input.passwordParamsVersion,
+      input.name ?? null,
+      input.pub_key,
+      input.priv_key,
+      Date.now(),
+    )
     .run();
 }
 
@@ -195,9 +220,10 @@ export async function updateUser(
     email?: string;
     name?: string;
     password_hash?: string;
+    password_salt?: ArrayBuffer;
+    password_params_version?: string;
     email_verified?: boolean;
     email_bounced_at?: number | null;
-    e2ee_key?: ArrayBuffer;
     pub_key?: ArrayBuffer;
     priv_key?: ArrayBuffer;
   },
@@ -220,6 +246,16 @@ export async function updateUser(
     params.push(fields.password_hash);
   }
 
+  if (fields.password_salt !== undefined) {
+    updates.push('password_salt = ?');
+    params.push(fields.password_salt);
+  }
+
+  if (fields.password_params_version !== undefined) {
+    updates.push('password_params_version = ?');
+    params.push(fields.password_params_version);
+  }
+
   if (fields.email_verified !== undefined) {
     updates.push('email_verified = ?');
     params.push(fields.email_verified ? 1 : 0);
@@ -228,11 +264,6 @@ export async function updateUser(
   if (fields.email_bounced_at !== undefined) {
     updates.push('email_bounced_at = ?');
     params.push(fields.email_bounced_at);
-  }
-
-  if (fields.e2ee_key !== undefined) {
-    updates.push('e2ee_key = ?');
-    params.push(fields.e2ee_key);
   }
 
   if (fields.pub_key !== undefined) {
@@ -459,13 +490,15 @@ export async function createBatch(
     start_time: number;
     end_time: number;
     end_hash: string;
+    access_keys: string;
     created_at: number;
   },
 ) {
   return db
     .prepare(
-      `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO batches (
+         id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       uuidToBytes(input.id),
@@ -475,6 +508,7 @@ export async function createBatch(
       input.start_time,
       input.end_time,
       input.end_hash,
+      input.access_keys,
       input.created_at,
     )
     .run();
@@ -522,7 +556,7 @@ export async function listBatches(
   }
 
   const params: SqlValue[] = ownerIds.map(uuidToBytes);
-  let query = `SELECT id, user_id, device_id, url, start_time, end_time, end_hash, created_at
+  let query = `SELECT id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at
                FROM batches
                WHERE user_id IN (${placeholders(ownerIds.length)})`;
 
@@ -547,6 +581,7 @@ export async function listBatches(
     start_time: number;
     end_time: number;
     end_hash: string;
+    access_keys: string;
     created_at: number;
   }>(db.prepare(query).bind(...params), ['id', 'user_id', 'device_id']);
 }
@@ -715,23 +750,20 @@ export async function createPartner(
     watching_user_id: string;
     watcher_email: string;
     invite_token_id: string;
-    e2ee_key?: ArrayBuffer;
     created_at: number;
   },
 ) {
   return db
     .prepare(
       `INSERT INTO partners (
-        id, watching_user_id, watcher_user_id, watcher_email, invite_token_id,
-        status, e2ee_key, created_at, updated_at
-      ) VALUES (?, ?, NULL, ?, ?, 'pending', ?, ?, ?)`,
+        id, watching_user_id, watcher_user_id, watcher_email, invite_token_id, status, created_at, updated_at
+      ) VALUES (?, ?, NULL, ?, ?, 'pending', ?, ?)`,
     )
     .bind(
       uuidToBytes(input.id),
       uuidToBytes(input.watching_user_id),
       input.watcher_email,
       uuidToBytes(input.invite_token_id),
-      input.e2ee_key ?? null,
       input.created_at,
       input.created_at,
     )
@@ -748,7 +780,6 @@ export async function findPartnerById(db: D1Database, partnerId: string) {
     invite_expires_at: number | null;
     invite_consumed_at: number | null;
     status: string;
-    e2ee_key: ArrayBuffer | null;
     created_at: number;
     updated_at: number;
   }>(
@@ -762,7 +793,6 @@ export async function findPartnerById(db: D1Database, partnerId: string) {
                 et.expires_at AS invite_expires_at,
                 et.consumed_at AS invite_consumed_at,
                 p.status,
-                p.e2ee_key,
                 p.created_at,
                 p.updated_at
          FROM partners p
@@ -784,7 +814,6 @@ export async function findPartnerByInviteTokenHash(db: D1Database, tokenHash: st
     invite_expires_at: number | null;
     invite_consumed_at: number | null;
     status: string;
-    e2ee_key: ArrayBuffer | null;
     created_at: number;
     updated_at: number;
   }>(
@@ -798,7 +827,6 @@ export async function findPartnerByInviteTokenHash(db: D1Database, tokenHash: st
                 et.expires_at AS invite_expires_at,
                 et.consumed_at AS invite_consumed_at,
                 p.status,
-                p.e2ee_key,
                 p.created_at,
                 p.updated_at
          FROM partners p
@@ -836,7 +864,7 @@ export async function acceptPartner(
     .prepare(
       `UPDATE partners
        SET watcher_user_id = ?, watcher_email = ?, invite_token_id = NULL,
-           status = 'accepted', e2ee_key = NULL, updated_at = ?
+           status = 'accepted', updated_at = ?
        WHERE id = ?`,
     )
     .bind(
@@ -853,14 +881,13 @@ export async function listOwnedPartners(db: D1Database, ownerId: string) {
     id: string;
     status: string;
     created_at: number;
-    e2ee_key: ArrayBuffer | null;
     watcher_email: string;
     watcher_id: string | null;
     watcher_name: string | null;
   }>(
     db
       .prepare(
-        `SELECT p.id, p.status, p.created_at, p.e2ee_key, p.watcher_email,
+        `SELECT p.id, p.status, p.created_at, p.watcher_email,
                  u.id AS watcher_id, u.name AS watcher_name
            FROM partners p
            LEFT JOIN users u ON u.id = p.watcher_user_id
@@ -877,7 +904,6 @@ export async function listIncomingPartners(db: D1Database, partnerUserId: string
     id: string;
     status: string;
     created_at: number;
-    e2ee_key: ArrayBuffer | null;
     watching_user_id: string;
     watching_user_email: string;
     watching_user_name: string | null;
@@ -886,7 +912,7 @@ export async function listIncomingPartners(db: D1Database, partnerUserId: string
   }>(
     db
       .prepare(
-        `SELECT p.id, p.status, p.created_at, p.e2ee_key,
+        `SELECT p.id, p.status, p.created_at,
                 u.id AS watching_user_id, u.email AS watching_user_email, u.name AS watching_user_name,
                 pref.email_frequency, pref.immediate_tamper_severity
           FROM partners p
@@ -898,31 +924,6 @@ export async function listIncomingPartners(db: D1Database, partnerUserId: string
       .bind(uuidToBytes(partnerUserId)),
     ['id', 'watching_user_id'],
   );
-}
-
-export async function updatePartnerByOwner(
-  db: D1Database,
-  input: {
-    id: string;
-    ownerId: string;
-    e2ee_key?: ArrayBuffer;
-    updated_at: number;
-  },
-) {
-  const updates: string[] = ['updated_at = ?'];
-  const params: (string | number | ArrayBuffer | null)[] = [input.updated_at];
-
-  if (input.e2ee_key !== undefined) {
-    updates.push('e2ee_key = ?');
-    params.push(input.e2ee_key);
-  }
-
-  params.push(uuidToBytes(input.id), uuidToBytes(input.ownerId));
-
-  return db
-    .prepare(`UPDATE partners SET ${updates.join(', ')} WHERE id = ? AND watching_user_id = ?`)
-    .bind(...params)
-    .run();
 }
 
 export async function deletePartnerById(db: D1Database, partnerId: string) {
@@ -1035,50 +1036,29 @@ export async function updatePartnerNotificationPreference(
   };
 }
 
-export async function clearPartnerAccessKeysForUser(db: D1Database, partnerUserId: string) {
-  return db
-    .prepare('UPDATE partners SET e2ee_key = NULL WHERE watcher_user_id = ?')
-    .bind(uuidToBytes(partnerUserId))
-    .run();
-}
+export async function listBatchAccessRecipientsForOwner(db: D1Database, ownerId: string) {
+  const [owner, partners] = await Promise.all([
+    firstWithUuidFields<{ id: string; pub_key: ArrayBuffer | null }>(
+      db.prepare('SELECT id, pub_key FROM users WHERE id = ?').bind(uuidToBytes(ownerId)),
+      ['id'],
+    ),
+    allWithUuidFields<{ id: string; pub_key: ArrayBuffer | null }>(
+      db
+        .prepare(
+          `SELECT recipient.id AS id, recipient.pub_key
+           FROM partners p
+           JOIN users recipient ON recipient.id = p.watcher_user_id
+           WHERE p.watching_user_id = ? AND p.status = 'accepted'`,
+        )
+        .bind(uuidToBytes(ownerId)),
+      ['id'],
+    ),
+  ]);
 
-export async function listPartnerAccessTargetsForOwner(db: D1Database, ownerId: string) {
-  const result = await allWithUuidFields<{
-    id: string;
-    watcher_user_id: string | null;
-    watcher_email: string | null;
-    watcher_pub_key: ArrayBuffer | null;
-  }>(
-    db
-      .prepare(
-        `SELECT p.id,
-                p.watcher_user_id,
-                recipient.email AS watcher_email,
-                recipient.pub_key AS watcher_pub_key
-         FROM partners p
-         LEFT JOIN users recipient ON recipient.id = p.watcher_user_id
-         WHERE p.watching_user_id = ? AND p.status = 'accepted'`,
-      )
-      .bind(uuidToBytes(ownerId)),
-    ['id', 'watcher_user_id'],
-  );
-
-  return result.filter((row) => row.watcher_user_id && row.watcher_email);
-}
-
-export async function updatePartnerAccessKeys(
-  db: D1Database,
-  ownerId: string,
-  keys: Array<{ partnership_id: string; e2ee_key: ArrayBuffer }>,
-) {
-  for (const key of keys) {
-    await db
-      .prepare(
-        'UPDATE partners SET e2ee_key = ?, updated_at = ? WHERE id = ? AND watching_user_id = ?',
-      )
-      .bind(key.e2ee_key, Date.now(), uuidToBytes(key.partnership_id), uuidToBytes(ownerId))
-      .run();
-  }
+  return [
+    ...(owner?.pub_key ? [{ id: owner.id, pub_key: owner.pub_key }] : []),
+    ...partners.filter((partner) => partner.pub_key),
+  ];
 }
 
 export async function listAcceptedNotificationTargetsForUser(db: D1Database, userId: string) {

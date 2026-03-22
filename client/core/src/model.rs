@@ -43,6 +43,13 @@ pub struct BatchUpload {
     pub end_time_ms: i64,
     #[serde(with = "serde_bytes")]
     pub bytes: Vec<u8>,
+    pub access_keys: Vec<BatchAccessKey>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchAccessKey {
+    pub user_id: String,
+    pub hpke_key_base64: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,8 +65,29 @@ pub struct DeviceSettings {
     pub name: String,
     pub platform: String,
     pub enabled: bool,
-    pub e2ee_key_base64: Option<String>,
+    #[serde(default)]
+    pub owner: Option<BatchRecipient>,
+    #[serde(default)]
+    pub partners: Vec<BatchRecipient>,
+    #[serde(default)]
     pub hash_base_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchRecipient {
+    pub user_id: String,
+    pub pub_key_base64: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HashParams {
+    pub version: String,
+    pub algorithm: String,
+    pub memory_cost_kib: u32,
+    pub time_cost: u32,
+    pub parallelism: u32,
+    pub salt_length: u32,
+    pub hkdf_hash: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,10 +98,8 @@ pub struct LoginStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AuthState {
-    pub user_id: Option<String>,
     pub user_access_token: Option<String>,
     pub device_credentials: Option<DeviceCredentials>,
-    pub wrapping_key_base64: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

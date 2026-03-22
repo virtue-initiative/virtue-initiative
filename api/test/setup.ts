@@ -5,10 +5,11 @@ CREATE TABLE IF NOT EXISTS users (
   id BLOB PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
+  password_salt BLOB NOT NULL,
+  password_params_version TEXT NOT NULL DEFAULT 'argon2id-v1',
   name TEXT,
   email_verified INTEGER NOT NULL DEFAULT 0,
   email_bounced_at INTEGER,
-  e2ee_key BLOB,
   pub_key BLOB,
   priv_key BLOB,
   created_at INTEGER NOT NULL
@@ -34,6 +35,7 @@ CREATE TABLE IF NOT EXISTS batches (
   start_time INTEGER NOT NULL,
   end_time INTEGER NOT NULL,
   end_hash TEXT NOT NULL,
+  access_keys TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
@@ -48,7 +50,6 @@ CREATE TABLE IF NOT EXISTS partners (
   watcher_email TEXT NOT NULL,
   invite_token_id BLOB UNIQUE,
   status TEXT NOT NULL,
-  e2ee_key BLOB,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   FOREIGN KEY (watching_user_id) REFERENCES users(id) ON DELETE CASCADE,

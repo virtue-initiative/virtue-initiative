@@ -12,8 +12,8 @@ import {
   getHashState,
   findDeviceById,
   findSessionByRefreshTokenHash,
-  findUserById,
   deleteSessionByRefreshTokenHash,
+  listBatchAccessRecipientsForOwner,
   resetHashState as resetStoredHashState,
 } from '../lib/db';
 import { encodeBase64, encodeHex } from '../lib/encoding';
@@ -50,10 +50,20 @@ const deviceTokenSchema = z.object({
 const uploadBatchSchema = z.object({
   start_time: z.coerce.number().int().nonnegative(),
   end_time: z.coerce.number().int().nonnegative(),
+  access_keys: z.string().min(1),
   file: z
     .instanceof(File)
     .refine((file) => file.size > 0, { message: 'File is empty' })
     .refine((file) => file.size <= 100 * 1024 * 1024, { message: 'File exceeds 100MB limit' }),
+});
+
+const accessKeyEntrySchema = z.object({
+  user_id: z.uuid(),
+  hpke_key: z.base64(),
+});
+
+const accessKeysSchema = z.object({
+  keys: z.array(accessKeyEntrySchema).min(1),
 });
 
 const deviceLogSchema = z.object({
@@ -70,6 +80,21 @@ function getConfiguredHashBaseUrl(env: Env) {
 
 function getHashBaseUrl(requestUrl: string, env: Env) {
   return getConfiguredHashBaseUrl(env) ?? getRequestApiBaseUrl(requestUrl, env.API_BASE_PATH);
+}
+
+function parseAccessKeysPayload(raw: string) {
+  const parsed = JSON.parse(raw) as unknown;
+  const payload = accessKeysSchema.parse(parsed);
+  const seen = new Set<string>();
+
+  for (const key of payload.keys) {
+    if (seen.has(key.user_id)) {
+      throw new Error('access_keys contains duplicate user_id entries');
+    }
+    seen.add(key.user_id);
+  }
+
+  return payload;
 }
 
 async function readHashState(
@@ -166,14 +191,28 @@ deviceOnly.get('/device', authenticate('device-access'), async (c) => {
     return c.json({ error: 'Not found' }, 404);
   }
 
-  const user = await findUserById(c.env.DB, device.owner);
+  const recipients = await listBatchAccessRecipientsForOwner(c.env.DB, device.owner);
+  const owner = recipients.find((recipient) => recipient.id === device.owner);
 
   return c.json({
     id: device.id,
     name: device.name,
     platform: device.platform,
     enabled: device.enabled === 1,
-    ...(user?.e2ee_key ? { e2ee_key: encodeBase64(user.e2ee_key) } : {}),
+    ...(owner?.pub_key
+      ? {
+          owner: {
+            user_id: owner.id,
+            pub_key: encodeBase64(owner.pub_key),
+          },
+        }
+      : {}),
+    partners: recipients
+      .filter((recipient) => recipient.id !== device.owner)
+      .map((recipient) => ({
+        user_id: recipient.id,
+        pub_key: encodeBase64(recipient.pub_key!),
+      })),
     hash_base_url: getHashBaseUrl(c.req.url, c.env),
   });
 });
@@ -228,7 +267,7 @@ deviceOnly.post(
       return c.json({ error: 'Not found' }, 404);
     }
 
-    const { start_time, end_time, file } = c.req.valid('form');
+    const { start_time, end_time, access_keys, file } = c.req.valid('form');
     const authorization = c.req.header('Authorization');
 
     if (!authorization) {
@@ -242,6 +281,19 @@ deviceOnly.post(
     const key = `user/${device.owner}/batches/${batchId}.enc`;
     const url = `${c.env.R2_URL}/${key}`;
     const createdAt = Date.now();
+    let parsedAccessKeys: z.infer<typeof accessKeysSchema>;
+
+    try {
+      parsedAccessKeys = parseAccessKeysPayload(access_keys);
+    } catch (error) {
+      return c.json(
+        {
+          error: 'Bad Request',
+          details: { errors: [error instanceof Error ? error.message : 'Invalid access_keys'] },
+        },
+        400,
+      );
+    }
 
     await putObject(c.env, key, await file.arrayBuffer(), 'application/octet-stream');
     await createBatch(c.env.DB, {
@@ -252,6 +304,7 @@ deviceOnly.post(
       start_time,
       end_time,
       end_hash: endHash,
+      access_keys: JSON.stringify(parsedAccessKeys),
       created_at: createdAt,
     });
     await resetHashState(

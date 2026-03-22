@@ -1,15 +1,13 @@
-use base64::Engine;
-
 use crate::api::ApiClient;
 use crate::batch::BatchBuilder;
 use crate::config::Config;
-use crate::crypto::{CryptoEngine, derive_wrapping_key, prepare_screenshot_event};
+use crate::crypto::{CryptoEngine, prepare_screenshot_event};
 use crate::error::{CoreError, CoreResult};
 use crate::image_pipeline::ImagePipeline;
 use crate::model::{
-    AuthState, BatchBufferState, BatchUpload, BufferedScreenshot, DeviceCredentials,
-    DeviceSettings, LogEntry, LoginStatus, LoopOutcome, PendingRequest, RequestDisposition,
-    RequestKind, Screenshot, ServiceStatus,
+    AuthState, BatchBufferState, BatchRecipient, BatchUpload, BufferedScreenshot,
+    DeviceCredentials, DeviceSettings, LogEntry, LoginStatus, LoopOutcome, PendingRequest,
+    RequestDisposition, RequestKind, Screenshot, ServiceStatus,
 };
 use crate::platform::PlatformHooks;
 use crate::storage::FileStateStore;
@@ -19,10 +17,7 @@ pub struct MonitorService<P> {
     platform: P,
     api: ApiClient,
     storage: FileStateStore,
-    user_id: Option<String>,
     user_access_token: Option<String>,
-    wrapping_key_base64: Option<String>,
-    batch_encryption_key_base64: Option<String>,
     device_credentials: Option<DeviceCredentials>,
     device_settings: Option<DeviceSettings>,
     batch_buffer: BatchBufferState,
@@ -65,10 +60,7 @@ impl<P: PlatformHooks> MonitorService<P> {
             platform,
             api,
             storage,
-            user_id: auth_state.user_id,
             user_access_token: auth_state.user_access_token,
-            wrapping_key_base64: auth_state.wrapping_key_base64,
-            batch_encryption_key_base64: None,
             device_credentials: auth_state.device_credentials,
             device_settings,
             batch_buffer,
@@ -76,7 +68,6 @@ impl<P: PlatformHooks> MonitorService<P> {
             status,
         };
 
-        let _ = service.refresh_batch_key_from_settings();
         if service.device_credentials.is_some() {
             let _ = service.refresh_device_settings();
         }
@@ -105,6 +96,7 @@ impl<P: PlatformHooks> MonitorService<P> {
         }
 
         if self.can_upload_batch() && self.should_upload_batch(now_ms) {
+            self.refresh_device_settings()?;
             let batch = self.build_batch(now_ms)?;
             let _ = self.try_request(self.pending_batch_request(&batch, now_ms)?)?;
             BatchBuilder::clear(&mut self.batch_buffer);
@@ -156,20 +148,13 @@ impl<P: PlatformHooks> MonitorService<P> {
         self.ensure_running()?;
 
         let access_token = self.api.login(username, password)?;
-        let user_id = jwt_subject(&access_token)
-            .ok_or(CoreError::InvalidState("access token missing sub"))?;
-        let wrapping_key = derive_wrapping_key(password, &user_id);
         let device = self.api.register_device(
             &access_token,
             &self.config.device_name,
             &self.config.platform_name,
         )?;
 
-        self.user_id = Some(user_id);
         self.user_access_token = Some(access_token.clone());
-        self.wrapping_key_base64 =
-            Some(base64::engine::general_purpose::STANDARD.encode(wrapping_key));
-        self.batch_encryption_key_base64 = None;
         self.device_credentials = Some(device.clone());
         self.status.is_authenticated = true;
         self.status.device_id = Some(device.device_id.clone());
@@ -213,9 +198,6 @@ impl<P: PlatformHooks> MonitorService<P> {
         }
 
         self.user_access_token = None;
-        self.user_id = None;
-        self.wrapping_key_base64 = None;
-        self.batch_encryption_key_base64 = None;
         self.device_credentials = None;
         self.device_settings = None;
         self.batch_buffer = BatchBufferState::default();
@@ -243,8 +225,8 @@ impl<P: PlatformHooks> MonitorService<P> {
     }
 
     fn build_batch(&self, now_ms: i64) -> CoreResult<BatchUpload> {
-        let crypto = self.crypto_engine()?;
-        BatchBuilder::build_upload(&self.batch_buffer, &crypto, now_ms)
+        let recipients = self.batch_recipients()?;
+        BatchBuilder::build_upload(&self.batch_buffer, &CryptoEngine, &recipients, now_ms)
     }
 
     fn pending_hash_request(
@@ -309,7 +291,6 @@ impl<P: PlatformHooks> MonitorService<P> {
                     api.get_device_settings(access_token)
                 })?;
                 self.device_settings = Some(settings);
-                self.refresh_batch_key_from_settings()?;
                 self.storage
                     .save_device_settings(self.device_settings.as_ref())?;
                 Ok(())
@@ -406,24 +387,19 @@ impl<P: PlatformHooks> MonitorService<P> {
 
     fn persist_auth_state(&self) -> CoreResult<()> {
         self.storage.save_auth_state(&AuthState {
-            user_id: self.user_id.clone(),
             user_access_token: self.user_access_token.clone(),
             device_credentials: self.device_credentials.clone(),
-            wrapping_key_base64: self.wrapping_key_base64.clone(),
         })
     }
 
     fn reload_persisted_state(&mut self) -> CoreResult<()> {
         let auth_state = self.storage.load_auth_state()?;
-        self.user_id = auth_state.user_id;
         self.user_access_token = auth_state.user_access_token;
-        self.wrapping_key_base64 = auth_state.wrapping_key_base64;
         self.device_credentials = auth_state.device_credentials;
 
         self.device_settings = self.storage.load_device_settings()?;
         self.pending_requests = self.storage.load_pending_requests()?;
         self.batch_buffer = self.storage.load_batch_buffer()?;
-        self.refresh_batch_key_from_settings()?;
         Ok(())
     }
 
@@ -444,23 +420,12 @@ impl<P: PlatformHooks> MonitorService<P> {
         }
     }
 
-    fn crypto_engine(&self) -> CoreResult<CryptoEngine> {
-        let key = self
-            .batch_encryption_key_base64
-            .as_deref()
-            .ok_or(CoreError::InvalidState(
-                "batch encryption key not available",
-            ))?;
-        CryptoEngine::from_base64(key)
-    }
-
     fn can_capture(&self) -> bool {
         self.device_credentials.is_some()
-            && self.batch_encryption_key_base64.is_some()
             && self
                 .device_settings
                 .as_ref()
-                .map(|settings| settings.enabled)
+                .map(|settings| settings.enabled && settings.owner.is_some())
                 .unwrap_or(false)
     }
 
@@ -502,27 +467,20 @@ impl<P: PlatformHooks> MonitorService<P> {
         Ok(())
     }
 
-    fn refresh_batch_key_from_settings(&mut self) -> CoreResult<()> {
-        let encrypted_key = self
+    fn batch_recipients(&self) -> CoreResult<Vec<BatchRecipient>> {
+        let settings = self
             .device_settings
             .as_ref()
-            .and_then(|settings| settings.e2ee_key_base64.as_deref());
-        let Some(encrypted_key) = encrypted_key else {
-            self.batch_encryption_key_base64 = None;
-            return Ok(());
-        };
+            .ok_or(CoreError::InvalidState("device settings not available"))?;
+        let owner = settings
+            .owner
+            .clone()
+            .ok_or(CoreError::InvalidState("owner public key not available"))?;
 
-        let wrapping_key_base64 = self
-            .wrapping_key_base64
-            .as_deref()
-            .ok_or(CoreError::InvalidState("wrapping key not available"))?;
-        let wrapping_crypto = CryptoEngine::from_base64(wrapping_key_base64)?;
-        let encrypted_key_bytes =
-            base64::engine::general_purpose::STANDARD.decode(encrypted_key)?;
-        let decrypted_key = wrapping_crypto.decrypt_blob(&encrypted_key_bytes)?;
-        self.batch_encryption_key_base64 =
-            Some(base64::engine::general_purpose::STANDARD.encode(decrypted_key));
-        Ok(())
+        let mut recipients = Vec::with_capacity(1 + settings.partners.len());
+        recipients.push(owner);
+        recipients.extend(settings.partners.clone());
+        Ok(recipients)
     }
 
     fn log_error(
@@ -559,18 +517,4 @@ fn parse_content_hash(payload: &serde_json::Value) -> CoreResult<[u8; 32]> {
             .ok_or(CoreError::InvalidState("missing content_hash payload"))?,
     )?;
     Ok(content_hash)
-}
-
-fn jwt_subject(token: &str) -> Option<String> {
-    let payload = token.split('.').nth(1)?;
-    let padded = match payload.len() % 4 {
-        2 => format!("{payload}=="),
-        3 => format!("{payload}="),
-        _ => payload.to_string(),
-    };
-    let decoded = base64::engine::general_purpose::URL_SAFE
-        .decode(padded)
-        .ok()?;
-    let value: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
-    value.get("sub")?.as_str().map(ToOwned::to_owned)
 }
