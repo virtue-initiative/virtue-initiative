@@ -100,6 +100,8 @@ pub struct LoginStatus {
 pub struct AuthState {
     pub user_access_token: Option<String>,
     pub device_credentials: Option<DeviceCredentials>,
+    #[serde(default)]
+    pub post_login_proof_batches_remaining: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
