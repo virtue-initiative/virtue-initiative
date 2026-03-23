@@ -239,9 +239,7 @@ describe('Auth routes', () => {
     expect(updatedBody.email_bounced_at).toBeNull();
 
     const deliveries = await listEmailDeliveries();
-    expect(
-      deliveries.filter((delivery) => delivery.kind === 'email_verification'),
-    ).toHaveLength(2);
+    expect(deliveries.filter((delivery) => delivery.kind === 'email_verification')).toHaveLength(2);
     expect(deliveries[deliveries.length - 1]).toMatchObject({
       kind: 'email_verification',
       recipient_email: 'carol-new@example.com',
