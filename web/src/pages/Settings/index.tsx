@@ -36,18 +36,35 @@ export function Settings() {
     reload().catch(() => {});
   }, [token]);
 
+  const normalizedEmail = email.trim().toLowerCase();
+  const trimmedName = name.trim();
+  const profilePatch: {
+    email?: string;
+    name?: string;
+  } = {};
+
+  if (user && normalizedEmail !== user.email) {
+    profilePatch.email = normalizedEmail;
+  }
+
+  if (user && trimmedName.length > 0 && trimmedName !== (user.name ?? "")) {
+    profilePatch.name = trimmedName;
+  }
+
+  const hasProfileChanges = Object.keys(profilePatch).length > 0;
+
   async function saveName(e: Event) {
     e.preventDefault();
     if (!token) return;
+    if (!hasProfileChanges) {
+      setNameStatus(null);
+      return;
+    }
     setNameStatus(null);
     setNameSaving(true);
     try {
-      const nextEmail = email.trim().toLowerCase();
-      const emailChanged = user ? nextEmail !== user.email : false;
-      await api.updateUser(token, {
-        email: emailChanged ? nextEmail : undefined,
-        name: name.trim() || undefined,
-      });
+      const emailChanged = Boolean(profilePatch.email);
+      await api.updateUser(token, profilePatch);
       setNameStatus(
         emailChanged
           ? "Profile saved. Please verify your new email address."
@@ -145,7 +162,11 @@ export function Settings() {
               {nameStatus}
             </p>
           )}
-          <button class="btn btn-primary" type="submit" disabled={nameSaving}>
+          <button
+            class="btn btn-primary"
+            type="submit"
+            disabled={nameSaving || !hasProfileChanges}
+          >
             {nameSaving ? "Saving…" : "Save"}
           </button>
         </form>

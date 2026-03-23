@@ -237,6 +237,19 @@ describe('Auth routes', () => {
     expect(updatedBody.email).toBe('carol-new@example.com');
     expect(updatedBody.email_verified).toBe(false);
     expect(updatedBody.email_bounced_at).toBeNull();
+
+    const deliveries = await listEmailDeliveries();
+    expect(
+      deliveries.filter((delivery) => delivery.kind === 'email_verification'),
+    ).toHaveLength(2);
+    expect(deliveries[deliveries.length - 1]).toMatchObject({
+      kind: 'email_verification',
+      recipient_email: 'carol-new@example.com',
+      status: 'sent',
+    });
+
+    const latestVerificationToken = await latestEmailToken('email_verification');
+    expect(latestVerificationToken?.email).toBe('carol-new@example.com');
   });
 
   it('verifies email tokens and resends verification emails for authenticated users', async () => {

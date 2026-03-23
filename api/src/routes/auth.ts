@@ -438,6 +438,14 @@ auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema),
     priv_key: decodedPrivateKey,
   });
 
+  if (emailChanged) {
+    await sendVerificationEmail(c, {
+      id: userId,
+      email: normalizedEmail!,
+      name: name ?? user.name,
+    });
+  }
+
   return c.json({ ok: true });
 });
 
