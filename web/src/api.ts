@@ -41,20 +41,23 @@ export interface Batch {
   end_hash: string;
   url: string;
   encrypted_key: string;
+  created_at: number;
 }
 
 export interface DataLog {
+  id: string;
   device_id: string;
   ts: number;
   type: string;
   data: Record<string, unknown>;
+  created_at: number;
   risk?: number;
 }
 
 export interface DataPage {
   batches: Batch[];
   logs: DataLog[];
-  next_cursor?: number;
+  next_since?: number;
 }
 
 export interface WatchingPartner {
@@ -415,15 +418,13 @@ export const api = {
     token: string,
     params?: {
       user?: string;
-      device_id?: string;
-      cursor?: number;
+      since?: number;
       limit?: number;
     },
   ) => {
     const qs = new URLSearchParams();
     if (params?.user) qs.set("user", params.user);
-    if (params?.device_id) qs.set("device_id", params.device_id);
-    if (params?.cursor !== undefined) qs.set("cursor", String(params.cursor));
+    if (params?.since !== undefined) qs.set("since", String(params.since));
     if (params?.limit) qs.set("limit", String(params.limit));
     const query = qs.toString();
     return req<DataPage>(`/data${query ? `?${query}` : ""}`, {}, token);
