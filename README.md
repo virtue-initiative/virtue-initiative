@@ -42,8 +42,10 @@ subfolders.
 ## Contributing
 
 If you are interested in contributing, you can reach out to us at
-[virtue@anb.codes](mailto:virtue@anb.codes), or you can create an issue, comment on an issue or create a
-pull request.
+[develop@virtueinitiative.org](mailto:develop@virtueinitiative.org), or you can
+create an issue, comment on an issue or create a pull request. We also have a
+[Discord](https://discord.gg/4kNsbRuzQD) channel where we discuss development
+and can provide help with using the app.
 
 AI is permitted for writing code, but in general not permitted for writing
 text. All issues or pull requests should be human-written and site copy should
