@@ -15,6 +15,10 @@ const UNAUTHENTICATED_INTERVAL_MS = 60 * 1000;
 const EXPECTED_SHA = process.env.GITHUB_SHA?.toLowerCase() ?? null;
 const EXPECTED_SHORT_SHA = EXPECTED_SHA?.slice(0, 7) ?? null;
 const HAS_GITHUB_TOKEN = Boolean(process.env.GITHUB_TOKEN);
+const RELEASE_SYNC_CHANNEL =
+  process.env.VIRTUE_RELEASE_SYNC_CHANNEL === "stable"
+    ? "stable"
+    : "prerelease";
 const INTERVAL_MS = HAS_GITHUB_TOKEN
   ? AUTHENTICATED_INTERVAL_MS
   : UNAUTHENTICATED_INTERVAL_MS;
@@ -148,7 +152,7 @@ export async function syncReleaseData() {
   let latestStableRelease = null;
 
   console.log(
-    `Polling GitHub releases every ${INTERVAL_MS / 1000}s (${
+    `Polling GitHub ${RELEASE_SYNC_CHANNEL} releases every ${INTERVAL_MS / 1000}s (${
       HAS_GITHUB_TOKEN ? "authenticated" : "unauthenticated"
     })${EXPECTED_SHORT_SHA ? ` for commit ${EXPECTED_SHORT_SHA}` : ""}.`,
   );
@@ -167,8 +171,14 @@ export async function syncReleaseData() {
         .filter((release) => release.prerelease)
         .sort(byNewestPublished)[0] ?? null;
 
-    const matchesCommit = releaseTargetsCurrentCommit(latestPrerelease);
-    const missing = matchesCommit ? missingPlatforms(latestPrerelease) : [];
+    const targetRelease =
+      RELEASE_SYNC_CHANNEL === "stable"
+        ? latestStableRelease
+        : latestPrerelease;
+    const releaseLabel =
+      RELEASE_SYNC_CHANNEL === "stable" ? "stable release" : "prerelease";
+    const matchesCommit = releaseTargetsCurrentCommit(targetRelease);
+    const missing = matchesCommit ? missingPlatforms(targetRelease) : [];
 
     if (matchesCommit && missing.length === 0) {
       await mkdir(path.dirname(outputPath), { recursive: true });
@@ -186,7 +196,7 @@ export async function syncReleaseData() {
       );
 
       console.log(
-        `Wrote release data to ${outputPath} using prerelease ${latestPrerelease.tag_name}.`,
+        `Wrote release data to ${outputPath} using ${releaseLabel} ${targetRelease.tag_name}.`,
       );
       return;
     }
@@ -198,19 +208,19 @@ export async function syncReleaseData() {
 
     if (!matchesCommit) {
       console.log(
-        `Latest prerelease ${
-          latestPrerelease?.tag_name ?? "none"
+        `Latest ${releaseLabel} ${
+          targetRelease?.tag_name ?? "none"
         } does not target the current commit yet. Expected ${
           EXPECTED_SHORT_SHA ?? "current sha"
-        }, got ${latestPrerelease?.target_commitish ?? "none"}. Polling again in ${
+        }, got ${targetRelease?.target_commitish ?? "none"}. Polling again in ${
           INTERVAL_MS / 1000
         }s (${remainingSeconds}s remaining).`,
       );
     } else {
       console.log(
-        `Latest prerelease for ${
+        `Latest ${releaseLabel} for ${
           EXPECTED_SHORT_SHA ??
-          latestPrerelease?.target_commitish ??
+          targetRelease?.target_commitish ??
           "current build"
         } is not complete yet. Missing: ${missing.join(", ")}. Polling again in ${
           INTERVAL_MS / 1000
@@ -222,11 +232,25 @@ export async function syncReleaseData() {
   }
 
   throw new Error(
-    `Timed out after ${TIMEOUT_MS / 60000} minutes waiting for a complete prerelease. Latest prerelease: ${
-      latestPrerelease?.tag_name ?? "none"
-    }. Target commit: ${latestPrerelease?.target_commitish ?? "none"}. Expected commit: ${
-      EXPECTED_SHA ?? "not specified"
-    }. Missing: ${missingPlatforms(latestPrerelease).join(", ") || "unknown"}.`,
+    `Timed out after ${TIMEOUT_MS / 60000} minutes waiting for a complete ${RELEASE_SYNC_CHANNEL}. Latest ${
+      RELEASE_SYNC_CHANNEL
+    }: ${
+      (RELEASE_SYNC_CHANNEL === "stable"
+        ? latestStableRelease
+        : latestPrerelease
+      )?.tag_name ?? "none"
+    }. Target commit: ${
+      (RELEASE_SYNC_CHANNEL === "stable"
+        ? latestStableRelease
+        : latestPrerelease
+      )?.target_commitish ?? "none"
+    }. Expected commit: ${EXPECTED_SHA ?? "not specified"}. Missing: ${
+      missingPlatforms(
+        RELEASE_SYNC_CHANNEL === "stable"
+          ? latestStableRelease
+          : latestPrerelease,
+      ).join(", ") || "unknown"
+    }.`,
   );
 }
 
