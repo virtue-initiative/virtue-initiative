@@ -82,10 +82,12 @@ def load_theme_color(root: Path) -> tuple[int, int, int]:
 
 
 def recolor_with_theme(raw: Image.Image, rgb: tuple[int, int, int]) -> Image.Image:
-    alpha = raw.getchannel("A")
-    recolored = Image.new("RGBA", raw.size, (*rgb, 0))
-    recolored.putalpha(alpha)
-    return recolored
+    # No recoloring
+    return raw;
+    # alpha = raw.getchannel("A")
+    # recolored = Image.new("RGBA", raw.size, (*rgb, 0))
+    # recolored.putalpha(alpha)
+    # return recolored
 
 
 def save_png(master: Image.Image, path: Path, size: int) -> None:
