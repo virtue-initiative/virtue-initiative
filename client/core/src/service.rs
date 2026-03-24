@@ -12,6 +12,8 @@ use crate::model::{
 use crate::platform::PlatformHooks;
 use crate::storage::FileStateStore;
 
+const POST_LOGIN_PROOF_BATCH_COUNT: u32 = 3;
+
 pub struct MonitorService<P> {
     config: Config,
     platform: P,
@@ -19,6 +21,7 @@ pub struct MonitorService<P> {
     storage: FileStateStore,
     user_access_token: Option<String>,
     device_credentials: Option<DeviceCredentials>,
+    post_login_proof_batches_remaining: u32,
     device_settings: Option<DeviceSettings>,
     batch_buffer: BatchBufferState,
     pending_requests: Vec<PendingRequest>,
@@ -62,6 +65,7 @@ impl<P: PlatformHooks> MonitorService<P> {
             storage,
             user_access_token: auth_state.user_access_token,
             device_credentials: auth_state.device_credentials,
+            post_login_proof_batches_remaining: auth_state.post_login_proof_batches_remaining,
             device_settings,
             batch_buffer,
             pending_requests,
@@ -100,6 +104,7 @@ impl<P: PlatformHooks> MonitorService<P> {
             let batch = self.build_batch(now_ms)?;
             let _ = self.try_request(self.pending_batch_request(&batch, now_ms)?)?;
             BatchBuilder::clear(&mut self.batch_buffer);
+            self.complete_batch_upload();
             self.status.last_batch_at_ms = Some(now_ms);
         }
 
@@ -156,6 +161,11 @@ impl<P: PlatformHooks> MonitorService<P> {
 
         self.user_access_token = Some(access_token.clone());
         self.device_credentials = Some(device.clone());
+        self.post_login_proof_batches_remaining = POST_LOGIN_PROOF_BATCH_COUNT;
+        self.batch_buffer = BatchBufferState::default();
+        self.pending_requests.clear();
+        self.status.last_screenshot_at_ms = None;
+        self.status.last_batch_at_ms = None;
         self.status.is_authenticated = true;
         self.status.device_id = Some(device.device_id.clone());
         self.persist_auth_state()?;
@@ -199,6 +209,7 @@ impl<P: PlatformHooks> MonitorService<P> {
 
         self.user_access_token = None;
         self.device_credentials = None;
+        self.post_login_proof_batches_remaining = 0;
         self.device_settings = None;
         self.batch_buffer = BatchBufferState::default();
         self.pending_requests.clear();
@@ -389,17 +400,28 @@ impl<P: PlatformHooks> MonitorService<P> {
         self.storage.save_auth_state(&AuthState {
             user_access_token: self.user_access_token.clone(),
             device_credentials: self.device_credentials.clone(),
+            post_login_proof_batches_remaining: self.post_login_proof_batches_remaining,
         })
     }
 
     fn reload_persisted_state(&mut self) -> CoreResult<()> {
         let auth_state = self.storage.load_auth_state()?;
+        let previous_post_login_proof_batches_remaining = self.post_login_proof_batches_remaining;
+
         self.user_access_token = auth_state.user_access_token;
         self.device_credentials = auth_state.device_credentials;
+        self.post_login_proof_batches_remaining = auth_state.post_login_proof_batches_remaining;
 
         self.device_settings = self.storage.load_device_settings()?;
         self.pending_requests = self.storage.load_pending_requests()?;
         self.batch_buffer = self.storage.load_batch_buffer()?;
+
+        let proof_burst_started = previous_post_login_proof_batches_remaining == 0
+            && self.post_login_proof_batches_remaining > 0;
+        if proof_burst_started {
+            self.status.last_screenshot_at_ms = None;
+            self.status.last_batch_at_ms = None;
+        }
         Ok(())
     }
 
@@ -441,9 +463,18 @@ impl<P: PlatformHooks> MonitorService<P> {
     }
 
     fn should_upload_batch(&self, now_ms: i64) -> bool {
+        if self.post_login_proof_batches_remaining > 0 {
+            return true;
+        }
         match self.status.last_batch_at_ms {
             Some(last) => now_ms - last >= self.config.batch_interval.as_millis() as i64,
             None => true,
+        }
+    }
+
+    fn complete_batch_upload(&mut self) {
+        if self.post_login_proof_batches_remaining > 0 {
+            self.post_login_proof_batches_remaining -= 1;
         }
     }
 
@@ -517,4 +548,163 @@ fn parse_content_hash(payload: &serde_json::Value) -> CoreResult<[u8; 32]> {
             .ok_or(CoreError::InvalidState("missing content_hash payload"))?,
     )?;
     Ok(content_hash)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Duration;
+
+    use super::*;
+
+    static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[derive(Clone)]
+    struct TestPlatform;
+
+    impl PlatformHooks for TestPlatform {
+        fn take_screenshot(&self) -> CoreResult<Screenshot> {
+            Ok(Screenshot {
+                captured_at_ms: 0,
+                bytes: Vec::new(),
+                content_type: "image/png".to_string(),
+            })
+        }
+
+        fn get_time_utc_ms(&self) -> CoreResult<i64> {
+            Ok(0)
+        }
+    }
+
+    fn test_config(state_dir: PathBuf) -> Config {
+        Config::new(
+            "https://example.invalid",
+            "test-device",
+            "test-platform",
+            state_dir,
+            None,
+            Duration::from_secs(300),
+            Duration::from_secs(3600),
+        )
+    }
+
+    fn temp_state_dir() -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "virtue-core-test-{}-{}",
+            std::process::id(),
+            TEST_DIR_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&path).expect("create temp state dir");
+        path
+    }
+
+    fn build_service(state_dir: PathBuf) -> MonitorService<TestPlatform> {
+        let config = test_config(state_dir.clone());
+        let storage = FileStateStore::new(&state_dir).expect("create file state store");
+        MonitorService {
+            api: ApiClient::new(&config).expect("create api client"),
+            config,
+            platform: TestPlatform,
+            storage,
+            user_access_token: None,
+            device_credentials: None,
+            post_login_proof_batches_remaining: 0,
+            device_settings: Some(DeviceSettings {
+                device_id: "device-1".to_string(),
+                name: "Device".to_string(),
+                platform: "test".to_string(),
+                enabled: true,
+                owner: Some(BatchRecipient {
+                    user_id: "user-1".to_string(),
+                    pub_key_base64: "owner-key".to_string(),
+                }),
+                partners: Vec::new(),
+                hash_base_url: None,
+            }),
+            batch_buffer: BatchBufferState {
+                screenshots: vec![BufferedScreenshot {
+                    event: crate::model::BatchEvent {
+                        ts: 1,
+                        kind: "screenshot".to_string(),
+                        data: crate::model::BatchEventData {
+                            image: vec![1, 2, 3],
+                            content_type: "image/png".to_string(),
+                        },
+                    },
+                    content_hash: [7; 32],
+                }],
+            },
+            pending_requests: Vec::new(),
+            status: ServiceStatus {
+                is_authenticated: false,
+                is_running: true,
+                device_id: None,
+                last_loop_at_ms: None,
+                last_screenshot_at_ms: Some(1000),
+                last_batch_at_ms: Some(1000),
+                pending_request_count: 0,
+            },
+        }
+    }
+
+    #[test]
+    fn post_login_proof_uploads_ignore_batch_interval() {
+        let state_dir = temp_state_dir();
+        let mut service = build_service(state_dir.clone());
+        service.post_login_proof_batches_remaining = 2;
+
+        assert!(service.should_upload_batch(1001));
+
+        let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn reloading_new_login_state_resets_capture_schedule() {
+        let state_dir = temp_state_dir();
+        let mut service = build_service(state_dir.clone());
+        service.post_login_proof_batches_remaining = 0;
+        service.device_credentials = None;
+
+        service
+            .storage
+            .save_auth_state(&AuthState {
+                user_access_token: Some("user-token".to_string()),
+                device_credentials: Some(DeviceCredentials {
+                    device_id: "device-2".to_string(),
+                    access_token: "device-access".to_string(),
+                    refresh_token: "device-refresh".to_string(),
+                }),
+                post_login_proof_batches_remaining: POST_LOGIN_PROOF_BATCH_COUNT,
+            })
+            .expect("persist auth state");
+
+        service.reload_persisted_state().expect("reload state");
+
+        assert_eq!(service.status.last_screenshot_at_ms, None);
+        assert_eq!(service.status.last_batch_at_ms, None);
+        assert_eq!(
+            service.post_login_proof_batches_remaining,
+            POST_LOGIN_PROOF_BATCH_COUNT
+        );
+
+        let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn complete_batch_upload_consumes_one_proof_batch() {
+        let state_dir = temp_state_dir();
+        let mut service = build_service(state_dir.clone());
+        service.post_login_proof_batches_remaining = 2;
+
+        service.complete_batch_upload();
+        assert_eq!(service.post_login_proof_batches_remaining, 1);
+
+        service.complete_batch_upload();
+        service.complete_batch_upload();
+        assert_eq!(service.post_login_proof_batches_remaining, 0);
+
+        let _ = fs::remove_dir_all(state_dir);
+    }
 }
