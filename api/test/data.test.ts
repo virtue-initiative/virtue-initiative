@@ -96,23 +96,37 @@ describe('Data and device API routes', () => {
     });
     expect(refreshRes.status).toBe(200);
 
-    const dataRes = await SELF.fetch(`${BASE}/data`, {
+    const dataRes = await SELF.fetch(`${BASE}/data?since=0`, {
       headers: { Authorization: `Bearer ${userToken}` },
     });
     expect(dataRes.status).toBe(200);
     const data = (await dataRes.json()) as {
-      batches: Array<{ device_id: string; end_hash: string; encrypted_key: string }>;
-      logs: Array<{ device_id: string; type: string; data: { event: string } }>;
+      batches: Array<{
+        device_id: string;
+        end_hash: string;
+        encrypted_key: string;
+        created_at: number;
+      }>;
+      logs: Array<{
+        id: string;
+        device_id: string;
+        type: string;
+        data: { event: string };
+        created_at: number;
+      }>;
     };
     expect(data.batches[0]).toMatchObject({
       device_id: device.id,
       encrypted_key: Buffer.from('owner-envelope').toString('base64'),
     });
+    expect(data.batches[0]?.created_at).toEqual(expect.any(Number));
     expect(data.logs[0]).toMatchObject({
       device_id: device.id,
       type: 'system_event',
       data: { event: 'startup' },
     });
+    expect(data.logs[0]?.id).toBeTruthy();
+    expect(data.logs[0]?.created_at).toEqual(expect.any(Number));
 
     const serverToken = await createServerToken(device.id);
     const resetRes = await SELF.fetch(`${BASE}/hash`, {
@@ -177,7 +191,7 @@ describe('Data and device API routes', () => {
     });
     expect(batchUploadRes.status).toBe(201);
 
-    const ownerDataRes = await SELF.fetch(`${BASE}/data`, {
+    const ownerDataRes = await SELF.fetch(`${BASE}/data?since=0`, {
       headers: { Authorization: `Bearer ${ownerToken}` },
     });
     expect(ownerDataRes.status).toBe(200);
@@ -189,7 +203,7 @@ describe('Data and device API routes', () => {
     );
 
     const partnerDataRes = await SELF.fetch(
-      `${BASE}/data?user=${encodeURIComponent(ownerUserId)}`,
+      `${BASE}/data?since=0&user=${encodeURIComponent(ownerUserId)}`,
       {
         headers: { Authorization: `Bearer ${partnerToken}` },
       },

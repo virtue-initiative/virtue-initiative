@@ -548,7 +548,7 @@ export async function createDeviceLog(
 export async function listBatches(
   db: D1Database,
   ownerIds: string[],
-  filters: { deviceId?: string; cursor?: number },
+  filters: { deviceId?: string; since?: number },
   limit: number,
 ) {
   if (ownerIds.length === 0) {
@@ -565,12 +565,12 @@ export async function listBatches(
     params.push(uuidToBytes(filters.deviceId));
   }
 
-  if (filters.cursor !== undefined) {
-    query += ' AND created_at < ?';
-    params.push(filters.cursor);
+  if (filters.since !== undefined) {
+    query += ' AND created_at > ?';
+    params.push(filters.since);
   }
 
-  query += ' ORDER BY created_at DESC LIMIT ?';
+  query += ' ORDER BY created_at ASC LIMIT ?';
   params.push(limit);
 
   return allWithUuidFields<{
@@ -608,7 +608,7 @@ export async function listBatchWindowsForUser(
 export async function listDeviceLogs(
   db: D1Database,
   ownerIds: string[],
-  filters: { deviceId?: string; cursor?: number },
+  filters: { deviceId?: string; since?: number },
   limit: number,
 ) {
   if (ownerIds.length === 0) {
@@ -625,12 +625,12 @@ export async function listDeviceLogs(
     params.push(uuidToBytes(filters.deviceId));
   }
 
-  if (filters.cursor !== undefined) {
-    query += ' AND created_at < ?';
-    params.push(filters.cursor);
+  if (filters.since !== undefined) {
+    query += ' AND created_at > ?';
+    params.push(filters.since);
   }
 
-  query += ' ORDER BY created_at DESC LIMIT ?';
+  query += ' ORDER BY created_at ASC LIMIT ?';
   params.push(limit);
 
   return allWithUuidFields<{

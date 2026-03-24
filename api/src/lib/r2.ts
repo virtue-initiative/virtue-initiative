@@ -10,7 +10,10 @@ export async function putObject(
   contentType: string,
 ): Promise<void> {
   await env.BUCKET.put(key, body, {
-    httpMetadata: { contentType },
+    httpMetadata: {
+      contentType,
+      cacheControl: 'public, max-age=31536000, immutable',
+    },
   });
 }
 

@@ -70,7 +70,8 @@ Base URL examples:
   "end_time": DateTime,
   "end_hash": SHA256,
   "url": "https://.../user/.../batches/...enc",
-  "encrypted_key": Base64
+  "encrypted_key": Base64,
+  "created_at": DateTime
 }
 ```
 
@@ -412,8 +413,8 @@ Query parameters:
 
 - `device_id`: optional `UUID`
 - `user`: optional `UUID`
-- `cursor`: optional timestamp
-- `limit`: optional integer, max `100`
+- `since`: optional timestamp, default `0`
+- `limit`: optional integer, max `500`
 
 Response `200`:
 
@@ -422,18 +423,21 @@ Response `200`:
   "batches": [BatchData],
   "logs": [
     {
+      "id": UUID,
       "device_id": UUID,
       "ts": DateTime,
       "type": "system_event",
       "data": {},
+      "created_at": DateTime,
       "risk": 0.7 | undefined
     }
   ],
-  "next_cursor": DateTime | undefined
+  "next_since": DateTime | undefined
 }
 ```
 
 `batches` only include rows where the requester has a matching `encrypted_key` envelope.
+Responses are ordered oldest-to-newest within the requested sync page.
 
 ## Device API
 

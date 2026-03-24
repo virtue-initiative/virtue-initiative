@@ -139,7 +139,7 @@ export function renderEmailVerificationTemplate(input: {
   });
 
   return {
-    subject: `Verify your ${appName} email`,
+    subject: `Verify your ${appName.replace('The', '').trim()} email`,
     text: footer.text,
     html: footer.html,
   };
@@ -174,7 +174,7 @@ export function renderPasswordResetTemplate(input: {
   });
 
   return {
-    subject: `Reset your ${appName} password`,
+    subject: `Reset your ${appName.replace('The', '').trim()} password`,
     text: footer.text,
     html: footer.html,
   };
@@ -235,7 +235,7 @@ export function renderPartnerAcceptedTemplate(input: {
   });
 
   return {
-    subject: `${partner} accepted your ${appName} invitation`,
+    subject: `${partner} accepted your ${appName.replace('The', '').trim()} invitation`,
     text: footer.text,
     html: footer.html,
   };

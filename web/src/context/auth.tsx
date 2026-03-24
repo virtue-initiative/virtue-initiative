@@ -1,6 +1,7 @@
 import { createContext } from "preact";
 import { useContext, useState, useEffect, useCallback } from "preact/hooks";
 import { api, setReauthHandler } from "../api";
+import { clearDataCache } from "../data-cache";
 import {
   derivePasswordMaterial,
   encryptData,
@@ -169,6 +170,7 @@ export function AuthProvider({
 
   const logout = useCallback(async () => {
     await api.logout().catch(() => {});
+    await clearDataCache().catch(() => {});
     clearWrappingKey();
     setToken(null);
     setUserId(null);
@@ -188,6 +190,7 @@ export function AuthProvider({
       try {
         return await refresh();
       } catch {
+        void clearDataCache().catch(() => {});
         clearWrappingKey();
         setToken(null);
         setUserId(null);

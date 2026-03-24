@@ -55,8 +55,12 @@ app.get('/r2/*', async (c) => {
     return c.json({ error: 'Not found' }, 404);
   }
 
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set('etag', object.httpEtag);
+
   return new Response(object.body, {
-    headers: { 'Content-Type': 'application/octet-stream' },
+    headers,
   });
 });
 
