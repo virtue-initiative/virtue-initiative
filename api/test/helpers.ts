@@ -121,7 +121,7 @@ export async function createDeviceForUser(token: string, name = 'Laptop', platfo
 }
 
 export async function createServerToken(deviceId: string) {
-  return generateToken('server', deviceId, env.JWT_SECRET, 60);
+  return generateToken('server', deviceId, env.JWT_PRIVATE_KEY, 60);
 }
 
 export async function listEmailDeliveries() {

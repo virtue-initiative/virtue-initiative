@@ -1,4 +1,12 @@
-import { SignJWT, jwtVerify } from 'jose';
+import {
+  calculateJwkThumbprint,
+  exportJWK,
+  importPKCS8,
+  importSPKI,
+  jwtVerify,
+  SignJWT,
+  type JWK,
+} from 'jose';
 
 export type JWTType = 'access' | 'refresh' | 'server' | 'device-access' | 'device-refresh';
 
@@ -9,24 +17,104 @@ export interface JWTPayload {
   exp?: number;
 }
 
-function getSecretKey(secret: string) {
-  return new TextEncoder().encode(secret);
+const JWT_ALGORITHM = 'EdDSA';
+const JWT_CURVE = 'Ed25519';
+
+type JWTPrivateKey = Awaited<ReturnType<typeof importPKCS8>>;
+type JWTPublicKey = Awaited<ReturnType<typeof importSPKI>>;
+type PublicJwk = JWK & {
+  alg: typeof JWT_ALGORITHM;
+  crv: typeof JWT_CURVE;
+  kid: string;
+  kty: 'OKP';
+  use: 'sig';
+  x: string;
+};
+
+const privateKeyCache = new Map<string, Promise<JWTPrivateKey>>();
+const publicKeyCache = new Map<string, Promise<JWTPublicKey>>();
+const publicJwkCache = new Map<string, Promise<PublicJwk>>();
+
+function normalizePem(pem: string) {
+  const normalized = pem.replace(/\r\n/g, '\n').replace(/\\n/g, '\n').trim();
+
+  if (!normalized) {
+    throw new Error('JWT key must not be empty');
+  }
+
+  return normalized;
+}
+
+function getPrivateKey(privateKeyPem: string) {
+  const normalized = normalizePem(privateKeyPem);
+  let keyPromise = privateKeyCache.get(normalized);
+
+  if (!keyPromise) {
+    keyPromise = importPKCS8(normalized, JWT_ALGORITHM);
+    privateKeyCache.set(normalized, keyPromise);
+  }
+
+  return keyPromise;
+}
+
+function getPublicKey(publicKeyPem: string) {
+  const normalized = normalizePem(publicKeyPem);
+  let keyPromise = publicKeyCache.get(normalized);
+
+  if (!keyPromise) {
+    keyPromise = importSPKI(normalized, JWT_ALGORITHM);
+    publicKeyCache.set(normalized, keyPromise);
+  }
+
+  return keyPromise;
+}
+
+export async function getPublicJwk(publicKeyPem: string) {
+  const normalized = normalizePem(publicKeyPem);
+  let jwkPromise = publicJwkCache.get(normalized);
+
+  if (!jwkPromise) {
+    jwkPromise = (async () => {
+      const exported = await exportJWK(await getPublicKey(normalized));
+      const kid = await calculateJwkThumbprint(exported);
+
+      return {
+        ...exported,
+        alg: JWT_ALGORITHM,
+        crv: JWT_CURVE,
+        kid,
+        kty: 'OKP',
+        use: 'sig',
+      } as PublicJwk;
+    })();
+    publicJwkCache.set(normalized, jwkPromise);
+  }
+
+  return jwkPromise;
+}
+
+export async function getJWKS(publicKeyPem: string) {
+  return {
+    keys: [await getPublicJwk(publicKeyPem)],
+  };
 }
 
 export async function signJWT(
   payload: Omit<JWTPayload, 'iat' | 'exp'>,
-  secret: string,
+  privateKeyPem: string,
   expiresInSeconds: number,
 ): Promise<string> {
   return new SignJWT(payload)
-    .setProtectedHeader({ alg: 'HS256' })
+    .setProtectedHeader({ alg: JWT_ALGORITHM })
     .setIssuedAt()
     .setExpirationTime(Math.floor(Date.now() / 1000) + expiresInSeconds)
-    .sign(getSecretKey(secret));
+    .sign(await getPrivateKey(privateKeyPem));
 }
 
-export async function verifyJWT(token: string, secret: string): Promise<JWTPayload> {
-  const { payload } = await jwtVerify(token, getSecretKey(secret));
+export async function verifyJWT(token: string, publicKeyPem: string): Promise<JWTPayload> {
+  const { payload } = await jwtVerify(token, await getPublicKey(publicKeyPem), {
+    algorithms: [JWT_ALGORITHM],
+  });
 
   if (typeof payload.sub !== 'string' || typeof payload.type !== 'string') {
     throw new Error('Invalid token payload');
@@ -43,16 +131,16 @@ export async function verifyJWT(token: string, secret: string): Promise<JWTPaylo
 export function generateToken(
   type: JWTType,
   sub: string,
-  secret: string,
+  privateKeyPem: string,
   expiresInSeconds: number,
 ): Promise<string> {
-  return signJWT({ sub, type }, secret, expiresInSeconds);
+  return signJWT({ sub, type }, privateKeyPem, expiresInSeconds);
 }
 
-export function generateAccessToken(sub: string, secret: string, expiresInSeconds: number) {
-  return generateToken('access', sub, secret, expiresInSeconds);
+export function generateAccessToken(sub: string, privateKeyPem: string, expiresInSeconds: number) {
+  return generateToken('access', sub, privateKeyPem, expiresInSeconds);
 }
 
-export function generateRefreshToken(sub: string, secret: string, expiresInSeconds: number) {
-  return generateToken('refresh', sub, secret, expiresInSeconds);
+export function generateRefreshToken(sub: string, privateKeyPem: string, expiresInSeconds: number) {
+  return generateToken('refresh', sub, privateKeyPem, expiresInSeconds);
 }

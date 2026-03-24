@@ -14,7 +14,7 @@ export function authenticate(type: JWTType) {
     }
 
     try {
-      const payload = await verifyJWT(authHeader.slice(7), c.env.JWT_SECRET);
+      const payload = await verifyJWT(authHeader.slice(7), c.env.JWT_PUBLIC_KEY);
 
       if (payload.type !== type) {
         return c.json({ error: 'Unauthorized', details: { reason: 'Invalid token type' } }, 401);

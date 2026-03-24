@@ -35,7 +35,8 @@ These test the crypto utilities directly, with no HTTP layer or database:
   - Verifies two hashes of the same password are different (salted)
 - **JWT tokens** — `generateAccessToken` + `verifyJWT` using `jose`
   - Verifies token round-trips with correct payload (`sub`, `type`)
-  - Verifies token is rejected if the secret is wrong
+  - Verifies token is rejected if the public key does not match the signer
+  - Verifies the worker publishes an Ed25519 JWKS endpoint for remote verification
   - Verifies token is rejected after expiry (generates a 1-second token, waits 1.5s)
 
 > **Note:** Argon2id hashing uses production parameters (`t:3, m:65536`), which takes ~7–11 seconds per hash. The test timeout is set to **30 seconds** in `vitest.config.ts` to accommodate this.

@@ -136,7 +136,11 @@ function badRequest(c: Context<{ Bindings: Env; Variables: Variables }>, message
 }
 
 async function createSession(c: Context<{ Bindings: Env; Variables: Variables }>, userId: string) {
-  const accessToken = await generateAccessToken(userId, c.env.JWT_SECRET, ACCESS_TOKEN_TTL_SECONDS);
+  const accessToken = await generateAccessToken(
+    userId,
+    c.env.JWT_PRIVATE_KEY,
+    ACCESS_TOKEN_TTL_SECONDS,
+  );
   const refreshToken = generateOpaqueToken();
   const now = Date.now();
 
@@ -376,7 +380,7 @@ auth.post('/token', async (c) => {
 
   const accessToken = await generateAccessToken(
     session.user_id,
-    c.env.JWT_SECRET,
+    c.env.JWT_PRIVATE_KEY,
     ACCESS_TOKEN_TTL_SECONDS,
   );
 
