@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { generateAccessToken, verifyJWT } from '../src/lib/jwt';
 import { generatePasswordSalt, hashPasswordAuth, verifyPasswordAuth } from '../src/lib/password';
-import { TEST_JWT_PRIVATE_KEY, TEST_JWT_PUBLIC_KEY, TEST_OTHER_JWT_PUBLIC_KEY } from './jwt-test-keys';
+import {
+  TEST_JWT_PRIVATE_KEY,
+  TEST_JWT_PUBLIC_KEY,
+  TEST_OTHER_JWT_PUBLIC_KEY,
+} from './jwt-test-keys';
 
 describe('Password auth hashing', () => {
   it('hashes and verifies correct password auth material', async () => {
