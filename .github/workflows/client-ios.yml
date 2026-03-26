@@ -5,10 +5,16 @@ permissions:
 
 on:
   pull_request:
+    paths:
+      - "client/**"
+      - ".github/workflows/client-ios.yml"
   push:
     branches:
       - main
       - staging
+    paths:
+      - "client/**"
+      - ".github/workflows/client-ios.yml"
   workflow_dispatch:
 
 jobs:

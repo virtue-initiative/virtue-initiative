@@ -3,6 +3,7 @@ import { useLocation } from "preact-iso";
 import { api, Device, WatchingPartner, WatcherPartner } from "../../api";
 import { Button } from "../../components/Button";
 import { useAuth } from "../../context/auth";
+import { PARTNERS_CHANGED_EVENT } from "../../events";
 import { formatDate, formatRelativeTimestamp } from "../../utils/time";
 import "./style.css";
 
@@ -53,6 +54,13 @@ export function Home() {
   }
 
   useEffect(reload, [token]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = () => reload();
+    window.addEventListener(PARTNERS_CHANGED_EVENT, handler);
+    return () => window.removeEventListener(PARTNERS_CHANGED_EVENT, handler);
+  }, [token]);
 
   const ownDevices = useMemo(
     () => devices.filter((device) => device.owner === userId),

@@ -10,6 +10,7 @@ import {
 } from "../../data-cache";
 import { useAuth } from "../../context/auth";
 import { useE2EE } from "../../context/e2ee";
+import { PARTNERS_CHANGED_EVENT } from "../../events";
 import { LogsGallery } from "./LogsGallery";
 import { LogsList } from "./LogsList";
 import { ImageLogItem, LogItem } from "./shared";
@@ -31,6 +32,11 @@ interface DeviceGroup {
   label: string;
   userId: string | null;
   devices: Device[];
+}
+
+interface UserLabel {
+  id: string;
+  label: string;
 }
 
 function ExpandIcon() {
@@ -192,6 +198,7 @@ export function Logs() {
 
   const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[]>([]);
   const [partners, setPartners] = useState<WatchingPartner[]>([]);
+  const [knownUsers, setKnownUsers] = useState<UserLabel[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string | null>(() =>
     new URLSearchParams(window.location.search).get("device_id"),
   );
@@ -215,45 +222,66 @@ export function Logs() {
 
   useEffect(() => {
     if (!token || !userId) return;
-    setSidebarLoading(true);
-    setLoadError(null);
 
-    Promise.all([api.getDevices(token), api.getPartners(token)])
-      .then(([devices, partners]) => {
-        setPartners(partners.watching);
-        const labels = new Map<string, string>();
-        labels.set(userId, "My devices");
-        for (const partner of partners.watching) {
-          labels.set(partner.user.id, partner.user.name ?? partner.user.email);
-        }
+    const loadSidebar = () => {
+      setSidebarLoading(true);
+      setLoadError(null);
 
-        const grouped = new Map<string, Device[]>();
-        for (const device of devices) {
-          const current = grouped.get(device.owner) ?? [];
-          current.push(device);
-          grouped.set(device.owner, current);
-        }
+      Promise.all([api.getDevices(token), api.getPartners(token)])
+        .then(([devices, partners]) => {
+          setPartners(partners.watching);
+          const labels = new Map<string, string>();
+          labels.set(userId, "My devices");
+          for (const partner of partners.watching) {
+            labels.set(
+              partner.user.id,
+              partner.user.name ?? partner.user.email,
+            );
+          }
 
-        const groups = Array.from(grouped.entries())
-          .sort(([a], [b]) =>
-            a === userId ? -1 : b === userId ? 1 : a.localeCompare(b),
-          )
-          .map(([owner, ownerDevices]) => ({
-            label: labels.get(owner) ?? `${owner.slice(0, 8)}…`,
-            userId: owner === userId ? null : owner,
-            devices: ownerDevices,
-          }));
+          setKnownUsers(
+            Array.from(labels.entries()).map(([id, label]) => ({ id, label })),
+          );
 
-        setDeviceGroups(groups);
-      })
-      .catch((err) => {
-        setLoadError(
-          err instanceof Error ? err.message : "Failed to load devices",
-        );
-      })
-      .finally(() => {
-        setSidebarLoading(false);
-      });
+          const grouped = new Map<string, Device[]>();
+          for (const device of devices) {
+            const current = grouped.get(device.owner) ?? [];
+            current.push(device);
+            grouped.set(device.owner, current);
+          }
+          for (const ownerId of labels.keys()) {
+            if (!grouped.has(ownerId)) {
+              grouped.set(ownerId, []);
+            }
+          }
+
+          const groups = Array.from(grouped.entries())
+            .sort(([a], [b]) =>
+              a === userId ? -1 : b === userId ? 1 : a.localeCompare(b),
+            )
+            .map(([owner, ownerDevices]) => ({
+              label: labels.get(owner) ?? `${owner.slice(0, 8)}…`,
+              userId: owner === userId ? null : owner,
+              devices: ownerDevices,
+            }));
+
+          setDeviceGroups(groups);
+        })
+        .catch((err) => {
+          setLoadError(
+            err instanceof Error ? err.message : "Failed to load devices",
+          );
+        })
+        .finally(() => {
+          setSidebarLoading(false);
+        });
+    };
+
+    loadSidebar();
+    if (typeof window === "undefined") return;
+    window.addEventListener(PARTNERS_CHANGED_EVENT, loadSidebar);
+    return () =>
+      window.removeEventListener(PARTNERS_CHANGED_EVENT, loadSidebar);
   }, [token, userId]);
 
   useEffect(() => {
@@ -451,6 +479,9 @@ export function Logs() {
   const deviceName = (id: string) =>
     allDevices.find((device) => device.id === id)?.name ?? `${id.slice(0, 8)}…`;
   const groupLabel = (ownerId: string) =>
+    knownUsers.find((entry) => entry.id === ownerId)?.label ??
+    partners.find((partner) => partner.user.id === ownerId)?.user.name ??
+    partners.find((partner) => partner.user.id === ownerId)?.user.email ??
     deviceGroups.find((group) => group.userId === ownerId)?.label ??
     `${ownerId.slice(0, 8)}…`;
 
@@ -533,6 +564,9 @@ export function Logs() {
                     </li>
                   ))}
                 </ul>
+                {group.devices.length === 0 && (
+                  <p class="sidebar-loading">No devices registered yet.</p>
+                )}
               </div>
             ))}
           </aside>
