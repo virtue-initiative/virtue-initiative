@@ -67,8 +67,61 @@ virtue_build_date() {
   date -u +%Y-%m-%d
 }
 
+virtue_git_ref_name() {
+  if [[ -n "${VIRTUE_GIT_REF_NAME:-}" ]]; then
+    printf '%s\n' "${VIRTUE_GIT_REF_NAME}"
+    return 0
+  fi
+
+  if [[ -n "${GITHUB_REF_NAME:-}" ]]; then
+    printf '%s\n' "${GITHUB_REF_NAME}"
+    return 0
+  fi
+
+  local branch_name
+  branch_name="$(git -C "${VIRTUE_REPO_ROOT}" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  if [[ -n "${branch_name}" && "${branch_name}" != "HEAD" ]]; then
+    printf '%s\n' "${branch_name}"
+    return 0
+  fi
+
+  printf 'detached\n'
+}
+
+virtue_release_channel() {
+  if [[ -n "${VIRTUE_RELEASE_CHANNEL:-}" ]]; then
+    case "${VIRTUE_RELEASE_CHANNEL}" in
+      stable|dev)
+        printf '%s\n' "${VIRTUE_RELEASE_CHANNEL}"
+        return 0
+        ;;
+      *)
+        echo "Unsupported VIRTUE_RELEASE_CHANNEL: ${VIRTUE_RELEASE_CHANNEL}" >&2
+        return 1
+        ;;
+    esac
+  fi
+
+  case "$(virtue_git_ref_name)" in
+    main)
+      printf 'stable\n'
+      ;;
+    *)
+      printf 'dev\n'
+      ;;
+  esac
+}
+
 virtue_release_tag() {
-  printf '%s-dev\n' "$(virtue_base_version)"
+  local base_version
+  base_version="$(virtue_base_version)"
+
+  if [[ "$(virtue_release_channel)" == "stable" ]]; then
+    printf '%s\n' "${base_version}"
+    return 0
+  fi
+
+  printf '%s-dev\n' "${base_version}"
 }
 
 virtue_build_label() {
@@ -81,6 +134,8 @@ virtue_print_env() {
   printf 'VIRTUE_APPLE_BUILD_NUMBER=%s\n' "$(virtue_apple_build_number)"
   printf 'VIRTUE_BUILD_DATE=%s\n' "$(virtue_build_date)"
   printf 'VIRTUE_GIT_SHORT_HASH=%s\n' "$(virtue_git_short_hash)"
+  printf 'VIRTUE_GIT_REF_NAME=%s\n' "$(virtue_git_ref_name)"
+  printf 'VIRTUE_RELEASE_CHANNEL=%s\n' "$(virtue_release_channel)"
   printf 'VIRTUE_RELEASE_TAG=%s\n' "$(virtue_release_tag)"
   printf 'VIRTUE_BUILD_LABEL=%s\n' "$(virtue_build_label)"
 }

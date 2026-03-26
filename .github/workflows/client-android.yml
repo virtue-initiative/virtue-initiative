@@ -80,7 +80,7 @@ jobs:
           fi
 
       - name: Resolve version info
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         id: version
         shell: bash
         run: |
@@ -94,12 +94,12 @@ jobs:
         working-directory: client/android
 
       - name: Android build (release)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         run: ./gradlew --no-daemon :app:assembleRelease
         working-directory: client/android
 
       - name: Package Android artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         shell: bash
         run: |
           mkdir -p dist
@@ -112,24 +112,24 @@ jobs:
         working-directory: client/android
 
       - name: Upload Android artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         uses: actions/upload-artifact@v4
         with:
           name: virtue-android-${{ steps.version.outputs.build_label }}
           path: client/android/dist/virtue-android-${{ steps.version.outputs.build_label }}.apk
 
-      - name: Clear existing Android prerelease assets
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Clear existing Android release assets
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: ../scripts/clear-prerelease-assets.sh "${{ steps.version.outputs.release_tag }}" "virtue-android-*.apk"
         working-directory: client/android
 
-      - name: Publish Android prerelease asset
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Publish Android release asset
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ../scripts/publish-prerelease.sh "${{ steps.version.outputs.release_tag }}" "${{ steps.version.outputs.build_label }}" "dist/virtue-android-${{ steps.version.outputs.build_label }}.apk"
+        run: ../scripts/publish-release.sh "${{ steps.version.outputs.release_tag }}" "${{ steps.version.outputs.build_label }}" "dist/virtue-android-${{ steps.version.outputs.build_label }}.apk" "${{ github.ref_name == 'main' && 'stable' || 'dev' }}"
         working-directory: client/android
