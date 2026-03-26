@@ -9,6 +9,7 @@ import hashes from './routes/hashes';
 import notifications from './routes/notifications';
 import partners from './routes/partners';
 import { stripApiBasePath } from './lib/base-path';
+import { getJWKS } from './lib/jwt';
 import { runNotificationSchedule } from './lib/scheduler';
 import { Env, Variables } from './types/bindings';
 
@@ -37,6 +38,8 @@ app.get('/', (c) =>
     status: 'ok',
   }),
 );
+
+app.get('/.well-known/jwks.json', async (c) => c.json(await getJWKS(c.env.JWT_PUBLIC_KEY)));
 
 app.route('/', auth);
 app.route('/', notifications);

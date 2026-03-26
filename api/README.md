@@ -55,7 +55,19 @@ HASH_SERVER_URL=http://127.0.0.1:8787
 
 ## Deployment
 
-Ensure all the enviroment variables are set correctly (in `wrangler.json` and
+Generate a signing keypair once:
+
+```bash
+openssl genpkey -algorithm ed25519 -out jwt-private.pem
+openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
+```
+
+Set `JWT_PRIVATE_KEY` and `JWT_PUBLIC_KEY` in local `.dev.vars`, and in deployed
+environments upload at least the private key with `wrangler secret put`. The
+public key can be shared with any other server that needs to verify tokens.
+The worker also exposes the verifier key at `GET /.well-known/jwks.json`.
+
+Ensure all the environment variables are set correctly (in `wrangler.json` and
 using `wrangler secret put`) and run
 
 ```bash

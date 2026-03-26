@@ -1,7 +1,8 @@
 export interface Env {
   DB: D1Database;
   BUCKET: R2Bucket;
-  JWT_SECRET: string;
+  JWT_PRIVATE_KEY: string;
+  JWT_PUBLIC_KEY: string;
   API_BASE_PATH?: string;
   HASH_SERVER_URL?: string;
   R2_URL: string;

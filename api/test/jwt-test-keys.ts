@@ -1,0 +1,11 @@
+export const TEST_JWT_PRIVATE_KEY = `-----BEGIN PRIVATE KEY-----
+MC4CAQAwBQYDK2VwBCIEIAJm+07rCmNlHyGjt5bwX0pFVeoddBs1yeY1jJyd7Gkm
+-----END PRIVATE KEY-----`;
+
+export const TEST_JWT_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAmjBnclbQ5hpvPrTnHBuk3CseEB0k2yurLQIU8r25jN0=
+-----END PUBLIC KEY-----`;
+
+export const TEST_OTHER_JWT_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAMJvLAK+FdbRAaUhIDXqWshEHgumXiWgZBl7hbVdOZ7s=
+-----END PUBLIC KEY-----`;

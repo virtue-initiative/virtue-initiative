@@ -16,6 +16,35 @@ describe('API base path routing', () => {
     expect(await prefixedRes.json()).toEqual(await rootRes.json());
   });
 
+  it('serves the same JWKS with and without the configured base path', async () => {
+    const [rootRes, prefixedRes] = await Promise.all([
+      SELF.fetch(`${BASE}/.well-known/jwks.json`),
+      SELF.fetch(`${BASE}/api/.well-known/jwks.json`),
+    ]);
+
+    expect(rootRes.status).toBe(200);
+    expect(prefixedRes.status).toBe(200);
+
+    const rootJson = (await rootRes.json()) as {
+      keys: Array<Record<string, string>>;
+    };
+
+    expect(await prefixedRes.json()).toEqual(rootJson);
+    expect(rootJson).toMatchObject({
+      keys: [
+        {
+          alg: 'EdDSA',
+          crv: 'Ed25519',
+          kty: 'OKP',
+          use: 'sig',
+        },
+      ],
+    });
+    expect(rootJson.keys).toHaveLength(1);
+    expect(rootJson.keys[0]?.kid).toBeTruthy();
+    expect(rootJson.keys[0]?.x).toBeTruthy();
+  });
+
   it('preserves the /api base path in device hash_base_url responses', async () => {
     const { token } = await signupAndGetToken('prefixed-device@example.com', 'pw');
 

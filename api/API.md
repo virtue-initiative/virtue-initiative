@@ -11,10 +11,10 @@ Base URL examples:
 - `DateTime`: millisecond Unix timestamp
 - `Base64`: base64-encoded binary
 - `SHA256`: lowercase hex-encoded SHA-256 digest
-- `AccessToken`: JWT with `type: "access"` and `sub = user id`
-- `DeviceAccessToken`: JWT with `type: "device-access"` and `sub = device id`
+- `AccessToken`: EdDSA JWT (`Ed25519`) with `type: "access"` and `sub = user id`
+- `DeviceAccessToken`: EdDSA JWT (`Ed25519`) with `type: "device-access"` and `sub = device id`
 - `DeviceRefreshToken`: opaque string returned by `POST /d/device`
-- `ServerToken`: JWT with `type: "server"` and `sub = device id`
+- `ServerToken`: EdDSA JWT (`Ed25519`) with `type: "server"` and `sub = device id`
 
 ## Shared Shapes
 
@@ -100,6 +100,27 @@ Response `200`:
 
 ```js
 HashParams;
+```
+
+### `GET /.well-known/jwks.json`
+
+Returns the public signing key in JWKS form for remote JWT verification.
+
+Response `200`:
+
+```js
+{
+  "keys": [
+    {
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "x": "base64url-public-key",
+      "alg": "EdDSA",
+      "use": "sig",
+      "kid": "thumbprint"
+    }
+  ]
+}
 ```
 
 ### `GET /user/login-material?email=user@example.com`

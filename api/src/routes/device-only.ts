@@ -173,7 +173,7 @@ deviceOnly.post(
     await createDevice(c.env.DB, { id, owner, name, platform });
 
     const [accessToken, refreshToken] = await Promise.all([
-      generateToken('device-access', id, c.env.JWT_SECRET, DEVICE_ACCESS_TOKEN_TTL_SECONDS),
+      generateToken('device-access', id, c.env.JWT_PRIVATE_KEY, DEVICE_ACCESS_TOKEN_TTL_SECONDS),
       createDeviceSession(c, id),
     ]);
 
@@ -246,7 +246,7 @@ deviceOnly.post('/token', validateZ('json', deviceTokenSchema), async (c) => {
   const accessToken = await generateToken(
     'device-access',
     session.device_id,
-    c.env.JWT_SECRET,
+    c.env.JWT_PRIVATE_KEY,
     DEVICE_ACCESS_TOKEN_TTL_SECONDS,
   );
 
@@ -311,7 +311,7 @@ deviceOnly.post(
       c,
       device,
       configuredHashBaseUrl,
-      await generateToken('server', device.id, c.env.JWT_SECRET, 60),
+      await generateToken('server', device.id, c.env.JWT_PRIVATE_KEY, 60),
     );
 
     return c.json({ id: batchId, start_time, end_time, end_hash: endHash, url }, 201);
