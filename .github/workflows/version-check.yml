@@ -1,0 +1,28 @@
+name: Version Check
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  version-bump:
+    name: Version bump required for main
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compare version.properties with base branch
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          base_version_file="$(mktemp)"
+          git show "${BASE_SHA}:client/version.properties" > "${base_version_file}"
+          ./client/scripts/check-version-bump.sh "${base_version_file}" ./client/version.properties
