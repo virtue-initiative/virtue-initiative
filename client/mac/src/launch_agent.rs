@@ -6,7 +6,7 @@ use anyhow::{Context, Result, anyhow};
 
 use crate::config::ClientPaths;
 
-pub const LABEL: &str = "codes.anb.virtue.daemon";
+pub const LABEL: &str = "org.virtueinitiative.virtue.daemon";
 
 pub fn ensure_agent_running(paths: &ClientPaths, exe_path: &Path) -> Result<()> {
     let plist = render_plist(exe_path, paths);

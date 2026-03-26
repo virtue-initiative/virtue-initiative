@@ -2,6 +2,28 @@ import Combine
 import Foundation
 import UIKit
 
+private struct CoreServiceStatus: Decodable {
+    let isRunning: Bool
+    let lastLoopAtMs: Int64?
+    let lastScreenshotAtMs: Int64?
+    let lastBatchAtMs: Int64?
+    let pendingRequestCount: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case isRunning = "is_running"
+        case lastLoopAtMs = "last_loop_at_ms"
+        case lastScreenshotAtMs = "last_screenshot_at_ms"
+        case lastBatchAtMs = "last_batch_at_ms"
+        case pendingRequestCount = "pending_request_count"
+    }
+}
+
+private struct CoreDeviceSettings: Decodable {
+    let enabled: Bool
+}
+
+private struct CorePendingRequest: Decodable {}
+
 final class MonitoringCoordinator: ObservableObject {
     @Published var email: String = ""
     @Published var password: String = ""
@@ -12,6 +34,12 @@ final class MonitoringCoordinator: ObservableObject {
     @Published private(set) var statusMessage: String = "Not initialized"
     @Published private(set) var loggedIn: Bool = false
     @Published private(set) var deviceId: String = "<none>"
+    @Published private(set) var monitorSummary: String = "idle"
+    @Published private(set) var pendingRequestCount: Int = 0
+    @Published private(set) var currentApiBaseUrl: String = VirtueShared.defaultBaseApiUrl
+    @Published private(set) var lastCoreLoop: String = "<none>"
+    @Published private(set) var lastCoreScreenshot: String = "<none>"
+    @Published private(set) var lastCoreBatch: String = "<none>"
 
     @Published private(set) var safariCaptureHealth: String = "No Safari extension heartbeat yet"
     @Published private(set) var safariLastHeartbeat: String = "<none>"
@@ -52,6 +80,7 @@ final class MonitoringCoordinator: ObservableObject {
         initializeCore()
         bindAppLifecycleState()
         refreshSessionState()
+        refreshCoreStatus()
         refreshSafariStatus()
         startStatusRefreshTimerIfNeeded()
     }
@@ -75,6 +104,7 @@ final class MonitoringCoordinator: ObservableObject {
             return
         }
 
+        refreshCoreStatus()
         statusMessage = "Runtime overrides updated"
     }
 
@@ -95,6 +125,7 @@ final class MonitoringCoordinator: ObservableObject {
         }
 
         refreshSessionState()
+        refreshCoreStatus()
         statusMessage = "Signed in. Enable Virtue Safari extension in Safari settings."
     }
 
@@ -106,6 +137,7 @@ final class MonitoringCoordinator: ObservableObject {
             statusMessage = "Signed out"
         }
         refreshSessionState()
+        refreshCoreStatus()
     }
 
     private func initializeCore() {
@@ -155,6 +187,7 @@ final class MonitoringCoordinator: ObservableObject {
 
     private func handleAppForegroundEvent() {
         refreshSessionState()
+        refreshCoreStatus()
         refreshSafariStatus()
         startStatusRefreshTimerIfNeeded()
     }
@@ -164,6 +197,7 @@ final class MonitoringCoordinator: ObservableObject {
             return
         }
         statusRefreshTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            self?.refreshCoreStatus()
             self?.refreshSafariStatus()
         }
     }
@@ -242,6 +276,32 @@ final class MonitoringCoordinator: ObservableObject {
         }
     }
 
+    private func refreshCoreStatus() {
+        currentApiBaseUrl = runtimeOverrides().baseApiUrl.isEmpty
+            ? VirtueShared.defaultBaseApiUrl
+            : runtimeOverrides().baseApiUrl
+
+        let serviceStatus = loadJSONFile(named: "status.json", as: CoreServiceStatus.self)
+        let pendingRequests = loadJSONFile(named: "pending_requests.json", as: [CorePendingRequest].self)
+            ?? []
+        let deviceSettings = loadJSONFile(named: "device_settings.json", as: CoreDeviceSettings?.self) ?? nil
+
+        pendingRequestCount = serviceStatus?.pendingRequestCount ?? pendingRequests.count
+        lastCoreLoop = formatMillisTimestamp(serviceStatus?.lastLoopAtMs)
+        lastCoreScreenshot = formatMillisTimestamp(serviceStatus?.lastScreenshotAtMs)
+        lastCoreBatch = formatMillisTimestamp(serviceStatus?.lastBatchAtMs)
+
+        if !loggedIn {
+            monitorSummary = "signed out"
+        } else if deviceSettings?.enabled == false {
+            monitorSummary = "disabled by device settings"
+        } else if serviceStatus?.isRunning == true {
+            monitorSummary = "active"
+        } else {
+            monitorSummary = "idle"
+        }
+    }
+
     private func runtimeOverrides() -> RuntimeOverrides {
         RuntimeOverrides(
             baseApiUrl: baseApiUrlOverride.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -263,11 +323,36 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     private func loadOverrideInputs() {
-        // Force known-good local dev defaults at startup so user input is not required each run.
-        baseApiUrlOverride = VirtueShared.defaultBaseApiUrl
-        captureIntervalOverride = VirtueShared.defaultCaptureIntervalSeconds
-        batchWindowOverride = VirtueShared.defaultBatchWindowSeconds
+        let preferredDefaults = sharedDefaults ?? UserDefaults.standard
+        baseApiUrlOverride = storedOverride(
+            forKey: VirtueShared.baseApiUrlKey,
+            defaults: preferredDefaults,
+            fallback: VirtueShared.defaultBaseApiUrl
+        )
+        captureIntervalOverride = storedOverride(
+            forKey: VirtueShared.captureIntervalKey,
+            defaults: preferredDefaults,
+            fallback: VirtueShared.defaultCaptureIntervalSeconds
+        )
+        batchWindowOverride = storedOverride(
+            forKey: VirtueShared.batchWindowKey,
+            defaults: preferredDefaults,
+            fallback: VirtueShared.defaultBatchWindowSeconds
+        )
         persistOverrides(runtimeOverrides())
+    }
+
+    private func storedOverride(forKey key: String, defaults: UserDefaults, fallback: String) -> String {
+        let value = defaults.string(forKey: key)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (value?.isEmpty == false) ? value! : fallback
+    }
+
+    private func loadJSONFile<T: Decodable>(named name: String, as type: T.Type) -> T? {
+        let fileURL = dataDir.appendingPathComponent(name, isDirectory: false)
+        guard let data = try? Data(contentsOf: fileURL), !data.isEmpty else {
+            return nil
+        }
+        return try? JSONDecoder().decode(type, from: data)
     }
 
     private func timestamp(forKey key: String, defaults: UserDefaults) -> TimeInterval? {
@@ -275,6 +360,14 @@ final class MonitoringCoordinator: ObservableObject {
             return nil
         }
         return defaults.double(forKey: key)
+    }
+
+    private func formatMillisTimestamp(_ timestampMs: Int64?) -> String {
+        guard let timestampMs else {
+            return "<none>"
+        }
+        let timestamp = TimeInterval(timestampMs) / 1000
+        return formatAbsoluteTime(timestamp)
     }
 
     private func formatAbsoluteTime(_ timestamp: TimeInterval) -> String {

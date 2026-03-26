@@ -1,8 +1,8 @@
 use std::process::{Command, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
-
-use crate::config::CaptureBackendHint;
+use virtue_core::{CoreError, CoreResult, PlatformHooks, Screenshot};
 
 #[derive(Clone, Copy, Debug)]
 pub enum CaptureBackend {
@@ -12,24 +12,13 @@ pub enum CaptureBackend {
 
 #[derive(Clone, Debug)]
 pub struct CaptureProbe {
-    pub backend: Option<CaptureBackend>,
     pub captured_ok: bool,
     pub guidance: String,
 }
 
-pub fn detect_backend(hint: Option<CaptureBackendHint>) -> Option<CaptureBackend> {
+pub fn detect_backend() -> Option<CaptureBackend> {
     let wayland_available = env_var_nonempty("WAYLAND_DISPLAY").is_some();
     let x11_available = resolve_x11_display().is_some();
-
-    if let Some(hint) = hint {
-        match hint {
-            CaptureBackendHint::Wayland if wayland_available => {
-                return Some(CaptureBackend::Wayland);
-            }
-            CaptureBackendHint::X11 if x11_available => return Some(CaptureBackend::X11),
-            _ => {}
-        }
-    }
 
     if wayland_available {
         return Some(CaptureBackend::Wayland);
@@ -42,18 +31,16 @@ pub fn detect_backend(hint: Option<CaptureBackendHint>) -> Option<CaptureBackend
     None
 }
 
-pub fn probe_backend(hint: Option<CaptureBackendHint>) -> CaptureProbe {
-    let backend = detect_backend(hint);
+pub fn probe_backend() -> CaptureProbe {
+    let backend = detect_backend();
 
     match backend {
         Some(CaptureBackend::Wayland) => match capture_wayland() {
             Ok(_) => CaptureProbe {
-                backend,
                 captured_ok: true,
                 guidance: "Wayland capture probe succeeded using grim.".to_string(),
             },
             Err(err) => CaptureProbe {
-                backend,
                 captured_ok: false,
                 guidance: format!(
                     "Wayland detected but unattended capture failed: {}\nBest path: use an X11 session for headless capture reliability, or run a compositor that permits grim screencopy (for example sway/wlroots with correct permissions).",
@@ -63,12 +50,10 @@ pub fn probe_backend(hint: Option<CaptureBackendHint>) -> CaptureProbe {
         },
         Some(CaptureBackend::X11) => match capture_x11() {
             Ok(_) => CaptureProbe {
-                backend,
                 captured_ok: true,
                 guidance: "X11 capture probe succeeded.".to_string(),
             },
             Err(err) => CaptureProbe {
-                backend,
                 captured_ok: false,
                 guidance: format!(
                     "X11 detected but capture failed: {}\nInstall one of these tools: ImageMagick (`import`) or `maim`, then rerun `virtue login`.",
@@ -77,15 +62,14 @@ pub fn probe_backend(hint: Option<CaptureBackendHint>) -> CaptureProbe {
             },
         },
         None => CaptureProbe {
-            backend: None,
             captured_ok: false,
             guidance: "No graphical session detected. Run `virtue login` from a terminal inside your desktop session so capture permissions can be tested.".to_string(),
         },
     }
 }
 
-pub fn capture_screen(hint: Option<CaptureBackendHint>) -> Result<Vec<u8>> {
-    match detect_backend(hint) {
+pub fn capture_screen() -> Result<Vec<u8>> {
+    match detect_backend() {
         Some(CaptureBackend::Wayland) => capture_wayland(),
         Some(CaptureBackend::X11) => capture_x11(),
         None => Err(anyhow!(
@@ -94,8 +78,8 @@ pub fn capture_screen(hint: Option<CaptureBackendHint>) -> Result<Vec<u8>> {
     }
 }
 
-pub fn is_session_unavailable_error(err: &anyhow::Error) -> bool {
-    let text = err.to_string().to_ascii_lowercase();
+pub fn is_session_unavailable_text(text: &str) -> bool {
+    let text = text.to_ascii_lowercase();
     text.contains("no graphical session detected")
         || text.contains("x11 display unavailable")
         || text.contains("unable to open x server")
@@ -208,4 +192,32 @@ fn run_capture_command(
     }
 
     Ok(output.stdout)
+}
+
+#[derive(Clone)]
+pub struct LinuxPlatformHooks;
+
+impl LinuxPlatformHooks {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl PlatformHooks for LinuxPlatformHooks {
+    fn take_screenshot(&self) -> CoreResult<Screenshot> {
+        let bytes = capture_screen().map_err(|err| CoreError::CommandFailed(err.to_string()))?;
+        Ok(Screenshot {
+            captured_at_ms: self.get_time_utc_ms()?,
+            bytes,
+            content_type: "image/png".to_string(),
+        })
+    }
+
+    fn get_time_utc_ms(&self) -> CoreResult<i64> {
+        let duration = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|err| CoreError::CommandFailed(err.to_string()))?;
+        i64::try_from(duration.as_millis())
+            .map_err(|_| CoreError::InvalidState("system clock overflow"))
+    }
 }

@@ -1,19 +1,42 @@
 import { decode } from "@msgpack/msgpack";
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
-import { api, Batch, Device, WatchingPartner } from "../../api";
+import { api, Batch, DataLog, Device, WatchingPartner } from "../../api";
 import { decryptBatch, decompressGzip } from "../../crypto";
+import {
+  CachedDataFeed,
+  loadCachedDataFeed,
+  mergeDataPageIntoCache,
+} from "../../data-cache";
 import { useAuth } from "../../context/auth";
 import { useE2EE } from "../../context/e2ee";
+import { PARTNERS_CHANGED_EVENT } from "../../events";
 import { LogsGallery } from "./LogsGallery";
 import { LogsList } from "./LogsList";
 import { ImageLogItem, LogItem } from "./shared";
 import "./style.css";
 
+const SYNC_PAGE_SIZE = 250;
+const VISIBLE_PAGE_SIZE = 25;
+
+interface FeedEntry {
+  key: string;
+  created_at: number;
+  device_id: string;
+  kind: "batch" | "log";
+  batch?: Batch;
+  log?: DataLog;
+}
+
 interface DeviceGroup {
   label: string;
   userId: string | null;
   devices: Device[];
+}
+
+interface UserLabel {
+  id: string;
+  label: string;
 }
 
 function ExpandIcon() {
@@ -93,7 +116,7 @@ function toMetadataEntries(value: unknown): [string, string][] {
 
 async function decryptAndFlattenBatch(
   batch: Batch,
-  key: CryptoKey,
+  openBatchKey: (encryptedKey: string) => Promise<CryptoKey>,
 ): Promise<LogItem[]> {
   const resp = await fetch(batch.url);
   if (!resp.ok) {
@@ -105,7 +128,8 @@ async function decryptAndFlattenBatch(
     throw new Error(`Batch blob too short for AES-GCM payload: ${batch.url}`);
   }
 
-  const decrypted = await decryptBatch(key, raw);
+  const batchKey = await openBatchKey(batch.encrypted_key);
+  const decrypted = await decryptBatch(batchKey, raw);
   const decompressed = await decompressGzip(decrypted);
   const decoded = decode(decompressed) as unknown;
   const record =
@@ -154,6 +178,19 @@ async function decryptAndFlattenBatch(
   });
 }
 
+function toDirectLogItem(entry: DataLog): LogItem {
+  return {
+    id: entry.id,
+    taken_at: entry.ts,
+    device_id: entry.device_id,
+    kind: entry.type,
+    image: toUint8Array(entry.data.image),
+    metadata: toMetadata(entry.data),
+    batch_status: "unknown" as const,
+    source: "log" as const,
+  };
+}
+
 export function Logs() {
   const { token, userId } = useAuth();
   const e2ee = useE2EE();
@@ -161,6 +198,7 @@ export function Logs() {
 
   const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[]>([]);
   const [partners, setPartners] = useState<WatchingPartner[]>([]);
+  const [knownUsers, setKnownUsers] = useState<UserLabel[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string | null>(() =>
     new URLSearchParams(window.location.search).get("device_id"),
   );
@@ -169,135 +207,269 @@ export function Logs() {
   );
   const [sidebarLoading, setSidebarLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [cachedFeed, setCachedFeed] = useState<CachedDataFeed | null>(null);
   const [items, setItems] = useState<LogItem[]>([]);
-  const [nextCursor, setNextCursor] = useState<number | undefined>(undefined);
-  const [loading, setLoading] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(VISIBLE_PAGE_SIZE);
+  const [syncing, setSyncing] = useState(false);
+  const [materializing, setMaterializing] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [batchStats, setBatchStats] = useState({ decrypted: 0, skipped: 0 });
   const [galleryFullscreen, setGalleryFullscreen] = useState(false);
+  const batchItemsCache = useRef(new Map<string, Promise<LogItem[]>>());
 
   const activeUserId = selectedUser ?? userId;
-  const activeKey = activeUserId ? e2ee.getKey(activeUserId) : null;
-  const activePartner =
-    activeUserId && activeUserId !== userId
-      ? (partners.find((partner) => partner.user.id === activeUserId) ?? null)
-      : null;
-  const missingPartnerKey = Boolean(activePartner && !activeKey);
+  const activePrivateKey = e2ee.privateKey;
 
   useEffect(() => {
     if (!token || !userId) return;
-    setSidebarLoading(true);
-    setLoadError(null);
 
-    Promise.all([api.getDevices(token), api.getPartners(token)])
-      .then(([devices, partners]) => {
-        setPartners(partners.watching);
-        const labels = new Map<string, string>();
-        labels.set(userId, "My devices");
-        for (const partner of partners.watching) {
-          labels.set(partner.user.id, partner.user.name ?? partner.user.email);
-        }
+    const loadSidebar = () => {
+      setSidebarLoading(true);
+      setLoadError(null);
 
-        const grouped = new Map<string, Device[]>();
-        for (const device of devices) {
-          const current = grouped.get(device.owner) ?? [];
-          current.push(device);
-          grouped.set(device.owner, current);
-        }
+      Promise.all([api.getDevices(token), api.getPartners(token)])
+        .then(([devices, partners]) => {
+          setPartners(partners.watching);
+          const labels = new Map<string, string>();
+          labels.set(userId, "My devices");
+          for (const partner of partners.watching) {
+            labels.set(
+              partner.user.id,
+              partner.user.name ?? partner.user.email,
+            );
+          }
 
-        const groups = Array.from(grouped.entries())
-          .sort(([a], [b]) =>
-            a === userId ? -1 : b === userId ? 1 : a.localeCompare(b),
-          )
-          .map(([owner, ownerDevices]) => ({
-            label: labels.get(owner) ?? `${owner.slice(0, 8)}…`,
-            userId: owner === userId ? null : owner,
-            devices: ownerDevices,
-          }));
+          setKnownUsers(
+            Array.from(labels.entries()).map(([id, label]) => ({ id, label })),
+          );
 
-        setDeviceGroups(groups);
-      })
-      .catch((err) => {
-        setLoadError(
-          err instanceof Error ? err.message : "Failed to load devices",
-        );
-      })
-      .finally(() => {
-        setSidebarLoading(false);
-      });
+          const grouped = new Map<string, Device[]>();
+          for (const device of devices) {
+            const current = grouped.get(device.owner) ?? [];
+            current.push(device);
+            grouped.set(device.owner, current);
+          }
+          for (const ownerId of labels.keys()) {
+            if (!grouped.has(ownerId)) {
+              grouped.set(ownerId, []);
+            }
+          }
+
+          const groups = Array.from(grouped.entries())
+            .sort(([a], [b]) =>
+              a === userId ? -1 : b === userId ? 1 : a.localeCompare(b),
+            )
+            .map(([owner, ownerDevices]) => ({
+              label: labels.get(owner) ?? `${owner.slice(0, 8)}…`,
+              userId: owner === userId ? null : owner,
+              devices: ownerDevices,
+            }));
+
+          setDeviceGroups(groups);
+        })
+        .catch((err) => {
+          setLoadError(
+            err instanceof Error ? err.message : "Failed to load devices",
+          );
+        })
+        .finally(() => {
+          setSidebarLoading(false);
+        });
+    };
+
+    loadSidebar();
+    if (typeof window === "undefined") return;
+    window.addEventListener(PARTNERS_CHANGED_EVENT, loadSidebar);
+    return () =>
+      window.removeEventListener(PARTNERS_CHANGED_EVENT, loadSidebar);
   }, [token, userId]);
 
   useEffect(() => {
-    if (!token) return;
-    setItems([]);
-    setNextCursor(undefined);
-    setBatchStats({ decrypted: 0, skipped: 0 });
-    void doLoad(undefined, true);
-  }, [token, selectedDevice, selectedUser, activeKey]);
+    batchItemsCache.current.clear();
+  }, [activeUserId, activePrivateKey]);
 
-  async function doLoad(cursor: number | undefined, reset: boolean) {
-    if (!token) return;
-    setLoading(true);
+  useEffect(() => {
+    if (!token || !userId || !activeUserId || !e2ee.ready) return;
+
+    let cancelled = false;
+    const targetUserId = activeUserId;
     setFetchError(null);
+    setCachedFeed(null);
+    setItems([]);
+    setBatchStats({ decrypted: 0, skipped: 0 });
+    setVisibleCount(VISIBLE_PAGE_SIZE);
+    setSyncing(true);
 
-    try {
-      const page = await api.getData(token, {
-        user: selectedUser ?? undefined,
-        device_id: selectedDevice ?? undefined,
-        cursor,
-        limit: 25,
-      });
+    async function loadAndSync() {
+      try {
+        const cached = await loadCachedDataFeed(userId, targetUserId);
+        if (cancelled) return;
+        setCachedFeed(cached);
 
-      const decryptedBatches = activeKey
-        ? await Promise.allSettled(
-            page.batches.map((batch) =>
-              decryptAndFlattenBatch(batch, activeKey),
-            ),
-          )
-        : [];
+        let since = cached.since;
+        while (!cancelled) {
+          const page = await api.getData(token, {
+            user: selectedUser ?? undefined,
+            since,
+            limit: SYNC_PAGE_SIZE,
+          });
+          if (cancelled) return;
 
-      const batchItems: LogItem[] = [];
-      let decrypted = 0;
-      let skipped = activeKey ? 0 : page.batches.length;
+          if (page.batches.length === 0 && page.logs.length === 0) {
+            break;
+          }
 
-      for (const result of decryptedBatches) {
-        if (result.status === "fulfilled") {
-          batchItems.push(...result.value);
-          decrypted += 1;
-        } else {
-          skipped += 1;
-          console.error("[logs] failed to decrypt batch", result.reason);
+          const updated = await mergeDataPageIntoCache(
+            userId,
+            targetUserId,
+            page,
+          );
+          if (cancelled) return;
+          since = updated.since;
+
+          if (page.next_since === undefined) {
+            break;
+          }
+        }
+
+        if (cancelled) return;
+        setCachedFeed(await loadCachedDataFeed(userId, targetUserId));
+      } catch (err) {
+        console.error("[logs] sync failed:", err);
+        if (!cancelled) {
+          setCachedFeed(await loadCachedDataFeed(userId, targetUserId));
+          setFetchError(
+            err instanceof Error ? err.message : "Failed to sync logs",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setSyncing(false);
         }
       }
-
-      const directLogs = page.logs.map((entry, index) => ({
-        id: `${entry.device_id}:${entry.ts}:${index}`,
-        taken_at: entry.ts,
-        device_id: entry.device_id,
-        kind: entry.type,
-        image: toUint8Array(entry.data.image),
-        metadata: toMetadata(entry.data),
-        batch_status: "unknown" as const,
-        source: "log" as const,
-      }));
-
-      const merged = [...batchItems, ...directLogs].sort(
-        (a, b) => b.taken_at - a.taken_at,
-      );
-
-      setItems((prev) => (reset ? merged : [...prev, ...merged]));
-      setNextCursor(page.next_cursor);
-      setBatchStats((prev) => ({
-        decrypted: (reset ? 0 : prev.decrypted) + decrypted,
-        skipped: (reset ? 0 : prev.skipped) + skipped,
-      }));
-    } catch (err) {
-      console.error("[logs] load failed:", err);
-      setFetchError(err instanceof Error ? err.message : "Failed to load logs");
-    } finally {
-      setLoading(false);
     }
-  }
+
+    void loadAndSync();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, userId, activeUserId, selectedUser, e2ee.ready]);
+
+  const filteredFeedEntries = useMemo<FeedEntry[]>(() => {
+    if (!cachedFeed) {
+      return [];
+    }
+
+    const combined = [
+      ...cachedFeed.batches.map((batch) => ({
+        key: batch.id,
+        created_at: batch.created_at,
+        device_id: batch.device_id,
+        kind: "batch" as const,
+        batch,
+      })),
+      ...cachedFeed.logs.map((log) => ({
+        key: log.id,
+        created_at: log.created_at,
+        device_id: log.device_id,
+        kind: "log" as const,
+        log,
+      })),
+    ].sort((a, b) => b.created_at - a.created_at);
+
+    return selectedDevice
+      ? combined.filter((entry) => entry.device_id === selectedDevice)
+      : combined;
+  }, [cachedFeed, selectedDevice]);
+
+  const visibleEntries = useMemo(
+    () => filteredFeedEntries.slice(0, visibleCount),
+    [filteredFeedEntries, visibleCount],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function materializeVisibleItems() {
+      if (!cachedFeed) {
+        setItems([]);
+        setBatchStats({ decrypted: 0, skipped: 0 });
+        setMaterializing(false);
+        return;
+      }
+
+      setMaterializing(true);
+
+      try {
+        const batchEntries = visibleEntries.flatMap((entry) =>
+          entry.batch ? [entry.batch] : [],
+        );
+        const directLogs = visibleEntries.flatMap((entry) =>
+          entry.log ? [toDirectLogItem(entry.log)] : [],
+        );
+
+        let decrypted = 0;
+        let skipped = activePrivateKey ? 0 : batchEntries.length;
+        const batchItems: LogItem[] = [];
+
+        if (activePrivateKey) {
+          const results = await Promise.allSettled(
+            batchEntries.map((batch) => {
+              const cachedBatch = batchItemsCache.current.get(batch.id);
+              if (cachedBatch) {
+                return cachedBatch;
+              }
+
+              const promise = decryptAndFlattenBatch(
+                batch,
+                e2ee.unwrapEncryptedBatchKey,
+              ).catch((error) => {
+                batchItemsCache.current.delete(batch.id);
+                throw error;
+              });
+              batchItemsCache.current.set(batch.id, promise);
+              return promise;
+            }),
+          );
+
+          for (const result of results) {
+            if (result.status === "fulfilled") {
+              batchItems.push(...result.value);
+              decrypted += 1;
+            } else {
+              skipped += 1;
+              console.error("[logs] failed to decrypt batch", result.reason);
+            }
+          }
+        }
+
+        const merged = [...batchItems, ...directLogs].sort(
+          (a, b) => b.taken_at - a.taken_at,
+        );
+
+        if (!cancelled) {
+          setItems(merged);
+          setBatchStats({ decrypted, skipped });
+        }
+      } finally {
+        if (!cancelled) {
+          setMaterializing(false);
+        }
+      }
+    }
+
+    void materializeVisibleItems();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    cachedFeed,
+    visibleEntries,
+    activePrivateKey,
+    e2ee.unwrapEncryptedBatchKey,
+  ]);
 
   const allDevices = useMemo(
     () => deviceGroups.flatMap((group) => group.devices),
@@ -307,12 +479,16 @@ export function Logs() {
   const deviceName = (id: string) =>
     allDevices.find((device) => device.id === id)?.name ?? `${id.slice(0, 8)}…`;
   const groupLabel = (ownerId: string) =>
+    knownUsers.find((entry) => entry.id === ownerId)?.label ??
+    partners.find((partner) => partner.user.id === ownerId)?.user.name ??
+    partners.find((partner) => partner.user.id === ownerId)?.user.email ??
     deviceGroups.find((group) => group.userId === ownerId)?.label ??
     `${ownerId.slice(0, 8)}…`;
 
   function select(user: string | null, device: string | null) {
     setSelectedUser(user);
     setSelectedDevice(device);
+    setVisibleCount(VISIBLE_PAGE_SIZE);
     const qs = new URLSearchParams(window.location.search);
     if (device) qs.set("device_id", device);
     else qs.delete("device_id");
@@ -332,6 +508,8 @@ export function Logs() {
   const galleryItems = items.filter((item): item is ImageLogItem =>
     Boolean(item.image),
   );
+  const loading = syncing || materializing;
+  const hasMore = filteredFeedEntries.length > visibleCount;
   useEffect(() => {
     if (!isGallery) {
       setGalleryFullscreen(false);
@@ -386,6 +564,9 @@ export function Logs() {
                     </li>
                   ))}
                 </ul>
+                {group.devices.length === 0 && (
+                  <p class="sidebar-loading">No devices registered yet.</p>
+                )}
               </div>
             ))}
           </aside>
@@ -426,17 +607,6 @@ export function Logs() {
           </div>
 
           {fetchError && <p class="alert-error">{fetchError}</p>}
-          {missingPartnerKey && (
-            <div class="card settings-form">
-              <p class="settings-hint">
-                You are monitoring this person, but you do not have their
-                decryption key yet, so encrypted screenshots and uploaded blocks
-                cannot be shown. Ask the owner of these logs to click{" "}
-                <strong>Confirm partner</strong> so the encrypted sharing key is
-                attached to your partnership.
-              </p>
-            </div>
-          )}
           {(batchStats.decrypted > 0 || batchStats.skipped > 0) && (
             <p class="logs-summary">
               {batchStats.decrypted} block
@@ -450,8 +620,10 @@ export function Logs() {
             <LogsGallery
               items={galleryItems}
               loading={loading}
-              hasMore={nextCursor !== undefined}
-              onLoadMore={() => void doLoad(nextCursor, false)}
+              hasMore={hasMore}
+              onLoadMore={() =>
+                setVisibleCount((prev) => prev + VISIBLE_PAGE_SIZE)
+              }
               deviceName={deviceName}
               fullscreen={galleryFullscreen}
             />
@@ -459,8 +631,10 @@ export function Logs() {
             <LogsList
               items={items}
               loading={loading}
-              hasMore={nextCursor !== undefined}
-              onLoadMore={() => void doLoad(nextCursor, false)}
+              hasMore={hasMore}
+              onLoadMore={() =>
+                setVisibleCount((prev) => prev + VISIBLE_PAGE_SIZE)
+              }
               deviceName={deviceName}
             />
           )}

@@ -1,31 +1,36 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use virtue_core::Config;
+
+const DEFAULT_BASE_API_URL: &str = "https://api.virtueinitiative.org";
+const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
+const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
 
 #[derive(Clone, Debug)]
 pub struct ClientPaths {
     pub config_dir: PathBuf,
     pub data_dir: PathBuf,
-    pub state_file: PathBuf,
-    pub token_file: PathBuf,
-    pub batch_buffer_file: PathBuf,
+    pub state_dir: PathBuf,
+    pub runtime_config_file: PathBuf,
     pub lifecycle_state_file: PathBuf,
 }
 
 impl ClientPaths {
     pub fn discover() -> Result<Self> {
-        let config_root = dirs::config_dir().context("failed to resolve config directory")?;
-        let data_root = dirs::data_dir().context("failed to resolve data directory")?;
+        let config_root = xdg_base_dir("XDG_CONFIG_HOME", ".config")
+            .context("failed to resolve config directory")?;
+        let state_root = xdg_base_dir("XDG_STATE_HOME", ".local/state")
+            .context("failed to resolve state directory")?;
 
         let config_dir = config_root.join("virtue");
-        let data_dir = data_root.join("virtue");
+        let data_dir = state_root.join("virtue");
 
         Ok(Self {
-            state_file: config_dir.join("client_state.json"),
-            token_file: config_dir.join("token_store.json"),
-            batch_buffer_file: data_dir.join("batch_buffer.json"),
+            state_dir: data_dir.clone(),
+            runtime_config_file: config_dir.join("config.json"),
             lifecycle_state_file: data_dir.join("lifecycle_state.json"),
             config_dir,
             data_dir,
@@ -37,53 +42,35 @@ impl ClientPaths {
             .with_context(|| format!("failed to create {}", self.config_dir.display()))?;
         fs::create_dir_all(&self.data_dir)
             .with_context(|| format!("failed to create {}", self.data_dir.display()))?;
+        fs::create_dir_all(&self.state_dir)
+            .with_context(|| format!("failed to create {}", self.state_dir.display()))?;
         Ok(())
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct ClientState {
-    pub monitoring_enabled: bool,
-    pub email: Option<String>,
-    pub device_id: Option<String>,
-    pub backend_hint: Option<CaptureBackendHint>,
-    /// User ID used as PBKDF2 salt for E2EE key derivation.
-    pub e2ee_user_id: Option<String>,
+pub fn build_core_config(paths: &ClientPaths) -> Config {
+    let device_name = hostname::get()
+        .ok()
+        .and_then(|value| value.into_string().ok())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "linux-device".to_string());
+
+    Config::new(
+        DEFAULT_BASE_API_URL,
+        device_name,
+        "linux",
+        paths.state_dir.clone(),
+        Some(paths.runtime_config_file.clone()),
+        Duration::from_secs(DEFAULT_CAPTURE_INTERVAL_SECONDS),
+        Duration::from_secs(DEFAULT_BATCH_WINDOW_SECONDS),
+    )
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum CaptureBackendHint {
-    Wayland,
-    X11,
-}
-
-pub fn load_state(path: &Path) -> Result<ClientState> {
-    if !path.exists() {
-        return Ok(ClientState::default());
+fn xdg_base_dir(env_name: &str, fallback_suffix: &str) -> Result<PathBuf> {
+    if let Some(value) = std::env::var_os(env_name).filter(|value| !value.is_empty()) {
+        return Ok(PathBuf::from(value));
     }
 
-    let raw = fs::read(path).with_context(|| format!("failed reading {}", path.display()))?;
-    if raw.is_empty() {
-        return Ok(ClientState::default());
-    }
-
-    let parsed = serde_json::from_slice::<ClientState>(&raw)
-        .with_context(|| format!("failed parsing {}", path.display()))?;
-    Ok(parsed)
-}
-
-pub fn save_state(path: &Path, state: &ClientState) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-
-    let tmp = path.with_extension("tmp");
-    let bytes = serde_json::to_vec_pretty(state).context("failed serializing state")?;
-    fs::write(&tmp, bytes).with_context(|| format!("failed writing {}", tmp.display()))?;
-    fs::rename(&tmp, path)
-        .with_context(|| format!("failed replacing {} with {}", path.display(), tmp.display()))?;
-
-    Ok(())
+    let home = dirs::home_dir().context("failed to resolve home directory")?;
+    Ok(home.join(fallback_suffix))
 }

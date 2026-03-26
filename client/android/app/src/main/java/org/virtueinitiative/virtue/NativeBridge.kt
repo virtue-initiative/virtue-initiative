@@ -4,7 +4,7 @@ import android.content.Context
 
 object NativeBridge {
     init {
-        System.loadLibrary("virtue_android_rust")
+        System.loadLibrary("virtue_android")
     }
 
     @Volatile

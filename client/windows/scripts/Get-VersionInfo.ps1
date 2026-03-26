@@ -55,6 +55,59 @@ function Get-BuildDate {
     return [DateTime]::UtcNow.ToString("yyyy-MM-dd")
 }
 
+function Get-GitRefName {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepoRoot
+    )
+
+    if ($env:VIRTUE_GIT_REF_NAME) {
+        return $env:VIRTUE_GIT_REF_NAME
+    }
+
+    if ($env:GITHUB_REF_NAME) {
+        return $env:GITHUB_REF_NAME
+    }
+
+    $git = (Get-Command git -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+    if (-not $git) {
+        return "detached"
+    }
+
+    $branchName = & $git -C $RepoRoot rev-parse --abbrev-ref HEAD 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        return "detached"
+    }
+
+    $branchName = $branchName.Trim()
+    if ($branchName -and $branchName -ne "HEAD") {
+        return $branchName
+    }
+
+    return "detached"
+}
+
+function Get-ReleaseChannel {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepoRoot
+    )
+
+    if ($env:VIRTUE_RELEASE_CHANNEL) {
+        if ($env:VIRTUE_RELEASE_CHANNEL -in @("stable", "dev")) {
+            return $env:VIRTUE_RELEASE_CHANNEL
+        }
+
+        throw "Unsupported VIRTUE_RELEASE_CHANNEL: $($env:VIRTUE_RELEASE_CHANNEL)"
+    }
+
+    if ((Get-GitRefName -RepoRoot $RepoRoot) -eq "main") {
+        return "stable"
+    }
+
+    return "dev"
+}
+
 function Get-VirtueVersionInfo {
     param(
         [string]$ClientRoot = (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)),
@@ -66,7 +119,9 @@ function Get-VirtueVersionInfo {
     $appleBuildNumber = [int](Get-VersionProperty -ClientRoot $ClientRoot -Key "APPLE_BUILD_NUMBER")
     $buildDate = Get-BuildDate
     $gitShortHash = Get-GitShortHash -RepoRoot $RepoRoot
-    $releaseTag = "$baseVersion-dev"
+    $gitRefName = Get-GitRefName -RepoRoot $RepoRoot
+    $releaseChannel = Get-ReleaseChannel -RepoRoot $RepoRoot
+    $releaseTag = if ($releaseChannel -eq "stable") { $baseVersion } else { "$baseVersion-dev" }
     $buildLabel = "$releaseTag-$buildDate-$gitShortHash"
 
     [pscustomobject]@{
@@ -75,6 +130,8 @@ function Get-VirtueVersionInfo {
         AppleBuildNumber = $appleBuildNumber
         BuildDate = $buildDate
         GitShortHash = $gitShortHash
+        GitRefName = $gitRefName
+        ReleaseChannel = $releaseChannel
         ReleaseTag = $releaseTag
         BuildLabel = $buildLabel
     }

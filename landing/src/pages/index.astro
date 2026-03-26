@@ -2,6 +2,7 @@
 import SiteLayout from "../layouts/SiteLayout.astro";
 import CheckIcon from "../components/icons/CheckIcon.astro";
 import MinusIcon from "../components/icons/MinusIcon.astro";
+import { APP_URL } from "../lib/app-url";
 ---
 
 <SiteLayout tagline="Providing free tools and resources for accountability">
@@ -16,18 +17,18 @@ import MinusIcon from "../components/icons/MinusIcon.astro";
     </p>
 
     <p>
-      Our mission is to develop free technology and resources to support ending
-      pornography addiction. We know what it's like to feel stuck, and we want
-      to provide tools to support you. We don't want the price to be yet another
-      excuse not to deal with pornography.
+      Our mission is to develop free technology and resources to support people
+      who want to be free from pornography. We know what it's like to feel
+      stuck, and we want to provide tools to support you. We don't want the
+      price to be yet another excuse not to deal with pornography.
     </p>
 
     <p>
       Our vision is to see the Christian church and the world freed from
       pornography. There are billions of dollars made by keeping men and women
-      stuck in addiction. For many people, it starts from a young age, and it's
-      hard to give up, even if they desperately want to. We want to provide
-      tools to provide support and make it easier.
+      stuck. For many people, it starts from a young age, and it's hard to give
+      up, even if they desperately want to. We want to provide tools to provide
+      support and make it easier.
     </p>
 
     <p>
@@ -41,15 +42,16 @@ import MinusIcon from "../components/icons/MinusIcon.astro";
     <p>
       Hopefully you're willing to join us on this mission. If you've been or
       know someone who's been struggling to break free from porn,
-      <a href="https://app.virtueinitiative.org#signup">sign up</a> now or send this
-      to them. You might also want to read
-      <a href="/help/tips"> this page on tips to beat the addiction. </a>
+      <a href={`${APP_URL}#signup`}>sign up</a> now or send this to them. You might
+      also want to read
+      <a href="/help/tips"> this page on tips to beat pornography. </a>
     </p>
 
     <p>
       If you wish to support us monetarily, you can donate (at some point). If
       you have any questions, feel free to contact us at
-      <a href="mailto:help@virtueinitiative.org">help@virtueinitiative.org</a>
+      <a href="mailto:help@virtueinitiative.org">help@virtueinitiative.org</a> or
+      join our <a href="https://discord.gg/4kNsbRuzQD">Discord server</a>.
     </p>
   </section>
 
@@ -57,7 +59,7 @@ import MinusIcon from "../components/icons/MinusIcon.astro";
     <h2>How it works</h2>
     <ol>
       <li>
-        <a href="https://app.virtueinitiative.org#signup">Create an account</a>
+        <a href={`${APP_URL}#signup`}>Create an account</a>
       </li>
       <li>
         <a href="/download">Install Virtue (the monitoring app)</a>
@@ -77,9 +79,9 @@ import MinusIcon from "../components/icons/MinusIcon.astro";
       </li>
     </ol>
     <div class="section-actions">
-      <a href="/download" class="btn btn-outline btn-help"
-        >Download installers</a
-      >
+      <a href="/download" class="btn btn-outline btn-help">
+        Download installers
+      </a>
       <a href="/help/getting-started" class="btn btn-outline btn-help">
         Learn more
       </a>

@@ -1,23 +1,27 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use virtue_core::Config;
+
+const DEFAULT_BASE_API_URL: &str = "https://api.virtueinitiative.org";
+const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
+const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
 
 #[derive(Clone, Debug)]
 pub struct ClientPaths {
     pub config_dir: PathBuf,
     pub data_dir: PathBuf,
+    pub state_dir: PathBuf,
+    pub runtime_config_file: PathBuf,
+    pub daemon_status_file: PathBuf,
+    pub lifecycle_state_file: PathBuf,
+    pub ui_state_file: PathBuf,
     pub launch_agents_dir: PathBuf,
     pub logs_dir: PathBuf,
-    pub state_file: PathBuf,
-    pub token_file: PathBuf,
-    pub batch_buffer_file: PathBuf,
-    pub lifecycle_state_file: PathBuf,
-    pub service_env_file: PathBuf,
-    pub daemon_status_file: PathBuf,
     pub launch_agent_file: PathBuf,
-    legacy_upload_queue_file: PathBuf,
 }
 
 impl ClientPaths {
@@ -28,18 +32,17 @@ impl ClientPaths {
 
         let config_dir = config_root.join("virtue");
         let data_dir = data_root.join("virtue");
+        let state_dir = data_dir.join("state");
         let launch_agents_dir = home.join("Library").join("LaunchAgents");
         let logs_dir = home.join("Library").join("Logs");
 
         Ok(Self {
-            state_file: config_dir.join("mac_client_state.json"),
-            token_file: config_dir.join("token_store.json"),
-            batch_buffer_file: data_dir.join("batch_buffer.json"),
+            state_dir,
+            runtime_config_file: config_dir.join("config.json"),
+            daemon_status_file: data_dir.join("daemon_status.json"),
             lifecycle_state_file: data_dir.join("lifecycle_state.json"),
-            service_env_file: config_dir.join("service.dev.env"),
-            daemon_status_file: data_dir.join("mac_daemon_status.json"),
-            launch_agent_file: launch_agents_dir.join("codes.anb.virtue.daemon.plist"),
-            legacy_upload_queue_file: data_dir.join("upload_queue.json"),
+            ui_state_file: config_dir.join("ui_state.json"),
+            launch_agent_file: launch_agents_dir.join("org.virtueinitiative.virtue.daemon.plist"),
             config_dir,
             data_dir,
             launch_agents_dir,
@@ -52,34 +55,32 @@ impl ClientPaths {
             .with_context(|| format!("failed to create {}", self.config_dir.display()))?;
         fs::create_dir_all(&self.data_dir)
             .with_context(|| format!("failed to create {}", self.data_dir.display()))?;
+        fs::create_dir_all(&self.state_dir)
+            .with_context(|| format!("failed to create {}", self.state_dir.display()))?;
         fs::create_dir_all(&self.launch_agents_dir)
             .with_context(|| format!("failed to create {}", self.launch_agents_dir.display()))?;
         fs::create_dir_all(&self.logs_dir)
             .with_context(|| format!("failed to create {}", self.logs_dir.display()))?;
-
-        // Keep existing buffered batches when upgrading from the old path name.
-        if !self.batch_buffer_file.exists() && self.legacy_upload_queue_file.exists() {
-            fs::rename(&self.legacy_upload_queue_file, &self.batch_buffer_file).with_context(
-                || {
-                    format!(
-                        "failed migrating {} to {}",
-                        self.legacy_upload_queue_file.display(),
-                        self.batch_buffer_file.display()
-                    )
-                },
-            )?;
-        }
         Ok(())
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ClientState {
-    pub monitoring_enabled: bool,
-    pub device_id: Option<String>,
-    pub email: Option<String>,
-    pub e2ee_user_id: Option<String>,
+pub fn build_core_config(paths: &ClientPaths) -> Config {
+    let device_name = hostname::get()
+        .ok()
+        .and_then(|value| value.into_string().ok())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "mac-device".to_string());
+
+    Config::new(
+        DEFAULT_BASE_API_URL,
+        device_name,
+        "macos",
+        paths.state_dir.clone(),
+        Some(paths.runtime_config_file.clone()),
+        Duration::from_secs(DEFAULT_CAPTURE_INTERVAL_SECONDS),
+        Duration::from_secs(DEFAULT_BATCH_WINDOW_SECONDS),
+    )
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -111,36 +112,6 @@ pub struct DaemonStatus {
     pub updated_at: Option<String>,
 }
 
-pub fn load_state(path: &Path) -> Result<ClientState> {
-    if !path.exists() {
-        return Ok(ClientState::default());
-    }
-
-    let raw = fs::read(path).with_context(|| format!("failed reading {}", path.display()))?;
-    if raw.is_empty() {
-        return Ok(ClientState::default());
-    }
-
-    let parsed = serde_json::from_slice::<ClientState>(&raw)
-        .with_context(|| format!("failed parsing {}", path.display()))?;
-    Ok(parsed)
-}
-
-pub fn save_state(path: &Path, state: &ClientState) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-
-    let tmp = path.with_extension("tmp");
-    let bytes = serde_json::to_vec_pretty(state).context("failed serializing state")?;
-    fs::write(&tmp, bytes).with_context(|| format!("failed writing {}", tmp.display()))?;
-    fs::rename(&tmp, path)
-        .with_context(|| format!("failed replacing {} with {}", path.display(), tmp.display()))?;
-
-    Ok(())
-}
-
 pub fn load_daemon_status(path: &Path) -> Result<DaemonStatus> {
     if !path.exists() {
         return Ok(DaemonStatus::default());
@@ -151,9 +122,7 @@ pub fn load_daemon_status(path: &Path) -> Result<DaemonStatus> {
         return Ok(DaemonStatus::default());
     }
 
-    let parsed = serde_json::from_slice::<DaemonStatus>(&raw)
-        .with_context(|| format!("failed parsing {}", path.display()))?;
-    Ok(parsed)
+    serde_json::from_slice(&raw).with_context(|| format!("failed parsing {}", path.display()))
 }
 
 pub fn save_daemon_status(path: &Path, status: &DaemonStatus) -> Result<()> {
@@ -164,6 +133,40 @@ pub fn save_daemon_status(path: &Path, status: &DaemonStatus) -> Result<()> {
 
     let tmp = path.with_extension("tmp");
     let bytes = serde_json::to_vec_pretty(status).context("failed serializing daemon status")?;
+    fs::write(&tmp, bytes).with_context(|| format!("failed writing {}", tmp.display()))?;
+    fs::rename(&tmp, path)
+        .with_context(|| format!("failed replacing {} with {}", path.display(), tmp.display()))?;
+
+    Ok(())
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ClientState {
+    pub email: Option<String>,
+}
+
+pub fn load_state(path: &Path) -> Result<ClientState> {
+    if !path.exists() {
+        return Ok(ClientState::default());
+    }
+
+    let raw = fs::read(path).with_context(|| format!("failed reading {}", path.display()))?;
+    if raw.is_empty() {
+        return Ok(ClientState::default());
+    }
+
+    serde_json::from_slice(&raw).with_context(|| format!("failed parsing {}", path.display()))
+}
+
+pub fn save_state(path: &Path, state: &ClientState) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    let tmp = path.with_extension("tmp");
+    let bytes = serde_json::to_vec_pretty(state).context("failed serializing state")?;
     fs::write(&tmp, bytes).with_context(|| format!("failed writing {}", tmp.display()))?;
     fs::rename(&tmp, path)
         .with_context(|| format!("failed replacing {} with {}", path.display(), tmp.display()))?;

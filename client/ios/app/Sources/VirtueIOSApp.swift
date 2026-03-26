@@ -35,6 +35,9 @@ struct ContentView: View {
                         .font(.headline)
                     Text("Logged in: \(coordinator.loggedIn ? "yes" : "no")")
                     Text("Device ID: \(coordinator.deviceId)")
+                    Text("Monitoring: \(coordinator.monitorSummary)")
+                    Text("Pending Requests: \(coordinator.pendingRequestCount)")
+                    Text("API: \(coordinator.currentApiBaseUrl)")
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -104,6 +107,12 @@ struct ContentView: View {
                     Text("Status")
                         .font(.headline)
                     Text(coordinator.statusMessage)
+                    Text("Core Last Loop: \(coordinator.lastCoreLoop)")
+                        .foregroundStyle(.secondary)
+                    Text("Core Last Screenshot: \(coordinator.lastCoreScreenshot)")
+                        .foregroundStyle(.secondary)
+                    Text("Core Last Batch: \(coordinator.lastCoreBatch)")
+                        .foregroundStyle(.secondary)
                     Text("Capture Health: \(coordinator.safariCaptureHealth)")
                         .foregroundStyle(.secondary)
                     Text("Last Heartbeat: \(coordinator.safariLastHeartbeat)")

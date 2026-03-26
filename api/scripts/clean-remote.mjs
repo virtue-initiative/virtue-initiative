@@ -8,6 +8,13 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
+const BUCKET_NAME =
+  process.argv[2] === 'prod' ? 'virtueinitiative-images' : 'virtueinitiative-staging-images';
+const DB_ID =
+  process.argv[2] === 'prod'
+    ? 'ff636ee0-a8f9-44a1-8a16-f0a162cf1c73'
+    : '9ec06359-1165-48bc-a73a-a870d9082980';
+
 function readWranglerToken() {
   const configPath = join(homedir(), '.config', '.wrangler', 'config', 'default.toml');
   const toml = readFileSync(configPath, 'utf8');
@@ -47,7 +54,6 @@ if (!accountId) {
   console.log(`Using account: ${data.result[0].name} (${accountId})`);
 }
 
-const BUCKET_NAME = 'virtueinitiative-images';
 const BASE = `https://api.cloudflare.com/client/v4/accounts/${accountId}/r2/buckets/${BUCKET_NAME}`;
 let totalDeleted = 0;
 let cursor;
@@ -87,7 +93,6 @@ console.log(`Done. Total objects deleted: ${totalDeleted}`);
 
 // --- Drop all user tables from the remote D1 database ---
 
-const DB_ID = 'ff636ee0-a8f9-44a1-8a16-f0a162cf1c73';
 const DB_BASE = `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${DB_ID}`;
 
 async function d1Query(sql, { ignoreErrors = false } = {}) {

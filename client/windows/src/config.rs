@@ -1,19 +1,24 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use virtue_core::Config;
+
+const DEFAULT_BASE_API_URL: &str = "https://api.virtueinitiative.org";
+const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
+const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
 
 #[derive(Clone, Debug)]
 pub struct ClientPaths {
     pub base_dir: PathBuf,
     pub config_dir: PathBuf,
     pub data_dir: PathBuf,
-    pub state_file: PathBuf,
-    pub token_file: PathBuf,
-    pub batch_buffer_file: PathBuf,
+    pub state_dir: PathBuf,
+    pub runtime_config_file: PathBuf,
     pub lifecycle_state_file: PathBuf,
-    pub service_env_file: PathBuf,
+    pub ui_state_file: PathBuf,
     pub log_file: PathBuf,
 }
 
@@ -26,11 +31,10 @@ impl ClientPaths {
         let data_dir = base_dir.join("data");
 
         Ok(Self {
-            state_file: config_dir.join("client_state.json"),
-            token_file: config_dir.join("token_store.json"),
-            batch_buffer_file: data_dir.join("batch_buffer.json"),
+            state_dir: data_dir.clone(),
+            runtime_config_file: config_dir.join("config.json"),
             lifecycle_state_file: data_dir.join("lifecycle_state.json"),
-            service_env_file: config_dir.join("service.dev.env"),
+            ui_state_file: config_dir.join("ui_state.json"),
             log_file: data_dir.join("service.log"),
             base_dir,
             config_dir,
@@ -43,15 +47,33 @@ impl ClientPaths {
             .with_context(|| format!("failed to create {}", self.config_dir.display()))?;
         fs::create_dir_all(&self.data_dir)
             .with_context(|| format!("failed to create {}", self.data_dir.display()))?;
+        fs::create_dir_all(&self.state_dir)
+            .with_context(|| format!("failed to create {}", self.state_dir.display()))?;
         Ok(())
     }
+}
+
+pub fn build_core_config(paths: &ClientPaths) -> Config {
+    let device_name = hostname::get()
+        .ok()
+        .and_then(|value| value.into_string().ok())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "windows-device".to_string());
+
+    Config::new(
+        DEFAULT_BASE_API_URL,
+        device_name,
+        "windows",
+        paths.state_dir.clone(),
+        Some(paths.runtime_config_file.clone()),
+        Duration::from_secs(DEFAULT_CAPTURE_INTERVAL_SECONDS),
+        Duration::from_secs(DEFAULT_BATCH_WINDOW_SECONDS),
+    )
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ClientState {
-    pub monitoring_enabled: bool,
-    pub device_id: Option<String>,
     pub email: Option<String>,
 }
 
@@ -65,9 +87,7 @@ pub fn load_state(path: &Path) -> Result<ClientState> {
         return Ok(ClientState::default());
     }
 
-    let parsed = serde_json::from_slice::<ClientState>(&raw)
-        .with_context(|| format!("failed parsing {}", path.display()))?;
-    Ok(parsed)
+    serde_json::from_slice(&raw).with_context(|| format!("failed parsing {}", path.display()))
 }
 
 pub fn save_state(path: &Path, state: &ClientState) -> Result<()> {

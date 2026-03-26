@@ -26,12 +26,12 @@ if [[ ! -f "$ICON_SOURCE" ]]; then
   exit 1
 fi
 
-cargo build --release -p virtue-mac-client
+cargo build --release -p virtue-mac
 
 rm -rf "$APP_ROOT"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
-install -m 0755 target/release/virtue-mac-client "${MACOS_DIR}/Virtue"
+install -m 0755 target/release/virtue-mac "${MACOS_DIR}/Virtue"
 install -m 0644 "$ICON_SOURCE" "${RESOURCES_DIR}/AppIcon.icns"
 
 cat > "${CONTENTS_DIR}/Info.plist" <<PLIST

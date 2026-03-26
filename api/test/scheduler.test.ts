@@ -17,6 +17,7 @@ beforeEach(clearDB);
 const DAILY_BATCH_ID = '00000000-0000-4000-8000-000000000001';
 const DAILY_RISK_LOG_ID = '00000000-0000-4000-8000-000000000002';
 const WEEKLY_BATCH_ID = '00000000-0000-4000-8000-000000000003';
+const EMPTY_ACCESS_KEYS = JSON.stringify({ keys: [] });
 
 describe('Notification scheduler', () => {
   it('sends a daily digest and mentions devices with no logs without creating gap alerts', async () => {
@@ -62,8 +63,8 @@ describe('Notification scheduler', () => {
       .run();
 
     await env.DB.prepare(
-      `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
         uuidToBytes(DAILY_BATCH_ID),
@@ -73,6 +74,7 @@ describe('Notification scheduler', () => {
         previousDayStart,
         previousDayMid,
         'hash-1',
+        EMPTY_ACCESS_KEYS,
         previousDayMid,
       )
       .run();
@@ -150,8 +152,8 @@ describe('Notification scheduler', () => {
 
     const device = await createDeviceForUser(ownerToken, 'Twice Device', 'linux');
     await env.DB.prepare(
-      `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
         uuidToBytes(WEEKLY_BATCH_ID),
@@ -161,6 +163,7 @@ describe('Notification scheduler', () => {
         previousWeekStart,
         sundayMid,
         'hash-twice',
+        EMPTY_ACCESS_KEYS,
         sundayMid,
       )
       .run();

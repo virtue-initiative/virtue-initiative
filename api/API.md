@@ -7,54 +7,30 @@ Base URL examples:
 
 ## Types
 
-### Basic Types
-
 - `UUID`: UUIDv4 string
 - `DateTime`: millisecond Unix timestamp
 - `Base64`: base64-encoded binary
 - `SHA256`: lowercase hex-encoded SHA-256 digest
-- `AccessToken`: JWT with `type: "access"` and `sub = user id`
-- `DeviceAccessToken`: JWT with `type: "device-access"` and `sub = device id`
+- `AccessToken`: EdDSA JWT (`Ed25519`) with `type: "access"` and `sub = user id`
+- `DeviceAccessToken`: EdDSA JWT (`Ed25519`) with `type: "device-access"` and `sub = device id`
 - `DeviceRefreshToken`: opaque string returned by `POST /d/device`
-- `ServerToken`: JWT with `type: "server"` and `sub = device id`
-
-### Errors
-
-Standard error shape:
-
-```js
-{
-  "error": "Unauthorized",
-  "details": {}
-}
-```
-
-Validation errors:
-
-```js
-{
-  "error": "Bad Request",
-  "details": {
-    "errors": [],
-    "properties": {
-      "email": { "errors": ["Invalid email"] }
-    }
-  }
-}
-```
-
-Unhandled server errors:
-
-```js
-{
-  "error": "Internal server error",
-  "details": {
-    "message": "..."
-  }
-}
-```
+- `ServerToken`: EdDSA JWT (`Ed25519`) with `type: "server"` and `sub = device id`
 
 ## Shared Shapes
+
+### HashParams
+
+```js
+{
+  "version": "argon2id-v1",
+  "algorithm": "argon2id",
+  "memory_cost_kib": 131072,
+  "time_cost": 5,
+  "parallelism": 1,
+  "salt_length": 16,
+  "hkdf_hash": "sha256"
+}
+```
 
 ### User
 
@@ -65,7 +41,6 @@ Unhandled server errors:
   "email_verified": true,
   "email_bounced_at": DateTime | null,
   "name": "Name" | undefined,
-  "e2ee_key": Base64 | undefined,
   "pub_key": Base64 | undefined,
   "priv_key": Base64 | undefined
 }
@@ -85,19 +60,6 @@ Unhandled server errors:
 }
 ```
 
-### Log
-
-```js
-{
-  "ts": DateTime,
-  "type": "system_event",
-  "data": {
-    "event": "startup"
-  },
-  "risk": 0.7 | undefined
-}
-```
-
 ### BatchData
 
 ```js
@@ -107,69 +69,73 @@ Unhandled server errors:
   "start_time": DateTime,
   "end_time": DateTime,
   "end_hash": SHA256,
-  "url": "https://.../user/.../batches/...enc"
+  "url": "https://.../user/.../batches/...enc",
+  "encrypted_key": Base64,
+  "created_at": DateTime
 }
 ```
 
-### Partner
+### Partner List Item
 
 ```js
 {
   "id": UUID,
-  "role": "owner" | "invitee",
-  "partner": {
+  "user": {
     "id": UUID | undefined,
     "email": "partner@example.com",
     "name": "Partner Name" | undefined
   },
   "status": "pending" | "accepted",
-  "permissions": {
-    "view_data": true
-  },
-  "created_at": DateTime,
-  "e2ee_key": Base64 | undefined
+  "created_at": DateTime
 }
 ```
 
-### Notification Preference
+## Auth
+
+### `GET /current-hash-params`
+
+Returns the current client password-derivation settings.
+
+Response `200`:
 
 ```js
-{
-  "partnership_id": UUID,
-  "status": "pending" | "accepted",
-  "monitored_user": {
-    "id": UUID,
-    "email": "owner@example.com",
-    "name": "Owner Name" | undefined
-  },
-  "email_frequency": "none" | "alerts-only" | "daily" | "weekly",
-  "immediate_tamper_severity": "warning" | "critical"
-}
+HashParams;
 ```
 
-## Main API
+### `GET /.well-known/jwks.json`
 
-### Authentication Model
-
-- User access tokens go in `Authorization: Bearer <token>`.
-- User refresh tokens are stored in the `refresh_token` httpOnly cookie.
-- Current server defaults: access token TTL 1 hour, refresh token TTL 365 days.
-
-### `GET /`
-
-Health check.
+Returns the public signing key in JWKS form for remote JWT verification.
 
 Response `200`:
 
 ```js
 {
-  "name": "Virtue Initiative API",
-  "version": "1.0.0",
-  "status": "ok"
+  "keys": [
+    {
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "x": "base64url-public-key",
+      "alg": "EdDSA",
+      "use": "sig",
+      "kid": "thumbprint"
+    }
+  ]
 }
 ```
 
-## Auth
+### `GET /user/login-material?email=user@example.com`
+
+Returns a login salt and the current hash params. The response shape is the same for existing and
+non-existing users.
+
+Response `200`:
+
+```js
+{
+  "password_salt": Base64,
+  "params": HashParams
+}
+```
 
 ### `POST /signup`
 
@@ -178,8 +144,11 @@ Request:
 ```js
 {
   "email": "user@example.com",
-  "password": "string",
-  "name": "Name" | undefined
+  "name": "Name" | undefined,
+  "password_auth": Base64,
+  "password_salt": Base64,
+  "pub_key": Base64,
+  "priv_key": Base64
 }
 ```
 
@@ -206,7 +175,7 @@ Request:
 ```js
 {
   "email": "user@example.com",
-  "password": "string"
+  "password_auth": Base64
 }
 ```
 
@@ -217,8 +186,6 @@ Response `200`:
   "access_token": AccessToken
 }
 ```
-
-Also sets the `refresh_token` cookie.
 
 ### `POST /logout`
 
@@ -240,21 +207,24 @@ Response `201`:
 
 ### `GET /user`
 
-Auth required.
+Requires a user `AccessToken`.
 
-Response `200`: [User](#user)
+Response `200`:
+
+```js
+User;
+```
 
 ### `PATCH /user`
 
-Auth required.
+Requires a user `AccessToken`.
 
 Request:
 
 ```js
 {
   "email": "new@example.com" | undefined,
-  "name": "Name" | undefined,
-  "e2ee_key": Base64 | undefined,
+  "name": "New Name" | undefined,
   "pub_key": Base64 | undefined,
   "priv_key": Base64 | undefined
 }
@@ -268,45 +238,7 @@ Response `200`:
 }
 ```
 
-### `POST /email-verification`
-
-Auth required.
-
-Sends a verification email.
-
-Response `200`:
-
-```js
-{
-  "ok": true,
-  "already_verified": true | undefined
-}
-```
-
-### `POST /email-verification/validate`
-
-Validates a token from a verification email.
-
-Request:
-
-```js
-{
-  "token": "opaque token from email link"
-}
-```
-
-Response `200`:
-
-```js
-{
-  "ok": true,
-  "email": "user@example.com"
-}
-```
-
 ### `POST /password-reset`
-
-Sends a password reset request.
 
 Request:
 
@@ -320,13 +252,11 @@ Response: `204 No Content`
 
 ### `POST /password-reset/validate`
 
-Gets information about a password reset request.
-
 Request:
 
 ```js
 {
-  "token": "opaque token from email link"
+  "token": "opaque-string"
 }
 ```
 
@@ -335,37 +265,21 @@ Response `200`:
 ```js
 {
   "ok": true,
-  "email": "user@example.com",
-  "user_id": UUID,
-  "partner_access_targets": [
-    {
-      "partnership_id": UUID,
-      "partner_email": "partner@example.com",
-      "partner_pub_key": Base64 | undefined
-    }
-  ]
+  "email": "user@example.com"
 }
 ```
 
 ### `POST /password-reset/finalize`
 
-Finishes a password reset.
-
 Request:
 
 ```js
 {
-  "token": "opaque token from email link",
-  "password": "string",
-  "e2ee_key": Base64 | undefined,
-  "pub_key": Base64 | undefined,
-  "priv_key": Base64 | undefined,
-  "partner_access_keys": [
-    {
-      "partnership_id": UUID,
-      "e2ee_key": Base64
-    }
-  ] | undefined
+  "token": "opaque-string",
+  "password_auth": Base64,
+  "password_salt": Base64,
+  "pub_key": Base64,
+  "priv_key": Base64
 }
 ```
 
@@ -377,128 +291,17 @@ Response `200`:
 }
 ```
 
-## Devices
-
-All `/device/*` endpoints require a user access token.
-
-### `GET /device`
-
-Lists devices the current user can view, including accepted partners' devices when `view_data` is allowed.
-
-Response `200`:
-
-```js
-[
-  {
-    id: UUID,
-    owner: UUID,
-    name: 'My Laptop',
-    platform: 'linux',
-    last_upload_at: DateTime | null,
-    status: 'online' | 'offline',
-    enabled: true,
-  },
-];
-```
-
-### `PATCH /device/:id`
-
-Updates a device owned by the current user.
-
-Request:
-
-```js
-{
-  "name": "New Name" | undefined,
-  "enabled": true | undefined
-}
-```
-
-Response `200`:
-
-```js
-{
-  "id": UUID,
-  "updated": true
-}
-```
-
-### `DELETE /device/:id`
-
-Deletes a device owned by the current user, removes its batches, and may send notification emails.
-
-Response: `204 No Content`
-
-## Data
-
-### `GET /data`
-
-Auth required.
-
-Lists uploaded batches and direct device logs for the current user, or for a monitored user if the requester has `view_data`.
-
-Query params:
-
-- `device_id?`
-- `user?`
-- `cursor?`
-- `limit?` with max `100`
-
-Response `200`:
-
-```js
-{
-  "batches": [
-    {
-      "id": UUID,
-      "device_id": UUID,
-      "start_time": DateTime,
-      "end_time": DateTime,
-      "end_hash": SHA256,
-      "url": "https://..."
-    }
-  ],
-  "logs": [
-    {
-      "device_id": UUID,
-      "ts": DateTime,
-      "type": "system_event",
-      "data": {
-        "event": "startup"
-      },
-      "risk": 0.7 | undefined
-    }
-  ],
-  "next_cursor": DateTime | undefined
-}
-```
-
 ## Partners
-
-### `GET /pubkey?email=user@example.com`
-
-Returns the public key for a user if present.
-
-Response `200`:
-
-```js
-{
-  "pubkey": Base64
-}
-```
 
 ### `POST /partner`
 
-Auth required.
-
-Creates a pending partnership and sends an email invite.
+Requires a user `AccessToken`.
 
 Request:
 
 ```js
 {
-  "email": "partner@example.com",
-  "e2ee_key": Base64 | undefined
+  "email": "partner@example.com"
 }
 ```
 
@@ -519,7 +322,7 @@ Request:
 
 ```js
 {
-  "token": "opaque invite token"
+  "token": "opaque-string"
 }
 ```
 
@@ -539,15 +342,13 @@ Response `200`:
 
 ### `POST /partner/accept`
 
-Auth required.
-
-Accepts a pending invite token for the current user.
+Requires a user `AccessToken`.
 
 Request:
 
 ```js
 {
-  "token": "opaque invite token"
+  "token": "opaque-string"
 }
 ```
 
@@ -561,7 +362,7 @@ Response `200`:
 
 ### `GET /partner`
 
-Auth required.
+Requires a user `AccessToken`.
 
 Response `200`:
 
@@ -572,12 +373,14 @@ Response `200`:
       "id": UUID,
       "user": {
         "id": UUID,
-        "email": "partner@example.com",
-        "name": "Partner Name" | undefined,
+        "email": "owner@example.com",
+        "name": "Owner Name" | undefined
       },
       "status": "pending" | "accepted",
-      "e2ee_key": Base64 | undefined,
-    },
+      "digest_cadence": "none" | "alerts-only" | "daily" | "weekly",
+      "immediate_tamper_severity": "warning" | "critical",
+      "created_at": DateTime
+    }
   ],
   "watchers": [
     {
@@ -585,99 +388,86 @@ Response `200`:
       "user": {
         "id": UUID | undefined,
         "email": "partner@example.com",
-        "name": "Partner Name" | undefined,
+        "name": "Partner Name" | undefined
       },
       "status": "pending" | "accepted",
+      "created_at": DateTime
     }
-  ],
+  ]
 }
 ```
-
-### `PATCH /partner/watcher/:id`
-
-Auth required. Updates the key the watcher will use to decrypt your logs.
-
-Request:
-
-```js
-{
-  "e2ee_key": Base64 | undefined
-}
-```
-
-Response `204 No Content`
 
 ### `PATCH /partner/watching/:id`
 
-Auth required. Updates the user's notification preferences
+Requires a user `AccessToken`.
 
 Request:
 
 ```js
 {
   "digest_cadence": "none" | "alerts-only" | "daily" | "weekly" | undefined,
-  "immediate_tamper_severity": "warning" | "critical" | undefined,
+  "immediate_tamper_severity": "warning" | "critical" | undefined
 }
 ```
 
-Response `204 No Content`
+Response: `204 No Content`
 
 ### `DELETE /partner/watcher/:id`
 
-Auth required. Deletes a watcher.
+Requires a user `AccessToken`.
 
 Response: `204 No Content`
 
 ### `DELETE /partner/watching/:id`
 
-Auth required. Deletes a person you're watching.
+Requires a user `AccessToken`.
 
 Response: `204 No Content`
 
-## Email Webhooks
+## Data
 
-### `POST /email/sns`
+### `GET /data`
 
-Handles AWS SNS subscription confirmations plus SES bounce and complaint notifications.
+Requires a user `AccessToken`.
 
-For SNS `SubscriptionConfirmation`, the worker calls `SubscribeURL`.
+Query parameters:
 
-For SES `Notification` envelopes, the worker:
-
-- marks bounced users as email-bounced
-- marks bounced and complained users as unverified
+- `device_id`: optional `UUID`
+- `user`: optional `UUID`
+- `since`: optional timestamp, default `0`
+- `limit`: optional integer, max `500`
 
 Response `200`:
 
 ```js
 {
-  "ok": true,
-  "subscribed": true | undefined,
-  "updated": 2 | undefined
+  "batches": [BatchData],
+  "logs": [
+    {
+      "id": UUID,
+      "device_id": UUID,
+      "ts": DateTime,
+      "type": "system_event",
+      "data": {},
+      "created_at": DateTime,
+      "risk": 0.7 | undefined
+    }
+  ],
+  "next_since": DateTime | undefined
 }
 ```
 
-## Public R2 Pass-through
-
-### `GET /r2/*`
-
-Returns encrypted batch blob bytes from R2 with no auth.
-
-Response content type: `application/octet-stream`
+`batches` only include rows where the requester has a matching `encrypted_key` envelope.
+Responses are ordered oldest-to-newest within the requested sync page.
 
 ## Device API
 
-### Authentication
+The following routes use device auth:
 
 - `POST /d/device` uses a user `AccessToken`
-- `POST /d/token` uses a device refresh token in the request body
-- `GET /d/device`, `POST /d/batch`, `POST /d/log`, and `POST /hash` / `GET /hash` use a `DeviceAccessToken`
-- `DELETE /hash` uses a `ServerToken`
-
-Current server defaults:
-
-- Device access token TTL: 7 days
-- Device refresh token TTL: `1000 * 365` days, multiplied by seconds again in current server code, so effectively very long-lived
+- `POST /d/token` uses a `DeviceRefreshToken`
+- `GET /d/device`, `POST /d/batch`, `POST /d/log`, `POST /hash`, `GET /hash`, and `DELETE /hash`
+  use a `DeviceAccessToken` or `ServerToken` as applicable
 
 ### `POST /d/device`
 
@@ -704,8 +494,6 @@ Response `201`:
 
 ### `GET /d/device`
 
-Returns the authenticated device's settings.
-
 Response `200`:
 
 ```js
@@ -714,8 +502,17 @@ Response `200`:
   "name": "My Laptop",
   "platform": "linux",
   "enabled": true,
-  "e2ee_key": Base64 | undefined,
-  "hash_base_url": "https://hash-server.example.com"
+  "owner": {
+    "user_id": UUID,
+    "pub_key": Base64
+  } | undefined,
+  "partners": [
+    {
+      "user_id": UUID,
+      "pub_key": Base64
+    }
+  ],
+  "hash_base_url": "https://..." | null
 }
 ```
 
@@ -739,13 +536,25 @@ Response `200`:
 
 ### `POST /d/batch`
 
-Uploads an encrypted batch as multipart form data.
+Multipart form request:
 
-Fields:
-
+- `start_time`: integer
+- `end_time`: integer
+- `access_keys`: JSON string
 - `file`: encrypted batch blob
-- `start_time`: batch window start timestamp
-- `end_time`: batch window end timestamp
+
+`access_keys` JSON shape:
+
+```js
+{
+  "keys": [
+    {
+      "user_id": UUID,
+      "hpke_key": Base64
+    }
+  ]
+}
+```
 
 Response `201`:
 
@@ -755,56 +564,30 @@ Response `201`:
   "start_time": DateTime,
   "end_time": DateTime,
   "end_hash": SHA256,
-  "url": "https://..."
+  "url": "https://.../user/.../batches/...enc"
 }
 ```
 
 ### `POST /d/log`
-
-Uploads a direct log entry.
 
 Request:
 
 ```js
 {
   "ts": DateTime,
-  "type": "service_stop",
-  "risk": 0.2 | undefined,
-  "data": {
-    "title": "Optional title" | undefined,
-    "details": "Optional details" | undefined
-    // ... other options are accepted
-  }
-}
-```
-
-Response `201`:
-
-```js
-{
-  "ts": DateTime,
-  "type": "service_stop",
-  "risk": 1 | undefined,
+  "type": "system_event",
+  "risk": 0.7 | undefined,
   "data": {}
 }
 ```
 
+Response `201` echoes the stored log.
+
 ## Hash API
-
-For each uploaded content hash:
-
-```txt
-new_state = sha256(current_state || content_hash)
-```
 
 ### `POST /hash`
 
-Auth: `DeviceAccessToken`
-
-Request body:
-
-- content type: `application/octet-stream`
-- body: exactly 32 bytes
+Uploads a single 32-byte plaintext content hash for the device hash chain.
 
 Response `200`:
 
@@ -816,23 +599,10 @@ Response `200`:
 
 ### `GET /hash`
 
-Auth: `DeviceAccessToken`
-
-Response `200`:
-
-- content type: `application/octet-stream`
-- body: current 32-byte rolling hash state
+Returns the current 32-byte hash-chain state as binary.
 
 ### `DELETE /hash`
 
-Auth: `ServerToken`
+Requires a `ServerToken`.
 
-Resets a device's rolling hash state to zero bytes.
-
-Response `200`:
-
-```js
-{
-  "ok": true
-}
-```
+Resets the current device hash-chain state.

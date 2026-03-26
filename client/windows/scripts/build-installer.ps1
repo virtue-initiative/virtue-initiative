@@ -13,8 +13,8 @@ $ErrorActionPreference = "Stop"
 $VersionHelper = Join-Path $PSScriptRoot "Get-VersionInfo.ps1"
 . $VersionHelper
 
-$VersionInfo = Get-VirtueVersionInfo
 if ([string]::IsNullOrWhiteSpace($Version)) {
+    $VersionInfo = Get-VirtueVersionInfo
     $Version = $VersionInfo.BuildLabel
 }
 

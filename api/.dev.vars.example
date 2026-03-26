@@ -1,8 +1,10 @@
 # .dev.vars template
 # Copy this file to .dev.vars and fill in the values
 
-# JWT Secret - Use a strong random string
-JWT_SECRET=your-super-secret-key-change-this-in-production
+# JWT signing keypair. Use an Ed25519 PKCS#8 private key and matching SPKI public key.
+# Values can be literal PEM blocks or "\n"-escaped PEM strings.
+JWT_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIICDMV++otdvtyN120jSEqOU7u5a119/aSvUSuh26V61\n-----END PRIVATE KEY-----"
+JWT_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAbYBZuUYl4eRF+lRwOKOk6fgjK2OA7CSA7EZSWtHeN9I=\n-----END PUBLIC KEY-----"
 
 # Web app URL. Its origin is also used for CORS.
 APP_URL=http://localhost:5173

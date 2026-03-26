@@ -4,7 +4,7 @@ sidebar_position: 1
 
 # Tips
 
-Here are some tips/steps on how to beat porn addition.
+Here are some tips/steps on how to beat porn.
 
 1. **Do not do this alone**. This is not a fight your win by yourself. Find
    someone you trust and start talking to them about your struggles - ask for
@@ -21,9 +21,9 @@ Here are some tips/steps on how to beat porn addition.
 5. **Monitor access**. If you can't remove access, monitor it. That's where the
    screenshot software or other monitoring software comes in. Since it's the
    21st century, at some point you probably will need access to the internet.
-   Remember, this is only one brick in your wall against the addiction, but
-   it's still important.
-6. **Be patient with yourself**. This isn't an addiction that goes away
+   Remember, this is only one brick in your wall against it, but it's still
+   important.
+6. **Be patient with yourself**. This isn't a struggle that goes away
    overnight. It will take longer than you hope and some of that is because you
    won't fight it perfectly. Be patient and keep going.
 

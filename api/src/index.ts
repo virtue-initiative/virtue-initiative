@@ -9,6 +9,7 @@ import hashes from './routes/hashes';
 import notifications from './routes/notifications';
 import partners from './routes/partners';
 import { stripApiBasePath } from './lib/base-path';
+import { getJWKS } from './lib/jwt';
 import { runNotificationSchedule } from './lib/scheduler';
 import { Env, Variables } from './types/bindings';
 
@@ -38,6 +39,8 @@ app.get('/', (c) =>
   }),
 );
 
+app.get('/.well-known/jwks.json', async (c) => c.json(await getJWKS(c.env.JWT_PUBLIC_KEY)));
+
 app.route('/', auth);
 app.route('/', notifications);
 app.route('/', partners);
@@ -55,8 +58,12 @@ app.get('/r2/*', async (c) => {
     return c.json({ error: 'Not found' }, 404);
   }
 
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set('etag', object.httpEtag);
+
   return new Response(object.body, {
-    headers: { 'Content-Type': 'application/octet-stream' },
+    headers,
   });
 });
 

@@ -1,27 +1,29 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
-use chrono::Utc;
 use jni::objects::{JByteArray, JClass, JString};
 use jni::sys::{jboolean, jstring};
 use jni::{JNIEnv, JavaVM};
 use once_cell::sync::OnceCell;
-use serde::{Deserialize, Serialize};
-use tokio::runtime::{Builder, Runtime};
-use tokio::time::sleep;
-
-use virtue_client_core::{
-    apply_dev_env, login_and_register_device, logout_and_clear_tokens_with_alert, run_batch_daemon,
-    ApiClient, AuthClient, BatchDaemonConfig, CaptureOutcome, CoreError, FileTokenStore,
-    LoginCommandInput, PersistedServiceState, ServiceEvent, ServiceHost, SleepOutcome, TokenStore,
-    BASE_API_URL_ENV_VAR, BATCH_WINDOW_SECONDS_ENV_VAR, CAPTURE_INTERVAL_SECONDS_ENV_VAR,
+use serde::de::DeserializeOwned;
+use virtue_core::storage::FileStateStore;
+use virtue_core::{
+    AuthState, BatchBufferState, Config, CoreError, CoreResult, DeviceSettings, MonitorService,
+    PendingRequest, PlatformHooks, Screenshot, ServiceStatus,
 };
 
 static CORE: OnceCell<AndroidCore> = OnceCell::new();
+
+const DEFAULT_BASE_API_URL: &str = "https://api.virtueinitiative.org";
+const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
+const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
+const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
 
 const SCREENSHOT_SERVICE_CLASS: &str = "org/virtueinitiative/virtue/ScreenshotService";
 const CAPTURE_STATUS_READY: i32 = 0;
@@ -29,68 +31,23 @@ const CAPTURE_STATUS_PERMISSION_MISSING: i32 = 1;
 const CAPTURE_STATUS_SESSION_UNAVAILABLE: i32 = 2;
 
 struct AndroidCore {
-    runtime: Runtime,
-    token_store: Arc<dyn TokenStore>,
-    state_path: PathBuf,
-    batch_buffer_path: PathBuf,
-    dynamic: Mutex<DynamicCore>,
-    daemon_state: Mutex<DaemonState>,
+    state_dir: PathBuf,
+    runtime_config_file: PathBuf,
     java_vm: Arc<JavaVM>,
+    stop: Arc<AtomicBool>,
+    daemon_running: Mutex<bool>,
 }
 
 #[derive(Clone)]
-struct DynamicCore {
-    auth_client: AuthClient,
-    api_client: ApiClient,
-}
-
-struct DaemonState {
-    running: bool,
-    stop: Arc<AtomicBool>,
-}
-
-impl Default for DaemonState {
-    fn default() -> Self {
-        Self {
-            running: false,
-            stop: Arc::new(AtomicBool::new(false)),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct AndroidState {
-    #[serde(default = "default_monitoring_enabled")]
-    monitoring_enabled: bool,
-    device_id: Option<String>,
-}
-
-fn default_monitoring_enabled() -> bool {
-    true
-}
-
-impl Default for AndroidState {
-    fn default() -> Self {
-        Self {
-            monitoring_enabled: default_monitoring_enabled(),
-            device_id: None,
-        }
-    }
-}
-
-#[derive(Clone)]
-struct AndroidDaemonHost {
-    state_path: PathBuf,
-    stop: Arc<AtomicBool>,
+struct AndroidPlatformHooks {
     java_vm: Arc<JavaVM>,
 }
 
-impl AndroidDaemonHost {
+impl AndroidPlatformHooks {
     fn capture_status(&self) -> Result<i32, CoreError> {
-        let mut env = self
-            .java_vm
-            .attach_current_thread()
-            .map_err(|err| CoreError::Platform(format!("attach_current_thread failed: {err}")))?;
+        let mut env = self.java_vm.attach_current_thread().map_err(|err| {
+            CoreError::CommandFailed(format!("attach_current_thread failed: {err}"))
+        })?;
 
         env.call_static_method(
             SCREENSHOT_SERVICE_CLASS,
@@ -98,95 +55,68 @@ impl AndroidDaemonHost {
             "()I",
             &[],
         )
-        .map_err(|err| CoreError::Platform(format!("captureStatusForDaemon failed: {err}")))?
+        .map_err(|err| CoreError::CommandFailed(format!("captureStatusForDaemon failed: {err}")))?
         .i()
-        .map_err(|err| CoreError::Platform(format!("captureStatusForDaemon type error: {err}")))
+        .map_err(|err| {
+            CoreError::CommandFailed(format!("captureStatusForDaemon type error: {err}"))
+        })
     }
 
     fn capture_png(&self) -> Result<Vec<u8>, CoreError> {
-        let mut env = self
-            .java_vm
-            .attach_current_thread()
-            .map_err(|err| CoreError::Platform(format!("attach_current_thread failed: {err}")))?;
+        let mut env = self.java_vm.attach_current_thread().map_err(|err| {
+            CoreError::CommandFailed(format!("attach_current_thread failed: {err}"))
+        })?;
 
         let value = env
             .call_static_method(SCREENSHOT_SERVICE_CLASS, "capturePngForDaemon", "()[B", &[])
-            .map_err(|err| CoreError::Platform(format!("capturePngForDaemon failed: {err}")))?;
-        let array_obj = value
-            .l()
-            .map_err(|err| CoreError::Platform(format!("capturePngForDaemon type error: {err}")))?;
+            .map_err(|err| {
+                CoreError::CommandFailed(format!("capturePngForDaemon failed: {err}"))
+            })?;
+        let array_obj = value.l().map_err(|err| {
+            CoreError::CommandFailed(format!("capturePngForDaemon type error: {err}"))
+        })?;
 
         if array_obj.is_null() {
-            return Err(CoreError::Platform(
+            return Err(CoreError::CommandFailed(
                 "capture frame unavailable from ScreenshotService".to_string(),
             ));
         }
 
         let array = JByteArray::from(array_obj);
         env.convert_byte_array(&array)
-            .map_err(|err| CoreError::Platform(format!("decode capture byte[] failed: {err}")))
+            .map_err(|err| CoreError::CommandFailed(format!("decode capture byte[] failed: {err}")))
     }
 }
 
-impl ServiceHost for AndroidDaemonHost {
-    fn load_persisted_state(&self) -> virtue_client_core::CoreResult<PersistedServiceState> {
-        let state =
-            load_state(&self.state_path).map_err(|err| CoreError::Platform(err.to_string()))?;
-        Ok(PersistedServiceState {
-            monitoring_enabled: state.monitoring_enabled,
-            device_id: state.device_id,
-        })
-    }
-
-    fn now_utc(&self) -> chrono::DateTime<Utc> {
-        Utc::now()
-    }
-
-    async fn sleep_interruptible(
-        &self,
-        duration: Duration,
-    ) -> virtue_client_core::CoreResult<SleepOutcome> {
-        let mut remaining = duration;
-        while remaining > Duration::ZERO {
-            if self.should_stop() {
-                return Ok(SleepOutcome::Interrupted);
-            }
-            let tick = remaining.min(Duration::from_secs(1));
-            sleep(tick).await;
-            remaining = remaining.saturating_sub(tick);
-        }
-
-        if self.should_stop() {
-            Ok(SleepOutcome::Interrupted)
-        } else {
-            Ok(SleepOutcome::Elapsed)
-        }
-    }
-
-    async fn capture_frame_png(&self) -> virtue_client_core::CoreResult<CaptureOutcome> {
+impl PlatformHooks for AndroidPlatformHooks {
+    fn take_screenshot(&self) -> CoreResult<Screenshot> {
         match self.capture_status()? {
             CAPTURE_STATUS_READY => {
-                let png = self.capture_png()?;
-                Ok(CaptureOutcome::FramePng(png))
+                let bytes = self.capture_png()?;
+                Ok(Screenshot {
+                    captured_at_ms: self.get_time_utc_ms()?,
+                    bytes,
+                    content_type: "image/png".to_string(),
+                })
             }
-            CAPTURE_STATUS_PERMISSION_MISSING => Ok(CaptureOutcome::PermissionMissing),
-            CAPTURE_STATUS_SESSION_UNAVAILABLE => Ok(CaptureOutcome::SessionUnavailable),
-            other => Err(CoreError::Platform(format!(
+            CAPTURE_STATUS_PERMISSION_MISSING => Err(CoreError::CommandFailed(
+                "capture permission missing".to_string(),
+            )),
+            CAPTURE_STATUS_SESSION_UNAVAILABLE => Err(CoreError::CommandFailed(
+                "capture session unavailable".to_string(),
+            )),
+            other => Err(CoreError::CommandFailed(format!(
                 "unexpected capture status code: {other}"
             ))),
         }
     }
 
-    fn emit_event(&self, event: ServiceEvent) {
-        match event {
-            ServiceEvent::Info(msg) => eprintln!("android-daemon: {msg}"),
-            ServiceEvent::Warn(msg) => eprintln!("android-daemon: {msg}"),
-            ServiceEvent::Error(msg) => eprintln!("android-daemon: {msg}"),
-        }
-    }
-
-    fn should_stop(&self) -> bool {
-        self.stop.load(Ordering::SeqCst)
+    fn get_time_utc_ms(&self) -> CoreResult<i64> {
+        let duration = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|err| CoreError::CommandFailed(err.to_string()))?;
+        i64::try_from(duration.as_millis())
+            .map_err(|_| CoreError::InvalidState("system clock overflow"))
     }
 }
 
@@ -207,42 +137,31 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeInit(
         let capture_interval_seconds: String = env.get_string(&capture_interval_seconds)?.into();
         let batch_window_seconds: String = env.get_string(&batch_window_seconds)?.into();
 
-        apply_dev_env();
-        apply_overrides(
-            &base_api_url,
-            &capture_interval_seconds,
-            &batch_window_seconds,
-        );
-
-        if let Some(core) = CORE.get() {
-            refresh_dynamic(core)?;
-            return Ok(());
-        }
-
         fs::create_dir_all(&config_dir)
             .with_context(|| format!("failed to create config dir {config_dir}"))?;
         fs::create_dir_all(&data_dir)
             .with_context(|| format!("failed to create data dir {data_dir}"))?;
+        sanitize_state_dir(Path::new(&data_dir))?;
 
-        let token_file = Path::new(&config_dir).join("token_store.json");
-        let state_file = Path::new(&config_dir).join("android_client_state.json");
-        let batch_buffer_file = Path::new(&data_dir).join("batch_buffer.json");
+        let runtime_config_file = Path::new(&config_dir).join("config.json");
+        write_runtime_overrides(
+            &runtime_config_file,
+            &base_api_url,
+            &capture_interval_seconds,
+            &batch_window_seconds,
+        )?;
 
-        let token_store: Arc<dyn TokenStore> = Arc::new(FileTokenStore::new(&token_file));
-        let runtime = Runtime::new().context("failed to build tokio runtime")?;
-        let dynamic = build_dynamic(token_store.clone())?;
-        let java_vm = Arc::new(env.get_java_vm().context("failed to get JavaVM")?);
-
-        CORE.set(AndroidCore {
-            runtime,
-            token_store,
-            state_path: state_file,
-            batch_buffer_path: batch_buffer_file,
-            dynamic: Mutex::new(dynamic),
-            daemon_state: Mutex::new(DaemonState::default()),
-            java_vm,
-        })
-        .map_err(|_| anyhow!("core already initialized"))?;
+        if CORE.get().is_none() {
+            let java_vm = Arc::new(env.get_java_vm().context("failed to get JavaVM")?);
+            CORE.set(AndroidCore {
+                state_dir: PathBuf::from(data_dir),
+                runtime_config_file,
+                java_vm,
+                stop: Arc::new(AtomicBool::new(false)),
+                daemon_running: Mutex::new(false),
+            })
+            .map_err(|_| anyhow!("core already initialized"))?;
+        }
 
         Ok(())
     })();
@@ -259,19 +178,17 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeSetOv
     batch_window_seconds: JString,
 ) -> jstring {
     let result = (|| -> Result<()> {
+        let core = core()?;
         let base_api_url: String = env.get_string(&base_api_url)?.into();
         let capture_interval_seconds: String = env.get_string(&capture_interval_seconds)?.into();
         let batch_window_seconds: String = env.get_string(&batch_window_seconds)?.into();
 
-        apply_overrides(
+        write_runtime_overrides(
+            &core.runtime_config_file,
             &base_api_url,
             &capture_interval_seconds,
             &batch_window_seconds,
-        );
-
-        let core = core()?;
-        refresh_dynamic(core)?;
-        Ok(())
+        )
     })();
 
     to_jstring_result(&mut env, result)
@@ -286,39 +203,16 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeLogin
     device_name: JString,
 ) -> jstring {
     let result = (|| -> Result<()> {
-        let core = core()?;
         let email: String = env.get_string(&email)?.into();
         let password: String = env.get_string(&password)?.into();
         let device_name: String = env.get_string(&device_name)?.into();
-
-        let (auth_client, api_client) = {
-            let dynamic = core
-                .dynamic
-                .lock()
-                .map_err(|_| anyhow!("dynamic core lock poisoned"))?;
-            (dynamic.auth_client.clone(), dynamic.api_client.clone())
+        let core = core()?;
+        let hooks = AndroidPlatformHooks {
+            java_vm: core.java_vm.clone(),
         };
-
-        core.runtime.block_on(async {
-            let login = login_and_register_device(
-                &auth_client,
-                &api_client,
-                core.token_store.as_ref(),
-                LoginCommandInput {
-                    email: &email,
-                    password: &password,
-                    device_name: &device_name,
-                    platform: "android",
-                },
-            )
-            .await?;
-
-            let mut state = load_state(&core.state_path)?;
-            state.monitoring_enabled = true;
-            state.device_id = Some(login.device_id);
-            save_state(&core.state_path, &state)?;
-            Ok::<(), anyhow::Error>(())
-        })
+        let mut service = MonitorService::setup(build_core_config(core, &device_name), hooks)?;
+        service.login(&email, &password)?;
+        Ok(())
     })();
 
     to_jstring_result(&mut env, result)
@@ -331,39 +225,48 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeLogou
 ) -> jstring {
     let result = (|| -> Result<()> {
         let core = core()?;
-
-        let (auth_client, api_client) = {
-            let dynamic = core
-                .dynamic
-                .lock()
-                .map_err(|_| anyhow!("dynamic core lock poisoned"))?;
-            (dynamic.auth_client.clone(), dynamic.api_client.clone())
+        let hooks = AndroidPlatformHooks {
+            java_vm: core.java_vm.clone(),
         };
-
-        core.runtime.block_on(async {
-            let mut state = load_state(&core.state_path)?;
-            let metadata = vec![
-                ("source".to_string(), "android".to_string()),
-                ("reason".to_string(), "user_logout".to_string()),
-            ];
-
-            let _ = logout_and_clear_tokens_with_alert(
-                &auth_client,
-                Some(&api_client),
-                core.token_store.as_ref(),
-                state.device_id.as_deref(),
-                &metadata,
-            )
-            .await;
-
-            state.monitoring_enabled = false;
-            state.device_id = None;
-            save_state(&core.state_path, &state)?;
-            Ok::<(), anyhow::Error>(())
-        })
+        let mut service = MonitorService::setup(build_core_config(core, "android-device"), hooks)?;
+        service.logout()?;
+        Ok(())
     })();
 
     to_jstring_result(&mut env, result)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeIsLoggedIn(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jboolean {
+    match core()
+        .and_then(|core| Ok(FileStateStore::new(&core.state_dir)?.load_auth_state()?))
+        .map(|auth| auth.device_credentials.is_some())
+    {
+        Ok(true) => 1,
+        _ => 0,
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeGetDeviceId(
+    env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    let device_id = core()
+        .and_then(|core| Ok(FileStateStore::new(&core.state_dir)?.load_auth_state()?))
+        .ok()
+        .and_then(|auth| auth.device_credentials.map(|device| device.device_id));
+
+    match device_id {
+        Some(value) => env
+            .new_string(value)
+            .map(|value| value.into_raw())
+            .unwrap_or(std::ptr::null_mut()),
+        None => std::ptr::null_mut(),
+    }
 }
 
 #[no_mangle]
@@ -373,60 +276,24 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeRunDa
 ) -> jstring {
     let result = (|| -> Result<()> {
         let core = core()?;
-
-        let stop_signal = {
-            let mut daemon_state = core
-                .daemon_state
+        {
+            let mut guard = core
+                .daemon_running
                 .lock()
                 .map_err(|_| anyhow!("daemon state lock poisoned"))?;
-            if daemon_state.running {
-                return Ok(());
+            if *guard {
+                return Err(anyhow!("daemon already running"));
             }
-            daemon_state.running = true;
-            daemon_state.stop.store(false, Ordering::SeqCst);
-            daemon_state.stop.clone()
-        };
-
-        let run_result = (|| -> Result<()> {
-            let host = AndroidDaemonHost {
-                state_path: core.state_path.clone(),
-                stop: stop_signal,
-                java_vm: core.java_vm.clone(),
-            };
-            let auth_client = AuthClient::new(core.token_store.clone())?;
-            let api_client = ApiClient::new()?;
-            let config = BatchDaemonConfig {
-                settings_refresh_interval: Duration::from_secs(30 * 60),
-                settings_fetch_retry_interval: Duration::from_secs(20),
-                idle_retry_interval: Duration::from_secs(20),
-                token_refresh_threshold: Duration::from_secs(120),
-                session_unavailable_log_interval: Duration::from_secs(5 * 60),
-                continue_on_token_refresh_error: false,
-            };
-
-            let daemon_runtime = Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .context("failed to build daemon runtime")?;
-
-            daemon_runtime
-                .block_on(run_batch_daemon(
-                    &host,
-                    core.token_store.clone(),
-                    &auth_client,
-                    &api_client,
-                    &core.batch_buffer_path,
-                    config,
-                ))
-                .map_err(Into::into)
-        })();
-
-        if let Ok(mut daemon_state) = core.daemon_state.lock() {
-            daemon_state.running = false;
-            daemon_state.stop.store(false, Ordering::SeqCst);
+            *guard = true;
         }
+        core.stop.store(false, Ordering::SeqCst);
 
-        run_result
+        let daemon_result = run_daemon_loop(core);
+
+        if let Ok(mut guard) = core.daemon_running.lock() {
+            *guard = false;
+        }
+        daemon_result
     })();
 
     to_jstring_result(&mut env, result)
@@ -439,209 +306,143 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeStopD
 ) -> jstring {
     let result = (|| -> Result<()> {
         let core = core()?;
-        let daemon_state = core
-            .daemon_state
-            .lock()
-            .map_err(|_| anyhow!("daemon state lock poisoned"))?;
-        daemon_state.stop.store(true, Ordering::SeqCst);
+        core.stop.store(true, Ordering::SeqCst);
         Ok(())
     })();
 
     to_jstring_result(&mut env, result)
 }
 
-#[no_mangle]
-pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeIsLoggedIn(
-    _env: JNIEnv,
-    _class: JClass,
-) -> jboolean {
-    let result = (|| -> Result<bool> {
-        let core = core()?;
-        let token = core.token_store.get_access_token()?;
-        let state = load_state(&core.state_path)?;
-        Ok(token.is_some() && state.device_id.is_some())
-    })();
+fn run_daemon_loop(core: &AndroidCore) -> Result<()> {
+    let hooks = AndroidPlatformHooks {
+        java_vm: core.java_vm.clone(),
+    };
+    let mut service = MonitorService::setup(build_core_config(core, "android-device"), hooks)?;
 
-    match result {
-        Ok(true) => 1,
-        _ => 0,
-    }
-}
-
-#[no_mangle]
-pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeGetDeviceId(
-    mut env: JNIEnv,
-    _class: JClass,
-) -> jstring {
-    let result = (|| -> Result<Option<String>> {
-        let core = core()?;
-        let state = load_state(&core.state_path)?;
-        Ok(state.device_id)
-    })();
-
-    match result {
-        Ok(Some(device_id)) => to_jstring(&mut env, &device_id),
-        _ => std::ptr::null_mut(),
-    }
-}
-
-#[no_mangle]
-pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeReportLog(
-    mut env: JNIEnv,
-    _class: JClass,
-    event_type: JString,
-    reason: JString,
-    detail: JString,
-) -> jstring {
-    let result = (|| -> Result<()> {
-        let core = core()?;
-
-        let event_type: String = env.get_string(&event_type)?.into();
-        let reason: String = env.get_string(&reason)?.into();
-        let detail = match env.get_string(&detail) {
-            Ok(value) => Some(String::from(value)),
-            Err(_) => None,
-        };
-
-        let api_client = {
-            let dynamic = core
-                .dynamic
-                .lock()
-                .map_err(|_| anyhow!("dynamic core lock poisoned"))?;
-            dynamic.api_client.clone()
-        };
-
-        core.runtime.block_on(async {
-            let access_token = match core.token_store.get_access_token()? {
-                Some(token) => token,
-                None => return Ok::<(), anyhow::Error>(()),
-            };
-
-            let state = load_state(&core.state_path)?;
-            let device_id = match state.device_id {
-                Some(device_id) => device_id,
-                None => return Ok::<(), anyhow::Error>(()),
-            };
-
-            let mut metadata = vec![("reason".to_string(), reason)];
-            if let Some(detail) = detail {
-                metadata.push(("detail".to_string(), detail));
+    while !core.stop.load(Ordering::SeqCst) {
+        let sleep_duration = match service.loop_iteration() {
+            Ok(outcome) => duration_until(outcome.next_run_at_ms),
+            Err(err) => {
+                eprintln!("android-daemon: {err}");
+                ERROR_RETRY_INTERVAL
             }
+        };
+        sleep_interruptible(&core.stop, sleep_duration);
+    }
 
-            api_client
-                .create_alert_log(
-                    &access_token,
-                    &device_id,
-                    &event_type,
-                    &metadata,
-                    Utc::now(),
-                )
-                .await?;
+    let _ = service.shutdown();
+    Ok(())
+}
 
-            Ok::<(), anyhow::Error>(())
-        })
-    })();
+fn sleep_interruptible(stop: &AtomicBool, duration: Duration) {
+    let mut remaining = duration;
+    while remaining > Duration::ZERO && !stop.load(Ordering::SeqCst) {
+        let tick = remaining.min(Duration::from_secs(1));
+        thread::sleep(tick);
+        remaining = remaining.saturating_sub(tick);
+    }
+}
 
-    to_jstring_result(&mut env, result)
+fn duration_until(next_run_at_ms: i64) -> Duration {
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(next_run_at_ms);
+    let delta_ms = next_run_at_ms.saturating_sub(now_ms);
+    Duration::from_millis(delta_ms.max(0) as u64)
+}
+
+fn build_core_config(core: &AndroidCore, device_name: &str) -> Config {
+    Config::new(
+        DEFAULT_BASE_API_URL,
+        device_name,
+        "android",
+        core.state_dir.clone(),
+        Some(core.runtime_config_file.clone()),
+        Duration::from_secs(DEFAULT_CAPTURE_INTERVAL_SECONDS),
+        Duration::from_secs(DEFAULT_BATCH_WINDOW_SECONDS),
+    )
+}
+
+fn write_runtime_overrides(
+    path: &Path,
+    base_api_url: &str,
+    capture_interval_seconds: &str,
+    batch_window_seconds: &str,
+) -> Result<()> {
+    let mut payload = serde_json::Map::new();
+    if !base_api_url.trim().is_empty() {
+        payload.insert(
+            "api_base_url".to_string(),
+            serde_json::Value::String(base_api_url.trim().to_string()),
+        );
+    }
+    if !capture_interval_seconds.trim().is_empty() {
+        payload.insert(
+            "capture_interval_seconds".to_string(),
+            serde_json::Value::Number(parse_u64(capture_interval_seconds)?.into()),
+        );
+    }
+    if !batch_window_seconds.trim().is_empty() {
+        payload.insert(
+            "batch_window_seconds".to_string(),
+            serde_json::Value::Number(parse_u64(batch_window_seconds)?.into()),
+        );
+    }
+
+    let bytes = serde_json::to_vec_pretty(&serde_json::Value::Object(payload))?;
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, bytes).with_context(|| format!("failed writing {}", tmp.display()))?;
+    fs::rename(&tmp, path)
+        .with_context(|| format!("failed replacing {} with {}", path.display(), tmp.display()))?;
+    Ok(())
+}
+
+fn parse_u64(value: &str) -> Result<u64> {
+    value
+        .trim()
+        .parse::<u64>()
+        .with_context(|| format!("invalid integer override: {value}"))
+}
+
+fn sanitize_state_dir(root: &Path) -> Result<()> {
+    sanitize_json_file::<AuthState>(root, "auth.json")?;
+    sanitize_json_file::<BatchBufferState>(root, "batch_buffer.json")?;
+    sanitize_json_file::<Vec<PendingRequest>>(root, "pending_requests.json")?;
+    sanitize_json_file::<ServiceStatus>(root, "status.json")?;
+    sanitize_json_file::<Option<DeviceSettings>>(root, "device_settings.json")?;
+    Ok(())
+}
+
+fn sanitize_json_file<T: DeserializeOwned>(root: &Path, name: &str) -> Result<()> {
+    let path = root.join(name);
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let bytes = fs::read(&path).with_context(|| format!("failed reading {}", path.display()))?;
+    if bytes.is_empty() {
+        return Ok(());
+    }
+
+    if serde_json::from_slice::<T>(&bytes).is_ok() {
+        return Ok(());
+    }
+
+    fs::remove_file(&path).with_context(|| format!("failed removing {}", path.display()))?;
+    Ok(())
 }
 
 fn core() -> Result<&'static AndroidCore> {
-    CORE.get()
-        .ok_or_else(|| anyhow!("native core not initialized"))
-}
-
-fn build_dynamic(token_store: Arc<dyn TokenStore>) -> Result<DynamicCore> {
-    Ok(DynamicCore {
-        auth_client: AuthClient::new(token_store.clone())?,
-        api_client: ApiClient::new()?,
-    })
-}
-
-fn refresh_dynamic(core: &AndroidCore) -> Result<()> {
-    let mut dynamic = core
-        .dynamic
-        .lock()
-        .map_err(|_| anyhow!("dynamic core lock poisoned"))?;
-    *dynamic = build_dynamic(core.token_store.clone())?;
-    Ok(())
-}
-
-fn apply_overrides(base_api_url: &str, capture_interval_seconds: &str, batch_window_seconds: &str) {
-    set_or_remove_env(BASE_API_URL_ENV_VAR, normalize_base_url(base_api_url));
-    set_or_remove_env(
-        CAPTURE_INTERVAL_SECONDS_ENV_VAR,
-        normalize_numeric(capture_interval_seconds),
-    );
-    set_or_remove_env(
-        BATCH_WINDOW_SECONDS_ENV_VAR,
-        normalize_numeric(batch_window_seconds),
-    );
-}
-
-fn normalize_base_url(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(trimmed.trim_end_matches('/').to_string())
-}
-
-fn normalize_numeric(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(trimmed.to_string())
-}
-
-fn set_or_remove_env(key: &str, value: Option<String>) {
-    match value {
-        Some(v) => {
-            unsafe { std::env::set_var(key, v) };
-        }
-        None => {
-            unsafe { std::env::remove_var(key) };
-        }
-    }
-}
-
-fn load_state(path: &Path) -> Result<AndroidState> {
-    if !path.exists() {
-        return Ok(AndroidState::default());
-    }
-
-    let raw = fs::read(path).with_context(|| format!("failed reading {}", path.display()))?;
-    if raw.is_empty() {
-        return Ok(AndroidState::default());
-    }
-
-    serde_json::from_slice(&raw).with_context(|| format!("failed parsing {}", path.display()))
-}
-
-fn save_state(path: &Path, state: &AndroidState) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed creating {}", parent.display()))?;
-    }
-
-    let tmp = path.with_extension("tmp");
-    let bytes = serde_json::to_vec_pretty(state)?;
-    fs::write(&tmp, bytes).with_context(|| format!("failed writing {}", tmp.display()))?;
-    fs::rename(&tmp, path).with_context(|| format!("failed replacing {}", path.display()))?;
-
-    Ok(())
+    CORE.get().ok_or_else(|| anyhow!("core not initialized"))
 }
 
 fn to_jstring_result(env: &mut JNIEnv, result: Result<()>) -> jstring {
     match result {
-        Ok(_) => std::ptr::null_mut(),
-        Err(err) => to_jstring(env, &err.to_string()),
-    }
-}
-
-fn to_jstring(env: &mut JNIEnv, value: &str) -> jstring {
-    match env.new_string(value) {
-        Ok(s) => s.into_raw(),
-        Err(_) => std::ptr::null_mut(),
+        Ok(()) => std::ptr::null_mut(),
+        Err(err) => env
+            .new_string(err.to_string())
+            .map(|value| value.into_raw())
+            .unwrap_or(std::ptr::null_mut()),
     }
 }

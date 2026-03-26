@@ -105,6 +105,7 @@ Section "Install"
   nsExec::ExecToLog '"$SYSDIR\\cmd.exe" /C copy /Y "$INSTDIR\\virtue-service.exe" "$0\\Virtue\\virtue-service.exe"'
   nsExec::ExecToLog '"$SYSDIR\\cmd.exe" /C copy /Y "$INSTDIR\\virtue-tray.exe" "$0\\Virtue\\virtue-tray.exe"'
   nsExec::ExecToLog '"$SYSDIR\\cmd.exe" /C copy /Y "$INSTDIR\\virtue-auth-ui.exe" "$0\\Virtue\\virtue-auth-ui.exe"'
+  nsExec::ExecToLog '"$SYSDIR\\cmd.exe" /C copy /Y "$INSTDIR\\app-icon.ico" "$0\\Virtue\\app-icon.ico"'
   nsExec::ExecToLog '$SYSDIR\\sc.exe create ${SERVICE_NAME} start= auto binPath= "$0\\Virtue\\virtue-service.exe --mode lifecycle" DisplayName= "Virtue Lifecycle Service"'
   nsExec::ExecToLog '$SYSDIR\\sc.exe description ${SERVICE_NAME} "Virtue lifecycle logging service"'
   nsExec::ExecToLog '$SYSDIR\\sc.exe start ${SERVICE_NAME}'
@@ -113,6 +114,8 @@ Section "Install"
   DeleteRegValue HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Run" "VirtueCapture"
   DeleteRegValue HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Run" "BePureTray"
   DeleteRegValue HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Run" "VirtueTray"
+  WriteRegStr HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Run" "VirtueCapture" "$\"$SYSDIR\\wscript.exe$\" //B $\"$INSTDIR\\${CAPTURE_LAUNCHER_VBS}$\""
+  WriteRegStr HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Run" "VirtueTray" "$\"$0\\Virtue\\virtue-tray.exe$\""
   DeleteRegValue HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Run" "BePureCapture"
   DeleteRegValue HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Run" "VirtueCapture"
   DeleteRegValue HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Run" "BePureTray"
@@ -122,6 +125,8 @@ Section "Install"
   SetShellVarContext all
   Delete "$SMSTARTUP\${CAPTURE_STARTUP_SHORTCUT}"
   Delete "$SMSTARTUP\${TRAY_STARTUP_SHORTCUT}"
+  CreateShortCut "$SMSTARTUP\${CAPTURE_STARTUP_SHORTCUT}" "$SYSDIR\\wscript.exe" "//B $\"$INSTDIR\\${CAPTURE_LAUNCHER_VBS}$\"" "$SYSDIR\\wscript.exe" 0
+  CreateShortCut "$SMSTARTUP\${TRAY_STARTUP_SHORTCUT}" "$0\\Virtue\\virtue-tray.exe" "" "$0\\Virtue\\virtue-tray.exe" 0
   SetShellVarContext current
 
   ; Also clear stale 32-bit Run entries from older installer versions.
@@ -133,6 +138,8 @@ Section "Install"
   SetRegView 64
 
   WriteUninstaller "$INSTDIR\\Uninstall.exe"
+  Exec '"$SYSDIR\\wscript.exe" //B "$INSTDIR\\${CAPTURE_LAUNCHER_VBS}"'
+  Exec '"$0\\Virtue\\virtue-tray.exe"'
 SectionEnd
 
 Section "Uninstall"
@@ -184,6 +191,7 @@ Section "Uninstall"
   Delete "$0\\Virtue\\virtue-service.exe"
   Delete "$0\\Virtue\\virtue-tray.exe"
   Delete "$0\\Virtue\\virtue-auth-ui.exe"
+  Delete "$0\\Virtue\\app-icon.ico"
   RMDir "$INSTDIR"
 
   DeleteRegKey HKLM "Software\\BePure"

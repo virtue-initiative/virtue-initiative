@@ -5,9 +5,16 @@ permissions:
 
 on:
   pull_request:
+    paths:
+      - "client/**"
+      - ".github/workflows/client-windows.yml"
   push:
     branches:
       - main
+      - staging
+    paths:
+      - "client/**"
+      - ".github/workflows/client-windows.yml"
   workflow_dispatch:
 
 jobs:
@@ -31,31 +38,31 @@ jobs:
             client -> target
 
       - name: Rust build smoke test (core)
-        run: cargo build --target x86_64-pc-windows-msvc -p virtue-client-core
+        run: cargo build --target x86_64-pc-windows-msvc -p virtue-core
         working-directory: client
 
       - name: Rust build smoke test (Windows client)
-        run: cargo build --target x86_64-pc-windows-msvc -p virtue-windows-client
+        run: cargo build --target x86_64-pc-windows-msvc -p virtue-windows
         working-directory: client
 
       - name: Rust lint (core)
-        run: cargo clippy --target x86_64-pc-windows-msvc -p virtue-client-core --all-targets -- -D warnings
+        run: cargo clippy --target x86_64-pc-windows-msvc -p virtue-core --all-targets -- -D warnings
         working-directory: client
 
       - name: Rust lint (Windows client)
-        run: cargo clippy --target x86_64-pc-windows-msvc -p virtue-windows-client --all-targets -- -D warnings
+        run: cargo clippy --target x86_64-pc-windows-msvc -p virtue-windows --all-targets -- -D warnings
         working-directory: client
 
       - name: Install NSIS
         run: choco install nsis -y
 
       - name: Build Windows installer (debug)
-        if: github.event_name != 'push' || github.ref != 'refs/heads/main'
+        if: github.event_name != 'push' || (github.ref != 'refs/heads/main' && github.ref != 'refs/heads/staging')
         run: ./windows/scripts/build-installer.ps1 -Profile Debug
         working-directory: client
 
       - name: Resolve version info
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         id: version
         shell: pwsh
         working-directory: client/windows
@@ -66,29 +73,29 @@ jobs:
           "build_label=$($info.BuildLabel)" >> $env:GITHUB_OUTPUT
 
       - name: Build Windows installer (release)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         run: ./windows/scripts/build-installer.ps1 -Profile Release -Version "${{ steps.version.outputs.build_label }}"
         working-directory: client
 
       - name: Upload Windows installer artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         uses: actions/upload-artifact@v4
         with:
           name: virtue-windows-${{ steps.version.outputs.build_label }}
           path: client/windows/dist/virtue-windows-installer-${{ steps.version.outputs.build_label }}.exe
 
-      - name: Clear existing Windows prerelease assets
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Clear existing Windows release assets
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./scripts/clear-prerelease-assets.sh "${{ steps.version.outputs.release_tag }}" "virtue-windows-installer-*.exe"
         working-directory: client
 
-      - name: Publish Windows prerelease asset
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Publish Windows release asset
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./scripts/publish-prerelease.sh "${{ steps.version.outputs.release_tag }}" "${{ steps.version.outputs.build_label }}" "windows/dist/virtue-windows-installer-${{ steps.version.outputs.build_label }}.exe"
+        run: ./scripts/publish-release.sh "${{ steps.version.outputs.release_tag }}" "${{ steps.version.outputs.build_label }}" "windows/dist/virtue-windows-installer-${{ steps.version.outputs.build_label }}.exe" "${{ github.ref_name == 'main' && 'stable' || 'dev' }}"
         working-directory: client

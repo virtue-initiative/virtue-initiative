@@ -1,38 +1,44 @@
 import { describe, it, expect } from 'vitest';
 import { generateAccessToken, verifyJWT } from '../src/lib/jwt';
-import { hashPassword, verifyPassword } from '../src/lib/password';
+import { generatePasswordSalt, hashPasswordAuth, verifyPasswordAuth } from '../src/lib/password';
+import {
+  TEST_JWT_PRIVATE_KEY,
+  TEST_JWT_PUBLIC_KEY,
+  TEST_OTHER_JWT_PUBLIC_KEY,
+} from './jwt-test-keys';
 
-describe('Password hashing', () => {
-  it('hashes and verifies a correct password', async () => {
-    const hash = await hashPassword('hunter2');
-    expect(hash).toContain(':');
-    expect(await verifyPassword('hunter2', hash)).toBe(true);
+describe('Password auth hashing', () => {
+  it('hashes and verifies correct password auth material', async () => {
+    const passwordAuth = new TextEncoder().encode('hunter2-auth');
+    const hash = await hashPasswordAuth(passwordAuth);
+    expect(hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(await verifyPasswordAuth(passwordAuth, hash)).toBe(true);
   });
 
-  it('rejects a wrong password', async () => {
-    const hash = await hashPassword('hunter2');
-    expect(await verifyPassword('wrong', hash)).toBe(false);
+  it('rejects different password auth material', async () => {
+    const hash = await hashPasswordAuth(new TextEncoder().encode('hunter2-auth'));
+    expect(await verifyPasswordAuth(new TextEncoder().encode('wrong-auth'), hash)).toBe(false);
   });
 
-  it('produces a unique salt each time', async () => {
-    const first = await hashPassword('same');
-    const second = await hashPassword('same');
-    expect(first).not.toBe(second);
+  it('produces a unique random password salt each time', () => {
+    const first = generatePasswordSalt();
+    const second = generatePasswordSalt();
+    expect(first).toHaveLength(16);
+    expect(second).toHaveLength(16);
+    expect(Buffer.from(first).equals(Buffer.from(second))).toBe(false);
   });
 });
 
 describe('JWT tokens', () => {
-  const secret = 'test-secret-key-12345';
-
   it('generates and verifies an access token', async () => {
-    const token = await generateAccessToken('user-123', secret, 900);
-    const payload = await verifyJWT(token, secret);
+    const token = await generateAccessToken('user-123', TEST_JWT_PRIVATE_KEY, 900);
+    const payload = await verifyJWT(token, TEST_JWT_PUBLIC_KEY);
     expect(payload.sub).toBe('user-123');
     expect(payload.type).toBe('access');
   });
 
-  it('rejects a token signed with the wrong secret', async () => {
-    const token = await generateAccessToken('user-123', secret, 900);
-    await expect(verifyJWT(token, 'wrong-secret')).rejects.toThrow();
+  it('rejects a token signed with a different public key', async () => {
+    const token = await generateAccessToken('user-123', TEST_JWT_PRIVATE_KEY, 900);
+    await expect(verifyJWT(token, TEST_OTHER_JWT_PUBLIC_KEY)).rejects.toThrow();
   });
 });

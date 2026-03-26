@@ -14,10 +14,8 @@ import {
   findPartnerInviteForOwner,
   findPartnerForOwnerAndUser,
   findUserById,
-  findUserPublicKeyByEmail,
   listIncomingPartners,
   listOwnedPartners,
-  updatePartnerByOwner,
   updatePartnerNotificationPreference,
   upsertPartnerPreference,
 } from '../lib/db';
@@ -25,7 +23,6 @@ import { renderPartnerAcceptedTemplate, renderPartnerInviteTemplate } from '../l
 import { PARTNER_INVITE_TTL_MS } from '../lib/email-domain';
 import { sendEmail } from '../lib/email';
 import { DEFAULT_EMAIL_FREQUENCY, DEFAULT_IMMEDIATE_TAMPER_SEVERITY } from '../lib/email-domain';
-import { decodeBase64, encodeBase64 } from '../lib/encoding';
 import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
 
@@ -41,24 +38,13 @@ function getAppUrl(c: Context<{ Bindings: Env; Variables: Variables }>) {
   return c.env.APP_URL;
 }
 
-const pubKeyQuerySchema = z.object({
-  email: z.email(),
-});
-
 const createPartnerSchema = z.object({
   email: z.email(),
-  e2ee_key: z.base64().optional(),
 });
 
 const inviteTokenSchema = z.object({
   token: z.string().min(1),
 });
-
-const updateWatcherSchema = z
-  .object({
-    e2ee_key: z.base64().optional(),
-  })
-  .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
 
 const publicNotificationCadences = ['none', 'alerts-only', 'daily', 'weekly'] as const;
 
@@ -76,17 +62,6 @@ function toPublicNotificationCadence(emailFrequency: string | null | undefined) 
 
   return emailFrequency as (typeof publicNotificationCadences)[number];
 }
-
-partners.get('/pubkey', validateZ('query', pubKeyQuerySchema), async (c) => {
-  const { email } = c.req.valid('query');
-  const user = await findUserPublicKeyByEmail(c.env.DB, email);
-
-  if (!user?.pub_key) {
-    return c.json({ error: 'Not found' }, 404);
-  }
-
-  return c.json({ pubkey: encodeBase64(user.pub_key) });
-});
 
 partners.post(
   '/partner',
@@ -132,7 +107,6 @@ partners.post(
       watching_user_id: userId,
       watcher_email: email,
       invite_token_id: inviteTokenId,
-      e2ee_key: undefined,
       created_at: now,
     });
     await upsertPartnerPreference(c.env.DB, {
@@ -294,7 +268,6 @@ partners.get('/partner', authenticate('access'), async (c) => {
       immediate_tamper_severity:
         partner.immediate_tamper_severity === 'warning' ? 'warning' : 'critical',
       created_at: partner.created_at,
-      ...(partner.e2ee_key ? { e2ee_key: encodeBase64(partner.e2ee_key) } : {}),
     })),
     watchers: owned.map((partner) => ({
       id: partner.id,
@@ -305,35 +278,9 @@ partners.get('/partner', authenticate('access'), async (c) => {
       },
       status: partner.status,
       created_at: partner.created_at,
-      ...(partner.e2ee_key ? { e2ee_key: encodeBase64(partner.e2ee_key) } : {}),
     })),
   });
 });
-
-partners.patch(
-  '/partner/watcher/:id',
-  authenticate('access'),
-  validateZ('json', updateWatcherSchema),
-  async (c) => {
-    const partnerId = c.req.param('id');
-    const partnership = await findPartnerById(c.env.DB, partnerId);
-
-    if (!partnership || partnership.watching_user_id !== c.get('sub')) {
-      return c.json({ error: 'Not found' }, 404);
-    }
-
-    const { e2ee_key } = c.req.valid('json');
-
-    await updatePartnerByOwner(c.env.DB, {
-      id: partnerId,
-      ownerId: c.get('sub'),
-      e2ee_key: e2ee_key ? decodeBase64(e2ee_key) : undefined,
-      updated_at: Date.now(),
-    });
-
-    return c.body(null, 204);
-  },
-);
 
 partners.patch(
   '/partner/watching/:id',

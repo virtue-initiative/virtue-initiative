@@ -5,7 +5,7 @@ import {
   hydrate,
   prerender as ssr,
 } from "preact-iso";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 
 import { api } from "./api";
 import { AuthProvider, useAuth } from "./context/auth";
@@ -16,14 +16,61 @@ import { Logs } from "./pages/Logs/index";
 import { Auth } from "./pages/Auth/index";
 import { Settings } from "./pages/Settings/index";
 import { NotFound } from "./pages/_404";
+import { PARTNERS_CHANGED_EVENT } from "./events";
 import "./style.css";
 
 const GLOBAL_MESSAGE_KEY = "virtue_global_link_message";
 
+type GlobalAlert = {
+  id: string;
+  message: string;
+  isError: boolean;
+  closing: boolean;
+};
+
 function GlobalEmailActionBanner() {
   const { token } = useAuth();
-  const [message, setMessage] = useState<string | null>(null);
-  const [isError, setIsError] = useState(false);
+  const [alerts, setAlerts] = useState<GlobalAlert[]>([]);
+  const timeoutsRef = useRef<number[]>([]);
+
+  useEffect(
+    () => () => {
+      for (const timeout of timeoutsRef.current) {
+        window.clearTimeout(timeout);
+      }
+      timeoutsRef.current = [];
+    },
+    [],
+  );
+
+  function dismissAlert(id: string) {
+    setAlerts((previous) =>
+      previous.map((alert) =>
+        alert.id === id ? { ...alert, closing: true } : alert,
+      ),
+    );
+    const removalTimeout = window.setTimeout(() => {
+      setAlerts((previous) => previous.filter((alert) => alert.id !== id));
+    }, 220);
+    timeoutsRef.current.push(removalTimeout);
+  }
+
+  function pushAlert(message: string, isError: boolean) {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setAlerts((previous) => [
+      ...previous,
+      {
+        id,
+        message,
+        isError,
+        closing: false,
+      },
+    ]);
+    const timeout = window.setTimeout(() => {
+      dismissAlert(id);
+    }, 45_000);
+    timeoutsRef.current.push(timeout);
+  }
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -31,12 +78,29 @@ function GlobalEmailActionBanner() {
     if (!stored) return;
     window.sessionStorage.removeItem(GLOBAL_MESSAGE_KEY);
     try {
-      const parsed = JSON.parse(stored) as {
-        message: string;
-        isError: boolean;
-      };
-      setMessage(parsed.message);
-      setIsError(parsed.isError);
+      const parsed = JSON.parse(stored) as
+        | {
+            message: string;
+            isError: boolean;
+          }
+        | Array<{
+            message: string;
+            isError: boolean;
+          }>;
+      const parsedList = Array.isArray(parsed) ? parsed : [parsed];
+      const nextAlerts = parsedList
+        .filter(
+          (item) => typeof item.message === "string" && item.message.trim(),
+        )
+        .map((item) => ({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          message: item.message,
+          isError: Boolean(item.isError),
+          closing: false,
+        }));
+      if (nextAlerts.length > 0) {
+        setAlerts((previous) => [...previous, ...nextAlerts]);
+      }
     } catch {
       window.sessionStorage.removeItem(GLOBAL_MESSAGE_KEY);
     }
@@ -51,14 +115,13 @@ function GlobalEmailActionBanner() {
     api
       .verifyEmail(token)
       .then(() => {
-        setMessage("Email verified successfully.");
-        setIsError(false);
+        pushAlert("Email verified successfully.", false);
       })
       .catch((err: unknown) => {
-        setMessage(
+        pushAlert(
           err instanceof Error ? err.message : "Failed to verify email",
+          true,
         );
-        setIsError(true);
       })
       .finally(() => {
         const nextUrl = new URL(window.location.href);
@@ -80,59 +143,53 @@ function GlobalEmailActionBanner() {
     };
 
     if (!token) {
-      api
-        .validatePartnerInvite(inviteToken)
-        .then((result) => {
-          setMessage(
-            `Invitation from ${result.owner.name ?? result.owner.email} ready. Sign in or create an account to accept it.`,
-          );
-          setIsError(false);
-        })
-        .catch((err: unknown) => {
-          setMessage(
-            err instanceof Error ? err.message : "Failed to validate invite",
-          );
-          setIsError(true);
-          clearInviteToken();
-        });
       return;
     }
 
     api
       .acceptPartnerInvite(token, inviteToken)
       .then(() => {
-        window.sessionStorage.setItem(
-          GLOBAL_MESSAGE_KEY,
-          JSON.stringify({
-            message: "Partner invite accepted.",
-            isError: false,
-          }),
-        );
-        const nextUrl = new URL(window.location.href);
-        nextUrl.searchParams.delete("partner_invite_token");
-        window.location.replace(nextUrl.toString());
+        pushAlert("Partner invite accepted.", false);
+        clearInviteToken();
+        window.dispatchEvent(new CustomEvent(PARTNERS_CHANGED_EVENT));
       })
       .catch((err: unknown) => {
-        setMessage(
+        pushAlert(
           err instanceof Error ? err.message : "Failed to accept invite",
+          true,
         );
-        setIsError(true);
         clearInviteToken();
       });
   }, [token]);
 
-  if (!message) {
+  if (alerts.length === 0) {
     return null;
   }
 
   return (
-    <p
-      class={
-        isError ? "alert-error global-alert" : "alert-success global-alert"
-      }
+    <div
+      class={`global-alert-stack${token ? " global-alert-stack--with-header" : ""}`}
+      aria-live="polite"
+      aria-atomic="false"
     >
-      {message}
-    </p>
+      {alerts.map((alert) => (
+        <div
+          key={alert.id}
+          role="status"
+          class={`${alert.isError ? "alert-error" : "alert-success"} global-alert${alert.closing ? " global-alert--closing" : ""}`}
+        >
+          <span>{alert.message}</span>
+          <button
+            class="global-alert-close"
+            type="button"
+            onClick={() => dismissAlert(alert.id)}
+            aria-label="Dismiss notification"
+          >
+            ×
+          </button>
+        </div>
+      ))}
+    </div>
   );
 }
 

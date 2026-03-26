@@ -1,0 +1,391 @@
+import SecurityFlow from "./security-flow.svg?raw";
+
+# Cryptography and security
+
+Last Updated: 2026-03-18
+
+The following is a document that lays out our security model and the
+cryptography that we use.
+
+## High level overview
+
+The main goal of this project is to send screenshots and logs from client
+devices to partners.
+
+### Sensitive data
+
+- User email and password
+- User private/public keypair
+- Low quality screenshot batches
+- Logs
+
+### Data storage
+
+| Item         | Place   | Format                                                 | Access           |
+| ------------ | ------- | ------------------------------------------------------ | ---------------- |
+| Password     | Server  | `HKDF-SHA256("auth", Argon2id(pwd, salt, params))`     | None             |
+| Email        | Server  | Plaintext                                              | Partners         |
+| Private Key  | Server  | `AES-256-GCM(HKDF-SHA256("key", Argon2id(...), salt))` | User             |
+| Private Key  | Browser | Plaintext                                              | Browser          |
+| Private Key  | Device  | Plaintext                                              | Device           |
+| Public Key   | Server  | Plaintext (X25519)                                     | Anyone           |
+| Batch List   | Server  | Plaintext                                              | Partners         |
+| Batch Key    | Server  | `HPKE(DHKEM(X25519), HKDF-SHA256, AES-256-GCM)`        | Partners         |
+| Batches      | Server  | `AES-256-GCM(batch_key)`                               | Anyone with UUID |
+| Latest Batch | Device  | Plaintext                                              | Device           |
+| Logs         | Server  | Plaintext                                              | Partners         |
+| Logs         | Device  | Plaintext                                              | Device           |
+
+## Details
+
+### Passwords
+
+Passwords are used for authentication and encryption.
+
+When a user signs up, they make a request to get the current hash parameters
+which is currently set to (t=5, m=128MB, p=1) and then generate a random salt
+(16 bytes, CSPRNG). They then hash the plaintext password using Argon2id with
+those parameters and the salt. They upload
+
+```
+HKDF-SHA256(
+  "auth",
+  Argon2id(password)
+)
+```
+
+and the salt to the server. The server hashes it one more time
+with `SHA256` and stores it in the database.
+
+They also generate a private key and encrypt the private key with
+
+```
+AES-256-GCM(
+  HKDF-SHA256("key", Argon2id(password))
+)
+```
+
+and upload it to the server. The plaintext private key is stored in the browser
+(as a non-exportable key).
+
+On login, the browser/device requests the hash parameters and salt from the
+server and then produces `Argon2id(password, salt, params)`. Next it logs in
+using `HKDF-SHA256("auth", Argon2id(...))`. Next, it downloads the encrypted
+private key and decrypts it with `AES-256-GCM(HKDF-SHA256("key",
+Argon2id(...)))`. Finally, it stores the private key locally (if it is the
+browser, it stores it as a non-exportable WebCrypto key).
+
+### Email addresses
+
+Email addresses are uploaded to the server on signup/login and can be viewed by
+partners. They are stored in plaintext.
+
+### Private key
+
+This key is created on signup using X25519 and encrypted with the password
+based key (see **Passwords**) before being sent to the server. It is stored in
+the browser for decrypting screenshot batch decryption keys.
+
+On login, the browser downloads the encrypted key from the server and decrypts
+it with the user's password key, and it is stored in the browser.
+
+This key is recreated on a password reset.
+
+See the **Passwords** section for more information.
+
+### Public key
+
+This key is generated alongside the private key on signup using X25519. It is
+uploaded in plaintext to the server. The devices download a list of all the
+current partners' public keys and encrypt the batch encryption key with all of
+them.
+
+### Batch list
+
+This is the list of batches stored in the database. The user and their partners
+can access it.
+
+Each item consists of the following data about the batch which is stored in
+plaintext.
+
+```
+owner
+start time
+end time
+download url
+verification hash
+encryption keys
+  user1: HPKE(encrypted batch key)
+  partner1: HPKE(encrypted batch key)
+  partner2: HPKE(encrypted batch key)
+  ...
+```
+
+The encrypted batch key for each user is encrypted with their public key using
+`HPKE(DHKEM(X25519), HKDF-SHA256, AES-256-GCM)`.
+
+Batches and the batch items are deleted after 30 days.
+
+> Note: The verification hash is a combined hash of each screenshot in the
+> batch. See **Verification** for more details.
+
+### Batches
+
+Encrypted batches are stored in publically accessible object storage. Their
+URLs look like `/[user]/[batch id]`.
+
+They are encrypted with a random key (32 bytes, CSPRNG) which is stored (encrypted) in the
+database (see **Batch list**).
+
+The in-progress batch is stored in plaintext on the device, but is compressed
+then encrypted as a batch before being sent to the server using `AES-256-GCM`.
+
+### Verification
+
+The verification hash is used to verify that the content of the final batch is
+the same as what the client had been tracking (to prevent locally deleting
+screenshots before they are uploaded)
+
+The verification hash looks like this:
+
+```
+SHA256(SHA256(screenshot_n) || SHA256(SHA256(screenshot_n-1) || SHA256(....)))
+```
+
+Every screenshot the client uploads `SHA256(screenshot)` and it is combined on
+the server with the hash like above. The partner can verify that the batch is
+correct by doing the same process on their end when downloading and decrypting
+the batch.
+
+## Known tradeoffs
+
+- We ultimately encrypt everything with the user's password. Using the user's
+  private key would be better, but implementing a good UX for key management is
+  non-trivial.
+- We provide a browser app, so the server could still send malicious JS code
+  that exfiltrates the data after it is decrypted, breaking E2EE. We might try
+  to think about a solution in the future, but that is a hard problem to solve.
+- We use public R2 URLs for cost reasons. The data is inaccessible without both
+  the ID (which is unpredictable, ≥128 bits entropy) and the random encryption key which are both
+  stored in the database and only accessible to partners.
+- Metadata about the batches is unencrypted. We consider this acceptable since
+  it is only accessible to the server and the partners. Additionally, the
+  batching makes it fairly low time resolution.
+
+## Possible weaknesses or improvements
+
+- Emails might currently be able to be guessed, either in the login flow or in
+  the invite flow.
+- Devices should use the keychain eventually.
+
+## Flow diagram
+
+<div set:html={SecurityFlow} />
+
+{/* CODE_REFERENCES:START */}
+
+## Code references
+
+The links and snippets below are generated from the current tree by `node scripts/check-code-references.js`. They currently point at Git ref `main`.
+
+### Browser password derivation
+
+Argon2id output is split into `passwordAuth` and the AES wrapping key with HKDF-SHA256.
+
+Source: [`web/src/crypto.ts:L85-L112`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/crypto.ts#L85-L112)
+
+```ts
+export async function derivePasswordMaterial(
+  password: string,
+  passwordSalt: Uint8Array,
+  params: HashParams,
+) {
+  const argonOutput = await argon2id({
+    password,
+    salt: passwordSalt,
+    iterations: params.time_cost,
+    memorySize: params.memory_cost_kib,
+    hashLength: 32,
+    parallelism: params.parallelism,
+    outputType: "binary",
+  });
+  const passwordAuth = await hkdfSha256("auth", argonOutput);
+  const wrappingKeyBytes = await hkdfSha256("key", argonOutput);
+  const wrappingKey = await importAesKey(
+    wrappingKeyBytes,
+    ["encrypt", "decrypt"],
+    true,
+  );
+
+  return {
+    argonOutput,
+    passwordAuth,
+    wrappingKey,
+  };
+}
+```
+
+### Browser private-key wrapping
+
+The web client encrypts the private key locally with AES-GCM before upload.
+
+Source: [`web/src/crypto.ts:L114-L126`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/crypto.ts#L114-L126)
+
+```ts
+export async function encryptData(
+  key: CryptoKey,
+  data: Uint8Array,
+): Promise<Uint8Array> {
+  const payload = Uint8Array.from(data);
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: nonce },
+    key,
+    payload,
+  );
+  return concatBytes(nonce, new Uint8Array(ciphertext));
+}
+```
+
+### Browser X25519 key generation
+
+The web app generates the user keypair from the HPKE suite's X25519 KEM.
+
+Source: [`web/src/crypto.ts:L142-L151`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/crypto.ts#L142-L151)
+
+```ts
+export async function generateUserKeyPair() {
+  const keyPair = await HPKE_SUITE.kem.generateKeyPair();
+  return {
+    publicKey: new Uint8Array(
+      await HPKE_SUITE.kem.serializePublicKey(keyPair.publicKey),
+    ),
+    privateKey: new Uint8Array(
+      await HPKE_SUITE.kem.serializePrivateKey(keyPair.privateKey),
+    ),
+    privateKeyHandle: keyPair.privateKey,
+  };
+}
+```
+
+### Browser batch-key unwrapping
+
+Batch access envelopes are opened with HPKE and imported back into WebCrypto as AES keys.
+
+Source: [`web/src/crypto.ts:L159-L171`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/crypto.ts#L159-L171)
+
+```ts
+export async function unwrapBatchKey(
+  privateKey: CryptoKey,
+  encryptedKey: BufferSource,
+) {
+  const envelope = toUint8Array(encryptedKey);
+  const enc = envelope.slice(0, HPKE_SUITE.kem.encSize);
+  const ct = envelope.slice(HPKE_SUITE.kem.encSize);
+  const rawKey = new Uint8Array(
+    await HPKE_SUITE.open({ recipientKey: privateKey, enc }, ct),
+  );
+
+  return importAesKey(rawKey, ["decrypt"]);
+}
+```
+
+### API password-auth hashing
+
+The server stores `SHA-256(password_auth)` instead of the raw client-derived bytes.
+
+Source: [`api/src/lib/password.ts:L35-L38`](https://github.com/virtue-initiative/virtue-initiative/blob/main/api/src/lib/password.ts#L35-L38)
+
+```ts
+export async function hashPasswordAuth(passwordAuth: ArrayBuffer | Uint8Array) {
+  const hashBuffer = await crypto.subtle.digest(
+    "SHA-256",
+    toBytes(passwordAuth),
+  );
+  return bytesToHex(new Uint8Array(hashBuffer));
+}
+```
+
+### Native client password derivation
+
+The Rust client matches the browser flow with Argon2id and HKDF-SHA256("auth").
+
+Source: [`client/core/src/crypto.rs:L77-L100`](https://github.com/virtue-initiative/virtue-initiative/blob/main/client/core/src/crypto.rs#L77-L100)
+
+```rs
+pub fn derive_password_auth(
+    password: &str,
+    password_salt: &[u8],
+    params: &HashParams,
+) -> CoreResult<[u8; 32]> {
+    let argon_params = Params::new(
+        params.memory_cost_kib,
+        params.time_cost,
+        params.parallelism,
+        Some(32),
+    )
+    .map_err(|_| CoreError::InvalidState("invalid argon2 parameters"))?;
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, argon_params);
+    let mut argon_output = [0_u8; 32];
+    argon2
+        .hash_password_into(password.as_bytes(), password_salt, &mut argon_output)
+        .map_err(|err| CoreError::Argon2(err.to_string()))?;
+
+    let hkdf = Hkdf::<Sha256>::new(None, &argon_output);
+    let mut password_auth = [0_u8; 32];
+    hkdf.expand(b"auth", &mut password_auth)
+        .map_err(|_| CoreError::Crypto("HKDF expand failed"))?;
+    Ok(password_auth)
+}
+```
+
+### Native client batch upload encryption
+
+Each batch gets a fresh AES key, then the client HPKE-wraps that key for every recipient.
+
+Source: [`client/core/src/batch.rs:L24-L63`](https://github.com/virtue-initiative/virtue-initiative/blob/main/client/core/src/batch.rs#L24-L63)
+
+```rs
+    pub fn build_upload(
+        buffer: &BatchBufferState,
+        crypto: &CryptoEngine,
+        recipients: &[BatchRecipient],
+        end_time_ms: i64,
+    ) -> CoreResult<BatchUpload> {
+        let first = buffer.screenshots.first().ok_or(CoreError::InvalidState(
+            "cannot build a batch from an empty buffer",
+        ))?;
+        if recipients.is_empty() {
+            return Err(CoreError::InvalidState(
+                "cannot build a batch without any recipients",
+            ));
+        }
+
+        let events: Vec<&BatchEvent> = buffer.screenshots.iter().map(|item| &item.event).collect();
+        let msgpack = rmp_serde::to_vec_named(&BatchEnvelope { events })?;
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&msgpack)?;
+        let gzipped = encoder.finish()?;
+        let batch_key = crypto.generate_batch_key();
+        let encrypted = crypto.encrypt_batch_blob(&batch_key, &gzipped)?;
+        let access_keys = recipients
+            .iter()
+            .map(|recipient| {
+                Ok(crate::model::BatchAccessKey {
+                    user_id: recipient.user_id.clone(),
+                    hpke_key_base64: crypto.wrap_batch_key_for_recipient(recipient, &batch_key)?,
+                })
+            })
+            .collect::<CoreResult<Vec<_>>>()?;
+
+        Ok(BatchUpload {
+            start_time_ms: first.event.ts,
+            end_time_ms,
+            bytes: encrypted,
+            access_keys,
+        })
+    }
+```
+
+{/* CODE_REFERENCES:END */}

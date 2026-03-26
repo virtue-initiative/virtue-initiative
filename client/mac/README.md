@@ -7,7 +7,7 @@ This client has two modes in one binary:
 
 ## Behavior
 
-- On tray app launch, it installs/starts a LaunchAgent (`codes.anb.virtue.daemon`) so the daemon restarts on login/reboot.
+- On tray app launch, it installs/starts a LaunchAgent (`org.virtueinitiative.virtue.daemon`) so the daemon restarts on login/reboot.
 - Login/logout flows use the shared device API (`/d/...`) and shared core auth command behavior.
 - Daemon idles until login is complete (device token + device ID + E2EE key).
 - Menu action `Open Virtue`:
@@ -31,28 +31,29 @@ macOS daemon alert logs include:
 
 ## Local API Override
 
-macOS supports a persistent override file that is read by the app and daemon at startup:
+macOS reads runtime overrides from:
 
-`~/Library/Application Support/virtue/service.dev.env`
+`~/Library/Application Support/virtue/config.json`
 
 Example:
 
-```bash
-mkdir -p ~/Library/Application\\ Support/virtue
-cat > ~/Library/Application\\ Support/virtue/service.dev.env <<'EOF'
-VIRTUE_BASE_API_URL=http://localhost:8787
-VIRTUE_CAPTURE_INTERVAL_SECONDS=120
-VIRTUE_BATCH_WINDOW_SECONDS=900
-EOF
+```json
+{
+  "api_base_url": "http://localhost:8787",
+  "capture_interval_seconds": 120,
+  "batch_window_seconds": 900
+}
 ```
 
-Apply after changing file:
+Apply after changing the file:
 
 ```bash
-launchctl kickstart -k gui/$(id -u)/codes.anb.virtue.daemon
+launchctl kickstart -k gui/$(id -u)/org.virtueinitiative.virtue.daemon
 ```
 
-`service.dev.env` values are defaults. If a variable is already set in the process/launchd environment, that value wins.
+The mac client stores shared core state under:
+
+`~/Library/Application Support/virtue/state`
 
 ## Screen capture permission
 
@@ -66,7 +67,7 @@ If captures fail, grant permission under:
 From `client/`:
 
 ```bash
-cargo build --release -p virtue-mac-client
+cargo build --release -p virtue-mac
 ```
 
 ## Build `.app`

@@ -5,9 +5,16 @@ permissions:
 
 on:
   pull_request:
+    paths:
+      - "client/**"
+      - ".github/workflows/client-macos.yml"
   push:
     branches:
       - main
+      - staging
+    paths:
+      - "client/**"
+      - ".github/workflows/client-macos.yml"
   workflow_dispatch:
 
 jobs:
@@ -30,19 +37,19 @@ jobs:
             client -> target
 
       - name: Rust build smoke test (core)
-        run: cargo build -p virtue-client-core
+        run: cargo build -p virtue-core
         working-directory: client
 
       - name: Rust build smoke test (macOS client)
-        run: cargo build -p virtue-mac-client
+        run: cargo build -p virtue-mac
         working-directory: client
 
       - name: Rust lint (core)
-        run: cargo clippy -p virtue-client-core --all-targets -- -D warnings
+        run: cargo clippy -p virtue-core --all-targets -- -D warnings
         working-directory: client
 
       - name: Rust lint (macOS client)
-        run: cargo clippy -p virtue-mac-client --all-targets -- -D warnings
+        run: cargo clippy -p virtue-mac --all-targets -- -D warnings
         working-directory: client
 
       - name: Build macOS app bundle and DMG
@@ -50,7 +57,7 @@ jobs:
         working-directory: client
 
       - name: Resolve version info
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         id: version
         shell: bash
         run: |
@@ -60,24 +67,24 @@ jobs:
         working-directory: client
 
       - name: Upload macOS installer artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         uses: actions/upload-artifact@v4
         with:
           name: virtue-macos-${{ steps.version.outputs.build_label }}
           path: client/target/macos/Virtue-${{ steps.version.outputs.build_label }}.dmg
 
-      - name: Clear existing macOS prerelease assets
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Clear existing macOS release assets
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./scripts/clear-prerelease-assets.sh "${{ steps.version.outputs.release_tag }}" "Virtue-*.dmg"
         working-directory: client
 
-      - name: Publish macOS prerelease asset
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Publish macOS release asset
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./scripts/publish-prerelease.sh "${{ steps.version.outputs.release_tag }}" "${{ steps.version.outputs.build_label }}" "target/macos/Virtue-${{ steps.version.outputs.build_label }}.dmg"
+        run: ./scripts/publish-release.sh "${{ steps.version.outputs.release_tag }}" "${{ steps.version.outputs.build_label }}" "target/macos/Virtue-${{ steps.version.outputs.build_label }}.dmg" "${{ github.ref_name == 'main' && 'stable' || 'dev' }}"
         working-directory: client

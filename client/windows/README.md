@@ -27,7 +27,7 @@ next boot emits recovered `daemon_stop_signal`/`system_shutdown` events with
 - `src/bin/virtue-service.rs`: mode switch + lifecycle service + capture console entrypoint.
 - `src/bin/virtue-tray.rs`: tray app with login/logout UI.
 - `src/daemon.rs`: lifecycle logging daemon (startup/shutdown/session/service events).
-- `src/capture_daemon.rs`: screenshot capture/upload daemon using `virtue-client-core`.
+- `src/capture_daemon.rs`: screenshot capture/upload daemon using `virtue-core`.
 - `src/capture.rs`: Windows GDI screenshot capture.
 - `packaging/nsis/installer.nsi`: installer definition.
 - `scripts/build-installer.ps1`: Windows host build + packaging script.
@@ -69,19 +69,19 @@ Useful installer build flags:
 
 The CI-equivalent smoke checks run:
 
-- `cargo build -p virtue-client-core`
-- `cargo build -p virtue-windows-client`
-- `cargo clippy -p virtue-client-core --all-targets -- -D warnings`
-- `cargo clippy -p virtue-windows-client --all-targets -- -D warnings`
+- `cargo build -p virtue-core`
+- `cargo build -p virtue-windows`
+- `cargo clippy -p virtue-core --all-targets -- -D warnings`
+- `cargo clippy -p virtue-windows --all-targets -- -D warnings`
 
 On Windows host:
 
 ```powershell
 cd C:\path\to\virtue-initiative\client
-cargo build -p virtue-client-core
-cargo build -p virtue-windows-client
-cargo clippy -p virtue-client-core --all-targets -- -D warnings
-cargo clippy -p virtue-windows-client --all-targets -- -D warnings
+cargo build -p virtue-core
+cargo build -p virtue-windows
+cargo clippy -p virtue-core --all-targets -- -D warnings
+cargo clippy -p virtue-windows --all-targets -- -D warnings
 ```
 
 This uses persistent cache dirs under `%LOCALAPPDATA%\VirtueBuildCache` and
