@@ -56,7 +56,13 @@ tag_ref_endpoint="repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}"
 tag_refs_endpoint="repos/${GITHUB_REPOSITORY}/git/refs"
 
 fetch_tag_sha() {
-  gh api "${tag_ref_endpoint}" --jq '.object.sha' 2>/dev/null
+  local tag_sha
+
+  if ! tag_sha="$(gh api "${tag_ref_endpoint}" --jq '.object.sha' 2>/dev/null)"; then
+    return 1
+  fi
+
+  printf '%s\n' "${tag_sha}"
 }
 
 ensure_tag() {
