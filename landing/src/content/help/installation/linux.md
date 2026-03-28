@@ -2,7 +2,9 @@
 sidebar_position: 3
 ---
 
-# Linux installation
+# Linux client
+
+## Installation
 
 If you do not yet have one, first [create an account](/signup).
 
@@ -12,11 +14,11 @@ Double-click the downloaded file to install the package.
 
 When the `virtue` service is installed and running, you should see an icon appear in the system tray.
 
-From a terminal, run `virtue login` and login with your credentials.
+From a terminal, run `virtue login` and log in with your credentials.
 
-That's it! At this point the app will begin to periodically collect and send logs and images in the background.
+That's it! At this point the app will begin to periodically collect and send events and screenshots in the background. To ensure that the service is functioning properly, log in to the [application](/app) and you should see a new device in your dashboard. Click on the Logs tab and for your device you should start seeing screenshots. A few screenshots should appear within the first 5-10 minutes, and then batches of images should appear every hour.
 
-# Usage
+## Usage
 
 Run `virtue --help` from a terminal to see the available list of commands.
 **Note that the service will log an alert for logout events.**
@@ -26,7 +28,7 @@ To stop the service, run `systemctl --user stop virtue.service`.
 
 To start the service again, run `systemctl --user start virtue.service`.
 
-# Uninstall
+## Uninstall
 
 Run `sudo apt remove virtue` to uninstall the package. **Note that the service
 will log an alert as it shuts down.**
