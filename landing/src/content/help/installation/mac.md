@@ -32,4 +32,3 @@ To restart the service, open the Virtue application from the app launcher and lo
 
 To uninstall, first right-click the tray application and click "Stop". Then navigate to the Applications folder in Finder, find the Virtue application, right-click and select Move to Trash.
 **Note that the service will log an alert when uninstalling.**
-

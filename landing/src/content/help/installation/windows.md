@@ -25,4 +25,3 @@ To log out, open the tray application to log out of your account and stop sendin
 
 To uninstall, navigate to "This PC", "Local Disk (C:)", "Program Files", then "Virtue". Double click the "Uninstall" application in that folder.
 **Note that the service will log an alert when uninstalling the service.**
-

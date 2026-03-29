@@ -16,7 +16,7 @@ Open Settings on your phone. Go to Apps & Notifications (or just Apps) > Special
 
 Select the app you used for downloading (e.g., Chrome) and toggle "Allow from this source".
 
-Open the downloaded `.apk` file in your file manager and tap Install. 
+Open the downloaded `.apk` file in your file manager and tap Install.
 
 Once installed, open the Virtue app and log in with your credentials.
 
