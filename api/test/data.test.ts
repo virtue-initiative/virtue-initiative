@@ -44,6 +44,14 @@ describe('Data and device API routes', () => {
       body: JSON.stringify({ ts: 1710000000000, type: 'system_event', data: { event: 'startup' } }),
     });
     expect(logRes.status).toBe(201);
+    const uploadedLog = (await logRes.json()) as {
+      id: string;
+      type: string;
+      data: { event: string };
+    };
+    expect(uploadedLog.id).toBeTruthy();
+    expect(uploadedLog.type).toBe('system_event');
+    expect(uploadedLog.data.event).toBe('startup');
 
     const form = new FormData();
     form.set('start_time', '1710000000000');

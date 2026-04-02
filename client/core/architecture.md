@@ -94,8 +94,7 @@ Current files:
 - `status.json`: last known runtime status
 - `auth.json`: user access token and device credentials
 - `device_settings.json`: latest device settings returned by `GET /d/device`
-- `pending_requests.json`: retry queue
-- `batch_buffer.json`: buffered plaintext screenshot events waiting for batch upload
+- `audit.jsonl`: append-only upload audit log and retry source
 - `errors.log`: local append-only operational error log
 
 `core` should be able to restart and continue uploading without platform-specific recovery logic.
@@ -263,17 +262,17 @@ The client does not compute server state itself, but it must produce compatible 
 `loop_iteration()` should:
 
 1. reload runtime config overrides from `Config.runtime_config_file`
-2. reload persisted auth, settings, retry queue, and batch buffer state
+2. reload persisted auth, settings, and audit-log state
 3. get current UTC time
 4. write/update current status
-5. retry queued failed requests
+5. retry unresolved audit-log work
 6. if screenshot interval elapsed:
    - capture screenshot through platform hooks
    - normalize it into a batch event
    - compute its plaintext content hash
-   - append event to `batch_buffer.json`
+   - append a screenshot `log` record to `audit.jsonl`
    - attempt `POST /hash`
-7. if batch interval elapsed and buffered events exist:
+7. if batch interval elapsed and unresolved batched audit items exist:
    - build batch payload
    - MessagePack encode
    - gzip compress
@@ -286,18 +285,16 @@ The client does not compute server state itself, but it must produce compatible 
 
 All retry behavior lives in `core`.
 
-Queued request record fields:
+Audit records are append-only JSON lines.
 
-- request id
-- request kind
-- serialized payload
-- last tried timestamp
-- try count
+When work succeeds:
 
-When a request fails:
+- append a success record to disk
 
-- queue it to disk
-- retry it in future loop iterations
+When work fails:
+
+- leave the original `log` record unresolved
+- retry it in future loop iterations based on replayed audit state
 
 Exception:
 
@@ -312,12 +309,11 @@ For device-authenticated endpoints:
 - persist the new device access token
 - retry the original request once
 
-Request kinds that should support replay:
+Replayable work tracked by the audit log:
 
 - upload hash
 - upload batch
 - upload log
-- fetch device settings
 
 ## API Mapping
 

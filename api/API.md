@@ -582,6 +582,17 @@ Request:
 ```
 
 Response `201` echoes the stored log.
+Response `201`:
+
+```js
+{
+  "id": UUID,
+  "ts": DateTime,
+  "type": "system_event",
+  "risk": 0.7 | undefined,
+  "data": {}
+}
+```
 
 ## Hash API
 
