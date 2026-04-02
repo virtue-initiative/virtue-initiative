@@ -366,7 +366,14 @@ deviceOnly.post(
       });
     }
 
-    return c.json({ ...log, ...(computedRisk != null ? { risk: computedRisk } : {}) }, 201);
+    return c.json(
+      {
+        id: logId,
+        ...log,
+        ...(computedRisk != null ? { risk: computedRisk } : {}),
+      },
+      201,
+    );
   },
 );
 

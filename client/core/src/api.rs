@@ -10,6 +10,16 @@ use crate::crypto::derive_password_auth;
 use crate::error::{CoreError, CoreResult};
 use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, HashParams, LogEntry};
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct UploadedBatchResponse {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UploadedLogResponse {
+    pub id: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct ApiClient {
     base_url: String,
@@ -170,7 +180,11 @@ impl ApiClient {
         Ok(response.access_token)
     }
 
-    pub fn upload_batch(&self, device_access_token: &str, batch: &BatchUpload) -> CoreResult<()> {
+    pub fn upload_batch(
+        &self,
+        device_access_token: &str,
+        batch: &BatchUpload,
+    ) -> CoreResult<UploadedBatchResponse> {
         #[derive(Serialize)]
         struct AccessKeysPayload<'a> {
             keys: Vec<AccessKeyEntry<'a>>,
@@ -204,7 +218,11 @@ impl ApiClient {
         self.send_form(Method::POST, None, "/d/batch", device_access_token, form)
     }
 
-    pub fn upload_log(&self, device_access_token: &str, log: &LogEntry) -> CoreResult<()> {
+    pub fn upload_log(
+        &self,
+        device_access_token: &str,
+        log: &LogEntry,
+    ) -> CoreResult<UploadedLogResponse> {
         #[derive(Serialize)]
         struct UploadLogRequest<'a> {
             ts: i64,
@@ -215,17 +233,17 @@ impl ApiClient {
             data: &'a serde_json::Value,
         }
 
-        self.send_empty_with_json(
+        self.send_json(
             Method::POST,
             None,
             "/d/log",
-            device_access_token,
-            &UploadLogRequest {
+            Some(device_access_token),
+            Some(&UploadLogRequest {
                 ts: log.ts_ms,
                 kind: &log.kind,
                 risk: log.risk,
                 data: &log.data,
-            },
+            }),
         )
     }
 
@@ -269,21 +287,6 @@ impl ApiClient {
         self.expect_json(response)
     }
 
-    fn send_empty_with_json<TBody: Serialize + ?Sized>(
-        &self,
-        method: Method,
-        base_override: Option<&str>,
-        path: &str,
-        bearer_token: &str,
-        body: &TBody,
-    ) -> CoreResult<()> {
-        let response = self
-            .request(method, base_override, path, Some(bearer_token))
-            .json(body)
-            .send()?;
-        self.expect_success(response)
-    }
-
     fn send_empty(
         &self,
         method: Method,
@@ -304,12 +307,12 @@ impl ApiClient {
         path: &str,
         bearer_token: &str,
         form: Form,
-    ) -> CoreResult<()> {
+    ) -> CoreResult<UploadedBatchResponse> {
         let response = self
             .request(method, base_override, path, Some(bearer_token))
             .multipart(form)
             .send()?;
-        self.expect_success(response)
+        self.expect_json(response)
     }
 
     fn request(

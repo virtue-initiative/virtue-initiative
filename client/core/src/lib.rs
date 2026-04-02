@@ -1,4 +1,5 @@
 pub mod api;
+pub mod audit;
 pub mod batch;
 pub mod config;
 pub mod crypto;
@@ -12,9 +13,9 @@ pub mod storage;
 pub use config::Config;
 pub use error::{CoreError, CoreResult};
 pub use model::{
-    AuthState, BatchBufferState, BatchEvent, BatchEventData, BatchUpload, BufferedScreenshot,
-    DeviceCredentials, DeviceSettings, LogEntry, LoginStatus, LoopOutcome, PendingRequest,
-    RequestDisposition, RequestKind, Screenshot, ServiceStatus,
+    AuditLogPayload, AuditRecord, AuditState, AuthState, BatchEvent, BatchEventData, BatchUpload,
+    BufferedScreenshot, DeviceCredentials, DeviceSettings, LogEntry, LoginStatus, LoopOutcome,
+    Screenshot, ServiceStatus,
 };
 pub use platform::PlatformHooks;
 pub use service::MonitorService;

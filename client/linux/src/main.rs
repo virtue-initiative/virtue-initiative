@@ -8,6 +8,7 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use virtue_core::audit::derive_state;
 use virtue_core::storage::FileStateStore;
 use virtue_core::{AuthState, MonitorService, ServiceStatus};
 
@@ -195,8 +196,8 @@ fn prompt_yes_no(prompt: &str, default_yes: bool) -> Result<bool> {
 }
 
 fn load_service_status(store: &FileStateStore, auth: &AuthState) -> Result<ServiceStatus> {
-    let pending_request_count = store.load_pending_requests()?.len();
-    Ok(store.load_status()?.unwrap_or(ServiceStatus {
+    let pending_request_count = derive_state(&store.load_audit_records()?).pending_request_count;
+    let mut status = store.load_status()?.unwrap_or(ServiceStatus {
         is_authenticated: auth.device_credentials.is_some(),
         is_running: false,
         device_id: auth
@@ -207,5 +208,7 @@ fn load_service_status(store: &FileStateStore, auth: &AuthState) -> Result<Servi
         last_screenshot_at_ms: None,
         last_batch_at_ms: None,
         pending_request_count,
-    }))
+    });
+    status.pending_request_count = pending_request_count;
+    Ok(status)
 }

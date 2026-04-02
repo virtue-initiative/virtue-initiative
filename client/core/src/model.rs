@@ -37,6 +37,55 @@ pub struct LogEntry {
     pub data: serde_json::Value,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AuditLogPayload {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direct_log: Option<LogEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch_screenshot: Option<BufferedScreenshot>,
+}
+
+impl AuditLogPayload {
+    pub fn for_direct_log(log: LogEntry) -> Self {
+        Self {
+            direct_log: Some(log),
+            batch_screenshot: None,
+        }
+    }
+
+    pub fn for_batch_screenshot(screenshot: BufferedScreenshot) -> Self {
+        Self {
+            direct_log: None,
+            batch_screenshot: Some(screenshot),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AuditRecord {
+    Log {
+        local_id: String,
+        should_be_in_batch: bool,
+        #[serde(default)]
+        requires_hash_upload: bool,
+        log: AuditLogPayload,
+    },
+    HashUploaded {
+        local_id: String,
+    },
+    LogUploaded {
+        local_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        server_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        batch_id: Option<String>,
+    },
+    BatchUploaded {
+        server_id: String,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchUpload {
     pub start_time_ms: i64,
@@ -104,11 +153,6 @@ pub struct AuthState {
     pub post_login_proof_batches_remaining: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct BatchBufferState {
-    pub screenshots: Vec<BufferedScreenshot>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceStatus {
     pub is_authenticated: bool,
@@ -121,31 +165,25 @@ pub struct ServiceStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum RequestKind {
-    DeviceSettings,
-    UploadBatch,
-    UploadLog,
-    UploadHash,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PendingRequest {
-    pub id: String,
-    pub kind: RequestKind,
-    pub payload: serde_json::Value,
-    pub last_tried_at_ms: Option<i64>,
-    pub try_count: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum RequestDisposition {
-    Completed,
-    Deferred,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoopOutcome {
     pub ran_at_ms: i64,
     pub next_run_at_ms: i64,
     pub status: ServiceStatus,
+}
+
+#[derive(Debug, Clone)]
+pub struct AuditLogItem {
+    pub local_id: String,
+    pub should_be_in_batch: bool,
+    pub requires_hash_upload: bool,
+    pub payload: AuditLogPayload,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AuditState {
+    pub items: Vec<AuditLogItem>,
+    pub pending_hash_uploads: Vec<AuditLogItem>,
+    pub pending_direct_uploads: Vec<AuditLogItem>,
+    pub pending_batch_uploads: Vec<AuditLogItem>,
+    pub pending_request_count: usize,
 }

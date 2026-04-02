@@ -6,28 +6,19 @@ use serde::Serialize;
 
 use crate::crypto::CryptoEngine;
 use crate::error::{CoreError, CoreResult};
-use crate::model::{BatchBufferState, BatchEvent, BatchRecipient, BatchUpload, BufferedScreenshot};
+use crate::model::{BatchEvent, BatchRecipient, BatchUpload, BufferedScreenshot};
 
 #[derive(Debug, Default, Clone)]
 pub struct BatchBuilder;
 
 impl BatchBuilder {
-    pub fn push_screenshot(
-        buffer: &mut BatchBufferState,
-        screenshot: BufferedScreenshot,
-    ) -> CoreResult<()> {
-        buffer.screenshots.push(screenshot);
-        buffer.screenshots.sort_by_key(|item| item.event.ts);
-        Ok(())
-    }
-
     pub fn build_upload(
-        buffer: &BatchBufferState,
+        screenshots: &[BufferedScreenshot],
         crypto: &CryptoEngine,
         recipients: &[BatchRecipient],
         end_time_ms: i64,
     ) -> CoreResult<BatchUpload> {
-        let first = buffer.screenshots.first().ok_or(CoreError::InvalidState(
+        let first = screenshots.first().ok_or(CoreError::InvalidState(
             "cannot build a batch from an empty buffer",
         ))?;
         if recipients.is_empty() {
@@ -36,7 +27,7 @@ impl BatchBuilder {
             ));
         }
 
-        let events: Vec<&BatchEvent> = buffer.screenshots.iter().map(|item| &item.event).collect();
+        let events: Vec<&BatchEvent> = screenshots.iter().map(|item| &item.event).collect();
         let msgpack = rmp_serde::to_vec_named(&BatchEnvelope { events })?;
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
@@ -60,10 +51,6 @@ impl BatchBuilder {
             bytes: encrypted,
             access_keys,
         })
-    }
-
-    pub fn clear(buffer: &mut BatchBufferState) {
-        buffer.screenshots.clear();
     }
 }
 

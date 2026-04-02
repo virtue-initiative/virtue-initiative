@@ -243,7 +243,7 @@ The tray app and service share state in:
 
 - `%PROGRAMDATA%\Virtue\config\client_state.json`
 - `%PROGRAMDATA%\Virtue\config\token_store.json`
-- `%PROGRAMDATA%\Virtue\data\batch_buffer.json`
+- `%PROGRAMDATA%\Virtue\data\audit.jsonl`
 - `%PROGRAMDATA%\Virtue\data\lifecycle_state.json`
 - `%PROGRAMDATA%\Virtue\data\service.log`
 
