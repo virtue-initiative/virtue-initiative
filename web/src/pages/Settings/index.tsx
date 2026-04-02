@@ -1,6 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { api, User, WatchingPartner } from "../../api";
 import { useAuth } from "../../context/auth";
+import { formatDate } from "../../utils/time";
 import "./style.css";
 
 export function Settings() {
@@ -11,6 +12,7 @@ export function Settings() {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [nameStatus, setNameStatus] = useState<string | null>(null);
+  const [savedButtonUntil, setSavedButtonUntil] = useState<number>(0);
   const [verificationStatus, setVerificationStatus] = useState<string | null>(
     null,
   );
@@ -35,6 +37,19 @@ export function Settings() {
   useEffect(() => {
     reload().catch(() => {});
   }, [token]);
+
+  useEffect(() => {
+    if (savedButtonUntil <= 0) return;
+    const remaining = savedButtonUntil - Date.now();
+    if (remaining <= 0) {
+      setSavedButtonUntil(0);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setSavedButtonUntil(0);
+    }, remaining);
+    return () => window.clearTimeout(timer);
+  }, [savedButtonUntil]);
 
   const normalizedEmail = email.trim().toLowerCase();
   const trimmedName = name.trim();
@@ -65,10 +80,11 @@ export function Settings() {
     try {
       const emailChanged = Boolean(profilePatch.email);
       await api.updateUser(token, profilePatch);
+      setSavedButtonUntil(Date.now() + 3000);
       setNameStatus(
         emailChanged
           ? "Profile saved. Please verify your new email address."
-          : "Saved.",
+          : "Saved",
       );
       await reload();
     } catch (err) {
@@ -131,6 +147,7 @@ export function Settings() {
               onInput={(e) => {
                 setName((e.target as HTMLInputElement).value);
                 setNameStatus(null);
+                setSavedButtonUntil(0);
               }}
               placeholder="Your name"
               autoComplete="name"
@@ -145,13 +162,14 @@ export function Settings() {
               onInput={(e) => {
                 setEmail((e.target as HTMLInputElement).value);
                 setNameStatus(null);
+                setSavedButtonUntil(0);
               }}
               placeholder="you@example.com"
               autoComplete="email"
               required
             />
           </div>
-          {nameStatus && (
+          {nameStatus && !nameStatus.toLowerCase().includes("saved") && (
             <p
               class={
                 nameStatus.toLowerCase().includes("saved")
@@ -167,7 +185,11 @@ export function Settings() {
             type="submit"
             disabled={nameSaving || !hasProfileChanges}
           >
-            {nameSaving ? "Saving…" : "Save"}
+            {nameSaving
+              ? "Saving…"
+              : savedButtonUntil > Date.now()
+                ? "Saved"
+                : "Save"}
           </button>
         </form>
       </section>
@@ -183,7 +205,8 @@ export function Settings() {
           <>
             {Boolean(user?.email_bounced_at) && (
               <p class="alert-error">
-                Your last verification email bounced. Update your email above
+                Your last verification email bounced on{" "}
+                {formatDate(user.email_bounced_at)}. Update your email above
                 before requesting another verification email.
               </p>
             )}

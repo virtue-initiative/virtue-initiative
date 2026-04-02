@@ -90,9 +90,15 @@ export function Home() {
       <section class="dash-section">
         <div class="section-header">
           <h2>My devices</h2>
+          <a
+            class="btn btn-primary"
+            href="https://virtueinitiative.org/help/installation/"
+          >
+            Create device
+          </a>
         </div>
         {ownDevices.length === 0 ? (
-          <p class="empty">No devices registered yet.</p>
+          <p class="empty">No devices</p>
         ) : (
           <div class="card-grid">
             {ownDevices.map((device) => (
@@ -260,6 +266,10 @@ function InviteButton({
       </Button>
       <dialog ref={dialogRef}>
         <h3 class="dialog-title">Invite a partner</h3>
+        <p class="invite-desc">
+          Your partner can view your uploaded screenshots and activity logs
+          after they accept this invite and set up their account.
+        </p>
         <form onSubmit={handleSubmit}>
           <div class="field">
             <label for="invite-email">Partner's email</label>
@@ -299,8 +309,10 @@ function PendingPartnerCard({
 }) {
   const [action, setAction] = useState<"remove" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const confirmRef = useRef<HTMLDialogElement>(null);
+  const partnerName = partner.user.name ?? partner.user.email;
 
-  async function remove() {
+  async function removeConfirmed() {
     setAction("remove");
     setError(null);
     try {
@@ -338,12 +350,40 @@ function PendingPartnerCard({
         <button
           class="btn btn-danger"
           type="button"
-          onClick={remove}
+          onClick={() => confirmRef.current?.showModal()}
           disabled={action !== null}
         >
           {action === "remove" ? "Removing…" : "Remove"}
         </button>
       </div>
+      <dialog ref={confirmRef}>
+        <h3 class="dialog-title">Remove {partnerName}?</h3>
+        <p class="invite-desc">
+          This will cancel the pending partner relationship. The partner will be
+          notified.
+        </p>
+        <div class="invite-actions">
+          <button
+            class="btn btn-danger"
+            type="button"
+            onClick={() => {
+              confirmRef.current?.close();
+              removeConfirmed().catch(() => {});
+            }}
+            disabled={action !== null}
+          >
+            {action === "remove" ? "Removing…" : "Remove partner"}
+          </button>
+          <button
+            class="btn btn-ghost"
+            type="button"
+            onClick={() => confirmRef.current?.close()}
+            disabled={action !== null}
+          >
+            Cancel
+          </button>
+        </div>
+      </dialog>
     </div>
   );
 }
@@ -360,8 +400,10 @@ function PartnerCard({
   const { route } = useLocation();
   const [action, setAction] = useState<"remove" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const confirmRef = useRef<HTMLDialogElement>(null);
+  const partnerName = partner.user.name ?? partner.user.email;
 
-  async function remove() {
+  async function removeConfirmed() {
     setAction("remove");
     setError(null);
     try {
@@ -401,12 +443,40 @@ function PartnerCard({
         <button
           class="btn btn-danger"
           type="button"
-          onClick={remove}
+          onClick={() => confirmRef.current?.showModal()}
           disabled={action !== null}
         >
           {action === "remove" ? "Removing…" : "Remove"}
         </button>
       </div>
+      <dialog ref={confirmRef}>
+        <h3 class="dialog-title">Remove {partnerName}?</h3>
+        <p class="invite-desc">
+          This will remove your partner relationship with this person. The
+          partner will be notified.
+        </p>
+        <div class="invite-actions">
+          <button
+            class="btn btn-danger"
+            type="button"
+            onClick={() => {
+              confirmRef.current?.close();
+              removeConfirmed().catch(() => {});
+            }}
+            disabled={action !== null}
+          >
+            {action === "remove" ? "Removing…" : "Remove partner"}
+          </button>
+          <button
+            class="btn btn-ghost"
+            type="button"
+            onClick={() => confirmRef.current?.close()}
+            disabled={action !== null}
+          >
+            Cancel
+          </button>
+        </div>
+      </dialog>
     </div>
   );
 }
