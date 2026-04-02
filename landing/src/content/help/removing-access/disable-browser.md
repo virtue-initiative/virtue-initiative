@@ -2,6 +2,6 @@
 sidebar_position: 3
 ---
 
-# Disable The Browser
+# Disable the browser
 
 TODO: Write this article

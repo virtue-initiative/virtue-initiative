@@ -2,9 +2,9 @@
 sidebar_position: 1
 ---
 
-# Inviting a Partner
+# Inviting a partner
 
-Invite your accountability partner from the dashboard's **Partners** section.
+Invite your accountability partner from the dashboard's **Watchers** section.
 
 If you enable **Can view data**, the server will include that partner in future
 batch access once they accept the invite.

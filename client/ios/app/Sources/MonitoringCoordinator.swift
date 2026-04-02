@@ -207,7 +207,7 @@ final class MonitoringCoordinator: ObservableObject {
 
     private func refreshSafariStatus() {
         guard let defaults = sharedDefaults else {
-            safariCaptureHealth = "App Group unavailable"
+            safariCaptureHealth = "App group unavailable"
             safariLastHeartbeat = "<none>"
             safariLastFrame = "<none>"
             safariLastPage = "<none>"

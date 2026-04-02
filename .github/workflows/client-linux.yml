@@ -5,9 +5,6 @@ permissions:
 
 on:
   pull_request:
-    paths:
-      - "client/**"
-      - ".github/workflows/client-linux.yml"
   push:
     branches:
       - main

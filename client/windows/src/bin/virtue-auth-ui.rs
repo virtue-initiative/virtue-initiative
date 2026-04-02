@@ -54,7 +54,7 @@ slint::slint! {
                     spacing: 12px;
 
                     Text {
-                        text: logged_in ? "Virtue Account" : "Sign In";
+                        text: logged_in ? "Virtue account" : "Sign in";
                         color: #0f172a;
                         font-size: 24px;
                         font-weight: 700;

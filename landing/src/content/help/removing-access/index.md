@@ -2,7 +2,7 @@
 sidebar_position: 1
 ---
 
-# Removing Access
+# Removing access
 
 One of the first lines of defense is removing access. There are a few main ways
 of restricting or removing access to porn.

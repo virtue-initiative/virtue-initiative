@@ -107,8 +107,6 @@ function renderEmailDocument(input: {
                   color: EMAIL_COLORS.textMuted,
                   'font-size': '13px',
                   'font-weight': '600',
-                  'letter-spacing': '0.04em',
-                  'text-transform': 'uppercase',
                 })}">${escapeHtml(input.appName)}</p>
               </td>
             </tr>
@@ -379,7 +377,7 @@ export function renderTamperAlertTemplate(input: {
   const footer = withFooter({
     appName,
     appUrl: input.appUrl,
-    headline: `${input.severity.toUpperCase()} tamper alert`,
+    headline: `${input.severity} tamper alert`,
     textLines: [
       `${owner} triggered a ${input.severity} tamper alert.`,
       input.title,
@@ -396,7 +394,7 @@ export function renderTamperAlertTemplate(input: {
   });
 
   return {
-    subject: `[${input.severity.toUpperCase()}] ${owner}: ${input.title}`,
+    subject: `[${input.severity}] ${owner}: ${input.title}`,
     text: footer.text,
     html: footer.html,
   };

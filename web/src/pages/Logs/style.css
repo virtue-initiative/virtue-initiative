@@ -52,8 +52,6 @@
     margin: 0 0 0.75rem;
     font-size: 0.75rem;
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
     color: var(--text-muted);
   }
 
@@ -73,8 +71,6 @@
   margin: 0 0 0.3rem 0.65rem;
   font-size: 0.72rem;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;

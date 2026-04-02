@@ -10,12 +10,12 @@ This client has two modes in one binary:
 - On tray app launch, it installs/starts a LaunchAgent (`org.virtueinitiative.virtue.daemon`) so the daemon restarts on login/reboot.
 - Login/logout flows use the shared device API (`/d/...`) and shared core auth command behavior.
 - Daemon idles until login is complete (device token + device ID + E2EE key).
-- Menu action `Open Virtue`:
+- Menu action `Open virtue`:
   - If logged out: prompts for email/password.
   - If logged in: shows signed-in state with `Restart daemon` / `Logout`.
-- Tray menu action `Close (Will Send Alert)` sends a `manual_override` alert (best effort), stops the daemon launch agent, and exits the tray app.
+- Tray menu action `Close (will send alert)` sends a `manual_override` alert (best effort), stops the daemon launch agent, and exits the tray app.
 - Closing behavior:
-  - `Close (Will Send Alert)` is a full stop: tray icon exits and background daemon is stopped.
+  - `Close (will send alert)` is a full stop: tray icon exits and background daemon is stopped.
   - After closing, opening the installed `/Applications/Virtue.app` starts both the tray icon and daemon again.
 
 ## Lifecycle logs

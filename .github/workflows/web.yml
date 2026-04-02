@@ -2,13 +2,6 @@ name: Web Checks
 
 on:
   pull_request:
-    paths:
-      - "api/**"
-      - "web/**"
-      - "landing/**"
-      - "shared-web/**"
-      - "theme.json"
-      - ".github/workflows/web.yml"
   push:
     branches:
       - staging

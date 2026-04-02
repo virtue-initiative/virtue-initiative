@@ -149,10 +149,10 @@ screenshots before they are uploaded)
 The verification hash looks like this:
 
 ```
-SHA256(SHA256(screenshot_n) || SHA256(SHA256(screenshot_n-1) || SHA256(....)))
+SHA256(SHA256(log_n) || SHA256(SHA256(log_n-1) || SHA256(....)))
 ```
 
-Every screenshot the client uploads `SHA256(screenshot)` and it is combined on
+Every log the client uploads `SHA256(log)` and it is combined on
 the server with the hash like above. The partner can verify that the batch is
 correct by doing the same process on their end when downloading and decrypting
 the batch.
