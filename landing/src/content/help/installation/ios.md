@@ -2,6 +2,6 @@
 sidebar_position: 5
 ---
 
-# iOS
+# iOS client
 
-Coming soon.
+**The iOS client is coming soon.**
