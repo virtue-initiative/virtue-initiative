@@ -11,6 +11,8 @@ use crate::config::ClientPaths;
 const TOOLTIP_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
 const RETRY_INTERVAL: Duration = Duration::from_secs(30);
 const LOG_THROTTLE_INTERVAL: Duration = Duration::from_secs(10 * 60);
+const STATUS_NOTIFIER_WATCHER_NAME: &str = "org.kde.StatusNotifierWatcher";
+const DBUS_SERVICE_UNKNOWN_ERROR: &str = "org.freedesktop.DBus.Error.ServiceUnknown";
 
 pub struct DaemonTray {
     shutdown: Arc<AtomicBool>,
@@ -53,12 +55,17 @@ fn spawn_tray_worker(paths: ClientPaths, shutdown: Arc<AtomicBool>) -> thread::J
                 Ok(()) => break,
                 Err(err) => {
                     let message = err.to_string();
+                    let error_kind = classify_tray_error(&message);
                     let should_log = last_error_message.as_deref() != Some(message.as_str())
                         || last_error_log_at.elapsed() >= LOG_THROTTLE_INTERVAL;
                     if should_log {
                         eprintln!("tray unavailable (non-fatal): {message}");
                         last_error_message = Some(message);
                         last_error_log_at = std::time::Instant::now();
+                    }
+
+                    if matches!(error_kind, TrayErrorKind::MissingWatcher) {
+                        break;
                     }
                 }
             }
@@ -150,6 +157,22 @@ fn sleep_interruptible(shutdown: &Arc<AtomicBool>, duration: Duration) {
     }
 }
 
+fn classify_tray_error(message: &str) -> TrayErrorKind {
+    if message.contains(DBUS_SERVICE_UNKNOWN_ERROR)
+        && message.contains(STATUS_NOTIFIER_WATCHER_NAME)
+    {
+        TrayErrorKind::MissingWatcher
+    } else {
+        TrayErrorKind::Retryable
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TrayErrorKind {
+    MissingWatcher,
+    Retryable,
+}
+
 #[derive(Clone, Debug)]
 struct VirtueTray {
     tooltip: String,
@@ -211,5 +234,27 @@ fn build_icon() -> ksni::Icon {
         width,
         height,
         data: argb,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TrayErrorKind, classify_tray_error};
+
+    #[test]
+    fn classifies_missing_status_notifier_watcher_as_non_retryable() {
+        let message = "failed to register to the StatusNotifierWatcher: \
+                       org.freedesktop.DBus.Error.ServiceUnknown: \
+                       The name org.kde.StatusNotifierWatcher was not provided by any .service files";
+
+        assert_eq!(classify_tray_error(message), TrayErrorKind::MissingWatcher);
+    }
+
+    #[test]
+    fn leaves_other_tray_errors_retryable() {
+        assert_eq!(
+            classify_tray_error("failed to connect to tray host"),
+            TrayErrorKind::Retryable
+        );
     }
 }

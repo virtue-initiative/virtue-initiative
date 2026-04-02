@@ -20,7 +20,7 @@ The service is installed and auto-started for active desktop users by the packag
 Before `virtue login`, monitoring is idle because there is no token/device binding.
 After `virtue login`, captures and uploads start automatically.
 The tray icon (when available) is started and stopped by the daemon process.
-If a tray host is unavailable, monitoring continues and the daemon retries tray registration in the background.
+If a tray host is unavailable at daemon startup, monitoring continues without the tray icon.
 Linux alert logs include:
 
 - `daemon_start` / `daemon_stop_signal` for service process lifecycle.
