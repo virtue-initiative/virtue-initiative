@@ -5,13 +5,6 @@ on:
   push:
     branches:
       - staging
-    paths:
-      - "api/**"
-      - "web/**"
-      - "landing/**"
-      - "shared-web/**"
-      - "theme.json"
-      - ".github/workflows/web.yml"
   workflow_dispatch:
 
 jobs:
