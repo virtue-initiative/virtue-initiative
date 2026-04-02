@@ -80,8 +80,8 @@ fn run_tray(paths: ClientPaths) -> Result<()> {
     let event_loop = EventLoopBuilder::<()>::with_user_event().build();
 
     let menu = Menu::new();
-    let open_item = MenuItem::new("Open Virtue", true, None);
-    let close_item = MenuItem::new("Close (Will Send Alert)", true, None);
+    let open_item = MenuItem::new("Open virtue", true, None);
+    let close_item = MenuItem::new("Close (will send alert)", true, None);
     menu.append(&open_item)?;
     menu.append(&PredefinedMenuItem::separator())?;
     menu.append(&close_item)?;

@@ -12,7 +12,7 @@ If you do not yet have one, first [create an account](/signup).
 
 On your Android device, download the Android `.apk` file from the [downloads](/download) page.
 
-Open Settings on your phone. Go to Apps & Notifications (or just Apps) > Special App Access > Install Unknown Apps.
+Open Settings on your phone. Go to Apps & notifications (or just Apps) > Special app access > Install unknown apps.
 
 Select the app you used for downloading (e.g., Chrome) and toggle "Allow from this source".
 
@@ -24,7 +24,7 @@ That's it! At this point the app will begin to periodically collect and send eve
 
 ## Usage
 
-To stop the service, click the Sign out button in the app.
+To stop the service, click the sign out button in the app.
 **Note that the service will log an alert when signing out.**
 
 To start the service, sign in with your credentials in the app.

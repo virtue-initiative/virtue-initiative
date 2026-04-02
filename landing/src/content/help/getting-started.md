@@ -2,7 +2,7 @@
 sidebar_position: 1
 ---
 
-# Getting Started
+# Getting started
 
 To get set up, all you have to do is:
 

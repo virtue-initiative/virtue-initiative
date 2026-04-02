@@ -2,7 +2,7 @@
 
 Use this as a short manual end-to-end checklist before shipping.
 
-## Signup Flow
+## Signup flow
 
 1. Create a fresh account.
 2. Log in on one client device.

@@ -122,8 +122,6 @@ section {
   & h2 {
     font-size: 1.15rem;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
     color: var(--text-muted);
     margin-bottom: 1rem;
     border-bottom: 1px solid var(--border);
@@ -566,8 +564,6 @@ footer {
   & h1 {
     font-size: 1.15rem;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
     color: var(--text-muted);
     margin-bottom: 1rem;
     border-bottom: 1px solid var(--border);
