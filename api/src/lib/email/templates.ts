@@ -1,5 +1,28 @@
 import { DigestFrequency, TamperSeverity } from '../email-domain';
 
+const EMAIL_COLORS = {
+  text: '#1a1a1a',
+  textMuted: '#6b6860',
+  textOnAccent: '#ffffff',
+  accent: '#008900',
+  pageBg: '#f9f9f7',
+  surface: '#ffffff',
+  border: '#e0ddd8',
+} as const;
+
+function inlineStyle(rules: Record<string, string>) {
+  return Object.entries(rules)
+    .map(([key, value]) => `${key}:${value}`)
+    .join(';');
+}
+
+function themedLink(url: string, label: string) {
+  return `<a href="${escapeHtml(url)}" style="${inlineStyle({
+    color: EMAIL_COLORS.accent,
+    'text-decoration': 'none',
+  })}">${escapeHtml(label)}</a>`;
+}
+
 function escapeHtml(value: string) {
   return value
     .replaceAll('&', '&amp;')
@@ -10,15 +33,37 @@ function escapeHtml(value: string) {
 }
 
 function paragraph(text: string) {
-  return `<p style="margin:0 0 16px 0;color:#1a1a1a;font-size:16px;line-height:1.6;">${escapeHtml(text)}</p>`;
+  return `<p style="${inlineStyle({
+    margin: '0 0 16px 0',
+    color: EMAIL_COLORS.text,
+    'font-size': '16px',
+    'line-height': '1.6',
+  })}">${escapeHtml(text)}</p>`;
 }
 
 function actionButton(url: string, label: string) {
-  return `<p style="margin:0 0 18px 0;"><a href="${escapeHtml(url)}" style="display:inline-block;background:#1a8a50;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;line-height:1;padding:12px 18px;border-radius:8px;">${escapeHtml(label)}</a></p>`;
+  return `<p style="${inlineStyle({ margin: '0 0 18px 0' })}"><a href="${escapeHtml(url)}" style="${inlineStyle(
+    {
+      display: 'inline-block',
+      background: EMAIL_COLORS.accent,
+      color: EMAIL_COLORS.textOnAccent,
+      'text-decoration': 'none',
+      'font-weight': '600',
+      'font-size': '15px',
+      'line-height': '1',
+      padding: '12px 18px',
+      'border-radius': '8px',
+    },
+  )}">${escapeHtml(label)}</a></p>`;
 }
 
 function listItem(text: string) {
-  return `<li style="margin:0 0 8px 0;color:#1a1a1a;font-size:15px;line-height:1.5;">${escapeHtml(text)}</li>`;
+  return `<li style="${inlineStyle({
+    margin: '0 0 8px 0',
+    color: EMAIL_COLORS.text,
+    'font-size': '15px',
+    'line-height': '1.5',
+  })}">${escapeHtml(text)}</li>`;
 }
 
 function normalizeAppName(appName: string) {
@@ -39,26 +84,59 @@ function renderEmailDocument(input: {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(input.headline)}</title>
   </head>
-  <body style="margin:0;padding:24px;background:#f9f9f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#1a1a1a;">
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+  <body style="${inlineStyle({
+    margin: '0',
+    padding: '24px',
+    background: EMAIL_COLORS.pageBg,
+    'font-family': "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif",
+    color: EMAIL_COLORS.text,
+  })}">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="${inlineStyle({ 'border-collapse': 'collapse' })}">
       <tr>
         <td align="center">
-          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;border-collapse:collapse;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="${inlineStyle(
+            {
+              'max-width': '640px',
+              'border-collapse': 'collapse',
+            },
+          )}">
             <tr>
-              <td style="padding:0 0 14px 0;">
-                <p style="margin:0;color:#6b6860;font-size:13px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;">${escapeHtml(input.appName)}</p>
+              <td style="${inlineStyle({ padding: '0 0 14px 0' })}">
+                <p style="${inlineStyle({
+                  margin: '0',
+                  color: EMAIL_COLORS.textMuted,
+                  'font-size': '13px',
+                  'font-weight': '600',
+                  'letter-spacing': '0.04em',
+                  'text-transform': 'uppercase',
+                })}">${escapeHtml(input.appName)}</p>
               </td>
             </tr>
             <tr>
-              <td style="background:#ffffff;border:1px solid #e0ddd8;border-radius:14px;padding:26px 24px;">
-                <h1 style="margin:0 0 16px 0;font-size:22px;line-height:1.25;color:#1a1a1a;">${escapeHtml(input.headline)}</h1>
+              <td style="${inlineStyle({
+                background: EMAIL_COLORS.surface,
+                border: `1px solid ${EMAIL_COLORS.border}`,
+                'border-radius': '14px',
+                padding: '26px 24px',
+              })}">
+                <h1 style="${inlineStyle({
+                  margin: '0 0 16px 0',
+                  'font-size': '22px',
+                  'line-height': '1.25',
+                  color: EMAIL_COLORS.text,
+                })}">${escapeHtml(input.headline)}</h1>
                 ${input.contentHtml}
               </td>
             </tr>
             <tr>
-              <td style="padding:14px 2px 0 2px;">
-                <p style="margin:0;color:#6b6860;font-size:12px;line-height:1.5;">
-                  <a href="${escapeHtml(input.appUrl)}" style="color:#1a8a50;text-decoration:none;">Open ${escapeHtml(input.appName)}</a>
+              <td style="${inlineStyle({ padding: '14px 2px 0 2px' })}">
+                <p style="${inlineStyle({
+                  margin: '0',
+                  color: EMAIL_COLORS.textMuted,
+                  'font-size': '12px',
+                  'line-height': '1.5',
+                })}">
+                  ${themedLink(input.appUrl, `Open ${input.appName}`)}
                 </p>
               </td>
             </tr>
@@ -87,9 +165,12 @@ function withFooter(input: {
     ...input.htmlSections,
     paragraph('Thanks,'),
     paragraph(`${input.appName} team`),
-    `<p style="margin:0;color:#6b6860;font-size:13px;line-height:1.5;"><a href="${escapeHtml(
-      settingsUrl,
-    )}" style="color:#1a8a50;text-decoration:none;">Manage email preferences</a></p>`,
+    `<p style="${inlineStyle({
+      margin: '0',
+      color: EMAIL_COLORS.textMuted,
+      'font-size': '13px',
+      'line-height': '1.5',
+    })}">${themedLink(settingsUrl, 'Manage email preferences')}</p>`,
   ].join('');
 
   return {
@@ -132,9 +213,12 @@ export function renderEmailVerificationTemplate(input: {
       paragraph(greeting),
       paragraph(`Please verify your email address for ${appName}.`),
       actionButton(input.verifyUrl, 'Verify email'),
-      `<p style="margin:0 0 16px 0;color:#6b6860;font-size:13px;line-height:1.5;">If the button does not work, open this link: <a href="${escapeHtml(
-        input.verifyUrl,
-      )}" style="color:#1a8a50;text-decoration:none;">${escapeHtml(input.verifyUrl)}</a></p>`,
+      `<p style="${inlineStyle({
+        margin: '0 0 16px 0',
+        color: EMAIL_COLORS.textMuted,
+        'font-size': '13px',
+        'line-height': '1.5',
+      })}">If the button does not work, open this link: ${themedLink(input.verifyUrl, input.verifyUrl)}</p>`,
     ],
   });
 
@@ -356,9 +440,15 @@ export function renderPartnerDigestTemplate(input: {
     listItem(`Info-only tamper events: ${input.tamperCounts.info}`),
     ...(input.missingLogDays.length > 0
       ? [
-          `<li style="margin:0 0 8px 0;color:#1a1a1a;font-size:15px;line-height:1.5;">Devices with at least one day without logs:<ul style="margin:8px 0 0 18px;padding:0;">${input.missingLogDays
-            .map((line) => listItem(line))
-            .join('')}</ul></li>`,
+          `<li style="${inlineStyle({
+            margin: '0 0 8px 0',
+            color: EMAIL_COLORS.text,
+            'font-size': '15px',
+            'line-height': '1.5',
+          })}">Devices with at least one day without logs:<ul style="${inlineStyle({
+            margin: '8px 0 0 18px',
+            padding: '0',
+          })}">${input.missingLogDays.map((line) => listItem(line)).join('')}</ul></li>`,
         ]
       : []),
   ].join('');
@@ -370,7 +460,10 @@ export function renderPartnerDigestTemplate(input: {
     textLines: lines,
     htmlSections: [
       paragraph(`${periodLabel} accountability summary for ${owner}.`),
-      `<ul style="margin:0 0 16px 18px;padding:0;">${summaryItems}</ul>`,
+      `<ul style="${inlineStyle({
+        margin: '0 0 16px 18px',
+        padding: '0',
+      })}">${summaryItems}</ul>`,
       actionButton(input.appUrl, 'Open dashboard'),
     ],
   });
