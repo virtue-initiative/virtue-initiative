@@ -1,7 +1,6 @@
 import {
   DEFAULT_EMAIL_FREQUENCY,
   DEFAULT_IMMEDIATE_TAMPER_SEVERITY,
-  normalizeImmediateTamperSeverity,
   TamperSeverity,
   severityAtLeast,
 } from './email-domain';
@@ -55,11 +54,7 @@ export async function notifyPartnersAboutRiskLog(
       continue;
     }
 
-    const minimumSeverity =
-      normalizeImmediateTamperSeverity(target.immediate_tamper_severity) ??
-      DEFAULT_IMMEDIATE_TAMPER_SEVERITY;
-
-    if (!severityAtLeast(input.severity, minimumSeverity)) {
+    if (!severityAtLeast(input.severity, DEFAULT_IMMEDIATE_TAMPER_SEVERITY)) {
       continue;
     }
 
