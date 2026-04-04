@@ -13,6 +13,7 @@ use clap::{Parser, Subcommand};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use virtue_core::audit::derive_state;
 use virtue_core::storage::FileStateStore;
 use virtue_core::{AuthState, CoreError, LogEntry, MonitorService, ServiceStatus};
 
@@ -79,8 +80,8 @@ fn run_tray(paths: ClientPaths) -> Result<()> {
     let event_loop = EventLoopBuilder::<()>::with_user_event().build();
 
     let menu = Menu::new();
-    let open_item = MenuItem::new("Open Virtue", true, None);
-    let close_item = MenuItem::new("Close (Will Send Alert)", true, None);
+    let open_item = MenuItem::new("Open virtue", true, None);
+    let close_item = MenuItem::new("Close (will send alert)", true, None);
     menu.append(&open_item)?;
     menu.append(&PredefinedMenuItem::separator())?;
     menu.append(&close_item)?;
@@ -356,8 +357,8 @@ fn collect_status(paths: &ClientPaths) -> Result<AppStatus> {
 }
 
 fn load_service_status(store: &FileStateStore, auth: &AuthState) -> Result<ServiceStatus> {
-    let pending_request_count = store.load_pending_requests()?.len();
-    Ok(store.load_status()?.unwrap_or(ServiceStatus {
+    let pending_request_count = derive_state(&store.load_audit_records()?).pending_request_count;
+    let mut status = store.load_status()?.unwrap_or(ServiceStatus {
         is_authenticated: auth.device_credentials.is_some(),
         is_running: false,
         device_id: auth
@@ -368,7 +369,9 @@ fn load_service_status(store: &FileStateStore, auth: &AuthState) -> Result<Servi
         last_screenshot_at_ms: None,
         last_batch_at_ms: None,
         pending_request_count,
-    }))
+    });
+    status.pending_request_count = pending_request_count;
+    Ok(status)
 }
 
 fn build_tray_icon() -> Result<Icon> {

@@ -104,13 +104,14 @@ export async function findUserByEmail(db: D1Database, email: string) {
     name: string | null;
     email_verified: number;
     email_bounced_at: number | null;
+    email_frequency: string;
     pub_key: ArrayBuffer | null;
     priv_key: ArrayBuffer | null;
   }>(
     db
       .prepare(
         `SELECT id, email, password_hash, password_salt, password_params_version,
-                name, email_verified, email_bounced_at, pub_key, priv_key
+                name, email_verified, email_bounced_at, email_frequency, pub_key, priv_key
          FROM users
          WHERE email = ?`,
       )
@@ -126,12 +127,13 @@ export async function findUserById(db: D1Database, userId: string) {
     name: string | null;
     email_verified: number;
     email_bounced_at: number | null;
+    email_frequency: string;
     pub_key: ArrayBuffer | null;
     priv_key: ArrayBuffer | null;
   }>(
     db
       .prepare(
-        'SELECT id, email, name, email_verified, email_bounced_at, pub_key, priv_key FROM users WHERE id = ?',
+        'SELECT id, email, name, email_verified, email_bounced_at, email_frequency, pub_key, priv_key FROM users WHERE id = ?',
       )
       .bind(uuidToBytes(userId)),
     ['id'],
@@ -224,6 +226,7 @@ export async function updateUser(
     password_params_version?: string;
     email_verified?: boolean;
     email_bounced_at?: number | null;
+    email_frequency?: string;
     pub_key?: ArrayBuffer;
     priv_key?: ArrayBuffer;
   },
@@ -264,6 +267,11 @@ export async function updateUser(
   if (fields.email_bounced_at !== undefined) {
     updates.push('email_bounced_at = ?');
     params.push(fields.email_bounced_at);
+  }
+
+  if (fields.email_frequency !== undefined) {
+    updates.push('email_frequency = ?');
+    params.push(fields.email_frequency);
   }
 
   if (fields.pub_key !== undefined) {
@@ -907,17 +915,16 @@ export async function listIncomingPartners(db: D1Database, partnerUserId: string
     watching_user_id: string;
     watching_user_email: string;
     watching_user_name: string | null;
-    email_frequency: string | null;
-    immediate_tamper_severity: string | null;
+    email_frequency: string;
   }>(
     db
       .prepare(
         `SELECT p.id, p.status, p.created_at,
                 u.id AS watching_user_id, u.email AS watching_user_email, u.name AS watching_user_name,
-                pref.email_frequency, pref.immediate_tamper_severity
+                watcher.email_frequency
           FROM partners p
           JOIN users u ON u.id = p.watching_user_id
-          LEFT JOIN partner_preferences pref ON pref.partnership_id = p.id
+          JOIN users watcher ON watcher.id = p.watcher_user_id
           WHERE p.watcher_user_id = ?
           ORDER BY p.created_at DESC`,
       )
@@ -930,73 +937,12 @@ export async function deletePartnerById(db: D1Database, partnerId: string) {
   return db.prepare('DELETE FROM partners WHERE id = ?').bind(uuidToBytes(partnerId)).run();
 }
 
-export async function upsertPartnerPreference(
-  db: D1Database,
-  input: {
-    partnership_id: string;
-    email_frequency: string;
-    immediate_tamper_severity: string;
-    updated_at: number;
-  },
-) {
-  return db
-    .prepare(
-      `INSERT INTO partner_preferences (
-         partnership_id, email_frequency, immediate_tamper_severity, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(partnership_id) DO UPDATE SET
-         email_frequency = excluded.email_frequency,
-         immediate_tamper_severity = excluded.immediate_tamper_severity,
-         updated_at = excluded.updated_at`,
-    )
-    .bind(
-      uuidToBytes(input.partnership_id),
-      input.email_frequency,
-      input.immediate_tamper_severity,
-      input.updated_at,
-      input.updated_at,
-    )
-    .run();
-}
-
-export async function listNotificationPreferencesForPartner(db: D1Database, partnerUserId: string) {
-  return allWithUuidFields<{
-    partnership_id: string;
-    status: string;
-    watching_user_id: string;
-    watching_user_email: string;
-    watching_user_name: string | null;
-    email_frequency: string | null;
-    immediate_tamper_severity: string | null;
-  }>(
-    db
-      .prepare(
-        `SELECT p.id AS partnership_id,
-                 p.status,
-                 owner.id AS watching_user_id,
-                 owner.email AS watching_user_email,
-                 owner.name AS watching_user_name,
-                 pref.email_frequency,
-                 pref.immediate_tamper_severity
-          FROM partners p
-          JOIN users owner ON owner.id = p.watching_user_id
-          LEFT JOIN partner_preferences pref ON pref.partnership_id = p.id
-          WHERE p.watcher_user_id = ?
-          ORDER BY p.created_at DESC`,
-      )
-      .bind(uuidToBytes(partnerUserId)),
-    ['partnership_id', 'watching_user_id'],
-  );
-}
-
 export async function updatePartnerNotificationPreference(
   db: D1Database,
   input: {
     partnership_id: string;
     watcher_user_id: string;
     email_frequency?: string;
-    immediate_tamper_severity?: string;
-    updated_at: number;
   },
 ) {
   const partnership = await db
@@ -1008,31 +954,20 @@ export async function updatePartnerNotificationPreference(
     return null;
   }
 
-  const current = await db
-    .prepare(
-      'SELECT email_frequency, immediate_tamper_severity FROM partner_preferences WHERE partnership_id = ?',
-    )
-    .bind(uuidToBytes(input.partnership_id))
-    .first<{
-      email_frequency: string;
-      immediate_tamper_severity: string;
-    }>();
+  const currentUser = await db
+    .prepare('SELECT email_frequency FROM users WHERE id = ?')
+    .bind(uuidToBytes(input.watcher_user_id))
+    .first<{ email_frequency: string }>();
 
-  const emailFrequency = input.email_frequency ?? current?.email_frequency ?? 'daily';
-  const severity =
-    input.immediate_tamper_severity ?? current?.immediate_tamper_severity ?? 'critical';
+  const emailFrequency = input.email_frequency ?? currentUser?.email_frequency ?? 'daily';
 
-  await upsertPartnerPreference(db, {
-    partnership_id: input.partnership_id,
+  await updateUser(db, input.watcher_user_id, {
     email_frequency: emailFrequency,
-    immediate_tamper_severity: severity,
-    updated_at: input.updated_at,
   });
 
   return {
     partnership_id: input.partnership_id,
     email_frequency: emailFrequency,
-    immediate_tamper_severity: severity,
   };
 }
 
@@ -1067,8 +1002,7 @@ export async function listAcceptedNotificationTargetsForUser(db: D1Database, use
     watcher_email: string;
     watcher_user_id: string | null;
     watcher_name: string | null;
-    email_frequency: string | null;
-    immediate_tamper_severity: string | null;
+    email_frequency: string;
   }>(
     db
       .prepare(
@@ -1076,11 +1010,9 @@ export async function listAcceptedNotificationTargetsForUser(db: D1Database, use
                 recipient.email AS watcher_email,
                 recipient.id AS watcher_user_id,
                 recipient.name AS watcher_name,
-                pref.email_frequency,
-                pref.immediate_tamper_severity
+                recipient.email_frequency
           FROM partners p
           JOIN users recipient ON recipient.id = p.watcher_user_id
-          LEFT JOIN partner_preferences pref ON pref.partnership_id = p.id
           WHERE p.watching_user_id = ? AND p.status = 'accepted'`,
       )
       .bind(uuidToBytes(userId)),
@@ -1269,27 +1201,26 @@ export async function listDigestEligiblePartnerships(db: D1Database) {
   return allWithUuidFields<{
     partnership_id: string;
     watching_user_id: string;
+    watcher_user_id: string;
     watcher_email: string;
     watching_user_email: string;
     watching_user_name: string | null;
-    email_frequency: string | null;
-    immediate_tamper_severity: string | null;
+    email_frequency: string;
   }>(
     db.prepare(
       `SELECT p.id AS partnership_id,
               p.watching_user_id,
+              recipient.id AS watcher_user_id,
               recipient.email AS watcher_email,
+              recipient.email_frequency,
               owner.email AS watching_user_email,
-              owner.name AS watching_user_name,
-              pref.email_frequency,
-              pref.immediate_tamper_severity
+              owner.name AS watching_user_name
         FROM partners p
         JOIN users owner ON owner.id = p.watching_user_id
         JOIN users recipient ON recipient.id = p.watcher_user_id
-        LEFT JOIN partner_preferences pref ON pref.partnership_id = p.id
         WHERE p.status = 'accepted'`,
     ),
-    ['partnership_id', 'watching_user_id'],
+    ['partnership_id', 'watching_user_id', 'watcher_user_id'],
   );
 }
 

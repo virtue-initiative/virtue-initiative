@@ -42,7 +42,7 @@ describe('Notification scheduler', () => {
         email: 'digest-partner@example.com',
       }),
     });
-    const invite = (await inviteRes.json()) as { id: string };
+    await inviteRes.json();
     const inviteDelivery = (await listEmailDeliveries()).find(
       (delivery) =>
         delivery.kind === 'partner_invite' &&
@@ -108,6 +108,102 @@ describe('Notification scheduler', () => {
     expect(deliveries.some((delivery) => delivery.kind === 'tamper_alert')).toBe(false);
   });
 
+  it('sends one daily digest with separate summaries when a partner monitors multiple people', async () => {
+    const now = Date.UTC(2026, 0, 6, 8, 0, 0);
+    const previousDayStart = Date.UTC(2026, 0, 5, 0, 0, 0);
+    const previousDayMid = Date.UTC(2026, 0, 5, 12, 0, 0);
+
+    const { token: ownerOneToken, userId: ownerOneId } = await signupAndGetToken(
+      'multi-owner-one@example.com',
+      'pw',
+      'Owner One',
+    );
+    const { token: ownerTwoToken, userId: ownerTwoId } = await signupAndGetToken(
+      'multi-owner-two@example.com',
+      'pw',
+      'Owner Two',
+    );
+    const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
+      'multi-partner@example.com',
+      'pw',
+      'Partner',
+    );
+    await markUserEmailVerified(partnerUserId);
+
+    for (const ownerToken of [ownerOneToken, ownerTwoToken]) {
+      const inviteRes = await SELF.fetch(`${BASE}/partner`, {
+        method: 'POST',
+        headers: authHeaders(ownerToken),
+        body: JSON.stringify({
+          email: 'multi-partner@example.com',
+        }),
+      });
+      await inviteRes.json();
+    }
+
+    const inviteDeliveries = (await listEmailDeliveries()).filter(
+      (delivery) =>
+        delivery.kind === 'partner_invite' &&
+        delivery.recipient_email === 'multi-partner@example.com',
+    );
+
+    for (const delivery of inviteDeliveries) {
+      const inviteMetadata = JSON.parse(delivery.metadata) as { inviteToken: string };
+      await SELF.fetch(`${BASE}/partner/accept`, {
+        method: 'POST',
+        headers: authHeaders(partnerToken),
+        body: JSON.stringify({ token: inviteMetadata.inviteToken }),
+      });
+    }
+
+    const ownerOneDevice = await createDeviceForUser(ownerOneToken, 'Owner One Device', 'linux');
+    const ownerTwoDevice = await createDeviceForUser(ownerTwoToken, 'Owner Two Device', 'linux');
+
+    await env.DB.prepare(
+      `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(
+        uuidToBytes('00000000-0000-4000-8000-000000000011'),
+        uuidToBytes(ownerOneId),
+        uuidToBytes(ownerOneDevice.id),
+        'https://example.com/multi-batch-1.enc',
+        previousDayStart,
+        previousDayMid,
+        'hash-multi-1',
+        EMPTY_ACCESS_KEYS,
+        previousDayMid,
+      )
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(
+        uuidToBytes('00000000-0000-4000-8000-000000000012'),
+        uuidToBytes(ownerTwoId),
+        uuidToBytes(ownerTwoDevice.id),
+        'https://example.com/multi-batch-2.enc',
+        previousDayStart,
+        previousDayMid,
+        'hash-multi-2',
+        EMPTY_ACCESS_KEYS,
+        previousDayMid,
+      )
+      .run();
+
+    await runNotificationSchedule(env, now);
+
+    const deliveries = await listEmailDeliveries();
+    const digestDeliveries = deliveries.filter((delivery) => delivery.kind === 'daily_digest');
+    expect(digestDeliveries).toHaveLength(1);
+    expect(digestDeliveries[0]?.recipient_email).toBe('multi-partner@example.com');
+    expect(digestDeliveries[0]?.text).toContain('Monitored accounts: 2');
+    expect(digestDeliveries[0]?.text).toContain('Owner One');
+    expect(digestDeliveries[0]?.text).toContain('Owner Two');
+  });
+
   it('sends weekly digests on Monday', async () => {
     const now = Date.UTC(2026, 0, 5, 8, 0, 0);
     const previousWeekStart = Date.UTC(2025, 11, 29, 0, 0, 0);
@@ -143,11 +239,11 @@ describe('Notification scheduler', () => {
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
 
-    const invite = (await inviteRes.json()) as { id: string };
-    await SELF.fetch(`${BASE}/partner/watching/${invite.id}`, {
+    await inviteRes.json();
+    await SELF.fetch(`${BASE}/user`, {
       method: 'PATCH',
       headers: authHeaders(partnerToken),
-      body: JSON.stringify({ digest_cadence: 'weekly' }),
+      body: JSON.stringify({ email_frequency: 'weekly' }),
     });
 
     const device = await createDeviceForUser(ownerToken, 'Twice Device', 'linux');

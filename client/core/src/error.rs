@@ -39,6 +39,10 @@ impl CoreError {
         matches!(self, Self::HttpStatus { status: 401, .. })
     }
 
+    pub fn is_not_found(&self) -> bool {
+        matches!(self, Self::HttpStatus { status: 404, .. })
+    }
+
     pub fn is_bad_request(&self) -> bool {
         matches!(self, Self::HttpStatus { status: 400, .. })
     }

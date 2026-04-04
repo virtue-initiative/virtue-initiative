@@ -17,12 +17,11 @@ import {
   listIncomingPartners,
   listOwnedPartners,
   updatePartnerNotificationPreference,
-  upsertPartnerPreference,
 } from '../lib/db';
 import { renderPartnerAcceptedTemplate, renderPartnerInviteTemplate } from '../lib/email/templates';
 import { PARTNER_INVITE_TTL_MS } from '../lib/email-domain';
 import { sendEmail } from '../lib/email';
-import { DEFAULT_EMAIL_FREQUENCY, DEFAULT_IMMEDIATE_TAMPER_SEVERITY } from '../lib/email-domain';
+import { DEFAULT_EMAIL_FREQUENCY } from '../lib/email-domain';
 import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
 
@@ -51,7 +50,6 @@ const publicNotificationCadences = ['none', 'alerts-only', 'daily', 'weekly'] as
 const updateWatchingSchema = z
   .object({
     digest_cadence: z.enum(publicNotificationCadences).optional(),
-    immediate_tamper_severity: z.enum(['warning', 'critical']).optional(),
   })
   .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
 
@@ -108,12 +106,6 @@ partners.post(
       watcher_email: email,
       invite_token_id: inviteTokenId,
       created_at: now,
-    });
-    await upsertPartnerPreference(c.env.DB, {
-      partnership_id: id,
-      email_frequency: DEFAULT_EMAIL_FREQUENCY,
-      immediate_tamper_severity: DEFAULT_IMMEDIATE_TAMPER_SEVERITY,
-      updated_at: now,
     });
 
     const inviteEmail = renderPartnerInviteTemplate({
@@ -264,9 +256,9 @@ partners.get('/partner', authenticate('access'), async (c) => {
         ...(partner.watching_user_name ? { name: partner.watching_user_name } : {}),
       },
       status: partner.status,
-      digest_cadence: toPublicNotificationCadence(partner.email_frequency),
-      immediate_tamper_severity:
-        partner.immediate_tamper_severity === 'warning' ? 'warning' : 'critical',
+      digest_cadence: toPublicNotificationCadence(
+        partner.email_frequency ?? DEFAULT_EMAIL_FREQUENCY,
+      ),
       created_at: partner.created_at,
     })),
     watchers: owned.map((partner) => ({
@@ -287,14 +279,12 @@ partners.patch(
   authenticate('access'),
   validateZ('json', updateWatchingSchema),
   async (c) => {
-    const { digest_cadence, immediate_tamper_severity } = c.req.valid('json');
+    const { digest_cadence } = c.req.valid('json');
 
     const result = await updatePartnerNotificationPreference(c.env.DB, {
       partnership_id: c.req.param('id'),
       watcher_user_id: c.get('sub'),
-      updated_at: Date.now(),
       ...(digest_cadence ? { email_frequency: digest_cadence } : {}),
-      ...(immediate_tamper_severity ? { immediate_tamper_severity } : {}),
     });
 
     if (!result) {

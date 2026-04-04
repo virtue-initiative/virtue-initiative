@@ -225,6 +225,7 @@ Request:
 {
   "email": "new@example.com" | undefined,
   "name": "New Name" | undefined,
+  "email_frequency": "none" | "alerts-only" | "daily" | "weekly" | undefined,
   "pub_key": Base64 | undefined,
   "priv_key": Base64 | undefined
 }
@@ -378,7 +379,6 @@ Response `200`:
       },
       "status": "pending" | "accepted",
       "digest_cadence": "none" | "alerts-only" | "daily" | "weekly",
-      "immediate_tamper_severity": "warning" | "critical",
       "created_at": DateTime
     }
   ],
@@ -405,8 +405,7 @@ Request:
 
 ```js
 {
-  "digest_cadence": "none" | "alerts-only" | "daily" | "weekly" | undefined,
-  "immediate_tamper_severity": "warning" | "critical" | undefined
+  "digest_cadence": "none" | "alerts-only" | "daily" | "weekly" | undefined
 }
 ```
 
@@ -582,6 +581,17 @@ Request:
 ```
 
 Response `201` echoes the stored log.
+Response `201`:
+
+```js
+{
+  "id": UUID,
+  "ts": DateTime,
+  "type": "system_event",
+  "risk": 0.7 | undefined,
+  "data": {}
+}
+```
 
 ## Hash API
 

@@ -10,11 +10,14 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT,
   email_verified INTEGER NOT NULL DEFAULT 0,
   email_bounced_at INTEGER,
+  email_frequency TEXT NOT NULL DEFAULT 'daily',
   pub_key BLOB,
   priv_key BLOB,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  CHECK (email_frequency IN ('none', 'alerts-only', 'daily', 'weekly'))
 );
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_email_frequency ON users(email_frequency);
 
 CREATE TABLE IF NOT EXISTS devices (
   id BLOB PRIMARY KEY,
@@ -60,16 +63,6 @@ CREATE TABLE IF NOT EXISTS partners (
 CREATE INDEX IF NOT EXISTS idx_partners_watching_user_id ON partners(watching_user_id);
 CREATE INDEX IF NOT EXISTS idx_partners_watcher_user_id ON partners(watcher_user_id);
 CREATE INDEX IF NOT EXISTS idx_partners_status ON partners(status);
-
-CREATE TABLE IF NOT EXISTS partner_preferences (
-  partnership_id BLOB PRIMARY KEY,
-  email_frequency TEXT NOT NULL DEFAULT 'daily',
-  immediate_tamper_severity TEXT NOT NULL DEFAULT 'critical',
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  FOREIGN KEY (partnership_id) REFERENCES partners(id) ON DELETE CASCADE,
-  CHECK (email_frequency IN ('none', 'alerts-only', 'daily', 'weekly'))
-);
 
 CREATE TABLE IF NOT EXISTS device_logs (
   id BLOB PRIMARY KEY,

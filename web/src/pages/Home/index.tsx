@@ -4,7 +4,7 @@ import { api, Device, WatchingPartner, WatcherPartner } from "../../api";
 import { Button } from "../../components/Button";
 import { useAuth } from "../../context/auth";
 import { PARTNERS_CHANGED_EVENT } from "../../events";
-import { formatDate, formatRelativeTimestamp } from "../../utils/time";
+import { formatRelativeTimestamp } from "../../utils/time";
 import "./style.css";
 
 function UserPlusIcon() {
@@ -23,12 +23,6 @@ function UserPlusIcon() {
       />
     </svg>
   );
-}
-
-function relationshipSummary(partner: WatchingPartner | WatcherPartner) {
-  return "user" in partner && "digest_cadence" in partner
-    ? "You are monitoring this person."
-    : "This person is monitoring you.";
 }
 
 export function Home() {
@@ -66,6 +60,15 @@ export function Home() {
     () => devices.filter((device) => device.owner === userId),
     [devices, userId],
   );
+  const devicesByOwner = useMemo(() => {
+    const map = new Map<string, Device[]>();
+    for (const device of devices) {
+      const ownerDevices = map.get(device.owner) ?? [];
+      ownerDevices.push(device);
+      map.set(device.owner, ownerDevices);
+    }
+    return map;
+  }, [devices]);
   const acceptedWatching = useMemo(
     () => watching.filter((partner) => partner.status === "accepted"),
     [watching],
@@ -90,9 +93,15 @@ export function Home() {
       <section class="dash-section">
         <div class="section-header">
           <h2>My devices</h2>
+          <a
+            class="btn btn-primary"
+            href="https://virtueinitiative.org/help/installation/"
+          >
+            Create device
+          </a>
         </div>
         {ownDevices.length === 0 ? (
-          <p class="empty">No devices registered yet.</p>
+          <p class="empty">No devices</p>
         ) : (
           <div class="card-grid">
             {ownDevices.map((device) => (
@@ -109,107 +118,88 @@ export function Home() {
 
       <section class="dash-section">
         <div class="section-header">
-          <h2>Partners</h2>
-          <InviteButton token={token!} onInvited={reload} />
+          <h2>Watching</h2>
         </div>
-
-        {watching.length === 0 && watchers.length === 0 ? (
-          <p class="empty">No accountability partners yet.</p>
-        ) : (
-          <div class="partners-split">
-            <PartnerArea
-              title="Watching"
-              subtitle="People you can monitor and review."
-              pending={pendingWatching}
-              accepted={acceptedWatching}
-              token={token!}
-              onChanged={reload}
-            />
-            <PartnerArea
-              title="Watchers"
-              subtitle="People who can monitor your account."
-              pending={pendingWatchers}
-              accepted={acceptedWatchers}
-              token={token!}
-              onChanged={reload}
-            />
-          </div>
-        )}
+        <PartnerArea
+          subtitle="People you can monitor and review."
+          emptyLabel="No watching relationships yet."
+          pending={pendingWatching}
+          accepted={acceptedWatching}
+          partnerDevicesByOwner={devicesByOwner}
+          token={token!}
+          onChanged={reload}
+        />
       </section>
 
-      {acceptedWatching
-        .filter((partner) => partner.user.id)
-        .map((partner) => (
-          <PartnerDevicesSection
-            key={partner.id}
-            partner={partner}
-            devices={devices.filter(
-              (device) => device.owner === partner.user.id,
-            )}
-          />
-        ))}
+      <section class="dash-section">
+        <div class="section-header">
+          <h2>Watchers</h2>
+          <InviteButton token={token!} onInvited={reload} />
+        </div>
+        <PartnerArea
+          subtitle="People who can monitor your account."
+          emptyLabel="No watcher relationships yet."
+          pending={pendingWatchers}
+          accepted={acceptedWatchers}
+          partnerDevicesByOwner={devicesByOwner}
+          token={token!}
+          onChanged={reload}
+        />
+      </section>
     </div>
   );
 }
 
 function PartnerArea({
-  title,
   subtitle,
+  emptyLabel,
   pending,
   accepted,
+  partnerDevicesByOwner,
   token,
   onChanged,
 }: {
-  title: string;
   subtitle: string;
+  emptyLabel: string;
   pending: Array<WatchingPartner | WatcherPartner>;
   accepted: Array<WatchingPartner | WatcherPartner>;
+  partnerDevicesByOwner: Map<string, Device[]>;
   token: string;
   onChanged: () => void;
 }) {
+  const partners = [...pending, ...accepted];
+
   return (
     <section class="partners-panel">
-      <div class="partners-panel-header">
-        <h3>{title}</h3>
-        <p>{subtitle}</p>
-      </div>
+      <p class="partners-panel-subtitle">{subtitle}</p>
 
-      {pending.length === 0 && accepted.length === 0 ? (
-        <p class="empty">{`No ${title.toLowerCase()} relationships yet.`}</p>
+      {partners.length === 0 ? (
+        <p class="empty">{emptyLabel}</p>
       ) : (
-        <>
-          {pending.length > 0 && (
-            <>
-              <p class="partners-group-label">Pending</p>
-              <div class="card-grid">
-                {pending.map((partner) => (
-                  <PendingPartnerCard
-                    key={partner.id}
-                    partner={partner}
-                    token={token}
-                    onChanged={onChanged}
-                  />
-                ))}
-              </div>
-            </>
+        <div class="card-grid">
+          {partners.map((partner) =>
+            partner.status === "pending" ? (
+              <PendingPartnerCard
+                key={partner.id}
+                partner={partner}
+                token={token}
+                onChanged={onChanged}
+              />
+            ) : (
+              <PartnerCard
+                key={partner.id}
+                partner={partner}
+                devices={
+                  "digest_cadence" in partner
+                    ? (partnerDevicesByOwner.get(partner.user.id) ?? [])
+                    : []
+                }
+                token={token}
+                onChanged={onChanged}
+              />
+            ),
           )}
-
-          {accepted.length > 0 && (
-            <>
-              <p class="partners-group-label">Accepted</p>
-              <div class="card-grid">
-                {accepted.map((partner) => (
-                  <PartnerCard
-                    key={partner.id}
-                    partner={partner}
-                    token={token}
-                    onChanged={onChanged}
-                  />
-                ))}
-              </div>
-            </>
-          )}
-        </>
+        </div>
       )}
     </section>
   );
@@ -260,6 +250,10 @@ function InviteButton({
       </Button>
       <dialog ref={dialogRef}>
         <h3 class="dialog-title">Invite a partner</h3>
+        <p class="invite-desc">
+          Your partner can view your uploaded screenshots and activity logs
+          after they accept this invite and set up their account.
+        </p>
         <form onSubmit={handleSubmit}>
           <div class="field">
             <label for="invite-email">Partner's email</label>
@@ -299,8 +293,10 @@ function PendingPartnerCard({
 }) {
   const [action, setAction] = useState<"remove" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const confirmRef = useRef<HTMLDialogElement>(null);
+  const partnerName = partner.user.name ?? partner.user.email;
 
-  async function remove() {
+  async function removeConfirmed() {
     setAction("remove");
     setError(null);
     try {
@@ -320,48 +316,68 @@ function PendingPartnerCard({
         <span class="card-name">{partner.user.name ?? partner.user.email}</span>
         <span class="badge badge-yellow">Pending</span>
       </div>
-      <p class="invite-desc">
-        {"digest_cadence" in partner
-          ? "You have been invited to monitor this person. Once you accept, you will be able to view their encrypted activity data."
-          : "You invited this person to monitor your account. Once they accept and have an account, new uploads will include them automatically."}
-      </p>
-      <dl class="card-meta">
-        <dt>Email</dt>
-        <dd>{partner.user.email}</dd>
-        <dt>Relationship</dt>
-        <dd>{relationshipSummary(partner)}</dd>
-        <dt>Created</dt>
-        <dd>{formatDate(partner.created_at ?? Date.now())}</dd>
-      </dl>
       {error && <p class="alert-error">{error}</p>}
       <div class="card-actions">
         <button
           class="btn btn-danger"
           type="button"
-          onClick={remove}
+          onClick={() => confirmRef.current?.showModal()}
           disabled={action !== null}
         >
           {action === "remove" ? "Removing…" : "Remove"}
         </button>
       </div>
+      <dialog ref={confirmRef}>
+        <h3 class="dialog-title">Remove {partnerName}?</h3>
+        <p class="invite-desc">
+          This will cancel the pending partner relationship. The partner will be
+          notified.
+        </p>
+        <div class="invite-actions">
+          <button
+            class="btn btn-danger"
+            type="button"
+            onClick={() => {
+              confirmRef.current?.close();
+              removeConfirmed().catch(() => {});
+            }}
+            disabled={action !== null}
+          >
+            {action === "remove" ? "Removing…" : "Remove partner"}
+          </button>
+          <button
+            class="btn btn-ghost"
+            type="button"
+            onClick={() => confirmRef.current?.close()}
+            disabled={action !== null}
+          >
+            Cancel
+          </button>
+        </div>
+      </dialog>
     </div>
   );
 }
 
 function PartnerCard({
   partner,
+  devices,
   token,
   onChanged,
 }: {
   partner: WatchingPartner | WatcherPartner;
+  devices: Device[];
   token: string;
   onChanged: () => void;
 }) {
   const { route } = useLocation();
+  const isWatching = "digest_cadence" in partner;
   const [action, setAction] = useState<"remove" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const confirmRef = useRef<HTMLDialogElement>(null);
+  const partnerName = partner.user.name ?? partner.user.email;
 
-  async function remove() {
+  async function removeConfirmed() {
     setAction("remove");
     setError(null);
     try {
@@ -376,20 +392,39 @@ function PartnerCard({
   }
 
   return (
-    <div class="card">
+    <div class={`card${isWatching ? "" : " partner-card-compact"}`}>
       <div class="card-header">
         <span class="card-name">{partner.user.name ?? partner.user.email}</span>
         <span class="badge badge-green">Accepted</span>
       </div>
-      <dl class="card-meta">
-        <dt>Email</dt>
-        <dd>{partner.user.email}</dd>
-        <dt>Relationship</dt>
-        <dd>{relationshipSummary(partner)}</dd>
-      </dl>
+      {isWatching && devices.length > 0 && (
+        <div class="partner-device-list">
+          {devices.slice(0, 4).map((device) => (
+            <button
+              key={device.id}
+              class="partner-device-chip"
+              type="button"
+              onClick={() =>
+                route(`/logs?user=${partner.user.id}&device_id=${device.id}`)
+              }
+              title={device.name}
+            >
+              <span
+                class={`partner-device-status ${device.status === "online" ? "partner-device-status-online" : "partner-device-status-offline"}`}
+              />
+              <span>{device.name}</span>
+            </button>
+          ))}
+          {devices.length > 4 && (
+            <p class="partner-device-more">
+              +{devices.length - 4} more devices
+            </p>
+          )}
+        </div>
+      )}
       {error && <p class="alert-error">{error}</p>}
       <div class="card-actions">
-        {"digest_cadence" in partner && partner.user.id && (
+        {isWatching && partner.user.id && (
           <button
             class="btn btn-ghost"
             type="button"
@@ -401,68 +436,41 @@ function PartnerCard({
         <button
           class="btn btn-danger"
           type="button"
-          onClick={remove}
+          onClick={() => confirmRef.current?.showModal()}
           disabled={action !== null}
         >
           {action === "remove" ? "Removing…" : "Remove"}
         </button>
       </div>
-    </div>
-  );
-}
-
-function PartnerDevicesSection({
-  partner,
-  devices,
-}: {
-  partner: WatchingPartner;
-  devices: Device[];
-}) {
-  const { route } = useLocation();
-  const partnerId = partner.user.id;
-
-  return (
-    <section class="dash-section">
-      <div class="section-header">
-        <h2>{partner.user.name ?? partner.user.email}</h2>
-      </div>
-
-      {devices.length === 0 ? (
-        <p class="empty">No devices registered.</p>
-      ) : (
-        <div class="card-grid">
-          {devices.map((device) => (
-            <div class="card" key={device.id}>
-              <div class="card-header">
-                <span class="card-name">{device.name}</span>
-                <span
-                  class={`badge ${device.status === "online" ? "badge-green" : "badge-gray"}`}
-                >
-                  {device.status === "online" ? "Online" : "Offline"}
-                </span>
-              </div>
-              <dl class="card-meta">
-                <dt>Platform</dt>
-                <dd>{device.platform}</dd>
-                <dt>Last upload</dt>
-                <dd>{formatRelativeTimestamp(device.last_upload_at)}</dd>
-              </dl>
-              <div class="card-actions">
-                <button
-                  class="btn btn-ghost"
-                  type="button"
-                  onClick={() =>
-                    route(`/logs?user=${partnerId}&device_id=${device.id}`)
-                  }
-                >
-                  View logs
-                </button>
-              </div>
-            </div>
-          ))}
+      <dialog ref={confirmRef}>
+        <h3 class="dialog-title">Remove {partnerName}?</h3>
+        <p class="invite-desc">
+          This will remove your partner relationship with this person. The
+          partner will be notified.
+        </p>
+        <div class="invite-actions">
+          <button
+            class="btn btn-danger"
+            type="button"
+            onClick={() => {
+              confirmRef.current?.close();
+              removeConfirmed().catch(() => {});
+            }}
+            disabled={action !== null}
+          >
+            {action === "remove" ? "Removing…" : "Remove partner"}
+          </button>
+          <button
+            class="btn btn-ghost"
+            type="button"
+            onClick={() => confirmRef.current?.close()}
+            disabled={action !== null}
+          >
+            Cancel
+          </button>
         </div>
-      )}
-    </section>
+      </dialog>
+    </div>
   );
 }
 
@@ -482,12 +490,29 @@ function DeviceCard({
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const deleteDialogRef = useRef<HTMLDialogElement>(null);
 
   function openEdit() {
     setName(device.name);
     setEnabled(device.enabled);
     setError(null);
     dialogRef.current?.showModal();
+  }
+
+  function closeEdit() {
+    setError(null);
+    dialogRef.current?.close();
+  }
+
+  function openDeleteDialog() {
+    setError(null);
+    dialogRef.current?.close();
+    deleteDialogRef.current?.showModal();
+  }
+
+  function closeDeleteDialog() {
+    setError(null);
+    deleteDialogRef.current?.close();
   }
 
   async function handleSave(e: Event) {
@@ -505,20 +530,12 @@ function DeviceCard({
     }
   }
 
-  async function handleDelete() {
-    if (
-      !confirm(
-        `Delete device "${device.name}"? This removes its logs and uploads.`,
-      )
-    ) {
-      return;
-    }
-
+  async function handleDeleteConfirmed() {
     setDeleting(true);
     setError(null);
     try {
       await api.deleteDevice(token, device.id);
-      dialogRef.current?.close();
+      closeDeleteDialog();
       onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete device");
@@ -597,21 +614,48 @@ function DeviceCard({
             <button
               class="btn btn-danger"
               type="button"
-              onClick={handleDelete}
+              onClick={openDeleteDialog}
               disabled={saving || deleting}
             >
-              {deleting ? "Deleting…" : "Delete device"}
+              Delete device
             </button>
             <button
               class="btn btn-ghost"
               type="button"
-              onClick={() => dialogRef.current?.close()}
+              onClick={closeEdit}
               disabled={saving || deleting}
             >
               Cancel
             </button>
           </div>
         </form>
+      </dialog>
+
+      <dialog ref={deleteDialogRef}>
+        <h3 class="dialog-title">Delete device</h3>
+        <p class="invite-desc">
+          Delete "{device.name}"? This permanently removes its logs and uploads,
+          and your partners will be notified.
+        </p>
+        {error && <p class="alert-error">{error}</p>}
+        <div class="invite-actions">
+          <button
+            class="btn btn-danger"
+            type="button"
+            onClick={() => handleDeleteConfirmed().catch(() => {})}
+            disabled={saving || deleting}
+          >
+            {deleting ? "Deleting…" : "Delete device"}
+          </button>
+          <button
+            class="btn btn-ghost"
+            type="button"
+            onClick={closeDeleteDialog}
+            disabled={saving || deleting}
+          >
+            Cancel
+          </button>
+        </div>
       </dialog>
     </div>
   );

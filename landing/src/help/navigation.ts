@@ -6,7 +6,7 @@ export type HelpNavItem = {
 
 export const helpSidebar: HelpNavItem[] = [
   {
-    label: "Getting Started",
+    label: "Getting started",
     href: "/help/getting-started",
   },
   {
@@ -25,13 +25,13 @@ export const helpSidebar: HelpNavItem[] = [
     href: "/help/how-it-works",
   },
   {
-    label: "Removing Access",
+    label: "Removing access",
     href: "/help/removing-access",
     items: [
       { label: "Whitelisting", href: "/help/removing-access/whitelisting" },
       { label: "Filtering", href: "/help/removing-access/filtering" },
       {
-        label: "Disable The Browser",
+        label: "Disable the browser",
         href: "/help/removing-access/disable-browser",
       },
     ],
@@ -44,7 +44,7 @@ export const helpSidebar: HelpNavItem[] = [
     label: "Web",
     href: "/help/web",
     items: [
-      { label: "Inviting a Partner", href: "/help/web/inviting-a-partner" },
+      { label: "Inviting a partner", href: "/help/web/inviting-a-partner" },
     ],
   },
   {
@@ -53,7 +53,7 @@ export const helpSidebar: HelpNavItem[] = [
     items: [
       { label: "Testing", href: "/help/developer/testing" },
       {
-        label: "Developer Overrides",
+        label: "Developer overrides",
         href: "/help/developer/overrides",
       },
       {

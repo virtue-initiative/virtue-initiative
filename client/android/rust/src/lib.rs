@@ -14,8 +14,8 @@ use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
 use virtue_core::storage::FileStateStore;
 use virtue_core::{
-    AuthState, BatchBufferState, Config, CoreError, CoreResult, DeviceSettings, MonitorService,
-    PendingRequest, PlatformHooks, Screenshot, ServiceStatus,
+    AuthState, Config, CoreError, CoreResult, DeviceSettings, MonitorService, PlatformHooks,
+    Screenshot, ServiceStatus,
 };
 
 static CORE: OnceCell<AndroidCore> = OnceCell::new();
@@ -407,8 +407,6 @@ fn parse_u64(value: &str) -> Result<u64> {
 
 fn sanitize_state_dir(root: &Path) -> Result<()> {
     sanitize_json_file::<AuthState>(root, "auth.json")?;
-    sanitize_json_file::<BatchBufferState>(root, "batch_buffer.json")?;
-    sanitize_json_file::<Vec<PendingRequest>>(root, "pending_requests.json")?;
     sanitize_json_file::<ServiceStatus>(root, "status.json")?;
     sanitize_json_file::<Option<DeviceSettings>>(root, "device_settings.json")?;
     Ok(())

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "preact/hooks";
 import { api, User, WatchingPartner } from "../../api";
 import { useAuth } from "../../context/auth";
+import { GLOBAL_ALERT_EVENT } from "../../events";
+import { formatDate } from "../../utils/time";
 import "./style.css";
 
 export function Settings() {
@@ -11,14 +13,16 @@ export function Settings() {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [nameStatus, setNameStatus] = useState<string | null>(null);
+  const [savedButtonUntil, setSavedButtonUntil] = useState<number>(0);
   const [verificationStatus, setVerificationStatus] = useState<string | null>(
     null,
   );
+  const [emailFrequencyStatus, setEmailFrequencyStatus] = useState<
+    string | null
+  >(null);
   const [nameSaving, setNameSaving] = useState(false);
   const [verificationSending, setVerificationSending] = useState(false);
-  const [savingPreferenceId, setSavingPreferenceId] = useState<string | null>(
-    null,
-  );
+  const [emailFrequencySaving, setEmailFrequencySaving] = useState(false);
 
   async function reload() {
     if (!token) return;
@@ -35,6 +39,19 @@ export function Settings() {
   useEffect(() => {
     reload().catch(() => {});
   }, [token]);
+
+  useEffect(() => {
+    if (savedButtonUntil <= 0) return;
+    const remaining = savedButtonUntil - Date.now();
+    if (remaining <= 0) {
+      setSavedButtonUntil(0);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setSavedButtonUntil(0);
+    }, remaining);
+    return () => window.clearTimeout(timer);
+  }, [savedButtonUntil]);
 
   const normalizedEmail = email.trim().toLowerCase();
   const trimmedName = name.trim();
@@ -65,10 +82,11 @@ export function Settings() {
     try {
       const emailChanged = Boolean(profilePatch.email);
       await api.updateUser(token, profilePatch);
+      setSavedButtonUntil(Date.now() + 3000);
       setNameStatus(
         emailChanged
           ? "Profile saved. Please verify your new email address."
-          : "Saved.",
+          : "Saved",
       );
       await reload();
     } catch (err) {
@@ -99,19 +117,27 @@ export function Settings() {
     }
   }
 
-  async function updatePreference(
-    partnershipId: string,
-    patch: Partial<
-      Pick<WatchingPartner, "digest_cadence" | "immediate_tamper_severity">
-    >,
-  ) {
+  async function updateEmailFrequency(emailFrequency: User["email_frequency"]) {
     if (!token) return;
-    setSavingPreferenceId(partnershipId);
+    setEmailFrequencyStatus(null);
+    setEmailFrequencySaving(true);
     try {
-      await api.updateNotificationPreference(token, partnershipId, patch);
+      await api.updateUser(token, { email_frequency: emailFrequency });
       await reload();
+      window.dispatchEvent(
+        new CustomEvent(GLOBAL_ALERT_EVENT, {
+          detail: {
+            message: "Email preferences saved.",
+            isError: false,
+          },
+        }),
+      );
+    } catch (err) {
+      setEmailFrequencyStatus(
+        err instanceof Error ? err.message : "Failed to save",
+      );
     } finally {
-      setSavingPreferenceId(null);
+      setEmailFrequencySaving(false);
     }
   }
 
@@ -131,6 +157,7 @@ export function Settings() {
               onInput={(e) => {
                 setName((e.target as HTMLInputElement).value);
                 setNameStatus(null);
+                setSavedButtonUntil(0);
               }}
               placeholder="Your name"
               autoComplete="name"
@@ -145,13 +172,14 @@ export function Settings() {
               onInput={(e) => {
                 setEmail((e.target as HTMLInputElement).value);
                 setNameStatus(null);
+                setSavedButtonUntil(0);
               }}
               placeholder="you@example.com"
               autoComplete="email"
               required
             />
           </div>
-          {nameStatus && (
+          {nameStatus && !nameStatus.toLowerCase().includes("saved") && (
             <p
               class={
                 nameStatus.toLowerCase().includes("saved")
@@ -167,7 +195,11 @@ export function Settings() {
             type="submit"
             disabled={nameSaving || !hasProfileChanges}
           >
-            {nameSaving ? "Saving…" : "Save"}
+            {nameSaving
+              ? "Saving…"
+              : savedButtonUntil > Date.now()
+                ? "Saved"
+                : "Save"}
           </button>
         </form>
       </section>
@@ -183,7 +215,8 @@ export function Settings() {
           <>
             {Boolean(user?.email_bounced_at) && (
               <p class="alert-error">
-                Your last verification email bounced. Update your email above
+                Your last verification email bounced on{" "}
+                {formatDate(user.email_bounced_at)}. Update your email above
                 before requesting another verification email.
               </p>
             )}
@@ -212,75 +245,48 @@ export function Settings() {
       </section>
 
       <section class="card settings-section">
-        <h2>Partner notifications</h2>
+        <h2>Email notifications</h2>
         <p class="settings-hint">
-          Configure how you receive tamper alerts and summary emails for each
-          person you monitor.
+          Choose how often you receive accountability emails. If you monitor
+          more than one person, each email includes one summary with a section
+          for each person you monitor.
         </p>
-
+        <div class="field settings-frequency-field">
+          <label for="settings-email-frequency">Email frequency</label>
+          <select
+            id="settings-email-frequency"
+            class="settings-select"
+            value={user?.email_frequency ?? "daily"}
+            onChange={(e) =>
+              updateEmailFrequency(
+                (e.target as HTMLSelectElement)
+                  .value as User["email_frequency"],
+              ).catch(() => {})
+            }
+            disabled={!user || emailFrequencySaving}
+          >
+            <option value="none">None</option>
+            <option value="alerts-only">Alerts only</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+          </select>
+        </div>
+        {emailFrequencyStatus && (
+          <p class="alert-error">{emailFrequencyStatus}</p>
+        )}
         {watching.length === 0 ? (
-          <p class="settings-hint">
-            Accept a partner invite to configure email notifications for the
-            people you monitor.
+          <p class="settings-hint settings-followup-hint">
+            You are not monitoring anyone yet. This setting will apply once you
+            accept a partner invite.
           </p>
         ) : (
-          <div class="settings-list">
-            {watching.map((partner) => (
-              <div class="settings-item" key={partner.id}>
-                <div class="settings-item-header">
-                  <strong>
-                    Monitoring {partner.user.name ?? partner.user.email}
-                  </strong>
-                  <span class="settings-badge">{partner.status}</span>
-                </div>
-                {partner.status === "accepted" && (
-                  <div class="settings-preference-grid">
-                    <label class="field settings-inline-field">
-                      <span>Email notifications</span>
-                      <select
-                        class="settings-select"
-                        value={partner.digest_cadence}
-                        onChange={(e) =>
-                          updatePreference(partner.id, {
-                            digest_cadence: (e.target as HTMLSelectElement)
-                              .value as WatchingPartner["digest_cadence"],
-                          }).catch(() => {})
-                        }
-                        disabled={savingPreferenceId === partner.id}
-                      >
-                        <option value="none">None</option>
-                        <option value="alerts-only">Alerts only</option>
-                        <option value="daily">Daily</option>
-                        <option value="weekly">Weekly</option>
-                      </select>
-                    </label>
-                    <label class="field settings-inline-field">
-                      <span>Immediate tamper emails</span>
-                      <select
-                        class="settings-select"
-                        value={partner.immediate_tamper_severity}
-                        onChange={(e) =>
-                          updatePreference(partner.id, {
-                            immediate_tamper_severity: (
-                              e.target as HTMLSelectElement
-                            )
-                              .value as WatchingPartner["immediate_tamper_severity"],
-                          }).catch(() => {})
-                        }
-                        disabled={
-                          savingPreferenceId === partner.id ||
-                          partner.digest_cadence === "none"
-                        }
-                      >
-                        <option value="critical">Critical only</option>
-                        <option value="warning">Warning and critical</option>
-                      </select>
-                    </label>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+          <p class="settings-hint settings-followup-hint">
+            Currently monitoring{" "}
+            {watching
+              .map((partner) => partner.user.name ?? partner.user.email)
+              .join(", ")}
+            .
+          </p>
         )}
       </section>
     </div>

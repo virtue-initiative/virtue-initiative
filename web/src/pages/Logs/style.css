@@ -52,8 +52,6 @@
     margin: 0 0 0.75rem;
     font-size: 0.75rem;
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
     color: var(--text-muted);
   }
 
@@ -73,8 +71,6 @@
   margin: 0 0 0.3rem 0.65rem;
   font-size: 0.72rem;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -160,10 +156,20 @@
   background: #9ca3af;
 }
 
+.dot-placeholder {
+  visibility: hidden;
+}
+
+.device-btn-group {
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
 .sidebar-loading {
   font-size: 0.85rem;
   color: var(--text-muted);
   padding: 0.4rem 0.65rem;
+  margin-left: 0.99rem;
 }
 
 /* ── Main ── */

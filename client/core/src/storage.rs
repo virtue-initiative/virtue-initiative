@@ -1,9 +1,10 @@
 use std::fs;
 use std::io::Write;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use crate::error::CoreResult;
-use crate::model::{AuthState, BatchBufferState, DeviceSettings, PendingRequest, ServiceStatus};
+use crate::model::{AuditRecord, AuthState, DeviceSettings, ServiceStatus};
 
 #[derive(Debug, Clone)]
 pub struct FileStateStore {
@@ -25,16 +26,6 @@ impl FileStateStore {
         self.read_json("status.json")
     }
 
-    pub fn save_pending_requests(&self, requests: &[PendingRequest]) -> CoreResult<()> {
-        self.write_json("pending_requests.json", requests)
-    }
-
-    pub fn load_pending_requests(&self) -> CoreResult<Vec<PendingRequest>> {
-        Ok(self
-            .read_json::<Vec<PendingRequest>>("pending_requests.json")?
-            .unwrap_or_default())
-    }
-
     pub fn save_auth_state(&self, auth_state: &AuthState) -> CoreResult<()> {
         self.write_json("auth.json", auth_state)
     }
@@ -43,12 +34,48 @@ impl FileStateStore {
         Ok(self.read_json("auth.json")?.unwrap_or_default())
     }
 
-    pub fn save_batch_buffer(&self, batch_buffer: &BatchBufferState) -> CoreResult<()> {
-        self.write_json("batch_buffer.json", batch_buffer)
+    pub fn append_audit_record(&self, record: &AuditRecord) -> CoreResult<()> {
+        let path = self.root.join("audit.jsonl");
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
+        serde_json::to_writer(&mut file, record)?;
+        writeln!(file)?;
+        file.flush()?;
+        Ok(())
     }
 
-    pub fn load_batch_buffer(&self) -> CoreResult<BatchBufferState> {
-        Ok(self.read_json("batch_buffer.json")?.unwrap_or_default())
+    pub fn load_audit_records(&self) -> CoreResult<Vec<AuditRecord>> {
+        let path = self.root.join("audit.jsonl");
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let file = fs::File::open(path)?;
+        let reader = BufReader::new(file);
+        let mut records = Vec::new();
+        for line in reader.lines() {
+            let line = line?;
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            match serde_json::from_str(trimmed) {
+                Ok(record) => records.push(record),
+                Err(err) if err.is_eof() => break,
+                Err(err) => return Err(err.into()),
+            }
+        }
+        Ok(records)
+    }
+
+    pub fn clear_audit_records(&self) -> CoreResult<()> {
+        let path = self.root.join("audit.jsonl");
+        if path.exists() {
+            fs::remove_file(path)?;
+        }
+        Ok(())
     }
 
     pub fn save_device_settings(&self, settings: Option<&DeviceSettings>) -> CoreResult<()> {
@@ -86,5 +113,51 @@ impl FileStateStore {
 
         let bytes = fs::read(path)?;
         Ok(Some(serde_json::from_slice(&bytes)?))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use super::*;
+
+    static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_state_dir() -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "virtue-storage-test-{}-{}",
+            std::process::id(),
+            TEST_DIR_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&path).expect("create temp state dir");
+        path
+    }
+
+    #[test]
+    fn load_audit_records_ignores_partial_last_line() {
+        let state_dir = temp_state_dir();
+        let store = FileStateStore::new(&state_dir).expect("create store");
+        let path = state_dir.join("audit.jsonl");
+        fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"hash_uploaded\",\"local_id\":\"ok\"}\n",
+                "{\"type\":\"log\""
+            ),
+        )
+        .expect("write audit log");
+
+        let records = store.load_audit_records().expect("load audit records");
+
+        assert_eq!(records.len(), 1);
+        match &records[0] {
+            AuditRecord::HashUploaded { local_id } => assert_eq!(local_id, "ok"),
+            other => panic!("unexpected record: {other:?}"),
+        }
+
+        let _ = fs::remove_dir_all(state_dir);
     }
 }

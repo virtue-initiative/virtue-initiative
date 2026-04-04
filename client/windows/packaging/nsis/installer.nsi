@@ -97,9 +97,6 @@ Section "Install"
   IfFileExists "$0\\Virtue\\config\\service.dev.env" +2 0
   CopyFiles /SILENT "$0\\BePure\\config\\service.dev.env" "$0\\Virtue\\config"
 
-  IfFileExists "$0\\BePure\\data\\batch_buffer.json" 0 +3
-  IfFileExists "$0\\Virtue\\data\\batch_buffer.json" +2 0
-  CopyFiles /SILENT "$0\\BePure\\data\\batch_buffer.json" "$0\\Virtue\\data"
 
   ; Lifecycle service and capture supervisor binaries live in ProgramData.
   nsExec::ExecToLog '"$SYSDIR\\cmd.exe" /C copy /Y "$INSTDIR\\virtue-service.exe" "$0\\Virtue\\virtue-service.exe"'

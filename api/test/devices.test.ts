@@ -162,4 +162,50 @@ describe('Main device routes', () => {
       ),
     ).toBe(true);
   });
+
+  it('sends deletion notifications to accepted partners even if emails are unverified', async () => {
+    const { token } = await signupAndGetToken('delete-device-unverified@example.com');
+    const { token: partnerToken } = await signupAndGetToken(
+      'delete-device-unverified-partner@example.com',
+    );
+    const device = await createDeviceForUser(token, 'Unverified Delete', 'linux');
+
+    const inviteRes = await SELF.fetch(`${BASE}/partner`, {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify({
+        email: 'delete-device-unverified-partner@example.com',
+      }),
+    });
+    expect(inviteRes.status).toBe(201);
+    await inviteRes.json();
+    const inviteDelivery = (await listEmailDeliveries()).find(
+      (delivery) =>
+        delivery.kind === 'partner_invite' &&
+        delivery.recipient_email === 'delete-device-unverified-partner@example.com',
+    );
+    const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
+
+    const acceptRes = await SELF.fetch(`${BASE}/partner/accept`, {
+      method: 'POST',
+      headers: authHeaders(partnerToken),
+      body: JSON.stringify({ token: inviteMetadata.inviteToken }),
+    });
+    expect(acceptRes.status).toBe(200);
+
+    const deleteRes = await SELF.fetch(`${BASE}/device/${device.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(deleteRes.status).toBe(204);
+
+    const deletionEmails = (await listEmailDeliveries()).filter(
+      (delivery) => delivery.kind === 'device_deleted',
+    );
+    expect(
+      deletionEmails.some(
+        (delivery) => delivery.recipient_email === 'delete-device-unverified-partner@example.com',
+      ),
+    ).toBe(true);
+  });
 });

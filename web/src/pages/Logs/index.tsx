@@ -530,24 +530,21 @@ export function Logs() {
             {!sidebarLoading && deviceGroups.length === 0 && !loadError && (
               <div class="sidebar-group">
                 <p class="sidebar-group-label">My devices</p>
-                <p class="sidebar-loading">No devices registered yet.</p>
+                <p class="sidebar-loading">No devices</p>
               </div>
             )}
             {deviceGroups.map((group) => (
               <div class="sidebar-group" key={group.label}>
-                <p class="sidebar-group-label" title={group.label}>
-                  {group.label}
-                </p>
+                <button
+                  class={`device-btn device-btn-group${selectedUser === group.userId && selectedDevice === null ? " active" : ""}`}
+                  title={group.label}
+                  onClick={() => select(group.userId, null)}
+                  type="button"
+                >
+                  <span class="dot dot-placeholder" />
+                  <span class="device-btn-label">{group.label}</span>
+                </button>
                 <ul class="device-list">
-                  <li>
-                    <button
-                      class={`device-btn${selectedUser === group.userId && selectedDevice === null ? " active" : ""}`}
-                      onClick={() => select(group.userId, null)}
-                      type="button"
-                    >
-                      <span class="device-btn-label">All</span>
-                    </button>
-                  </li>
                   {group.devices.map((device) => (
                     <li key={device.id}>
                       <button
@@ -565,7 +562,7 @@ export function Logs() {
                   ))}
                 </ul>
                 {group.devices.length === 0 && (
-                  <p class="sidebar-loading">No devices registered yet.</p>
+                  <p class="sidebar-loading">No devices</p>
                 )}
               </div>
             ))}

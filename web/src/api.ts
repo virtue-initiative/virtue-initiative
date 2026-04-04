@@ -3,6 +3,7 @@ export interface User {
   email: string;
   email_verified: boolean;
   email_bounced_at: number | null;
+  email_frequency: "none" | "alerts-only" | "daily" | "weekly";
   name?: string;
   pub_key?: string;
   priv_key?: string;
@@ -69,7 +70,6 @@ export interface WatchingPartner {
   };
   status: "pending" | "accepted";
   digest_cadence: "none" | "alerts-only" | "daily" | "weekly";
-  immediate_tamper_severity: "warning" | "critical";
   created_at?: number;
 }
 
@@ -292,6 +292,7 @@ export const api = {
     fields: {
       email?: string;
       name?: string;
+      email_frequency?: User["email_frequency"];
       pub_key?: string;
       priv_key?: string;
     },
@@ -397,23 +398,6 @@ export const api = {
 
   deleteWatching: (token: string, id: string) =>
     req<void>(`/partner/watching/${id}`, { method: "DELETE" }, token),
-
-  updateNotificationPreference: (
-    token: string,
-    id: string,
-    patch: Partial<
-      Pick<WatchingPartner, "digest_cadence" | "immediate_tamper_severity">
-    >,
-  ) =>
-    req<void>(
-      `/partner/watching/${id}`,
-      {
-        method: "PATCH",
-        body: JSON.stringify(patch),
-      },
-      token,
-    ),
-
   getData: (
     token: string,
     params?: {

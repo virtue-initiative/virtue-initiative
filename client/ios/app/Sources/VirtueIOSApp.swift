@@ -36,7 +36,7 @@ struct ContentView: View {
                     Text("Logged in: \(coordinator.loggedIn ? "yes" : "no")")
                     Text("Device ID: \(coordinator.deviceId)")
                     Text("Monitoring: \(coordinator.monitorSummary)")
-                    Text("Pending Requests: \(coordinator.pendingRequestCount)")
+                    Text("Pending requests: \(coordinator.pendingRequestCount)")
                     Text("API: \(coordinator.currentApiBaseUrl)")
                 }
 
@@ -50,12 +50,12 @@ struct ContentView: View {
                     SecureField("Password", text: $coordinator.password)
                         .textFieldStyle(.roundedBorder)
                     HStack {
-                        Button("Sign In") {
+                        Button("Sign in") {
                             coordinator.login()
                         }
                         .buttonStyle(.borderedProminent)
 
-                        Button("Sign Out") {
+                        Button("Sign out") {
                             coordinator.logout()
                         }
                         .buttonStyle(.bordered)
@@ -63,7 +63,7 @@ struct ContentView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Safari Capture")
+                    Text("Safari capture")
                         .font(.headline)
                     Text("Capture now comes only from the Safari extension. Keep Safari as the browsing surface and enable the Virtue extension for all websites.")
                         .font(.footnote)
@@ -79,7 +79,7 @@ struct ContentView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Runtime Overrides")
+                    Text("Runtime overrides")
                         .font(.headline)
                     TextField("VIRTUE_BASE_API_URL", text: $coordinator.baseApiUrlOverride)
                         .textInputAutocapitalization(.never)
@@ -97,7 +97,7 @@ struct ContentView: View {
                     )
                     .keyboardType(.numberPad)
                     .textFieldStyle(.roundedBorder)
-                    Button("Apply Overrides") {
+                    Button("Apply overrides") {
                         coordinator.applyOverrides()
                     }
                     .buttonStyle(.bordered)
@@ -107,21 +107,21 @@ struct ContentView: View {
                     Text("Status")
                         .font(.headline)
                     Text(coordinator.statusMessage)
-                    Text("Core Last Loop: \(coordinator.lastCoreLoop)")
+                    Text("Core last loop: \(coordinator.lastCoreLoop)")
                         .foregroundStyle(.secondary)
-                    Text("Core Last Screenshot: \(coordinator.lastCoreScreenshot)")
+                    Text("Core last screenshot: \(coordinator.lastCoreScreenshot)")
                         .foregroundStyle(.secondary)
-                    Text("Core Last Batch: \(coordinator.lastCoreBatch)")
+                    Text("Core last batch: \(coordinator.lastCoreBatch)")
                         .foregroundStyle(.secondary)
-                    Text("Capture Health: \(coordinator.safariCaptureHealth)")
+                    Text("Capture health: \(coordinator.safariCaptureHealth)")
                         .foregroundStyle(.secondary)
-                    Text("Last Heartbeat: \(coordinator.safariLastHeartbeat)")
+                    Text("Last heartbeat: \(coordinator.safariLastHeartbeat)")
                         .foregroundStyle(.secondary)
-                    Text("Last Frame: \(coordinator.safariLastFrame)")
+                    Text("Last frame: \(coordinator.safariLastFrame)")
                         .foregroundStyle(.secondary)
-                    Text("Last Page: \(coordinator.safariLastPage)")
+                    Text("Last page: \(coordinator.safariLastPage)")
                         .foregroundStyle(.secondary)
-                    Text("Last Capture Error: \(coordinator.safariLastError)")
+                    Text("Last capture error: \(coordinator.safariLastError)")
                         .foregroundStyle(.secondary)
                     Text("Daemon: \(coordinator.safariDaemonStatus)")
                         .foregroundStyle(.secondary)
@@ -145,7 +145,7 @@ struct ContentView: View {
                 .shadow(color: captureActive ? .red.opacity(0.8) : .clear, radius: 8)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("Safari Monitoring Indicator")
+                Text("Safari monitoring indicator")
                     .font(.headline)
                 Text(captureActive ? "ON (Safari extension heartbeat active)" : "OFF")
                     .font(.subheadline)

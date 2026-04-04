@@ -22,8 +22,6 @@ private struct CoreDeviceSettings: Decodable {
     let enabled: Bool
 }
 
-private struct CorePendingRequest: Decodable {}
-
 final class MonitoringCoordinator: ObservableObject {
     @Published var email: String = ""
     @Published var password: String = ""
@@ -209,7 +207,7 @@ final class MonitoringCoordinator: ObservableObject {
 
     private func refreshSafariStatus() {
         guard let defaults = sharedDefaults else {
-            safariCaptureHealth = "App Group unavailable"
+            safariCaptureHealth = "App group unavailable"
             safariLastHeartbeat = "<none>"
             safariLastFrame = "<none>"
             safariLastPage = "<none>"
@@ -282,11 +280,9 @@ final class MonitoringCoordinator: ObservableObject {
             : runtimeOverrides().baseApiUrl
 
         let serviceStatus = loadJSONFile(named: "status.json", as: CoreServiceStatus.self)
-        let pendingRequests = loadJSONFile(named: "pending_requests.json", as: [CorePendingRequest].self)
-            ?? []
         let deviceSettings = loadJSONFile(named: "device_settings.json", as: CoreDeviceSettings?.self) ?? nil
 
-        pendingRequestCount = serviceStatus?.pendingRequestCount ?? pendingRequests.count
+        pendingRequestCount = serviceStatus?.pendingRequestCount ?? 0
         lastCoreLoop = formatMillisTimestamp(serviceStatus?.lastLoopAtMs)
         lastCoreScreenshot = formatMillisTimestamp(serviceStatus?.lastScreenshotAtMs)
         lastCoreBatch = formatMillisTimestamp(serviceStatus?.lastBatchAtMs)

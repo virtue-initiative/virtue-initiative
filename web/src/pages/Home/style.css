@@ -16,8 +16,6 @@
   & h2 {
     font-size: 1.1rem;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
     color: var(--text-muted);
   }
 }
@@ -73,45 +71,22 @@
   margin: 0 0 0.75rem;
 }
 
-/* Partners split */
-
-.partners-split {
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-
 .partners-panel {
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
 }
 
-.partners-panel-header {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-
-  & h3 {
-    margin: 0;
-    font-size: 1rem;
-    font-weight: 700;
-    color: var(--text);
-  }
-
-  & p {
-    margin: 0;
-    font-size: 0.9rem;
-    color: var(--text-muted);
-  }
+.partners-panel-subtitle {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-muted);
 }
 
 .partners-group-label {
   margin: 0 0 0.6rem;
   font-size: 0.8rem;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
   color: var(--text-muted);
 }
 
@@ -121,4 +96,53 @@
 
 .card-delete {
   margin-top: 0.85rem;
+}
+
+.partner-device-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+}
+
+.partner-device-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--line, #26263a);
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.partner-device-status {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+}
+
+.partner-device-status-online {
+  background: #14b86f;
+}
+
+.partner-device-status-offline {
+  background: #7e7e92;
+}
+
+.partner-device-more {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.partner-card-compact {
+  min-height: 0;
+  padding: 0.95rem;
+}
+
+.partner-card-compact .card-actions {
+  margin-top: 0.6rem;
 }

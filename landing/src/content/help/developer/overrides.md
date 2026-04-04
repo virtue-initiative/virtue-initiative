@@ -1,4 +1,4 @@
-# Developer Overrides
+# Developer overrides
 
 The main developer overrides are:
 

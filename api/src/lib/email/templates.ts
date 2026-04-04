@@ -1,5 +1,28 @@
 import { DigestFrequency, TamperSeverity } from '../email-domain';
 
+const EMAIL_COLORS = {
+  text: '#1a1a1a',
+  textMuted: '#6b6860',
+  textOnAccent: '#ffffff',
+  accent: '#008900',
+  pageBg: '#f9f9f7',
+  surface: '#ffffff',
+  border: '#e0ddd8',
+} as const;
+
+function inlineStyle(rules: Record<string, string>) {
+  return Object.entries(rules)
+    .map(([key, value]) => `${key}:${value}`)
+    .join(';');
+}
+
+function themedLink(url: string, label: string) {
+  return `<a href="${escapeHtml(url)}" style="${inlineStyle({
+    color: EMAIL_COLORS.accent,
+    'text-decoration': 'none',
+  })}">${escapeHtml(label)}</a>`;
+}
+
 function escapeHtml(value: string) {
   return value
     .replaceAll('&', '&amp;')
@@ -10,15 +33,37 @@ function escapeHtml(value: string) {
 }
 
 function paragraph(text: string) {
-  return `<p style="margin:0 0 16px 0;color:#1a1a1a;font-size:16px;line-height:1.6;">${escapeHtml(text)}</p>`;
+  return `<p style="${inlineStyle({
+    margin: '0 0 16px 0',
+    color: EMAIL_COLORS.text,
+    'font-size': '16px',
+    'line-height': '1.6',
+  })}">${escapeHtml(text)}</p>`;
 }
 
 function actionButton(url: string, label: string) {
-  return `<p style="margin:0 0 18px 0;"><a href="${escapeHtml(url)}" style="display:inline-block;background:#1a8a50;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;line-height:1;padding:12px 18px;border-radius:8px;">${escapeHtml(label)}</a></p>`;
+  return `<p style="${inlineStyle({ margin: '0 0 18px 0' })}"><a href="${escapeHtml(url)}" style="${inlineStyle(
+    {
+      display: 'inline-block',
+      background: EMAIL_COLORS.accent,
+      color: EMAIL_COLORS.textOnAccent,
+      'text-decoration': 'none',
+      'font-weight': '600',
+      'font-size': '15px',
+      'line-height': '1',
+      padding: '12px 18px',
+      'border-radius': '8px',
+    },
+  )}">${escapeHtml(label)}</a></p>`;
 }
 
 function listItem(text: string) {
-  return `<li style="margin:0 0 8px 0;color:#1a1a1a;font-size:15px;line-height:1.5;">${escapeHtml(text)}</li>`;
+  return `<li style="${inlineStyle({
+    margin: '0 0 8px 0',
+    color: EMAIL_COLORS.text,
+    'font-size': '15px',
+    'line-height': '1.5',
+  })}">${escapeHtml(text)}</li>`;
 }
 
 function normalizeAppName(appName: string) {
@@ -39,26 +84,57 @@ function renderEmailDocument(input: {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(input.headline)}</title>
   </head>
-  <body style="margin:0;padding:24px;background:#f9f9f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#1a1a1a;">
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+  <body style="${inlineStyle({
+    margin: '0',
+    padding: '24px',
+    background: EMAIL_COLORS.pageBg,
+    'font-family': "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif",
+    color: EMAIL_COLORS.text,
+  })}">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="${inlineStyle({ 'border-collapse': 'collapse' })}">
       <tr>
         <td align="center">
-          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;border-collapse:collapse;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="${inlineStyle(
+            {
+              'max-width': '640px',
+              'border-collapse': 'collapse',
+            },
+          )}">
             <tr>
-              <td style="padding:0 0 14px 0;">
-                <p style="margin:0;color:#6b6860;font-size:13px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;">${escapeHtml(input.appName)}</p>
+              <td style="${inlineStyle({ padding: '0 0 14px 0' })}">
+                <p style="${inlineStyle({
+                  margin: '0',
+                  color: EMAIL_COLORS.textMuted,
+                  'font-size': '13px',
+                  'font-weight': '600',
+                })}">${escapeHtml(input.appName)}</p>
               </td>
             </tr>
             <tr>
-              <td style="background:#ffffff;border:1px solid #e0ddd8;border-radius:14px;padding:26px 24px;">
-                <h1 style="margin:0 0 16px 0;font-size:22px;line-height:1.25;color:#1a1a1a;">${escapeHtml(input.headline)}</h1>
+              <td style="${inlineStyle({
+                background: EMAIL_COLORS.surface,
+                border: `1px solid ${EMAIL_COLORS.border}`,
+                'border-radius': '14px',
+                padding: '26px 24px',
+              })}">
+                <h1 style="${inlineStyle({
+                  margin: '0 0 16px 0',
+                  'font-size': '22px',
+                  'line-height': '1.25',
+                  color: EMAIL_COLORS.text,
+                })}">${escapeHtml(input.headline)}</h1>
                 ${input.contentHtml}
               </td>
             </tr>
             <tr>
-              <td style="padding:14px 2px 0 2px;">
-                <p style="margin:0;color:#6b6860;font-size:12px;line-height:1.5;">
-                  <a href="${escapeHtml(input.appUrl)}" style="color:#1a8a50;text-decoration:none;">Open ${escapeHtml(input.appName)}</a>
+              <td style="${inlineStyle({ padding: '14px 2px 0 2px' })}">
+                <p style="${inlineStyle({
+                  margin: '0',
+                  color: EMAIL_COLORS.textMuted,
+                  'font-size': '12px',
+                  'line-height': '1.5',
+                })}">
+                  ${themedLink(input.appUrl, `Open ${input.appName}`)}
                 </p>
               </td>
             </tr>
@@ -87,9 +163,12 @@ function withFooter(input: {
     ...input.htmlSections,
     paragraph('Thanks,'),
     paragraph(`${input.appName} team`),
-    `<p style="margin:0;color:#6b6860;font-size:13px;line-height:1.5;"><a href="${escapeHtml(
-      settingsUrl,
-    )}" style="color:#1a8a50;text-decoration:none;">Manage email preferences</a></p>`,
+    `<p style="${inlineStyle({
+      margin: '0',
+      color: EMAIL_COLORS.textMuted,
+      'font-size': '13px',
+      'line-height': '1.5',
+    })}">${themedLink(settingsUrl, 'Manage email preferences')}</p>`,
   ].join('');
 
   return {
@@ -132,9 +211,12 @@ export function renderEmailVerificationTemplate(input: {
       paragraph(greeting),
       paragraph(`Please verify your email address for ${appName}.`),
       actionButton(input.verifyUrl, 'Verify email'),
-      `<p style="margin:0 0 16px 0;color:#6b6860;font-size:13px;line-height:1.5;">If the button does not work, open this link: <a href="${escapeHtml(
-        input.verifyUrl,
-      )}" style="color:#1a8a50;text-decoration:none;">${escapeHtml(input.verifyUrl)}</a></p>`,
+      `<p style="${inlineStyle({
+        margin: '0 0 16px 0',
+        color: EMAIL_COLORS.textMuted,
+        'font-size': '13px',
+        'line-height': '1.5',
+      })}">If the button does not work, open this link: ${themedLink(input.verifyUrl, input.verifyUrl)}</p>`,
     ],
   });
 
@@ -295,7 +377,7 @@ export function renderTamperAlertTemplate(input: {
   const footer = withFooter({
     appName,
     appUrl: input.appUrl,
-    headline: `${input.severity.toUpperCase()} tamper alert`,
+    headline: `${input.severity} tamper alert`,
     textLines: [
       `${owner} triggered a ${input.severity} tamper alert.`,
       input.title,
@@ -312,7 +394,7 @@ export function renderTamperAlertTemplate(input: {
   });
 
   return {
-    subject: `[${input.severity.toUpperCase()}] ${owner}: ${input.title}`,
+    subject: `[${input.severity}] ${owner}: ${input.title}`,
     text: footer.text,
     html: footer.html,
   };
@@ -320,48 +402,116 @@ export function renderTamperAlertTemplate(input: {
 
 export function renderPartnerDigestTemplate(input: {
   cadence: DigestFrequency;
-  ownerName?: string | null;
-  ownerEmail: string;
-  approxScreenshotCount: number;
-  tamperCounts: Record<TamperSeverity, number>;
-  missingLogDays: string[];
+  partnerSummaries: Array<{
+    ownerName?: string | null;
+    ownerEmail: string;
+    approxScreenshotCount: number;
+    tamperCounts: Record<TamperSeverity, number>;
+    missingLogDays: string[];
+  }>;
   appName: string;
   appUrl: string;
 }) {
   const appName = normalizeAppName(input.appName);
-  const owner = input.ownerName?.trim() || input.ownerEmail;
   const periodLabel = input.cadence === 'weekly' ? 'Weekly' : 'Daily';
+  const accountCount = input.partnerSummaries.length;
+  const summaryTarget =
+    accountCount === 1
+      ? input.partnerSummaries[0]?.ownerName?.trim() || input.partnerSummaries[0]?.ownerEmail
+      : `${accountCount} monitored accounts`;
+  const totalTamperCounts = input.partnerSummaries.reduce<Record<TamperSeverity, number>>(
+    (totals, summary) => ({
+      info: totals.info + summary.tamperCounts.info,
+      warning: totals.warning + summary.tamperCounts.warning,
+      critical: totals.critical + summary.tamperCounts.critical,
+    }),
+    { info: 0, warning: 0, critical: 0 },
+  );
+  const totalScreenshots = input.partnerSummaries.reduce(
+    (total, summary) => total + summary.approxScreenshotCount,
+    0,
+  );
+
+  const partnerSections = input.partnerSummaries.flatMap((summary) => {
+    const owner = summary.ownerName?.trim() || summary.ownerEmail;
+    return [
+      '',
+      owner,
+      `Approximate screenshots available: ${summary.approxScreenshotCount}`,
+      `Critical tamper alerts: ${summary.tamperCounts.critical}`,
+      `Warning tamper alerts: ${summary.tamperCounts.warning}`,
+      `Info-only tamper events: ${summary.tamperCounts.info}`,
+      ...(summary.missingLogDays.length > 0
+        ? [
+            'Devices with at least one day without logs:',
+            ...summary.missingLogDays.map((line) => `- ${line}`),
+          ]
+        : []),
+    ];
+  });
+
   const lines = [
-    `${periodLabel} accountability summary for ${owner}`,
+    `${periodLabel} accountability summary for ${summaryTarget}`,
     '',
-    `Approximate screenshots available: ${input.approxScreenshotCount}`,
-    `Critical tamper alerts: ${input.tamperCounts.critical}`,
-    `Warning tamper alerts: ${input.tamperCounts.warning}`,
-    `Info-only tamper events: ${input.tamperCounts.info}`,
-    ...(input.missingLogDays.length > 0
-      ? [
-          '',
-          'Devices with at least one day without logs:',
-          ...input.missingLogDays.map((line) => `- ${line}`),
-        ]
-      : []),
+    `Monitored accounts: ${accountCount}`,
+    `Approximate screenshots available: ${totalScreenshots}`,
+    `Critical tamper alerts: ${totalTamperCounts.critical}`,
+    `Warning tamper alerts: ${totalTamperCounts.warning}`,
+    `Info-only tamper events: ${totalTamperCounts.info}`,
+    ...partnerSections,
     '',
     `Please review the screenshots and logs: ${input.appUrl}`,
   ];
 
   const summaryItems = [
-    listItem(`Approximate screenshots available: ${input.approxScreenshotCount}`),
-    listItem(`Critical tamper alerts: ${input.tamperCounts.critical}`),
-    listItem(`Warning tamper alerts: ${input.tamperCounts.warning}`),
-    listItem(`Info-only tamper events: ${input.tamperCounts.info}`),
-    ...(input.missingLogDays.length > 0
-      ? [
-          `<li style="margin:0 0 8px 0;color:#1a1a1a;font-size:15px;line-height:1.5;">Devices with at least one day without logs:<ul style="margin:8px 0 0 18px;padding:0;">${input.missingLogDays
-            .map((line) => listItem(line))
-            .join('')}</ul></li>`,
-        ]
-      : []),
+    listItem(`Monitored accounts: ${accountCount}`),
+    listItem(`Approximate screenshots available: ${totalScreenshots}`),
+    listItem(`Critical tamper alerts: ${totalTamperCounts.critical}`),
+    listItem(`Warning tamper alerts: ${totalTamperCounts.warning}`),
+    listItem(`Info-only tamper events: ${totalTamperCounts.info}`),
   ].join('');
+
+  const partnerSummarySections = input.partnerSummaries
+    .map((summary) => {
+      const owner = summary.ownerName?.trim() || summary.ownerEmail;
+      const missingLogHtml =
+        summary.missingLogDays.length > 0
+          ? `<li style="${inlineStyle({
+              margin: '0 0 8px 0',
+              color: EMAIL_COLORS.text,
+              'font-size': '15px',
+              'line-height': '1.5',
+            })}">Devices with at least one day without logs:<ul style="${inlineStyle({
+              margin: '8px 0 0 18px',
+              padding: '0',
+            })}">${summary.missingLogDays.map((line) => listItem(line)).join('')}</ul></li>`
+          : '';
+
+      return `<div style="${inlineStyle({
+        margin: '0 0 18px 0',
+        padding: '16px',
+        border: `1px solid ${EMAIL_COLORS.border}`,
+        'border-radius': '10px',
+      })}">
+        <p style="${inlineStyle({
+          margin: '0 0 12px 0',
+          color: EMAIL_COLORS.text,
+          'font-size': '16px',
+          'font-weight': '600',
+        })}">${escapeHtml(owner)}</p>
+        <ul style="${inlineStyle({
+          margin: '0 0 0 18px',
+          padding: '0',
+        })}">
+          ${listItem(`Approximate screenshots available: ${summary.approxScreenshotCount}`)}
+          ${listItem(`Critical tamper alerts: ${summary.tamperCounts.critical}`)}
+          ${listItem(`Warning tamper alerts: ${summary.tamperCounts.warning}`)}
+          ${listItem(`Info-only tamper events: ${summary.tamperCounts.info}`)}
+          ${missingLogHtml}
+        </ul>
+      </div>`;
+    })
+    .join('');
 
   const footer = withFooter({
     appName,
@@ -369,14 +519,18 @@ export function renderPartnerDigestTemplate(input: {
     headline: `${periodLabel} summary`,
     textLines: lines,
     htmlSections: [
-      paragraph(`${periodLabel} accountability summary for ${owner}.`),
-      `<ul style="margin:0 0 16px 18px;padding:0;">${summaryItems}</ul>`,
+      paragraph(`${periodLabel} accountability summary for ${summaryTarget}.`),
+      `<ul style="${inlineStyle({
+        margin: '0 0 16px 18px',
+        padding: '0',
+      })}">${summaryItems}</ul>`,
+      partnerSummarySections,
       actionButton(input.appUrl, 'Open dashboard'),
     ],
   });
 
   return {
-    subject: `${periodLabel} summary for ${owner}`,
+    subject: `${periodLabel} summary for ${summaryTarget}`,
     text: footer.text,
     html: footer.html,
   };

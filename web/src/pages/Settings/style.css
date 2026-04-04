@@ -75,6 +75,14 @@
   gap: 0.4rem;
 }
 
+.settings-frequency-field {
+  width: min(100%, 18rem);
+}
+
+.settings-followup-hint {
+  margin-top: 0.35rem;
+}
+
 .settings-preference-grid {
   display: grid;
   gap: 0.85rem;
@@ -83,27 +91,25 @@
 .settings-select {
   appearance: none;
   width: 100%;
-  min-height: 2.6rem;
-  padding: 0.7rem 2.5rem 0.7rem 0.85rem;
+  min-height: 0;
+  padding: 0.55rem 2.25rem 0.55rem 0.75rem;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 7px;
   background:
     linear-gradient(45deg, transparent 50%, var(--text-muted) 50%)
       calc(100% - 1.05rem) calc(50% - 0.1rem) / 0.45rem 0.45rem no-repeat,
     linear-gradient(135deg, var(--text-muted) 50%, transparent 50%)
       calc(100% - 0.75rem) calc(50% - 0.1rem) / 0.45rem 0.45rem no-repeat,
-    var(--bg-subtle);
+    var(--bg);
   color: var(--text);
+  font-size: 1rem;
   font: inherit;
-  transition:
-    border-color 0.12s,
-    box-shadow 0.12s,
-    background 0.12s;
+  line-height: 1.5;
+  outline: none;
+  transition: border-color 0.15s;
 
   &:focus {
-    outline: none;
-    border-color: var(--control-active-border);
-    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.14);
+    border-color: var(--accent);
   }
 
   &:disabled {

@@ -1,18 +1,30 @@
 use crate::api::ApiClient;
+use crate::audit::{derive_state, generate_local_id};
 use crate::batch::BatchBuilder;
 use crate::config::Config;
 use crate::crypto::{CryptoEngine, prepare_screenshot_event};
 use crate::error::{CoreError, CoreResult};
 use crate::image_pipeline::ImagePipeline;
 use crate::model::{
-    AuthState, BatchBufferState, BatchRecipient, BatchUpload, BufferedScreenshot,
-    DeviceCredentials, DeviceSettings, LogEntry, LoginStatus, LoopOutcome, PendingRequest,
-    RequestDisposition, RequestKind, Screenshot, ServiceStatus,
+    AuditLogItem, AuditLogPayload, AuditRecord, AuditState, AuthState, BatchRecipient, BatchUpload,
+    BufferedScreenshot, DeviceCredentials, DeviceSettings, LogEntry, LoginStatus, LoopOutcome,
+    Screenshot, ServiceStatus,
 };
 use crate::platform::PlatformHooks;
 use crate::storage::FileStateStore;
 
 const POST_LOGIN_PROOF_BATCH_COUNT: u32 = 3;
+const MAX_HASH_RETRIES_PER_LOOP: usize = 8;
+const MAX_DIRECT_LOG_RETRIES_PER_LOOP: usize = 8;
+const MAX_BATCH_ITEMS_PER_UPLOAD: usize = 25;
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum RetryAttemptOutcome {
+    Uploaded,
+    Deferred,
+    NonRetryable,
+    ResetLoggedOut,
+}
 
 pub struct MonitorService<P> {
     config: Config,
@@ -23,8 +35,6 @@ pub struct MonitorService<P> {
     device_credentials: Option<DeviceCredentials>,
     post_login_proof_batches_remaining: u32,
     device_settings: Option<DeviceSettings>,
-    batch_buffer: BatchBufferState,
-    pending_requests: Vec<PendingRequest>,
     status: ServiceStatus,
 }
 
@@ -34,9 +44,8 @@ impl<P: PlatformHooks> MonitorService<P> {
         let api = ApiClient::new(&config)?;
         let storage = FileStateStore::new(&config.state_dir)?;
         let auth_state = storage.load_auth_state()?;
-        let pending_requests = storage.load_pending_requests()?;
-        let batch_buffer = storage.load_batch_buffer()?;
         let device_settings = storage.load_device_settings()?;
+        let audit_state = derive_state(&storage.load_audit_records()?);
 
         let mut status = storage.load_status()?.unwrap_or(ServiceStatus {
             is_authenticated: auth_state.device_credentials.is_some(),
@@ -48,7 +57,7 @@ impl<P: PlatformHooks> MonitorService<P> {
             last_loop_at_ms: None,
             last_screenshot_at_ms: None,
             last_batch_at_ms: None,
-            pending_request_count: pending_requests.len(),
+            pending_request_count: audit_state.pending_request_count,
         });
         status.is_running = true;
         status.is_authenticated = auth_state.device_credentials.is_some();
@@ -56,7 +65,7 @@ impl<P: PlatformHooks> MonitorService<P> {
             .device_credentials
             .as_ref()
             .map(|device| device.device_id.clone());
-        status.pending_request_count = pending_requests.len();
+        status.pending_request_count = audit_state.pending_request_count;
 
         let mut service = Self {
             config,
@@ -67,8 +76,6 @@ impl<P: PlatformHooks> MonitorService<P> {
             device_credentials: auth_state.device_credentials,
             post_login_proof_batches_remaining: auth_state.post_login_proof_batches_remaining,
             device_settings,
-            batch_buffer,
-            pending_requests,
             status,
         };
 
@@ -87,28 +94,31 @@ impl<P: PlatformHooks> MonitorService<P> {
         let now_ms = self.platform.get_time_utc_ms()?;
         self.status.last_loop_at_ms = Some(now_ms);
 
-        if self.device_credentials.is_some() {
-            self.retry_failed_requests()?;
-        }
+        let work_result = (|| -> CoreResult<()> {
+            if self.device_credentials.is_some() {
+                self.retry_pending_work()?;
+            }
 
-        if self.can_capture() && self.should_take_screenshot(now_ms) {
-            let screenshot = self.platform.take_screenshot()?;
-            let processed = self.process_screenshot(screenshot)?;
-            self.store_screenshot(&processed)?;
-            let _ = self.try_request(self.pending_hash_request(&processed, now_ms)?)?;
-            self.status.last_screenshot_at_ms = Some(now_ms);
-        }
+            if self.can_capture() && self.should_take_screenshot(now_ms) {
+                let screenshot = self.platform.take_screenshot()?;
+                let processed = self.process_screenshot(screenshot)?;
+                let item = self.enqueue_batch_screenshot(processed)?;
+                let _ = self.try_upload_hash_for_item(&item);
+                self.status.last_screenshot_at_ms = Some(now_ms);
+            }
 
-        if self.can_upload_batch() && self.should_upload_batch(now_ms) {
-            self.refresh_device_settings()?;
-            let batch = self.build_batch(now_ms)?;
-            let _ = self.try_request(self.pending_batch_request(&batch, now_ms)?)?;
-            BatchBuilder::clear(&mut self.batch_buffer);
-            self.complete_batch_upload();
-            self.status.last_batch_at_ms = Some(now_ms);
-        }
+            let audit_state = self.load_audit_state()?;
+            if self.can_upload_batch(&audit_state) && self.should_upload_batch(now_ms) {
+                self.refresh_device_settings()?;
+                let batch_items = self.batch_upload_candidates(&audit_state);
+                self.try_upload_pending_batch(batch_items, now_ms)?;
+            }
+
+            Ok(())
+        })();
 
         self.persist_state()?;
+        work_result?;
 
         Ok(LoopOutcome {
             ran_at_ms: now_ms,
@@ -138,14 +148,8 @@ impl<P: PlatformHooks> MonitorService<P> {
 
     pub fn send_log(&mut self, log: LogEntry) -> CoreResult<()> {
         self.ensure_running()?;
-        let request = PendingRequest {
-            id: format!("log-{}", log.ts_ms),
-            kind: RequestKind::UploadLog,
-            payload: serde_json::to_value(log)?,
-            last_tried_at_ms: None,
-            try_count: 0,
-        };
-        let _ = self.try_request(request)?;
+        let item = self.append_audit_log(false, false, AuditLogPayload::for_direct_log(log))?;
+        let _ = self.try_upload_direct_log(&item);
         self.persist_state()
     }
 
@@ -159,11 +163,11 @@ impl<P: PlatformHooks> MonitorService<P> {
             &self.config.platform_name,
         )?;
 
+        self.storage.clear_audit_records()?;
+
         self.user_access_token = Some(access_token.clone());
         self.device_credentials = Some(device.clone());
         self.post_login_proof_batches_remaining = POST_LOGIN_PROOF_BATCH_COUNT;
-        self.batch_buffer = BatchBufferState::default();
-        self.pending_requests.clear();
         self.status.last_screenshot_at_ms = None;
         self.status.last_batch_at_ms = None;
         self.status.is_authenticated = true;
@@ -211,18 +215,19 @@ impl<P: PlatformHooks> MonitorService<P> {
         self.device_credentials = None;
         self.post_login_proof_batches_remaining = 0;
         self.device_settings = None;
-        self.batch_buffer = BatchBufferState::default();
-        self.pending_requests.clear();
+        self.storage.clear_audit_records()?;
         self.status.is_authenticated = false;
         self.status.device_id = None;
         self.persist_state()
     }
 
     pub fn status(&self) -> CoreResult<ServiceStatus> {
-        Ok(self
+        let mut status = self
             .storage
             .load_status()?
-            .unwrap_or_else(|| self.status.clone()))
+            .unwrap_or_else(|| self.status.clone());
+        status.pending_request_count = self.load_audit_state()?.pending_request_count;
+        Ok(status)
     }
 
     fn process_screenshot(&self, screenshot: Screenshot) -> CoreResult<BufferedScreenshot> {
@@ -230,151 +235,258 @@ impl<P: PlatformHooks> MonitorService<P> {
         Ok(prepare_screenshot_event(processed))
     }
 
-    fn store_screenshot(&mut self, processed: &BufferedScreenshot) -> CoreResult<()> {
-        BatchBuilder::push_screenshot(&mut self.batch_buffer, processed.clone())?;
-        self.storage.save_batch_buffer(&self.batch_buffer)
+    fn enqueue_batch_screenshot(
+        &mut self,
+        screenshot: BufferedScreenshot,
+    ) -> CoreResult<AuditLogItem> {
+        self.append_audit_log(
+            true,
+            true,
+            AuditLogPayload::for_batch_screenshot(screenshot),
+        )
     }
 
-    fn build_batch(&self, now_ms: i64) -> CoreResult<BatchUpload> {
-        let recipients = self.batch_recipients()?;
-        BatchBuilder::build_upload(&self.batch_buffer, &CryptoEngine, &recipients, now_ms)
+    fn append_audit_log(
+        &mut self,
+        should_be_in_batch: bool,
+        requires_hash_upload: bool,
+        payload: AuditLogPayload,
+    ) -> CoreResult<AuditLogItem> {
+        let item = AuditLogItem {
+            local_id: generate_local_id(),
+            should_be_in_batch,
+            requires_hash_upload,
+            payload: payload.clone(),
+        };
+        self.storage.append_audit_record(&AuditRecord::Log {
+            local_id: item.local_id.clone(),
+            should_be_in_batch,
+            requires_hash_upload,
+            log: payload,
+        })?;
+        Ok(item)
     }
 
-    fn pending_hash_request(
-        &self,
-        processed: &BufferedScreenshot,
-        now_ms: i64,
-    ) -> CoreResult<PendingRequest> {
-        Ok(PendingRequest {
-            id: format!("hash-{now_ms}"),
-            kind: RequestKind::UploadHash,
-            payload: serde_json::json!({
-                "content_hash": processed.content_hash,
-            }),
-            last_tried_at_ms: None,
-            try_count: 0,
-        })
+    fn load_audit_state(&self) -> CoreResult<AuditState> {
+        Ok(derive_state(&self.storage.load_audit_records()?))
     }
 
-    fn pending_batch_request(
-        &self,
-        batch: &BatchUpload,
-        now_ms: i64,
-    ) -> CoreResult<PendingRequest> {
-        Ok(PendingRequest {
-            id: format!("batch-{now_ms}"),
-            kind: RequestKind::UploadBatch,
-            payload: serde_json::to_value(batch)?,
-            last_tried_at_ms: None,
-            try_count: 0,
-        })
-    }
+    fn try_upload_hash_for_item(&mut self, item: &AuditLogItem) -> CoreResult<RetryAttemptOutcome> {
+        let Some(screenshot) = item.payload.batch_screenshot.as_ref() else {
+            self.log_error(
+                "hash upload skipped; batch payload missing",
+                Some(&item.local_id),
+                None,
+            );
+            return Ok(RetryAttemptOutcome::NonRetryable);
+        };
 
-    fn try_request(&mut self, mut request: PendingRequest) -> CoreResult<RequestDisposition> {
-        match self.execute_request(&request) {
-            Ok(()) => Ok(RequestDisposition::Completed),
-            Err(err) if err.is_bad_request() => {
-                self.log_error(
-                    "dropping bad request without retry",
-                    Some(&request),
-                    Some(&err),
-                );
-                Ok(RequestDisposition::Completed)
-            }
-            Err(err) => {
-                self.log_error(
-                    "request failed, queuing for retry",
-                    Some(&request),
-                    Some(&err),
-                );
-                request.try_count += 1;
-                request.last_tried_at_ms = Some(self.platform.get_time_utc_ms()?);
-                self.pending_requests.push(request);
-                Ok(RequestDisposition::Deferred)
-            }
-        }
-    }
-
-    fn execute_request(&mut self, request: &PendingRequest) -> CoreResult<()> {
-        match request.kind {
-            RequestKind::DeviceSettings => {
-                let settings = self.with_device_token_retry(|api, access_token, _| {
-                    api.get_device_settings(access_token)
-                })?;
-                self.device_settings = Some(settings);
-                self.storage
-                    .save_device_settings(self.device_settings.as_ref())?;
-                Ok(())
-            }
-            RequestKind::UploadBatch => {
-                let batch: BatchUpload = serde_json::from_value(request.payload.clone())?;
-                self.with_device_token_retry(|api, access_token, _| {
-                    api.upload_batch(access_token, &batch)
-                })
-            }
-            RequestKind::UploadLog => {
-                let log: LogEntry = serde_json::from_value(request.payload.clone())?;
-                self.with_device_token_retry(|api, access_token, _| {
-                    api.upload_log(access_token, &log)
-                })
-            }
-            RequestKind::UploadHash => {
-                let content_hash = parse_content_hash(&request.payload)?;
-                let hash_base_url = self
-                    .device_settings
-                    .as_ref()
-                    .and_then(|settings| settings.hash_base_url.clone());
-                self.with_device_token_retry(|api, access_token, _| {
-                    api.upload_hash(hash_base_url.as_deref(), access_token, &content_hash)
-                })
-            }
-        }
-    }
-
-    fn with_device_token_retry<T, F>(&mut self, mut operation: F) -> CoreResult<T>
-    where
-        F: FnMut(&ApiClient, &str, Option<&str>) -> CoreResult<T>,
-    {
-        let credentials = self
-            .device_credentials
-            .as_ref()
-            .ok_or(CoreError::NotAuthenticated)?
-            .clone();
         let hash_base_url = self
             .device_settings
             .as_ref()
-            .and_then(|settings| settings.hash_base_url.as_deref());
-
-        match operation(&self.api, &credentials.access_token, hash_base_url) {
-            Ok(value) => Ok(value),
-            Err(err) if err.is_unauthorized() => {
-                let refreshed = self.api.refresh_device_token(&credentials.refresh_token)?;
-                if let Some(device_credentials) = self.device_credentials.as_mut() {
-                    device_credentials.access_token = refreshed.clone();
-                }
-                self.persist_auth_state()?;
-                operation(&self.api, &refreshed, hash_base_url)
+            .and_then(|settings| settings.hash_base_url.clone());
+        match self.with_device_token_retry(|api, access_token, _| {
+            api.upload_hash(
+                hash_base_url.as_deref(),
+                access_token,
+                &screenshot.content_hash,
+            )
+        }) {
+            Ok(()) => {
+                self.storage
+                    .append_audit_record(&AuditRecord::HashUploaded {
+                        local_id: item.local_id.clone(),
+                    })?;
+                Ok(RetryAttemptOutcome::Uploaded)
             }
-            Err(err) => Err(err),
+            Err(err) if err.is_not_found() => {
+                self.reset_local_state_after_not_found(Some(&item.local_id), &err)?;
+                Ok(RetryAttemptOutcome::ResetLoggedOut)
+            }
+            Err(err) if err.is_bad_request() => {
+                self.log_error(
+                    "hash upload failed permanently",
+                    Some(&item.local_id),
+                    Some(&err),
+                );
+                Ok(RetryAttemptOutcome::NonRetryable)
+            }
+            Err(err) => {
+                self.log_error("hash upload deferred", Some(&item.local_id), Some(&err));
+                Ok(RetryAttemptOutcome::Deferred)
+            }
         }
     }
 
-    fn refresh_device_settings(&mut self) -> CoreResult<()> {
-        let request = PendingRequest {
-            id: "device-settings".to_string(),
-            kind: RequestKind::DeviceSettings,
-            payload: serde_json::json!({}),
-            last_tried_at_ms: None,
-            try_count: 0,
+    fn try_upload_direct_log(&mut self, item: &AuditLogItem) -> CoreResult<RetryAttemptOutcome> {
+        let Some(log) = item.payload.direct_log.as_ref() else {
+            self.log_error(
+                "direct log upload skipped; direct payload missing",
+                Some(&item.local_id),
+                None,
+            );
+            return Ok(RetryAttemptOutcome::NonRetryable);
         };
 
-        match self.execute_request(&request) {
-            Ok(()) => {
-                self.status.is_authenticated = self.device_credentials.is_some();
+        match self.with_device_token_retry(|api, access_token, _| api.upload_log(access_token, log))
+        {
+            Ok(response) => {
+                self.storage
+                    .append_audit_record(&AuditRecord::LogUploaded {
+                        local_id: item.local_id.clone(),
+                        server_id: Some(response.id),
+                        batch_id: None,
+                    })?;
+                Ok(RetryAttemptOutcome::Uploaded)
+            }
+            Err(err) if err.is_not_found() => {
+                self.reset_local_state_after_not_found(Some(&item.local_id), &err)?;
+                Ok(RetryAttemptOutcome::ResetLoggedOut)
+            }
+            Err(err) if err.is_bad_request() => {
+                self.log_error(
+                    "direct log upload failed permanently",
+                    Some(&item.local_id),
+                    Some(&err),
+                );
+                Ok(RetryAttemptOutcome::NonRetryable)
+            }
+            Err(err) => {
+                self.log_error(
+                    "direct log upload deferred",
+                    Some(&item.local_id),
+                    Some(&err),
+                );
+                Ok(RetryAttemptOutcome::Deferred)
+            }
+        }
+    }
+
+    fn try_upload_pending_batch(&mut self, items: &[AuditLogItem], now_ms: i64) -> CoreResult<()> {
+        let screenshots = items
+            .iter()
+            .filter_map(|item| {
+                if item.payload.batch_screenshot.is_none() {
+                    self.log_error(
+                        "batch upload skipped item; batch payload missing",
+                        Some(&item.local_id),
+                        None,
+                    );
+                }
+                item.payload.batch_screenshot.clone()
+            })
+            .collect::<Vec<_>>();
+        if screenshots.is_empty() {
+            return Ok(());
+        }
+
+        let mut screenshots = screenshots;
+        screenshots.sort_by_key(|item| item.event.ts);
+        let batch = self.build_batch(&screenshots, now_ms)?;
+
+        match self
+            .with_device_token_retry(|api, access_token, _| api.upload_batch(access_token, &batch))
+        {
+            Ok(response) => {
+                self.storage
+                    .append_audit_record(&AuditRecord::BatchUploaded {
+                        server_id: response.id.clone(),
+                    })?;
+                for item in items {
+                    if item.payload.batch_screenshot.is_none() {
+                        continue;
+                    }
+                    self.storage
+                        .append_audit_record(&AuditRecord::LogUploaded {
+                            local_id: item.local_id.clone(),
+                            server_id: None,
+                            batch_id: Some(response.id.clone()),
+                        })?;
+                }
+                self.complete_batch_upload(now_ms);
+                Ok(())
+            }
+            Err(err) if err.is_not_found() => {
+                self.reset_local_state_after_not_found(Some("batch-upload"), &err)?;
+                Ok(())
+            }
+            Err(err) if err.is_bad_request() => {
+                self.log_error("batch upload failed permanently", None, Some(&err));
                 Ok(())
             }
             Err(err) => {
-                self.log_error("device settings refresh failed", Some(&request), Some(&err));
+                self.log_error("batch upload deferred", None, Some(&err));
+                Ok(())
+            }
+        }
+    }
+
+    fn build_batch(
+        &self,
+        screenshots: &[BufferedScreenshot],
+        now_ms: i64,
+    ) -> CoreResult<BatchUpload> {
+        let recipients = self.batch_recipients()?;
+        BatchBuilder::build_upload(screenshots, &CryptoEngine, &recipients, now_ms)
+    }
+
+    fn retry_pending_work(&mut self) -> CoreResult<()> {
+        let audit_state = self.load_audit_state()?;
+        for item in audit_state
+            .pending_hash_uploads
+            .iter()
+            .take(MAX_HASH_RETRIES_PER_LOOP)
+        {
+            if matches!(
+                self.try_upload_hash_for_item(item)?,
+                RetryAttemptOutcome::Deferred | RetryAttemptOutcome::ResetLoggedOut
+            ) {
+                break;
+            }
+        }
+
+        if self.device_credentials.is_none() {
+            return Ok(());
+        }
+
+        let audit_state = self.load_audit_state()?;
+        for item in audit_state
+            .pending_direct_uploads
+            .iter()
+            .take(MAX_DIRECT_LOG_RETRIES_PER_LOOP)
+        {
+            if matches!(
+                self.try_upload_direct_log(item)?,
+                RetryAttemptOutcome::Deferred | RetryAttemptOutcome::ResetLoggedOut
+            ) {
+                break;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn refresh_device_settings(&mut self) -> CoreResult<()> {
+        match self
+            .with_device_token_retry(|api, access_token, _| api.get_device_settings(access_token))
+        {
+            Ok(settings) => {
+                self.device_settings = Some(settings);
+                self.storage
+                    .save_device_settings(self.device_settings.as_ref())?;
+                self.status.is_authenticated = self.device_credentials.is_some();
+                Ok(())
+            }
+            Err(err) if err.is_not_found() => {
+                self.reset_local_state_after_not_found(Some("device-settings"), &err)?;
+                Err(CoreError::NotAuthenticated)
+            }
+            Err(err) => {
+                self.log_error(
+                    "device settings refresh failed",
+                    Some("device-settings"),
+                    Some(&err),
+                );
                 Err(err)
             }
         }
@@ -386,11 +498,9 @@ impl<P: PlatformHooks> MonitorService<P> {
             .device_credentials
             .as_ref()
             .map(|credentials| credentials.device_id.clone());
-        self.status.pending_request_count = self.pending_requests.len();
+        self.status.pending_request_count = self.load_audit_state()?.pending_request_count;
 
         self.storage.save_status(&self.status)?;
-        self.storage.save_pending_requests(&self.pending_requests)?;
-        self.storage.save_batch_buffer(&self.batch_buffer)?;
         self.storage
             .save_device_settings(self.device_settings.as_ref())?;
         self.persist_auth_state()
@@ -404,6 +514,28 @@ impl<P: PlatformHooks> MonitorService<P> {
         })
     }
 
+    fn reset_local_state_after_not_found(
+        &mut self,
+        request_id: Option<&str>,
+        error: &CoreError,
+    ) -> CoreResult<()> {
+        self.log_error(
+            "remote state missing; clearing local auth and audit state",
+            request_id,
+            Some(error),
+        );
+        self.user_access_token = None;
+        self.device_credentials = None;
+        self.post_login_proof_batches_remaining = 0;
+        self.device_settings = None;
+        self.storage.clear_audit_records()?;
+        self.status.is_authenticated = false;
+        self.status.device_id = None;
+        self.status.last_screenshot_at_ms = None;
+        self.status.last_batch_at_ms = None;
+        self.persist_state()
+    }
+
     fn reload_persisted_state(&mut self) -> CoreResult<()> {
         let auth_state = self.storage.load_auth_state()?;
         let previous_post_login_proof_batches_remaining = self.post_login_proof_batches_remaining;
@@ -411,10 +543,7 @@ impl<P: PlatformHooks> MonitorService<P> {
         self.user_access_token = auth_state.user_access_token;
         self.device_credentials = auth_state.device_credentials;
         self.post_login_proof_batches_remaining = auth_state.post_login_proof_batches_remaining;
-
         self.device_settings = self.storage.load_device_settings()?;
-        self.pending_requests = self.storage.load_pending_requests()?;
-        self.batch_buffer = self.storage.load_batch_buffer()?;
 
         let proof_burst_started = previous_post_login_proof_batches_remaining == 0
             && self.post_login_proof_batches_remaining > 0;
@@ -451,8 +580,16 @@ impl<P: PlatformHooks> MonitorService<P> {
                 .unwrap_or(false)
     }
 
-    fn can_upload_batch(&self) -> bool {
-        self.can_capture() && !self.batch_buffer.screenshots.is_empty()
+    fn can_upload_batch(&self, audit_state: &AuditState) -> bool {
+        self.can_capture() && !audit_state.pending_batch_uploads.is_empty()
+    }
+
+    fn batch_upload_candidates<'a>(&self, audit_state: &'a AuditState) -> &'a [AuditLogItem] {
+        let count = audit_state
+            .pending_batch_uploads
+            .len()
+            .min(MAX_BATCH_ITEMS_PER_UPLOAD);
+        &audit_state.pending_batch_uploads[..count]
     }
 
     fn should_take_screenshot(&self, now_ms: i64) -> bool {
@@ -472,10 +609,11 @@ impl<P: PlatformHooks> MonitorService<P> {
         }
     }
 
-    fn complete_batch_upload(&mut self) {
+    fn complete_batch_upload(&mut self, now_ms: i64) {
         if self.post_login_proof_batches_remaining > 0 {
             self.post_login_proof_batches_remaining -= 1;
         }
+        self.status.last_batch_at_ms = Some(now_ms);
     }
 
     fn next_run_at_ms(&self, now_ms: i64) -> i64 {
@@ -488,14 +626,6 @@ impl<P: PlatformHooks> MonitorService<P> {
             |last| last + self.config.batch_interval.as_millis() as i64,
         );
         screenshot_due.min(batch_due)
-    }
-
-    fn retry_failed_requests(&mut self) -> CoreResult<()> {
-        let requests = std::mem::take(&mut self.pending_requests);
-        for request in requests {
-            let _ = self.try_request(request)?;
-        }
-        Ok(())
     }
 
     fn batch_recipients(&self) -> CoreResult<Vec<BatchRecipient>> {
@@ -514,40 +644,48 @@ impl<P: PlatformHooks> MonitorService<P> {
         Ok(recipients)
     }
 
-    fn log_error(
-        &self,
-        message: &str,
-        request: Option<&PendingRequest>,
-        error: Option<&CoreError>,
-    ) {
+    fn with_device_token_retry<T, F>(&mut self, mut operation: F) -> CoreResult<T>
+    where
+        F: FnMut(&ApiClient, &str, Option<&str>) -> CoreResult<T>,
+    {
+        let credentials = self
+            .device_credentials
+            .as_ref()
+            .ok_or(CoreError::NotAuthenticated)?
+            .clone();
+        let hash_base_url = self
+            .device_settings
+            .as_ref()
+            .and_then(|settings| settings.hash_base_url.as_deref());
+
+        match operation(&self.api, &credentials.access_token, hash_base_url) {
+            Ok(value) => Ok(value),
+            Err(err) if err.is_unauthorized() => {
+                let refreshed = self.api.refresh_device_token(&credentials.refresh_token)?;
+                if let Some(device_credentials) = self.device_credentials.as_mut() {
+                    device_credentials.access_token = refreshed.clone();
+                }
+                self.persist_auth_state()?;
+                operation(&self.api, &refreshed, hash_base_url)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    fn log_error(&self, message: &str, request_id: Option<&str>, error: Option<&CoreError>) {
         let ts = self
             .platform
             .get_time_utc_ms()
             .map(|value| value.to_string())
             .unwrap_or_else(|_| "unknown-ts".to_string());
-        let request_kind = request
-            .map(|value| format!("{:?}", value.kind))
-            .unwrap_or_else(|| "none".to_string());
-        let request_id = request.map(|value| value.id.as_str()).unwrap_or("-");
+        let request_id = request_id.unwrap_or("-");
         let error_text = error
             .map(ToString::to_string)
             .unwrap_or_else(|| "unknown error".to_string());
-        let line = format!(
-            "[{ts}] {message}; request_id={request_id}; kind={request_kind}; error={error_text}"
-        );
+        let line = format!("[{ts}] {message}; request_id={request_id}; error={error_text}");
         let _ = self.storage.append_error_log(&line);
         eprintln!("{line}");
     }
-}
-
-fn parse_content_hash(payload: &serde_json::Value) -> CoreResult<[u8; 32]> {
-    let content_hash: [u8; 32] = serde_json::from_value(
-        payload
-            .get("content_hash")
-            .cloned()
-            .ok_or(CoreError::InvalidState("missing content_hash payload"))?,
-    )?;
-    Ok(content_hash)
 }
 
 #[cfg(test)]
@@ -623,20 +761,6 @@ mod tests {
                 partners: Vec::new(),
                 hash_base_url: None,
             }),
-            batch_buffer: BatchBufferState {
-                screenshots: vec![BufferedScreenshot {
-                    event: crate::model::BatchEvent {
-                        ts: 1,
-                        kind: "screenshot".to_string(),
-                        data: crate::model::BatchEventData {
-                            image: vec![1, 2, 3],
-                            content_type: "image/png".to_string(),
-                        },
-                    },
-                    content_hash: [7; 32],
-                }],
-            },
-            pending_requests: Vec::new(),
             status: ServiceStatus {
                 is_authenticated: false,
                 is_running: true,
@@ -698,12 +822,146 @@ mod tests {
         let mut service = build_service(state_dir.clone());
         service.post_login_proof_batches_remaining = 2;
 
-        service.complete_batch_upload();
+        service.complete_batch_upload(1001);
         assert_eq!(service.post_login_proof_batches_remaining, 1);
 
-        service.complete_batch_upload();
-        service.complete_batch_upload();
+        service.complete_batch_upload(1002);
+        service.complete_batch_upload(1003);
         assert_eq!(service.post_login_proof_batches_remaining, 0);
+        assert_eq!(service.status.last_batch_at_ms, Some(1003));
+
+        let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn status_derives_pending_request_count_from_audit_log() {
+        let state_dir = temp_state_dir();
+        let service = build_service(state_dir.clone());
+        service
+            .storage
+            .save_status(&ServiceStatus {
+                is_authenticated: true,
+                is_running: true,
+                device_id: Some("device-1".to_string()),
+                last_loop_at_ms: Some(1),
+                last_screenshot_at_ms: Some(1),
+                last_batch_at_ms: Some(1),
+                pending_request_count: 0,
+            })
+            .expect("save stale status");
+        service
+            .storage
+            .append_audit_record(&AuditRecord::Log {
+                local_id: "pending-log".to_string(),
+                should_be_in_batch: false,
+                requires_hash_upload: false,
+                log: AuditLogPayload::for_direct_log(LogEntry {
+                    ts_ms: 1,
+                    kind: "system_event".to_string(),
+                    risk: None,
+                    data: serde_json::json!({ "event": "test" }),
+                }),
+            })
+            .expect("append audit record");
+
+        let status = service.status().expect("load status");
+
+        assert_eq!(status.pending_request_count, 1);
+
+        let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn batch_upload_candidates_are_capped() {
+        let state_dir = temp_state_dir();
+        let service = build_service(state_dir.clone());
+        let audit_state = AuditState {
+            pending_batch_uploads: (0..(MAX_BATCH_ITEMS_PER_UPLOAD + 5))
+                .map(|index| AuditLogItem {
+                    local_id: format!("batch-{index}"),
+                    should_be_in_batch: true,
+                    requires_hash_upload: false,
+                    payload: AuditLogPayload::for_batch_screenshot(BufferedScreenshot {
+                        event: crate::model::BatchEvent {
+                            ts: index as i64,
+                            kind: "screenshot".to_string(),
+                            data: crate::model::BatchEventData {
+                                image: Vec::new(),
+                                content_type: "image/png".to_string(),
+                            },
+                        },
+                        content_hash: [0; 32],
+                    }),
+                })
+                .collect(),
+            ..AuditState::default()
+        };
+
+        let candidates = service.batch_upload_candidates(&audit_state);
+
+        assert_eq!(candidates.len(), MAX_BATCH_ITEMS_PER_UPLOAD);
+        assert_eq!(candidates[0].local_id, "batch-0");
+        assert_eq!(
+            candidates[MAX_BATCH_ITEMS_PER_UPLOAD - 1].local_id,
+            format!("batch-{}", MAX_BATCH_ITEMS_PER_UPLOAD - 1)
+        );
+
+        let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn reset_local_state_after_not_found_clears_auth_and_audit_log() {
+        let state_dir = temp_state_dir();
+        let mut service = build_service(state_dir.clone());
+        service.user_access_token = Some("user-token".to_string());
+        service.device_credentials = Some(DeviceCredentials {
+            device_id: "device-1".to_string(),
+            access_token: "device-access".to_string(),
+            refresh_token: "device-refresh".to_string(),
+        });
+        service.status.is_authenticated = true;
+        service.status.device_id = Some("device-1".to_string());
+        service
+            .storage
+            .append_audit_record(&AuditRecord::Log {
+                local_id: "pending-log".to_string(),
+                should_be_in_batch: false,
+                requires_hash_upload: false,
+                log: AuditLogPayload::for_direct_log(LogEntry {
+                    ts_ms: 1,
+                    kind: "system_event".to_string(),
+                    risk: None,
+                    data: serde_json::json!({ "event": "test" }),
+                }),
+            })
+            .expect("append audit record");
+
+        service
+            .reset_local_state_after_not_found(
+                Some("pending-log"),
+                &CoreError::HttpStatus {
+                    status: 404,
+                    message: "Not found".to_string(),
+                },
+            )
+            .expect("reset local state");
+
+        let auth_state = service.storage.load_auth_state().expect("load auth");
+        let status = service.status().expect("load status");
+
+        assert!(auth_state.user_access_token.is_none());
+        assert!(auth_state.device_credentials.is_none());
+        assert_eq!(
+            service
+                .storage
+                .load_audit_records()
+                .expect("load audit")
+                .len(),
+            0
+        );
+        assert!(!status.is_authenticated);
+        assert_eq!(status.device_id, None);
+        assert_eq!(status.pending_request_count, 0);
 
         let _ = fs::remove_dir_all(state_dir);
     }
