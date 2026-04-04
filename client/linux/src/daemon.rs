@@ -292,10 +292,7 @@ fn metadata_value(metadata: &[(&str, &str)]) -> EventData {
     for (key, value) in metadata {
         fields.insert((*key).to_string(), Value::String((*value).to_string()));
     }
-    EventData {
-        fields: fields.into_iter().collect(),
-        ..EventData::default()
-    }
+    EventData(fields.into_iter().collect())
 }
 
 fn metadata_value_owned(metadata: Vec<(String, String)>) -> EventData {
@@ -303,8 +300,5 @@ fn metadata_value_owned(metadata: Vec<(String, String)>) -> EventData {
     for (key, value) in metadata {
         object.insert(key, Value::String(value));
     }
-    EventData {
-        fields: object.into_iter().collect(),
-        ..EventData::default()
-    }
+    EventData(object.into_iter().collect())
 }

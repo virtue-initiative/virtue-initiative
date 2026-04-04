@@ -160,7 +160,7 @@ impl<P: PlatformHooks> MonitorService<P> {
         data: EventData,
     ) -> CoreResult<()> {
         self.ensure_running()?;
-        let event = prepare_log_batch_event(self.platform.get_time_utc_ms()?, kind, risk, data);
+        let event = prepare_log_batch_event(self.platform.get_time_utc_ms()?, kind, risk, data)?;
         self.enqueue_batch_event(event, false)?;
         self.persist_state()
     }
@@ -281,7 +281,7 @@ impl<P: PlatformHooks> MonitorService<P> {
 
     fn process_screenshot(&self, screenshot: Screenshot) -> CoreResult<BufferedBatchEvent> {
         let processed = ImagePipeline.process(screenshot)?;
-        Ok(prepare_screenshot_event(processed))
+        prepare_screenshot_event(processed)
     }
 
     fn process_screenshot_with_data(
@@ -292,7 +292,7 @@ impl<P: PlatformHooks> MonitorService<P> {
         data: EventData,
     ) -> CoreResult<BufferedBatchEvent> {
         let processed = ImagePipeline.process(screenshot)?;
-        Ok(prepare_screenshot_batch_event(processed, kind, risk, data))
+        prepare_screenshot_batch_event(processed, kind, risk, data)
     }
 
     fn enqueue_batch_event(
@@ -947,11 +947,8 @@ mod tests {
                             ts: index as i64,
                             kind: "screenshot".to_string(),
                             risk: None,
-                            data: crate::model::BatchEventData {
-                                image: Vec::new(),
-                                content_type: "image/png".to_string(),
-                                fields: Default::default(),
-                            },
+                            data: crate::model::BatchEventData::from_pairs([])
+                                .with_screenshot(Vec::new(), "image/png"),
                         },
                         content_hash: [0; 32],
                     }),

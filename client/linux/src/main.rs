@@ -338,10 +338,7 @@ fn developer_log_data(command: &str, title: &str, details: Option<&str>) -> Even
         ("title".to_string(), title.to_string()),
     ]);
     if let Some(details) = details.filter(|value| !value.trim().is_empty()) {
-        data.fields.insert(
-            "details".to_string(),
-            serde_json::Value::String(details.to_string()),
-        );
+        data.insert("details", serde_json::Value::String(details.to_string()));
     }
     data
 }

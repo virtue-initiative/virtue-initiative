@@ -119,17 +119,15 @@ async function decryptAndFlattenBatch(
   const decrypted = await decryptBatch(batchKey, raw);
   const decompressed = await decompressGzip(decrypted);
   const decoded = decode(decompressed) as unknown;
-  const record =
-    decoded && typeof decoded === "object"
-      ? (decoded as Record<string, unknown>)
-      : {};
-  const events = Array.isArray(record.events)
-    ? (record.events as Record<string, unknown>[])
-    : Array.isArray(record.items)
-      ? (record.items as Record<string, unknown>[])
-      : [];
+  const eventBytes = Array.isArray(decoded) ? decoded : [];
 
-  return events.map((event, index) => {
+  return eventBytes.map((encodedEvent, index) => {
+    const rawEvent = toUint8Array(encodedEvent);
+    if (!rawEvent) {
+      throw new Error(`Batch event ${index} is not a byte array`);
+    }
+
+    const event = decode(rawEvent) as Record<string, unknown>;
     const data =
       event.data && typeof event.data === "object"
         ? (event.data as Record<string, unknown>)
@@ -139,12 +137,7 @@ async function decryptAndFlattenBatch(
 
     return {
       id: typeof event.id === "string" ? event.id : `${batch.id}:${index}`,
-      taken_at:
-        typeof event.ts === "number"
-          ? event.ts
-          : typeof event.taken_at === "number"
-            ? event.taken_at
-            : batch.end_time,
+      taken_at: typeof event.ts === "number" ? event.ts : batch.end_time,
       device_id: batch.device_id,
       kind: typeof event.type === "string" ? event.type : "unknown",
       image,

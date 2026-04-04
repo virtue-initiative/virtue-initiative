@@ -11,7 +11,6 @@ use hpke::{
     setup_sender,
 };
 use rand_core::{OsRng as HpkeOsRng, TryRngCore};
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::error::{CoreError, CoreResult};
@@ -105,14 +104,15 @@ pub fn derive_password_auth(
     Ok(password_auth)
 }
 
-pub fn buffer_batch_event(event: BatchEvent) -> BufferedBatchEvent {
-    BufferedBatchEvent {
-        content_hash: compute_event_hash(&event),
+pub fn buffer_batch_event(event: BatchEvent) -> CoreResult<BufferedBatchEvent> {
+    let encoded = encode_batch_event(&event)?;
+    Ok(BufferedBatchEvent {
+        content_hash: compute_event_hash(&encoded),
         event,
-    }
+    })
 }
 
-pub fn prepare_screenshot_event(screenshot: Screenshot) -> BufferedBatchEvent {
+pub fn prepare_screenshot_event(screenshot: Screenshot) -> CoreResult<BufferedBatchEvent> {
     prepare_screenshot_batch_event(screenshot, "screenshot", None, BatchEventData::default())
 }
 
@@ -121,12 +121,12 @@ pub fn prepare_screenshot_batch_event(
     kind: impl Into<String>,
     risk: Option<f32>,
     data: BatchEventData,
-) -> BufferedBatchEvent {
+) -> CoreResult<BufferedBatchEvent> {
     buffer_batch_event(BatchEvent {
         ts: screenshot.captured_at_ms,
         kind: kind.into(),
         risk,
-        data: data.with_image(screenshot.bytes, screenshot.content_type),
+        data: data.with_screenshot(screenshot.bytes, screenshot.content_type),
     })
 }
 
@@ -135,7 +135,7 @@ pub fn prepare_log_batch_event(
     kind: impl Into<String>,
     risk: Option<f32>,
     data: BatchEventData,
-) -> BufferedBatchEvent {
+) -> CoreResult<BufferedBatchEvent> {
     buffer_batch_event(BatchEvent {
         ts,
         kind: kind.into(),
@@ -144,62 +144,10 @@ pub fn prepare_log_batch_event(
     })
 }
 
-pub fn compute_event_hash(event: &BatchEvent) -> [u8; 32] {
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(&(event.ts as u64).to_le_bytes());
-    bytes.extend_from_slice(event.kind.as_bytes());
-    if let Some(risk) = event.risk {
-        bytes.extend_from_slice(b"risk");
-        bytes.extend_from_slice(&risk.to_bits().to_le_bytes());
-    }
-
-    if !event.data.content_type.is_empty() {
-        bytes.extend_from_slice(b"content_type");
-        bytes.extend_from_slice(event.data.content_type.as_bytes());
-    }
-    if !event.data.image.is_empty() {
-        bytes.extend_from_slice(b"image");
-        bytes.extend_from_slice(&event.data.image);
-    }
-    for (key, value) in &event.data.fields {
-        bytes.extend_from_slice(key.as_bytes());
-        append_json_value(&mut bytes, value);
-    }
-
-    Sha256::digest(bytes).into()
+pub fn encode_batch_event(event: &BatchEvent) -> CoreResult<Vec<u8>> {
+    Ok(rmp_serde::to_vec_named(event)?)
 }
 
-fn append_json_value(bytes: &mut Vec<u8>, value: &Value) {
-    match value {
-        Value::Null => bytes.extend_from_slice(b"n"),
-        Value::Bool(value) => {
-            bytes.extend_from_slice(b"b");
-            bytes.push(u8::from(*value));
-        }
-        Value::Number(value) => {
-            bytes.extend_from_slice(b"#");
-            bytes.extend_from_slice(value.to_string().as_bytes());
-        }
-        Value::String(value) => {
-            bytes.extend_from_slice(b"s");
-            bytes.extend_from_slice(value.as_bytes());
-        }
-        Value::Array(values) => {
-            bytes.extend_from_slice(b"[");
-            for value in values {
-                append_json_value(bytes, value);
-            }
-            bytes.extend_from_slice(b"]");
-        }
-        Value::Object(values) => {
-            bytes.extend_from_slice(b"{");
-            let mut keys = values.keys().collect::<Vec<_>>();
-            keys.sort();
-            for key in keys {
-                bytes.extend_from_slice(key.as_bytes());
-                append_json_value(bytes, &values[key]);
-            }
-            bytes.extend_from_slice(b"}");
-        }
-    }
+pub fn compute_event_hash(encoded_event: &[u8]) -> [u8; 32] {
+    Sha256::digest(encoded_event).into()
 }

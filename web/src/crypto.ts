@@ -230,155 +230,31 @@ const ZEROS_HEX = "0".repeat(64);
 
 export type BatchVerification = "verified" | "failed" | "unknown";
 
-function appendU64(parts: Uint8Array[], value: number) {
-  const bytes = new Uint8Array(8);
-  const dv = new DataView(bytes.buffer);
-  const lo = value >>> 0;
-  const hi = Math.floor(value / 0x100000000);
-  dv.setUint32(0, lo, true);
-  dv.setUint32(4, hi, true);
-  parts.push(bytes);
-}
-
-function appendF32(parts: Uint8Array[], value: number) {
-  const bytes = new Uint8Array(4);
-  const dv = new DataView(bytes.buffer);
-  dv.setFloat32(0, value, true);
-  parts.push(bytes);
-}
-
-function eventImageBytes(value: unknown): Uint8Array {
-  if (value instanceof Uint8Array) {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return new Uint8Array(value as number[]);
-  }
-  if (typeof value === "string") {
-    try {
-      return Uint8Array.fromBase64(value);
-    } catch {
-      return textEncoder.encode(value);
-    }
-  }
-  return new Uint8Array();
-}
-
-async function computeBatchEventHash(event: {
-  ts: number;
-  type: string;
-  risk?: number;
-  data?: Record<string, unknown>;
-}) {
-  const parts: Uint8Array[] = [];
-  appendU64(parts, event.ts);
-  parts.push(textEncoder.encode(event.type));
-
-  if (typeof event.risk === "number") {
-    parts.push(textEncoder.encode("risk"));
-    appendF32(parts, event.risk);
-  }
-
-  const data = event.data ?? {};
-  const image = eventImageBytes(data.image);
-  const contentType =
-    typeof data.content_type === "string" ? data.content_type : "";
-
-  if (contentType) {
-    parts.push(textEncoder.encode("content_type"));
-    parts.push(textEncoder.encode(contentType));
-  }
-  if (image.length > 0) {
-    parts.push(textEncoder.encode("image"));
-    parts.push(image);
-  }
-
-  const fieldEntries = Object.entries(data)
-    .filter(([key]) => key !== "content_type" && key !== "image")
-    .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey));
-  for (const [key, value] of fieldEntries) {
-    parts.push(textEncoder.encode(key));
-    appendJsonValue(parts, value);
-  }
-
-  const totalLen = parts.reduce((sum, part) => sum + part.length, 0);
-  const buf = new Uint8Array(totalLen);
-  let offset = 0;
-  for (const part of parts) {
-    buf.set(part, offset);
-    offset += part.length;
-  }
-
-  return new Uint8Array(await crypto.subtle.digest("SHA-256", buf));
-}
-
-function appendJsonValue(parts: Uint8Array[], value: unknown) {
-  if (value === null || value === undefined) {
-    parts.push(textEncoder.encode("n"));
-    return;
-  }
-  if (typeof value === "boolean") {
-    parts.push(textEncoder.encode("b"));
-    parts.push(Uint8Array.of(value ? 1 : 0));
-    return;
-  }
-  if (typeof value === "number") {
-    parts.push(textEncoder.encode("#"));
-    parts.push(textEncoder.encode(JSON.stringify(value)));
-    return;
-  }
-  if (typeof value === "string") {
-    parts.push(textEncoder.encode("s"));
-    parts.push(textEncoder.encode(value));
-    return;
-  }
-  if (Array.isArray(value)) {
-    parts.push(textEncoder.encode("["));
-    for (const item of value) {
-      appendJsonValue(parts, item);
-    }
-    parts.push(textEncoder.encode("]"));
-    return;
-  }
-  if (typeof value === "object") {
-    parts.push(textEncoder.encode("{"));
-    const entries = Object.entries(value as Record<string, unknown>).sort(
-      ([leftKey], [rightKey]) => leftKey.localeCompare(rightKey),
-    );
-    for (const [key, item] of entries) {
-      parts.push(textEncoder.encode(key));
-      appendJsonValue(parts, item);
-    }
-    parts.push(textEncoder.encode("}"));
-    return;
-  }
-
-  parts.push(textEncoder.encode("n"));
+async function sha256Bytes(
+  value: ArrayBufferLike | ArrayBufferView,
+): Promise<Uint8Array> {
+  const normalized = toUint8Array(value);
+  const input = new Uint8Array(normalized.byteLength);
+  input.set(normalized);
+  return new Uint8Array(await crypto.subtle.digest("SHA-256", input));
 }
 
 /**
  * Verify the hash chain for a batch.
  *
  * Every item advances the chain:
- *   new_state = sha256(current_state || sha256(core_compute_event_hash_payload))
+ *   new_state = sha256(current_state || sha256(raw_event_msgpack_bytes))
  *
  * If the final state matches end_chain_hash the batch is verified.
  * Returns 'unknown' when the server has no state tracking (both hashes are zeros).
  */
 export async function verifyBatch(
-  events: {
-    ts: number;
-    type: string;
-    risk?: number;
-    data?: Record<string, unknown>;
-  }[],
+  events: Array<ArrayBufferLike | ArrayBufferView>,
   startChainHash: string,
   endChainHash: string,
 ): Promise<BatchVerification> {
   if (startChainHash === ZEROS_HEX && endChainHash === ZEROS_HEX)
     return "unknown";
-
-  const sortedEvents = [...events].sort((a, b) => a.ts - b.ts);
 
   // Convert startChainHash hex to bytes
   const startBytes = new Uint8Array(32);
@@ -387,8 +263,8 @@ export async function verifyBatch(
   }
 
   let state: Uint8Array = startBytes;
-  for (const event of sortedEvents) {
-    const contentHash = await computeBatchEventHash(event);
+  for (const event of events) {
+    const contentHash = await sha256Bytes(event);
     state = await computeNewState(state, contentHash);
   }
 

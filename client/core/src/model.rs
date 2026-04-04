@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Screenshot {
@@ -11,26 +12,35 @@ pub struct Screenshot {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-pub struct EventData {
-    #[serde(default, with = "serde_bytes", skip_serializing_if = "Vec::is_empty")]
-    pub image: Vec<u8>,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub content_type: String,
-    #[serde(flatten)]
-    pub fields: BTreeMap<String, serde_json::Value>,
-}
+#[serde(transparent)]
+pub struct EventData(pub BTreeMap<String, Value>);
 
 impl EventData {
-    pub fn with_image(mut self, image: Vec<u8>, content_type: impl Into<String>) -> Self {
-        self.image = image;
-        self.content_type = content_type.into();
+    pub fn insert(&mut self, key: impl Into<String>, value: Value) {
+        self.0.insert(key.into(), value);
+    }
+
+    pub fn get(&self, key: &str) -> Option<&Value> {
+        self.0.get(key)
+    }
+
+    pub fn object(&self) -> Map<String, Value> {
+        self.0.clone().into_iter().collect()
+    }
+
+    pub fn with_screenshot(mut self, image: Vec<u8>, content_type: impl Into<String>) -> Self {
+        self.insert(
+            "image",
+            Value::Array(image.into_iter().map(Value::from).collect()),
+        );
+        self.insert("content_type", Value::String(content_type.into()));
         self
     }
 
     pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
         let mut data = Self::default();
         for (key, value) in pairs {
-            data.fields.insert(key, serde_json::Value::String(value));
+            data.insert(key, Value::String(value));
         }
         data
     }

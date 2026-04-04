@@ -9,7 +9,9 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use virtue_core::{CoreError, CoreResult, LogEntry, MonitorService, PlatformHooks, Screenshot};
+use virtue_core::{
+    CoreError, CoreResult, EventData, LogEntry, MonitorService, PlatformHooks, Screenshot,
+};
 use windows::Win32::System::SystemInformation::GetTickCount64;
 
 use crate::capture_control;
@@ -166,7 +168,7 @@ fn detect_system_startup_event(paths: &ClientPaths) -> Option<LogEntry> {
     }
 
     Some(LogEntry {
-        ts_ms: started_at.timestamp_millis(),
+        ts: started_at.timestamp_millis(),
         kind: "system_startup".to_string(),
         risk: None,
         data: metadata_value(&[
@@ -182,7 +184,7 @@ fn emit_log(paths: &ClientPaths, logger: &ServiceLogger, kind: &str, metadata: &
         paths,
         logger,
         LogEntry {
-            ts_ms: Utc::now().timestamp_millis(),
+            ts: Utc::now().timestamp_millis(),
             kind: kind.to_string(),
             risk: None,
             data: metadata_value(metadata),
@@ -206,17 +208,11 @@ fn emit_log_entry(paths: &ClientPaths, logger: &ServiceLogger, entry: LogEntry) 
     }
 }
 
-fn metadata_value(metadata: &[(&str, &str)]) -> serde_json::Value {
-    serde_json::Value::Object(
+fn metadata_value(metadata: &[(&str, &str)]) -> EventData {
+    EventData::from_pairs(
         metadata
             .iter()
-            .map(|(key, value)| {
-                (
-                    (*key).to_string(),
-                    serde_json::Value::String((*value).to_string()),
-                )
-            })
-            .collect::<serde_json::Map<_, _>>(),
+            .map(|(key, value)| ((*key).to_string(), (*value).to_string())),
     )
 }
 
