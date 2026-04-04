@@ -24,7 +24,7 @@ use crate::config::{
 };
 use crate::runtime_env::apply_runtime_env;
 
-const BUILD_LABEL: &str = env!("CARGO_PKG_VERSION");
+const BUILD_LABEL: &str = virtue_core::BUILD_LABEL;
 
 #[derive(Debug, Parser)]
 #[command(name = "virtue-mac")]

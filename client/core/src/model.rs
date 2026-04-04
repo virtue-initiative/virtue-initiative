@@ -10,9 +10,19 @@ pub struct Screenshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchEventData {
-    #[serde(with = "serde_bytes")]
+    #[serde(default, with = "serde_bytes", skip_serializing_if = "Vec::is_empty")]
     pub image: Vec<u8>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub content_type: String,
+}
+
+impl Default for BatchEventData {
+    fn default() -> Self {
+        Self {
+            image: Vec::new(),
+            content_type: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,11 +30,16 @@ pub struct BatchEvent {
     pub ts: i64,
     #[serde(rename = "type")]
     pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub risk: Option<f32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub metadata: Vec<(String, String)>,
+    #[serde(default)]
     pub data: BatchEventData,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BufferedScreenshot {
+pub struct BufferedBatchEvent {
     pub event: BatchEvent,
     pub content_hash: [u8; 32],
 }
@@ -41,22 +56,22 @@ pub struct LogEntry {
 pub struct AuditLogPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub direct_log: Option<LogEntry>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub batch_screenshot: Option<BufferedScreenshot>,
+    #[serde(skip_serializing_if = "Option::is_none", alias = "batch_screenshot")]
+    pub batch_event: Option<BufferedBatchEvent>,
 }
 
 impl AuditLogPayload {
     pub fn for_direct_log(log: LogEntry) -> Self {
         Self {
             direct_log: Some(log),
-            batch_screenshot: None,
+            batch_event: None,
         }
     }
 
-    pub fn for_batch_screenshot(screenshot: BufferedScreenshot) -> Self {
+    pub fn for_batch_event(event: BufferedBatchEvent) -> Self {
         Self {
             direct_log: None,
-            batch_screenshot: Some(screenshot),
+            batch_event: Some(event),
         }
     }
 }

@@ -15,7 +15,7 @@ use sha2::{Digest, Sha256};
 
 use crate::error::{CoreError, CoreResult};
 use crate::model::{
-    BatchEvent, BatchEventData, BatchRecipient, BufferedScreenshot, HashParams, Screenshot,
+    BatchEvent, BatchEventData, BatchRecipient, BufferedBatchEvent, HashParams, Screenshot,
 };
 
 type HpkeKem = X25519HkdfSha256;
@@ -104,26 +104,58 @@ pub fn derive_password_auth(
     Ok(password_auth)
 }
 
-pub fn prepare_screenshot_event(screenshot: Screenshot) -> BufferedScreenshot {
-    let event = BatchEvent {
+pub fn buffer_batch_event(event: BatchEvent) -> BufferedBatchEvent {
+    BufferedBatchEvent {
+        content_hash: compute_event_hash(&event),
+        event,
+    }
+}
+
+pub fn prepare_screenshot_event(screenshot: Screenshot) -> BufferedBatchEvent {
+    prepare_screenshot_batch_event(screenshot, "screenshot", None, Vec::new())
+}
+
+pub fn prepare_screenshot_batch_event(
+    screenshot: Screenshot,
+    kind: impl Into<String>,
+    risk: Option<f32>,
+    metadata: Vec<(String, String)>,
+) -> BufferedBatchEvent {
+    buffer_batch_event(BatchEvent {
         ts: screenshot.captured_at_ms,
-        kind: "screenshot".to_string(),
+        kind: kind.into(),
+        risk,
+        metadata,
         data: BatchEventData {
             image: screenshot.bytes,
             content_type: screenshot.content_type,
         },
-    };
+    })
+}
 
-    BufferedScreenshot {
-        content_hash: compute_event_hash(&event),
-        event,
-    }
+pub fn prepare_metadata_batch_event(
+    ts_ms: i64,
+    kind: impl Into<String>,
+    risk: Option<f32>,
+    metadata: Vec<(String, String)>,
+) -> BufferedBatchEvent {
+    buffer_batch_event(BatchEvent {
+        ts: ts_ms,
+        kind: kind.into(),
+        risk,
+        metadata,
+        data: BatchEventData::default(),
+    })
 }
 
 pub fn compute_event_hash(event: &BatchEvent) -> [u8; 32] {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(&(event.ts as u64).to_le_bytes());
     bytes.extend_from_slice(event.kind.as_bytes());
+    if let Some(risk) = event.risk {
+        bytes.extend_from_slice(b"risk");
+        bytes.extend_from_slice(&risk.to_bits().to_le_bytes());
+    }
 
     let mut fields = vec![
         ("content_type", BatchValue::String(&event.data.content_type)),
@@ -137,6 +169,18 @@ pub fn compute_event_hash(event: &BatchEvent) -> [u8; 32] {
             BatchValue::String(value) => bytes.extend_from_slice(value.as_bytes()),
             BatchValue::Bytes(value) => bytes.extend_from_slice(value),
         }
+    }
+
+    let mut metadata = event.metadata.iter().collect::<Vec<_>>();
+    metadata.sort_by(|(left_key, left_value), (right_key, right_value)| {
+        left_key
+            .cmp(right_key)
+            .then_with(|| left_value.cmp(right_value))
+    });
+    for (key, value) in metadata {
+        bytes.extend_from_slice(b"metadata");
+        bytes.extend_from_slice(key.as_bytes());
+        bytes.extend_from_slice(value.as_bytes());
     }
 
     Sha256::digest(bytes).into()

@@ -29,7 +29,7 @@ use virtue_windows::service_log::ServiceLogger;
 
 const SERVICE_NAME: &str = "VirtueLifecycleService";
 const LIFECYCLE_INSTANCE_MUTEX_NAME: windows::core::PCWSTR = w!("Local\\VirtueLifecycleConsole");
-const BUILD_LABEL: &str = env!("CARGO_PKG_VERSION");
+const BUILD_LABEL: &str = virtue_core::BUILD_LABEL;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Mode {
