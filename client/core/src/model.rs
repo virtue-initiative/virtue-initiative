@@ -8,21 +8,12 @@ pub struct Screenshot {
     pub content_type: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BatchEventData {
     #[serde(default, with = "serde_bytes", skip_serializing_if = "Vec::is_empty")]
     pub image: Vec<u8>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub content_type: String,
-}
-
-impl Default for BatchEventData {
-    fn default() -> Self {
-        Self {
-            image: Vec::new(),
-            content_type: String::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
