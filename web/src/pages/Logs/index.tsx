@@ -101,19 +101,6 @@ function toMetadata(data: Record<string, unknown>) {
     );
 }
 
-function toMetadataEntries(value: unknown): [string, string][] {
-  if (!Array.isArray(value)) return [];
-
-  return value.flatMap((entry) => {
-    if (!Array.isArray(entry) || entry.length < 2) return [];
-    const [key, rawValue] = entry;
-    if (typeof key !== "string") return [];
-    return [
-      [key, typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)],
-    ];
-  });
-}
-
 async function decryptAndFlattenBatch(
   batch: Batch,
   openBatchKey: (encryptedKey: string) => Promise<CryptoKey>,
@@ -147,13 +134,8 @@ async function decryptAndFlattenBatch(
       event.data && typeof event.data === "object"
         ? (event.data as Record<string, unknown>)
         : {};
-    const metadata =
-      "metadata" in event
-        ? toMetadataEntries(event.metadata)
-        : toMetadata(data);
-    const image =
-      toUint8Array("image" in event ? event.image : undefined) ??
-      toUint8Array(data.image);
+    const metadata = toMetadata(data);
+    const image = toUint8Array(data.image);
 
     return {
       id: typeof event.id === "string" ? event.id : `${batch.id}:${index}`,
@@ -164,12 +146,7 @@ async function decryptAndFlattenBatch(
             ? event.taken_at
             : batch.end_time,
       device_id: batch.device_id,
-      kind:
-        typeof event.type === "string"
-          ? event.type
-          : typeof event.kind === "string"
-            ? event.kind
-            : "unknown",
+      kind: typeof event.type === "string" ? event.type : "unknown",
       image,
       metadata,
       batch_status: "unknown" as const,

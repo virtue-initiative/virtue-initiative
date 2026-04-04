@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use virtue_core::audit::derive_state;
 use virtue_core::storage::FileStateStore;
-use virtue_core::{AuthState, LogEntry, MonitorService, ServiceStatus};
+use virtue_core::{AuthState, EventData, LogEntry, MonitorService, ServiceStatus};
 
 use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_backend};
 use crate::config::{ClientPaths, build_core_config};
@@ -205,7 +205,7 @@ fn dev_upload_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
         .unwrap_or_else(|| "Developer CLI log".to_string());
     let mut service = MonitorService::setup(build_core_config(&paths), LinuxPlatformHooks::new())?;
     service.send_log(LogEntry {
-        ts_ms: current_time_utc_ms()?,
+        ts: current_time_utc_ms()?,
         kind: "developer_log".to_string(),
         risk: Some(args.risk),
         data: developer_log_data("upload_log", &title, args.details.as_deref()),
@@ -226,7 +226,7 @@ fn dev_add_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
     service.queue_batch_log(
         "developer_log",
         Some(args.risk),
-        developer_metadata("add_log", &title, args.details.as_deref()),
+        developer_log_data("add_log", &title, args.details.as_deref()),
     )?;
 
     println!(
@@ -244,7 +244,7 @@ fn dev_add_screenshot(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()
     service.capture_batch_screenshot(
         "developer_screenshot",
         Some(args.risk),
-        developer_metadata("add_screenshot", &title, args.details.as_deref()),
+        developer_log_data("add_screenshot", &title, args.details.as_deref()),
     )?;
 
     println!(
@@ -331,28 +331,14 @@ fn format_risk(risk: f32) -> String {
     value
 }
 
-fn developer_metadata(command: &str, title: &str, details: Option<&str>) -> Vec<(String, String)> {
-    let mut metadata = vec![
+fn developer_log_data(command: &str, title: &str, details: Option<&str>) -> EventData {
+    let mut data = EventData::from_pairs([
         ("source".to_string(), "linux_dev_cli".to_string()),
         ("command".to_string(), command.to_string()),
         ("title".to_string(), title.to_string()),
-    ];
+    ]);
     if let Some(details) = details.filter(|value| !value.trim().is_empty()) {
-        metadata.push(("details".to_string(), details.to_string()));
-    }
-    metadata
-}
-
-fn developer_log_data(command: &str, title: &str, details: Option<&str>) -> serde_json::Value {
-    let mut data = serde_json::json!({
-        "source": "linux_dev_cli",
-        "command": command,
-        "title": title,
-    });
-    if let Some(details) = details.filter(|value| !value.trim().is_empty())
-        && let Some(object) = data.as_object_mut()
-    {
-        object.insert(
+        data.fields.insert(
             "details".to_string(),
             serde_json::Value::String(details.to_string()),
         );

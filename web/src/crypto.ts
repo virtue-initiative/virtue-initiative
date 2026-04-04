@@ -268,11 +268,7 @@ async function computeBatchEventHash(event: {
   ts: number;
   type: string;
   risk?: number;
-  metadata?: [string, string][];
-  data?: {
-    image?: unknown;
-    content_type?: unknown;
-  };
+  data?: Record<string, unknown>;
 }) {
   const parts: Uint8Array[] = [];
   appendU64(parts, event.ts);
@@ -288,21 +284,21 @@ async function computeBatchEventHash(event: {
   const contentType =
     typeof data.content_type === "string" ? data.content_type : "";
 
-  for (const [key, value] of [
-    ["content_type", textEncoder.encode(contentType)],
-    ["image", image],
-  ] as const) {
-    parts.push(textEncoder.encode(key));
-    parts.push(value);
+  if (contentType) {
+    parts.push(textEncoder.encode("content_type"));
+    parts.push(textEncoder.encode(contentType));
+  }
+  if (image.length > 0) {
+    parts.push(textEncoder.encode("image"));
+    parts.push(image);
   }
 
-  const metadata = [...(event.metadata ?? [])].sort(([leftKey, leftValue], [rightKey, rightValue]) =>
-    leftKey.localeCompare(rightKey) || leftValue.localeCompare(rightValue),
-  );
-  for (const [key, value] of metadata) {
-    parts.push(textEncoder.encode("metadata"));
+  const fieldEntries = Object.entries(data)
+    .filter(([key]) => key !== "content_type" && key !== "image")
+    .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey));
+  for (const [key, value] of fieldEntries) {
     parts.push(textEncoder.encode(key));
-    parts.push(textEncoder.encode(value));
+    appendJsonValue(parts, value);
   }
 
   const totalLen = parts.reduce((sum, part) => sum + part.length, 0);
@@ -314,6 +310,50 @@ async function computeBatchEventHash(event: {
   }
 
   return new Uint8Array(await crypto.subtle.digest("SHA-256", buf));
+}
+
+function appendJsonValue(parts: Uint8Array[], value: unknown) {
+  if (value === null || value === undefined) {
+    parts.push(textEncoder.encode("n"));
+    return;
+  }
+  if (typeof value === "boolean") {
+    parts.push(textEncoder.encode("b"));
+    parts.push(Uint8Array.of(value ? 1 : 0));
+    return;
+  }
+  if (typeof value === "number") {
+    parts.push(textEncoder.encode("#"));
+    parts.push(textEncoder.encode(JSON.stringify(value)));
+    return;
+  }
+  if (typeof value === "string") {
+    parts.push(textEncoder.encode("s"));
+    parts.push(textEncoder.encode(value));
+    return;
+  }
+  if (Array.isArray(value)) {
+    parts.push(textEncoder.encode("["));
+    for (const item of value) {
+      appendJsonValue(parts, item);
+    }
+    parts.push(textEncoder.encode("]"));
+    return;
+  }
+  if (typeof value === "object") {
+    parts.push(textEncoder.encode("{"));
+    const entries = Object.entries(value as Record<string, unknown>).sort(
+      ([leftKey], [rightKey]) => leftKey.localeCompare(rightKey),
+    );
+    for (const [key, item] of entries) {
+      parts.push(textEncoder.encode(key));
+      appendJsonValue(parts, item);
+    }
+    parts.push(textEncoder.encode("}"));
+    return;
+  }
+
+  parts.push(textEncoder.encode("n"));
 }
 
 /**
@@ -330,11 +370,7 @@ export async function verifyBatch(
     ts: number;
     type: string;
     risk?: number;
-    metadata?: [string, string][];
-    data?: {
-      image?: unknown;
-      content_type?: unknown;
-    };
+    data?: Record<string, unknown>;
   }[],
   startChainHash: string,
   endChainHash: string,

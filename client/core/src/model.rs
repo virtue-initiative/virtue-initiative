@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -8,25 +10,41 @@ pub struct Screenshot {
     pub content_type: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct BatchEventData {
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct EventData {
     #[serde(default, with = "serde_bytes", skip_serializing_if = "Vec::is_empty")]
     pub image: Vec<u8>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub content_type: String,
+    #[serde(flatten)]
+    pub fields: BTreeMap<String, serde_json::Value>,
+}
+
+impl EventData {
+    pub fn with_image(mut self, image: Vec<u8>, content_type: impl Into<String>) -> Self {
+        self.image = image;
+        self.content_type = content_type.into();
+        self
+    }
+
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
+        let mut data = Self::default();
+        for (key, value) in pairs {
+            data.fields.insert(key, serde_json::Value::String(value));
+        }
+        data
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BatchEvent {
+pub struct LogEntry {
     pub ts: i64,
     #[serde(rename = "type")]
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub risk: Option<f32>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub metadata: Vec<(String, String)>,
     #[serde(default)]
-    pub data: BatchEventData,
+    pub data: EventData,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,34 +53,36 @@ pub struct BufferedBatchEvent {
     pub content_hash: [u8; 32],
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LogEntry {
-    pub ts_ms: i64,
-    pub kind: String,
-    pub risk: Option<f32>,
-    pub data: serde_json::Value,
-}
+pub type BatchEvent = LogEntry;
+pub type BatchEventData = EventData;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct AuditLogPayload {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub direct_log: Option<LogEntry>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "batch_screenshot")]
-    pub batch_event: Option<BufferedBatchEvent>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+pub enum AuditLogPayload {
+    Direct(LogEntry),
+    Batch(BufferedBatchEvent),
 }
 
 impl AuditLogPayload {
     pub fn for_direct_log(log: LogEntry) -> Self {
-        Self {
-            direct_log: Some(log),
-            batch_event: None,
-        }
+        Self::Direct(log)
     }
 
     pub fn for_batch_event(event: BufferedBatchEvent) -> Self {
-        Self {
-            direct_log: None,
-            batch_event: Some(event),
+        Self::Batch(event)
+    }
+
+    pub fn as_direct_log(&self) -> Option<&LogEntry> {
+        match self {
+            Self::Direct(log) => Some(log),
+            Self::Batch(_) => None,
+        }
+    }
+
+    pub fn as_batch_event(&self) -> Option<&BufferedBatchEvent> {
+        match self {
+            Self::Direct(_) => None,
+            Self::Batch(event) => Some(event),
         }
     }
 }

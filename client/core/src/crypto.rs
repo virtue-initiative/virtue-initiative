@@ -11,6 +11,7 @@ use hpke::{
     setup_sender,
 };
 use rand_core::{OsRng as HpkeOsRng, TryRngCore};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::error::{CoreError, CoreResult};
@@ -112,39 +113,34 @@ pub fn buffer_batch_event(event: BatchEvent) -> BufferedBatchEvent {
 }
 
 pub fn prepare_screenshot_event(screenshot: Screenshot) -> BufferedBatchEvent {
-    prepare_screenshot_batch_event(screenshot, "screenshot", None, Vec::new())
+    prepare_screenshot_batch_event(screenshot, "screenshot", None, BatchEventData::default())
 }
 
 pub fn prepare_screenshot_batch_event(
     screenshot: Screenshot,
     kind: impl Into<String>,
     risk: Option<f32>,
-    metadata: Vec<(String, String)>,
+    data: BatchEventData,
 ) -> BufferedBatchEvent {
     buffer_batch_event(BatchEvent {
         ts: screenshot.captured_at_ms,
         kind: kind.into(),
         risk,
-        metadata,
-        data: BatchEventData {
-            image: screenshot.bytes,
-            content_type: screenshot.content_type,
-        },
+        data: data.with_image(screenshot.bytes, screenshot.content_type),
     })
 }
 
-pub fn prepare_metadata_batch_event(
-    ts_ms: i64,
+pub fn prepare_log_batch_event(
+    ts: i64,
     kind: impl Into<String>,
     risk: Option<f32>,
-    metadata: Vec<(String, String)>,
+    data: BatchEventData,
 ) -> BufferedBatchEvent {
     buffer_batch_event(BatchEvent {
-        ts: ts_ms,
+        ts,
         kind: kind.into(),
         risk,
-        metadata,
-        data: BatchEventData::default(),
+        data,
     })
 }
 
@@ -157,36 +153,53 @@ pub fn compute_event_hash(event: &BatchEvent) -> [u8; 32] {
         bytes.extend_from_slice(&risk.to_bits().to_le_bytes());
     }
 
-    let mut fields = vec![
-        ("content_type", BatchValue::String(&event.data.content_type)),
-        ("image", BatchValue::Bytes(&event.data.image)),
-    ];
-    fields.sort_by(|(left, _), (right, _)| left.cmp(right));
-
-    for (key, value) in fields {
-        bytes.extend_from_slice(key.as_bytes());
-        match value {
-            BatchValue::String(value) => bytes.extend_from_slice(value.as_bytes()),
-            BatchValue::Bytes(value) => bytes.extend_from_slice(value),
-        }
+    if !event.data.content_type.is_empty() {
+        bytes.extend_from_slice(b"content_type");
+        bytes.extend_from_slice(event.data.content_type.as_bytes());
     }
-
-    let mut metadata = event.metadata.iter().collect::<Vec<_>>();
-    metadata.sort_by(|(left_key, left_value), (right_key, right_value)| {
-        left_key
-            .cmp(right_key)
-            .then_with(|| left_value.cmp(right_value))
-    });
-    for (key, value) in metadata {
-        bytes.extend_from_slice(b"metadata");
+    if !event.data.image.is_empty() {
+        bytes.extend_from_slice(b"image");
+        bytes.extend_from_slice(&event.data.image);
+    }
+    for (key, value) in &event.data.fields {
         bytes.extend_from_slice(key.as_bytes());
-        bytes.extend_from_slice(value.as_bytes());
+        append_json_value(&mut bytes, value);
     }
 
     Sha256::digest(bytes).into()
 }
 
-enum BatchValue<'a> {
-    String(&'a str),
-    Bytes(&'a [u8]),
+fn append_json_value(bytes: &mut Vec<u8>, value: &Value) {
+    match value {
+        Value::Null => bytes.extend_from_slice(b"n"),
+        Value::Bool(value) => {
+            bytes.extend_from_slice(b"b");
+            bytes.push(u8::from(*value));
+        }
+        Value::Number(value) => {
+            bytes.extend_from_slice(b"#");
+            bytes.extend_from_slice(value.to_string().as_bytes());
+        }
+        Value::String(value) => {
+            bytes.extend_from_slice(b"s");
+            bytes.extend_from_slice(value.as_bytes());
+        }
+        Value::Array(values) => {
+            bytes.extend_from_slice(b"[");
+            for value in values {
+                append_json_value(bytes, value);
+            }
+            bytes.extend_from_slice(b"]");
+        }
+        Value::Object(values) => {
+            bytes.extend_from_slice(b"{");
+            let mut keys = values.keys().collect::<Vec<_>>();
+            keys.sort();
+            for key in keys {
+                bytes.extend_from_slice(key.as_bytes());
+                append_json_value(bytes, &values[key]);
+            }
+            bytes.extend_from_slice(b"}");
+        }
+    }
 }

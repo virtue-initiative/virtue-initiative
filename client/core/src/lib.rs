@@ -16,8 +16,8 @@ pub use config::Config;
 pub use error::{CoreError, CoreResult};
 pub use model::{
     AuditLogPayload, AuditRecord, AuditState, AuthState, BatchEvent, BatchEventData, BatchUpload,
-    BufferedBatchEvent, DeviceCredentials, DeviceSettings, LogEntry, LoginStatus, LoopOutcome,
-    Screenshot, ServiceStatus,
+    BufferedBatchEvent, DeviceCredentials, DeviceSettings, EventData, LogEntry, LoginStatus,
+    LoopOutcome, Screenshot, ServiceStatus,
 };
 pub use platform::PlatformHooks;
 pub use service::MonitorService;

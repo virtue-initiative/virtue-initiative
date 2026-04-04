@@ -223,6 +223,8 @@ impl ApiClient {
         device_access_token: &str,
         log: &LogEntry,
     ) -> CoreResult<UploadedLogResponse> {
+        let data = serde_json::to_value(&log.data)?;
+
         #[derive(Serialize)]
         struct UploadLogRequest<'a> {
             ts: i64,
@@ -239,10 +241,10 @@ impl ApiClient {
             "/d/log",
             Some(device_access_token),
             Some(&UploadLogRequest {
-                ts: log.ts_ms,
+                ts: log.ts,
                 kind: &log.kind,
                 risk: log.risk,
-                data: &log.data,
+                data: &data,
             }),
         )
     }

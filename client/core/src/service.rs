@@ -3,15 +3,14 @@ use crate::audit::{derive_state, generate_local_id};
 use crate::batch::BatchBuilder;
 use crate::config::Config;
 use crate::crypto::{
-    CryptoEngine, prepare_metadata_batch_event, prepare_screenshot_batch_event,
-    prepare_screenshot_event,
+    CryptoEngine, prepare_log_batch_event, prepare_screenshot_batch_event, prepare_screenshot_event,
 };
 use crate::error::{CoreError, CoreResult};
 use crate::image_pipeline::ImagePipeline;
 use crate::model::{
     AuditLogItem, AuditLogPayload, AuditRecord, AuditState, AuthState, BatchRecipient, BatchUpload,
-    BufferedBatchEvent, DeviceCredentials, DeviceSettings, LogEntry, LoginStatus, LoopOutcome,
-    Screenshot, ServiceStatus,
+    BufferedBatchEvent, DeviceCredentials, DeviceSettings, EventData, LogEntry, LoginStatus,
+    LoopOutcome, Screenshot, ServiceStatus,
 };
 use crate::platform::PlatformHooks;
 use crate::storage::FileStateStore;
@@ -137,12 +136,10 @@ impl<P: PlatformHooks> MonitorService<P> {
 
         let now_ms = self.platform.get_time_utc_ms()?;
         let _ = self.send_log(LogEntry {
-            ts_ms: now_ms,
+            ts: now_ms,
             kind: "service_stop".to_string(),
             risk: None,
-            data: serde_json::json!({
-                "event": "shutdown",
-            }),
+            data: EventData::from_pairs([("event".to_string(), "shutdown".to_string())]),
         });
 
         self.status.is_running = false;
@@ -160,11 +157,10 @@ impl<P: PlatformHooks> MonitorService<P> {
         &mut self,
         kind: &str,
         risk: Option<f32>,
-        metadata: Vec<(String, String)>,
+        data: EventData,
     ) -> CoreResult<()> {
         self.ensure_running()?;
-        let event =
-            prepare_metadata_batch_event(self.platform.get_time_utc_ms()?, kind, risk, metadata);
+        let event = prepare_log_batch_event(self.platform.get_time_utc_ms()?, kind, risk, data);
         self.enqueue_batch_event(event, false)?;
         self.persist_state()
     }
@@ -173,11 +169,11 @@ impl<P: PlatformHooks> MonitorService<P> {
         &mut self,
         kind: &str,
         risk: Option<f32>,
-        metadata: Vec<(String, String)>,
+        data: EventData,
     ) -> CoreResult<()> {
         self.ensure_running()?;
         let screenshot = self.platform.take_screenshot()?;
-        let item = self.process_screenshot_with_metadata(screenshot, kind, risk, metadata)?;
+        let item = self.process_screenshot_with_data(screenshot, kind, risk, data)?;
         let item = self.enqueue_batch_event(item, true)?;
         let _ = self.try_upload_hash_for_item(&item);
         self.status.last_screenshot_at_ms = Some(self.platform.get_time_utc_ms()?);
@@ -233,13 +229,13 @@ impl<P: PlatformHooks> MonitorService<P> {
         self.persist_state()?;
 
         let _ = self.send_log(LogEntry {
-            ts_ms: self.platform.get_time_utc_ms()?,
+            ts: self.platform.get_time_utc_ms()?,
             kind: "system_event".to_string(),
             risk: None,
-            data: serde_json::json!({
-                "event": "login",
-                "user": username,
-            }),
+            data: EventData::from_pairs([
+                ("event".to_string(), "login".to_string()),
+                ("user".to_string(), username.to_string()),
+            ]),
         });
 
         Ok(LoginStatus {
@@ -253,12 +249,10 @@ impl<P: PlatformHooks> MonitorService<P> {
 
         if self.device_credentials.is_some() {
             let _ = self.send_log(LogEntry {
-                ts_ms: self.platform.get_time_utc_ms()?,
+                ts: self.platform.get_time_utc_ms()?,
                 kind: "system_event".to_string(),
                 risk: None,
-                data: serde_json::json!({
-                    "event": "logout",
-                }),
+                data: EventData::from_pairs([("event".to_string(), "logout".to_string())]),
             });
         }
 
@@ -290,17 +284,15 @@ impl<P: PlatformHooks> MonitorService<P> {
         Ok(prepare_screenshot_event(processed))
     }
 
-    fn process_screenshot_with_metadata(
+    fn process_screenshot_with_data(
         &self,
         screenshot: Screenshot,
         kind: &str,
         risk: Option<f32>,
-        metadata: Vec<(String, String)>,
+        data: EventData,
     ) -> CoreResult<BufferedBatchEvent> {
         let processed = ImagePipeline.process(screenshot)?;
-        Ok(prepare_screenshot_batch_event(
-            processed, kind, risk, metadata,
-        ))
+        Ok(prepare_screenshot_batch_event(processed, kind, risk, data))
     }
 
     fn enqueue_batch_event(
@@ -341,7 +333,7 @@ impl<P: PlatformHooks> MonitorService<P> {
     }
 
     fn try_upload_hash_for_item(&mut self, item: &AuditLogItem) -> CoreResult<RetryAttemptOutcome> {
-        let Some(batch_event) = item.payload.batch_event.as_ref() else {
+        let Some(batch_event) = item.payload.as_batch_event() else {
             self.log_error(
                 "hash upload skipped; batch payload missing",
                 Some(&item.local_id),
@@ -388,7 +380,7 @@ impl<P: PlatformHooks> MonitorService<P> {
     }
 
     fn try_upload_direct_log(&mut self, item: &AuditLogItem) -> CoreResult<RetryAttemptOutcome> {
-        let Some(log) = item.payload.direct_log.as_ref() else {
+        let Some(log) = item.payload.as_direct_log() else {
             self.log_error(
                 "direct log upload skipped; direct payload missing",
                 Some(&item.local_id),
@@ -435,14 +427,14 @@ impl<P: PlatformHooks> MonitorService<P> {
         let batch_events = items
             .iter()
             .filter_map(|item| {
-                if item.payload.batch_event.is_none() {
+                if item.payload.as_batch_event().is_none() {
                     self.log_error(
                         "batch upload skipped item; batch payload missing",
                         Some(&item.local_id),
                         None,
                     );
                 }
-                item.payload.batch_event.clone()
+                item.payload.as_batch_event().cloned()
             })
             .collect::<Vec<_>>();
         if batch_events.is_empty() {
@@ -462,7 +454,7 @@ impl<P: PlatformHooks> MonitorService<P> {
                         server_id: response.id.clone(),
                     })?;
                 for item in items {
-                    if item.payload.batch_event.is_none() {
+                    if item.payload.as_batch_event().is_none() {
                         continue;
                     }
                     self.storage
@@ -925,10 +917,10 @@ mod tests {
                 should_be_in_batch: false,
                 requires_hash_upload: false,
                 log: AuditLogPayload::for_direct_log(LogEntry {
-                    ts_ms: 1,
+                    ts: 1,
                     kind: "system_event".to_string(),
                     risk: None,
-                    data: serde_json::json!({ "event": "test" }),
+                    data: EventData::from_pairs([("event".to_string(), "test".to_string())]),
                 }),
             })
             .expect("append audit record");
@@ -955,10 +947,10 @@ mod tests {
                             ts: index as i64,
                             kind: "screenshot".to_string(),
                             risk: None,
-                            metadata: Vec::new(),
                             data: crate::model::BatchEventData {
                                 image: Vec::new(),
                                 content_type: "image/png".to_string(),
+                                fields: Default::default(),
                             },
                         },
                         content_hash: [0; 32],
@@ -989,10 +981,10 @@ mod tests {
             .queue_batch_log(
                 "developer_log",
                 Some(0.7),
-                vec![
+                EventData::from_pairs([
                     ("source".to_string(), "test".to_string()),
                     ("title".to_string(), "Developer test".to_string()),
-                ],
+                ]),
             )
             .expect("queue batch log");
 
@@ -1001,19 +993,15 @@ mod tests {
         assert_eq!(audit_state.pending_hash_uploads.len(), 0);
         assert_eq!(audit_state.pending_batch_uploads.len(), 1);
         let queued = &audit_state.pending_batch_uploads[0];
-        let batch_event = queued
-            .payload
-            .batch_event
-            .as_ref()
-            .expect("queued batch event");
+        let batch_event = queued.payload.as_batch_event().expect("queued batch event");
         assert_eq!(batch_event.event.kind, "developer_log");
         assert_eq!(batch_event.event.risk, Some(0.7));
         assert_eq!(
-            batch_event.event.metadata,
-            vec![
+            batch_event.event.data,
+            EventData::from_pairs([
                 ("source".to_string(), "test".to_string()),
                 ("title".to_string(), "Developer test".to_string()),
-            ]
+            ])
         );
 
         let _ = fs::remove_dir_all(state_dir);
@@ -1038,10 +1026,10 @@ mod tests {
                 should_be_in_batch: false,
                 requires_hash_upload: false,
                 log: AuditLogPayload::for_direct_log(LogEntry {
-                    ts_ms: 1,
+                    ts: 1,
                     kind: "system_event".to_string(),
                     risk: None,
-                    data: serde_json::json!({ "event": "test" }),
+                    data: EventData::from_pairs([("event".to_string(), "test".to_string())]),
                 }),
             })
             .expect("append audit record");
