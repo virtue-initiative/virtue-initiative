@@ -16,7 +16,7 @@ import { Logs } from "./pages/Logs/index";
 import { Auth } from "./pages/Auth/index";
 import { Settings } from "./pages/Settings/index";
 import { NotFound } from "./pages/_404";
-import { PARTNERS_CHANGED_EVENT } from "./events";
+import { GLOBAL_ALERT_EVENT, PARTNERS_CHANGED_EVENT } from "./events";
 import "./style.css";
 
 const GLOBAL_MESSAGE_KEY = "virtue_global_link_message";
@@ -104,6 +104,30 @@ function GlobalEmailActionBanner() {
     } catch {
       window.sessionStorage.removeItem(GLOBAL_MESSAGE_KEY);
     }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    function handleGlobalAlert(event: Event) {
+      const detail = (
+        event as CustomEvent<{
+          message?: string;
+          isError?: boolean;
+        }>
+      ).detail;
+
+      if (!detail?.message?.trim()) {
+        return;
+      }
+
+      pushAlert(detail.message, Boolean(detail.isError));
+    }
+
+    window.addEventListener(GLOBAL_ALERT_EVENT, handleGlobalAlert);
+    return () => {
+      window.removeEventListener(GLOBAL_ALERT_EVENT, handleGlobalAlert);
+    };
   }, []);
 
   useEffect(() => {

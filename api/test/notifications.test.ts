@@ -14,7 +14,7 @@ import {
 beforeEach(clearDB);
 
 describe('Notification routes and tamper alerts', () => {
-  it('lists and updates owner notification preferences', async () => {
+  it('stores notification frequency on the user and reflects it across monitored partners', async () => {
     const { token: ownerToken } = await signupAndGetToken('notify-owner@example.com', 'pw');
     const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
       'notify-partner@example.com',
@@ -52,25 +52,30 @@ describe('Notification routes and tamper alerts', () => {
         id: string;
         user: { email: string };
         digest_cadence: string;
-        immediate_tamper_severity: string;
       }>;
     };
     expect(list.watching[0]).toMatchObject({
       id: created.id,
       user: { email: 'notify-owner@example.com' },
       digest_cadence: 'daily',
-      immediate_tamper_severity: 'critical',
     });
 
-    const patchRes = await SELF.fetch(`${BASE}/partner/watching/${created.id}`, {
+    const patchRes = await SELF.fetch(`${BASE}/user`, {
       method: 'PATCH',
       headers: authHeaders(partnerToken),
       body: JSON.stringify({
-        digest_cadence: 'alerts-only',
-        immediate_tamper_severity: 'warning',
+        email_frequency: 'alerts-only',
       }),
     });
-    expect(patchRes.status).toBe(204);
+    expect(patchRes.status).toBe(200);
+
+    const userRes = await SELF.fetch(`${BASE}/user`, {
+      headers: { Authorization: `Bearer ${partnerToken}` },
+    });
+    expect(userRes.status).toBe(200);
+    expect((await userRes.json()) as { email_frequency: string }).toMatchObject({
+      email_frequency: 'alerts-only',
+    });
 
     const updatedRes = await SELF.fetch(`${BASE}/partner`, {
       headers: { Authorization: `Bearer ${partnerToken}` },
@@ -79,13 +84,11 @@ describe('Notification routes and tamper alerts', () => {
       watching: Array<{
         id: string;
         digest_cadence: string;
-        immediate_tamper_severity: string;
       }>;
     };
     expect(updated.watching[0]).toMatchObject({
       id: created.id,
       digest_cadence: 'alerts-only',
-      immediate_tamper_severity: 'warning',
     });
   });
 
@@ -156,7 +159,7 @@ describe('Notification routes and tamper alerts', () => {
         email: 'mute-partner@example.com',
       }),
     });
-    const created = (await createRes.json()) as { id: string };
+    await createRes.json();
     const inviteDelivery = (await listEmailDeliveries()).find(
       (delivery) =>
         delivery.kind === 'partner_invite' &&
@@ -169,10 +172,10 @@ describe('Notification routes and tamper alerts', () => {
       headers: authHeaders(partnerToken),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
-    await SELF.fetch(`${BASE}/partner/watching/${created.id}`, {
+    await SELF.fetch(`${BASE}/user`, {
       method: 'PATCH',
       headers: authHeaders(partnerToken),
-      body: JSON.stringify({ digest_cadence: 'none' }),
+      body: JSON.stringify({ email_frequency: 'none' }),
     });
 
     const device = await createDeviceForUser(ownerToken, 'Muted Device', 'linux');

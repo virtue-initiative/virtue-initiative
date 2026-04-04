@@ -9,12 +9,15 @@ CREATE TABLE users (
   name TEXT,
   email_verified INTEGER NOT NULL DEFAULT 0,
   email_bounced_at INTEGER,
+  email_frequency TEXT NOT NULL DEFAULT 'daily',
   pub_key BLOB,
   priv_key BLOB,
-  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  CHECK (email_frequency IN ('none', 'alerts-only', 'daily', 'weekly'))
 );
 
 CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_email_frequency ON users(email_frequency);
 
 CREATE TABLE devices (
   id BLOB PRIMARY KEY,
@@ -65,19 +68,6 @@ CREATE TABLE partners (
 CREATE INDEX idx_partners_watching_user_id ON partners(watching_user_id);
 CREATE INDEX idx_partners_watcher_user_id ON partners(watcher_user_id);
 CREATE INDEX idx_partners_status ON partners(status);
-
-CREATE TABLE partner_preferences (
-  partnership_id BLOB PRIMARY KEY,
-  email_frequency TEXT NOT NULL DEFAULT 'daily',
-  immediate_tamper_severity TEXT NOT NULL DEFAULT 'critical',
-  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  FOREIGN KEY (partnership_id) REFERENCES partners(id) ON DELETE CASCADE,
-  CHECK (email_frequency IN ('none', 'alerts-only', 'daily', 'weekly'))
-);
-
-CREATE INDEX idx_partner_preferences_email_frequency
-  ON partner_preferences(email_frequency);
 
 -- Non-encrypted immediate device log entries sent directly from devices
 CREATE TABLE device_logs (

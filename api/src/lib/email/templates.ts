@@ -402,54 +402,116 @@ export function renderTamperAlertTemplate(input: {
 
 export function renderPartnerDigestTemplate(input: {
   cadence: DigestFrequency;
-  ownerName?: string | null;
-  ownerEmail: string;
-  approxScreenshotCount: number;
-  tamperCounts: Record<TamperSeverity, number>;
-  missingLogDays: string[];
+  partnerSummaries: Array<{
+    ownerName?: string | null;
+    ownerEmail: string;
+    approxScreenshotCount: number;
+    tamperCounts: Record<TamperSeverity, number>;
+    missingLogDays: string[];
+  }>;
   appName: string;
   appUrl: string;
 }) {
   const appName = normalizeAppName(input.appName);
-  const owner = input.ownerName?.trim() || input.ownerEmail;
   const periodLabel = input.cadence === 'weekly' ? 'Weekly' : 'Daily';
+  const accountCount = input.partnerSummaries.length;
+  const summaryTarget =
+    accountCount === 1
+      ? input.partnerSummaries[0]?.ownerName?.trim() || input.partnerSummaries[0]?.ownerEmail
+      : `${accountCount} monitored accounts`;
+  const totalTamperCounts = input.partnerSummaries.reduce<Record<TamperSeverity, number>>(
+    (totals, summary) => ({
+      info: totals.info + summary.tamperCounts.info,
+      warning: totals.warning + summary.tamperCounts.warning,
+      critical: totals.critical + summary.tamperCounts.critical,
+    }),
+    { info: 0, warning: 0, critical: 0 },
+  );
+  const totalScreenshots = input.partnerSummaries.reduce(
+    (total, summary) => total + summary.approxScreenshotCount,
+    0,
+  );
+
+  const partnerSections = input.partnerSummaries.flatMap((summary) => {
+    const owner = summary.ownerName?.trim() || summary.ownerEmail;
+    return [
+      '',
+      owner,
+      `Approximate screenshots available: ${summary.approxScreenshotCount}`,
+      `Critical tamper alerts: ${summary.tamperCounts.critical}`,
+      `Warning tamper alerts: ${summary.tamperCounts.warning}`,
+      `Info-only tamper events: ${summary.tamperCounts.info}`,
+      ...(summary.missingLogDays.length > 0
+        ? [
+            'Devices with at least one day without logs:',
+            ...summary.missingLogDays.map((line) => `- ${line}`),
+          ]
+        : []),
+    ];
+  });
+
   const lines = [
-    `${periodLabel} accountability summary for ${owner}`,
+    `${periodLabel} accountability summary for ${summaryTarget}`,
     '',
-    `Approximate screenshots available: ${input.approxScreenshotCount}`,
-    `Critical tamper alerts: ${input.tamperCounts.critical}`,
-    `Warning tamper alerts: ${input.tamperCounts.warning}`,
-    `Info-only tamper events: ${input.tamperCounts.info}`,
-    ...(input.missingLogDays.length > 0
-      ? [
-          '',
-          'Devices with at least one day without logs:',
-          ...input.missingLogDays.map((line) => `- ${line}`),
-        ]
-      : []),
+    `Monitored accounts: ${accountCount}`,
+    `Approximate screenshots available: ${totalScreenshots}`,
+    `Critical tamper alerts: ${totalTamperCounts.critical}`,
+    `Warning tamper alerts: ${totalTamperCounts.warning}`,
+    `Info-only tamper events: ${totalTamperCounts.info}`,
+    ...partnerSections,
     '',
     `Please review the screenshots and logs: ${input.appUrl}`,
   ];
 
   const summaryItems = [
-    listItem(`Approximate screenshots available: ${input.approxScreenshotCount}`),
-    listItem(`Critical tamper alerts: ${input.tamperCounts.critical}`),
-    listItem(`Warning tamper alerts: ${input.tamperCounts.warning}`),
-    listItem(`Info-only tamper events: ${input.tamperCounts.info}`),
-    ...(input.missingLogDays.length > 0
-      ? [
-          `<li style="${inlineStyle({
-            margin: '0 0 8px 0',
-            color: EMAIL_COLORS.text,
-            'font-size': '15px',
-            'line-height': '1.5',
-          })}">Devices with at least one day without logs:<ul style="${inlineStyle({
-            margin: '8px 0 0 18px',
-            padding: '0',
-          })}">${input.missingLogDays.map((line) => listItem(line)).join('')}</ul></li>`,
-        ]
-      : []),
+    listItem(`Monitored accounts: ${accountCount}`),
+    listItem(`Approximate screenshots available: ${totalScreenshots}`),
+    listItem(`Critical tamper alerts: ${totalTamperCounts.critical}`),
+    listItem(`Warning tamper alerts: ${totalTamperCounts.warning}`),
+    listItem(`Info-only tamper events: ${totalTamperCounts.info}`),
   ].join('');
+
+  const partnerSummarySections = input.partnerSummaries
+    .map((summary) => {
+      const owner = summary.ownerName?.trim() || summary.ownerEmail;
+      const missingLogHtml =
+        summary.missingLogDays.length > 0
+          ? `<li style="${inlineStyle({
+              margin: '0 0 8px 0',
+              color: EMAIL_COLORS.text,
+              'font-size': '15px',
+              'line-height': '1.5',
+            })}">Devices with at least one day without logs:<ul style="${inlineStyle({
+              margin: '8px 0 0 18px',
+              padding: '0',
+            })}">${summary.missingLogDays.map((line) => listItem(line)).join('')}</ul></li>`
+          : '';
+
+      return `<div style="${inlineStyle({
+        margin: '0 0 18px 0',
+        padding: '16px',
+        border: `1px solid ${EMAIL_COLORS.border}`,
+        'border-radius': '10px',
+      })}">
+        <p style="${inlineStyle({
+          margin: '0 0 12px 0',
+          color: EMAIL_COLORS.text,
+          'font-size': '16px',
+          'font-weight': '600',
+        })}">${escapeHtml(owner)}</p>
+        <ul style="${inlineStyle({
+          margin: '0 0 0 18px',
+          padding: '0',
+        })}">
+          ${listItem(`Approximate screenshots available: ${summary.approxScreenshotCount}`)}
+          ${listItem(`Critical tamper alerts: ${summary.tamperCounts.critical}`)}
+          ${listItem(`Warning tamper alerts: ${summary.tamperCounts.warning}`)}
+          ${listItem(`Info-only tamper events: ${summary.tamperCounts.info}`)}
+          ${missingLogHtml}
+        </ul>
+      </div>`;
+    })
+    .join('');
 
   const footer = withFooter({
     appName,
@@ -457,17 +519,18 @@ export function renderPartnerDigestTemplate(input: {
     headline: `${periodLabel} summary`,
     textLines: lines,
     htmlSections: [
-      paragraph(`${periodLabel} accountability summary for ${owner}.`),
+      paragraph(`${periodLabel} accountability summary for ${summaryTarget}.`),
       `<ul style="${inlineStyle({
         margin: '0 0 16px 18px',
         padding: '0',
       })}">${summaryItems}</ul>`,
+      partnerSummarySections,
       actionButton(input.appUrl, 'Open dashboard'),
     ],
   });
 
   return {
-    subject: `${periodLabel} summary for ${owner}`,
+    subject: `${periodLabel} summary for ${summaryTarget}`,
     text: footer.text,
     html: footer.html,
   };

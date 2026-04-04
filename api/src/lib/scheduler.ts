@@ -90,9 +90,21 @@ function collectMissingLogDays(
 
 export async function runNotificationSchedule(env: Env, now = Date.now()) {
   const partnerships = await listDigestEligiblePartnerships(env.DB);
+  const partnershipsByWatcher = new Map<string, typeof partnerships>();
 
   for (const partnership of partnerships) {
-    const emailFrequency = partnership.email_frequency ?? DEFAULT_EMAIL_FREQUENCY;
+    const current = partnershipsByWatcher.get(partnership.watcher_user_id) ?? [];
+    current.push(partnership);
+    partnershipsByWatcher.set(partnership.watcher_user_id, current);
+  }
+
+  for (const watcherPartnerships of partnershipsByWatcher.values()) {
+    const recipient = watcherPartnerships[0];
+    if (!recipient) {
+      continue;
+    }
+
+    const emailFrequency = recipient.email_frequency ?? DEFAULT_EMAIL_FREQUENCY;
     if (emailFrequency !== 'daily' && emailFrequency !== 'weekly') {
       continue;
     }
@@ -102,28 +114,46 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
       continue;
     }
 
-    const [batches, riskLogs, deviceLogs, devices] = await Promise.all([
-      listBatchWindowsForUser(env.DB, partnership.watching_user_id, window.start, window.end),
-      listRiskDeviceLogsForUser(env.DB, partnership.watching_user_id, window.start, window.end),
-      listDeviceLogsForUser(env.DB, partnership.watching_user_id, window.start, window.end),
-      listEnabledDevicesForUser(env.DB, partnership.watching_user_id),
-    ]);
+    const partnerSummaries = await Promise.all(
+      watcherPartnerships
+        .slice()
+        .sort((a, b) =>
+          (a.watching_user_name ?? a.watching_user_email).localeCompare(
+            b.watching_user_name ?? b.watching_user_email,
+          ),
+        )
+        .map(async (partnership) => {
+          const [batches, riskLogs, deviceLogs, devices] = await Promise.all([
+            listBatchWindowsForUser(env.DB, partnership.watching_user_id, window.start, window.end),
+            listRiskDeviceLogsForUser(
+              env.DB,
+              partnership.watching_user_id,
+              window.start,
+              window.end,
+            ),
+            listDeviceLogsForUser(env.DB, partnership.watching_user_id, window.start, window.end),
+            listEnabledDevicesForUser(env.DB, partnership.watching_user_id),
+          ]);
 
-    const approxScreenshotCount = countApproximateScreenshots(
-      batches.length,
-      riskLogs.length,
-      DEFAULT_CAPTURE_INTERVAL_MS,
+          return {
+            partnershipId: partnership.partnership_id,
+            ownerName: partnership.watching_user_name,
+            ownerEmail: partnership.watching_user_email,
+            approxScreenshotCount: countApproximateScreenshots(
+              batches.length,
+              riskLogs.length,
+              DEFAULT_CAPTURE_INTERVAL_MS,
+            ),
+            tamperCounts: summarizeTamperCounts(riskLogs),
+            missingLogDays: collectMissingLogDays(devices, deviceLogs, window.start, window.end),
+          };
+        }),
     );
-    const tamperCounts = summarizeTamperCounts(riskLogs);
-    const missingLogDays = collectMissingLogDays(devices, deviceLogs, window.start, window.end);
+
     const email = renderPartnerDigestTemplate({
       cadence: emailFrequency,
       appName: env.APP_NAME,
-      ownerName: partnership.watching_user_name,
-      ownerEmail: partnership.watching_user_email,
-      approxScreenshotCount,
-      tamperCounts,
-      missingLogDays,
+      partnerSummaries,
       appUrl: env.APP_URL,
     });
 
@@ -131,17 +161,17 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
       env,
       db: env.DB,
       kind: emailFrequency === 'weekly' ? 'weekly_digest' : 'daily_digest',
-      recipient: partnership.watcher_email,
+      recipient: recipient.watcher_email,
       subject: email.subject,
       text: email.text,
       html: email.html,
-      related_user_id: partnership.watching_user_id,
-      related_partnership_id: partnership.partnership_id,
+      related_user_id: recipient.watcher_user_id,
       metadata: {
         email_frequency: emailFrequency,
         windowStart: window.start,
         windowEnd: window.end,
-        missingLogDays,
+        partnershipIds: partnerSummaries.map((summary) => summary.partnershipId),
+        watchedUserIds: watcherPartnerships.map((partnership) => partnership.watching_user_id),
       },
     });
   }

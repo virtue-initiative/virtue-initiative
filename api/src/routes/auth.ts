@@ -82,6 +82,7 @@ const updateUserSchema = z
   .object({
     email: z.email().optional(),
     name: z.string().min(1).optional(),
+    email_frequency: z.enum(['none', 'alerts-only', 'daily', 'weekly']).optional(),
     pub_key: z.base64().optional(),
     priv_key: z.base64().optional(),
   })
@@ -399,6 +400,7 @@ auth.get('/user', authenticate('access'), async (c) => {
     email: user.email,
     email_verified: user.email_verified === 1,
     email_bounced_at: user.email_bounced_at,
+    email_frequency: user.email_frequency,
     ...(user.name ? { name: user.name } : {}),
     ...(user.pub_key ? { pub_key: encodeBase64(user.pub_key) } : {}),
     ...(user.priv_key ? { priv_key: encodeBase64(user.priv_key) } : {}),
@@ -407,7 +409,7 @@ auth.get('/user', authenticate('access'), async (c) => {
 
 auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema), async (c) => {
   const userId = c.get('sub');
-  const { email, name, pub_key, priv_key } = c.req.valid('json');
+  const { email, name, email_frequency, pub_key, priv_key } = c.req.valid('json');
   const normalizedEmail = email?.trim().toLowerCase();
   const user = await findUserById(c.env.DB, userId);
 
@@ -438,6 +440,7 @@ auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema),
       ? { email: normalizedEmail, email_verified: false, email_bounced_at: null }
       : {}),
     name,
+    email_frequency,
     pub_key: decodedPublicKey,
     priv_key: decodedPrivateKey,
   });
