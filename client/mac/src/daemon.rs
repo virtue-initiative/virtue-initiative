@@ -15,7 +15,7 @@ use objc2_foundation::{NSDate, NSRunLoop};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio::time::sleep;
-use virtue_core::{LogEntry, MonitorService};
+use virtue_core::{EventData, LogEntry, MonitorService};
 
 use crate::capture::{MacPlatformHooks, has_screen_capture_access, is_permission_missing_error};
 use crate::config::{
@@ -295,20 +295,16 @@ fn save_lifecycle_state(path: &Path, state: &LifecycleState) -> Result<()> {
 }
 
 fn log_entry(kind: &str, metadata: &[(&str, &str)], ts: DateTime<Utc>) -> LogEntry {
-    let data = metadata
-        .iter()
-        .map(|(key, value)| {
-            (
-                (*key).to_string(),
-                serde_json::Value::String((*value).to_string()),
-            )
-        })
-        .collect::<serde_json::Map<_, _>>();
+    let data = EventData::from_pairs(
+        metadata
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), (*value).to_string())),
+    );
 
     LogEntry {
-        ts_ms: ts.timestamp_millis(),
+        ts: ts.timestamp_millis(),
         kind: kind.to_string(),
         risk: None,
-        data: serde_json::Value::Object(data),
+        data,
     }
 }

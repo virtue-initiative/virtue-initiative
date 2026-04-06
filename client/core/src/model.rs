@@ -1,4 +1,7 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Screenshot {
@@ -8,55 +11,88 @@ pub struct Screenshot {
     pub content_type: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BatchEventData {
-    #[serde(with = "serde_bytes")]
-    pub image: Vec<u8>,
-    pub content_type: String,
-}
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(transparent)]
+pub struct EventData(pub BTreeMap<String, Value>);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BatchEvent {
-    pub ts: i64,
-    #[serde(rename = "type")]
-    pub kind: String,
-    pub data: BatchEventData,
-}
+impl EventData {
+    pub fn insert(&mut self, key: impl Into<String>, value: Value) {
+        self.0.insert(key.into(), value);
+    }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BufferedScreenshot {
-    pub event: BatchEvent,
-    pub content_hash: [u8; 32],
+    pub fn get(&self, key: &str) -> Option<&Value> {
+        self.0.get(key)
+    }
+
+    pub fn object(&self) -> Map<String, Value> {
+        self.0.clone().into_iter().collect()
+    }
+
+    pub fn with_screenshot(mut self, image: Vec<u8>, content_type: impl Into<String>) -> Self {
+        self.insert(
+            "image",
+            Value::Array(image.into_iter().map(Value::from).collect()),
+        );
+        self.insert("content_type", Value::String(content_type.into()));
+        self
+    }
+
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
+        let mut data = Self::default();
+        for (key, value) in pairs {
+            data.insert(key, Value::String(value));
+        }
+        data
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
-    pub ts_ms: i64,
+    pub ts: i64,
+    #[serde(rename = "type")]
     pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub risk: Option<f32>,
-    pub data: serde_json::Value,
+    #[serde(default)]
+    pub data: EventData,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct AuditLogPayload {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub direct_log: Option<LogEntry>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub batch_screenshot: Option<BufferedScreenshot>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BufferedBatchEvent {
+    pub event: BatchEvent,
+    pub content_hash: [u8; 32],
+}
+
+pub type BatchEvent = LogEntry;
+pub type BatchEventData = EventData;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+pub enum AuditLogPayload {
+    Direct(LogEntry),
+    Batch(BufferedBatchEvent),
 }
 
 impl AuditLogPayload {
     pub fn for_direct_log(log: LogEntry) -> Self {
-        Self {
-            direct_log: Some(log),
-            batch_screenshot: None,
+        Self::Direct(log)
+    }
+
+    pub fn for_batch_event(event: BufferedBatchEvent) -> Self {
+        Self::Batch(event)
+    }
+
+    pub fn as_direct_log(&self) -> Option<&LogEntry> {
+        match self {
+            Self::Direct(log) => Some(log),
+            Self::Batch(_) => None,
         }
     }
 
-    pub fn for_batch_screenshot(screenshot: BufferedScreenshot) -> Self {
-        Self {
-            direct_log: None,
-            batch_screenshot: Some(screenshot),
+    pub fn as_batch_event(&self) -> Option<&BufferedBatchEvent> {
+        match self {
+            Self::Direct(_) => None,
+            Self::Batch(event) => Some(event),
         }
     }
 }

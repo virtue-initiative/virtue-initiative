@@ -101,19 +101,6 @@ function toMetadata(data: Record<string, unknown>) {
     );
 }
 
-function toMetadataEntries(value: unknown): [string, string][] {
-  if (!Array.isArray(value)) return [];
-
-  return value.flatMap((entry) => {
-    if (!Array.isArray(entry) || entry.length < 2) return [];
-    const [key, rawValue] = entry;
-    if (typeof key !== "string") return [];
-    return [
-      [key, typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)],
-    ];
-  });
-}
-
 async function decryptAndFlattenBatch(
   batch: Batch,
   openBatchKey: (encryptedKey: string) => Promise<CryptoKey>,
@@ -132,44 +119,27 @@ async function decryptAndFlattenBatch(
   const decrypted = await decryptBatch(batchKey, raw);
   const decompressed = await decompressGzip(decrypted);
   const decoded = decode(decompressed) as unknown;
-  const record =
-    decoded && typeof decoded === "object"
-      ? (decoded as Record<string, unknown>)
-      : {};
-  const events = Array.isArray(record.events)
-    ? (record.events as Record<string, unknown>[])
-    : Array.isArray(record.items)
-      ? (record.items as Record<string, unknown>[])
-      : [];
+  const eventBytes = Array.isArray(decoded) ? decoded : [];
 
-  return events.map((event, index) => {
+  return eventBytes.map((encodedEvent, index) => {
+    const rawEvent = toUint8Array(encodedEvent);
+    if (!rawEvent) {
+      throw new Error(`Batch event ${index} is not a byte array`);
+    }
+
+    const event = decode(rawEvent) as Record<string, unknown>;
     const data =
       event.data && typeof event.data === "object"
         ? (event.data as Record<string, unknown>)
         : {};
-    const metadata =
-      "metadata" in event
-        ? toMetadataEntries(event.metadata)
-        : toMetadata(data);
-    const image =
-      toUint8Array("image" in event ? event.image : undefined) ??
-      toUint8Array(data.image);
+    const metadata = toMetadata(data);
+    const image = toUint8Array(data.image);
 
     return {
       id: typeof event.id === "string" ? event.id : `${batch.id}:${index}`,
-      taken_at:
-        typeof event.ts === "number"
-          ? event.ts
-          : typeof event.taken_at === "number"
-            ? event.taken_at
-            : batch.end_time,
+      taken_at: typeof event.ts === "number" ? event.ts : batch.end_time,
       device_id: batch.device_id,
-      kind:
-        typeof event.type === "string"
-          ? event.type
-          : typeof event.kind === "string"
-            ? event.kind
-            : "unknown",
+      kind: typeof event.type === "string" ? event.type : "unknown",
       image,
       metadata,
       batch_status: "unknown" as const,

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::sync::mpsc;
 use tokio::time::sleep;
-use virtue_core::{LogEntry, MonitorService};
+use virtue_core::{EventData, LogEntry, MonitorService};
 
 use crate::capture::{LinuxPlatformHooks, is_session_unavailable_text};
 use crate::config::{ClientPaths, build_core_config};
@@ -254,7 +254,7 @@ fn emit_shutdown_logs(service: &mut MonitorService<LinuxPlatformHooks>, signal_n
         emit_log_entry(
             service,
             LogEntry {
-                ts_ms: Utc::now().timestamp_millis(),
+                ts: Utc::now().timestamp_millis(),
                 kind: "system_shutdown".to_string(),
                 risk: None,
                 data: metadata_value_owned(metadata),
@@ -280,25 +280,25 @@ fn emit_log_entry(service: &mut MonitorService<LinuxPlatformHooks>, entry: LogEn
 
 fn log_entry(kind: &str, metadata: &[(&str, &str)], created_at: DateTime<Utc>) -> LogEntry {
     LogEntry {
-        ts_ms: created_at.timestamp_millis(),
+        ts: created_at.timestamp_millis(),
         kind: kind.to_string(),
         risk: None,
         data: metadata_value(metadata),
     }
 }
 
-fn metadata_value(metadata: &[(&str, &str)]) -> Value {
-    let mut object = Map::new();
+fn metadata_value(metadata: &[(&str, &str)]) -> EventData {
+    let mut fields = Map::new();
     for (key, value) in metadata {
-        object.insert((*key).to_string(), Value::String((*value).to_string()));
+        fields.insert((*key).to_string(), Value::String((*value).to_string()));
     }
-    Value::Object(object)
+    EventData(fields.into_iter().collect())
 }
 
-fn metadata_value_owned(metadata: Vec<(String, String)>) -> Value {
+fn metadata_value_owned(metadata: Vec<(String, String)>) -> EventData {
     let mut object = Map::new();
     for (key, value) in metadata {
         object.insert(key, Value::String(value));
     }
-    Value::Object(object)
+    EventData(object.into_iter().collect())
 }

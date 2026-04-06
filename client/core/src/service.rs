@@ -2,13 +2,15 @@ use crate::api::ApiClient;
 use crate::audit::{derive_state, generate_local_id};
 use crate::batch::BatchBuilder;
 use crate::config::Config;
-use crate::crypto::{CryptoEngine, prepare_screenshot_event};
+use crate::crypto::{
+    CryptoEngine, prepare_log_batch_event, prepare_screenshot_batch_event, prepare_screenshot_event,
+};
 use crate::error::{CoreError, CoreResult};
 use crate::image_pipeline::ImagePipeline;
 use crate::model::{
     AuditLogItem, AuditLogPayload, AuditRecord, AuditState, AuthState, BatchRecipient, BatchUpload,
-    BufferedScreenshot, DeviceCredentials, DeviceSettings, LogEntry, LoginStatus, LoopOutcome,
-    Screenshot, ServiceStatus,
+    BufferedBatchEvent, DeviceCredentials, DeviceSettings, EventData, LogEntry, LoginStatus,
+    LoopOutcome, Screenshot, ServiceStatus,
 };
 use crate::platform::PlatformHooks;
 use crate::storage::FileStateStore;
@@ -102,7 +104,7 @@ impl<P: PlatformHooks> MonitorService<P> {
             if self.can_capture() && self.should_take_screenshot(now_ms) {
                 let screenshot = self.platform.take_screenshot()?;
                 let processed = self.process_screenshot(screenshot)?;
-                let item = self.enqueue_batch_screenshot(processed)?;
+                let item = self.enqueue_batch_event(processed, true)?;
                 let _ = self.try_upload_hash_for_item(&item);
                 self.status.last_screenshot_at_ms = Some(now_ms);
             }
@@ -134,12 +136,10 @@ impl<P: PlatformHooks> MonitorService<P> {
 
         let now_ms = self.platform.get_time_utc_ms()?;
         let _ = self.send_log(LogEntry {
-            ts_ms: now_ms,
+            ts: now_ms,
             kind: "service_stop".to_string(),
             risk: None,
-            data: serde_json::json!({
-                "event": "shutdown",
-            }),
+            data: EventData::from_pairs([("event".to_string(), "shutdown".to_string())]),
         });
 
         self.status.is_running = false;
@@ -151,6 +151,57 @@ impl<P: PlatformHooks> MonitorService<P> {
         let item = self.append_audit_log(false, false, AuditLogPayload::for_direct_log(log))?;
         let _ = self.try_upload_direct_log(&item);
         self.persist_state()
+    }
+
+    pub fn queue_batch_log(
+        &mut self,
+        kind: &str,
+        risk: Option<f32>,
+        data: EventData,
+    ) -> CoreResult<()> {
+        self.ensure_running()?;
+        let event = prepare_log_batch_event(self.platform.get_time_utc_ms()?, kind, risk, data)?;
+        self.enqueue_batch_event(event, false)?;
+        self.persist_state()
+    }
+
+    pub fn capture_batch_screenshot(
+        &mut self,
+        kind: &str,
+        risk: Option<f32>,
+        data: EventData,
+    ) -> CoreResult<()> {
+        self.ensure_running()?;
+        let screenshot = self.platform.take_screenshot()?;
+        let item = self.process_screenshot_with_data(screenshot, kind, risk, data)?;
+        let item = self.enqueue_batch_event(item, true)?;
+        let _ = self.try_upload_hash_for_item(&item);
+        self.status.last_screenshot_at_ms = Some(self.platform.get_time_utc_ms()?);
+        self.persist_state()
+    }
+
+    pub fn upload_pending_batch_now(&mut self) -> CoreResult<(usize, usize)> {
+        self.ensure_running()?;
+        self.refresh_runtime_config()?;
+        self.reload_persisted_state()?;
+
+        let audit_state = self.load_audit_state()?;
+        let count = audit_state
+            .pending_batch_uploads
+            .len()
+            .min(MAX_BATCH_ITEMS_PER_UPLOAD);
+        if count == 0 {
+            self.persist_state()?;
+            return Ok((0, 0));
+        }
+
+        self.refresh_device_settings()?;
+        let now_ms = self.platform.get_time_utc_ms()?;
+        let batch_items = self.batch_upload_candidates(&audit_state);
+        self.try_upload_pending_batch(batch_items, now_ms)?;
+        let remaining = self.load_audit_state()?.pending_batch_uploads.len();
+        self.persist_state()?;
+        Ok((count, remaining))
     }
 
     pub fn login(&mut self, username: &str, password: &str) -> CoreResult<LoginStatus> {
@@ -178,13 +229,13 @@ impl<P: PlatformHooks> MonitorService<P> {
         self.persist_state()?;
 
         let _ = self.send_log(LogEntry {
-            ts_ms: self.platform.get_time_utc_ms()?,
+            ts: self.platform.get_time_utc_ms()?,
             kind: "system_event".to_string(),
             risk: None,
-            data: serde_json::json!({
-                "event": "login",
-                "user": username,
-            }),
+            data: EventData::from_pairs([
+                ("event".to_string(), "login".to_string()),
+                ("user".to_string(), username.to_string()),
+            ]),
         });
 
         Ok(LoginStatus {
@@ -198,12 +249,10 @@ impl<P: PlatformHooks> MonitorService<P> {
 
         if self.device_credentials.is_some() {
             let _ = self.send_log(LogEntry {
-                ts_ms: self.platform.get_time_utc_ms()?,
+                ts: self.platform.get_time_utc_ms()?,
                 kind: "system_event".to_string(),
                 risk: None,
-                data: serde_json::json!({
-                    "event": "logout",
-                }),
+                data: EventData::from_pairs([("event".to_string(), "logout".to_string())]),
             });
         }
 
@@ -230,19 +279,31 @@ impl<P: PlatformHooks> MonitorService<P> {
         Ok(status)
     }
 
-    fn process_screenshot(&self, screenshot: Screenshot) -> CoreResult<BufferedScreenshot> {
+    fn process_screenshot(&self, screenshot: Screenshot) -> CoreResult<BufferedBatchEvent> {
         let processed = ImagePipeline.process(screenshot)?;
-        Ok(prepare_screenshot_event(processed))
+        prepare_screenshot_event(processed)
     }
 
-    fn enqueue_batch_screenshot(
+    fn process_screenshot_with_data(
+        &self,
+        screenshot: Screenshot,
+        kind: &str,
+        risk: Option<f32>,
+        data: EventData,
+    ) -> CoreResult<BufferedBatchEvent> {
+        let processed = ImagePipeline.process(screenshot)?;
+        prepare_screenshot_batch_event(processed, kind, risk, data)
+    }
+
+    fn enqueue_batch_event(
         &mut self,
-        screenshot: BufferedScreenshot,
+        event: BufferedBatchEvent,
+        requires_hash_upload: bool,
     ) -> CoreResult<AuditLogItem> {
         self.append_audit_log(
             true,
-            true,
-            AuditLogPayload::for_batch_screenshot(screenshot),
+            requires_hash_upload,
+            AuditLogPayload::for_batch_event(event),
         )
     }
 
@@ -272,7 +333,7 @@ impl<P: PlatformHooks> MonitorService<P> {
     }
 
     fn try_upload_hash_for_item(&mut self, item: &AuditLogItem) -> CoreResult<RetryAttemptOutcome> {
-        let Some(screenshot) = item.payload.batch_screenshot.as_ref() else {
+        let Some(batch_event) = item.payload.as_batch_event() else {
             self.log_error(
                 "hash upload skipped; batch payload missing",
                 Some(&item.local_id),
@@ -289,7 +350,7 @@ impl<P: PlatformHooks> MonitorService<P> {
             api.upload_hash(
                 hash_base_url.as_deref(),
                 access_token,
-                &screenshot.content_hash,
+                &batch_event.content_hash,
             )
         }) {
             Ok(()) => {
@@ -319,7 +380,7 @@ impl<P: PlatformHooks> MonitorService<P> {
     }
 
     fn try_upload_direct_log(&mut self, item: &AuditLogItem) -> CoreResult<RetryAttemptOutcome> {
-        let Some(log) = item.payload.direct_log.as_ref() else {
+        let Some(log) = item.payload.as_direct_log() else {
             self.log_error(
                 "direct log upload skipped; direct payload missing",
                 Some(&item.local_id),
@@ -363,26 +424,26 @@ impl<P: PlatformHooks> MonitorService<P> {
     }
 
     fn try_upload_pending_batch(&mut self, items: &[AuditLogItem], now_ms: i64) -> CoreResult<()> {
-        let screenshots = items
+        let batch_events = items
             .iter()
             .filter_map(|item| {
-                if item.payload.batch_screenshot.is_none() {
+                if item.payload.as_batch_event().is_none() {
                     self.log_error(
                         "batch upload skipped item; batch payload missing",
                         Some(&item.local_id),
                         None,
                     );
                 }
-                item.payload.batch_screenshot.clone()
+                item.payload.as_batch_event().cloned()
             })
             .collect::<Vec<_>>();
-        if screenshots.is_empty() {
+        if batch_events.is_empty() {
             return Ok(());
         }
 
-        let mut screenshots = screenshots;
-        screenshots.sort_by_key(|item| item.event.ts);
-        let batch = self.build_batch(&screenshots, now_ms)?;
+        let mut batch_events = batch_events;
+        batch_events.sort_by_key(|item| item.event.ts);
+        let batch = self.build_batch(&batch_events, now_ms)?;
 
         match self
             .with_device_token_retry(|api, access_token, _| api.upload_batch(access_token, &batch))
@@ -393,7 +454,7 @@ impl<P: PlatformHooks> MonitorService<P> {
                         server_id: response.id.clone(),
                     })?;
                 for item in items {
-                    if item.payload.batch_screenshot.is_none() {
+                    if item.payload.as_batch_event().is_none() {
                         continue;
                     }
                     self.storage
@@ -423,11 +484,11 @@ impl<P: PlatformHooks> MonitorService<P> {
 
     fn build_batch(
         &self,
-        screenshots: &[BufferedScreenshot],
+        batch_events: &[BufferedBatchEvent],
         now_ms: i64,
     ) -> CoreResult<BatchUpload> {
         let recipients = self.batch_recipients()?;
-        BatchBuilder::build_upload(screenshots, &CryptoEngine, &recipients, now_ms)
+        BatchBuilder::build_upload(batch_events, &CryptoEngine, &recipients, now_ms)
     }
 
     fn retry_pending_work(&mut self) -> CoreResult<()> {
@@ -856,10 +917,10 @@ mod tests {
                 should_be_in_batch: false,
                 requires_hash_upload: false,
                 log: AuditLogPayload::for_direct_log(LogEntry {
-                    ts_ms: 1,
+                    ts: 1,
                     kind: "system_event".to_string(),
                     risk: None,
-                    data: serde_json::json!({ "event": "test" }),
+                    data: EventData::from_pairs([("event".to_string(), "test".to_string())]),
                 }),
             })
             .expect("append audit record");
@@ -881,14 +942,13 @@ mod tests {
                     local_id: format!("batch-{index}"),
                     should_be_in_batch: true,
                     requires_hash_upload: false,
-                    payload: AuditLogPayload::for_batch_screenshot(BufferedScreenshot {
+                    payload: AuditLogPayload::for_batch_event(BufferedBatchEvent {
                         event: crate::model::BatchEvent {
                             ts: index as i64,
                             kind: "screenshot".to_string(),
-                            data: crate::model::BatchEventData {
-                                image: Vec::new(),
-                                content_type: "image/png".to_string(),
-                            },
+                            risk: None,
+                            data: crate::model::BatchEventData::from_pairs([])
+                                .with_screenshot(Vec::new(), "image/png"),
                         },
                         content_hash: [0; 32],
                     }),
@@ -904,6 +964,41 @@ mod tests {
         assert_eq!(
             candidates[MAX_BATCH_ITEMS_PER_UPLOAD - 1].local_id,
             format!("batch-{}", MAX_BATCH_ITEMS_PER_UPLOAD - 1)
+        );
+
+        let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn queue_batch_log_creates_pending_batch_item_without_hash_upload() {
+        let state_dir = temp_state_dir();
+        let mut service = build_service(state_dir.clone());
+
+        service
+            .queue_batch_log(
+                "developer_log",
+                Some(0.7),
+                EventData::from_pairs([
+                    ("source".to_string(), "test".to_string()),
+                    ("title".to_string(), "Developer test".to_string()),
+                ]),
+            )
+            .expect("queue batch log");
+
+        let audit_state = service.load_audit_state().expect("load audit state");
+
+        assert_eq!(audit_state.pending_hash_uploads.len(), 0);
+        assert_eq!(audit_state.pending_batch_uploads.len(), 1);
+        let queued = &audit_state.pending_batch_uploads[0];
+        let batch_event = queued.payload.as_batch_event().expect("queued batch event");
+        assert_eq!(batch_event.event.kind, "developer_log");
+        assert_eq!(batch_event.event.risk, Some(0.7));
+        assert_eq!(
+            batch_event.event.data,
+            EventData::from_pairs([
+                ("source".to_string(), "test".to_string()),
+                ("title".to_string(), "Developer test".to_string()),
+            ])
         );
 
         let _ = fs::remove_dir_all(state_dir);
@@ -928,10 +1023,10 @@ mod tests {
                 should_be_in_batch: false,
                 requires_hash_upload: false,
                 log: AuditLogPayload::for_direct_log(LogEntry {
-                    ts_ms: 1,
+                    ts: 1,
                     kind: "system_event".to_string(),
                     risk: None,
-                    data: serde_json::json!({ "event": "test" }),
+                    data: EventData::from_pairs([("event".to_string(), "test".to_string())]),
                 }),
             })
             .expect("append audit record");

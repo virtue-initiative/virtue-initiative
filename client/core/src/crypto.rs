@@ -15,7 +15,7 @@ use sha2::{Digest, Sha256};
 
 use crate::error::{CoreError, CoreResult};
 use crate::model::{
-    BatchEvent, BatchEventData, BatchRecipient, BufferedScreenshot, HashParams, Screenshot,
+    BatchEvent, BatchEventData, BatchRecipient, BufferedBatchEvent, HashParams, Screenshot,
 };
 
 type HpkeKem = X25519HkdfSha256;
@@ -104,45 +104,50 @@ pub fn derive_password_auth(
     Ok(password_auth)
 }
 
-pub fn prepare_screenshot_event(screenshot: Screenshot) -> BufferedScreenshot {
-    let event = BatchEvent {
-        ts: screenshot.captured_at_ms,
-        kind: "screenshot".to_string(),
-        data: BatchEventData {
-            image: screenshot.bytes,
-            content_type: screenshot.content_type,
-        },
-    };
-
-    BufferedScreenshot {
-        content_hash: compute_event_hash(&event),
+pub fn buffer_batch_event(event: BatchEvent) -> CoreResult<BufferedBatchEvent> {
+    let encoded = encode_batch_event(&event)?;
+    Ok(BufferedBatchEvent {
+        content_hash: compute_event_hash(&encoded),
         event,
-    }
+    })
 }
 
-pub fn compute_event_hash(event: &BatchEvent) -> [u8; 32] {
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(&(event.ts as u64).to_le_bytes());
-    bytes.extend_from_slice(event.kind.as_bytes());
-
-    let mut fields = vec![
-        ("content_type", BatchValue::String(&event.data.content_type)),
-        ("image", BatchValue::Bytes(&event.data.image)),
-    ];
-    fields.sort_by(|(left, _), (right, _)| left.cmp(right));
-
-    for (key, value) in fields {
-        bytes.extend_from_slice(key.as_bytes());
-        match value {
-            BatchValue::String(value) => bytes.extend_from_slice(value.as_bytes()),
-            BatchValue::Bytes(value) => bytes.extend_from_slice(value),
-        }
-    }
-
-    Sha256::digest(bytes).into()
+pub fn prepare_screenshot_event(screenshot: Screenshot) -> CoreResult<BufferedBatchEvent> {
+    prepare_screenshot_batch_event(screenshot, "screenshot", None, BatchEventData::default())
 }
 
-enum BatchValue<'a> {
-    String(&'a str),
-    Bytes(&'a [u8]),
+pub fn prepare_screenshot_batch_event(
+    screenshot: Screenshot,
+    kind: impl Into<String>,
+    risk: Option<f32>,
+    data: BatchEventData,
+) -> CoreResult<BufferedBatchEvent> {
+    buffer_batch_event(BatchEvent {
+        ts: screenshot.captured_at_ms,
+        kind: kind.into(),
+        risk,
+        data: data.with_screenshot(screenshot.bytes, screenshot.content_type),
+    })
+}
+
+pub fn prepare_log_batch_event(
+    ts: i64,
+    kind: impl Into<String>,
+    risk: Option<f32>,
+    data: BatchEventData,
+) -> CoreResult<BufferedBatchEvent> {
+    buffer_batch_event(BatchEvent {
+        ts,
+        kind: kind.into(),
+        risk,
+        data,
+    })
+}
+
+pub fn encode_batch_event(event: &BatchEvent) -> CoreResult<Vec<u8>> {
+    Ok(rmp_serde::to_vec_named(event)?)
+}
+
+pub fn compute_event_hash(encoded_event: &[u8]) -> [u8; 32] {
+    Sha256::digest(encoded_event).into()
 }

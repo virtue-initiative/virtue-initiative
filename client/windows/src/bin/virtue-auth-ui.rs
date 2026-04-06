@@ -146,7 +146,7 @@ slint::slint! {
     }
 }
 
-const BUILD_LABEL: &str = env!("CARGO_PKG_VERSION");
+const BUILD_LABEL: &str = virtue_core::BUILD_LABEL;
 
 fn main() -> Result<()> {
     let paths = ClientPaths::discover()?;

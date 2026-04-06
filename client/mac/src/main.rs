@@ -15,7 +15,7 @@ use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use virtue_core::audit::derive_state;
 use virtue_core::storage::FileStateStore;
-use virtue_core::{AuthState, CoreError, LogEntry, MonitorService, ServiceStatus};
+use virtue_core::{AuthState, CoreError, EventData, LogEntry, MonitorService, ServiceStatus};
 
 use crate::capture::MacPlatformHooks;
 use crate::config::{
@@ -24,7 +24,7 @@ use crate::config::{
 };
 use crate::runtime_env::apply_runtime_env;
 
-const BUILD_LABEL: &str = env!("CARGO_PKG_VERSION");
+const BUILD_LABEL: &str = virtue_core::BUILD_LABEL;
 
 #[derive(Debug, Parser)]
 #[command(name = "virtue-mac")]
@@ -246,13 +246,13 @@ fn send_close_alert(paths: &ClientPaths) -> Result<()> {
 
     let mut service = MonitorService::setup(build_core_config(paths), MacPlatformHooks::new())?;
     let _ = service.send_log(LogEntry {
-        ts_ms: Utc::now().timestamp_millis(),
+        ts: Utc::now().timestamp_millis(),
         kind: "manual_override".to_string(),
         risk: None,
-        data: serde_json::json!({
-            "source": "mac_tray_menu",
-            "reason": "tray_close_requested",
-        }),
+        data: EventData::from_pairs([
+            ("source".to_string(), "mac_tray_menu".to_string()),
+            ("reason".to_string(), "tray_close_requested".to_string()),
+        ]),
     });
     Ok(())
 }

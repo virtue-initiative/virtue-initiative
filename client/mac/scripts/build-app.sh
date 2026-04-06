@@ -26,7 +26,7 @@ if [[ ! -f "$ICON_SOURCE" ]]; then
   exit 1
 fi
 
-cargo build --release -p virtue-mac
+VIRTUE_BUILD_LABEL="$BUILD_LABEL" cargo build --release -p virtue-mac
 
 rm -rf "$APP_ROOT"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
