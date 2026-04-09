@@ -522,6 +522,11 @@ button.logs-fullscreen-btn {
   color: #fff;
 }
 
+.verify-badge--moderate {
+  background: #f57c00;
+  color: #fff;
+}
+
 .verify-badge--alert {
   background: #f59e0b;
   color: #fff;

@@ -56,13 +56,22 @@ export function LogsList({
                         <span class="log-device">
                           {deviceName(item.device_id)}
                         </span>
-                        {item.source === "log" && (
+                        {item.risk > 0.7 ? (
                           <span
-                            class="verify-badge verify-badge--alert"
-                            title="Immediate alert log"
+                            class="verify-badge verify-badge--failed"
+                            title="High risk log"
                           >
-                            ⚡ Alert
+                            ⚠ High Risk
                           </span>
+                        ) : (
+                          item.risk > 0.4 && (
+                            <span
+                              class="verify-badge verify-badge--moderate"
+                              title="Moderate risk log"
+                            >
+                              Moderate Risk
+                            </span>
+                          )
                         )}
                         {item.batch_status === "failed" && (
                           <span
