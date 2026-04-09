@@ -13,7 +13,7 @@ import { useE2EE } from "../../context/e2ee";
 import { PARTNERS_CHANGED_EVENT } from "../../events";
 import { LogsGallery } from "./LogsGallery";
 import { LogsList } from "./LogsList";
-import { ImageLogItem, LogItem } from "./shared";
+import { FeedLog, getLogImage, toUint8Array } from "./shared";
 import "./style.css";
 
 const SYNC_PAGE_SIZE = 250;
@@ -75,42 +75,16 @@ function ExitFullscreenIcon() {
   );
 }
 
-function toUint8Array(value: unknown): Uint8Array | undefined {
-  if (!value) return undefined;
-  if (value instanceof Uint8Array) return value;
-  if (Array.isArray(value)) return new Uint8Array(value as number[]);
-  if (typeof value === "string") {
-    try {
-      return Uint8Array.fromBase64(value);
-    } catch {
-      return undefined;
-    }
-  }
-  return undefined;
-}
-
-function toMetadata(data: Record<string, unknown>) {
-  return Object.entries(data)
-    .filter(([key]) => key !== "image")
-    .map(
-      ([key, value]) =>
-        [key, typeof value === "string" ? value : JSON.stringify(value)] as [
-          string,
-          string,
-        ],
-    );
-}
-
 async function decryptAndFlattenBatch(
   batch: Batch,
   openBatchKey: (encryptedKey: string) => Promise<CryptoKey>,
-): Promise<LogItem[]> {
-  const resp = await fetch(batch.url);
-  if (!resp.ok) {
-    throw new Error(`Fetch failed (${resp.status}) for ${batch.url}`);
+): Promise<FeedLog[]> {
+  const response = await fetch(batch.url);
+  if (!response.ok) {
+    throw new Error(`Fetch failed (${response.status}) for ${batch.url}`);
   }
 
-  const raw = new Uint8Array(await resp.arrayBuffer());
+  const raw = new Uint8Array(await response.arrayBuffer());
   if (raw.length < 13) {
     throw new Error(`Batch blob too short for AES-GCM payload: ${batch.url}`);
   }
@@ -132,30 +106,24 @@ async function decryptAndFlattenBatch(
       event.data && typeof event.data === "object"
         ? (event.data as Record<string, unknown>)
         : {};
-    const metadata = toMetadata(data);
-    const image = toUint8Array(data.image);
 
     return {
       id: typeof event.id === "string" ? event.id : `${batch.id}:${index}`,
-      taken_at: typeof event.ts === "number" ? event.ts : batch.end_time,
       device_id: batch.device_id,
-      kind: typeof event.type === "string" ? event.type : "unknown",
-      image,
-      metadata,
+      ts: typeof event.ts === "number" ? event.ts : batch.end_time,
+      type: typeof event.type === "string" ? event.type : "unknown",
+      data,
+      created_at: batch.created_at,
+      risk: typeof event.risk === "number" ? event.risk : undefined,
       batch_status: "unknown" as const,
       source: "batch" as const,
     };
   });
 }
 
-function toDirectLogItem(entry: DataLog): LogItem {
+function toDirectLogEntry(entry: DataLog): FeedLog {
   return {
-    id: entry.id,
-    taken_at: entry.ts,
-    device_id: entry.device_id,
-    kind: entry.type,
-    image: toUint8Array(entry.data.image),
-    metadata: toMetadata(entry.data),
+    ...entry,
     batch_status: "unknown" as const,
     source: "log" as const,
   };
@@ -178,14 +146,14 @@ export function Logs() {
   const [sidebarLoading, setSidebarLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [cachedFeed, setCachedFeed] = useState<CachedDataFeed | null>(null);
-  const [items, setItems] = useState<LogItem[]>([]);
+  const [items, setItems] = useState<FeedLog[]>([]);
   const [visibleCount, setVisibleCount] = useState(VISIBLE_PAGE_SIZE);
   const [syncing, setSyncing] = useState(false);
   const [materializing, setMaterializing] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [batchStats, setBatchStats] = useState({ decrypted: 0, skipped: 0 });
   const [galleryFullscreen, setGalleryFullscreen] = useState(false);
-  const batchItemsCache = useRef(new Map<string, Promise<LogItem[]>>());
+  const batchItemsCache = useRef(new Map<string, Promise<FeedLog[]>>());
 
   const activeUserId = selectedUser ?? userId;
   const activePrivateKey = e2ee.privateKey;
@@ -376,12 +344,12 @@ export function Logs() {
           entry.batch ? [entry.batch] : [],
         );
         const directLogs = visibleEntries.flatMap((entry) =>
-          entry.log ? [toDirectLogItem(entry.log)] : [],
+          entry.log ? [toDirectLogEntry(entry.log)] : [],
         );
 
         let decrypted = 0;
         let skipped = activePrivateKey ? 0 : batchEntries.length;
-        const batchItems: LogItem[] = [];
+        const batchItems: FeedLog[] = [];
 
         if (activePrivateKey) {
           const results = await Promise.allSettled(
@@ -415,7 +383,7 @@ export function Logs() {
         }
 
         const merged = [...batchItems, ...directLogs].sort(
-          (a, b) => b.taken_at - a.taken_at,
+          (a, b) => b.ts - a.ts,
         );
 
         if (!cancelled) {
@@ -475,9 +443,7 @@ export function Logs() {
   const title = selectedUser ? `${groupLabel(selectedUser)}'s logs` : "My logs";
 
   const isGallery = path === "/logs/gallery";
-  const galleryItems = items.filter((item): item is ImageLogItem =>
-    Boolean(item.image),
-  );
+  const galleryItems = items.filter((item) => getLogImage(item) !== undefined);
   const loading = syncing || materializing;
   const hasMore = filteredFeedEntries.length > visibleCount;
   useEffect(() => {
