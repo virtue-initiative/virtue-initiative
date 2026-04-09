@@ -251,8 +251,9 @@ function InviteButton({
       <dialog ref={dialogRef}>
         <h3 class="dialog-title">Invite a partner</h3>
         <p class="invite-desc">
-          Your partner can view your uploaded screenshots and activity logs
-          after they accept this invite and set up their account.
+          Your partner can <b>view any screenshots and activity logs </b>
+          uploaded <b>after</b> you add them as a partner and they set up their
+          account.
         </p>
         <form onSubmit={handleSubmit}>
           <div class="field">
