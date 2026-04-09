@@ -118,11 +118,10 @@ export function Home() {
 
       <section class="dash-section">
         <div class="section-header">
-          <h2>Watching</h2>
+          <h2>People you can monitor</h2>
         </div>
         <PartnerArea
-          subtitle="People you can monitor and review."
-          emptyLabel="No watching relationships yet."
+          emptyLabel="You cannot monitor anyone yet."
           pending={pendingWatching}
           accepted={acceptedWatching}
           partnerDevicesByOwner={devicesByOwner}
@@ -133,12 +132,11 @@ export function Home() {
 
       <section class="dash-section">
         <div class="section-header">
-          <h2>Watchers</h2>
+          <h2>People who can monitor you</h2>
           <InviteButton token={token!} onInvited={reload} />
         </div>
         <PartnerArea
-          subtitle="People who can monitor your account."
-          emptyLabel="No watcher relationships yet."
+          emptyLabel="No one can monitor you yet."
           pending={pendingWatchers}
           accepted={acceptedWatchers}
           partnerDevicesByOwner={devicesByOwner}
@@ -151,7 +149,6 @@ export function Home() {
 }
 
 function PartnerArea({
-  subtitle,
   emptyLabel,
   pending,
   accepted,
@@ -159,7 +156,6 @@ function PartnerArea({
   token,
   onChanged,
 }: {
-  subtitle: string;
   emptyLabel: string;
   pending: Array<WatchingPartner | WatcherPartner>;
   accepted: Array<WatchingPartner | WatcherPartner>;
@@ -171,8 +167,6 @@ function PartnerArea({
 
   return (
     <section class="partners-panel">
-      <p class="partners-panel-subtitle">{subtitle}</p>
-
       {partners.length === 0 ? (
         <p class="empty">{emptyLabel}</p>
       ) : (

@@ -61,7 +61,7 @@ export function LogsList({
                             class="verify-badge verify-badge--failed"
                             title="High risk log"
                           >
-                            ⚠ High Risk
+                            ⚠ High risk
                           </span>
                         ) : (
                           item.risk > 0.4 && (
@@ -69,7 +69,7 @@ export function LogsList({
                               class="verify-badge verify-badge--moderate"
                               title="Moderate risk log"
                             >
-                              Moderate Risk
+                              Moderate risk
                             </span>
                           )
                         )}
