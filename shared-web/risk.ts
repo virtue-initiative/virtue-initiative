@@ -13,7 +13,9 @@ export const riskRatingBands = [
   max: number;
 }>;
 
-export function getRiskRating(risk: number | null | undefined): RiskRating | null {
+export function getRiskRating(
+  risk: number | null | undefined,
+): RiskRating | null {
   if (risk == null || Number.isNaN(risk) || risk <= 0 || risk > 1) {
     return null;
   }
