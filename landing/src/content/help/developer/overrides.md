@@ -1,25 +1,29 @@
 # Developer overrides
 
-The main developer overrides are:
+To overwrite the default settings for development create a config file with the
+following content.
 
-- `VIRTUE_BASE_API_URL`
-- `VIRTUE_CAPTURE_INTERVAL_SECONDS`
-- `VIRTUE_BATCH_WINDOW_SECONDS`
+```json
+{
+  "api_base_url": "http://localhost:8787",
+  "capture_interval_seconds": 15,
+  "batch_window_seconds": 60
+}
+```
 
-Use them to point a client at a local API or shorten capture timing while
+Use these settings to point a client at a local API or shorten capture timing while
 testing.
 
 ## Where to set them
 
-- Android: login screen under `Runtime overrides (optional)`.
-- iOS: app runtime override UI.
-- Linux: `systemctl --user edit virtue.service` or `~/.config/systemd/user/virtue.service.d/override.conf`.
-- macOS: `~/Library/Application Support/virtue/service.dev.env`.
-- Windows: `%PROGRAMDATA%\\Virtue\\config\\service.dev.env`.
+- Android: login screen under `Runtime overrides (optional)` or `context.filesDir/core-config/config.json`.
+- iOS: app runtime override UI. or `<app group container>/virtue/config/config.json`
+- Linux: `~/.config/virtue/config.json`.
+- macOS: `~/Library/Application Support/virtue/config.json`.
+- Windows: `%PROGRAMDATA%\\Virtue\\config\\config.json`.
 
 ## Notes
 
 - Android emulators should use `http://10.0.2.2:8787`, not `http://localhost:8787`.
 - Linux, macOS, and Windows usually need a service restart after editing overrides.
 - When switching between prod and local APIs, log out and log back in again.
-- Keep intervals realistic; extremely small values create noisy test results.

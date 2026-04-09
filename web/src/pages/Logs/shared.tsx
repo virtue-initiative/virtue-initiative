@@ -45,7 +45,13 @@ export function groupLogsByDay<T extends { taken_at: number }>(
   return groups;
 }
 
-export function LogImage({ imageBytes }: { imageBytes: Uint8Array }) {
+export function LogImage({
+  imageBytes,
+  onDimensions,
+}: {
+  imageBytes: Uint8Array;
+  onDimensions?: (width: number, height: number) => void;
+}) {
   const [imgSrc, setImgSrc] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
 
@@ -68,7 +74,22 @@ export function LogImage({ imageBytes }: { imageBytes: Uint8Array }) {
         onClick={() => setOpen(true)}
         aria-label="View screenshot"
       >
-        <img class="log-thumb" src={imgSrc} alt="screenshot" loading="lazy" />
+        <img
+          class="log-thumb"
+          src={imgSrc}
+          alt="screenshot"
+          loading="lazy"
+          onLoad={(event) => {
+            if (!onDimensions) {
+              return;
+            }
+
+            const image = event.currentTarget;
+            if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+              onDimensions(image.naturalWidth, image.naturalHeight);
+            }
+          }}
+        />
       </button>
       {open && (
         <div class="img-overlay" onClick={() => setOpen(false)}>
