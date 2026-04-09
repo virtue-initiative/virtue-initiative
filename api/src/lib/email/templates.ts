@@ -366,6 +366,7 @@ export function renderTamperAlertTemplate(input: {
   severity: TamperSeverity;
   ownerName?: string | null;
   ownerEmail: string;
+  deviceName: string;
   title: string;
   details?: string | null;
   appName: string;
@@ -374,12 +375,14 @@ export function renderTamperAlertTemplate(input: {
   const appName = normalizeAppName(input.appName);
   const owner = input.ownerName?.trim() || input.ownerEmail;
   const detailText = input.details?.trim();
+  const deviceLine = `Device: ${input.deviceName}`;
   const footer = withFooter({
     appName,
     appUrl: input.appUrl,
     headline: `${input.severity} tamper alert`,
     textLines: [
       `${owner} triggered a ${input.severity} tamper alert.`,
+      deviceLine,
       input.title,
       ...(detailText ? ['', detailText] : []),
       '',
@@ -387,6 +390,7 @@ export function renderTamperAlertTemplate(input: {
     ],
     htmlSections: [
       paragraph(`${owner} triggered a ${input.severity} tamper alert.`),
+      paragraph(deviceLine),
       paragraph(input.title),
       ...(detailText ? [paragraph(detailText)] : []),
       actionButton(input.appUrl, 'Review screenshots and logs'),

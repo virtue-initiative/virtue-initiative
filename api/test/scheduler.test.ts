@@ -102,7 +102,7 @@ describe('Notification scheduler', () => {
     expect(digestDelivery?.recipient_email).toBe('digest-partner@example.com');
     expect(digestDelivery?.status).toBe('sent');
     expect(digestDelivery?.text).toContain('Approximate screenshots available: 13');
-    expect(digestDelivery?.text).toContain('Warning tamper alerts: 1');
+    expect(digestDelivery?.text).toContain('Critical tamper alerts: 1');
     expect(digestDelivery?.text).toContain('Silent Device: no logs on 2026-01-05');
     expect(digestDelivery?.text).toContain(`${env.APP_URL}/settings`);
     expect(deliveries.some((delivery) => delivery.kind === 'tamper_alert')).toBe(false);
