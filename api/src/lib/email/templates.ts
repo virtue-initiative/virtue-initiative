@@ -435,6 +435,10 @@ export function renderPartnerDigestTemplate(input: {
     (total, summary) => total + summary.approxScreenshotCount,
     0,
   );
+  const missingLogHeading =
+    input.cadence === 'weekly'
+      ? 'Devices with at least one day without logs:'
+      : 'Devices without logs in the last 24 hours:';
 
   const partnerSections = input.partnerSummaries.flatMap((summary) => {
     const owner = summary.ownerName?.trim() || summary.ownerEmail;
@@ -446,10 +450,7 @@ export function renderPartnerDigestTemplate(input: {
       `Warning tamper alerts: ${summary.tamperCounts.warning}`,
       `Info-only tamper events: ${summary.tamperCounts.info}`,
       ...(summary.missingLogDays.length > 0
-        ? [
-            'Devices with at least one day without logs:',
-            ...summary.missingLogDays.map((line) => `- ${line}`),
-          ]
+        ? [missingLogHeading, ...summary.missingLogDays.map((line) => `- ${line}`)]
         : []),
     ];
   });
@@ -485,7 +486,7 @@ export function renderPartnerDigestTemplate(input: {
               color: EMAIL_COLORS.text,
               'font-size': '15px',
               'line-height': '1.5',
-            })}">Devices with at least one day without logs:<ul style="${inlineStyle({
+            })}">${escapeHtml(missingLogHeading)}<ul style="${inlineStyle({
               margin: '8px 0 0 18px',
               padding: '0',
             })}">${summary.missingLogDays.map((line) => listItem(line)).join('')}</ul></li>`

@@ -211,11 +211,13 @@ describe('Auth routes', () => {
     const body = (await getRes.json()) as {
       name: string;
       email_verified: boolean;
+      email_digest_minutes_utc: number;
       pub_key: string;
       priv_key: string;
     };
     expect(body.name).toBe('Updated Carol');
     expect(body.email_verified).toBe(false);
+    expect(body.email_digest_minutes_utc).toBe(360);
     expect(body.pub_key).toBe(nextPubKey);
     expect(body.priv_key).toBe(nextPrivKey);
     await markUserEmailVerified(userId);
@@ -237,6 +239,26 @@ describe('Auth routes', () => {
     expect(updatedBody.email).toBe('carol-new@example.com');
     expect(updatedBody.email_verified).toBe(false);
     expect(updatedBody.email_bounced_at).toBeNull();
+
+    const updateDigestRes = await SELF.fetch(`${BASE}/user`, {
+      method: 'PATCH',
+      headers: authHeaders(token),
+      body: JSON.stringify({
+        email_digest_minutes_utc: 540,
+      }),
+    });
+    expect(updateDigestRes.status).toBe(200);
+
+    const digestUserRes = await SELF.fetch(`${BASE}/user`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(
+      (await digestUserRes.json()) as {
+        email_digest_minutes_utc: number;
+      },
+    ).toMatchObject({
+      email_digest_minutes_utc: 540,
+    });
 
     const deliveries = await listEmailDeliveries();
     expect(deliveries.filter((delivery) => delivery.kind === 'email_verification')).toHaveLength(2);

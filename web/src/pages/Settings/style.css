@@ -89,6 +89,7 @@
 }
 
 .settings-select {
+  margin-bottom: 0.4rem;
   appearance: none;
   width: 100%;
   min-height: 0;

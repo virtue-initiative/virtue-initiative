@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
   email_verified INTEGER NOT NULL DEFAULT 0,
   email_bounced_at INTEGER,
   email_frequency TEXT NOT NULL DEFAULT 'daily',
+  email_digest_minutes_utc INTEGER NOT NULL DEFAULT 360,
   pub_key BLOB,
   priv_key BLOB,
   created_at INTEGER NOT NULL,

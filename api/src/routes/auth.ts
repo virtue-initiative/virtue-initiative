@@ -17,6 +17,7 @@ import {
   updateUser,
   consumeEmailToken,
 } from '../lib/db';
+import { DEFAULT_DIGEST_MINUTES_UTC, normalizeDigestMinutesUtc } from '../lib/digest-schedule';
 import {
   renderEmailVerificationTemplate,
   renderPasswordResetTemplate,
@@ -47,6 +48,7 @@ const signupSchema = z.object({
   pub_key: z.base64(),
   priv_key: z.base64(),
   name: z.string().min(1).optional(),
+  email_digest_minutes_utc: z.int().min(0).max(1439).optional(),
 });
 
 const loginMaterialQuerySchema = z.object({
@@ -83,6 +85,7 @@ const updateUserSchema = z
     email: z.email().optional(),
     name: z.string().min(1).optional(),
     email_frequency: z.enum(['none', 'alerts-only', 'daily', 'weekly']).optional(),
+    email_digest_minutes_utc: z.int().min(0).max(1439).optional(),
     pub_key: z.base64().optional(),
     priv_key: z.base64().optional(),
   })
@@ -276,7 +279,8 @@ auth.get('/user/login-material', validateZ('query', loginMaterialQuerySchema), a
 });
 
 auth.post('/signup', validateZ('json', signupSchema), async (c) => {
-  const { email, password_auth, password_salt, pub_key, priv_key, name } = c.req.valid('json');
+  const { email, password_auth, password_salt, pub_key, priv_key, name, email_digest_minutes_utc } =
+    c.req.valid('json');
   const normalizedEmail = email.trim().toLowerCase();
   const existingUser = await findUserByEmail(c.env.DB, normalizedEmail);
 
@@ -310,6 +314,7 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
     pub_key: decodedPublicKey,
     priv_key: decodedPrivateKey,
     name,
+    email_digest_minutes_utc: normalizeDigestMinutesUtc(email_digest_minutes_utc),
   });
   await sendVerificationEmail(c, { id: userId, email: normalizedEmail, name });
   const accessToken = await createSession(c, userId);
@@ -401,6 +406,7 @@ auth.get('/user', authenticate('access'), async (c) => {
     email_verified: user.email_verified === 1,
     email_bounced_at: user.email_bounced_at,
     email_frequency: user.email_frequency,
+    email_digest_minutes_utc: user.email_digest_minutes_utc ?? DEFAULT_DIGEST_MINUTES_UTC,
     ...(user.name ? { name: user.name } : {}),
     ...(user.pub_key ? { pub_key: encodeBase64(user.pub_key) } : {}),
     ...(user.priv_key ? { priv_key: encodeBase64(user.priv_key) } : {}),
@@ -409,7 +415,8 @@ auth.get('/user', authenticate('access'), async (c) => {
 
 auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema), async (c) => {
   const userId = c.get('sub');
-  const { email, name, email_frequency, pub_key, priv_key } = c.req.valid('json');
+  const { email, name, email_frequency, email_digest_minutes_utc, pub_key, priv_key } =
+    c.req.valid('json');
   const normalizedEmail = email?.trim().toLowerCase();
   const user = await findUserById(c.env.DB, userId);
 
@@ -441,6 +448,10 @@ auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema),
       : {}),
     name,
     email_frequency,
+    email_digest_minutes_utc:
+      email_digest_minutes_utc !== undefined
+        ? normalizeDigestMinutesUtc(email_digest_minutes_utc)
+        : undefined,
     pub_key: decodedPublicKey,
     priv_key: decodedPrivateKey,
   });
