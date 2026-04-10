@@ -4,6 +4,7 @@ export interface User {
   email_verified: boolean;
   email_bounced_at: number | null;
   email_frequency: "none" | "alerts-only" | "daily" | "weekly";
+  email_digest_minutes_utc: number;
   name?: string;
   pub_key?: string;
   priv_key?: string;
@@ -268,6 +269,7 @@ export const api = {
       pub_key: string;
       priv_key: string;
       name?: string;
+      email_digest_minutes_utc?: number;
     },
   ) =>
     req<{
@@ -293,6 +295,7 @@ export const api = {
       email?: string;
       name?: string;
       email_frequency?: User["email_frequency"];
+      email_digest_minutes_utc?: User["email_digest_minutes_utc"];
       pub_key?: string;
       priv_key?: string;
     },

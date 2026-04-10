@@ -1,6 +1,7 @@
 import { useState } from "preact/hooks";
 import { groupLogsByDay, ImageLogItem, LogImage } from "./shared";
 import { formatTime } from "../../utils/time";
+import { FeedLog, getLogImage, groupLogsByDay, LogImage } from "./shared";
 
 const GALLERY_THUMB_SIZE = 72;
 const GALLERY_FULLSCREEN_THUMB_SIZE = 96;
@@ -23,7 +24,7 @@ export function LogsGallery({
   deviceName,
   fullscreen,
 }: {
-  items: ImageLogItem[];
+  items: FeedLog[];
   loading: boolean;
   hasMore: boolean;
   onLoadMore: () => void;

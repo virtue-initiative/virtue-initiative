@@ -1,39 +1,32 @@
-import { useState, useEffect } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
+import { DataLog } from "../../api";
 import { BatchVerification } from "../../crypto";
 import { formatDayHeading, localDateKey } from "../../utils/time";
 
-export interface LogItem {
-  id: string;
-  taken_at: number; // ms epoch
-  device_id: string;
-  kind: string;
-  image?: Uint8Array;
-  metadata: [string, string][];
+export type FeedLog = DataLog & {
   batch_status: BatchVerification;
-  source?: "batch" | "log";
-}
+  source: "batch" | "log";
+};
 
-export type ImageLogItem = LogItem & { image: Uint8Array };
-
-export interface LogDayGroup<T extends { taken_at: number }> {
+export interface LogDayGroup<T extends { ts: number }> {
   key: string;
   label: string;
   items: T[];
 }
 
-export function groupLogsByDay<T extends { taken_at: number }>(
+export function groupLogsByDay<T extends { ts: number }>(
   items: T[],
 ): LogDayGroup<T>[] {
   const groups: LogDayGroup<T>[] = [];
   const byKey = new Map<string, LogDayGroup<T>>();
 
   for (const item of items) {
-    const key = localDateKey(item.taken_at);
+    const key = localDateKey(item.ts);
     let group = byKey.get(key);
     if (!group) {
       group = {
         key,
-        label: formatDayHeading(item.taken_at),
+        label: formatDayHeading(item.ts),
         items: [],
       };
       byKey.set(key, group);
@@ -45,13 +38,37 @@ export function groupLogsByDay<T extends { taken_at: number }>(
   return groups;
 }
 
-export function LogImage({
-  imageBytes,
-  onDimensions,
-}: {
-  imageBytes: Uint8Array;
-  onDimensions?: (width: number, height: number) => void;
-}) {
+export function toUint8Array(value: unknown): Uint8Array | undefined {
+  if (!value) return undefined;
+  if (value instanceof Uint8Array) return value;
+  if (Array.isArray(value)) return new Uint8Array(value as number[]);
+  if (typeof value === "string") {
+    try {
+      return Uint8Array.fromBase64(value);
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+export function getLogImage(log: DataLog): Uint8Array | undefined {
+  return toUint8Array(log.data.image);
+}
+
+export function getLogMetadata(log: DataLog) {
+  return Object.entries(log.data)
+    .filter(([key]) => key !== "image")
+    .map(
+      ([key, value]) =>
+        [key, typeof value === "string" ? value : JSON.stringify(value)] as [
+          string,
+          string,
+        ],
+    );
+}
+
+export function LogImage({ imageBytes }: { imageBytes: Uint8Array }) {
   const [imgSrc, setImgSrc] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
 

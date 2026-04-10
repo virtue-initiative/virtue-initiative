@@ -1,4 +1,5 @@
 import { DEFAULT_EMAIL_FREQUENCY, DigestFrequency, TamperSeverity } from './email-domain';
+import { formatUtcDate, getDigestWindowForRun } from './digest-schedule';
 import {
   listBatchWindowsForUser,
   listDeviceLogsForUser,
@@ -12,33 +13,23 @@ import { riskToSeverity } from './tamper';
 import { Env } from '../types/bindings';
 
 const DEFAULT_CAPTURE_INTERVAL_MS = 300 * 1000;
-
-function startOfUtcDay(timestamp: number) {
-  const date = new Date(timestamp);
-  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
-}
-
-function getDailyWindow(now: number) {
-  const end = startOfUtcDay(now);
-  return { start: end - 24 * 60 * 60 * 1000, end };
-}
-
-function getWeeklyWindow(now: number) {
-  const end = startOfUtcDay(now);
-  return { start: end - 7 * 24 * 60 * 60 * 1000, end };
-}
-
-function isWeeklyRun(now: number) {
-  return new Date(now).getUTCDay() === 1;
-}
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function countApproximateScreenshots(
-  batchCount: number,
-  tamperAlertCount: number,
+  batches: Array<{ start_time: number; end_time: number }>,
   captureIntervalMs: number,
+  window: { start: number; end: number },
 ) {
-  const screenshotsPerBlock = Math.max(1, Math.round((60 * 60 * 1000) / captureIntervalMs));
-  return batchCount * screenshotsPerBlock + tamperAlertCount;
+  return batches.reduce((total, batch) => {
+    const overlapMs =
+      Math.min(batch.end_time, window.end) - Math.max(batch.start_time, window.start);
+
+    if (overlapMs <= 0) {
+      return total;
+    }
+
+    return total + Math.max(1, Math.round(overlapMs / captureIntervalMs));
+  }, 0);
 }
 
 function summarizeTamperCounts(events: Array<{ risk: number | null }>) {
@@ -52,35 +43,62 @@ function summarizeTamperCounts(events: Array<{ risk: number | null }>) {
   return counts;
 }
 
-function getCadenceWindow(cadence: DigestFrequency, now: number) {
-  if (cadence === 'weekly') {
-    return isWeeklyRun(now) ? getWeeklyWindow(now) : null;
-  }
-
-  return getDailyWindow(now);
+function batchOverlapsWindow(
+  batch: { start_time: number; end_time: number },
+  windowStart: number,
+  windowEnd: number,
+) {
+  return batch.end_time > windowStart && batch.start_time < windowEnd;
 }
 
-function collectMissingLogDays(
-  devices: Array<{ id: string; name: string; created_at: number }>,
+function logFallsWithinWindow(log: { ts: number }, windowStart: number, windowEnd: number) {
+  return log.ts >= windowStart && log.ts < windowEnd;
+}
+
+function hasActivityInWindow(
+  deviceId: string,
+  batches: Array<{ device_id: string; start_time: number; end_time: number }>,
   logs: Array<{ device_id: string; ts: number }>,
   windowStart: number,
   windowEnd: number,
 ) {
-  const seenDaysByDevice = new Map<string, Set<number>>();
-  for (const log of logs) {
-    const dayStart = startOfUtcDay(log.ts);
-    const current = seenDaysByDevice.get(log.device_id) ?? new Set<number>();
-    current.add(dayStart);
-    seenDaysByDevice.set(log.device_id, current);
-  }
+  return (
+    batches.some(
+      (batch) => batch.device_id === deviceId && batchOverlapsWindow(batch, windowStart, windowEnd),
+    ) ||
+    logs.some(
+      (log) => log.device_id === deviceId && logFallsWithinWindow(log, windowStart, windowEnd),
+    )
+  );
+}
 
+function collectMissingLogPeriods(
+  cadence: DigestFrequency,
+  devices: Array<{ id: string; name: string; created_at: number }>,
+  batches: Array<{ device_id: string; start_time: number; end_time: number }>,
+  logs: Array<{ device_id: string; ts: number }>,
+  windowStart: number,
+  windowEnd: number,
+) {
   const missing: string[] = [];
   for (const device of devices) {
-    const firstRelevantDay = startOfUtcDay(Math.max(windowStart, device.created_at));
-    const seenDays = seenDaysByDevice.get(device.id) ?? new Set<number>();
-    for (let dayStart = firstRelevantDay; dayStart < windowEnd; dayStart += 24 * 60 * 60 * 1000) {
-      if (!seenDays.has(dayStart)) {
-        missing.push(`${device.name}: no logs on ${new Date(dayStart).toISOString().slice(0, 10)}`);
+    const firstRelevantTime = Math.max(windowStart, device.created_at);
+
+    if (firstRelevantTime >= windowEnd) {
+      continue;
+    }
+
+    if (cadence === 'daily') {
+      if (!hasActivityInWindow(device.id, batches, logs, firstRelevantTime, windowEnd)) {
+        missing.push(`${device.name}: no logs in the last 24 hours`);
+      }
+      continue;
+    }
+
+    for (let bucketStart = firstRelevantTime; bucketStart < windowEnd; bucketStart += DAY_MS) {
+      const bucketEnd = Math.min(bucketStart + DAY_MS, windowEnd);
+      if (!hasActivityInWindow(device.id, batches, logs, bucketStart, bucketEnd)) {
+        missing.push(`${device.name}: no logs on ${formatUtcDate(bucketStart)}`);
       }
     }
   }
@@ -109,7 +127,11 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
       continue;
     }
 
-    const window = getCadenceWindow(emailFrequency, now);
+    const window = getDigestWindowForRun({
+      cadence: emailFrequency,
+      now,
+      utcMinutes: recipient.email_digest_minutes_utc,
+    });
     if (!window) {
       continue;
     }
@@ -140,12 +162,19 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
             ownerName: partnership.watching_user_name,
             ownerEmail: partnership.watching_user_email,
             approxScreenshotCount: countApproximateScreenshots(
-              batches.length,
-              riskLogs.length,
+              batches,
               DEFAULT_CAPTURE_INTERVAL_MS,
+              window,
             ),
             tamperCounts: summarizeTamperCounts(riskLogs),
-            missingLogDays: collectMissingLogDays(devices, deviceLogs, window.start, window.end),
+            missingLogDays: collectMissingLogPeriods(
+              emailFrequency,
+              devices,
+              batches,
+              deviceLogs,
+              window.start,
+              window.end,
+            ),
           };
         }),
     );
@@ -168,6 +197,7 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
       related_user_id: recipient.watcher_user_id,
       metadata: {
         email_frequency: emailFrequency,
+        email_digest_minutes_utc: recipient.email_digest_minutes_utc,
         windowStart: window.start,
         windowEnd: window.end,
         partnershipIds: partnerSummaries.map((summary) => summary.partnershipId),

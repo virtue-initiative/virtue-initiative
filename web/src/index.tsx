@@ -32,6 +32,7 @@ function GlobalEmailActionBanner() {
   const { token } = useAuth();
   const [alerts, setAlerts] = useState<GlobalAlert[]>([]);
   const timeoutsRef = useRef<number[]>([]);
+  const loadedVerificationNoticeRef = useRef<string | null>(null);
 
   useEffect(
     () => () => {
@@ -184,6 +185,43 @@ function GlobalEmailActionBanner() {
         );
         clearInviteToken();
       });
+  }, [token]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !token) {
+      loadedVerificationNoticeRef.current = null;
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("verify_email_token")) {
+      return;
+    }
+
+    if (loadedVerificationNoticeRef.current === token) {
+      return;
+    }
+
+    let cancelled = false;
+
+    api
+      .getUser(token)
+      .then((user) => {
+        if (cancelled || user.email_verified) {
+          return;
+        }
+
+        loadedVerificationNoticeRef.current = token;
+        pushAlert(
+          "Your email is not verified. Check Settings to resend the verification email.",
+          true,
+        );
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
   }, [token]);
 
   if (alerts.length === 0) {

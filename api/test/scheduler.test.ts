@@ -17,13 +17,18 @@ beforeEach(clearDB);
 const DAILY_BATCH_ID = '00000000-0000-4000-8000-000000000001';
 const DAILY_RISK_LOG_ID = '00000000-0000-4000-8000-000000000002';
 const WEEKLY_BATCH_ID = '00000000-0000-4000-8000-000000000003';
+const OLD_DAILY_BATCH_ID = '00000000-0000-4000-8000-000000000004';
 const EMPTY_ACCESS_KEYS = JSON.stringify({ keys: [] });
 
 describe('Notification scheduler', () => {
-  it('sends a daily digest and mentions devices with no logs without creating gap alerts', async () => {
-    const now = Date.UTC(2026, 0, 6, 8, 0, 0);
-    const previousDayStart = Date.UTC(2026, 0, 5, 0, 0, 0);
-    const previousDayMid = Date.UTC(2026, 0, 5, 12, 0, 0);
+  it('sends a daily digest at the configured local hour using the prior 24 hours', async () => {
+    const now = Date.UTC(2026, 0, 6, 11, 5, 0);
+    const previousWindowStart = Date.UTC(2026, 0, 5, 11, 0, 0);
+    const withinWindowBatchStart = Date.UTC(2026, 0, 5, 10, 0, 0);
+    const withinWindowBatchEnd = Date.UTC(2026, 0, 5, 12, 0, 0);
+    const oldBatchStart = Date.UTC(2026, 0, 5, 0, 0, 0);
+    const oldBatchEnd = Date.UTC(2026, 0, 5, 2, 0, 0);
+    const riskLogTime = Date.UTC(2026, 0, 5, 15, 0, 0);
 
     const { token: ownerToken, userId: ownerId } = await signupAndGetToken(
       'digest-owner@example.com',
@@ -55,11 +60,18 @@ describe('Notification scheduler', () => {
       headers: authHeaders(partnerToken),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
+    await SELF.fetch(`${BASE}/user`, {
+      method: 'PATCH',
+      headers: authHeaders(partnerToken),
+      body: JSON.stringify({
+        email_digest_minutes_utc: 11 * 60,
+      }),
+    });
 
     const device = await createDeviceForUser(ownerToken, 'Digest Device', 'linux');
     const silentDevice = await createDeviceForUser(ownerToken, 'Silent Device', 'linux');
     await env.DB.prepare('UPDATE devices SET created_at = ? WHERE id IN (?, ?)')
-      .bind(previousDayStart, uuidToBytes(device.id), uuidToBytes(silentDevice.id))
+      .bind(previousWindowStart, uuidToBytes(device.id), uuidToBytes(silentDevice.id))
       .run();
 
     await env.DB.prepare(
@@ -71,11 +83,28 @@ describe('Notification scheduler', () => {
         uuidToBytes(ownerId),
         uuidToBytes(device.id),
         'https://example.com/batch-1.enc',
-        previousDayStart,
-        previousDayMid,
+        withinWindowBatchStart,
+        withinWindowBatchEnd,
         'hash-1',
         EMPTY_ACCESS_KEYS,
-        previousDayMid,
+        withinWindowBatchEnd,
+      )
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(
+        uuidToBytes(OLD_DAILY_BATCH_ID),
+        uuidToBytes(ownerId),
+        uuidToBytes(device.id),
+        'https://example.com/old-batch.enc',
+        oldBatchStart,
+        oldBatchEnd,
+        'hash-old',
+        EMPTY_ACCESS_KEYS,
+        oldBatchEnd,
       )
       .run();
 
@@ -87,11 +116,11 @@ describe('Notification scheduler', () => {
         uuidToBytes(DAILY_RISK_LOG_ID),
         uuidToBytes(ownerId),
         uuidToBytes(device.id),
-        previousDayMid,
+        riskLogTime,
         'system_shutdown',
         JSON.stringify({ title: 'Monitoring interruption detected' }),
         0.7,
-        previousDayMid,
+        riskLogTime,
       )
       .run();
 
@@ -101,15 +130,85 @@ describe('Notification scheduler', () => {
     const digestDelivery = deliveries.find((delivery) => delivery.kind === 'daily_digest');
     expect(digestDelivery?.recipient_email).toBe('digest-partner@example.com');
     expect(digestDelivery?.status).toBe('sent');
-    expect(digestDelivery?.text).toContain('Approximate screenshots available: 13');
-    expect(digestDelivery?.text).toContain('Warning tamper alerts: 1');
-    expect(digestDelivery?.text).toContain('Silent Device: no logs on 2026-01-05');
+    expect(digestDelivery?.text).toContain('Approximate screenshots available: 12');
+    expect(digestDelivery?.text).toContain('Critical tamper alerts: 1');
+    expect(digestDelivery?.text).toContain('Silent Device: no logs in the last 24 hours');
     expect(digestDelivery?.text).toContain(`${env.APP_URL}/settings`);
     expect(deliveries.some((delivery) => delivery.kind === 'tamper_alert')).toBe(false);
   });
 
+  it('treats batch uploads as activity when deciding whether logs are missing', async () => {
+    const now = Date.UTC(2026, 0, 6, 6, 5, 0);
+    const previousWindowStart = Date.UTC(2026, 0, 5, 6, 0, 0);
+    const batchStart = Date.UTC(2026, 0, 5, 12, 0, 0);
+    const batchEnd = Date.UTC(2026, 0, 5, 13, 0, 0);
+
+    const { token: ownerToken, userId: ownerId } = await signupAndGetToken(
+      'batch-owner@example.com',
+      'pw',
+    );
+    const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
+      'batch-partner@example.com',
+      'pw',
+    );
+    await markUserEmailVerified(partnerUserId);
+
+    const inviteRes = await SELF.fetch(`${BASE}/partner`, {
+      method: 'POST',
+      headers: authHeaders(ownerToken),
+      body: JSON.stringify({
+        email: 'batch-partner@example.com',
+      }),
+    });
+    await inviteRes.json();
+    const inviteDelivery = (await listEmailDeliveries()).find(
+      (delivery) =>
+        delivery.kind === 'partner_invite' &&
+        delivery.recipient_email === 'batch-partner@example.com',
+    );
+    const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
+
+    await SELF.fetch(`${BASE}/partner/accept`, {
+      method: 'POST',
+      headers: authHeaders(partnerToken),
+      body: JSON.stringify({ token: inviteMetadata.inviteToken }),
+    });
+
+    const device = await createDeviceForUser(ownerToken, 'Batch Device', 'linux');
+    const silentDevice = await createDeviceForUser(ownerToken, 'Silent Device', 'linux');
+    await env.DB.prepare('UPDATE devices SET created_at = ? WHERE id IN (?, ?)')
+      .bind(previousWindowStart, uuidToBytes(device.id), uuidToBytes(silentDevice.id))
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(
+        uuidToBytes(DAILY_BATCH_ID),
+        uuidToBytes(ownerId),
+        uuidToBytes(device.id),
+        'https://example.com/batch-only.enc',
+        batchStart,
+        batchEnd,
+        'hash-batch-only',
+        EMPTY_ACCESS_KEYS,
+        batchEnd,
+      )
+      .run();
+
+    await runNotificationSchedule(env, now);
+
+    const digestDelivery = (await listEmailDeliveries()).find(
+      (delivery) => delivery.kind === 'daily_digest',
+    );
+    expect(digestDelivery?.text).toContain('Approximate screenshots available: 12');
+    expect(digestDelivery?.text).not.toContain('Batch Device: no logs in the last 24 hours');
+    expect(digestDelivery?.text).toContain('Silent Device: no logs in the last 24 hours');
+  });
+
   it('sends one daily digest with separate summaries when a partner monitors multiple people', async () => {
-    const now = Date.UTC(2026, 0, 6, 8, 0, 0);
+    const now = Date.UTC(2026, 0, 6, 6, 5, 0);
     const previousDayStart = Date.UTC(2026, 0, 5, 0, 0, 0);
     const previousDayMid = Date.UTC(2026, 0, 5, 12, 0, 0);
 
@@ -205,7 +304,7 @@ describe('Notification scheduler', () => {
   });
 
   it('sends weekly digests on Monday', async () => {
-    const now = Date.UTC(2026, 0, 5, 8, 0, 0);
+    const now = Date.UTC(2026, 0, 5, 6, 5, 0);
     const previousWeekStart = Date.UTC(2025, 11, 29, 0, 0, 0);
     const sundayMid = Date.UTC(2026, 0, 4, 12, 0, 0);
 

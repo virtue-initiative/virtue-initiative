@@ -9,15 +9,12 @@ CREATE TABLE users (
   name TEXT,
   email_verified INTEGER NOT NULL DEFAULT 0,
   email_bounced_at INTEGER,
-  email_frequency TEXT NOT NULL DEFAULT 'daily',
   pub_key BLOB,
   priv_key BLOB,
-  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  CHECK (email_frequency IN ('none', 'alerts-only', 'daily', 'weekly'))
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
 CREATE INDEX idx_users_email ON users(email);
-CREATE INDEX idx_users_email_frequency ON users(email_frequency);
 
 CREATE TABLE devices (
   id BLOB PRIMARY KEY,

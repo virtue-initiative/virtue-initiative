@@ -77,12 +77,6 @@
   gap: 0.9rem;
 }
 
-.partners-panel-subtitle {
-  margin: 0;
-  font-size: 0.9rem;
-  color: var(--text-muted);
-}
-
 .partners-group-label {
   margin: 0 0 0.6rem;
   font-size: 0.8rem;
