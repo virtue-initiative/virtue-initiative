@@ -9,6 +9,8 @@ import {
 } from "../../utils/digest";
 import { formatDate } from "../../utils/time";
 import "./style.css";
+import { usePersistedState } from "../../hooks/usePersistedState";
+import { sendToast } from "../../utils/toast";
 
 export function Settings() {
   const { token } = useAuth();
@@ -19,9 +21,9 @@ export function Settings() {
   const [name, setName] = useState("");
   const [nameStatus, setNameStatus] = useState<string | null>(null);
   const [savedButtonUntil, setSavedButtonUntil] = useState<number>(0);
-  const [verificationStatus, setVerificationStatus] = useState<string | null>(
-    null,
-  );
+  const [verificationLastSent, setVerificationLastSent] = usePersistedState<
+    number | null
+  >("verificationLastSent", null);
   const [emailFrequencyStatus, setEmailFrequencyStatus] = useState<
     string | null
   >(null);
@@ -33,6 +35,10 @@ export function Settings() {
     null,
   );
   const [emailScheduleSaving, setEmailScheduleSaving] = useState(false);
+
+  const VERIFICATION_RESEND_COOLDOWN = 2 * 60 * 1000; // 2 minutes
+  const verificationRecentlySent =
+    +new Date() - verificationLastSent < VERIFICATION_RESEND_COOLDOWN;
 
   async function reload() {
     if (!token) return;
@@ -105,6 +111,11 @@ export function Settings() {
           ? "Profile saved. Please verify your new email address."
           : "Saved",
       );
+
+      if (emailChanged) {
+        setVerificationLastSent(null);
+      }
+
       await reload();
     } catch (err) {
       setNameStatus(err instanceof Error ? err.message : "Failed to save");
@@ -115,19 +126,23 @@ export function Settings() {
 
   async function resendVerificationEmail() {
     if (!token) return;
-    setVerificationStatus(null);
     setVerificationSending(true);
     try {
       const result = await api.requestVerificationEmail(token);
-      setVerificationStatus(
+      sendToast(
         result.already_verified
           ? "Your email is already verified."
           : "Verification email sent.",
+        result.already_verified,
       );
+      setVerificationLastSent(Date.now());
       await reload();
     } catch (err) {
-      setVerificationStatus(
-        err instanceof Error ? err.message : "Failed to send email",
+      sendToast(
+        err instanceof Error
+          ? err.message
+          : "Failed to send verification email",
+        true,
       );
     } finally {
       setVerificationSending(false);
@@ -141,14 +156,7 @@ export function Settings() {
     try {
       await api.updateUser(token, { email_frequency: emailFrequency });
       await reload();
-      window.dispatchEvent(
-        new CustomEvent(GLOBAL_ALERT_EVENT, {
-          detail: {
-            message: "Email preferences saved.",
-            isError: false,
-          },
-        }),
-      );
+      sendToast("Email preferences saved.");
     } catch (err) {
       setEmailFrequencyStatus(
         err instanceof Error ? err.message : "Failed to save",
@@ -259,25 +267,21 @@ export function Settings() {
                 before requesting another verification email.
               </p>
             )}
-            {verificationStatus && (
-              <p
-                class={
-                  verificationStatus.includes("sent") ||
-                  verificationStatus.includes("already")
-                    ? "alert-success"
-                    : "alert-error"
-                }
-              >
-                {verificationStatus}
-              </p>
-            )}
             <button
               class="btn btn-primary"
               type="button"
-              disabled={verificationSending || Boolean(user?.email_bounced_at)}
+              disabled={
+                verificationSending ||
+                Boolean(user?.email_bounced_at) ||
+                verificationRecentlySent
+              }
               onClick={resendVerificationEmail}
             >
-              {verificationSending ? "Sending…" : "Resend verification email"}
+              {verificationSending
+                ? "Sending…"
+                : verificationRecentlySent
+                  ? "Please wait 2 minutes before resending"
+                  : "Resend verification email"}
             </button>
           </>
         )}

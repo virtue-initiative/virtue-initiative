@@ -1,5 +1,5 @@
-import { groupLogsByDay, ImageLogItem, LogImage } from "./shared";
 import { formatTime } from "../../utils/time";
+import { FeedLog, getLogImage, groupLogsByDay, LogImage } from "./shared";
 
 export function LogsGallery({
   items,
@@ -9,7 +9,7 @@ export function LogsGallery({
   deviceName,
   fullscreen,
 }: {
-  items: ImageLogItem[];
+  items: FeedLog[];
   loading: boolean;
   hasMore: boolean;
   onLoadMore: () => void;
@@ -30,15 +30,22 @@ export function LogsGallery({
             <div
               class={`gallery-grid${fullscreen ? " gallery-grid--fullscreen" : ""}`}
             >
-              {group.items.map((item) => (
-                <div
-                  class={`gallery-item${item.batch_status === "failed" ? " gallery-item--unverified" : ""}`}
-                  key={item.id}
-                  title={`${deviceName(item.device_id)} — ${formatTime(item.taken_at)}${item.batch_status === "failed" ? " ⚠ Unverified" : ""}`}
-                >
-                  <LogImage imageBytes={item.image} />
-                </div>
-              ))}
+              {group.items.map((item) => {
+                const image = getLogImage(item);
+                if (!image) {
+                  return null;
+                }
+
+                return (
+                  <div
+                    class={`gallery-item${item.batch_status === "failed" ? " gallery-item--unverified" : ""}`}
+                    key={item.id}
+                    title={`${deviceName(item.device_id)} — ${formatTime(item.ts)}${item.batch_status === "failed" ? " ⚠ Unverified" : ""}`}
+                  >
+                    <LogImage imageBytes={image} />
+                  </div>
+                );
+              })}
             </div>
           </section>
         ))}
