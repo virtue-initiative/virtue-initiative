@@ -2,6 +2,11 @@ import { useEffect, useState } from "preact/hooks";
 import { api, User, WatchingPartner } from "../../api";
 import { useAuth } from "../../context/auth";
 import { GLOBAL_ALERT_EVENT } from "../../events";
+import {
+  formatDigestHour,
+  utcMinutesToLocalHour,
+  localHourToUtcMinutes,
+} from "../../utils/digest";
 import { formatDate } from "../../utils/time";
 import "./style.css";
 
@@ -23,6 +28,11 @@ export function Settings() {
   const [nameSaving, setNameSaving] = useState(false);
   const [verificationSending, setVerificationSending] = useState(false);
   const [emailFrequencySaving, setEmailFrequencySaving] = useState(false);
+  const [emailDigestLocalHour, setEmailDigestLocalHour] = useState(6);
+  const [emailScheduleStatus, setEmailScheduleStatus] = useState<string | null>(
+    null,
+  );
+  const [emailScheduleSaving, setEmailScheduleSaving] = useState(false);
 
   async function reload() {
     if (!token) return;
@@ -33,6 +43,9 @@ export function Settings() {
     setUser(nextUser);
     setEmail(nextUser.email);
     setName(nextUser.name ?? "");
+    setEmailDigestLocalHour(
+      utcMinutesToLocalHour(nextUser.email_digest_minutes_utc),
+    );
     setWatching(nextPartners.watching);
   }
 
@@ -69,6 +82,10 @@ export function Settings() {
   }
 
   const hasProfileChanges = Object.keys(profilePatch).length > 0;
+  const emailDigestMinutesUtc = localHourToUtcMinutes(emailDigestLocalHour);
+  const hasDigestScheduleChanges = Boolean(
+    user && emailDigestMinutesUtc !== user.email_digest_minutes_utc,
+  );
 
   async function saveName(e: Event) {
     e.preventDefault();
@@ -138,6 +155,28 @@ export function Settings() {
       );
     } finally {
       setEmailFrequencySaving(false);
+    }
+  }
+
+  async function saveEmailSchedule(e: Event) {
+    e.preventDefault();
+    if (!token || !user) return;
+
+    setEmailScheduleStatus(null);
+
+    setEmailScheduleSaving(true);
+    try {
+      await api.updateUser(token, {
+        email_digest_minutes_utc: localHourToUtcMinutes(emailDigestLocalHour),
+      });
+      await reload();
+      setEmailScheduleStatus("Digest schedule saved.");
+    } catch (err) {
+      setEmailScheduleStatus(
+        err instanceof Error ? err.message : "Failed to save digest schedule",
+      );
+    } finally {
+      setEmailScheduleSaving(false);
     }
   }
 
@@ -249,7 +288,9 @@ export function Settings() {
         <p class="settings-hint">
           Choose how often you receive accountability emails. If you monitor
           more than one person, each email includes one summary with a section
-          for each person you monitor.
+          for each person you monitor. Digests cover the 24 hours leading up to
+          your chosen delivery time, converted from your current browser
+          timezone.
         </p>
         <div class="field settings-frequency-field">
           <label for="settings-email-frequency">Email frequency</label>
@@ -274,6 +315,48 @@ export function Settings() {
         {emailFrequencyStatus && (
           <p class="alert-error">{emailFrequencyStatus}</p>
         )}
+        <form class="settings-form" onSubmit={saveEmailSchedule}>
+          <div class="field settings-frequency-field">
+            <label for="settings-email-digest-hour">Digest delivery time</label>
+            <select
+              id="settings-email-digest-hour"
+              class="settings-select"
+              value={String(emailDigestLocalHour)}
+              onChange={(e) => {
+                setEmailDigestLocalHour(
+                  Number.parseInt((e.target as HTMLSelectElement).value, 10) ||
+                    0,
+                );
+                setEmailScheduleStatus(null);
+              }}
+              disabled={!user || emailScheduleSaving}
+            >
+              {Array.from({ length: 24 }, (_, hour) => (
+                <option key={hour} value={hour}>
+                  {formatDigestHour(hour)}
+                </option>
+              ))}
+            </select>
+          </div>
+          {emailScheduleStatus && (
+            <p
+              class={
+                emailScheduleStatus.toLowerCase().includes("saved")
+                  ? "alert-success"
+                  : "alert-error"
+              }
+            >
+              {emailScheduleStatus}
+            </p>
+          )}
+          <button
+            class="btn btn-primary"
+            type="submit"
+            disabled={!user || emailScheduleSaving || !hasDigestScheduleChanges}
+          >
+            {emailScheduleSaving ? "Saving…" : "Save digest schedule"}
+          </button>
+        </form>
         {watching.length === 0 ? (
           <p class="settings-hint settings-followup-hint">
             You are not monitoring anyone yet. This setting will apply once you

@@ -3,6 +3,10 @@ import { useContext, useState, useEffect, useCallback } from "preact/hooks";
 import { api, setReauthHandler } from "../api";
 import { clearDataCache } from "../data-cache";
 import {
+  DEFAULT_DIGEST_LOCAL_HOUR,
+  localHourToUtcMinutes,
+} from "../utils/digest";
+import {
   derivePasswordMaterial,
   encryptData,
   generateRandomKeyBytes,
@@ -139,6 +143,9 @@ export function AuthProvider({
         pub_key: keyPair.publicKey.toBase64(),
         priv_key: encryptedPrivateKey.toBase64(),
         ...(name ? { name } : {}),
+        email_digest_minutes_utc: localHourToUtcMinutes(
+          DEFAULT_DIGEST_LOCAL_HOUR,
+        ),
       });
       const uid = res.user.id;
       await saveWrappingKey(wk);

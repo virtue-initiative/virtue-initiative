@@ -9,7 +9,7 @@
     "port": 8787
   },
   "triggers": {
-    "crons": ["5 8 * * *"]
+    "crons": ["5 * * * *"]
   },
   "observability": {
     "logs": {

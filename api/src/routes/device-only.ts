@@ -355,6 +355,7 @@ deviceOnly.post(
         logId,
         appUrl: getAppUrl(c),
         userId: device.owner,
+        deviceName: device.name,
         severity: computedSeverity,
         risk: computedRisk,
         title:
