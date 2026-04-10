@@ -1,5 +1,4 @@
 import { useState } from "preact/hooks";
-import { groupLogsByDay, ImageLogItem, LogImage } from "./shared";
 import { formatTime } from "../../utils/time";
 import { FeedLog, getLogImage, groupLogsByDay, LogImage } from "./shared";
 
@@ -46,11 +45,7 @@ export function LogsGallery({
     ? GALLERY_FULLSCREEN_THUMB_SIZE
     : GALLERY_THUMB_SIZE;
 
-  function registerAspectRatio(
-    item: ImageLogItem,
-    width: number,
-    height: number,
-  ) {
+  function registerAspectRatio(item: FeedLog, width: number, height: number) {
     if (height <= 0 || width <= 0) {
       return;
     }
@@ -73,7 +68,7 @@ export function LogsGallery({
     });
   }
 
-  function thumbnailWidth(item: ImageLogItem): number {
+  function thumbnailWidth(item: FeedLog): number {
     const itemAspect = imageAspectsById[item.id];
     if (itemAspect === undefined) {
       return thumbnailSize;
@@ -102,24 +97,31 @@ export function LogsGallery({
             <div
               class={`gallery-grid${fullscreen ? " gallery-grid--fullscreen" : ""}`}
             >
-              {group.items.map((item) => (
-                <div
-                  class={`gallery-item${item.batch_status === "failed" ? " gallery-item--unverified" : ""}`}
-                  key={item.id}
-                  title={`${deviceName(item.device_id)} — ${formatTime(item.taken_at)}${item.batch_status === "failed" ? " ⚠ Unverified" : ""}`}
-                  style={{
-                    width: `${thumbnailWidth(item)}px`,
-                    height: `${thumbnailSize}px`,
-                  }}
-                >
-                  <LogImage
-                    imageBytes={item.image}
-                    onDimensions={(width, height) =>
-                      registerAspectRatio(item, width, height)
-                    }
-                  />
-                </div>
-              ))}
+              {group.items.map((item) => {
+                const image = getLogImage(item);
+                if (!image) {
+                  return null;
+                }
+
+                return (
+                  <div
+                    class={`gallery-item${item.batch_status === "failed" ? " gallery-item--unverified" : ""}`}
+                    key={item.id}
+                    title={`${deviceName(item.device_id)} — ${formatTime(item.ts)}${item.batch_status === "failed" ? " ⚠ Unverified" : ""}`}
+                    style={{
+                      width: `${thumbnailWidth(item)}px`,
+                      height: `${thumbnailSize}px`,
+                    }}
+                  >
+                    <LogImage
+                      imageBytes={image}
+                      onDimensions={(width, height) =>
+                        registerAspectRatio(item, width, height)
+                      }
+                    />
+                  </div>
+                );
+              })}
             </div>
           </section>
         ))}

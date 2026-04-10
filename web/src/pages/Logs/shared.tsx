@@ -68,7 +68,13 @@ export function getLogMetadata(log: DataLog) {
     );
 }
 
-export function LogImage({ imageBytes }: { imageBytes: Uint8Array }) {
+export function LogImage({
+  imageBytes,
+  onDimensions,
+}: {
+  imageBytes: Uint8Array;
+  onDimensions?: (width: number, height: number) => void;
+}) {
   const [imgSrc, setImgSrc] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
 
