@@ -51,7 +51,12 @@ function sectionContainsPath(item: HelpNavItem, pathname: string): boolean {
                     class="help-sidebar-section"
                     open={sectionContainsPath(item, currentPath)}
                   >
-                    <summary class="help-sidebar-section-summary">
+                    <summary
+                      class:list={[
+                        "help-sidebar-section-summary",
+                        { active: item.href === currentPath },
+                      ]}
+                    >
                       {item.href && (
                         <a
                           href={item.href}
