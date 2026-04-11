@@ -122,6 +122,12 @@ pub enum AuditRecord {
     },
 }
 
+#[derive(Debug, Clone)]
+pub struct StoredAuditRecord {
+    pub audit_day: String,
+    pub record: AuditRecord,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchUpload {
     pub start_time_ms: i64,
@@ -209,6 +215,7 @@ pub struct LoopOutcome {
 
 #[derive(Debug, Clone)]
 pub struct AuditLogItem {
+    pub audit_day: String,
     pub local_id: String,
     pub should_be_in_batch: bool,
     pub requires_hash_upload: bool,
