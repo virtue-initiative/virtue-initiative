@@ -47,7 +47,8 @@ impl<P: PlatformHooks> MonitorService<P> {
         let storage = FileStateStore::new(&config.state_dir)?;
         let auth_state = storage.load_auth_state()?;
         let device_settings = storage.load_device_settings()?;
-        let audit_state = derive_state(&storage.load_audit_records()?);
+        let audit_state =
+            derive_state(&storage.load_audit_records_at(platform.get_time_utc_ms()?)?);
 
         let mut status = storage.load_status()?.unwrap_or(ServiceStatus {
             is_authenticated: auth_state.device_credentials.is_some(),
@@ -313,23 +314,29 @@ impl<P: PlatformHooks> MonitorService<P> {
         requires_hash_upload: bool,
         payload: AuditLogPayload,
     ) -> CoreResult<AuditLogItem> {
-        let item = AuditLogItem {
-            local_id: generate_local_id(),
+        let local_id = generate_local_id();
+        let record = AuditRecord::Log {
+            local_id: local_id.clone(),
             should_be_in_batch,
             requires_hash_upload,
-            payload: payload.clone(),
+            log: payload.clone(),
         };
-        self.storage.append_audit_record(&AuditRecord::Log {
-            local_id: item.local_id.clone(),
+        let audit_day = self.storage.append_audit_log_record(&record)?;
+        Ok(AuditLogItem {
+            audit_day,
+            local_id,
             should_be_in_batch,
             requires_hash_upload,
-            log: payload,
-        })?;
-        Ok(item)
+            payload,
+        })
     }
 
     fn load_audit_state(&self) -> CoreResult<AuditState> {
-        Ok(derive_state(&self.storage.load_audit_records()?))
+        Ok(derive_state(
+            &self
+                .storage
+                .load_audit_records_at(self.platform.get_time_utc_ms()?)?,
+        ))
     }
 
     fn try_upload_hash_for_item(&mut self, item: &AuditLogItem) -> CoreResult<RetryAttemptOutcome> {
@@ -354,10 +361,12 @@ impl<P: PlatformHooks> MonitorService<P> {
             )
         }) {
             Ok(()) => {
-                self.storage
-                    .append_audit_record(&AuditRecord::HashUploaded {
+                self.storage.append_audit_record_for_day(
+                    &item.audit_day,
+                    &AuditRecord::HashUploaded {
                         local_id: item.local_id.clone(),
-                    })?;
+                    },
+                )?;
                 Ok(RetryAttemptOutcome::Uploaded)
             }
             Err(err) if err.is_not_found() => {
@@ -392,12 +401,14 @@ impl<P: PlatformHooks> MonitorService<P> {
         match self.with_device_token_retry(|api, access_token, _| api.upload_log(access_token, log))
         {
             Ok(response) => {
-                self.storage
-                    .append_audit_record(&AuditRecord::LogUploaded {
+                self.storage.append_audit_record_for_day(
+                    &item.audit_day,
+                    &AuditRecord::LogUploaded {
                         local_id: item.local_id.clone(),
                         server_id: Some(response.id),
                         batch_id: None,
-                    })?;
+                    },
+                )?;
                 Ok(RetryAttemptOutcome::Uploaded)
             }
             Err(err) if err.is_not_found() => {
@@ -449,20 +460,28 @@ impl<P: PlatformHooks> MonitorService<P> {
             .with_device_token_retry(|api, access_token, _| api.upload_batch(access_token, &batch))
         {
             Ok(response) => {
-                self.storage
-                    .append_audit_record(&AuditRecord::BatchUploaded {
+                let batch_day = items
+                    .first()
+                    .map(|item| item.audit_day.as_str())
+                    .unwrap_or("1970-01-01");
+                self.storage.append_audit_record_for_day(
+                    batch_day,
+                    &AuditRecord::BatchUploaded {
                         server_id: response.id.clone(),
-                    })?;
+                    },
+                )?;
                 for item in items {
                     if item.payload.as_batch_event().is_none() {
                         continue;
                     }
-                    self.storage
-                        .append_audit_record(&AuditRecord::LogUploaded {
+                    self.storage.append_audit_record_for_day(
+                        &item.audit_day,
+                        &AuditRecord::LogUploaded {
                             local_id: item.local_id.clone(),
                             server_id: None,
                             batch_id: Some(response.id.clone()),
-                        })?;
+                        },
+                    )?;
                 }
                 self.complete_batch_upload(now_ms);
                 Ok(())
@@ -912,7 +931,7 @@ mod tests {
             .expect("save stale status");
         service
             .storage
-            .append_audit_record(&AuditRecord::Log {
+            .append_audit_log_record(&AuditRecord::Log {
                 local_id: "pending-log".to_string(),
                 should_be_in_batch: false,
                 requires_hash_upload: false,
@@ -939,6 +958,7 @@ mod tests {
         let audit_state = AuditState {
             pending_batch_uploads: (0..(MAX_BATCH_ITEMS_PER_UPLOAD + 5))
                 .map(|index| AuditLogItem {
+                    audit_day: "1970-01-01".to_string(),
                     local_id: format!("batch-{index}"),
                     should_be_in_batch: true,
                     requires_hash_upload: false,
@@ -1018,7 +1038,7 @@ mod tests {
         service.status.device_id = Some("device-1".to_string());
         service
             .storage
-            .append_audit_record(&AuditRecord::Log {
+            .append_audit_log_record(&AuditRecord::Log {
                 local_id: "pending-log".to_string(),
                 should_be_in_batch: false,
                 requires_hash_upload: false,
