@@ -16,6 +16,7 @@ const LOGIN_RESPONSE_CANCEL: NSModalResponse = 0;
 const ACTION_RESPONSE_CLOSE: NSModalResponse = 1;
 const ACTION_RESPONSE_RESTART: NSModalResponse = 2;
 const ACTION_RESPONSE_LOGOUT: NSModalResponse = 3;
+const VIRTUE_WEBSITE_URL: &str = "https://virtueinitiative.org";
 
 #[derive(Debug, Clone)]
 pub struct LoginInput {
@@ -65,6 +66,11 @@ define_class!(
         #[unsafe(method(cancel:))]
         fn cancel(&self, _sender: Option<&AnyObject>) {
             self.finish_modal(LOGIN_RESPONSE_CANCEL);
+        }
+
+        #[unsafe(method(openWebsite:))]
+        fn open_website(&self, _sender: Option<&AnyObject>) {
+            let _ = open_virtue_website();
         }
     }
 
@@ -165,6 +171,11 @@ define_class!(
         fn logout(&self, _sender: Option<&AnyObject>) {
             self.finish_modal(ACTION_RESPONSE_LOGOUT);
         }
+
+        #[unsafe(method(openWebsite:))]
+        fn open_website(&self, _sender: Option<&AnyObject>) {
+            let _ = open_virtue_website();
+        }
     }
 
     unsafe impl NSObjectProtocol for ActionWindowController {}
@@ -196,14 +207,18 @@ pub fn prompt_login<F>(
 where
     F: FnMut(&LoginInput) -> std::result::Result<String, String>,
 {
-    let title = format!("Virtue login ({build_label})");
+    let title = format!("Virtue login - virtueinitiative.org ({build_label})");
     show_login_window(&title, default_email.unwrap_or_default(), attempt_login)
 }
 
 pub fn prompt_logged_in_action(
     details: &LoggedInDialogDetails<'_>,
 ) -> Result<Option<LoggedInAction>> {
-    show_action_window("Virtue", &format_status_message(details), false)
+    show_action_window(
+        "Virtue - virtueinitiative.org",
+        &format_status_message(details),
+        false,
+    )
 }
 
 pub fn prompt_permission_issue_action(
@@ -213,7 +228,11 @@ pub fn prompt_permission_issue_action(
     message.push_str(
         "\n\nScreen Recording permission appears to be missing for the Virtue background service.\n\nOpen System Settings > Privacy & Security > Screen Recording, enable Virtue, then click Restart daemon. Restart is required even if you selected Quit & Reopen earlier.",
     );
-    show_action_window("Virtue permission required", &message, true)
+    show_action_window(
+        "Virtue permission required - virtueinitiative.org",
+        &message,
+        true,
+    )
 }
 
 pub fn show_info(message: &str) -> Result<()> {
@@ -284,10 +303,18 @@ where
     let sign_in_button = button(
         mtm,
         "Sign in",
-        NSRect::new(NSPoint::new(270.0, 14.0), NSSize::new(90.0, 28.0)),
+        NSRect::new(NSPoint::new(174.0, 14.0), NSSize::new(90.0, 28.0)),
         &controller,
         sel!(submit:),
         Some("\r"),
+    );
+    let website_button = button(
+        mtm,
+        "Open website",
+        NSRect::new(NSPoint::new(270.0, 14.0), NSSize::new(90.0, 28.0)),
+        &controller,
+        sel!(openWebsite:),
+        None,
     );
     let cancel_button = button(
         mtm,
@@ -305,12 +332,14 @@ where
     content.addSubview(&password_label);
     content.addSubview(&password_field);
     content.addSubview(&sign_in_button);
+    content.addSubview(&website_button);
     content.addSubview(&cancel_button);
 
     unsafe {
         email_field.setNextKeyView(Some(&password_field));
         password_field.setNextKeyView(Some(&sign_in_button));
-        sign_in_button.setNextKeyView(Some(&cancel_button));
+        sign_in_button.setNextKeyView(Some(&website_button));
+        website_button.setNextKeyView(Some(&cancel_button));
         cancel_button.setNextKeyView(Some(&email_field));
     }
 
@@ -372,15 +401,23 @@ fn show_action_window(
     let close_button = button(
         mtm,
         "Close",
-        NSRect::new(NSPoint::new(224.0, 18.0), NSSize::new(120.0, 28.0)),
+        NSRect::new(NSPoint::new(128.0, 18.0), NSSize::new(120.0, 28.0)),
         &controller,
         sel!(closeWindow:),
         if emphasize_restart { None } else { Some("\r") },
     );
+    let website_button = button(
+        mtm,
+        "Open website",
+        NSRect::new(NSPoint::new(256.0, 18.0), NSSize::new(120.0, 28.0)),
+        &controller,
+        sel!(openWebsite:),
+        None,
+    );
     let restart_button = button(
         mtm,
         "Restart daemon",
-        NSRect::new(NSPoint::new(352.0, 18.0), NSSize::new(120.0, 28.0)),
+        NSRect::new(NSPoint::new(384.0, 18.0), NSSize::new(120.0, 28.0)),
         &controller,
         sel!(restartDaemon:),
         if emphasize_restart { Some("\r") } else { None },
@@ -388,7 +425,7 @@ fn show_action_window(
     let logout_button = button(
         mtm,
         "Logout",
-        NSRect::new(NSPoint::new(480.0, 18.0), NSSize::new(120.0, 28.0)),
+        NSRect::new(NSPoint::new(512.0, 18.0), NSSize::new(88.0, 28.0)),
         &controller,
         sel!(logout:),
         None,
@@ -396,6 +433,7 @@ fn show_action_window(
 
     content.addSubview(&message_label);
     content.addSubview(&close_button);
+    content.addSubview(&website_button);
     content.addSubview(&restart_button);
     content.addSubview(&logout_button);
 
@@ -547,6 +585,18 @@ fn format_status_message(details: &LoggedInDialogDetails<'_>) -> String {
             .filter(|value| !value.trim().is_empty())
             .unwrap_or("<none>")
     )
+}
+
+fn open_virtue_website() -> Result<()> {
+    let status = Command::new("open")
+        .arg(VIRTUE_WEBSITE_URL)
+        .status()
+        .context("failed to launch website opener")?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(anyhow!("website opener exited with status {status}"))
+    }
 }
 
 fn appkit_thread_marker() -> Result<MainThreadMarker> {

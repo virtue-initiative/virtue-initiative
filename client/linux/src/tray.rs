@@ -193,7 +193,7 @@ impl ksni::Tray for VirtueTray {
 
     fn tool_tip(&self) -> ksni::ToolTip {
         ksni::ToolTip {
-            title: "Virtue".to_string(),
+            title: "Virtue - virtueinitiative.org".to_string(),
             description: self.tooltip.clone(),
             ..Default::default()
         }

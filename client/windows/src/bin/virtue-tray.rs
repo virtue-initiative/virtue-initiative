@@ -89,7 +89,7 @@ impl AppState {
             ..Default::default()
         };
 
-        let tip = to_wide(&format!("Virtue {BUILD_LABEL}"));
+        let tip = to_wide(&format!("Virtue {BUILD_LABEL} - virtueinitiative.org"));
         for (idx, ch) in tip.iter().take(data.szTip.len()).enumerate() {
             data.szTip[idx] = *ch;
         }
