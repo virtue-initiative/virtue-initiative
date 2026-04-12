@@ -54,10 +54,6 @@ impl FileStateStore {
         Ok(audit_day)
     }
 
-    pub fn append_audit_record(&self, record: &AuditRecord) -> CoreResult<()> {
-        self.append_audit_log_record(record).map(|_| ())
-    }
-
     pub fn append_audit_record_for_day(
         &self,
         audit_day: &str,

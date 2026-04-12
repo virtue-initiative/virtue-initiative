@@ -931,7 +931,7 @@ mod tests {
             .expect("save stale status");
         service
             .storage
-            .append_audit_record(&AuditRecord::Log {
+            .append_audit_log_record(&AuditRecord::Log {
                 local_id: "pending-log".to_string(),
                 should_be_in_batch: false,
                 requires_hash_upload: false,
@@ -1038,7 +1038,7 @@ mod tests {
         service.status.device_id = Some("device-1".to_string());
         service
             .storage
-            .append_audit_record(&AuditRecord::Log {
+            .append_audit_log_record(&AuditRecord::Log {
                 local_id: "pending-log".to_string(),
                 should_be_in_batch: false,
                 requires_hash_upload: false,
