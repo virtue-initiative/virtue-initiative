@@ -22,7 +22,8 @@ type Platform = {
   label: string;
   detail: string;
   kind: "laptop" | "mobile";
-  matches: (assetName: string) => boolean;
+  preferredMatches?: (assetName: string) => boolean;
+  fallbackMatches: (assetName: string) => boolean;
 };
 
 const platforms: Platform[] = [
@@ -30,35 +31,39 @@ const platforms: Platform[] = [
     label: "Linux",
     detail: ".deb package",
     kind: "laptop",
-    matches: (assetName) =>
-      /\.deb$/i.test(assetName) && /^virtue_/i.test(assetName),
+    preferredMatches: (assetName) => /^virtue-linux_/i.test(assetName),
+    fallbackMatches: (assetName) =>
+      /\.deb$/i.test(assetName) &&
+      (/^virtue-linux_/i.test(assetName) || /^virtue_/i.test(assetName)),
   },
   {
     label: "macOS",
     detail: ".dmg installer",
     kind: "laptop",
-    matches: (assetName) =>
-      /\.dmg$/i.test(assetName) && /^Virtue-/i.test(assetName),
+    preferredMatches: (assetName) => /^virtue-macos-/i.test(assetName),
+    fallbackMatches: (assetName) =>
+      /\.dmg$/i.test(assetName) &&
+      (/^virtue-macos-/i.test(assetName) || /^Virtue-/i.test(assetName)),
   },
   {
     label: "Windows",
     detail: ".exe installer",
     kind: "laptop",
-    matches: (assetName) =>
+    fallbackMatches: (assetName) =>
       /\.exe$/i.test(assetName) && /windows-installer/i.test(assetName),
   },
   {
     label: "Android",
     detail: ".apk package",
     kind: "mobile",
-    matches: (assetName) =>
+    fallbackMatches: (assetName) =>
       /\.apk$/i.test(assetName) && /android/i.test(assetName),
   },
   {
     label: "iOS",
     detail: ".zip app bundle",
     kind: "mobile",
-    matches: (assetName) =>
+    fallbackMatches: (assetName) =>
       /\.zip$/i.test(assetName) && /^VirtueIOS/i.test(assetName),
   },
 ];
@@ -73,7 +78,16 @@ function formatDate(value: string | null) {
 }
 
 function findPlatformAsset(release: Release, platform: Platform) {
-  return release.assets.find((asset) => platform.matches(asset.name)) ?? null;
+  if (platform.preferredMatches) {
+    const preferred = release.assets.find((asset) =>
+      platform.preferredMatches?.(asset.name),
+    );
+    if (preferred) return preferred;
+  }
+
+  return (
+    release.assets.find((asset) => platform.fallbackMatches(asset.name)) ?? null
+  );
 }
 
 const stableRelease = releaseData.stableRelease as Release | null;

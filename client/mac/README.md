@@ -88,4 +88,4 @@ Creates:
 
 Creates:
 
-`client/target/macos/Virtue-<version>.dmg`
+`client/target/macos/virtue-macos-<version>.dmg`

@@ -27,12 +27,14 @@ const expectedPlatforms = [
   {
     label: "Linux",
     matches: (assetName) =>
-      /\.deb$/i.test(assetName) && /^virtue_/i.test(assetName),
+      /\.deb$/i.test(assetName) &&
+      (/^virtue-linux_/i.test(assetName) || /^virtue_/i.test(assetName)),
   },
   {
     label: "macOS",
     matches: (assetName) =>
-      /\.dmg$/i.test(assetName) && /^Virtue-/i.test(assetName),
+      /\.dmg$/i.test(assetName) &&
+      (/^virtue-macos-/i.test(assetName) || /^Virtue-/i.test(assetName)),
   },
   {
     label: "Windows",

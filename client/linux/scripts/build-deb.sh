@@ -15,7 +15,7 @@ VIRTUE_BUILD_LABEL="$BUILD_LABEL" cargo build --release -p virtue-linux
 
 
 PKG_DIR="target/debian/${PKG_NAME}_${BUILD_LABEL}_${ARCH}"
-OUT_DEB="target/debian/${PKG_NAME}_${BUILD_LABEL}_${ARCH}.deb"
+OUT_DEB="target/debian/${PKG_NAME}-linux_${BUILD_LABEL}_${ARCH}.deb"
 
 rm -rf "target/debian"
 mkdir -p "$PKG_DIR/DEBIAN"
