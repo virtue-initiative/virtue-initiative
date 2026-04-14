@@ -396,12 +396,25 @@ export async function listBatchUrlsForDevice(db: D1Database, deviceId: string) {
   return result.results;
 }
 
+export async function listBatchUrlsForUser(db: D1Database, userId: string) {
+  const result = await db
+    .prepare('SELECT url FROM batches WHERE user_id = ?')
+    .bind(uuidToBytes(userId))
+    .all<{ url: string }>();
+
+  return result.results;
+}
+
 export async function deleteDeviceById(db: D1Database, deviceId: string) {
   const deviceIdBytes = uuidToBytes(deviceId);
   await db.prepare('DELETE FROM device_logs WHERE device_id = ?').bind(deviceIdBytes).run();
   await db.prepare('DELETE FROM batches WHERE device_id = ?').bind(deviceIdBytes).run();
   await db.prepare('DELETE FROM hash_states WHERE device_id = ?').bind(deviceIdBytes).run();
   return db.prepare('DELETE FROM devices WHERE id = ?').bind(deviceIdBytes).run();
+}
+
+export async function deleteUserById(db: D1Database, userId: string) {
+  return db.prepare('DELETE FROM users WHERE id = ?').bind(uuidToBytes(userId)).run();
 }
 
 export async function listVisibleOwnerIds(db: D1Database, requesterId: string) {

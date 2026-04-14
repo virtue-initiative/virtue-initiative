@@ -309,6 +309,16 @@ export const api = {
       token,
     ),
 
+  deleteUser: (token: string, confirm_email: string) =>
+    req<void>(
+      "/user",
+      {
+        method: "DELETE",
+        body: JSON.stringify({ confirm_email }),
+      },
+      token,
+    ),
+
   requestVerificationEmail: (token: string) =>
     req<{ ok: boolean; already_verified?: boolean }>(
       "/email-verification",

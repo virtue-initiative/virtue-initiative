@@ -125,3 +125,13 @@
   gap: 0.6rem;
   color: var(--text);
 }
+
+.settings-danger-zone {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+}
+
+.settings-dialog-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}

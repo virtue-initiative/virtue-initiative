@@ -1,7 +1,6 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { api, User, WatchingPartner } from "../../api";
 import { useAuth } from "../../context/auth";
-import { GLOBAL_ALERT_EVENT } from "../../events";
 import {
   formatDigestHour,
   utcMinutesToLocalHour,
@@ -13,7 +12,7 @@ import { usePersistedState } from "../../hooks/usePersistedState";
 import { sendToast } from "../../utils/toast";
 
 export function Settings() {
-  const { token } = useAuth();
+  const { token, logout } = useAuth();
 
   const [user, setUser] = useState<User | null>(null);
   const [watching, setWatching] = useState<WatchingPartner[]>([]);
@@ -35,6 +34,12 @@ export function Settings() {
     null,
   );
   const [emailScheduleSaving, setEmailScheduleSaving] = useState(false);
+  const [deleteConfirmEmail, setDeleteConfirmEmail] = useState("");
+  const [deleteAccountStatus, setDeleteAccountStatus] = useState<string | null>(
+    null,
+  );
+  const [deleteAccountPending, setDeleteAccountPending] = useState(false);
+  const deleteDialogRef = useRef<HTMLDialogElement>(null);
 
   const VERIFICATION_RESEND_COOLDOWN = 2 * 60 * 1000; // 2 minutes
   const verificationRecentlySent =
@@ -92,6 +97,9 @@ export function Settings() {
   const hasDigestScheduleChanges = Boolean(
     user && emailDigestMinutesUtc !== user.email_digest_minutes_utc,
   );
+  const deleteConfirmationMatches =
+    Boolean(user) &&
+    deleteConfirmEmail.trim().toLowerCase() === user.email.toLowerCase();
 
   async function saveName(e: Event) {
     e.preventDefault();
@@ -185,6 +193,48 @@ export function Settings() {
       );
     } finally {
       setEmailScheduleSaving(false);
+    }
+  }
+
+  function openDeleteDialog() {
+    setDeleteConfirmEmail("");
+    setDeleteAccountStatus(null);
+    deleteDialogRef.current?.showModal();
+  }
+
+  function closeDeleteDialog() {
+    if (deleteAccountPending) return;
+    setDeleteConfirmEmail("");
+    setDeleteAccountStatus(null);
+    deleteDialogRef.current?.close();
+  }
+
+  async function deleteAccountConfirmed() {
+    if (!token || !user || !deleteConfirmationMatches) {
+      return;
+    }
+
+    setDeleteAccountStatus(null);
+    setDeleteAccountPending(true);
+    try {
+      await api.deleteUser(token, user.email);
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem(
+          "virtue_global_link_message",
+          JSON.stringify({
+            message: "Your account has been deleted.",
+            isError: false,
+          }),
+        );
+      }
+      deleteDialogRef.current?.close();
+      await logout();
+    } catch (err) {
+      setDeleteAccountStatus(
+        err instanceof Error ? err.message : "Failed to delete account",
+      );
+    } finally {
+      setDeleteAccountPending(false);
     }
   }
 
@@ -376,6 +426,68 @@ export function Settings() {
           </p>
         )}
       </section>
+
+      <section class="card settings-section settings-danger-zone">
+        <h2>Delete account</h2>
+        <p class="settings-hint">
+          This permanently deletes your account, devices, partner relationships,
+          sessions, and stored logs. This cannot be undone.
+        </p>
+        <button
+          class="btn btn-danger"
+          type="button"
+          onClick={openDeleteDialog}
+          disabled={!user || deleteAccountPending}
+        >
+          Delete account
+        </button>
+      </section>
+
+      <dialog ref={deleteDialogRef} class="settings-dialog">
+        <h3 class="dialog-title">Delete account</h3>
+        <p class="invite-desc">
+          This permanently removes your account and all associated data. Type{" "}
+          <strong>{user?.email ?? "your email address"}</strong> to confirm.
+        </p>
+        <div class="field">
+          <label for="settings-delete-account-confirm-email">
+            Confirm your email
+          </label>
+          <input
+            id="settings-delete-account-confirm-email"
+            type="email"
+            value={deleteConfirmEmail}
+            onInput={(e) => {
+              setDeleteConfirmEmail((e.target as HTMLInputElement).value);
+              setDeleteAccountStatus(null);
+            }}
+            placeholder={user?.email ?? "you@example.com"}
+            autoComplete="off"
+            disabled={deleteAccountPending}
+          />
+        </div>
+        {deleteAccountStatus && (
+          <p class="alert-error">{deleteAccountStatus}</p>
+        )}
+        <div class="settings-dialog-actions">
+          <button
+            class="btn btn-danger"
+            type="button"
+            onClick={() => deleteAccountConfirmed().catch(() => {})}
+            disabled={!deleteConfirmationMatches || deleteAccountPending}
+          >
+            {deleteAccountPending ? "Deleting…" : "Delete account"}
+          </button>
+          <button
+            class="btn btn-ghost"
+            type="button"
+            onClick={closeDeleteDialog}
+            disabled={deleteAccountPending}
+          >
+            Cancel
+          </button>
+        </div>
+      </dialog>
     </div>
   );
 }
