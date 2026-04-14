@@ -71,6 +71,52 @@
   margin: 0 0 0.75rem;
 }
 
+.device-setup-dialog {
+  max-width: 460px;
+}
+
+.device-setup-steps {
+  margin: 0 0 1rem;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  font-size: 1rem;
+}
+
+.device-setup-steps::marker {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.device-setup-steps li {
+  color: var(--text);
+  font-size: 1rem;
+  line-height: 1.5;
+  padding-left: 0.25rem;
+}
+
+.device-setup-step-label {
+  display: block;
+  font-weight: 600;
+  font-size: 1.02rem;
+}
+
+.device-setup-actions {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+.device-setup-close {
+  margin-left: auto;
+}
+
+@media (max-width: 560px) {
+  .device-setup-actions {
+    flex-wrap: wrap;
+  }
+}
+
 .partners-panel {
   display: flex;
   flex-direction: column;

@@ -7,6 +7,9 @@ import { PARTNERS_CHANGED_EVENT } from "../../events";
 import { formatRelativeTimestamp } from "../../utils/time";
 import "./style.css";
 
+const DOWNLOAD_URL = "https://virtueinitiative.org/download";
+const INSTALLATION_URL = "https://virtueinitiative.org/help/installation/";
+
 function UserPlusIcon() {
   return (
     <svg
@@ -93,12 +96,7 @@ export function Home() {
       <section class="dash-section">
         <div class="section-header">
           <h2>My devices</h2>
-          <a
-            class="btn btn-primary"
-            href="https://virtueinitiative.org/help/installation/"
-          >
-            Create device
-          </a>
+          <AddDeviceButton />
         </div>
         {ownDevices.length === 0 ? (
           <p class="empty">No devices</p>
@@ -145,6 +143,84 @@ export function Home() {
         />
       </section>
     </div>
+  );
+}
+
+function AddDeviceButton() {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  function open() {
+    dialogRef.current?.showModal();
+  }
+
+  function close() {
+    dialogRef.current?.close();
+  }
+
+  function handleDialogClick(e: MouseEvent) {
+    if (e.target === dialogRef.current) {
+      close();
+    }
+  }
+
+  return (
+    <>
+      <Button className="btn-primary" onClick={open}>
+        Add device
+      </Button>
+      <dialog
+        ref={dialogRef}
+        class="device-setup-dialog"
+        onClick={handleDialogClick}
+      >
+        <h3 class="dialog-title">Add device</h3>
+        <p class="invite-desc">
+          Set up Virtue on a phone or computer, then sign in with this account
+          so it starts appearing in your dashboard.
+        </p>
+        <ol class="device-setup-steps">
+          <li>
+            <span class="device-setup-step-label">Download the app.</span>
+            Choose the installer for the device you want to monitor.
+          </li>
+          <li>
+            <span class="device-setup-step-label">
+              Follow the installation instructions.
+            </span>
+            Use the platform-specific setup guide if you need it.
+          </li>
+          <li>
+            <span class="device-setup-step-label">Log in on that device.</span>
+            Once the app signs in and uploads, it will show up here.
+          </li>
+        </ol>
+        <div class="invite-actions device-setup-actions">
+          <a
+            class="btn btn-primary"
+            href={DOWNLOAD_URL}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Download
+          </a>
+          <a
+            class="btn btn-ghost"
+            href={INSTALLATION_URL}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Guide
+          </a>
+          <button
+            class="btn btn-ghost device-setup-close"
+            type="button"
+            onClick={close}
+          >
+            Close
+          </button>
+        </div>
+      </dialog>
+    </>
   );
 }
 
