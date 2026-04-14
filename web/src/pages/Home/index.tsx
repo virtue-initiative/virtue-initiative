@@ -3,6 +3,7 @@ import { useLocation } from "preact-iso";
 import { api, Device, WatchingPartner, WatcherPartner } from "../../api";
 import { Button } from "../../components/Button";
 import { useAuth } from "../../context/auth";
+import { removeDeviceFromCachedDataFeed } from "../../data-cache";
 import { PARTNERS_CHANGED_EVENT } from "../../events";
 import { formatRelativeTimestamp } from "../../utils/time";
 import "./style.css";
@@ -109,6 +110,7 @@ export function Home() {
                 key={device.id}
                 device={device}
                 token={token!}
+                viewerUserId={userId!}
                 onChanged={reload}
               />
             ))}
@@ -472,10 +474,12 @@ function PartnerCard({
 function DeviceCard({
   device,
   token,
+  viewerUserId,
   onChanged,
 }: {
   device: Device;
   token: string;
+  viewerUserId: string;
   onChanged: () => void;
 }) {
   const { route } = useLocation();
@@ -530,6 +534,13 @@ function DeviceCard({
     setError(null);
     try {
       await api.deleteDevice(token, device.id);
+      await removeDeviceFromCachedDataFeed(
+        viewerUserId,
+        viewerUserId,
+        device.id,
+      ).catch((err) => {
+        console.warn("[home] failed to remove deleted device from cache", err);
+      });
       closeDeleteDialog();
       onChanged();
     } catch (err) {
