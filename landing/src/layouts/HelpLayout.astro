@@ -1,9 +1,10 @@
 ---
+import HelpSidebarNav from "../components/HelpSidebarNav.astro";
 import Footer from "../components/Footer.astro";
 import Header from "../components/Header.astro";
 import ThemeHeadScript from "../components/ThemeHeadScript.astro";
 import ThemeScript from "../components/ThemeScript.astro";
-import { helpSidebar, type HelpNavItem } from "../help/navigation";
+import { helpSidebar } from "../help/navigation";
 import "../styles/global.css";
 
 interface Props {
@@ -14,16 +15,6 @@ interface Props {
 const { currentPath, pageTitle = "Help" } = Astro.props;
 const title = `${pageTitle} - The Virtue Initiative`;
 const rootLinks = [{ label: "Help", href: "/help" }, ...helpSidebar];
-
-function sectionContainsPath(item: HelpNavItem, pathname: string): boolean {
-  if (item.href === pathname) {
-    return true;
-  }
-
-  return (
-    item.items?.some((child) => sectionContainsPath(child, pathname)) ?? false
-  );
-}
 ---
 
 <!doctype html>
@@ -41,76 +32,123 @@ function sectionContainsPath(item: HelpNavItem, pathname: string): boolean {
   <body class="help-page">
     <Header tagline="Guides and docs for The Virtue Initiative" />
     <main class="help-main">
-      <aside class="help-sidebar">
-        <ul class="help-sidebar-list">
-          {
-            rootLinks.map((item) => (
-              <li>
-                {item.items && item.items.length > 0 ? (
-                  <details
-                    class="help-sidebar-section"
-                    open={sectionContainsPath(item, currentPath)}
-                  >
-                    <summary
-                      class:list={[
-                        "help-sidebar-section-summary",
-                        { active: item.href === currentPath },
-                      ]}
-                    >
-                      {item.href && (
-                        <a
-                          href={item.href}
-                          class:list={[
-                            "help-sidebar-item",
-                            { active: item.href === currentPath },
-                          ]}
-                        >
-                          {item.label}
-                        </a>
-                      )}
-                      <span class="help-sidebar-toggle" aria-hidden="true" />
-                    </summary>
-                    <ul class="help-sidebar-sublist">
-                      {item.items.map((child) => (
-                        <li>
-                          <a
-                            href={child.href}
-                            class:list={[
-                              "help-sidebar-item",
-                              "help-sidebar-item-child",
-                              { active: child.href === currentPath },
-                            ]}
-                          >
-                            {child.label}
-                          </a>
-                        </li>
-                      ))}
-                    </ul>
-                  </details>
-                ) : (
-                  item.href && (
-                    <a
-                      href={item.href}
-                      class:list={[
-                        "help-sidebar-item",
-                        { active: item.href === currentPath },
-                      ]}
-                    >
-                      {item.label}
-                    </a>
-                  )
-                )}
-              </li>
-            ))
-          }
-        </ul>
+      <aside class="help-sidebar help-sidebar-desktop">
+        <HelpSidebarNav currentPath={currentPath} rootLinks={rootLinks} />
       </aside>
 
       <div class="help-content">
         <slot />
       </div>
     </main>
+    <button
+      type="button"
+      class="help-sidebar-fab"
+      data-help-sidebar-toggle
+      aria-controls="help-sidebar-drawer"
+      aria-expanded="false"
+      aria-label="Open help navigation"
+    >
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke-width="1.5"
+        stroke="currentColor"
+        aria-hidden="true"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"></path>
+      </svg>
+    </button>
+    <div class="help-sidebar-backdrop" data-help-sidebar-close hidden></div>
+    <aside
+      id="help-sidebar-drawer"
+      class="help-sidebar-drawer"
+      aria-hidden="true"
+      hidden
+    >
+      <div class="help-sidebar-drawer-header">
+        <div class="help-sidebar-drawer-copy">
+          <span class="help-sidebar-drawer-label">Help Navigation</span>
+          <span class="help-sidebar-drawer-current">{pageTitle}</span>
+        </div>
+        <button
+          type="button"
+          class="help-sidebar-drawer-close"
+          data-help-sidebar-close
+          aria-label="Close help navigation"
+        >
+          <span aria-hidden="true">×</span>
+        </button>
+      </div>
+      <nav aria-label="Help navigation">
+        <HelpSidebarNav currentPath={currentPath} rootLinks={rootLinks} />
+      </nav>
+    </aside>
     <Footer />
     <ThemeScript />
+    <script is:inline>
+      const toggle = document.querySelector("[data-help-sidebar-toggle]");
+      const drawer = document.getElementById("help-sidebar-drawer");
+      const closeButtons = document.querySelectorAll(
+        "[data-help-sidebar-close]",
+      );
+
+      if (
+        toggle instanceof HTMLButtonElement &&
+        drawer instanceof HTMLElement
+      ) {
+        const setOpen = (isOpen) => {
+          toggle.setAttribute("aria-expanded", String(isOpen));
+          drawer.setAttribute("aria-hidden", String(!isOpen));
+          drawer.hidden = !isOpen;
+          document.body.classList.toggle("help-sidebar-open", isOpen);
+
+          closeButtons.forEach((element) => {
+            if (element instanceof HTMLElement && element !== toggle) {
+              element.hidden = !isOpen;
+            }
+          });
+        };
+
+        const closeDrawer = () => setOpen(false);
+
+        toggle.addEventListener("click", () => {
+          const isOpen = toggle.getAttribute("aria-expanded") === "true";
+          setOpen(!isOpen);
+        });
+
+        closeButtons.forEach((element) => {
+          if (element instanceof HTMLElement && element !== toggle) {
+            element.addEventListener("click", closeDrawer);
+          }
+        });
+
+        drawer.addEventListener("click", (event) => {
+          const target = event.target;
+          if (target instanceof HTMLAnchorElement) {
+            closeDrawer();
+          }
+        });
+
+        window.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") {
+            closeDrawer();
+          }
+        });
+
+        const mediaQuery = window.matchMedia("(min-width: 961px)");
+        const syncDesktopState = () => {
+          if (mediaQuery.matches) {
+            closeDrawer();
+          }
+        };
+
+        syncDesktopState();
+        mediaQuery.addEventListener("change", syncDesktopState);
+      }
+    </script>
   </body>
 </html>
