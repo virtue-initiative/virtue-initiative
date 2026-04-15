@@ -4,6 +4,7 @@ import {
   authHeaders,
   BASE,
   clearDB,
+  createDeviceForUser,
   latestEmailToken,
   listEmailDeliveries,
   markUserEmailVerified,
@@ -314,6 +315,100 @@ describe('Auth routes', () => {
     });
 
     expect(resendRes.status).toBe(409);
+  });
+
+  it('requires matching email confirmation and permanently deletes the account with cascaded data cleanup', async () => {
+    const { token, userId } = await signupAndGetToken('delete-me@example.com', 'pw', 'Delete Me');
+    const device = await createDeviceForUser(token, 'Phone', 'ios');
+
+    const hashUploadRes = await SELF.fetch(`${BASE}/hash`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${device.access_token}` },
+      body: new Uint8Array(32).fill(9),
+    });
+    expect(hashUploadRes.status).toBe(200);
+
+    const logRes = await SELF.fetch(`${BASE}/d/log`, {
+      method: 'POST',
+      headers: authHeaders(device.access_token),
+      body: JSON.stringify({
+        ts: 1710000000000,
+        type: 'system_event',
+        data: { event: 'account-delete-test' },
+      }),
+    });
+    expect(logRes.status).toBe(201);
+
+    const form = new FormData();
+    form.set('start_time', '1710000000000');
+    form.set('end_time', '1710003600000');
+    form.set(
+      'access_keys',
+      JSON.stringify({
+        keys: [{ user_id: userId, hpke_key: Buffer.from('owner-envelope').toString('base64') }],
+      }),
+    );
+    form.set('file', new File([new Uint8Array([4, 5, 6])], 'batch.enc'));
+    const batchRes = await SELF.fetch(`${BASE}/d/batch`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${device.access_token}` },
+      body: form,
+    });
+    expect(batchRes.status).toBe(201);
+    const batch = (await batchRes.json()) as { id: string; url: string };
+
+    expect(await env.BUCKET.head(batch.url.replace(`${env.R2_URL}/`, ''))).toBeTruthy();
+
+    const badDeleteRes = await SELF.fetch(`${BASE}/user`, {
+      method: 'DELETE',
+      headers: authHeaders(token),
+      body: JSON.stringify({ confirm_email: 'wrong@example.com' }),
+    });
+    expect(badDeleteRes.status).toBe(400);
+
+    const deleteRes = await SELF.fetch(`${BASE}/user`, {
+      method: 'DELETE',
+      headers: authHeaders(token),
+      body: JSON.stringify({ confirm_email: 'delete-me@example.com' }),
+    });
+    expect(deleteRes.status).toBe(204);
+    expect(deleteRes.headers.get('set-cookie')).toContain('refresh_token=');
+
+    expect(
+      await env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(uuidToBytes(userId)).first(),
+    ).toBeNull();
+    expect(
+      await env.DB.prepare('SELECT id FROM devices WHERE id = ?')
+        .bind(uuidToBytes(device.id))
+        .first(),
+    ).toBeNull();
+    expect(
+      await env.DB.prepare('SELECT id FROM batches WHERE id = ?')
+        .bind(uuidToBytes(batch.id))
+        .first(),
+    ).toBeNull();
+
+    expect(
+      await env.DB.prepare('SELECT COUNT(*) AS count FROM device_logs WHERE user_id = ?')
+        .bind(uuidToBytes(userId))
+        .first<{ count: number }>(),
+    ).toMatchObject({ count: 0 });
+    expect(
+      await env.DB.prepare('SELECT COUNT(*) AS count FROM user_sessions WHERE user_id = ?')
+        .bind(uuidToBytes(userId))
+        .first<{ count: number }>(),
+    ).toMatchObject({ count: 0 });
+    expect(
+      await env.DB.prepare('SELECT COUNT(*) AS count FROM email_tokens WHERE user_id = ?')
+        .bind(uuidToBytes(userId))
+        .first<{ count: number }>(),
+    ).toMatchObject({ count: 0 });
+    expect(
+      await env.DB.prepare('SELECT COUNT(*) AS count FROM device_sessions WHERE device_id = ?')
+        .bind(uuidToBytes(device.id))
+        .first<{ count: number }>(),
+    ).toMatchObject({ count: 0 });
+    expect(await env.BUCKET.head(batch.url.replace(`${env.R2_URL}/`, ''))).toBeNull();
   });
 
   it('requests and applies password resets with new auth material and keypair bytes', async () => {

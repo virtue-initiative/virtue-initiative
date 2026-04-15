@@ -8,12 +8,14 @@ import {
   createSessionRecord,
   createEmailToken,
   createUser,
+  deleteUserById,
   deleteSessionByRefreshTokenHash,
   findEmailTokenByHash,
   findSessionByRefreshTokenHash,
   findUserByEmail,
   findUserById,
   invalidateEmailTokens,
+  listBatchUrlsForUser,
   updateUser,
   consumeEmailToken,
 } from '../lib/db';
@@ -35,6 +37,7 @@ import {
 } from '../lib/password';
 import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
+import { deleteObject } from '../lib/r2';
 
 const auth = new Hono<{ Bindings: Env; Variables: Variables }>();
 const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
@@ -90,6 +93,10 @@ const updateUserSchema = z
     priv_key: z.base64().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
+
+const deleteUserSchema = z.object({
+  confirm_email: z.email(),
+});
 
 function buildHashParamsResponse() {
   return {
@@ -465,6 +472,34 @@ auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema),
   }
 
   return c.json({ ok: true });
+});
+
+auth.delete('/user', authenticate('access'), validateZ('json', deleteUserSchema), async (c) => {
+  const userId = c.get('sub');
+  const { confirm_email } = c.req.valid('json');
+  const user = await findUserById(c.env.DB, userId);
+
+  if (!user) {
+    return c.json({ error: 'User account not found' }, 404);
+  }
+
+  if (confirm_email.trim().toLowerCase() !== user.email) {
+    return c.json({ error: 'Confirmation email does not match your account email' }, 400);
+  }
+
+  const batchUrls = await listBatchUrlsForUser(c.env.DB, userId);
+  await deleteUserById(c.env.DB, userId);
+
+  const r2Prefix = `${c.env.R2_URL}/`;
+  await Promise.all(
+    batchUrls
+      .map((batch) => batch.url)
+      .filter((url) => url.startsWith(r2Prefix))
+      .map((url) => deleteObject(c.env, url.slice(r2Prefix.length))),
+  );
+
+  deleteCookie(c, 'refresh_token', { path: '/' });
+  return c.body(null, 204);
 });
 
 auth.post('/email-verification/validate', validateZ('json', verifyEmailSchema), async (c) => {
