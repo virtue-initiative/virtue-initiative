@@ -7,6 +7,7 @@ import {
   CachedDataFeed,
   loadCachedDataFeed,
   mergeDataPageIntoCache,
+  pruneCachedDataFeedDevices,
 } from "../../data-cache";
 import { useAuth } from "../../context/auth";
 import { useE2EE } from "../../context/e2ee";
@@ -18,6 +19,7 @@ import "./style.css";
 
 const SYNC_PAGE_SIZE = 250;
 const VISIBLE_PAGE_SIZE = 25;
+const EMPTY_DEVICES: Device[] = [];
 
 interface FeedEntry {
   key: string;
@@ -144,6 +146,7 @@ export function Logs() {
     new URLSearchParams(window.location.search).get("user"),
   );
   const [sidebarLoading, setSidebarLoading] = useState(false);
+  const [sidebarLoaded, setSidebarLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [cachedFeed, setCachedFeed] = useState<CachedDataFeed | null>(null);
   const [items, setItems] = useState<FeedLog[]>([]);
@@ -157,9 +160,25 @@ export function Logs() {
 
   const activeUserId = selectedUser ?? userId;
   const activePrivateKey = e2ee.privateKey;
+  const activeGroup = useMemo(
+    () => deviceGroups.find((group) => group.userId === selectedUser) ?? null,
+    [deviceGroups, selectedUser],
+  );
+  const activeDevices = activeGroup?.devices ?? EMPTY_DEVICES;
+  const activeDeviceIdList = useMemo(
+    () => activeDevices.map((device) => device.id).sort(),
+    [activeDevices],
+  );
+  const activeDeviceIds = useMemo(
+    () => new Set(activeDeviceIdList),
+    [activeDeviceIdList],
+  );
+  const activeDeviceIdsKey = activeDeviceIdList.join(",");
 
   useEffect(() => {
     if (!token || !userId) return;
+
+    setSidebarLoaded(false);
 
     const loadSidebar = () => {
       setSidebarLoading(true);
@@ -212,6 +231,7 @@ export function Logs() {
         })
         .finally(() => {
           setSidebarLoading(false);
+          setSidebarLoaded(true);
         });
     };
 
@@ -225,6 +245,59 @@ export function Logs() {
   useEffect(() => {
     batchItemsCache.current.clear();
   }, [activeUserId, activePrivateKey]);
+
+  useEffect(() => {
+    if (!userId || !activeUserId || !sidebarLoaded || loadError) return;
+    if (selectedUser !== null && !activeGroup) return;
+
+    let cancelled = false;
+
+    void pruneCachedDataFeedDevices(userId, activeUserId, activeDeviceIdList)
+      .then((nextFeed) => {
+        if (!cancelled) {
+          setCachedFeed(nextFeed);
+        }
+      })
+      .catch((err) => {
+        console.warn("[logs] failed to prune cached device data", err);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    userId,
+    activeUserId,
+    activeDeviceIdsKey,
+    sidebarLoaded,
+    loadError,
+    selectedUser,
+    activeGroup,
+  ]);
+
+  useEffect(() => {
+    if (!sidebarLoaded || sidebarLoading || loadError) return;
+
+    if (
+      selectedUser !== null &&
+      !deviceGroups.some((group) => group.userId === selectedUser)
+    ) {
+      select(null, null);
+      return;
+    }
+
+    if (selectedDevice && !activeDeviceIds.has(selectedDevice)) {
+      select(selectedUser, null);
+    }
+  }, [
+    sidebarLoaded,
+    sidebarLoading,
+    loadError,
+    deviceGroups,
+    selectedUser,
+    selectedDevice,
+    activeDeviceIds,
+  ]);
 
   useEffect(() => {
     if (!token || !userId || !activeUserId || !e2ee.ready) return;
@@ -314,12 +387,14 @@ export function Logs() {
         kind: "log" as const,
         log,
       })),
-    ].sort((a, b) => b.created_at - a.created_at);
+    ]
+      .filter((entry) => activeDeviceIds.has(entry.device_id))
+      .sort((a, b) => b.created_at - a.created_at);
 
     return selectedDevice
       ? combined.filter((entry) => entry.device_id === selectedDevice)
       : combined;
-  }, [cachedFeed, selectedDevice]);
+  }, [cachedFeed, selectedDevice, activeDeviceIds]);
 
   const visibleEntries = useMemo(
     () => filteredFeedEntries.slice(0, visibleCount),
