@@ -27,9 +27,8 @@ export function useDevices(): UseDevicesResult {
   const { token, userId } = useAuth();
   const { mutate } = useSWRConfig();
   const key = token ? swrKeys.devices(token) : null;
-  const { data, error, isLoading } = useSWR<Device[], Error>(
-    key,
-    () => api.getDevices(requireToken(token)),
+  const { data, error, isLoading } = useSWR<Device[], Error>(key, () =>
+    api.getDevices(requireToken(token)),
   );
 
   const updateDevice = async (
@@ -47,7 +46,10 @@ export function useDevices(): UseDevicesResult {
 
     if (userId) {
       await removeDeviceFromCachedDataFeed(userId, userId, id).catch((err) => {
-        console.warn("[devices] failed to remove deleted device from cache", err);
+        console.warn(
+          "[devices] failed to remove deleted device from cache",
+          err,
+        );
       });
     }
 

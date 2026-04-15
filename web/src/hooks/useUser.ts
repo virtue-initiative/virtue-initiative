@@ -15,16 +15,14 @@ export interface UseUserResult {
   user: User | undefined;
   error: Error | undefined;
   isLoading: boolean;
-  updateUser: (
-    patch: {
-      email?: string;
-      name?: string;
-      email_frequency?: User["email_frequency"];
-      email_digest_minutes_utc?: User["email_digest_minutes_utc"];
-      pub_key?: string;
-      priv_key?: string;
-    },
-  ) => Promise<void>;
+  updateUser: (patch: {
+    email?: string;
+    name?: string;
+    email_frequency?: User["email_frequency"];
+    email_digest_minutes_utc?: User["email_digest_minutes_utc"];
+    pub_key?: string;
+    priv_key?: string;
+  }) => Promise<void>;
   requestVerificationEmail: () => Promise<{
     ok: boolean;
     already_verified?: boolean;
@@ -36,9 +34,8 @@ export function useUser(): UseUserResult {
   const { token } = useAuth();
   const { mutate } = useSWRConfig();
   const key = token ? swrKeys.user(token) : null;
-  const { data, error, isLoading } = useSWR<User, Error>(
-    key,
-    () => api.getUser(requireToken(token)),
+  const { data, error, isLoading } = useSWR<User, Error>(key, () =>
+    api.getUser(requireToken(token)),
   );
 
   const updateUser = async (

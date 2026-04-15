@@ -136,8 +136,11 @@ export function useLogs({
   deviceId: selectedDeviceId,
 }: UseLogsOptions): UseLogsResult {
   const { token, userId: viewerUserId } = useAuth();
-  const { devices, error: devicesError, isLoading: devicesLoading } =
-    useDevices();
+  const {
+    devices,
+    error: devicesError,
+    isLoading: devicesLoading,
+  } = useDevices();
   const e2ee = useE2EE();
   const [visibleCount, setVisibleCount] = useState(VISIBLE_PAGE_SIZE);
   const [logs, setLogs] = useState<FeedLog[]>();
@@ -193,7 +196,9 @@ export function useLogs({
     mutate,
   } = useSWR<SyncedLogFeed, Error>(key, async () => {
     if (!token || !viewerUserId || !activeTargetUserId) {
-      throw new Error("Log data is not available without an authenticated user.");
+      throw new Error(
+        "Log data is not available without an authenticated user.",
+      );
     }
 
     let cachedFeed = await loadCachedDataFeed(viewerUserId, activeTargetUserId);
@@ -309,7 +314,9 @@ export function useLogs({
           }
         }
 
-        const merged = [...batchLogs, ...directLogs].sort((a, b) => b.ts - a.ts);
+        const merged = [...batchLogs, ...directLogs].sort(
+          (a, b) => b.ts - a.ts,
+        );
 
         if (!cancelled) {
           setLogs(merged);
