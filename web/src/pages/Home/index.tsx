@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useMemo, useRef, useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
-import { api, Device, WatchingPartner, WatcherPartner } from "../../api";
+import { Device, WatchingPartner, WatcherPartner } from "../../api";
 import { Button } from "../../components/Button";
 import { useAuth } from "../../context/auth";
-import { removeDeviceFromCachedDataFeed } from "../../data-cache";
-import { PARTNERS_CHANGED_EVENT } from "../../events";
+import { useDevices } from "../../hooks/useDevices";
+import { usePartners } from "../../hooks/usePartners";
 import { formatRelativeTimestamp } from "../../utils/time";
 import "./style.css";
 
@@ -30,120 +30,119 @@ function UserPlusIcon() {
 }
 
 export function Home() {
-  const { token, userId } = useAuth();
-  const [devices, setDevices] = useState<Device[]>([]);
-  const [watching, setWatching] = useState<WatchingPartner[]>([]);
-  const [watchers, setWatchers] = useState<WatcherPartner[]>([]);
-  const [error, setError] = useState<string | null>(null);
-
-  function reload() {
-    if (!token) return;
-    Promise.all([api.getDevices(token), api.getPartners(token)])
-      .then(([deviceList, partnerList]) => {
-        setDevices(deviceList);
-        setWatching(partnerList.watching);
-        setWatchers(partnerList.watchers);
-      })
-      .catch((err) =>
-        setError(
-          err instanceof Error ? err.message : "Failed to load dashboard",
-        ),
-      );
-  }
-
-  useEffect(reload, [token]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const handler = () => reload();
-    window.addEventListener(PARTNERS_CHANGED_EVENT, handler);
-    return () => window.removeEventListener(PARTNERS_CHANGED_EVENT, handler);
-  }, [token]);
+  const { userId } = useAuth();
+  const {
+    devices,
+    error: devicesError,
+    isLoading: devicesLoading,
+    updateDevice,
+    removeDevice,
+  } = useDevices();
+  const {
+    watching,
+    watchers,
+    error: partnersError,
+    isLoading: partnersLoading,
+    invitePartner,
+    removeWatching,
+    removeWatcher,
+  } = usePartners();
+  const error = devicesError ?? partnersError;
+  const dashboardLoading = devicesLoading || partnersLoading;
+  const deviceList = devices ?? [];
+  const watchingList = watching ?? [];
+  const watchersList = watchers ?? [];
 
   const ownDevices = useMemo(
-    () => devices.filter((device) => device.owner === userId),
-    [devices, userId],
+    () => deviceList.filter((device) => device.owner === userId),
+    [deviceList, userId],
   );
   const devicesByOwner = useMemo(() => {
     const map = new Map<string, Device[]>();
-    for (const device of devices) {
+    for (const device of deviceList) {
       const ownerDevices = map.get(device.owner) ?? [];
       ownerDevices.push(device);
       map.set(device.owner, ownerDevices);
     }
     return map;
-  }, [devices]);
+  }, [deviceList]);
   const acceptedWatching = useMemo(
-    () => watching.filter((partner) => partner.status === "accepted"),
-    [watching],
+    () => watchingList.filter((partner) => partner.status === "accepted"),
+    [watchingList],
   );
   const pendingWatching = useMemo(
-    () => watching.filter((partner) => partner.status === "pending"),
-    [watching],
+    () => watchingList.filter((partner) => partner.status === "pending"),
+    [watchingList],
   );
   const acceptedWatchers = useMemo(
-    () => watchers.filter((partner) => partner.status === "accepted"),
-    [watchers],
+    () => watchersList.filter((partner) => partner.status === "accepted"),
+    [watchersList],
   );
   const pendingWatchers = useMemo(
-    () => watchers.filter((partner) => partner.status === "pending"),
-    [watchers],
+    () => watchersList.filter((partner) => partner.status === "pending"),
+    [watchersList],
   );
 
   return (
     <div class="dashboard">
-      {error && <p class="alert-error">{error}</p>}
+      {error && <p class="alert-error">{error.message}</p>}
+      {dashboardLoading && !devices && !watching && !watchers && (
+        <p class="empty">Loading…</p>
+      )}
 
-      <section class="dash-section">
-        <div class="section-header">
-          <h2>My devices</h2>
-          <AddDeviceButton />
-        </div>
-        {ownDevices.length === 0 ? (
-          <p class="empty">No devices</p>
-        ) : (
-          <div class="card-grid">
-            {ownDevices.map((device) => (
-              <DeviceCard
-                key={device.id}
-                device={device}
-                token={token!}
-                viewerUserId={userId!}
-                onChanged={reload}
-              />
-            ))}
-          </div>
-        )}
-      </section>
+      {!dashboardLoading && (
+        <>
+          <section class="dash-section">
+            <div class="section-header">
+              <h2>My devices</h2>
+              <AddDeviceButton />
+            </div>
+            {ownDevices.length === 0 ? (
+              <p class="empty">No devices</p>
+            ) : (
+              <div class="card-grid">
+                {ownDevices.map((device) => (
+                  <DeviceCard
+                    key={device.id}
+                    device={device}
+                    onUpdateDevice={updateDevice}
+                    onRemoveDevice={removeDevice}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
 
-      <section class="dash-section">
-        <div class="section-header">
-          <h2>People you can monitor</h2>
-        </div>
-        <PartnerArea
-          emptyLabel="You cannot monitor anyone yet."
-          pending={pendingWatching}
-          accepted={acceptedWatching}
-          partnerDevicesByOwner={devicesByOwner}
-          token={token!}
-          onChanged={reload}
-        />
-      </section>
+          <section class="dash-section">
+            <div class="section-header">
+              <h2>People you can monitor</h2>
+            </div>
+            <PartnerArea
+              emptyLabel="You cannot monitor anyone yet."
+              pending={pendingWatching}
+              accepted={acceptedWatching}
+              partnerDevicesByOwner={devicesByOwner}
+              onRemoveWatching={removeWatching}
+              onRemoveWatcher={removeWatcher}
+            />
+          </section>
 
-      <section class="dash-section">
-        <div class="section-header">
-          <h2>People who can monitor you</h2>
-          <InviteButton token={token!} onInvited={reload} />
-        </div>
-        <PartnerArea
-          emptyLabel="No one can monitor you yet."
-          pending={pendingWatchers}
-          accepted={acceptedWatchers}
-          partnerDevicesByOwner={devicesByOwner}
-          token={token!}
-          onChanged={reload}
-        />
-      </section>
+          <section class="dash-section">
+            <div class="section-header">
+              <h2>People who can monitor you</h2>
+              <InviteButton onInvitePartner={invitePartner} />
+            </div>
+            <PartnerArea
+              emptyLabel="No one can monitor you yet."
+              pending={pendingWatchers}
+              accepted={acceptedWatchers}
+              partnerDevicesByOwner={devicesByOwner}
+              onRemoveWatching={removeWatching}
+              onRemoveWatcher={removeWatcher}
+            />
+          </section>
+        </>
+      )}
     </div>
   );
 }
@@ -231,15 +230,15 @@ function PartnerArea({
   pending,
   accepted,
   partnerDevicesByOwner,
-  token,
-  onChanged,
+  onRemoveWatching,
+  onRemoveWatcher,
 }: {
   emptyLabel: string;
   pending: Array<WatchingPartner | WatcherPartner>;
   accepted: Array<WatchingPartner | WatcherPartner>;
   partnerDevicesByOwner: Map<string, Device[]>;
-  token: string;
-  onChanged: () => void;
+  onRemoveWatching: (id: string) => Promise<void>;
+  onRemoveWatcher: (id: string) => Promise<void>;
 }) {
   const partners = [...pending, ...accepted];
 
@@ -254,8 +253,8 @@ function PartnerArea({
               <PendingPartnerCard
                 key={partner.id}
                 partner={partner}
-                token={token}
-                onChanged={onChanged}
+                onRemoveWatching={onRemoveWatching}
+                onRemoveWatcher={onRemoveWatcher}
               />
             ) : (
               <PartnerCard
@@ -266,8 +265,8 @@ function PartnerArea({
                     ? (partnerDevicesByOwner.get(partner.user.id) ?? [])
                     : []
                 }
-                token={token}
-                onChanged={onChanged}
+                onRemoveWatching={onRemoveWatching}
+                onRemoveWatcher={onRemoveWatcher}
               />
             ),
           )}
@@ -278,11 +277,9 @@ function PartnerArea({
 }
 
 function InviteButton({
-  token,
-  onInvited,
+  onInvitePartner,
 }: {
-  token: string;
-  onInvited: () => void;
+  onInvitePartner: (email: string) => Promise<void>;
 }) {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
@@ -305,9 +302,8 @@ function InviteButton({
     setError(null);
     setLoading(true);
     try {
-      await api.invitePartner(token, email);
+      await onInvitePartner(email);
       close();
-      onInvited();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send invite");
     } finally {
@@ -357,12 +353,12 @@ function InviteButton({
 
 function PendingPartnerCard({
   partner,
-  token,
-  onChanged,
+  onRemoveWatching,
+  onRemoveWatcher,
 }: {
   partner: WatchingPartner | WatcherPartner;
-  token: string;
-  onChanged: () => void;
+  onRemoveWatching: (id: string) => Promise<void>;
+  onRemoveWatcher: (id: string) => Promise<void>;
 }) {
   const [action, setAction] = useState<"remove" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -374,9 +370,8 @@ function PendingPartnerCard({
     setError(null);
     try {
       await ("digest_cadence" in partner
-        ? api.deleteWatching(token, partner.id)
-        : api.deleteWatcher(token, partner.id));
-      onChanged();
+        ? onRemoveWatching(partner.id)
+        : onRemoveWatcher(partner.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to remove request");
       setAction(null);
@@ -435,13 +430,13 @@ function PendingPartnerCard({
 function PartnerCard({
   partner,
   devices,
-  token,
-  onChanged,
+  onRemoveWatching,
+  onRemoveWatcher,
 }: {
   partner: WatchingPartner | WatcherPartner;
   devices: Device[];
-  token: string;
-  onChanged: () => void;
+  onRemoveWatching: (id: string) => Promise<void>;
+  onRemoveWatcher: (id: string) => Promise<void>;
 }) {
   const { route } = useLocation();
   const isWatching = "digest_cadence" in partner;
@@ -455,9 +450,8 @@ function PartnerCard({
     setError(null);
     try {
       await ("digest_cadence" in partner
-        ? api.deleteWatching(token, partner.id)
-        : api.deleteWatcher(token, partner.id));
-      onChanged();
+        ? onRemoveWatching(partner.id)
+        : onRemoveWatcher(partner.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to remove partner");
       setAction(null);
@@ -549,14 +543,15 @@ function PartnerCard({
 
 function DeviceCard({
   device,
-  token,
-  viewerUserId,
-  onChanged,
+  onUpdateDevice,
+  onRemoveDevice,
 }: {
   device: Device;
-  token: string;
-  viewerUserId: string;
-  onChanged: () => void;
+  onUpdateDevice: (
+    id: string,
+    patch: { name?: string; enabled?: boolean },
+  ) => Promise<void>;
+  onRemoveDevice: (id: string) => Promise<void>;
 }) {
   const { route } = useLocation();
   const [name, setName] = useState(device.name);
@@ -595,9 +590,8 @@ function DeviceCard({
     setSaving(true);
     setError(null);
     try {
-      await api.patchDevice(token, device.id, { name, enabled });
+      await onUpdateDevice(device.id, { name, enabled });
       dialogRef.current?.close();
-      onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save");
     } finally {
@@ -609,16 +603,8 @@ function DeviceCard({
     setDeleting(true);
     setError(null);
     try {
-      await api.deleteDevice(token, device.id);
-      await removeDeviceFromCachedDataFeed(
-        viewerUserId,
-        viewerUserId,
-        device.id,
-      ).catch((err) => {
-        console.warn("[home] failed to remove deleted device from cache", err);
-      });
+      await onRemoveDevice(device.id);
       closeDeleteDialog();
-      onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete device");
     } finally {

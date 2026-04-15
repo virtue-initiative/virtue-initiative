@@ -6,17 +6,21 @@ import {
   prerender as ssr,
 } from "preact-iso";
 import { useEffect, useRef, useState } from "preact/hooks";
+import { SWRConfig } from "swr";
 
 import { api } from "./api";
 import { AuthProvider, useAuth } from "./context/auth";
 import { E2EEProvider } from "./context/e2ee";
 import { Header } from "./components/Header";
+import { usePartners } from "./hooks/usePartners";
+import { useUser } from "./hooks/useUser";
 import { Home } from "./pages/Home/index";
 import { Logs } from "./pages/Logs/index";
 import { Auth } from "./pages/Auth/index";
 import { Settings } from "./pages/Settings/index";
 import { NotFound } from "./pages/_404";
-import { GLOBAL_ALERT_EVENT, PARTNERS_CHANGED_EVENT } from "./events";
+import { GLOBAL_ALERT_EVENT } from "./events";
+import { appSWRConfig } from "./swr";
 import "./style.css";
 
 const GLOBAL_MESSAGE_KEY = "virtue_global_link_message";
@@ -30,6 +34,8 @@ type GlobalAlert = {
 
 function GlobalEmailActionBanner() {
   const { token } = useAuth();
+  const { acceptPartnerInvite } = usePartners();
+  const { user } = useUser();
   const [alerts, setAlerts] = useState<GlobalAlert[]>([]);
   const timeoutsRef = useRef<number[]>([]);
   const loadedVerificationNoticeRef = useRef<string | null>(null);
@@ -171,12 +177,10 @@ function GlobalEmailActionBanner() {
       return;
     }
 
-    api
-      .acceptPartnerInvite(token, inviteToken)
+    acceptPartnerInvite(inviteToken)
       .then(() => {
         pushAlert("Partner invite accepted.", false);
         clearInviteToken();
-        window.dispatchEvent(new CustomEvent(PARTNERS_CHANGED_EVENT));
       })
       .catch((err: unknown) => {
         pushAlert(
@@ -185,7 +189,7 @@ function GlobalEmailActionBanner() {
         );
         clearInviteToken();
       });
-  }, [token]);
+  }, [acceptPartnerInvite, token]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !token) {
@@ -202,27 +206,16 @@ function GlobalEmailActionBanner() {
       return;
     }
 
-    let cancelled = false;
+    if (!user || user.email_verified) {
+      return;
+    }
 
-    api
-      .getUser(token)
-      .then((user) => {
-        if (cancelled || user.email_verified) {
-          return;
-        }
-
-        loadedVerificationNoticeRef.current = token;
-        pushAlert(
-          "Your email is not verified. Check Settings to resend the verification email.",
-          true,
-        );
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-    };
-  }, [token]);
+    loadedVerificationNoticeRef.current = token;
+    pushAlert(
+      "Your email is not verified. Check Settings to resend the verification email.",
+      true,
+    );
+  }, [token, user]);
 
   if (alerts.length === 0) {
     return null;
@@ -293,9 +286,11 @@ function AppShell() {
 export function App() {
   return (
     <AuthProvider>
-      <E2EEProvider>
-        <AppShell />
-      </E2EEProvider>
+      <SWRConfig value={appSWRConfig}>
+        <E2EEProvider>
+          <AppShell />
+        </E2EEProvider>
+      </SWRConfig>
     </AuthProvider>
   );
 }

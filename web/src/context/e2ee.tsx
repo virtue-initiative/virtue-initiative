@@ -1,7 +1,7 @@
 import { createContext } from "preact";
 import { useContext, useEffect, useState, useCallback } from "preact/hooks";
-import { api } from "../api";
 import { decryptBatch, importUserPrivateKey, unwrapBatchKey } from "../crypto";
+import { useUser } from "../hooks/useUser";
 import { useAuth } from "./auth";
 
 interface E2EEState {
@@ -20,6 +20,7 @@ export function E2EEProvider({
   children: preact.ComponentChildren;
 }) {
   const { token, wrappingKey } = useAuth();
+  const { user, isLoading: userLoading } = useUser();
   const [privateKey, setPrivateKeyState] = useState<CryptoKey | null>(null);
   const [ready, setReady] = useState(false);
 
@@ -49,13 +50,20 @@ export function E2EEProvider({
       return;
     }
 
+    if (userLoading) {
+      setReady(false);
+      return;
+    }
+
     let cancelled = false;
     setReady(false);
 
     async function restorePrivateKey() {
       try {
-        const user = await api.getUser(token);
-        if (cancelled) return;
+        if (!user) {
+          setPrivateKeyState(null);
+          return;
+        }
 
         if (!user.priv_key) {
           setPrivateKeyState(null);
@@ -86,7 +94,7 @@ export function E2EEProvider({
     return () => {
       cancelled = true;
     };
-  }, [clearKey, token, wrappingKey]);
+  }, [clearKey, token, wrappingKey, user, userLoading]);
 
   return (
     <E2EEContext.Provider
