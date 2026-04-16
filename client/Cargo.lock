@@ -6018,6 +6018,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "virtue-core",
+ "zbus",
 ]
 
 [[package]]
