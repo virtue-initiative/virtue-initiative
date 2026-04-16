@@ -3,6 +3,9 @@
 
 use anyhow::Result;
 use i_slint_backend_winit::WinitWindowAccessor;
+use windows::Win32::UI::Shell::ShellExecuteW;
+use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+use windows::core::PCWSTR;
 use winit::dpi::PhysicalSize;
 use winit::platform::windows::{IconExtWindows, WindowExtWindows};
 use winit::window::Icon;
@@ -11,6 +14,7 @@ use virtue_windows::config::{ClientPaths, build_core_config};
 use virtue_windows::runtime_env::apply_runtime_env;
 use virtue_windows::service_log::ServiceLogger;
 use virtue_windows::session::SessionManager;
+use virtue_windows::win_text::to_wide;
 
 slint::slint! {
     import { Button, LineEdit, VerticalBox, HorizontalBox } from "std-widgets.slint";
@@ -18,7 +22,7 @@ slint::slint! {
     export component AuthWindow inherits Window {
         in property <string> build_label;
 
-        title: "Virtue " + build_label;
+        title: "Virtue - virtueinitiative.org " + build_label;
         width: 420px;
         height: 320px;
 
@@ -32,6 +36,7 @@ slint::slint! {
         callback login_request(string, string);
         callback logout_request();
         callback close_request();
+        callback open_website_request();
 
         Rectangle {
             background: #eef3f8;
@@ -89,6 +94,13 @@ slint::slint! {
                             font-size: 14px;
                         }
 
+                        Button {
+                            text: "Open virtueinitiative.org";
+                            clicked => {
+                                root.open_website_request();
+                            }
+                        }
+
                         HorizontalBox {
                             spacing: 10px;
 
@@ -122,6 +134,13 @@ slint::slint! {
                             input-type: InputType.password;
                         }
 
+                        Button {
+                            text: "Open virtueinitiative.org";
+                            clicked => {
+                                root.open_website_request();
+                            }
+                        }
+
                         HorizontalBox {
                             spacing: 10px;
 
@@ -147,6 +166,7 @@ slint::slint! {
 }
 
 const BUILD_LABEL: &str = virtue_core::BUILD_LABEL;
+const VIRTUE_WEBSITE_URL: &str = "https://virtueinitiative.org";
 
 fn main() -> Result<()> {
     let paths = ClientPaths::discover()?;
@@ -182,6 +202,10 @@ fn main() -> Result<()> {
 
     ui.on_close_request(|| {
         let _ = slint::quit_event_loop();
+    });
+
+    ui.on_open_website_request(|| {
+        let _ = open_virtue_website();
     });
 
     let login_weak = ui.as_weak();
@@ -281,4 +305,28 @@ fn configure_taskbar_icon(ui: &AuthWindow) {
         winit_window.set_taskbar_icon(Some(icon.clone()));
         winit_window.set_window_icon(Some(icon));
     });
+}
+
+fn open_virtue_website() -> Result<()> {
+    let operation = to_wide("open");
+    let target = to_wide(VIRTUE_WEBSITE_URL);
+    let result = unsafe {
+        ShellExecuteW(
+            None,
+            PCWSTR(operation.as_ptr()),
+            PCWSTR(target.as_ptr()),
+            None,
+            None,
+            SW_SHOWNORMAL,
+        )
+    };
+
+    if (result.0 as usize) <= 32 {
+        Err(anyhow::anyhow!(
+            "ShellExecuteW failed with code {}",
+            result.0 as usize
+        ))
+    } else {
+        Ok(())
+    }
 }
