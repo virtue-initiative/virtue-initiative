@@ -1,0 +1,41 @@
+.logs-badge-red {
+  background: var(--danger);
+  color: #fff;
+  border-radius: 5px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.logs-verify-badge {
+  border-radius: 4px;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.logs-verify-badge--failed {
+  background: var(--danger);
+  color: #fff;
+}
+
+.logs-verify-badge--moderate {
+  background: #f57c00;
+  color: #fff;
+}
+
+.logs-verify-badge--alert {
+  background: var(--warning);
+  color: #fff;
+}
+
+.logs-password-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}

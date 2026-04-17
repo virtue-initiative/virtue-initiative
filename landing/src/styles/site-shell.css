@@ -1,0 +1,144 @@
+:root {
+  --site-shell-max: 960px;
+  --help-shell-max: 1120px;
+  --site-sidebar-width: 240px;
+  --site-layout-gap: 0.9rem;
+  --site-content-max: 860px;
+}
+
+body {
+  line-height: 1.65;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.site-container {
+  max-width: var(--site-shell-max);
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+.help-page .site-container {
+  max-width: var(--help-shell-max);
+}
+
+.site-header-shell {
+  padding: 3rem 0 2.5rem;
+}
+
+.help-page .site-header-shell {
+  padding-bottom: 1.5rem;
+}
+
+.site-header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.site-header-copy {
+  min-width: 0;
+}
+
+.site-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.site-header-actions .btn,
+.site-header-actions .control {
+  height: 2.75rem;
+}
+
+.site-header-actions .btn {
+  display: inline-flex;
+  align-items: center;
+}
+
+.site-header-actions .control-icon {
+  width: 2.75rem;
+  min-width: 2.75rem;
+}
+
+.btn-help {
+  margin-top: 1.25rem;
+}
+
+.section-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.site-wordmark {
+  display: inline-block;
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  line-height: 1.1;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.site-wordmark:hover {
+  text-decoration: none;
+}
+
+.site-tagline {
+  margin-top: 0.4rem;
+  color: var(--text-muted);
+  font-size: 1rem;
+}
+
+@media (max-width: 720px) {
+  .site-header-top {
+    flex-direction: column;
+  }
+
+  .site-header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+.site-main {
+  flex: 1 0 auto;
+  max-width: var(--site-shell-max);
+  margin: 0 auto;
+  padding: 2rem 0 4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 3rem;
+  padding-inline: 1.5rem;
+}
+
+.site-main > * {
+  min-width: 0;
+}
+
+.site-footer {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  padding: 1.5rem 0;
+  margin-top: 2rem;
+
+  & p {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    text-align: center;
+  }
+
+  & a {
+    color: var(--text-muted);
+  }
+}
+
+@media (max-width: 960px) {
+  .site-main {
+    gap: 2.5rem;
+  }
+}

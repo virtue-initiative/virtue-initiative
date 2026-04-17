@@ -1,0 +1,46 @@
+.site-main > section {
+  & h2 {
+    font-size: 1.24rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.5rem;
+  }
+
+  & p,
+  & li {
+    color: var(--text);
+    font-size: 1.03rem;
+    line-height: 1.76;
+    text-wrap: pretty;
+  }
+
+  & p + p {
+    margin-top: 0.65rem;
+  }
+
+  & ol {
+    padding-left: 1.4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    margin-top: 0.25rem;
+  }
+
+  & ul {
+    padding-left: 1.4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    margin-top: 0.25rem;
+  }
+
+  & li::marker {
+    color: var(--text-muted);
+  }
+
+  & ol li {
+    padding-left: 0.3rem;
+  }
+}
