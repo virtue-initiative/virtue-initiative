@@ -5,7 +5,7 @@ mod tray;
 
 use std::io::{self, Write};
 use std::process::ExitCode;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
@@ -153,10 +153,10 @@ fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
 fn status(paths: ClientPaths) -> Result<()> {
     let store = FileStateStore::new(&paths.state_dir)?;
     let auth = store.load_auth_state()?;
-    let status = load_service_status(&store, &auth)?;
-    let device_settings = store.load_device_settings()?;
     let mut config = build_core_config(&paths);
     config.refresh_from_runtime_file()?;
+    let status = load_service_status(&store, &auth, &config)?;
+    let device_settings = store.load_device_settings()?;
 
     println!("logged_in: {}", auth.device_credentials.is_some());
     println!("running: {}", status.is_running);
@@ -350,7 +350,11 @@ fn current_time_utc_ms() -> Result<i64> {
     i64::try_from(duration.as_millis()).context("system clock overflow")
 }
 
-fn load_service_status(store: &FileStateStore, auth: &AuthState) -> Result<ServiceStatus> {
+fn load_service_status(
+    store: &FileStateStore,
+    auth: &AuthState,
+    config: &virtue_core::Config,
+) -> Result<ServiceStatus> {
     let pending_request_count = derive_state(&store.load_audit_records()?).pending_request_count;
     let mut status = store.load_status()?.unwrap_or(ServiceStatus {
         is_authenticated: auth.device_credentials.is_some(),
@@ -364,6 +368,92 @@ fn load_service_status(store: &FileStateStore, auth: &AuthState) -> Result<Servi
         last_batch_at_ms: None,
         pending_request_count,
     });
+    status.is_running =
+        status.is_running && has_fresh_status_heartbeat(&status, config, current_time_utc_ms()?);
     status.pending_request_count = pending_request_count;
     Ok(status)
+}
+
+fn has_fresh_status_heartbeat(
+    status: &ServiceStatus,
+    config: &virtue_core::Config,
+    now_ms: i64,
+) -> bool {
+    let Some(last_loop_at_ms) = status.last_loop_at_ms else {
+        return false;
+    };
+
+    let heartbeat_window_ms = status_heartbeat_window(config).as_millis() as i64;
+    now_ms.saturating_sub(last_loop_at_ms) <= heartbeat_window_ms
+}
+
+fn status_heartbeat_window(config: &virtue_core::Config) -> Duration {
+    let base_interval = config
+        .screenshot_interval
+        .min(config.batch_interval)
+        .max(Duration::from_secs(30));
+    base_interval.checked_mul(2).unwrap_or(base_interval)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{has_fresh_status_heartbeat, status_heartbeat_window};
+    use std::path::PathBuf;
+    use std::time::Duration;
+    use virtue_core::{Config, ServiceStatus};
+
+    fn test_config() -> Config {
+        Config::new(
+            "https://example.invalid",
+            "test-device",
+            "linux",
+            PathBuf::from("/tmp/virtue-status-test"),
+            None,
+            Duration::from_secs(30),
+            Duration::from_secs(60),
+        )
+    }
+
+    fn test_status(last_loop_at_ms: Option<i64>) -> ServiceStatus {
+        ServiceStatus {
+            is_authenticated: true,
+            is_running: true,
+            device_id: Some("device-1".to_string()),
+            last_loop_at_ms,
+            last_screenshot_at_ms: None,
+            last_batch_at_ms: None,
+            pending_request_count: 0,
+        }
+    }
+
+    #[test]
+    fn status_heartbeat_window_uses_fastest_loop_interval_with_grace() {
+        let config = test_config();
+
+        assert_eq!(status_heartbeat_window(&config), Duration::from_secs(60));
+    }
+
+    #[test]
+    fn heartbeat_is_stale_when_last_loop_is_too_old() {
+        let config = test_config();
+        let status = test_status(Some(1_000));
+
+        assert!(!has_fresh_status_heartbeat(&status, &config, 62_000));
+    }
+
+    #[test]
+    fn heartbeat_is_fresh_when_last_loop_is_recent() {
+        let config = test_config();
+        let status = test_status(Some(5_000));
+
+        assert!(has_fresh_status_heartbeat(&status, &config, 64_000));
+    }
+
+    #[test]
+    fn heartbeat_is_stale_when_status_has_never_looped() {
+        let config = test_config();
+        let status = test_status(None);
+
+        assert!(!has_fresh_status_heartbeat(&status, &config, 64_000));
+    }
 }

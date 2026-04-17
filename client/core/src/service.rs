@@ -82,6 +82,9 @@ impl<P: PlatformHooks> MonitorService<P> {
             status,
         };
 
+        if service.device_credentials.is_none() {
+            service.clear_capture_schedule();
+        }
         if service.device_credentials.is_some() {
             let _ = service.refresh_device_settings();
         }
@@ -220,8 +223,7 @@ impl<P: PlatformHooks> MonitorService<P> {
         self.user_access_token = Some(access_token.clone());
         self.device_credentials = Some(device.clone());
         self.post_login_proof_batches_remaining = POST_LOGIN_PROOF_BATCH_COUNT;
-        self.status.last_screenshot_at_ms = None;
-        self.status.last_batch_at_ms = None;
+        self.clear_capture_schedule();
         self.status.is_authenticated = true;
         self.status.device_id = Some(device.device_id.clone());
         self.persist_auth_state()?;
@@ -268,6 +270,7 @@ impl<P: PlatformHooks> MonitorService<P> {
         self.storage.clear_audit_records()?;
         self.status.is_authenticated = false;
         self.status.device_id = None;
+        self.clear_capture_schedule();
         self.persist_state()
     }
 
@@ -611,8 +614,7 @@ impl<P: PlatformHooks> MonitorService<P> {
         self.storage.clear_audit_records()?;
         self.status.is_authenticated = false;
         self.status.device_id = None;
-        self.status.last_screenshot_at_ms = None;
-        self.status.last_batch_at_ms = None;
+        self.clear_capture_schedule();
         self.persist_state()
     }
 
@@ -627,9 +629,8 @@ impl<P: PlatformHooks> MonitorService<P> {
 
         let proof_burst_started = previous_post_login_proof_batches_remaining == 0
             && self.post_login_proof_batches_remaining > 0;
-        if proof_burst_started {
-            self.status.last_screenshot_at_ms = None;
-            self.status.last_batch_at_ms = None;
+        if self.device_credentials.is_none() || proof_burst_started {
+            self.clear_capture_schedule();
         }
         Ok(())
     }
@@ -697,6 +698,10 @@ impl<P: PlatformHooks> MonitorService<P> {
     }
 
     fn next_run_at_ms(&self, now_ms: i64) -> i64 {
+        if self.device_credentials.is_none() {
+            return now_ms + self.config.screenshot_interval.as_millis() as i64;
+        }
+
         let screenshot_due = self.status.last_screenshot_at_ms.map_or(
             now_ms + self.config.screenshot_interval.as_millis() as i64,
             |last| last + self.config.screenshot_interval.as_millis() as i64,
@@ -706,6 +711,11 @@ impl<P: PlatformHooks> MonitorService<P> {
             |last| last + self.config.batch_interval.as_millis() as i64,
         );
         screenshot_due.min(batch_due)
+    }
+
+    fn clear_capture_schedule(&mut self) {
+        self.status.last_screenshot_at_ms = None;
+        self.status.last_batch_at_ms = None;
     }
 
     fn batch_recipients(&self) -> CoreResult<Vec<BatchRecipient>> {
@@ -909,6 +919,52 @@ mod tests {
         service.complete_batch_upload(1003);
         assert_eq!(service.post_login_proof_batches_remaining, 0);
         assert_eq!(service.status.last_batch_at_ms, Some(1003));
+
+        let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn setup_clears_stale_capture_schedule_when_logged_out() {
+        let state_dir = temp_state_dir();
+        let storage = FileStateStore::new(&state_dir).expect("create file state store");
+        storage
+            .save_status(&ServiceStatus {
+                is_authenticated: false,
+                is_running: true,
+                device_id: None,
+                last_loop_at_ms: Some(1),
+                last_screenshot_at_ms: Some(1000),
+                last_batch_at_ms: Some(2000),
+                pending_request_count: 0,
+            })
+            .expect("save stale status");
+
+        let service = MonitorService::setup(test_config(state_dir.clone()), TestPlatform)
+            .expect("setup service");
+
+        assert_eq!(service.status.last_screenshot_at_ms, None);
+        assert_eq!(service.status.last_batch_at_ms, None);
+
+        let persisted_status = storage
+            .load_status()
+            .expect("load persisted status")
+            .expect("persisted status");
+        assert_eq!(persisted_status.last_screenshot_at_ms, None);
+        assert_eq!(persisted_status.last_batch_at_ms, None);
+
+        let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn next_run_stays_in_future_when_logged_out_with_stale_timestamps() {
+        let state_dir = temp_state_dir();
+        let mut service = build_service(state_dir.clone());
+        service.status.last_screenshot_at_ms = Some(1);
+        service.status.last_batch_at_ms = Some(1);
+
+        let next_run_at_ms = service.next_run_at_ms(10_000);
+
+        assert_eq!(next_run_at_ms, 10_000 + 300_000);
 
         let _ = fs::remove_dir_all(state_dir);
     }
