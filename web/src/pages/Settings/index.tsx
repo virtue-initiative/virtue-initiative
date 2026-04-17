@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { User } from "../../api";
+import { Dialog, DialogActions, DialogHeader } from "../../components/Dialog";
 import { useAuth } from "../../context/auth";
 import { usePartners } from "../../hooks/usePartners";
 import {
@@ -33,15 +34,15 @@ export function Settings() {
   const [name, setName] = useState("");
   const [nameStatus, setNameStatus] = useState<string | null>(null);
   const [savedButtonUntil, setSavedButtonUntil] = useState<number>(0);
+  const [emailScheduleSavedButtonUntil, setEmailScheduleSavedButtonUntil] =
+    useState<number>(0);
   const [verificationLastSent, setVerificationLastSent] = usePersistedState<
     number | null
   >("verificationLastSent", null);
-  const [emailFrequencyStatus, setEmailFrequencyStatus] = useState<
-    string | null
-  >(null);
   const [nameSaving, setNameSaving] = useState(false);
   const [verificationSending, setVerificationSending] = useState(false);
-  const [emailFrequencySaving, setEmailFrequencySaving] = useState(false);
+  const [emailFrequency, setEmailFrequency] =
+    useState<User["email_frequency"]>("daily");
   const [emailDigestLocalHour, setEmailDigestLocalHour] = useState(6);
   const [emailScheduleStatus, setEmailScheduleStatus] = useState<string | null>(
     null,
@@ -54,9 +55,22 @@ export function Settings() {
   const [deleteAccountPending, setDeleteAccountPending] = useState(false);
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
 
-  const VERIFICATION_RESEND_COOLDOWN = 2 * 60 * 1000; // 2 minutes
-  const verificationRecentlySent =
-    +new Date() - verificationLastSent < VERIFICATION_RESEND_COOLDOWN;
+  const [verificationTimerNow, setVerificationTimerNow] = useState(() =>
+    Date.now(),
+  );
+  const VERIFICATION_RESEND_COOLDOWN = 60 * 1000;
+  const verificationCooldownRemainingMs =
+    verificationLastSent === null
+      ? 0
+      : Math.max(
+          0,
+          VERIFICATION_RESEND_COOLDOWN -
+            (verificationTimerNow - verificationLastSent),
+        );
+  const verificationCooldownRemainingSeconds = Math.ceil(
+    verificationCooldownRemainingMs / 1000,
+  );
+  const verificationRecentlySent = verificationCooldownRemainingMs > 0;
   const loadError = userError ?? partnersError;
   const settingsLoading = userLoading || partnersLoading;
 
@@ -67,10 +81,23 @@ export function Settings() {
 
     setEmail(user.email);
     setName(user.name ?? "");
+    setEmailFrequency(user.email_frequency ?? "daily");
     setEmailDigestLocalHour(
       utcMinutesToLocalHour(user.email_digest_minutes_utc),
     );
   }, [user]);
+
+  useEffect(() => {
+    if (verificationLastSent === null || !verificationRecentlySent) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      setVerificationTimerNow(Date.now());
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [verificationLastSent, verificationRecentlySent]);
 
   useEffect(() => {
     if (savedButtonUntil <= 0) return;
@@ -84,6 +111,19 @@ export function Settings() {
     }, remaining);
     return () => window.clearTimeout(timer);
   }, [savedButtonUntil]);
+
+  useEffect(() => {
+    if (emailScheduleSavedButtonUntil <= 0) return;
+    const remaining = emailScheduleSavedButtonUntil - Date.now();
+    if (remaining <= 0) {
+      setEmailScheduleSavedButtonUntil(0);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setEmailScheduleSavedButtonUntil(0);
+    }, remaining);
+    return () => window.clearTimeout(timer);
+  }, [emailScheduleSavedButtonUntil]);
 
   const normalizedEmail = email.trim().toLowerCase();
   const trimmedName = name.trim();
@@ -105,6 +145,11 @@ export function Settings() {
   const hasDigestScheduleChanges = Boolean(
     user && emailDigestMinutesUtc !== user.email_digest_minutes_utc,
   );
+  const hasEmailFrequencyChanges = Boolean(
+    user && emailFrequency !== user.email_frequency,
+  );
+  const hasEmailScheduleChanges =
+    hasDigestScheduleChanges || hasEmailFrequencyChanges;
   const deleteConfirmationMatches =
     Boolean(user) &&
     deleteConfirmEmail.trim().toLowerCase() === user.email.toLowerCase();
@@ -149,7 +194,9 @@ export function Settings() {
           : "Verification email sent.",
         result.already_verified,
       );
-      setVerificationLastSent(Date.now());
+      const now = Date.now();
+      setVerificationLastSent(now);
+      setVerificationTimerNow(now);
     } catch (err) {
       sendToast(
         err instanceof Error
@@ -162,34 +209,34 @@ export function Settings() {
     }
   }
 
-  async function updateEmailFrequency(emailFrequency: User["email_frequency"]) {
-    if (!token) return;
-    setEmailFrequencyStatus(null);
-    setEmailFrequencySaving(true);
-    try {
-      await updateUser({ email_frequency: emailFrequency });
-      sendToast("Email preferences saved.");
-    } catch (err) {
-      setEmailFrequencyStatus(
-        err instanceof Error ? err.message : "Failed to save",
-      );
-    } finally {
-      setEmailFrequencySaving(false);
-    }
-  }
-
   async function saveEmailSchedule(e: Event) {
     e.preventDefault();
     if (!token || !user) return;
+    if (!hasEmailScheduleChanges) {
+      setEmailScheduleStatus(null);
+      return;
+    }
 
     setEmailScheduleStatus(null);
 
+    const schedulePatch: {
+      email_frequency?: User["email_frequency"];
+      email_digest_minutes_utc?: User["email_digest_minutes_utc"];
+    } = {};
+
+    if (hasEmailFrequencyChanges) {
+      schedulePatch.email_frequency = emailFrequency;
+    }
+
+    if (hasDigestScheduleChanges) {
+      schedulePatch.email_digest_minutes_utc = emailDigestMinutesUtc;
+    }
+
     setEmailScheduleSaving(true);
     try {
-      await updateUser({
-        email_digest_minutes_utc: localHourToUtcMinutes(emailDigestLocalHour),
-      });
-      setEmailScheduleStatus("Digest schedule saved.");
+      await updateUser(schedulePatch);
+      setEmailScheduleSavedButtonUntil(Date.now() + 3000);
+      setEmailScheduleStatus(null);
     } catch (err) {
       setEmailScheduleStatus(
         err instanceof Error ? err.message : "Failed to save digest schedule",
@@ -246,7 +293,7 @@ export function Settings() {
       <h1 class="settings-title">Settings</h1>
       {loadError && <p class="alert-error">{loadError.message}</p>}
       {settingsLoading && !user && !watching && (
-        <p class="settings-hint">Loading…</p>
+        <p class="hint-text">Loading…</p>
       )}
 
       {!settingsLoading && user && (
@@ -313,7 +360,7 @@ export function Settings() {
       {!settingsLoading && user && (
         <section class="card settings-section">
           <h2>Email verification</h2>
-          <p class="settings-hint">
+          <p class="hint-text settings-section-hint">
             {user.email_verified
               ? `Your email (${user.email}) is verified.`
               : `Your email (${user.email}) is not verified yet.`}
@@ -340,7 +387,7 @@ export function Settings() {
                 {verificationSending
                   ? "Sending…"
                   : verificationRecentlySent
-                    ? "Please wait 2 minutes before resending"
+                    ? `Resend verification email (Wait ${verificationCooldownRemainingSeconds}s)`
                     : "Resend verification email"}
               </button>
             </>
@@ -351,7 +398,7 @@ export function Settings() {
       {!settingsLoading && user && (
         <section class="card settings-section">
           <h2>Email notifications</h2>
-          <p class="settings-hint">
+          <p class="hint-text settings-section-hint">
             Choose how often you receive accountability emails. If you monitor
             more than one person, each email includes one summary with a section
             for each person you monitor. Digests cover the 24 hours leading up
@@ -363,14 +410,16 @@ export function Settings() {
             <select
               id="settings-email-frequency"
               class="settings-select"
-              value={user?.email_frequency ?? "daily"}
-              onChange={(e) =>
-                updateEmailFrequency(
+              value={emailFrequency}
+              onChange={(e) => {
+                setEmailFrequency(
                   (e.target as HTMLSelectElement)
                     .value as User["email_frequency"],
-                ).catch(() => {})
-              }
-              disabled={!user || emailFrequencySaving}
+                );
+                setEmailScheduleStatus(null);
+                setEmailScheduleSavedButtonUntil(0);
+              }}
+              disabled={!user || emailScheduleSaving}
             >
               <option value="none">None</option>
               <option value="alerts-only">Alerts only</option>
@@ -378,9 +427,6 @@ export function Settings() {
               <option value="weekly">Weekly</option>
             </select>
           </div>
-          {emailFrequencyStatus && (
-            <p class="alert-error">{emailFrequencyStatus}</p>
-          )}
           <form class="settings-form" onSubmit={saveEmailSchedule}>
             <div class="field settings-frequency-field">
               <label for="settings-email-digest-hour">
@@ -398,6 +444,7 @@ export function Settings() {
                     ) || 0,
                   );
                   setEmailScheduleStatus(null);
+                  setEmailScheduleSavedButtonUntil(0);
                 }}
                 disabled={!user || emailScheduleSaving}
               >
@@ -409,33 +456,29 @@ export function Settings() {
               </select>
             </div>
             {emailScheduleStatus && (
-              <p
-                class={
-                  emailScheduleStatus.toLowerCase().includes("saved")
-                    ? "alert-success"
-                    : "alert-error"
-                }
-              >
-                {emailScheduleStatus}
-              </p>
+              <p class="alert-error">{emailScheduleStatus}</p>
             )}
             <button
               class="btn btn-primary"
               type="submit"
               disabled={
-                !user || emailScheduleSaving || !hasDigestScheduleChanges
+                !user || emailScheduleSaving || !hasEmailScheduleChanges
               }
             >
-              {emailScheduleSaving ? "Saving…" : "Save digest schedule"}
+              {emailScheduleSaving
+                ? "Saving…"
+                : emailScheduleSavedButtonUntil > Date.now()
+                  ? "Saved"
+                  : "Save digest schedule"}
             </button>
           </form>
           {(watching ?? []).length === 0 ? (
-            <p class="settings-hint settings-followup-hint">
+            <p class="hint-text settings-followup-hint">
               You are not monitoring anyone yet. This setting will apply once
               you accept a partner invite.
             </p>
           ) : (
-            <p class="settings-hint settings-followup-hint">
+            <p class="hint-text settings-followup-hint">
               Currently monitoring{" "}
               {(watching ?? [])
                 .map((partner) => partner.user.name ?? partner.user.email)
@@ -449,7 +492,7 @@ export function Settings() {
       {!settingsLoading && user && (
         <section class="card settings-section settings-danger-zone">
           <h2>Delete account</h2>
-          <p class="settings-hint">
+          <p class="hint-text settings-section-hint">
             This permanently deletes your account, devices, partner
             relationships, sessions, and stored logs. This cannot be undone.
           </p>
@@ -465,8 +508,8 @@ export function Settings() {
       )}
 
       {!settingsLoading && user && (
-        <dialog ref={deleteDialogRef} class="settings-dialog">
-          <h3 class="dialog-title">Delete account</h3>
+        <Dialog dialogRef={deleteDialogRef} class="settings-dialog">
+          <DialogHeader>Delete account</DialogHeader>
           <p class="invite-desc">
             This permanently removes your account and all associated data. Type{" "}
             <strong>{user.email}</strong> to confirm.
@@ -491,15 +534,7 @@ export function Settings() {
           {deleteAccountStatus && (
             <p class="alert-error">{deleteAccountStatus}</p>
           )}
-          <div class="settings-dialog-actions">
-            <button
-              class="btn btn-danger"
-              type="button"
-              onClick={() => deleteAccountConfirmed().catch(() => {})}
-              disabled={!deleteConfirmationMatches || deleteAccountPending}
-            >
-              {deleteAccountPending ? "Deleting…" : "Delete account"}
-            </button>
+          <DialogActions>
             <button
               class="btn btn-ghost"
               type="button"
@@ -508,8 +543,16 @@ export function Settings() {
             >
               Cancel
             </button>
-          </div>
-        </dialog>
+            <button
+              class="btn btn-danger"
+              type="button"
+              onClick={() => deleteAccountConfirmed().catch(() => {})}
+              disabled={!deleteConfirmationMatches || deleteAccountPending}
+            >
+              {deleteAccountPending ? "Deleting…" : "Delete account"}
+            </button>
+          </DialogActions>
+        </Dialog>
       )}
     </div>
   );

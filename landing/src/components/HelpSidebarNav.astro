@@ -31,7 +31,7 @@ function sectionContainsPath(item: HelpNavItem, pathname: string): boolean {
             <summary
               class:list={[
                 "help-sidebar-section-summary",
-                { active: item.href === currentPath },
+                { "is-active": item.href === currentPath },
               ]}
             >
               {item.href && (
@@ -39,7 +39,7 @@ function sectionContainsPath(item: HelpNavItem, pathname: string): boolean {
                   href={item.href}
                   class:list={[
                     "help-sidebar-item",
-                    { active: item.href === currentPath },
+                    { "is-active": item.href === currentPath },
                   ]}
                 >
                   {item.label}
@@ -55,7 +55,7 @@ function sectionContainsPath(item: HelpNavItem, pathname: string): boolean {
                     class:list={[
                       "help-sidebar-item",
                       "help-sidebar-item-child",
-                      { active: child.href === currentPath },
+                      { "is-active": child.href === currentPath },
                     ]}
                   >
                     {child.label}
@@ -70,7 +70,7 @@ function sectionContainsPath(item: HelpNavItem, pathname: string): boolean {
               href={item.href}
               class:list={[
                 "help-sidebar-item",
-                { active: item.href === currentPath },
+                { "is-active": item.href === currentPath },
               ]}
             >
               {item.label}

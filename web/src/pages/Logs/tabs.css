@@ -1,0 +1,31 @@
+button.logs-fullscreen-btn {
+  width: 2rem;
+  min-width: 2rem;
+  padding: 0;
+
+  & svg {
+    width: 1.1rem;
+    height: 1.1rem;
+  }
+}
+
+@media (max-width: 600px) {
+  button.logs-fullscreen-btn {
+    display: none;
+  }
+
+  .logs-view-switcher .segmented-control__item {
+    padding: 0.28rem 0.65rem;
+    font-size: 0.8rem;
+  }
+}
+
+.logs-view-switcher .segmented-control__item {
+  padding: 0.3rem 0.85rem;
+  font-size: 0.85rem;
+}
+
+.logs-view-switcher {
+  max-width: 100%;
+  min-width: 0;
+}

@@ -68,15 +68,37 @@ export function getLogMetadata(log: DataLog) {
     );
 }
 
+export function describeRiskLevel(risk: number | undefined): string | null {
+  if (typeof risk !== "number" || Number.isNaN(risk)) {
+    return null;
+  }
+
+  const percentage = Math.round(Math.max(0, Math.min(1, risk)) * 100);
+
+  if (risk > 0.7) {
+    return `High risk (${percentage}%)`;
+  }
+  if (risk > 0.4) {
+    return `Moderate risk (${percentage}%)`;
+  }
+
+  return `Risk ${percentage}%`;
+}
+
 export function LogImage({
   imageBytes,
   onDimensions,
+  previewTitle,
+  previewSubtitle,
 }: {
   imageBytes: Uint8Array;
   onDimensions?: (width: number, height: number) => void;
+  previewTitle?: string;
+  previewSubtitle?: string;
 }) {
   const [imgSrc, setImgSrc] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
 
   useEffect(() => {
     const imageData = Uint8Array.from(imageBytes);
@@ -92,13 +114,13 @@ export function LogImage({
   return (
     <>
       <button
-        class="log-thumb-btn"
+        class="logs-thumb-button"
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => setDialogOpen(true)}
         aria-label="View screenshot"
       >
         <img
-          class="log-thumb"
+          class="logs-thumb-image"
           src={imgSrc}
           alt="screenshot"
           loading="lazy"
@@ -114,11 +136,57 @@ export function LogImage({
           }}
         />
       </button>
-      {open && (
-        <div class="img-overlay" onClick={() => setOpen(false)}>
-          <div class="img-full-frame">
+      {dialogOpen && (
+        <div class="logs-preview-overlay" onClick={() => setDialogOpen(false)}>
+          <div
+            class="logs-preview-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Screenshot preview"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div class="logs-preview-heading">
+              <div class="logs-preview-header">
+                {previewTitle && (
+                  <p class="logs-preview-meta-title" aria-live="polite">
+                    {previewTitle}
+                  </p>
+                )}
+                <button
+                  class="logs-preview-close"
+                  type="button"
+                  aria-label="Close screenshot preview"
+                  onClick={() => setDialogOpen(false)}
+                >
+                  ×
+                </button>
+              </div>
+              {previewSubtitle && (
+                <p class="logs-preview-meta-subtitle">{previewSubtitle}</p>
+              )}
+            </div>
+            <button
+              class="logs-preview-image-button"
+              type="button"
+              onClick={() => {
+                setDialogOpen(false);
+                setLightboxOpen(true);
+              }}
+              aria-label="Open image in fullscreen"
+            >
+              <img class="logs-preview-image" src={imgSrc} alt="screenshot" />
+            </button>
+          </div>
+        </div>
+      )}
+      {lightboxOpen && (
+        <div
+          class="logs-lightbox-overlay"
+          onClick={() => setLightboxOpen(false)}
+        >
+          <div class="logs-lightbox-frame">
             <img
-              class="img-full"
+              class="logs-lightbox-image"
               src={imgSrc}
               alt="screenshot"
               onClick={(e) => e.stopPropagation()}

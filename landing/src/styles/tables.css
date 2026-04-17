@@ -1,0 +1,142 @@
+.table-wrapper {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin-top: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+
+  & table {
+    border: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .table-wrapper {
+    max-width: calc(100vw - 3rem);
+  }
+
+  .table-wrapper table {
+    width: max-content;
+    min-width: 100%;
+    max-width: none;
+    font-size: 0.84rem;
+  }
+
+  .table-wrapper th,
+  .table-wrapper td {
+    padding: 0.5rem 0.7rem;
+    white-space: nowrap;
+  }
+
+  .table-wrapper th:first-child,
+  .table-wrapper td:first-child {
+    min-width: 10.5rem;
+    white-space: normal;
+  }
+
+  .table-wrapper th {
+    font-size: 0.8rem;
+  }
+
+  .table-wrapper td.yes svg,
+  .table-wrapper td.no svg {
+    width: 1rem;
+    height: 1rem;
+  }
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+
+  & thead tr {
+    background: var(--bg-subtle);
+  }
+
+  & th,
+  & td {
+    padding: 0.65rem 1rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+
+    &:not(:first-child) {
+      text-align: center;
+    }
+  }
+
+  & th {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+
+    & sup {
+      font-size: 0.7em;
+      line-height: 0;
+    }
+
+    & sup a {
+      color: inherit;
+      text-decoration: none;
+    }
+  }
+
+  & tbody {
+    & tr:last-child td {
+      border-bottom: none;
+    }
+
+    & tr:hover {
+      background: var(--bg-subtle);
+    }
+  }
+
+  & td.yes,
+  & td.no {
+    padding-top: 0.55rem;
+    padding-bottom: 0.55rem;
+
+    & svg {
+      display: inline-block;
+      width: 1.1rem;
+      height: 1.1rem;
+      vertical-align: middle;
+    }
+  }
+
+  & td.yes {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  & td.no {
+    color: var(--text-muted);
+  }
+
+  & td.na {
+    color: var(--text-muted);
+  }
+}
+
+.table-footnotes {
+  margin-top: 0.6rem;
+
+  & p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+  }
+
+  & sup {
+    font-size: 0.75em;
+    line-height: 0;
+  }
+}

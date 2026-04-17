@@ -1,0 +1,56 @@
+.app-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.app-drawer-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  min-width: 2.25rem;
+  height: 2.25rem;
+  min-height: 2.25rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0;
+  cursor: pointer;
+  flex: 0 0 auto;
+  appearance: none;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+
+  & svg {
+    width: 1.1rem;
+    height: 1.1rem;
+  }
+
+  &:hover {
+    background: var(--bg-subtle);
+    color: var(--text);
+  }
+}
+
+.app-drawer-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  border: 0;
+  padding: 0;
+  background: color-mix(in srgb, var(--overlay) 78%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+.app-drawer-backdrop.is-open {
+  display: block;
+  opacity: 1;
+  pointer-events: auto;
+}

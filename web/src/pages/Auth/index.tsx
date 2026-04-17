@@ -180,16 +180,16 @@ export function Auth() {
         <p class="auth-subtitle">Accountability starts here.</p>
 
         {(mode === "login" || mode === "signup") && (
-          <div class="auth-tabs">
+          <div class="segmented-control auth-tabs">
             <button
-              class={`auth-tab ${mode === "login" ? "active" : ""}`}
+              class={`segmented-control__item${mode === "login" ? " is-active" : ""}`}
               onClick={() => switchMode("login")}
               type="button"
             >
               Log in
             </button>
             <button
-              class={`auth-tab ${mode === "signup" ? "active" : ""}`}
+              class={`segmented-control__item${mode === "signup" ? " is-active" : ""}`}
               onClick={() => switchMode("signup")}
               type="button"
             >
@@ -199,16 +199,16 @@ export function Auth() {
         )}
 
         {mode === "forgot" && (
-          <p class="settings-hint">
+          <p class="hint-text auth-flow-hint">
             Enter your email to receive a password reset link.
           </p>
         )}
         {mode === "reset" && (
           <>
-            <p class="settings-hint">
+            <p class="hint-text auth-flow-hint">
               Choose a new password to complete the reset for the account below.
             </p>
-            <p class="alert-error">
+            <p class="alert-error auth-flow-hint">
               Resetting your password will generate a new encryption keypair for
               this account. Previously uploaded batches will remain
               inaccessible, and you should sign back in on your Virtue clients
@@ -217,7 +217,7 @@ export function Auth() {
           </>
         )}
         {inviteToken && (
-          <p class="settings-hint">
+          <p class="hint-text auth-flow-hint">
             This sign-in or sign-up will also accept your pending partner
             invite.
           </p>
@@ -301,7 +301,7 @@ export function Auth() {
           )}
 
           {mode === "signup" && (
-            <p class="settings-hint">
+            <p class="hint-text">
               During sign-up, Virtue creates an end-to-end encryption key for
               your account. It protects your uploaded logs, screenshots, and
               blocks so only you and partners you approve can decrypt them.

@@ -1,0 +1,178 @@
+.help-doc {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  color: var(--text);
+
+  & img {
+    max-width: 100%;
+    height: auto;
+  }
+
+  & svg {
+    max-width: 100%;
+    height: auto;
+  }
+
+  & h1 {
+    margin: 0 0 0.8rem;
+    padding-bottom: 0.7rem;
+    border-bottom: 1px solid var(--border);
+    font-size: clamp(1.5rem, 2.8vw, 1.95rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.08;
+    color: var(--text-muted);
+    text-wrap: balance;
+  }
+
+  & h2 {
+    margin: 0.75rem 0;
+    font-size: clamp(1.35rem, 2.1vw, 1.6rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    color: var(--text);
+    text-wrap: balance;
+    scroll-margin-top: 1.25rem;
+  }
+
+  & h3 {
+    margin: 0.45rem 0;
+    font-size: 1.12rem;
+    font-weight: 650;
+    letter-spacing: -0.015em;
+    line-height: 1.25;
+    color: var(--text);
+
+    h2 + & {
+      margin-top: 0.45rem;
+    }
+  }
+
+  & p,
+  & li {
+    font-size: 1.03rem;
+    color: var(--text);
+    line-height: 1.78;
+    text-wrap: pretty;
+  }
+
+  & ul,
+  & ol {
+    padding-left: 1.4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    /* margin: 0.25rem 0 0.55rem; */
+  }
+
+  & li::marker {
+    color: var(--text-muted);
+  }
+
+  & ol li {
+    padding-left: 0.3rem;
+  }
+
+  & p + p,
+  & p + ul,
+  & p + ol,
+  & ul + p,
+  & ol + p,
+  & ul + ul,
+  & ol + ol {
+    margin-top: 0.1rem;
+  }
+
+  & h1 + p {
+    margin-top: -0.05rem;
+  }
+
+  & strong {
+    font-weight: 650;
+    color: var(--text);
+  }
+
+  & code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.88em;
+    background: var(--bg-subtle);
+    border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+    padding: 0.12rem 0.38rem;
+    border-radius: 6px;
+  }
+
+  & pre {
+    overflow-x: auto;
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.15rem 1.2rem;
+    margin: 0.5rem 0;
+    line-height: 1.65;
+    font-size: 0.95rem;
+
+    & code {
+      padding: 0;
+      background: transparent;
+      border: 0;
+      border-radius: 0;
+    }
+  }
+
+  & blockquote {
+    margin: 0.65rem 0;
+    padding: 1.05rem 1.15rem 1.05rem 1.3rem;
+    border-left: 4px solid var(--accent);
+    border-radius: 0 10px 10px 0;
+    background:
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--accent) 10%, transparent),
+        transparent 55%
+      ),
+      var(--bg-subtle);
+    color: var(--text);
+
+    & p {
+      margin: 0;
+      color: color-mix(in srgb, var(--text) 92%, var(--text-muted));
+    }
+
+    & p + p {
+      margin-top: 0.75rem;
+    }
+  }
+}
+
+@media (max-width: 960px) {
+  .help-doc {
+    gap: 0.8rem;
+
+    & h1 {
+      font-size: clamp(1.35rem, 6.8vw, 1.7rem);
+      margin-bottom: 0.75rem;
+      padding-bottom: 0.6rem;
+    }
+
+    & h2 {
+      margin: 0.65rem 0;
+      font-size: 1.3rem;
+    }
+
+    & h3 {
+      margin: 0.4rem 0;
+    }
+
+    & p,
+    & li {
+      font-size: 1rem;
+      line-height: 1.72;
+    }
+
+    & h1 + p {
+      font-size: 1.03rem;
+    }
+  }
+}
