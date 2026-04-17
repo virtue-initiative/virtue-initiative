@@ -208,7 +208,7 @@ export function Auth() {
             <p class="hint-text auth-flow-hint">
               Choose a new password to complete the reset for the account below.
             </p>
-            <p class="alert-error">
+            <p class="alert-error auth-flow-hint">
               Resetting your password will generate a new encryption keypair for
               this account. Previously uploaded batches will remain
               inaccessible, and you should sign back in on your Virtue clients
