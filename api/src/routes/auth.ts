@@ -5,8 +5,8 @@ import { z } from 'zod';
 import { authenticate } from '../middleware/auth';
 import { validateZ } from '../middleware/validation';
 import {
-  createSessionRecord,
   createEmailToken,
+  createSessionRecord,
   createUser,
   deleteUserById,
   deleteSessionByRefreshTokenHash,
@@ -186,12 +186,13 @@ function getAppUrl(c: Context<{ Bindings: Env; Variables: Variables }>) {
 async function issueEmailToken(
   db: D1Database,
   user: { id: string; email: string },
-  purpose: 'email_verification' | 'password_reset',
+  purpose: 'email_verification' | 'email_change' | 'password_reset',
   ttlMs: number,
 ) {
   await invalidateEmailTokens(db, user.id, purpose);
   const token = generateOpaqueToken();
   const now = Date.now();
+
   await createEmailToken(db, {
     id: uuidv4(),
     user_id: user.id,
@@ -201,20 +202,24 @@ async function issueEmailToken(
     expires_at: now + ttlMs,
     created_at: now,
   });
+
   return token;
 }
 
 async function sendVerificationEmail(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   user: { id: string; email: string; name?: string | null },
+  token: string,
+  options?: {
+    purpose?: 'email_verification' | 'email_change';
+    next?: '/settings';
+  },
 ) {
-  const token = await issueEmailToken(
-    c.env.DB,
-    user,
-    'email_verification',
-    EMAIL_VERIFICATION_TTL_MS,
-  );
-  const verifyUrl = `${getAppUrl(c)}/?verify_email_token=${encodeURIComponent(token)}`;
+  const params = new URLSearchParams({ token });
+  if (options?.next) {
+    params.set('next', options.next);
+  }
+  const verifyUrl = `${getAppUrl(c)}/verify-email?${params.toString()}`;
   const email = renderEmailVerificationTemplate({
     appName: c.env.APP_NAME,
     appUrl: getAppUrl(c),
@@ -231,7 +236,7 @@ async function sendVerificationEmail(
     text: email.text,
     html: email.html,
     related_user_id: user.id,
-    metadata: { purpose: 'email_verification', verifyUrl },
+    metadata: { purpose: options?.purpose ?? 'email_verification', verifyUrl },
   });
 }
 
@@ -240,7 +245,7 @@ async function sendPasswordResetEmail(
   user: { id: string; email: string; name?: string | null },
 ) {
   const token = await issueEmailToken(c.env.DB, user, 'password_reset', PASSWORD_RESET_TTL_MS);
-  const resetUrl = `${getAppUrl(c)}/?reset_password_token=${encodeURIComponent(token)}`;
+  const resetUrl = `${getAppUrl(c)}/forgot-password?token=${encodeURIComponent(token)}`;
   const email = renderPasswordResetTemplate({
     appName: c.env.APP_NAME,
     appUrl: getAppUrl(c),
@@ -264,7 +269,7 @@ async function sendPasswordResetEmail(
 async function getValidTokenRecord(
   db: D1Database,
   rawToken: string,
-  purpose: 'email_verification' | 'password_reset',
+  purpose?: 'email_verification' | 'email_change' | 'password_reset',
 ) {
   const token = await findEmailTokenByHash(db, hashOpaqueToken(rawToken), purpose);
   if (!token || !token.user_id || token.consumed_at || token.expires_at < Date.now()) {
@@ -323,18 +328,23 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
     name,
     email_digest_minutes_utc: normalizeDigestMinutesUtc(email_digest_minutes_utc),
   });
-  await sendVerificationEmail(c, { id: userId, email: normalizedEmail, name });
-  const accessToken = await createSession(c, userId);
+  const verificationToken = await issueEmailToken(
+    c.env.DB,
+    { id: userId, email: normalizedEmail },
+    'email_verification',
+    EMAIL_VERIFICATION_TTL_MS,
+  );
+  await sendVerificationEmail(c, { id: userId, email: normalizedEmail, name }, verificationToken);
 
   return c.json(
     {
+      ok: true,
       user: {
         id: userId,
         email: normalizedEmail,
         email_verified: false,
         ...(name ? { name } : {}),
       },
-      access_token: accessToken,
     },
     201,
   );
@@ -354,6 +364,10 @@ auth.post('/login', validateZ('json', loginSchema), async (c) => {
 
   if (!user || !(await verifyPasswordAuth(decodedPasswordAuth, user.password_hash))) {
     return c.json({ error: 'Invalid email or password' }, 401);
+  }
+
+  if (user.email_verified !== 1) {
+    return c.json({ error: 'Please verify your email before logging in.' }, 403);
   }
 
   const accessToken = await createSession(c, user.id);
@@ -450,9 +464,6 @@ auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema),
   }
 
   await updateUser(c.env.DB, userId, {
-    ...(emailChanged
-      ? { email: normalizedEmail, email_verified: false, email_bounced_at: null }
-      : {}),
     name,
     email_frequency,
     email_digest_minutes_utc:
@@ -464,14 +475,33 @@ auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema),
   });
 
   if (emailChanged) {
-    await sendVerificationEmail(c, {
-      id: userId,
-      email: normalizedEmail!,
-      name: name ?? user.name,
-    });
+    const verificationToken = await issueEmailToken(
+      c.env.DB,
+      { id: userId, email: normalizedEmail! },
+      'email_change',
+      EMAIL_VERIFICATION_TTL_MS,
+    );
+    await sendVerificationEmail(
+      c,
+      {
+        id: userId,
+        email: normalizedEmail!,
+        name: name ?? user.name,
+      },
+      verificationToken,
+      { purpose: 'email_change', next: '/settings' },
+    );
   }
 
-  return c.json({ ok: true });
+  return c.json({
+    ok: true,
+    ...(emailChanged
+      ? {
+          email_verification_required: true,
+          pending_email: normalizedEmail,
+        }
+      : {}),
+  });
 });
 
 auth.delete('/user', authenticate('access'), validateZ('json', deleteUserSchema), async (c) => {
@@ -504,17 +534,41 @@ auth.delete('/user', authenticate('access'), validateZ('json', deleteUserSchema)
 
 auth.post('/email-verification/validate', validateZ('json', verifyEmailSchema), async (c) => {
   const { token } = c.req.valid('json');
-  const record = await getValidTokenRecord(c.env.DB, token, 'email_verification');
+  const record = await getValidTokenRecord(c.env.DB, token);
 
-  if (!record) {
+  if (!record || (record.purpose !== 'email_verification' && record.purpose !== 'email_change')) {
     return c.json({ error: 'Invalid or expired token' }, 400);
   }
 
-  await updateUser(c.env.DB, record.user_id, { email_verified: true, email_bounced_at: null });
-  await consumeEmailToken(c.env.DB, record.id, Date.now());
-  await invalidateEmailTokens(c.env.DB, record.user_id, 'email_verification');
+  const verificationPurpose = record.purpose;
 
-  return c.json({ ok: true, email: record.email });
+  if (verificationPurpose === 'email_change') {
+    const existingUser = await findUserByEmail(c.env.DB, record.email);
+    if (existingUser && existingUser.id !== record.user_id) {
+      return c.json({ error: 'Email is already in use' }, 409);
+    }
+
+    await updateUser(c.env.DB, record.user_id, {
+      email: record.email,
+      email_verified: true,
+      email_bounced_at: null,
+    });
+    await consumeEmailToken(c.env.DB, record.id, Date.now());
+    await invalidateEmailTokens(c.env.DB, record.user_id, 'email_change');
+  } else {
+    await updateUser(c.env.DB, record.user_id, { email_verified: true, email_bounced_at: null });
+    await consumeEmailToken(c.env.DB, record.id, Date.now());
+    await invalidateEmailTokens(c.env.DB, record.user_id, 'email_verification');
+  }
+
+  const accessToken = await createSession(c, record.user_id);
+
+  return c.json({
+    ok: true,
+    email: record.email,
+    access_token: accessToken,
+    purpose: verificationPurpose,
+  });
 });
 
 auth.post('/email-verification', authenticate('access'), async (c) => {
@@ -538,7 +592,13 @@ auth.post('/email-verification', authenticate('access'), async (c) => {
     );
   }
 
-  await sendVerificationEmail(c, user);
+  const verificationToken = await issueEmailToken(
+    c.env.DB,
+    { id: user.id, email: user.email },
+    'email_verification',
+    EMAIL_VERIFICATION_TTL_MS,
+  );
+  await sendVerificationEmail(c, user, verificationToken);
   return c.json({ ok: true });
 });
 
@@ -557,7 +617,7 @@ auth.post('/password-reset/validate', validateZ('json', passwordResetValidateSch
   const { token } = c.req.valid('json');
   const record = await getValidTokenRecord(c.env.DB, token, 'password_reset');
 
-  if (!record) {
+  if (!record || !record.user_id) {
     return c.json({ error: 'Invalid or expired token' }, 400);
   }
 
@@ -576,7 +636,7 @@ auth.post('/password-reset/finalize', validateZ('json', passwordResetSchema), as
   const { token, password_auth, password_salt, pub_key, priv_key } = c.req.valid('json');
   const record = await getValidTokenRecord(c.env.DB, token, 'password_reset');
 
-  if (!record) {
+  if (!record || !record.user_id) {
     return c.json({ error: 'Invalid or expired token' }, 400);
   }
 

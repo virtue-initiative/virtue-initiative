@@ -62,10 +62,15 @@ interface AuthState {
     password: string,
     name?: string,
   ) => Promise<{
-    access_token: string;
     userId: string;
     wrappingKey: CryptoKey;
-    privateKey: CryptoKey;
+    email: string;
+  }>;
+  verifyEmail: (token: string) => Promise<{
+    access_token: string;
+    userId: string;
+    email: string;
+    purpose: "email_verification" | "email_change";
   }>;
   rememberWrappingKey: (wrappingKey: CryptoKey) => Promise<void>;
   logout: () => Promise<void>;
@@ -147,20 +152,39 @@ export function AuthProvider({
           DEFAULT_DIGEST_LOCAL_HOUR,
         ),
       });
-      const uid = res.user.id;
       await saveWrappingKey(wk);
-      setToken(res.access_token);
-      setUserId(uid);
       setWrappingKey(wk);
       return {
-        access_token: res.access_token,
-        userId: uid,
+        userId: res.user.id,
         wrappingKey: wk,
-        privateKey: keyPair.privateKeyHandle,
+        email: res.user.email,
       };
     },
     [],
   );
+
+  const verifyEmail = useCallback(async (token: string) => {
+    const res = await api.verifyEmail(token);
+    const uid = jwtSub(res.access_token);
+
+    if (!uid) {
+      throw new Error("Verified access token is missing a subject");
+    }
+
+    const persistedWrappingKey = await loadWrappingKey().catch(() => null);
+    if (persistedWrappingKey) {
+      setWrappingKey(persistedWrappingKey);
+    }
+
+    setToken(res.access_token);
+    setUserId(uid);
+    return {
+      access_token: res.access_token,
+      userId: uid,
+      email: res.email,
+      purpose: res.purpose,
+    };
+  }, []);
 
   const refresh = useCallback(async () => {
     const res = await api.refreshToken();
@@ -218,6 +242,7 @@ export function AuthProvider({
         ready,
         login,
         signup,
+        verifyEmail,
         rememberWrappingKey,
         logout,
       }}

@@ -286,7 +286,10 @@ describe('Notification routes and tamper alerts', () => {
 
   it('suppresses tamper alerts to unverified recipient accounts', async () => {
     const { token: ownerToken } = await signupAndGetToken('unverified-owner@example.com', 'pw');
-    const { token: partnerToken } = await signupAndGetToken('unverified-partner@example.com', 'pw');
+    const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
+      'unverified-partner@example.com',
+      'pw',
+    );
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
@@ -308,6 +311,9 @@ describe('Notification routes and tamper alerts', () => {
       headers: authHeaders(partnerToken),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
+    await env.DB.prepare('UPDATE users SET email_verified = 0 WHERE id = ?')
+      .bind(uuidToBytes(partnerUserId))
+      .run();
 
     const device = await createDeviceForUser(ownerToken, 'Quiet Device', 'linux');
     const baselineCount = (await listEmailDeliveries()).length;

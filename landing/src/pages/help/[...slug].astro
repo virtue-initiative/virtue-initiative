@@ -37,7 +37,7 @@ export function getStaticPaths() {
   });
 }
 
-const SIGNUP_URL = `${APP_URL}#signup`;
+const SIGNUP_URL = `${APP_URL}/signup`;
 const { currentPath, entry } = Astro.props;
 const currentItem = findHelpItem(currentPath);
 const contentHtml = hasCompiledContent(entry)

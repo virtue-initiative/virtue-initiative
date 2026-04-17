@@ -8,11 +8,8 @@ import {
   utcMinutesToLocalHour,
   localHourToUtcMinutes,
 } from "../../utils/digest";
-import { formatDate } from "../../utils/time";
 import "./style.css";
-import { usePersistedState } from "../../hooks/usePersistedState";
 import { useUser } from "../../hooks/useUser";
-import { sendToast } from "../../utils/toast";
 
 export function Settings() {
   const { token, logout } = useAuth();
@@ -21,7 +18,6 @@ export function Settings() {
     error: userError,
     isLoading: userLoading,
     updateUser,
-    requestVerificationEmail,
     deleteUser,
   } = useUser();
   const {
@@ -34,13 +30,10 @@ export function Settings() {
   const [name, setName] = useState("");
   const [nameStatus, setNameStatus] = useState<string | null>(null);
   const [savedButtonUntil, setSavedButtonUntil] = useState<number>(0);
+  const [profileSavePending, setProfileSavePending] = useState(false);
   const [emailScheduleSavedButtonUntil, setEmailScheduleSavedButtonUntil] =
     useState<number>(0);
-  const [verificationLastSent, setVerificationLastSent] = usePersistedState<
-    number | null
-  >("verificationLastSent", null);
   const [nameSaving, setNameSaving] = useState(false);
-  const [verificationSending, setVerificationSending] = useState(false);
   const [emailFrequency, setEmailFrequency] =
     useState<User["email_frequency"]>("daily");
   const [emailDigestLocalHour, setEmailDigestLocalHour] = useState(6);
@@ -53,24 +46,11 @@ export function Settings() {
     null,
   );
   const [deleteAccountPending, setDeleteAccountPending] = useState(false);
+  const [emailChangeVerificationTarget, setEmailChangeVerificationTarget] =
+    useState<string>("");
+  const emailChangeDialogRef = useRef<HTMLDialogElement>(null);
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
 
-  const [verificationTimerNow, setVerificationTimerNow] = useState(() =>
-    Date.now(),
-  );
-  const VERIFICATION_RESEND_COOLDOWN = 60 * 1000;
-  const verificationCooldownRemainingMs =
-    verificationLastSent === null
-      ? 0
-      : Math.max(
-          0,
-          VERIFICATION_RESEND_COOLDOWN -
-            (verificationTimerNow - verificationLastSent),
-        );
-  const verificationCooldownRemainingSeconds = Math.ceil(
-    verificationCooldownRemainingMs / 1000,
-  );
-  const verificationRecentlySent = verificationCooldownRemainingMs > 0;
   const loadError = userError ?? partnersError;
   const settingsLoading = userLoading || partnersLoading;
 
@@ -86,18 +66,6 @@ export function Settings() {
       utcMinutesToLocalHour(user.email_digest_minutes_utc),
     );
   }, [user]);
-
-  useEffect(() => {
-    if (verificationLastSent === null || !verificationRecentlySent) {
-      return;
-    }
-
-    const timer = window.setInterval(() => {
-      setVerificationTimerNow(Date.now());
-    }, 1000);
-
-    return () => window.clearInterval(timer);
-  }, [verificationLastSent, verificationRecentlySent]);
 
   useEffect(() => {
     if (savedButtonUntil <= 0) return;
@@ -159,53 +127,30 @@ export function Settings() {
     if (!token) return;
     if (!hasProfileChanges) {
       setNameStatus(null);
+      setProfileSavePending(false);
       return;
     }
     setNameStatus(null);
     setNameSaving(true);
     try {
       const emailChanged = Boolean(profilePatch.email);
-      await updateUser(profilePatch);
+      const result = await updateUser(profilePatch);
       setSavedButtonUntil(Date.now() + 3000);
-      setNameStatus(
-        emailChanged
-          ? "Profile saved. Please verify your new email address."
-          : "Saved",
-      );
-
-      if (emailChanged) {
-        setVerificationLastSent(null);
+      if (emailChanged && result.email_verification_required) {
+        setNameStatus(null);
+        setProfileSavePending(true);
+        setEmailChangeVerificationTarget(
+          result.pending_email ?? normalizedEmail,
+        );
+        emailChangeDialogRef.current?.showModal();
+      } else {
+        setProfileSavePending(false);
+        setNameStatus("Saved");
       }
     } catch (err) {
       setNameStatus(err instanceof Error ? err.message : "Failed to save");
     } finally {
       setNameSaving(false);
-    }
-  }
-
-  async function resendVerificationEmail() {
-    if (!token) return;
-    setVerificationSending(true);
-    try {
-      const result = await requestVerificationEmail();
-      sendToast(
-        result.already_verified
-          ? "Your email is already verified."
-          : "Verification email sent.",
-        result.already_verified,
-      );
-      const now = Date.now();
-      setVerificationLastSent(now);
-      setVerificationTimerNow(now);
-    } catch (err) {
-      sendToast(
-        err instanceof Error
-          ? err.message
-          : "Failed to send verification email",
-        true,
-      );
-    } finally {
-      setVerificationSending(false);
     }
   }
 
@@ -310,6 +255,7 @@ export function Settings() {
                   setName((e.target as HTMLInputElement).value);
                   setNameStatus(null);
                   setSavedButtonUntil(0);
+                  setProfileSavePending(false);
                 }}
                 placeholder="Your name"
                 autoComplete="name"
@@ -325,13 +271,14 @@ export function Settings() {
                   setEmail((e.target as HTMLInputElement).value);
                   setNameStatus(null);
                   setSavedButtonUntil(0);
+                  setProfileSavePending(false);
                 }}
                 placeholder="you@example.com"
                 autoComplete="email"
                 required
               />
             </div>
-            {nameStatus && !nameStatus.toLowerCase().includes("saved") && (
+            {nameStatus && (
               <p
                 class={
                   nameStatus.toLowerCase().includes("saved")
@@ -345,53 +292,41 @@ export function Settings() {
             <button
               class="btn btn-primary"
               type="submit"
-              disabled={userLoading || nameSaving || !hasProfileChanges}
+              disabled={
+                userLoading ||
+                nameSaving ||
+                profileSavePending ||
+                !hasProfileChanges
+              }
             >
               {nameSaving
                 ? "Saving…"
-                : savedButtonUntil > Date.now()
-                  ? "Saved"
-                  : "Save"}
+                : profileSavePending
+                  ? "Pending"
+                  : savedButtonUntil > Date.now()
+                    ? "Saved"
+                    : "Save"}
             </button>
           </form>
-        </section>
-      )}
-
-      {!settingsLoading && user && (
-        <section class="card settings-section">
-          <h2>Email verification</h2>
-          <p class="hint-text settings-section-hint">
-            {user.email_verified
-              ? `Your email (${user.email}) is verified.`
-              : `Your email (${user.email}) is not verified yet.`}
-          </p>
-          {!user.email_verified && (
-            <>
-              {Boolean(user.email_bounced_at) && (
-                <p class="alert-error">
-                  Your last verification email bounced on{" "}
-                  {formatDate(user.email_bounced_at)}. Update your email above
-                  before requesting another verification email.
-                </p>
-              )}
+          <Dialog dialogRef={emailChangeDialogRef} class="settings-dialog">
+            <DialogHeader>Confirm your new email</DialogHeader>
+            <p class="invite-desc">
+              We sent a verification link to{" "}
+              <strong>
+                {emailChangeVerificationTarget || "your new email"}
+              </strong>
+              . Your account email will change after you confirm that link.
+            </p>
+            <DialogActions>
               <button
                 class="btn btn-primary"
                 type="button"
-                disabled={
-                  verificationSending ||
-                  Boolean(user.email_bounced_at) ||
-                  verificationRecentlySent
-                }
-                onClick={resendVerificationEmail}
+                onClick={() => emailChangeDialogRef.current?.close()}
               >
-                {verificationSending
-                  ? "Sending…"
-                  : verificationRecentlySent
-                    ? `Resend verification email (Wait ${verificationCooldownRemainingSeconds}s)`
-                    : "Resend verification email"}
+                Got it
               </button>
-            </>
-          )}
+            </DialogActions>
+          </Dialog>
         </section>
       )}
 
