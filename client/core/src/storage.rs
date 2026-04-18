@@ -73,20 +73,7 @@ impl FileStateStore {
     pub fn load_audit_records_at(&self, now_ms: i64) -> CoreResult<Vec<StoredAuditRecord>> {
         self.migrate_legacy_audit_log(now_ms)?;
         self.prune_audit_logs(now_ms)?;
-
-        let mut records = Vec::new();
-        for path in self.audit_log_paths()? {
-            let Some(audit_day) = audit_day_from_path(&path) else {
-                continue;
-            };
-            for record in self.read_records_from_path(&path)? {
-                records.push(StoredAuditRecord {
-                    audit_day: audit_day.clone(),
-                    record,
-                });
-            }
-        }
-        Ok(records)
+        self.load_stored_audit_records()
     }
 
     pub fn clear_audit_records(&self) -> CoreResult<()> {
@@ -131,19 +118,7 @@ impl FileStateStore {
 
     pub fn load_stop_intent(&self) -> CoreResult<Option<StopIntent>> {
         self.migrate_legacy_audit_log(current_time_utc_ms()?)?;
-        let mut records = Vec::new();
-        for path in self.audit_log_paths()? {
-            let Some(audit_day) = audit_day_from_path(&path) else {
-                continue;
-            };
-            for record in self.read_records_from_path(&path)? {
-                records.push(StoredAuditRecord {
-                    audit_day: audit_day.clone(),
-                    record,
-                });
-            }
-        }
-        for record in records.into_iter().rev() {
+        for record in self.load_stored_audit_records()?.into_iter().rev() {
             let AuditRecord::LocalLog { log } = record.record else {
                 continue;
             };
@@ -347,6 +322,22 @@ impl FileStateStore {
         }
         paths.sort();
         Ok(paths)
+    }
+
+    fn load_stored_audit_records(&self) -> CoreResult<Vec<StoredAuditRecord>> {
+        let mut records = Vec::new();
+        for path in self.audit_log_paths()? {
+            let Some(audit_day) = audit_day_from_path(&path) else {
+                continue;
+            };
+            for record in self.read_records_from_path(&path)? {
+                records.push(StoredAuditRecord {
+                    audit_day: audit_day.clone(),
+                    record,
+                });
+            }
+        }
+        Ok(records)
     }
 
     fn migrate_legacy_audit_log(&self, now_ms: i64) -> CoreResult<()> {
