@@ -4,6 +4,7 @@ mod daemon;
 mod tray;
 
 use std::io::{self, Write};
+use std::process::Command;
 use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -11,7 +12,7 @@ use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use virtue_core::audit::derive_state;
 use virtue_core::storage::FileStateStore;
-use virtue_core::{AuthState, EventData, LogEntry, MonitorService, ServiceStatus};
+use virtue_core::{AuthState, EventData, LogEntry, MonitorService, ServiceRole, ServiceStatus};
 
 use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_backend};
 use crate::config::{ClientPaths, build_core_config};
@@ -39,14 +40,28 @@ enum Commands {
         #[arg(long)]
         yes: bool,
     },
-    #[command(about = "Run the background monitoring daemon")]
-    Daemon,
+    #[command(about = "Run or control the background monitoring daemon")]
+    Daemon {
+        #[command(subcommand)]
+        command: Option<DaemonCommands>,
+    },
     #[command(about = "Show current auth, capture, and upload status")]
     Status,
     #[command(about = "Developer-only commands for test logs and batch uploads")]
     Dev {
         #[command(subcommand)]
         command: DevCommands,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum DaemonCommands {
+    #[command(about = "Start the user service via systemd")]
+    Start,
+    #[command(about = "Stop the user service via systemd and mark it as user-requested")]
+    Stop {
+        #[arg(long)]
+        yes: bool,
     },
 }
 
@@ -91,9 +106,17 @@ async fn run() -> Result<()> {
     match cli.command {
         Commands::Login { email } => login(paths, email),
         Commands::Logout { yes } => logout(paths, yes),
-        Commands::Daemon => daemon::run_daemon(&paths).await,
+        Commands::Daemon { command } => daemon_command(paths, command).await,
         Commands::Status => status(paths),
         Commands::Dev { command } => dev(paths, command),
+    }
+}
+
+async fn daemon_command(paths: ClientPaths, command: Option<DaemonCommands>) -> Result<()> {
+    match command {
+        None => daemon::run_daemon(&paths).await,
+        Some(DaemonCommands::Start) => daemon_start(),
+        Some(DaemonCommands::Stop { yes }) => daemon_stop(paths, yes),
     }
 }
 
@@ -135,7 +158,7 @@ fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
     }
 
     println!(
-        "Warning: logging out will send a log event indicating monitoring was turned off on this device."
+        "Warning: logging out will alert people monitoring you and will recreate a new device on login."
     );
 
     if !yes && !prompt_yes_no("Continue logout?", false)? {
@@ -162,6 +185,45 @@ fn status(paths: ClientPaths) -> Result<()> {
     println!("running: {}", status.is_running);
     println!("pending_request_count: {}", status.pending_request_count);
     println!(
+        "lifecycle_primary_service: {}",
+        status.lifecycle.snapshot.primary_service.as_str()
+    );
+    println!(
+        "lifecycle_computer_power: {}",
+        status.lifecycle.snapshot.computer_power.as_str()
+    );
+    println!(
+        "lifecycle_capture_availability: {}",
+        status.lifecycle.snapshot.capture_availability.as_str()
+    );
+    println!(
+        "last_stop_origin: {}",
+        status
+            .lifecycle
+            .last_stop_origin
+            .map(|value| value.as_str())
+            .unwrap_or("<none>")
+    );
+    println!(
+        "last_lifecycle_risk: {}",
+        status
+            .lifecycle
+            .last_emitted_risk
+            .map(format_risk)
+            .unwrap_or_else(|| "<none>".to_string())
+    );
+    if let Some(transition) = &status.lifecycle.last_transition {
+        println!(
+            "last_transition: {} {} -> {}",
+            transition.domain.as_str(),
+            transition.from,
+            transition.to
+        );
+        println!("last_transition_origin: {}", transition.origin.as_str());
+    } else {
+        println!("last_transition: <none>");
+    }
+    println!(
         "device_id: {}",
         status.device_id.as_deref().unwrap_or("<none>")
     );
@@ -186,8 +248,110 @@ fn status(paths: ClientPaths) -> Result<()> {
             None => "<unknown>",
         }
     );
+    println!(
+        "capability_startup: {}",
+        status.lifecycle.capabilities.startup.as_str()
+    );
+    println!(
+        "capability_shutdown: {}",
+        status.lifecycle.capabilities.shutdown.as_str()
+    );
+    println!(
+        "capability_suspend: {}",
+        status.lifecycle.capabilities.suspend.as_str()
+    );
+    println!(
+        "capability_wake: {}",
+        status.lifecycle.capabilities.wake.as_str()
+    );
+    println!(
+        "capability_explicit_user_stop: {}",
+        status.lifecycle.capabilities.explicit_user_stop.as_str()
+    );
+    println!(
+        "capability_capture_availability: {}",
+        status.lifecycle.capabilities.capture_availability.as_str()
+    );
 
     Ok(())
+}
+
+fn daemon_start() -> Result<()> {
+    run_systemctl_user(["start", "virtue.service"])?;
+    println!("Started virtue.service.");
+    Ok(())
+}
+
+fn daemon_stop(paths: ClientPaths, yes: bool) -> Result<()> {
+    if !is_user_service_active()? {
+        println!("virtue.service is already stopped.");
+        return Ok(());
+    }
+
+    println!("Warning: stopping the daemon will alert people monitoring you.");
+
+    if !yes && !prompt_yes_no("Continue stopping the daemon?", false)? {
+        println!("Daemon stop cancelled.");
+        return Ok(());
+    }
+
+    let mut service = MonitorService::setup(build_core_config(&paths), LinuxPlatformHooks::new())?;
+    service.note_stop_requested_by_user(ServiceRole::PrimaryService, "cli_daemon_stop")?;
+
+    if let Err(err) = run_systemctl_user(["stop", "virtue.service"]) {
+        let _ = service.take_stop_intent(ServiceRole::PrimaryService);
+        return Err(err);
+    }
+
+    println!("Stopped virtue.service.");
+    Ok(())
+}
+
+fn is_user_service_active() -> Result<bool> {
+    let status = Command::new("systemctl")
+        .args(["--user", "is-active", "--quiet", "virtue.service"])
+        .status()
+        .context("failed to query virtue.service status with systemctl --user")?;
+
+    match status.code() {
+        Some(0) => Ok(true),
+        Some(3) => Ok(false),
+        _ => Err(anyhow::anyhow!(
+            "systemctl --user is-active --quiet virtue.service exited with status {}",
+            status
+                .code()
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "<signal>".to_string())
+        )),
+    }
+}
+
+fn run_systemctl_user<const N: usize>(args: [&str; N]) -> Result<()> {
+    let output = Command::new("systemctl")
+        .arg("--user")
+        .args(args)
+        .output()
+        .with_context(|| format!("failed to run `systemctl --user {}`", args.join(" ")))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let details = if !stderr.is_empty() {
+        stderr
+    } else if !stdout.is_empty() {
+        stdout
+    } else {
+        "no diagnostic output".to_string()
+    };
+
+    Err(anyhow::anyhow!(
+        "`systemctl --user {}` failed: {}",
+        args.join(" "),
+        details
+    ))
 }
 
 fn dev(paths: ClientPaths, command: DevCommands) -> Result<()> {
@@ -367,10 +531,13 @@ fn load_service_status(
         last_screenshot_at_ms: None,
         last_batch_at_ms: None,
         pending_request_count,
+        lifecycle: virtue_core::LifecycleStatus::for_platform(&config.platform_name),
     });
     status.is_running =
         status.is_running && has_fresh_status_heartbeat(&status, config, current_time_utc_ms()?);
     status.pending_request_count = pending_request_count;
+    status.lifecycle.capabilities =
+        virtue_core::LifecycleCapabilities::for_platform(&config.platform_name);
     Ok(status)
 }
 
@@ -397,7 +564,10 @@ fn status_heartbeat_window(config: &virtue_core::Config) -> Duration {
 
 #[cfg(test)]
 mod tests {
-    use super::{has_fresh_status_heartbeat, status_heartbeat_window};
+    use super::{
+        Cli, Commands, DaemonCommands, has_fresh_status_heartbeat, status_heartbeat_window,
+    };
+    use clap::Parser;
     use std::path::PathBuf;
     use std::time::Duration;
     use virtue_core::{Config, ServiceStatus};
@@ -423,6 +593,7 @@ mod tests {
             last_screenshot_at_ms: None,
             last_batch_at_ms: None,
             pending_request_count: 0,
+            lifecycle: virtue_core::LifecycleStatus::for_platform("linux"),
         }
     }
 
@@ -455,5 +626,54 @@ mod tests {
         let status = test_status(None);
 
         assert!(!has_fresh_status_heartbeat(&status, &config, 64_000));
+    }
+
+    #[test]
+    fn cli_accepts_bare_daemon_command() {
+        let cli = Cli::try_parse_from(["virtue", "daemon"]).expect("daemon command should parse");
+
+        match cli.command {
+            Commands::Daemon { command } => assert!(command.is_none()),
+            other => panic!("expected daemon command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_accepts_daemon_start_subcommand() {
+        let cli =
+            Cli::try_parse_from(["virtue", "daemon", "start"]).expect("daemon start should parse");
+
+        match cli.command {
+            Commands::Daemon { command } => {
+                assert!(matches!(command, Some(DaemonCommands::Start)));
+            }
+            other => panic!("expected daemon command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_accepts_daemon_stop_subcommand() {
+        let cli =
+            Cli::try_parse_from(["virtue", "daemon", "stop"]).expect("daemon stop should parse");
+
+        match cli.command {
+            Commands::Daemon { command } => {
+                assert!(matches!(command, Some(DaemonCommands::Stop { yes: false })));
+            }
+            other => panic!("expected daemon command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_accepts_daemon_stop_yes_flag() {
+        let cli = Cli::try_parse_from(["virtue", "daemon", "stop", "--yes"])
+            .expect("daemon stop --yes should parse");
+
+        match cli.command {
+            Commands::Daemon { command } => {
+                assert!(matches!(command, Some(DaemonCommands::Stop { yes: true })));
+            }
+            other => panic!("expected daemon command, got {other:?}"),
+        }
     }
 }

@@ -1,5 +1,4 @@
 use std::fs;
-use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -7,12 +6,15 @@ use std::time::Duration;
 use std::time::Instant;
 
 use anyhow::Result;
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use chrono::Utc;
+use futures_util::StreamExt;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
-use virtue_core::{EventData, LogEntry, MonitorService};
+use virtue_core::{
+    CaptureAvailabilityState, ComputerPowerState, LifecycleConfidence, LifecycleObservation,
+    LifecycleOrigin, MonitorService, ServiceRole,
+};
+use zbus::proxy;
 
 use crate::capture::{LinuxPlatformHooks, is_session_unavailable_text};
 use crate::config::{ClientPaths, build_core_config};
@@ -20,12 +22,18 @@ use crate::tray;
 
 const CURRENT_BOOT_ID_PATH: &str = "/proc/sys/kernel/random/boot_id";
 const PROC_STAT_PATH: &str = "/proc/stat";
+const SERVICE_PING_WAKE_PADDING_MS: i64 = 1_000;
 const SESSION_UNAVAILABLE_LOG_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
 
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct LifecycleState {
-    last_seen_boot_id: Option<String>,
+#[proxy(
+    interface = "org.freedesktop.login1.Manager",
+    default_service = "org.freedesktop.login1",
+    default_path = "/org/freedesktop/login1"
+)]
+trait LoginManager {
+    #[zbus(signal)]
+    fn prepare_for_sleep(&self, start: bool) -> zbus::Result<()>;
 }
 
 pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
@@ -34,19 +42,22 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
 
     let shutdown = Arc::new(AtomicBool::new(false));
     let mut service = MonitorService::setup(build_core_config(paths), LinuxPlatformHooks::new())?;
-
-    emit_log(
-        &mut service,
-        "daemon_start",
-        &[("source", "linux_service")],
-        Utc::now(),
-    );
-    if let Some(startup_event) = detect_system_startup_event(paths) {
-        emit_log_entry(&mut service, startup_event);
+    if let Some(boot_marker) = read_current_boot_id() {
+        let _ = service.record_lifecycle_observation(LifecycleObservation::BootObserved {
+            boot_marker,
+            booted_at_ms: read_current_boot_time_ms(),
+            detected_by: "boot_id_change".to_string(),
+        });
     }
+    let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStarted {
+        role: ServiceRole::PrimaryService,
+        detected_by: "linux_service".to_string(),
+    });
 
     let (signal_tx, mut signal_rx) = mpsc::unbounded_channel::<String>();
     spawn_signal_handler(shutdown.clone(), signal_tx);
+    let (sleep_tx, mut sleep_rx) = mpsc::unbounded_channel::<bool>();
+    spawn_suspend_watcher(sleep_tx);
 
     let mut last_session_unavailable_log: Option<Instant> = None;
     loop {
@@ -56,12 +67,24 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
 
         let sleep_duration = match service.loop_iteration() {
             Ok(outcome) => {
+                let _ = service.record_lifecycle_observation(
+                    LifecycleObservation::CaptureAvailabilityChanged {
+                        state: CaptureAvailabilityState::Ready,
+                        detected_by: "successful_loop".to_string(),
+                    },
+                );
                 last_session_unavailable_log = None;
                 duration_until(outcome.next_run_at_ms)
             }
             Err(err) => {
                 let message = err.to_string();
                 if is_session_unavailable_text(&message) {
+                    let _ = service.record_lifecycle_observation(
+                        LifecycleObservation::CaptureAvailabilityChanged {
+                            state: CaptureAvailabilityState::Blocked,
+                            detected_by: "session_unavailable".to_string(),
+                        },
+                    );
                     let should_log = last_session_unavailable_log
                         .is_none_or(|last| last.elapsed() >= SESSION_UNAVAILABLE_LOG_INTERVAL);
                     if should_log {
@@ -74,13 +97,47 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
                 ERROR_RETRY_INTERVAL
             }
         };
+        let _ =
+            service.record_service_ping_if_due(ServiceRole::PrimaryService, "linux_service_timer");
+        let sleep_duration = service
+            .next_service_ping_due_at_ms(ServiceRole::PrimaryService)
+            .ok()
+            .flatten()
+            .map(|due_at_ms| duration_until(due_at_ms.saturating_add(SERVICE_PING_WAKE_PADDING_MS)))
+            .map(|ping_duration| ping_duration.min(sleep_duration))
+            .unwrap_or(sleep_duration);
 
         tokio::select! {
             signal = signal_rx.recv() => {
                 if let Some(signal_name) = signal {
-                    emit_shutdown_logs(&mut service, &signal_name);
+                    record_shutdown_transition(&mut service, &signal_name);
                 }
                 break;
+            }
+            sleep_change = sleep_rx.recv() => {
+                if let Some(suspending) = sleep_change {
+                    let (state, origin, confidence) = if suspending {
+                        (
+                            ComputerPowerState::Suspended,
+                            LifecycleOrigin::SystemSuspend,
+                            LifecycleConfidence::Confirmed,
+                        )
+                    } else {
+                        (
+                            ComputerPowerState::Running,
+                            LifecycleOrigin::SystemSuspend,
+                            LifecycleConfidence::Confirmed,
+                        )
+                    };
+                    let _ = service.record_lifecycle_observation(
+                        LifecycleObservation::ComputerPowerChanged {
+                            state,
+                            origin,
+                            detected_by: "login1_prepare_for_sleep".to_string(),
+                            confidence,
+                        },
+                    );
+                }
             }
             _ = sleep_interruptible(&shutdown, sleep_duration) => {}
         }
@@ -90,33 +147,6 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     Ok(())
 }
 
-fn detect_system_startup_event(paths: &ClientPaths) -> Option<LogEntry> {
-    let boot_id = read_current_boot_id()?;
-    let mut state = load_lifecycle_state(&paths.lifecycle_state_file);
-    if state.last_seen_boot_id.as_deref() == Some(boot_id.as_str()) {
-        return None;
-    }
-
-    state.last_seen_boot_id = Some(boot_id.clone());
-    if let Err(err) = save_lifecycle_state(&paths.lifecycle_state_file, &state) {
-        eprintln!(
-            "daemon: could not persist lifecycle state {}: {err}",
-            paths.lifecycle_state_file.display()
-        );
-    }
-
-    let started_at = read_system_boot_time_utc().unwrap_or_else(Utc::now);
-    Some(log_entry(
-        "system_startup",
-        &[
-            ("source", "linux_system"),
-            ("boot_id", boot_id.as_str()),
-            ("detected_by", "boot_id_change"),
-        ],
-        started_at,
-    ))
-}
-
 fn read_current_boot_id() -> Option<String> {
     fs::read_to_string(CURRENT_BOOT_ID_PATH)
         .ok()
@@ -124,13 +154,11 @@ fn read_current_boot_id() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn read_system_boot_time_utc() -> Option<DateTime<Utc>> {
-    let raw = fs::read_to_string(PROC_STAT_PATH).ok()?;
-    let seconds = raw
-        .lines()
-        .find_map(|line| line.strip_prefix("btime "))
-        .and_then(|value| value.trim().parse::<i64>().ok())?;
-    DateTime::<Utc>::from_timestamp(seconds, 0)
+fn read_current_boot_time_ms() -> Option<i64> {
+    let stat = fs::read_to_string(PROC_STAT_PATH).ok()?;
+    let boot_line = stat.lines().find(|line| line.starts_with("btime "))?;
+    let seconds = boot_line.split_whitespace().nth(1)?.parse::<i64>().ok()?;
+    seconds.checked_mul(1_000)
 }
 
 fn read_systemd_state() -> Option<String> {
@@ -173,25 +201,6 @@ fn is_shutdown_job_queued() -> bool {
     })
 }
 
-fn load_lifecycle_state(path: &Path) -> LifecycleState {
-    fs::read(path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<LifecycleState>(&bytes).ok())
-        .unwrap_or_default()
-}
-
-fn save_lifecycle_state(path: &Path, state: &LifecycleState) -> Result<()> {
-    let Some(parent) = path.parent() else {
-        return Ok(());
-    };
-    fs::create_dir_all(parent)?;
-    let tmp_path = path.with_extension("tmp");
-    let bytes = serde_json::to_vec_pretty(state)?;
-    fs::write(&tmp_path, bytes)?;
-    fs::rename(&tmp_path, path)?;
-    Ok(())
-}
-
 fn spawn_signal_handler(shutdown: Arc<AtomicBool>, signal_tx: mpsc::UnboundedSender<String>) {
     tokio::spawn(async move {
         use tokio::signal::unix::{SignalKind, signal};
@@ -217,6 +226,45 @@ fn spawn_signal_handler(shutdown: Arc<AtomicBool>, signal_tx: mpsc::UnboundedSen
     });
 }
 
+fn spawn_suspend_watcher(sleep_tx: mpsc::UnboundedSender<bool>) {
+    tokio::spawn(async move {
+        let connection = match zbus::Connection::system().await {
+            Ok(connection) => connection,
+            Err(err) => {
+                eprintln!("daemon: failed connecting to system bus for suspend watcher: {err}");
+                return;
+            }
+        };
+
+        let proxy = match LoginManagerProxy::new(&connection).await {
+            Ok(proxy) => proxy,
+            Err(err) => {
+                eprintln!("daemon: failed creating login1 proxy for suspend watcher: {err}");
+                return;
+            }
+        };
+
+        let mut stream = match proxy.receive_prepare_for_sleep().await {
+            Ok(stream) => stream,
+            Err(err) => {
+                eprintln!("daemon: failed subscribing to login1 PrepareForSleep: {err}");
+                return;
+            }
+        };
+
+        while let Some(signal) = stream.next().await {
+            match signal.args() {
+                Ok(args) => {
+                    let _ = sleep_tx.send(*args.start());
+                }
+                Err(err) => {
+                    eprintln!("daemon: failed decoding login1 PrepareForSleep signal: {err}");
+                }
+            }
+        }
+    });
+}
+
 async fn sleep_interruptible(shutdown: &Arc<AtomicBool>, duration: Duration) {
     let mut remaining = duration;
     while remaining > Duration::ZERO && !shutdown.load(Ordering::SeqCst) {
@@ -232,73 +280,20 @@ fn duration_until(next_run_at_ms: i64) -> Duration {
     Duration::from_millis(delta_ms.max(0) as u64)
 }
 
-fn emit_shutdown_logs(service: &mut MonitorService<LinuxPlatformHooks>, signal_name: &str) {
-    emit_log(
-        service,
-        "daemon_stop_signal",
-        &[("signal", signal_name)],
-        Utc::now(),
-    );
-
+fn record_shutdown_transition(service: &mut MonitorService<LinuxPlatformHooks>, signal_name: &str) {
     let system_state = read_systemd_state();
     let shutting_down =
         matches!(system_state.as_deref(), Some("stopping")) || is_shutdown_job_queued();
-    if shutting_down {
-        let mut metadata = vec![
-            ("source".to_string(), "linux_system".to_string()),
-            ("signal".to_string(), signal_name.to_string()),
-        ];
-        if let Some(system_state) = system_state {
-            metadata.push(("system_state".to_string(), system_state));
-        }
-        emit_log_entry(
-            service,
-            LogEntry {
-                ts: Utc::now().timestamp_millis(),
-                kind: "system_shutdown".to_string(),
-                risk: None,
-                data: metadata_value_owned(metadata),
-            },
-        );
-    }
-}
-
-fn emit_log(
-    service: &mut MonitorService<LinuxPlatformHooks>,
-    kind: &str,
-    metadata: &[(&str, &str)],
-    created_at: DateTime<Utc>,
-) {
-    emit_log_entry(service, log_entry(kind, metadata, created_at));
-}
-
-fn emit_log_entry(service: &mut MonitorService<LinuxPlatformHooks>, entry: LogEntry) {
-    if let Err(err) = service.send_log(entry) {
-        eprintln!("daemon: could not send log event: {err}");
-    }
-}
-
-fn log_entry(kind: &str, metadata: &[(&str, &str)], created_at: DateTime<Utc>) -> LogEntry {
-    LogEntry {
-        ts: created_at.timestamp_millis(),
-        kind: kind.to_string(),
-        risk: None,
-        data: metadata_value(metadata),
-    }
-}
-
-fn metadata_value(metadata: &[(&str, &str)]) -> EventData {
-    let mut fields = Map::new();
-    for (key, value) in metadata {
-        fields.insert((*key).to_string(), Value::String((*value).to_string()));
-    }
-    EventData(fields.into_iter().collect())
-}
-
-fn metadata_value_owned(metadata: Vec<(String, String)>) -> EventData {
-    let mut object = Map::new();
-    for (key, value) in metadata {
-        object.insert(key, Value::String(value));
-    }
-    EventData(object.into_iter().collect())
+    let explicit_user_stop = service
+        .take_stop_intent(ServiceRole::PrimaryService)
+        .ok()
+        .flatten()
+        .is_some();
+    let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStopObserved {
+        role: ServiceRole::PrimaryService,
+        raw_reason: signal_name.to_string(),
+        shutdown_in_progress: shutting_down,
+        explicit_user_stop,
+        detected_by: "signal_plus_system_state".to_string(),
+    });
 }

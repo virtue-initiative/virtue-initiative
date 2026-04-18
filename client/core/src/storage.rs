@@ -6,8 +6,12 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, NaiveDate, Utc};
 
 use crate::error::CoreResult;
+use crate::lifecycle::{
+    LifecycleObservation, ServicePingLog, ServiceRole, ServiceStopMarker, StopIntent,
+};
 use crate::model::{
-    AuditLogPayload, AuditRecord, AuthState, DeviceSettings, ServiceStatus, StoredAuditRecord,
+    AuditLogPayload, AuditRecord, AuthState, DeviceSettings, EventData, LogEntry, ServiceStatus,
+    StoredAuditRecord,
 };
 
 const LEGACY_AUDIT_LOG_NAME: &str = "audit.jsonl";
@@ -69,20 +73,7 @@ impl FileStateStore {
     pub fn load_audit_records_at(&self, now_ms: i64) -> CoreResult<Vec<StoredAuditRecord>> {
         self.migrate_legacy_audit_log(now_ms)?;
         self.prune_audit_logs(now_ms)?;
-
-        let mut records = Vec::new();
-        for path in self.audit_log_paths()? {
-            let Some(audit_day) = audit_day_from_path(&path) else {
-                continue;
-            };
-            for record in self.read_records_from_path(&path)? {
-                records.push(StoredAuditRecord {
-                    audit_day: audit_day.clone(),
-                    record,
-                });
-            }
-        }
-        Ok(records)
+        self.load_stored_audit_records()
     }
 
     pub fn clear_audit_records(&self) -> CoreResult<()> {
@@ -118,6 +109,130 @@ impl FileStateStore {
         Ok(())
     }
 
+    pub fn save_stop_intent(&self, intent: &StopIntent) -> CoreResult<()> {
+        self.append_audit_log_record(&AuditRecord::LocalLog {
+            log: stop_intent_marker_log("set", intent.requested_at_ms, Some(intent)),
+        })?;
+        Ok(())
+    }
+
+    pub fn load_stop_intent(&self) -> CoreResult<Option<StopIntent>> {
+        self.migrate_legacy_audit_log(current_time_utc_ms()?)?;
+        for record in self.load_stored_audit_records()?.into_iter().rev() {
+            let AuditRecord::LocalLog { log } = record.record else {
+                continue;
+            };
+            if log.kind != "lifecycle_marker" {
+                continue;
+            }
+            let Some(marker_type) = log.data.get("marker").and_then(|value| value.as_str()) else {
+                continue;
+            };
+            if marker_type != "stop_intent" {
+                continue;
+            }
+            match log.data.get("action").and_then(|value| value.as_str()) {
+                Some("cleared") => return Ok(None),
+                Some("set") => {
+                    let Some(role) = log
+                        .data
+                        .get("service_role")
+                        .and_then(|value| value.as_str())
+                    else {
+                        continue;
+                    };
+                    let role = match role {
+                        "primary_service" => ServiceRole::PrimaryService,
+                        "capture_worker" => ServiceRole::CaptureWorker,
+                        _ => continue,
+                    };
+                    let Some(source) = log.data.get("source").and_then(|value| value.as_str())
+                    else {
+                        continue;
+                    };
+                    return Ok(Some(StopIntent {
+                        role,
+                        source: source.to_string(),
+                        requested_at_ms: log.ts,
+                    }));
+                }
+                _ => {}
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn clear_stop_intent(&self) -> CoreResult<()> {
+        if let Some(intent) = self.load_stop_intent()? {
+            self.append_audit_log_record(&AuditRecord::LocalLog {
+                log: stop_intent_marker_log("cleared", current_time_utc_ms()?, Some(&intent)),
+            })?;
+        }
+        Ok(())
+    }
+
+    pub fn save_service_stop_marker(&self, marker: &ServiceStopMarker) -> CoreResult<()> {
+        let name = service_stop_marker_file_name(marker.role);
+        self.write_json(&name, marker)
+    }
+
+    pub fn load_service_stop_marker(
+        &self,
+        role: ServiceRole,
+    ) -> CoreResult<Option<ServiceStopMarker>> {
+        let name = service_stop_marker_file_name(role);
+        self.read_json(&name)
+    }
+
+    pub fn clear_service_stop_marker(&self, role: ServiceRole) -> CoreResult<()> {
+        let path = self.root.join(service_stop_marker_file_name(role));
+        match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    pub fn clear_all_service_stop_markers(&self) -> CoreResult<()> {
+        self.clear_service_stop_marker(ServiceRole::PrimaryService)?;
+        self.clear_service_stop_marker(ServiceRole::CaptureWorker)
+    }
+
+    pub fn save_last_service_ping(&self, ping: &ServicePingLog) -> CoreResult<()> {
+        let name = service_ping_state_file_name(ping.role);
+        self.write_json(&name, ping)
+    }
+
+    pub fn load_last_service_ping(&self, role: ServiceRole) -> CoreResult<Option<ServicePingLog>> {
+        let name = service_ping_state_file_name(role);
+        self.read_json(&name)
+    }
+
+    pub fn clear_last_service_ping(&self, role: ServiceRole) -> CoreResult<()> {
+        let path = self.root.join(service_ping_state_file_name(role));
+        match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    pub fn clear_all_service_pings(&self) -> CoreResult<()> {
+        self.clear_last_service_ping(ServiceRole::PrimaryService)?;
+        self.clear_last_service_ping(ServiceRole::CaptureWorker)
+    }
+
+    pub fn append_service_ping_log(&self, ping: &ServicePingLog) -> CoreResult<()> {
+        self.append_json_line("service_ping_log.jsonl", ping)
+    }
+
+    pub fn append_lifecycle_observation(
+        &self,
+        observation: &LifecycleObservation,
+    ) -> CoreResult<()> {
+        self.append_json_line("lifecycle_observations.jsonl", observation)
+    }
+
     fn write_json<T: serde::Serialize + ?Sized>(&self, name: &str, value: &T) -> CoreResult<()> {
         let path = self.root.join(name);
         let bytes = serde_json::to_vec_pretty(value)?;
@@ -141,6 +256,22 @@ impl FileStateStore {
             .append(true)
             .open(path)?;
         serde_json::to_writer(&mut file, record)?;
+        writeln!(file)?;
+        file.flush()?;
+        Ok(())
+    }
+
+    fn append_json_line<T: serde::Serialize + ?Sized>(
+        &self,
+        name: &str,
+        value: &T,
+    ) -> CoreResult<()> {
+        let path = self.root.join(name);
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
+        serde_json::to_writer(&mut file, value)?;
         writeln!(file)?;
         file.flush()?;
         Ok(())
@@ -193,6 +324,22 @@ impl FileStateStore {
         Ok(paths)
     }
 
+    fn load_stored_audit_records(&self) -> CoreResult<Vec<StoredAuditRecord>> {
+        let mut records = Vec::new();
+        for path in self.audit_log_paths()? {
+            let Some(audit_day) = audit_day_from_path(&path) else {
+                continue;
+            };
+            for record in self.read_records_from_path(&path)? {
+                records.push(StoredAuditRecord {
+                    audit_day: audit_day.clone(),
+                    record,
+                });
+            }
+        }
+        Ok(records)
+    }
+
     fn migrate_legacy_audit_log(&self, now_ms: i64) -> CoreResult<()> {
         let legacy_path = self.root.join(LEGACY_AUDIT_LOG_NAME);
         if !legacy_path.exists() {
@@ -220,6 +367,7 @@ impl FileStateStore {
         for record in records {
             let audit_day = match &record {
                 AuditRecord::Log { log, .. } => day_key_from_payload(log)?,
+                AuditRecord::LocalLog { log } => day_key_from_ms(log.ts)?,
                 AuditRecord::HashUploaded { local_id }
                 | AuditRecord::LogUploaded { local_id, .. } => log_days
                     .get(local_id)
@@ -273,6 +421,14 @@ fn current_time_utc_ms() -> CoreResult<i64> {
     Ok(Utc::now().timestamp_millis())
 }
 
+fn service_stop_marker_file_name(role: ServiceRole) -> String {
+    format!("service_stop_marker_{}.json", role.as_str())
+}
+
+fn service_ping_state_file_name(role: ServiceRole) -> String {
+    format!("service_ping_state_{}.json", role.as_str())
+}
+
 fn audit_day_fully_uploaded(records: &[AuditRecord]) -> bool {
     let mut log_ids = std::collections::HashSet::<&str>::new();
     let mut uploaded_ids = std::collections::HashSet::<&str>::new();
@@ -282,6 +438,7 @@ fn audit_day_fully_uploaded(records: &[AuditRecord]) -> bool {
             AuditRecord::Log { local_id, .. } => {
                 log_ids.insert(local_id.as_str());
             }
+            AuditRecord::LocalLog { .. } => {}
             AuditRecord::LogUploaded { local_id, .. } => {
                 uploaded_ids.insert(local_id.as_str());
             }
@@ -298,7 +455,31 @@ fn audit_day_fully_uploaded(records: &[AuditRecord]) -> bool {
 fn audit_day_for_log_record(record: &AuditRecord) -> Option<String> {
     match record {
         AuditRecord::Log { log, .. } => day_key_from_payload(log).ok(),
+        AuditRecord::LocalLog { log } => day_key_from_ms(log.ts).ok(),
         _ => None,
+    }
+}
+
+fn stop_intent_marker_log(action: &str, ts: i64, intent: Option<&StopIntent>) -> LogEntry {
+    let mut data = EventData::default();
+    data.insert(
+        "marker",
+        serde_json::Value::String("stop_intent".to_string()),
+    );
+    data.insert("action", serde_json::Value::String(action.to_string()));
+    if let Some(intent) = intent {
+        data.insert(
+            "service_role",
+            serde_json::Value::String(intent.role.as_str().to_string()),
+        );
+        data.insert("source", serde_json::Value::String(intent.source.clone()));
+    }
+
+    LogEntry {
+        ts,
+        kind: "lifecycle_marker".to_string(),
+        risk: None,
+        data,
     }
 }
 
@@ -413,6 +594,61 @@ mod tests {
         assert_eq!(records[0].audit_day, "1970-01-02");
         assert_eq!(records[1].audit_day, "1970-01-02");
         assert_eq!(records[2].audit_day, "1970-01-03");
+
+        let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn stop_intent_is_stored_in_local_audit_log_markers() {
+        let state_dir = temp_state_dir();
+        let store = FileStateStore::new(&state_dir).expect("create store");
+        let intent = StopIntent {
+            role: ServiceRole::PrimaryService,
+            source: "tray_close".to_string(),
+            requested_at_ms: 1_234,
+        };
+
+        store.save_stop_intent(&intent).expect("save stop intent");
+        let loaded = store
+            .load_stop_intent()
+            .expect("load stop intent")
+            .expect("persisted stop intent");
+        assert_eq!(loaded, intent);
+        assert!(!state_dir.join("stop_intent.json").exists());
+
+        let records = store
+            .load_audit_records_at(2_000)
+            .expect("load audit records");
+        assert!(records.iter().any(|record| matches!(
+            &record.record,
+            AuditRecord::LocalLog { log }
+                if log.kind == "lifecycle_marker"
+                    && log.data.get("marker")
+                        == Some(&serde_json::Value::String("stop_intent".to_string()))
+                    && log.data.get("action")
+                        == Some(&serde_json::Value::String("set".to_string()))
+        )));
+
+        store.clear_stop_intent().expect("clear stop intent");
+        assert!(
+            store
+                .load_stop_intent()
+                .expect("load cleared stop intent")
+                .is_none()
+        );
+
+        let records = store
+            .load_audit_records_at(3_000)
+            .expect("load cleared audit records");
+        assert!(records.iter().any(|record| matches!(
+            &record.record,
+            AuditRecord::LocalLog { log }
+                if log.kind == "lifecycle_marker"
+                    && log.data.get("marker")
+                        == Some(&serde_json::Value::String("stop_intent".to_string()))
+                    && log.data.get("action")
+                        == Some(&serde_json::Value::String("cleared".to_string()))
+        )));
 
         let _ = fs::remove_dir_all(state_dir);
     }

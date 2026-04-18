@@ -57,8 +57,12 @@ export const helpSidebar: HelpNavItem[] = [
         href: "/help/developer/overrides",
       },
       {
-        label: "Security and Encryption",
+        label: "Security and encryption",
         href: "/help/developer/security",
+      },
+      {
+        label: "Tamper protection",
+        href: "/help/developer/tamper-controls",
       },
     ],
   },
