@@ -156,17 +156,21 @@ Response `201`:
 
 ```js
 {
+  "ok": true,
   "user": {
     "id": UUID,
     "email": "user@example.com",
     "email_verified": false,
     "name": "Name" | undefined
-  },
-  "access_token": AccessToken
+  }
 }
 ```
 
-Also sets the `refresh_token` cookie.
+Notes:
+
+- Signup creates the account immediately with `email_verified = false`.
+- Signup sends a verification email.
+- Signup does **not** return an access token or set the `refresh_token` cookie.
 
 ### `POST /login`
 
@@ -184,6 +188,54 @@ Response `200`:
 ```js
 {
   "access_token": AccessToken
+}
+```
+
+If the credentials are valid but the account email is unverified, returns `403` with:
+
+```js
+{
+  "error": "Please verify your email before logging in."
+}
+```
+
+### `POST /email-verification/validate`
+
+Request:
+
+```js
+{
+  "token": "opaque-string"
+}
+```
+
+Response `200`:
+
+```js
+{
+  "ok": true,
+  "email": "user@example.com",
+  "access_token": AccessToken,
+  "purpose": "email_verification" | "email_change"
+}
+```
+
+Notes:
+
+- Marks the user email as verified, or applies a pending email change token.
+- Also creates a web session and sets the `refresh_token` cookie (auto-login on verification).
+
+### `POST /email-verification`
+
+Requires a user `AccessToken`.
+
+Resends a verification email for the current account when `email_verified = false`.
+
+Response `200`:
+
+```js
+{
+  "ok": true
 }
 ```
 
@@ -235,9 +287,17 @@ Response `200`:
 
 ```js
 {
-  "ok": true
+  "ok": true,
+  "email_verification_required": true | undefined,
+  "pending_email": "new@example.com" | undefined
 }
 ```
+
+Notes:
+
+- When `email` is changed, the user email is **not** updated immediately.
+- A pending `email_change` token is sent to the new address.
+- Submitting that token to `POST /email-verification/validate` applies the email update.
 
 ### `POST /password-reset`
 

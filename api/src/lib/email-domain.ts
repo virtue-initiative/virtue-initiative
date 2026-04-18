@@ -1,5 +1,6 @@
 export const emailTokenPurposes = [
   'email_verification',
+  'email_change',
   'password_reset',
   'partner_invite',
 ] as const;

@@ -273,7 +273,7 @@ export const api = {
     },
   ) =>
     req<{
-      access_token: string;
+      ok: boolean;
       user: {
         id: string;
         email: string;
@@ -300,7 +300,11 @@ export const api = {
       priv_key?: string;
     },
   ) =>
-    req<{ ok: boolean }>(
+    req<{
+      ok: boolean;
+      email_verification_required?: boolean;
+      pending_email?: string;
+    }>(
       "/user",
       {
         method: "PATCH",
@@ -327,7 +331,12 @@ export const api = {
     ),
 
   verifyEmail: (token: string) =>
-    req<{ ok: boolean; email: string }>("/email-verification/validate", {
+    req<{
+      ok: boolean;
+      email: string;
+      access_token: string;
+      purpose: "email_verification" | "email_change";
+    }>("/email-verification/validate", {
       method: "POST",
       body: JSON.stringify({ token }),
     }),

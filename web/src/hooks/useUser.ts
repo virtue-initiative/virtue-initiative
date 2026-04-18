@@ -22,10 +22,9 @@ export interface UseUserResult {
     email_digest_minutes_utc?: User["email_digest_minutes_utc"];
     pub_key?: string;
     priv_key?: string;
-  }) => Promise<void>;
-  requestVerificationEmail: () => Promise<{
-    ok: boolean;
-    already_verified?: boolean;
+  }) => Promise<{
+    email_verification_required?: boolean;
+    pending_email?: string;
   }>;
   deleteUser: (confirmEmail: string) => Promise<void>;
 }
@@ -40,17 +39,17 @@ export function useUser(): UseUserResult {
 
   const updateUser = async (
     patch: Parameters<typeof api.updateUser>[1],
-  ): Promise<void> => {
+  ): Promise<{
+    email_verification_required?: boolean;
+    pending_email?: string;
+  }> => {
     const authToken = requireToken(token);
-    await api.updateUser(authToken, patch);
+    const result = await api.updateUser(authToken, patch);
     await mutate(swrKeys.user(authToken));
-  };
-
-  const requestVerificationEmail = async () => {
-    const authToken = requireToken(token);
-    const result = await api.requestVerificationEmail(authToken);
-    await mutate(swrKeys.user(authToken));
-    return result;
+    return {
+      email_verification_required: result.email_verification_required,
+      pending_email: result.pending_email,
+    };
   };
 
   const deleteUser = async (confirmEmail: string) => {
@@ -66,7 +65,6 @@ export function useUser(): UseUserResult {
     error,
     isLoading: Boolean(token) && isLoading,
     updateUser,
-    requestVerificationEmail,
     deleteUser,
   };
 }
