@@ -1,11 +1,45 @@
 import { useEffect } from "preact/hooks";
 import { useAuth } from "../../context/auth";
 
+const VERIFY_INFLIGHT_KEY = "virtue_verify_email_inflight";
+const VERIFY_INFLIGHT_TTL_MS = 60_000;
+
+function navigate(path: string, replace = false) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const method = replace ? "replaceState" : "pushState";
+  window.history[method]({}, "", path);
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
 function hardNavigate(path: string) {
   if (typeof window === "undefined") {
     return;
   }
   window.location.assign(path);
+}
+
+function hasRecentInflightVerification() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const startedRaw = window.sessionStorage.getItem(VERIFY_INFLIGHT_KEY);
+  if (!startedRaw) {
+    return false;
+  }
+
+  const startedAt = Number(startedRaw);
+  if (
+    !Number.isFinite(startedAt) ||
+    Date.now() - startedAt > VERIFY_INFLIGHT_TTL_MS
+  ) {
+    window.sessionStorage.removeItem(VERIFY_INFLIGHT_KEY);
+    return false;
+  }
+
+  return true;
 }
 
 export function VerifyEmail() {
@@ -21,9 +55,14 @@ export function VerifyEmail() {
     const next = params.get("next");
 
     if (!token) {
-      hardNavigate("/");
+      if (hasRecentInflightVerification()) {
+        return;
+      }
+      navigate("/", true);
       return;
     }
+
+    window.sessionStorage.setItem(VERIFY_INFLIGHT_KEY, String(Date.now()));
 
     // Remove token from the URL before verification to avoid accidental retries.
     params.delete("token");
@@ -38,6 +77,7 @@ export function VerifyEmail() {
           result.purpose === "email_change" ||
           next === "settings" ||
           next === "/settings";
+        window.sessionStorage.removeItem(VERIFY_INFLIGHT_KEY);
         window.sessionStorage.setItem(
           "virtue_global_link_message",
           JSON.stringify({
@@ -47,9 +87,14 @@ export function VerifyEmail() {
             isError: false,
           }),
         );
-        hardNavigate(isEmailChange ? "/settings" : "/");
+        if (isEmailChange) {
+          hardNavigate("/settings");
+          return;
+        }
+        navigate("/", true);
       })
       .catch((err: unknown) => {
+        window.sessionStorage.removeItem(VERIFY_INFLIGHT_KEY);
         window.sessionStorage.setItem(
           "virtue_global_link_message",
           JSON.stringify({
@@ -58,7 +103,7 @@ export function VerifyEmail() {
             isError: true,
           }),
         );
-        hardNavigate("/login");
+        navigate("/login", true);
       });
   }, [verifyEmail]);
 
