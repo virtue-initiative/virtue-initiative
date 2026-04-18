@@ -3,6 +3,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::lifecycle::LifecycleStatus;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Screenshot {
     pub captured_at_ms: i64,
@@ -195,7 +197,7 @@ pub struct AuthState {
     pub post_login_proof_batches_remaining: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ServiceStatus {
     pub is_authenticated: bool,
     pub is_running: bool,
@@ -204,6 +206,8 @@ pub struct ServiceStatus {
     pub last_screenshot_at_ms: Option<i64>,
     pub last_batch_at_ms: Option<i64>,
     pub pending_request_count: usize,
+    #[serde(default)]
+    pub lifecycle: LifecycleStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

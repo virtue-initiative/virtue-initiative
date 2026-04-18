@@ -14,8 +14,8 @@ use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
 use virtue_core::storage::FileStateStore;
 use virtue_core::{
-    AuthState, Config, CoreError, CoreResult, DeviceSettings, MonitorService, PlatformHooks,
-    Screenshot, ServiceStatus,
+    AuthState, Config, CoreError, CoreResult, DeviceSettings, LifecycleObservation,
+    MonitorService, PlatformHooks, Screenshot, ServiceRole, ServiceStatus,
 };
 
 static CORE: OnceCell<AndroidCore> = OnceCell::new();
@@ -318,6 +318,10 @@ fn run_daemon_loop(core: &AndroidCore) -> Result<()> {
         java_vm: core.java_vm.clone(),
     };
     let mut service = MonitorService::setup(build_core_config(core, "android-device"), hooks)?;
+    let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStarted {
+        role: ServiceRole::PrimaryService,
+        detected_by: "android_foreground_service".to_string(),
+    });
 
     while !core.stop.load(Ordering::SeqCst) {
         let sleep_duration = match service.loop_iteration() {
@@ -330,6 +334,13 @@ fn run_daemon_loop(core: &AndroidCore) -> Result<()> {
         sleep_interruptible(&core.stop, sleep_duration);
     }
 
+    let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStopObserved {
+        role: ServiceRole::PrimaryService,
+        raw_reason: "android_stop_request".to_string(),
+        shutdown_in_progress: false,
+        explicit_user_stop: false,
+        detected_by: "android_foreground_service".to_string(),
+    });
     let _ = service.shutdown();
     Ok(())
 }

@@ -12,8 +12,8 @@ use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
 use virtue_core::storage::FileStateStore;
 use virtue_core::{
-    AuthState, Config, CoreError, CoreResult, DeviceSettings, MonitorService, PlatformHooks,
-    Screenshot, ServiceStatus,
+    AuthState, Config, CoreError, CoreResult, DeviceSettings, LifecycleObservation,
+    MonitorService, PlatformHooks, Screenshot, ServiceRole, ServiceStatus,
 };
 
 static CORE: OnceCell<IosCore> = OnceCell::new();
@@ -280,6 +280,10 @@ pub unsafe extern "C" fn virtue_ios_free_string(value: *mut c_char) {
 fn run_daemon_loop(core: &IosCore) -> Result<()> {
     let mut service =
         MonitorService::setup(build_core_config(core, "ios-device"), IosPlatformHooks)?;
+    let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStarted {
+        role: ServiceRole::PrimaryService,
+        detected_by: "ios_extension_daemon".to_string(),
+    });
 
     while !core.stop.load(Ordering::SeqCst) {
         let sleep_duration = match service.loop_iteration() {
@@ -292,6 +296,13 @@ fn run_daemon_loop(core: &IosCore) -> Result<()> {
         sleep_interruptible(&core.stop, sleep_duration);
     }
 
+    let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStopObserved {
+        role: ServiceRole::PrimaryService,
+        raw_reason: "ios_stop_request".to_string(),
+        shutdown_in_progress: false,
+        explicit_user_stop: false,
+        detected_by: "ios_extension_daemon".to_string(),
+    });
     let _ = service.shutdown();
     Ok(())
 }

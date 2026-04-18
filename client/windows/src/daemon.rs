@@ -1,5 +1,3 @@
-use std::fs;
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -8,9 +6,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 use virtue_core::{
-    CoreError, CoreResult, EventData, LogEntry, MonitorService, PlatformHooks, Screenshot,
+    CoreError, CoreResult, LifecycleObservation, MonitorService, PlatformHooks, Screenshot,
+    ServiceRole,
 };
 use windows::Win32::System::SystemInformation::GetTickCount64;
 
@@ -57,11 +55,6 @@ impl StopReason {
 const CAPTURE_SUPERVISOR_INTERVAL: Duration = Duration::from_secs(10);
 const CAPTURE_RESTART_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct LifecycleState {
-    last_seen_boot_id: Option<String>,
-}
-
 #[derive(Debug, Default)]
 struct CaptureSupervisorState {
     last_check: Option<Instant>,
@@ -97,15 +90,18 @@ pub fn run_daemon(
     let paths = ClientPaths::discover()?;
     paths.ensure_dirs()?;
 
-    emit_log(
-        &paths,
-        logger,
-        "daemon_start",
-        &[("source", "windows_service")],
-    );
-    if let Some(startup_event) = detect_system_startup_event(&paths) {
-        emit_log_entry(&paths, logger, startup_event);
+    let mut service = MonitorService::setup(build_core_config(&paths), LifecyclePlatformHooks)?;
+    if let Some((boot_marker, _)) = current_boot_marker() {
+        let _ = service.record_lifecycle_observation(LifecycleObservation::BootObserved {
+            boot_marker,
+            booted_at_ms: None,
+            detected_by: "boot_time_change".to_string(),
+        });
     }
+    let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStarted {
+        role: ServiceRole::PrimaryService,
+        detected_by: "windows_service".to_string(),
+    });
 
     let mut supervisor = CaptureSupervisorState::default();
     loop {
@@ -113,7 +109,7 @@ pub fn run_daemon(
             break;
         }
 
-        supervise_capture_process(&paths, logger, &mut supervisor);
+        supervise_capture_process(&paths, logger, &mut supervisor, &mut service);
         sleep_interruptible(&shutdown, Duration::from_secs(1));
     }
 
@@ -123,23 +119,13 @@ pub fn run_daemon(
         .and_then(|guard| *guard)
         .unwrap_or(StopReason::ServiceControlStop);
 
-    emit_log(
-        &paths,
-        logger,
-        "daemon_stop_signal",
-        &[("signal", reason.signal_name())],
-    );
-    if reason.should_emit_system_shutdown() {
-        emit_log(
-            &paths,
-            logger,
-            "system_shutdown",
-            &[
-                ("source", "windows_system"),
-                ("signal", reason.signal_name()),
-            ],
-        );
-    }
+    let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStopObserved {
+        role: ServiceRole::PrimaryService,
+        raw_reason: reason.signal_name().to_string(),
+        shutdown_in_progress: reason.should_emit_system_shutdown(),
+        explicit_user_stop: false,
+        detected_by: "windows_service_control".to_string(),
+    });
 
     Ok(())
 }
@@ -152,70 +138,6 @@ pub fn set_stop_reason_if_empty(target: &Arc<Mutex<Option<StopReason>>>, reason:
     }
 }
 
-fn detect_system_startup_event(paths: &ClientPaths) -> Option<LogEntry> {
-    let (boot_id, started_at) = current_boot_marker()?;
-    let mut state = load_lifecycle_state(&paths.lifecycle_state_file);
-    if state.last_seen_boot_id.as_deref() == Some(boot_id.as_str()) {
-        return None;
-    }
-
-    state.last_seen_boot_id = Some(boot_id.clone());
-    if let Err(err) = save_lifecycle_state(&paths.lifecycle_state_file, &state) {
-        eprintln!(
-            "daemon: could not persist lifecycle state {}: {err}",
-            paths.lifecycle_state_file.display()
-        );
-    }
-
-    Some(LogEntry {
-        ts: started_at.timestamp_millis(),
-        kind: "system_startup".to_string(),
-        risk: None,
-        data: metadata_value(&[
-            ("source", "windows_system"),
-            ("boot_id", boot_id.as_str()),
-            ("detected_by", "boot_time_change"),
-        ]),
-    })
-}
-
-fn emit_log(paths: &ClientPaths, logger: &ServiceLogger, kind: &str, metadata: &[(&str, &str)]) {
-    emit_log_entry(
-        paths,
-        logger,
-        LogEntry {
-            ts: Utc::now().timestamp_millis(),
-            kind: kind.to_string(),
-            risk: None,
-            data: metadata_value(metadata),
-        },
-    );
-}
-
-fn emit_log_entry(paths: &ClientPaths, logger: &ServiceLogger, entry: LogEntry) {
-    let mut service = match MonitorService::setup(build_core_config(paths), LifecyclePlatformHooks)
-    {
-        Ok(service) => service,
-        Err(err) => {
-            logger.warn(&format!("failed to prepare lifecycle logger: {err:#}"));
-            return;
-        }
-    };
-
-    let kind = entry.kind.clone();
-    if let Err(err) = service.send_log(entry) {
-        logger.warn(&format!("failed to queue lifecycle log {kind}: {err:#}"));
-    }
-}
-
-fn metadata_value(metadata: &[(&str, &str)]) -> EventData {
-    EventData::from_pairs(
-        metadata
-            .iter()
-            .map(|(key, value)| ((*key).to_string(), (*value).to_string())),
-    )
-}
-
 fn current_boot_marker() -> Option<(String, DateTime<Utc>)> {
     let now = Utc::now();
     let uptime_ms = unsafe { GetTickCount64() };
@@ -225,29 +147,11 @@ fn current_boot_marker() -> Option<(String, DateTime<Utc>)> {
     Some((boot_id, started_at))
 }
 
-fn load_lifecycle_state(path: &Path) -> LifecycleState {
-    fs::read(path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<LifecycleState>(&bytes).ok())
-        .unwrap_or_default()
-}
-
-fn save_lifecycle_state(path: &Path, state: &LifecycleState) -> Result<()> {
-    let Some(parent) = path.parent() else {
-        return Ok(());
-    };
-    fs::create_dir_all(parent)?;
-    let tmp_path = path.with_extension("tmp");
-    let bytes = serde_json::to_vec_pretty(state)?;
-    fs::write(&tmp_path, bytes)?;
-    fs::rename(&tmp_path, path)?;
-    Ok(())
-}
-
 fn supervise_capture_process(
     paths: &ClientPaths,
     logger: &ServiceLogger,
     supervisor: &mut CaptureSupervisorState,
+    service: &mut MonitorService<LifecyclePlatformHooks>,
 ) {
     let now = Instant::now();
     if let Some(last) = supervisor.last_check
@@ -260,12 +164,21 @@ fn supervise_capture_process(
     if capture_control::is_capture_running() {
         supervisor.saw_running_once = true;
         supervisor.missing_reported = false;
+        let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStarted {
+            role: ServiceRole::CaptureWorker,
+            detected_by: "capture_supervisor".to_string(),
+        });
         return;
     }
 
     if supervisor.saw_running_once && !supervisor.missing_reported {
         logger.warn("capture process missing");
         supervisor.missing_reported = true;
+        let _ = service.record_lifecycle_observation(LifecycleObservation::ProcessMissing {
+            role: ServiceRole::CaptureWorker,
+            had_expected_runtime: true,
+            detected_by: "capture_supervisor".to_string(),
+        });
     }
 
     if let Some(last_restart) = supervisor.last_restart_attempt

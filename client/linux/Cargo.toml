@@ -13,6 +13,7 @@ anyhow = "1"
 chrono = { version = "0.4", features = ["clock", "serde"] }
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
+futures-util = "0.3"
 hostname = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
 ksni = { version = "0.3.3", features = ["blocking"] }

@@ -8,14 +8,13 @@ mod ui;
 use std::process::ExitCode;
 
 use anyhow::{Context, Result};
-use chrono::Utc;
 use clap::{Parser, Subcommand};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use virtue_core::audit::derive_state;
 use virtue_core::storage::FileStateStore;
-use virtue_core::{AuthState, CoreError, EventData, LogEntry, MonitorService, ServiceStatus};
+use virtue_core::{AuthState, CoreError, MonitorService, ServiceRole, ServiceStatus};
 
 use crate::capture::MacPlatformHooks;
 use crate::config::{
@@ -137,8 +136,10 @@ fn run_tray(paths: ClientPaths) -> Result<()> {
 }
 
 fn close_tray_and_service(paths: &ClientPaths) -> Result<()> {
-    if let Err(err) = send_close_alert(paths) {
-        eprintln!("warning: could not send close alert: {err:#}");
+    if let Ok(mut service) =
+        MonitorService::setup(build_core_config(paths), MacPlatformHooks::new())
+    {
+        let _ = service.note_stop_requested_by_user(ServiceRole::PrimaryService, "tray_close");
     }
     launch_agent::stop_agent(paths).context("failed to stop background service")
 }
@@ -191,6 +192,11 @@ fn open_app_dialog(paths: &ClientPaths) -> Result<()> {
 }
 
 fn restart_daemon(paths: &ClientPaths) -> Result<()> {
+    if let Ok(mut service) =
+        MonitorService::setup(build_core_config(paths), MacPlatformHooks::new())
+    {
+        let _ = service.note_stop_requested_by_user(ServiceRole::PrimaryService, "tray_restart");
+    }
     let exe = std::env::current_exe().context("failed to resolve current executable")?;
     launch_agent::ensure_agent_running(paths, &exe).context("failed to restart background service")
 }
@@ -237,26 +243,6 @@ fn logout(paths: &ClientPaths) -> Result<()> {
     Ok(())
 }
 
-fn send_close_alert(paths: &ClientPaths) -> Result<()> {
-    let store = FileStateStore::new(&paths.state_dir)?;
-    let auth = store.load_auth_state()?;
-    if auth.device_credentials.is_none() {
-        return Ok(());
-    }
-
-    let mut service = MonitorService::setup(build_core_config(paths), MacPlatformHooks::new())?;
-    let _ = service.send_log(LogEntry {
-        ts: Utc::now().timestamp_millis(),
-        kind: "manual_override".to_string(),
-        risk: None,
-        data: EventData::from_pairs([
-            ("source".to_string(), "mac_tray_menu".to_string()),
-            ("reason".to_string(), "tray_close_requested".to_string()),
-        ]),
-    });
-    Ok(())
-}
-
 fn status(paths: ClientPaths) -> Result<()> {
     let store = FileStateStore::new(&paths.state_dir)?;
     let auth = store.load_auth_state()?;
@@ -268,6 +254,30 @@ fn status(paths: ClientPaths) -> Result<()> {
 
     println!("logged_in: {}", auth.device_credentials.is_some());
     println!("running: {}", service_status.is_running);
+    println!(
+        "lifecycle_primary_service: {}",
+        service_status.lifecycle.snapshot.primary_service.as_str()
+    );
+    println!(
+        "lifecycle_computer_power: {}",
+        service_status.lifecycle.snapshot.computer_power.as_str()
+    );
+    println!(
+        "last_stop_origin: {}",
+        service_status
+            .lifecycle
+            .last_stop_origin
+            .map(|value| value.as_str())
+            .unwrap_or("<none>")
+    );
+    println!(
+        "last_lifecycle_risk: {}",
+        service_status
+            .lifecycle
+            .last_emitted_risk
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "<none>".to_string())
+    );
     println!(
         "pending_request_count: {}",
         service_status.pending_request_count
@@ -294,6 +304,22 @@ fn status(paths: ClientPaths) -> Result<()> {
     println!(
         "daemon_status_updated_at: {}",
         daemon_status.updated_at.as_deref().unwrap_or("<none>")
+    );
+    println!(
+        "capability_startup: {}",
+        service_status.lifecycle.capabilities.startup.as_str()
+    );
+    println!(
+        "capability_shutdown: {}",
+        service_status.lifecycle.capabilities.shutdown.as_str()
+    );
+    println!(
+        "capability_explicit_user_stop: {}",
+        service_status
+            .lifecycle
+            .capabilities
+            .explicit_user_stop
+            .as_str()
     );
     println!(
         "capture_interval_seconds: {}",
@@ -369,8 +395,10 @@ fn load_service_status(store: &FileStateStore, auth: &AuthState) -> Result<Servi
         last_screenshot_at_ms: None,
         last_batch_at_ms: None,
         pending_request_count,
+        lifecycle: virtue_core::LifecycleStatus::for_platform("macos"),
     });
     status.pending_request_count = pending_request_count;
+    status.lifecycle.capabilities = virtue_core::LifecycleCapabilities::for_platform("macos");
     Ok(status)
 }
 

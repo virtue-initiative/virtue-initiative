@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, NaiveDate, Utc};
 
 use crate::error::CoreResult;
+use crate::lifecycle::{
+    LifecycleObservation, ServicePingLog, ServiceRole, ServiceStopMarker, StopIntent,
+};
 use crate::model::{
     AuditLogPayload, AuditRecord, AuthState, DeviceSettings, ServiceStatus, StoredAuditRecord,
 };
@@ -118,6 +121,85 @@ impl FileStateStore {
         Ok(())
     }
 
+    pub fn save_stop_intent(&self, intent: &StopIntent) -> CoreResult<()> {
+        self.write_json("stop_intent.json", intent)
+    }
+
+    pub fn load_stop_intent(&self) -> CoreResult<Option<StopIntent>> {
+        self.read_json("stop_intent.json")
+    }
+
+    pub fn clear_stop_intent(&self) -> CoreResult<()> {
+        let path = self.root.join("stop_intent.json");
+        match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    pub fn save_service_stop_marker(&self, marker: &ServiceStopMarker) -> CoreResult<()> {
+        let name = service_stop_marker_file_name(marker.role);
+        self.write_json(&name, marker)
+    }
+
+    pub fn load_service_stop_marker(
+        &self,
+        role: ServiceRole,
+    ) -> CoreResult<Option<ServiceStopMarker>> {
+        let name = service_stop_marker_file_name(role);
+        self.read_json(&name)
+    }
+
+    pub fn clear_service_stop_marker(&self, role: ServiceRole) -> CoreResult<()> {
+        let path = self.root.join(service_stop_marker_file_name(role));
+        match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    pub fn clear_all_service_stop_markers(&self) -> CoreResult<()> {
+        self.clear_service_stop_marker(ServiceRole::PrimaryService)?;
+        self.clear_service_stop_marker(ServiceRole::CaptureWorker)
+    }
+
+    pub fn save_last_service_ping(&self, ping: &ServicePingLog) -> CoreResult<()> {
+        let name = service_ping_state_file_name(ping.role);
+        self.write_json(&name, ping)
+    }
+
+    pub fn load_last_service_ping(&self, role: ServiceRole) -> CoreResult<Option<ServicePingLog>> {
+        let name = service_ping_state_file_name(role);
+        self.read_json(&name)
+    }
+
+    pub fn clear_last_service_ping(&self, role: ServiceRole) -> CoreResult<()> {
+        let path = self.root.join(service_ping_state_file_name(role));
+        match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    pub fn clear_all_service_pings(&self) -> CoreResult<()> {
+        self.clear_last_service_ping(ServiceRole::PrimaryService)?;
+        self.clear_last_service_ping(ServiceRole::CaptureWorker)
+    }
+
+    pub fn append_service_ping_log(&self, ping: &ServicePingLog) -> CoreResult<()> {
+        self.append_json_line("service_ping_log.jsonl", ping)
+    }
+
+    pub fn append_lifecycle_observation(
+        &self,
+        observation: &LifecycleObservation,
+    ) -> CoreResult<()> {
+        self.append_json_line("lifecycle_observations.jsonl", observation)
+    }
+
     fn write_json<T: serde::Serialize + ?Sized>(&self, name: &str, value: &T) -> CoreResult<()> {
         let path = self.root.join(name);
         let bytes = serde_json::to_vec_pretty(value)?;
@@ -141,6 +223,22 @@ impl FileStateStore {
             .append(true)
             .open(path)?;
         serde_json::to_writer(&mut file, record)?;
+        writeln!(file)?;
+        file.flush()?;
+        Ok(())
+    }
+
+    fn append_json_line<T: serde::Serialize + ?Sized>(
+        &self,
+        name: &str,
+        value: &T,
+    ) -> CoreResult<()> {
+        let path = self.root.join(name);
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
+        serde_json::to_writer(&mut file, value)?;
         writeln!(file)?;
         file.flush()?;
         Ok(())
@@ -271,6 +369,14 @@ impl FileStateStore {
 
 fn current_time_utc_ms() -> CoreResult<i64> {
     Ok(Utc::now().timestamp_millis())
+}
+
+fn service_stop_marker_file_name(role: ServiceRole) -> String {
+    format!("service_stop_marker_{}.json", role.as_str())
+}
+
+fn service_ping_state_file_name(role: ServiceRole) -> String {
+    format!("service_ping_state_{}.json", role.as_str())
 }
 
 fn audit_day_fully_uploaded(records: &[AuditRecord]) -> bool {

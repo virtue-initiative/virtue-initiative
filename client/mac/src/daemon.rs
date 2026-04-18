@@ -1,5 +1,3 @@
-use std::fs;
-use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,10 +10,9 @@ use chrono::{DateTime, Utc};
 use objc2::rc::autoreleasepool;
 use objc2_app_kit::{NSWorkspace, NSWorkspaceWillPowerOffNotification};
 use objc2_foundation::{NSDate, NSRunLoop};
-use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio::time::sleep;
-use virtue_core::{EventData, LogEntry, MonitorService};
+use virtue_core::{CapturePermissionState, LifecycleObservation, MonitorService, ServiceRole};
 
 use crate::capture::{MacPlatformHooks, has_screen_capture_access, is_permission_missing_error};
 use crate::config::{
@@ -23,11 +20,6 @@ use crate::config::{
 };
 
 const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
-
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct LifecycleState {
-    last_seen_boot_id: Option<String>,
-}
 
 struct ShutdownWatcher {
     should_stop: Arc<AtomicBool>,
@@ -88,14 +80,17 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     let _shutdown_watcher = ShutdownWatcher::spawn(system_shutdown_requested.clone());
 
     let mut service = MonitorService::setup(build_core_config(paths), MacPlatformHooks::new())?;
-    emit_log(
-        &mut service,
-        "daemon_start",
-        &[("source", "macos_launch_agent")],
-    );
-    if let Some(startup_event) = detect_system_startup_event(paths) {
-        emit_log_entry(&mut service, startup_event);
+    if let Some((boot_marker, _)) = current_boot_marker() {
+        let _ = service.record_lifecycle_observation(LifecycleObservation::BootObserved {
+            boot_marker,
+            booted_at_ms: None,
+            detected_by: "kern_boottime_change".to_string(),
+        });
     }
+    let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStarted {
+        role: ServiceRole::PrimaryService,
+        detected_by: "macos_launch_agent".to_string(),
+    });
 
     loop {
         if shutdown.load(Ordering::SeqCst) {
@@ -104,6 +99,12 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
 
         let sleep_duration = match service.loop_iteration() {
             Ok(outcome) => {
+                let _ = service.record_lifecycle_observation(
+                    LifecycleObservation::CapturePermissionChanged {
+                        state: current_permission_state(),
+                        detected_by: "permission_probe".to_string(),
+                    },
+                );
                 update_daemon_status(paths, current_permission_status(), None);
                 duration_until(outcome.next_run_at_ms)
             }
@@ -114,6 +115,16 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
                 } else {
                     current_permission_status()
                 };
+                let _ = service.record_lifecycle_observation(
+                    LifecycleObservation::CapturePermissionChanged {
+                        state: if is_permission_missing_error(&error_text) {
+                            CapturePermissionState::Missing
+                        } else {
+                            current_permission_state()
+                        },
+                        detected_by: "permission_probe".to_string(),
+                    },
+                );
                 update_daemon_status(paths, permission, Some(error_text.clone()));
                 eprintln!("daemon: {error_text}");
                 ERROR_RETRY_INTERVAL
@@ -123,22 +134,20 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
         tokio::select! {
             signal = signal_rx.recv() => {
                 if let Some(signal_name) = signal {
-                    emit_log(
-                        &mut service,
-                        "daemon_stop_signal",
-                        &[("signal", signal_name.as_str())],
+                    let explicit_user_stop = service
+                        .take_stop_intent(ServiceRole::PrimaryService)
+                        .ok()
+                        .flatten()
+                        .is_some();
+                    let _ = service.record_lifecycle_observation(
+                        LifecycleObservation::ServiceStopObserved {
+                            role: ServiceRole::PrimaryService,
+                            raw_reason: signal_name,
+                            shutdown_in_progress: system_shutdown_requested.load(Ordering::SeqCst),
+                            explicit_user_stop,
+                            detected_by: "signal_plus_power_notification".to_string(),
+                        },
                     );
-                    if system_shutdown_requested.load(Ordering::SeqCst) {
-                        emit_log(
-                            &mut service,
-                            "system_shutdown",
-                            &[
-                                ("source", "macos_system"),
-                                ("signal", signal_name.as_str()),
-                                ("detected_by", "nsworkspace_will_power_off"),
-                            ],
-                        );
-                    }
                 }
                 break;
             }
@@ -151,37 +160,19 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     Ok(())
 }
 
-fn detect_system_startup_event(paths: &ClientPaths) -> Option<LogEntry> {
-    let (boot_id, started_at) = current_boot_marker()?;
-    let mut state = load_lifecycle_state(&paths.lifecycle_state_file);
-    if state.last_seen_boot_id.as_deref() == Some(boot_id.as_str()) {
-        return None;
-    }
-
-    state.last_seen_boot_id = Some(boot_id.clone());
-    if let Err(err) = save_lifecycle_state(&paths.lifecycle_state_file, &state) {
-        eprintln!(
-            "daemon: could not persist lifecycle state {}: {err}",
-            paths.lifecycle_state_file.display()
-        );
-    }
-
-    Some(log_entry(
-        "system_startup",
-        &[
-            ("source", "macos_system"),
-            ("boot_id", boot_id.as_str()),
-            ("detected_by", "kern_boottime_change"),
-        ],
-        started_at,
-    ))
-}
-
 fn current_permission_status() -> ScreenshotPermissionStatus {
     if has_screen_capture_access() {
         ScreenshotPermissionStatus::Granted
     } else {
         ScreenshotPermissionStatus::Missing
+    }
+}
+
+fn current_permission_state() -> CapturePermissionState {
+    if has_screen_capture_access() {
+        CapturePermissionState::Granted
+    } else {
+        CapturePermissionState::Missing
     }
 }
 
@@ -201,14 +192,6 @@ fn update_daemon_status(
             paths.daemon_status_file.display()
         );
     }
-}
-
-fn emit_log(service: &mut MonitorService<MacPlatformHooks>, kind: &str, metadata: &[(&str, &str)]) {
-    emit_log_entry(service, log_entry(kind, metadata, Utc::now()));
-}
-
-fn emit_log_entry(service: &mut MonitorService<MacPlatformHooks>, entry: LogEntry) {
-    let _ = service.send_log(entry);
 }
 
 fn spawn_signal_handler(shutdown: Arc<AtomicBool>, signal_tx: mpsc::UnboundedSender<String>) {
@@ -273,38 +256,4 @@ fn parse_sysctl_component(text: &str, prefix: &str) -> Option<i64> {
     let rest = &text[start..];
     let digits: String = rest.chars().take_while(|ch| ch.is_ascii_digit()).collect();
     digits.parse().ok()
-}
-
-fn load_lifecycle_state(path: &Path) -> LifecycleState {
-    fs::read(path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<LifecycleState>(&bytes).ok())
-        .unwrap_or_default()
-}
-
-fn save_lifecycle_state(path: &Path, state: &LifecycleState) -> Result<()> {
-    let Some(parent) = path.parent() else {
-        return Ok(());
-    };
-    fs::create_dir_all(parent)?;
-    let tmp_path = path.with_extension("tmp");
-    let bytes = serde_json::to_vec_pretty(state)?;
-    fs::write(&tmp_path, bytes)?;
-    fs::rename(&tmp_path, path)?;
-    Ok(())
-}
-
-fn log_entry(kind: &str, metadata: &[(&str, &str)], ts: DateTime<Utc>) -> LogEntry {
-    let data = EventData::from_pairs(
-        metadata
-            .iter()
-            .map(|(key, value)| ((*key).to_string(), (*value).to_string())),
-    );
-
-    LogEntry {
-        ts: ts.timestamp_millis(),
-        kind: kind.to_string(),
-        risk: None,
-        data,
-    }
 }

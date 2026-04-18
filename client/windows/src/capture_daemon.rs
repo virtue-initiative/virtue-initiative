@@ -10,7 +10,7 @@ use windows::Win32::Foundation::{CloseHandle, ERROR_FILE_NOT_FOUND, HANDLE};
 use windows::Win32::System::Threading::{MUTEX_MODIFY_STATE, OpenMutexW};
 use windows::core::w;
 
-use virtue_core::MonitorService;
+use virtue_core::{LifecycleObservation, MonitorService, ServiceRole};
 
 use crate::capture::WindowsPlatformHooks;
 use crate::capture_control;
@@ -27,6 +27,10 @@ pub fn run_daemon(shutdown: Arc<AtomicBool>, logger: &ServiceLogger) -> Result<(
     let mut service =
         MonitorService::setup(build_core_config(&paths), WindowsPlatformHooks::new())?;
     let mut last_tray_ensure: Option<Instant> = None;
+    let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStarted {
+        role: ServiceRole::CaptureWorker,
+        detected_by: "capture_console".to_string(),
+    });
 
     loop {
         if should_stop(&shutdown, &paths) {
@@ -49,6 +53,17 @@ pub fn run_daemon(shutdown: Arc<AtomicBool>, logger: &ServiceLogger) -> Result<(
         sleep_interruptible(&shutdown, &paths, sleep_duration);
     }
 
+    let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStopObserved {
+        role: ServiceRole::CaptureWorker,
+        raw_reason: if capture_control::is_capture_stop_requested(&paths) {
+            "capture_stop_signal".to_string()
+        } else {
+            "capture_console_exit".to_string()
+        },
+        shutdown_in_progress: false,
+        explicit_user_stop: false,
+        detected_by: "capture_console".to_string(),
+    });
     let _ = service.shutdown();
     Ok(())
 }
