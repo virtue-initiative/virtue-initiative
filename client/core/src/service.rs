@@ -1305,6 +1305,7 @@ mod tests {
             .into_iter()
             .filter_map(|record| match record.record {
                 AuditRecord::Log { log, .. } => log.as_direct_log().cloned(),
+                AuditRecord::LocalLog { .. } => None,
                 AuditRecord::HashUploaded { .. }
                 | AuditRecord::LogUploaded { .. }
                 | AuditRecord::BatchUploaded { .. } => None,
@@ -1322,6 +1323,7 @@ mod tests {
                 AuditRecord::Log { log, .. } => {
                     log.as_batch_event().map(|event| event.event.clone())
                 }
+                AuditRecord::LocalLog { .. } => None,
                 AuditRecord::HashUploaded { .. }
                 | AuditRecord::LogUploaded { .. }
                 | AuditRecord::BatchUploaded { .. } => None,

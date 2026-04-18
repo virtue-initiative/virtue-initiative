@@ -109,6 +109,9 @@ pub enum AuditRecord {
         requires_hash_upload: bool,
         log: AuditLogPayload,
     },
+    LocalLog {
+        log: LogEntry,
+    },
     HashUploaded {
         local_id: String,
     },

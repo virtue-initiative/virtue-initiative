@@ -41,6 +41,7 @@ pub fn derive_state(records: &[StoredAuditRecord]) -> AuditState {
                 );
                 order.push(local_id.clone());
             }
+            AuditRecord::LocalLog { .. } => {}
             AuditRecord::HashUploaded { local_id } => {
                 hash_uploaded.insert(local_id.clone());
             }
