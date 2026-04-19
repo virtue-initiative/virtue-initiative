@@ -366,6 +366,7 @@ export function renderTamperAlertTemplate(input: {
   severity: TamperSeverity;
   ownerName?: string | null;
   ownerEmail: string;
+  deviceName: string;
   title: string;
   details?: string | null;
   appName: string;
@@ -374,12 +375,14 @@ export function renderTamperAlertTemplate(input: {
   const appName = normalizeAppName(input.appName);
   const owner = input.ownerName?.trim() || input.ownerEmail;
   const detailText = input.details?.trim();
+  const deviceLine = `Device: ${input.deviceName}`;
   const footer = withFooter({
     appName,
     appUrl: input.appUrl,
     headline: `${input.severity} tamper alert`,
     textLines: [
       `${owner} triggered a ${input.severity} tamper alert.`,
+      deviceLine,
       input.title,
       ...(detailText ? ['', detailText] : []),
       '',
@@ -387,6 +390,7 @@ export function renderTamperAlertTemplate(input: {
     ],
     htmlSections: [
       paragraph(`${owner} triggered a ${input.severity} tamper alert.`),
+      paragraph(deviceLine),
       paragraph(input.title),
       ...(detailText ? [paragraph(detailText)] : []),
       actionButton(input.appUrl, 'Review screenshots and logs'),
@@ -431,6 +435,10 @@ export function renderPartnerDigestTemplate(input: {
     (total, summary) => total + summary.approxScreenshotCount,
     0,
   );
+  const missingLogHeading =
+    input.cadence === 'weekly'
+      ? 'Devices with at least one day without logs:'
+      : 'Devices without logs in the last 24 hours:';
 
   const partnerSections = input.partnerSummaries.flatMap((summary) => {
     const owner = summary.ownerName?.trim() || summary.ownerEmail;
@@ -442,10 +450,7 @@ export function renderPartnerDigestTemplate(input: {
       `Warning tamper alerts: ${summary.tamperCounts.warning}`,
       `Info-only tamper events: ${summary.tamperCounts.info}`,
       ...(summary.missingLogDays.length > 0
-        ? [
-            'Devices with at least one day without logs:',
-            ...summary.missingLogDays.map((line) => `- ${line}`),
-          ]
+        ? [missingLogHeading, ...summary.missingLogDays.map((line) => `- ${line}`)]
         : []),
     ];
   });
@@ -481,7 +486,7 @@ export function renderPartnerDigestTemplate(input: {
               color: EMAIL_COLORS.text,
               'font-size': '15px',
               'line-height': '1.5',
-            })}">Devices with at least one day without logs:<ul style="${inlineStyle({
+            })}">${escapeHtml(missingLogHeading)}<ul style="${inlineStyle({
               margin: '8px 0 0 18px',
               padding: '0',
             })}">${summary.missingLogDays.map((line) => listItem(line)).join('')}</ul></li>`

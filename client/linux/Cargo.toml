@@ -13,6 +13,7 @@ anyhow = "1"
 chrono = { version = "0.4", features = ["clock", "serde"] }
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
+futures-util = "0.3"
 hostname = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
 ksni = { version = "0.3.3", features = ["blocking"] }
@@ -21,6 +22,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time"] }
 virtue_core = { package = "virtue-core", path = "../core" }
+zbus = "5.14.0"
 
 [package.metadata.deb]
 name = "virtue"

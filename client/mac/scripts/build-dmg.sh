@@ -16,7 +16,7 @@ source "${CLIENT_ROOT}/scripts/version.sh"
 
 BUILD_LABEL="$(virtue_build_label)"
 APP_NAME="Virtue.app"
-DMG_NAME="Virtue-${BUILD_LABEL}.dmg"
+DMG_NAME="virtue-macos-${BUILD_LABEL}.dmg"
 DMG_PATH="target/macos/${DMG_NAME}"
 TEMP_DMG_PATH="target/macos/Virtue-${BUILD_LABEL}-temp.dmg"
 STAGING_DIR="target/macos/dmg-staging"

@@ -1,186 +1,255 @@
 ---
-import SiteLayout from "../layouts/SiteLayout.astro";
 import CheckIcon from "../components/icons/CheckIcon.astro";
 import MinusIcon from "../components/icons/MinusIcon.astro";
+import LogoMark from "../components/LogoMark.astro";
+import SiteLayout from "../layouts/SiteLayout.astro";
 import { APP_URL } from "../lib/app-url";
 ---
 
 <SiteLayout tagline="Providing free tools and resources for accountability">
-  <section id="about">
-    <h2>About</h2>
+  <div class="home-page">
+    <section class="home-hero">
+      <div class="home-hero-copy">
+        <h1>We want to see a world set free from pornography</h1>
+        <p class="home-hero-lead">
+          Virtue is a simple app that shares blurred screenshots of your
+          activity with an accountability partner you trust. It's entirely free
+          to use and end-to-end encrypted.
+        </p>
+        <div class="section-actions">
+          <a href={`${APP_URL}/signup`} class="btn btn-primary">Get started</a>
+          <a href="/about" class="btn btn-outline">Our mission</a>
+        </div>
+      </div>
+      <div class="home-hero-logo" aria-hidden="true">
+        <LogoMark />
+      </div>
+    </section>
 
-    <p>
-      The Virtue Initiative is an organization that aims to provide free tools
-      and resources for accountability. We currently offer a free
-      screenshot-based accountability app and some resources on how to use it
-      well.
-    </p>
+    <section class="home-section">
+      <div class="home-section-heading">
+        <h2>How it works</h2>
+      </div>
+      <ol class="steps-grid">
+        <li class="step-card">
+          <span class="step-number">1.</span>
+          <span>Create an account</span>
+        </li>
+        <li class="step-card">
+          <span class="step-number">2.</span>
+          <span>Install the app on your devices</span>
+        </li>
+        <li class="step-card">
+          <span class="step-number">3.</span>
+          <span>It captures blurred screenshots of your activity</span>
+        </li>
+        <li class="step-card">
+          <span class="step-number">4.</span>
+          <span>Your accountability partner can review them</span>
+        </li>
+      </ol>
+    </section>
 
-    <p>
-      Our mission is to develop free technology and resources to support people
-      who want to be free from pornography. We know what it's like to feel
-      stuck, and we want to provide tools to support you. We don't want the
-      price to be yet another excuse not to deal with pornography.
-    </p>
+    <section class="home-section home-section-split">
+      <div class="home-section-body">
+        <div class="partner-copy">
+          <div class="home-section-heading">
+            <h2>You need one accountability partner</h2>
+          </div>
 
-    <p>
-      Our vision is to see the Christian church and the world freed from
-      pornography. There are billions of dollars made by keeping men and women
-      stuck. For many people, it starts from a young age, and it's hard to give
-      up, even if they desperately want to. We want to provide tools to provide
-      support and make it easier.
-    </p>
+          <p>This only works if someone else can see your activity.</p>
+          <p>That could be:</p>
+          <ul class="plain-list">
+            <li>a friend</li>
+            <li>a brother</li>
+            <li>a mentor</li>
+            <li>your father</li>
+          </ul>
+          <p>
+            Once you make an account, invite someone by email to be your
+            accountability partner.
+          </p>
+        </div>
+      </div>
+    </section>
 
-    <p>
-      The Virtue Initiative began in February 2026 when we started looking at
-      accountability apps. There were a few options but none of them were free.
-      We thought, "What if we can make a free version while keeping most of the
-      essential features of other paid services?" Our goal is to fundraise all
-      our financial support and keep the app free.
-    </p>
+    <section class="home-section">
+      <div class="privacy-card">
+        <div class="home-section-heading">
+          <h2>Privacy &amp; security</h2>
+        </div>
 
-    <p>
-      Hopefully you're willing to join us on this mission. If you've been or
-      know someone who's been struggling to break free from porn,
-      <a href={`${APP_URL}#signup`}>sign up</a> now or send this to them. You might
-      also want to read
-      <a href="/help/tips"> this page on tips to beat pornography. </a>
-    </p>
+        <ul class="plain-list privacy-list">
+          <li>Screenshots are shrunk and blurred before being shared</li>
+          <li>Data is end-to-end encrypted</li>
+          <li>
+            Only your chosen accountability partner can view your activity
+          </li>
+          <li>No ads or data selling</li>
+        </ul>
+      </div>
+    </section>
 
-    <p>
-      If you wish to support us monetarily, you can donate (at some point). If
-      you have any questions, feel free to contact us at
-      <a href="mailto:help@virtueinitiative.org">help@virtueinitiative.org</a> or
-      join our <a href="https://discord.gg/4kNsbRuzQD">Discord server</a>.
-    </p>
-  </section>
+    <section class="home-section">
+      <div class="home-section-heading">
+        <h2>FAQ</h2>
+      </div>
 
-  <section id="how-it-works">
-    <h2>How it works</h2>
-    <ol>
-      <li>
-        <a href={`${APP_URL}#signup`}>Create an account</a>
-      </li>
-      <li>
-        <a href="/download">Install Virtue (the monitoring app)</a>
-        on one or more of your devices.
-      </li>
-      <li>
-        Invite an accountability partner by email. They will need to create an
-        account.
-      </li>
-      <li>
-        The client runs in the background, capturing periodic blurry screenshots
-        and uploading them securely using end-to-end encryption.
-      </li>
-      <li>
-        Your accountability partner logs in to the web portal to review your
-        activity log and screenshots.
-      </li>
-    </ol>
-    <div class="section-actions">
-      <a href="/download" class="btn btn-outline btn-help">
-        Download installers
-      </a>
-      <a href="/help/getting-started" class="btn btn-outline btn-help">
-        Learn more
-      </a>
-    </div>
-  </section>
+      <div class="faq-list">
+        <details class="faq-item" open>
+          <summary>What does the app share?</summary>
+          <p>
+            It captures blurred screenshots of activity on supported devices and
+            makes them available to the accountability partner you choose.
+          </p>
+        </details>
 
-  <section id="platforms">
-    <h2>Currently supported platforms &amp; features</h2>
-    <p>
-      We are working hard to support more platforms and features. Below is the
-      current features supported by platform. As you can probably tell, this is
-      still a beta stage project.
-    </p>
-    <div class="table-wrapper">
-      <table>
-        <thead>
-          <tr>
-            <th>Feature</th>
-            <th>Windows</th>
-            <th>macOS</th>
-            <th>Linux</th>
-            <th>
-              Android<sup><a href="#platform-footnote-1">1</a></sup>
-            </th>
-            <th>iOS</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>Periodic screenshots</td>
-            <td class="yes"><CheckIcon /></td>
-            <td class="yes"><CheckIcon /></td>
-            <td class="yes"><CheckIcon /></td>
-            <td class="yes"><CheckIcon /></td>
-            <td class="no"><MinusIcon /></td>
-          </tr>
-          <tr>
-            <td>Detects shutdowns</td>
-            <td class="yes"><CheckIcon /></td>
-            <td class="yes"><CheckIcon /></td>
-            <td class="yes"><CheckIcon /></td>
-            <td class="yes"><CheckIcon /></td>
-            <td class="no"><MinusIcon /></td>
-          </tr>
-          <tr>
-            <td>End-to-end encryption</td>
-            <td class="yes"><CheckIcon /></td>
-            <td class="yes"><CheckIcon /></td>
-            <td class="yes"><CheckIcon /></td>
-            <td class="yes"><CheckIcon /></td>
-            <td class="no"><MinusIcon /></td>
-          </tr>
-          <tr>
-            <td>Daily/weekly email reports</td>
-            <td class="yes"><CheckIcon /></td>
-            <td class="yes"><CheckIcon /></td>
-            <td class="yes"><CheckIcon /></td>
-            <td class="yes"><CheckIcon /></td>
-            <td class="no"><MinusIcon /></td>
-          </tr>
-          <tr>
-            <td>Immediate email alerts</td>
-            <td class="no"><MinusIcon /></td>
-            <td class="no"><MinusIcon /></td>
-            <td class="no"><MinusIcon /></td>
-            <td class="no"><MinusIcon /></td>
-            <td class="no"><MinusIcon /></td>
-          </tr>
-          <tr>
-            <td>Detects tampering</td>
-            <td class="no"><MinusIcon /></td>
-            <td class="no"><MinusIcon /></td>
-            <td class="no"><MinusIcon /></td>
-            <td class="no"><MinusIcon /></td>
-            <td class="no"><MinusIcon /></td>
-          </tr>
-          <tr>
-            <td>Captures web history</td>
-            <td class="no"><MinusIcon /></td>
-            <td class="no"><MinusIcon /></td>
-            <td class="no"><MinusIcon /></td>
-            <td class="no"><MinusIcon /></td>
-            <td class="no"><MinusIcon /></td>
-          </tr>
-          <tr>
-            <td>Image risk classification</td>
-            <td class="no"><MinusIcon /></td>
-            <td class="no"><MinusIcon /></td>
-            <td class="no"><MinusIcon /></td>
-            <td class="no"><MinusIcon /></td>
-            <td class="no"><MinusIcon /></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <div class="table-footnotes">
-      <p id="platform-footnote-1">
-        <sup>1</sup> Android currently requires sideloading the app.
+        <details class="faq-item" open>
+          <summary>Do I need an accountability partner before I start?</summary>
+          <p>
+            Yes. This only works if one other person can review your activity.
+            Start with one person you trust.
+          </p>
+        </details>
+
+        <details class="faq-item">
+          <summary>Is it really free?</summary>
+          <p>
+            Yes. The app is free to use with no subscriptions. Our code is even <a
+              href="https://github.com/virtue-initiative">open source</a
+            >.
+          </p>
+        </details>
+
+        <details class="faq-item">
+          <summary>Who can see my data?</summary>
+          <p>
+            Only the accountability partner you authorize can review it. The
+            data is end-to-end encrypted, and the service does not sell it or
+            use it for ads.
+          </p>
+        </details>
+
+        <details class="faq-item">
+          <summary>Where do I install it?</summary>
+          <p>
+            You can install Virtue on supported devices from the
+            <a href="/download">downloads page</a>, and the
+            <a href="/help/getting-started">getting started guide</a> walks through
+            the setup.
+          </p>
+        </details>
+      </div>
+    </section>
+
+    <section class="home-section" id="platforms">
+      <div class="home-section-heading">
+        <h2>Currently supported platforms &amp; features</h2>
+      </div>
+      <p>
+        We are working hard to support more platforms and features. Below is the
+        current feature support by platform. This is still a beta stage project.
       </p>
-    </div>
-  </section>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th>Windows</th>
+              <th>macOS</th>
+              <th>Linux</th>
+              <th>
+                Android<sup><a href="#platform-footnote-1">1</a></sup>
+              </th>
+              <th>iOS<sup><a href="#platform-footnote-2">2</a></sup></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Periodic screenshots</td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="no"><MinusIcon /></td>
+            </tr>
+            <tr>
+              <td>Detects shutdowns</td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="no"><MinusIcon /></td>
+            </tr>
+            <tr>
+              <td>End-to-end encryption</td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="no"><MinusIcon /></td>
+            </tr>
+            <tr>
+              <td>Daily/weekly email reports</td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="no"><MinusIcon /></td>
+            </tr>
+            <tr>
+              <td>Immediate email alerts</td>
+              <td class="no"><MinusIcon /></td>
+              <td class="no"><MinusIcon /></td>
+              <td class="no"><MinusIcon /></td>
+              <td class="no"><MinusIcon /></td>
+              <td class="no"><MinusIcon /></td>
+            </tr>
+            <tr>
+              <td>Detects tampering</td>
+              <td class="no"><MinusIcon /></td>
+              <td class="no"><MinusIcon /></td>
+              <td class="no"><MinusIcon /></td>
+              <td class="no"><MinusIcon /></td>
+              <td class="no"><MinusIcon /></td>
+            </tr>
+            <tr>
+              <td>Captures web history</td>
+              <td class="no"><MinusIcon /></td>
+              <td class="no"><MinusIcon /></td>
+              <td class="no"><MinusIcon /></td>
+              <td class="no"><MinusIcon /></td>
+              <td class="no"><MinusIcon /></td>
+            </tr>
+            <tr>
+              <td>Image risk classification</td>
+              <td class="no"><MinusIcon /></td>
+              <td class="no"><MinusIcon /></td>
+              <td class="no"><MinusIcon /></td>
+              <td class="no"><MinusIcon /></td>
+              <td class="no"><MinusIcon /></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="table-footnotes">
+        <p id="platform-footnote-1">
+          <sup>1</sup> Android currently requires sideloading the app.
+        </p>
+        <p id="platform-footnote-2">
+          <sup>2</sup> iOS Safari monitoring coming soon.
+        </p>
+      </div>
+    </section>
+
+    <section class="home-section home-cta">
+      <div class="home-section-heading">
+        <h2>Get started</h2>
+      </div>
+      <p>Create your account and set up your accountability partner.</p>
+      <div class="section-actions">
+        <a href={`${APP_URL}/signup`} class="btn btn-primary">Get started</a>
+      </div>
+    </section>
+  </div>
 </SiteLayout>

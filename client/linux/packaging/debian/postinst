@@ -29,21 +29,37 @@ start_for_user() {
   su - "$user" -s /bin/sh -c "export XDG_RUNTIME_DIR=$runtime; if systemctl --user is-active --quiet virtue.service; then systemctl --user restart virtue.service; else systemctl --user start virtue.service; fi >/dev/null 2>&1 || true"
 }
 
+start_for_user_once() {
+  user="$1"
+  uid="$2"
+  processed_key=" $uid:$user "
+
+  case " $STARTED_USERS " in
+    *"$processed_key"*) return 0 ;;
+  esac
+
+  STARTED_USERS="${STARTED_USERS}${processed_key}"
+  start_for_user "$user" "$uid"
+}
+
 # Enable globally so newly logged-in users auto-start without manual enable.
 systemctl --global enable virtue.service >/dev/null 2>&1 || true
+STARTED_USERS=""
 
 if command -v loginctl >/dev/null 2>&1; then
-  loginctl list-users --no-legend | while read -r uid user _; do
+  while read -r uid user _; do
     [ -n "$uid" ] || continue
     [ -n "$user" ] || continue
-    start_for_user "$user" "$uid"
-  done
+    start_for_user_once "$user" "$uid"
+  done <<EOF
+$(loginctl list-users --no-legend 2>/dev/null || true)
+EOF
 fi
 
 if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
   uid=$(id -u "$SUDO_USER" 2>/dev/null || true)
   if [ -n "$uid" ]; then
-    start_for_user "$SUDO_USER" "$uid"
+    start_for_user_once "$SUDO_USER" "$uid"
   fi
 fi
 

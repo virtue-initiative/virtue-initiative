@@ -1,11 +1,21 @@
-import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useMemo, useRef, useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
-import { api, Device, WatchingPartner, WatcherPartner } from "../../api";
+import { Device, WatchingPartner, WatcherPartner } from "../../api";
 import { Button } from "../../components/Button";
+import {
+  Dialog,
+  DialogActions,
+  DialogHeader,
+  DialogSecondaryActions,
+} from "../../components/Dialog";
 import { useAuth } from "../../context/auth";
-import { PARTNERS_CHANGED_EVENT } from "../../events";
+import { useDevices } from "../../hooks/useDevices";
+import { usePartners } from "../../hooks/usePartners";
 import { formatRelativeTimestamp } from "../../utils/time";
 import "./style.css";
+
+const DOWNLOAD_URL = "https://virtueinitiative.org/download";
+const INSTALLATION_URL = "https://virtueinitiative.org/help/installation/";
 
 function UserPlusIcon() {
   return (
@@ -26,153 +36,209 @@ function UserPlusIcon() {
 }
 
 export function Home() {
-  const { token, userId } = useAuth();
-  const [devices, setDevices] = useState<Device[]>([]);
-  const [watching, setWatching] = useState<WatchingPartner[]>([]);
-  const [watchers, setWatchers] = useState<WatcherPartner[]>([]);
-  const [error, setError] = useState<string | null>(null);
-
-  function reload() {
-    if (!token) return;
-    Promise.all([api.getDevices(token), api.getPartners(token)])
-      .then(([deviceList, partnerList]) => {
-        setDevices(deviceList);
-        setWatching(partnerList.watching);
-        setWatchers(partnerList.watchers);
-      })
-      .catch((err) =>
-        setError(
-          err instanceof Error ? err.message : "Failed to load dashboard",
-        ),
-      );
-  }
-
-  useEffect(reload, [token]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const handler = () => reload();
-    window.addEventListener(PARTNERS_CHANGED_EVENT, handler);
-    return () => window.removeEventListener(PARTNERS_CHANGED_EVENT, handler);
-  }, [token]);
+  const { userId } = useAuth();
+  const {
+    devices,
+    error: devicesError,
+    isLoading: devicesLoading,
+    updateDevice,
+    removeDevice,
+  } = useDevices();
+  const {
+    watching,
+    watchers,
+    error: partnersError,
+    isLoading: partnersLoading,
+    invitePartner,
+    removeWatching,
+    removeWatcher,
+  } = usePartners();
+  const error = devicesError ?? partnersError;
+  const dashboardLoading = devicesLoading || partnersLoading;
+  const deviceList = devices ?? [];
+  const watchingList = watching ?? [];
+  const watchersList = watchers ?? [];
 
   const ownDevices = useMemo(
-    () => devices.filter((device) => device.owner === userId),
-    [devices, userId],
+    () => deviceList.filter((device) => device.owner === userId),
+    [deviceList, userId],
   );
   const devicesByOwner = useMemo(() => {
     const map = new Map<string, Device[]>();
-    for (const device of devices) {
+    for (const device of deviceList) {
       const ownerDevices = map.get(device.owner) ?? [];
       ownerDevices.push(device);
       map.set(device.owner, ownerDevices);
     }
     return map;
-  }, [devices]);
+  }, [deviceList]);
   const acceptedWatching = useMemo(
-    () => watching.filter((partner) => partner.status === "accepted"),
-    [watching],
+    () => watchingList.filter((partner) => partner.status === "accepted"),
+    [watchingList],
   );
   const pendingWatching = useMemo(
-    () => watching.filter((partner) => partner.status === "pending"),
-    [watching],
+    () => watchingList.filter((partner) => partner.status === "pending"),
+    [watchingList],
   );
   const acceptedWatchers = useMemo(
-    () => watchers.filter((partner) => partner.status === "accepted"),
-    [watchers],
+    () => watchersList.filter((partner) => partner.status === "accepted"),
+    [watchersList],
   );
   const pendingWatchers = useMemo(
-    () => watchers.filter((partner) => partner.status === "pending"),
-    [watchers],
+    () => watchersList.filter((partner) => partner.status === "pending"),
+    [watchersList],
   );
 
   return (
     <div class="dashboard">
-      {error && <p class="alert-error">{error}</p>}
+      {error && <p class="alert-error">{error.message}</p>}
+      {dashboardLoading && !devices && !watching && !watchers && (
+        <p class="empty">Loading…</p>
+      )}
 
-      <section class="dash-section">
-        <div class="section-header">
-          <h2>My devices</h2>
-          <a
-            class="btn btn-primary"
-            href="https://virtueinitiative.org/help/installation/"
-          >
-            Create device
-          </a>
-        </div>
-        {ownDevices.length === 0 ? (
-          <p class="empty">No devices</p>
-        ) : (
-          <div class="card-grid">
-            {ownDevices.map((device) => (
-              <DeviceCard
-                key={device.id}
-                device={device}
-                token={token!}
-                onChanged={reload}
-              />
-            ))}
-          </div>
-        )}
-      </section>
+      {!dashboardLoading && (
+        <>
+          <section class="dashboard-section">
+            <div class="dashboard-section-header">
+              <h2>My devices</h2>
+              <AddDeviceButton />
+            </div>
+            {ownDevices.length === 0 ? (
+              <p class="empty">No devices</p>
+            ) : (
+              <div class="card-grid">
+                {ownDevices.map((device) => (
+                  <DeviceCard
+                    key={device.id}
+                    device={device}
+                    onUpdateDevice={updateDevice}
+                    onRemoveDevice={removeDevice}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
 
-      <section class="dash-section">
-        <div class="section-header">
-          <h2>Watching</h2>
-        </div>
-        <PartnerArea
-          subtitle="People you can monitor and review."
-          emptyLabel="No watching relationships yet."
-          pending={pendingWatching}
-          accepted={acceptedWatching}
-          partnerDevicesByOwner={devicesByOwner}
-          token={token!}
-          onChanged={reload}
-        />
-      </section>
+          <section class="dashboard-section">
+            <div class="dashboard-section-header">
+              <h2>You monitor</h2>
+            </div>
+            <PartnerArea
+              emptyLabel="You cannot monitor anyone yet."
+              pending={pendingWatching}
+              accepted={acceptedWatching}
+              partnerDevicesByOwner={devicesByOwner}
+              onRemoveWatching={removeWatching}
+              onRemoveWatcher={removeWatcher}
+            />
+          </section>
 
-      <section class="dash-section">
-        <div class="section-header">
-          <h2>Watchers</h2>
-          <InviteButton token={token!} onInvited={reload} />
-        </div>
-        <PartnerArea
-          subtitle="People who can monitor your account."
-          emptyLabel="No watcher relationships yet."
-          pending={pendingWatchers}
-          accepted={acceptedWatchers}
-          partnerDevicesByOwner={devicesByOwner}
-          token={token!}
-          onChanged={reload}
-        />
-      </section>
+          <section class="dashboard-section">
+            <div class="dashboard-section-header">
+              <h2>Monitor you</h2>
+              <InviteButton onInvitePartner={invitePartner} />
+            </div>
+            <PartnerArea
+              emptyLabel="No one can monitor you yet."
+              pending={pendingWatchers}
+              accepted={acceptedWatchers}
+              partnerDevicesByOwner={devicesByOwner}
+              onRemoveWatching={removeWatching}
+              onRemoveWatcher={removeWatcher}
+            />
+          </section>
+        </>
+      )}
     </div>
   );
 }
 
+function AddDeviceButton() {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  function open() {
+    dialogRef.current?.showModal();
+  }
+
+  function close() {
+    dialogRef.current?.close();
+  }
+
+  return (
+    <>
+      <Button className="btn-primary" onClick={open}>
+        Add device
+      </Button>
+      <Dialog dialogRef={dialogRef} class="device-setup-dialog">
+        <DialogHeader>Add device</DialogHeader>
+        <p class="invite-desc">
+          Set up Virtue on a phone or computer, then sign in with this account
+          so it starts appearing in your dashboard.
+        </p>
+        <ol class="device-setup-steps">
+          <li>
+            <span class="device-setup-step-label">Download the app.</span>
+            Choose the installer for the device you want to monitor.
+          </li>
+          <li>
+            <span class="device-setup-step-label">
+              Follow the installation instructions.
+            </span>
+            Use the platform-specific setup guide if you need it.
+          </li>
+          <li>
+            <span class="device-setup-step-label">Log in on that device.</span>
+            Once the app signs in and uploads, it will show up here.
+          </li>
+        </ol>
+        <DialogActions
+          left={
+            <a
+              class="btn btn-ghost"
+              href={INSTALLATION_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              View guide
+            </a>
+          }
+        >
+          <button class="btn btn-ghost" type="button" onClick={close}>
+            Close
+          </button>
+          <a
+            class="btn btn-primary"
+            href={DOWNLOAD_URL}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Download
+          </a>
+        </DialogActions>
+      </Dialog>
+    </>
+  );
+}
+
 function PartnerArea({
-  subtitle,
   emptyLabel,
   pending,
   accepted,
   partnerDevicesByOwner,
-  token,
-  onChanged,
+  onRemoveWatching,
+  onRemoveWatcher,
 }: {
-  subtitle: string;
   emptyLabel: string;
   pending: Array<WatchingPartner | WatcherPartner>;
   accepted: Array<WatchingPartner | WatcherPartner>;
   partnerDevicesByOwner: Map<string, Device[]>;
-  token: string;
-  onChanged: () => void;
+  onRemoveWatching: (id: string) => Promise<void>;
+  onRemoveWatcher: (id: string) => Promise<void>;
 }) {
   const partners = [...pending, ...accepted];
 
   return (
     <section class="partners-panel">
-      <p class="partners-panel-subtitle">{subtitle}</p>
-
       {partners.length === 0 ? (
         <p class="empty">{emptyLabel}</p>
       ) : (
@@ -182,8 +248,8 @@ function PartnerArea({
               <PendingPartnerCard
                 key={partner.id}
                 partner={partner}
-                token={token}
-                onChanged={onChanged}
+                onRemoveWatching={onRemoveWatching}
+                onRemoveWatcher={onRemoveWatcher}
               />
             ) : (
               <PartnerCard
@@ -194,8 +260,8 @@ function PartnerArea({
                     ? (partnerDevicesByOwner.get(partner.user.id) ?? [])
                     : []
                 }
-                token={token}
-                onChanged={onChanged}
+                onRemoveWatching={onRemoveWatching}
+                onRemoveWatcher={onRemoveWatcher}
               />
             ),
           )}
@@ -206,11 +272,9 @@ function PartnerArea({
 }
 
 function InviteButton({
-  token,
-  onInvited,
+  onInvitePartner,
 }: {
-  token: string;
-  onInvited: () => void;
+  onInvitePartner: (email: string) => Promise<void>;
 }) {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
@@ -233,9 +297,8 @@ function InviteButton({
     setError(null);
     setLoading(true);
     try {
-      await api.invitePartner(token, email);
+      await onInvitePartner(email);
       close();
-      onInvited();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send invite");
     } finally {
@@ -248,11 +311,12 @@ function InviteButton({
       <Button className="btn-primary" onClick={open} icon={<UserPlusIcon />}>
         Invite partner
       </Button>
-      <dialog ref={dialogRef}>
-        <h3 class="dialog-title">Invite a partner</h3>
+      <Dialog dialogRef={dialogRef}>
+        <DialogHeader>Invite a partner</DialogHeader>
         <p class="invite-desc">
-          Your partner can view your uploaded screenshots and activity logs
-          after they accept this invite and set up their account.
+          Your partner can <b>view any screenshots and activity logs </b>
+          uploaded <b>after</b> you add them as a partner and they set up their
+          account.
         </p>
         <form onSubmit={handleSubmit}>
           <div class="field">
@@ -268,42 +332,45 @@ function InviteButton({
             />
           </div>
           {error && <p class="alert-error">{error}</p>}
-          <div class="invite-actions">
-            <button class="btn btn-primary" type="submit" disabled={loading}>
-              {loading ? "Sending…" : "Send invite"}
-            </button>
+          <DialogActions>
             <button class="btn btn-ghost" type="button" onClick={close}>
               Cancel
             </button>
-          </div>
+            <button class="btn btn-primary" type="submit" disabled={loading}>
+              {loading ? "Sending…" : "Send invite"}
+            </button>
+          </DialogActions>
         </form>
-      </dialog>
+      </Dialog>
     </>
   );
 }
 
 function PendingPartnerCard({
   partner,
-  token,
-  onChanged,
+  onRemoveWatching,
+  onRemoveWatcher,
 }: {
   partner: WatchingPartner | WatcherPartner;
-  token: string;
-  onChanged: () => void;
+  onRemoveWatching: (id: string) => Promise<void>;
+  onRemoveWatcher: (id: string) => Promise<void>;
 }) {
   const [action, setAction] = useState<"remove" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const confirmRef = useRef<HTMLDialogElement>(null);
-  const partnerName = partner.user.name ?? partner.user.email;
+  const partnerLabel = partner.user.name ?? partner.user.email;
+  const partnerEmailTooltip = partner.user.name
+    ? undefined
+    : partner.user.email;
+  const partnerName = partnerLabel;
 
   async function removeConfirmed() {
     setAction("remove");
     setError(null);
     try {
       await ("digest_cadence" in partner
-        ? api.deleteWatching(token, partner.id)
-        : api.deleteWatcher(token, partner.id));
-      onChanged();
+        ? onRemoveWatching(partner.id)
+        : onRemoveWatcher(partner.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to remove request");
       setAction(null);
@@ -311,9 +378,11 @@ function PendingPartnerCard({
   }
 
   return (
-    <div class="card card-highlight">
+    <div class="card">
       <div class="card-header">
-        <span class="card-name">{partner.user.name ?? partner.user.email}</span>
+        <span class="card-name" title={partnerEmailTooltip}>
+          {partnerLabel}
+        </span>
         <span class="badge badge-yellow">Pending</span>
       </div>
       {error && <p class="alert-error">{error}</p>}
@@ -327,13 +396,20 @@ function PendingPartnerCard({
           {action === "remove" ? "Removing…" : "Remove"}
         </button>
       </div>
-      <dialog ref={confirmRef}>
-        <h3 class="dialog-title">Remove {partnerName}?</h3>
+      <Dialog dialogRef={confirmRef}>
+        <DialogHeader>Remove {partnerName}?</DialogHeader>
         <p class="invite-desc">
-          This will cancel the pending partner relationship. The partner will be
-          notified.
+          This will cancel the pending partner relationship.
         </p>
-        <div class="invite-actions">
+        <DialogActions>
+          <button
+            class="btn btn-ghost"
+            type="button"
+            onClick={() => confirmRef.current?.close()}
+            disabled={action !== null}
+          >
+            Cancel
+          </button>
           <button
             class="btn btn-danger"
             type="button"
@@ -345,16 +421,8 @@ function PendingPartnerCard({
           >
             {action === "remove" ? "Removing…" : "Remove partner"}
           </button>
-          <button
-            class="btn btn-ghost"
-            type="button"
-            onClick={() => confirmRef.current?.close()}
-            disabled={action !== null}
-          >
-            Cancel
-          </button>
-        </div>
-      </dialog>
+        </DialogActions>
+      </Dialog>
     </div>
   );
 }
@@ -362,29 +430,32 @@ function PendingPartnerCard({
 function PartnerCard({
   partner,
   devices,
-  token,
-  onChanged,
+  onRemoveWatching,
+  onRemoveWatcher,
 }: {
   partner: WatchingPartner | WatcherPartner;
   devices: Device[];
-  token: string;
-  onChanged: () => void;
+  onRemoveWatching: (id: string) => Promise<void>;
+  onRemoveWatcher: (id: string) => Promise<void>;
 }) {
   const { route } = useLocation();
   const isWatching = "digest_cadence" in partner;
   const [action, setAction] = useState<"remove" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const confirmRef = useRef<HTMLDialogElement>(null);
-  const partnerName = partner.user.name ?? partner.user.email;
+  const partnerLabel = partner.user.name ?? partner.user.email;
+  const partnerEmailTooltip = partner.user.name
+    ? undefined
+    : partner.user.email;
+  const partnerName = partnerLabel;
 
   async function removeConfirmed() {
     setAction("remove");
     setError(null);
     try {
       await ("digest_cadence" in partner
-        ? api.deleteWatching(token, partner.id)
-        : api.deleteWatcher(token, partner.id));
-      onChanged();
+        ? onRemoveWatching(partner.id)
+        : onRemoveWatcher(partner.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to remove partner");
       setAction(null);
@@ -394,8 +465,9 @@ function PartnerCard({
   return (
     <div class={`card${isWatching ? "" : " partner-card-compact"}`}>
       <div class="card-header">
-        <span class="card-name">{partner.user.name ?? partner.user.email}</span>
-        <span class="badge badge-green">Accepted</span>
+        <span class="card-name" title={partnerEmailTooltip}>
+          {partnerLabel}
+        </span>
       </div>
       {isWatching && devices.length > 0 && (
         <div class="partner-device-list">
@@ -442,13 +514,21 @@ function PartnerCard({
           {action === "remove" ? "Removing…" : "Remove"}
         </button>
       </div>
-      <dialog ref={confirmRef}>
-        <h3 class="dialog-title">Remove {partnerName}?</h3>
+      <Dialog dialogRef={confirmRef}>
+        <DialogHeader>Remove {partnerName}?</DialogHeader>
         <p class="invite-desc">
           This will remove your partner relationship with this person. The
           partner will be notified.
         </p>
-        <div class="invite-actions">
+        <DialogActions>
+          <button
+            class="btn btn-ghost"
+            type="button"
+            onClick={() => confirmRef.current?.close()}
+            disabled={action !== null}
+          >
+            Cancel
+          </button>
           <button
             class="btn btn-danger"
             type="button"
@@ -460,28 +540,23 @@ function PartnerCard({
           >
             {action === "remove" ? "Removing…" : "Remove partner"}
           </button>
-          <button
-            class="btn btn-ghost"
-            type="button"
-            onClick={() => confirmRef.current?.close()}
-            disabled={action !== null}
-          >
-            Cancel
-          </button>
-        </div>
-      </dialog>
+        </DialogActions>
+      </Dialog>
     </div>
   );
 }
 
 function DeviceCard({
   device,
-  token,
-  onChanged,
+  onUpdateDevice,
+  onRemoveDevice,
 }: {
   device: Device;
-  token: string;
-  onChanged: () => void;
+  onUpdateDevice: (
+    id: string,
+    patch: { name?: string; enabled?: boolean },
+  ) => Promise<void>;
+  onRemoveDevice: (id: string) => Promise<void>;
 }) {
   const { route } = useLocation();
   const [name, setName] = useState(device.name);
@@ -520,9 +595,8 @@ function DeviceCard({
     setSaving(true);
     setError(null);
     try {
-      await api.patchDevice(token, device.id, { name, enabled });
+      await onUpdateDevice(device.id, { name, enabled });
       dialogRef.current?.close();
-      onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save");
     } finally {
@@ -534,9 +608,8 @@ function DeviceCard({
     setDeleting(true);
     setError(null);
     try {
-      await api.deleteDevice(token, device.id);
+      await onRemoveDevice(device.id);
       closeDeleteDialog();
-      onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete device");
     } finally {
@@ -579,8 +652,8 @@ function DeviceCard({
         </button>
       </div>
 
-      <dialog ref={dialogRef}>
-        <h3 class="dialog-title">Edit device</h3>
+      <Dialog dialogRef={dialogRef}>
+        <DialogHeader>Edit device</DialogHeader>
         <form onSubmit={handleSave}>
           <div class="field">
             <label for={`device-name-${device.id}`}>Name</label>
@@ -592,7 +665,7 @@ function DeviceCard({
               required
             />
           </div>
-          <label class="checkbox-label">
+          <label class="invite-checkbox-label">
             <input
               type="checkbox"
               checked={enabled}
@@ -603,14 +676,7 @@ function DeviceCard({
             Enabled
           </label>
           {error && <p class="alert-error">{error}</p>}
-          <div class="invite-actions">
-            <button
-              class="btn btn-primary"
-              type="submit"
-              disabled={saving || deleting}
-            >
-              {saving ? "Saving…" : "Save"}
-            </button>
+          <DialogSecondaryActions>
             <button
               class="btn btn-danger"
               type="button"
@@ -619,6 +685,8 @@ function DeviceCard({
             >
               Delete device
             </button>
+          </DialogSecondaryActions>
+          <DialogActions>
             <button
               class="btn btn-ghost"
               type="button"
@@ -627,26 +695,25 @@ function DeviceCard({
             >
               Cancel
             </button>
-          </div>
+            <button
+              class="btn btn-primary"
+              type="submit"
+              disabled={saving || deleting}
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </DialogActions>
         </form>
-      </dialog>
+      </Dialog>
 
-      <dialog ref={deleteDialogRef}>
-        <h3 class="dialog-title">Delete device</h3>
+      <Dialog dialogRef={deleteDialogRef}>
+        <DialogHeader>Delete device</DialogHeader>
         <p class="invite-desc">
           Delete "{device.name}"? This permanently removes its logs and uploads,
           and your partners will be notified.
         </p>
         {error && <p class="alert-error">{error}</p>}
-        <div class="invite-actions">
-          <button
-            class="btn btn-danger"
-            type="button"
-            onClick={() => handleDeleteConfirmed().catch(() => {})}
-            disabled={saving || deleting}
-          >
-            {deleting ? "Deleting…" : "Delete device"}
-          </button>
+        <DialogActions>
           <button
             class="btn btn-ghost"
             type="button"
@@ -655,8 +722,16 @@ function DeviceCard({
           >
             Cancel
           </button>
-        </div>
-      </dialog>
+          <button
+            class="btn btn-danger"
+            type="button"
+            onClick={() => handleDeleteConfirmed().catch(() => {})}
+            disabled={saving || deleting}
+          >
+            {deleting ? "Deleting…" : "Delete device"}
+          </button>
+        </DialogActions>
+      </Dialog>
     </div>
   );
 }

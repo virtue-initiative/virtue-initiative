@@ -105,13 +105,16 @@ export async function findUserByEmail(db: D1Database, email: string) {
     email_verified: number;
     email_bounced_at: number | null;
     email_frequency: string;
+    email_digest_minutes_utc: number;
     pub_key: ArrayBuffer | null;
     priv_key: ArrayBuffer | null;
   }>(
     db
       .prepare(
         `SELECT id, email, password_hash, password_salt, password_params_version,
-                name, email_verified, email_bounced_at, email_frequency, pub_key, priv_key
+                name, email_verified, email_bounced_at, email_frequency,
+                email_digest_minutes_utc,
+                pub_key, priv_key
          FROM users
          WHERE email = ?`,
       )
@@ -128,12 +131,17 @@ export async function findUserById(db: D1Database, userId: string) {
     email_verified: number;
     email_bounced_at: number | null;
     email_frequency: string;
+    email_digest_minutes_utc: number;
     pub_key: ArrayBuffer | null;
     priv_key: ArrayBuffer | null;
   }>(
     db
       .prepare(
-        'SELECT id, email, name, email_verified, email_bounced_at, email_frequency, pub_key, priv_key FROM users WHERE id = ?',
+        `SELECT id, email, name, email_verified, email_bounced_at, email_frequency,
+                email_digest_minutes_utc,
+                pub_key, priv_key
+         FROM users
+         WHERE id = ?`,
       )
       .bind(uuidToBytes(userId)),
     ['id'],
@@ -192,14 +200,16 @@ export async function createUser(
     pub_key: ArrayBuffer;
     priv_key: ArrayBuffer;
     name?: string;
+    email_digest_minutes_utc?: number;
   },
 ) {
   return db
     .prepare(
       `INSERT INTO users (
         id, email, password_hash, password_salt, password_params_version,
-        name, email_verified, pub_key, priv_key, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+        name, email_verified, email_digest_minutes_utc,
+        pub_key, priv_key, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
     )
     .bind(
       uuidToBytes(input.id),
@@ -208,6 +218,7 @@ export async function createUser(
       input.passwordSalt,
       input.passwordParamsVersion,
       input.name ?? null,
+      input.email_digest_minutes_utc ?? 6 * 60,
       input.pub_key,
       input.priv_key,
       Date.now(),
@@ -227,6 +238,7 @@ export async function updateUser(
     email_verified?: boolean;
     email_bounced_at?: number | null;
     email_frequency?: string;
+    email_digest_minutes_utc?: number;
     pub_key?: ArrayBuffer;
     priv_key?: ArrayBuffer;
   },
@@ -272,6 +284,11 @@ export async function updateUser(
   if (fields.email_frequency !== undefined) {
     updates.push('email_frequency = ?');
     params.push(fields.email_frequency);
+  }
+
+  if (fields.email_digest_minutes_utc !== undefined) {
+    updates.push('email_digest_minutes_utc = ?');
+    params.push(fields.email_digest_minutes_utc);
   }
 
   if (fields.pub_key !== undefined) {
@@ -379,12 +396,25 @@ export async function listBatchUrlsForDevice(db: D1Database, deviceId: string) {
   return result.results;
 }
 
+export async function listBatchUrlsForUser(db: D1Database, userId: string) {
+  const result = await db
+    .prepare('SELECT url FROM batches WHERE user_id = ?')
+    .bind(uuidToBytes(userId))
+    .all<{ url: string }>();
+
+  return result.results;
+}
+
 export async function deleteDeviceById(db: D1Database, deviceId: string) {
   const deviceIdBytes = uuidToBytes(deviceId);
   await db.prepare('DELETE FROM device_logs WHERE device_id = ?').bind(deviceIdBytes).run();
   await db.prepare('DELETE FROM batches WHERE device_id = ?').bind(deviceIdBytes).run();
   await db.prepare('DELETE FROM hash_states WHERE device_id = ?').bind(deviceIdBytes).run();
   return db.prepare('DELETE FROM devices WHERE id = ?').bind(deviceIdBytes).run();
+}
+
+export async function deleteUserById(db: D1Database, userId: string) {
+  return db.prepare('DELETE FROM users WHERE id = ?').bind(uuidToBytes(userId)).run();
 }
 
 export async function listVisibleOwnerIds(db: D1Database, requesterId: string) {
@@ -1206,6 +1236,7 @@ export async function listDigestEligiblePartnerships(db: D1Database) {
     watching_user_email: string;
     watching_user_name: string | null;
     email_frequency: string;
+    email_digest_minutes_utc: number;
   }>(
     db.prepare(
       `SELECT p.id AS partnership_id,
@@ -1213,6 +1244,7 @@ export async function listDigestEligiblePartnerships(db: D1Database) {
               recipient.id AS watcher_user_id,
               recipient.email AS watcher_email,
               recipient.email_frequency,
+              recipient.email_digest_minutes_utc,
               owner.email AS watching_user_email,
               owner.name AS watching_user_name
         FROM partners p

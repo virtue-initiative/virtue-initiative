@@ -8,14 +8,14 @@ interface Props {
 const { tagline } = Astro.props;
 ---
 
-<header>
-  <div class="container">
-    <div class="header-top">
-      <div class="header-copy">
-        <a href="/" class="wordmark">The Virtue Initiative</a>
-        {tagline && <p class="tagline">{tagline}</p>}
+<header class="site-header-shell">
+  <div class="site-container">
+    <div class="site-header-top">
+      <div class="site-header-copy">
+        <a href="/" class="site-wordmark">The Virtue Initiative</a>
+        {tagline && <p class="site-tagline">{tagline}</p>}
       </div>
-      <div class="header-actions">
+      <div class="site-header-actions">
         <button
           class="control control-icon"
           id="theme-toggle"

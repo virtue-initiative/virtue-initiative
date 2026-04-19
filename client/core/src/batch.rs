@@ -2,23 +2,22 @@ use std::io::Write;
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use serde::Serialize;
 
-use crate::crypto::CryptoEngine;
+use crate::crypto::{CryptoEngine, encode_batch_event};
 use crate::error::{CoreError, CoreResult};
-use crate::model::{BatchEvent, BatchRecipient, BatchUpload, BufferedScreenshot};
+use crate::model::{BatchRecipient, BatchUpload, BufferedBatchEvent};
 
 #[derive(Debug, Default, Clone)]
 pub struct BatchBuilder;
 
 impl BatchBuilder {
     pub fn build_upload(
-        screenshots: &[BufferedScreenshot],
+        items: &[BufferedBatchEvent],
         crypto: &CryptoEngine,
         recipients: &[BatchRecipient],
         end_time_ms: i64,
     ) -> CoreResult<BatchUpload> {
-        let first = screenshots.first().ok_or(CoreError::InvalidState(
+        let first = items.first().ok_or(CoreError::InvalidState(
             "cannot build a batch from an empty buffer",
         ))?;
         if recipients.is_empty() {
@@ -27,8 +26,11 @@ impl BatchBuilder {
             ));
         }
 
-        let events: Vec<&BatchEvent> = screenshots.iter().map(|item| &item.event).collect();
-        let msgpack = rmp_serde::to_vec_named(&BatchEnvelope { events })?;
+        let encoded_events = items
+            .iter()
+            .map(|item| encode_batch_event(&item.event))
+            .collect::<CoreResult<Vec<_>>>()?;
+        let msgpack = rmp_serde::to_vec_named(&encoded_events)?;
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(&msgpack)?;
@@ -54,7 +56,26 @@ impl BatchBuilder {
     }
 }
 
-#[derive(Serialize)]
-struct BatchEnvelope<'a> {
-    events: Vec<&'a BatchEvent>,
+#[cfg(test)]
+mod tests {
+    use crate::crypto::encode_batch_event;
+    use crate::model::{BatchEvent, EventData};
+
+    #[test]
+    fn batch_payload_is_array_of_encoded_event_bytes() {
+        let event = BatchEvent {
+            ts: 123,
+            kind: "developer_log".to_string(),
+            risk: Some(0.5),
+            data: EventData::from_pairs([("source".to_string(), "test".to_string())]),
+        };
+
+        let encoded_event = encode_batch_event(&event).expect("encode event");
+        let encoded_batch =
+            rmp_serde::to_vec_named(&vec![encoded_event.clone()]).expect("encode batch");
+        let decoded_batch: Vec<Vec<u8>> =
+            rmp_serde::from_slice(&encoded_batch).expect("decode batch");
+
+        assert_eq!(decoded_batch, vec![encoded_event]);
+    }
 }

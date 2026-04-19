@@ -1,0 +1,38 @@
+.legal {
+  & h1 {
+    font-size: 1.6rem;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+  }
+
+  & h2 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 1.75rem 0 0.5rem;
+    color: var(--text);
+    text-transform: none;
+    letter-spacing: 0;
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+
+  & p,
+  & li {
+    font-size: 0.95rem;
+    color: var(--text);
+  }
+
+  & ul {
+    padding-left: 1.4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+  }
+}
+
+.legal-date {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  margin-bottom: 2rem;
+}

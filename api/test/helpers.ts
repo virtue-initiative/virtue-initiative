@@ -91,8 +91,60 @@ export async function signupAndGetToken(
     throw new Error(`signup failed: ${res.status} ${await res.text()}`);
   }
 
-  const body = (await res.json()) as { access_token: string; user: { id: string } };
-  return { token: body.access_token, userId: body.user.id };
+  const deliveries = await listMockEmailDeliveries();
+  const signupDelivery = [...deliveries]
+    .reverse()
+    .find(
+      (delivery) => delivery.kind === 'email_verification' && delivery.recipient_email === email,
+    );
+
+  if (!signupDelivery) {
+    throw new Error(`signup verification delivery not found for ${email}`);
+  }
+
+  const verificationToken = extractTokenFromDelivery(signupDelivery, 'token');
+  if (!verificationToken) {
+    throw new Error(`signup verification token not found for ${email}`);
+  }
+
+  const verifyRes = await SELF.fetch(`${BASE}/email-verification/validate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: verificationToken }),
+  });
+
+  if (!verifyRes.ok) {
+    throw new Error(`signup verification failed: ${verifyRes.status} ${await verifyRes.text()}`);
+  }
+
+  const loginRes = await SELF.fetch(`${BASE}/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email,
+      password_auth,
+    }),
+  });
+
+  if (!loginRes.ok) {
+    throw new Error(
+      `login failed after signup verification: ${loginRes.status} ${await loginRes.text()}`,
+    );
+  }
+
+  const loginBody = (await loginRes.json()) as { access_token: string };
+  const userRes = await SELF.fetch(`${BASE}/user`, {
+    headers: { Authorization: `Bearer ${loginBody.access_token}` },
+  });
+
+  if (!userRes.ok) {
+    throw new Error(
+      `failed to load user after signup verification: ${userRes.status} ${await userRes.text()}`,
+    );
+  }
+
+  const user = (await userRes.json()) as { id: string };
+  return { token: loginBody.access_token, userId: user.id };
 }
 
 export function authHeaders(token: string): Record<string, string> {
@@ -128,7 +180,9 @@ export async function listEmailDeliveries() {
   return listMockEmailDeliveries();
 }
 
-export async function latestEmailToken(purpose: 'email_verification' | 'password_reset') {
+export async function latestEmailToken(
+  purpose: 'email_verification' | 'email_change' | 'password_reset',
+) {
   const token = await env.DB.prepare(
     `SELECT id, user_id, email, purpose, token_hash, expires_at, consumed_at, created_at
      FROM email_tokens
@@ -170,12 +224,22 @@ export function extractTokenFromDelivery(
   param: string,
 ) {
   const metadata = JSON.parse(delivery.metadata) as Record<string, string>;
-  const url = Object.values(metadata).find((value) => value.includes?.(`?${param}=`));
+  const url = Object.values(metadata).find((value) => {
+    if (typeof value !== 'string' || !value.includes('://')) {
+      return false;
+    }
+
+    try {
+      return new URL(value).searchParams.has(param);
+    } catch {
+      return false;
+    }
+  });
   if (url) {
     return new URL(url).searchParams.get(param);
   }
 
-  const match = delivery.text.match(new RegExp(`${param}=([^\\s]+)`));
+  const match = delivery.text.match(new RegExp(`[?&]${param}=([^\\s&]+)`));
   return match ? decodeURIComponent(match[1] ?? '') : null;
 }
 

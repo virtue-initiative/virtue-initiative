@@ -1,32 +1,14 @@
-import { decode } from "@msgpack/msgpack";
-import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useEffect, useMemo, useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
-import { api, Batch, DataLog, Device, WatchingPartner } from "../../api";
-import { decryptBatch, decompressGzip } from "../../crypto";
-import {
-  CachedDataFeed,
-  loadCachedDataFeed,
-  mergeDataPageIntoCache,
-} from "../../data-cache";
+import { Device, WatchingPartner } from "../../api";
 import { useAuth } from "../../context/auth";
-import { useE2EE } from "../../context/e2ee";
-import { PARTNERS_CHANGED_EVENT } from "../../events";
+import { useDevices } from "../../hooks/useDevices";
+import { useLogs } from "../../hooks/useLogs";
+import { usePartners } from "../../hooks/usePartners";
 import { LogsGallery } from "./LogsGallery";
 import { LogsList } from "./LogsList";
-import { ImageLogItem, LogItem } from "./shared";
+import { FeedLog, getLogImage } from "./shared";
 import "./style.css";
-
-const SYNC_PAGE_SIZE = 250;
-const VISIBLE_PAGE_SIZE = 25;
-
-interface FeedEntry {
-  key: string;
-  created_at: number;
-  device_id: string;
-  kind: "batch" | "log";
-  batch?: Batch;
-  log?: DataLog;
-}
 
 interface DeviceGroup {
   label: string;
@@ -75,400 +57,158 @@ function ExitFullscreenIcon() {
   );
 }
 
-function toUint8Array(value: unknown): Uint8Array | undefined {
-  if (!value) return undefined;
-  if (value instanceof Uint8Array) return value;
-  if (Array.isArray(value)) return new Uint8Array(value as number[]);
-  if (typeof value === "string") {
-    try {
-      return Uint8Array.fromBase64(value);
-    } catch {
-      return undefined;
-    }
-  }
-  return undefined;
+function MenuIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth={1.5}
+      stroke="currentColor"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"
+      />
+    </svg>
+  );
 }
 
-function toMetadata(data: Record<string, unknown>) {
-  return Object.entries(data)
-    .filter(([key]) => key !== "image")
-    .map(
-      ([key, value]) =>
-        [key, typeof value === "string" ? value : JSON.stringify(value)] as [
-          string,
-          string,
-        ],
-    );
-}
-
-function toMetadataEntries(value: unknown): [string, string][] {
-  if (!Array.isArray(value)) return [];
-
-  return value.flatMap((entry) => {
-    if (!Array.isArray(entry) || entry.length < 2) return [];
-    const [key, rawValue] = entry;
-    if (typeof key !== "string") return [];
-    return [
-      [key, typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)],
-    ];
-  });
-}
-
-async function decryptAndFlattenBatch(
-  batch: Batch,
-  openBatchKey: (encryptedKey: string) => Promise<CryptoKey>,
-): Promise<LogItem[]> {
-  const resp = await fetch(batch.url);
-  if (!resp.ok) {
-    throw new Error(`Fetch failed (${resp.status}) for ${batch.url}`);
-  }
-
-  const raw = new Uint8Array(await resp.arrayBuffer());
-  if (raw.length < 13) {
-    throw new Error(`Batch blob too short for AES-GCM payload: ${batch.url}`);
-  }
-
-  const batchKey = await openBatchKey(batch.encrypted_key);
-  const decrypted = await decryptBatch(batchKey, raw);
-  const decompressed = await decompressGzip(decrypted);
-  const decoded = decode(decompressed) as unknown;
-  const record =
-    decoded && typeof decoded === "object"
-      ? (decoded as Record<string, unknown>)
-      : {};
-  const events = Array.isArray(record.events)
-    ? (record.events as Record<string, unknown>[])
-    : Array.isArray(record.items)
-      ? (record.items as Record<string, unknown>[])
-      : [];
-
-  return events.map((event, index) => {
-    const data =
-      event.data && typeof event.data === "object"
-        ? (event.data as Record<string, unknown>)
-        : {};
-    const metadata =
-      "metadata" in event
-        ? toMetadataEntries(event.metadata)
-        : toMetadata(data);
-    const image =
-      toUint8Array("image" in event ? event.image : undefined) ??
-      toUint8Array(data.image);
-
-    return {
-      id: typeof event.id === "string" ? event.id : `${batch.id}:${index}`,
-      taken_at:
-        typeof event.ts === "number"
-          ? event.ts
-          : typeof event.taken_at === "number"
-            ? event.taken_at
-            : batch.end_time,
-      device_id: batch.device_id,
-      kind:
-        typeof event.type === "string"
-          ? event.type
-          : typeof event.kind === "string"
-            ? event.kind
-            : "unknown",
-      image,
-      metadata,
-      batch_status: "unknown" as const,
-      source: "batch" as const,
-    };
-  });
-}
-
-function toDirectLogItem(entry: DataLog): LogItem {
-  return {
-    id: entry.id,
-    taken_at: entry.ts,
-    device_id: entry.device_id,
-    kind: entry.type,
-    image: toUint8Array(entry.data.image),
-    metadata: toMetadata(entry.data),
-    batch_status: "unknown" as const,
-    source: "log" as const,
-  };
+function CloseIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth={1.5}
+      stroke="currentColor"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M6 18 18 6M6 6l12 12"
+      />
+    </svg>
+  );
 }
 
 export function Logs() {
-  const { token, userId } = useAuth();
-  const e2ee = useE2EE();
+  const { userId } = useAuth();
   const { path } = useLocation();
+  const {
+    devices,
+    error: devicesError,
+    isLoading: devicesLoading,
+  } = useDevices();
+  const {
+    watching,
+    error: partnersError,
+    isLoading: partnersLoading,
+  } = usePartners();
 
-  const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[]>([]);
-  const [partners, setPartners] = useState<WatchingPartner[]>([]);
-  const [knownUsers, setKnownUsers] = useState<UserLabel[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string | null>(() =>
     new URLSearchParams(window.location.search).get("device_id"),
   );
   const [selectedUser, setSelectedUser] = useState<string | null>(() =>
     new URLSearchParams(window.location.search).get("user"),
   );
-  const [sidebarLoading, setSidebarLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [cachedFeed, setCachedFeed] = useState<CachedDataFeed | null>(null);
-  const [items, setItems] = useState<LogItem[]>([]);
-  const [visibleCount, setVisibleCount] = useState(VISIBLE_PAGE_SIZE);
-  const [syncing, setSyncing] = useState(false);
-  const [materializing, setMaterializing] = useState(false);
-  const [fetchError, setFetchError] = useState<string | null>(null);
-  const [batchStats, setBatchStats] = useState({ decrypted: 0, skipped: 0 });
   const [galleryFullscreen, setGalleryFullscreen] = useState(false);
-  const batchItemsCache = useRef(new Map<string, Promise<LogItem[]>>());
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const activeUserId = selectedUser ?? userId;
-  const activePrivateKey = e2ee.privateKey;
+  const {
+    logs,
+    hasMore,
+    batchStats,
+    error: logsError,
+    isLoading: logsLoading,
+    loadMore,
+  } = useLogs({
+    userId: selectedUser,
+    deviceId: selectedDevice,
+  });
 
-  useEffect(() => {
-    if (!token || !userId) return;
+  const deviceList = devices ?? [];
+  const watchingList = watching ?? [];
+  const loadError = devicesError ?? partnersError;
+  const sidebarLoading = devicesLoading || partnersLoading;
 
-    const loadSidebar = () => {
-      setSidebarLoading(true);
-      setLoadError(null);
+  const { knownUsers, deviceGroups } = useMemo(() => {
+    if (!userId) {
+      return {
+        knownUsers: [] as UserLabel[],
+        deviceGroups: [] as DeviceGroup[],
+      };
+    }
 
-      Promise.all([api.getDevices(token), api.getPartners(token)])
-        .then(([devices, partners]) => {
-          setPartners(partners.watching);
-          const labels = new Map<string, string>();
-          labels.set(userId, "My devices");
-          for (const partner of partners.watching) {
-            labels.set(
-              partner.user.id,
-              partner.user.name ?? partner.user.email,
-            );
-          }
+    const labels = new Map<string, string>();
+    labels.set(userId, "My devices");
+    for (const partner of watchingList) {
+      labels.set(partner.user.id, partner.user.name ?? partner.user.email);
+    }
 
-          setKnownUsers(
-            Array.from(labels.entries()).map(([id, label]) => ({ id, label })),
-          );
-
-          const grouped = new Map<string, Device[]>();
-          for (const device of devices) {
-            const current = grouped.get(device.owner) ?? [];
-            current.push(device);
-            grouped.set(device.owner, current);
-          }
-          for (const ownerId of labels.keys()) {
-            if (!grouped.has(ownerId)) {
-              grouped.set(ownerId, []);
-            }
-          }
-
-          const groups = Array.from(grouped.entries())
-            .sort(([a], [b]) =>
-              a === userId ? -1 : b === userId ? 1 : a.localeCompare(b),
-            )
-            .map(([owner, ownerDevices]) => ({
-              label: labels.get(owner) ?? `${owner.slice(0, 8)}…`,
-              userId: owner === userId ? null : owner,
-              devices: ownerDevices,
-            }));
-
-          setDeviceGroups(groups);
-        })
-        .catch((err) => {
-          setLoadError(
-            err instanceof Error ? err.message : "Failed to load devices",
-          );
-        })
-        .finally(() => {
-          setSidebarLoading(false);
-        });
-    };
-
-    loadSidebar();
-    if (typeof window === "undefined") return;
-    window.addEventListener(PARTNERS_CHANGED_EVENT, loadSidebar);
-    return () =>
-      window.removeEventListener(PARTNERS_CHANGED_EVENT, loadSidebar);
-  }, [token, userId]);
-
-  useEffect(() => {
-    batchItemsCache.current.clear();
-  }, [activeUserId, activePrivateKey]);
-
-  useEffect(() => {
-    if (!token || !userId || !activeUserId || !e2ee.ready) return;
-
-    let cancelled = false;
-    const targetUserId = activeUserId;
-    setFetchError(null);
-    setCachedFeed(null);
-    setItems([]);
-    setBatchStats({ decrypted: 0, skipped: 0 });
-    setVisibleCount(VISIBLE_PAGE_SIZE);
-    setSyncing(true);
-
-    async function loadAndSync() {
-      try {
-        const cached = await loadCachedDataFeed(userId, targetUserId);
-        if (cancelled) return;
-        setCachedFeed(cached);
-
-        let since = cached.since;
-        while (!cancelled) {
-          const page = await api.getData(token, {
-            user: selectedUser ?? undefined,
-            since,
-            limit: SYNC_PAGE_SIZE,
-          });
-          if (cancelled) return;
-
-          if (page.batches.length === 0 && page.logs.length === 0) {
-            break;
-          }
-
-          const updated = await mergeDataPageIntoCache(
-            userId,
-            targetUserId,
-            page,
-          );
-          if (cancelled) return;
-          since = updated.since;
-
-          if (page.next_since === undefined) {
-            break;
-          }
-        }
-
-        if (cancelled) return;
-        setCachedFeed(await loadCachedDataFeed(userId, targetUserId));
-      } catch (err) {
-        console.error("[logs] sync failed:", err);
-        if (!cancelled) {
-          setCachedFeed(await loadCachedDataFeed(userId, targetUserId));
-          setFetchError(
-            err instanceof Error ? err.message : "Failed to sync logs",
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setSyncing(false);
-        }
+    const grouped = new Map<string, Device[]>();
+    for (const device of deviceList) {
+      const current = grouped.get(device.owner) ?? [];
+      current.push(device);
+      grouped.set(device.owner, current);
+    }
+    for (const ownerId of labels.keys()) {
+      if (!grouped.has(ownerId)) {
+        grouped.set(ownerId, []);
       }
     }
 
-    void loadAndSync();
-
-    return () => {
-      cancelled = true;
+    return {
+      knownUsers: Array.from(labels.entries()).map(([id, label]) => ({
+        id,
+        label,
+      })),
+      deviceGroups: Array.from(grouped.entries())
+        .sort(([a], [b]) =>
+          a === userId ? -1 : b === userId ? 1 : a.localeCompare(b),
+        )
+        .map(([owner, ownerDevices]) => ({
+          label: labels.get(owner) ?? `${owner.slice(0, 8)}…`,
+          userId: owner === userId ? null : owner,
+          devices: ownerDevices,
+        })),
     };
-  }, [token, userId, activeUserId, selectedUser, e2ee.ready]);
+  }, [deviceList, userId, watchingList]);
 
-  const filteredFeedEntries = useMemo<FeedEntry[]>(() => {
-    if (!cachedFeed) {
-      return [];
-    }
-
-    const combined = [
-      ...cachedFeed.batches.map((batch) => ({
-        key: batch.id,
-        created_at: batch.created_at,
-        device_id: batch.device_id,
-        kind: "batch" as const,
-        batch,
-      })),
-      ...cachedFeed.logs.map((log) => ({
-        key: log.id,
-        created_at: log.created_at,
-        device_id: log.device_id,
-        kind: "log" as const,
-        log,
-      })),
-    ].sort((a, b) => b.created_at - a.created_at);
-
-    return selectedDevice
-      ? combined.filter((entry) => entry.device_id === selectedDevice)
-      : combined;
-  }, [cachedFeed, selectedDevice]);
-
-  const visibleEntries = useMemo(
-    () => filteredFeedEntries.slice(0, visibleCount),
-    [filteredFeedEntries, visibleCount],
+  const activeGroup = useMemo(
+    () => deviceGroups.find((group) => group.userId === selectedUser) ?? null,
+    [deviceGroups, selectedUser],
+  );
+  const activeDevices = activeGroup?.devices ?? [];
+  const activeDeviceIds = useMemo(
+    () => new Set(activeDevices.map((device) => device.id)),
+    [activeDevices],
   );
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function materializeVisibleItems() {
-      if (!cachedFeed) {
-        setItems([]);
-        setBatchStats({ decrypted: 0, skipped: 0 });
-        setMaterializing(false);
-        return;
-      }
-
-      setMaterializing(true);
-
-      try {
-        const batchEntries = visibleEntries.flatMap((entry) =>
-          entry.batch ? [entry.batch] : [],
-        );
-        const directLogs = visibleEntries.flatMap((entry) =>
-          entry.log ? [toDirectLogItem(entry.log)] : [],
-        );
-
-        let decrypted = 0;
-        let skipped = activePrivateKey ? 0 : batchEntries.length;
-        const batchItems: LogItem[] = [];
-
-        if (activePrivateKey) {
-          const results = await Promise.allSettled(
-            batchEntries.map((batch) => {
-              const cachedBatch = batchItemsCache.current.get(batch.id);
-              if (cachedBatch) {
-                return cachedBatch;
-              }
-
-              const promise = decryptAndFlattenBatch(
-                batch,
-                e2ee.unwrapEncryptedBatchKey,
-              ).catch((error) => {
-                batchItemsCache.current.delete(batch.id);
-                throw error;
-              });
-              batchItemsCache.current.set(batch.id, promise);
-              return promise;
-            }),
-          );
-
-          for (const result of results) {
-            if (result.status === "fulfilled") {
-              batchItems.push(...result.value);
-              decrypted += 1;
-            } else {
-              skipped += 1;
-              console.error("[logs] failed to decrypt batch", result.reason);
-            }
-          }
-        }
-
-        const merged = [...batchItems, ...directLogs].sort(
-          (a, b) => b.taken_at - a.taken_at,
-        );
-
-        if (!cancelled) {
-          setItems(merged);
-          setBatchStats({ decrypted, skipped });
-        }
-      } finally {
-        if (!cancelled) {
-          setMaterializing(false);
-        }
-      }
+    if (sidebarLoading || loadError) {
+      return;
     }
 
-    void materializeVisibleItems();
+    if (
+      selectedUser !== null &&
+      !deviceGroups.some((group) => group.userId === selectedUser)
+    ) {
+      select(null, null);
+      return;
+    }
 
-    return () => {
-      cancelled = true;
-    };
+    if (selectedDevice && !activeDeviceIds.has(selectedDevice)) {
+      select(selectedUser, null);
+    }
   }, [
-    cachedFeed,
-    visibleEntries,
-    activePrivateKey,
-    e2ee.unwrapEncryptedBatchKey,
+    activeDeviceIds,
+    deviceGroups,
+    loadError,
+    selectedDevice,
+    selectedUser,
+    sidebarLoading,
   ]);
 
   const allDevices = useMemo(
@@ -480,15 +220,15 @@ export function Logs() {
     allDevices.find((device) => device.id === id)?.name ?? `${id.slice(0, 8)}…`;
   const groupLabel = (ownerId: string) =>
     knownUsers.find((entry) => entry.id === ownerId)?.label ??
-    partners.find((partner) => partner.user.id === ownerId)?.user.name ??
-    partners.find((partner) => partner.user.id === ownerId)?.user.email ??
+    watchingList.find((partner) => partner.user.id === ownerId)?.user.name ??
+    watchingList.find((partner) => partner.user.id === ownerId)?.user.email ??
     deviceGroups.find((group) => group.userId === ownerId)?.label ??
     `${ownerId.slice(0, 8)}…`;
 
   function select(user: string | null, device: string | null) {
     setSelectedUser(user);
     setSelectedDevice(device);
-    setVisibleCount(VISIBLE_PAGE_SIZE);
+    setSidebarOpen(false);
     const qs = new URLSearchParams(window.location.search);
     if (device) qs.set("device_id", device);
     else qs.delete("device_id");
@@ -502,14 +242,27 @@ export function Logs() {
     );
   }
 
-  const title = selectedUser ? `${groupLabel(selectedUser)}'s logs` : "My logs";
-
+  const title =
+    sidebarLoading && selectedUser
+      ? "Loading…"
+      : selectedUser
+        ? `${groupLabel(selectedUser)}'s logs`
+        : "My logs";
   const isGallery = path === "/logs/gallery";
-  const galleryItems = items.filter((item): item is ImageLogItem =>
-    Boolean(item.image),
-  );
-  const loading = syncing || materializing;
-  const hasMore = filteredFeedEntries.length > visibleCount;
+  const logsViewQuery = useMemo(() => {
+    const qs = new URLSearchParams();
+    if (selectedDevice) {
+      qs.set("device_id", selectedDevice);
+    }
+    if (selectedUser) {
+      qs.set("user", selectedUser);
+    }
+    const query = qs.toString();
+    return query ? `?${query}` : "";
+  }, [selectedDevice, selectedUser]);
+  const items = logs ?? ([] as FeedLog[]);
+  const galleryItems = items.filter((item) => getLogImage(item) !== undefined);
+
   useEffect(() => {
     if (!isGallery) {
       setGalleryFullscreen(false);
@@ -520,49 +273,70 @@ export function Logs() {
     <div
       class={`logs-page${isGallery && galleryFullscreen ? " logs-page--gallery-fullscreen" : ""}`}
     >
+      <button
+        class={`app-drawer-backdrop logs-sidebar-backdrop${sidebarOpen ? " is-open" : ""}`}
+        type="button"
+        aria-label="Close logs sidebar"
+        onClick={() => setSidebarOpen(false)}
+      />
       <div class="logs-layout">
         {!(isGallery && galleryFullscreen) && (
-          <aside class="logs-sidebar">
-            {loadError && <p class="sidebar-loading">{loadError}</p>}
+          <aside class={`logs-sidebar${sidebarOpen ? " is-open" : ""}`}>
+            <div class="app-drawer-header logs-sidebar-header">
+              <h2>Devices</h2>
+              <button
+                class="app-drawer-close logs-sidebar-close"
+                type="button"
+                aria-label="Close logs sidebar"
+                onClick={() => setSidebarOpen(false)}
+              >
+                <CloseIcon />
+              </button>
+            </div>
+            {loadError && (
+              <p class="logs-sidebar-loading">{loadError.message}</p>
+            )}
             {sidebarLoading && !loadError && (
-              <p class="sidebar-loading">Loading…</p>
+              <p class="logs-sidebar-loading">Loading…</p>
             )}
             {!sidebarLoading && deviceGroups.length === 0 && !loadError && (
-              <div class="sidebar-group">
-                <p class="sidebar-group-label">My devices</p>
-                <p class="sidebar-loading">No devices</p>
+              <div class="logs-sidebar-group">
+                <p class="logs-sidebar-group-label">My devices</p>
+                <p class="logs-sidebar-loading">No devices</p>
               </div>
             )}
             {deviceGroups.map((group) => (
-              <div class="sidebar-group" key={group.label}>
+              <div class="logs-sidebar-group" key={group.label}>
                 <button
-                  class={`device-btn device-btn-group${selectedUser === group.userId && selectedDevice === null ? " active" : ""}`}
+                  class={`logs-device-button logs-device-button-group${selectedUser === group.userId && selectedDevice === null ? " is-active" : ""}`}
                   title={group.label}
                   onClick={() => select(group.userId, null)}
                   type="button"
                 >
-                  <span class="dot dot-placeholder" />
-                  <span class="device-btn-label">{group.label}</span>
+                  <span class="logs-status-dot logs-status-dot--placeholder" />
+                  <span class="logs-device-button-label">{group.label}</span>
                 </button>
-                <ul class="device-list">
+                <ul class="logs-device-list">
                   {group.devices.map((device) => (
                     <li key={device.id}>
                       <button
-                        class={`device-btn${selectedDevice === device.id ? " active" : ""}`}
+                        class={`logs-device-button${selectedDevice === device.id ? " is-active" : ""}`}
                         onClick={() => select(group.userId, device.id)}
                         type="button"
                         title={device.name}
                       >
                         <span
-                          class={`dot ${device.status === "online" ? "dot-green" : "dot-gray"}`}
+                          class={`logs-status-dot ${device.status === "online" ? "logs-status-dot--online" : "logs-status-dot--offline"}`}
                         />
-                        <span class="device-btn-label">{device.name}</span>
+                        <span class="logs-device-button-label">
+                          {device.name}
+                        </span>
                       </button>
                     </li>
                   ))}
                 </ul>
                 {group.devices.length === 0 && (
-                  <p class="sidebar-loading">No devices</p>
+                  <p class="logs-sidebar-loading">No devices</p>
                 )}
               </div>
             ))}
@@ -574,64 +348,75 @@ export function Logs() {
             <h1>{title}</h1>
             <div class="logs-header-actions">
               <button
-                class={`btn btn-ghost btn-sm logs-fullscreen-btn${isGallery ? "" : " logs-fullscreen-btn--hidden"}`}
+                class="btn btn-ghost btn-sm logs-sidebar-toggle"
                 type="button"
-                onClick={() => setGalleryFullscreen((prev) => !prev)}
-                aria-label={
-                  galleryFullscreen ? "Exit fullscreen" : "Fullscreen"
-                }
-                title={galleryFullscreen ? "Exit fullscreen" : "Fullscreen"}
-                disabled={!isGallery}
-                tabIndex={isGallery ? 0 : -1}
+                onClick={() => setSidebarOpen(true)}
               >
-                {galleryFullscreen ? <ExitFullscreenIcon /> : <ExpandIcon />}
+                <MenuIcon />
+                <span>Devices</span>
               </button>
-              <div class="view-tabs">
-                <a
-                  class={`view-tab${!isGallery ? " active" : ""}`}
-                  href="/logs"
-                >
-                  List
-                </a>
-                <a
-                  class={`view-tab${isGallery ? " active" : ""}`}
-                  href="/logs/gallery"
-                >
-                  Gallery
-                </a>
+              <div class="logs-header-view-controls">
+                {isGallery && (
+                  <button
+                    class="btn btn-ghost btn-sm logs-fullscreen-btn"
+                    type="button"
+                    onClick={() => setGalleryFullscreen((prev) => !prev)}
+                    aria-label={
+                      galleryFullscreen ? "Exit fullscreen" : "Fullscreen"
+                    }
+                    title={galleryFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                  >
+                    {galleryFullscreen ? (
+                      <ExitFullscreenIcon />
+                    ) : (
+                      <ExpandIcon />
+                    )}
+                  </button>
+                )}
+                <div class="segmented-control logs-view-switcher">
+                  <a
+                    class={`segmented-control__item${!isGallery ? " is-active" : ""}`}
+                    href={`/logs${logsViewQuery}`}
+                  >
+                    List
+                  </a>
+                  <a
+                    class={`segmented-control__item${isGallery ? " is-active" : ""}`}
+                    href={`/logs/gallery${logsViewQuery}`}
+                  >
+                    Gallery
+                  </a>
+                </div>
               </div>
             </div>
           </div>
 
-          {fetchError && <p class="alert-error">{fetchError}</p>}
-          {(batchStats.decrypted > 0 || batchStats.skipped > 0) && (
-            <p class="logs-summary">
-              {batchStats.decrypted} block
-              {batchStats.decrypted === 1 ? "" : "s"} decrypted
-              {batchStats.skipped > 0 &&
-                `, ${batchStats.skipped} block${batchStats.skipped === 1 ? "" : "s"} unavailable`}
-            </p>
-          )}
+          {logsError && <p class="alert-error">{logsError.message}</p>}
+          {batchStats &&
+            (batchStats.decrypted > 0 || batchStats.skipped > 0) && (
+              <p class="logs-summary">
+                {batchStats.decrypted} block
+                {batchStats.decrypted === 1 ? "" : "s"} decrypted
+                {batchStats.skipped > 0 &&
+                  `, ${batchStats.skipped} block${batchStats.skipped === 1 ? "" : "s"} unavailable`}
+              </p>
+            )}
 
           {isGallery ? (
             <LogsGallery
               items={galleryItems}
-              loading={loading}
-              hasMore={hasMore}
-              onLoadMore={() =>
-                setVisibleCount((prev) => prev + VISIBLE_PAGE_SIZE)
-              }
+              loading={logsLoading}
+              hasMore={hasMore ?? false}
+              onLoadMore={loadMore}
               deviceName={deviceName}
               fullscreen={galleryFullscreen}
             />
           ) : (
             <LogsList
               items={items}
-              loading={loading}
-              hasMore={hasMore}
-              onLoadMore={() =>
-                setVisibleCount((prev) => prev + VISIBLE_PAGE_SIZE)
-              }
+              loading={logsLoading}
+              hasMore={hasMore ?? false}
+              onLoadMore={loadMore}
               deviceName={deviceName}
             />
           )}

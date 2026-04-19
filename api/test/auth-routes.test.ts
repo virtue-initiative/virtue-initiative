@@ -4,6 +4,8 @@ import {
   authHeaders,
   BASE,
   clearDB,
+  createDeviceForUser,
+  extractTokenFromDelivery,
   latestEmailToken,
   listEmailDeliveries,
   markUserEmailVerified,
@@ -60,7 +62,7 @@ describe('Auth routes', () => {
     expect(unknownBody).toHaveProperty('params');
   });
 
-  it('creates a user, returns session credentials, and sends a verification email on signup', async () => {
+  it('creates an unverified user and sends a verification email on signup', async () => {
     const password_auth = await passwordAuthFor('client-derived-auth');
     const password_salt = await passwordSaltFor('alice@example.com');
     const pub_key = await publicKeyFor('alice@example.com');
@@ -80,30 +82,31 @@ describe('Auth routes', () => {
     });
 
     expect(res.status).toBe(201);
-    expect(res.headers.get('set-cookie')).toContain('refresh_token=');
+    expect(res.headers.get('set-cookie')).toBeNull();
 
-    const body = (await res.json()) as {
-      access_token: string;
-      user: { id: string; email: string; name: string; email_verified: boolean };
-    };
-
-    expect(body.access_token).toBeTruthy();
-    expect(body.user.email).toBe('alice@example.com');
-    expect(body.user.name).toBe('Alice');
-    expect(body.user.email_verified).toBe(false);
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      user: {
+        email: 'alice@example.com',
+        email_verified: false,
+        name: 'Alice',
+      },
+    });
 
     const storedUser = await env.DB.prepare(
-      'SELECT id, password_hash, password_salt, pub_key, priv_key FROM users WHERE email = ?',
+      'SELECT id, email_verified, password_hash, password_salt, pub_key, priv_key FROM users WHERE email = ?',
     )
       .bind('alice@example.com')
       .first<{
         id: ArrayBuffer;
+        email_verified: number;
         password_hash: string;
         password_salt: ArrayBuffer;
         pub_key: ArrayBuffer;
         priv_key: ArrayBuffer;
       }>();
     expect(storedUser).toBeTruthy();
+    expect(storedUser?.email_verified).toBe(0);
     expect(new Uint8Array(storedUser!.id)).toHaveLength(16);
     expect(
       await verifyPasswordAuth(Buffer.from(password_auth, 'base64'), storedUser!.password_hash),
@@ -111,24 +114,6 @@ describe('Auth routes', () => {
     expect(Buffer.from(storedUser!.password_salt).toString('base64')).toBe(password_salt);
     expect(Buffer.from(storedUser!.pub_key).toString('base64')).toBe(pub_key);
     expect(Buffer.from(storedUser!.priv_key).toString('base64')).toBe(priv_key);
-
-    const session = await env.DB.prepare(
-      `SELECT lower(hex(user_id)) as user_id_hex, expires_at
-       FROM user_sessions
-       WHERE user_id = ?
-       ORDER BY created_at DESC
-       LIMIT 1`,
-    )
-      .bind(uuidToBytes(body.user.id))
-      .first<{
-        user_id_hex: string | null;
-        expires_at: number;
-      }>();
-
-    expect(session).toMatchObject({
-      user_id_hex: body.user.id.replaceAll('-', ''),
-    });
-    expect(session?.expires_at).toBeGreaterThan(Date.now());
 
     const deliveries = await listEmailDeliveries();
     expect(deliveries).toHaveLength(1);
@@ -140,6 +125,7 @@ describe('Auth routes', () => {
 
     const token = await latestEmailToken('email_verification');
     expect(token?.email).toBe('alice@example.com');
+    expect(token?.user_id).toBeTruthy();
   });
 
   it('logs in with password_auth and refreshes an access token from the refresh cookie', async () => {
@@ -155,6 +141,31 @@ describe('Auth routes', () => {
       }),
     });
     expect(signupRes.status).toBe(201);
+
+    const preVerifyLoginRes = await SELF.fetch(`${BASE}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'bob@example.com',
+        password_auth: await passwordAuthFor('pw'),
+      }),
+    });
+    expect(preVerifyLoginRes.status).toBe(403);
+
+    const deliveries = await listEmailDeliveries();
+    const verifyDelivery = deliveries.find(
+      (delivery) => delivery.recipient_email === 'bob@example.com',
+    );
+    const verifyToken = verifyDelivery ? extractTokenFromDelivery(verifyDelivery, 'token') : null;
+    expect(verifyToken).toBeTruthy();
+
+    const verifyRes = await SELF.fetch(`${BASE}/email-verification/validate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: verifyToken }),
+    });
+    expect(verifyRes.status).toBe(200);
+    expect((await verifyRes.json()) as { access_token: string }).toHaveProperty('access_token');
 
     const loginRes = await SELF.fetch(`${BASE}/login`, {
       method: 'POST',
@@ -177,7 +188,7 @@ describe('Auth routes', () => {
     });
     expect(badLoginRes.status).toBe(401);
 
-    const cookie = signupRes.headers.get('set-cookie') ?? '';
+    const cookie = loginRes.headers.get('set-cookie') ?? '';
     const refreshRes = await SELF.fetch(`${BASE}/token`, {
       method: 'POST',
       headers: { Cookie: cookie },
@@ -211,11 +222,13 @@ describe('Auth routes', () => {
     const body = (await getRes.json()) as {
       name: string;
       email_verified: boolean;
+      email_digest_minutes_utc: number;
       pub_key: string;
       priv_key: string;
     };
     expect(body.name).toBe('Updated Carol');
-    expect(body.email_verified).toBe(false);
+    expect(body.email_verified).toBe(true);
+    expect(body.email_digest_minutes_utc).toBe(360);
     expect(body.pub_key).toBe(nextPubKey);
     expect(body.priv_key).toBe(nextPrivKey);
     await markUserEmailVerified(userId);
@@ -225,6 +238,11 @@ describe('Auth routes', () => {
       body: JSON.stringify({ email: 'carol-new@example.com' }),
     });
     expect(updateEmailRes.status).toBe(200);
+    expect(await updateEmailRes.json()).toEqual({
+      ok: true,
+      email_verification_required: true,
+      pending_email: 'carol-new@example.com',
+    });
 
     const updatedUserRes = await SELF.fetch(`${BASE}/user`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -234,9 +252,29 @@ describe('Auth routes', () => {
       email_verified: boolean;
       email_bounced_at: number | null;
     };
-    expect(updatedBody.email).toBe('carol-new@example.com');
-    expect(updatedBody.email_verified).toBe(false);
+    expect(updatedBody.email).toBe('carol@example.com');
+    expect(updatedBody.email_verified).toBe(true);
     expect(updatedBody.email_bounced_at).toBeNull();
+
+    const updateDigestRes = await SELF.fetch(`${BASE}/user`, {
+      method: 'PATCH',
+      headers: authHeaders(token),
+      body: JSON.stringify({
+        email_digest_minutes_utc: 540,
+      }),
+    });
+    expect(updateDigestRes.status).toBe(200);
+
+    const digestUserRes = await SELF.fetch(`${BASE}/user`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(
+      (await digestUserRes.json()) as {
+        email_digest_minutes_utc: number;
+      },
+    ).toMatchObject({
+      email_digest_minutes_utc: 540,
+    });
 
     const deliveries = await listEmailDeliveries();
     expect(deliveries.filter((delivery) => delivery.kind === 'email_verification')).toHaveLength(2);
@@ -245,44 +283,138 @@ describe('Auth routes', () => {
       recipient_email: 'carol-new@example.com',
       status: 'sent',
     });
+    const latestMetadata = JSON.parse(deliveries[deliveries.length - 1]!.metadata) as {
+      verifyUrl: string;
+    };
+    expect(new URL(latestMetadata.verifyUrl).searchParams.get('next')).toBe('/settings');
 
-    const latestVerificationToken = await latestEmailToken('email_verification');
+    const latestVerificationToken = await latestEmailToken('email_change');
     expect(latestVerificationToken?.email).toBe('carol-new@example.com');
   });
 
-  it('verifies email tokens and resends verification emails for authenticated users', async () => {
-    const { token, userId } = await signupAndGetToken('verifyme@example.com', 'pw', 'Verify Me');
-    const deliveries = await listEmailDeliveries();
-    const metadata = JSON.parse(deliveries[0]!.metadata) as { verifyUrl: string };
-    const verifyToken = new URL(metadata.verifyUrl).searchParams.get('verify_email_token');
-
-    const verifyRes = await SELF.fetch(`${BASE}/email-verification/validate`, {
+  it('verifies signup and email-change tokens, and can resend for unverified users', async () => {
+    const signupRes = await SELF.fetch(`${BASE}/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: verifyToken }),
+      body: JSON.stringify({
+        email: 'verifyme@example.com',
+        password_auth: await passwordAuthFor('pw'),
+        password_salt: await passwordSaltFor('verifyme@example.com'),
+        pub_key: await publicKeyFor('verifyme@example.com'),
+        priv_key: privateKeyFor('verifyme@example.com'),
+        name: 'Verify Me',
+      }),
     });
-    expect(verifyRes.status).toBe(200);
+    expect(signupRes.status).toBe(201);
+
+    const preVerifyLoginRes = await SELF.fetch(`${BASE}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'verifyme@example.com',
+        password_auth: await passwordAuthFor('pw'),
+      }),
+    });
+    expect(preVerifyLoginRes.status).toBe(403);
+
+    const deliveries = await listEmailDeliveries();
+    const signupToken = extractTokenFromDelivery(deliveries[0]!, 'token');
+
+    const verifySignupRes = await SELF.fetch(`${BASE}/email-verification/validate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: signupToken }),
+    });
+    expect(verifySignupRes.status).toBe(200);
+    expect(await verifySignupRes.json()).toMatchObject({
+      ok: true,
+      email: 'verifyme@example.com',
+      access_token: expect.any(String),
+      purpose: 'email_verification',
+    });
+
+    const loginRes = await SELF.fetch(`${BASE}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'verifyme@example.com',
+        password_auth: await passwordAuthFor('pw'),
+      }),
+    });
+    expect(loginRes.status).toBe(200);
+    const loginBody = (await loginRes.json()) as { access_token: string };
+
+    const updateEmailRes = await SELF.fetch(`${BASE}/user`, {
+      method: 'PATCH',
+      headers: authHeaders(loginBody.access_token),
+      body: JSON.stringify({ email: 'verifyme-new@example.com' }),
+    });
+    expect(updateEmailRes.status).toBe(200);
+    expect(await updateEmailRes.json()).toMatchObject({
+      ok: true,
+      email_verification_required: true,
+      pending_email: 'verifyme-new@example.com',
+    });
+
+    const preChangeVerifyUserRes = await SELF.fetch(`${BASE}/user`, {
+      headers: { Authorization: `Bearer ${loginBody.access_token}` },
+    });
+    expect(await preChangeVerifyUserRes.json()).toMatchObject({
+      email: 'verifyme@example.com',
+      email_verified: true,
+    });
+
+    const latestDelivery = (await listEmailDeliveries()).at(-1);
+    const emailChangeToken = latestDelivery
+      ? extractTokenFromDelivery(latestDelivery, 'token')
+      : null;
+    expect(emailChangeToken).toBeTruthy();
+
+    const verifyChangeRes = await SELF.fetch(`${BASE}/email-verification/validate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: emailChangeToken }),
+    });
+    expect(verifyChangeRes.status).toBe(200);
+    const verifyChangeBody = (await verifyChangeRes.json()) as {
+      ok: boolean;
+      email: string;
+      access_token: string;
+      purpose: string;
+    };
+    expect(verifyChangeBody).toMatchObject({
+      ok: true,
+      email: 'verifyme-new@example.com',
+      access_token: expect.any(String),
+      purpose: 'email_change',
+    });
 
     const userRes = await SELF.fetch(`${BASE}/user`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${verifyChangeBody.access_token}` },
     });
-    expect((await userRes.json()) as { email_verified: boolean }).toMatchObject({
+    const userBody = (await userRes.json()) as {
+      id: string;
+      email: string;
+      email_verified: boolean;
+    };
+    expect(userBody).toMatchObject({
+      email: 'verifyme-new@example.com',
       email_verified: true,
     });
 
     await env.DB.prepare('UPDATE users SET email_verified = 0 WHERE id = ?')
-      .bind(uuidToBytes(userId))
+      .bind(uuidToBytes(userBody.id))
       .run();
     const resendRes = await SELF.fetch(`${BASE}/email-verification`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${loginBody.access_token}` },
     });
     expect(resendRes.status).toBe(200);
   });
 
   it('blocks verification resend requests after a bounced delivery', async () => {
     const { token, userId } = await signupAndGetToken('bounced-resend@example.com', 'pw');
-    await env.DB.prepare('UPDATE users SET email_bounced_at = ? WHERE id = ?')
+    await env.DB.prepare('UPDATE users SET email_verified = 0, email_bounced_at = ? WHERE id = ?')
       .bind(Date.now(), uuidToBytes(userId))
       .run();
 
@@ -292,6 +424,100 @@ describe('Auth routes', () => {
     });
 
     expect(resendRes.status).toBe(409);
+  });
+
+  it('requires matching email confirmation and permanently deletes the account with cascaded data cleanup', async () => {
+    const { token, userId } = await signupAndGetToken('delete-me@example.com', 'pw', 'Delete Me');
+    const device = await createDeviceForUser(token, 'Phone', 'ios');
+
+    const hashUploadRes = await SELF.fetch(`${BASE}/hash`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${device.access_token}` },
+      body: new Uint8Array(32).fill(9),
+    });
+    expect(hashUploadRes.status).toBe(200);
+
+    const logRes = await SELF.fetch(`${BASE}/d/log`, {
+      method: 'POST',
+      headers: authHeaders(device.access_token),
+      body: JSON.stringify({
+        ts: 1710000000000,
+        type: 'system_event',
+        data: { event: 'account-delete-test' },
+      }),
+    });
+    expect(logRes.status).toBe(201);
+
+    const form = new FormData();
+    form.set('start_time', '1710000000000');
+    form.set('end_time', '1710003600000');
+    form.set(
+      'access_keys',
+      JSON.stringify({
+        keys: [{ user_id: userId, hpke_key: Buffer.from('owner-envelope').toString('base64') }],
+      }),
+    );
+    form.set('file', new File([new Uint8Array([4, 5, 6])], 'batch.enc'));
+    const batchRes = await SELF.fetch(`${BASE}/d/batch`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${device.access_token}` },
+      body: form,
+    });
+    expect(batchRes.status).toBe(201);
+    const batch = (await batchRes.json()) as { id: string; url: string };
+
+    expect(await env.BUCKET.head(batch.url.replace(`${env.R2_URL}/`, ''))).toBeTruthy();
+
+    const badDeleteRes = await SELF.fetch(`${BASE}/user`, {
+      method: 'DELETE',
+      headers: authHeaders(token),
+      body: JSON.stringify({ confirm_email: 'wrong@example.com' }),
+    });
+    expect(badDeleteRes.status).toBe(400);
+
+    const deleteRes = await SELF.fetch(`${BASE}/user`, {
+      method: 'DELETE',
+      headers: authHeaders(token),
+      body: JSON.stringify({ confirm_email: 'delete-me@example.com' }),
+    });
+    expect(deleteRes.status).toBe(204);
+    expect(deleteRes.headers.get('set-cookie')).toContain('refresh_token=');
+
+    expect(
+      await env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(uuidToBytes(userId)).first(),
+    ).toBeNull();
+    expect(
+      await env.DB.prepare('SELECT id FROM devices WHERE id = ?')
+        .bind(uuidToBytes(device.id))
+        .first(),
+    ).toBeNull();
+    expect(
+      await env.DB.prepare('SELECT id FROM batches WHERE id = ?')
+        .bind(uuidToBytes(batch.id))
+        .first(),
+    ).toBeNull();
+
+    expect(
+      await env.DB.prepare('SELECT COUNT(*) AS count FROM device_logs WHERE user_id = ?')
+        .bind(uuidToBytes(userId))
+        .first<{ count: number }>(),
+    ).toMatchObject({ count: 0 });
+    expect(
+      await env.DB.prepare('SELECT COUNT(*) AS count FROM user_sessions WHERE user_id = ?')
+        .bind(uuidToBytes(userId))
+        .first<{ count: number }>(),
+    ).toMatchObject({ count: 0 });
+    expect(
+      await env.DB.prepare('SELECT COUNT(*) AS count FROM email_tokens WHERE user_id = ?')
+        .bind(uuidToBytes(userId))
+        .first<{ count: number }>(),
+    ).toMatchObject({ count: 0 });
+    expect(
+      await env.DB.prepare('SELECT COUNT(*) AS count FROM device_sessions WHERE device_id = ?')
+        .bind(uuidToBytes(device.id))
+        .first<{ count: number }>(),
+    ).toMatchObject({ count: 0 });
+    expect(await env.BUCKET.head(batch.url.replace(`${env.R2_URL}/`, ''))).toBeNull();
   });
 
   it('requests and applies password resets with new auth material and keypair bytes', async () => {
@@ -309,7 +535,7 @@ describe('Auth routes', () => {
     const resetDelivery = deliveries.find((delivery) => delivery.kind === 'password_reset');
     expect(resetDelivery?.recipient_email).toBe('reset@example.com');
     const resetMetadata = JSON.parse(resetDelivery!.metadata) as { resetUrl: string };
-    const resetToken = new URL(resetMetadata.resetUrl).searchParams.get('reset_password_token');
+    const resetToken = new URL(resetMetadata.resetUrl).searchParams.get('token');
 
     const validateRes = await SELF.fetch(`${BASE}/password-reset/validate`, {
       method: 'POST',

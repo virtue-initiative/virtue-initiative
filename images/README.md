@@ -31,6 +31,7 @@ Generated targets:
 - `web/public/apple-touch-icon.png`
 - `web/public/android-chrome-192x192.png`
 - `web/public/android-chrome-512x512.png`
+- `landing/public/logo.svg`
 - `client/mac/assets/AppIcon.icns`
 - `client/mac/assets/tray-icon.png`
 - `client/linux/assets/tray-icon.png`

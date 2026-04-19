@@ -5984,6 +5984,7 @@ dependencies = [
  "aes-gcm",
  "argon2",
  "base64",
+ "chrono",
  "flate2",
  "hex",
  "hkdf",
@@ -6009,6 +6010,7 @@ dependencies = [
  "chrono",
  "clap",
  "dirs",
+ "futures-util",
  "hostname",
  "image",
  "ksni",
@@ -6017,6 +6019,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "virtue-core",
+ "zbus",
 ]
 
 [[package]]

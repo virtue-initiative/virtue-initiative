@@ -1,0 +1,58 @@
+---
+import SiteLayout from "../layouts/SiteLayout.astro";
+import { APP_URL } from "../lib/app-url";
+---
+
+<SiteLayout
+  pageTitle="About"
+  tagline="Providing free tools and resources for accountability"
+>
+  <section id="about">
+    <h2>About</h2>
+
+    <p>
+      The Virtue Initiative is an organization that aims to provide free tools
+      and resources for accountability. We currently offer a free
+      screenshot-based accountability app and some resources on how to use it
+      well.
+    </p>
+
+    <p>
+      Our mission is to develop free technology and resources to support people
+      who want to be free from pornography. We know what it&apos;s like to feel
+      stuck, and we want to provide tools to support you. We don&apos;t want the
+      price to be yet another excuse not to deal with pornography.
+    </p>
+
+    <p>
+      Our vision is to see the Christian church and the world freed from
+      pornography. There are billions of dollars made by keeping men and women
+      stuck. For many people, it starts from a young age, and it&apos;s hard to
+      give up, even if they desperately want to. We want to provide tools to
+      provide support and make it easier.
+    </p>
+
+    <p>
+      The Virtue Initiative began in February 2026 when we started looking at
+      accountability apps. There were a few options but none of them were free.
+      We thought, &quot;What if we can make a free version while keeping most of
+      the essential features of other paid services?&quot; Our goal is to
+      fundraise all our financial support and keep the app free.
+    </p>
+
+    <p>
+      Hopefully you&apos;re willing to join us on this mission. If you&apos;ve
+      been or know someone who&apos;s been struggling to break free from porn,
+      <a href={`${APP_URL}/signup`}>sign up</a> now or send this to them. You might
+      also want to read
+      <a href="/help/tips"> this page on tips to beat pornography. </a>
+    </p>
+
+    <p>
+      If you wish to support us monetarily, you can donate (at some point). If
+      you have any questions, feel free to contact us at
+      <a href="mailto:help@virtueinitiative.org">help@virtueinitiative.org</a>
+      or join our <a href="https://discord.gg/4kNsbRuzQD">Discord server</a>.
+    </p>
+  </section>
+</SiteLayout>

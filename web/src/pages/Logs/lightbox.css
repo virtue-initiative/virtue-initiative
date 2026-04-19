@@ -1,0 +1,126 @@
+.logs-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem;
+  background: color-mix(in srgb, var(--overlay) 82%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.logs-preview-dialog {
+  width: min(68rem, calc(100vw - 1.5rem));
+  max-height: calc(100vh - 1.5rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.65rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.logs-preview-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.logs-preview-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.logs-preview-meta-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.logs-preview-meta-subtitle {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.logs-preview-close {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 999px;
+  width: 2rem;
+  min-width: 2rem;
+  height: 2rem;
+  min-height: 2rem;
+  font-size: 1.3rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--text);
+    background: var(--bg-subtle);
+  }
+}
+
+.logs-preview-image-button {
+  border: 0;
+  border-radius: 10px;
+  padding: 0;
+  cursor: zoom-in;
+  overflow: hidden;
+  background: var(--bg-subtle);
+}
+
+.logs-preview-image {
+  display: block;
+  width: 100%;
+  max-height: min(72vh, 44rem);
+  object-fit: contain;
+}
+
+.logs-lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  cursor: default;
+}
+
+.logs-lightbox-frame {
+  width: calc(100vw - 2rem);
+  height: calc(100vh - 2rem);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.logs-lightbox-image {
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+  object-fit: contain;
+}

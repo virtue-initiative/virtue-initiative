@@ -92,7 +92,7 @@ describe('Notification routes and tamper alerts', () => {
     });
   });
 
-  it('sends immediate tamper alerts for critical device log events', async () => {
+  it('sends immediate tamper alerts for high-risk device log events', async () => {
     const { token: ownerToken } = await signupAndGetToken('alerts-owner@example.com', 'pw');
     const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
       'alerts-partner@example.com',
@@ -125,7 +125,7 @@ describe('Notification routes and tamper alerts', () => {
     const logRes = await SELF.fetch(`${BASE}/d/log`, {
       method: 'POST',
       headers: authHeaders(device.access_token),
-      body: JSON.stringify({ ts: Date.now(), type: 'service_stop', risk: 1, data: {} }),
+      body: JSON.stringify({ ts: Date.now(), type: 'service_stop', risk: 0.7, data: {} }),
     });
 
     expect(logRes.status).toBe(201);
@@ -135,13 +135,105 @@ describe('Notification routes and tamper alerts', () => {
     )
       .bind(uuidToBytes(device.id))
       .first<{ risk: number | null }>();
-    expect(storedLog?.risk).toBe(1);
+    expect(storedLog?.risk).toBe(0.7);
 
     const deliveries = await listEmailDeliveries();
     expect(deliveries.some((delivery) => delivery.kind === 'tamper_alert')).toBe(true);
     expect(
       deliveries.some((delivery) => delivery.recipient_email === 'alerts-partner@example.com'),
     ).toBe(true);
+    const tamperDelivery = deliveries.find((delivery) => delivery.kind === 'tamper_alert');
+    expect(tamperDelivery?.text).toContain('Device: Workstation');
+  });
+
+  it('does not send immediate tamper alerts for moderate-risk device log events', async () => {
+    const { token: ownerToken } = await signupAndGetToken('moderate-owner@example.com', 'pw');
+    const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
+      'moderate-partner@example.com',
+      'pw',
+    );
+    await markUserEmailVerified(partnerUserId);
+
+    const inviteRes = await SELF.fetch(`${BASE}/partner`, {
+      method: 'POST',
+      headers: authHeaders(ownerToken),
+      body: JSON.stringify({
+        email: 'moderate-partner@example.com',
+      }),
+    });
+    await inviteRes.json();
+    const inviteDelivery = (await listEmailDeliveries()).find(
+      (delivery) =>
+        delivery.kind === 'partner_invite' &&
+        delivery.recipient_email === 'moderate-partner@example.com',
+    );
+    const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
+
+    await SELF.fetch(`${BASE}/partner/accept`, {
+      method: 'POST',
+      headers: authHeaders(partnerToken),
+      body: JSON.stringify({ token: inviteMetadata.inviteToken }),
+    });
+
+    const device = await createDeviceForUser(ownerToken, 'Laptop', 'linux');
+    const baselineCount = (await listEmailDeliveries()).length;
+    const logRes = await SELF.fetch(`${BASE}/d/log`, {
+      method: 'POST',
+      headers: authHeaders(device.access_token),
+      body: JSON.stringify({ ts: Date.now(), type: 'service_stop', risk: 0.69, data: {} }),
+    });
+
+    expect(logRes.status).toBe(201);
+    expect(await listEmailDeliveries()).toHaveLength(baselineCount);
+  });
+
+  it('treats zero or absent risk as non-tamper', async () => {
+    const { token: ownerToken } = await signupAndGetToken('non-tamper-owner@example.com', 'pw');
+    const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
+      'non-tamper-partner@example.com',
+      'pw',
+    );
+    await markUserEmailVerified(partnerUserId);
+
+    const inviteRes = await SELF.fetch(`${BASE}/partner`, {
+      method: 'POST',
+      headers: authHeaders(ownerToken),
+      body: JSON.stringify({
+        email: 'non-tamper-partner@example.com',
+      }),
+    });
+    await inviteRes.json();
+    const inviteDelivery = (await listEmailDeliveries()).find(
+      (delivery) =>
+        delivery.kind === 'partner_invite' &&
+        delivery.recipient_email === 'non-tamper-partner@example.com',
+    );
+    const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
+
+    await SELF.fetch(`${BASE}/partner/accept`, {
+      method: 'POST',
+      headers: authHeaders(partnerToken),
+      body: JSON.stringify({ token: inviteMetadata.inviteToken }),
+    });
+
+    const device = await createDeviceForUser(ownerToken, 'Desktop', 'linux');
+    const baselineCount = (await listEmailDeliveries()).length;
+
+    const zeroRiskRes = await SELF.fetch(`${BASE}/d/log`, {
+      method: 'POST',
+      headers: authHeaders(device.access_token),
+      body: JSON.stringify({ ts: Date.now(), type: 'heartbeat', risk: 0, data: {} }),
+    });
+    expect(zeroRiskRes.status).toBe(201);
+
+    const missingRiskRes = await SELF.fetch(`${BASE}/d/log`, {
+      method: 'POST',
+      headers: authHeaders(device.access_token),
+      body: JSON.stringify({ ts: Date.now(), type: 'heartbeat', data: {} }),
+    });
+    expect(missingRiskRes.status).toBe(201);
+
+    expect(await listEmailDeliveries()).toHaveLength(baselineCount);
   });
 
   it('stops all partner emails when receive emails is disabled', async () => {
@@ -194,7 +286,10 @@ describe('Notification routes and tamper alerts', () => {
 
   it('suppresses tamper alerts to unverified recipient accounts', async () => {
     const { token: ownerToken } = await signupAndGetToken('unverified-owner@example.com', 'pw');
-    const { token: partnerToken } = await signupAndGetToken('unverified-partner@example.com', 'pw');
+    const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
+      'unverified-partner@example.com',
+      'pw',
+    );
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
@@ -216,6 +311,9 @@ describe('Notification routes and tamper alerts', () => {
       headers: authHeaders(partnerToken),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
+    await env.DB.prepare('UPDATE users SET email_verified = 0 WHERE id = ?')
+      .bind(uuidToBytes(partnerUserId))
+      .run();
 
     const device = await createDeviceForUser(ownerToken, 'Quiet Device', 'linux');
     const baselineCount = (await listEmailDeliveries()).length;

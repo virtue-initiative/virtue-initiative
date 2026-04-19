@@ -56,6 +56,16 @@ def save_json(path: Path, payload: Any) -> None:
         handle.write("\n")
 
 
+def copy_file(source: Path, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, destination)
+
+
+def remove_file_if_exists(path: Path) -> None:
+    if path.exists():
+        path.unlink()
+
+
 def load_theme_color(root: Path) -> tuple[int, int, int]:
     theme_path = root / "theme.json"
     if not theme_path.exists():
@@ -223,11 +233,14 @@ def main() -> None:
     root = Path(__file__).resolve().parent.parent
     images_dir = root / "images"
     raw_path = images_dir / "logo-raw.png"
+    svg_path = images_dir / "logo.svg"
     prepped_path = images_dir / "logo-prepped.png"
     theme_rgb = load_theme_color(root)
 
     if not raw_path.exists():
         raise SystemExit(f"missing source image: {raw_path}")
+    if not svg_path.exists():
+        raise SystemExit(f"missing source svg: {svg_path}")
 
     master = preprocess_logo(
         raw_path,
@@ -238,7 +251,12 @@ def main() -> None:
     outputs: list[Path] = [prepped_path] if args.target == "all" else []
 
     if args.target == "all":
-        for path in [root / "web" / "public", root / "landing" / "public"]:
+        web_public = root / "web" / "public"
+        landing_public = root / "landing" / "public"
+        remove_file_if_exists(web_public / "logo.svg")
+        copy_file(svg_path, landing_public / "logo.svg")
+
+        for path in [web_public, landing_public]:
             save_ico(master, path / "favicon.ico", [16, 32, 48])
             save_png(master, path / "favicon-16x16.png", 16)
             save_png(master, path / "favicon-32x32.png", 32)
@@ -255,6 +273,8 @@ def main() -> None:
                     path / "android-chrome-512x512.png",
                 ]
             )
+
+        outputs.append(landing_public / "logo.svg")
 
         mac_assets = root / "client" / "mac" / "assets"
         save_icns(master, mac_assets / "AppIcon.icns", [16, 32, 64, 128, 256, 512, 1024])

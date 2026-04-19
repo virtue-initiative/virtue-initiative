@@ -2,11 +2,10 @@
   width: 100%;
   max-width: 900px;
   padding: 2rem 1rem;
-  box-sizing: border-box;
   text-align: left;
 }
 
-.dash-section {
+.dashboard-section {
   margin-bottom: 2.5rem;
 
   & > h2 {
@@ -20,7 +19,7 @@
   }
 }
 
-.section-header {
+.dashboard-section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -33,7 +32,7 @@
   }
 }
 
-.section-header > * {
+.dashboard-section-header > * {
   min-width: 0;
 }
 
@@ -52,17 +51,12 @@
   gap: 0.4rem;
 }
 
-.checkbox-label {
+.invite-checkbox-label {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   font-size: 0.875rem;
   cursor: pointer;
-}
-
-.invite-actions {
-  display: flex;
-  gap: 0.5rem;
 }
 
 .invite-desc {
@@ -71,16 +65,41 @@
   margin: 0 0 0.75rem;
 }
 
+.device-setup-dialog {
+  max-width: 460px;
+}
+
+.device-setup-steps {
+  margin: 0 0 1rem;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  font-size: 1rem;
+}
+
+.device-setup-steps::marker {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.device-setup-steps li {
+  color: var(--text);
+  font-size: 1rem;
+  line-height: 1.5;
+  padding-left: 0.25rem;
+}
+
+.device-setup-step-label {
+  display: block;
+  font-weight: 600;
+  font-size: 1.02rem;
+}
+
 .partners-panel {
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
-}
-
-.partners-panel-subtitle {
-  margin: 0;
-  font-size: 0.9rem;
-  color: var(--text-muted);
 }
 
 .partners-group-label {
@@ -94,10 +113,6 @@
   margin-bottom: 1rem;
 }
 
-.card-delete {
-  margin-top: 0.85rem;
-}
-
 .partner-device-list {
   display: flex;
   flex-wrap: wrap;
@@ -109,13 +124,23 @@
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  border: 1px solid var(--line, #26263a);
+  border: 1px solid var(--border);
   border-radius: 999px;
   padding: 0.2rem 0.55rem;
   background: transparent;
   color: var(--text-muted);
   font-size: 0.8rem;
   cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+
+  &:hover {
+    background: var(--bg-subtle);
+    border-color: var(--control-border-hover);
+    color: var(--text);
+  }
 }
 
 .partner-device-status {

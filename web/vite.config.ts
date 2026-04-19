@@ -18,7 +18,7 @@ export default defineConfig(({ mode }) => {
           renderTarget: "#app",
           additionalPrerenderRoutes: ["/404"],
           previewMiddlewareEnabled: true,
-          previewMiddlewareFallback: "/404",
+          previewMiddlewareFallback: "/",
         },
       }),
     ],

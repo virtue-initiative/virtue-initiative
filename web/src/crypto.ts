@@ -230,55 +230,31 @@ const ZEROS_HEX = "0".repeat(64);
 
 export type BatchVerification = "verified" | "failed" | "unknown";
 
-type BatchLogValue = string | number | boolean | Uint8Array;
-
-function appendBatchLogValue(parts: Uint8Array[], value: BatchLogValue) {
-  if (value instanceof Uint8Array) {
-    parts.push(value);
-    return;
-  }
-
-  if (typeof value === "number") {
-    const bytes = new Uint8Array(8);
-    const dv = new DataView(bytes.buffer);
-    const lo = value >>> 0;
-    const hi = Math.floor(value / 0x100000000);
-    dv.setUint32(0, lo, true);
-    dv.setUint32(4, hi, true);
-    parts.push(bytes);
-    return;
-  }
-
-  if (typeof value === "boolean") {
-    parts.push(new Uint8Array([Number(value)]));
-    return;
-  }
-
-  parts.push(new TextEncoder().encode(value));
+async function sha256Bytes(
+  value: ArrayBufferLike | ArrayBufferView,
+): Promise<Uint8Array> {
+  const normalized = toUint8Array(value);
+  const input = new Uint8Array(normalized.byteLength);
+  input.set(normalized);
+  return new Uint8Array(await crypto.subtle.digest("SHA-256", input));
 }
 
 /**
  * Verify the hash chain for a batch.
  *
- * Every item advances the chain (including missed captures):
- *   new_state = sha256(current_state || sha256(ts_le[8] || type_utf8 || data_key || data_value || ...))
+ * Every item advances the chain:
+ *   new_state = sha256(current_state || sha256(raw_event_msgpack_bytes))
  *
  * If the final state matches end_chain_hash the batch is verified.
  * Returns 'unknown' when the server has no state tracking (both hashes are zeros).
  */
 export async function verifyBatch(
-  events: {
-    ts: number;
-    type: string;
-    data: Record<string, BatchLogValue>;
-  }[],
+  events: Array<ArrayBufferLike | ArrayBufferView>,
   startChainHash: string,
   endChainHash: string,
 ): Promise<BatchVerification> {
   if (startChainHash === ZEROS_HEX && endChainHash === ZEROS_HEX)
-    return "failed";
-
-  const sortedEvents = [...events].sort((a, b) => a.ts - b.ts);
+    return "unknown";
 
   // Convert startChainHash hex to bytes
   const startBytes = new Uint8Array(32);
@@ -286,42 +262,9 @@ export async function verifyBatch(
     startBytes[i] = parseInt(startChainHash.slice(i * 2, i * 2 + 2), 16);
   }
 
-  const enc = new TextEncoder();
-
   let state: Uint8Array = startBytes;
-  for (const event of sortedEvents) {
-    // Replicate BatchItem::sha256():
-    //   ts_le[8] || type_utf8 || data_key || data_value ...
-    const tsBytes = new Uint8Array(8);
-    const dv = new DataView(tsBytes.buffer);
-    const lo = event.ts >>> 0;
-    const hi = Math.floor(event.ts / 0x100000000);
-    dv.setUint32(0, lo, true);
-    dv.setUint32(4, hi, true);
-
-    const typeBytes = enc.encode(event.type);
-    const dataParts: Uint8Array[] = [];
-    for (const [key, value] of Object.entries(event.data).sort(([a], [b]) =>
-      a.localeCompare(b),
-    )) {
-      dataParts.push(enc.encode(key));
-      appendBatchLogValue(dataParts, value);
-    }
-
-    const totalLen =
-      tsBytes.length +
-      typeBytes.length +
-      dataParts.reduce((s, p) => s + p.length, 0);
-    const buf = new Uint8Array(totalLen);
-    let off = 0;
-    for (const part of [tsBytes, typeBytes, ...dataParts]) {
-      buf.set(part, off);
-      off += part.length;
-    }
-
-    const contentHash = new Uint8Array(
-      await crypto.subtle.digest("SHA-256", buf),
-    );
+  for (const event of events) {
+    const contentHash = await sha256Bytes(event);
     state = await computeNewState(state, contentHash);
   }
 

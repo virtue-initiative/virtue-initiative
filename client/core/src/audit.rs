@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use rand_core::{OsRng, TryRngCore};
 
-use crate::model::{AuditLogItem, AuditRecord, AuditState};
+use crate::model::{AuditLogItem, AuditRecord, AuditState, StoredAuditRecord};
 
 pub fn generate_local_id() -> String {
     let mut bytes = [0_u8; 16];
@@ -12,14 +12,14 @@ pub fn generate_local_id() -> String {
     hex::encode(bytes)
 }
 
-pub fn derive_state(records: &[AuditRecord]) -> AuditState {
+pub fn derive_state(records: &[StoredAuditRecord]) -> AuditState {
     let mut by_id = HashMap::<String, AuditLogItem>::new();
     let mut order = Vec::<String>::new();
     let mut hash_uploaded = HashSet::<String>::new();
     let mut log_uploaded = HashSet::<String>::new();
 
     for record in records {
-        match record {
+        match &record.record {
             AuditRecord::Log {
                 local_id,
                 should_be_in_batch,
@@ -32,6 +32,7 @@ pub fn derive_state(records: &[AuditRecord]) -> AuditState {
                 by_id.insert(
                     local_id.clone(),
                     AuditLogItem {
+                        audit_day: record.audit_day.clone(),
                         local_id: local_id.clone(),
                         should_be_in_batch: *should_be_in_batch,
                         requires_hash_upload: *requires_hash_upload,
@@ -40,6 +41,7 @@ pub fn derive_state(records: &[AuditRecord]) -> AuditState {
                 );
                 order.push(local_id.clone());
             }
+            AuditRecord::LocalLog { .. } => {}
             AuditRecord::HashUploaded { local_id } => {
                 hash_uploaded.insert(local_id.clone());
             }

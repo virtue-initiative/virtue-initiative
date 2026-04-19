@@ -13,6 +13,19 @@
 - `virtue daemon`
   - Background worker used by systemd.
   - On desktop sessions, it also starts a minimal tray icon with hover status.
+- `virtue daemon start`
+  - Starts the `virtue.service` user unit through `systemctl --user`.
+- `virtue daemon stop`
+  - Stops the `virtue.service` user unit through `systemctl --user`.
+  - Records an explicit user stop-intent before stopping so the lifecycle event is classified as user-requested.
+- `virtue dev upload-log --risk 0.7 [--title ...] [--details ...]`
+  - Sends a developer log immediately with the provided risk score.
+- `virtue dev add-log --risk 0.7 [--title ...] [--details ...]`
+  - Queues a metadata-only developer log into the next encrypted batch.
+- `virtue dev add-screenshot --risk 0.7 [--title ...] [--details ...]`
+  - Captures a screenshot and queues it into the next encrypted batch.
+- `virtue dev upload-batch`
+  - Forces the currently queued batch items to upload now.
 
 ## Service behavior
 

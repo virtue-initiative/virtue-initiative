@@ -34,7 +34,7 @@ use virtue_windows::win_text::to_wide;
 
 const WINDOW_CLASS: PCWSTR = w!("VirtueTrayWindow");
 const WINDOW_TITLE: PCWSTR = w!("Virtue");
-const BUILD_LABEL: &str = env!("CARGO_PKG_VERSION");
+const BUILD_LABEL: &str = virtue_core::BUILD_LABEL;
 
 const ID_TRAY_OPEN: u16 = 2001;
 const ID_TRAY_EXIT: u16 = 2002;
@@ -89,7 +89,7 @@ impl AppState {
             ..Default::default()
         };
 
-        let tip = to_wide(&format!("Virtue {BUILD_LABEL}"));
+        let tip = to_wide(&format!("Virtue {BUILD_LABEL} - virtueinitiative.org"));
         for (idx, ch) in tip.iter().take(data.szTip.len()).enumerate() {
             data.szTip[idx] = *ch;
         }

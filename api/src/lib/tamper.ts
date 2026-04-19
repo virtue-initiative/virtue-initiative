@@ -8,25 +8,17 @@ import { findUserById, listAcceptedNotificationTargetsForUser } from './db';
 import { sendEmail } from './email';
 import { renderTamperAlertTemplate } from './email/templates';
 import { Env } from '../types/bindings';
+import { getRiskRating, type RiskRating } from '../../../shared-web/risk';
+
+const riskRatingToSeverity: Record<RiskRating, TamperSeverity> = {
+  marginal: 'info',
+  moderate: 'warning',
+  high: 'critical',
+};
 
 export function riskToSeverity(risk: number | null | undefined): TamperSeverity | null {
-  if (risk == null) {
-    return null;
-  }
-
-  if (risk >= 0.9) {
-    return 'critical';
-  }
-
-  if (risk >= 0.6) {
-    return 'warning';
-  }
-
-  if (risk > 0) {
-    return 'info';
-  }
-
-  return null;
+  const rating = getRiskRating(risk);
+  return rating ? riskRatingToSeverity[rating] : null;
 }
 
 export async function notifyPartnersAboutRiskLog(
@@ -36,6 +28,7 @@ export async function notifyPartnersAboutRiskLog(
     logId: string;
     appUrl?: string;
     userId: string;
+    deviceName: string;
     severity: TamperSeverity;
     risk: number;
     title: string;
@@ -63,6 +56,7 @@ export async function notifyPartnersAboutRiskLog(
       severity: input.severity,
       ownerName: owner.name,
       ownerEmail: owner.email,
+      deviceName: input.deviceName,
       title: input.title,
       details: input.details ?? null,
       appUrl: input.appUrl ?? env.APP_URL,
@@ -81,6 +75,7 @@ export async function notifyPartnersAboutRiskLog(
       metadata: {
         email_frequency: target.email_frequency ?? DEFAULT_EMAIL_FREQUENCY,
         logId: input.logId,
+        deviceName: input.deviceName,
         risk: input.risk,
         severity: input.severity,
         happenedAt: input.happenedAt,

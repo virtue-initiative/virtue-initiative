@@ -4,22 +4,36 @@ import {
   Route,
   hydrate,
   prerender as ssr,
+  useLocation,
 } from "preact-iso";
 import { useEffect, useRef, useState } from "preact/hooks";
+import { SWRConfig } from "swr";
 
-import { api } from "./api";
 import { AuthProvider, useAuth } from "./context/auth";
 import { E2EEProvider } from "./context/e2ee";
 import { Header } from "./components/Header";
+import { usePartners } from "./hooks/usePartners";
 import { Home } from "./pages/Home/index";
 import { Logs } from "./pages/Logs/index";
 import { Auth } from "./pages/Auth/index";
+import { VerifyEmail } from "./pages/VerifyEmail/index";
 import { Settings } from "./pages/Settings/index";
 import { NotFound } from "./pages/_404";
-import { GLOBAL_ALERT_EVENT, PARTNERS_CHANGED_EVENT } from "./events";
+import { GLOBAL_ALERT_EVENT } from "./events";
+import { appSWRConfig } from "./swr";
 import "./style.css";
 
 const GLOBAL_MESSAGE_KEY = "virtue_global_link_message";
+
+function navigate(path: string, replace = false) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const method = replace ? "replaceState" : "pushState";
+  window.history[method]({}, "", path);
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
 
 type GlobalAlert = {
   id: string;
@@ -30,6 +44,8 @@ type GlobalAlert = {
 
 function GlobalEmailActionBanner() {
   const { token } = useAuth();
+  const { acceptPartnerInvite } = usePartners();
+  const { path: currentPath } = useLocation();
   const [alerts, setAlerts] = useState<GlobalAlert[]>([]);
   const timeoutsRef = useRef<number[]>([]);
 
@@ -104,7 +120,7 @@ function GlobalEmailActionBanner() {
     } catch {
       window.sessionStorage.removeItem(GLOBAL_MESSAGE_KEY);
     }
-  }, []);
+  }, [currentPath]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -133,30 +149,6 @@ function GlobalEmailActionBanner() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
-    const token = params.get("verify_email_token");
-    if (!token) return;
-
-    api
-      .verifyEmail(token)
-      .then(() => {
-        pushAlert("Email verified successfully.", false);
-      })
-      .catch((err: unknown) => {
-        pushAlert(
-          err instanceof Error ? err.message : "Failed to verify email",
-          true,
-        );
-      })
-      .finally(() => {
-        const nextUrl = new URL(window.location.href);
-        nextUrl.searchParams.delete("verify_email_token");
-        window.history.replaceState({}, "", nextUrl.toString());
-      });
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
     const inviteToken = params.get("partner_invite_token");
     if (!inviteToken) return;
 
@@ -170,12 +162,10 @@ function GlobalEmailActionBanner() {
       return;
     }
 
-    api
-      .acceptPartnerInvite(token, inviteToken)
+    acceptPartnerInvite(inviteToken)
       .then(() => {
         pushAlert("Partner invite accepted.", false);
         clearInviteToken();
-        window.dispatchEvent(new CustomEvent(PARTNERS_CHANGED_EVENT));
       })
       .catch((err: unknown) => {
         pushAlert(
@@ -184,7 +174,7 @@ function GlobalEmailActionBanner() {
         );
         clearInviteToken();
       });
-  }, [token]);
+  }, [acceptPartnerInvite, token]);
 
   if (alerts.length === 0) {
     return null;
@@ -217,6 +207,29 @@ function GlobalEmailActionBanner() {
   );
 }
 
+function RedirectToLogin() {
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const target = `/login${window.location.search}`;
+    if (window.location.pathname !== "/login") {
+      navigate(target, true);
+    }
+  }, []);
+
+  return <div class="splash">Loading…</div>;
+}
+
+function RedirectToDashboard() {
+  useEffect(() => {
+    navigate("/", true);
+  }, []);
+
+  return <div class="splash">Loading…</div>;
+}
+
 function AppShell() {
   const { token, ready } = useAuth();
 
@@ -224,30 +237,43 @@ function AppShell() {
     return <div class="splash">Loading…</div>;
   }
 
-  if (!token) {
-    return (
-      <>
-        <GlobalEmailActionBanner />
-        <Auth />
-      </>
-    );
-  }
-
   return (
     <LocationProvider>
-      <div class="app-shell">
-        <Header />
-        <main class="app-main">
+      {!token && (
+        <>
           <GlobalEmailActionBanner />
           <Router>
-            <Route path="/" component={Home} />
-            <Route path="/logs" component={Logs} />
-            <Route path="/logs/gallery" component={Logs} />
-            <Route path="/settings" component={Settings} />
-            <Route default component={NotFound} />
+            <Route path="/login" component={() => <Auth mode="login" />} />
+            <Route path="/signup" component={() => <Auth mode="signup" />} />
+            <Route
+              path="/forgot-password"
+              component={() => <Auth mode="forgot-password" />}
+            />
+            <Route path="/verify-email" component={VerifyEmail} />
+            <Route default component={RedirectToLogin} />
           </Router>
-        </main>
-      </div>
+        </>
+      )}
+
+      {token && (
+        <div class="app-shell">
+          <Header />
+          <main class="app-main">
+            <GlobalEmailActionBanner />
+            <Router>
+              <Route path="/login" component={RedirectToDashboard} />
+              <Route path="/signup" component={RedirectToDashboard} />
+              <Route path="/forgot-password" component={RedirectToDashboard} />
+              <Route path="/" component={Home} />
+              <Route path="/logs" component={Logs} />
+              <Route path="/logs/gallery" component={Logs} />
+              <Route path="/settings" component={Settings} />
+              <Route path="/verify-email" component={VerifyEmail} />
+              <Route default component={NotFound} />
+            </Router>
+          </main>
+        </div>
+      )}
     </LocationProvider>
   );
 }
@@ -255,9 +281,11 @@ function AppShell() {
 export function App() {
   return (
     <AuthProvider>
-      <E2EEProvider>
-        <AppShell />
-      </E2EEProvider>
+      <SWRConfig value={appSWRConfig}>
+        <E2EEProvider>
+          <AppShell />
+        </E2EEProvider>
+      </SWRConfig>
     </AuthProvider>
   );
 }

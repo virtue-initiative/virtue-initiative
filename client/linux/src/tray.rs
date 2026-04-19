@@ -10,9 +10,13 @@ use crate::config::ClientPaths;
 
 const TOOLTIP_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
 const RETRY_INTERVAL: Duration = Duration::from_secs(30);
+const SESSION_BUS_WAIT_INTERVAL: Duration = Duration::from_secs(5);
+const MISSING_WATCHER_RETRY_SCHEDULE: [Duration; 3] = [
+    Duration::from_secs(5),
+    Duration::from_secs(10),
+    Duration::from_secs(60),
+];
 const LOG_THROTTLE_INTERVAL: Duration = Duration::from_secs(10 * 60);
-const STATUS_NOTIFIER_WATCHER_NAME: &str = "org.kde.StatusNotifierWatcher";
-const DBUS_SERVICE_UNKNOWN_ERROR: &str = "org.freedesktop.DBus.Error.ServiceUnknown";
 
 pub struct DaemonTray {
     shutdown: Arc<AtomicBool>,
@@ -44,18 +48,18 @@ fn spawn_tray_worker(paths: ClientPaths, shutdown: Arc<AtomicBool>) -> thread::J
         let mut last_error_log_at = std::time::Instant::now()
             .checked_sub(LOG_THROTTLE_INTERVAL)
             .unwrap_or_else(std::time::Instant::now);
+        let mut missing_watcher_failures = 0_usize;
 
         while !shutdown.load(Ordering::SeqCst) {
             if !has_session_bus() {
-                sleep_interruptible(&shutdown, Duration::from_secs(5));
+                sleep_interruptible(&shutdown, SESSION_BUS_WAIT_INTERVAL);
                 continue;
             }
 
             match run_one_tray_session(&paths, &shutdown) {
                 Ok(()) => break,
                 Err(err) => {
-                    let message = err.to_string();
-                    let error_kind = classify_tray_error(&message);
+                    let message = err.message();
                     let should_log = last_error_message.as_deref() != Some(message.as_str())
                         || last_error_log_at.elapsed() >= LOG_THROTTLE_INTERVAL;
                     if should_log {
@@ -64,23 +68,45 @@ fn spawn_tray_worker(paths: ClientPaths, shutdown: Arc<AtomicBool>) -> thread::J
                         last_error_log_at = std::time::Instant::now();
                     }
 
-                    if matches!(error_kind, TrayErrorKind::MissingWatcher) {
+                    let retry_delay = match err.kind() {
+                        TrayErrorKind::MissingWatcher => {
+                            let delay = next_missing_watcher_retry_delay(missing_watcher_failures);
+                            missing_watcher_failures += 1;
+                            delay
+                        }
+                        TrayErrorKind::Retryable => {
+                            missing_watcher_failures = 0;
+                            Some(RETRY_INTERVAL)
+                        }
+                    };
+
+                    let Some(retry_delay) = retry_delay else {
+                        eprintln!(
+                            "tray unavailable (non-fatal): no tray host appeared after startup retries; giving up until the daemon restarts"
+                        );
                         break;
-                    }
+                    };
+
+                    sleep_interruptible(&shutdown, retry_delay);
                 }
             }
-
-            sleep_interruptible(&shutdown, RETRY_INTERVAL);
         }
     })
 }
 
-fn run_one_tray_session(paths: &ClientPaths, shutdown: &Arc<AtomicBool>) -> anyhow::Result<()> {
+fn next_missing_watcher_retry_delay(failure_count: usize) -> Option<Duration> {
+    MISSING_WATCHER_RETRY_SCHEDULE.get(failure_count).copied()
+}
+
+fn run_one_tray_session(
+    paths: &ClientPaths,
+    shutdown: &Arc<AtomicBool>,
+) -> Result<(), TraySessionError> {
     let mut tooltip = build_tooltip(paths);
     let tray = VirtueTray {
         tooltip: tooltip.clone(),
     };
-    let handle = tray.spawn()?;
+    let handle = tray.spawn().map_err(TraySessionError::from_spawn_error)?;
 
     let mut elapsed = Duration::ZERO;
     while !shutdown.load(Ordering::SeqCst) {
@@ -102,7 +128,7 @@ fn run_one_tray_session(paths: &ClientPaths, shutdown: &Arc<AtomicBool>) -> anyh
             })
             .is_none()
         {
-            return Err(anyhow::anyhow!("tray host disconnected"));
+            return Err(TraySessionError::retryable("tray host disconnected"));
         }
 
         tooltip = next;
@@ -157,13 +183,10 @@ fn sleep_interruptible(shutdown: &Arc<AtomicBool>, duration: Duration) {
     }
 }
 
-fn classify_tray_error(message: &str) -> TrayErrorKind {
-    if message.contains(DBUS_SERVICE_UNKNOWN_ERROR)
-        && message.contains(STATUS_NOTIFIER_WATCHER_NAME)
-    {
-        TrayErrorKind::MissingWatcher
-    } else {
-        TrayErrorKind::Retryable
+fn classify_spawn_error(error: &ksni::Error) -> TrayErrorKind {
+    match error {
+        ksni::Error::Watcher(zbus::fdo::Error::ServiceUnknown(_)) => TrayErrorKind::MissingWatcher,
+        _ => TrayErrorKind::Retryable,
     }
 }
 
@@ -171,6 +194,36 @@ fn classify_tray_error(message: &str) -> TrayErrorKind {
 enum TrayErrorKind {
     MissingWatcher,
     Retryable,
+}
+
+#[derive(Debug)]
+struct TraySessionError {
+    kind: TrayErrorKind,
+    message: String,
+}
+
+impl TraySessionError {
+    fn from_spawn_error(error: ksni::Error) -> Self {
+        Self {
+            kind: classify_spawn_error(&error),
+            message: error.to_string(),
+        }
+    }
+
+    fn retryable(message: impl Into<String>) -> Self {
+        Self {
+            kind: TrayErrorKind::Retryable,
+            message: message.into(),
+        }
+    }
+
+    fn kind(&self) -> TrayErrorKind {
+        self.kind
+    }
+
+    fn message(&self) -> String {
+        self.message.clone()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -193,7 +246,7 @@ impl ksni::Tray for VirtueTray {
 
     fn tool_tip(&self) -> ksni::ToolTip {
         ksni::ToolTip {
-            title: "Virtue".to_string(),
+            title: "Virtue - virtueinitiative.org".to_string(),
             description: self.tooltip.clone(),
             ..Default::default()
         }
@@ -239,22 +292,41 @@ fn build_icon() -> ksni::Icon {
 
 #[cfg(test)]
 mod tests {
-    use super::{TrayErrorKind, classify_tray_error};
+    use std::time::Duration;
+
+    use super::{TrayErrorKind, classify_spawn_error, next_missing_watcher_retry_delay};
 
     #[test]
     fn classifies_missing_status_notifier_watcher_as_non_retryable() {
-        let message = "failed to register to the StatusNotifierWatcher: \
-                       org.freedesktop.DBus.Error.ServiceUnknown: \
-                       The name org.kde.StatusNotifierWatcher was not provided by any .service files";
+        let error = ksni::Error::Watcher(zbus::fdo::Error::ServiceUnknown(
+            "The name org.kde.StatusNotifierWatcher was not provided by any .service files"
+                .to_string(),
+        ));
 
-        assert_eq!(classify_tray_error(message), TrayErrorKind::MissingWatcher);
+        assert_eq!(classify_spawn_error(&error), TrayErrorKind::MissingWatcher);
     }
 
     #[test]
-    fn leaves_other_tray_errors_retryable() {
+    fn leaves_other_spawn_errors_retryable() {
+        let error = ksni::Error::WontShow;
+
+        assert_eq!(classify_spawn_error(&error), TrayErrorKind::Retryable);
+    }
+
+    #[test]
+    fn missing_watcher_retries_use_capped_startup_backoff() {
         assert_eq!(
-            classify_tray_error("failed to connect to tray host"),
-            TrayErrorKind::Retryable
+            next_missing_watcher_retry_delay(0),
+            Some(Duration::from_secs(5))
         );
+        assert_eq!(
+            next_missing_watcher_retry_delay(1),
+            Some(Duration::from_secs(10))
+        );
+        assert_eq!(
+            next_missing_watcher_retry_delay(2),
+            Some(Duration::from_secs(60))
+        );
+        assert_eq!(next_missing_watcher_retry_delay(3), None);
     }
 }
