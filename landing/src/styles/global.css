@@ -1,6 +1,7 @@
 @import "@virtueinitiative/shared-web/base.css";
 @import "./site-shell.css";
 @import "./site-sections.css";
+@import "./home.css";
 @import "./tables.css";
 @import "./legal.css";
 @import "./downloads.css";
