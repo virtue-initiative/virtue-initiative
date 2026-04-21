@@ -160,7 +160,6 @@ pub struct DeviceSettings {
     pub device_id: String,
     pub name: String,
     pub platform: String,
-    pub enabled: bool,
     #[serde(default)]
     pub owner: Option<BatchRecipient>,
     #[serde(default)]

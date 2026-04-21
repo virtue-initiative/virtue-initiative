@@ -18,10 +18,6 @@ private struct CoreServiceStatus: Decodable {
     }
 }
 
-private struct CoreDeviceSettings: Decodable {
-    let enabled: Bool
-}
-
 final class MonitoringCoordinator: ObservableObject {
     @Published var email: String = ""
     @Published var password: String = ""
@@ -280,7 +276,6 @@ final class MonitoringCoordinator: ObservableObject {
             : runtimeOverrides().baseApiUrl
 
         let serviceStatus = loadJSONFile(named: "status.json", as: CoreServiceStatus.self)
-        let deviceSettings = loadJSONFile(named: "device_settings.json", as: CoreDeviceSettings?.self) ?? nil
 
         pendingRequestCount = serviceStatus?.pendingRequestCount ?? 0
         lastCoreLoop = formatMillisTimestamp(serviceStatus?.lastLoopAtMs)
@@ -289,8 +284,6 @@ final class MonitoringCoordinator: ObservableObject {
 
         if !loggedIn {
             monitorSummary = "signed out"
-        } else if deviceSettings?.enabled == false {
-            monitorSummary = "disabled by device settings"
         } else if serviceStatus?.isRunning == true {
             monitorSummary = "active"
         } else {

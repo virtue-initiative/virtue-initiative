@@ -1,6 +1,7 @@
 import useSWR, { useSWRConfig } from "swr";
 import {
   api,
+  isToastHandledError,
   PartnerRelationships,
   WatchingPartner,
   WatcherPartner,
@@ -75,7 +76,7 @@ export function usePartners(): UsePartnersResult {
     partners: data,
     watching: data?.watching,
     watchers: data?.watchers,
-    error,
+    error: error && !isToastHandledError(error) ? error : undefined,
     isLoading: Boolean(token) && isLoading,
     invitePartner,
     acceptPartnerInvite,

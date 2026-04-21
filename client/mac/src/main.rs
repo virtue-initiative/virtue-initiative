@@ -247,7 +247,6 @@ fn status(paths: ClientPaths) -> Result<()> {
     let store = FileStateStore::new(&paths.state_dir)?;
     let auth = store.load_auth_state()?;
     let service_status = load_service_status(&store, &auth)?;
-    let device_settings = store.load_device_settings()?;
     let daemon_status = load_daemon_status(&paths.daemon_status_file)?;
     let mut config = build_core_config(&paths);
     config.refresh_from_runtime_file()?;
@@ -285,13 +284,6 @@ fn status(paths: ClientPaths) -> Result<()> {
     println!(
         "device_id: {}",
         service_status.device_id.as_deref().unwrap_or("<none>")
-    );
-    println!(
-        "device_enabled: {}",
-        device_settings
-            .as_ref()
-            .map(|settings| settings.enabled.to_string())
-            .unwrap_or_else(|| "<unknown>".to_string())
     );
     println!(
         "screenshot_permission: {}",
@@ -348,18 +340,12 @@ fn collect_status(paths: &ClientPaths) -> Result<AppStatus> {
     let state = load_state(&paths.ui_state_file)?;
     let auth = store.load_auth_state()?;
     let service_status = load_service_status(&store, &auth)?;
-    let device_settings = store.load_device_settings()?;
     let daemon_status = load_daemon_status(&paths.daemon_status_file)?;
     let mut config = build_core_config(paths);
     config.refresh_from_runtime_file()?;
 
     let monitor_summary = if auth.device_credentials.is_none() {
         "signed out".to_string()
-    } else if device_settings
-        .as_ref()
-        .is_some_and(|settings| !settings.enabled)
-    {
-        "disabled by device settings".to_string()
     } else if service_status.is_running {
         "active".to_string()
     } else {

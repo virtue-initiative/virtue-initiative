@@ -22,9 +22,9 @@ describe('Main device routes', () => {
     });
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as Array<{ name: string; platform: string; enabled: boolean }>;
+    const body = (await res.json()) as Array<{ name: string; platform: string }>;
     expect(body).toHaveLength(1);
-    expect(body[0]).toMatchObject({ name: 'Work Laptop', platform: 'linux', enabled: true });
+    expect(body[0]).toMatchObject({ name: 'Work Laptop', platform: 'linux' });
   });
 
   it('updates an owned device', async () => {
@@ -34,7 +34,7 @@ describe('Main device routes', () => {
     const res = await SELF.fetch(`${BASE}/device/${device.id}`, {
       method: 'PATCH',
       headers: authHeaders(token),
-      body: JSON.stringify({ name: 'New Name', enabled: false }),
+      body: JSON.stringify({ name: 'New Name' }),
     });
 
     expect(res.status).toBe(200);
@@ -43,10 +43,9 @@ describe('Main device routes', () => {
     const listRes = await SELF.fetch(`${BASE}/device`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    const list = (await listRes.json()) as Array<{ id: string; name: string; enabled: boolean }>;
+    const list = (await listRes.json()) as Array<{ id: string; name: string }>;
     expect(list.find((item) => item.id === device.id)).toMatchObject({
       name: 'New Name',
-      enabled: false,
     });
   });
 

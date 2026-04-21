@@ -198,7 +198,6 @@ deviceOnly.get('/device', authenticate('device-access'), async (c) => {
     id: device.id,
     name: device.name,
     platform: device.platform,
-    enabled: device.enabled === 1,
     ...(owner?.pub_key
       ? {
           owner: {

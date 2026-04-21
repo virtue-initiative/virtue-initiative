@@ -1064,7 +1064,7 @@ impl<P: PlatformHooks> MonitorService<P> {
             && self
                 .device_settings
                 .as_ref()
-                .map(|settings| settings.enabled && settings.owner.is_some())
+                .map(|settings| settings.owner.is_some())
                 .unwrap_or(false)
     }
 
@@ -1266,7 +1266,6 @@ mod tests {
                 device_id: "device-1".to_string(),
                 name: "Device".to_string(),
                 platform: "test".to_string(),
-                enabled: true,
                 owner: Some(BatchRecipient {
                     user_id: "user-1".to_string(),
                     pub_key_base64: "owner-key".to_string(),
