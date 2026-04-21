@@ -9,7 +9,7 @@ Unicode true
 !define CAPTURE_STARTUP_SHORTCUT "Virtue Capture.lnk"
 !define TRAY_STARTUP_SHORTCUT "Virtue Tray.lnk"
 !ifndef PRODUCT_VERSION
-!define PRODUCT_VERSION "0.0.2"
+!define PRODUCT_VERSION "0.0.5"
 !endif
 !ifndef BUILD_TARGET_DIR
 !define BUILD_TARGET_DIR "..\\..\\target"
