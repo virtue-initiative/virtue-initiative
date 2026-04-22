@@ -39,6 +39,9 @@ type GlobalAlert = {
   id: string;
   message: string;
   isError: boolean;
+  centered: boolean;
+  dismissible: boolean;
+  durationMs: number | null;
   closing: boolean;
 };
 
@@ -71,21 +74,36 @@ function GlobalEmailActionBanner() {
     timeoutsRef.current.push(removalTimeout);
   }
 
-  function pushAlert(message: string, isError: boolean) {
+  function pushAlert(
+    message: string,
+    isError: boolean,
+    options: {
+      centered?: boolean;
+      dismissible?: boolean;
+      durationMs?: number | null;
+    } = {},
+  ) {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const durationMs =
+      options.durationMs === undefined ? 45_000 : options.durationMs;
     setAlerts((previous) => [
       ...previous,
       {
         id,
         message,
         isError,
+        centered: Boolean(options.centered),
+        dismissible: options.dismissible ?? true,
+        durationMs,
         closing: false,
       },
     ]);
-    const timeout = window.setTimeout(() => {
-      dismissAlert(id);
-    }, 45_000);
-    timeoutsRef.current.push(timeout);
+    if (durationMs !== null) {
+      const timeout = window.setTimeout(() => {
+        dismissAlert(id);
+      }, durationMs);
+      timeoutsRef.current.push(timeout);
+    }
   }
 
   useEffect(() => {
@@ -112,6 +130,9 @@ function GlobalEmailActionBanner() {
           id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
           message: item.message,
           isError: Boolean(item.isError),
+          centered: false,
+          dismissible: true,
+          durationMs: 45_000,
           closing: false,
         }));
       if (nextAlerts.length > 0) {
@@ -130,6 +151,9 @@ function GlobalEmailActionBanner() {
         event as CustomEvent<{
           message?: string;
           isError?: boolean;
+          centered?: boolean;
+          dismissible?: boolean;
+          durationMs?: number | null;
         }>
       ).detail;
 
@@ -137,7 +161,14 @@ function GlobalEmailActionBanner() {
         return;
       }
 
-      pushAlert(detail.message, Boolean(detail.isError));
+      pushAlert(detail.message, Boolean(detail.isError), {
+        centered: Boolean(detail.centered),
+        dismissible: detail.dismissible ?? true,
+        durationMs:
+          typeof detail.durationMs === "number" || detail.durationMs === null
+            ? detail.durationMs
+            : undefined,
+      });
     }
 
     window.addEventListener(GLOBAL_ALERT_EVENT, handleGlobalAlert);
@@ -180,30 +211,67 @@ function GlobalEmailActionBanner() {
     return null;
   }
 
+  const edgeAlerts = alerts.filter((alert) => !alert.centered);
+  const centeredAlerts = alerts.filter((alert) => alert.centered);
+
   return (
-    <div
-      class={`global-alert-stack${token ? " global-alert-stack--with-header" : ""}`}
-      aria-live="polite"
-      aria-atomic="false"
-    >
-      {alerts.map((alert) => (
+    <>
+      {edgeAlerts.length > 0 && (
         <div
-          key={alert.id}
-          role="status"
-          class={`${alert.isError ? "alert-error" : "alert-success"} global-alert${alert.closing ? " global-alert--closing" : ""}`}
+          class={`global-alert-stack${token ? " global-alert-stack--with-header" : ""}`}
+          aria-live="polite"
+          aria-atomic="false"
         >
-          <span>{alert.message}</span>
-          <button
-            class="global-alert-close"
-            type="button"
-            onClick={() => dismissAlert(alert.id)}
-            aria-label="Dismiss notification"
-          >
-            ×
-          </button>
+          {edgeAlerts.map((alert) => (
+            <div
+              key={alert.id}
+              role="status"
+              class={`${alert.isError ? "alert-error" : "alert-success"} global-alert${alert.closing ? " global-alert--closing" : ""}`}
+            >
+              <span>{alert.message}</span>
+              {alert.dismissible && (
+                <button
+                  class="global-alert-close"
+                  type="button"
+                  onClick={() => dismissAlert(alert.id)}
+                  aria-label="Dismiss notification"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          ))}
         </div>
-      ))}
-    </div>
+      )}
+
+      {centeredAlerts.length > 0 && (
+        <div
+          class={`global-alert-stack global-alert-stack--centered${token ? " global-alert-stack--with-header" : ""}`}
+          aria-live="polite"
+          aria-atomic="false"
+        >
+          {centeredAlerts.map((alert) => (
+            <div
+              key={alert.id}
+              role="status"
+              class={`${alert.isError ? "alert-error" : "alert-success"} global-alert${alert.closing ? " global-alert--closing" : ""}`}
+            >
+              <span>{alert.message}</span>
+              {alert.dismissible && (
+                <button
+                  class="global-alert-close"
+                  type="button"
+                  onClick={() => dismissAlert(alert.id)}
+                  aria-label="Dismiss notification"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 

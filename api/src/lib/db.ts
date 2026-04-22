@@ -317,9 +317,7 @@ export async function createDevice(
   input: { id: string; owner: string; name: string; platform: string },
 ) {
   return db
-    .prepare(
-      'INSERT INTO devices (id, owner, name, platform, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)',
-    )
+    .prepare('INSERT INTO devices (id, owner, name, platform, created_at) VALUES (?, ?, ?, ?, ?)')
     .bind(uuidToBytes(input.id), uuidToBytes(input.owner), input.name, input.platform, Date.now())
     .run();
 }
@@ -330,11 +328,10 @@ export async function findDeviceById(db: D1Database, deviceId: string) {
     owner: string;
     name: string;
     platform: string;
-    enabled: number;
     created_at: number;
   }>(
     db
-      .prepare('SELECT id, owner, name, platform, enabled, created_at FROM devices WHERE id = ?')
+      .prepare('SELECT id, owner, name, platform, created_at FROM devices WHERE id = ?')
       .bind(uuidToBytes(deviceId)),
     ['id', 'owner'],
   );
@@ -346,34 +343,24 @@ export async function findOwnedDevice(db: D1Database, deviceId: string, ownerId:
     owner: string;
     name: string;
     platform: string;
-    enabled: number;
     created_at: number;
   }>(
     db
       .prepare(
-        'SELECT id, owner, name, platform, enabled, created_at FROM devices WHERE id = ? AND owner = ?',
+        'SELECT id, owner, name, platform, created_at FROM devices WHERE id = ? AND owner = ?',
       )
       .bind(uuidToBytes(deviceId), uuidToBytes(ownerId)),
     ['id', 'owner'],
   );
 }
 
-export async function updateDevice(
-  db: D1Database,
-  deviceId: string,
-  fields: { name?: string; enabled?: boolean },
-) {
+export async function updateDevice(db: D1Database, deviceId: string, fields: { name?: string }) {
   const updates: string[] = [];
   const params: SqlValue[] = [];
 
   if (fields.name !== undefined) {
     updates.push('name = ?');
     params.push(fields.name);
-  }
-
-  if (fields.enabled !== undefined) {
-    updates.push('enabled = ?');
-    params.push(fields.enabled ? 1 : 0);
   }
 
   if (updates.length === 0) {
@@ -453,13 +440,12 @@ export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
     owner: string;
     name: string;
     platform: string;
-    enabled: number;
     created_at: number;
     last_upload_at: number | null;
   }>(
     db
       .prepare(
-        `SELECT d.id, d.owner, d.name, d.platform, d.enabled, d.created_at, MAX(b.end_time) AS last_upload_at
+        `SELECT d.id, d.owner, d.name, d.platform, d.created_at, MAX(b.end_time) AS last_upload_at
          FROM devices d
          LEFT JOIN batches b ON b.device_id = d.id
          WHERE d.owner IN (${placeholders(ownerIds.length)})
@@ -471,25 +457,23 @@ export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
   );
 }
 
-export async function listEnabledDevicesWithLastUpload(db: D1Database) {
+export async function listDevicesWithLastUpload(db: D1Database) {
   return allWithUuidFields<{
     id: string;
     owner: string;
     name: string;
     platform: string;
-    enabled: number;
     created_at: number;
     last_upload_at: number | null;
     owner_email: string;
     owner_name: string | null;
   }>(
     db.prepare(
-      `SELECT d.id, d.owner, d.name, d.platform, d.enabled, d.created_at, MAX(b.end_time) AS last_upload_at,
+      `SELECT d.id, d.owner, d.name, d.platform, d.created_at, MAX(b.end_time) AS last_upload_at,
               u.email AS owner_email, u.name AS owner_name
        FROM devices d
        JOIN users u ON u.id = d.owner
        LEFT JOIN batches b ON b.device_id = d.id
-       WHERE d.enabled = 1
        GROUP BY d.id
        ORDER BY d.created_at DESC`,
     ),
@@ -497,20 +481,19 @@ export async function listEnabledDevicesWithLastUpload(db: D1Database) {
   );
 }
 
-export async function listEnabledDevicesForUser(db: D1Database, userId: string) {
+export async function listDevicesForUser(db: D1Database, userId: string) {
   return allWithUuidFields<{
     id: string;
     owner: string;
     name: string;
     platform: string;
-    enabled: number;
     created_at: number;
   }>(
     db
       .prepare(
-        `SELECT id, owner, name, platform, enabled, created_at
+        `SELECT id, owner, name, platform, created_at
          FROM devices
-         WHERE owner = ? AND enabled = 1
+         WHERE owner = ?
          ORDER BY created_at DESC`,
       )
       .bind(uuidToBytes(userId)),

@@ -179,7 +179,6 @@ fn status(paths: ClientPaths) -> Result<()> {
     let mut config = build_core_config(&paths);
     config.refresh_from_runtime_file()?;
     let status = load_service_status(&store, &auth, &config)?;
-    let device_settings = store.load_device_settings()?;
 
     println!("logged_in: {}", auth.device_credentials.is_some());
     println!("running: {}", status.is_running);
@@ -226,13 +225,6 @@ fn status(paths: ClientPaths) -> Result<()> {
     println!(
         "device_id: {}",
         status.device_id.as_deref().unwrap_or("<none>")
-    );
-    println!(
-        "device_enabled: {}",
-        device_settings
-            .as_ref()
-            .map(|settings| settings.enabled.to_string())
-            .unwrap_or_else(|| "<unknown>".to_string())
     );
     println!(
         "capture_interval_seconds: {}",

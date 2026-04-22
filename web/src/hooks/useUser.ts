@@ -1,5 +1,5 @@
 import useSWR, { useSWRConfig } from "swr";
-import { api, User } from "../api";
+import { api, isToastHandledError, User } from "../api";
 import { useAuth } from "../context/auth";
 import { swrKeys } from "./swr-keys";
 
@@ -62,7 +62,7 @@ export function useUser(): UseUserResult {
 
   return {
     user: data,
-    error,
+    error: error && !isToastHandledError(error) ? error : undefined,
     isLoading: Boolean(token) && isLoading,
     updateUser,
     deleteUser,

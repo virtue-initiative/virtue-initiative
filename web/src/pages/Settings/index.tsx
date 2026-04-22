@@ -334,11 +334,8 @@ export function Settings() {
         <section class="card settings-section">
           <h2>Email notifications</h2>
           <p class="hint-text settings-section-hint">
-            Choose how often you receive accountability emails. If you monitor
-            more than one person, each email includes one summary with a section
-            for each person you monitor. Digests cover the 24 hours leading up
-            to your chosen delivery time, converted from your current browser
-            timezone.
+            Choose how often and when you receive reminders to review your
+            partners' screenshots
           </p>
           <div class="field settings-frequency-field">
             <label for="settings-email-frequency">Email frequency</label>

@@ -552,15 +552,11 @@ function DeviceCard({
   onRemoveDevice,
 }: {
   device: Device;
-  onUpdateDevice: (
-    id: string,
-    patch: { name?: string; enabled?: boolean },
-  ) => Promise<void>;
+  onUpdateDevice: (id: string, patch: { name?: string }) => Promise<void>;
   onRemoveDevice: (id: string) => Promise<void>;
 }) {
   const { route } = useLocation();
   const [name, setName] = useState(device.name);
-  const [enabled, setEnabled] = useState(device.enabled);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -569,7 +565,6 @@ function DeviceCard({
 
   function openEdit() {
     setName(device.name);
-    setEnabled(device.enabled);
     setError(null);
     dialogRef.current?.showModal();
   }
@@ -595,7 +590,7 @@ function DeviceCard({
     setSaving(true);
     setError(null);
     try {
-      await onUpdateDevice(device.id, { name, enabled });
+      await onUpdateDevice(device.id, { name });
       dialogRef.current?.close();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save");
@@ -632,12 +627,6 @@ function DeviceCard({
         <dd>{device.platform}</dd>
         <dt>Last upload</dt>
         <dd>{formatRelativeTimestamp(device.last_upload_at)}</dd>
-        {!device.enabled && (
-          <>
-            <dt>Status</dt>
-            <dd class="muted">Disabled</dd>
-          </>
-        )}
       </dl>
       <div class="card-actions">
         <button
@@ -665,16 +654,6 @@ function DeviceCard({
               required
             />
           </div>
-          <label class="invite-checkbox-label">
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={(e) =>
-                setEnabled((e.target as HTMLInputElement).checked)
-              }
-            />
-            Enabled
-          </label>
           {error && <p class="alert-error">{error}</p>}
           <DialogSecondaryActions>
             <button

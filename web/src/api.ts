@@ -1,3 +1,5 @@
+import { sendToast } from "./utils/toast";
+
 export interface User {
   id: string;
   email: string;
@@ -32,7 +34,6 @@ export interface Device {
   platform: string;
   last_upload_at: number | null;
   status: "online" | "offline";
-  enabled: boolean;
 }
 
 export interface Batch {
@@ -106,12 +107,26 @@ export interface PasswordResetValidation {
 }
 
 const BASE = (import.meta as any).env?.VITE_API_URL ?? "http://localhost:8787";
+const NETWORK_ERROR_MESSAGE =
+  "Error: Couldn't connect to the network. Try reloading.";
+const NETWORK_TOAST_THROTTLE_MS = 3_000;
+let lastNetworkToastAt = 0;
+
+type ToastHandledError = Error & { toastHandled?: boolean };
 
 type ReauthHandler = () => Promise<string | null>;
 
 interface RequestOptions {
   allowReauth?: boolean;
   retrying?: boolean;
+}
+
+export function isToastHandledError(
+  error: unknown,
+): error is ToastHandledError {
+  return (
+    error instanceof Error && (error as ToastHandledError).toastHandled === true
+  );
 }
 
 let reauthHandler: ReauthHandler | null = null;
@@ -194,11 +209,29 @@ async function req<T>(
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const res = await fetch(`${BASE}${path}`, {
-    ...init,
-    credentials: "include",
-    headers,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      ...init,
+      credentials: "include",
+      headers,
+    });
+  } catch (error) {
+    const now = Date.now();
+    if (now - lastNetworkToastAt > NETWORK_TOAST_THROTTLE_MS) {
+      sendToast(NETWORK_ERROR_MESSAGE, {
+        isError: true,
+        centered: true,
+        dismissible: true,
+        durationMs: null,
+      });
+      lastNetworkToastAt = now;
+    }
+    throw Object.assign(new Error(""), {
+      toastHandled: true,
+      cause: error,
+    });
+  }
 
   if (!res.ok) {
     if (res.status === 401 && token && allowReauth && !retrying) {
@@ -369,11 +402,7 @@ export const api = {
 
   getDevices: (token: string) => req<Device[]>("/device", {}, token),
 
-  patchDevice: (
-    token: string,
-    id: string,
-    patch: { name?: string; enabled?: boolean },
-  ) =>
+  patchDevice: (token: string, id: string, patch: { name?: string }) =>
     req<{ id: string; updated: boolean }>(
       `/device/${id}`,
       {
