@@ -7,25 +7,32 @@ This client has two modes in one binary:
 
 ## Behavior
 
-- On tray app launch, it installs/starts a LaunchAgent (`org.virtueinitiative.virtue.daemon`) so the daemon restarts on login/reboot.
+- On tray app launch, it installs/starts a LaunchAgent (`org.virtueinitiative.virtue.daemon`) so the daemon starts immediately and is registered for future login/reboot launches.
 - Login/logout flows use the shared device API (`/d/...`) and shared core auth command behavior.
 - Daemon idles until login is complete (device token + device ID + E2EE key).
-- Menu action `Open virtue`:
+- Menu action `Open Virtue`:
   - If logged out: prompts for email/password.
-  - If logged in: shows signed-in state with `Restart daemon` / `Logout`.
-- Tray menu action `Close (will send alert)` sends a `manual_override` alert (best effort), stops the daemon launch agent, and exits the tray app.
+  - If logged in: shows signed-in state with `Stop Monitoring` / `Logout`.
+- `Stop Monitoring` asks for confirmation, records an explicit user stop intent, unregisters the daemon LaunchAgent, and exits the tray app.
+- `Logout` asks for confirmation, alerts observers through the shared core logout flow, clears local login state, and unregisters the daemon LaunchAgent.
 - Closing behavior:
-  - `Close (will send alert)` is a full stop: tray icon exits and background daemon is stopped.
-  - After closing, opening the installed `/Applications/Virtue.app` starts both the tray icon and daemon again.
+  - `Stop Monitoring` is a full stop: tray icon exits, background daemon is stopped, and startup relaunch is disabled until the app is opened again.
+  - `Logout` also disables startup relaunch until the app is opened again.
+  - Opening the Virtue app again recreates/re-enables the LaunchAgent and starts background monitoring.
 
 ## Lifecycle logs
 
-macOS daemon alert logs include:
+macOS lifecycle behavior follows the shared core lifecycle model, analogous to Linux:
 
-- `daemon_start` when the daemon starts.
-- `daemon_stop_signal` when SIGTERM/SIGINT is received.
-- `system_startup` when kernel `kern.boottime` changes since last daemon run.
-- `system_shutdown` when AppKit posts `NSWorkspaceWillPowerOffNotification` and daemon receives SIGTERM.
+- Service pings are recorded every 60 seconds so forced stops can be detected on the next start.
+- Startup is detected from `kern.boottime`.
+- Shutdown is best-effort via `NSWorkspaceWillPowerOffNotification` plus the daemon stop signal.
+- If launchd delivers the stop signal before the power-off notification, the next boot upgrades a recent `unknown` stop marker into `system_shutdown` so reboot cycles stay zero-risk.
+- Suspend and wake are tracked from `NSWorkspaceWillSleepNotification` / `NSWorkspaceDidWakeNotification`.
+- Explicit tray-initiated stop prompts for confirmation before recording a user-requested stop.
+- Logout prompts for confirmation before sending the shared core logout alert.
+
+The tray app waits for the daemon to come up, but it now stays open and keeps polling if startup confirmation is delayed instead of immediately failing closed after a short timeout.
 
 `system_shutdown` is best-effort and may still be missed on abrupt power loss or forced termination.
 

@@ -192,6 +192,10 @@ fn status(paths: ClientPaths) -> Result<()> {
         status.lifecycle.snapshot.computer_power.as_str()
     );
     println!(
+        "lifecycle_capture_permission: {}",
+        status.lifecycle.snapshot.capture_permission.as_str()
+    );
+    println!(
         "lifecycle_capture_availability: {}",
         status.lifecycle.snapshot.capture_availability.as_str()
     );
@@ -261,8 +265,28 @@ fn status(paths: ClientPaths) -> Result<()> {
         status.lifecycle.capabilities.explicit_user_stop.as_str()
     );
     println!(
+        "capability_capture_permission: {}",
+        status.lifecycle.capabilities.capture_permission.as_str()
+    );
+    println!(
         "capability_capture_availability: {}",
         status.lifecycle.capabilities.capture_availability.as_str()
+    );
+    println!(
+        "capability_user_login: {}",
+        status.lifecycle.capabilities.user_login.as_str()
+    );
+    println!(
+        "capability_user_logout: {}",
+        status.lifecycle.capabilities.user_logout.as_str()
+    );
+    println!(
+        "capability_capture_worker: {}",
+        status.lifecycle.capabilities.capture_worker.as_str()
+    );
+    println!(
+        "capability_next_boot_recovery: {}",
+        status.lifecycle.capabilities.next_boot_recovery.as_str()
     );
 
     Ok(())

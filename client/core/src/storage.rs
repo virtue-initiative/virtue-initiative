@@ -255,8 +255,9 @@ impl FileStateStore {
             .create(true)
             .append(true)
             .open(path)?;
-        serde_json::to_writer(&mut file, record)?;
-        writeln!(file)?;
+        let mut line = serde_json::to_vec(record)?;
+        line.push(b'\n');
+        file.write_all(&line)?;
         file.flush()?;
         Ok(())
     }
@@ -271,8 +272,9 @@ impl FileStateStore {
             .create(true)
             .append(true)
             .open(path)?;
-        serde_json::to_writer(&mut file, value)?;
-        writeln!(file)?;
+        let mut line = serde_json::to_vec(value)?;
+        line.push(b'\n');
+        file.write_all(&line)?;
         file.flush()?;
         Ok(())
     }

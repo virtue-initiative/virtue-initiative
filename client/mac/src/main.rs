@@ -6,24 +6,32 @@ mod runtime_env;
 mod ui;
 
 use std::process::ExitCode;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use tao::event::Event;
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use virtue_core::audit::derive_state;
 use virtue_core::storage::FileStateStore;
-use virtue_core::{AuthState, CoreError, MonitorService, ServiceRole, ServiceStatus};
-
-use crate::capture::MacPlatformHooks;
-use crate::config::{
-    ClientPaths, ClientState, ScreenshotPermissionStatus, build_core_config, load_daemon_status,
-    load_state, save_state,
+use virtue_core::{
+    AuthState, CapturePermissionState, CoreError, MonitorService, ServiceRole, ServiceStatus,
 };
+
+use crate::capture::{
+    MacPlatformHooks, ScreenCaptureAccessRequestOutcome, has_screen_capture_access,
+    open_screen_capture_settings, request_screen_capture_access_if_needed,
+};
+use crate::config::{ClientPaths, ClientState, build_core_config, load_state, save_state};
 use crate::runtime_env::apply_runtime_env;
 
 const BUILD_LABEL: &str = virtue_core::BUILD_LABEL;
+const SERVICE_START_TIMEOUT: Duration = Duration::from_secs(20);
+const SERVICE_START_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const STATUS_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Parser)]
 #[command(name = "virtue-mac")]
@@ -57,10 +65,7 @@ fn run() -> Result<()> {
     apply_runtime_env(&paths);
 
     match cli.command {
-        Some(Commands::Daemon) => {
-            let runtime = tokio::runtime::Runtime::new().context("failed to create runtime")?;
-            runtime.block_on(daemon::run_daemon(&paths))
-        }
+        Some(Commands::Daemon) => daemon::run_daemon(&paths),
         Some(Commands::Status) => status(paths),
         None => run_tray(paths),
     }
@@ -76,11 +81,20 @@ fn run_tray(paths: ClientPaths) -> Result<()> {
         ));
     }
 
-    let event_loop = EventLoopBuilder::<()>::with_user_event().build();
+    if let Err(err) = ensure_background_service_running(&paths) {
+        eprintln!("warning: background service startup confirmation delayed: {err:#}");
+        let _ = ui::show_warning(&format!(
+            "Virtue is still waiting for the background service to finish starting.\n\n{err}\n\nThe tray app will stay open while the service keeps starting."
+        ));
+    }
+    maybe_request_screen_capture_access_for_logged_in_user(&paths)?;
+
+    let event_loop = EventLoopBuilder::<ui::MainWindowEvent>::with_user_event().build();
+    ui::install_main_window_event_proxy(event_loop.create_proxy());
 
     let menu = Menu::new();
-    let open_item = MenuItem::new("Open virtue", true, None);
-    let close_item = MenuItem::new("Close (will send alert)", true, None);
+    let open_item = MenuItem::new("Open Virtue", true, None);
+    let close_item = MenuItem::new("Stop Monitoring", true, None);
     menu.append(&open_item)?;
     menu.append(&PredefinedMenuItem::separator())?;
     menu.append(&close_item)?;
@@ -93,112 +107,190 @@ fn run_tray(paths: ClientPaths) -> Result<()> {
         .build()
         .context("failed to build tray icon")?;
 
-    if let Err(err) = open_app_dialog(&paths) {
+    let mut main_window = None;
+    let mut next_status_poll_at = Instant::now();
+
+    if let Err(err) = open_app_dialog(&paths, &mut main_window) {
         eprintln!("initial dialog failed: {err:#}");
         let _ = ui::show_error(&format!("Operation failed:\n{err}"));
     }
 
-    event_loop.run(move |_event, _event_loop_target, control_flow| {
-        *control_flow = ControlFlow::Wait;
+    event_loop.run(move |event, _event_loop_target, control_flow| {
+        if let Event::UserEvent(main_window_event) = event {
+            match handle_main_window_event(&paths, &mut main_window, main_window_event) {
+                Ok(true) => {
+                    *control_flow = ControlFlow::Exit;
+                    return;
+                }
+                Ok(false) => {
+                    next_status_poll_at = Instant::now();
+                }
+                Err(err) => {
+                    eprintln!("main window action failed: {err:#}");
+                    let _ = ui::show_error(&format!("Operation failed:\n{err}"));
+                }
+            }
+        }
 
         while let Ok(menu_event) = MenuEvent::receiver().try_recv() {
             if menu_event.id == close_item.id() {
-                if let Err(err) = close_tray_and_service(&paths) {
-                    eprintln!("close failed: {err:#}");
-                    let _ = ui::show_error(&format!("Could not close background service:\n{err}"));
-                    continue;
+                match close_tray_and_service(&paths) {
+                    Ok(true) => {
+                        *control_flow = ControlFlow::Exit;
+                        return;
+                    }
+                    Ok(false) => continue,
+                    Err(err) => {
+                        eprintln!("close failed: {err:#}");
+                        let _ =
+                            ui::show_error(&format!("Could not close background service:\n{err}"));
+                        continue;
+                    }
                 }
-                *control_flow = ControlFlow::Exit;
-                return;
             }
 
-            if menu_event.id == open_item.id()
-                && let Err(err) = open_app_dialog(&paths)
-            {
-                eprintln!("open dialog failed: {err:#}");
-                let _ = ui::show_error(&format!("Operation failed:\n{err}"));
+            if menu_event.id == open_item.id() {
+                if let Err(err) = open_app_dialog(&paths, &mut main_window) {
+                    eprintln!("open dialog failed: {err:#}");
+                    let _ = ui::show_error(&format!("Operation failed:\n{err}"));
+                }
+                next_status_poll_at = Instant::now();
             }
         }
 
         while let Ok(tray_event) = TrayIconEvent::receiver().try_recv() {
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } = tray_event
-                && let Err(err) = open_app_dialog(&paths)
-            {
-                eprintln!("open dialog failed: {err:#}");
-                let _ = ui::show_error(&format!("Operation failed:\n{err}"));
+            if matches!(
+                tray_event,
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                }
+            ) {
+                if let Err(err) = open_app_dialog(&paths, &mut main_window) {
+                    eprintln!("open dialog failed: {err:#}");
+                    let _ = ui::show_error(&format!("Operation failed:\n{err}"));
+                }
+                next_status_poll_at = Instant::now();
             }
         }
+
+        if main_window.is_some() && Instant::now() >= next_status_poll_at {
+            if let Err(err) = refresh_main_window_status(&paths, main_window.as_ref()) {
+                eprintln!("main window status refresh failed: {err:#}");
+            }
+            next_status_poll_at = Instant::now() + STATUS_POLL_INTERVAL;
+        }
+
+        *control_flow = if main_window.is_some() {
+            ControlFlow::WaitUntil(next_status_poll_at)
+        } else {
+            ControlFlow::Wait
+        };
     });
 }
 
-fn close_tray_and_service(paths: &ClientPaths) -> Result<()> {
-    if let Ok(mut service) =
-        MonitorService::setup(build_core_config(paths), MacPlatformHooks::new())
-    {
-        let _ = service.note_stop_requested_by_user(ServiceRole::PrimaryService, "tray_close");
+fn close_tray_and_service(paths: &ClientPaths) -> Result<bool> {
+    if agent_is_registered(paths) && !ui::confirm_stop_monitoring()? {
+        return Ok(false);
     }
-    launch_agent::stop_agent(paths).context("failed to stop background service")
+
+    let stopped = stop_monitoring(paths)?;
+    if stopped {
+        ui::show_info("Stopped monitoring. Open the Virtue app to start monitoring again.")?;
+    }
+
+    Ok(true)
 }
 
-fn open_app_dialog(paths: &ClientPaths) -> Result<()> {
+fn open_app_dialog(
+    paths: &ClientPaths,
+    main_window: &mut Option<ui::MainWindowHandle>,
+) -> Result<()> {
     let app_status = collect_status(paths)?;
-    if app_status.logged_in {
-        let email = app_status.email.as_deref().unwrap_or("<unknown>");
-        let device_id = app_status.device_id.as_deref().unwrap_or("<unknown>");
-        let dialog_details = ui::LoggedInDialogDetails {
-            build_label: BUILD_LABEL,
-            email,
-            device_id,
-            monitor_summary: &app_status.monitor_summary,
-            pending_request_count: app_status.pending_request_count,
-            base_api_url: &app_status.base_api_url,
-            screenshot_permission: app_status.screenshot_permission.as_str(),
-            daemon_status_updated_at: app_status.daemon_status_updated_at.as_deref(),
-            daemon_last_error: app_status.daemon_last_error.as_deref(),
+    if !app_status.logged_in {
+        let Some(device_id) =
+            ui::prompt_login(BUILD_LABEL, app_status.email.as_deref(), |input| {
+                login(paths, &input.email, &input.password).map_err(|err| login_error_message(&err))
+            })?
+        else {
+            return Ok(());
         };
-        let action = if app_status.screenshot_permission == ScreenshotPermissionStatus::Missing {
-            ui::prompt_permission_issue_action(&dialog_details)?
-        } else {
-            ui::prompt_logged_in_action(&dialog_details)?
-        };
+        request_screen_capture_access_for_monitoring()?;
+        ui::show_info(&format!("Signed in.\nDevice id: {device_id}"))?;
+    }
 
-        match action {
-            Some(ui::LoggedInAction::RestartDaemon) => {
-                restart_daemon(paths)?;
-                ui::show_info("Background service restarted.")?;
-            }
-            Some(ui::LoggedInAction::Logout) => {
-                logout(paths)?;
-                ui::show_info("Signed out. Monitoring disabled on this device.")?;
-            }
-            _ => {}
-        }
+    if let Some(window) = main_window.as_ref() {
+        window.focus()?;
         return Ok(());
     }
 
-    let Some(device_id) = ui::prompt_login(BUILD_LABEL, app_status.email.as_deref(), |input| {
-        login(paths, &input.email, &input.password).map_err(|err| login_error_message(&err))
-    })?
-    else {
-        return Ok(());
+    let app_status = collect_status(paths)?;
+    let email = app_status.email.as_deref().unwrap_or("<unknown>");
+    let dialog_details = ui::LoggedInDialogDetails {
+        build_label: BUILD_LABEL,
+        email,
+        show_permission_actions: app_status.capture_permission != CapturePermissionState::Granted,
     };
-
-    ui::show_info(&format!("Signed in.\nDevice id: {device_id}"))?;
+    *main_window = Some(ui::show_main_window(&dialog_details)?);
     Ok(())
 }
 
-fn restart_daemon(paths: &ClientPaths) -> Result<()> {
-    if let Ok(mut service) =
-        MonitorService::setup(build_core_config(paths), MacPlatformHooks::new())
-    {
-        let _ = service.note_stop_requested_by_user(ServiceRole::PrimaryService, "tray_restart");
+fn handle_main_window_event(
+    paths: &ClientPaths,
+    main_window: &mut Option<ui::MainWindowHandle>,
+    event: ui::MainWindowEvent,
+) -> Result<bool> {
+    match event {
+        ui::MainWindowEvent::Closed => {
+            *main_window = None;
+            Ok(false)
+        }
+        ui::MainWindowEvent::Action(ui::LoggedInAction::Status) => {
+            ui::show_status(&render_status_text(paths)?)?;
+            Ok(false)
+        }
+        ui::MainWindowEvent::Action(ui::LoggedInAction::AllowScreenCapture) => {
+            request_screen_capture_access_for_monitoring()?;
+            ui::show_info(
+                "Requested screen capture access. If macOS does not show the inline prompt, Screen Recording settings should open.",
+            )?;
+            Ok(false)
+        }
+        ui::MainWindowEvent::Action(ui::LoggedInAction::RelaunchToAcceptPermissions) => {
+            relaunch_background_service(paths)?;
+            ui::show_info("Virtue background service relaunched.")?;
+            Ok(false)
+        }
+        ui::MainWindowEvent::Action(ui::LoggedInAction::StopMonitoring) => {
+            if !ui::confirm_stop_monitoring()? {
+                return Ok(false);
+            }
+            let stopped = stop_monitoring(paths)?;
+            if stopped {
+                if let Some(window) = main_window.take() {
+                    window.close();
+                }
+                ui::show_info(
+                    "Stopped monitoring. Open the Virtue app to start monitoring again.",
+                )?;
+            }
+            Ok(true)
+        }
+        ui::MainWindowEvent::Action(ui::LoggedInAction::Logout) => {
+            if !ui::confirm_logout()? {
+                return Ok(false);
+            }
+            logout(paths)?;
+            if let Some(window) = main_window.take() {
+                window.close();
+            }
+            ui::show_info(
+                "Logged out. Monitoring is disabled on this device until you open the Virtue app and log in again.",
+            )?;
+            Ok(false)
+        }
     }
-    let exe = std::env::current_exe().context("failed to resolve current executable")?;
-    launch_agent::ensure_agent_running(paths, &exe).context("failed to restart background service")
 }
 
 fn login(paths: &ClientPaths, email: &str, password: &str) -> Result<String> {
@@ -239,100 +331,249 @@ fn login_error_message(err: &anyhow::Error) -> String {
 fn logout(paths: &ClientPaths) -> Result<()> {
     let mut service = MonitorService::setup(build_core_config(paths), MacPlatformHooks::new())?;
     service.logout()?;
+    launch_agent::stop_agent(paths).context("failed to unregister background service")?;
     save_state(&paths.ui_state_file, &ClientState { email: None })?;
     Ok(())
 }
 
+fn stop_monitoring(paths: &ClientPaths) -> Result<bool> {
+    if !agent_is_registered(paths) {
+        return Ok(false);
+    }
+
+    let mut service = MonitorService::setup(build_core_config(paths), MacPlatformHooks::new())?;
+    service.note_stop_requested_by_user(ServiceRole::PrimaryService, "tray_stop_monitoring")?;
+
+    if let Err(err) = launch_agent::stop_agent(paths).context("failed to stop background service") {
+        let _ = service.take_stop_intent(ServiceRole::PrimaryService);
+        return Err(err);
+    }
+
+    Ok(true)
+}
+
+fn agent_is_registered(paths: &ClientPaths) -> bool {
+    paths.launch_agent_file.exists() || launch_agent::is_agent_loaded().unwrap_or(false)
+}
+
+fn ensure_background_service_running(paths: &ClientPaths) -> Result<()> {
+    let deadline = Instant::now() + SERVICE_START_TIMEOUT;
+
+    while Instant::now() < deadline {
+        if service_is_running(paths)? {
+            return Ok(());
+        }
+        thread::sleep(SERVICE_START_POLL_INTERVAL);
+    }
+
+    Err(anyhow::anyhow!(
+        "background service did not report running within {} seconds",
+        SERVICE_START_TIMEOUT.as_secs()
+    ))
+}
+
+fn service_is_running(paths: &ClientPaths) -> Result<bool> {
+    let store = FileStateStore::new(&paths.state_dir)?;
+    let auth = store.load_auth_state()?;
+    Ok(load_service_status(&store, &auth)?.is_running)
+}
+
+fn maybe_request_screen_capture_access_for_logged_in_user(paths: &ClientPaths) -> Result<()> {
+    let store = FileStateStore::new(&paths.state_dir)?;
+    let auth = store.load_auth_state()?;
+    if auth.device_credentials.is_some() {
+        let service_status = load_service_status(&store, &auth)?;
+        if service_status.lifecycle.snapshot.capture_permission != CapturePermissionState::Granted {
+            request_screen_capture_access_for_monitoring()?;
+        }
+    }
+
+    Ok(())
+}
+
+fn request_screen_capture_access_for_monitoring() -> Result<()> {
+    if has_screen_capture_access() {
+        return Ok(());
+    }
+
+    match request_screen_capture_access_if_needed() {
+        ScreenCaptureAccessRequestOutcome::AlreadyGranted
+        | ScreenCaptureAccessRequestOutcome::Granted => Ok(()),
+        ScreenCaptureAccessRequestOutcome::Missing => open_screen_capture_settings(),
+    }
+}
+
+fn relaunch_background_service(paths: &ClientPaths) -> Result<()> {
+    if agent_is_registered(paths) {
+        launch_agent::stop_agent(paths)
+            .context("failed to stop existing background service before relaunch")?;
+    }
+
+    let exe = std::env::current_exe().context("failed to resolve current executable")?;
+    launch_agent::ensure_agent_running(paths, &exe)
+        .context("failed to relaunch background service")?;
+    ensure_background_service_running(paths)?;
+    Ok(())
+}
+
 fn status(paths: ClientPaths) -> Result<()> {
+    println!("{}", render_status_text(&paths)?);
+    Ok(())
+}
+
+fn render_status_text(paths: &ClientPaths) -> Result<String> {
     let store = FileStateStore::new(&paths.state_dir)?;
     let auth = store.load_auth_state()?;
     let service_status = load_service_status(&store, &auth)?;
-    let daemon_status = load_daemon_status(&paths.daemon_status_file)?;
-    let mut config = build_core_config(&paths);
+    let mut config = build_core_config(paths);
     config.refresh_from_runtime_file()?;
-
-    println!("logged_in: {}", auth.device_credentials.is_some());
-    println!("running: {}", service_status.is_running);
-    println!(
+    let mut lines = Vec::new();
+    lines.push(format!("logged_in: {}", auth.device_credentials.is_some()));
+    lines.push(format!("running: {}", service_status.is_running));
+    lines.push(format!(
+        "pending_request_count: {}",
+        service_status.pending_request_count
+    ));
+    lines.push(format!(
         "lifecycle_primary_service: {}",
         service_status.lifecycle.snapshot.primary_service.as_str()
-    );
-    println!(
+    ));
+    lines.push(format!(
         "lifecycle_computer_power: {}",
         service_status.lifecycle.snapshot.computer_power.as_str()
-    );
-    println!(
+    ));
+    lines.push(format!(
+        "lifecycle_capture_permission: {}",
+        service_status
+            .lifecycle
+            .snapshot
+            .capture_permission
+            .as_str()
+    ));
+    lines.push(format!(
+        "lifecycle_capture_availability: {}",
+        service_status
+            .lifecycle
+            .snapshot
+            .capture_availability
+            .as_str()
+    ));
+    lines.push(format!(
         "last_stop_origin: {}",
         service_status
             .lifecycle
             .last_stop_origin
             .map(|value| value.as_str())
             .unwrap_or("<none>")
-    );
-    println!(
+    ));
+    lines.push(format!(
         "last_lifecycle_risk: {}",
         service_status
             .lifecycle
             .last_emitted_risk
             .map(|value| value.to_string())
             .unwrap_or_else(|| "<none>".to_string())
-    );
-    println!(
-        "pending_request_count: {}",
-        service_status.pending_request_count
-    );
-    println!(
+    ));
+    if let Some(transition) = &service_status.lifecycle.last_transition {
+        lines.push(format!(
+            "last_transition: {} {} -> {}",
+            transition.domain.as_str(),
+            transition.from,
+            transition.to
+        ));
+        lines.push(format!(
+            "last_transition_origin: {}",
+            transition.origin.as_str()
+        ));
+    } else {
+        lines.push("last_transition: <none>".to_string());
+    }
+    lines.push(format!(
         "device_id: {}",
         service_status.device_id.as_deref().unwrap_or("<none>")
-    );
-    println!(
-        "screenshot_permission: {}",
-        daemon_status.screenshot_permission.as_str()
-    );
-    println!(
-        "daemon_last_error: {}",
-        daemon_status.last_error.as_deref().unwrap_or("<none>")
-    );
-    println!(
-        "daemon_status_updated_at: {}",
-        daemon_status.updated_at.as_deref().unwrap_or("<none>")
-    );
-    println!(
+    ));
+    lines.push(format!(
+        "capture_interval_seconds: {}",
+        config.screenshot_interval.as_secs()
+    ));
+    lines.push(format!(
+        "batch_window_seconds: {}",
+        config.batch_interval.as_secs()
+    ));
+    lines.push(format!("base_api_url: {}", config.api_base_url));
+    lines.push("backend: screencapture".to_string());
+    lines.push(format!(
         "capability_startup: {}",
         service_status.lifecycle.capabilities.startup.as_str()
-    );
-    println!(
+    ));
+    lines.push(format!(
         "capability_shutdown: {}",
         service_status.lifecycle.capabilities.shutdown.as_str()
-    );
-    println!(
+    ));
+    lines.push(format!(
+        "capability_suspend: {}",
+        service_status.lifecycle.capabilities.suspend.as_str()
+    ));
+    lines.push(format!(
+        "capability_wake: {}",
+        service_status.lifecycle.capabilities.wake.as_str()
+    ));
+    lines.push(format!(
         "capability_explicit_user_stop: {}",
         service_status
             .lifecycle
             .capabilities
             .explicit_user_stop
             .as_str()
-    );
-    println!(
-        "capture_interval_seconds: {}",
-        config.screenshot_interval.as_secs()
-    );
-    println!("batch_window_seconds: {}", config.batch_interval.as_secs());
-    println!("base_api_url: {}", config.api_base_url);
-    Ok(())
+    ));
+    lines.push(format!(
+        "capability_capture_permission: {}",
+        service_status
+            .lifecycle
+            .capabilities
+            .capture_permission
+            .as_str()
+    ));
+    lines.push(format!(
+        "capability_capture_availability: {}",
+        service_status
+            .lifecycle
+            .capabilities
+            .capture_availability
+            .as_str()
+    ));
+    lines.push(format!(
+        "capability_user_login: {}",
+        service_status.lifecycle.capabilities.user_login.as_str()
+    ));
+    lines.push(format!(
+        "capability_user_logout: {}",
+        service_status.lifecycle.capabilities.user_logout.as_str()
+    ));
+    lines.push(format!(
+        "capability_capture_worker: {}",
+        service_status
+            .lifecycle
+            .capabilities
+            .capture_worker
+            .as_str()
+    ));
+    lines.push(format!(
+        "capability_next_boot_recovery: {}",
+        service_status
+            .lifecycle
+            .capabilities
+            .next_boot_recovery
+            .as_str()
+    ));
+    Ok(lines.join("\n"))
 }
 
 #[derive(Debug)]
 struct AppStatus {
     logged_in: bool,
     email: Option<String>,
-    device_id: Option<String>,
-    monitor_summary: String,
-    pending_request_count: usize,
-    base_api_url: String,
-    screenshot_permission: ScreenshotPermissionStatus,
-    daemon_last_error: Option<String>,
-    daemon_status_updated_at: Option<String>,
+    capture_permission: CapturePermissionState,
 }
 
 fn collect_status(paths: &ClientPaths) -> Result<AppStatus> {
@@ -340,32 +581,27 @@ fn collect_status(paths: &ClientPaths) -> Result<AppStatus> {
     let state = load_state(&paths.ui_state_file)?;
     let auth = store.load_auth_state()?;
     let service_status = load_service_status(&store, &auth)?;
-    let daemon_status = load_daemon_status(&paths.daemon_status_file)?;
-    let mut config = build_core_config(paths);
-    config.refresh_from_runtime_file()?;
-
-    let monitor_summary = if auth.device_credentials.is_none() {
-        "signed out".to_string()
-    } else if service_status.is_running {
-        "active".to_string()
-    } else {
-        "background service not running".to_string()
-    };
 
     Ok(AppStatus {
         logged_in: auth.device_credentials.is_some(),
         email: state.email,
-        device_id: auth
-            .device_credentials
-            .as_ref()
-            .map(|device| device.device_id.clone()),
-        monitor_summary,
-        pending_request_count: service_status.pending_request_count,
-        base_api_url: config.api_base_url,
-        screenshot_permission: daemon_status.screenshot_permission,
-        daemon_last_error: daemon_status.last_error,
-        daemon_status_updated_at: daemon_status.updated_at,
+        capture_permission: service_status.lifecycle.snapshot.capture_permission,
     })
+}
+
+fn refresh_main_window_status(
+    paths: &ClientPaths,
+    main_window: Option<&ui::MainWindowHandle>,
+) -> Result<()> {
+    let Some(main_window) = main_window else {
+        return Ok(());
+    };
+
+    let app_status = collect_status(paths)?;
+    main_window.update_permission_section(ui::PermissionSectionState {
+        show_permission_actions: app_status.capture_permission != CapturePermissionState::Granted,
+    });
+    Ok(())
 }
 
 fn load_service_status(store: &FileStateStore, auth: &AuthState) -> Result<ServiceStatus> {

@@ -1,6 +1,9 @@
 use std::fs;
+use std::io::ErrorKind;
 use std::path::Path;
 use std::process::Command;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
 
@@ -72,22 +75,59 @@ pub fn stop_agent(paths: &ClientPaths) -> Result<()> {
     let gui_domain = format!("gui/{uid}");
     let service_id = format!("{gui_domain}/{LABEL}");
     let plist_path = paths.launch_agent_file.display().to_string();
+    let mut failures = Vec::new();
 
     let by_service = run_launchctl(&["bootout", &service_id])?;
-    if by_service.success {
+    if !by_service.success && service_is_loaded(&service_id)? {
+        let by_plist = run_launchctl(&["bootout", &gui_domain, &plist_path])?;
+        if !by_plist.success && wait_for_loaded_state(&service_id, false, STOP_WAIT_TIMEOUT)? {
+            failures.push(format!(
+                "failed to unload launch agent: {}; {}",
+                by_service.stderr.trim(),
+                by_plist.stderr.trim()
+            ));
+        }
+    }
+
+    let disable = run_launchctl(&["disable", &service_id])?;
+    if !disable.success && !is_missing_target_error(&disable.stderr) {
+        failures.push(format!(
+            "failed to disable launch agent override: {}",
+            disable.stderr.trim()
+        ));
+    }
+
+    match fs::remove_file(&paths.launch_agent_file) {
+        Ok(()) => {}
+        Err(err) if err.kind() == ErrorKind::NotFound => {}
+        Err(err) => failures.push(format!(
+            "failed to remove launch agent plist {}: {err}",
+            paths.launch_agent_file.display()
+        )),
+    }
+
+    if wait_for_loaded_state(&service_id, false, STOP_WAIT_TIMEOUT)? {
+        failures.push("launch agent is still loaded after stop".to_string());
+    }
+
+    if paths.launch_agent_file.exists() {
+        failures.push(format!(
+            "launch agent plist still exists at {}",
+            paths.launch_agent_file.display()
+        ));
+    }
+
+    if failures.is_empty() {
         return Ok(());
     }
 
-    let by_plist = run_launchctl(&["bootout", &gui_domain, &plist_path])?;
-    if by_plist.success || !service_is_loaded(&service_id)? {
-        return Ok(());
-    }
+    Err(anyhow!(failures.join("; ")))
+}
 
-    Err(anyhow!(
-        "failed to stop launch agent: {}; {}",
-        by_service.stderr.trim(),
-        by_plist.stderr.trim()
-    ))
+pub fn is_agent_loaded() -> Result<bool> {
+    let uid = current_uid()?;
+    let service_id = format!("gui/{uid}/{LABEL}");
+    service_is_loaded(&service_id)
 }
 
 struct LaunchctlOutput {
@@ -129,6 +169,37 @@ fn current_uid() -> Result<String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn is_missing_target_error(stderr: &str) -> bool {
+    let lower = stderr.to_ascii_lowercase();
+    lower.contains("could not find service")
+        || lower.contains("could not find specified service")
+        || lower.contains("service not found")
+        || lower.contains("no such process")
+        || lower.contains("no such file")
+        || lower.contains("not loaded")
+}
+
+const STOP_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
+const STOP_WAIT_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+fn wait_for_loaded_state(
+    service_id: &str,
+    expected_loaded: bool,
+    timeout: Duration,
+) -> Result<bool> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let is_loaded = service_is_loaded(service_id)?;
+        if is_loaded == expected_loaded {
+            return Ok(is_loaded);
+        }
+        if Instant::now() >= deadline {
+            return Ok(is_loaded);
+        }
+        thread::sleep(STOP_WAIT_POLL_INTERVAL);
+    }
 }
 
 fn render_plist(exe_path: &Path, paths: &ClientPaths) -> String {

@@ -8,8 +8,9 @@ use crate::crypto::{
 use crate::error::{CoreError, CoreResult};
 use crate::image_pipeline::ImagePipeline;
 use crate::lifecycle::{
-    LifecycleObservation, LifecycleOrigin, LifecycleStatus, LifecycleTransition, ServicePingLog,
-    ServiceRole, ServiceStopMarker, StopIntent, UserSessionState, apply_observation,
+    CapturePermissionState, LifecycleObservation, LifecycleOrigin, LifecycleStatus,
+    LifecycleTransition, ServicePingLog, ServiceRole, ServiceStopMarker, StopIntent,
+    UserSessionState, apply_observation,
 };
 use crate::model::{
     AuditLogItem, AuditLogPayload, AuditRecord, AuditState, AuthState, BatchRecipient, BatchUpload,
@@ -96,6 +97,7 @@ impl<P: PlatformHooks> MonitorService<P> {
         if service.device_credentials.is_none() {
             service.clear_capture_schedule();
         }
+        service.persist_state()?;
         if service.device_credentials.is_some() {
             let _ = service.refresh_device_settings();
         }
@@ -116,6 +118,8 @@ impl<P: PlatformHooks> MonitorService<P> {
                 self.retry_pending_work()?;
             }
 
+            self.try_upload_due_batch(now_ms)?;
+
             if self.can_capture() && self.should_take_screenshot(now_ms) {
                 let screenshot = self.platform.take_screenshot()?;
                 let processed = self.process_screenshot(screenshot)?;
@@ -124,12 +128,7 @@ impl<P: PlatformHooks> MonitorService<P> {
                 self.status.last_screenshot_at_ms = Some(now_ms);
             }
 
-            let audit_state = self.load_audit_state()?;
-            if self.can_upload_batch(&audit_state) && self.should_upload_batch(now_ms) {
-                self.refresh_device_settings()?;
-                let batch_items = self.batch_upload_candidates(&audit_state);
-                self.try_upload_pending_batch(batch_items, now_ms)?;
-            }
+            self.try_upload_due_batch(now_ms)?;
 
             Ok(())
         })();
@@ -535,6 +534,15 @@ impl<P: PlatformHooks> MonitorService<P> {
         Ok(())
     }
 
+    fn capture_permission_alert_risk(from: &str, to: CapturePermissionState) -> f32 {
+        if from == CapturePermissionState::Granted.as_str() && to != CapturePermissionState::Granted
+        {
+            HIGH_RISK_LIFECYCLE_ALERT
+        } else {
+            0.2
+        }
+    }
+
     fn handle_lifecycle_observation_effects(
         &mut self,
         observation: &LifecycleObservation,
@@ -729,6 +737,41 @@ impl<P: PlatformHooks> MonitorService<P> {
                         data,
                     ))?;
                 }
+            }
+            LifecycleObservation::CapturePermissionChanged { state, detected_by } => {
+                let Some(permission_transition) = transitions.iter().find(|transition| {
+                    transition.domain.as_str() == "capture_permission"
+                        && transition.to == state.as_str()
+                }) else {
+                    return Ok(());
+                };
+
+                if self.device_credentials.is_none() {
+                    return Ok(());
+                }
+
+                let mut data = EventData::default();
+                data.insert(
+                    "alert_reason",
+                    serde_json::Value::String("capture_permission_changed".to_string()),
+                );
+                data.insert(
+                    "detected_by",
+                    serde_json::Value::String(detected_by.clone()),
+                );
+                data.insert(
+                    "from",
+                    serde_json::Value::String(permission_transition.from.clone()),
+                );
+                data.insert(
+                    "to",
+                    serde_json::Value::String(permission_transition.to.clone()),
+                );
+                self.emit_lifecycle_alert(self.lifecycle_alert_log(
+                    observed_at_ms,
+                    Self::capture_permission_alert_risk(&permission_transition.from, *state),
+                    data,
+                ))?;
             }
             _ => {}
         }
@@ -1072,6 +1115,16 @@ impl<P: PlatformHooks> MonitorService<P> {
         self.can_capture() && !audit_state.pending_batch_uploads.is_empty()
     }
 
+    fn try_upload_due_batch(&mut self, now_ms: i64) -> CoreResult<()> {
+        let audit_state = self.load_audit_state()?;
+        if self.can_upload_batch(&audit_state) && self.should_upload_batch(now_ms) {
+            self.refresh_device_settings()?;
+            let batch_items = self.batch_upload_candidates(&audit_state);
+            self.try_upload_pending_batch(batch_items, now_ms)?;
+        }
+        Ok(())
+    }
+
     fn batch_upload_candidates<'a>(&self, audit_state: &'a AuditState) -> &'a [AuditLogItem] {
         let count = audit_state
             .pending_batch_uploads
@@ -1194,6 +1247,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::lifecycle::{CaptureAvailabilityState, CapturePermissionState, ComputerPowerState};
 
     static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -1976,6 +2030,146 @@ mod tests {
         assert!(audit_logs.iter().all(|log| !(log.kind == "system_event"
             && log.data.get("event") == Some(&serde_json::Value::String("stale".to_string())))));
         assert!(!service.status.is_authenticated);
+
+        let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn capture_permission_loss_emits_direct_high_risk_alert() {
+        let state_dir = temp_state_dir();
+        let mut service = build_service(state_dir.clone());
+        authenticate_service(&mut service);
+        service.status.lifecycle.snapshot.capture_permission = CapturePermissionState::Granted;
+
+        service
+            .record_lifecycle_observation(LifecycleObservation::CapturePermissionChanged {
+                state: CapturePermissionState::Missing,
+                detected_by: "macos_probe".to_string(),
+            })
+            .expect("record capture permission loss");
+
+        let direct_logs = lifecycle_direct_logs(&service);
+        let alert_log = direct_logs
+            .iter()
+            .find(|log| log.kind == "lifecycle_alert")
+            .expect("direct lifecycle alert");
+        assert_eq!(alert_log.risk, Some(0.9));
+        assert_eq!(
+            alert_log.data.get("alert_reason"),
+            Some(&serde_json::Value::String(
+                "capture_permission_changed".to_string()
+            ))
+        );
+        assert_eq!(
+            alert_log.data.get("from"),
+            Some(&serde_json::Value::String("granted".to_string()))
+        );
+        assert_eq!(
+            alert_log.data.get("to"),
+            Some(&serde_json::Value::String("missing".to_string()))
+        );
+
+        let batch_logs = lifecycle_batch_logs(&service);
+        assert_eq!(
+            batch_logs
+                .iter()
+                .filter(|log| log.kind == "lifecycle_transition")
+                .count(),
+            1
+        );
+        let transition_log = batch_logs
+            .iter()
+            .find(|log| log.kind == "lifecycle_transition")
+            .expect("batched lifecycle transition");
+        assert_eq!(transition_log.risk, Some(0.0));
+        assert!(
+            batch_logs
+                .iter()
+                .all(|log| !(log.kind == "lifecycle_alert" && log.risk == Some(0.9)))
+        );
+
+        let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn capture_state_changes_while_suspended_do_not_emit_alerts_or_transitions() {
+        let state_dir = temp_state_dir();
+        let mut service = build_service(state_dir.clone());
+        authenticate_service(&mut service);
+        service.status.lifecycle.snapshot.computer_power = ComputerPowerState::Suspended;
+        service.status.lifecycle.snapshot.capture_permission = CapturePermissionState::Granted;
+        service.status.lifecycle.snapshot.capture_availability = CaptureAvailabilityState::Ready;
+
+        service
+            .record_lifecycle_observation(LifecycleObservation::CapturePermissionChanged {
+                state: CapturePermissionState::Missing,
+                detected_by: "failed_loop".to_string(),
+            })
+            .expect("record capture permission during sleep");
+        service
+            .record_lifecycle_observation(LifecycleObservation::CaptureAvailabilityChanged {
+                state: CaptureAvailabilityState::Blocked,
+                detected_by: "failed_loop".to_string(),
+            })
+            .expect("record capture availability during sleep");
+
+        assert!(lifecycle_direct_logs(&service).is_empty());
+        assert!(
+            lifecycle_batch_logs(&service)
+                .iter()
+                .all(|log| log.kind != "lifecycle_transition" && log.kind != "lifecycle_alert")
+        );
+        assert_eq!(
+            service.status.lifecycle.snapshot.capture_permission,
+            CapturePermissionState::Granted
+        );
+        assert_eq!(
+            service.status.lifecycle.snapshot.capture_availability,
+            CaptureAvailabilityState::Ready
+        );
+
+        let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn capture_permission_gain_emits_batched_low_risk_alert() {
+        let state_dir = temp_state_dir();
+        let mut service = build_service(state_dir.clone());
+        authenticate_service(&mut service);
+        service.status.lifecycle.snapshot.capture_permission = CapturePermissionState::Missing;
+
+        service
+            .record_lifecycle_observation(LifecycleObservation::CapturePermissionChanged {
+                state: CapturePermissionState::Granted,
+                detected_by: "macos_probe".to_string(),
+            })
+            .expect("record capture permission gain");
+
+        assert!(
+            lifecycle_direct_logs(&service)
+                .iter()
+                .all(|log| log.kind != "lifecycle_alert")
+        );
+
+        let batch_logs = lifecycle_batch_logs(&service);
+        let alert_log = batch_logs
+            .iter()
+            .find(|log| log.kind == "lifecycle_alert")
+            .expect("batched lifecycle alert");
+        assert_eq!(alert_log.risk, Some(0.2));
+        assert_eq!(
+            alert_log.data.get("from"),
+            Some(&serde_json::Value::String("missing".to_string()))
+        );
+        assert_eq!(
+            alert_log.data.get("to"),
+            Some(&serde_json::Value::String("granted".to_string()))
+        );
+        let transition_log = batch_logs
+            .iter()
+            .find(|log| log.kind == "lifecycle_transition")
+            .expect("batched lifecycle transition");
+        assert_eq!(transition_log.risk, Some(0.0));
 
         let _ = fs::remove_dir_all(state_dir);
     }
