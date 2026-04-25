@@ -15,9 +15,9 @@ use tokio::sync::mpsc;
 use tokio::time::sleep;
 use virtue_core::storage::FileStateStore;
 use virtue_core::{
-    CaptureAvailabilityState, CapturePermissionState, ComputerPowerState,
-    LifecycleConfidence, LifecycleObservation, LifecycleOrigin, MonitorService, PlatformHooks,
-    ServiceRole, ServiceStopMarker,
+    CaptureAvailabilityState, CapturePermissionState, ComputerPowerState, LifecycleConfidence,
+    LifecycleObservation, LifecycleOrigin, MonitorService, PlatformHooks, ServiceRole,
+    ServiceStopMarker,
 };
 
 use crate::capture::{MacPlatformHooks, has_screen_capture_access, is_permission_missing_error};
