@@ -16,7 +16,6 @@ pub struct ClientPaths {
     pub data_dir: PathBuf,
     pub state_dir: PathBuf,
     pub runtime_config_file: PathBuf,
-    pub daemon_status_file: PathBuf,
     pub ui_state_file: PathBuf,
     pub launch_agents_dir: PathBuf,
     pub logs_dir: PathBuf,
@@ -38,7 +37,6 @@ impl ClientPaths {
         Ok(Self {
             state_dir,
             runtime_config_file: config_dir.join("config.json"),
-            daemon_status_file: data_dir.join("daemon_status.json"),
             ui_state_file: config_dir.join("ui_state.json"),
             launch_agent_file: launch_agents_dir.join("org.virtueinitiative.virtue.daemon.plist"),
             config_dir,
@@ -79,63 +77,6 @@ pub fn build_core_config(paths: &ClientPaths) -> Config {
         Duration::from_secs(DEFAULT_CAPTURE_INTERVAL_SECONDS),
         Duration::from_secs(DEFAULT_BATCH_WINDOW_SECONDS),
     )
-}
-
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ScreenshotPermissionStatus {
-    #[default]
-    Unknown,
-    Granted,
-    Missing,
-}
-
-impl ScreenshotPermissionStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Unknown => "unknown",
-            Self::Granted => "granted",
-            Self::Missing => "missing",
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct DaemonStatus {
-    #[serde(default)]
-    pub screenshot_permission: ScreenshotPermissionStatus,
-    #[serde(default)]
-    pub last_error: Option<String>,
-    #[serde(default)]
-    pub updated_at: Option<String>,
-}
-
-pub fn load_daemon_status(path: &Path) -> Result<DaemonStatus> {
-    if !path.exists() {
-        return Ok(DaemonStatus::default());
-    }
-
-    let raw = fs::read(path).with_context(|| format!("failed reading {}", path.display()))?;
-    if raw.is_empty() {
-        return Ok(DaemonStatus::default());
-    }
-
-    serde_json::from_slice(&raw).with_context(|| format!("failed parsing {}", path.display()))
-}
-
-pub fn save_daemon_status(path: &Path, status: &DaemonStatus) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-
-    let tmp = path.with_extension("tmp");
-    let bytes = serde_json::to_vec_pretty(status).context("failed serializing daemon status")?;
-    fs::write(&tmp, bytes).with_context(|| format!("failed writing {}", tmp.display()))?;
-    fs::rename(&tmp, path)
-        .with_context(|| format!("failed replacing {} with {}", path.display(), tmp.display()))?;
-
-    Ok(())
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

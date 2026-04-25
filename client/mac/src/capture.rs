@@ -10,9 +10,25 @@ use virtue_core::{CoreError, CoreResult, PlatformHooks, Screenshot};
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
     fn CGPreflightScreenCaptureAccess() -> bool;
+    #[allow(dead_code)]
+    fn CGRequestScreenCaptureAccess() -> bool;
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScreenCaptureAccessRequestOutcome {
+    AlreadyGranted,
+    Granted,
+    Missing,
 }
 
 pub fn capture_screen() -> Result<Vec<u8>> {
+    if !has_screen_capture_access() {
+        return Err(anyhow!(
+            "screen recording permission missing (grant Screen Recording permission in macOS)"
+        ));
+    }
+
     run_capture_command("/usr/sbin/screencapture", &["-x", "-t", "png"])
         .or_else(|_| run_capture_command("screencapture", &["-x", "-t", "png"]))
         .with_context(|| "screencapture failed (grant Screen Recording permission in macOS)")
@@ -20,6 +36,41 @@ pub fn capture_screen() -> Result<Vec<u8>> {
 
 pub fn has_screen_capture_access() -> bool {
     unsafe { CGPreflightScreenCaptureAccess() }
+}
+
+#[allow(dead_code)]
+pub fn request_screen_capture_access_if_needed() -> ScreenCaptureAccessRequestOutcome {
+    if has_screen_capture_access() {
+        return ScreenCaptureAccessRequestOutcome::AlreadyGranted;
+    }
+
+    if unsafe { CGRequestScreenCaptureAccess() } {
+        return ScreenCaptureAccessRequestOutcome::Granted;
+    }
+
+    // Some macOS/TCC states do not visibly present the prompt from
+    // CGRequestScreenCaptureAccess alone. Make one explicit throwaway capture
+    // attempt for user-initiated permission flows, but never return these bytes
+    // to core so a denied black capture cannot be uploaded.
+    let _ = run_capture_command("/usr/sbin/screencapture", &["-x", "-t", "png"])
+        .or_else(|_| run_capture_command("screencapture", &["-x", "-t", "png"]));
+
+    if has_screen_capture_access() {
+        ScreenCaptureAccessRequestOutcome::Granted
+    } else {
+        ScreenCaptureAccessRequestOutcome::Missing
+    }
+}
+
+pub fn open_screen_capture_settings() -> Result<()> {
+    Command::new("/usr/bin/open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("failed to open Screen Recording settings")?;
+    Ok(())
 }
 
 pub fn is_permission_missing_error(text: &str) -> bool {

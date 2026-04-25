@@ -44,7 +44,7 @@ cat > "${CONTENTS_DIR}/Info.plist" <<PLIST
   <key>CFBundleDisplayName</key>
   <string>Virtue</string>
   <key>CFBundleIdentifier</key>
-  <string>codes.anb.virtue.mac</string>
+  <string>org.virtueinitiative.virtue.mac</string>
   <key>CFBundleVersion</key>
   <string>${APPLE_BUILD_NUMBER}</string>
   <key>CFBundleShortVersionString</key>
