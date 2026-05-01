@@ -85,6 +85,10 @@ export function describeRiskLevel(risk: number | undefined): string | null {
   return `Risk ${percentage}%`;
 }
 
+export function humanizeLogType(type: string): string {
+  return type.replace(/_/g, " ");
+}
+
 export function LogImage({
   imageBytes,
   onDimensions,
