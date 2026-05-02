@@ -264,14 +264,14 @@ impl LifecycleCapabilities {
             "windows" => Self {
                 startup: LifecycleCapabilitySupport::Supported,
                 shutdown: LifecycleCapabilitySupport::Supported,
-                suspend: LifecycleCapabilitySupport::Unsupported,
-                wake: LifecycleCapabilitySupport::Unsupported,
-                user_login: LifecycleCapabilitySupport::Unsupported,
-                user_logout: LifecycleCapabilitySupport::Unsupported,
-                explicit_user_stop: LifecycleCapabilitySupport::Unsupported,
+                suspend: LifecycleCapabilitySupport::Supported,
+                wake: LifecycleCapabilitySupport::Supported,
+                user_login: LifecycleCapabilitySupport::BestEffort,
+                user_logout: LifecycleCapabilitySupport::Supported,
+                explicit_user_stop: LifecycleCapabilitySupport::Supported,
                 capture_permission: LifecycleCapabilitySupport::Unsupported,
                 capture_availability: LifecycleCapabilitySupport::Supported,
-                capture_worker: LifecycleCapabilitySupport::Supported,
+                capture_worker: LifecycleCapabilitySupport::Unsupported,
                 next_boot_recovery: LifecycleCapabilitySupport::Supported,
             },
             "android" => Self {
@@ -543,7 +543,9 @@ fn new_transition(input: TransitionInput<'_>) -> LifecycleTransition {
 
 fn stop_origin_from_raw_reason(raw_reason: &str) -> LifecycleOrigin {
     let normalized = raw_reason.trim().to_ascii_lowercase();
-    if normalized.contains("service_control_stop") {
+    if normalized.contains("session_logout") || normalized.contains("logoff") {
+        LifecycleOrigin::SessionLogout
+    } else if normalized.contains("service_control_stop") {
         LifecycleOrigin::ServiceManager
     } else {
         LifecycleOrigin::Unknown

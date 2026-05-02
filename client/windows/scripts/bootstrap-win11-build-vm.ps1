@@ -6,7 +6,6 @@ param(
     [string]$BatchWindowSeconds = "",
     [string]$AuthorizedKey = "",
     [switch]$SkipVsBuildTools,
-    [switch]$SkipNsis,
     [switch]$SkipSccache,
     [switch]$SkipDefenderExclusions
 )
@@ -46,6 +45,58 @@ function Add-ToPathIfMissing {
     $env:Path = "$PathEntry;$env:Path"
 }
 
+function Resolve-WinGetCommand {
+    $command = Get-Command winget -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Source
+    }
+
+    $candidates = @(
+        (Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps\winget.exe"),
+        (Join-Path $env:USERPROFILE "AppData\Local\Microsoft\WindowsApps\winget.exe")
+    )
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    return $null
+}
+
+function Resolve-DotNetCommand {
+    $command = Get-Command dotnet -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Source
+    }
+
+    $candidates = @(
+        "C:\Program Files\dotnet\dotnet.exe",
+        "C:\Program Files (x86)\dotnet\dotnet.exe"
+    )
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    return $null
+}
+
+function Invoke-WinGet {
+    param([string[]]$Arguments)
+
+    $winget = Resolve-WinGetCommand
+    if (-not $winget) {
+        throw "winget is not available."
+    }
+
+    & $winget @Arguments
+    return $LASTEXITCODE
+}
+
 function Install-OpenSshServer {
     Write-Step "Installing and configuring OpenSSH Server"
 
@@ -66,6 +117,42 @@ function Install-OpenSshServer {
 
     New-Item -Path "HKLM:\SOFTWARE\OpenSSH" -Force | Out-Null
     New-ItemProperty -Path "HKLM:\SOFTWARE\OpenSSH" -Name "DefaultShell" -Value "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -PropertyType String -Force | Out-Null
+}
+
+function Install-WinGet {
+    Write-Step "Ensuring WinGet is installed"
+
+    $winget = Resolve-WinGetCommand
+    if ($winget) {
+        Add-ToPathIfMissing (Split-Path -Parent $winget)
+        return
+    }
+
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+    Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force | Out-Null
+
+    $gallery = Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue
+    if ($gallery) {
+        Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+    }
+
+    Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery -Scope AllUsers -AllowClobber | Out-Null
+    Import-Module Microsoft.WinGet.Client -Force
+    Repair-WinGetPackageManager -AllUsers | Out-Null
+
+    try {
+        Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe -ErrorAction Stop | Out-Null
+    } catch {
+        Write-Warning "App Installer registration step was skipped ($($_.Exception.Message))"
+    }
+
+    $winget = Resolve-WinGetCommand
+    if (-not $winget) {
+        throw "WinGet bootstrap completed, but winget.exe was not found. Sign out/in once and rerun if needed."
+    }
+
+    Add-ToPathIfMissing (Split-Path -Parent $winget)
 }
 
 function Configure-AuthorizedKey {
@@ -108,11 +195,7 @@ function Install-Git {
         }
     }
 
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        throw "winget is required to install Git automatically."
-    }
-
-    $listOutput = (& winget list --exact --id Git.Git --source winget 2>&1 | Out-String)
+    $listOutput = (Invoke-WinGet @("list", "--exact", "--id", "Git.Git", "--source", "winget") 2>&1 | Out-String)
     if ($listOutput -match "Git\.Git" -or $listOutput -match "(?i)Git\s+Git\.Git") {
         Add-ToPathIfMissing $gitCmdPath
         Add-ToPathIfMissing $gitBinPath
@@ -121,9 +204,17 @@ function Install-Git {
         }
     }
 
-    & winget install --exact --id Git.Git --source winget --accept-package-agreements --accept-source-agreements --silent
+    Invoke-WinGet @(
+        "install",
+        "--exact",
+        "--id", "Git.Git",
+        "--source", "winget",
+        "--accept-package-agreements",
+        "--accept-source-agreements",
+        "--silent"
+    )
     if ($LASTEXITCODE -ne 0) {
-        $listOutput = (& winget list --exact --id Git.Git --source winget 2>&1 | Out-String)
+        $listOutput = (Invoke-WinGet @("list", "--exact", "--id", "Git.Git", "--source", "winget") 2>&1 | Out-String)
         if ($listOutput -match "Git\.Git" -or $listOutput -match "(?i)Git\s+Git\.Git") {
             Add-ToPathIfMissing $gitCmdPath
             Add-ToPathIfMissing $gitBinPath
@@ -177,12 +268,47 @@ function Install-Rust {
     }
 }
 
+function Install-DotNetSdk {
+    Write-Step "Ensuring .NET SDK 8 is installed"
+
+    $dotnet = Resolve-DotNetCommand
+    if ($dotnet) {
+        Add-ToPathIfMissing (Split-Path -Parent $dotnet)
+        $sdks = (& $dotnet --list-sdks 2>$null | Out-String)
+        if ($sdks -match '^8\.') {
+            return
+        }
+    }
+
+    Invoke-WinGet @(
+        "install",
+        "--exact",
+        "--id", "Microsoft.DotNet.SDK.8",
+        "--source", "winget",
+        "--accept-package-agreements",
+        "--accept-source-agreements",
+        "--silent"
+    )
+    $dotnet = Resolve-DotNetCommand
+    if ($dotnet) {
+        Add-ToPathIfMissing (Split-Path -Parent $dotnet)
+        $sdks = (& $dotnet --list-sdks 2>$null | Out-String)
+        if ($sdks -match '^8\.') {
+            return
+        }
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        throw ".NET SDK install failed with exit code $LASTEXITCODE"
+    }
+}
+
 function Install-VsBuildTools {
     if ($SkipVsBuildTools) {
         return
     }
 
-    Write-Step "Ensuring Visual Studio Build Tools (C++) is installed"
+    Write-Step "Ensuring Visual Studio Build Tools for Rust and WinUI are installed"
     $bootstrapper = Join-Path $env:TEMP "vs_BuildTools.exe"
     Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vs_BuildTools.exe" -OutFile $bootstrapper
 
@@ -192,37 +318,13 @@ function Install-VsBuildTools {
         "--norestart",
         "--nocache",
         "--add", "Microsoft.VisualStudio.Workload.VCTools",
+        "--add", "Microsoft.VisualStudio.Workload.ManagedDesktopBuildTools",
+        "--add", "Microsoft.VisualStudio.Component.Windows10SDK.19041",
         "--includeRecommended"
     )
     $proc = Start-Process -FilePath $bootstrapper -ArgumentList $args -Wait -PassThru
     if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
         throw "VS Build Tools install failed with exit code $($proc.ExitCode)"
-    }
-}
-
-function Install-Nsis {
-    if ($SkipNsis) {
-        return
-    }
-    Write-Step "Ensuring NSIS (makensis) is installed"
-    if (Get-Command makensis -ErrorAction SilentlyContinue) {
-        return
-    }
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        throw "winget is required to install NSIS automatically."
-    }
-
-    $attempts = @("NSIS.NSIS", "Nullsoft.NSIS")
-    $ok = $false
-    foreach ($id in $attempts) {
-        & winget install --exact --id $id --source winget --accept-package-agreements --accept-source-agreements --silent
-        if ($LASTEXITCODE -eq 0) {
-            $ok = $true
-            break
-        }
-    }
-    if (-not $ok) {
-        throw "Failed to install NSIS with winget. Install NSIS manually and rerun."
     }
 }
 
@@ -327,10 +429,11 @@ Write-Host "Bootstrap starting for Windows build/test VM..."
 
 Install-OpenSshServer
 Configure-AuthorizedKey -Key $AuthorizedKey
+Install-WinGet
 Install-Git
 Install-Rust
+Install-DotNetSdk
 Install-VsBuildTools
-Install-Nsis
 Install-Sccache
 Configure-DevPaths
 Configure-DefenderExclusions
@@ -340,6 +443,8 @@ Enable-LongPaths
 Write-Step "Bootstrap complete"
 Write-Host "Recommended next checks:"
 Write-Host "  1) powershell -Command `"Get-Service sshd`""
-Write-Host "  2) powershell -Command `"cargo --version`""
-Write-Host "  3) powershell -Command `"makensis /VERSION`""
-Write-Host "  4) Reboot once if VS Build Tools installer requested it"
+Write-Host "  2) powershell -Command `"winget --info`""
+Write-Host "  3) powershell -Command `"cargo --version`""
+Write-Host "  4) powershell -Command `"dotnet --info`""
+Write-Host "  5) powershell -Command `"msbuild -version`""
+Write-Host "  6) Reboot once if VS Build Tools installer requested it"

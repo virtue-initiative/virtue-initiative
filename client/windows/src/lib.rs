@@ -1,9 +1,5 @@
 pub mod capture;
-pub mod capture_control;
-pub mod capture_daemon;
 pub mod config;
-pub mod daemon;
-pub mod runtime_env;
-pub mod service_log;
+pub mod ffi;
+pub mod resident_monitor;
 pub mod session;
-pub mod win_text;

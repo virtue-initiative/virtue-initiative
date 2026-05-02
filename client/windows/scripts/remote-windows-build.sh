@@ -6,27 +6,23 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/../../.." && pwd)"
 
 usage() {
   cat <<'EOF'
-Run Windows CI smoke checks or build an installer from Linux via SSH to a Windows VM.
+Run Windows CI smoke checks or build a Windows MSIX package from Linux via SSH to a Windows VM.
 
 Usage:
   remote-windows-build.sh --build-host <ssh-host> [options]
 
 Options:
-  --mode <smoke|installer>        Default: smoke
+  --mode <smoke|msix>             Default: smoke.
   --build-host <ssh-host>         SSH host/alias for the Windows VM (required)
   --build-root <win-path>         Remote workspace root. Default: C:/virtue-build
   --cache-root <win-path>         Remote cache root. Default: C:/virtue-build/cache
-  --target <triple>               Rust target for installer mode. Default: x86_64-pc-windows-msvc
-  --profile <Debug|Release>       Installer profile. Default: Debug
-  --version <version>             Installer version. Default: 0.0.5-dev
-  --clean                         Run cargo clean before installer build
+  --target <triple>               Rust target for packaging modes. Default: x86_64-pc-windows-msvc
+  --profile <Debug|Release>       Packaging profile. Default: Debug
+  --version <version>             Artifact label. Default: 0.0.5-dev
+  --clean                         Run cargo clean before packaging
   --skip-sync                     Reuse remote source tree without uploading local client/
   --log-dir <dir>                 Local directory for full remote run logs.
                                   Default: client/windows/dist/remote-logs
-  --copy-installer-to-linux       Copy built installer from Windows VM back to Linux.
-                                  Default is off (installer remains on Windows VM).
-  --local-dist <dir>              Linux destination when --copy-installer-to-linux is used.
-                                  Default: client/windows/dist/remote
   -h, --help                      Show this help
 EOF
 }
@@ -36,23 +32,6 @@ require_cmd() {
     echo "Missing required command: $1" >&2
     exit 1
   fi
-}
-
-win_to_scp_path() {
-  local path="${1//\\//}"
-  if [[ "$path" =~ ^([A-Za-z]):(.*)$ ]]; then
-    local drive="${BASH_REMATCH[1]}"
-    local rest="${BASH_REMATCH[2]}"
-    if [[ -z "$rest" ]]; then
-      printf '/%s:/' "$drive"
-    elif [[ "${rest:0:1}" == "/" ]]; then
-      printf '/%s:%s' "$drive" "$rest"
-    else
-      printf '/%s:/%s' "$drive" "$rest"
-    fi
-    return
-  fi
-  printf '%s' "$path"
 }
 
 ps_quote() {
@@ -68,9 +47,7 @@ PROFILE="Debug"
 VERSION="0.0.5-dev"
 CLEAN=0
 SKIP_SYNC=0
-LOCAL_DIST="$REPO_ROOT/client/windows/dist/remote"
 LOG_DIR="$REPO_ROOT/client/windows/dist/remote-logs"
-COPY_INSTALLER_TO_LINUX=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -110,17 +87,9 @@ while [[ $# -gt 0 ]]; do
       SKIP_SYNC=1
       shift
       ;;
-    --local-dist)
-      LOCAL_DIST="${2:-}"
-      shift 2
-      ;;
     --log-dir)
       LOG_DIR="${2:-}"
       shift 2
-      ;;
-    --copy-installer-to-linux)
-      COPY_INSTALLER_TO_LINUX=1
-      shift
       ;;
     -h|--help)
       usage
@@ -140,8 +109,8 @@ if [[ -z "$BUILD_HOST" ]]; then
   exit 1
 fi
 
-if [[ "$MODE" != "smoke" && "$MODE" != "installer" ]]; then
-  echo "--mode must be smoke or installer" >&2
+if [[ "$MODE" != "smoke" && "$MODE" != "msix" ]]; then
+  echo "--mode must be smoke or msix" >&2
   exit 1
 fi
 
@@ -221,6 +190,10 @@ if (-not (Test-Path \$clientDir)) {
 Push-Location \$clientDir
 try {
     if (\$mode -eq "smoke") {
+        \$windowsAppDir = Join-Path \$clientDir "windows"
+        \$windowsAppProject = Join-Path \$windowsAppDir "Virtue.WindowsApp\\Virtue.WindowsApp.csproj"
+        \$windowsCoreProject = Join-Path \$windowsAppDir "Virtue.WindowsApp.Core\\Virtue.WindowsApp.Core.csproj"
+        \$windowsTestsProject = Join-Path \$windowsAppDir "Virtue.WindowsApp.Tests\\Virtue.WindowsApp.Tests.csproj"
         \$targetDir = Join-Path \$cacheRoot "cargo-target"
         \$sccacheDir = Join-Path \$cacheRoot "sccache"
         New-Item -ItemType Directory -Force -Path \$cacheRoot | Out-Null
@@ -271,15 +244,35 @@ try {
         if (\$LASTEXITCODE -ne 0) {
             throw "cargo clippy -p virtue-windows failed with exit code \$LASTEXITCODE"
         }
-    } elseif (\$mode -eq "installer") {
-        \$script = Join-Path \$clientDir "windows\\scripts\\build-installer.ps1"
+
+        dotnet restore \$windowsAppProject
+        if (\$LASTEXITCODE -ne 0) {
+            throw "dotnet restore for Virtue.WindowsApp failed with exit code \$LASTEXITCODE"
+        }
+
+        dotnet build \$windowsCoreProject -c \$buildProfile
+        if (\$LASTEXITCODE -ne 0) {
+            throw "dotnet build for Virtue.WindowsApp.Core failed with exit code \$LASTEXITCODE"
+        }
+
+        dotnet test \$windowsTestsProject -c \$buildProfile
+        if (\$LASTEXITCODE -ne 0) {
+            throw "dotnet test for Virtue.WindowsApp.Tests failed with exit code \$LASTEXITCODE"
+        }
+
+        dotnet build \$windowsAppProject -c \$buildProfile -p:Platform=x64 -p:AppxPackageSigningEnabled=false -p:GenerateAppxPackageOnBuild=false
+        if (\$LASTEXITCODE -ne 0) {
+            throw "dotnet build for Virtue.WindowsApp failed with exit code \$LASTEXITCODE"
+        }
+    } elseif (\$mode -eq "msix") {
+        \$script = Join-Path \$clientDir "windows\\scripts\\build-msix.ps1"
         if (\$clean) {
             & \$script -Version \$version -Target \$target -Profile \$buildProfile -CacheRoot \$cacheRoot -Clean
         } else {
             & \$script -Version \$version -Target \$target -Profile \$buildProfile -CacheRoot \$cacheRoot
         }
         if (\$LASTEXITCODE -ne 0) {
-            throw "build-installer.ps1 failed with exit code \$LASTEXITCODE"
+            throw "build-msix.ps1 failed with exit code \$LASTEXITCODE"
         }
     } else {
         throw "Unsupported mode '\$mode'"
@@ -293,15 +286,9 @@ EOF
 scp -q "$TMP_DIR/$REMOTE_SCRIPT_NAME" "$BUILD_HOST:$REMOTE_SCRIPT_NAME"
 ssh "$BUILD_HOST" "powershell -NoProfile -ExecutionPolicy Bypass -File $REMOTE_SCRIPT_NAME"
 
-if [[ "$MODE" == "installer" ]]; then
-  REMOTE_ARTIFACT_WIN="${BUILD_ROOT%/}/src/client/windows/dist/virtue-windows-installer-$VERSION.exe"
-  echo "Installer built on VM at: $REMOTE_ARTIFACT_WIN"
-
-  if [[ "$COPY_INSTALLER_TO_LINUX" == "1" ]]; then
-    mkdir -p "$LOCAL_DIST"
-    REMOTE_ARTIFACT_SCP="$(win_to_scp_path "$REMOTE_ARTIFACT_WIN")"
-    LOCAL_ARTIFACT="$LOCAL_DIST/virtue-windows-installer-$VERSION.exe"
-    scp -q "$BUILD_HOST:$REMOTE_ARTIFACT_SCP" "$LOCAL_ARTIFACT"
-    echo "Installer copied to Linux at: $LOCAL_ARTIFACT"
-  fi
+if [[ "$MODE" == "msix" ]]; then
+  REMOTE_ARTIFACT_WIN="${BUILD_ROOT%/}/src/client/windows/dist/virtue-windows-$VERSION.msix"
+  REMOTE_SETUP_ZIP_WIN="${BUILD_ROOT%/}/src/client/windows/dist/virtue-windows-$VERSION-setup.zip"
+  echo "MSIX package built on VM at: $REMOTE_ARTIFACT_WIN"
+  echo "Setup bundle built on VM at: $REMOTE_SETUP_ZIP_WIN"
 fi
