@@ -8,18 +8,7 @@ build = "build.rs"
 [lib]
 name = "virtue_windows"
 path = "src/lib.rs"
-
-[[bin]]
-name = "virtue-service"
-path = "src/bin/virtue-service.rs"
-
-[[bin]]
-name = "virtue-tray"
-path = "src/bin/virtue-tray.rs"
-
-[[bin]]
-name = "virtue-auth-ui"
-path = "src/bin/virtue-auth-ui.rs"
+crate-type = ["rlib", "cdylib"]
 
 [dependencies]
 anyhow = "1"
@@ -33,15 +22,13 @@ rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-slint = { version = "1.14", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time"] }
 uuid = { version = "1", features = ["v4", "serde"] }
-winit = "0.30.13"
-i-slint-backend-winit = "1.15.1"
-windows-service = "0.8"
 
 [build-dependencies]
 winresource = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
 
 [dependencies.windows]
 version = "0.62"
@@ -49,12 +36,7 @@ features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
   "Win32_Graphics_Imaging",
-  "Win32_Security",
-  "Win32_System_LibraryLoader",
-  "Win32_System_Environment",
-  "Win32_System_RemoteDesktop",
   "Win32_System_SystemInformation",
-  "Win32_System_Threading",
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
 ]

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-PS_SCRIPT="$SCRIPT_DIR/build-installer.ps1"
+PS_SCRIPT="$SCRIPT_DIR/build-msix.ps1"
 WIN_PS_SCRIPT="$(wslpath -w "$PS_SCRIPT")"
 
 if [[ $# -eq 0 ]]; then

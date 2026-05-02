@@ -3,6 +3,7 @@ use virtue_core::storage::FileStateStore;
 use virtue_core::{CoreError, CoreResult, MonitorService, PlatformHooks, Screenshot};
 
 use crate::config::{ClientPaths, ClientState, build_core_config, load_state, save_state};
+use crate::resident_monitor;
 
 #[derive(Clone)]
 struct SessionPlatformHooks;
@@ -67,6 +68,7 @@ impl SessionManager {
                 email: Some(email.to_string()),
             },
         )?;
+        resident_monitor::note_login_state(true);
 
         Ok(result
             .device
@@ -81,6 +83,7 @@ impl SessionManager {
         service.logout()?;
 
         save_state(&self.paths.ui_state_file, &ClientState { email: None })?;
+        resident_monitor::note_login_state(false);
         Ok(())
     }
 }

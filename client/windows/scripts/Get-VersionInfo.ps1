@@ -36,12 +36,17 @@ function Get-GitShortHash {
 
     $git = (Get-Command git -ErrorAction SilentlyContinue | Select-Object -First 1).Source
     if (-not $git) {
-        throw "git not found and no VIRTUE_GIT_SHORT_HASH or GITHUB_SHA override was provided."
+        return "unknown"
     }
 
-    $hash = & $git -C $RepoRoot rev-parse --short HEAD
+    try {
+        $hash = & $git -C $RepoRoot rev-parse --short HEAD 2>$null
+    } catch {
+        return "unknown"
+    }
+
     if ($LASTEXITCODE -ne 0) {
-        throw "git rev-parse failed with exit code $LASTEXITCODE"
+        return "unknown"
     }
 
     return $hash.Trim()
@@ -74,7 +79,12 @@ function Get-GitRefName {
         return "detached"
     }
 
-    $branchName = & $git -C $RepoRoot rev-parse --abbrev-ref HEAD 2>$null
+    try {
+        $branchName = & $git -C $RepoRoot rev-parse --abbrev-ref HEAD 2>$null
+    } catch {
+        return "detached"
+    }
+
     if ($LASTEXITCODE -ne 0) {
         return "detached"
     }
