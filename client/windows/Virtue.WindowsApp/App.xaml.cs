@@ -9,18 +9,12 @@ using Virtue.WindowsApp.Core.ViewModels;
 using WinUiLaunchActivatedEventArgs = Microsoft.UI.Xaml.LaunchActivatedEventArgs;
 using StartupTaskActivatedEventArgs = Windows.ApplicationModel.Activation.StartupTaskActivatedEventArgs;
 using AppLifecycleInstance = Microsoft.Windows.AppLifecycle.AppInstance;
-using System.Runtime.InteropServices;
 
 namespace Virtue.WindowsApp;
 
 public partial class App : Application
 {
-    private const string StopMonitoringDialogTitle = "Virtue stop monitoring";
-    private const string StopMonitoringDialogMessage =
-        "Stopping the background service will alert people monitoring you. Continue?";
-    private const uint MbIconWarning = 0x00000030;
-    private const uint MbOkCancel = 0x00000001;
-    private const int IdOk = 1;
+    private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(5);
     private MainWindow? _mainWindow;
     private SessionViewModel? _viewModel;
     private TrayMenuController? _trayController;
@@ -61,7 +55,7 @@ public partial class App : Application
 
             _trayController = new TrayMenuController();
             _trayController.OpenRequested += (_, _) => ShowMainWindow();
-            _trayController.ExitRequested += async (_, _) => await ExitResidentAsync();
+            _trayController.ExitRequested += async (_, _) => await RequestResidentShutdownAsync();
             _trayController.SessionLogonObserved += (_, _) => RecordSessionLogon();
             _trayController.SessionLogoffObserved += (_, _) => HandleSessionLogoff();
             _trayController.SystemShutdownObserved += (_, _) => HandleSystemShutdown();
@@ -176,6 +170,7 @@ public partial class App : Application
     {
         _mainWindow ??= CreateMainWindow();
         _mainWindow.ShowFromTray();
+        _ = _viewModel?.RefreshAsync();
     }
 
     private MainWindow CreateMainWindow()
@@ -190,6 +185,11 @@ public partial class App : Application
         window.Activate();
         LogStartup("MainWindow activated.");
         return window;
+    }
+
+    public Task RequestResidentShutdownAsync()
+    {
+        return ExitResidentAsync(requireConfirmation: true);
     }
 
     private void ViewModelOnPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -211,7 +211,7 @@ public partial class App : Application
         var token = _refreshLoopCancellation.Token;
         _ = Task.Run(async () =>
         {
-            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
+            using var timer = new PeriodicTimer(RefreshInterval);
             while (await timer.WaitForNextTickAsync(token))
             {
                 _ = _dispatcherQueue?.TryEnqueue(async () =>
@@ -227,9 +227,9 @@ public partial class App : Application
         }, token);
     }
 
-    private async Task ExitResidentAsync()
+    private async Task ExitResidentAsync(bool requireConfirmation)
     {
-        if (!ConfirmTrayExit())
+        if (requireConfirmation && !await ConfirmResidentShutdownAsync())
         {
             return;
         }
@@ -267,7 +267,7 @@ public partial class App : Application
         }
     }
 
-    private bool ConfirmTrayExit()
+    private async Task<bool> ConfirmResidentShutdownAsync()
     {
         if (_viewModel is null)
         {
@@ -279,7 +279,30 @@ public partial class App : Application
             return true;
         }
 
-        return MessageBox(IntPtr.Zero, StopMonitoringDialogMessage, StopMonitoringDialogTitle, MbOkCancel | MbIconWarning) == IdOk;
+        var shouldHideAfterCancel = false;
+        if (_mainWindow is null)
+        {
+            ShowMainWindow();
+            shouldHideAfterCancel = true;
+        }
+        else if (!_mainWindow.IsVisibleToUser)
+        {
+            _mainWindow.ShowFromTray();
+            shouldHideAfterCancel = true;
+        }
+
+        if (_mainWindow is null)
+        {
+            return true;
+        }
+
+        var confirmed = await _mainWindow.ShowStopMonitoringConfirmationAsync();
+        if (!confirmed && shouldHideAfterCancel)
+        {
+            _mainWindow.HideToTray();
+        }
+
+        return confirmed;
     }
 
     private static void RecordSessionLogon()
@@ -340,7 +363,4 @@ public partial class App : Application
         {
         }
     }
-
-    [DllImport("user32.dll", EntryPoint = "MessageBoxW", CharSet = CharSet.Unicode)]
-    private static extern int MessageBox(IntPtr hWnd, string text, string caption, uint type);
 }
