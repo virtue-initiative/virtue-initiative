@@ -104,14 +104,6 @@ jobs:
           ./scripts/clear-prerelease-assets.sh "${{ steps.version.outputs.release_tag }}" "virtue-windows-*-setup.zip"
         working-directory: client
 
-      - name: Publish Windows MSIX asset
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: ./scripts/publish-release.sh "${{ steps.version.outputs.release_tag }}" "${{ steps.version.outputs.build_label }}" "windows/dist/virtue-windows-${{ steps.version.outputs.build_label }}.msix" "${{ github.ref_name == 'main' && 'stable' || 'dev' }}"
-        working-directory: client
-
       - name: Publish Windows setup bundle asset
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         shell: bash
