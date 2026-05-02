@@ -39,7 +39,10 @@ const expectedPlatforms = [
   {
     label: "Windows",
     matches: (assetName) =>
-      /\.exe$/i.test(assetName) && /windows-installer/i.test(assetName),
+      (/\.exe$/i.test(assetName) && /windows-installer/i.test(assetName)) ||
+      (/\.zip$/i.test(assetName) &&
+        /^virtue-windows-/i.test(assetName) &&
+        /-setup\.zip$/i.test(assetName)),
   },
   {
     label: "Android",

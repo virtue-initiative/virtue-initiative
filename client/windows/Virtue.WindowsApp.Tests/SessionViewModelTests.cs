@@ -94,6 +94,50 @@ public sealed class SessionViewModelTests
     }
 
     [Fact]
+    public async Task RefreshAsync_ClearsStaleMonitorDetailsWhenSignedOut()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(false, null, null, "build-123"),
+            MonitorStatus = new MonitorStatusPayload("running", true, 4, 123, "stale error"),
+            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\ProgramData\Virtue\config\config.json", "build-123"),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234")
+        {
+            EmailInput = "stale@example.com",
+        };
+
+        await viewModel.RefreshAsync();
+
+        Assert.False(viewModel.LoggedIn);
+        Assert.Equal("signed_out", viewModel.MonitorState);
+        Assert.Null(viewModel.DeviceId);
+        Assert.Null(viewModel.MonitorError);
+        Assert.Equal(0, viewModel.PendingRequestCount);
+        Assert.Null(viewModel.LastScreenshotAtMs);
+        Assert.Equal("stale@example.com", viewModel.EmailInput);
+        Assert.Equal("Sign in to start monitoring.", viewModel.StatusText);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_TreatsSignedOutMonitorStateAsStartingWhenSessionIsSignedIn()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
+            MonitorStatus = new MonitorStatusPayload("signed_out", false, 0, null, null),
+            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\ProgramData\Virtue\config\config.json", "build-123"),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        await viewModel.RefreshAsync();
+
+        Assert.True(viewModel.LoggedIn);
+        Assert.Equal("starting", viewModel.MonitorState);
+        Assert.Equal("Monitoring is starting for this device.", viewModel.StatusText);
+    }
+
+    [Fact]
     public void TrayMenuController_RoutesOpenAndExitEvents()
     {
         var host = new NullTrayIconHost();

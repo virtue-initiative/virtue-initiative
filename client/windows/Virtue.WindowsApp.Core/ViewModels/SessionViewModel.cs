@@ -25,6 +25,8 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private string _batchWindowSeconds = string.Empty;
     private string _configPath = "Loading config path...";
     private bool _isBusy;
+    private bool _isHydratingEmailInput;
+    private bool _hasUserEditedEmailInput;
 
     public SessionViewModel(IRustInteropClient interopClient, string? windowsPackageVersion = null)
     {
@@ -93,7 +95,13 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     public string EmailInput
     {
         get => _emailInput;
-        set => SetProperty(ref _emailInput, value);
+        set
+        {
+            if (SetProperty(ref _emailInput, value) && !_isHydratingEmailInput)
+            {
+                _hasUserEditedEmailInput = true;
+            }
+        }
     }
 
     public string PasswordInput
@@ -288,16 +296,25 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         var status = _interopClient.GetSessionStatus();
         var monitorStatus = _interopClient.GetMonitorStatus();
         var runtimeConfig = _interopClient.GetRuntimeConfig();
+        var resolvedMonitorState = ResolveMonitorState(status.LoggedIn, monitorStatus.State);
+        var isSignedIn = status.LoggedIn;
 
         BuildLabel = status.BuildLabel;
-        LoggedIn = status.LoggedIn;
-        DeviceId = status.DeviceId;
+        LoggedIn = isSignedIn;
+        DeviceId = isSignedIn ? status.DeviceId : null;
         AccountEmail = status.Email ?? string.Empty;
-        MonitorState = monitorStatus.State;
-        MonitorError = monitorStatus.LastError;
-        PendingRequestCount = monitorStatus.PendingRequestCount;
-        LastScreenshotAtMs = monitorStatus.LastScreenshotAtMs;
-        EmailInput = status.Email ?? EmailInput;
+        MonitorState = resolvedMonitorState;
+        MonitorError = isSignedIn ? monitorStatus.LastError : null;
+        PendingRequestCount = isSignedIn ? monitorStatus.PendingRequestCount : 0;
+        LastScreenshotAtMs = isSignedIn ? monitorStatus.LastScreenshotAtMs : null;
+        if (isSignedIn)
+        {
+            SetEmailInput(status.Email ?? string.Empty);
+        }
+        else if (!_hasUserEditedEmailInput)
+        {
+            SetEmailInput(status.Email ?? string.Empty);
+        }
         ApiBaseUrl = runtimeConfig.ApiBaseUrl;
         CaptureIntervalSeconds = runtimeConfig.CaptureIntervalSeconds.ToString();
         BatchWindowSeconds = runtimeConfig.BatchWindowSeconds.ToString();
@@ -306,6 +323,34 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         StatusText = BuildStatusText();
 
         return Task.CompletedTask;
+    }
+
+    private static string ResolveMonitorState(bool loggedIn, string monitorState)
+    {
+        if (!loggedIn)
+        {
+            return "signed_out";
+        }
+
+        return monitorState switch
+        {
+            "signed_out" => "starting",
+            _ => monitorState,
+        };
+    }
+
+    private void SetEmailInput(string value)
+    {
+        _isHydratingEmailInput = true;
+        try
+        {
+            EmailInput = value;
+            _hasUserEditedEmailInput = false;
+        }
+        finally
+        {
+            _isHydratingEmailInput = false;
+        }
     }
 
     public async Task StopMonitoringAsync()

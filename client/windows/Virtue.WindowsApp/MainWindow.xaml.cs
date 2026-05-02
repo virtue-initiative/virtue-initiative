@@ -25,6 +25,7 @@ public sealed partial class MainWindow : Window
     private readonly TextBlock _buildLabelTextBlock;
     private readonly TextBlock _accountSummaryTextBlock;
     private readonly StackPanel _loginPanel;
+    private readonly StackPanel _accountActionsPanel;
     private readonly StackPanel _signedInActionsPanel;
     private readonly TextBox _emailTextBox;
     private readonly PasswordBox _passwordBox;
@@ -42,6 +43,7 @@ public sealed partial class MainWindow : Window
         _emailTextBox = new TextBox();
         _passwordBox = new PasswordBox();
         _loginPanel = new StackPanel();
+        _accountActionsPanel = new StackPanel();
         _signedInActionsPanel = new StackPanel();
 
         Content = BuildContent();
@@ -51,14 +53,18 @@ public sealed partial class MainWindow : Window
         _appWindow.Resize(new SizeInt32(720, 560));
         SetWindowIcon();
         SyncFromViewModel();
+        IsVisibleToUser = true;
     }
 
     public SessionViewModel ViewModel { get; }
+
+    public bool IsVisibleToUser { get; private set; }
 
     public void HideToTray()
     {
         var windowHandle = WindowNative.GetWindowHandle(this);
         ShowWindow(windowHandle, ShowWindowCommands.Hide);
+        IsVisibleToUser = false;
     }
 
     public void ShowFromTray()
@@ -67,6 +73,7 @@ public sealed partial class MainWindow : Window
         ShowWindow(windowHandle, ShowWindowCommands.Restore);
         Activate();
         SetForegroundWindow(windowHandle);
+        IsVisibleToUser = true;
     }
 
     public void PrepareForExit()
@@ -142,11 +149,6 @@ public sealed partial class MainWindow : Window
             FontSize = 30,
             FontWeight = FontWeights.SemiBold,
         });
-        textStack.Children.Add(new TextBlock
-        {
-            Text = "Private, resident monitoring on this device.",
-            Foreground = new SolidColorBrush(ColorFromHex("#4B5E68")),
-        });
         textStack.Children.Add(new HyperlinkButton
         {
             Content = WebsiteDisplayUrl,
@@ -171,15 +173,11 @@ public sealed partial class MainWindow : Window
         detailsButton.Click += StatusDetailsButton_OnClick;
 
         var stopMonitoringButton = CreateActionButton("Stop Monitoring");
-        stopMonitoringButton.Click += async (_, _) => await ViewModel.StopMonitoringAsync();
-
-        var signOutButton = CreateActionButton("Sign Out");
-        signOutButton.Click += async (_, _) => await ViewModel.LogoutAsync();
+        stopMonitoringButton.Click += StopMonitoringButton_OnClick;
 
         _signedInActionsPanel.Orientation = Orientation.Horizontal;
         _signedInActionsPanel.Spacing = 10;
         _signedInActionsPanel.Children.Add(stopMonitoringButton);
-        _signedInActionsPanel.Children.Add(signOutButton);
 
         var actionRow = new StackPanel
         {
@@ -214,10 +212,19 @@ public sealed partial class MainWindow : Window
         signInButton.Click += SignInButton_OnClick;
         _loginPanel.Children.Add(signInButton);
 
+        var signOutButton = CreateActionButton("Sign Out");
+        signOutButton.Click += async (_, _) => await ViewModel.LogoutAsync();
+
+        _accountActionsPanel.Orientation = Orientation.Horizontal;
+        _accountActionsPanel.Spacing = 10;
+        _accountActionsPanel.Margin = new Thickness(0, 12, 0, 0);
+        _accountActionsPanel.Children.Add(signOutButton);
+
         var content = new StackPanel { Spacing = 8 };
         content.Children.Add(CreateSectionLabel("Account"));
         content.Children.Add(_accountSummaryTextBlock);
         content.Children.Add(_loginPanel);
+        content.Children.Add(_accountActionsPanel);
 
         return CreateCard(content);
     }
@@ -264,19 +271,79 @@ public sealed partial class MainWindow : Window
         await ShowStatusDialogAsync();
     }
 
+    public async Task<bool> ShowStopMonitoringConfirmationAsync()
+    {
+        var warningIcon = new FontIcon
+        {
+            Glyph = "\uE7BA",
+            FontSize = 28,
+            Foreground = new SolidColorBrush(ColorFromHex("#A14A00")),
+            Margin = new Thickness(0, 2, 16, 0),
+        };
+
+        var textStack = new StackPanel
+        {
+            Spacing = 8,
+        };
+        textStack.Children.Add(new TextBlock
+        {
+            Text = "Stop monitoring and close Virtue?",
+            FontSize = 20,
+            FontWeight = FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        textStack.Children.Add(new TextBlock
+        {
+            Text = "This will stop monitoring on this device and close the main window and tray app.",
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = new SolidColorBrush(ColorFromHex("#4B5E68")),
+        });
+        textStack.Children.Add(new TextBlock
+        {
+            Text = "People monitoring you may be alerted.",
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = new SolidColorBrush(ColorFromHex("#A14A00")),
+            FontWeight = FontWeights.Medium,
+        });
+
+        var content = new Grid
+        {
+            ColumnSpacing = 0,
+            MinWidth = 420,
+        };
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(warningIcon, 0);
+        Grid.SetColumn(textStack, 1);
+        content.Children.Add(warningIcon);
+        content.Children.Add(textStack);
+
+        var dialog = new ContentDialog
+        {
+            Title = "Stop Monitoring",
+            PrimaryButtonText = "Stop Monitoring",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            Content = content,
+        };
+
+        if (Content is FrameworkElement root)
+        {
+            dialog.XamlRoot = root.XamlRoot;
+        }
+
+        var result = await dialog.ShowAsync();
+        return result == ContentDialogResult.Primary;
+    }
+
     private async Task ShowStatusDialogAsync()
     {
-        var statusBox = new TextBox
+        var statusBlock = new TextBlock
         {
             Text = BuildStatusDetailsText(),
-            IsReadOnly = true,
-            AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
-            MinWidth = 520,
-            MinHeight = 320,
-            BorderThickness = new Thickness(0),
-            Background = new SolidColorBrush(Colors.Transparent),
             FontFamily = new FontFamily("Consolas"),
+            Width = 520,
         };
 
         var dialog = new ContentDialog
@@ -286,8 +353,10 @@ public sealed partial class MainWindow : Window
             DefaultButton = ContentDialogButton.Close,
             Content = new ScrollViewer
             {
-                Content = statusBox,
+                Content = statusBlock,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                MinHeight = 320,
             },
         };
 
@@ -334,6 +403,14 @@ public sealed partial class MainWindow : Window
         await ViewModel.LoginAsync();
     }
 
+    private async void StopMonitoringButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (Application.Current is App app)
+        {
+            await app.RequestResidentShutdownAsync();
+        }
+    }
+
     private void PasswordBox_OnPasswordChanged(object sender, RoutedEventArgs e)
     {
         if (sender is PasswordBox passwordBox)
@@ -356,6 +433,7 @@ public sealed partial class MainWindow : Window
             ? $"Signed in as {ViewModel.AccountSummary}"
             : "Sign in to start monitoring.";
         _loginPanel.Visibility = ViewModel.LoggedIn ? Visibility.Collapsed : Visibility.Visible;
+        _accountActionsPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
         _signedInActionsPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
 
         if (_emailTextBox.Text != ViewModel.EmailInput)
