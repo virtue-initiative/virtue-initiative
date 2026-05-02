@@ -16,7 +16,7 @@ namespace Virtue.WindowsApp;
 
 public sealed partial class MainWindow : Window
 {
-    private const string WebsiteDisplayUrl = "virtue-initiative.org";
+    private const string WebsiteDisplayUrl = "virtueinitiative.org";
     private const string WebsiteNavigateUrl = "https://virtueinitiative.org";
 
     private readonly AppWindow _appWindow;
