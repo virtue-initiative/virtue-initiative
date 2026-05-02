@@ -101,7 +101,6 @@ public sealed partial class MainWindow : Window
         {
             Spacing = 20,
             Padding = new Thickness(28, 30, 28, 28),
-            // MaxWidth = 680,
         };
 
         contentStack.Children.Add(BuildHeader());
