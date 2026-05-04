@@ -2,11 +2,16 @@ param(
     [string]$Target = "x86_64-pc-windows-msvc",
     [string]$Version = "",
     [string]$PackageVersion = "",
+    [string]$PackagePublisher = "",
     [ValidateSet("Debug", "Release")]
     [string]$Profile = "Debug",
     [switch]$SkipBuild,
+    [switch]$SkipSigning,
     [switch]$Clean,
-    [string]$CacheRoot = ""
+    [string]$CacheRoot = "",
+    [string]$SigningCertificatePath = "",
+    [string]$SigningCertificatePassword = "",
+    [string]$SigningTimestampUrl = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -74,19 +79,21 @@ if (-not (Test-Path `$packagePath)) {
     throw "MSIX package not found at `$packagePath"
 }
 
-`$certificatePath = Join-Path `$PSScriptRoot "$CertificateFileName"
-if (-not (Test-Path `$certificatePath)) {
-    throw "Package signing certificate not found at `$certificatePath"
-}
+if (-not [string]::IsNullOrWhiteSpace("$CertificateFileName")) {
+    `$certificatePath = Join-Path `$PSScriptRoot "$CertificateFileName"
+    if (-not (Test-Path `$certificatePath)) {
+        throw "Package signing certificate not found at `$certificatePath"
+    }
 
-`$certificate = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(`$certificatePath)
-`$thumbprint = `$certificate.Thumbprint
-`$existingCertificate = Get-ChildItem -Path Cert:\LocalMachine\TrustedPeople | Where-Object Thumbprint -eq `$thumbprint | Select-Object -First 1
-if (-not `$existingCertificate) {
-    Import-Certificate -FilePath `$certificatePath -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
-    Write-Host "Imported package signing certificate into LocalMachine\\TrustedPeople."
-} else {
-    Write-Host "Package signing certificate already trusted."
+    `$certificate = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(`$certificatePath)
+    `$thumbprint = `$certificate.Thumbprint
+    `$existingCertificate = Get-ChildItem -Path Cert:\LocalMachine\TrustedPeople | Where-Object Thumbprint -eq `$thumbprint | Select-Object -First 1
+    if (-not `$existingCertificate) {
+        Import-Certificate -FilePath `$certificatePath -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
+        Write-Host "Imported package signing certificate into LocalMachine\\TrustedPeople."
+    } else {
+        Write-Host "Package signing certificate already trusted."
+    }
 }
 
 `$generatedInstallScript = Join-Path `$PSScriptRoot "Install-AppDevPackage.ps1"
@@ -122,10 +129,11 @@ function Get-AppPackagePublisher {
     return $publisher
 }
 
-function Set-AppPackageVersionInManifest {
+function Set-AppPackageIdentityInManifest {
     param(
         [string]$ManifestPath,
-        [string]$PackageVersion
+        [string]$PackageVersion,
+        [string]$Publisher
     )
 
     $manifestText = Get-Content -Path $ManifestPath -Raw
@@ -147,7 +155,13 @@ function Set-AppPackageVersionInManifest {
         throw "Failed to find Identity Version attribute in manifest: $ManifestPath"
     }
 
+    $publisherAttribute = $identityNode.Attributes["Publisher"]
+    if ($null -eq $publisherAttribute) {
+        throw "Failed to find Identity Publisher attribute in manifest: $ManifestPath"
+    }
+
     $versionAttribute.Value = $PackageVersion
+    $publisherAttribute.Value = $Publisher
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($ManifestPath, $document.OuterXml, $utf8NoBom)
     return $manifestText
@@ -211,6 +225,72 @@ function Ensure-PackageSigningCertificate {
         PfxPath = $pfxPath
         CerPath = $cerPath
         Password = $plainPassword
+    }
+}
+
+function Get-SigningCertificateFromPfx {
+    param(
+        [string]$CertificatePath,
+        [string]$CertificatePassword
+    )
+
+    if ([string]::IsNullOrWhiteSpace($CertificatePath)) {
+        throw "Signing certificate path is required."
+    }
+    if (-not (Test-Path $CertificatePath)) {
+        throw "Signing certificate not found at $CertificatePath"
+    }
+
+    return New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(
+        $CertificatePath,
+        $CertificatePassword,
+        [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable
+    )
+}
+
+function Resolve-SigningConfiguration {
+    param(
+        [string]$ManifestPublisher,
+        [string]$CertificateRoot,
+        [string]$SigningCertificatePath,
+        [string]$SigningCertificatePassword,
+        [string]$SigningTimestampUrl
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($SigningCertificatePath)) {
+        $certificate = Get-SigningCertificateFromPfx `
+            -CertificatePath $SigningCertificatePath `
+            -CertificatePassword $SigningCertificatePassword
+
+        if (-not $certificate.HasPrivateKey) {
+            throw "Signing certificate at $SigningCertificatePath does not include a private key."
+        }
+        if ($certificate.NotAfter -le (Get-Date)) {
+            throw "Signing certificate at $SigningCertificatePath is expired."
+        }
+
+        return [pscustomobject]@{
+            Mode = "Trusted"
+            Publisher = $certificate.Subject
+            Certificate = $certificate
+            PfxPath = $SigningCertificatePath
+            Password = $SigningCertificatePassword
+            CerPath = $null
+            TimestampUrl = $SigningTimestampUrl
+            RequiresCertificateBootstrap = $false
+        }
+    }
+
+    $devCertificate = Ensure-PackageSigningCertificate -Publisher $ManifestPublisher -CertificateRoot $CertificateRoot
+    return [pscustomobject]@{
+        Mode = "Dev"
+        Publisher = $ManifestPublisher
+        Certificate = $devCertificate.Certificate
+        PfxPath = $devCertificate.PfxPath
+        Password = $devCertificate.Password
+        CerPath = $devCertificate.CerPath
+        TimestampUrl = $null
+        RequiresCertificateBootstrap = $true
     }
 }
 
@@ -395,6 +475,19 @@ $SetupBundleDir = Join-Path $DistDir "virtue-windows-$Version-setup"
 $SetupBundleZip = Join-Path $DistDir "virtue-windows-$Version-setup.zip"
 $WorkspaceTargetDir = Join-Path $ClientRoot "target"
 
+if ([string]::IsNullOrWhiteSpace($SigningCertificatePath) -and -not [string]::IsNullOrWhiteSpace($env:VIRTUE_WINDOWS_SIGNING_CERT_PATH)) {
+    $SigningCertificatePath = $env:VIRTUE_WINDOWS_SIGNING_CERT_PATH
+}
+if ([string]::IsNullOrWhiteSpace($SigningCertificatePassword) -and -not [string]::IsNullOrWhiteSpace($env:VIRTUE_WINDOWS_SIGNING_CERT_PASSWORD)) {
+    $SigningCertificatePassword = $env:VIRTUE_WINDOWS_SIGNING_CERT_PASSWORD
+}
+if ([string]::IsNullOrWhiteSpace($SigningTimestampUrl) -and -not [string]::IsNullOrWhiteSpace($env:VIRTUE_WINDOWS_SIGNING_TIMESTAMP_URL)) {
+    $SigningTimestampUrl = $env:VIRTUE_WINDOWS_SIGNING_TIMESTAMP_URL
+}
+if ([string]::IsNullOrWhiteSpace($PackagePublisher) -and -not [string]::IsNullOrWhiteSpace($env:VIRTUE_WINDOWS_PACKAGE_PUBLISHER)) {
+    $PackagePublisher = $env:VIRTUE_WINDOWS_PACKAGE_PUBLISHER
+}
+
 if ([string]::IsNullOrWhiteSpace($Version)) {
     $Version = $VersionInfo.BuildLabel
 }
@@ -425,11 +518,15 @@ $CertificateCacheDir = Join-Path $CacheRoot "signing"
 
 Push-Location $ClientRoot
 $originalManifestText = $null
+$signingCertificate = $null
 try {
     $cargo = Resolve-Cargo
     $dotnet = Resolve-DotNet
     $msbuild = Resolve-MSBuild
-    $signTool = Resolve-SignTool
+    $signTool = $null
+    if (-not $SkipSigning) {
+        $signTool = Resolve-SignTool
+    }
 
     New-Item -ItemType Directory -Force -Path $CacheRoot | Out-Null
     New-Item -ItemType Directory -Force -Path $BuildTargetDir | Out-Null
@@ -498,10 +595,26 @@ try {
         throw "dotnet test failed with exit code $LASTEXITCODE"
     }
 
-    $publisher = Get-AppPackagePublisher -ManifestPath $WindowsAppManifest
-    $originalManifestText = Set-AppPackageVersionInManifest -ManifestPath $WindowsAppManifest -PackageVersion $PackageVersion
-    $signingCertificate = Ensure-PackageSigningCertificate -Publisher $publisher -CertificateRoot $CertificateCacheDir
-    Ensure-TrustedCertificate -CertificatePath $signingCertificate.CerPath
+    $manifestPublisher = Get-AppPackagePublisher -ManifestPath $WindowsAppManifest
+    if ([string]::IsNullOrWhiteSpace($PackagePublisher)) {
+        $PackagePublisher = $manifestPublisher
+    }
+    if (-not $SkipSigning) {
+        $signingCertificate = Resolve-SigningConfiguration `
+            -ManifestPublisher $PackagePublisher `
+            -CertificateRoot $CertificateCacheDir `
+            -SigningCertificatePath $SigningCertificatePath `
+            -SigningCertificatePassword $SigningCertificatePassword `
+            -SigningTimestampUrl $SigningTimestampUrl
+        $PackagePublisher = $signingCertificate.Publisher
+    }
+    $originalManifestText = Set-AppPackageIdentityInManifest `
+        -ManifestPath $WindowsAppManifest `
+        -PackageVersion $PackageVersion `
+        -Publisher $PackagePublisher
+    if ($null -ne $signingCertificate -and $signingCertificate.RequiresCertificateBootstrap) {
+        Ensure-TrustedCertificate -CertificatePath $signingCertificate.CerPath
+    }
 
     $msbuildArgs = @(
         $WindowsAppProject,
@@ -529,20 +642,37 @@ try {
         throw "MSIX build did not produce an .msix artifact in $PackageOutputDir"
     }
 
-    & $signTool sign /fd SHA256 /sha1 $signingCertificate.Certificate.Thumbprint /s My $package.FullName
-    if ($LASTEXITCODE -ne 0) {
-        throw "signtool failed to sign $($package.FullName) with exit code $LASTEXITCODE"
+    if (-not $SkipSigning) {
+        $signArgs = @(
+            "sign",
+            "/fd", "SHA256",
+            "/f", $signingCertificate.PfxPath
+        )
+        if (-not [string]::IsNullOrWhiteSpace($signingCertificate.Password)) {
+            $signArgs += @("/p", $signingCertificate.Password)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($signingCertificate.TimestampUrl)) {
+            $signArgs += @("/tr", $signingCertificate.TimestampUrl, "/td", "SHA256")
+        }
+        $signArgs += $package.FullName
+
+        & $signTool @signArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw "signtool failed to sign $($package.FullName) with exit code $LASTEXITCODE"
+        }
     }
 
     if (Test-Path $OutFile) {
         Remove-Item -Force $OutFile
     }
     Copy-Item -Force $package.FullName $OutFile
-    Copy-Item -Force $signingCertificate.CerPath $CertificateFile
+    if ($null -ne $signingCertificate -and $signingCertificate.RequiresCertificateBootstrap) {
+        Copy-Item -Force $signingCertificate.CerPath $CertificateFile
+    }
     New-SideloadInstallScript `
         -OutputPath $InstallScriptFile `
         -PackageFileName (Split-Path -Leaf $OutFile) `
-        -CertificateFileName (Split-Path -Leaf $CertificateFile)
+        -CertificateFileName $(if ($null -ne $signingCertificate -and $signingCertificate.RequiresCertificateBootstrap) { Split-Path -Leaf $CertificateFile } else { "" })
 
     $packageLayoutDir = $package.Directory.FullName
     if (-not (Test-Path (Join-Path $packageLayoutDir "Install.ps1"))) {
@@ -554,7 +684,9 @@ try {
     }
     New-Item -ItemType Directory -Force -Path $SetupBundleDir | Out-Null
     Copy-Item -Path (Join-Path $packageLayoutDir "*") -Destination $SetupBundleDir -Recurse -Force
-    Copy-Item -Force $signingCertificate.CerPath (Join-Path $SetupBundleDir (Split-Path -Leaf $CertificateFile))
+    if ($null -ne $signingCertificate -and $signingCertificate.RequiresCertificateBootstrap) {
+        Copy-Item -Force $signingCertificate.CerPath (Join-Path $SetupBundleDir (Split-Path -Leaf $CertificateFile))
+    }
     $generatedInstallScript = Join-Path $SetupBundleDir "Install-AppDevPackage.ps1"
     Move-Item -Force (Join-Path $SetupBundleDir "Install.ps1") $generatedInstallScript
     $setupBundleInstallScript = Join-Path $SetupBundleDir "Install.ps1"
@@ -564,7 +696,7 @@ try {
     New-SideloadInstallScript `
         -OutputPath $setupBundleInstallScript `
         -PackageFileName (Split-Path -Leaf $package.FullName) `
-        -CertificateFileName (Split-Path -Leaf $CertificateFile)
+        -CertificateFileName $(if ($null -ne $signingCertificate -and $signingCertificate.RequiresCertificateBootstrap) { Split-Path -Leaf $CertificateFile } else { "" })
     Copy-Item -Force $setupBundleInstallScript $friendlyInstallScript
 
     if (Test-Path $SetupBundleZip) {
@@ -574,7 +706,17 @@ try {
 
     Write-Host "Built MSIX package: $OutFile"
     Write-Host "Package version: $PackageVersion"
-    Write-Host "Exported signing certificate: $CertificateFile"
+    Write-Host "Package publisher: $PackagePublisher"
+    if ($SkipSigning) {
+        Write-Host "Skipped package signing; package artifacts are unsigned."
+    } elseif ($signingCertificate.RequiresCertificateBootstrap) {
+        Write-Host "Exported signing certificate: $CertificateFile"
+    } else {
+        Write-Host "Signed with trusted certificate subject: $($signingCertificate.Publisher)"
+        if (-not [string]::IsNullOrWhiteSpace($signingCertificate.TimestampUrl)) {
+            Write-Host "Timestamp authority: $($signingCertificate.TimestampUrl)"
+        }
+    }
     Write-Host "Built unsigned-install script: $InstallScriptFile"
     Write-Host "Built setup bundle: $SetupBundleZip"
 }
