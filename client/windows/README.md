@@ -54,6 +54,17 @@ Useful build flags:
 - `-Clean` (opt-in, only when you need a clean rebuild)
 - `-CacheRoot C:\path\to\cache` (default: `%LOCALAPPDATA%\VirtueBuildCache`)
 - `-SkipBuild` (reuse existing Rust artifacts and just rebuild/package the WinUI app)
+- `-SkipSigning` (build/package the MSIX but leave the artifacts unsigned for external CI signing)
+- `-PackagePublisher "CN=Publisher"` (override the MSIX manifest publisher during packaging)
+- `-SigningCertificatePath C:\path\to\cert.pfx` (sign with a real code-signing certificate instead of the local dev cert)
+- `-SigningTimestampUrl https://timestamp.example` (recommended for verified/release signing)
+
+Signing behavior:
+
+- Local builds without a configured PFX fall back to a self-signed development certificate and emit a `.cer` plus installer helper for sideloading.
+- CI can build unsigned artifacts with `-SkipSigning` and then sign the generated `.msix` files externally.
+- When a verified PFX is provided, the package manifest publisher is rewritten to match the certificate subject before signing. This must match exactly for MSIX installation to succeed.
+- When signing outside the script, set `-PackagePublisher` or `VIRTUE_WINDOWS_PACKAGE_PUBLISHER` to the exact publisher subject that the external signer uses.
 
 ## Windows CI smoke checks (local, cached)
 
@@ -74,6 +85,30 @@ dotnet build .\windows\Virtue.WindowsApp\Virtue.WindowsApp.csproj -c Debug -p:Pl
 ```
 
 The packaging script also runs the managed tests before producing the MSIX artifacts.
+
+## Release Signing
+
+GitHub Actions release packaging uses Azure Artifact Signing with OpenID Connect.
+
+Repository secrets:
+
+- `AZURE_CLIENT_ID`
+- `AZURE_TENANT_ID`
+- `AZURE_SUBSCRIPTION_ID`
+
+Repository variables:
+
+- `AZURE_CODESIGN_ACCOUNT_NAME`
+- `AZURE_CODESIGN_ENDPOINT`
+- `AZURE_CODESIGN_CERT_PROFILE`
+
+Recommended repository variable:
+
+- `AZURE_CODESIGN_PUBLISHER_SUBJECT`
+
+The publisher-subject variable should be the exact subject used by the Artifact Signing certificate profile, for example `CN=Jane Doe` for individual signing or the exact org subject string for organization signing. The MSIX manifest publisher must match this subject exactly.
+
+The workflow builds unsigned release artifacts, signs every `.msix` under `client/windows/dist/` with `azure/artifact-signing-action`, and then recreates the setup ZIP so the embedded MSIX is signed too.
 
 ## Linux-Driven Remote Windows Loop
 
