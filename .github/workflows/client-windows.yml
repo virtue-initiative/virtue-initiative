@@ -104,7 +104,7 @@ jobs:
           signing-account-name: ${{ vars.AZURE_CODESIGN_ACCOUNT_NAME }}
           certificate-profile-name: ${{ vars.AZURE_CODESIGN_CERT_PROFILE }}
           files-folder: ${{ github.workspace }}\client\windows\dist
-          files-folder-filter: '*.msix'
+          files-folder-filter: 'Virtue.*.msix,virtue-*.msix'
           files-folder-recurse: true
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
