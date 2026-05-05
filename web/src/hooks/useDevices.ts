@@ -1,5 +1,5 @@
 import useSWR, { useSWRConfig } from "swr";
-import { api, Device } from "../api";
+import { api, Device, isToastHandledError } from "../api";
 import { removeDeviceFromCachedDataFeed } from "../data-cache";
 import { useAuth } from "../context/auth";
 import { isLogsKey, swrKeys } from "./swr-keys";
@@ -16,10 +16,7 @@ export interface UseDevicesResult {
   devices: Device[] | undefined;
   error: Error | undefined;
   isLoading: boolean;
-  updateDevice: (
-    id: string,
-    patch: { name?: string; enabled?: boolean },
-  ) => Promise<void>;
+  updateDevice: (id: string, patch: { name?: string }) => Promise<void>;
   removeDevice: (id: string) => Promise<void>;
 }
 
@@ -31,10 +28,7 @@ export function useDevices(): UseDevicesResult {
     api.getDevices(requireToken(token)),
   );
 
-  const updateDevice = async (
-    id: string,
-    patch: { name?: string; enabled?: boolean },
-  ) => {
+  const updateDevice = async (id: string, patch: { name?: string }) => {
     const authToken = requireToken(token);
     await api.patchDevice(authToken, id, patch);
     await mutate(swrKeys.devices(authToken));
@@ -63,7 +57,7 @@ export function useDevices(): UseDevicesResult {
 
   return {
     devices: data,
-    error,
+    error: error && !isToastHandledError(error) ? error : undefined,
     isLoading: Boolean(token) && isLoading,
     updateDevice,
     removeDevice,

@@ -1,0 +1,69 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <VirtueWindowsPackageType Condition="'$(VirtueWindowsPackageType)' == ''">MSIX</VirtueWindowsPackageType>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <RootNamespace>Virtue.WindowsApp</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\assets\app-icon.ico</ApplicationIcon>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <UseWinUI>true</UseWinUI>
+    <EnableMsixTooling Condition="'$(VirtueWindowsPackageType)' == 'MSIX'">true</EnableMsixTooling>
+    <WindowsPackageType>$(VirtueWindowsPackageType)</WindowsPackageType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <GenerateAppxPackageOnBuild Condition="'$(GenerateAppxPackageOnBuild)' == ''">false</GenerateAppxPackageOnBuild>
+    <AppxPackageSigningEnabled Condition="'$(AppxPackageSigningEnabled)' == ''">false</AppxPackageSigningEnabled>
+    <AppxBundle Condition="'$(AppxBundle)' == ''">Never</AppxBundle>
+    <GenerateTestArtifacts>false</GenerateTestArtifacts>
+    <WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
+    <WindowsAppSdkBootstrapInitialize Condition="'$(VirtueWindowsPackageType)' != 'MSIX'">false</WindowsAppSdkBootstrapInitialize>
+    <WindowsAppSdkDeploymentManagerInitialize Condition="'$(VirtueWindowsPackageType)' != 'MSIX'">false</WindowsAppSdkDeploymentManagerInitialize>
+    <AppxPackageDir Condition="'$(AppxPackageDir)' == ''">$(MSBuildThisFileDirectory)AppPackages\</AppxPackageDir>
+    <VirtueRustBinariesDir Condition="'$(VirtueRustBinariesDir)' == ''">$(MSBuildThisFileDirectory)..\..\target\x86_64-pc-windows-msvc\$(Configuration)</VirtueRustBinariesDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Virtue.WindowsApp.Core\Virtue.WindowsApp.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260317003" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.4654" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(VirtueWindowsPackageType)' == 'MSIX'">
+    <None Include="Package.appxmanifest" />
+    <Content Include="..\assets\app-icon.png" Link="Assets\app-icon.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\assets\Square44x44Logo.png" Link="Assets\Square44x44Logo.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\assets\Square150x150Logo.png" Link="Assets\Square150x150Logo.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\assets\StoreLogo.png" Link="Assets\StoreLogo.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\assets\SplashScreen.png" Link="Assets\SplashScreen.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\assets\Square44x44Logo.targetsize-16_altform-unplated.png" Link="Assets\Square44x44Logo.targetsize-16_altform-unplated.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\assets\Square44x44Logo.targetsize-20_altform-unplated.png" Link="Assets\Square44x44Logo.targetsize-20_altform-unplated.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\assets\Square44x44Logo.targetsize-24_altform-unplated.png" Link="Assets\Square44x44Logo.targetsize-24_altform-unplated.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\assets\Square44x44Logo.targetsize-32_altform-unplated.png" Link="Assets\Square44x44Logo.targetsize-32_altform-unplated.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\assets\Square44x44Logo.targetsize-40_altform-unplated.png" Link="Assets\Square44x44Logo.targetsize-40_altform-unplated.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\assets\Square44x44Logo.targetsize-48_altform-unplated.png" Link="Assets\Square44x44Logo.targetsize-48_altform-unplated.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\assets\Square44x44Logo.targetsize-64_altform-unplated.png" Link="Assets\Square44x44Logo.targetsize-64_altform-unplated.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\assets\Square44x44Logo.targetsize-256_altform-unplated.png" Link="Assets\Square44x44Logo.targetsize-256_altform-unplated.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\assets\app-icon.ico" Link="Assets\app-icon.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(VirtueWindowsPackageType)' != 'MSIX'">
+    <Content Include="..\assets\app-icon.png" Link="Assets\app-icon.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\assets\app-icon.ico" Link="app-icon.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(VirtueWindowsPackageType)' == 'MSIX' and Exists('$(VirtueRustBinariesDir)\virtue_windows.dll')">
+    <Content Include="$(VirtueRustBinariesDir)\virtue_windows.dll" Link="Payload\virtue_windows.dll" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(VirtueWindowsPackageType)' != 'MSIX' and Exists('$(VirtueRustBinariesDir)\virtue_windows.dll')">
+    <Content Include="$(VirtueRustBinariesDir)\virtue_windows.dll" Link="virtue_windows.dll" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

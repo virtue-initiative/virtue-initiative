@@ -113,7 +113,6 @@ The service primarily depends on device credentials after login. User refresh-co
 
 The device settings response is important because it provides:
 
-- `enabled`
 - `owner` public key
 - accepted partner public keys
 - `hash_base_url`

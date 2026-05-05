@@ -2,9 +2,15 @@
 
 This guide assumes:
 
-- Linux host with `virt-manager` / libvirt.
-- One Windows VM used for both build and GUI testing.
-- Repo path on Linux: `/home/jeff/code/virtue-initiative`.
+- Linux host with `virt-manager` / libvirt
+- one Windows VM used for both build and GUI testing
+- repo path on Linux: `/home/jeff/code/virtue-initiative`
+
+The Windows build path now targets:
+
+- Rust backend artifact (`virtue_windows.dll`)
+- C# WinUI 3 resident app in `client/windows/`
+- MSIX output built remotely over SSH
 
 ## 1) Create or reset the VM
 
@@ -37,11 +43,7 @@ virsh destroy win11
 virsh undefine win11 --nvram --remove-all-storage
 ```
 
-Note: this removes VM disk storage. Keep ISO files outside VM-managed storage and
-recheck paths before recreating.
-
-Set resources (good starting point for 12 GB host RAM): 4608 MiB RAM, 3 vCPUs.
-Use virt-manager hardware settings if you want to tune this later.
+Set resources (good starting point for a 12 GB host): 4608 MiB RAM, 3 vCPUs.
 
 Start VM:
 
@@ -51,77 +53,31 @@ virsh start win11
 
 ### Installer console checklist
 
-- Use graphical console (`virt-viewer win11` or virt-manager `Display Spice`).
-- Do **not** use `virsh console win11` for Windows install (serial text console).
-- If you see text like `Ubuntu 24.04 PC (Q35 + ICH9)` at the top, that is
-  firmware/machine labeling, not proof of wrong ISO.
-- In boot menu, pick the UEFI DVD entry for the Windows ISO.
-- On first prompt, press a key for `Press any key to boot from CD/DVD`.
-- On later reboots, do **not** press a key (let it continue from disk).
+- Use a graphical console (`virt-viewer win11` or virt-manager `Display Spice`).
+- Do not use `virsh console win11` for Windows installation.
+- Use the UEFI DVD entry for the Windows ISO.
+- Press a key only on the first `Press any key to boot from CD/DVD` prompt.
 
 Complete Windows setup in the VM UI and sign in.
 
-### Enable host <-> guest copy/paste (SPICE agent)
-
-If clipboard sharing does not work in virt-manager/virt-viewer, install SPICE
-guest tools inside Windows (PowerShell as Administrator):
-
-```powershell
-$exe="$env:TEMP\spice-guest-tools.exe"
-Invoke-WebRequest -Uri "https://www.spice-space.org/download/windows/spice-guest-tools/spice-guest-tools-latest.exe" -OutFile $exe
-Start-Process -FilePath $exe -Wait
-Restart-Computer
-```
-
-After reboot, reconnect to the VM (`virt-viewer win11` or virt-manager).
-Clipboard copy/paste should now work between host and guest.
-
 ### If no disk appears in Windows setup
 
-When installer says no disk is available:
+When the installer says no disk is available:
 
 1. Click `Load driver` -> `Browse`.
-2. Open VirtIO CD drive.
-3. Use `amd64\w11` first.
-4. Select/install storage driver shown there (`vioscsi` or `viostor`).
+2. Open the VirtIO CD drive.
+3. Try `amd64\w11` first.
+4. Install the storage driver shown there.
 5. Return to disk list and click `Refresh`.
-
-Notes:
-
-- `Red Hat` in driver names is expected for VirtIO.
-- Use `amd64` (not `x86` or `ARM64`).
-- If `w11` does not work, try `amd64\w10`.
 
 ### If OOBE asks for a network driver
 
 When first-login setup requires internet but no adapter is detected:
 
 1. Click `Install driver` / `Load driver`.
-2. Open VirtIO CD drive.
-3. Use `NetKVM\w11\amd64` first.
+2. Open the VirtIO CD drive.
+3. Try `NetKVM\w11\amd64` first.
 4. If needed, try `NetKVM\w10\amd64`.
-5. Select the NIC driver and continue.
-
-`Red Hat` labeling is expected for VirtIO drivers.
-
-Optional offline fallback:
-
-1. Press `Shift+F10`.
-2. Try direct local-account flow first:
-
-```cmd
-start ms-cxh:localonly
-```
-
-3. If that does not open local account setup, run:
-
-```cmd
-OOBE\BYPASSNRO
-```
-
-4. After reboot, choose offline setup (`I don't have internet`).
-5. If the offline option is still missing, temporarily unplug NIC in
-   virt-manager and continue OOBE, then reconnect after first login.
 
 ## 2) Serve bootstrap script from Linux
 
@@ -134,7 +90,7 @@ python3 -m http.server 8765 --bind 0.0.0.0
 
 Keep this running temporarily.
 
-In commands below, replace `<HOST_IP>` with your Linux host IP reachable from the VM.
+In the commands below, replace `<HOST_IP>` with the Linux host IP reachable from the VM.
 
 ## 3) Run bootstrap script in Windows (as Administrator)
 
@@ -165,18 +121,28 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 .\bootstrap-win11-build-vm.ps1 -ApiBaseUrl "http://<HOST_IP>:8787" -CaptureIntervalSeconds 10 -BatchWindowSeconds 30
 ```
 
-Reboot the VM once after bootstrap finishes.
+The bootstrap script installs:
+
+- WinGet / App Installer bootstrap support
+- OpenSSH server
+- Git
+- Rust MSVC toolchain + clippy
+- .NET 8 SDK
+- Visual Studio Build Tools with MSBuild, C++ tools, managed desktop tools, and Windows SDK
+- optional `sccache`
+
+You do not need to preinstall `winget` manually anymore. The bootstrap script now tries the Microsoft-supported PowerShell module flow (`Microsoft.WinGet.Client` + `Repair-WinGetPackageManager -AllUsers`) before it uses `winget` to install the rest of the toolchain.
+
+Reboot the VM once after bootstrap completes.
 
 ## 4) Add SSH host alias on Linux
 
-Find VM IP:
+Find the VM IP:
 
 ```bash
 virsh domifaddr win11 --source agent
 virsh domifaddr win11 --source lease
 ```
-
-Use the IPv4 address shown for the VM NIC (strip CIDR suffix like `/24`).
 
 Add/update `~/.ssh/config`:
 
@@ -192,42 +158,51 @@ Test:
 ssh win11 'echo connected'
 ```
 
-## 5) Run first smoke build from Linux
+## 5) Run the first remote smoke build
 
 ```bash
 cd /home/jeff/code/virtue-initiative
-./client/windows/scripts/remote-windows-build.sh --build-host win11 --mode smoke
+./client/windows/scripts/remote-windows-build.sh \
+  --build-host win11 \
+  --mode smoke
 ```
 
-The full run log is saved on Linux under:
+This remote smoke run validates:
+
+- Rust build + clippy for `virtue-core`
+- Rust build + clippy for `virtue-windows`
+- WinUI dependency restore
+- managed core build
+- managed tests
+- WinUI app compile without packaging
+
+The full run log is saved locally under:
 
 - `client/windows/dist/remote-logs/`
 
-## 6) Build installer from Linux
+## 6) Build the Windows MSIX package from Linux
 
 ```bash
 ./client/windows/scripts/remote-windows-build.sh \
   --build-host win11 \
-  --mode installer \
+  --mode msix \
   --profile Debug \
-  --version 0.0.2-dev
+  --version 0.0.5-dev
 ```
 
-By default, the installer remains on the Windows VM at:
+By default, the package remains on the Windows VM at:
 
-- `C:\virtue-build\src\client\windows\dist\virtue-windows-installer-0.0.2-dev.exe`
+- `C:\virtue-build\src\client\windows\dist\virtue-windows-0.0.5-dev.msix`
+- `C:\virtue-build\src\client\windows\dist\virtue-windows-0.0.5-dev-setup.zip`
 
-If you also want a Linux copy:
+## 7) Optional direct Windows build checks
 
-```bash
-./client/windows/scripts/remote-windows-build.sh \
-  --build-host win11 \
-  --mode installer \
-  --profile Debug \
-  --version 0.0.2-dev \
-  --copy-installer-to-linux
+Inside the VM:
+
+```powershell
+cd C:\virtue-build\src\client
+cargo build --target x86_64-pc-windows-msvc -p virtue-core
+cargo build --target x86_64-pc-windows-msvc -p virtue-windows
+dotnet test .\windows\Virtue.WindowsApp.Tests\Virtue.WindowsApp.Tests.csproj -c Debug
+.\windows\scripts\build-msix.ps1 -Profile Debug -Version 0.0.5-dev
 ```
-
-That copies to:
-
-- `client/windows/dist/remote/virtue-windows-installer-0.0.2-dev.exe`

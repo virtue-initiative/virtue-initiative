@@ -106,6 +106,18 @@ def save_png(master: Image.Image, path: Path, size: int) -> None:
     out.save(path, format="PNG", optimize=True)
 
 
+def save_png_with_canvas(
+    master: Image.Image, path: Path, width: int, height: int, content_size: int
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    content = master.resize((content_size, content_size), Image.Resampling.LANCZOS)
+    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    x = (width - content_size) // 2
+    y = (height - content_size) // 2
+    canvas.paste(content, (x, y), content)
+    canvas.save(path, format="PNG", optimize=True)
+
+
 def save_ico(master: Image.Image, path: Path, sizes: Iterable[int]) -> None:
     sorted_sizes = sorted(set(sizes))
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -288,7 +300,31 @@ def main() -> None:
         windows_assets = root / "client" / "windows" / "assets"
         save_ico(master, windows_assets / "app-icon.ico", [16, 24, 32, 40, 48, 64, 128, 256])
         save_png(master, windows_assets / "app-icon.png", 256)
-        outputs.extend([windows_assets / "app-icon.ico", windows_assets / "app-icon.png"])
+        save_png(master, windows_assets / "Square44x44Logo.png", 44)
+        save_png(master, windows_assets / "Square150x150Logo.png", 150)
+        save_png(master, windows_assets / "StoreLogo.png", 50)
+        save_png_with_canvas(master, windows_assets / "SplashScreen.png", 620, 300, 220)
+        for size in [16, 20, 24, 32, 40, 48, 64, 256]:
+            save_png(
+                master,
+                windows_assets
+                / f"Square44x44Logo.targetsize-{size}_altform-unplated.png",
+                size,
+            )
+        outputs.extend(
+            [
+                windows_assets / "app-icon.ico",
+                windows_assets / "app-icon.png",
+                windows_assets / "Square44x44Logo.png",
+                windows_assets / "Square150x150Logo.png",
+                windows_assets / "StoreLogo.png",
+                windows_assets / "SplashScreen.png",
+            ]
+            + [
+                windows_assets / f"Square44x44Logo.targetsize-{size}_altform-unplated.png"
+                for size in [16, 20, 24, 32, 40, 48, 64, 256]
+            ]
+        )
 
         android_base = root / "client" / "android" / "app" / "src" / "main" / "res"
         android_sizes = {

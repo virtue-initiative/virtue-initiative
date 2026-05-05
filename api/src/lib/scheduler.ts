@@ -2,9 +2,9 @@ import { DEFAULT_EMAIL_FREQUENCY, DigestFrequency, TamperSeverity } from './emai
 import { formatUtcDate, getDigestWindowForRun } from './digest-schedule';
 import {
   listBatchWindowsForUser,
+  listDevicesForUser,
   listDeviceLogsForUser,
   listDigestEligiblePartnerships,
-  listEnabledDevicesForUser,
   listRiskDeviceLogsForUser,
 } from './db';
 import { sendEmail } from './email';
@@ -154,7 +154,7 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
               window.end,
             ),
             listDeviceLogsForUser(env.DB, partnership.watching_user_id, window.start, window.end),
-            listEnabledDevicesForUser(env.DB, partnership.watching_user_id),
+            listDevicesForUser(env.DB, partnership.watching_user_id),
           ]);
 
           return {

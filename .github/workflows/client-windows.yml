@@ -1,6 +1,7 @@
 name: Client Windows Checks
 
 permissions:
+  id-token: write
   contents: write
 
 on:
@@ -18,6 +19,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -47,12 +53,21 @@ jobs:
         run: cargo clippy --target x86_64-pc-windows-msvc -p virtue-windows --all-targets -- -D warnings
         working-directory: client
 
-      - name: Install NSIS
-        run: choco install nsis -y
+      - name: Restore WinUI solution dependencies
+        run: dotnet restore ./windows/Virtue.WindowsApp/Virtue.WindowsApp.csproj
+        working-directory: client
 
-      - name: Build Windows installer (debug)
+      - name: Build WinUI core library
+        run: dotnet build ./windows/Virtue.WindowsApp.Core/Virtue.WindowsApp.Core.csproj -c Debug
+        working-directory: client
+
+      - name: Test WinUI core library
+        run: dotnet test ./windows/Virtue.WindowsApp.Tests/Virtue.WindowsApp.Tests.csproj -c Debug
+        working-directory: client
+
+      - name: Build Windows MSIX (debug)
         if: github.event_name != 'push' || (github.ref != 'refs/heads/main' && github.ref != 'refs/heads/staging')
-        run: ./windows/scripts/build-installer.ps1 -Profile Debug
+        run: ./windows/scripts/build-msix.ps1 -Profile Debug
         working-directory: client
 
       - name: Resolve version info
@@ -66,30 +81,78 @@ jobs:
           "release_tag=$($info.ReleaseTag)" >> $env:GITHUB_OUTPUT
           "build_label=$($info.BuildLabel)" >> $env:GITHUB_OUTPUT
 
-      - name: Build Windows installer (release)
+      - name: Azure login
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
-        run: ./windows/scripts/build-installer.ps1 -Profile Release -Version "${{ steps.version.outputs.build_label }}"
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build Windows MSIX (release)
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
+        env:
+          VIRTUE_WINDOWS_PACKAGE_PUBLISHER: ${{ vars.AZURE_CODESIGN_PUBLISHER_SUBJECT }}
+        run: ./windows/scripts/build-msix.ps1 -Profile Release -Version "${{ steps.version.outputs.build_label }}" -SkipSigning
         working-directory: client
 
-      - name: Upload Windows installer artifact
+      - name: Sign Windows MSIX artifacts with Azure Artifact Signing
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
+        uses: azure/artifact-signing-action@v1
+        with:
+          endpoint: ${{ vars.AZURE_CODESIGN_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_CODESIGN_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ vars.AZURE_CODESIGN_CERT_PROFILE }}
+          files-folder: ${{ github.workspace }}\client\windows\dist
+          files-folder-filter: 'Virtue.*.msix,virtue-*.msix'
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Repack Windows setup bundle
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.build_label }}"
+          $distDir = Join-Path $PWD "windows\dist"
+          $bundleDir = Join-Path $distDir "virtue-windows-$version-setup"
+          $bundleZip = Join-Path $distDir "virtue-windows-$version-setup.zip"
+
+          if (-not (Test-Path $bundleDir)) {
+            throw "Setup bundle directory not found at $bundleDir"
+          }
+
+          if (Test-Path $bundleZip) {
+            Remove-Item -Force $bundleZip
+          }
+
+          Compress-Archive -Path $bundleDir -DestinationPath $bundleZip -Force
+        working-directory: client
+
+      - name: Upload Windows MSIX artifact
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         uses: actions/upload-artifact@v4
         with:
           name: virtue-windows-${{ steps.version.outputs.build_label }}
-          path: client/windows/dist/virtue-windows-installer-${{ steps.version.outputs.build_label }}.exe
+          path: |
+            client/windows/dist/virtue-windows-${{ steps.version.outputs.build_label }}.msix
+            client/windows/dist/virtue-windows-${{ steps.version.outputs.build_label }}-setup.zip
 
       - name: Clear existing Windows release assets
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./scripts/clear-prerelease-assets.sh "${{ steps.version.outputs.release_tag }}" "virtue-windows-installer-*.exe"
+        run: |
+          ./scripts/clear-prerelease-assets.sh "${{ steps.version.outputs.release_tag }}" "virtue-windows-*.msix"
+          ./scripts/clear-prerelease-assets.sh "${{ steps.version.outputs.release_tag }}" "virtue-windows-*-setup.zip"
         working-directory: client
 
-      - name: Publish Windows release asset
+      - name: Publish Windows setup bundle asset
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./scripts/publish-release.sh "${{ steps.version.outputs.release_tag }}" "${{ steps.version.outputs.build_label }}" "windows/dist/virtue-windows-installer-${{ steps.version.outputs.build_label }}.exe" "${{ github.ref_name == 'main' && 'stable' || 'dev' }}"
+        run: ./scripts/publish-release.sh "${{ steps.version.outputs.release_tag }}" "${{ steps.version.outputs.build_label }}" "windows/dist/virtue-windows-${{ steps.version.outputs.build_label }}-setup.zip" "${{ github.ref_name == 'main' && 'stable' || 'dev' }}"
         working-directory: client

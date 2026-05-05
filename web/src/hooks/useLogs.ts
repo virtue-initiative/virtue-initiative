@@ -1,7 +1,7 @@
 import { decode } from "@msgpack/msgpack";
 import useSWR from "swr";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { api, Batch, DataLog } from "../api";
+import { api, Batch, DataLog, isToastHandledError } from "../api";
 import { decryptBatch, decompressGzip } from "../crypto";
 import {
   CachedDataFeed,
@@ -340,7 +340,9 @@ export function useLogs({
     logs,
     hasMore: data ? filteredFeedEntries.length > visibleCount : undefined,
     batchStats,
-    error: devicesError ?? error,
+    error: [devicesError, error].find(
+      (candidate) => candidate && !isToastHandledError(candidate),
+    ),
     isLoading:
       (Boolean(token && viewerUserId) &&
         (devicesLoading || !e2ee.ready || feedLoading || materializing)) ||

@@ -119,7 +119,6 @@ impl ApiClient {
             id: String,
             name: String,
             platform: String,
-            enabled: bool,
             owner: Option<DeviceRecipientResponse>,
             partners: Vec<DeviceRecipientResponse>,
             hash_base_url: Option<String>,
@@ -142,7 +141,6 @@ impl ApiClient {
             device_id: response.id,
             name: response.name,
             platform: response.platform,
-            enabled: response.enabled,
             owner: response.owner.map(|owner| crate::model::BatchRecipient {
                 user_id: owner.user_id,
                 pub_key_base64: owner.pub_key,

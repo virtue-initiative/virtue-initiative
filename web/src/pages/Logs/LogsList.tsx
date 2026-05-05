@@ -11,12 +11,9 @@ import {
   getLogImage,
   getLogMetadata,
   groupLogsByDay,
+  humanizeLogType,
   LogImage,
 } from "./shared";
-
-function humanizeKind(kind: string): string {
-  return kind.replace(/_/g, " ");
-}
 
 export function LogsList({
   items,
@@ -101,7 +98,9 @@ export function LogsList({
                     </div>
                     <div class="logs-row-main">
                       <div class="logs-row-top">
-                        <span class="logs-type">{humanizeKind(item.type)}</span>
+                        <span class="logs-type">
+                          {humanizeLogType(item.type)}
+                        </span>
                         <span class="logs-device">
                           {deviceName(item.device_id)}
                         </span>

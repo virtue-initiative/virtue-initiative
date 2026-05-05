@@ -55,8 +55,7 @@ Base URL examples:
   "name": "My Laptop",
   "platform": "linux",
   "last_upload_at": DateTime | null,
-  "status": "online" | "offline",
-  "enabled": true
+  "status": "online" | "offline"
 }
 ```
 
@@ -560,7 +559,6 @@ Response `200`:
   "id": UUID,
   "name": "My Laptop",
   "platform": "linux",
-  "enabled": true,
   "owner": {
     "user_id": UUID,
     "pub_key": Base64

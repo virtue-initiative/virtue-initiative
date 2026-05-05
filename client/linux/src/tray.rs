@@ -143,21 +143,13 @@ fn build_tooltip(paths: &ClientPaths) -> String {
     let auth = store
         .as_ref()
         .and_then(|store| store.load_auth_state().ok());
-    let settings = store
-        .as_ref()
-        .and_then(|store| store.load_device_settings().ok())
-        .flatten();
 
     if auth
         .as_ref()
         .and_then(|auth| auth.device_credentials.as_ref())
         .is_some()
     {
-        if settings.as_ref().is_some_and(|settings| !settings.enabled) {
-            "Signed in, but monitoring is disabled by device settings.".to_string()
-        } else {
-            "Signed in. Run 'virtue status' from a terminal for details.".to_string()
-        }
+        "Signed in. Run 'virtue status' from a terminal for details.".to_string()
     } else {
         "Not signed in. Run 'virtue login' from a terminal.".to_string()
     }

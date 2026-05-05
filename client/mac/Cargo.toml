@@ -1,6 +1,6 @@
 [package]
 name = "virtue-mac"
-version = "0.0.2"
+version = "0.0.5"
 edition = "2024"
 description = "Virtue macOS tray client and daemon"
 
@@ -18,7 +18,7 @@ dirs = "6"
 hostname = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSApplication", "NSButton", "NSButtonCell", "NSControl", "NSGraphics", "NSResponder", "NSSecureTextField", "NSTextField", "NSTextFieldCell", "NSView", "NSWindow", "NSWorkspace"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAlert", "NSApplication", "NSButton", "NSButtonCell", "NSColor", "NSControl", "NSEvent", "NSGraphics", "NSImage", "NSImageView", "NSMenu", "NSMenuItem", "NSResponder", "NSScrollView", "NSSecureTextField", "NSText", "NSTextField", "NSTextFieldCell", "NSTextView", "NSView", "NSVisualEffectView", "NSWindow", "NSWorkspace"] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSDate", "NSNotification", "NSOperation", "NSRunLoop", "NSString", "block2"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

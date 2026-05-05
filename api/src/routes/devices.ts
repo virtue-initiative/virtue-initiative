@@ -24,7 +24,6 @@ const LOCAL_WEB_URL = 'http://localhost:5173';
 const updateDeviceSchema = z
   .object({
     name: z.string().min(1).optional(),
-    enabled: z.boolean().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
 
@@ -52,7 +51,6 @@ devices.get('/', authenticate('access'), async (c) => {
         device.last_upload_at && Date.now() - device.last_upload_at < ONLINE_WINDOW_MS
           ? 'online'
           : 'offline',
-      enabled: device.enabled === 1,
     })),
   );
 });
@@ -65,8 +63,8 @@ devices.patch('/:id', authenticate('access'), validateZ('json', updateDeviceSche
     return c.json({ error: 'Not found' }, 404);
   }
 
-  const { name, enabled } = c.req.valid('json');
-  await updateDevice(c.env.DB, deviceId, { name, enabled });
+  const { name } = c.req.valid('json');
+  await updateDevice(c.env.DB, deviceId, { name });
 
   return c.json({ id: deviceId, updated: true });
 });

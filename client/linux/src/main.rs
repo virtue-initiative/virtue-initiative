@@ -179,7 +179,6 @@ fn status(paths: ClientPaths) -> Result<()> {
     let mut config = build_core_config(&paths);
     config.refresh_from_runtime_file()?;
     let status = load_service_status(&store, &auth, &config)?;
-    let device_settings = store.load_device_settings()?;
 
     println!("logged_in: {}", auth.device_credentials.is_some());
     println!("running: {}", status.is_running);
@@ -191,6 +190,10 @@ fn status(paths: ClientPaths) -> Result<()> {
     println!(
         "lifecycle_computer_power: {}",
         status.lifecycle.snapshot.computer_power.as_str()
+    );
+    println!(
+        "lifecycle_capture_permission: {}",
+        status.lifecycle.snapshot.capture_permission.as_str()
     );
     println!(
         "lifecycle_capture_availability: {}",
@@ -228,13 +231,6 @@ fn status(paths: ClientPaths) -> Result<()> {
         status.device_id.as_deref().unwrap_or("<none>")
     );
     println!(
-        "device_enabled: {}",
-        device_settings
-            .as_ref()
-            .map(|settings| settings.enabled.to_string())
-            .unwrap_or_else(|| "<unknown>".to_string())
-    );
-    println!(
         "capture_interval_seconds: {}",
         config.screenshot_interval.as_secs()
     );
@@ -269,8 +265,28 @@ fn status(paths: ClientPaths) -> Result<()> {
         status.lifecycle.capabilities.explicit_user_stop.as_str()
     );
     println!(
+        "capability_capture_permission: {}",
+        status.lifecycle.capabilities.capture_permission.as_str()
+    );
+    println!(
         "capability_capture_availability: {}",
         status.lifecycle.capabilities.capture_availability.as_str()
+    );
+    println!(
+        "capability_user_login: {}",
+        status.lifecycle.capabilities.user_login.as_str()
+    );
+    println!(
+        "capability_user_logout: {}",
+        status.lifecycle.capabilities.user_logout.as_str()
+    );
+    println!(
+        "capability_capture_worker: {}",
+        status.lifecycle.capabilities.capture_worker.as_str()
+    );
+    println!(
+        "capability_next_boot_recovery: {}",
+        status.lifecycle.capabilities.next_boot_recovery.as_str()
     );
 
     Ok(())

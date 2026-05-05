@@ -7,8 +7,9 @@ import { useLogs } from "../../hooks/useLogs";
 import { usePartners } from "../../hooks/usePartners";
 import { LogsGallery } from "./LogsGallery";
 import { LogsList } from "./LogsList";
-import { FeedLog, getLogImage } from "./shared";
+import { FeedLog, getLogImage, humanizeLogType } from "./shared";
 import "./style.css";
+import { useUrlState } from "../../hooks/useUrlState";
 
 interface DeviceGroup {
   label: string;
@@ -107,14 +108,21 @@ export function Logs() {
     isLoading: partnersLoading,
   } = usePartners();
 
-  const [selectedDevice, setSelectedDevice] = useState<string | null>(() =>
-    new URLSearchParams(window.location.search).get("device_id"),
+  const [selectedDevice, setSelectedDevice] = useUrlState<string | null>(
+    "device_id",
+    null,
   );
-  const [selectedUser, setSelectedUser] = useState<string | null>(() =>
-    new URLSearchParams(window.location.search).get("user"),
+  const [selectedUser, setSelectedUser] = useUrlState<string | null>(
+    "user_id",
+    null,
   );
   const [galleryFullscreen, setGalleryFullscreen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [minRiskFilter, setMinRiskFilter] = useUrlState("risk", 0);
+  const [rawTypeFilter, setTypeFilter] = useUrlState<string | string[] | null>(
+    "type",
+    null,
+  );
 
   const {
     logs,
@@ -229,17 +237,6 @@ export function Logs() {
     setSelectedUser(user);
     setSelectedDevice(device);
     setSidebarOpen(false);
-    const qs = new URLSearchParams(window.location.search);
-    if (device) qs.set("device_id", device);
-    else qs.delete("device_id");
-    if (user) qs.set("user", user);
-    else qs.delete("user");
-    const query = qs.toString();
-    window.history.replaceState(
-      null,
-      "",
-      `${window.location.pathname}${query ? `?${query}` : ""}`,
-    );
   }
 
   const title =
@@ -249,18 +246,24 @@ export function Logs() {
         ? `${groupLabel(selectedUser)}'s logs`
         : "My logs";
   const isGallery = path === "/logs/gallery";
-  const logsViewQuery = useMemo(() => {
-    const qs = new URLSearchParams();
-    if (selectedDevice) {
-      qs.set("device_id", selectedDevice);
-    }
-    if (selectedUser) {
-      qs.set("user", selectedUser);
-    }
-    const query = qs.toString();
-    return query ? `?${query}` : "";
-  }, [selectedDevice, selectedUser]);
-  const items = logs ?? ([] as FeedLog[]);
+  const availableTypes = useMemo(
+    () => Array.from(new Set((logs ?? []).map((item) => item.type))).sort(),
+    [logs],
+  );
+  const typeFilter = Array.isArray(rawTypeFilter)
+    ? (rawTypeFilter[0] ?? null)
+    : rawTypeFilter;
+
+  const items = useMemo(
+    () =>
+      (logs ?? []).filter((item) => {
+        return (
+          (item.risk ?? 0) >= minRiskFilter &&
+          (typeFilter === null || typeFilter === item.type)
+        );
+      }),
+    [logs, minRiskFilter, typeFilter],
+  );
   const galleryItems = items.filter((item) => getLogImage(item) !== undefined);
 
   useEffect(() => {
@@ -373,16 +376,49 @@ export function Logs() {
                     )}
                   </button>
                 )}
+                <div class="logs-filter-switcher">
+                  <select
+                    class="logs-filter-select"
+                    value={minRiskFilter}
+                    onChange={(e) =>
+                      setMinRiskFilter(+(e.target as HTMLSelectElement).value)
+                    }
+                  >
+                    <option value="0">All</option>
+                    <option value="7">High</option>
+                    <option value="5">Medium</option>
+                    <option value="2">Low</option>
+                  </select>
+                  {availableTypes.length > 0 && (
+                    <select
+                      class="logs-filter-select"
+                      value={typeFilter ?? ""}
+                      onChange={(e) =>
+                        setTypeFilter(
+                          (e.target as HTMLSelectElement).value || null,
+                        )
+                      }
+                      aria-label="Log type"
+                    >
+                      <option value="">All types</option>
+                      {availableTypes.map((type) => (
+                        <option key={type} value={type}>
+                          {humanizeLogType(type)}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
                 <div class="segmented-control logs-view-switcher">
                   <a
                     class={`segmented-control__item${!isGallery ? " is-active" : ""}`}
-                    href={`/logs${logsViewQuery}`}
+                    href={`/logs${window.location.search}`}
                   >
                     List
                   </a>
                   <a
                     class={`segmented-control__item${isGallery ? " is-active" : ""}`}
-                    href={`/logs/gallery${logsViewQuery}`}
+                    href={`/logs/gallery${window.location.search}`}
                   >
                     Gallery
                   </a>

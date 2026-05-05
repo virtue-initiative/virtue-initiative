@@ -1,9 +1,14 @@
 .logs-gallery-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(4.75rem, 1fr));
-  align-items: stretch;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: space-between;
   width: 100%;
   gap: 0.5rem;
+
+  & > * {
+    flex: 1 1 4.75rem;
+    max-width: 6.2rem;
+  }
 }
 
 .logs-gallery-day-group .logs-gallery-grid {
@@ -11,7 +16,6 @@
 }
 
 .logs-gallery-grid--fullscreen {
-  grid-template-columns: repeat(auto-fit, minmax(5.8rem, 1fr));
   gap: 0.6rem;
 }
 

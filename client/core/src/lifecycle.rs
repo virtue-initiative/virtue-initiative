@@ -251,8 +251,8 @@ impl LifecycleCapabilities {
             "macos" => Self {
                 startup: LifecycleCapabilitySupport::Supported,
                 shutdown: LifecycleCapabilitySupport::BestEffort,
-                suspend: LifecycleCapabilitySupport::Unsupported,
-                wake: LifecycleCapabilitySupport::Unsupported,
+                suspend: LifecycleCapabilitySupport::Supported,
+                wake: LifecycleCapabilitySupport::Supported,
                 user_login: LifecycleCapabilitySupport::Unsupported,
                 user_logout: LifecycleCapabilitySupport::Unsupported,
                 explicit_user_stop: LifecycleCapabilitySupport::Supported,
@@ -264,14 +264,14 @@ impl LifecycleCapabilities {
             "windows" => Self {
                 startup: LifecycleCapabilitySupport::Supported,
                 shutdown: LifecycleCapabilitySupport::Supported,
-                suspend: LifecycleCapabilitySupport::Unsupported,
-                wake: LifecycleCapabilitySupport::Unsupported,
-                user_login: LifecycleCapabilitySupport::Unsupported,
-                user_logout: LifecycleCapabilitySupport::Unsupported,
-                explicit_user_stop: LifecycleCapabilitySupport::Unsupported,
+                suspend: LifecycleCapabilitySupport::Supported,
+                wake: LifecycleCapabilitySupport::Supported,
+                user_login: LifecycleCapabilitySupport::BestEffort,
+                user_logout: LifecycleCapabilitySupport::Supported,
+                explicit_user_stop: LifecycleCapabilitySupport::Supported,
                 capture_permission: LifecycleCapabilitySupport::Unsupported,
                 capture_availability: LifecycleCapabilitySupport::Supported,
-                capture_worker: LifecycleCapabilitySupport::Supported,
+                capture_worker: LifecycleCapabilitySupport::Unsupported,
                 next_boot_recovery: LifecycleCapabilitySupport::Supported,
             },
             "android" => Self {
@@ -543,7 +543,9 @@ fn new_transition(input: TransitionInput<'_>) -> LifecycleTransition {
 
 fn stop_origin_from_raw_reason(raw_reason: &str) -> LifecycleOrigin {
     let normalized = raw_reason.trim().to_ascii_lowercase();
-    if normalized.contains("service_control_stop") {
+    if normalized.contains("session_logout") || normalized.contains("logoff") {
+        LifecycleOrigin::SessionLogout
+    } else if normalized.contains("service_control_stop") {
         LifecycleOrigin::ServiceManager
     } else {
         LifecycleOrigin::Unknown
@@ -559,6 +561,13 @@ fn stop_risk(origin: LifecycleOrigin) -> f32 {
         | LifecycleOrigin::StartupRecovery => 0.5,
         LifecycleOrigin::SystemSuspend | LifecycleOrigin::SessionLogout => 0.0,
     }
+}
+
+fn is_sleeping_power_state(state: ComputerPowerState) -> bool {
+    matches!(
+        state,
+        ComputerPowerState::Suspending | ComputerPowerState::Suspended
+    )
 }
 
 pub fn apply_observation(
@@ -787,11 +796,19 @@ pub fn apply_observation(
             }
         }
         LifecycleObservation::CapturePermissionChanged { state, detected_by } => {
-            if status.snapshot.capture_permission != *state {
+            if is_sleeping_power_state(status.snapshot.computer_power) {
+                return LifecycleReduceResult {
+                    status,
+                    transitions,
+                };
+            }
+
+            let previous = status.snapshot.capture_permission;
+            if previous != *state {
                 let transition = new_transition(TransitionInput {
                     domain: LifecycleDomain::CapturePermission,
                     service_role: None,
-                    from: status.snapshot.capture_permission.as_str(),
+                    from: previous.as_str(),
                     to: state.as_str(),
                     origin: LifecycleOrigin::Unknown,
                     detected_by,
@@ -805,6 +822,13 @@ pub fn apply_observation(
             }
         }
         LifecycleObservation::CaptureAvailabilityChanged { state, detected_by } => {
+            if is_sleeping_power_state(status.snapshot.computer_power) {
+                return LifecycleReduceResult {
+                    status,
+                    transitions,
+                };
+            }
+
             if status.snapshot.capture_availability != *state {
                 let transition = new_transition(TransitionInput {
                     domain: LifecycleDomain::CaptureAvailability,
@@ -950,5 +974,107 @@ mod tests {
         assert_eq!(result.transitions[0].risk, 0.0);
         assert_eq!(result.transitions[0].domain, LifecycleDomain::ComputerPower);
         assert_eq!(result.transitions[0].origin, LifecycleOrigin::SystemSuspend);
+    }
+
+    #[test]
+    fn capture_permission_loss_transition_is_informational() {
+        let current = LifecycleStatus {
+            snapshot: LifecycleSnapshot {
+                capture_permission: CapturePermissionState::Granted,
+                ..LifecycleSnapshot::default()
+            },
+            ..LifecycleStatus::default()
+        };
+
+        let result = apply_observation(
+            &current,
+            &LifecycleObservation::CapturePermissionChanged {
+                state: CapturePermissionState::Missing,
+                detected_by: "test_probe".to_string(),
+            },
+        );
+
+        assert_eq!(result.transitions.len(), 1);
+        assert_eq!(
+            result.transitions[0].domain,
+            LifecycleDomain::CapturePermission
+        );
+        assert_eq!(result.transitions[0].from, "granted");
+        assert_eq!(result.transitions[0].to, "missing");
+        assert_eq!(result.transitions[0].risk, 0.0);
+    }
+
+    #[test]
+    fn capture_permission_change_while_suspended_is_ignored() {
+        let current = LifecycleStatus {
+            snapshot: LifecycleSnapshot {
+                computer_power: ComputerPowerState::Suspended,
+                capture_permission: CapturePermissionState::Granted,
+                ..LifecycleSnapshot::default()
+            },
+            ..LifecycleStatus::default()
+        };
+
+        let result = apply_observation(
+            &current,
+            &LifecycleObservation::CapturePermissionChanged {
+                state: CapturePermissionState::Missing,
+                detected_by: "failed_loop".to_string(),
+            },
+        );
+
+        assert!(result.transitions.is_empty());
+        assert_eq!(
+            result.status.snapshot.capture_permission,
+            CapturePermissionState::Granted
+        );
+    }
+
+    #[test]
+    fn capture_availability_change_while_suspended_is_ignored() {
+        let current = LifecycleStatus {
+            snapshot: LifecycleSnapshot {
+                computer_power: ComputerPowerState::Suspended,
+                capture_availability: CaptureAvailabilityState::Ready,
+                ..LifecycleSnapshot::default()
+            },
+            ..LifecycleStatus::default()
+        };
+
+        let result = apply_observation(
+            &current,
+            &LifecycleObservation::CaptureAvailabilityChanged {
+                state: CaptureAvailabilityState::Blocked,
+                detected_by: "failed_loop".to_string(),
+            },
+        );
+
+        assert!(result.transitions.is_empty());
+        assert_eq!(
+            result.status.snapshot.capture_availability,
+            CaptureAvailabilityState::Ready
+        );
+    }
+
+    #[test]
+    fn capture_permission_gain_transition_is_informational() {
+        let current = LifecycleStatus {
+            snapshot: LifecycleSnapshot {
+                capture_permission: CapturePermissionState::Missing,
+                ..LifecycleSnapshot::default()
+            },
+            ..LifecycleStatus::default()
+        };
+
+        let result = apply_observation(
+            &current,
+            &LifecycleObservation::CapturePermissionChanged {
+                state: CapturePermissionState::Granted,
+                detected_by: "test_probe".to_string(),
+            },
+        );
+
+        assert_eq!(result.transitions.len(), 1);
+        assert_eq!(result.transitions[0].risk, 0.0);
     }
 }

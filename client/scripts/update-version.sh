@@ -111,29 +111,14 @@ replace_line \
   "  \"version\": \"${BASE_VERSION}\","
 
 replace_line \
-  "${CLIENT_ROOT}/windows/packaging/nsis/installer.nsi" \
-  '^!define PRODUCT_VERSION ".*"$' \
-  "!define PRODUCT_VERSION \"${BASE_VERSION}\""
-
-replace_line \
   "${CLIENT_ROOT}/windows/scripts/remote-windows-build.sh" \
-  '^  --version <version>             Installer version\. Default: .*$' \
-  "  --version <version>             Installer version. Default: ${DEV_VERSION}"
+  '^  --version <version>             Artifact label\. Default: .*$' \
+  "  --version <version>             Artifact label. Default: ${DEV_VERSION}"
 
 replace_line \
   "${CLIENT_ROOT}/windows/scripts/remote-windows-build.sh" \
   '^VERSION=".*"$' \
   "VERSION=\"${DEV_VERSION}\""
-
-replace_line \
-  "${CLIENT_ROOT}/windows/README.md" \
-  'build-installer\.sh -Version [0-9]+\.[0-9]+\.[0-9]+ -Profile Debug' \
-  "build-installer.sh -Version ${BASE_VERSION} -Profile Debug"
-
-replace_line \
-  "${CLIENT_ROOT}/windows/README.md" \
-  'build-installer\.ps1 -Version [0-9]+\.[0-9]+\.[0-9]+ -Profile Debug' \
-  "build-installer.ps1 -Version ${BASE_VERSION} -Profile Debug"
 
 replace_line \
   "${CLIENT_ROOT}/windows/README.md" \
