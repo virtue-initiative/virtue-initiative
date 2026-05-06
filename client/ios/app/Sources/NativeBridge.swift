@@ -38,6 +38,11 @@ private func virtue_ios_native_run_daemon_loop() -> UnsafeMutablePointer<CChar>?
 @_silgen_name("virtue_ios_native_stop_daemon")
 private func virtue_ios_native_stop_daemon() -> UnsafeMutablePointer<CChar>?
 
+@_silgen_name("virtue_ios_native_request_pause_monitoring")
+private func virtue_ios_native_request_pause_monitoring(
+    _ source: UnsafePointer<CChar>?
+) -> UnsafeMutablePointer<CChar>?
+
 @_silgen_name("virtue_ios_free_string")
 private func virtue_ios_free_string(_ value: UnsafeMutablePointer<CChar>?)
 
@@ -127,6 +132,14 @@ enum NativeBridge {
     static func stopDaemon() -> String? {
         callReturningError {
             virtue_ios_native_stop_daemon()
+        }
+    }
+
+    static func requestPauseMonitoring(source: String) -> String? {
+        callReturningError {
+            source.withCString { sourceCString in
+                virtue_ios_native_request_pause_monitoring(sourceCString)
+            }
         }
     }
 

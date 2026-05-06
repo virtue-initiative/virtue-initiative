@@ -12,8 +12,9 @@ use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
 use virtue_core::storage::FileStateStore;
 use virtue_core::{
-    AuthState, Config, CoreError, CoreResult, DeviceSettings, LifecycleObservation,
-    MonitorService, PlatformHooks, Screenshot, ServiceRole, ServiceStatus,
+    AuthState, CaptureAvailabilityState, CapturePermissionState, Config, CoreError, CoreResult,
+    DeviceSettings, LifecycleObservation, LifecycleOrigin, MonitorService, PlatformHooks,
+    Screenshot, ServiceRole, ServiceStatus, ServiceStopMarker,
 };
 
 static CORE: OnceCell<IosCore> = OnceCell::new();
@@ -26,6 +27,14 @@ const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
 const CAPTURE_STATUS_READY: c_int = 0;
 const CAPTURE_STATUS_PERMISSION_MISSING: c_int = 1;
 const CAPTURE_STATUS_SESSION_UNAVAILABLE: c_int = 2;
+const CAPTURE_STATUS_UNKNOWN: c_int = 3;
+
+#[derive(Clone, Debug)]
+struct StopRequest {
+    raw_reason: String,
+    detected_by: String,
+    explicit_user_stop: bool,
+}
 
 unsafe extern "C" {
     fn virtue_ios_capture_status() -> c_int;
@@ -38,10 +47,17 @@ struct IosCore {
     runtime_config_file: PathBuf,
     stop: AtomicBool,
     daemon_running: Mutex<bool>,
+    stop_request: Mutex<Option<StopRequest>>,
 }
 
 #[derive(Clone)]
 struct IosPlatformHooks;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CaptureState {
+    permission: CapturePermissionState,
+    availability: CaptureAvailabilityState,
+}
 
 impl IosPlatformHooks {
     fn capture_status(&self) -> c_int {
@@ -86,6 +102,9 @@ impl PlatformHooks for IosPlatformHooks {
             )),
             CAPTURE_STATUS_SESSION_UNAVAILABLE => Err(CoreError::CommandFailed(
                 "capture session unavailable".to_string(),
+            )),
+            CAPTURE_STATUS_UNKNOWN => Err(CoreError::CommandFailed(
+                "capture status unknown".to_string(),
             )),
             other => Err(CoreError::CommandFailed(format!(
                 "unexpected capture status code: {other}"
@@ -137,6 +156,7 @@ pub extern "C" fn virtue_ios_native_init(
                 runtime_config_file,
                 stop: AtomicBool::new(false),
                 daemon_running: Mutex::new(false),
+                stop_request: Mutex::new(None),
             })
             .map_err(|_| anyhow!("core already initialized"))?;
         }
@@ -182,10 +202,10 @@ pub extern "C" fn virtue_ios_native_login(
         let device_name = c_string_or_empty(device_name);
         let core = core()?;
 
-        let mut service =
-            MonitorService::setup(build_core_config(core, &device_name), IosPlatformHooks)?;
-        service.login(&email, &password)?;
-        Ok(())
+        with_ephemeral_service(core, &device_name, |service| {
+            service.login(&email, &password)?;
+            Ok(())
+        })
     })();
 
     into_c_result(result)
@@ -195,10 +215,10 @@ pub extern "C" fn virtue_ios_native_login(
 pub extern "C" fn virtue_ios_native_logout() -> *mut c_char {
     let result = (|| -> Result<()> {
         let core = core()?;
-        let mut service =
-            MonitorService::setup(build_core_config(core, "ios-device"), IosPlatformHooks)?;
-        service.logout()?;
-        Ok(())
+        with_ephemeral_service(core, "ios-device", |service| {
+            service.logout()?;
+            Ok(())
+        })
     })();
 
     into_c_result(result)
@@ -258,8 +278,61 @@ pub extern "C" fn virtue_ios_native_run_daemon_loop() -> *mut c_char {
 pub extern "C" fn virtue_ios_native_stop_daemon() -> *mut c_char {
     let result = (|| -> Result<()> {
         let core = core()?;
+        set_stop_request(
+            core,
+            StopRequest {
+                raw_reason: "ios_stop_request".to_string(),
+                detected_by: "ios_extension_daemon".to_string(),
+                explicit_user_stop: false,
+            },
+        )?;
         core.stop.store(true, Ordering::SeqCst);
         Ok(())
+    })();
+
+    into_c_result(result)
+}
+
+#[no_mangle]
+pub extern "C" fn virtue_ios_native_pause_monitoring(
+    source: *const c_char,
+) -> *mut c_char {
+    let result = (|| -> Result<()> {
+        let core = core()?;
+        let _source = match c_string_or_empty(source).trim() {
+            "" => "ios_pause_button".to_string(),
+            value => value.to_string(),
+        };
+        set_stop_request(
+            core,
+            StopRequest {
+                raw_reason: "user_pause".to_string(),
+                detected_by: "ios_extension_daemon".to_string(),
+                explicit_user_stop: true,
+            },
+        )?;
+        core.stop.store(true, Ordering::SeqCst);
+        Ok(())
+    })();
+
+    into_c_result(result)
+}
+
+#[no_mangle]
+pub extern "C" fn virtue_ios_native_request_pause_monitoring(
+    source: *const c_char,
+) -> *mut c_char {
+    let result = (|| -> Result<()> {
+        let core = core()?;
+        let source = match c_string_or_empty(source).trim() {
+            "" => "ios_pause_button".to_string(),
+            value => value.to_string(),
+        };
+
+        with_ephemeral_service(core, "ios-device", |service| {
+            service.note_stop_requested_by_user(ServiceRole::PrimaryService, &source)?;
+            Ok(())
+        })
     })();
 
     into_c_result(result)
@@ -280,15 +353,52 @@ pub unsafe extern "C" fn virtue_ios_free_string(value: *mut c_char) {
 fn run_daemon_loop(core: &IosCore) -> Result<()> {
     let mut service =
         MonitorService::setup(build_core_config(core, "ios-device"), IosPlatformHooks)?;
+    seed_ephemeral_service_stop_marker(&core.state_dir, ServiceRole::PrimaryService)?;
     let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStarted {
         role: ServiceRole::PrimaryService,
         detected_by: "ios_extension_daemon".to_string(),
     });
+    let mut last_capture_state = None;
+    sync_capture_state(
+        &mut service,
+        &mut last_capture_state,
+        "ios_extension_capture_poll",
+    );
 
     while !core.stop.load(Ordering::SeqCst) {
+        if let Some(_intent) = service.take_stop_intent(ServiceRole::PrimaryService)? {
+            set_stop_request(
+                core,
+                StopRequest {
+                    raw_reason: "user_pause".to_string(),
+                    detected_by: "ios_extension_daemon".to_string(),
+                    explicit_user_stop: true,
+                },
+            )?;
+            core.stop.store(true, Ordering::SeqCst);
+            continue;
+        }
+
+        sync_capture_state(
+            &mut service,
+            &mut last_capture_state,
+            "ios_extension_capture_poll",
+        );
         let sleep_duration = match service.loop_iteration() {
-            Ok(outcome) => duration_until(outcome.next_run_at_ms),
+            Ok(outcome) => {
+                sync_capture_state(
+                    &mut service,
+                    &mut last_capture_state,
+                    "ios_extension_capture_poll",
+                );
+                duration_until(outcome.next_run_at_ms)
+            }
             Err(err) => {
+                sync_capture_state(
+                    &mut service,
+                    &mut last_capture_state,
+                    "ios_extension_capture_poll",
+                );
                 eprintln!("ios-daemon: {err}");
                 ERROR_RETRY_INTERVAL
             }
@@ -296,15 +406,76 @@ fn run_daemon_loop(core: &IosCore) -> Result<()> {
         sleep_interruptible(&core.stop, sleep_duration);
     }
 
+    let stop_request = if let Some(_intent) = service.take_stop_intent(ServiceRole::PrimaryService)? {
+        Some(StopRequest {
+            raw_reason: "user_pause".to_string(),
+            detected_by: "ios_extension_daemon".to_string(),
+            explicit_user_stop: true,
+        })
+    } else {
+        take_stop_request(core)?
+    };
+
+    let stop_request = stop_request.unwrap_or_else(|| StopRequest {
+        raw_reason: "ios_stop_request".to_string(),
+        detected_by: "ios_extension_daemon".to_string(),
+        explicit_user_stop: false,
+    });
     let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStopObserved {
         role: ServiceRole::PrimaryService,
-        raw_reason: "ios_stop_request".to_string(),
+        raw_reason: stop_request.raw_reason,
         shutdown_in_progress: false,
-        explicit_user_stop: false,
-        detected_by: "ios_extension_daemon".to_string(),
+        explicit_user_stop: stop_request.explicit_user_stop,
+        detected_by: stop_request.detected_by,
     });
     let _ = service.shutdown();
     Ok(())
+}
+
+fn sync_capture_state<P: PlatformHooks>(
+    service: &mut MonitorService<P>,
+    last_capture_state: &mut Option<CaptureState>,
+    detected_by: &str,
+) {
+    let current_state = current_capture_state();
+    if last_capture_state.as_ref() == Some(&current_state) {
+        return;
+    }
+
+    let _ = service.record_lifecycle_observation(LifecycleObservation::CapturePermissionChanged {
+        state: current_state.permission,
+        detected_by: detected_by.to_string(),
+    });
+    let _ = service.record_lifecycle_observation(LifecycleObservation::CaptureAvailabilityChanged {
+        state: current_state.availability,
+        detected_by: detected_by.to_string(),
+    });
+    *last_capture_state = Some(current_state);
+}
+
+fn current_capture_state() -> CaptureState {
+    match unsafe { virtue_ios_capture_status() } {
+        CAPTURE_STATUS_READY => CaptureState {
+            permission: CapturePermissionState::Granted,
+            availability: CaptureAvailabilityState::Ready,
+        },
+        CAPTURE_STATUS_PERMISSION_MISSING => CaptureState {
+            permission: CapturePermissionState::Missing,
+            availability: CaptureAvailabilityState::Blocked,
+        },
+        CAPTURE_STATUS_SESSION_UNAVAILABLE => CaptureState {
+            permission: CapturePermissionState::Granted,
+            availability: CaptureAvailabilityState::Blocked,
+        },
+        CAPTURE_STATUS_UNKNOWN => CaptureState {
+            permission: CapturePermissionState::Unknown,
+            availability: CaptureAvailabilityState::Unknown,
+        },
+        _ => CaptureState {
+            permission: CapturePermissionState::Unknown,
+            availability: CaptureAvailabilityState::Unknown,
+        },
+    }
 }
 
 fn sleep_interruptible(stop: &AtomicBool, duration: Duration) {
@@ -335,6 +506,41 @@ fn build_core_config(core: &IosCore, device_name: &str) -> Config {
         Duration::from_secs(DEFAULT_CAPTURE_INTERVAL_SECONDS),
         Duration::from_secs(DEFAULT_BATCH_WINDOW_SECONDS),
     )
+}
+
+fn with_ephemeral_service<T>(
+    core: &IosCore,
+    device_name: &str,
+    action: impl FnOnce(&mut MonitorService<IosPlatformHooks>) -> Result<T>,
+) -> Result<T> {
+    let mut service =
+        MonitorService::setup(build_core_config(core, device_name), IosPlatformHooks)?;
+    let result = action(&mut service);
+    let shutdown_result = service.shutdown();
+
+    match (result, shutdown_result) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(err), Ok(())) => Err(err),
+        (Ok(_), Err(err)) => Err(err.into()),
+        (Err(err), Err(_shutdown_err)) => Err(err),
+    }
+}
+
+fn set_stop_request(core: &IosCore, request: StopRequest) -> Result<()> {
+    let mut guard = core
+        .stop_request
+        .lock()
+        .map_err(|_| anyhow!("stop request lock poisoned"))?;
+    *guard = Some(request);
+    Ok(())
+}
+
+fn take_stop_request(core: &IosCore) -> Result<Option<StopRequest>> {
+    let mut guard = core
+        .stop_request
+        .lock()
+        .map_err(|_| anyhow!("stop request lock poisoned"))?;
+    Ok(guard.take())
 }
 
 fn write_runtime_overrides(
@@ -401,6 +607,20 @@ fn sanitize_json_file<T: DeserializeOwned>(root: &Path, name: &str) -> Result<()
     }
 
     fs::remove_file(&path).with_context(|| format!("failed removing {}", path.display()))?;
+    Ok(())
+}
+
+fn seed_ephemeral_service_stop_marker(state_dir: &Path, role: ServiceRole) -> Result<()> {
+    let store = FileStateStore::new(state_dir)?;
+    let stopped_at_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(0);
+    store.save_service_stop_marker(&ServiceStopMarker {
+        role,
+        origin: LifecycleOrigin::SystemShutdown,
+        stopped_at_ms,
+    })?;
     Ok(())
 }
 

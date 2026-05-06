@@ -17,10 +17,14 @@ enum VirtueShared {
     static let baseApiUrlKey = "VIRTUE_BASE_API_URL"
     static let captureIntervalKey = "VIRTUE_CAPTURE_INTERVAL_SECONDS"
     static let batchWindowKey = "VIRTUE_BATCH_WINDOW_SECONDS"
+    static let monitoringEnabledKey = "VIRTUE_MONITORING_ENABLED"
+    static let safariCaptureStateCodeKey = "VIRTUE_SAFARI_CAPTURE_STATE_CODE"
+    static let safariPauseStopIssuedKey = "VIRTUE_SAFARI_PAUSE_STOP_ISSUED"
 
-    static let defaultBaseApiUrl = "http://10.7.7.4:8787"
+    static let defaultBaseApiUrl = "https://api.virtueinitiative.org"
     static let defaultCaptureIntervalSeconds = "15"
     static let defaultBatchWindowSeconds = "30"
+    static let defaultMonitoringEnabled = true
 
     static let safariLastMessageAtKey = "VIRTUE_SAFARI_LAST_MESSAGE_AT"
     static let safariLastFrameAtKey = "VIRTUE_SAFARI_LAST_FRAME_AT"
@@ -32,4 +36,11 @@ enum VirtueShared {
 
     static let safariHeartbeatStaleThresholdSeconds: TimeInterval = 10
     static let safariFrameFreshnessThresholdSeconds: TimeInterval = 20
+
+    static let captureStateReady = 0
+    static let captureStatePermissionMissing = 1
+    static let captureStateSessionUnavailable = 2
+    static let captureStateUnknown = 3
+
+    static let brandAccentHex = "#008900"
 }
