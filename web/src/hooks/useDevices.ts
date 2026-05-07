@@ -1,6 +1,9 @@
 import useSWR, { useSWRConfig } from "swr";
 import { api, Device, isToastHandledError } from "../api";
-import { removeDeviceFromCachedDataFeed } from "../data-cache";
+import {
+  removeDeviceFromCachedDataFeed,
+  deleteDecryptedEventsForDevice,
+} from "../data-cache";
 import { useAuth } from "../context/auth";
 import { isLogsKey, swrKeys } from "./swr-keys";
 
@@ -42,6 +45,12 @@ export function useDevices(): UseDevicesResult {
       await removeDeviceFromCachedDataFeed(userId, userId, id).catch((err) => {
         console.warn(
           "[devices] failed to remove deleted device from cache",
+          err,
+        );
+      });
+      await deleteDecryptedEventsForDevice(userId, id).catch((err) => {
+        console.warn(
+          "[devices] failed to wipe decrypted events for device",
           err,
         );
       });

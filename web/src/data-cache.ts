@@ -1,8 +1,11 @@
 import { Batch, DataLog, DataPage } from "./api";
+import { FeedLog } from "./pages/Logs/shared";
 
 const DB_NAME = "virtue-data-cache";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const FEEDS_STORE = "feeds";
+const DECRYPTED_EVENTS_STORE = "decrypted_events";
+const MATERIALIZED_BATCHES_STORE = "materialized_batches";
 
 export interface CachedDataFeed {
   key: string;
@@ -11,6 +14,24 @@ export interface CachedDataFeed {
   since: number;
   batches: Batch[];
   logs: DataLog[];
+}
+
+interface StoredDecryptedEvent extends FeedLog {
+  viewer_id: string;
+}
+
+interface MaterializedBatchRecord {
+  id: string; // `${viewer_id}:${batch_id}`
+  viewer_id: string;
+  batch_id: string;
+  device_id: string;
+  created_at: number;
+}
+
+export interface DecryptedEventQuery {
+  deviceId?: string;
+  startTs?: number;
+  endTs?: number;
 }
 
 function feedKey(viewerId: string, targetUserId: string) {
@@ -46,10 +67,27 @@ function transactionDone(tx: IDBTransaction) {
 function openDatabase() {
   return new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
-      if (!db.objectStoreNames.contains(FEEDS_STORE)) {
+      const oldVersion = event.oldVersion;
+
+      if (oldVersion < 1) {
         db.createObjectStore(FEEDS_STORE, { keyPath: "key" });
+      }
+
+      if (oldVersion < 2) {
+        const eventsStore = db.createObjectStore(DECRYPTED_EVENTS_STORE, {
+          keyPath: "id",
+        });
+        eventsStore.createIndex("by_viewer_ts", ["viewer_id", "ts"]);
+        eventsStore.createIndex("by_viewer_device", ["viewer_id", "device_id"]);
+        eventsStore.createIndex("by_device_id", "device_id");
+
+        const batchesStore = db.createObjectStore(MATERIALIZED_BATCHES_STORE, {
+          keyPath: "id",
+        });
+        batchesStore.createIndex("by_viewer", "viewer_id");
+        batchesStore.createIndex("by_viewer_device", ["viewer_id", "device_id"]);
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -73,6 +111,40 @@ async function withDatabase<T>(fn: (db: IDBDatabase) => Promise<T>) {
 function sortByCreatedAt<T extends { created_at: number }>(items: T[]) {
   items.sort((a, b) => a.created_at - b.created_at);
 }
+
+function getAllFromIndex<T>(
+  store: IDBObjectStore,
+  indexName: string,
+  range?: IDBKeyRange,
+): Promise<T[]> {
+  return requestToPromise(
+    range
+      ? store.index(indexName).getAll(range)
+      : store.index(indexName).getAll(),
+  ) as Promise<T[]>;
+}
+
+function deleteByIndexCursor(
+  store: IDBObjectStore,
+  indexName: string,
+  range: IDBKeyRange,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const request = store.index(indexName).openCursor(range);
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (cursor) {
+        cursor.delete();
+        cursor.continue();
+      } else {
+        resolve();
+      }
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+// ── Existing feed functions ────────────────────────────────────────────────
 
 export async function loadCachedDataFeed(
   viewerId: string,
@@ -209,8 +281,180 @@ export async function clearDataCache(): Promise<void> {
   }
 
   await withDatabase(async (db) => {
-    const tx = db.transaction(FEEDS_STORE, "readwrite");
+    const tx = db.transaction(
+      [FEEDS_STORE, DECRYPTED_EVENTS_STORE, MATERIALIZED_BATCHES_STORE],
+      "readwrite",
+    );
     tx.objectStore(FEEDS_STORE).clear();
+    tx.objectStore(DECRYPTED_EVENTS_STORE).clear();
+    tx.objectStore(MATERIALIZED_BATCHES_STORE).clear();
+    await transactionDone(tx);
+  });
+}
+
+// ── Decrypted event cache functions ───────────────────────────────────────
+
+export async function getUnmaterializedBatches(
+  viewerId: string,
+  batches: Batch[],
+  cutoffTs: number,
+): Promise<Batch[]> {
+  if (batches.length === 0) return [];
+
+  return withDatabase(async (db) => {
+    const tx = db.transaction(MATERIALIZED_BATCHES_STORE, "readonly");
+    const store = tx.objectStore(MATERIALIZED_BATCHES_STORE);
+    const records = await getAllFromIndex<MaterializedBatchRecord>(
+      store,
+      "by_viewer",
+      IDBKeyRange.only(viewerId),
+    );
+    await transactionDone(tx);
+
+    const materializedIds = new Set(records.map((r) => r.batch_id));
+    return batches.filter(
+      (b) => !materializedIds.has(b.id) && b.created_at >= cutoffTs,
+    );
+  });
+}
+
+export async function writeMaterializedEvents(
+  viewerId: string,
+  batchId: string,
+  deviceId: string,
+  createdAt: number,
+  events: FeedLog[],
+): Promise<void> {
+  return withDatabase(async (db) => {
+    const tx = db.transaction(
+      [DECRYPTED_EVENTS_STORE, MATERIALIZED_BATCHES_STORE],
+      "readwrite",
+    );
+    const eventsStore = tx.objectStore(DECRYPTED_EVENTS_STORE);
+    const batchesStore = tx.objectStore(MATERIALIZED_BATCHES_STORE);
+
+    for (const event of events) {
+      const stored: StoredDecryptedEvent = { ...event, viewer_id: viewerId };
+      eventsStore.put(stored);
+    }
+
+    const record: MaterializedBatchRecord = {
+      id: `${viewerId}:${batchId}`,
+      viewer_id: viewerId,
+      batch_id: batchId,
+      device_id: deviceId,
+      created_at: createdAt,
+    };
+    batchesStore.put(record);
+
+    await transactionDone(tx);
+  });
+}
+
+export async function queryDecryptedEvents(
+  viewerId: string,
+  { deviceId, startTs, endTs }: DecryptedEventQuery,
+): Promise<FeedLog[]> {
+  return withDatabase(async (db) => {
+    const tx = db.transaction(DECRYPTED_EVENTS_STORE, "readonly");
+    const store = tx.objectStore(DECRYPTED_EVENTS_STORE);
+
+    let records: StoredDecryptedEvent[];
+
+    if (startTs !== undefined && endTs !== undefined) {
+      records = await getAllFromIndex<StoredDecryptedEvent>(
+        store,
+        "by_viewer_ts",
+        IDBKeyRange.bound([viewerId, startTs], [viewerId, endTs]),
+      );
+    } else {
+      records = await getAllFromIndex<StoredDecryptedEvent>(
+        store,
+        "by_viewer_ts",
+        IDBKeyRange.bound([viewerId, 0], [viewerId, Infinity]),
+      );
+    }
+
+    await transactionDone(tx);
+
+    const filtered = deviceId
+      ? records.filter((r) => r.device_id === deviceId)
+      : records;
+
+    return filtered.map(({ viewer_id: _v, ...event }) => event as FeedLog);
+  });
+}
+
+export async function deleteDecryptedEventsForDevice(
+  viewerId: string,
+  deviceId: string,
+): Promise<void> {
+  return withDatabase(async (db) => {
+    const tx = db.transaction(
+      [DECRYPTED_EVENTS_STORE, MATERIALIZED_BATCHES_STORE],
+      "readwrite",
+    );
+
+    await deleteByIndexCursor(
+      tx.objectStore(DECRYPTED_EVENTS_STORE),
+      "by_viewer_device",
+      IDBKeyRange.only([viewerId, deviceId]),
+    );
+
+    await deleteByIndexCursor(
+      tx.objectStore(MATERIALIZED_BATCHES_STORE),
+      "by_viewer_device",
+      IDBKeyRange.only([viewerId, deviceId]),
+    );
+
+    await transactionDone(tx);
+  });
+}
+
+export async function pruneDecryptedEventsBefore(
+  viewerId: string,
+  cutoffTs: number,
+): Promise<void> {
+  return withDatabase(async (db) => {
+    const tx = db.transaction(
+      [DECRYPTED_EVENTS_STORE, MATERIALIZED_BATCHES_STORE],
+      "readwrite",
+    );
+
+    await deleteByIndexCursor(
+      tx.objectStore(DECRYPTED_EVENTS_STORE),
+      "by_viewer_ts",
+      IDBKeyRange.bound([viewerId, 0], [viewerId, cutoffTs], false, true),
+    );
+
+    const batchRecords = await getAllFromIndex<MaterializedBatchRecord>(
+      tx.objectStore(MATERIALIZED_BATCHES_STORE),
+      "by_viewer",
+      IDBKeyRange.only(viewerId),
+    );
+    const batchesStore = tx.objectStore(MATERIALIZED_BATCHES_STORE);
+    for (const record of batchRecords) {
+      if (record.created_at < cutoffTs) {
+        batchesStore.delete(record.id);
+      }
+    }
+
+    await transactionDone(tx);
+  });
+}
+
+export async function clearDecryptedCache(): Promise<void> {
+  if (typeof indexedDB === "undefined") {
+    return;
+  }
+
+  await withDatabase(async (db) => {
+    const tx = db.transaction(
+      [DECRYPTED_EVENTS_STORE, MATERIALIZED_BATCHES_STORE],
+      "readwrite",
+    );
+    tx.objectStore(DECRYPTED_EVENTS_STORE).clear();
+    tx.objectStore(MATERIALIZED_BATCHES_STORE).clear();
     await transactionDone(tx);
   });
 }
