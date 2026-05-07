@@ -10,7 +10,6 @@ import {
   FeedLog,
   getLogImage,
   getLogMetadata,
-  groupLogsByDay,
   humanizeLogType,
   LogImage,
 } from "./shared";
@@ -28,10 +27,6 @@ export function LogsList({
   onLoadMore: () => void;
   deviceName: (id: string) => string;
 }) {
-  if (items.length === 0 && !loading) {
-    return <p class="empty">No logs found.</p>;
-  }
-  const dayGroups = groupLogsByDay(items);
   const loadSentinelRef = useRef<HTMLDivElement>(null);
   const loadRequestedRef = useRef(false);
 
@@ -68,88 +63,84 @@ export function LogsList({
     return () => observer.disconnect();
   }, [hasMore, loading, onLoadMore]);
 
+  if (items.length === 0 && !loading) {
+    return <p class="empty">No logs found.</p>;
+  }
+
+  if (items.length === 0 && !loading) {
+    return <p class="empty">No logs found.</p>;
+  }
+
   return (
     <>
-      <div class="section-stack">
-        {dayGroups.map((group) => (
-          <section class="logs-day-group" key={group.key}>
-            <h2 class="section-heading">{group.label}</h2>
-            <div class="logs-list">
-              {group.items.map((item) => {
-                const image = getLogImage(item);
-                const metadata = getLogMetadata(item);
-                const riskLabel =
-                  describeRiskLevel(item.risk) ?? "Risk unavailable";
-                const previewTitle = `${formatDate(item.ts)} ${formatTime(item.ts)}`;
-                const previewSubtitle = `${riskLabel}${item.batch_status === "failed" ? " • Unverified" : ""}`;
+      <div class="logs-list">
+        {items.map((item) => {
+          const image = getLogImage(item);
+          const metadata = getLogMetadata(item);
+          const riskLabel = describeRiskLevel(item.risk) ?? "Risk unavailable";
+          const previewTitle = `${formatDate(item.ts)} ${formatTime(item.ts)}`;
+          const previewSubtitle = `${riskLabel}${item.batch_status === "failed" ? " • Unverified" : ""}`;
 
-                return (
-                  <div class="logs-row" key={item.id}>
-                    <div class="logs-thumb-wrap">
-                      {image ? (
-                        <LogImage
-                          imageBytes={image}
-                          previewTitle={previewTitle}
-                          previewSubtitle={previewSubtitle}
-                        />
-                      ) : (
-                        <div class="logs-thumb-status">No image</div>
-                      )}
-                    </div>
-                    <div class="logs-row-main">
-                      <div class="logs-row-top">
-                        <span class="logs-type">
-                          {humanizeLogType(item.type)}
-                        </span>
-                        <span class="logs-device">
-                          {deviceName(item.device_id)}
-                        </span>
-                        {item.risk > 0.7 ? (
-                          <span
-                            class="logs-verify-badge logs-verify-badge--failed"
-                            title="High risk log"
-                          >
-                            ⚠ High risk
-                          </span>
-                        ) : (
-                          item.risk > 0.4 && (
-                            <span
-                              class="logs-verify-badge logs-verify-badge--moderate"
-                              title="Moderate risk log"
-                            >
-                              Moderate risk
-                            </span>
-                          )
-                        )}
-                        {item.batch_status === "failed" && (
-                          <span
-                            class="logs-verify-badge logs-verify-badge--failed"
-                            title="Batch hash chain verification failed — data may have been tampered with"
-                          >
-                            ⚠ Unverified
-                          </span>
-                        )}
-                        <span class="logs-time" title={formatTime(item.ts)}>
-                          {formatRelativeTimestamp(item.ts)}
-                        </span>
-                      </div>
-                      {metadata.length > 0 && (
-                        <dl class="logs-meta">
-                          {metadata.map(([key, value], index) => (
-                            <Fragment key={`${item.id}-meta-${index}`}>
-                              <dt>{key}</dt>
-                              <dd>{value}</dd>
-                            </Fragment>
-                          ))}
-                        </dl>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+          return (
+            <div class="logs-row" key={item.id}>
+              <div class="logs-thumb-wrap">
+                {image ? (
+                  <LogImage
+                    imageBytes={image}
+                    previewTitle={previewTitle}
+                    previewSubtitle={previewSubtitle}
+                  />
+                ) : (
+                  <div class="logs-thumb-status">No image</div>
+                )}
+              </div>
+              <div class="logs-row-main">
+                <div class="logs-row-top">
+                  <span class="logs-type">{humanizeLogType(item.type)}</span>
+                  <span class="logs-device">{deviceName(item.device_id)}</span>
+                  {item.risk > 0.7 ? (
+                    <span
+                      class="logs-verify-badge logs-verify-badge--failed"
+                      title="High risk log"
+                    >
+                      ⚠ High risk
+                    </span>
+                  ) : (
+                    item.risk > 0.4 && (
+                      <span
+                        class="logs-verify-badge logs-verify-badge--moderate"
+                        title="Moderate risk log"
+                      >
+                        Moderate risk
+                      </span>
+                    )
+                  )}
+                  {item.batch_status === "failed" && (
+                    <span
+                      class="logs-verify-badge logs-verify-badge--failed"
+                      title="Batch hash chain verification failed — data may have been tampered with"
+                    >
+                      ⚠ Unverified
+                    </span>
+                  )}
+                  <span class="logs-time" title={formatTime(item.ts)}>
+                    {formatRelativeTimestamp(item.ts)}
+                  </span>
+                </div>
+                {metadata.length > 0 && (
+                  <dl class="logs-meta">
+                    {metadata.map(([key, value], index) => (
+                      <Fragment key={`${item.id}-meta-${index}`}>
+                        <dt>{key}</dt>
+                        <dd>{value}</dd>
+                      </Fragment>
+                    ))}
+                  </dl>
+                )}
+              </div>
             </div>
-          </section>
-        ))}
+          );
+        })}
       </div>
       {hasMore && <div class="logs-load-sentinel" ref={loadSentinelRef} />}
       {loading && <p class="logs-loading">Loading…</p>}

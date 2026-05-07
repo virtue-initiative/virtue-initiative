@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useState, useCallback } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { Device, WatchingPartner } from "../../api";
 import { useAuth } from "../../context/auth";
@@ -94,6 +94,26 @@ function CloseIcon() {
   );
 }
 
+const dayLabelFormatter = new Intl.DateTimeFormat(undefined, {
+  weekday: "long",
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+});
+
+function getDayBounds(offset: number): { startMs: number; endMs: number } {
+  const day = new Date();
+  day.setHours(0, 0, 0, 0);
+  day.setDate(day.getDate() + offset);
+  const end = new Date(day);
+  end.setHours(23, 59, 59, 999);
+  return { startMs: day.getTime(), endMs: end.getTime() };
+}
+
+function formatDayLabel(startMs: number): string {
+  return dayLabelFormatter.format(new Date(startMs));
+}
+
 export function Logs() {
   const { userId } = useAuth();
   const { path } = useLocation();
@@ -110,30 +130,39 @@ export function Logs() {
 
   const [selectedDevice, setSelectedDevice] = useUrlState<string | null>(
     "device_id",
+    "string",
     null,
   );
   const [selectedUser, setSelectedUser] = useUrlState<string | null>(
     "user_id",
+    "string",
     null,
   );
   const [galleryFullscreen, setGalleryFullscreen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [minRiskFilter, setMinRiskFilter] = useUrlState("risk", 0);
+  const [dayOffset, setDayOffset] = useUrlState("day", "number", 0);
+  const [minRiskFilter, setMinRiskFilter] = useUrlState("risk", "number", 0);
   const [rawTypeFilter, setTypeFilter] = useUrlState<string | string[] | null>(
     "type",
+    "string",
     null,
+  );
+
+  const { startMs: weekStart, endMs: weekEnd } = useMemo(
+    () => getDayBounds(dayOffset),
+    [dayOffset],
   );
 
   const {
     logs,
-    hasMore,
     batchStats,
     error: logsError,
     isLoading: logsLoading,
-    loadMore,
   } = useLogs({
     userId: selectedUser,
     deviceId: selectedDevice,
+    startTime: weekStart,
+    endTime: weekEnd,
   });
 
   const deviceList = devices ?? [];
@@ -239,6 +268,10 @@ export function Logs() {
     setSidebarOpen(false);
   }
 
+  const dayLabel = formatDayLabel(weekStart);
+  const prevDay = useCallback(() => setDayOffset(dayOffset - 1), [dayOffset, setDayOffset]);
+  const nextDay = useCallback(() => setDayOffset(dayOffset + 1), [dayOffset, setDayOffset]);
+
   const title =
     sidebarLoading && selectedUser
       ? "Loading…"
@@ -258,11 +291,13 @@ export function Logs() {
     () =>
       (logs ?? []).filter((item) => {
         return (
+          item.ts >= weekStart &&
+          item.ts <= weekEnd &&
           (item.risk ?? 0) >= minRiskFilter &&
           (typeFilter === null || typeFilter === item.type)
         );
       }),
-    [logs, minRiskFilter, typeFilter],
+    [logs, minRiskFilter, typeFilter, weekStart, weekEnd],
   );
   const galleryItems = items.filter((item) => getLogImage(item) !== undefined);
 
@@ -385,9 +420,9 @@ export function Logs() {
                     }
                   >
                     <option value="0">All</option>
-                    <option value="7">High</option>
-                    <option value="5">Medium</option>
-                    <option value="2">Low</option>
+                    <option value="0.7">High</option>
+                    <option value="0.5">Medium</option>
+                    <option value="0.2">Low</option>
                   </select>
                   {availableTypes.length > 0 && (
                     <select
@@ -427,23 +462,43 @@ export function Logs() {
             </div>
           </div>
 
+          <div class="logs-week-nav">
+            <button
+              class="btn btn-ghost btn-sm"
+              type="button"
+              aria-label="Previous day"
+              onClick={prevDay}
+            >
+              ‹
+            </button>
+            <span class="logs-week-label">{dayLabel}</span>
+            <button
+              class="btn btn-ghost btn-sm"
+              type="button"
+              aria-label="Next day"
+              onClick={nextDay}
+              disabled={dayOffset >= 0}
+            >
+              ›
+            </button>
+          </div>
+
           {logsError && <p class="alert-error">{logsError.message}</p>}
-          {batchStats &&
-            (batchStats.decrypted > 0 || batchStats.skipped > 0) && (
-              <p class="logs-summary">
-                {batchStats.decrypted} block
-                {batchStats.decrypted === 1 ? "" : "s"} decrypted
-                {batchStats.skipped > 0 &&
-                  `, ${batchStats.skipped} block${batchStats.skipped === 1 ? "" : "s"} unavailable`}
-              </p>
-            )}
+          {batchStats && batchStats.total > 0 && (
+            <p class="logs-summary">
+              {batchStats.decrypted}/{batchStats.total} block
+              {batchStats.total === 1 ? "" : "s"} decrypted
+              {batchStats.skipped > 0 &&
+                `, ${batchStats.skipped} unavailable`}
+            </p>
+          )}
 
           {isGallery ? (
             <LogsGallery
               items={galleryItems}
               loading={logsLoading}
-              hasMore={hasMore ?? false}
-              onLoadMore={loadMore}
+              hasMore={false}
+              onLoadMore={() => {}}
               deviceName={deviceName}
               fullscreen={galleryFullscreen}
             />
@@ -451,8 +506,8 @@ export function Logs() {
             <LogsList
               items={items}
               loading={logsLoading}
-              hasMore={hasMore ?? false}
-              onLoadMore={loadMore}
+              hasMore={false}
+              onLoadMore={() => {}}
               deviceName={deviceName}
             />
           )}
