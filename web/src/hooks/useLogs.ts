@@ -1,22 +1,28 @@
-import { decode } from "@msgpack/msgpack";
 import useSWR from "swr";
-import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useEffect, useMemo, useState } from "preact/hooks";
 import { api, Batch, DataLog, isToastHandledError } from "../api";
-import { decryptBatch, decompressGzip } from "../crypto";
+import { decryptAndFlattenBatch } from "../batch-materializer";
 import {
   CachedDataFeed,
   loadCachedDataFeed,
   mergeDataPageIntoCache,
   pruneCachedDataFeedDevices,
+  getUnmaterializedBatches,
+  queryDecryptedEvents,
+  writeMaterializedEvents,
 } from "../data-cache";
 import { useAuth } from "../context/auth";
 import { useE2EE } from "../context/e2ee";
-import { FeedLog, toUint8Array } from "../pages/Logs/shared";
+import { FeedLog, getLogImage } from "../pages/Logs/shared";
+import { decodeWebpDimensions } from "../utils/webp-dimensions";
 import { useDevices } from "./useDevices";
+import { useDecryptedEventSync } from "./useDecryptedEventSync";
 import { swrKeys } from "./swr-keys";
 
 const SYNC_PAGE_SIZE = 250;
 const VISIBLE_PAGE_SIZE = 25;
+const DECRYPT_CONCURRENCY = 5;
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
 interface FeedEntry {
   key: string;
@@ -35,6 +41,8 @@ interface SyncedLogFeed {
 export interface UseLogsOptions {
   userId: string | null;
   deviceId: string | null;
+  startTime?: number;
+  endTime?: number;
 }
 
 export interface UseLogsResult {
@@ -44,6 +52,7 @@ export interface UseLogsResult {
     | {
         decrypted: number;
         skipped: number;
+        total: number;
       }
     | undefined;
   error: Error | undefined;
@@ -53,57 +62,23 @@ export interface UseLogsResult {
 }
 
 function toDirectLogEntry(entry: DataLog): FeedLog {
+  const image = getLogImage(entry);
+  let image_w: number | undefined;
+  let image_h: number | undefined;
+  if (image) {
+    const dims = decodeWebpDimensions(image);
+    if (dims) {
+      image_w = dims.width;
+      image_h = dims.height;
+    }
+  }
   return {
     ...entry,
     batch_status: "unknown" as const,
     source: "log" as const,
+    image_w,
+    image_h,
   };
-}
-
-async function decryptAndFlattenBatch(
-  batch: Batch,
-  openBatchKey: (encryptedKey: string) => Promise<CryptoKey>,
-): Promise<FeedLog[]> {
-  const response = await fetch(batch.url);
-  if (!response.ok) {
-    throw new Error(`Fetch failed (${response.status}) for ${batch.url}`);
-  }
-
-  const raw = new Uint8Array(await response.arrayBuffer());
-  if (raw.length < 13) {
-    throw new Error(`Batch blob too short for AES-GCM payload: ${batch.url}`);
-  }
-
-  const batchKey = await openBatchKey(batch.encrypted_key);
-  const decrypted = await decryptBatch(batchKey, raw);
-  const decompressed = await decompressGzip(decrypted);
-  const decoded = decode(decompressed) as unknown;
-  const eventBytes = Array.isArray(decoded) ? decoded : [];
-
-  return eventBytes.map((encodedEvent, index) => {
-    const rawEvent = toUint8Array(encodedEvent);
-    if (!rawEvent) {
-      throw new Error(`Batch event ${index} is not a byte array`);
-    }
-
-    const event = decode(rawEvent) as Record<string, unknown>;
-    const data =
-      event.data && typeof event.data === "object"
-        ? (event.data as Record<string, unknown>)
-        : {};
-
-    return {
-      id: typeof event.id === "string" ? event.id : `${batch.id}:${index}`,
-      device_id: batch.device_id,
-      ts: typeof event.ts === "number" ? event.ts : batch.end_time,
-      type: typeof event.type === "string" ? event.type : "unknown",
-      data,
-      created_at: batch.created_at,
-      risk: typeof event.risk === "number" ? event.risk : undefined,
-      batch_status: "unknown" as const,
-      source: "batch" as const,
-    };
-  });
 }
 
 function buildFilteredFeedEntries(
@@ -134,6 +109,8 @@ function buildFilteredFeedEntries(
 export function useLogs({
   userId: selectedUserId,
   deviceId: selectedDeviceId,
+  startTime,
+  endTime,
 }: UseLogsOptions): UseLogsResult {
   const { token, userId: viewerUserId } = useAuth();
   const {
@@ -145,14 +122,9 @@ export function useLogs({
   const [visibleCount, setVisibleCount] = useState(VISIBLE_PAGE_SIZE);
   const [logs, setLogs] = useState<FeedLog[]>();
   const [batchStats, setBatchStats] = useState<
-    | {
-        decrypted: number;
-        skipped: number;
-      }
-    | undefined
+    { decrypted: number; skipped: number; total: number } | undefined
   >();
   const [materializing, setMaterializing] = useState(false);
-  const batchItemsCache = useRef(new Map<string, Promise<FeedLog[]>>());
 
   const activeTargetUserId = selectedUserId ?? viewerUserId;
   const activePrivateKey = e2ee.privateKey;
@@ -174,10 +146,6 @@ export function useLogs({
   useEffect(() => {
     setVisibleCount(VISIBLE_PAGE_SIZE);
   }, [activeTargetUserId, selectedDeviceId, activeDeviceIdsKey]);
-
-  useEffect(() => {
-    batchItemsCache.current.clear();
-  }, [activeTargetUserId, activePrivateKey]);
 
   const key =
     token && viewerUserId && activeTargetUserId && !devicesLoading && e2ee.ready
@@ -246,99 +214,177 @@ export function useLogs({
     };
   });
 
+  // Background sync: materializes all batches to IDB newest-first
+  useDecryptedEventSync({
+    viewerId: viewerUserId,
+    batches: data?.cachedFeed.batches ?? [],
+    unwrapEncryptedBatchKey: e2ee.unwrapEncryptedBatchKey,
+    privateKeyReady: e2ee.ready && !!activePrivateKey,
+  });
+
   const filteredFeedEntries = useMemo(() => {
     const feedEntries = data?.feedEntries ?? [];
-    return selectedDeviceId
+    let filtered = selectedDeviceId
       ? feedEntries.filter((entry) => entry.device_id === selectedDeviceId)
       : feedEntries;
-  }, [data, selectedDeviceId]);
+
+    if (startTime !== undefined && endTime !== undefined) {
+      filtered = filtered.filter((entry) => {
+        if (entry.batch) {
+          return (
+            entry.batch.start_time <= endTime &&
+            entry.batch.end_time >= startTime
+          );
+        }
+        if (entry.log) {
+          return entry.log.ts >= startTime && entry.log.ts <= endTime;
+        }
+        return false;
+      });
+    }
+
+    return filtered;
+  }, [data, selectedDeviceId, startTime, endTime]);
+
+  const dateRangeActive = startTime !== undefined && endTime !== undefined;
 
   const visibleEntries = useMemo(
-    () => filteredFeedEntries.slice(0, visibleCount),
-    [filteredFeedEntries, visibleCount],
+    () =>
+      dateRangeActive
+        ? filteredFeedEntries
+        : filteredFeedEntries.slice(0, visibleCount),
+    [filteredFeedEntries, visibleCount, dateRangeActive],
   );
 
   useEffect(() => {
+    if (!data || !viewerUserId) {
+      setLogs(undefined);
+      setBatchStats(undefined);
+      setMaterializing(false);
+      return;
+    }
+
     let cancelled = false;
 
-    async function materializeVisibleItems() {
-      if (!data) {
-        setLogs(undefined);
-        setBatchStats(undefined);
+    async function loadLogs() {
+      setMaterializing(true);
+
+      // Query IDB for already-materialized events in the visible range
+      const cachedEvents = await queryDecryptedEvents(viewerUserId!, {
+        deviceId: selectedDeviceId ?? undefined,
+        startTs: startTime,
+        endTs: endTime,
+      });
+
+      if (cancelled) return;
+
+      // Direct (unencrypted) logs from the feed
+      const directLogs = visibleEntries.flatMap((entry) =>
+        entry.log ? [toDirectLogEntry(entry.log)] : [],
+      );
+
+      // Show cached + direct logs immediately
+      setLogs([...cachedEvents, ...directLogs].sort((a, b) => b.ts - a.ts));
+
+      // Determine which visible batches still need on-demand decryption
+      const cutoff = Date.now() - THIRTY_DAYS_MS;
+      const visibleBatches = visibleEntries.flatMap((entry) =>
+        entry.batch ? [entry.batch] : [],
+      );
+
+      let unmaterialized: Batch[];
+      try {
+        unmaterialized = await getUnmaterializedBatches(
+          viewerUserId!,
+          visibleBatches,
+          cutoff,
+        );
+      } catch (err) {
+        console.warn("[logs] failed to check materialized batches", err);
+        unmaterialized = visibleBatches;
+      }
+
+      if (cancelled) return;
+
+      const alreadyDecrypted = visibleBatches.length - unmaterialized.length;
+      setBatchStats({
+        decrypted: alreadyDecrypted,
+        skipped: 0,
+        total: visibleBatches.length,
+      });
+
+      if (!activePrivateKey || unmaterialized.length === 0) {
         setMaterializing(false);
         return;
       }
 
-      setMaterializing(true);
+      let decrypted = alreadyDecrypted;
+      let skipped = 0;
+      let completed = 0;
+      const accumLogs: FeedLog[] = [...cachedEvents, ...directLogs];
+      const queue = [...unmaterialized];
 
-      try {
-        const batchEntries = visibleEntries.flatMap((entry) =>
-          entry.batch ? [entry.batch] : [],
-        );
-        const directLogs = visibleEntries.flatMap((entry) =>
-          entry.log ? [toDirectLogEntry(entry.log)] : [],
-        );
-
-        let decrypted = 0;
-        let skipped = activePrivateKey ? 0 : batchEntries.length;
-        const batchLogs: FeedLog[] = [];
-
-        if (activePrivateKey) {
-          const results = await Promise.allSettled(
-            batchEntries.map((batch) => {
-              const cachedBatch = batchItemsCache.current.get(batch.id);
-              if (cachedBatch) {
-                return cachedBatch;
-              }
-
-              const promise = decryptAndFlattenBatch(
-                batch,
-                e2ee.unwrapEncryptedBatchKey,
-              ).catch((decryptError) => {
-                batchItemsCache.current.delete(batch.id);
-                throw decryptError;
-              });
-              batchItemsCache.current.set(batch.id, promise);
-              return promise;
-            }),
-          );
-
-          for (const result of results) {
-            if (result.status === "fulfilled") {
-              batchLogs.push(...result.value);
-              decrypted += 1;
-            } else {
-              skipped += 1;
-              console.error("[logs] failed to decrypt batch", result.reason);
-            }
+      async function worker() {
+        while (queue.length > 0) {
+          if (cancelled) return;
+          const batch = queue.shift()!;
+          try {
+            const batchLogs = await decryptAndFlattenBatch(
+              batch,
+              e2ee.unwrapEncryptedBatchKey,
+            );
+            if (cancelled) return;
+            accumLogs.push(...batchLogs);
+            decrypted++;
+            // Write to IDB so future visits load instantly
+            writeMaterializedEvents(
+              viewerUserId!,
+              batch.id,
+              batch.device_id,
+              batch.created_at,
+              batchLogs,
+            ).catch((err) => console.warn("[logs] failed to cache batch", err));
+          } catch (err) {
+            if (cancelled) return;
+            console.error("[logs] failed to decrypt batch", err);
+            skipped++;
           }
-        }
-
-        const merged = [...batchLogs, ...directLogs].sort(
-          (a, b) => b.ts - a.ts,
-        );
-
-        if (!cancelled) {
-          setLogs(merged);
-          setBatchStats({ decrypted, skipped });
-        }
-      } finally {
-        if (!cancelled) {
-          setMaterializing(false);
+          completed++;
+          setLogs([...accumLogs].sort((a, b) => b.ts - a.ts));
+          setBatchStats({ decrypted, skipped, total: visibleBatches.length });
+          if (completed === unmaterialized.length) setMaterializing(false);
         }
       }
+
+      await Promise.all(
+        Array.from(
+          { length: Math.min(DECRYPT_CONCURRENCY, unmaterialized.length) },
+          worker,
+        ),
+      );
     }
 
-    void materializeVisibleItems();
+    void loadLogs();
 
     return () => {
       cancelled = true;
     };
-  }, [data, visibleEntries, activePrivateKey, e2ee.unwrapEncryptedBatchKey]);
+  }, [
+    data,
+    viewerUserId,
+    selectedDeviceId,
+    startTime,
+    endTime,
+    visibleEntries,
+    activePrivateKey,
+    e2ee.unwrapEncryptedBatchKey,
+  ]);
 
   return {
     logs,
-    hasMore: data ? filteredFeedEntries.length > visibleCount : undefined,
+    hasMore: data
+      ? !dateRangeActive && filteredFeedEntries.length > visibleCount
+      : undefined,
     batchStats,
     error: [devicesError, error].find(
       (candidate) => candidate && !isToastHandledError(candidate),

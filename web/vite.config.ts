@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig, loadEnv, searchForWorkspaceRoot } from "vite";
 import preact from "@preact/preset-vite";
 
@@ -33,6 +34,9 @@ export default defineConfig(({ mode }) => {
     },
     resolve: {
       preserveSymlinks: false,
+    },
+    test: {
+      environment: "node",
     },
   };
 });

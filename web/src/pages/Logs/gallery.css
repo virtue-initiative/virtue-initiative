@@ -1,26 +1,9 @@
-.logs-gallery-grid {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: space-between;
+.logs-gallery-virtual {
   width: 100%;
-  gap: 0.5rem;
-
-  & > * {
-    flex: 1 1 4.75rem;
-    max-width: 6.2rem;
-  }
-}
-
-.logs-gallery-day-group .logs-gallery-grid {
-  margin-top: 0.25rem;
-}
-
-.logs-gallery-grid--fullscreen {
-  gap: 0.6rem;
+  position: relative;
 }
 
 .logs-gallery-item {
-  aspect-ratio: 4 / 3;
   min-width: 0;
   overflow: hidden;
 
@@ -61,7 +44,7 @@
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   background: var(--bg-subtle);
 }
 
@@ -78,15 +61,4 @@
   text-align: center;
   padding: 0.25rem;
   box-sizing: border-box;
-}
-
-@media (max-width: 600px) {
-  .logs-gallery-grid {
-    grid-template-columns: repeat(auto-fit, minmax(4rem, 1fr));
-    gap: 0.45rem;
-  }
-
-  .logs-gallery-grid--fullscreen {
-    grid-template-columns: repeat(auto-fit, minmax(4.6rem, 1fr));
-  }
 }

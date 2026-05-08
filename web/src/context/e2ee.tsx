@@ -1,6 +1,13 @@
 import { createContext } from "preact";
-import { useContext, useEffect, useState, useCallback } from "preact/hooks";
+import {
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+} from "preact/hooks";
 import { decryptBatch, importUserPrivateKey, unwrapBatchKey } from "../crypto";
+import { clearDecryptedCache } from "../data-cache";
 import { useUser } from "../hooks/useUser";
 import { useAuth } from "./auth";
 
@@ -23,6 +30,7 @@ export function E2EEProvider({
   const { user, isLoading: userLoading } = useUser();
   const [privateKey, setPrivateKeyState] = useState<CryptoKey | null>(null);
   const [ready, setReady] = useState(false);
+  const prevPrivKeyRef = useRef<string | undefined>(undefined);
 
   const setPrivateKey = useCallback((key: CryptoKey | null) => {
     setPrivateKeyState(key);
@@ -53,6 +61,18 @@ export function E2EEProvider({
     if (userLoading) {
       setReady(false);
       return;
+    }
+
+    // Wipe decrypted cache when the private key rotates
+    const prevPrivKey = prevPrivKeyRef.current;
+    const currentPrivKey = user?.priv_key;
+    prevPrivKeyRef.current = currentPrivKey;
+    if (
+      prevPrivKey !== undefined &&
+      prevPrivKey !== currentPrivKey &&
+      currentPrivKey
+    ) {
+      void clearDecryptedCache().catch(() => {});
     }
 
     let cancelled = false;
