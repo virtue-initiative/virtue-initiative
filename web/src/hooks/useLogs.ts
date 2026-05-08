@@ -13,7 +13,8 @@ import {
 } from "../data-cache";
 import { useAuth } from "../context/auth";
 import { useE2EE } from "../context/e2ee";
-import { FeedLog } from "../pages/Logs/shared";
+import { FeedLog, getLogImage } from "../pages/Logs/shared";
+import { decodeWebpDimensions } from "../utils/webp-dimensions";
 import { useDevices } from "./useDevices";
 import { useDecryptedEventSync } from "./useDecryptedEventSync";
 import { swrKeys } from "./swr-keys";
@@ -61,10 +62,22 @@ export interface UseLogsResult {
 }
 
 function toDirectLogEntry(entry: DataLog): FeedLog {
+  const image = getLogImage(entry);
+  let image_w: number | undefined;
+  let image_h: number | undefined;
+  if (image) {
+    const dims = decodeWebpDimensions(image);
+    if (dims) {
+      image_w = dims.width;
+      image_h = dims.height;
+    }
+  }
   return {
     ...entry,
     batch_status: "unknown" as const,
     source: "log" as const,
+    image_w,
+    image_h,
   };
 }
 
@@ -109,8 +122,7 @@ export function useLogs({
   const [visibleCount, setVisibleCount] = useState(VISIBLE_PAGE_SIZE);
   const [logs, setLogs] = useState<FeedLog[]>();
   const [batchStats, setBatchStats] = useState<
-    | { decrypted: number; skipped: number; total: number }
-    | undefined
+    { decrypted: number; skipped: number; total: number } | undefined
   >();
   const [materializing, setMaterializing] = useState(false);
 
@@ -272,9 +284,7 @@ export function useLogs({
       );
 
       // Show cached + direct logs immediately
-      setLogs(
-        [...cachedEvents, ...directLogs].sort((a, b) => b.ts - a.ts),
-      );
+      setLogs([...cachedEvents, ...directLogs].sort((a, b) => b.ts - a.ts));
 
       // Determine which visible batches still need on-demand decryption
       const cutoff = Date.now() - THIRTY_DAYS_MS;
@@ -333,9 +343,7 @@ export function useLogs({
               batch.device_id,
               batch.created_at,
               batchLogs,
-            ).catch((err) =>
-              console.warn("[logs] failed to cache batch", err),
-            );
+            ).catch((err) => console.warn("[logs] failed to cache batch", err));
           } catch (err) {
             if (cancelled) return;
             console.error("[logs] failed to decrypt batch", err);

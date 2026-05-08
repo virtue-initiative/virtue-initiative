@@ -2,6 +2,7 @@ import { decode } from "@msgpack/msgpack";
 import { Batch } from "./api";
 import { decryptBatch, decompressGzip } from "./crypto";
 import { FeedLog, toUint8Array } from "./pages/Logs/shared";
+import { decodeWebpDimensions } from "./utils/webp-dimensions";
 
 export async function decryptAndFlattenBatch(
   batch: Batch,
@@ -39,6 +40,16 @@ export async function decryptAndFlattenBatch(
       data.image = new Uint8Array(data.image as number[]);
     }
 
+    let image_w: number | undefined;
+    let image_h: number | undefined;
+    if (data.image instanceof Uint8Array) {
+      const dims = decodeWebpDimensions(data.image);
+      if (dims) {
+        image_w = dims.width;
+        image_h = dims.height;
+      }
+    }
+
     return {
       id: typeof event.id === "string" ? event.id : `${batch.id}:${index}`,
       device_id: batch.device_id,
@@ -49,6 +60,8 @@ export async function decryptAndFlattenBatch(
       risk: typeof event.risk === "number" ? event.risk : undefined,
       batch_status: "unknown" as const,
       source: "batch" as const,
+      image_w,
+      image_h,
     };
   });
 }

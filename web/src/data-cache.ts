@@ -1,5 +1,6 @@
 import { Batch, DataLog, DataPage } from "./api";
 import { FeedLog } from "./pages/Logs/shared";
+import { decodeWebpDimensions } from "./utils/webp-dimensions";
 
 const DB_NAME = "virtue-data-cache";
 const DB_VERSION = 2;
@@ -87,7 +88,10 @@ function openDatabase() {
           keyPath: "id",
         });
         batchesStore.createIndex("by_viewer", "viewer_id");
-        batchesStore.createIndex("by_viewer_device", ["viewer_id", "device_id"]);
+        batchesStore.createIndex("by_viewer_device", [
+          "viewer_id",
+          "device_id",
+        ]);
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -381,7 +385,45 @@ export async function queryDecryptedEvents(
       ? records.filter((r) => r.device_id === deviceId)
       : records;
 
-    return filtered.map(({ viewer_id: _v, ...event }) => event as FeedLog);
+    const toBackfill: StoredDecryptedEvent[] = [];
+    const updated = filtered.map((record) => {
+      const hasDims =
+        typeof record.image_w === "number" &&
+        typeof record.image_h === "number";
+      if (hasDims) return record;
+      const image = record.data?.image;
+      if (!(image instanceof Uint8Array)) return record;
+      const dims = decodeWebpDimensions(image);
+      if (!dims) return record;
+      const next: StoredDecryptedEvent = {
+        ...record,
+        image_w: dims.width,
+        image_h: dims.height,
+      };
+      toBackfill.push(next);
+      return next;
+    });
+
+    if (toBackfill.length > 0) {
+      void backfillDimensions(toBackfill).catch((err) =>
+        console.warn("[data-cache] dimension backfill failed", err),
+      );
+    }
+
+    return updated.map(({ viewer_id: _v, ...event }) => event as FeedLog);
+  });
+}
+
+async function backfillDimensions(
+  records: StoredDecryptedEvent[],
+): Promise<void> {
+  await withDatabase(async (db) => {
+    const tx = db.transaction(DECRYPTED_EVENTS_STORE, "readwrite");
+    const store = tx.objectStore(DECRYPTED_EVENTS_STORE);
+    for (const record of records) {
+      store.put(record);
+    }
+    await transactionDone(tx);
   });
 }
 

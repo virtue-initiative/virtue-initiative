@@ -6,6 +6,8 @@ import { formatDayHeading, localDateKey } from "../../utils/time";
 export type FeedLog = DataLog & {
   batch_status: BatchVerification;
   source: "batch" | "log";
+  image_w?: number;
+  image_h?: number;
 };
 
 export interface LogDayGroup<T extends { ts: number }> {
@@ -54,6 +56,18 @@ export function toUint8Array(value: unknown): Uint8Array | undefined {
 
 export function getLogImage(log: DataLog): Uint8Array | undefined {
   return toUint8Array(log.data.image);
+}
+
+export function getLogImageRatio(log: FeedLog): number | undefined {
+  if (
+    typeof log.image_w === "number" &&
+    typeof log.image_h === "number" &&
+    log.image_w > 0 &&
+    log.image_h > 0
+  ) {
+    return log.image_w / log.image_h;
+  }
+  return undefined;
 }
 
 export function getLogMetadata(log: DataLog) {

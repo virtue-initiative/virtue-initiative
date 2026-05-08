@@ -1,5 +1,11 @@
 import { createContext } from "preact";
-import { useContext, useEffect, useRef, useState, useCallback } from "preact/hooks";
+import {
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+} from "preact/hooks";
 import { decryptBatch, importUserPrivateKey, unwrapBatchKey } from "../crypto";
 import { clearDecryptedCache } from "../data-cache";
 import { useUser } from "../hooks/useUser";

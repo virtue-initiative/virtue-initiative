@@ -269,8 +269,14 @@ export function Logs() {
   }
 
   const dayLabel = formatDayLabel(weekStart);
-  const prevDay = useCallback(() => setDayOffset(dayOffset - 1), [dayOffset, setDayOffset]);
-  const nextDay = useCallback(() => setDayOffset(dayOffset + 1), [dayOffset, setDayOffset]);
+  const prevDay = useCallback(
+    () => setDayOffset(dayOffset - 1),
+    [dayOffset, setDayOffset],
+  );
+  const nextDay = useCallback(
+    () => setDayOffset(dayOffset + 1),
+    [dayOffset, setDayOffset],
+  );
 
   const title =
     sidebarLoading && selectedUser
@@ -488,8 +494,7 @@ export function Logs() {
             <p class="logs-summary">
               {batchStats.decrypted}/{batchStats.total} block
               {batchStats.total === 1 ? "" : "s"} decrypted
-              {batchStats.skipped > 0 &&
-                `, ${batchStats.skipped} unavailable`}
+              {batchStats.skipped > 0 && `, ${batchStats.skipped} unavailable`}
             </p>
           )}
 
