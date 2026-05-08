@@ -44,7 +44,9 @@ describe("buildGalleryRows", () => {
   });
 
   it("returns [] when containerWidth is 0", () => {
-    expect(buildGalleryRows(make169(5), { ...OPTS, containerWidth: 0 })).toEqual([]);
+    expect(
+      buildGalleryRows(make169(5), { ...OPTS, containerWidth: 0 }),
+    ).toEqual([]);
   });
 
   it("all 16:9 items — widths sum to containerWidth (non-last rows)", () => {
@@ -73,7 +75,8 @@ describe("buildGalleryRows", () => {
     ];
     const rows = buildGalleryRows(items, OPTS);
     for (const row of rows) {
-      const total = row.widths.reduce((a, b) => a + b, 0) + OPTS.gap * (row.count - 1);
+      const total =
+        row.widths.reduce((a, b) => a + b, 0) + OPTS.gap * (row.count - 1);
       expect(total).toBeLessThanOrEqual(OPTS.containerWidth + 0.01);
     }
   });

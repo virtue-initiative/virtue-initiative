@@ -36,7 +36,14 @@ export function buildGalleryRows(
   items: FeedLog[],
   options: GalleryLayoutOptions,
 ): GalleryRow[] {
-  const { containerWidth: W, targetRowHeight: H, gap: G, defaultRatio, minRowScale, maxLastRowScale } = options;
+  const {
+    containerWidth: W,
+    targetRowHeight: H,
+    gap: G,
+    defaultRatio,
+    minRowScale,
+    maxLastRowScale,
+  } = options;
 
   if (W <= 0 || items.length === 0) return [];
 

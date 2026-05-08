@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "preact/hooks";
 import {
   useVirtualizer,
   observeElementRect,
@@ -21,7 +27,9 @@ const MAX_LAST_ROW_SCALE = 1.0;
 
 function useIsNarrowViewport() {
   const [isNarrow, setIsNarrow] = useState(
-    () => typeof window !== "undefined" && window.matchMedia("(max-width: 720px)").matches,
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(max-width: 720px)").matches,
   );
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 720px)");
@@ -46,7 +54,10 @@ export function LogsGallery({
   fullscreen: boolean;
 }) {
   const [wrapperEl, setWrapperEl] = useState<HTMLDivElement | null>(null);
-  const wrapperRef = useCallback((el: HTMLDivElement | null) => setWrapperEl(el), []);
+  const wrapperRef = useCallback(
+    (el: HTMLDivElement | null) => setWrapperEl(el),
+    [],
+  );
   const [containerWidth, setContainerWidth] = useState(0);
   const rafRef = useRef<number | null>(null);
   const isNarrow = useIsNarrowViewport();
@@ -87,25 +98,36 @@ export function LogsGallery({
   );
 
   const scrollMargin = isNarrow
-    ? (wrapperEl ? wrapperEl.getBoundingClientRect().top + window.scrollY : 0)
+    ? wrapperEl
+      ? wrapperEl.getBoundingClientRect().top + window.scrollY
+      : 0
     : (wrapperEl?.offsetTop ?? 0);
 
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () =>
       isNarrow
-        ? (typeof window !== "undefined" ? (window as unknown as HTMLElement) : null)
-        : ((wrapperEl?.closest(".logs-main") as HTMLElement | null) ?? wrapperEl),
+        ? typeof window !== "undefined"
+          ? (window as unknown as HTMLElement)
+          : null
+        : ((wrapperEl?.closest(".logs-main") as HTMLElement | null) ??
+          wrapperEl),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    observeElementRect: (isNarrow ? observeWindowRect : observeElementRect) as any,
+    observeElementRect: (isNarrow
+      ? observeWindowRect
+      : observeElementRect) as any,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    observeElementOffset: (isNarrow ? observeWindowOffset : observeElementOffset) as any,
+    observeElementOffset: (isNarrow
+      ? observeWindowOffset
+      : observeElementOffset) as any,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     scrollToFn: (isNarrow ? windowScroll : elementScroll) as any,
     scrollMargin,
     estimateSize: (index) => rows[index].height + gap,
     overscan: 3,
-    getItemKey: (index) => items[rows[index].startIndex]?.id ?? `${rows[index].startIndex}-${rows[index].count}`,
+    getItemKey: (index) =>
+      items[rows[index].startIndex]?.id ??
+      `${rows[index].startIndex}-${rows[index].count}`,
     useAnimationFrameWithResizeObserver: true,
   });
 

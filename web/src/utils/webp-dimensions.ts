@@ -3,16 +3,28 @@ export interface WebpDimensions {
   height: number;
 }
 
-export function decodeWebpDimensions(bytes: Uint8Array): WebpDimensions | undefined {
+export function decodeWebpDimensions(
+  bytes: Uint8Array,
+): WebpDimensions | undefined {
   // Need at least 12 bytes for RIFF....WEBP
   if (bytes.length < 12) return undefined;
 
   // Validate RIFF signature
-  if (bytes[0] !== 0x52 || bytes[1] !== 0x49 || bytes[2] !== 0x46 || bytes[3] !== 0x46) {
+  if (
+    bytes[0] !== 0x52 ||
+    bytes[1] !== 0x49 ||
+    bytes[2] !== 0x46 ||
+    bytes[3] !== 0x46
+  ) {
     return undefined;
   }
   // Validate WEBP signature at bytes 8–11
-  if (bytes[8] !== 0x57 || bytes[9] !== 0x45 || bytes[10] !== 0x42 || bytes[11] !== 0x50) {
+  if (
+    bytes[8] !== 0x57 ||
+    bytes[9] !== 0x45 ||
+    bytes[10] !== 0x42 ||
+    bytes[11] !== 0x50
+  ) {
     return undefined;
   }
 
@@ -25,7 +37,8 @@ export function decodeWebpDimensions(bytes: Uint8Array): WebpDimensions | undefi
     // Need bytes 0–29 (30 bytes)
     if (bytes.length < 30) return undefined;
     // Validate VP8 sync code at bytes 23–25
-    if (bytes[23] !== 0x9d || bytes[24] !== 0x01 || bytes[25] !== 0x2a) return undefined;
+    if (bytes[23] !== 0x9d || bytes[24] !== 0x01 || bytes[25] !== 0x2a)
+      return undefined;
     const width = (bytes[26] | (bytes[27] << 8)) & 0x3fff;
     const height = (bytes[28] | (bytes[29] << 8)) & 0x3fff;
     return { width, height };
@@ -37,10 +50,7 @@ export function decodeWebpDimensions(bytes: Uint8Array): WebpDimensions | undefi
     // Verify signature byte at offset 20
     if (bytes[20] !== 0x2f) return undefined;
     const bits =
-      bytes[21] |
-      (bytes[22] << 8) |
-      (bytes[23] << 16) |
-      (bytes[24] << 24);
+      bytes[21] | (bytes[22] << 8) | (bytes[23] << 16) | (bytes[24] << 24);
     const width = (bits & 0x3fff) + 1;
     const height = ((bits >>> 14) & 0x3fff) + 1;
     return { width, height };
