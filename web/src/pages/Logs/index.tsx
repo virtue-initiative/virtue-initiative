@@ -305,7 +305,10 @@ export function Logs() {
       }),
     [logs, minRiskFilter, typeFilter, weekStart, weekEnd],
   );
-  const galleryItems = items.filter((item) => getLogImage(item) !== undefined);
+  const galleryItems = useMemo(
+    () => items.filter((item) => getLogImage(item) !== undefined),
+    [items],
+  );
 
   useEffect(() => {
     if (!isGallery) {

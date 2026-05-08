@@ -205,7 +205,7 @@ button.logs-sidebar-close {
   scrollbar-gutter: stable;
   padding-right: 0.25rem;
 
-  @media (max-width: 600px) {
+  @media (max-width: 720px) {
     overflow: visible;
     padding-right: 0;
     min-height: auto;

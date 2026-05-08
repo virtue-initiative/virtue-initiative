@@ -1,5 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
+import {
+  useVirtualizer,
+  observeElementRect,
+  observeElementOffset,
+  elementScroll,
+  observeWindowRect,
+  observeWindowOffset,
+  windowScroll,
+} from "@tanstack/react-virtual";
 import { formatDate, formatTime } from "../../utils/time";
 import { describeRiskLevel, FeedLog, getLogImage, LogImage } from "./shared";
 import { buildGalleryRows } from "./gallery-layout";
@@ -10,6 +18,19 @@ const GAP_FULLSCREEN = 10;
 const DEFAULT_RATIO = 16 / 9;
 const MIN_ROW_SCALE = 0.6;
 const MAX_LAST_ROW_SCALE = 1.0;
+
+function useIsNarrowViewport() {
+  const [isNarrow, setIsNarrow] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(max-width: 720px)").matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 720px)");
+    const handler = (e: MediaQueryListEvent) => setIsNarrow(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  return isNarrow;
+}
 
 export function LogsGallery({
   items,
@@ -27,16 +48,27 @@ export function LogsGallery({
   const [wrapperEl, setWrapperEl] = useState<HTMLDivElement | null>(null);
   const wrapperRef = useCallback((el: HTMLDivElement | null) => setWrapperEl(el), []);
   const [containerWidth, setContainerWidth] = useState(0);
+  const rafRef = useRef<number | null>(null);
+  const isNarrow = useIsNarrowViewport();
 
   useEffect(() => {
     if (!wrapperEl) return;
-    setContainerWidth(wrapperEl.getBoundingClientRect().width);
+    setContainerWidth(Math.round(wrapperEl.getBoundingClientRect().width));
     const ro = new ResizeObserver((entries) => {
       const entry = entries[0];
-      if (entry) setContainerWidth(entry.contentRect.width);
+      if (!entry) return;
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      const width = Math.round(entry.contentRect.width);
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
+        setContainerWidth((prev) => (prev === width ? prev : width));
+      });
     });
     ro.observe(wrapperEl);
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
   }, [wrapperEl]);
 
   const gap = fullscreen ? GAP_FULLSCREEN : GAP_NORMAL;
@@ -54,14 +86,27 @@ export function LogsGallery({
     [items, containerWidth, gap],
   );
 
+  const scrollMargin = isNarrow
+    ? (wrapperEl ? wrapperEl.getBoundingClientRect().top + window.scrollY : 0)
+    : (wrapperEl?.offsetTop ?? 0);
+
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () =>
-      (wrapperEl?.closest(".logs-main") as HTMLElement | null) ?? wrapperEl,
-    scrollMargin: wrapperEl?.offsetTop ?? 0,
+      isNarrow
+        ? (typeof window !== "undefined" ? (window as unknown as HTMLElement) : null)
+        : ((wrapperEl?.closest(".logs-main") as HTMLElement | null) ?? wrapperEl),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    observeElementRect: (isNarrow ? observeWindowRect : observeElementRect) as any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    observeElementOffset: (isNarrow ? observeWindowOffset : observeElementOffset) as any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    scrollToFn: (isNarrow ? windowScroll : elementScroll) as any,
+    scrollMargin,
     estimateSize: (index) => rows[index].height + gap,
     overscan: 3,
-    getItemKey: (index) => `${rows[index].startIndex}-${rows[index].count}`,
+    getItemKey: (index) => items[rows[index].startIndex]?.id ?? `${rows[index].startIndex}-${rows[index].count}`,
+    useAnimationFrameWithResizeObserver: true,
   });
 
   useEffect(() => {

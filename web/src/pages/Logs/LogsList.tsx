@@ -148,6 +148,7 @@ export function LogsList({
     scrollMargin: scrollRef.current?.offsetTop ?? 0,
     estimateSize: () => ITEM_HEIGHT,
     overscan: 10,
+    useAnimationFrameWithResizeObserver: true,
     onChange: (instance) => {
       if (!hasMore || loading) return;
       const virtualItems = instance.getVirtualItems();
