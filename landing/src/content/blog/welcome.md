@@ -26,4 +26,3 @@ and [Discord](https://discord.gg/4kNsbRuzQD).
 
 We hope you find this software helpful, and we hope that it helps people break
 the hold of pornography in their lives.
-

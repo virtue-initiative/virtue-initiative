@@ -6,9 +6,7 @@ import LogoMark from "../components/LogoMark.astro";
 import SiteLayout from "../layouts/SiteLayout.astro";
 import { APP_URL } from "../lib/app-url";
 
-const latestPosts = (
-  await getCollection("blog", ({ data }) => !data.draft)
-)
+const latestPosts = (await getCollection("blog", ({ data }) => !data.draft))
   .sort((a, b) => b.data.pubDate.getTime() - a.data.pubDate.getTime())
   .slice(0, 3);
 ---

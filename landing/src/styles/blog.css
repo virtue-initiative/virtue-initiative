@@ -13,7 +13,6 @@
   background: var(--bg-subtle);
 }
 
-
 .blog-card-body {
   display: flex;
   flex-direction: column;

@@ -8,7 +8,8 @@ const posts = (await getCollection("blog", ({ data }) => !data.draft)).sort(
 
 function getExcerpt(body: string, maxLength = 220): string {
   const paragraphs = body.split(/\n\n+/);
-  const first = paragraphs.find((p) => p.trim() && !p.trim().startsWith("#")) ?? "";
+  const first =
+    paragraphs.find((p) => p.trim() && !p.trim().startsWith("#")) ?? "";
   let text = first
     .replace(/!\[.*?\]\(.*?\)/g, "")
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
@@ -27,8 +28,8 @@ function getExcerpt(body: string, maxLength = 220): string {
   <article class="help-content-card help-doc">
     <h1>Blog</h1>
     <p>
-      Updates on the project — new platforms, feature releases, and the
-      thinking behind the work.
+      Updates on the project — new platforms, feature releases, and the thinking
+      behind the work.
     </p>
 
     {
@@ -40,7 +41,10 @@ function getExcerpt(body: string, maxLength = 220): string {
             return (
               <li class="blog-card">
                 <div class="blog-card-body">
-                  <time class="blog-card-date" datetime={post.data.pubDate.toISOString()}>
+                  <time
+                    class="blog-card-date"
+                    datetime={post.data.pubDate.toISOString()}
+                  >
                     {post.data.pubDate.toLocaleDateString("en-US", {
                       year: "numeric",
                       month: "long",
@@ -51,7 +55,9 @@ function getExcerpt(body: string, maxLength = 220): string {
                     <a href={href}>{post.data.title}</a>
                   </h2>
                   {excerpt && <p class="blog-card-excerpt">{excerpt}</p>}
-                  <a href={href} class="blog-card-readmore">Read more →</a>
+                  <a href={href} class="blog-card-readmore">
+                    Read more →
+                  </a>
                 </div>
               </li>
             );
