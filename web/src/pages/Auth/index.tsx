@@ -169,6 +169,11 @@ export function Auth({
         </div>
         <p class="auth-subtitle">Accountability starts here.</p>
 
+        <p class="auth-dev-warning">
+          <strong>Warning:</strong> Virtue is currently in early development and
+          does not work reliably.
+        </p>
+
         {(authMode === "login" || authMode === "signup") && (
           <div class="segmented-control auth-tabs">
             <a
