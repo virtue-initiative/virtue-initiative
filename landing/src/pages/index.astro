@@ -1,9 +1,14 @@
 ---
+import { getCollection } from "astro:content";
 import CheckIcon from "../components/icons/CheckIcon.astro";
 import MinusIcon from "../components/icons/MinusIcon.astro";
 import LogoMark from "../components/LogoMark.astro";
 import SiteLayout from "../layouts/SiteLayout.astro";
 import { APP_URL } from "../lib/app-url";
+
+const latestPosts = (await getCollection("blog", ({ data }) => !data.draft))
+  .sort((a, b) => b.data.pubDate.getTime() - a.data.pubDate.getTime())
+  .slice(0, 3);
 ---
 
 <SiteLayout tagline="Providing free tools and resources for accountability">
@@ -241,6 +246,38 @@ import { APP_URL } from "../lib/app-url";
         </p>
       </div>
     </section>
+
+    {
+      latestPosts.length > 0 && (
+        <section class="home-section">
+          <div class="home-section-heading">
+            <h2>From the blog</h2>
+          </div>
+          <ul class="home-blog-list">
+            {latestPosts.map((post) => (
+              <li class="home-blog-item">
+                <a href={`/blog/${post.id}`} class="home-blog-item-title">
+                  {post.data.title}
+                </a>
+                <span class="home-blog-item-meta">
+                  {post.data.pubDate.toLocaleDateString("en-US", {
+                    year: "numeric",
+                    month: "long",
+                    day: "numeric",
+                  })}
+                  {post.data.author && <> · {post.data.author}</>}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <div class="section-actions">
+            <a href="/blog" class="btn btn-outline">
+              View all posts
+            </a>
+          </div>
+        </section>
+      )
+    }
 
     <section class="home-section home-cta">
       <div class="home-section-heading">

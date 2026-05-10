@@ -1,0 +1,71 @@
+---
+import { getCollection } from "astro:content";
+import SiteLayout from "../../layouts/SiteLayout.astro";
+
+const posts = (await getCollection("blog", ({ data }) => !data.draft)).sort(
+  (a, b) => b.data.pubDate.getTime() - a.data.pubDate.getTime(),
+);
+
+function getExcerpt(body: string, maxLength = 220): string {
+  const paragraphs = body.split(/\n\n+/);
+  const first =
+    paragraphs.find((p) => p.trim() && !p.trim().startsWith("#")) ?? "";
+  let text = first
+    .replace(/!\[.*?\]\(.*?\)/g, "")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[*_]{1,3}([^*_]+)[*_]{1,3}/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^#+\s+/gm, "")
+    .trim();
+  if (text.length > maxLength) {
+    text = text.slice(0, maxLength).replace(/\s+\S*$/, "") + "…";
+  }
+  return text;
+}
+---
+
+<SiteLayout pageTitle="Blog">
+  <article class="help-content-card help-doc">
+    <h1>Blog</h1>
+    <p>
+      Updates on the project — new platforms, feature releases, and the thinking
+      behind the work.
+    </p>
+
+    {
+      posts.length > 0 ? (
+        <ul class="blog-list">
+          {posts.map((post) => {
+            const excerpt = getExcerpt(post.body ?? "");
+            const href = `/blog/${post.id}`;
+            return (
+              <li class="blog-card">
+                <div class="blog-card-body">
+                  <time
+                    class="blog-card-date"
+                    datetime={post.data.pubDate.toISOString()}
+                  >
+                    {post.data.pubDate.toLocaleDateString("en-US", {
+                      year: "numeric",
+                      month: "long",
+                      day: "numeric",
+                    })}
+                  </time>
+                  <h2 class="blog-card-title">
+                    <a href={href}>{post.data.title}</a>
+                  </h2>
+                  {excerpt && <p class="blog-card-excerpt">{excerpt}</p>}
+                  <a href={href} class="blog-card-readmore">
+                    Read more →
+                  </a>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p class="blog-empty">No posts yet — check back soon.</p>
+      )
+    }
+  </article>
+</SiteLayout>
