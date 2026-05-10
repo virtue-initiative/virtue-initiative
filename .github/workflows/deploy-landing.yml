@@ -29,7 +29,10 @@ jobs:
           cache-dependency-path: landing/package-lock.json
 
       - run: npm ci
-      - run: npm run ${{ github.ref_name == 'main' && 'deploy:prod' || 'deploy:staging' }}
+      - name: deploy
+        run:
+          - npm run deploy:prod
+          - npm run deploy:staging
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_SHA: ${{ steps.main-sha.outputs.sha }}
