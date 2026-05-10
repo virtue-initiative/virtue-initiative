@@ -30,9 +30,9 @@ jobs:
 
       - run: npm ci
       - name: deploy
-        run:
-          - npm run deploy:prod
-          - npm run deploy:staging
+        run: |
+          npm run deploy:prod
+          npm run deploy:staging
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_SHA: ${{ steps.main-sha.outputs.sha }}
