@@ -7,7 +7,10 @@ import { useLogs } from "../../hooks/useLogs";
 import { usePartners } from "../../hooks/usePartners";
 import { LogsGallery } from "./LogsGallery";
 import { LogsList } from "./LogsList";
-import { getRiskRating, type RiskRating } from "@virtueinitiative/shared-web/risk";
+import {
+  getRiskRating,
+  type RiskRating,
+} from "@virtueinitiative/shared-web/risk";
 import { FeedLog, getLogImage, humanizeLogType, LOG_TYPES } from "./shared";
 import "./style.css";
 import { useUrlState } from "../../hooks/useUrlState";
@@ -143,7 +146,11 @@ export function Logs() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [dayOffset, setDayOffset] = useUrlState("day", "number", 0);
   type RiskFilter = "all" | RiskRating;
-  const [riskFilter, setRiskFilter] = useUrlState<RiskFilter>("risk", "string", "all");
+  const [riskFilter, setRiskFilter] = useUrlState<RiskFilter>(
+    "risk",
+    "string",
+    "all",
+  );
   const [rawTypeFilter, setTypeFilter] = useUrlState<string | string[] | null>(
     "type",
     "string",
