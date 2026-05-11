@@ -365,7 +365,6 @@ export function Logs() {
                   onClick={() => select(group.userId, null)}
                   type="button"
                 >
-                  <span class="logs-status-dot logs-status-dot--placeholder" />
                   <span class="logs-device-button-label">{group.label}</span>
                 </button>
                 <ul class="logs-device-list">
