@@ -281,15 +281,28 @@ button.logs-sidebar-backdrop.is-open {
   .logs-header-actions {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      "toggle  view-controls"
+      "filters filters";
     align-items: center;
     width: 100%;
-    justify-content: normal;
-    flex-wrap: nowrap;
-    row-gap: 0.45rem;
+    row-gap: 0.5rem;
+    column-gap: 0.6rem;
+  }
+
+  button.logs-sidebar-toggle {
+    grid-area: toggle;
+    justify-self: start;
   }
 
   .logs-header-view-controls {
+    grid-area: view-controls;
     justify-self: end;
+    min-width: 0;
+  }
+
+  .logs-filter-switcher {
+    grid-area: filters;
     min-width: 0;
   }
 }

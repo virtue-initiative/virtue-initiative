@@ -103,6 +103,15 @@ export function humanizeLogType(type: string): string {
   return type.replace(/_/g, " ");
 }
 
+export const LOG_TYPES = [
+  "screenshot",
+  "system_event",
+  "lifecycle_alert",
+  "lifecycle_marker",
+  "lifecycle_transition",
+  "developer_log",
+] as const;
+
 export function LogImage({
   imageBytes,
   onDimensions,
