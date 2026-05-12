@@ -52,7 +52,7 @@
     color: var(--text-muted);
   }
 
-  @media (max-width: 600px) {
+  @media (max-width: 900px) {
     position: fixed;
     top: 0;
     left: 0;
@@ -69,7 +69,7 @@
     transition: transform 0.18s ease;
   }
 
-  @media (max-width: 600px) {
+  @media (max-width: 900px) {
     &.is-open {
       transform: translateX(0);
       visibility: visible;
@@ -82,7 +82,7 @@
 .logs-sidebar .logs-sidebar-header {
   display: none;
 
-  @media (max-width: 600px) {
+  @media (max-width: 900px) {
     display: flex;
     margin-bottom: 0.75rem;
   }
@@ -91,7 +91,7 @@
 button.logs-sidebar-close {
   display: none;
 
-  @media (max-width: 600px) {
+  @media (max-width: 900px) {
     display: inline-flex;
   }
 }
@@ -114,7 +114,7 @@ button.logs-sidebar-close {
 .logs-device-list {
   list-style: none;
   margin: 0;
-  padding: 0 0 0 0.9rem;
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -229,7 +229,7 @@ button.logs-sidebar-close {
 
 .logs-header-actions {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 0.6rem;
   flex-wrap: wrap;
 }
@@ -239,7 +239,7 @@ button.logs-sidebar-toggle {
   align-items: center;
   gap: 0.45rem;
 
-  @media (max-width: 600px) {
+  @media (max-width: 900px) {
     display: inline-flex;
   }
 
@@ -255,6 +255,12 @@ button.logs-sidebar-toggle {
   gap: 0.6rem;
 }
 
+button.logs-fullscreen-btn {
+  @media (max-width: 900px) {
+    display: none;
+  }
+}
+
 button.logs-sidebar-backdrop,
 button.logs-sidebar-backdrop.is-open {
   display: none;
@@ -262,13 +268,15 @@ button.logs-sidebar-backdrop.is-open {
   pointer-events: none;
 }
 
-@media (max-width: 600px) {
+@media (max-width: 900px) {
   button.logs-sidebar-backdrop.is-open {
     display: block;
     opacity: 1;
     pointer-events: auto;
   }
+}
 
+@media (max-width: 600px) {
   .logs-header {
     align-items: flex-start;
     margin-bottom: 1rem;
@@ -281,15 +289,28 @@ button.logs-sidebar-backdrop.is-open {
   .logs-header-actions {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      "toggle  view-controls"
+      "filters filters";
     align-items: center;
     width: 100%;
-    justify-content: normal;
-    flex-wrap: nowrap;
-    row-gap: 0.45rem;
+    row-gap: 0.5rem;
+    column-gap: 0.6rem;
+  }
+
+  button.logs-sidebar-toggle {
+    grid-area: toggle;
+    justify-self: start;
   }
 
   .logs-header-view-controls {
+    grid-area: view-controls;
     justify-self: end;
+    min-width: 0;
+  }
+
+  .logs-filter-switcher {
+    grid-area: filters;
     min-width: 0;
   }
 }

@@ -7,7 +7,11 @@ import { useLogs } from "../../hooks/useLogs";
 import { usePartners } from "../../hooks/usePartners";
 import { LogsGallery } from "./LogsGallery";
 import { LogsList } from "./LogsList";
-import { FeedLog, getLogImage, humanizeLogType } from "./shared";
+import {
+  getRiskRating,
+  type RiskRating,
+} from "@virtueinitiative/shared-web/risk";
+import { FeedLog, getLogImage, humanizeLogType, LOG_TYPES } from "./shared";
 import "./style.css";
 import { useUrlState } from "../../hooks/useUrlState";
 
@@ -141,7 +145,12 @@ export function Logs() {
   const [galleryFullscreen, setGalleryFullscreen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [dayOffset, setDayOffset] = useUrlState("day", "number", 0);
-  const [minRiskFilter, setMinRiskFilter] = useUrlState("risk", "number", 0);
+  type RiskFilter = "all" | RiskRating;
+  const [riskFilter, setRiskFilter] = useUrlState<RiskFilter>(
+    "risk",
+    "string",
+    "all",
+  );
   const [rawTypeFilter, setTypeFilter] = useUrlState<string | string[] | null>(
     "type",
     "string",
@@ -285,10 +294,6 @@ export function Logs() {
         ? `${groupLabel(selectedUser)}'s logs`
         : "My logs";
   const isGallery = path === "/logs/gallery";
-  const availableTypes = useMemo(
-    () => Array.from(new Set((logs ?? []).map((item) => item.type))).sort(),
-    [logs],
-  );
   const typeFilter = Array.isArray(rawTypeFilter)
     ? (rawTypeFilter[0] ?? null)
     : rawTypeFilter;
@@ -296,14 +301,21 @@ export function Logs() {
   const items = useMemo(
     () =>
       (logs ?? []).filter((item) => {
-        return (
-          item.ts >= weekStart &&
-          item.ts <= weekEnd &&
-          (item.risk ?? 0) >= minRiskFilter &&
-          (typeFilter === null || typeFilter === item.type)
-        );
+        if (item.ts < weekStart || item.ts > weekEnd) return false;
+        if (typeFilter !== null && typeFilter !== item.type) return false;
+        if (riskFilter !== "all") {
+          const rating = getRiskRating(item.risk);
+          if (riskFilter === "high" && rating !== "high") return false;
+          if (
+            riskFilter === "moderate" &&
+            rating !== "moderate" &&
+            rating !== "high"
+          )
+            return false;
+        }
+        return true;
       }),
-    [logs, minRiskFilter, typeFilter, weekStart, weekEnd],
+    [logs, riskFilter, typeFilter, weekStart, weekEnd],
   );
   const galleryItems = useMemo(
     () => items.filter((item) => getLogImage(item) !== undefined),
@@ -360,7 +372,6 @@ export function Logs() {
                   onClick={() => select(group.userId, null)}
                   type="button"
                 >
-                  <span class="logs-status-dot logs-status-dot--placeholder" />
                   <span class="logs-device-button-label">{group.label}</span>
                 </button>
                 <ul class="logs-device-list">
@@ -402,6 +413,43 @@ export function Logs() {
                 <MenuIcon />
                 <span>Devices</span>
               </button>
+              <div class="logs-filter-switcher">
+                <label class="logs-filter-field">
+                  <span class="logs-filter-label">Risk</span>
+                  <select
+                    class="logs-filter-select"
+                    value={riskFilter}
+                    onChange={(e) =>
+                      setRiskFilter(
+                        (e.target as HTMLSelectElement).value as RiskFilter,
+                      )
+                    }
+                  >
+                    <option value="all">All</option>
+                    <option value="high">High</option>
+                    <option value="moderate">Medium</option>
+                  </select>
+                </label>
+                <label class="logs-filter-field">
+                  <span class="logs-filter-label">Type</span>
+                  <select
+                    class="logs-filter-select"
+                    value={typeFilter ?? ""}
+                    onChange={(e) =>
+                      setTypeFilter(
+                        (e.target as HTMLSelectElement).value || null,
+                      )
+                    }
+                  >
+                    <option value="">All</option>
+                    {LOG_TYPES.map((type) => (
+                      <option key={type} value={type}>
+                        {humanizeLogType(type)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
               <div class="logs-header-view-controls">
                 {isGallery && (
                   <button
@@ -420,39 +468,6 @@ export function Logs() {
                     )}
                   </button>
                 )}
-                <div class="logs-filter-switcher">
-                  <select
-                    class="logs-filter-select"
-                    value={minRiskFilter}
-                    onChange={(e) =>
-                      setMinRiskFilter(+(e.target as HTMLSelectElement).value)
-                    }
-                  >
-                    <option value="0">All</option>
-                    <option value="0.7">High</option>
-                    <option value="0.5">Medium</option>
-                    <option value="0.2">Low</option>
-                  </select>
-                  {availableTypes.length > 0 && (
-                    <select
-                      class="logs-filter-select"
-                      value={typeFilter ?? ""}
-                      onChange={(e) =>
-                        setTypeFilter(
-                          (e.target as HTMLSelectElement).value || null,
-                        )
-                      }
-                      aria-label="Log type"
-                    >
-                      <option value="">All types</option>
-                      {availableTypes.map((type) => (
-                        <option key={type} value={type}>
-                          {humanizeLogType(type)}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
                 <div class="segmented-control logs-view-switcher">
                   <a
                     class={`segmented-control__item${!isGallery ? " is-active" : ""}`}

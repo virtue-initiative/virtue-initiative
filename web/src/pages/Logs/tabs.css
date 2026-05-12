@@ -32,9 +32,10 @@ button.logs-fullscreen-btn {
 
 .logs-filter-switcher {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 0.65rem;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .logs-filter-field {
