@@ -9,10 +9,10 @@ export function NotFound() {
         moved or deleted.
       </p>
       <div class="not-found-actions">
-        <a href="/" class="btn btn-primary">
+        <a href="/" class="vi-btn vi-btn--primary">
           Go to dashboard
         </a>
-        <a href="/settings" class="btn btn-ghost">
+        <a href="/settings" class="vi-btn vi-btn--ghost">
           Settings
         </a>
       </div>
