@@ -17,12 +17,15 @@ import { APP_URL } from "../lib/app-url";
       well.
     </p>
 
-    <p>
-      Our mission is to develop free technology and resources to support people
-      who want to be free from pornography. We know what it&apos;s like to feel
-      stuck, and we want to provide tools to support you. We don&apos;t want the
-      price to be yet another excuse not to deal with pornography.
-    </p>
+    <div class="about-callout">
+      <p>
+        Our mission is to develop free technology and resources to support
+        people who want to be free from pornography. We know what it&apos;s like
+        to feel stuck, and we want to provide tools to support you. We
+        don&apos;t want the price to be yet another excuse not to deal with
+        pornography.
+      </p>
+    </div>
 
     <p>
       Our vision is to see the Christian church and the world freed from
@@ -56,3 +59,40 @@ import { APP_URL } from "../lib/app-url";
     </p>
   </section>
 </SiteLayout>
+
+<style is:global>
+  #about h2 {
+    font-size: clamp(1.5rem, 2.8vw, 1.95rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.08;
+    color: var(--text-muted);
+    text-wrap: balance;
+  }
+
+  #about p,
+  #about li {
+    font-size: 1.12rem;
+    line-height: 1.85;
+  }
+
+  #about p + p {
+    margin-top: 1rem;
+  }
+
+  .about-callout {
+    background: var(--bg-subtle);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 0.5rem 0.5rem 0;
+    padding: 1.25rem 1.5rem;
+    margin: 1.25rem 0;
+  }
+
+  .about-callout p {
+    font-size: 1.12rem !important;
+    font-style: italic;
+    color: var(--text) !important;
+    margin-top: 0 !important;
+    line-height: 1.85 !important;
+  }
+</style>
