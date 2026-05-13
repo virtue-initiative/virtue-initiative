@@ -26,7 +26,13 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: landing/package-lock.json
+          cache-dependency-path: |
+            shared-web/package-lock.json
+            landing/package-lock.json
+
+      - name: Install shared-web dependencies
+        run: npm ci
+        working-directory: shared-web
 
       - run: npm ci
       - name: deploy
