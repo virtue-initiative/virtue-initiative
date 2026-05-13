@@ -9,7 +9,17 @@ import {
 import { api } from "../../api";
 import "./style.css";
 import { ThemeButton } from "../../components/ThemeButton";
-import { Dialog, DialogActions, DialogHeader } from "../../components/Dialog";
+import {
+  Alert,
+  Button,
+  Card,
+  Dialog,
+  DialogActions,
+  DialogHeader,
+  Field,
+  Input,
+  SegmentedControl,
+} from "@virtueinitiative/shared-web";
 
 type AuthMode = "login" | "signup" | "forgot" | "reset";
 
@@ -162,33 +172,30 @@ export function Auth({
 
   return (
     <div class="auth-page">
-      <div class="card auth-card">
+      <Card class="auth-card">
         <div class="auth-header">
           <h1 class="auth-title">The Virtue Initiative</h1>
           <ThemeButton />
         </div>
         <p class="auth-subtitle">Accountability starts here.</p>
 
-        <p class="auth-dev-warning">
+        <Alert variant="error" class="auth-dev-warning">
           <strong>Warning:</strong> Virtue is currently in early development and
           does not work reliably.
-        </p>
+        </Alert>
 
         {(authMode === "login" || authMode === "signup") && (
-          <div class="segmented-control auth-tabs">
-            <a
-              class={`segmented-control__item${authMode === "login" ? " is-active" : ""}`}
-              href={loginUrl}
-            >
-              Log in
-            </a>
-            <a
-              class={`segmented-control__item${authMode === "signup" ? " is-active" : ""}`}
-              href={signupUrl}
-            >
-              Sign up
-            </a>
-          </div>
+          <SegmentedControl
+            segments={[
+              { label: "Log in", value: "login" },
+              { label: "Sign up", value: "signup" },
+            ]}
+            value={authMode}
+            onChange={(value) =>
+              navigate(value === "login" ? loginUrl : signupUrl)
+            }
+            class="auth-tabs"
+          />
         )}
 
         {authMode === "forgot" && (
@@ -201,12 +208,12 @@ export function Auth({
             <p class="hint-text auth-flow-hint">
               Choose a new password to complete the reset for the account below.
             </p>
-            <p class="alert-error auth-flow-hint">
+            <Alert variant="warning" class="auth-flow-hint">
               Resetting your password will generate a new encryption keypair for
               this account. Previously uploaded batches will remain
               inaccessible, and you should sign back in on your Virtue clients
               so future uploads use the new keys.
-            </p>
+            </Alert>
           </>
         )}
         {inviteToken && (
@@ -218,23 +225,19 @@ export function Auth({
 
         <form class="auth-form" onSubmit={handleSubmit}>
           {authMode === "signup" && (
-            <div class="field">
-              <label for="name">Name (optional)</label>
-              <input
-                id="name"
+            <Field label="Name (optional)">
+              <Input
                 type="text"
                 value={name}
                 onInput={(e) => setName((e.target as HTMLInputElement).value)}
                 placeholder="Your name"
                 autoComplete="name"
               />
-            </div>
+            </Field>
           )}
 
-          <div class="field">
-            <label for="email">Email</label>
-            <input
-              id="email"
+          <Field label="Email">
+            <Input
               type="email"
               value={email}
               onInput={(e) => setEmail((e.target as HTMLInputElement).value)}
@@ -243,15 +246,11 @@ export function Auth({
               required
               disabled={authMode === "reset"}
             />
-          </div>
+          </Field>
 
           {authMode !== "forgot" && (
-            <div class="field">
-              <label for="password">
-                {authMode === "reset" ? "New password" : "Password"}
-              </label>
-              <input
-                id="password"
+            <Field label={authMode === "reset" ? "New password" : "Password"}>
+              <Input
                 type="password"
                 value={password}
                 onInput={(e) =>
@@ -270,14 +269,12 @@ export function Auth({
                 required
                 disabled={authMode === "reset" && !resetTokenValid}
               />
-            </div>
+            </Field>
           )}
 
           {(authMode === "signup" || authMode === "reset") && (
-            <div class="field">
-              <label for="confirm">Confirm password</label>
-              <input
-                id="confirm"
+            <Field label="Confirm password">
+              <Input
                 type="password"
                 value={confirm}
                 onInput={(e) =>
@@ -288,7 +285,7 @@ export function Auth({
                 required
                 disabled={authMode === "reset" && !resetTokenValid}
               />
-            </div>
+            </Field>
           )}
 
           {authMode === "signup" && (
@@ -299,12 +296,13 @@ export function Auth({
             </p>
           )}
 
-          {status && <p class="alert-success">{status}</p>}
-          {error && <p class="alert-error">{error}</p>}
+          {status && <Alert variant="success">{status}</Alert>}
+          {error && <Alert variant="error">{error}</Alert>}
 
-          <button
-            class="btn btn-primary auth-submit"
+          <Button
+            variant="primary"
             type="submit"
+            class="auth-submit"
             disabled={loading}
           >
             {loading
@@ -316,7 +314,7 @@ export function Auth({
                   : authMode === "forgot"
                     ? "Send reset link"
                     : "Reset password"}
-          </button>
+          </Button>
         </form>
 
         <div class="auth-links">
@@ -340,16 +338,16 @@ export function Auth({
             to verify your email before you can log in.
           </p>
           <DialogActions>
-            <button
-              class="btn btn-primary"
+            <Button
+              variant="primary"
               type="button"
               onClick={() => signupVerificationDialogRef.current?.close()}
             >
               Got it
-            </button>
+            </Button>
           </DialogActions>
         </Dialog>
-      </div>
+      </Card>
     </div>
   );
 }

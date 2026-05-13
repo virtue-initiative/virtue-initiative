@@ -34,6 +34,7 @@ export default defineConfig(({ mode }) => {
     },
     resolve: {
       preserveSymlinks: false,
+      dedupe: ["preact"],
     },
     test: {
       environment: "node",

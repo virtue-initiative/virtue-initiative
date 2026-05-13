@@ -9,6 +9,64 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
     <title>Virtue</title>
+    <script>
+      (() => {
+        const THEME_COOKIE_NAME = "virtue-theme";
+        const STORAGE_KEYS = ["shared-state-local", "shared-state"];
+        const root = document.documentElement;
+
+        function readCookie(name) {
+          const match = document.cookie.match(
+            new RegExp("(?:^|; )" + name + "=([^;]*)"),
+          );
+          return match ? decodeURIComponent(match[1]) : undefined;
+        }
+
+        function readStoredTheme(key) {
+          try {
+            const raw = localStorage.getItem(key);
+            if (!raw) return undefined;
+            const parsed = JSON.parse(raw);
+            return parsed?.theme === "dark" || parsed?.theme === "light"
+              ? parsed.theme
+              : undefined;
+          } catch {
+            return undefined;
+          }
+        }
+
+        function getTheme() {
+          const cookieTheme = readCookie(THEME_COOKIE_NAME);
+          if (cookieTheme === "dark" || cookieTheme === "light") {
+            return cookieTheme;
+          }
+          for (const key of STORAGE_KEYS) {
+            const storedTheme = readStoredTheme(key);
+            if (storedTheme === "dark" || storedTheme === "light") {
+              return storedTheme;
+            }
+          }
+          return window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light";
+        }
+
+        const theme = getTheme();
+        root.setAttribute("data-theme", theme);
+        root.style.colorScheme = theme;
+      })();
+    </script>
+    <!-- These four colors must stay in sync with tokens.css :root and [data-theme="dark"] for --bg and --text. They cannot reference CSS custom properties because they paint before tokens.css loads. -->
+    <style>
+      html {
+        background: #f9f9f7;
+        color: #1a1a1a;
+      }
+      html[data-theme="dark"] {
+        background: #111713;
+        color: #e6e3df;
+      }
+    </style>
   </head>
   <body>
     <div id="app"></div>

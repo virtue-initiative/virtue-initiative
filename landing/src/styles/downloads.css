@@ -1,8 +1,8 @@
 .dev-warning-banner {
-  background: #c0392b;
-  border: 1px solid #922b21;
+  background: var(--danger);
+  border: 1px solid var(--danger-strong);
   border-radius: 8px;
-  color: #ffffff;
+  color: white; /* literal: text on danger banner */
   padding: 0.85rem 1.25rem;
   font-size: 0.95rem;
   line-height: 1.5;
@@ -94,8 +94,8 @@
   height: 1.3em;
 }
 
-.btn-outline.download-button:hover:not(:disabled),
-.btn-primary.download-button:hover:not(:disabled) {
+.vi-btn--outline.download-button:hover:not(:disabled),
+.vi-btn--primary.download-button:hover:not(:disabled) {
   & .download-button-detail {
     color: inherit;
   }

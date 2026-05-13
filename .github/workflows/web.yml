@@ -7,6 +7,10 @@ on:
       - staging
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   web:
     name: Web
@@ -22,12 +26,17 @@ jobs:
           cache: "npm"
           cache-dependency-path: |
             api/package-lock.json
+            shared-web/package-lock.json
             web/package-lock.json
             landing/package-lock.json
 
       - name: Install API dependencies
         run: npm ci
         working-directory: api
+
+      - name: Install shared-web dependencies
+        run: npm ci
+        working-directory: shared-web
 
       - name: Install Web dependencies
         run: npm ci

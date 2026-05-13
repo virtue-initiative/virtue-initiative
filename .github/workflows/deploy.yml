@@ -8,6 +8,10 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
+    concurrency:
+      group: ${{ github.workflow }}-${{ matrix.project }}-${{ github.ref }}
+      cancel-in-progress: true
+
     strategy:
       matrix:
         project: [web, api]
@@ -23,7 +27,14 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: ${{ matrix.project }}/package-lock.json
+          cache-dependency-path: |
+            ${{ matrix.project }}/package-lock.json
+            ${{ matrix.project == 'web' && 'shared-web/package-lock.json' || '' }}
+
+      - name: Install shared-web dependencies
+        if: matrix.project == 'web'
+        run: npm ci
+        working-directory: shared-web
 
       - run: npm ci
       - run: npm run ${{ github.ref_name == 'main' && 'deploy:prod' || 'deploy:staging' }}

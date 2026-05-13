@@ -149,11 +149,11 @@ button.logs-sidebar-close {
 
   &.is-active {
     background: var(--accent);
-    color: #fff;
+    color: white; /* literal: text on accent button */
 
     & .logs-status-dot--online,
     & .logs-status-dot--offline {
-      background: #fff;
+      background: white; /* literal: dot on accent button */
     }
   }
 }
@@ -173,11 +173,11 @@ button.logs-sidebar-close {
 }
 
 .logs-status-dot--online {
-  background: #22c55e;
+  background: var(--success);
 }
 
 .logs-status-dot--offline {
-  background: #9ca3af;
+  background: var(--text-muted);
 }
 
 .logs-status-dot--placeholder {
@@ -382,6 +382,10 @@ button.logs-sidebar-backdrop.is-open {
   font-weight: 500;
 }
 
+.logs-device--indented {
+  margin-left: var(--space-2);
+}
+
 .logs-time {
   font-size: 0.8rem;
   color: var(--text-muted);
@@ -506,20 +510,17 @@ button.logs-sidebar-backdrop.is-open {
   align-items: center;
   gap: 0.5rem;
   margin-bottom: 1rem;
-
-  & button {
-    font-size: 1.1rem;
-    padding: 0 0.5rem;
-    line-height: 1;
-  }
 }
 
 .logs-week-label {
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--text);
-  min-width: 10rem;
+  width: 14rem;
   text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 @media (max-width: 600px) {
@@ -538,7 +539,7 @@ button.logs-sidebar-backdrop.is-open {
 .logs-detail-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--overlay);
   z-index: 100;
   display: flex;
   align-items: center;

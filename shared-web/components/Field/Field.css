@@ -1,0 +1,24 @@
+.vi-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.vi-field__label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.vi-field__help {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.vi-field__error {
+  font-size: var(--text-xs);
+  color: var(--danger);
+}
+
+.vi-field--error .vi-field__label {
+  color: var(--danger);
+}

@@ -24,8 +24,10 @@
   "type": "commonjs",
   "dependencies": {
     "@astrojs/mdx": "^5.0.2",
+    "@astrojs/preact": "^5.1.2",
     "@virtueinitiative/shared-web": "file:../shared-web",
-    "astro": "^6.0.3"
+    "astro": "^6.0.3",
+    "preact": "^10.29.1"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.4",

@@ -66,7 +66,7 @@ function LogDetailDialog({
         <div class="logs-detail-header">
           <div>
             <span class="logs-type">{humanizeLogType(item.type)}</span>
-            <span class="logs-device" style="margin-left: 0.5rem">
+            <span class="logs-device logs-device--indented">
               {deviceName(item.device_id)}
             </span>
           </div>

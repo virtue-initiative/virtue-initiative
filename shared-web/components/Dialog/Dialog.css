@@ -1,0 +1,89 @@
+.vi-dialog {
+  border: none;
+  border-radius: var(--radius-lg);
+  padding: 1.75rem;
+  width: 100%;
+  max-width: 400px;
+  margin: auto;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-md);
+
+  &::backdrop {
+    background: var(--overlay);
+    backdrop-filter: blur(2px);
+  }
+
+  & form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+  }
+}
+
+.vi-dialog-title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  line-height: var(--line-tight);
+}
+
+.vi-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+  gap: var(--space-2);
+}
+
+.vi-dialog-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
+
+  & svg {
+    width: 1.1rem;
+    height: 1.1rem;
+  }
+
+  &:hover {
+    color: var(--text);
+    background: var(--bg-subtle);
+  }
+}
+
+.vi-dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: 1.25rem;
+}
+
+.vi-dialog-actions-left {
+  margin-right: auto;
+}
+
+.vi-dialog-actions-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.vi-dialog-secondary-actions {
+  margin-top: var(--space-3);
+  display: flex;
+  justify-content: flex-start;
+}

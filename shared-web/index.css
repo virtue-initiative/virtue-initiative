@@ -1,9 +1,26 @@
 @import "./tokens.css";
-@import "./components/buttons.css";
-@import "./components/controls.css";
-@import "./components/segmented-control.css";
 @import "./components/forms.css";
-@import "./components/feedback.css";
 @import "./components/cards.css";
-@import "./components/dialog.css";
 @import "./utilities.css";
+
+/* New vi-* namespaced components */
+@import "./components/Button/Button.css";
+@import "./components/IconButton/IconButton.css";
+@import "./components/Card/Card.css";
+@import "./components/Field/Field.css";
+@import "./components/Input/Input.css";
+@import "./components/Textarea/Textarea.css";
+@import "./components/Select/Select.css";
+@import "./components/Checkbox/Checkbox.css";
+@import "./components/Radio/Radio.css";
+@import "./components/Dialog/Dialog.css";
+@import "./components/Alert/Alert.css";
+@import "./components/Toast/Toast.css";
+@import "./components/Badge/Badge.css";
+@import "./components/Tabs/Tabs.css";
+@import "./components/SegmentedControl/SegmentedControl.css";
+@import "./components/Spinner/Spinner.css";
+@import "./components/Skeleton/Skeleton.css";
+@import "./components/Menu/Menu.css";
+@import "./components/Tooltip/Tooltip.css";
+@import "./components/Avatar/Avatar.css";

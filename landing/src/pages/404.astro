@@ -1,4 +1,5 @@
 ---
+import { Button } from "@virtueinitiative/shared-web";
 import SiteLayout from "../layouts/SiteLayout.astro";
 ---
 
@@ -10,8 +11,8 @@ import SiteLayout from "../layouts/SiteLayout.astro";
       moved or deleted.
     </p>
     <div class="section-actions">
-      <a href="/" class="btn btn-primary">Go home</a>
-      <a href="/help" class="btn btn-outline">Help</a>
+      <Button href="/" variant="primary">Go home</Button>
+      <Button href="/help" variant="outline">Help</Button>
     </div>
   </section>
 </SiteLayout>

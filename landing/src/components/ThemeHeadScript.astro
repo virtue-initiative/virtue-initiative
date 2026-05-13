@@ -48,6 +48,7 @@
     root.style.colorScheme = theme;
   })();
 </script>
+<!-- These four colors must stay in sync with tokens.css :root and [data-theme="dark"] for --bg and --text. They cannot reference CSS custom properties because they paint before tokens.css loads. -->
 <style is:inline>
   html {
     background: #f9f9f7;

@@ -2,6 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { useAuth } from "../context/auth";
 import { ThemeButton } from "./ThemeButton";
+import { Button, IconButton } from "@virtueinitiative/shared-web";
 
 function MenuIcon() {
   return (
@@ -72,9 +73,7 @@ export function Header() {
       </div>
       <div class="app-header-mobile-actions">
         <ThemeButton />
-        <button
-          class="control control-icon"
-          type="button"
+        <IconButton
           aria-expanded={mobileMenuOpen}
           aria-controls="mobile-header-menu"
           aria-label={
@@ -83,36 +82,39 @@ export function Header() {
           onClick={toggleMobileMenu}
         >
           <MenuIcon />
-        </button>
+        </IconButton>
       </div>
       <nav class="app-header-toolbar">
         <div class="app-header-nav-group">
-          <a
+          <Button
             href="/"
-            class={`control control-flat ${isActive("/") ? "is-active" : ""}`}
+            variant="flat"
+            class={isActive("/") ? "is-active" : ""}
           >
             Dashboard
-          </a>
-          <a
+          </Button>
+          <Button
             href="/logs"
-            class={`control control-flat ${isActive("/logs") ? "is-active" : ""}`}
+            variant="flat"
+            class={isActive("/logs") ? "is-active" : ""}
           >
             Logs
-          </a>
-          <a
+          </Button>
+          <Button
             href="/settings"
-            class={`control control-flat ${isActive("/settings") ? "is-active" : ""}`}
+            variant="flat"
+            class={isActive("/settings") ? "is-active" : ""}
           >
             Settings
-          </a>
+          </Button>
         </div>
 
         <div class="app-header-action-group">
           <ThemeButton />
 
-          <button class="control" onClick={logout} type="button">
+          <Button variant="ghost" onClick={logout} type="button">
             Log out
-          </button>
+          </Button>
         </div>
       </nav>
       <button
@@ -136,29 +138,33 @@ export function Header() {
             <CloseIcon />
           </button>
         </div>
-        <a
+        <Button
           href="/"
-          class={`control control-flat ${isActive("/") ? "is-active" : ""}`}
+          variant="flat"
+          class={isActive("/") ? "is-active" : ""}
           onClick={closeMobileMenu}
         >
           Dashboard
-        </a>
-        <a
+        </Button>
+        <Button
           href="/logs"
-          class={`control control-flat ${isActive("/logs") ? "is-active" : ""}`}
+          variant="flat"
+          class={isActive("/logs") ? "is-active" : ""}
           onClick={closeMobileMenu}
         >
           Logs
-        </a>
-        <a
+        </Button>
+        <Button
           href="/settings"
-          class={`control control-flat ${isActive("/settings") ? "is-active" : ""}`}
+          variant="flat"
+          class={isActive("/settings") ? "is-active" : ""}
           onClick={closeMobileMenu}
         >
           Settings
-        </a>
-        <button
-          class="control app-header-mobile-logout"
+        </Button>
+        <Button
+          variant="ghost"
+          class="app-header-mobile-logout"
           onClick={() => {
             closeMobileMenu();
             logout();
@@ -166,7 +172,7 @@ export function Header() {
           type="button"
         >
           Log out
-        </button>
+        </Button>
       </nav>
     </header>
   );

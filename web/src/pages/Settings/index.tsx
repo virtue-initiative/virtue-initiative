@@ -1,6 +1,16 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { User } from "../../api";
-import { Dialog, DialogActions, DialogHeader } from "../../components/Dialog";
+import {
+  Alert,
+  Button,
+  Card,
+  Dialog,
+  DialogActions,
+  DialogHeader,
+  Field,
+  Input,
+  Select,
+} from "@virtueinitiative/shared-web";
 import { useAuth } from "../../context/auth";
 import { usePartners } from "../../hooks/usePartners";
 import {
@@ -236,19 +246,17 @@ export function Settings() {
   return (
     <div class="settings-page">
       <h1 class="settings-title">Settings</h1>
-      {loadError && <p class="alert-error">{loadError.message}</p>}
+      {loadError && <Alert variant="error">{loadError.message}</Alert>}
       {settingsLoading && !user && !watching && (
         <p class="hint-text">Loading…</p>
       )}
 
       {!settingsLoading && user && (
-        <section class="card settings-section">
+        <Card class="settings-section">
           <h2>Profile</h2>
           <form class="settings-form" onSubmit={saveName}>
-            <div class="field">
-              <label for="settings-name">Display name</label>
-              <input
-                id="settings-name"
+            <Field label="Display name">
+              <Input
                 type="text"
                 value={name}
                 onInput={(e) => {
@@ -260,11 +268,9 @@ export function Settings() {
                 placeholder="Your name"
                 autoComplete="name"
               />
-            </div>
-            <div class="field">
-              <label for="settings-email">Email</label>
-              <input
-                id="settings-email"
+            </Field>
+            <Field label="Email">
+              <Input
                 type="email"
                 value={email}
                 onInput={(e) => {
@@ -277,20 +283,20 @@ export function Settings() {
                 autoComplete="email"
                 required
               />
-            </div>
+            </Field>
             {nameStatus && (
-              <p
-                class={
+              <Alert
+                variant={
                   nameStatus.toLowerCase().includes("saved")
-                    ? "alert-success"
-                    : "alert-error"
+                    ? "success"
+                    : "error"
                 }
               >
                 {nameStatus}
-              </p>
+              </Alert>
             )}
-            <button
-              class="btn btn-primary"
+            <Button
+              variant="primary"
               type="submit"
               disabled={
                 userLoading ||
@@ -306,7 +312,7 @@ export function Settings() {
                   : savedButtonUntil > Date.now()
                     ? "Saved"
                     : "Save"}
-            </button>
+            </Button>
           </form>
           <Dialog dialogRef={emailChangeDialogRef} class="settings-dialog">
             <DialogHeader>Confirm your new email</DialogHeader>
@@ -318,30 +324,27 @@ export function Settings() {
               . Your account email will change after you confirm that link.
             </p>
             <DialogActions>
-              <button
-                class="btn btn-primary"
+              <Button
+                variant="primary"
                 type="button"
                 onClick={() => emailChangeDialogRef.current?.close()}
               >
                 Got it
-              </button>
+              </Button>
             </DialogActions>
           </Dialog>
-        </section>
+        </Card>
       )}
 
       {!settingsLoading && user && (
-        <section class="card settings-section">
+        <Card class="settings-section">
           <h2>Email notifications</h2>
           <p class="hint-text settings-section-hint">
             Choose how often and when you receive reminders to review your
             partners' screenshots
           </p>
-          <div class="field settings-frequency-field">
-            <label for="settings-email-frequency">Email frequency</label>
-            <select
-              id="settings-email-frequency"
-              class="settings-select"
+          <Field label="Email frequency">
+            <Select
               value={emailFrequency}
               onChange={(e) => {
                 setEmailFrequency(
@@ -357,16 +360,11 @@ export function Settings() {
               <option value="alerts-only">Alerts only</option>
               <option value="daily">Daily</option>
               <option value="weekly">Weekly</option>
-            </select>
-          </div>
+            </Select>
+          </Field>
           <form class="settings-form" onSubmit={saveEmailSchedule}>
-            <div class="field settings-frequency-field">
-              <label for="settings-email-digest-hour">
-                Digest delivery time
-              </label>
-              <select
-                id="settings-email-digest-hour"
-                class="settings-select"
+            <Field label="Digest delivery time">
+              <Select
                 value={String(emailDigestLocalHour)}
                 onChange={(e) => {
                   setEmailDigestLocalHour(
@@ -385,13 +383,13 @@ export function Settings() {
                     {formatDigestHour(hour)}
                   </option>
                 ))}
-              </select>
-            </div>
+              </Select>
+            </Field>
             {emailScheduleStatus && (
-              <p class="alert-error">{emailScheduleStatus}</p>
+              <Alert variant="error">{emailScheduleStatus}</Alert>
             )}
-            <button
-              class="btn btn-primary"
+            <Button
+              variant="primary"
               type="submit"
               disabled={
                 !user || emailScheduleSaving || !hasEmailScheduleChanges
@@ -402,7 +400,7 @@ export function Settings() {
                 : emailScheduleSavedButtonUntil > Date.now()
                   ? "Saved"
                   : "Save digest schedule"}
-            </button>
+            </Button>
           </form>
           {(watching ?? []).length === 0 ? (
             <p class="hint-text settings-followup-hint">
@@ -418,25 +416,25 @@ export function Settings() {
               .
             </p>
           )}
-        </section>
+        </Card>
       )}
 
       {!settingsLoading && user && (
-        <section class="card settings-section settings-danger-zone">
+        <Card class="settings-section settings-danger-zone">
           <h2>Delete account</h2>
           <p class="hint-text settings-section-hint">
             This permanently deletes your account, devices, partner
             relationships, sessions, and stored logs. This cannot be undone.
           </p>
-          <button
-            class="btn btn-danger"
+          <Button
+            variant="danger"
             type="button"
             onClick={openDeleteDialog}
             disabled={deleteAccountPending}
           >
             Delete account
-          </button>
-        </section>
+          </Button>
+        </Card>
       )}
 
       {!settingsLoading && user && (
@@ -446,12 +444,8 @@ export function Settings() {
             This permanently removes your account and all associated data. Type{" "}
             <strong>{user.email}</strong> to confirm.
           </p>
-          <div class="field">
-            <label for="settings-delete-account-confirm-email">
-              Confirm your email
-            </label>
-            <input
-              id="settings-delete-account-confirm-email"
+          <Field label="Confirm your email">
+            <Input
               type="email"
               value={deleteConfirmEmail}
               onInput={(e) => {
@@ -462,27 +456,27 @@ export function Settings() {
               autoComplete="off"
               disabled={deleteAccountPending}
             />
-          </div>
+          </Field>
           {deleteAccountStatus && (
-            <p class="alert-error">{deleteAccountStatus}</p>
+            <Alert variant="error">{deleteAccountStatus}</Alert>
           )}
           <DialogActions>
-            <button
-              class="btn btn-ghost"
+            <Button
+              variant="ghost"
               type="button"
               onClick={closeDeleteDialog}
               disabled={deleteAccountPending}
             >
               Cancel
-            </button>
-            <button
-              class="btn btn-danger"
+            </Button>
+            <Button
+              variant="danger"
               type="button"
               onClick={() => deleteAccountConfirmed().catch(() => {})}
               disabled={!deleteConfirmationMatches || deleteAccountPending}
             >
               {deleteAccountPending ? "Deleting…" : "Delete account"}
-            </button>
+            </Button>
           </DialogActions>
         </Dialog>
       )}

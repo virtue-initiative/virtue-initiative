@@ -45,7 +45,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--bg-subtle);
 }
 
 .settings-item-header {
@@ -73,10 +73,6 @@
   gap: 0.4rem;
 }
 
-.settings-frequency-field {
-  width: min(100%, var(--settings-control-width));
-}
-
 .settings-followup-hint {
   margin-top: 0.65rem;
 }
@@ -86,42 +82,11 @@
   gap: 0.85rem;
 }
 
-.settings-select {
-  margin-bottom: 0.4rem;
-  appearance: none;
-  width: 100%;
-  min-height: 0;
-  padding: 0.55rem 2.25rem 0.55rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background:
-    linear-gradient(45deg, transparent 50%, var(--text-muted) 50%)
-      calc(100% - 1.05rem) calc(50% - 0.1rem) / 0.45rem 0.45rem no-repeat,
-    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%)
-      calc(100% - 0.75rem) calc(50% - 0.1rem) / 0.45rem 0.45rem no-repeat,
-    var(--bg);
-  color: var(--text);
-  font-size: 1rem;
-  font: inherit;
-  line-height: 1.5;
-  outline: none;
-  transition: border-color 0.15s;
-
-  &:focus {
-    border-color: var(--accent);
-  }
-
-  &:disabled {
-    opacity: 0.65;
-    cursor: not-allowed;
-  }
-}
-
-.settings-page .field {
+.settings-page .vi-field {
   width: min(100%, var(--settings-control-width));
 }
 
-.settings-page .field input {
+.settings-page .vi-field input {
   width: 100%;
 }
 
@@ -141,7 +106,7 @@
     padding: 1.1rem 0.75rem;
   }
 
-  .settings-page .settings-section.card {
+  .settings-page .settings-section.vi-card {
     padding: 0.95rem;
   }
 

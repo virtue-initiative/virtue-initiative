@@ -55,10 +55,15 @@
   gap: 0.5rem;
 }
 
-.app-header-action-group .control-icon {
+.app-header-action-group .vi-icon-btn {
   width: 2.25rem;
   min-width: 2.25rem;
   height: 2.25rem;
+}
+
+.app-header-nav-group .vi-btn--flat.is-active {
+  color: var(--accent);
+  font-weight: 700;
 }
 
 @media (max-width: 720px) {
@@ -119,15 +124,20 @@
     box-shadow: var(--shadow-md);
   }
 
-  .app-header-mobile-menu .control {
+  .app-header-mobile-menu .vi-btn {
     justify-content: flex-start;
     width: 100%;
     min-height: 2.6rem;
     font-size: 0.95rem;
   }
 
-  .app-header-mobile-menu .control-flat {
+  .app-header-mobile-menu .vi-btn--flat {
     border-color: transparent;
+  }
+
+  .app-header-mobile-menu .vi-btn--flat.is-active {
+    color: var(--accent);
+    font-weight: 700;
   }
 
   .app-header-mobile-menu .app-header-mobile-logout {

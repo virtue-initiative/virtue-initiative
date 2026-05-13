@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 interface Uint8Array<TArrayBuffer extends ArrayBufferLike> {
   /**
    * Converts the `Uint8Array` to a base64-encoded string.

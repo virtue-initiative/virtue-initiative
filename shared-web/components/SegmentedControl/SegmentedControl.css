@@ -1,18 +1,18 @@
-.segmented-control {
+.vi-segmented-control {
   display: flex;
   gap: 3px;
   padding: 3px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-subtle);
 }
 
-.segmented-control__item {
+.vi-segmented-control__item {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border: none;
   background: transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 0.45rem 1rem;
   font-size: 0.9rem;
   font-weight: 500;

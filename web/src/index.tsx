@@ -1,3 +1,4 @@
+import * as preact from "preact";
 import {
   LocationProvider,
   Router,
@@ -6,7 +7,7 @@ import {
   prerender as ssr,
   useLocation,
 } from "preact-iso";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { SWRConfig } from "swr";
 
 import { AuthProvider, useAuth } from "./context/auth";
@@ -19,9 +20,22 @@ import { Auth } from "./pages/Auth/index";
 import { VerifyEmail } from "./pages/VerifyEmail/index";
 import { Settings } from "./pages/Settings/index";
 import { NotFound } from "./pages/_404";
-import { GLOBAL_ALERT_EVENT } from "./events";
 import { appSWRConfig } from "./swr";
+import { ToastProvider, useToast } from "@virtueinitiative/shared-web";
+import { initToast } from "./utils/toast";
 import "./style.css";
+
+// Dev-only: component preview page. The dynamic import keeps it out of the production bundle.
+function DevComponentsPage() {
+  const [Comp, setComp] = useState<null | (() => preact.JSX.Element)>(null);
+  useEffect(() => {
+    import("./pages/Dev/Components/index").then((m) => {
+      setComp(() => m.ComponentsPage as () => preact.JSX.Element);
+    });
+  }, []);
+  if (!Comp) return <div class="splash">Loading…</div>;
+  return <Comp />;
+}
 
 const GLOBAL_MESSAGE_KEY = "virtue_global_link_message";
 
@@ -35,76 +49,11 @@ function navigate(path: string, replace = false) {
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
-type GlobalAlert = {
-  id: string;
-  message: string;
-  isError: boolean;
-  centered: boolean;
-  dismissible: boolean;
-  durationMs: number | null;
-  closing: boolean;
-};
-
-function GlobalEmailActionBanner() {
+function GlobalEmailActionHandler() {
   const { token } = useAuth();
   const { acceptPartnerInvite } = usePartners();
   const { path: currentPath } = useLocation();
-  const [alerts, setAlerts] = useState<GlobalAlert[]>([]);
-  const timeoutsRef = useRef<number[]>([]);
-
-  useEffect(
-    () => () => {
-      for (const timeout of timeoutsRef.current) {
-        window.clearTimeout(timeout);
-      }
-      timeoutsRef.current = [];
-    },
-    [],
-  );
-
-  function dismissAlert(id: string) {
-    setAlerts((previous) =>
-      previous.map((alert) =>
-        alert.id === id ? { ...alert, closing: true } : alert,
-      ),
-    );
-    const removalTimeout = window.setTimeout(() => {
-      setAlerts((previous) => previous.filter((alert) => alert.id !== id));
-    }, 220);
-    timeoutsRef.current.push(removalTimeout);
-  }
-
-  function pushAlert(
-    message: string,
-    isError: boolean,
-    options: {
-      centered?: boolean;
-      dismissible?: boolean;
-      durationMs?: number | null;
-    } = {},
-  ) {
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const durationMs =
-      options.durationMs === undefined ? 45_000 : options.durationMs;
-    setAlerts((previous) => [
-      ...previous,
-      {
-        id,
-        message,
-        isError,
-        centered: Boolean(options.centered),
-        dismissible: options.dismissible ?? true,
-        durationMs,
-        closing: false,
-      },
-    ]);
-    if (durationMs !== null) {
-      const timeout = window.setTimeout(() => {
-        dismissAlert(id);
-      }, durationMs);
-      timeoutsRef.current.push(timeout);
-    }
-  }
+  const { push } = useToast();
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -113,69 +62,18 @@ function GlobalEmailActionBanner() {
     window.sessionStorage.removeItem(GLOBAL_MESSAGE_KEY);
     try {
       const parsed = JSON.parse(stored) as
-        | {
-            message: string;
-            isError: boolean;
-          }
-        | Array<{
-            message: string;
-            isError: boolean;
-          }>;
+        | { message: string; isError: boolean }
+        | Array<{ message: string; isError: boolean }>;
       const parsedList = Array.isArray(parsed) ? parsed : [parsed];
-      const nextAlerts = parsedList
-        .filter(
-          (item) => typeof item.message === "string" && item.message.trim(),
-        )
-        .map((item) => ({
-          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          message: item.message,
-          isError: Boolean(item.isError),
-          centered: false,
-          dismissible: true,
-          durationMs: 45_000,
-          closing: false,
-        }));
-      if (nextAlerts.length > 0) {
-        setAlerts((previous) => [...previous, ...nextAlerts]);
+      for (const item of parsedList.filter(
+        (i) => typeof i.message === "string" && i.message.trim(),
+      )) {
+        push(item.message, item.isError ? "error" : "success");
       }
     } catch {
       window.sessionStorage.removeItem(GLOBAL_MESSAGE_KEY);
     }
-  }, [currentPath]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    function handleGlobalAlert(event: Event) {
-      const detail = (
-        event as CustomEvent<{
-          message?: string;
-          isError?: boolean;
-          centered?: boolean;
-          dismissible?: boolean;
-          durationMs?: number | null;
-        }>
-      ).detail;
-
-      if (!detail?.message?.trim()) {
-        return;
-      }
-
-      pushAlert(detail.message, Boolean(detail.isError), {
-        centered: Boolean(detail.centered),
-        dismissible: detail.dismissible ?? true,
-        durationMs:
-          typeof detail.durationMs === "number" || detail.durationMs === null
-            ? detail.durationMs
-            : undefined,
-      });
-    }
-
-    window.addEventListener(GLOBAL_ALERT_EVENT, handleGlobalAlert);
-    return () => {
-      window.removeEventListener(GLOBAL_ALERT_EVENT, handleGlobalAlert);
-    };
-  }, []);
+  }, [currentPath, push]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -195,84 +93,19 @@ function GlobalEmailActionBanner() {
 
     acceptPartnerInvite(inviteToken)
       .then(() => {
-        pushAlert("Partner invite accepted.", false);
+        push("Partner invite accepted.", "success");
         clearInviteToken();
       })
       .catch((err: unknown) => {
-        pushAlert(
+        push(
           err instanceof Error ? err.message : "Failed to accept invite",
-          true,
+          "error",
         );
         clearInviteToken();
       });
-  }, [acceptPartnerInvite, token]);
+  }, [acceptPartnerInvite, token, push]);
 
-  if (alerts.length === 0) {
-    return null;
-  }
-
-  const edgeAlerts = alerts.filter((alert) => !alert.centered);
-  const centeredAlerts = alerts.filter((alert) => alert.centered);
-
-  return (
-    <>
-      {edgeAlerts.length > 0 && (
-        <div
-          class={`global-alert-stack${token ? " global-alert-stack--with-header" : ""}`}
-          aria-live="polite"
-          aria-atomic="false"
-        >
-          {edgeAlerts.map((alert) => (
-            <div
-              key={alert.id}
-              role="status"
-              class={`${alert.isError ? "alert-error" : "alert-success"} global-alert${alert.closing ? " global-alert--closing" : ""}`}
-            >
-              <span>{alert.message}</span>
-              {alert.dismissible && (
-                <button
-                  class="global-alert-close"
-                  type="button"
-                  onClick={() => dismissAlert(alert.id)}
-                  aria-label="Dismiss notification"
-                >
-                  ×
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {centeredAlerts.length > 0 && (
-        <div
-          class={`global-alert-stack global-alert-stack--centered${token ? " global-alert-stack--with-header" : ""}`}
-          aria-live="polite"
-          aria-atomic="false"
-        >
-          {centeredAlerts.map((alert) => (
-            <div
-              key={alert.id}
-              role="status"
-              class={`${alert.isError ? "alert-error" : "alert-success"} global-alert${alert.closing ? " global-alert--closing" : ""}`}
-            >
-              <span>{alert.message}</span>
-              {alert.dismissible && (
-                <button
-                  class="global-alert-close"
-                  type="button"
-                  onClick={() => dismissAlert(alert.id)}
-                  aria-label="Dismiss notification"
-                >
-                  ×
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </>
-  );
+  return null;
 }
 
 function RedirectToLogin() {
@@ -309,7 +142,7 @@ function AppShell() {
     <LocationProvider>
       {!token && (
         <>
-          <GlobalEmailActionBanner />
+          <GlobalEmailActionHandler />
           <Router>
             <Route path="/login" component={() => <Auth mode="login" />} />
             <Route path="/signup" component={() => <Auth mode="signup" />} />
@@ -327,7 +160,7 @@ function AppShell() {
         <div class="app-shell">
           <Header />
           <main class="app-main">
-            <GlobalEmailActionBanner />
+            <GlobalEmailActionHandler />
             <Router>
               <Route path="/login" component={RedirectToDashboard} />
               <Route path="/signup" component={RedirectToDashboard} />
@@ -337,6 +170,9 @@ function AppShell() {
               <Route path="/logs/gallery" component={Logs} />
               <Route path="/settings" component={Settings} />
               <Route path="/verify-email" component={VerifyEmail} />
+              {import.meta.env.DEV && (
+                <Route path="/dev/components" component={DevComponentsPage} />
+              )}
               <Route default component={NotFound} />
             </Router>
           </main>
@@ -346,15 +182,24 @@ function AppShell() {
   );
 }
 
+function ToastBridge() {
+  const { push } = useToast();
+  initToast(push);
+  return null;
+}
+
 export function App() {
   return (
-    <AuthProvider>
-      <SWRConfig value={appSWRConfig}>
-        <E2EEProvider>
-          <AppShell />
-        </E2EEProvider>
-      </SWRConfig>
-    </AuthProvider>
+    <ToastProvider>
+      <ToastBridge />
+      <AuthProvider>
+        <SWRConfig value={appSWRConfig}>
+          <E2EEProvider>
+            <AppShell />
+          </E2EEProvider>
+        </SWRConfig>
+      </AuthProvider>
+    </ToastProvider>
   );
 }
 

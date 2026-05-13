@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "preact/hooks";
 import { useLocation } from "preact-iso";
-import { Device, WatchingPartner } from "../../api";
+import { Device } from "../../api";
 import { useAuth } from "../../context/auth";
 import { useDevices } from "../../hooks/useDevices";
 import { useLogs } from "../../hooks/useLogs";
@@ -11,9 +11,16 @@ import {
   getRiskRating,
   type RiskRating,
 } from "@virtueinitiative/shared-web/risk";
-import { FeedLog, getLogImage, humanizeLogType, LOG_TYPES } from "./shared";
+import { getLogImage, humanizeLogType, LOG_TYPES } from "./shared";
 import "./style.css";
 import { useUrlState } from "../../hooks/useUrlState";
+import {
+  Alert,
+  Button,
+  Field,
+  IconButton,
+  Select,
+} from "@virtueinitiative/shared-web";
 
 interface DeviceGroup {
   label: string;
@@ -93,6 +100,42 @@ function CloseIcon() {
         strokeLinecap="round"
         strokeLinejoin="round"
         d="M6 18 18 6M6 6l12 12"
+      />
+    </svg>
+  );
+}
+
+function ChevronLeftIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth={2}
+      stroke="currentColor"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M15.75 19.5 8.25 12l7.5-7.5"
+      />
+    </svg>
+  );
+}
+
+function ChevronRightIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth={2}
+      stroke="currentColor"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="m8.25 4.5 7.5 7.5-7.5 7.5"
       />
     </svg>
   );
@@ -405,18 +448,20 @@ export function Logs() {
           <div class="logs-header">
             <h1>{title}</h1>
             <div class="logs-header-actions">
-              <button
-                class="btn btn-ghost btn-sm logs-sidebar-toggle"
+              <Button
+                variant="ghost"
+                size="md"
+                class="logs-sidebar-toggle"
                 type="button"
                 onClick={() => setSidebarOpen(true)}
               >
                 <MenuIcon />
                 <span>Devices</span>
-              </button>
+              </Button>
               <div class="logs-filter-switcher">
-                <label class="logs-filter-field">
-                  <span class="logs-filter-label">Risk</span>
-                  <select
+                <Field label="Risk" class="logs-filter-field">
+                  <Select
+                    size="md"
                     class="logs-filter-select"
                     value={riskFilter}
                     onChange={(e) =>
@@ -428,11 +473,11 @@ export function Logs() {
                     <option value="all">All</option>
                     <option value="high">High</option>
                     <option value="moderate">Medium</option>
-                  </select>
-                </label>
-                <label class="logs-filter-field">
-                  <span class="logs-filter-label">Type</span>
-                  <select
+                  </Select>
+                </Field>
+                <Field label="Type" class="logs-filter-field">
+                  <Select
+                    size="md"
                     class="logs-filter-select"
                     value={typeFilter ?? ""}
                     onChange={(e) =>
@@ -447,14 +492,13 @@ export function Logs() {
                         {humanizeLogType(type)}
                       </option>
                     ))}
-                  </select>
-                </label>
+                  </Select>
+                </Field>
               </div>
               <div class="logs-header-view-controls">
                 {isGallery && (
-                  <button
-                    class="btn btn-ghost btn-sm logs-fullscreen-btn"
-                    type="button"
+                  <IconButton
+                    class="logs-fullscreen-btn"
                     onClick={() => setGalleryFullscreen((prev) => !prev)}
                     aria-label={
                       galleryFullscreen ? "Exit fullscreen" : "Fullscreen"
@@ -466,17 +510,17 @@ export function Logs() {
                     ) : (
                       <ExpandIcon />
                     )}
-                  </button>
+                  </IconButton>
                 )}
-                <div class="segmented-control logs-view-switcher">
+                <div class="vi-segmented-control logs-view-switcher">
                   <a
-                    class={`segmented-control__item${!isGallery ? " is-active" : ""}`}
+                    class={`vi-segmented-control__item${!isGallery ? " is-active" : ""}`}
                     href={`/logs${window.location.search}`}
                   >
                     List
                   </a>
                   <a
-                    class={`segmented-control__item${isGallery ? " is-active" : ""}`}
+                    class={`vi-segmented-control__item${isGallery ? " is-active" : ""}`}
                     href={`/logs/gallery${window.location.search}`}
                   >
                     Gallery
@@ -487,27 +531,20 @@ export function Logs() {
           </div>
 
           <div class="logs-week-nav">
-            <button
-              class="btn btn-ghost btn-sm"
-              type="button"
-              aria-label="Previous day"
-              onClick={prevDay}
-            >
-              ‹
-            </button>
+            <IconButton aria-label="Previous day" onClick={prevDay}>
+              <ChevronLeftIcon />
+            </IconButton>
             <span class="logs-week-label">{dayLabel}</span>
-            <button
-              class="btn btn-ghost btn-sm"
-              type="button"
+            <IconButton
               aria-label="Next day"
               onClick={nextDay}
               disabled={dayOffset >= 0}
             >
-              ›
-            </button>
+              <ChevronRightIcon />
+            </IconButton>
           </div>
 
-          {logsError && <p class="alert-error">{logsError.message}</p>}
+          {logsError && <Alert variant="error">{logsError.message}</Alert>}
           {batchStats && batchStats.total > 0 && (
             <p class="logs-summary">
               {batchStats.decrypted}/{batchStats.total} block
