@@ -85,20 +85,3 @@
   --control-active-text: #8be28b;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --bg: #111713;
-    --surface: #1a1f1c;
-    --bg-subtle: #1e2421;
-    --border: #2c332e;
-    --text: #e6e3df;
-    --text-muted: #9a9890;
-    --accent: #00a300;
-    --success: var(--accent);
-    --control-border-hover: #3f4c44;
-    --control-active-bg: #142314;
-    --control-active-border: #165816;
-    --control-active-text: #8be28b;
-  }
-}

@@ -20,9 +20,9 @@ import { Auth } from "./pages/Auth/index";
 import { VerifyEmail } from "./pages/VerifyEmail/index";
 import { Settings } from "./pages/Settings/index";
 import { NotFound } from "./pages/_404";
-import { GLOBAL_ALERT_EVENT } from "./events";
 import { appSWRConfig } from "./swr";
 import { ToastProvider, useToast } from "@virtueinitiative/shared-web";
+import { initToast } from "./utils/toast";
 import "./style.css";
 
 // Dev-only: component preview page. The dynamic import keeps it out of the production bundle.
@@ -74,30 +74,6 @@ function GlobalEmailActionHandler() {
       window.sessionStorage.removeItem(GLOBAL_MESSAGE_KEY);
     }
   }, [currentPath, push]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    function handleGlobalAlert(event: Event) {
-      const detail = (
-        event as CustomEvent<{
-          message?: string;
-          isError?: boolean;
-        }>
-      ).detail;
-
-      if (!detail?.message?.trim()) {
-        return;
-      }
-
-      push(detail.message, detail.isError ? "error" : "success");
-    }
-
-    window.addEventListener(GLOBAL_ALERT_EVENT, handleGlobalAlert);
-    return () => {
-      window.removeEventListener(GLOBAL_ALERT_EVENT, handleGlobalAlert);
-    };
-  }, [push]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -206,9 +182,16 @@ function AppShell() {
   );
 }
 
+function ToastBridge() {
+  const { push } = useToast();
+  initToast(push);
+  return null;
+}
+
 export function App() {
   return (
     <ToastProvider>
+      <ToastBridge />
       <AuthProvider>
         <SWRConfig value={appSWRConfig}>
           <E2EEProvider>

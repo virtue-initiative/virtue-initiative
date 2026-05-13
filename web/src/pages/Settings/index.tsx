@@ -9,6 +9,7 @@ import {
   DialogHeader,
   Field,
   Input,
+  Select,
 } from "@virtueinitiative/shared-web";
 import { useAuth } from "../../context/auth";
 import { usePartners } from "../../hooks/usePartners";
@@ -342,11 +343,8 @@ export function Settings() {
             Choose how often and when you receive reminders to review your
             partners' screenshots
           </p>
-          <div class="settings-frequency-field">
-            <label for="settings-email-frequency" class="vi-field__label">Email frequency</label>
-            <select
-              id="settings-email-frequency"
-              class="settings-select"
+          <Field label="Email frequency">
+            <Select
               value={emailFrequency}
               onChange={(e) => {
                 setEmailFrequency(
@@ -362,16 +360,11 @@ export function Settings() {
               <option value="alerts-only">Alerts only</option>
               <option value="daily">Daily</option>
               <option value="weekly">Weekly</option>
-            </select>
-          </div>
+            </Select>
+          </Field>
           <form class="settings-form" onSubmit={saveEmailSchedule}>
-            <div class="settings-frequency-field">
-              <label for="settings-email-digest-hour" class="vi-field__label">
-                Digest delivery time
-              </label>
-              <select
-                id="settings-email-digest-hour"
-                class="settings-select"
+            <Field label="Digest delivery time">
+              <Select
                 value={String(emailDigestLocalHour)}
                 onChange={(e) => {
                   setEmailDigestLocalHour(
@@ -390,8 +383,8 @@ export function Settings() {
                     {formatDigestHour(hour)}
                   </option>
                 ))}
-              </select>
-            </div>
+              </Select>
+            </Field>
             {emailScheduleStatus && (
               <Alert variant="error">{emailScheduleStatus}</Alert>
             )}

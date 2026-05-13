@@ -1,7 +1,6 @@
 /* Legacy .card / .card-grid removed — use .vi-card from Card/Card.css */
-/* Keep .card-name and .card-meta — no vi-* equivalents exist */
 
-.card-name {
+.vi-card__name {
   font-weight: 600;
   font-size: 1rem;
   overflow: hidden;
@@ -9,7 +8,7 @@
   white-space: nowrap;
 }
 
-.card-meta {
+.vi-card__meta {
   margin: 0;
   display: grid;
   grid-template-columns: auto 1fr;

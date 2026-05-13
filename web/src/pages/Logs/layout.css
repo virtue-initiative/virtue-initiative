@@ -149,11 +149,11 @@ button.logs-sidebar-close {
 
   &.is-active {
     background: var(--accent);
-    color: #fff;
+    color: white; /* literal: text on accent button */
 
     & .logs-status-dot--online,
     & .logs-status-dot--offline {
-      background: #fff;
+      background: white; /* literal: dot on accent button */
     }
   }
 }
@@ -382,6 +382,10 @@ button.logs-sidebar-backdrop.is-open {
   font-weight: 500;
 }
 
+.logs-device--indented {
+  margin-left: var(--space-2);
+}
+
 .logs-time {
   font-size: 0.8rem;
   color: var(--text-muted);
@@ -538,7 +542,7 @@ button.logs-sidebar-backdrop.is-open {
 .logs-detail-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--overlay);
   z-index: 100;
   display: flex;
   align-items: center;

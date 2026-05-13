@@ -2,7 +2,7 @@
   background: var(--danger);
   border: 1px solid var(--danger-strong);
   border-radius: 8px;
-  color: #fff;
+  color: white; /* literal: text on danger banner */
   padding: 0.85rem 1.25rem;
   font-size: 0.95rem;
   line-height: 1.5;

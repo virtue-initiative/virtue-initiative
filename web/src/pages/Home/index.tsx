@@ -391,7 +391,7 @@ function PendingPartnerCard({
   return (
     <Card>
       <CardHeader>
-        <span class="card-name" title={partnerEmailTooltip}>
+        <span class="vi-card__name" title={partnerEmailTooltip}>
           {partnerLabel}
         </span>
         <Badge variant="yellow">Pending</Badge>
@@ -477,7 +477,7 @@ function PartnerCard({
   return (
     <Card class={isWatching ? undefined : "partner-card-compact"}>
       <CardHeader>
-        <span class="card-name" title={partnerEmailTooltip}>
+        <span class="vi-card__name" title={partnerEmailTooltip}>
           {partnerLabel}
         </span>
       </CardHeader>
@@ -626,12 +626,12 @@ function DeviceCard({
   return (
     <Card>
       <CardHeader>
-        <span class="card-name">{device.name}</span>
+        <span class="vi-card__name">{device.name}</span>
         <Badge variant={device.status === "online" ? "green" : "gray"}>
           {device.status === "online" ? "Online" : "Offline"}
         </Badge>
       </CardHeader>
-      <dl class="card-meta">
+      <dl class="vi-card__meta">
         <dt>Platform</dt>
         <dd>{device.platform}</dd>
         <dt>Last upload</dt>

@@ -1,6 +1,6 @@
 .logs-badge-red {
   background: var(--danger);
-  color: #fff;
+  color: white; /* literal: text on danger chip */
   border-radius: 5px;
   padding: 0.15rem 0.5rem;
   font-size: 0.78rem;
@@ -17,17 +17,17 @@
 
 .logs-verify-badge--failed {
   background: var(--danger);
-  color: #fff;
+  color: white; /* literal: text on danger chip */
 }
 
 .logs-verify-badge--moderate {
   background: var(--warning);
-  color: #fff;
+  color: white; /* literal: text on warning chip */
 }
 
 .logs-verify-badge--alert {
   background: var(--warning);
-  color: #fff;
+  color: white; /* literal: text on warning chip */
 }
 
 .logs-password-overlay {

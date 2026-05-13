@@ -14,7 +14,7 @@ import {
 import { getLogImage, humanizeLogType, LOG_TYPES } from "./shared";
 import "./style.css";
 import { useUrlState } from "../../hooks/useUrlState";
-import { Alert, Button, IconButton } from "@virtueinitiative/shared-web";
+import { Alert, Button, IconButton, Select } from "@virtueinitiative/shared-web";
 
 interface DeviceGroup {
   label: string;
@@ -419,7 +419,7 @@ export function Logs() {
               <div class="logs-filter-switcher">
                 <label class="logs-filter-field">
                   <span class="logs-filter-label">Risk</span>
-                  <select
+                  <Select
                     class="logs-filter-select"
                     value={riskFilter}
                     onChange={(e) =>
@@ -431,11 +431,11 @@ export function Logs() {
                     <option value="all">All</option>
                     <option value="high">High</option>
                     <option value="moderate">Medium</option>
-                  </select>
+                  </Select>
                 </label>
                 <label class="logs-filter-field">
                   <span class="logs-filter-label">Type</span>
-                  <select
+                  <Select
                     class="logs-filter-select"
                     value={typeFilter ?? ""}
                     onChange={(e) =>
@@ -450,7 +450,7 @@ export function Logs() {
                         {humanizeLogType(type)}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
               </div>
               <div class="logs-header-view-controls">
