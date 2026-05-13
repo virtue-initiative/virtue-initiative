@@ -173,11 +173,11 @@ button.logs-sidebar-close {
 }
 
 .logs-status-dot--online {
-  background: #22c55e;
+  background: var(--success);
 }
 
 .logs-status-dot--offline {
-  background: #9ca3af;
+  background: var(--text-muted);
 }
 
 .logs-status-dot--placeholder {

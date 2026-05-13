@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "preact/hooks";
 import { useLocation } from "preact-iso";
-import { Device, WatchingPartner } from "../../api";
+import { Device } from "../../api";
 import { useAuth } from "../../context/auth";
 import { useDevices } from "../../hooks/useDevices";
 import { useLogs } from "../../hooks/useLogs";
@@ -11,9 +11,10 @@ import {
   getRiskRating,
   type RiskRating,
 } from "@virtueinitiative/shared-web/risk";
-import { FeedLog, getLogImage, humanizeLogType, LOG_TYPES } from "./shared";
+import { getLogImage, humanizeLogType, LOG_TYPES } from "./shared";
 import "./style.css";
 import { useUrlState } from "../../hooks/useUrlState";
+import { Alert, Button, IconButton } from "@virtueinitiative/shared-web";
 
 interface DeviceGroup {
   label: string;
@@ -405,14 +406,16 @@ export function Logs() {
           <div class="logs-header">
             <h1>{title}</h1>
             <div class="logs-header-actions">
-              <button
-                class="btn btn-ghost btn-sm logs-sidebar-toggle"
+              <Button
+                variant="ghost"
+                size="sm"
+                class="logs-sidebar-toggle"
                 type="button"
                 onClick={() => setSidebarOpen(true)}
               >
                 <MenuIcon />
                 <span>Devices</span>
-              </button>
+              </Button>
               <div class="logs-filter-switcher">
                 <label class="logs-filter-field">
                   <span class="logs-filter-label">Risk</span>
@@ -452,9 +455,8 @@ export function Logs() {
               </div>
               <div class="logs-header-view-controls">
                 {isGallery && (
-                  <button
-                    class="btn btn-ghost btn-sm logs-fullscreen-btn"
-                    type="button"
+                  <IconButton
+                    class="logs-fullscreen-btn"
                     onClick={() => setGalleryFullscreen((prev) => !prev)}
                     aria-label={
                       galleryFullscreen ? "Exit fullscreen" : "Fullscreen"
@@ -466,17 +468,17 @@ export function Logs() {
                     ) : (
                       <ExpandIcon />
                     )}
-                  </button>
+                  </IconButton>
                 )}
-                <div class="segmented-control logs-view-switcher">
+                <div class="vi-segmented-control logs-view-switcher">
                   <a
-                    class={`segmented-control__item${!isGallery ? " is-active" : ""}`}
+                    class={`vi-segmented-control__item${!isGallery ? " is-active" : ""}`}
                     href={`/logs${window.location.search}`}
                   >
                     List
                   </a>
                   <a
-                    class={`segmented-control__item${isGallery ? " is-active" : ""}`}
+                    class={`vi-segmented-control__item${isGallery ? " is-active" : ""}`}
                     href={`/logs/gallery${window.location.search}`}
                   >
                     Gallery
@@ -487,27 +489,29 @@ export function Logs() {
           </div>
 
           <div class="logs-week-nav">
-            <button
-              class="btn btn-ghost btn-sm"
+            <Button
+              variant="ghost"
+              size="sm"
               type="button"
               aria-label="Previous day"
               onClick={prevDay}
             >
               ‹
-            </button>
+            </Button>
             <span class="logs-week-label">{dayLabel}</span>
-            <button
-              class="btn btn-ghost btn-sm"
+            <Button
+              variant="ghost"
+              size="sm"
               type="button"
               aria-label="Next day"
               onClick={nextDay}
               disabled={dayOffset >= 0}
             >
               ›
-            </button>
+            </Button>
           </div>
 
-          {logsError && <p class="alert-error">{logsError.message}</p>}
+          {logsError && <Alert variant="error">{logsError.message}</Alert>}
           {batchStats && batchStats.total > 0 && (
             <p class="logs-summary">
               {batchStats.decrypted}/{batchStats.total} block

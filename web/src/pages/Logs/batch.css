@@ -21,7 +21,7 @@
 }
 
 .logs-verify-badge--moderate {
-  background: #f57c00;
+  background: var(--warning);
   color: #fff;
 }
 

@@ -11,7 +11,7 @@
   }
 }
 
-.auth-card.auth-card {
+.auth-card {
   width: 100%;
   padding: 2.5rem 2rem;
   max-width: 420px;
@@ -29,7 +29,7 @@
   justify-content: space-between;
 
   @media (max-width: 450px) {
-    & .control {
+    & .vi-icon-btn {
       display: none;
     }
   }
@@ -48,20 +48,15 @@
 }
 
 .auth-dev-warning {
-  background: #c0392b;
-  border-radius: 8px;
-  color: #ffffff;
-  padding: 0.75rem 1rem;
-  font-size: 0.9rem;
-  line-height: 1.5;
   margin-bottom: 1rem;
 }
 
 .auth-tabs {
   margin-bottom: 1.5rem;
+  width: 100%;
 }
 
-.auth-tabs .segmented-control__item {
+.auth-tabs .vi-segmented-control__item {
   flex: 1;
 }
 
@@ -77,6 +72,7 @@
 
 .auth-submit {
   margin-top: 0.25rem;
+  width: 100%;
 }
 
 .auth-links {

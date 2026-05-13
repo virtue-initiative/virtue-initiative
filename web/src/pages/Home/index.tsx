@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { Device, WatchingPartner, WatcherPartner } from "../../api";
 import {
+  Alert,
   Badge,
   Button,
   Card,
@@ -102,7 +103,7 @@ export function Home() {
 
   return (
     <div class="dashboard">
-      {error && <p class="alert-error">{error.message}</p>}
+      {error && <Alert variant="error">{error.message}</Alert>}
       {dashboardLoading && !devices && !watching && !watchers && (
         <p class="empty">Loading…</p>
       )}

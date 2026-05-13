@@ -1,29 +1,5 @@
-/* Card */
-
-.card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.25rem;
-
-  &.card-highlight {
-    border-color: var(--accent);
-  }
-}
-
-.card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 1rem;
-}
-
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.75rem;
-  gap: 0.5rem;
-}
+/* Legacy .card / .card-grid removed — use .vi-card from Card/Card.css */
+/* Keep .card-name and .card-meta — no vi-* equivalents exist */
 
 .card-name {
   font-weight: 600;
@@ -48,10 +24,4 @@
   & dd {
     margin: 0;
   }
-}
-
-.card-actions {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 1rem;
 }
