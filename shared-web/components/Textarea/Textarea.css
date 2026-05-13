@@ -1,0 +1,37 @@
+.vi-textarea {
+  box-sizing: border-box;
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.55rem 0.75rem;
+  font-size: var(--text-base);
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s ease;
+  font-family: var(--font);
+  resize: vertical;
+  min-height: 6rem;
+  line-height: var(--line-normal);
+
+  &:focus {
+    border-color: var(--accent);
+  }
+
+  &::placeholder {
+    color: var(--text-muted);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+}
+
+.vi-textarea--error {
+  border-color: var(--danger);
+
+  &:focus {
+    border-color: var(--danger);
+  }
+}

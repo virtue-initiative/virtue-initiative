@@ -1,3 +1,4 @@
+import * as preact from "preact";
 import {
   LocationProvider,
   Router,
@@ -21,7 +22,20 @@ import { Settings } from "./pages/Settings/index";
 import { NotFound } from "./pages/_404";
 import { GLOBAL_ALERT_EVENT } from "./events";
 import { appSWRConfig } from "./swr";
+import { ToastProvider } from "@virtueinitiative/shared-web";
 import "./style.css";
+
+// Dev-only: component preview page. The dynamic import keeps it out of the production bundle.
+function DevComponentsPage() {
+  const [Comp, setComp] = useState<null | (() => preact.JSX.Element)>(null);
+  useEffect(() => {
+    import("./pages/Dev/Components/index").then((m) => {
+      setComp(() => m.ComponentsPage as () => preact.JSX.Element);
+    });
+  }, []);
+  if (!Comp) return <div class="splash">Loading…</div>;
+  return <Comp />;
+}
 
 const GLOBAL_MESSAGE_KEY = "virtue_global_link_message";
 
@@ -337,6 +351,9 @@ function AppShell() {
               <Route path="/logs/gallery" component={Logs} />
               <Route path="/settings" component={Settings} />
               <Route path="/verify-email" component={VerifyEmail} />
+              {import.meta.env.DEV && (
+                <Route path="/dev/components" component={DevComponentsPage} />
+              )}
               <Route default component={NotFound} />
             </Router>
           </main>
@@ -348,13 +365,15 @@ function AppShell() {
 
 export function App() {
   return (
-    <AuthProvider>
-      <SWRConfig value={appSWRConfig}>
-        <E2EEProvider>
-          <AppShell />
-        </E2EEProvider>
-      </SWRConfig>
-    </AuthProvider>
+    <ToastProvider>
+      <AuthProvider>
+        <SWRConfig value={appSWRConfig}>
+          <E2EEProvider>
+            <AppShell />
+          </E2EEProvider>
+        </SWRConfig>
+      </AuthProvider>
+    </ToastProvider>
   );
 }
 

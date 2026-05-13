@@ -22,9 +22,9 @@ const latestPosts = (await getCollection("blog", ({ data }) => !data.draft))
           to use and end-to-end encrypted.
         </p>
         <div class="section-actions">
-          <a href={`${APP_URL}/signup`} class="btn btn-primary">Get started</a>
-          <a href="/about" class="btn btn-outline">Our mission</a>
-          <a href="/help" class="btn btn-outline">Help</a>
+          <a href={`${APP_URL}/signup`} class="vi-btn vi-btn--primary">Get started</a>
+          <a href="/about" class="vi-btn vi-btn--outline">Our mission</a>
+          <a href="/help" class="vi-btn vi-btn--outline">Help</a>
         </div>
       </div>
       <div class="home-hero-logo" aria-hidden="true">
@@ -80,7 +80,7 @@ const latestPosts = (await getCollection("blog", ({ data }) => !data.draft))
     </section>
 
     <section class="home-section">
-      <div class="privacy-card">
+      <div class="vi-card privacy-card">
         <div class="home-section-heading">
           <h2>Privacy &amp; security</h2>
         </div>
@@ -272,7 +272,7 @@ const latestPosts = (await getCollection("blog", ({ data }) => !data.draft))
             ))}
           </ul>
           <div class="section-actions">
-            <a href="/blog" class="btn btn-outline">
+            <a href="/blog" class="vi-btn vi-btn--outline">
               View all posts
             </a>
           </div>
@@ -286,7 +286,7 @@ const latestPosts = (await getCollection("blog", ({ data }) => !data.draft))
       </div>
       <p>Create your account and set up your accountability partner.</p>
       <div class="section-actions">
-        <a href={`${APP_URL}/signup`} class="btn btn-primary">Get started</a>
+        <a href={`${APP_URL}/signup`} class="vi-btn vi-btn--primary">Get started</a>
       </div>
     </section>
   </div>

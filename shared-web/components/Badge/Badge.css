@@ -1,0 +1,48 @@
+.vi-badge {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  padding: 0.15rem 0.55rem;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.vi-badge--green {
+  background: #dcfce7;
+  color: var(--accent);
+
+  [data-theme="dark"] & {
+    background: #14532d;
+    color: #8be28b;
+  }
+}
+
+.vi-badge--gray {
+  background: #f3f4f6;
+  color: #6b7280;
+
+  [data-theme="dark"] & {
+    background: #1f2937;
+    color: #9ca3af;
+  }
+}
+
+.vi-badge--yellow {
+  background: #fef9c3;
+  color: #a16207;
+
+  [data-theme="dark"] & {
+    background: #2d1f07;
+    color: #fbbf24;
+  }
+}
+
+.vi-badge--red {
+  background: #fee2e2;
+  color: #b91c1c;
+
+  [data-theme="dark"] & {
+    background: #3b0a0a;
+    color: #fca5a5;
+  }
+}
