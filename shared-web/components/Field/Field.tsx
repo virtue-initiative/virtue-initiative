@@ -24,9 +24,7 @@ export function Field({
     >
       <label class="vi-field__label">{label}</label>
       {children}
-      {helpText && !error && (
-        <span class="vi-field__help">{helpText}</span>
-      )}
+      {helpText && !error && <span class="vi-field__help">{helpText}</span>}
       {error && <span class="vi-field__error">{error}</span>}
     </div>
   );

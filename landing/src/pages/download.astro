@@ -111,7 +111,9 @@ const prereleaseRelease = releaseData.prereleaseRelease as Release | null;
       available from GitHub.
     </p>
     <div class="section-actions">
-      <Button href="/help/installation" variant="outline">Installation guide</Button>
+      <Button href="/help/installation" variant="outline"
+        >Installation guide</Button
+      >
     </div>
   </section>
 
@@ -125,7 +127,9 @@ const prereleaseRelease = releaseData.prereleaseRelease as Release | null;
               <div>
                 <h3>{stableRelease.name || stableRelease.tag_name}</h3>
               </div>
-              <Button variant="ghost" size="sm" href={stableRelease.html_url}>View on GitHub</Button>
+              <Button variant="ghost" size="sm" href={stableRelease.html_url}>
+                View on GitHub
+              </Button>
             </div>
             <div class="release-card-meta">
               <span>Tag: {stableRelease.tag_name}</span>
@@ -193,7 +197,12 @@ const prereleaseRelease = releaseData.prereleaseRelease as Release | null;
         <div>
           <h3>Development release</h3>
         </div>
-        <Button variant="ghost" size="sm" href="https://github.com/virtue-initiative/virtue-initiative/releases">View on GitHub</Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          href="https://github.com/virtue-initiative/virtue-initiative/releases"
+          >View on GitHub</Button
+        >
       </div>
       <div class="release-card-body">
         <p>

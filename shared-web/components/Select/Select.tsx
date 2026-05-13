@@ -16,7 +16,12 @@ export function Select({
 }: SelectProps) {
   return (
     <select
-      class={["vi-select", size && `vi-select--${size}`, error && "vi-select--error", className]
+      class={[
+        "vi-select",
+        size && `vi-select--${size}`,
+        error && "vi-select--error",
+        className,
+      ]
         .filter(Boolean)
         .join(" ")}
       {...props}

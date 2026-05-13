@@ -9,7 +9,12 @@ type InputProps = Omit<JSX.IntrinsicElements["input"], "size"> & {
 export function Input({ error, size, class: className, ...props }: InputProps) {
   return (
     <input
-      class={["vi-input", size && `vi-input--${size}`, error && "vi-input--error", className]
+      class={[
+        "vi-input",
+        size && `vi-input--${size}`,
+        error && "vi-input--error",
+        className,
+      ]
         .filter(Boolean)
         .join(" ")}
       {...props}

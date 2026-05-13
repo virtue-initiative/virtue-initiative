@@ -18,7 +18,10 @@ export function useDarkMode() {
 
     onStateUpdate((state) => {
       console.log("Initializing theme...", state);
-      document.documentElement.setAttribute("data-theme", state.theme ?? preferredTheme());
+      document.documentElement.setAttribute(
+        "data-theme",
+        state.theme ?? preferredTheme(),
+      );
       setDark((state.theme ?? preferredTheme()) === "dark");
     });
   }, []);

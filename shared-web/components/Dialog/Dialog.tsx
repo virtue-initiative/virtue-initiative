@@ -96,7 +96,10 @@ export function DialogSecondaryActions({
   );
 }
 
-export function DialogHeader({ children, class: className }: DialogHeaderProps) {
+export function DialogHeader({
+  children,
+  class: className,
+}: DialogHeaderProps) {
   function closeDialog(e: MouseEvent) {
     (e.currentTarget as HTMLButtonElement).closest("dialog")?.close();
   }

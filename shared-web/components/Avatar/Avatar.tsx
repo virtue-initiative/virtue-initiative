@@ -8,7 +8,12 @@ type AvatarProps = {
   class?: string;
 };
 
-export function Avatar({ src, name, size = "md", class: className }: AvatarProps) {
+export function Avatar({
+  src,
+  name,
+  size = "md",
+  class: className,
+}: AvatarProps) {
   const initials = name
     ? name
         .split(" ")

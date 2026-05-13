@@ -14,7 +14,13 @@ import {
 import { getLogImage, humanizeLogType, LOG_TYPES } from "./shared";
 import "./style.css";
 import { useUrlState } from "../../hooks/useUrlState";
-import { Alert, Button, Field, IconButton, Select } from "@virtueinitiative/shared-web";
+import {
+  Alert,
+  Button,
+  Field,
+  IconButton,
+  Select,
+} from "@virtueinitiative/shared-web";
 
 interface DeviceGroup {
   label: string;
@@ -108,7 +114,11 @@ function ChevronLeftIcon() {
       strokeWidth={2}
       stroke="currentColor"
     >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M15.75 19.5 8.25 12l7.5-7.5"
+      />
     </svg>
   );
 }
@@ -122,7 +132,11 @@ function ChevronRightIcon() {
       strokeWidth={2}
       stroke="currentColor"
     >
-      <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="m8.25 4.5 7.5 7.5-7.5 7.5"
+      />
     </svg>
   );
 }
@@ -517,10 +531,7 @@ export function Logs() {
           </div>
 
           <div class="logs-week-nav">
-            <IconButton
-              aria-label="Previous day"
-              onClick={prevDay}
-            >
+            <IconButton aria-label="Previous day" onClick={prevDay}>
               <ChevronLeftIcon />
             </IconButton>
             <span class="logs-week-label">{dayLabel}</span>

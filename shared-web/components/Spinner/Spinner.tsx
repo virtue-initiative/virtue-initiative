@@ -11,11 +11,7 @@ export function Spinner({
 }) {
   return (
     <span
-      class={[
-        "vi-spinner",
-        size !== "md" && `vi-spinner--${size}`,
-        className,
-      ]
+      class={["vi-spinner", size !== "md" && `vi-spinner--${size}`, className]
         .filter(Boolean)
         .join(" ")}
       aria-label="Loading"

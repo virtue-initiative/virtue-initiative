@@ -46,11 +46,7 @@ export function ToastProvider({ children }: { children: ComponentChildren }) {
   return (
     <ToastContext.Provider value={{ toasts, push, dismiss }}>
       {children}
-      <div
-        class="vi-toast-stack"
-        aria-live="polite"
-        aria-atomic="false"
-      >
+      <div class="vi-toast-stack" aria-live="polite" aria-atomic="false">
         {toasts.map((toast) => (
           <Toast key={toast.id} toast={toast} onDismiss={dismiss} />
         ))}

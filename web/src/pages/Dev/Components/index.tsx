@@ -31,13 +31,7 @@ import {
 import "@virtueinitiative/shared-web/index.css";
 import "./Components.css";
 
-function ColorSwatch({
-  name,
-  variable,
-}: {
-  name: string;
-  variable: string;
-}) {
+function ColorSwatch({ name, variable }: { name: string; variable: string }) {
   return (
     <div class="dev-swatch">
       <div
@@ -75,13 +69,22 @@ function ToastDemo() {
   const { push } = useToast();
   return (
     <Row>
-      <Button variant="primary" onClick={() => push("Success message!", "success")}>
+      <Button
+        variant="primary"
+        onClick={() => push("Success message!", "success")}
+      >
         Success Toast
       </Button>
-      <Button variant="ghost" onClick={() => push("Something went wrong.", "error")}>
+      <Button
+        variant="ghost"
+        onClick={() => push("Something went wrong.", "error")}
+      >
         Error Toast
       </Button>
-      <Button variant="outline" onClick={() => push("Here is some info.", "info")}>
+      <Button
+        variant="outline"
+        onClick={() => push("Here is some info.", "info")}
+      >
         Info Toast
       </Button>
       <Button
@@ -118,16 +121,10 @@ function DialogDemo() {
           This is the shared-web Dialog component with vi-* classes.
         </p>
         <DialogActions>
-          <Button
-            variant="ghost"
-            onClick={() => ref.current?.close()}
-          >
+          <Button variant="ghost" onClick={() => ref.current?.close()}>
             Cancel
           </Button>
-          <Button
-            variant="primary"
-            onClick={() => ref.current?.close()}
-          >
+          <Button variant="primary" onClick={() => ref.current?.close()}>
             Confirm
           </Button>
         </DialogActions>
@@ -151,8 +148,7 @@ export function ComponentsPage() {
           <h1>Component Library Preview</h1>
           <p class="dev-subtitle">
             All vi-* namespaced components — light &amp; dark via system
-            preference or{" "}
-            <code>[data-theme]</code>
+            preference or <code>[data-theme]</code>
           </p>
         </header>
 
@@ -256,8 +252,15 @@ export function ComponentsPage() {
                 <strong>Basic Card</strong>
                 <Badge variant="green">Active</Badge>
               </CardHeader>
-              <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>
-                Card content here. Uses vi-card, vi-card-header, vi-card-actions.
+              <p
+                style={{
+                  margin: 0,
+                  color: "var(--text-muted)",
+                  fontSize: "var(--text-sm)",
+                }}
+              >
+                Card content here. Uses vi-card, vi-card-header,
+                vi-card-actions.
               </p>
               <CardActions>
                 <Button variant="ghost" size="sm">
@@ -273,7 +276,13 @@ export function ComponentsPage() {
                 <strong>Highlighted Card</strong>
                 <Badge variant="yellow">Pending</Badge>
               </CardHeader>
-              <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>
+              <p
+                style={{
+                  margin: 0,
+                  color: "var(--text-muted)",
+                  fontSize: "var(--text-sm)",
+                }}
+              >
                 This card has a colored border via vi-card--highlight.
               </p>
             </Card>
@@ -282,7 +291,10 @@ export function ComponentsPage() {
 
         <Section title="Field + Input + Textarea + Select">
           <div class="dev-form-grid">
-            <Field label="Email address" helpText="We'll never share your email.">
+            <Field
+              label="Email address"
+              helpText="We'll never share your email."
+            >
               <Input
                 type="email"
                 placeholder="you@example.com"
@@ -308,10 +320,7 @@ export function ComponentsPage() {
                 <option value="ca">Canada</option>
               </Select>
             </Field>
-            <Field
-              label="Username"
-              error="Username is already taken."
-            >
+            <Field label="Username" error="Username is already taken.">
               <Input
                 type="text"
                 placeholder="username"
@@ -325,13 +334,24 @@ export function ComponentsPage() {
               <Input type="text" placeholder="Default size" />
             </Field>
             <Field label="Medium input">
-              <Input size="md" type="text" placeholder="Matches button height" />
+              <Input
+                size="md"
+                type="text"
+                placeholder="Matches button height"
+              />
             </Field>
             <Button variant="ghost" style={{ alignSelf: "flex-end" }}>
               Button
             </Button>
             <IconButton style={{ alignSelf: "flex-end" }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
                 <path d="M12 5v14M5 12h14" />
               </svg>
             </IconButton>
@@ -412,9 +432,7 @@ export function ComponentsPage() {
             <Alert variant="error">
               Something went wrong. Please try again.
             </Alert>
-            <Alert variant="warning">
-              Your subscription is expiring soon.
-            </Alert>
+            <Alert variant="warning">Your subscription is expiring soon.</Alert>
             <Alert variant="info">
               New features are available. Check out the changelog.
             </Alert>
@@ -473,7 +491,9 @@ export function ComponentsPage() {
             <Skeleton variant="text" />
             <Skeleton variant="text" width="70%" />
             <Skeleton variant="rect" height="6rem" />
-            <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
+            <div
+              style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}
+            >
               <Skeleton variant="circle" />
               <div style={{ flex: 1 }}>
                 <Skeleton variant="text" />

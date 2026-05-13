@@ -12,11 +12,7 @@ export function IconButton({
   children,
   ...props
 }: IconButtonProps) {
-  const classes = [
-    "vi-icon-btn",
-    isActive && "vi-icon-btn--active",
-    className,
-  ]
+  const classes = ["vi-icon-btn", isActive && "vi-icon-btn--active", className]
     .filter(Boolean)
     .join(" ");
   return (

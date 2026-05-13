@@ -320,7 +320,12 @@ function InviteButton({
 
   return (
     <>
-      <Button variant="primary" type="button" onClick={open} style={{ gap: "0.4rem" }}>
+      <Button
+        variant="primary"
+        type="button"
+        onClick={open}
+        style={{ gap: "0.4rem" }}
+      >
         <UserPlusIcon /> Invite partner
       </Button>
       <Dialog dialogRef={dialogRef}>
@@ -599,10 +604,7 @@ function DeviceCard({
       await onUpdateDevice(device.id, { name });
       dialogRef.current?.close();
     } catch (err) {
-      pushToast(
-        err instanceof Error ? err.message : "Failed to save",
-        "error",
-      );
+      pushToast(err instanceof Error ? err.message : "Failed to save", "error");
     } finally {
       setSaving(false);
     }

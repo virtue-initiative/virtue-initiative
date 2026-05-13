@@ -8,7 +8,11 @@ type MenuItem = {
   href?: string;
   danger?: boolean;
 };
-type MenuProps = { trigger: ComponentChildren; items: MenuItem[]; class?: string };
+type MenuProps = {
+  trigger: ComponentChildren;
+  items: MenuItem[];
+  class?: string;
+};
 
 export function Menu({ trigger, items, class: className }: MenuProps) {
   const [open, setOpen] = useState(false);
@@ -25,10 +29,7 @@ export function Menu({ trigger, items, class: className }: MenuProps) {
   }, [open]);
 
   return (
-    <div
-      class={["vi-menu", className].filter(Boolean).join(" ")}
-      ref={ref}
-    >
+    <div class={["vi-menu", className].filter(Boolean).join(" ")} ref={ref}>
       <div class="vi-menu__trigger" onClick={() => setOpen((o) => !o)}>
         {trigger}
       </div>
@@ -39,10 +40,7 @@ export function Menu({ trigger, items, class: className }: MenuProps) {
               <a
                 key={i}
                 href={item.href}
-                class={[
-                  "vi-menu__item",
-                  item.danger && "vi-menu__item--danger",
-                ]
+                class={["vi-menu__item", item.danger && "vi-menu__item--danger"]
                   .filter(Boolean)
                   .join(" ")}
                 role="menuitem"
@@ -54,10 +52,7 @@ export function Menu({ trigger, items, class: className }: MenuProps) {
               <button
                 key={i}
                 type="button"
-                class={[
-                  "vi-menu__item",
-                  item.danger && "vi-menu__item--danger",
-                ]
+                class={["vi-menu__item", item.danger && "vi-menu__item--danger"]
                   .filter(Boolean)
                   .join(" ")}
                 role="menuitem"

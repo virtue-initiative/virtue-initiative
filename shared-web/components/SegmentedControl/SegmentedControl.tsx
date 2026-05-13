@@ -15,9 +15,7 @@ export function SegmentedControl({
   class: className,
 }: SegmentedControlProps) {
   return (
-    <div
-      class={["vi-segmented-control", className].filter(Boolean).join(" ")}
-    >
+    <div class={["vi-segmented-control", className].filter(Boolean).join(" ")}>
       {segments.map((seg) => (
         <button
           key={seg.value}

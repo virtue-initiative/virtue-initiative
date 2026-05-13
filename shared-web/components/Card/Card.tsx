@@ -12,11 +12,7 @@ export function Card({
   children?: ComponentChildren;
   [key: string]: any;
 }) {
-  const classes = [
-    "vi-card",
-    highlight && "vi-card--highlight",
-    className,
-  ]
+  const classes = ["vi-card", highlight && "vi-card--highlight", className]
     .filter(Boolean)
     .join(" ");
   return (

@@ -23,7 +23,9 @@ const latestPosts = (await getCollection("blog", ({ data }) => !data.draft))
           to use and end-to-end encrypted.
         </p>
         <div class="section-actions">
-          <Button href={`${APP_URL}/signup`} variant="primary">Get started</Button>
+          <Button href={`${APP_URL}/signup`} variant="primary"
+            >Get started</Button
+          >
           <Button href="/about" variant="outline">Our mission</Button>
           <Button href="/help" variant="outline">Help</Button>
         </div>
@@ -273,7 +275,9 @@ const latestPosts = (await getCollection("blog", ({ data }) => !data.draft))
             ))}
           </ul>
           <div class="section-actions">
-            <Button href="/blog" variant="outline">View all posts</Button>
+            <Button href="/blog" variant="outline">
+              View all posts
+            </Button>
           </div>
         </section>
       )
@@ -285,7 +289,8 @@ const latestPosts = (await getCollection("blog", ({ data }) => !data.draft))
       </div>
       <p>Create your account and set up your accountability partner.</p>
       <div class="section-actions">
-        <Button href={`${APP_URL}/signup`} variant="primary">Get started</Button>
+        <Button href={`${APP_URL}/signup`} variant="primary">Get started</Button
+        >
       </div>
     </section>
   </div>
