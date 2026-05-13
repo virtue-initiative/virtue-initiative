@@ -1,4 +1,5 @@
 ---
+import { Button } from "@virtueinitiative/shared-web";
 import LaptopIcon from "../components/icons/LaptopIcon.astro";
 import MobileIcon from "../components/icons/MobileIcon.astro";
 import releaseData from "../data/releases.json";
@@ -110,9 +111,7 @@ const prereleaseRelease = releaseData.prereleaseRelease as Release | null;
       available from GitHub.
     </p>
     <div class="section-actions">
-      <a href="/help/installation" class="vi-btn vi-btn--outline">
-        Installation guide
-      </a>
+      <Button href="/help/installation" variant="outline">Installation guide</Button>
     </div>
   </section>
 
@@ -126,9 +125,7 @@ const prereleaseRelease = releaseData.prereleaseRelease as Release | null;
               <div>
                 <h3>{stableRelease.name || stableRelease.tag_name}</h3>
               </div>
-              <a class="vi-btn vi-btn--ghost vi-btn--sm" href={stableRelease.html_url}>
-                View on GitHub
-              </a>
+              <Button variant="ghost" size="sm" href={stableRelease.html_url}>View on GitHub</Button>
             </div>
             <div class="release-card-meta">
               <span>Tag: {stableRelease.tag_name}</span>
@@ -196,12 +193,7 @@ const prereleaseRelease = releaseData.prereleaseRelease as Release | null;
         <div>
           <h3>Development release</h3>
         </div>
-        <a
-          class="vi-btn vi-btn--ghost vi-btn--sm"
-          href="https://github.com/virtue-initiative/virtue-initiative/releases"
-        >
-          View on GitHub
-        </a>
+        <Button variant="ghost" size="sm" href="https://github.com/virtue-initiative/virtue-initiative/releases">View on GitHub</Button>
       </div>
       <div class="release-card-body">
         <p>

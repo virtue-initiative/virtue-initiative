@@ -1,14 +1,3 @@
-button.logs-fullscreen-btn {
-  width: 2rem;
-  min-width: 2rem;
-  padding: 0;
-
-  & svg {
-    width: 1.1rem;
-    height: 1.1rem;
-  }
-}
-
 @media (max-width: 600px) {
   button.logs-fullscreen-btn {
     display: none;
@@ -39,53 +28,12 @@ button.logs-fullscreen-btn {
 }
 
 .logs-filter-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.32rem;
   min-width: 0;
 }
 
-.logs-filter-label {
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
 .logs-filter-select {
-  appearance: none;
   min-width: 8.75rem;
   max-width: min(11.5rem, 32vw);
-  min-height: 0;
-  padding: 0.45rem 2rem 0.45rem 0.7rem;
-  border: 1px solid color-mix(in oklab, var(--border) 85%, var(--accent));
-  border-radius: 10px;
-  background:
-    linear-gradient(45deg, transparent 50%, var(--text-muted) 50%)
-      calc(100% - 1rem) calc(50% - 0.1rem) / 0.45rem 0.45rem no-repeat,
-    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%)
-      calc(100% - 0.7rem) calc(50% - 0.1rem) / 0.45rem 0.45rem no-repeat,
-    linear-gradient(
-      180deg,
-      color-mix(in oklab, var(--surface) 82%, white),
-      var(--surface)
-    );
-  color: var(--text);
-  font: inherit;
-  font-size: 0.85rem;
-  line-height: 1.4;
-  outline: none;
-  transition: border-color 0.15s ease;
-
-  &:hover {
-    border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
-  }
-
-  &:focus {
-    border-color: var(--accent);
-    outline: none;
-  }
 }
 
 @media (max-width: 600px) {

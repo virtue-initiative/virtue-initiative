@@ -86,24 +86,27 @@ export function Header() {
       </div>
       <nav class="app-header-toolbar">
         <div class="app-header-nav-group">
-          <a
+          <Button
             href="/"
-            class={`vi-btn vi-btn--flat ${isActive("/") ? "is-active" : ""}`}
+            variant="flat"
+            class={isActive("/") ? "is-active" : ""}
           >
             Dashboard
-          </a>
-          <a
+          </Button>
+          <Button
             href="/logs"
-            class={`vi-btn vi-btn--flat ${isActive("/logs") ? "is-active" : ""}`}
+            variant="flat"
+            class={isActive("/logs") ? "is-active" : ""}
           >
             Logs
-          </a>
-          <a
+          </Button>
+          <Button
             href="/settings"
-            class={`vi-btn vi-btn--flat ${isActive("/settings") ? "is-active" : ""}`}
+            variant="flat"
+            class={isActive("/settings") ? "is-active" : ""}
           >
             Settings
-          </a>
+          </Button>
         </div>
 
         <div class="app-header-action-group">
@@ -135,27 +138,30 @@ export function Header() {
             <CloseIcon />
           </button>
         </div>
-        <a
+        <Button
           href="/"
-          class={`vi-btn vi-btn--flat ${isActive("/") ? "is-active" : ""}`}
+          variant="flat"
+          class={isActive("/") ? "is-active" : ""}
           onClick={closeMobileMenu}
         >
           Dashboard
-        </a>
-        <a
+        </Button>
+        <Button
           href="/logs"
-          class={`vi-btn vi-btn--flat ${isActive("/logs") ? "is-active" : ""}`}
+          variant="flat"
+          class={isActive("/logs") ? "is-active" : ""}
           onClick={closeMobileMenu}
         >
           Logs
-        </a>
-        <a
+        </Button>
+        <Button
           href="/settings"
-          class={`vi-btn vi-btn--flat ${isActive("/settings") ? "is-active" : ""}`}
+          variant="flat"
+          class={isActive("/settings") ? "is-active" : ""}
           onClick={closeMobileMenu}
         >
           Settings
-        </a>
+        </Button>
         <Button
           variant="ghost"
           class="app-header-mobile-logout"

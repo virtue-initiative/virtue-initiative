@@ -510,20 +510,17 @@ button.logs-sidebar-backdrop.is-open {
   align-items: center;
   gap: 0.5rem;
   margin-bottom: 1rem;
-
-  & button {
-    font-size: 1.1rem;
-    padding: 0 0.5rem;
-    line-height: 1;
-  }
 }
 
 .logs-week-label {
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--text);
-  min-width: 10rem;
+  width: 14rem;
   text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 @media (max-width: 600px) {

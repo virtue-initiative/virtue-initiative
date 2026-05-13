@@ -1,8 +1,8 @@
 .vi-icon-btn {
   box-sizing: border-box;
   height: var(--button-height);
-  width: 2.75rem;
-  min-width: 2.75rem;
+  width: var(--button-height);
+  min-width: var(--button-height);
   display: inline-flex;
   align-items: center;
   justify-content: center;

@@ -25,6 +25,17 @@
   }
 }
 
+.vi-input--md {
+  min-height: var(--button-height);
+  padding: 0.4rem 0.75rem;
+}
+
+.vi-input--sm {
+  min-height: 1.9rem;
+  padding: 0.28rem 0.65rem;
+  font-size: 0.8125rem;
+}
+
 .vi-input--error {
   border-color: var(--danger);
 

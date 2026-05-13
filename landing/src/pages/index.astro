@@ -1,5 +1,6 @@
 ---
 import { getCollection } from "astro:content";
+import { Button } from "@virtueinitiative/shared-web";
 import CheckIcon from "../components/icons/CheckIcon.astro";
 import MinusIcon from "../components/icons/MinusIcon.astro";
 import LogoMark from "../components/LogoMark.astro";
@@ -22,9 +23,9 @@ const latestPosts = (await getCollection("blog", ({ data }) => !data.draft))
           to use and end-to-end encrypted.
         </p>
         <div class="section-actions">
-          <a href={`${APP_URL}/signup`} class="vi-btn vi-btn--primary">Get started</a>
-          <a href="/about" class="vi-btn vi-btn--outline">Our mission</a>
-          <a href="/help" class="vi-btn vi-btn--outline">Help</a>
+          <Button href={`${APP_URL}/signup`} variant="primary">Get started</Button>
+          <Button href="/about" variant="outline">Our mission</Button>
+          <Button href="/help" variant="outline">Help</Button>
         </div>
       </div>
       <div class="home-hero-logo" aria-hidden="true">
@@ -272,9 +273,7 @@ const latestPosts = (await getCollection("blog", ({ data }) => !data.draft))
             ))}
           </ul>
           <div class="section-actions">
-            <a href="/blog" class="vi-btn vi-btn--outline">
-              View all posts
-            </a>
+            <Button href="/blog" variant="outline">View all posts</Button>
           </div>
         </section>
       )
@@ -286,7 +285,7 @@ const latestPosts = (await getCollection("blog", ({ data }) => !data.draft))
       </div>
       <p>Create your account and set up your accountability partner.</p>
       <div class="section-actions">
-        <a href={`${APP_URL}/signup`} class="vi-btn vi-btn--primary">Get started</a>
+        <Button href={`${APP_URL}/signup`} variant="primary">Get started</Button>
       </div>
     </section>
   </div>

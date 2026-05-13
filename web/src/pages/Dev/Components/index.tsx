@@ -320,6 +320,53 @@ export function ComponentsPage() {
               />
             </Field>
           </div>
+          <Row>
+            <Field label="Default input">
+              <Input type="text" placeholder="Default size" />
+            </Field>
+            <Field label="Medium input">
+              <Input size="md" type="text" placeholder="Matches button height" />
+            </Field>
+            <Button variant="ghost" style={{ alignSelf: "flex-end" }}>
+              Button
+            </Button>
+            <IconButton style={{ alignSelf: "flex-end" }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </IconButton>
+          </Row>
+          <Row>
+            <Field label="Default select">
+              <Select>
+                <option>Option A</option>
+                <option>Option B</option>
+              </Select>
+            </Field>
+            <Field label="Medium select">
+              <Select size="md">
+                <option>Option A</option>
+                <option>Option B</option>
+              </Select>
+            </Field>
+            <Button variant="ghost" style={{ alignSelf: "flex-end" }}>
+              Button
+            </Button>
+          </Row>
+          <Row>
+            <Field label="Small input">
+              <Input size="sm" type="text" placeholder="Matches button SM" />
+            </Field>
+            <Field label="Small select">
+              <Select size="sm">
+                <option>Option A</option>
+                <option>Option B</option>
+              </Select>
+            </Field>
+            <Button variant="ghost" size="sm" style={{ alignSelf: "flex-end" }}>
+              Button SM
+            </Button>
+          </Row>
         </Section>
 
         <Section title="Checkbox + Radio">

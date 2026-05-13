@@ -14,7 +14,7 @@ import {
 import { getLogImage, humanizeLogType, LOG_TYPES } from "./shared";
 import "./style.css";
 import { useUrlState } from "../../hooks/useUrlState";
-import { Alert, Button, IconButton, Select } from "@virtueinitiative/shared-web";
+import { Alert, Button, Field, IconButton, Select } from "@virtueinitiative/shared-web";
 
 interface DeviceGroup {
   label: string;
@@ -95,6 +95,34 @@ function CloseIcon() {
         strokeLinejoin="round"
         d="M6 18 18 6M6 6l12 12"
       />
+    </svg>
+  );
+}
+
+function ChevronLeftIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth={2}
+      stroke="currentColor"
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+    </svg>
+  );
+}
+
+function ChevronRightIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth={2}
+      stroke="currentColor"
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
     </svg>
   );
 }
@@ -408,7 +436,7 @@ export function Logs() {
             <div class="logs-header-actions">
               <Button
                 variant="ghost"
-                size="sm"
+                size="md"
                 class="logs-sidebar-toggle"
                 type="button"
                 onClick={() => setSidebarOpen(true)}
@@ -417,9 +445,9 @@ export function Logs() {
                 <span>Devices</span>
               </Button>
               <div class="logs-filter-switcher">
-                <label class="logs-filter-field">
-                  <span class="logs-filter-label">Risk</span>
+                <Field label="Risk" class="logs-filter-field">
                   <Select
+                    size="md"
                     class="logs-filter-select"
                     value={riskFilter}
                     onChange={(e) =>
@@ -432,10 +460,10 @@ export function Logs() {
                     <option value="high">High</option>
                     <option value="moderate">Medium</option>
                   </Select>
-                </label>
-                <label class="logs-filter-field">
-                  <span class="logs-filter-label">Type</span>
+                </Field>
+                <Field label="Type" class="logs-filter-field">
                   <Select
+                    size="md"
                     class="logs-filter-select"
                     value={typeFilter ?? ""}
                     onChange={(e) =>
@@ -451,7 +479,7 @@ export function Logs() {
                       </option>
                     ))}
                   </Select>
-                </label>
+                </Field>
               </div>
               <div class="logs-header-view-controls">
                 {isGallery && (
@@ -489,26 +517,20 @@ export function Logs() {
           </div>
 
           <div class="logs-week-nav">
-            <Button
-              variant="ghost"
-              size="sm"
-              type="button"
+            <IconButton
               aria-label="Previous day"
               onClick={prevDay}
             >
-              ‹
-            </Button>
+              <ChevronLeftIcon />
+            </IconButton>
             <span class="logs-week-label">{dayLabel}</span>
-            <Button
-              variant="ghost"
-              size="sm"
-              type="button"
+            <IconButton
               aria-label="Next day"
               onClick={nextDay}
               disabled={dayOffset >= 0}
             >
-              ›
-            </Button>
+              <ChevronRightIcon />
+            </IconButton>
           </div>
 
           {logsError && <Alert variant="error">{logsError.message}</Alert>}

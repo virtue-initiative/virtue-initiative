@@ -205,27 +205,27 @@ function AddDeviceButton() {
         </ol>
         <DialogActions
           left={
-            <a
-              class="vi-btn vi-btn--ghost"
+            <Button
+              variant="ghost"
               href={INSTALLATION_URL}
               target="_blank"
               rel="noreferrer"
             >
               View guide
-            </a>
+            </Button>
           }
         >
           <Button variant="ghost" type="button" onClick={close}>
             Close
           </Button>
-          <a
-            class="vi-btn vi-btn--primary"
+          <Button
+            variant="primary"
             href={DOWNLOAD_URL}
             target="_blank"
             rel="noreferrer"
           >
             Download
-          </a>
+          </Button>
         </DialogActions>
       </Dialog>
     </>

@@ -1,3 +1,4 @@
+import { Button } from "@virtueinitiative/shared-web";
 import "./404.css";
 
 export function NotFound() {
@@ -9,12 +10,12 @@ export function NotFound() {
         moved or deleted.
       </p>
       <div class="not-found-actions">
-        <a href="/" class="vi-btn vi-btn--primary">
+        <Button href="/" variant="primary">
           Go to dashboard
-        </a>
-        <a href="/settings" class="vi-btn vi-btn--ghost">
+        </Button>
+        <Button href="/settings" variant="ghost">
           Settings
-        </a>
+        </Button>
       </div>
     </div>
   );

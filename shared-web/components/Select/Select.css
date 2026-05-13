@@ -27,6 +27,19 @@
   }
 }
 
+.vi-select--md {
+  min-height: var(--button-height);
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+}
+
+.vi-select--sm {
+  min-height: 1.9rem;
+  padding-top: 0.28rem;
+  padding-bottom: 0.28rem;
+  font-size: 0.8125rem;
+}
+
 .vi-select--error {
   border-color: var(--danger);
 
