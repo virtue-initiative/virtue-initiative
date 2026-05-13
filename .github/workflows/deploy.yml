@@ -8,6 +8,10 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
+    concurrency:
+      group: ${{ github.workflow }}-${{ matrix.project }}-${{ github.ref }}
+      cancel-in-progress: true
+
     strategy:
       matrix:
         project: [web, api]
