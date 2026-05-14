@@ -4,12 +4,12 @@ Cloudflare Workers API using Hono. Entry point: `src/index.ts`.
 
 ## Token types and TTLs
 
-| Type | TTL | Auth header | Notes |
-|------|-----|-------------|-------|
-| `access` | 1 hour | `Bearer <jwt>` | User routes |
-| `device-access` | 7 days | `Bearer <jwt>` | Device routes (`/d/*`, `/hash`) |
-| `server` | 60 seconds | `Bearer <jwt>` | Server-to-server (e.g. `DELETE /hash`) |
-| refresh | 1 year | HTTPOnly cookie | Exchanged at `POST /token` |
+| Type            | TTL        | Auth header     | Notes                                  |
+| --------------- | ---------- | --------------- | -------------------------------------- |
+| `access`        | 1 hour     | `Bearer <jwt>`  | User routes                            |
+| `device-access` | 7 days     | `Bearer <jwt>`  | Device routes (`/d/*`, `/hash`)        |
+| `server`        | 60 seconds | `Bearer <jwt>`  | Server-to-server (e.g. `DELETE /hash`) |
+| refresh         | 1 year     | HTTPOnly cookie | Exchanged at `POST /token`             |
 
 JWT subject (`sub`) is a user ID for `access` tokens and a device ID for `device-access`/`server` tokens. The `type` claim in the payload distinguishes them.
 
