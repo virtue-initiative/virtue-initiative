@@ -1,17 +1,11 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { formatRelativeTimestamp } from "../../utils/time";
 import {
-  formatDate,
-  formatRelativeTimestamp,
-  formatTime,
-} from "../../utils/time";
-import {
-  describeRiskLevel,
   FeedLog,
   getLogImage,
-  getLogMetadata,
   humanizeLogType,
-  LogImage,
+  LogDetailDialog,
 } from "./shared";
 
 const ITEM_HEIGHT = 68;
@@ -39,90 +33,6 @@ function ThumbImage({ imageBytes }: { imageBytes: Uint8Array }) {
   return <img class="logs-thumb-image" src={src} alt="" loading="lazy" />;
 }
 
-function LogDetailDialog({
-  item,
-  deviceName,
-  onClose,
-}: {
-  item: FeedLog;
-  deviceName: (id: string) => string;
-  onClose: () => void;
-}) {
-  const image = getLogImage(item);
-  const metadata = getLogMetadata(item);
-  const riskLabel = describeRiskLevel(item.risk) ?? "Risk unavailable";
-  const previewTitle = `${formatDate(item.ts)} ${formatTime(item.ts)}`;
-  const previewSubtitle = `${riskLabel}${item.batch_status === "failed" ? " • Unverified" : ""}`;
-
-  return (
-    <div class="logs-detail-overlay" onClick={onClose}>
-      <div
-        class="logs-detail-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Log details"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div class="logs-detail-header">
-          <div>
-            <span class="logs-type">{humanizeLogType(item.type)}</span>
-            <span class="logs-device logs-device--indented">
-              {deviceName(item.device_id)}
-            </span>
-          </div>
-          <button
-            class="logs-detail-close"
-            type="button"
-            aria-label="Close"
-            onClick={onClose}
-          >
-            ×
-          </button>
-        </div>
-        <p class="logs-detail-time">
-          {formatDate(item.ts)} {formatTime(item.ts)}
-        </p>
-        <div class="logs-detail-badges">
-          {item.risk > 0.7 ? (
-            <span class="logs-verify-badge logs-verify-badge--failed">
-              ⚠ High risk
-            </span>
-          ) : (
-            item.risk > 0.4 && (
-              <span class="logs-verify-badge logs-verify-badge--moderate">
-                Moderate risk
-              </span>
-            )
-          )}
-          {item.batch_status === "failed" && (
-            <span class="logs-verify-badge logs-verify-badge--failed">
-              ⚠ Unverified
-            </span>
-          )}
-        </div>
-        {image && (
-          <div class="logs-detail-image-wrap">
-            <LogImage
-              imageBytes={image}
-              previewTitle={previewTitle}
-              previewSubtitle={previewSubtitle}
-            />
-          </div>
-        )}
-        {metadata.length > 0 && (
-          <dl class="logs-meta logs-detail-meta">
-            {metadata.map(([key, value], i) => (
-              <>
-                <dt key={`k-${i}`}>{key}</dt>
-                <dd key={`v-${i}`}>{value}</dd>
-              </>
-            ))}
-          </dl>
-        )}
-      </div>
-    </div>
-  );
-}
 
 export function LogsList({
   items,
