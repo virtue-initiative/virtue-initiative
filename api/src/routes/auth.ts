@@ -571,6 +571,27 @@ auth.post('/email-verification/validate', validateZ('json', verifyEmailSchema), 
   });
 });
 
+auth.post(
+  '/email-verification/resend',
+  validateZ('json', z.object({ email: z.email() })),
+  async (c) => {
+    const { email } = c.req.valid('json');
+    const user = await findUserByEmail(c.env.DB, email.trim().toLowerCase());
+
+    if (user && user.email_verified !== 1 && !user.email_bounced_at) {
+      const verificationToken = await issueEmailToken(
+        c.env.DB,
+        { id: user.id, email: user.email },
+        'email_verification',
+        EMAIL_VERIFICATION_TTL_MS,
+      );
+      await sendVerificationEmail(c, user, verificationToken);
+    }
+
+    return c.body(null, 204);
+  },
+);
+
 auth.post('/email-verification', authenticate('access'), async (c) => {
   const user = await findUserById(c.env.DB, c.get('sub'));
 

@@ -356,6 +356,12 @@ export const api = {
       token,
     ),
 
+  resendVerificationEmail: (email: string) =>
+    req<void>("/email-verification/resend", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
   requestVerificationEmail: (token: string) =>
     req<{ ok: boolean; already_verified?: boolean }>(
       "/email-verification",
