@@ -53,6 +53,7 @@ export function VerifyEmail() {
     const params = new URLSearchParams(window.location.search);
     const token = params.get("token");
     const next = params.get("next");
+    const invite = params.get("partner_invite_token");
 
     if (!token) {
       if (hasRecentInflightVerification()) {
@@ -89,6 +90,13 @@ export function VerifyEmail() {
         );
         if (isEmailChange) {
           hardNavigate("/settings");
+          return;
+        }
+        if (invite) {
+          navigate(
+            `/?partner_invite_token=${encodeURIComponent(invite)}`,
+            true,
+          );
           return;
         }
         navigate("/", true);

@@ -303,6 +303,7 @@ export const api = {
       priv_key: string;
       name?: string;
       email_digest_minutes_utc?: number;
+      partner_invite_token?: string;
     },
   ) =>
     req<{
