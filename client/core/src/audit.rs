@@ -13,42 +13,51 @@ pub fn generate_local_id() -> String {
 }
 
 pub fn derive_state(records: &[StoredAuditRecord]) -> AuditState {
-    let mut by_id = HashMap::<String, AuditLogItem>::new();
-    let mut order = Vec::<String>::new();
+    // Pass 1: collect upload markers so we know which Log records are already done.
     let mut hash_uploaded = HashSet::<String>::new();
     let mut log_uploaded = HashSet::<String>::new();
-
     for record in records {
         match &record.record {
-            AuditRecord::Log {
-                local_id,
-                should_be_in_batch,
-                requires_hash_upload,
-                log,
-            } => {
-                if by_id.contains_key(local_id) {
-                    continue;
-                }
-                by_id.insert(
-                    local_id.clone(),
-                    AuditLogItem {
-                        audit_day: record.audit_day.clone(),
-                        local_id: local_id.clone(),
-                        should_be_in_batch: *should_be_in_batch,
-                        requires_hash_upload: *requires_hash_upload,
-                        payload: log.clone(),
-                    },
-                );
-                order.push(local_id.clone());
-            }
-            AuditRecord::LocalLog { .. } => {}
             AuditRecord::HashUploaded { local_id } => {
                 hash_uploaded.insert(local_id.clone());
             }
             AuditRecord::LogUploaded { local_id, .. } => {
                 log_uploaded.insert(local_id.clone());
             }
-            AuditRecord::BatchUploaded { .. } => {}
+            _ => {}
+        }
+    }
+
+    // Pass 2: build items only for logs that haven't been uploaded yet.
+    // Skipping uploaded records avoids holding their (potentially large) payloads in memory;
+    // the data stays on disk in the JSONL files and is still tracked via log_uploaded above.
+    let mut by_id = HashMap::<String, AuditLogItem>::new();
+    let mut order = Vec::<String>::new();
+    for record in records {
+        if let AuditRecord::Log {
+            local_id,
+            should_be_in_batch,
+            requires_hash_upload,
+            log,
+        } = &record.record
+        {
+            if log_uploaded.contains(local_id) {
+                continue;
+            }
+            if by_id.contains_key(local_id) {
+                continue;
+            }
+            by_id.insert(
+                local_id.clone(),
+                AuditLogItem {
+                    audit_day: record.audit_day.clone(),
+                    local_id: local_id.clone(),
+                    should_be_in_batch: *should_be_in_batch,
+                    requires_hash_upload: *requires_hash_upload,
+                    payload: log.clone(),
+                },
+            );
+            order.push(local_id.clone());
         }
     }
 
@@ -63,14 +72,13 @@ pub fn derive_state(records: &[StoredAuditRecord]) -> AuditState {
         .collect::<Vec<_>>();
     let pending_direct_uploads = items
         .iter()
-        .filter(|item| !item.should_be_in_batch && !log_uploaded.contains(&item.local_id))
+        .filter(|item| !item.should_be_in_batch)
         .cloned()
         .collect::<Vec<_>>();
     let pending_batch_uploads = items
         .iter()
         .filter(|item| {
             item.should_be_in_batch
-                && !log_uploaded.contains(&item.local_id)
                 && (!item.requires_hash_upload || hash_uploaded.contains(&item.local_id))
         })
         .cloned()
