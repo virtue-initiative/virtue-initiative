@@ -33,7 +33,6 @@ function ThumbImage({ imageBytes }: { imageBytes: Uint8Array }) {
   return <img class="logs-thumb-image" src={src} alt="" loading="lazy" />;
 }
 
-
 export function LogsList({
   items,
   loading,

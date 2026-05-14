@@ -1,7 +1,12 @@
 import { useEffect, useState } from "preact/hooks";
 import { DataLog } from "../../api";
 import { BatchVerification } from "../../crypto";
-import { formatDate, formatDayHeading, formatTime, localDateKey } from "../../utils/time";
+import {
+  formatDate,
+  formatDayHeading,
+  formatTime,
+  localDateKey,
+} from "../../utils/time";
 
 export type FeedLog = DataLog & {
   batch_status: BatchVerification;
@@ -179,7 +184,7 @@ export function LogDetailDialog({
   useEffect(() => {
     if (!imageBytes) return;
     const url = URL.createObjectURL(
-      new Blob([imageBytes], { type: "image/webp" }),
+      new Blob([imageBytes as Uint8Array<ArrayBuffer>], { type: "image/webp" }),
     );
     setImgSrc(url);
     return () => URL.revokeObjectURL(url);
@@ -239,11 +244,7 @@ export function LogDetailDialog({
               onClick={() => setLightboxOpen(true)}
               aria-label="Open image fullscreen"
             >
-              <img
-                class="logs-detail-image"
-                src={imgSrc}
-                alt="screenshot"
-              />
+              <img class="logs-detail-image" src={imgSrc} alt="screenshot" />
             </button>
           )}
           {metadata.length > 0 && (
