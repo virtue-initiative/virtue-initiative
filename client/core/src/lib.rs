@@ -8,6 +8,7 @@ pub mod error;
 pub mod image_pipeline;
 pub mod lifecycle;
 pub mod model;
+pub mod nsfw;
 pub mod platform;
 pub mod service;
 pub mod storage;

@@ -155,11 +155,32 @@ The web app already expects decrypted batch events to contain screenshot bytes t
 Before the event is built, the raw captured frame is processed in `core`:
 
 1. decode source bytes
-2. apply a light blur
-3. resize so the smaller dimension is 128 px
-4. encode as low-quality WebP
+2. run decoded frame through the NSFW classifier (see below) to populate `risk`
+3. apply a light blur
+4. resize so the smaller dimension is 128 px
+5. encode as low-quality WebP
 
 That keeps the platform boundary simple while preserving the older client behavior of aggressively reducing image detail and size before batching.
+
+### NSFW Classifier
+
+`core` embeds a MobileNet-based ONNX classifier (sourced from `infinitered/nsfwjs` via the
+[`nsfw` crate](https://crates.io/crates/nsfw), Apache-2.0) in `assets/nsfw_model.onnx`.
+
+The classifier is owned by `NsfwClassifier` in `src/nsfw.rs`. `MonitorService` holds an
+`Option<NsfwClassifier>` initialized at startup; if initialization fails the classifier is
+disabled and screenshots continue to upload with `risk: None`.
+
+`score()` returns `max(porn, hentai, sexy)` from the model's output, clamped to `[0.0, 1.0]`.
+The raw score is stored in `BatchEvent::risk`; the existing web filtering and partner-alert
+paths (threshold `>= 0.4`) apply immediately.
+
+For `capture_batch_screenshot` callers that supply an explicit `risk`, the caller's value wins
+(`caller_risk.or(classifier_score)`).
+
+The classifier is compiled in by default via the `nsfw` Cargo feature. Disable it with
+`--no-default-features` if binary size or cross-compilation constraints require it (e.g. mobile
+targets until a lighter model is available).
 
 ## Batch Blob Format
 

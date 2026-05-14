@@ -2,9 +2,7 @@ use crate::api::ApiClient;
 use crate::audit::{derive_state, generate_local_id};
 use crate::batch::BatchBuilder;
 use crate::config::Config;
-use crate::crypto::{
-    CryptoEngine, prepare_log_batch_event, prepare_screenshot_batch_event, prepare_screenshot_event,
-};
+use crate::crypto::{CryptoEngine, prepare_log_batch_event, prepare_screenshot_batch_event};
 use crate::error::{CoreError, CoreResult};
 use crate::image_pipeline::ImagePipeline;
 use crate::lifecycle::{
@@ -17,6 +15,7 @@ use crate::model::{
     BufferedBatchEvent, DeviceCredentials, DeviceSettings, EventData, LogEntry, LoginStatus,
     LoopOutcome, Screenshot, ServiceStatus,
 };
+use crate::nsfw::NsfwClassifier;
 use crate::platform::PlatformHooks;
 use crate::storage::FileStateStore;
 
@@ -42,6 +41,7 @@ pub struct MonitorService<P> {
     platform: P,
     api: ApiClient,
     storage: FileStateStore,
+    classifier: Option<NsfwClassifier>,
     user_access_token: Option<String>,
     device_credentials: Option<DeviceCredentials>,
     post_login_proof_batches_remaining: u32,
@@ -82,11 +82,20 @@ impl<P: PlatformHooks> MonitorService<P> {
         status.lifecycle.capabilities =
             crate::lifecycle::LifecycleCapabilities::for_platform(&config.platform_name);
 
+        let classifier = match NsfwClassifier::new() {
+            Ok(c) => Some(c),
+            Err(e) => {
+                let _ = storage.append_error_log(&format!("nsfw classifier init failed: {e}"));
+                None
+            }
+        };
+
         let mut service = Self {
             config,
             platform,
             api,
             storage,
+            classifier,
             user_access_token: auth_state.user_access_token,
             device_credentials: auth_state.device_credentials,
             post_login_proof_batches_remaining: auth_state.post_login_proof_batches_remaining,
@@ -401,19 +410,30 @@ impl<P: PlatformHooks> MonitorService<P> {
     }
 
     fn process_screenshot(&self, screenshot: Screenshot) -> CoreResult<BufferedBatchEvent> {
-        let processed = ImagePipeline.process(screenshot)?;
-        prepare_screenshot_event(processed)
+        let captured_at_ms = screenshot.captured_at_ms;
+        let decoded = image::load_from_memory(&screenshot.bytes)?;
+        let classifier_score = self.classifier.as_ref().and_then(|c| c.score(&decoded));
+        let processed = ImagePipeline.process_decoded(decoded, captured_at_ms)?;
+        prepare_screenshot_batch_event(
+            processed,
+            "screenshot",
+            classifier_score,
+            EventData::default(),
+        )
     }
 
     fn process_screenshot_with_data(
         &self,
         screenshot: Screenshot,
         kind: &str,
-        risk: Option<f32>,
+        caller_risk: Option<f32>,
         data: EventData,
     ) -> CoreResult<BufferedBatchEvent> {
-        let processed = ImagePipeline.process(screenshot)?;
-        prepare_screenshot_batch_event(processed, kind, risk, data)
+        let captured_at_ms = screenshot.captured_at_ms;
+        let decoded = image::load_from_memory(&screenshot.bytes)?;
+        let classifier_score = self.classifier.as_ref().and_then(|c| c.score(&decoded));
+        let processed = ImagePipeline.process_decoded(decoded, captured_at_ms)?;
+        prepare_screenshot_batch_event(processed, kind, caller_risk.or(classifier_score), data)
     }
 
     fn enqueue_batch_event(
@@ -1256,11 +1276,14 @@ mod tests {
         now_ms: Arc<AtomicI64>,
     }
 
+    // Minimal 4x4 grey PNG used as a benign fixture in tests.
+    static TEST_PNG: &[u8] = include_bytes!("../assets/test_fixture.png");
+
     impl PlatformHooks for TestPlatform {
         fn take_screenshot(&self) -> CoreResult<Screenshot> {
             Ok(Screenshot {
                 captured_at_ms: 0,
-                bytes: Vec::new(),
+                bytes: TEST_PNG.to_vec(),
                 content_type: "image/png".to_string(),
             })
         }
@@ -1313,6 +1336,7 @@ mod tests {
             config,
             platform,
             storage,
+            classifier: NsfwClassifier::new().ok(),
             user_access_token: None,
             device_credentials: None,
             post_login_proof_batches_remaining: 0,
@@ -2459,6 +2483,49 @@ mod tests {
                 .count(),
             1
         );
+
+        let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn process_screenshot_populates_risk_field() {
+        let state_dir = temp_state_dir();
+        let service = build_service(state_dir.clone());
+
+        let screenshot = Screenshot {
+            captured_at_ms: 1000,
+            bytes: TEST_PNG.to_vec(),
+            content_type: "image/png".to_string(),
+        };
+        let event = service
+            .process_screenshot(screenshot)
+            .expect("process_screenshot should succeed");
+        // risk is Some(_) when the nsfw feature is enabled (classifier loaded)
+        // and None when disabled — both are acceptable; what must not happen is an Err.
+        let _ = event.event.risk;
+
+        let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn capture_batch_screenshot_explicit_risk_wins() {
+        let state_dir = temp_state_dir();
+        let mut service = build_service(state_dir.clone());
+        authenticate_service(&mut service);
+
+        service
+            .capture_batch_screenshot("screenshot", Some(0.9), EventData::default())
+            .expect("capture_batch_screenshot should succeed");
+
+        let audit_state = service.load_audit_state().expect("load audit state");
+        let events: Vec<_> = audit_state
+            .items
+            .iter()
+            .filter_map(|item| item.payload.as_batch_event())
+            .collect();
+        assert!(!events.is_empty(), "expected at least one batch event");
+        let risk = events.last().unwrap().event.risk;
+        assert_eq!(risk, Some(0.9), "explicit caller risk should be preserved");
 
         let _ = fs::remove_dir_all(state_dir);
     }

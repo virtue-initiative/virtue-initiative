@@ -1,4 +1,4 @@
-use image::GenericImageView;
+use image::{DynamicImage, GenericImageView};
 
 use crate::error::CoreResult;
 use crate::model::Screenshot;
@@ -13,6 +13,14 @@ pub struct ImagePipeline;
 impl ImagePipeline {
     pub fn process(&self, screenshot: Screenshot) -> CoreResult<Screenshot> {
         let decoded = image::load_from_memory(&screenshot.bytes)?;
+        self.process_decoded(decoded, screenshot.captured_at_ms)
+    }
+
+    pub fn process_decoded(
+        &self,
+        decoded: DynamicImage,
+        captured_at_ms: i64,
+    ) -> CoreResult<Screenshot> {
         let blurred = decoded.blur(BLUR_SIGMA);
         let (orig_width, orig_height) = blurred.dimensions();
         let scale = TARGET_SMALL_DIM as f32 / orig_width.min(orig_height) as f32;
@@ -29,7 +37,7 @@ impl ImagePipeline {
         let encoded = webp::Encoder::from_rgba(rgba.as_raw(), width, height).encode(WEBP_QUALITY);
 
         Ok(Screenshot {
-            captured_at_ms: screenshot.captured_at_ms,
+            captured_at_ms,
             bytes: encoded.to_vec(),
             content_type: "image/webp".to_string(),
         })

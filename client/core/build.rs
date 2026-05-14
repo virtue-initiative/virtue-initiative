@@ -5,6 +5,8 @@ use std::process::Command;
 
 use chrono::Utc;
 
+const NSFW_MODEL_URL: &str = "https://github.com/Fyko/nsfw/releases/download/v0.2.0/model.onnx";
+
 fn main() {
     println!("cargo:rerun-if-env-changed=VIRTUE_BUILD_LABEL");
     println!("cargo:rerun-if-env-changed=VIRTUE_BUILD_DATE");
@@ -18,6 +20,14 @@ fn main() {
 
     let build_label = build_label();
     println!("cargo:rustc-env=VIRTUE_BUILD_LABEL={build_label}");
+
+    if env::var("CARGO_FEATURE_NSFW").is_ok() {
+        let model_path = ensure_nsfw_model();
+        println!(
+            "cargo:rustc-env=VIRTUE_NSFW_MODEL_PATH={}",
+            model_path.display()
+        );
+    }
 }
 
 fn build_label() -> String {
@@ -134,4 +144,46 @@ fn git_output(args: &[&str]) -> Option<String> {
     } else {
         Some(trimmed.to_string())
     }
+}
+
+fn ensure_nsfw_model() -> PathBuf {
+    // Allow CI or developers to supply a pre-downloaded model to avoid network access.
+    println!("cargo:rerun-if-env-changed=NSFW_MODEL_PATH");
+    if let Ok(path) = env::var("NSFW_MODEL_PATH") {
+        let p = PathBuf::from(&path);
+        if p.is_file() {
+            return p;
+        }
+        panic!("NSFW_MODEL_PATH is set to '{path}' but the file does not exist");
+    }
+
+    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR should be set by cargo"));
+    let dest = out_dir.join("nsfw_model.onnx");
+
+    if dest.is_file() {
+        return dest;
+    }
+
+    eprintln!("cargo:warning=Downloading NSFW classifier model (~17 MB) from GitHub...");
+    let status = Command::new("curl")
+        .args([
+            "--location",
+            "--silent",
+            "--show-error",
+            "--fail",
+            NSFW_MODEL_URL,
+            "--output",
+            dest.to_str().expect("OUT_DIR path should be valid UTF-8"),
+        ])
+        .status()
+        .unwrap_or_else(|e| panic!("failed to run curl to download NSFW model: {e}"));
+
+    if !status.success() {
+        panic!(
+            "curl exited with status {status} while downloading NSFW model from {NSFW_MODEL_URL}. \
+             Set NSFW_MODEL_PATH to a local copy or build with --no-default-features to skip."
+        );
+    }
+
+    dest
 }
