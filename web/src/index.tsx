@@ -81,27 +81,23 @@ function GlobalEmailActionHandler() {
     const inviteToken = params.get("partner_invite_token");
     if (!inviteToken) return;
 
-    const clearInviteToken = () => {
-      const nextUrl = new URL(window.location.href);
-      nextUrl.searchParams.delete("partner_invite_token");
-      window.history.replaceState({}, "", nextUrl.toString());
-    };
-
     if (!token) {
       return;
     }
 
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.delete("partner_invite_token");
+    window.history.replaceState({}, "", nextUrl.toString());
+
     acceptPartnerInvite(inviteToken)
       .then(() => {
         push("Partner invite accepted.", "success");
-        clearInviteToken();
       })
       .catch((err: unknown) => {
         push(
           err instanceof Error ? err.message : "Failed to accept invite",
           "error",
         );
-        clearInviteToken();
       });
   }, [acceptPartnerInvite, token, push]);
 
