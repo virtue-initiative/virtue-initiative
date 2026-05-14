@@ -1,16 +1,11 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { formatRelativeTimestamp } from "../../utils/time";
 import {
-  formatDate,
-  formatRelativeTimestamp,
-  formatTime,
-} from "../../utils/time";
-import {
-  describeRiskLevel,
   FeedLog,
   getLogImage,
-  getLogMetadata,
   humanizeLogType,
+  LogDetailDialog,
 } from "./shared";
 
 const ITEM_HEIGHT = 68;
@@ -38,117 +33,6 @@ function ThumbImage({ imageBytes }: { imageBytes: Uint8Array }) {
   return <img class="logs-thumb-image" src={src} alt="" loading="lazy" />;
 }
 
-function LogDetailDialog({
-  item,
-  deviceName,
-  onClose,
-}: {
-  item: FeedLog;
-  deviceName: (id: string) => string;
-  onClose: () => void;
-}) {
-  const imageBytes = getLogImage(item);
-  const metadata = getLogMetadata(item);
-  const riskLabel = describeRiskLevel(item.risk) ?? "Risk unavailable";
-  const [imgSrc, setImgSrc] = useState<string | null>(null);
-  const [lightboxOpen, setLightboxOpen] = useState(false);
-
-  useEffect(() => {
-    if (!imageBytes) return;
-    const url = URL.createObjectURL(
-      new Blob([imageBytes], { type: "image/webp" }),
-    );
-    setImgSrc(url);
-    return () => URL.revokeObjectURL(url);
-  }, [imageBytes]);
-
-  return (
-    <>
-      <div class="logs-detail-overlay" onClick={onClose}>
-        <div
-          class="logs-detail-dialog"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Log details"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div class="logs-detail-header">
-            <div>
-              <span class="logs-type">{humanizeLogType(item.type)}</span>
-              <span class="logs-device logs-device--indented">
-                {deviceName(item.device_id)}
-              </span>
-            </div>
-            <button
-              class="logs-detail-close"
-              type="button"
-              aria-label="Close"
-              onClick={onClose}
-            >
-              ×
-            </button>
-          </div>
-          <p class="logs-detail-time">
-            {formatDate(item.ts)} {formatTime(item.ts)}
-          </p>
-          <div class="logs-detail-badges">
-            {item.risk > 0.7 ? (
-              <span class="logs-verify-badge logs-verify-badge--failed">
-                ⚠ {riskLabel}
-              </span>
-            ) : item.risk > 0.4 ? (
-              <span class="logs-verify-badge logs-verify-badge--moderate">
-                {riskLabel}
-              </span>
-            ) : (
-              <span class="logs-verify-badge">{riskLabel}</span>
-            )}
-            {item.batch_status === "failed" && (
-              <span class="logs-verify-badge logs-verify-badge--failed">
-                ⚠ Unverified
-              </span>
-            )}
-          </div>
-          {imgSrc && (
-            <button
-              class="logs-detail-image-button"
-              type="button"
-              onClick={() => setLightboxOpen(true)}
-              aria-label="Open image fullscreen"
-            >
-              <img class="logs-detail-image" src={imgSrc} alt="screenshot" />
-            </button>
-          )}
-          {metadata.length > 0 && (
-            <dl class="logs-meta logs-detail-meta">
-              {metadata.map(([key, value], i) => (
-                <>
-                  <dt key={`k-${i}`}>{key}</dt>
-                  <dd key={`v-${i}`}>{value}</dd>
-                </>
-              ))}
-            </dl>
-          )}
-        </div>
-      </div>
-      {lightboxOpen && (
-        <div
-          class="logs-lightbox-overlay"
-          onClick={() => setLightboxOpen(false)}
-        >
-          <div class="logs-lightbox-frame">
-            <img
-              class="logs-lightbox-image"
-              src={imgSrc!}
-              alt="screenshot"
-              onClick={(e) => e.stopPropagation()}
-            />
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
 
 export function LogsList({
   items,

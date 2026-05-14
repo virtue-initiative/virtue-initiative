@@ -624,6 +624,12 @@ button.logs-sidebar-backdrop.is-open {
   margin: 0 auto;
 }
 
+.logs-detail-risk-neutral {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
 .logs-detail-meta {
   margin-top: 0.25rem;
 }

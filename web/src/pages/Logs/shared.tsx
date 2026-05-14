@@ -174,6 +174,7 @@ export function LogDetailDialog({
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const imageBytes = getLogImage(item);
   const metadata = getLogMetadata(item);
+  const riskLabel = describeRiskLevel(item.risk) ?? "Risk unavailable";
 
   useEffect(() => {
     if (!imageBytes) return;
@@ -216,14 +217,14 @@ export function LogDetailDialog({
           <div class="logs-detail-badges">
             {item.risk > 0.7 ? (
               <span class="logs-verify-badge logs-verify-badge--failed">
-                ⚠ High risk
+                ⚠ {riskLabel}
+              </span>
+            ) : item.risk > 0.4 ? (
+              <span class="logs-verify-badge logs-verify-badge--moderate">
+                {riskLabel}
               </span>
             ) : (
-              item.risk > 0.4 && (
-                <span class="logs-verify-badge logs-verify-badge--moderate">
-                  Moderate risk
-                </span>
-              )
+              <span class="logs-detail-risk-neutral">{riskLabel}</span>
             )}
             {item.batch_status === "failed" && (
               <span class="logs-verify-badge logs-verify-badge--failed">
