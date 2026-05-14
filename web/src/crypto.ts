@@ -80,6 +80,8 @@ export function generateRandomKeyBytes(length = 32): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
+// Must match client/core/src/api.rs: argon2id(password, salt=lowercase_email, m=65536, t=3, p=1, len=32)
+// then HKDF-SHA256("auth"|"key", argon_output). Changing parameters breaks login for existing accounts.
 export async function derivePasswordMaterial(
   password: string,
   passwordSalt: Uint8Array,
@@ -123,6 +125,7 @@ export async function encryptData(
   return concatBytes(nonce, new Uint8Array(ciphertext));
 }
 
+// Wire format must match client/core/src/crypto.rs: nonce[12 bytes] || ciphertext+tag
 export async function decryptBatch(
   key: CryptoKey,
   data: Uint8Array,

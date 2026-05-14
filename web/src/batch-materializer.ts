@@ -4,6 +4,8 @@ import { decryptBatch, decompressGzip } from "./crypto";
 import { FeedLog, toUint8Array } from "./pages/Logs/shared";
 import { decodeWebpDimensions } from "./utils/webp-dimensions";
 
+// Batch payload format must match client/core/src/batch.rs:
+//   msgpack({events: [msgpack(event), ...]}) → gzip → AES-256-GCM (nonce[12] || ciphertext+tag)
 export async function decryptAndFlattenBatch(
   batch: Batch,
   openBatchKey: (encryptedKey: string) => Promise<CryptoKey>,

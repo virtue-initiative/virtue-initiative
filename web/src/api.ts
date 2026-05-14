@@ -47,6 +47,20 @@ export interface Batch {
   created_at: number;
 }
 
+// Known event data shapes — keeps type information at call sites.
+// The fallback branch preserves compatibility with future or unknown event types.
+export type LogEventData =
+  | {
+      type: "screenshot";
+      data: { image: Uint8Array | number[]; content_type: string };
+    }
+  | { type: "system_event"; data: Record<string, unknown> }
+  | { type: "lifecycle_alert"; data: Record<string, unknown> }
+  | { type: "lifecycle_marker"; data: Record<string, unknown> }
+  | { type: "lifecycle_transition"; data: Record<string, unknown> }
+  | { type: "developer_log"; data: Record<string, unknown> }
+  | { type: string; data: Record<string, unknown> };
+
 export interface DataLog {
   id: string;
   device_id: string;
