@@ -59,6 +59,9 @@ export function Auth({
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const resendCooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [resetTokenValid, setResetTokenValid] = useState(!resetToken);
   const [signupVerificationEmail, setSignupVerificationEmail] = useState("");
   const signupVerificationDialogRef = useRef<HTMLDialogElement>(null);
@@ -134,6 +137,28 @@ export function Auth({
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setLoading(false);
+    }
+  }
+
+  const EMAIL_NOT_VERIFIED_MSG = "Please verify your email before logging in.";
+
+  async function handleResendVerification() {
+    setResendLoading(true);
+    try {
+      await api.resendVerificationEmail(email);
+      setResendCooldown(60);
+      resendCooldownRef.current = setInterval(() => {
+        setResendCooldown((prev) => {
+          if (prev <= 1) {
+            clearInterval(resendCooldownRef.current!);
+            resendCooldownRef.current = null;
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } finally {
+      setResendLoading(false);
     }
   }
 
@@ -297,7 +322,29 @@ export function Auth({
           )}
 
           {status && <Alert variant="success">{status}</Alert>}
-          {error && <Alert variant="error">{error}</Alert>}
+          {error && (
+            <Alert variant="error">
+              {error}
+              {error === EMAIL_NOT_VERIFIED_MSG && (
+                <>
+                  {" "}
+                  {resendLoading ? (
+                    "Sending…"
+                  ) : resendCooldown > 0 ? (
+                    <>Try again in {resendCooldown}s.</>
+                  ) : (
+                    <button
+                      type="button"
+                      style="background:none;border:none;padding:0;font:inherit;color:inherit;text-decoration:underline;cursor:pointer;"
+                      onClick={handleResendVerification}
+                    >
+                      Resend verification email
+                    </button>
+                  )}
+                </>
+              )}
+            </Alert>
+          )}
 
           <Button
             variant="primary"
