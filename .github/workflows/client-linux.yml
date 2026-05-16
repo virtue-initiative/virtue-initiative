@@ -50,6 +50,10 @@ jobs:
         run: cargo test -p virtue-core
         working-directory: client
 
+      - name: Rust scenario tests (core)
+        run: cargo test -p virtue-core --features testing --test scenarios
+        working-directory: client
+
       - name: Rust tests (Linux client)
         run: cargo test -p virtue-linux
         working-directory: client
