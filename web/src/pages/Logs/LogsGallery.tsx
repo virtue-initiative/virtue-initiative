@@ -14,8 +14,7 @@ import {
   observeWindowOffset,
   windowScroll,
 } from "@tanstack/react-virtual";
-import { formatDate, formatTime } from "../../utils/time";
-import { describeRiskLevel, FeedLog, getLogImage, LogImage } from "./shared";
+import { FeedLog, getLogImage, LogDetailDialog, LogImage } from "./shared";
 import { buildGalleryRows } from "./gallery-layout";
 
 const TARGET_ROW_HEIGHT = 140;
@@ -54,6 +53,7 @@ export function LogsGallery({
   fullscreen: boolean;
 }) {
   const [wrapperEl, setWrapperEl] = useState<HTMLDivElement | null>(null);
+  const [selectedItem, setSelectedItem] = useState<FeedLog | null>(null);
   const wrapperRef = useCallback(
     (el: HTMLDivElement | null) => setWrapperEl(el),
     [],
@@ -173,10 +173,6 @@ export function LogsGallery({
                 const image = getLogImage(item);
                 if (!image) return null;
                 const cellWidth = row.widths[k];
-                const riskLabel =
-                  describeRiskLevel(item.risk) ?? "Risk unavailable";
-                const previewTitle = `${formatDate(item.ts)} ${formatTime(item.ts)}`;
-                const previewSubtitle = `${riskLabel}${item.batch_status === "failed" ? " • Unverified" : ""}`;
                 return (
                   <div
                     key={item.id}
@@ -186,12 +182,10 @@ export function LogsGallery({
                       height: `${row.height}px`,
                       flexShrink: 0,
                     }}
-                    title={`${deviceName(item.device_id)} — ${formatTime(item.ts)}${item.batch_status === "failed" ? " ⚠ Unverified" : ""}`}
                   >
                     <LogImage
                       imageBytes={image}
-                      previewTitle={previewTitle}
-                      previewSubtitle={previewSubtitle}
+                      onClick={() => setSelectedItem(item)}
                     />
                   </div>
                 );
@@ -201,6 +195,13 @@ export function LogsGallery({
         })}
       </div>
       {loading && <p class="logs-loading">Loading…</p>}
+      {selectedItem && (
+        <LogDetailDialog
+          item={selectedItem}
+          deviceName={deviceName}
+          onClose={() => setSelectedItem(null)}
+        />
+      )}
     </div>
   );
 }
