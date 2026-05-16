@@ -7,8 +7,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.lint.json --noEmit",
-    "prettier:check": "cd .. && git ls-files -z -- web | grep -zE '\\.(ts|tsx|cts|mts|js|jsx|cjs|mjs|json|json5|jsonc|css|scss|html|md|mdx|yml|yaml)$' | xargs -0 -r npx --prefix api prettier --check",
-    "prettier:write": "cd .. && git ls-files -z -- web | grep -zE '\\.(ts|tsx|cts|mts|js|jsx|cjs|mjs|json|json5|jsonc|css|scss|html|md|mdx|yml|yaml)$' | xargs -0 -r npx --prefix api prettier --write",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "deploy:prod": "npm run build && wrangler deploy --env prod",
     "deploy:staging": "vite build --mode staging && wrangler deploy --env staging"
   },
@@ -27,6 +27,7 @@
   },
   "devDependencies": {
     "@preact/preset-vite": "^2.10.2",
+    "prettier": "^3.8.3",
     "typescript": "^5.9.3",
     "vite": "^7.0.4",
     "vitest": "^3.2.4",

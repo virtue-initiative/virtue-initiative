@@ -11,12 +11,12 @@
     "typecheck": "astro check",
     "prebuild": "npm run prepare-release-data",
     "build": "astro build",
+    "format": "prettier --plugin prettier-plugin-astro --write .",
+    "format:check": "prettier --plugin prettier-plugin-astro --check .",
     "deploy:prod": "npm run build && wrangler deploy --env prod",
     "deploy:staging": "npm run prepare-release-data && astro build --mode staging && wrangler deploy --env staging",
     "preview": "astro preview",
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "prettier:check": "git ls-files -z -- . | grep -zE '\\.(astro|ts|tsx|cts|mts|js|jsx|cjs|mjs|json|json5|jsonc|css|scss|html|md|mdx|yml|yaml)$' | xargs -0 -r prettier --plugin prettier-plugin-astro --check",
-    "prettier:write": "git ls-files -z -- . | grep -zE '\\.(astro|ts|tsx|cts|mts|js|jsx|cjs|mjs|json|json5|jsonc|css|scss|html|md|mdx|yml|yaml)$' | xargs -0 -r prettier --plugin prettier-plugin-astro --write"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
@@ -31,7 +31,7 @@
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.4",
-    "prettier": "^3.8.1",
+    "prettier": "^3.8.3",
     "prettier-plugin-astro": "^0.14.1",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
