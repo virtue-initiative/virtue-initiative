@@ -31,6 +31,7 @@ iOS got a major user interface overhaul with styling polish and uniformity with 
 - We added a new component library to help simplify our styling.
 
 ## List of issues fixed
+
 - [Updates for iOS](https://github.com/virtue-initiative/virtue-initiative/pull/346)
 - [Log dropdown fixes](https://github.com/virtue-initiative/virtue-initiative/pull/355)
   - [Device buttons aren't the same width](https://github.com/virtue-initiative/virtue-initiative/issues/328)
@@ -55,4 +56,3 @@ iOS got a major user interface overhaul with styling polish and uniformity with 
   - [Create seperate hashing server](https://github.com/virtue-initiative/virtue-initiative/issues/30)
 - [Post 2026-05-16: How our security works](https://github.com/virtue-initiative/virtue-initiative/pull/353)
 - [Better core test harness](https://github.com/virtue-initiative/virtue-initiative/pull/380)
-
