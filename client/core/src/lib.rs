@@ -12,6 +12,9 @@ pub mod platform;
 pub mod service;
 pub mod storage;
 
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
+
 pub use build_info::{BUILD_LABEL, build_label};
 pub use config::Config;
 pub use error::{CoreError, CoreResult};

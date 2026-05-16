@@ -20,13 +20,45 @@ pub struct UploadedLogResponse {
     pub id: String,
 }
 
+pub trait ApiTransport: Send + Sync {
+    fn login(&self, username: &str, password: &str) -> CoreResult<String>;
+    fn logout(&self, access_token: &str) -> CoreResult<()>;
+    fn register_device(
+        &self,
+        access_token: &str,
+        name: &str,
+        platform: &str,
+    ) -> CoreResult<DeviceCredentials>;
+    fn get_device_settings(&self, device_access_token: &str) -> CoreResult<DeviceSettings>;
+    fn refresh_device_token(&self, refresh_token: &str) -> CoreResult<String>;
+    fn upload_batch(
+        &self,
+        device_access_token: &str,
+        batch: &BatchUpload,
+    ) -> CoreResult<UploadedBatchResponse>;
+    fn upload_log(
+        &self,
+        device_access_token: &str,
+        log: &LogEntry,
+    ) -> CoreResult<UploadedLogResponse>;
+    fn upload_hash(
+        &self,
+        hash_base_url: Option<&str>,
+        device_access_token: &str,
+        content_hash: &[u8; 32],
+    ) -> CoreResult<()>;
+
+    /// Apply an updated config (e.g., changed `api_base_url`) to the transport in place.
+    fn reconfigure(&mut self, config: &Config) -> CoreResult<()>;
+}
+
 #[derive(Debug, Clone)]
-pub struct ApiClient {
+pub struct ReqwestApiClient {
     base_url: String,
     client: Client,
 }
 
-impl ApiClient {
+impl ReqwestApiClient {
     pub fn new(config: &Config) -> CoreResult<Self> {
         let client = Client::builder().cookie_store(true).build()?;
         Ok(Self {
@@ -34,8 +66,15 @@ impl ApiClient {
             client,
         })
     }
+}
 
-    pub fn login(&self, username: &str, password: &str) -> CoreResult<String> {
+impl ApiTransport for ReqwestApiClient {
+    fn reconfigure(&mut self, config: &Config) -> CoreResult<()> {
+        self.base_url = config.api_base_url.trim_end_matches('/').to_string();
+        Ok(())
+    }
+
+    fn login(&self, username: &str, password: &str) -> CoreResult<String> {
         #[derive(Serialize)]
         struct LoginRequest<'a> {
             email: &'a str,
@@ -75,11 +114,11 @@ impl ApiClient {
         Ok(response.access_token)
     }
 
-    pub fn logout(&self, access_token: &str) -> CoreResult<()> {
+    fn logout(&self, access_token: &str) -> CoreResult<()> {
         self.send_empty(Method::POST, None, "/logout", Some(access_token))
     }
 
-    pub fn register_device(
+    fn register_device(
         &self,
         access_token: &str,
         name: &str,
@@ -113,7 +152,7 @@ impl ApiClient {
         })
     }
 
-    pub fn get_device_settings(&self, device_access_token: &str) -> CoreResult<DeviceSettings> {
+    fn get_device_settings(&self, device_access_token: &str) -> CoreResult<DeviceSettings> {
         #[derive(Deserialize)]
         struct DeviceSettingsResponse {
             id: String,
@@ -157,7 +196,7 @@ impl ApiClient {
         })
     }
 
-    pub fn refresh_device_token(&self, refresh_token: &str) -> CoreResult<String> {
+    fn refresh_device_token(&self, refresh_token: &str) -> CoreResult<String> {
         #[derive(Serialize)]
         struct RefreshRequest<'a> {
             refresh_token: &'a str,
@@ -178,7 +217,7 @@ impl ApiClient {
         Ok(response.access_token)
     }
 
-    pub fn upload_batch(
+    fn upload_batch(
         &self,
         device_access_token: &str,
         batch: &BatchUpload,
@@ -216,7 +255,7 @@ impl ApiClient {
         self.send_form(Method::POST, None, "/d/batch", device_access_token, form)
     }
 
-    pub fn upload_log(
+    fn upload_log(
         &self,
         device_access_token: &str,
         log: &LogEntry,
@@ -247,7 +286,7 @@ impl ApiClient {
         )
     }
 
-    pub fn upload_hash(
+    fn upload_hash(
         &self,
         hash_base_url: Option<&str>,
         device_access_token: &str,
@@ -265,7 +304,9 @@ impl ApiClient {
             .send()?;
         self.expect_success(response)
     }
+}
 
+impl ReqwestApiClient {
     fn send_json<TBody, TResponse>(
         &self,
         method: Method,
