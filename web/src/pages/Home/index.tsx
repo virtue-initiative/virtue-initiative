@@ -1,21 +1,30 @@
-import { useMemo, useRef, useState } from "preact/hooks";
-import { useLocation } from "preact-iso";
-import { Device, WatchingPartner, WatcherPartner } from "../../api";
-import { Button } from "../../components/Button";
+import { useMemo, useRef, useState } from 'preact/hooks';
+import { useLocation } from 'preact-iso';
+import { Device, WatchingPartner, WatcherPartner } from '../../api';
 import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  CardActions,
+  CardGrid,
+  CardHeader,
   Dialog,
   DialogActions,
   DialogHeader,
   DialogSecondaryActions,
-} from "../../components/Dialog";
-import { useAuth } from "../../context/auth";
-import { useDevices } from "../../hooks/useDevices";
-import { usePartners } from "../../hooks/usePartners";
-import { formatRelativeTimestamp } from "../../utils/time";
-import "./style.css";
+  Field,
+  Input,
+  useToast,
+} from '@virtueinitiative/shared-web';
+import { useAuth } from '../../context/auth';
+import { useDevices } from '../../hooks/useDevices';
+import { usePartners } from '../../hooks/usePartners';
+import { formatRelativeTimestamp } from '../../utils/time';
+import './style.css';
 
-const DOWNLOAD_URL = "https://virtueinitiative.org/download";
-const INSTALLATION_URL = "https://virtueinitiative.org/help/installation/";
+const DOWNLOAD_URL = 'https://virtueinitiative.org/download';
+const INSTALLATION_URL = 'https://virtueinitiative.org/help/installation/';
 
 function UserPlusIcon() {
   return (
@@ -24,7 +33,10 @@ function UserPlusIcon() {
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"
-      style="stroke-width: 1.5"
+      strokeWidth={1.5}
+      width="1.1em"
+      height="1.1em"
+      style={{ flexShrink: 0 }}
     >
       <path
         strokeLinecap="round"
@@ -73,28 +85,26 @@ export function Home() {
     return map;
   }, [deviceList]);
   const acceptedWatching = useMemo(
-    () => watchingList.filter((partner) => partner.status === "accepted"),
+    () => watchingList.filter((partner) => partner.status === 'accepted'),
     [watchingList],
   );
   const pendingWatching = useMemo(
-    () => watchingList.filter((partner) => partner.status === "pending"),
+    () => watchingList.filter((partner) => partner.status === 'pending'),
     [watchingList],
   );
   const acceptedWatchers = useMemo(
-    () => watchersList.filter((partner) => partner.status === "accepted"),
+    () => watchersList.filter((partner) => partner.status === 'accepted'),
     [watchersList],
   );
   const pendingWatchers = useMemo(
-    () => watchersList.filter((partner) => partner.status === "pending"),
+    () => watchersList.filter((partner) => partner.status === 'pending'),
     [watchersList],
   );
 
   return (
     <div class="dashboard">
-      {error && <p class="alert-error">{error.message}</p>}
-      {dashboardLoading && !devices && !watching && !watchers && (
-        <p class="empty">Loading…</p>
-      )}
+      {error && <Alert variant="error">{error.message}</Alert>}
+      {dashboardLoading && !devices && !watching && !watchers && <p class="empty">Loading…</p>}
 
       {!dashboardLoading && (
         <>
@@ -106,7 +116,7 @@ export function Home() {
             {ownDevices.length === 0 ? (
               <p class="empty">No devices</p>
             ) : (
-              <div class="card-grid">
+              <CardGrid>
                 {ownDevices.map((device) => (
                   <DeviceCard
                     key={device.id}
@@ -115,7 +125,7 @@ export function Home() {
                     onRemoveDevice={removeDevice}
                   />
                 ))}
-              </div>
+              </CardGrid>
             )}
           </section>
 
@@ -166,14 +176,14 @@ function AddDeviceButton() {
 
   return (
     <>
-      <Button className="btn-primary" onClick={open}>
+      <Button variant="primary" type="button" onClick={open}>
         Add device
       </Button>
       <Dialog dialogRef={dialogRef} class="device-setup-dialog">
         <DialogHeader>Add device</DialogHeader>
         <p class="invite-desc">
-          Set up Virtue on a phone or computer, then sign in with this account
-          so it starts appearing in your dashboard.
+          Set up Virtue on a phone or computer, then sign in with this account so it starts
+          appearing in your dashboard.
         </p>
         <ol class="device-setup-steps">
           <li>
@@ -181,9 +191,7 @@ function AddDeviceButton() {
             Choose the installer for the device you want to monitor.
           </li>
           <li>
-            <span class="device-setup-step-label">
-              Follow the installation instructions.
-            </span>
+            <span class="device-setup-step-label">Follow the installation instructions.</span>
             Use the platform-specific setup guide if you need it.
           </li>
           <li>
@@ -193,27 +201,17 @@ function AddDeviceButton() {
         </ol>
         <DialogActions
           left={
-            <a
-              class="btn btn-ghost"
-              href={INSTALLATION_URL}
-              target="_blank"
-              rel="noreferrer"
-            >
+            <Button variant="ghost" href={INSTALLATION_URL} target="_blank" rel="noreferrer">
               View guide
-            </a>
+            </Button>
           }
         >
-          <button class="btn btn-ghost" type="button" onClick={close}>
+          <Button variant="ghost" type="button" onClick={close}>
             Close
-          </button>
-          <a
-            class="btn btn-primary"
-            href={DOWNLOAD_URL}
-            target="_blank"
-            rel="noreferrer"
-          >
+          </Button>
+          <Button variant="primary" href={DOWNLOAD_URL} target="_blank" rel="noreferrer">
             Download
-          </a>
+          </Button>
         </DialogActions>
       </Dialog>
     </>
@@ -242,9 +240,9 @@ function PartnerArea({
       {partners.length === 0 ? (
         <p class="empty">{emptyLabel}</p>
       ) : (
-        <div class="card-grid">
+        <CardGrid>
           {partners.map((partner) =>
-            partner.status === "pending" ? (
+            partner.status === 'pending' ? (
               <PendingPartnerCard
                 key={partner.id}
                 partner={partner}
@@ -256,7 +254,7 @@ function PartnerArea({
                 key={partner.id}
                 partner={partner}
                 devices={
-                  "digest_cadence" in partner
+                  'digest_cadence' in partner
                     ? (partnerDevicesByOwner.get(partner.user.id) ?? [])
                     : []
                 }
@@ -265,42 +263,35 @@ function PartnerArea({
               />
             ),
           )}
-        </div>
+        </CardGrid>
       )}
     </section>
   );
 }
 
-function InviteButton({
-  onInvitePartner,
-}: {
-  onInvitePartner: (email: string) => Promise<void>;
-}) {
-  const [email, setEmail] = useState("");
+function InviteButton({ onInvitePartner }: { onInvitePartner: (email: string) => Promise<void> }) {
+  const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { push: pushToast } = useToast();
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   function open() {
-    setEmail("");
-    setError(null);
+    setEmail('');
     dialogRef.current?.showModal();
   }
 
   function close() {
     dialogRef.current?.close();
-    setError(null);
   }
 
   async function handleSubmit(e: Event) {
     e.preventDefault();
-    setError(null);
     setLoading(true);
     try {
       await onInvitePartner(email);
       close();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to send invite");
+      pushToast(err instanceof Error ? err.message : 'Failed to send invite', 'error');
     } finally {
       setLoading(false);
     }
@@ -308,21 +299,18 @@ function InviteButton({
 
   return (
     <>
-      <Button className="btn-primary" onClick={open} icon={<UserPlusIcon />}>
-        Invite partner
+      <Button variant="primary" type="button" onClick={open} style={{ gap: '0.4rem' }}>
+        <UserPlusIcon /> Invite partner
       </Button>
       <Dialog dialogRef={dialogRef}>
         <DialogHeader>Invite a partner</DialogHeader>
         <p class="invite-desc">
           Your partner can <b>view any screenshots and activity logs </b>
-          uploaded <b>after</b> you add them as a partner and they set up their
-          account.
+          uploaded <b>after</b> you add them as a partner and they set up their account.
         </p>
         <form onSubmit={handleSubmit}>
-          <div class="field">
-            <label for="invite-email">Partner's email</label>
-            <input
-              id="invite-email"
+          <Field label="Partner's email">
+            <Input
               type="email"
               value={email}
               onInput={(e) => setEmail((e.target as HTMLInputElement).value)}
@@ -330,15 +318,14 @@ function InviteButton({
               required
               autoFocus
             />
-          </div>
-          {error && <p class="alert-error">{error}</p>}
+          </Field>
           <DialogActions>
-            <button class="btn btn-ghost" type="button" onClick={close}>
+            <Button variant="ghost" type="button" onClick={close}>
               Cancel
-            </button>
-            <button class="btn btn-primary" type="submit" disabled={loading}>
-              {loading ? "Sending…" : "Send invite"}
-            </button>
+            </Button>
+            <Button variant="primary" type="submit" disabled={loading}>
+              {loading ? 'Sending…' : 'Send invite'}
+            </Button>
           </DialogActions>
         </form>
       </Dialog>
@@ -355,63 +342,57 @@ function PendingPartnerCard({
   onRemoveWatching: (id: string) => Promise<void>;
   onRemoveWatcher: (id: string) => Promise<void>;
 }) {
-  const [action, setAction] = useState<"remove" | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [action, setAction] = useState<'remove' | null>(null);
+  const { push: pushToast } = useToast();
   const confirmRef = useRef<HTMLDialogElement>(null);
   const partnerLabel = partner.user.name ?? partner.user.email;
-  const partnerEmailTooltip = partner.user.name
-    ? undefined
-    : partner.user.email;
+  const partnerEmailTooltip = partner.user.name ? undefined : partner.user.email;
   const partnerName = partnerLabel;
 
   async function removeConfirmed() {
-    setAction("remove");
-    setError(null);
+    setAction('remove');
     try {
-      await ("digest_cadence" in partner
+      await ('digest_cadence' in partner
         ? onRemoveWatching(partner.id)
         : onRemoveWatcher(partner.id));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to remove request");
+      pushToast(err instanceof Error ? err.message : 'Failed to remove request', 'error');
       setAction(null);
     }
   }
 
   return (
-    <div class="card">
-      <div class="card-header">
-        <span class="card-name" title={partnerEmailTooltip}>
+    <Card>
+      <CardHeader>
+        <span class="vi-card__name" title={partnerEmailTooltip}>
           {partnerLabel}
         </span>
-        <span class="badge badge-yellow">Pending</span>
-      </div>
-      {error && <p class="alert-error">{error}</p>}
-      <div class="card-actions">
-        <button
-          class="btn btn-danger"
+        <Badge variant="yellow">Pending</Badge>
+      </CardHeader>
+      <CardActions>
+        <Button
+          variant="danger"
           type="button"
           onClick={() => confirmRef.current?.showModal()}
           disabled={action !== null}
         >
-          {action === "remove" ? "Removing…" : "Remove"}
-        </button>
-      </div>
+          {action === 'remove' ? 'Removing…' : 'Remove'}
+        </Button>
+      </CardActions>
       <Dialog dialogRef={confirmRef}>
         <DialogHeader>Remove {partnerName}?</DialogHeader>
-        <p class="invite-desc">
-          This will cancel the pending partner relationship.
-        </p>
+        <p class="invite-desc">This will cancel the pending partner relationship.</p>
         <DialogActions>
-          <button
-            class="btn btn-ghost"
+          <Button
+            variant="ghost"
             type="button"
             onClick={() => confirmRef.current?.close()}
             disabled={action !== null}
           >
             Cancel
-          </button>
-          <button
-            class="btn btn-danger"
+          </Button>
+          <Button
+            variant="danger"
             type="button"
             onClick={() => {
               confirmRef.current?.close();
@@ -419,11 +400,11 @@ function PendingPartnerCard({
             }}
             disabled={action !== null}
           >
-            {action === "remove" ? "Removing…" : "Remove partner"}
-          </button>
+            {action === 'remove' ? 'Removing…' : 'Remove partner'}
+          </Button>
         </DialogActions>
       </Dialog>
-    </div>
+    </Card>
   );
 }
 
@@ -439,36 +420,33 @@ function PartnerCard({
   onRemoveWatcher: (id: string) => Promise<void>;
 }) {
   const { route } = useLocation();
-  const isWatching = "digest_cadence" in partner;
-  const [action, setAction] = useState<"remove" | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const isWatching = 'digest_cadence' in partner;
+  const [action, setAction] = useState<'remove' | null>(null);
+  const { push: pushToast } = useToast();
   const confirmRef = useRef<HTMLDialogElement>(null);
   const partnerLabel = partner.user.name ?? partner.user.email;
-  const partnerEmailTooltip = partner.user.name
-    ? undefined
-    : partner.user.email;
+  const partnerEmailTooltip = partner.user.name ? undefined : partner.user.email;
   const partnerName = partnerLabel;
 
   async function removeConfirmed() {
-    setAction("remove");
-    setError(null);
+    setAction('remove');
     try {
-      await ("digest_cadence" in partner
+      await ('digest_cadence' in partner
         ? onRemoveWatching(partner.id)
         : onRemoveWatcher(partner.id));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to remove partner");
+      pushToast(err instanceof Error ? err.message : 'Failed to remove partner', 'error');
       setAction(null);
     }
   }
 
   return (
-    <div class={`card${isWatching ? "" : " partner-card-compact"}`}>
-      <div class="card-header">
-        <span class="card-name" title={partnerEmailTooltip}>
+    <Card class={isWatching ? undefined : 'partner-card-compact'}>
+      <CardHeader>
+        <span class="vi-card__name" title={partnerEmailTooltip}>
           {partnerLabel}
         </span>
-      </div>
+      </CardHeader>
       {isWatching && devices.length > 0 && (
         <div class="partner-device-list">
           {devices.slice(0, 4).map((device) => (
@@ -476,61 +454,55 @@ function PartnerCard({
               key={device.id}
               class="partner-device-chip"
               type="button"
-              onClick={() =>
-                route(`/logs?user=${partner.user.id}&device_id=${device.id}`)
-              }
+              onClick={() => route(`/logs?user=${partner.user.id}&device_id=${device.id}`)}
               title={device.name}
             >
               <span
-                class={`partner-device-status ${device.status === "online" ? "partner-device-status-online" : "partner-device-status-offline"}`}
+                class={`partner-device-status ${device.status === 'online' ? 'partner-device-status-online' : 'partner-device-status-offline'}`}
               />
               <span>{device.name}</span>
             </button>
           ))}
           {devices.length > 4 && (
-            <p class="partner-device-more">
-              +{devices.length - 4} more devices
-            </p>
+            <p class="partner-device-more">+{devices.length - 4} more devices</p>
           )}
         </div>
       )}
-      {error && <p class="alert-error">{error}</p>}
-      <div class="card-actions">
+      <CardActions>
         {isWatching && partner.user.id && (
-          <button
-            class="btn btn-ghost"
+          <Button
+            variant="ghost"
             type="button"
             onClick={() => route(`/logs?user=${partner.user.id}`)}
           >
             View logs
-          </button>
+          </Button>
         )}
-        <button
-          class="btn btn-danger"
+        <Button
+          variant="danger"
           type="button"
           onClick={() => confirmRef.current?.showModal()}
           disabled={action !== null}
         >
-          {action === "remove" ? "Removing…" : "Remove"}
-        </button>
-      </div>
+          {action === 'remove' ? 'Removing…' : 'Remove'}
+        </Button>
+      </CardActions>
       <Dialog dialogRef={confirmRef}>
         <DialogHeader>Remove {partnerName}?</DialogHeader>
         <p class="invite-desc">
-          This will remove your partner relationship with this person. The
-          partner will be notified.
+          This will remove your partner relationship with this person. The partner will be notified.
         </p>
         <DialogActions>
-          <button
-            class="btn btn-ghost"
+          <Button
+            variant="ghost"
             type="button"
             onClick={() => confirmRef.current?.close()}
             disabled={action !== null}
           >
             Cancel
-          </button>
-          <button
-            class="btn btn-danger"
+          </Button>
+          <Button
+            variant="danger"
             type="button"
             onClick={() => {
               confirmRef.current?.close();
@@ -538,11 +510,11 @@ function PartnerCard({
             }}
             disabled={action !== null}
           >
-            {action === "remove" ? "Removing…" : "Remove partner"}
-          </button>
+            {action === 'remove' ? 'Removing…' : 'Remove partner'}
+          </Button>
         </DialogActions>
       </Dialog>
-    </div>
+    </Card>
   );
 }
 
@@ -559,41 +531,36 @@ function DeviceCard({
   const [name, setName] = useState(device.name);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { push: pushToast } = useToast();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
 
   function openEdit() {
     setName(device.name);
-    setError(null);
     dialogRef.current?.showModal();
   }
 
   function closeEdit() {
-    setError(null);
     dialogRef.current?.close();
   }
 
   function openDeleteDialog() {
-    setError(null);
     dialogRef.current?.close();
     deleteDialogRef.current?.showModal();
   }
 
   function closeDeleteDialog() {
-    setError(null);
     deleteDialogRef.current?.close();
   }
 
   async function handleSave(e: Event) {
     e.preventDefault();
     setSaving(true);
-    setError(null);
     try {
       await onUpdateDevice(device.id, { name });
       dialogRef.current?.close();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save");
+      pushToast(err instanceof Error ? err.message : 'Failed to save', 'error');
     } finally {
       setSaving(false);
     }
@@ -601,86 +568,67 @@ function DeviceCard({
 
   async function handleDeleteConfirmed() {
     setDeleting(true);
-    setError(null);
     try {
       await onRemoveDevice(device.id);
       closeDeleteDialog();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete device");
+      pushToast(err instanceof Error ? err.message : 'Failed to delete device', 'error');
     } finally {
       setDeleting(false);
     }
   }
 
   return (
-    <div class="card">
-      <div class="card-header">
-        <span class="card-name">{device.name}</span>
-        <span
-          class={`badge ${device.status === "online" ? "badge-green" : "badge-gray"}`}
-        >
-          {device.status === "online" ? "Online" : "Offline"}
-        </span>
-      </div>
-      <dl class="card-meta">
+    <Card>
+      <CardHeader>
+        <span class="vi-card__name">{device.name}</span>
+        <Badge variant={device.status === 'online' ? 'green' : 'gray'}>
+          {device.status === 'online' ? 'Online' : 'Offline'}
+        </Badge>
+      </CardHeader>
+      <dl class="vi-card__meta">
         <dt>Platform</dt>
         <dd>{device.platform}</dd>
         <dt>Last upload</dt>
         <dd>{formatRelativeTimestamp(device.last_upload_at)}</dd>
       </dl>
-      <div class="card-actions">
-        <button
-          class="btn btn-ghost"
-          type="button"
-          onClick={() => route(`/logs?device_id=${device.id}`)}
-        >
+      <CardActions>
+        <Button variant="ghost" type="button" onClick={() => route(`/logs?device_id=${device.id}`)}>
           View logs
-        </button>
-        <button class="btn btn-ghost" type="button" onClick={openEdit}>
+        </Button>
+        <Button variant="ghost" type="button" onClick={openEdit}>
           Edit
-        </button>
-      </div>
+        </Button>
+      </CardActions>
 
       <Dialog dialogRef={dialogRef}>
         <DialogHeader>Edit device</DialogHeader>
         <form onSubmit={handleSave}>
-          <div class="field">
-            <label for={`device-name-${device.id}`}>Name</label>
-            <input
-              id={`device-name-${device.id}`}
+          <Field label="Name">
+            <Input
               type="text"
               value={name}
               onInput={(e) => setName((e.target as HTMLInputElement).value)}
               required
             />
-          </div>
-          {error && <p class="alert-error">{error}</p>}
+          </Field>
           <DialogSecondaryActions>
-            <button
-              class="btn btn-danger"
+            <Button
+              variant="danger"
               type="button"
               onClick={openDeleteDialog}
               disabled={saving || deleting}
             >
               Delete device
-            </button>
+            </Button>
           </DialogSecondaryActions>
           <DialogActions>
-            <button
-              class="btn btn-ghost"
-              type="button"
-              onClick={closeEdit}
-              disabled={saving || deleting}
-            >
+            <Button variant="ghost" type="button" onClick={closeEdit} disabled={saving || deleting}>
               Cancel
-            </button>
-            <button
-              class="btn btn-primary"
-              type="submit"
-              disabled={saving || deleting}
-            >
-              {saving ? "Saving…" : "Save"}
-            </button>
+            </Button>
+            <Button variant="primary" type="submit" disabled={saving || deleting}>
+              {saving ? 'Saving…' : 'Save'}
+            </Button>
           </DialogActions>
         </form>
       </Dialog>
@@ -688,29 +636,28 @@ function DeviceCard({
       <Dialog dialogRef={deleteDialogRef}>
         <DialogHeader>Delete device</DialogHeader>
         <p class="invite-desc">
-          Delete "{device.name}"? This permanently removes its logs and uploads,
-          and your partners will be notified.
+          Delete "{device.name}"? This permanently removes its logs and uploads, and your partners
+          will be notified.
         </p>
-        {error && <p class="alert-error">{error}</p>}
         <DialogActions>
-          <button
-            class="btn btn-ghost"
+          <Button
+            variant="ghost"
             type="button"
             onClick={closeDeleteDialog}
             disabled={saving || deleting}
           >
             Cancel
-          </button>
-          <button
-            class="btn btn-danger"
+          </Button>
+          <Button
+            variant="danger"
             type="button"
             onClick={() => handleDeleteConfirmed().catch(() => {})}
             disabled={saving || deleting}
           >
-            {deleting ? "Deleting…" : "Delete device"}
-          </button>
+            {deleting ? 'Deleting…' : 'Delete device'}
+          </Button>
         </DialogActions>
       </Dialog>
-    </div>
+    </Card>
   );
 }

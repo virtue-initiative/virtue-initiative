@@ -1,7 +1,20 @@
 [package]
 name = "virtue-core"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2024"
+
+[features]
+# Exposes the `testing` module (MockClock, TestPlatformHooks, MockApiClient,
+# Scenario) so platform crates and integration tests can drive MonitorService
+# without real HTTP, screenshots, or wall-clock time. Automatically enabled
+# for in-crate `cargo test` via cfg(test). Integration tests under tests/
+# require the feature to be passed explicitly via `--features testing`.
+testing = []
+
+[[test]]
+name = "scenarios"
+path = "tests/scenarios.rs"
+required-features = ["testing"]
 
 [build-dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

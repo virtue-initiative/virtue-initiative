@@ -1,19 +1,37 @@
-import { Fragment } from "preact";
-import { useEffect, useRef } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { formatRelativeTimestamp } from "../../utils/time";
 import {
-  formatDate,
-  formatRelativeTimestamp,
-  formatTime,
-} from "../../utils/time";
-import {
-  describeRiskLevel,
   FeedLog,
   getLogImage,
-  getLogMetadata,
-  groupLogsByDay,
   humanizeLogType,
-  LogImage,
+  LogDetailDialog,
 } from "./shared";
+
+const ITEM_HEIGHT = 68;
+
+function ThumbImage({ imageBytes }: { imageBytes: Uint8Array }) {
+  const [src, setSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    const url = URL.createObjectURL(
+      new Blob(
+        [
+          imageBytes.buffer.slice(
+            imageBytes.byteOffset,
+            imageBytes.byteOffset + imageBytes.byteLength,
+          ) as ArrayBuffer,
+        ],
+        { type: "image/webp" },
+      ),
+    );
+    setSrc(url);
+    return () => URL.revokeObjectURL(url);
+  }, [imageBytes]);
+
+  if (!src) return <div class="logs-thumb-placeholder" />;
+  return <img class="logs-thumb-image" src={src} alt="" loading="lazy" />;
+}
 
 export function LogsList({
   items,
@@ -28,131 +46,109 @@ export function LogsList({
   onLoadMore: () => void;
   deviceName: (id: string) => string;
 }) {
+  const [selectedItem, setSelectedItem] = useState<FeedLog | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () =>
+      (scrollRef.current?.closest(".logs-main") as HTMLElement | null) ??
+      scrollRef.current,
+    scrollMargin: scrollRef.current?.offsetTop ?? 0,
+    estimateSize: () => ITEM_HEIGHT,
+    overscan: 10,
+    useAnimationFrameWithResizeObserver: true,
+    onChange: (instance) => {
+      if (!hasMore || loading) return;
+      const virtualItems = instance.getVirtualItems();
+      const lastItem = virtualItems[virtualItems.length - 1];
+      if (lastItem && lastItem.index >= items.length - 1) {
+        onLoadMore();
+      }
+    },
+  });
+
   if (items.length === 0 && !loading) {
     return <p class="empty">No logs found.</p>;
   }
-  const dayGroups = groupLogsByDay(items);
-  const loadSentinelRef = useRef<HTMLDivElement>(null);
-  const loadRequestedRef = useRef(false);
-
-  useEffect(() => {
-    if (!loading) {
-      loadRequestedRef.current = false;
-    }
-  }, [loading]);
-
-  useEffect(() => {
-    if (!hasMore || loading) {
-      return;
-    }
-
-    const sentinel = loadSentinelRef.current;
-    if (!sentinel) {
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const isVisible = entries.some((entry) => entry.isIntersecting);
-        if (!isVisible || loadRequestedRef.current) {
-          return;
-        }
-
-        loadRequestedRef.current = true;
-        onLoadMore();
-      },
-      { rootMargin: "280px 0px" },
-    );
-
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [hasMore, loading, onLoadMore]);
 
   return (
     <>
-      <div class="section-stack">
-        {dayGroups.map((group) => (
-          <section class="logs-day-group" key={group.key}>
-            <h2 class="section-heading">{group.label}</h2>
-            <div class="logs-list">
-              {group.items.map((item) => {
-                const image = getLogImage(item);
-                const metadata = getLogMetadata(item);
-                const riskLabel =
-                  describeRiskLevel(item.risk) ?? "Risk unavailable";
-                const previewTitle = `${formatDate(item.ts)} ${formatTime(item.ts)}`;
-                const previewSubtitle = `${riskLabel}${item.batch_status === "failed" ? " • Unverified" : ""}`;
+      <div class="logs-virtual-scroll" ref={scrollRef}>
+        <div
+          style={{
+            height: `${virtualizer.getTotalSize()}px`,
+            width: "100%",
+            position: "relative",
+          }}
+        >
+          {virtualizer.getVirtualItems().map((virtualRow) => {
+            const item = items[virtualRow.index];
+            const image = getLogImage(item);
 
-                return (
-                  <div class="logs-row" key={item.id}>
-                    <div class="logs-thumb-wrap">
-                      {image ? (
-                        <LogImage
-                          imageBytes={image}
-                          previewTitle={previewTitle}
-                          previewSubtitle={previewSubtitle}
-                        />
-                      ) : (
-                        <div class="logs-thumb-status">No image</div>
-                      )}
-                    </div>
-                    <div class="logs-row-main">
-                      <div class="logs-row-top">
-                        <span class="logs-type">
-                          {humanizeLogType(item.type)}
-                        </span>
-                        <span class="logs-device">
-                          {deviceName(item.device_id)}
-                        </span>
-                        {item.risk > 0.7 ? (
-                          <span
-                            class="logs-verify-badge logs-verify-badge--failed"
-                            title="High risk log"
-                          >
-                            ⚠ High risk
-                          </span>
-                        ) : (
-                          item.risk > 0.4 && (
-                            <span
-                              class="logs-verify-badge logs-verify-badge--moderate"
-                              title="Moderate risk log"
-                            >
-                              Moderate risk
-                            </span>
-                          )
-                        )}
-                        {item.batch_status === "failed" && (
-                          <span
-                            class="logs-verify-badge logs-verify-badge--failed"
-                            title="Batch hash chain verification failed — data may have been tampered with"
-                          >
-                            ⚠ Unverified
-                          </span>
-                        )}
-                        <span class="logs-time" title={formatTime(item.ts)}>
-                          {formatRelativeTimestamp(item.ts)}
-                        </span>
-                      </div>
-                      {metadata.length > 0 && (
-                        <dl class="logs-meta">
-                          {metadata.map(([key, value], index) => (
-                            <Fragment key={`${item.id}-meta-${index}`}>
-                              <dt>{key}</dt>
-                              <dd>{value}</dd>
-                            </Fragment>
-                          ))}
-                        </dl>
-                      )}
-                    </div>
+            return (
+              <button
+                key={item.id}
+                class="logs-vrow"
+                type="button"
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  height: `${virtualRow.size}px`,
+                  transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
+                }}
+                onClick={() => setSelectedItem(item)}
+              >
+                <div class="logs-vrow-thumb">
+                  {image ? (
+                    <ThumbImage imageBytes={image} />
+                  ) : (
+                    <div class="logs-thumb-placeholder" />
+                  )}
+                </div>
+                <div class="logs-vrow-body">
+                  <div class="logs-vrow-top">
+                    <span class="logs-type">{humanizeLogType(item.type)}</span>
+                    <span class="logs-device">
+                      {deviceName(item.device_id)}
+                    </span>
+                    {item.risk > 0.7 && (
+                      <span class="logs-verify-badge logs-verify-badge--failed">
+                        ⚠ High
+                      </span>
+                    )}
+                    {item.risk > 0.4 && item.risk <= 0.7 && (
+                      <span class="logs-verify-badge logs-verify-badge--moderate">
+                        Med
+                      </span>
+                    )}
+                    {item.batch_status === "failed" && (
+                      <span class="logs-verify-badge logs-verify-badge--failed">
+                        ⚠ Unverified
+                      </span>
+                    )}
                   </div>
-                );
-              })}
-            </div>
-          </section>
-        ))}
+                  <div class="logs-vrow-sub">
+                    <span class="logs-time">
+                      {formatRelativeTimestamp(item.ts)}
+                    </span>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </div>
-      {hasMore && <div class="logs-load-sentinel" ref={loadSentinelRef} />}
       {loading && <p class="logs-loading">Loading…</p>}
+      {selectedItem && (
+        <LogDetailDialog
+          item={selectedItem}
+          deviceName={deviceName}
+          onClose={() => setSelectedItem(null)}
+        />
+      )}
     </>
   );
 }

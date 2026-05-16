@@ -3,10 +3,7 @@
   margin: 0 auto;
   padding: 1.25rem 1.5rem 3rem;
   display: grid;
-  grid-template-columns: var(--site-sidebar-width) minmax(
-      0,
-      var(--site-content-max)
-    );
+  grid-template-columns: var(--site-sidebar-width) minmax(0, var(--site-content-max));
   justify-content: center;
   gap: clamp(2rem, 3vw, 3rem);
   align-items: start;

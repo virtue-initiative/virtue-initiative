@@ -11,6 +11,10 @@ on:
       - staging
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   client-linux:
     name: Client Linux
@@ -44,6 +48,10 @@ jobs:
 
       - name: Rust tests (core)
         run: cargo test -p virtue-core
+        working-directory: client
+
+      - name: Rust scenario tests (core)
+        run: cargo test -p virtue-core --features testing --test scenarios
         working-directory: client
 
       - name: Rust tests (Linux client)

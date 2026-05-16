@@ -11,6 +11,10 @@ on:
       - staging
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   client-ios:
     name: Client iOS
@@ -25,6 +29,7 @@ jobs:
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: "v1"
           workspaces: |
             client -> target
             client/ios/rust -> target

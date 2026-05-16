@@ -1,11 +1,18 @@
 import { useEffect, useState } from "preact/hooks";
 import { DataLog } from "../../api";
 import { BatchVerification } from "../../crypto";
-import { formatDayHeading, localDateKey } from "../../utils/time";
+import {
+  formatDate,
+  formatDayHeading,
+  formatTime,
+  localDateKey,
+} from "../../utils/time";
 
 export type FeedLog = DataLog & {
   batch_status: BatchVerification;
   source: "batch" | "log";
+  image_w?: number;
+  image_h?: number;
 };
 
 export interface LogDayGroup<T extends { ts: number }> {
@@ -56,6 +63,18 @@ export function getLogImage(log: DataLog): Uint8Array | undefined {
   return toUint8Array(log.data.image);
 }
 
+export function getLogImageRatio(log: FeedLog): number | undefined {
+  if (
+    typeof log.image_w === "number" &&
+    typeof log.image_h === "number" &&
+    log.image_w > 0 &&
+    log.image_h > 0
+  ) {
+    return log.image_w / log.image_h;
+  }
+  return undefined;
+}
+
 export function getLogMetadata(log: DataLog) {
   return Object.entries(log.data)
     .filter(([key]) => key !== "image")
@@ -89,20 +108,25 @@ export function humanizeLogType(type: string): string {
   return type.replace(/_/g, " ");
 }
 
+export const LOG_TYPES = [
+  "screenshot",
+  "system_event",
+  "lifecycle_alert",
+  "lifecycle_marker",
+  "lifecycle_transition",
+  "developer_log",
+] as const;
+
 export function LogImage({
   imageBytes,
   onDimensions,
-  previewTitle,
-  previewSubtitle,
+  onClick,
 }: {
   imageBytes: Uint8Array;
   onDimensions?: (width: number, height: number) => void;
-  previewTitle?: string;
-  previewSubtitle?: string;
+  onClick?: () => void;
 }) {
   const [imgSrc, setImgSrc] = useState<string | null>(null);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [lightboxOpen, setLightboxOpen] = useState(false);
 
   useEffect(() => {
     const imageData = Uint8Array.from(imageBytes);
@@ -116,73 +140,125 @@ export function LogImage({
   if (!imgSrc) return null;
 
   return (
-    <>
-      <button
-        class="logs-thumb-button"
-        type="button"
-        onClick={() => setDialogOpen(true)}
-        aria-label="View screenshot"
-      >
-        <img
-          class="logs-thumb-image"
-          src={imgSrc}
-          alt="screenshot"
-          loading="lazy"
-          onLoad={(event) => {
-            if (!onDimensions) {
-              return;
-            }
+    <button
+      class="logs-thumb-button"
+      type="button"
+      onClick={onClick}
+      aria-label="View screenshot"
+    >
+      <img
+        class="logs-thumb-image"
+        src={imgSrc}
+        alt="screenshot"
+        loading="lazy"
+        onLoad={(event) => {
+          if (!onDimensions) {
+            return;
+          }
 
-            const image = event.currentTarget;
-            if (image.naturalWidth > 0 && image.naturalHeight > 0) {
-              onDimensions(image.naturalWidth, image.naturalHeight);
-            }
-          }}
-        />
-      </button>
-      {dialogOpen && (
-        <div class="logs-preview-overlay" onClick={() => setDialogOpen(false)}>
-          <div
-            class="logs-preview-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Screenshot preview"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div class="logs-preview-heading">
-              <div class="logs-preview-header">
-                {previewTitle && (
-                  <p class="logs-preview-meta-title" aria-live="polite">
-                    {previewTitle}
-                  </p>
-                )}
-                <button
-                  class="logs-preview-close"
-                  type="button"
-                  aria-label="Close screenshot preview"
-                  onClick={() => setDialogOpen(false)}
-                >
-                  ×
-                </button>
-              </div>
-              {previewSubtitle && (
-                <p class="logs-preview-meta-subtitle">{previewSubtitle}</p>
-              )}
+          const image = event.currentTarget;
+          if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+            onDimensions(image.naturalWidth, image.naturalHeight);
+          }
+        }}
+      />
+    </button>
+  );
+}
+
+export function LogDetailDialog({
+  item,
+  deviceName,
+  onClose,
+}: {
+  item: FeedLog;
+  deviceName: (id: string) => string;
+  onClose: () => void;
+}) {
+  const [imgSrc, setImgSrc] = useState<string | null>(null);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const imageBytes = getLogImage(item);
+  const metadata = getLogMetadata(item);
+  const riskLabel = describeRiskLevel(item.risk) ?? "Risk unavailable";
+
+  useEffect(() => {
+    if (!imageBytes) return;
+    const url = URL.createObjectURL(
+      new Blob([imageBytes as Uint8Array<ArrayBuffer>], { type: "image/webp" }),
+    );
+    setImgSrc(url);
+    return () => URL.revokeObjectURL(url);
+  }, [imageBytes]);
+
+  return (
+    <>
+      <div class="logs-detail-overlay" onClick={onClose}>
+        <div
+          class="logs-detail-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Log details"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div class="logs-detail-header">
+            <div>
+              <span class="logs-type">{humanizeLogType(item.type)}</span>
+              <span class="logs-device logs-device--indented">
+                {deviceName(item.device_id)}
+              </span>
             </div>
             <button
-              class="logs-preview-image-button"
+              class="logs-detail-close"
               type="button"
-              onClick={() => {
-                setDialogOpen(false);
-                setLightboxOpen(true);
-              }}
-              aria-label="Open image in fullscreen"
+              aria-label="Close"
+              onClick={onClose}
             >
-              <img class="logs-preview-image" src={imgSrc} alt="screenshot" />
+              ×
             </button>
           </div>
+          <p class="logs-detail-time">
+            {formatDate(item.ts)} {formatTime(item.ts)}
+          </p>
+          <div class="logs-detail-badges">
+            {item.risk > 0.7 ? (
+              <span class="logs-verify-badge logs-verify-badge--failed">
+                ⚠ {riskLabel}
+              </span>
+            ) : item.risk > 0.4 ? (
+              <span class="logs-verify-badge logs-verify-badge--moderate">
+                {riskLabel}
+              </span>
+            ) : (
+              <span class="logs-detail-risk-neutral">{riskLabel}</span>
+            )}
+            {item.batch_status === "failed" && (
+              <span class="logs-verify-badge logs-verify-badge--failed">
+                ⚠ Unverified
+              </span>
+            )}
+          </div>
+          {imgSrc && (
+            <button
+              class="logs-detail-image-button"
+              type="button"
+              onClick={() => setLightboxOpen(true)}
+              aria-label="Open image fullscreen"
+            >
+              <img class="logs-detail-image" src={imgSrc} alt="screenshot" />
+            </button>
+          )}
+          {metadata.length > 0 && (
+            <dl class="logs-meta logs-detail-meta">
+              {metadata.map(([key, value], i) => (
+                <>
+                  <dt key={`k-${i}`}>{key}</dt>
+                  <dd key={`v-${i}`}>{value}</dd>
+                </>
+              ))}
+            </dl>
+          )}
         </div>
-      )}
+      </div>
       {lightboxOpen && (
         <div
           class="logs-lightbox-overlay"
@@ -191,7 +267,7 @@ export function LogImage({
           <div class="logs-lightbox-frame">
             <img
               class="logs-lightbox-image"
-              src={imgSrc}
+              src={imgSrc!}
               alt="screenshot"
               onClick={(e) => e.stopPropagation()}
             />

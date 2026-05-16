@@ -8,9 +8,13 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
+    concurrency:
+      group: ${{ github.workflow }}-${{ matrix.project }}-${{ github.ref }}
+      cancel-in-progress: true
+
     strategy:
       matrix:
-        project: [web, api, landing]
+        project: [web, api]
 
     defaults:
       run:
@@ -23,13 +27,17 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: ${{ matrix.project }}/package-lock.json
+          cache-dependency-path: |
+            ${{ matrix.project }}/package-lock.json
+            ${{ matrix.project == 'web' && 'shared-web/package-lock.json' || '' }}
+
+      - name: Install shared-web dependencies
+        if: matrix.project == 'web'
+        run: npm ci
+        working-directory: shared-web
 
       - run: npm ci
       - run: npm run ${{ github.ref_name == 'main' && 'deploy:prod' || 'deploy:staging' }}
         env:
-          GITHUB_TOKEN: ${{ matrix.project == 'landing' && github.token || '' }}
-          VIRTUE_REQUIRE_RELEASE_SYNC: ${{ matrix.project == 'landing' && (github.ref_name == 'main' || github.ref_name == 'staging') && '1' || '' }}
-          VIRTUE_RELEASE_SYNC_CHANNEL: ${{ matrix.project == 'landing' && github.ref_name == 'main' && 'stable' || matrix.project == 'landing' && github.ref_name == 'staging' && 'prerelease' || '' }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}

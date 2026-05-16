@@ -1,5 +1,3 @@
-import { GLOBAL_ALERT_EVENT } from "../events";
-
 export interface ToastOptions {
   isError?: boolean;
   centered?: boolean;
@@ -7,17 +5,22 @@ export interface ToastOptions {
   durationMs?: number | null;
 }
 
+type PushFn = (
+  message: string,
+  variant: 'error' | 'success' | 'info',
+  opts?: { durationMs?: number | null; dismissible?: boolean },
+) => void;
+
+let _push: PushFn | null = null;
+
+export function initToast(push: PushFn) {
+  _push = push;
+}
+
 export function sendToast(message: string, options: ToastOptions = {}) {
-  if (typeof window === "undefined") return;
-  const event = new CustomEvent(GLOBAL_ALERT_EVENT, {
-    detail: {
-      message,
-      isError: Boolean(options.isError),
-      centered: Boolean(options.centered),
-      dismissible: options.dismissible ?? true,
-      durationMs:
-        options.durationMs === undefined ? 45_000 : options.durationMs,
-    },
+  if (!_push || typeof window === 'undefined') return;
+  _push(message, options.isError ? 'error' : 'success', {
+    durationMs: options.durationMs === undefined ? 45_000 : options.durationMs,
+    dismissible: options.dismissible ?? true,
   });
-  window.dispatchEvent(event);
 }

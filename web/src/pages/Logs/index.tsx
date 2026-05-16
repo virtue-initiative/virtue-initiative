@@ -1,15 +1,26 @@
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useState, useCallback } from "preact/hooks";
 import { useLocation } from "preact-iso";
-import { Device, WatchingPartner } from "../../api";
+import { Device } from "../../api";
 import { useAuth } from "../../context/auth";
 import { useDevices } from "../../hooks/useDevices";
 import { useLogs } from "../../hooks/useLogs";
 import { usePartners } from "../../hooks/usePartners";
 import { LogsGallery } from "./LogsGallery";
 import { LogsList } from "./LogsList";
-import { FeedLog, getLogImage, humanizeLogType } from "./shared";
+import {
+  getRiskRating,
+  type RiskRating,
+} from "@virtueinitiative/shared-web/risk";
+import { getLogImage, humanizeLogType, LOG_TYPES } from "./shared";
 import "./style.css";
 import { useUrlState } from "../../hooks/useUrlState";
+import {
+  Alert,
+  Button,
+  Field,
+  IconButton,
+  Select,
+} from "@virtueinitiative/shared-web";
 
 interface DeviceGroup {
   label: string;
@@ -94,6 +105,62 @@ function CloseIcon() {
   );
 }
 
+function ChevronLeftIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth={2}
+      stroke="currentColor"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M15.75 19.5 8.25 12l7.5-7.5"
+      />
+    </svg>
+  );
+}
+
+function ChevronRightIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth={2}
+      stroke="currentColor"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="m8.25 4.5 7.5 7.5-7.5 7.5"
+      />
+    </svg>
+  );
+}
+
+const dayLabelFormatter = new Intl.DateTimeFormat(undefined, {
+  weekday: "long",
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+});
+
+function getDayBounds(offset: number): { startMs: number; endMs: number } {
+  const day = new Date();
+  day.setHours(0, 0, 0, 0);
+  day.setDate(day.getDate() + offset);
+  const end = new Date(day);
+  end.setHours(23, 59, 59, 999);
+  return { startMs: day.getTime(), endMs: end.getTime() };
+}
+
+function formatDayLabel(startMs: number): string {
+  return dayLabelFormatter.format(new Date(startMs));
+}
+
 export function Logs() {
   const { userId } = useAuth();
   const { path } = useLocation();
@@ -110,30 +177,44 @@ export function Logs() {
 
   const [selectedDevice, setSelectedDevice] = useUrlState<string | null>(
     "device_id",
+    "string",
     null,
   );
   const [selectedUser, setSelectedUser] = useUrlState<string | null>(
     "user_id",
+    "string",
     null,
   );
   const [galleryFullscreen, setGalleryFullscreen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [minRiskFilter, setMinRiskFilter] = useUrlState("risk", 0);
+  const [dayOffset, setDayOffset] = useUrlState("day", "number", 0);
+  type RiskFilter = "all" | RiskRating;
+  const [riskFilter, setRiskFilter] = useUrlState<RiskFilter>(
+    "risk",
+    "string",
+    "all",
+  );
   const [rawTypeFilter, setTypeFilter] = useUrlState<string | string[] | null>(
     "type",
+    "string",
     null,
+  );
+
+  const { startMs: weekStart, endMs: weekEnd } = useMemo(
+    () => getDayBounds(dayOffset),
+    [dayOffset],
   );
 
   const {
     logs,
-    hasMore,
     batchStats,
     error: logsError,
     isLoading: logsLoading,
-    loadMore,
   } = useLogs({
     userId: selectedUser,
     deviceId: selectedDevice,
+    startTime: weekStart,
+    endTime: weekEnd,
   });
 
   const deviceList = devices ?? [];
@@ -239,6 +320,16 @@ export function Logs() {
     setSidebarOpen(false);
   }
 
+  const dayLabel = formatDayLabel(weekStart);
+  const prevDay = useCallback(
+    () => setDayOffset(dayOffset - 1),
+    [dayOffset, setDayOffset],
+  );
+  const nextDay = useCallback(
+    () => setDayOffset(dayOffset + 1),
+    [dayOffset, setDayOffset],
+  );
+
   const title =
     sidebarLoading && selectedUser
       ? "Loading…"
@@ -246,10 +337,6 @@ export function Logs() {
         ? `${groupLabel(selectedUser)}'s logs`
         : "My logs";
   const isGallery = path === "/logs/gallery";
-  const availableTypes = useMemo(
-    () => Array.from(new Set((logs ?? []).map((item) => item.type))).sort(),
-    [logs],
-  );
   const typeFilter = Array.isArray(rawTypeFilter)
     ? (rawTypeFilter[0] ?? null)
     : rawTypeFilter;
@@ -257,14 +344,26 @@ export function Logs() {
   const items = useMemo(
     () =>
       (logs ?? []).filter((item) => {
-        return (
-          (item.risk ?? 0) >= minRiskFilter &&
-          (typeFilter === null || typeFilter === item.type)
-        );
+        if (item.ts < weekStart || item.ts > weekEnd) return false;
+        if (typeFilter !== null && typeFilter !== item.type) return false;
+        if (riskFilter !== "all") {
+          const rating = getRiskRating(item.risk);
+          if (riskFilter === "high" && rating !== "high") return false;
+          if (
+            riskFilter === "moderate" &&
+            rating !== "moderate" &&
+            rating !== "high"
+          )
+            return false;
+        }
+        return true;
       }),
-    [logs, minRiskFilter, typeFilter],
+    [logs, riskFilter, typeFilter, weekStart, weekEnd],
   );
-  const galleryItems = items.filter((item) => getLogImage(item) !== undefined);
+  const galleryItems = useMemo(
+    () => items.filter((item) => getLogImage(item) !== undefined),
+    [items],
+  );
 
   useEffect(() => {
     if (!isGallery) {
@@ -316,7 +415,6 @@ export function Logs() {
                   onClick={() => select(group.userId, null)}
                   type="button"
                 >
-                  <span class="logs-status-dot logs-status-dot--placeholder" />
                   <span class="logs-device-button-label">{group.label}</span>
                 </button>
                 <ul class="logs-device-list">
@@ -350,19 +448,57 @@ export function Logs() {
           <div class="logs-header">
             <h1>{title}</h1>
             <div class="logs-header-actions">
-              <button
-                class="btn btn-ghost btn-sm logs-sidebar-toggle"
+              <Button
+                variant="ghost"
+                size="md"
+                class="logs-sidebar-toggle"
                 type="button"
                 onClick={() => setSidebarOpen(true)}
               >
                 <MenuIcon />
                 <span>Devices</span>
-              </button>
+              </Button>
+              <div class="logs-filter-switcher">
+                <Field label="Risk" class="logs-filter-field">
+                  <Select
+                    size="md"
+                    class="logs-filter-select"
+                    value={riskFilter}
+                    onChange={(e) =>
+                      setRiskFilter(
+                        (e.target as HTMLSelectElement).value as RiskFilter,
+                      )
+                    }
+                  >
+                    <option value="all">All</option>
+                    <option value="high">High</option>
+                    <option value="moderate">Medium</option>
+                  </Select>
+                </Field>
+                <Field label="Type" class="logs-filter-field">
+                  <Select
+                    size="md"
+                    class="logs-filter-select"
+                    value={typeFilter ?? ""}
+                    onChange={(e) =>
+                      setTypeFilter(
+                        (e.target as HTMLSelectElement).value || null,
+                      )
+                    }
+                  >
+                    <option value="">All</option>
+                    {LOG_TYPES.map((type) => (
+                      <option key={type} value={type}>
+                        {humanizeLogType(type)}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
               <div class="logs-header-view-controls">
                 {isGallery && (
-                  <button
-                    class="btn btn-ghost btn-sm logs-fullscreen-btn"
-                    type="button"
+                  <IconButton
+                    class="logs-fullscreen-btn"
                     onClick={() => setGalleryFullscreen((prev) => !prev)}
                     aria-label={
                       galleryFullscreen ? "Exit fullscreen" : "Fullscreen"
@@ -374,50 +510,17 @@ export function Logs() {
                     ) : (
                       <ExpandIcon />
                     )}
-                  </button>
+                  </IconButton>
                 )}
-                <div class="logs-filter-switcher">
-                  <select
-                    class="logs-filter-select"
-                    value={minRiskFilter}
-                    onChange={(e) =>
-                      setMinRiskFilter(+(e.target as HTMLSelectElement).value)
-                    }
-                  >
-                    <option value="0">All</option>
-                    <option value="7">High</option>
-                    <option value="5">Medium</option>
-                    <option value="2">Low</option>
-                  </select>
-                  {availableTypes.length > 0 && (
-                    <select
-                      class="logs-filter-select"
-                      value={typeFilter ?? ""}
-                      onChange={(e) =>
-                        setTypeFilter(
-                          (e.target as HTMLSelectElement).value || null,
-                        )
-                      }
-                      aria-label="Log type"
-                    >
-                      <option value="">All types</option>
-                      {availableTypes.map((type) => (
-                        <option key={type} value={type}>
-                          {humanizeLogType(type)}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-                <div class="segmented-control logs-view-switcher">
+                <div class="vi-segmented-control logs-view-switcher">
                   <a
-                    class={`segmented-control__item${!isGallery ? " is-active" : ""}`}
+                    class={`vi-segmented-control__item${!isGallery ? " is-active" : ""}`}
                     href={`/logs${window.location.search}`}
                   >
                     List
                   </a>
                   <a
-                    class={`segmented-control__item${isGallery ? " is-active" : ""}`}
+                    class={`vi-segmented-control__item${isGallery ? " is-active" : ""}`}
                     href={`/logs/gallery${window.location.search}`}
                   >
                     Gallery
@@ -427,23 +530,35 @@ export function Logs() {
             </div>
           </div>
 
-          {logsError && <p class="alert-error">{logsError.message}</p>}
-          {batchStats &&
-            (batchStats.decrypted > 0 || batchStats.skipped > 0) && (
-              <p class="logs-summary">
-                {batchStats.decrypted} block
-                {batchStats.decrypted === 1 ? "" : "s"} decrypted
-                {batchStats.skipped > 0 &&
-                  `, ${batchStats.skipped} block${batchStats.skipped === 1 ? "" : "s"} unavailable`}
-              </p>
-            )}
+          <div class="logs-week-nav">
+            <IconButton aria-label="Previous day" onClick={prevDay}>
+              <ChevronLeftIcon />
+            </IconButton>
+            <span class="logs-week-label">{dayLabel}</span>
+            <IconButton
+              aria-label="Next day"
+              onClick={nextDay}
+              disabled={dayOffset >= 0}
+            >
+              <ChevronRightIcon />
+            </IconButton>
+          </div>
+
+          {logsError && <Alert variant="error">{logsError.message}</Alert>}
+          {batchStats && batchStats.total > 0 && (
+            <p class="logs-summary">
+              {batchStats.decrypted}/{batchStats.total} block
+              {batchStats.total === 1 ? "" : "s"} decrypted
+              {batchStats.skipped > 0 && `, ${batchStats.skipped} unavailable`}
+            </p>
+          )}
 
           {isGallery ? (
             <LogsGallery
               items={galleryItems}
               loading={logsLoading}
-              hasMore={hasMore ?? false}
-              onLoadMore={loadMore}
+              hasMore={false}
+              onLoadMore={() => {}}
               deviceName={deviceName}
               fullscreen={galleryFullscreen}
             />
@@ -451,8 +566,8 @@ export function Logs() {
             <LogsList
               items={items}
               loading={logsLoading}
-              hasMore={hasMore ?? false}
-              onLoadMore={loadMore}
+              hasMore={false}
+              onLoadMore={() => {}}
               deviceName={deviceName}
             />
           )}

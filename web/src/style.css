@@ -1,6 +1,5 @@
-@import "@virtueinitiative/shared-web/base.css";
-@import "./styles/app-shell.css";
-@import "./styles/drawer.css";
-@import "./styles/header.css";
-@import "./styles/alerts.css";
-@import "./styles/dialog.css";
+@import '@virtueinitiative/shared-web/base.css';
+@import './styles/app-shell.css';
+@import './styles/drawer.css';
+@import './styles/header.css';
+@import './styles/dialog.css';

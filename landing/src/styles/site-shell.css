@@ -49,23 +49,19 @@ body {
   flex-shrink: 0;
 }
 
-.site-header-actions .btn,
-.site-header-actions .control {
+.site-header-actions .vi-btn,
+.site-header-actions .vi-icon-btn {
   height: 2.75rem;
 }
 
-.site-header-actions .btn {
+.site-header-actions .vi-btn {
   display: inline-flex;
   align-items: center;
 }
 
-.site-header-actions .control-icon {
+.site-header-actions .vi-icon-btn {
   width: 2.75rem;
   min-width: 2.75rem;
-}
-
-.btn-help {
-  margin-top: 1.25rem;
 }
 
 .section-actions {

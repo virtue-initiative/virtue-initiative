@@ -1,0 +1,52 @@
+name: Deploy Landing
+
+on:
+  push:
+    branches: [main, staging]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: landing
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get main branch SHA
+        id: main-sha
+        working-directory: ${{ github.workspace }}
+        run: |
+          git fetch origin main --depth=1
+          echo "sha=$(git rev-parse origin/main)" >> $GITHUB_OUTPUT
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            shared-web/package-lock.json
+            landing/package-lock.json
+
+      - name: Install shared-web dependencies
+        run: npm ci
+        working-directory: shared-web
+
+      - run: npm ci
+      - name: deploy
+        run: |
+          npm run deploy:prod
+          npm run deploy:staging
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_SHA: ${{ steps.main-sha.outputs.sha }}
+          VIRTUE_REQUIRE_RELEASE_SYNC: ${{ (github.ref_name == 'main' || github.ref_name == 'staging') && '1' || '' }}
+          VIRTUE_RELEASE_SYNC_CHANNEL: ${{ github.ref_name == 'main' && 'stable' || github.ref_name == 'staging' && 'prerelease' || '' }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}

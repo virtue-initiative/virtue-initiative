@@ -1,29 +1,26 @@
 ---
-import type { MarkdownInstance } from "astro";
-import HelpLayout from "../../layouts/HelpLayout.astro";
-import { findHelpItem } from "../../help/navigation";
-import { APP_URL } from "../../lib/app-url";
+import type { MarkdownInstance } from 'astro';
+import HelpLayout from '../../layouts/HelpLayout.astro';
+import { findHelpItem } from '../../help/navigation';
+import { APP_URL } from '../../lib/app-url';
 
 type HelpEntry = {
   Content: any;
-  compiledContent?: MarkdownInstance<Record<string, never>>["compiledContent"];
+  compiledContent?: MarkdownInstance<Record<string, never>>['compiledContent'];
 };
 
 function hasCompiledContent(entry: HelpEntry): entry is Required<HelpEntry> {
-  return typeof entry.compiledContent === "function";
+  return typeof entry.compiledContent === 'function';
 }
 
 export function getStaticPaths() {
   return Object.entries(
-    import.meta.glob("../../content/help/**/*.md*", { eager: true }) as Record<
-      string,
-      HelpEntry
-    >,
+    import.meta.glob('../../content/help/**/*.md*', { eager: true }) as Record<string, HelpEntry>,
   ).map(([key, module]) => {
     const routePath = key
-      .replace("../../content/help/", "")
-      .replace(/\.mdx?$/, "")
-      .replace(/\/index$/, "");
+      .replace('../../content/help/', '')
+      .replace(/\.mdx?$/, '')
+      .replace(/\/index$/, '');
 
     return {
       params: {
@@ -48,7 +45,7 @@ const contentHtml = hasCompiledContent(entry)
 const EntryContent = entry.Content;
 ---
 
-<HelpLayout currentPath={currentPath} pageTitle={currentItem?.label ?? "Help"}>
+<HelpLayout currentPath={currentPath} pageTitle={currentItem?.label ?? 'Help'}>
   {
     contentHtml ? (
       <article class="help-content-card help-doc" set:html={contentHtml} />

@@ -1,4 +1,4 @@
-use crate::api::ApiClient;
+use crate::api::{ApiTransport, ReqwestApiClient};
 use crate::audit::{derive_state, generate_local_id};
 use crate::batch::BatchBuilder;
 use crate::config::Config;
@@ -23,7 +23,7 @@ use crate::storage::FileStateStore;
 const POST_LOGIN_PROOF_BATCH_COUNT: u32 = 3;
 const MAX_HASH_RETRIES_PER_LOOP: usize = 8;
 const MAX_DIRECT_LOG_RETRIES_PER_LOOP: usize = 8;
-const MAX_BATCH_ITEMS_PER_UPLOAD: usize = 25;
+const MAX_BATCH_ITEMS_PER_UPLOAD: usize = 200;
 const SERVICE_PING_INTERVAL_MS: i64 = 60_000;
 const SERVICE_PING_GRACE_MS: i64 = 10_000;
 const STOP_ALERT_THRESHOLD_MS: i64 = 10_000;
@@ -37,10 +37,10 @@ enum RetryAttemptOutcome {
     ResetLoggedOut,
 }
 
-pub struct MonitorService<P> {
+pub struct MonitorService<P, A: ApiTransport = ReqwestApiClient> {
     config: Config,
     platform: P,
-    api: ApiClient,
+    api: A,
     storage: FileStateStore,
     user_access_token: Option<String>,
     device_credentials: Option<DeviceCredentials>,
@@ -49,10 +49,17 @@ pub struct MonitorService<P> {
     status: ServiceStatus,
 }
 
-impl<P: PlatformHooks> MonitorService<P> {
+impl<P: PlatformHooks> MonitorService<P, ReqwestApiClient> {
     pub fn setup(mut config: Config, platform: P) -> CoreResult<Self> {
         config.refresh_from_runtime_file()?;
-        let api = ApiClient::new(&config)?;
+        let api = ReqwestApiClient::new(&config)?;
+        Self::setup_with_api(config, platform, api)
+    }
+}
+
+impl<P: PlatformHooks, A: ApiTransport> MonitorService<P, A> {
+    pub fn setup_with_api(mut config: Config, platform: P, api: A) -> CoreResult<Self> {
+        config.refresh_from_runtime_file()?;
         let storage = FileStateStore::new(&config.state_dir)?;
         let auth_state = storage.load_auth_state()?;
         let device_settings = storage.load_device_settings()?;
@@ -1089,7 +1096,7 @@ impl<P: PlatformHooks> MonitorService<P> {
         let previous_base_url = self.config.api_base_url.clone();
         self.config.refresh_from_runtime_file()?;
         if self.config.api_base_url != previous_base_url {
-            self.api = ApiClient::new(&self.config)?;
+            self.api.reconfigure(&self.config)?;
         }
         Ok(())
     }
@@ -1196,7 +1203,7 @@ impl<P: PlatformHooks> MonitorService<P> {
 
     fn with_device_token_retry<T, F>(&mut self, mut operation: F) -> CoreResult<T>
     where
-        F: FnMut(&ApiClient, &str, Option<&str>) -> CoreResult<T>,
+        F: FnMut(&A, &str, Option<&str>) -> CoreResult<T>,
     {
         let credentials = self
             .device_credentials
@@ -1309,7 +1316,7 @@ mod tests {
         let storage = FileStateStore::new(&state_dir).expect("create file state store");
         let platform = TestPlatform::new(0);
         MonitorService {
-            api: ApiClient::new(&config).expect("create api client"),
+            api: ReqwestApiClient::new(&config).expect("create api client"),
             config,
             platform,
             storage,

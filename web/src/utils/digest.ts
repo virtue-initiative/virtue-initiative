@@ -11,11 +11,11 @@ function normalizeMinutes(minutes: number) {
 }
 
 export function getBrowserTimeZone() {
-  if (typeof Intl === "undefined") {
-    return "";
+  if (typeof Intl === 'undefined') {
+    return '';
   }
 
-  return Intl.DateTimeFormat().resolvedOptions().timeZone?.trim() ?? "";
+  return Intl.DateTimeFormat().resolvedOptions().timeZone?.trim() ?? '';
 }
 
 export function localHourToUtcMinutes(hour: number, date = new Date()) {
@@ -29,7 +29,7 @@ export function utcMinutesToLocalHour(utcMinutes: number, date = new Date()) {
 
 export function formatDigestHour(hour: number) {
   const normalized = normalizeHour(hour);
-  const suffix = normalized >= 12 ? "PM" : "AM";
+  const suffix = normalized >= 12 ? 'PM' : 'AM';
   const displayHour = normalized % 12 || 12;
   return `${displayHour}:00 ${suffix}`;
 }
@@ -38,7 +38,7 @@ export function formatUtcDigestMinutes(utcMinutes: number) {
   const normalized = normalizeMinutes(utcMinutes);
   const hour = Math.floor(normalized / 60)
     .toString()
-    .padStart(2, "0");
-  const minute = (normalized % 60).toString().padStart(2, "0");
+    .padStart(2, '0');
+  const minute = (normalized % 60).toString().padStart(2, '0');
   return `${hour}:${minute} UTC`;
 }

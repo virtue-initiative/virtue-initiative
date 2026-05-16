@@ -1,7 +1,8 @@
-import { useEffect, useState } from "preact/hooks";
-import { useLocation } from "preact-iso";
-import { useAuth } from "../context/auth";
-import { ThemeButton } from "./ThemeButton";
+import { useEffect, useState } from 'preact/hooks';
+import { useLocation } from 'preact-iso';
+import { useAuth } from '../context/auth';
+import { ThemeButton } from './ThemeButton';
+import { Button, IconButton } from '@virtueinitiative/shared-web';
 
 function MenuIcon() {
   return (
@@ -32,11 +33,7 @@ function CloseIcon() {
       stroke="currentColor"
       aria-hidden="true"
     >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M6 18 18 6M6 6l12 12"
-      />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
     </svg>
   );
 }
@@ -49,7 +46,7 @@ export function Header() {
   if (!ready || !token) return null;
 
   const isActive = (routePath: string) =>
-    routePath === "/" ? currentPath === "/" : currentPath.startsWith(routePath);
+    routePath === '/' ? currentPath === '/' : currentPath.startsWith(routePath);
 
   useEffect(() => {
     setMobileMenuOpen(false);
@@ -72,58 +69,45 @@ export function Header() {
       </div>
       <div class="app-header-mobile-actions">
         <ThemeButton />
-        <button
-          class="control control-icon"
-          type="button"
+        <IconButton
           aria-expanded={mobileMenuOpen}
           aria-controls="mobile-header-menu"
-          aria-label={
-            mobileMenuOpen ? "Close navigation menu" : "Open navigation menu"
-          }
+          aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
           onClick={toggleMobileMenu}
         >
           <MenuIcon />
-        </button>
+        </IconButton>
       </div>
       <nav class="app-header-toolbar">
         <div class="app-header-nav-group">
-          <a
-            href="/"
-            class={`control control-flat ${isActive("/") ? "is-active" : ""}`}
-          >
+          <Button href="/" variant="flat" class={isActive('/') ? 'is-active' : ''}>
             Dashboard
-          </a>
-          <a
-            href="/logs"
-            class={`control control-flat ${isActive("/logs") ? "is-active" : ""}`}
-          >
+          </Button>
+          <Button href="/logs" variant="flat" class={isActive('/logs') ? 'is-active' : ''}>
             Logs
-          </a>
-          <a
-            href="/settings"
-            class={`control control-flat ${isActive("/settings") ? "is-active" : ""}`}
-          >
+          </Button>
+          <Button href="/settings" variant="flat" class={isActive('/settings') ? 'is-active' : ''}>
             Settings
-          </a>
+          </Button>
         </div>
 
         <div class="app-header-action-group">
           <ThemeButton />
 
-          <button class="control" onClick={logout} type="button">
+          <Button variant="ghost" onClick={logout} type="button">
             Log out
-          </button>
+          </Button>
         </div>
       </nav>
       <button
-        class={`app-drawer-backdrop app-header-mobile-backdrop${mobileMenuOpen ? " is-open" : ""}`}
+        class={`app-drawer-backdrop app-header-mobile-backdrop${mobileMenuOpen ? ' is-open' : ''}`}
         type="button"
         aria-label="Close navigation menu"
         onClick={closeMobileMenu}
       />
       <nav
         id="mobile-header-menu"
-        class={`app-header-mobile-menu${mobileMenuOpen ? " is-open" : ""}`}
+        class={`app-header-mobile-menu${mobileMenuOpen ? ' is-open' : ''}`}
       >
         <div class="app-drawer-header app-header-mobile-menu-header">
           <span class="app-header-mobile-menu-title">Menu</span>
@@ -136,29 +120,33 @@ export function Header() {
             <CloseIcon />
           </button>
         </div>
-        <a
+        <Button
           href="/"
-          class={`control control-flat ${isActive("/") ? "is-active" : ""}`}
+          variant="flat"
+          class={isActive('/') ? 'is-active' : ''}
           onClick={closeMobileMenu}
         >
           Dashboard
-        </a>
-        <a
+        </Button>
+        <Button
           href="/logs"
-          class={`control control-flat ${isActive("/logs") ? "is-active" : ""}`}
+          variant="flat"
+          class={isActive('/logs') ? 'is-active' : ''}
           onClick={closeMobileMenu}
         >
           Logs
-        </a>
-        <a
+        </Button>
+        <Button
           href="/settings"
-          class={`control control-flat ${isActive("/settings") ? "is-active" : ""}`}
+          variant="flat"
+          class={isActive('/settings') ? 'is-active' : ''}
           onClick={closeMobileMenu}
         >
           Settings
-        </a>
-        <button
-          class="control app-header-mobile-logout"
+        </Button>
+        <Button
+          variant="ghost"
+          class="app-header-mobile-logout"
           onClick={() => {
             closeMobileMenu();
             logout();
@@ -166,7 +154,7 @@ export function Header() {
           type="button"
         >
           Log out
-        </button>
+        </Button>
       </nav>
     </header>
   );

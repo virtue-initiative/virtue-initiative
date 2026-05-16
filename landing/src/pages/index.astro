@@ -1,9 +1,15 @@
 ---
-import CheckIcon from "../components/icons/CheckIcon.astro";
-import MinusIcon from "../components/icons/MinusIcon.astro";
-import LogoMark from "../components/LogoMark.astro";
-import SiteLayout from "../layouts/SiteLayout.astro";
-import { APP_URL } from "../lib/app-url";
+import { getCollection } from 'astro:content';
+import { Button } from '@virtueinitiative/shared-web';
+import CheckIcon from '../components/icons/CheckIcon.astro';
+import MinusIcon from '../components/icons/MinusIcon.astro';
+import LogoMark from '../components/LogoMark.astro';
+import SiteLayout from '../layouts/SiteLayout.astro';
+import { APP_URL } from '../lib/app-url';
+
+const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
+  .sort((a, b) => b.data.pubDate.getTime() - a.data.pubDate.getTime())
+  .slice(0, 3);
 ---
 
 <SiteLayout tagline="Providing free tools and resources for accountability">
@@ -12,13 +18,13 @@ import { APP_URL } from "../lib/app-url";
       <div class="home-hero-copy">
         <h1>We want to see a world set free from pornography</h1>
         <p class="home-hero-lead">
-          Virtue is a simple app that shares blurred screenshots of your
-          activity with an accountability partner you trust. It's entirely free
-          to use and end-to-end encrypted.
+          Virtue is a simple app that shares blurred screenshots of your activity with an
+          accountability partner you trust. It's entirely free to use and end-to-end encrypted.
         </p>
         <div class="section-actions">
-          <a href={`${APP_URL}/signup`} class="btn btn-primary">Get started</a>
-          <a href="/about" class="btn btn-outline">Our mission</a>
+          <Button href={`${APP_URL}/signup`} variant="primary">Get started</Button>
+          <Button href="/about" variant="outline">Our mission</Button>
+          <Button href="/help" variant="outline">Help</Button>
         </div>
       </div>
       <div class="home-hero-logo" aria-hidden="true">
@@ -66,15 +72,14 @@ import { APP_URL } from "../lib/app-url";
             <li>your father</li>
           </ul>
           <p>
-            Once you make an account, invite someone by email to be your
-            accountability partner.
+            Once you make an account, invite someone by email to be your accountability partner.
           </p>
         </div>
       </div>
     </section>
 
     <section class="home-section">
-      <div class="privacy-card">
+      <div class="vi-card privacy-card">
         <div class="home-section-heading">
           <h2>Privacy &amp; security</h2>
         </div>
@@ -82,9 +87,7 @@ import { APP_URL } from "../lib/app-url";
         <ul class="plain-list privacy-list">
           <li>Screenshots are shrunk and blurred before being shared</li>
           <li>Data is end-to-end encrypted</li>
-          <li>
-            Only your chosen accountability partner can view your activity
-          </li>
+          <li>Only your chosen accountability partner can view your activity</li>
           <li>No ads or data selling</li>
         </ul>
       </div>
@@ -99,16 +102,16 @@ import { APP_URL } from "../lib/app-url";
         <details class="faq-item" open>
           <summary>What does the app share?</summary>
           <p>
-            It captures blurred screenshots of activity on supported devices and
-            makes them available to the accountability partner you choose.
+            It captures blurred screenshots of activity on supported devices and makes them
+            available to the accountability partner you choose.
           </p>
         </details>
 
         <details class="faq-item" open>
           <summary>Do I need an accountability partner before I start?</summary>
           <p>
-            Yes. This only works if one other person can review your activity.
-            Start with one person you trust.
+            Yes. This only works if one other person can review your activity. Start with one person
+            you trust.
           </p>
         </details>
 
@@ -124,9 +127,8 @@ import { APP_URL } from "../lib/app-url";
         <details class="faq-item">
           <summary>Who can see my data?</summary>
           <p>
-            Only the accountability partner you authorize can review it. The
-            data is end-to-end encrypted, and the service does not sell it or
-            use it for ads.
+            Only the accountability partner you authorize can review it. The data is end-to-end
+            encrypted, and the service does not sell it or use it for ads.
           </p>
         </details>
 
@@ -135,8 +137,7 @@ import { APP_URL } from "../lib/app-url";
           <p>
             You can install Virtue on supported devices from the
             <a href="/download">downloads page</a>, and the
-            <a href="/help/getting-started">getting started guide</a> walks through
-            the setup.
+            <a href="/help/getting-started">getting started guide</a> walks through the setup.
           </p>
         </details>
       </div>
@@ -147,8 +148,8 @@ import { APP_URL } from "../lib/app-url";
         <h2>Currently supported platforms &amp; features</h2>
       </div>
       <p>
-        We are working hard to support more platforms and features. Below is the
-        current feature support by platform. This is still a beta stage project.
+        We are working hard to support more platforms and features. Below is the current feature
+        support by platform. This is still a beta stage project.
       </p>
       <div class="table-wrapper">
         <table>
@@ -242,13 +243,45 @@ import { APP_URL } from "../lib/app-url";
       </div>
     </section>
 
+    {
+      latestPosts.length > 0 && (
+        <section class="home-section">
+          <div class="home-section-heading">
+            <h2>From the blog</h2>
+          </div>
+          <ul class="home-blog-list">
+            {latestPosts.map((post) => (
+              <li class="home-blog-item">
+                <a href={`/blog/${post.id}`} class="home-blog-item-title">
+                  {post.data.title}
+                </a>
+                <span class="home-blog-item-meta">
+                  {post.data.pubDate.toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                  })}
+                  {post.data.author && <> · {post.data.author}</>}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <div class="section-actions">
+            <Button href="/blog" variant="outline">
+              View all posts
+            </Button>
+          </div>
+        </section>
+      )
+    }
+
     <section class="home-section home-cta">
       <div class="home-section-heading">
         <h2>Get started</h2>
       </div>
       <p>Create your account and set up your accountability partner.</p>
       <div class="section-actions">
-        <a href={`${APP_URL}/signup`} class="btn btn-primary">Get started</a>
+        <Button href={`${APP_URL}/signup`} variant="primary">Get started</Button>
       </div>
     </section>
   </div>

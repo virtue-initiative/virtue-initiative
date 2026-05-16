@@ -1,0 +1,90 @@
+.vi-btn {
+  box-sizing: border-box;
+  min-height: var(--button-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--button-padding-x);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+
+  &:hover:not(:disabled) {
+    text-decoration: none;
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+}
+
+.vi-btn--primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: transparent;
+
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 88%, black);
+  }
+}
+
+.vi-btn--outline {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+
+  &:hover:not(:disabled) {
+    background: var(--accent);
+    color: #fff;
+  }
+}
+
+.vi-btn--ghost {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+
+  &:hover:not(:disabled) {
+    background: var(--bg-subtle);
+    color: var(--text);
+  }
+}
+
+.vi-btn--danger {
+  background: transparent;
+  color: var(--danger);
+  border-color: var(--danger);
+
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
+    border-color: var(--danger);
+    color: var(--danger);
+  }
+}
+
+.vi-btn--flat {
+  background: transparent;
+  color: var(--text-muted);
+  border-color: transparent;
+
+  &:hover:not(:disabled) {
+    background: var(--bg-subtle);
+    color: var(--text);
+    border-color: transparent;
+  }
+}
+
+.vi-btn--sm {
+  min-height: 1.9rem;
+  padding: 0 0.65rem;
+  font-size: 0.8125rem;
+}

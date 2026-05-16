@@ -1,0 +1,21 @@
+.vi-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  font-size: var(--text-sm);
+
+  & input[type='checkbox'] {
+    width: 1rem;
+    height: 1rem;
+    accent-color: var(--accent);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+}
+
+.vi-checkbox__label {
+  color: var(--text);
+  line-height: var(--line-normal);
+  user-select: none;
+}

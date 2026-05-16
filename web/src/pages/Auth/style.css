@@ -11,7 +11,7 @@
   }
 }
 
-.auth-card.auth-card {
+.auth-card {
   width: 100%;
   padding: 2.5rem 2rem;
   max-width: 420px;
@@ -29,7 +29,7 @@
   justify-content: space-between;
 
   @media (max-width: 450px) {
-    & .control {
+    & .vi-icon-btn {
       display: none;
     }
   }
@@ -42,16 +42,21 @@
 }
 
 .auth-subtitle {
-  margin: 0 0 1.75rem;
+  margin: 0 0 1rem;
   color: var(--text-muted);
   font-size: 0.95rem;
 }
 
-.auth-tabs {
-  margin-bottom: 1.5rem;
+.auth-dev-warning {
+  margin-bottom: 1rem;
 }
 
-.auth-tabs .segmented-control__item {
+.auth-tabs {
+  margin-bottom: 1.5rem;
+  width: 100%;
+}
+
+.auth-tabs .vi-segmented-control__item {
   flex: 1;
 }
 
@@ -67,6 +72,7 @@
 
 .auth-submit {
   margin-top: 0.25rem;
+  width: 100%;
 }
 
 .auth-links {

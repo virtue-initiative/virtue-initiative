@@ -1,4 +1,4 @@
-import SecurityFlow from "./security-flow.svg?raw";
+import SecurityFlow from './security-flow.svg?raw';
 
 # Cryptography and security
 
@@ -207,15 +207,11 @@ export async function derivePasswordMaterial(
     memorySize: params.memory_cost_kib,
     hashLength: 32,
     parallelism: params.parallelism,
-    outputType: "binary",
+    outputType: 'binary',
   });
-  const passwordAuth = await hkdfSha256("auth", argonOutput);
-  const wrappingKeyBytes = await hkdfSha256("key", argonOutput);
-  const wrappingKey = await importAesKey(
-    wrappingKeyBytes,
-    ["encrypt", "decrypt"],
-    true,
-  );
+  const passwordAuth = await hkdfSha256('auth', argonOutput);
+  const wrappingKeyBytes = await hkdfSha256('key', argonOutput);
+  const wrappingKey = await importAesKey(wrappingKeyBytes, ['encrypt', 'decrypt'], true);
 
   return {
     argonOutput,
@@ -232,17 +228,10 @@ The web client encrypts the private key locally with AES-GCM before upload.
 Source: [`web/src/crypto.ts:L112-L124`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/crypto.ts#L112-L124)
 
 ```ts
-export async function encryptData(
-  key: CryptoKey,
-  data: Uint8Array,
-): Promise<Uint8Array> {
+export async function encryptData(key: CryptoKey, data: Uint8Array): Promise<Uint8Array> {
   const payload = Uint8Array.from(data);
   const nonce = crypto.getRandomValues(new Uint8Array(12));
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv: nonce },
-    key,
-    payload,
-  );
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, key, payload);
   return concatBytes(nonce, new Uint8Array(ciphertext));
 }
 ```
@@ -257,12 +246,8 @@ Source: [`web/src/crypto.ts:L140-L151`](https://github.com/virtue-initiative/vir
 export async function generateUserKeyPair() {
   const keyPair = await HPKE_SUITE.kem.generateKeyPair();
   return {
-    publicKey: new Uint8Array(
-      await HPKE_SUITE.kem.serializePublicKey(keyPair.publicKey),
-    ),
-    privateKey: new Uint8Array(
-      await HPKE_SUITE.kem.serializePrivateKey(keyPair.privateKey),
-    ),
+    publicKey: new Uint8Array(await HPKE_SUITE.kem.serializePublicKey(keyPair.publicKey)),
+    privateKey: new Uint8Array(await HPKE_SUITE.kem.serializePrivateKey(keyPair.privateKey)),
     privateKeyHandle: keyPair.privateKey,
   };
 }
@@ -275,18 +260,13 @@ Batch access envelopes are opened with HPKE and imported back into WebCrypto as 
 Source: [`web/src/crypto.ts:L159-L171`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/crypto.ts#L159-L171)
 
 ```ts
-export async function unwrapBatchKey(
-  privateKey: CryptoKey,
-  encryptedKey: BufferSource,
-) {
+export async function unwrapBatchKey(privateKey: CryptoKey, encryptedKey: BufferSource) {
   const envelope = toUint8Array(encryptedKey);
   const enc = envelope.slice(0, HPKE_SUITE.kem.encSize);
   const ct = envelope.slice(HPKE_SUITE.kem.encSize);
-  const rawKey = new Uint8Array(
-    await HPKE_SUITE.open({ recipientKey: privateKey, enc }, ct),
-  );
+  const rawKey = new Uint8Array(await HPKE_SUITE.open({ recipientKey: privateKey, enc }, ct));
 
-  return importAesKey(rawKey, ["decrypt"]);
+  return importAesKey(rawKey, ['decrypt']);
 }
 ```
 
@@ -298,10 +278,7 @@ Source: [`api/src/lib/password.ts:L35-L38`](https://github.com/virtue-initiative
 
 ```ts
 export async function hashPasswordAuth(passwordAuth: ArrayBuffer | Uint8Array) {
-  const hashBuffer = await crypto.subtle.digest(
-    "SHA-256",
-    toBytes(passwordAuth),
-  );
+  const hashBuffer = await crypto.subtle.digest('SHA-256', toBytes(passwordAuth));
   return bytesToHex(new Uint8Array(hashBuffer));
 }
 ```

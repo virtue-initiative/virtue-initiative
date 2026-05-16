@@ -52,6 +52,7 @@ const signupSchema = z.object({
   priv_key: z.base64(),
   name: z.string().min(1).optional(),
   email_digest_minutes_utc: z.int().min(0).max(1439).optional(),
+  partner_invite_token: z.string().min(1).optional(),
 });
 
 const loginMaterialQuerySchema = z.object({
@@ -213,11 +214,15 @@ async function sendVerificationEmail(
   options?: {
     purpose?: 'email_verification' | 'email_change';
     next?: '/settings';
+    partner_invite_token?: string;
   },
 ) {
   const params = new URLSearchParams({ token });
   if (options?.next) {
     params.set('next', options.next);
+  }
+  if (options?.partner_invite_token) {
+    params.set('partner_invite_token', options.partner_invite_token);
   }
   const verifyUrl = `${getAppUrl(c)}/verify-email?${params.toString()}`;
   const email = renderEmailVerificationTemplate({
@@ -291,8 +296,16 @@ auth.get('/user/login-material', validateZ('query', loginMaterialQuerySchema), a
 });
 
 auth.post('/signup', validateZ('json', signupSchema), async (c) => {
-  const { email, password_auth, password_salt, pub_key, priv_key, name, email_digest_minutes_utc } =
-    c.req.valid('json');
+  const {
+    email,
+    password_auth,
+    password_salt,
+    pub_key,
+    priv_key,
+    name,
+    email_digest_minutes_utc,
+    partner_invite_token,
+  } = c.req.valid('json');
   const normalizedEmail = email.trim().toLowerCase();
   const existingUser = await findUserByEmail(c.env.DB, normalizedEmail);
 
@@ -334,7 +347,9 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
     'email_verification',
     EMAIL_VERIFICATION_TTL_MS,
   );
-  await sendVerificationEmail(c, { id: userId, email: normalizedEmail, name }, verificationToken);
+  await sendVerificationEmail(c, { id: userId, email: normalizedEmail, name }, verificationToken, {
+    partner_invite_token: partner_invite_token ?? undefined,
+  });
 
   return c.json(
     {
@@ -570,6 +585,27 @@ auth.post('/email-verification/validate', validateZ('json', verifyEmailSchema), 
     purpose: verificationPurpose,
   });
 });
+
+auth.post(
+  '/email-verification/resend',
+  validateZ('json', z.object({ email: z.email() })),
+  async (c) => {
+    const { email } = c.req.valid('json');
+    const user = await findUserByEmail(c.env.DB, email.trim().toLowerCase());
+
+    if (user && user.email_verified !== 1 && !user.email_bounced_at) {
+      const verificationToken = await issueEmailToken(
+        c.env.DB,
+        { id: user.id, email: user.email },
+        'email_verification',
+        EMAIL_VERIFICATION_TTL_MS,
+      );
+      await sendVerificationEmail(c, user, verificationToken);
+    }
+
+    return c.body(null, 204);
+  },
+);
 
 auth.post('/email-verification', authenticate('access'), async (c) => {
   const user = await findUserById(c.env.DB, c.get('sub'));

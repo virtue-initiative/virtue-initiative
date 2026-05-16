@@ -1,11 +1,11 @@
-import useSWR, { useSWRConfig } from "swr";
-import { api, isToastHandledError, User } from "../api";
-import { useAuth } from "../context/auth";
-import { swrKeys } from "./swr-keys";
+import useSWR, { useSWRConfig } from 'swr';
+import { api, isToastHandledError, User } from '../api';
+import { useAuth } from '../context/auth';
+import { swrKeys } from './swr-keys';
 
 function requireToken(token: string | null): string {
   if (!token) {
-    throw new Error("You must be logged in to perform this action.");
+    throw new Error('You must be logged in to perform this action.');
   }
 
   return token;
@@ -18,8 +18,8 @@ export interface UseUserResult {
   updateUser: (patch: {
     email?: string;
     name?: string;
-    email_frequency?: User["email_frequency"];
-    email_digest_minutes_utc?: User["email_digest_minutes_utc"];
+    email_frequency?: User['email_frequency'];
+    email_digest_minutes_utc?: User['email_digest_minutes_utc'];
     pub_key?: string;
     priv_key?: string;
   }) => Promise<{

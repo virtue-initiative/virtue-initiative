@@ -7,6 +7,12 @@
   & img {
     max-width: 100%;
     height: auto;
+    max-height: 600px;
+    width: auto;
+  }
+
+  & p:has(img) {
+    align-self: center;
   }
 
   & svg {
@@ -127,11 +133,7 @@
     border-left: 4px solid var(--accent);
     border-radius: 0 10px 10px 0;
     background:
-      linear-gradient(
-        90deg,
-        color-mix(in srgb, var(--accent) 10%, transparent),
-        transparent 55%
-      ),
+      linear-gradient(90deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent 55%),
       var(--bg-subtle);
     color: var(--text);
 

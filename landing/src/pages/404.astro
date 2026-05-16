@@ -1,0 +1,41 @@
+---
+import { Button } from '@virtueinitiative/shared-web';
+import SiteLayout from '../layouts/SiteLayout.astro';
+---
+
+<SiteLayout pageTitle="Page Not Found">
+  <section class="not-found">
+    <h1>Page not found</h1>
+    <p>Sorry, we couldn't find the page you were looking for. It may have been moved or deleted.</p>
+    <div class="section-actions">
+      <Button href="/" variant="primary">Go home</Button>
+      <Button href="/help" variant="outline">Help</Button>
+    </div>
+  </section>
+</SiteLayout>
+
+<style>
+  .not-found {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    padding: 3rem 0;
+  }
+
+  .not-found h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .not-found p {
+    color: var(--text-muted);
+    font-size: 1.05rem;
+    line-height: 1.7;
+    max-width: 36rem;
+  }
+
+  .not-found .section-actions {
+    margin-top: 0.5rem;
+  }
+</style>

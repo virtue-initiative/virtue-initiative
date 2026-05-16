@@ -1,26 +1,20 @@
-import { createContext } from "preact";
-import { useContext, useState, useEffect, useCallback } from "preact/hooks";
-import { api, setReauthHandler } from "../api";
-import { clearDataCache } from "../data-cache";
-import {
-  DEFAULT_DIGEST_LOCAL_HOUR,
-  localHourToUtcMinutes,
-} from "../utils/digest";
+import { createContext } from 'preact';
+import { useContext, useState, useEffect, useCallback } from 'preact/hooks';
+import { api, setReauthHandler } from '../api';
+import { clearDataCache } from '../data-cache';
+import { DEFAULT_DIGEST_LOCAL_HOUR, localHourToUtcMinutes } from '../utils/digest';
 import {
   derivePasswordMaterial,
   encryptData,
   generateRandomKeyBytes,
   generateUserKeyPair,
-} from "../crypto";
+} from '../crypto';
 
-const WRAPPING_KEY_STORAGE = "virtue_wrapping_key";
+const WRAPPING_KEY_STORAGE = 'virtue_wrapping_key';
 
 async function saveWrappingKey(wk: CryptoKey): Promise<void> {
-  const raw = await crypto.subtle.exportKey("raw", wk);
-  localStorage.setItem(
-    WRAPPING_KEY_STORAGE,
-    btoa(String.fromCharCode(...new Uint8Array(raw))),
-  );
+  const raw = await crypto.subtle.exportKey('raw', wk);
+  localStorage.setItem(WRAPPING_KEY_STORAGE, btoa(String.fromCharCode(...new Uint8Array(raw))));
 }
 
 async function loadWrappingKey(): Promise<CryptoKey | null> {
@@ -28,13 +22,10 @@ async function loadWrappingKey(): Promise<CryptoKey | null> {
   if (!stored) return null;
   try {
     const raw = Uint8Array.from(atob(stored), (c) => c.charCodeAt(0));
-    return crypto.subtle.importKey(
-      "raw",
-      raw,
-      { name: "AES-GCM", length: 256 },
-      true,
-      ["encrypt", "decrypt"],
-    );
+    return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM', length: 256 }, true, [
+      'encrypt',
+      'decrypt',
+    ]);
   } catch {
     return null;
   }
@@ -61,6 +52,7 @@ interface AuthState {
     email: string,
     password: string,
     name?: string,
+    partnerInviteToken?: string,
   ) => Promise<{
     userId: string;
     wrappingKey: CryptoKey;
@@ -70,7 +62,7 @@ interface AuthState {
     access_token: string;
     userId: string;
     email: string;
-    purpose: "email_verification" | "email_change";
+    purpose: 'email_verification' | 'email_change';
   }>;
   rememberWrappingKey: (wrappingKey: CryptoKey) => Promise<void>;
   logout: () => Promise<void>;
@@ -78,11 +70,7 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState>(null as unknown as AuthState);
 
-export function AuthProvider({
-  children,
-}: {
-  children: preact.ComponentChildren;
-}) {
+export function AuthProvider({ children }: { children: preact.ComponentChildren }) {
   const [token, setToken] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [wrappingKey, setWrappingKey] = useState<CryptoKey | null>(null);
@@ -90,8 +78,8 @@ export function AuthProvider({
 
   function jwtSub(t: string): string | null {
     try {
-      const b64 = t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-      const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+      const b64 = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
       return JSON.parse(atob(padded)).sub ?? null;
     } catch {
       return null;
@@ -132,7 +120,7 @@ export function AuthProvider({
   }, []);
 
   const signup = useCallback(
-    async (email: string, pw: string, name?: string) => {
+    async (email: string, pw: string, name?: string, partnerInviteToken?: string) => {
       const params = await api.getCurrentHashParams();
       const passwordSalt = generateRandomKeyBytes(params.salt_length);
       const { passwordAuth, wrappingKey: wk } = await derivePasswordMaterial(
@@ -148,9 +136,8 @@ export function AuthProvider({
         pub_key: keyPair.publicKey.toBase64(),
         priv_key: encryptedPrivateKey.toBase64(),
         ...(name ? { name } : {}),
-        email_digest_minutes_utc: localHourToUtcMinutes(
-          DEFAULT_DIGEST_LOCAL_HOUR,
-        ),
+        email_digest_minutes_utc: localHourToUtcMinutes(DEFAULT_DIGEST_LOCAL_HOUR),
+        ...(partnerInviteToken ? { partner_invite_token: partnerInviteToken } : {}),
       });
       await saveWrappingKey(wk);
       setWrappingKey(wk);
@@ -168,7 +155,7 @@ export function AuthProvider({
     const uid = jwtSub(res.access_token);
 
     if (!uid) {
-      throw new Error("Verified access token is missing a subject");
+      throw new Error('Verified access token is missing a subject');
     }
 
     const persistedWrappingKey = await loadWrappingKey().catch(() => null);
@@ -191,7 +178,7 @@ export function AuthProvider({
     const uid = jwtSub(res.access_token);
 
     if (!uid) {
-      throw new Error("Refreshed access token is missing a subject");
+      throw new Error('Refreshed access token is missing a subject');
     }
 
     setToken(res.access_token);
@@ -208,13 +195,10 @@ export function AuthProvider({
     setWrappingKey(null);
   }, []);
 
-  const rememberWrappingKey = useCallback(
-    async (nextWrappingKey: CryptoKey) => {
-      await saveWrappingKey(nextWrappingKey);
-      setWrappingKey(nextWrappingKey);
-    },
-    [],
-  );
+  const rememberWrappingKey = useCallback(async (nextWrappingKey: CryptoKey) => {
+    await saveWrappingKey(nextWrappingKey);
+    setWrappingKey(nextWrappingKey);
+  }, []);
 
   useEffect(() => {
     setReauthHandler(async () => {

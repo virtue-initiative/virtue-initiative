@@ -1,0 +1,51 @@
+.vi-menu {
+  position: relative;
+  display: inline-block;
+}
+
+.vi-menu__trigger {
+  cursor: pointer;
+}
+
+.vi-menu__dropdown {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  z-index: var(--z-dropdown);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: var(--space-1) 0;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+}
+
+.vi-menu__item {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.45rem var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text);
+  text-decoration: none;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  white-space: nowrap;
+
+  &:hover {
+    background: var(--bg-subtle);
+  }
+}
+
+.vi-menu__item--danger {
+  color: var(--danger);
+
+  &:hover {
+    background: color-mix(in srgb, var(--danger) 8%, transparent);
+  }
+}

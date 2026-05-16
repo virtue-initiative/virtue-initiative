@@ -1,0 +1,42 @@
+.vi-icon-btn {
+  box-sizing: border-box;
+  height: var(--button-height);
+  width: var(--button-height);
+  min-width: var(--button-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+
+  & svg {
+    width: 1.1rem;
+    height: 1.1rem;
+  }
+
+  &:hover {
+    background: var(--bg-subtle);
+    color: var(--text);
+    border-color: var(--control-border-hover);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+}
+
+.vi-icon-btn--active {
+  background: var(--control-active-bg);
+  color: var(--control-active-text);
+  text-shadow: 0 0 1px var(--control-active-text);
+  border-color: var(--control-active-border);
+}

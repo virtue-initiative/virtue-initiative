@@ -7,6 +7,10 @@ on:
       - staging
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   web:
     name: Web
@@ -18,16 +22,21 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "24"
-          cache: "npm"
+          node-version: '24'
+          cache: 'npm'
           cache-dependency-path: |
             api/package-lock.json
+            shared-web/package-lock.json
             web/package-lock.json
             landing/package-lock.json
 
       - name: Install API dependencies
         run: npm ci
         working-directory: api
+
+      - name: Install shared-web dependencies
+        run: npm ci
+        working-directory: shared-web
 
       - name: Install Web dependencies
         run: npm ci
@@ -36,6 +45,22 @@ jobs:
       - name: Install Landing dependencies
         run: npm ci
         working-directory: landing
+
+      - name: API Prettier check
+        run: npm run format:check
+        working-directory: api
+
+      - name: Web Prettier check
+        run: npm run format:check
+        working-directory: web
+
+      - name: Landing Prettier check
+        run: npm run format:check
+        working-directory: landing
+
+      - name: Shared Web Prettier check
+        run: npm run format:check
+        working-directory: shared-web
 
       - name: API type check
         run: npm run typecheck
@@ -54,18 +79,6 @@ jobs:
         working-directory: landing
         env:
           GITHUB_TOKEN: ${{ github.token }}
-
-      - name: API Prettier check
-        run: npm run prettier:check
-        working-directory: api
-
-      - name: Web Prettier check
-        run: npm run prettier:check
-        working-directory: web
-
-      - name: Landing Prettier check
-        run: npm run prettier:check
-        working-directory: landing
 
       - name: Web build
         run: npm run build

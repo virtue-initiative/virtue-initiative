@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 interface Uint8Array<TArrayBuffer extends ArrayBufferLike> {
   /**
    * Converts the `Uint8Array` to a base64-encoded string.
@@ -5,7 +7,7 @@ interface Uint8Array<TArrayBuffer extends ArrayBufferLike> {
    * @returns A base64-encoded string.
    */
   toBase64(options?: {
-    alphabet?: "base64" | "base64url" | undefined;
+    alphabet?: 'base64' | 'base64url' | undefined;
     omitPadding?: boolean | undefined;
   }): string;
 
@@ -20,12 +22,8 @@ interface Uint8Array<TArrayBuffer extends ArrayBufferLike> {
   setFromBase64(
     string: string,
     options?: {
-      alphabet?: "base64" | "base64url" | undefined;
-      lastChunkHandling?:
-        | "loose"
-        | "strict"
-        | "stop-before-partial"
-        | undefined;
+      alphabet?: 'base64' | 'base64url' | undefined;
+      lastChunkHandling?: 'loose' | 'strict' | 'stop-before-partial' | undefined;
     },
   ): {
     read: number;
@@ -61,12 +59,8 @@ interface Uint8ArrayConstructor {
   fromBase64(
     string: string,
     options?: {
-      alphabet?: "base64" | "base64url" | undefined;
-      lastChunkHandling?:
-        | "loose"
-        | "strict"
-        | "stop-before-partial"
-        | undefined;
+      alphabet?: 'base64' | 'base64url' | undefined;
+      lastChunkHandling?: 'loose' | 'strict' | 'stop-before-partial' | undefined;
     },
   ): Uint8Array<ArrayBuffer>;
 
