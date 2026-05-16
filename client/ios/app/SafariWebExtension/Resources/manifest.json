@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Virtue Safari Capture",
   "description": "Capture Safari tab screenshots for Virtue monitoring.",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "permissions": ["activeTab", "nativeMessaging", "tabs"],
   "host_permissions": ["<all_urls>"],
   "background": {
