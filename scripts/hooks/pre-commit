@@ -5,10 +5,11 @@ pushd "$(dirname $0)/../.." > /dev/null
 # Store the current state of the git index
 commit=$(git status --porcelain)
 
-pushd web && npm run format && popd > /dev/null
-pushd api && npm run format && popd > /dev/null
-pushd landing && npm run format && popd > /dev/null
-pushd shared-web && npm run format && popd > /dev/null
+FILES=$(git diff --cached --name-only --diff-filter=ACMR | sed 's| |\\ |g')
+[ -z "$FILES" ] && exit 0
+
+# Prettify all selected files
+echo "$FILES" | xargs ./api/node_modules/.bin/prettier --ignore-unknown --write
 pushd client && cargo fmt --all && popd > /dev/null
 
 # Check if anything to be commited was changed by the formatters
