@@ -61,6 +61,7 @@ interface AuthState {
     email: string,
     password: string,
     name?: string,
+    partnerInviteToken?: string,
   ) => Promise<{
     userId: string;
     wrappingKey: CryptoKey;
@@ -132,7 +133,12 @@ export function AuthProvider({
   }, []);
 
   const signup = useCallback(
-    async (email: string, pw: string, name?: string) => {
+    async (
+      email: string,
+      pw: string,
+      name?: string,
+      partnerInviteToken?: string,
+    ) => {
       const params = await api.getCurrentHashParams();
       const passwordSalt = generateRandomKeyBytes(params.salt_length);
       const { passwordAuth, wrappingKey: wk } = await derivePasswordMaterial(
@@ -151,6 +157,9 @@ export function AuthProvider({
         email_digest_minutes_utc: localHourToUtcMinutes(
           DEFAULT_DIGEST_LOCAL_HOUR,
         ),
+        ...(partnerInviteToken
+          ? { partner_invite_token: partnerInviteToken }
+          : {}),
       });
       await saveWrappingKey(wk);
       setWrappingKey(wk);

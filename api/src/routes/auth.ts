@@ -52,6 +52,7 @@ const signupSchema = z.object({
   priv_key: z.base64(),
   name: z.string().min(1).optional(),
   email_digest_minutes_utc: z.int().min(0).max(1439).optional(),
+  partner_invite_token: z.string().min(1).optional(),
 });
 
 const loginMaterialQuerySchema = z.object({
@@ -213,11 +214,15 @@ async function sendVerificationEmail(
   options?: {
     purpose?: 'email_verification' | 'email_change';
     next?: '/settings';
+    partner_invite_token?: string;
   },
 ) {
   const params = new URLSearchParams({ token });
   if (options?.next) {
     params.set('next', options.next);
+  }
+  if (options?.partner_invite_token) {
+    params.set('partner_invite_token', options.partner_invite_token);
   }
   const verifyUrl = `${getAppUrl(c)}/verify-email?${params.toString()}`;
   const email = renderEmailVerificationTemplate({
@@ -291,8 +296,16 @@ auth.get('/user/login-material', validateZ('query', loginMaterialQuerySchema), a
 });
 
 auth.post('/signup', validateZ('json', signupSchema), async (c) => {
-  const { email, password_auth, password_salt, pub_key, priv_key, name, email_digest_minutes_utc } =
-    c.req.valid('json');
+  const {
+    email,
+    password_auth,
+    password_salt,
+    pub_key,
+    priv_key,
+    name,
+    email_digest_minutes_utc,
+    partner_invite_token,
+  } = c.req.valid('json');
   const normalizedEmail = email.trim().toLowerCase();
   const existingUser = await findUserByEmail(c.env.DB, normalizedEmail);
 
@@ -334,7 +347,9 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
     'email_verification',
     EMAIL_VERIFICATION_TTL_MS,
   );
-  await sendVerificationEmail(c, { id: userId, email: normalizedEmail, name }, verificationToken);
+  await sendVerificationEmail(c, { id: userId, email: normalizedEmail, name }, verificationToken, {
+    partner_invite_token: partner_invite_token ?? undefined,
+  });
 
   return c.json(
     {

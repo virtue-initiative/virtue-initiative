@@ -96,7 +96,12 @@ export function Auth({
         if (password !== confirm) {
           throw new Error("Passwords do not match");
         }
-        const result = await signup(email, password, name || undefined);
+        const result = await signup(
+          email,
+          password,
+          name || undefined,
+          inviteToken || undefined,
+        );
         setStatus(null);
         setSignupVerificationEmail(result.email);
         signupVerificationDialogRef.current?.showModal();

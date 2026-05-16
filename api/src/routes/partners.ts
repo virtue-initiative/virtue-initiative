@@ -172,7 +172,15 @@ partners.post(
     const { token } = c.req.valid('json');
     const invite = await findPartnerByInviteTokenHash(c.env.DB, hashOpaqueToken(token));
 
-    if (!currentUser || !invite || invite.status !== 'pending') {
+    if (!currentUser || !invite) {
+      return c.json({ error: 'Invalid or expired invite' }, 400);
+    }
+
+    if (invite.status === 'accepted' && invite.watcher_user_id === userId) {
+      return c.json({ id: invite.id });
+    }
+
+    if (invite.status !== 'pending') {
       return c.json({ error: 'Invalid or expired invite' }, 400);
     }
 

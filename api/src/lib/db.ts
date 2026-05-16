@@ -884,7 +884,7 @@ export async function acceptPartner(
   return db
     .prepare(
       `UPDATE partners
-       SET watcher_user_id = ?, watcher_email = ?, invite_token_id = NULL,
+       SET watcher_user_id = ?, watcher_email = ?,
            status = 'accepted', updated_at = ?
        WHERE id = ?`,
     )
