@@ -1,7 +1,7 @@
-import useSWR from "swr";
-import { useEffect, useMemo, useState } from "preact/hooks";
-import { api, Batch, DataLog, isToastHandledError } from "../api";
-import { decryptAndFlattenBatch } from "../batch-materializer";
+import useSWR from 'swr';
+import { useEffect, useMemo, useState } from 'preact/hooks';
+import { api, Batch, DataLog, isToastHandledError } from '../api';
+import { decryptAndFlattenBatch } from '../batch-materializer';
 import {
   CachedDataFeed,
   loadCachedDataFeed,
@@ -10,14 +10,14 @@ import {
   getUnmaterializedBatches,
   queryDecryptedEvents,
   writeMaterializedEvents,
-} from "../data-cache";
-import { useAuth } from "../context/auth";
-import { useE2EE } from "../context/e2ee";
-import { FeedLog, getLogImage } from "../pages/Logs/shared";
-import { decodeWebpDimensions } from "../utils/webp-dimensions";
-import { useDevices } from "./useDevices";
-import { useDecryptedEventSync } from "./useDecryptedEventSync";
-import { swrKeys } from "./swr-keys";
+} from '../data-cache';
+import { useAuth } from '../context/auth';
+import { useE2EE } from '../context/e2ee';
+import { FeedLog, getLogImage } from '../pages/Logs/shared';
+import { decodeWebpDimensions } from '../utils/webp-dimensions';
+import { useDevices } from './useDevices';
+import { useDecryptedEventSync } from './useDecryptedEventSync';
+import { swrKeys } from './swr-keys';
 
 const SYNC_PAGE_SIZE = 250;
 const VISIBLE_PAGE_SIZE = 25;
@@ -28,7 +28,7 @@ interface FeedEntry {
   key: string;
   created_at: number;
   device_id: string;
-  kind: "batch" | "log";
+  kind: 'batch' | 'log';
   batch?: Batch;
   log?: DataLog;
 }
@@ -74,8 +74,8 @@ function toDirectLogEntry(entry: DataLog): FeedLog {
   }
   return {
     ...entry,
-    batch_status: "unknown" as const,
-    source: "log" as const,
+    batch_status: 'unknown' as const,
+    source: 'log' as const,
     image_w,
     image_h,
   };
@@ -90,14 +90,14 @@ function buildFilteredFeedEntries(
       key: batch.id,
       created_at: batch.created_at,
       device_id: batch.device_id,
-      kind: "batch" as const,
+      kind: 'batch' as const,
       batch,
     })),
     ...cachedFeed.logs.map((log) => ({
       key: log.id,
       created_at: log.created_at,
       device_id: log.device_id,
-      kind: "log" as const,
+      kind: 'log' as const,
       log,
     })),
   ]
@@ -113,11 +113,7 @@ export function useLogs({
   endTime,
 }: UseLogsOptions): UseLogsResult {
   const { token, userId: viewerUserId } = useAuth();
-  const {
-    devices,
-    error: devicesError,
-    isLoading: devicesLoading,
-  } = useDevices();
+  const { devices, error: devicesError, isLoading: devicesLoading } = useDevices();
   const e2ee = useE2EE();
   const [visibleCount, setVisibleCount] = useState(VISIBLE_PAGE_SIZE);
   const [logs, setLogs] = useState<FeedLog[]>();
@@ -129,19 +125,15 @@ export function useLogs({
   const activeTargetUserId = selectedUserId ?? viewerUserId;
   const activePrivateKey = e2ee.privateKey;
   const activeDevices = useMemo(
-    () =>
-      (devices ?? []).filter((device) => device.owner === activeTargetUserId),
+    () => (devices ?? []).filter((device) => device.owner === activeTargetUserId),
     [devices, activeTargetUserId],
   );
   const activeDeviceIdList = useMemo(
     () => activeDevices.map((device) => device.id).sort(),
     [activeDevices],
   );
-  const activeDeviceIds = useMemo(
-    () => new Set(activeDeviceIdList),
-    [activeDeviceIdList],
-  );
-  const activeDeviceIdsKey = activeDeviceIdList.join(",");
+  const activeDeviceIds = useMemo(() => new Set(activeDeviceIdList), [activeDeviceIdList]);
+  const activeDeviceIdsKey = activeDeviceIdList.join(',');
 
   useEffect(() => {
     setVisibleCount(VISIBLE_PAGE_SIZE);
@@ -149,12 +141,7 @@ export function useLogs({
 
   const key =
     token && viewerUserId && activeTargetUserId && !devicesLoading && e2ee.ready
-      ? swrKeys.logs(
-          token,
-          viewerUserId,
-          activeTargetUserId,
-          activeDeviceIdsKey,
-        )
+      ? swrKeys.logs(token, viewerUserId, activeTargetUserId, activeDeviceIdsKey)
       : null;
 
   const {
@@ -164,9 +151,7 @@ export function useLogs({
     mutate,
   } = useSWR<SyncedLogFeed, Error>(key, async () => {
     if (!token || !viewerUserId || !activeTargetUserId) {
-      throw new Error(
-        "Log data is not available without an authenticated user.",
-      );
+      throw new Error('Log data is not available without an authenticated user.');
     }
 
     let cachedFeed = await loadCachedDataFeed(viewerUserId, activeTargetUserId);
@@ -179,8 +164,7 @@ export function useLogs({
     let since = cachedFeed.since;
     while (true) {
       const page = await api.getData(token, {
-        user:
-          activeTargetUserId === viewerUserId ? undefined : activeTargetUserId,
+        user: activeTargetUserId === viewerUserId ? undefined : activeTargetUserId,
         since,
         limit: SYNC_PAGE_SIZE,
       });
@@ -189,11 +173,7 @@ export function useLogs({
         break;
       }
 
-      const updated = await mergeDataPageIntoCache(
-        viewerUserId,
-        activeTargetUserId,
-        page,
-      );
+      const updated = await mergeDataPageIntoCache(viewerUserId, activeTargetUserId, page);
       since = updated.since;
 
       if (page.next_since === undefined) {
@@ -231,10 +211,7 @@ export function useLogs({
     if (startTime !== undefined && endTime !== undefined) {
       filtered = filtered.filter((entry) => {
         if (entry.batch) {
-          return (
-            entry.batch.start_time <= endTime &&
-            entry.batch.end_time >= startTime
-          );
+          return entry.batch.start_time <= endTime && entry.batch.end_time >= startTime;
         }
         if (entry.log) {
           return entry.log.ts >= startTime && entry.log.ts <= endTime;
@@ -249,10 +226,7 @@ export function useLogs({
   const dateRangeActive = startTime !== undefined && endTime !== undefined;
 
   const visibleEntries = useMemo(
-    () =>
-      dateRangeActive
-        ? filteredFeedEntries
-        : filteredFeedEntries.slice(0, visibleCount),
+    () => (dateRangeActive ? filteredFeedEntries : filteredFeedEntries.slice(0, visibleCount)),
     [filteredFeedEntries, visibleCount, dateRangeActive],
   );
 
@@ -288,19 +262,13 @@ export function useLogs({
 
       // Determine which visible batches still need on-demand decryption
       const cutoff = Date.now() - THIRTY_DAYS_MS;
-      const visibleBatches = visibleEntries.flatMap((entry) =>
-        entry.batch ? [entry.batch] : [],
-      );
+      const visibleBatches = visibleEntries.flatMap((entry) => (entry.batch ? [entry.batch] : []));
 
       let unmaterialized: Batch[];
       try {
-        unmaterialized = await getUnmaterializedBatches(
-          viewerUserId!,
-          visibleBatches,
-          cutoff,
-        );
+        unmaterialized = await getUnmaterializedBatches(viewerUserId!, visibleBatches, cutoff);
       } catch (err) {
-        console.warn("[logs] failed to check materialized batches", err);
+        console.warn('[logs] failed to check materialized batches', err);
         unmaterialized = visibleBatches;
       }
 
@@ -329,10 +297,7 @@ export function useLogs({
           if (cancelled) return;
           const batch = queue.shift()!;
           try {
-            const batchLogs = await decryptAndFlattenBatch(
-              batch,
-              e2ee.unwrapEncryptedBatchKey,
-            );
+            const batchLogs = await decryptAndFlattenBatch(batch, e2ee.unwrapEncryptedBatchKey);
             if (cancelled) return;
             accumLogs.push(...batchLogs);
             decrypted++;
@@ -343,10 +308,10 @@ export function useLogs({
               batch.device_id,
               batch.created_at,
               batchLogs,
-            ).catch((err) => console.warn("[logs] failed to cache batch", err));
+            ).catch((err) => console.warn('[logs] failed to cache batch', err));
           } catch (err) {
             if (cancelled) return;
-            console.error("[logs] failed to decrypt batch", err);
+            console.error('[logs] failed to decrypt batch', err);
             skipped++;
           }
           completed++;
@@ -357,10 +322,7 @@ export function useLogs({
       }
 
       await Promise.all(
-        Array.from(
-          { length: Math.min(DECRYPT_CONCURRENCY, unmaterialized.length) },
-          worker,
-        ),
+        Array.from({ length: Math.min(DECRYPT_CONCURRENCY, unmaterialized.length) }, worker),
       );
     }
 
@@ -382,13 +344,9 @@ export function useLogs({
 
   return {
     logs,
-    hasMore: data
-      ? !dateRangeActive && filteredFeedEntries.length > visibleCount
-      : undefined,
+    hasMore: data ? !dateRangeActive && filteredFeedEntries.length > visibleCount : undefined,
     batchStats,
-    error: [devicesError, error].find(
-      (candidate) => candidate && !isToastHandledError(candidate),
-    ),
+    error: [devicesError, error].find((candidate) => candidate && !isToastHandledError(candidate)),
     isLoading:
       (Boolean(token && viewerUserId) &&
         (devicesLoading || !e2ee.ready || feedLoading || materializing)) ||

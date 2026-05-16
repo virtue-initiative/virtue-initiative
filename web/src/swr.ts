@@ -1,4 +1,4 @@
-import type { SWRConfiguration } from "swr";
+import type { SWRConfiguration } from 'swr';
 
 export const appSWRConfig: SWRConfiguration = {
   revalidateOnFocus: false,

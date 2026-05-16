@@ -1,17 +1,15 @@
-import { ComponentChildren } from "preact";
-import { useState, useCallback, useRef } from "preact/hooks";
-import { ToastContext, ToastItem, ToastVariant } from "./useToast";
-import { Toast } from "./Toast";
-import "./Toast.css";
+import { ComponentChildren } from 'preact';
+import { useState, useCallback, useRef } from 'preact/hooks';
+import { ToastContext, ToastItem, ToastVariant } from './useToast';
+import { Toast } from './Toast';
+import './Toast.css';
 
 export function ToastProvider({ children }: { children: ComponentChildren }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const timeoutsRef = useRef<number[]>([]);
 
   const dismiss = useCallback((id: string) => {
-    setToasts((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, closing: true } : t)),
-    );
+    setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, closing: true } : t)));
     const t = window.setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 220);

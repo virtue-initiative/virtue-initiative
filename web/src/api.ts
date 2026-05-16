@@ -1,11 +1,11 @@
-import { sendToast } from "./utils/toast";
+import { sendToast } from './utils/toast';
 
 export interface User {
   id: string;
   email: string;
   email_verified: boolean;
   email_bounced_at: number | null;
-  email_frequency: "none" | "alerts-only" | "daily" | "weekly";
+  email_frequency: 'none' | 'alerts-only' | 'daily' | 'weekly';
   email_digest_minutes_utc: number;
   name?: string;
   pub_key?: string;
@@ -33,7 +33,7 @@ export interface Device {
   name: string;
   platform: string;
   last_upload_at: number | null;
-  status: "online" | "offline";
+  status: 'online' | 'offline';
 }
 
 export interface Batch {
@@ -51,14 +51,14 @@ export interface Batch {
 // The fallback branch preserves compatibility with future or unknown event types.
 export type LogEventData =
   | {
-      type: "screenshot";
+      type: 'screenshot';
       data: { image: Uint8Array | number[]; content_type: string };
     }
-  | { type: "system_event"; data: Record<string, unknown> }
-  | { type: "lifecycle_alert"; data: Record<string, unknown> }
-  | { type: "lifecycle_marker"; data: Record<string, unknown> }
-  | { type: "lifecycle_transition"; data: Record<string, unknown> }
-  | { type: "developer_log"; data: Record<string, unknown> }
+  | { type: 'system_event'; data: Record<string, unknown> }
+  | { type: 'lifecycle_alert'; data: Record<string, unknown> }
+  | { type: 'lifecycle_marker'; data: Record<string, unknown> }
+  | { type: 'lifecycle_transition'; data: Record<string, unknown> }
+  | { type: 'developer_log'; data: Record<string, unknown> }
   | { type: string; data: Record<string, unknown> };
 
 export interface DataLog {
@@ -84,8 +84,8 @@ export interface WatchingPartner {
     email: string;
     name?: string;
   };
-  status: "pending" | "accepted";
-  digest_cadence: "none" | "alerts-only" | "daily" | "weekly";
+  status: 'pending' | 'accepted';
+  digest_cadence: 'none' | 'alerts-only' | 'daily' | 'weekly';
   created_at?: number;
 }
 
@@ -96,7 +96,7 @@ export interface WatcherPartner {
     email: string;
     name?: string;
   };
-  status: "pending" | "accepted";
+  status: 'pending' | 'accepted';
   created_at?: number;
 }
 
@@ -120,9 +120,8 @@ export interface PasswordResetValidation {
   email: string;
 }
 
-const BASE = (import.meta as any).env?.VITE_API_URL ?? "http://localhost:8787";
-const NETWORK_ERROR_MESSAGE =
-  "Error: Couldn't connect to the network. Try reloading.";
+const BASE = (import.meta as any).env?.VITE_API_URL ?? 'http://localhost:8787';
+const NETWORK_ERROR_MESSAGE = "Error: Couldn't connect to the network. Try reloading.";
 const NETWORK_TOAST_THROTTLE_MS = 3_000;
 let lastNetworkToastAt = 0;
 
@@ -135,12 +134,8 @@ interface RequestOptions {
   retrying?: boolean;
 }
 
-export function isToastHandledError(
-  error: unknown,
-): error is ToastHandledError {
-  return (
-    error instanceof Error && (error as ToastHandledError).toastHandled === true
-  );
+export function isToastHandledError(error: unknown): error is ToastHandledError {
+  return error instanceof Error && (error as ToastHandledError).toastHandled === true;
 }
 
 let reauthHandler: ReauthHandler | null = null;
@@ -153,7 +148,7 @@ function firstValidationMessage(details: unknown): string | null {
 
   if (Array.isArray(details)) {
     for (const item of details) {
-      if (typeof item === "string" && item.trim()) {
+      if (typeof item === 'string' && item.trim()) {
         return item;
       }
       const nested = firstValidationMessage(item);
@@ -164,13 +159,12 @@ function firstValidationMessage(details: unknown): string | null {
     return null;
   }
 
-  if (typeof details === "object") {
+  if (typeof details === 'object') {
     const record = details as Record<string, unknown>;
 
     if (Array.isArray(record.errors)) {
       const topError = record.errors.find(
-        (error): error is string =>
-          typeof error === "string" && error.trim().length > 0,
+        (error): error is string => typeof error === 'string' && error.trim().length > 0,
       );
       if (topError) {
         return topError;
@@ -215,19 +209,19 @@ async function req<T>(
   const { allowReauth = Boolean(token), retrying = false } = options;
   const headers = new Headers(init.headers);
 
-  if (!headers.has("Content-Type") && !(init.body instanceof FormData)) {
-    headers.set("Content-Type", "application/json");
+  if (!headers.has('Content-Type') && !(init.body instanceof FormData)) {
+    headers.set('Content-Type', 'application/json');
   }
 
   if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
+    headers.set('Authorization', `Bearer ${token}`);
   }
 
   let res: Response;
   try {
     res = await fetch(`${BASE}${path}`, {
       ...init,
-      credentials: "include",
+      credentials: 'include',
       headers,
     });
   } catch (error) {
@@ -241,7 +235,7 @@ async function req<T>(
       });
       lastNetworkToastAt = now;
     }
-    throw Object.assign(new Error(""), {
+    throw Object.assign(new Error(''), {
       toastHandled: true,
       cause: error,
     });
@@ -263,17 +257,17 @@ async function req<T>(
       error?: unknown;
       details?: unknown;
     };
-    let message = typeof body.error === "string" ? body.error : res.statusText;
+    let message = typeof body.error === 'string' ? body.error : res.statusText;
 
-    if (message === "Bad Request") {
+    if (message === 'Bad Request') {
       const validationMessage = firstValidationMessage(body.details);
       message = validationMessage
         ? `Invalid request: ${validationMessage}`
-        : "Invalid request data";
-    } else if (message === "Unauthorized") {
-      message = "Your session is invalid or expired. Please log in again.";
-    } else if (message === "Not found") {
-      message = "Requested resource was not found.";
+        : 'Invalid request data';
+    } else if (message === 'Unauthorized') {
+      message = 'Your session is invalid or expired. Please log in again.';
+    } else if (message === 'Not found') {
+      message = 'Requested resource was not found.';
     }
 
     throw Object.assign(new Error(message), {
@@ -291,11 +285,11 @@ async function req<T>(
 
 export const api = {
   refreshToken: () =>
-    req<{ access_token: string }>("/token", { method: "POST" }, undefined, {
+    req<{ access_token: string }>('/token', { method: 'POST' }, undefined, {
       allowReauth: false,
     }),
 
-  getCurrentHashParams: () => req<HashParams>("/current-hash-params"),
+  getCurrentHashParams: () => req<HashParams>('/current-hash-params'),
 
   getLoginMaterial: (email: string) => {
     const qs = new URLSearchParams({ email });
@@ -303,8 +297,8 @@ export const api = {
   },
 
   login: (email: string, password_auth: string) =>
-    req<{ access_token: string }>("/login", {
-      method: "POST",
+    req<{ access_token: string }>('/login', {
+      method: 'POST',
       body: JSON.stringify({ email, password_auth }),
     }),
 
@@ -328,22 +322,22 @@ export const api = {
         name?: string;
         email_verified: boolean;
       };
-    }>("/signup", {
-      method: "POST",
+    }>('/signup', {
+      method: 'POST',
       body: JSON.stringify({ email, ...payload }),
     }),
 
-  logout: () => req<void>("/logout", { method: "POST" }),
+  logout: () => req<void>('/logout', { method: 'POST' }),
 
-  getUser: (token: string) => req<User>("/user", {}, token),
+  getUser: (token: string) => req<User>('/user', {}, token),
 
   updateUser: (
     token: string,
     fields: {
       email?: string;
       name?: string;
-      email_frequency?: User["email_frequency"];
-      email_digest_minutes_utc?: User["email_digest_minutes_utc"];
+      email_frequency?: User['email_frequency'];
+      email_digest_minutes_utc?: User['email_digest_minutes_utc'];
       pub_key?: string;
       priv_key?: string;
     },
@@ -353,9 +347,9 @@ export const api = {
       email_verification_required?: boolean;
       pending_email?: string;
     }>(
-      "/user",
+      '/user',
       {
-        method: "PATCH",
+        method: 'PATCH',
         body: JSON.stringify(fields),
       },
       token,
@@ -363,24 +357,24 @@ export const api = {
 
   deleteUser: (token: string, confirm_email: string) =>
     req<void>(
-      "/user",
+      '/user',
       {
-        method: "DELETE",
+        method: 'DELETE',
         body: JSON.stringify({ confirm_email }),
       },
       token,
     ),
 
   resendVerificationEmail: (email: string) =>
-    req<void>("/email-verification/resend", {
-      method: "POST",
+    req<void>('/email-verification/resend', {
+      method: 'POST',
       body: JSON.stringify({ email }),
     }),
 
   requestVerificationEmail: (token: string) =>
     req<{ ok: boolean; already_verified?: boolean }>(
-      "/email-verification",
-      { method: "POST" },
+      '/email-verification',
+      { method: 'POST' },
       token,
     ),
 
@@ -389,21 +383,21 @@ export const api = {
       ok: boolean;
       email: string;
       access_token: string;
-      purpose: "email_verification" | "email_change";
-    }>("/email-verification/validate", {
-      method: "POST",
+      purpose: 'email_verification' | 'email_change';
+    }>('/email-verification/validate', {
+      method: 'POST',
       body: JSON.stringify({ token }),
     }),
 
   requestPasswordReset: (email: string) =>
-    req<void>("/password-reset", {
-      method: "POST",
+    req<void>('/password-reset', {
+      method: 'POST',
       body: JSON.stringify({ email }),
     }),
 
   validatePasswordResetToken: (token: string) =>
-    req<PasswordResetValidation>("/password-reset/validate", {
-      method: "POST",
+    req<PasswordResetValidation>('/password-reset/validate', {
+      method: 'POST',
       body: JSON.stringify({ token }),
     }),
 
@@ -416,60 +410,59 @@ export const api = {
       priv_key?: string;
     },
   ) =>
-    req<{ ok: boolean }>("/password-reset/finalize", {
-      method: "POST",
+    req<{ ok: boolean }>('/password-reset/finalize', {
+      method: 'POST',
       body: JSON.stringify({ token, ...payload }),
     }),
 
-  getDevices: (token: string) => req<Device[]>("/device", {}, token),
+  getDevices: (token: string) => req<Device[]>('/device', {}, token),
 
   patchDevice: (token: string, id: string, patch: { name?: string }) =>
     req<{ id: string; updated: boolean }>(
       `/device/${id}`,
       {
-        method: "PATCH",
+        method: 'PATCH',
         body: JSON.stringify(patch),
       },
       token,
     ),
 
   deleteDevice: (token: string, id: string) =>
-    req<void>(`/device/${id}`, { method: "DELETE" }, token),
+    req<void>(`/device/${id}`, { method: 'DELETE' }, token),
 
-  getPartners: (token: string) =>
-    req<PartnerRelationships>("/partner", {}, token),
+  getPartners: (token: string) => req<PartnerRelationships>('/partner', {}, token),
 
   invitePartner: (token: string, email: string) =>
     req<{ id: string; status: string }>(
-      "/partner",
+      '/partner',
       {
-        method: "POST",
+        method: 'POST',
         body: JSON.stringify({ email }),
       },
       token,
     ),
 
   validatePartnerInvite: (inviteToken: string) =>
-    req<PartnerInviteValidation>("/partner/validate", {
-      method: "POST",
+    req<PartnerInviteValidation>('/partner/validate', {
+      method: 'POST',
       body: JSON.stringify({ token: inviteToken }),
     }),
 
   acceptPartnerInvite: (token: string, inviteToken: string) =>
     req<{ id: string }>(
-      "/partner/accept",
+      '/partner/accept',
       {
-        method: "POST",
+        method: 'POST',
         body: JSON.stringify({ token: inviteToken }),
       },
       token,
     ),
 
   deleteWatcher: (token: string, id: string) =>
-    req<void>(`/partner/watcher/${id}`, { method: "DELETE" }, token),
+    req<void>(`/partner/watcher/${id}`, { method: 'DELETE' }, token),
 
   deleteWatching: (token: string, id: string) =>
-    req<void>(`/partner/watching/${id}`, { method: "DELETE" }, token),
+    req<void>(`/partner/watching/${id}`, { method: 'DELETE' }, token),
   getData: (
     token: string,
     params?: {
@@ -479,10 +472,10 @@ export const api = {
     },
   ) => {
     const qs = new URLSearchParams();
-    if (params?.user) qs.set("user", params.user);
-    if (params?.since !== undefined) qs.set("since", String(params.since));
-    if (params?.limit) qs.set("limit", String(params.limit));
+    if (params?.user) qs.set('user', params.user);
+    if (params?.since !== undefined) qs.set('since', String(params.since));
+    if (params?.limit) qs.set('limit', String(params.limit));
     const query = qs.toString();
-    return req<DataPage>(`/data${query ? `?${query}` : ""}`, {}, token);
+    return req<DataPage>(`/data${query ? `?${query}` : ''}`, {}, token);
   },
 };

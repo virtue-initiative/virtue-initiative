@@ -1,12 +1,12 @@
-import { Batch, DataLog, DataPage } from "./api";
-import { FeedLog } from "./pages/Logs/shared";
-import { decodeWebpDimensions } from "./utils/webp-dimensions";
+import { Batch, DataLog, DataPage } from './api';
+import { FeedLog } from './pages/Logs/shared';
+import { decodeWebpDimensions } from './utils/webp-dimensions';
 
-const DB_NAME = "virtue-data-cache";
+const DB_NAME = 'virtue-data-cache';
 const DB_VERSION = 2;
-const FEEDS_STORE = "feeds";
-const DECRYPTED_EVENTS_STORE = "decrypted_events";
-const MATERIALIZED_BATCHES_STORE = "materialized_batches";
+const FEEDS_STORE = 'feeds';
+const DECRYPTED_EVENTS_STORE = 'decrypted_events';
+const MATERIALIZED_BATCHES_STORE = 'materialized_batches';
 
 export interface CachedDataFeed {
   key: string;
@@ -73,25 +73,22 @@ function openDatabase() {
       const oldVersion = event.oldVersion;
 
       if (oldVersion < 1) {
-        db.createObjectStore(FEEDS_STORE, { keyPath: "key" });
+        db.createObjectStore(FEEDS_STORE, { keyPath: 'key' });
       }
 
       if (oldVersion < 2) {
         const eventsStore = db.createObjectStore(DECRYPTED_EVENTS_STORE, {
-          keyPath: "id",
+          keyPath: 'id',
         });
-        eventsStore.createIndex("by_viewer_ts", ["viewer_id", "ts"]);
-        eventsStore.createIndex("by_viewer_device", ["viewer_id", "device_id"]);
-        eventsStore.createIndex("by_device_id", "device_id");
+        eventsStore.createIndex('by_viewer_ts', ['viewer_id', 'ts']);
+        eventsStore.createIndex('by_viewer_device', ['viewer_id', 'device_id']);
+        eventsStore.createIndex('by_device_id', 'device_id');
 
         const batchesStore = db.createObjectStore(MATERIALIZED_BATCHES_STORE, {
-          keyPath: "id",
+          keyPath: 'id',
         });
-        batchesStore.createIndex("by_viewer", "viewer_id");
-        batchesStore.createIndex("by_viewer_device", [
-          "viewer_id",
-          "device_id",
-        ]);
+        batchesStore.createIndex('by_viewer', 'viewer_id');
+        batchesStore.createIndex('by_viewer_device', ['viewer_id', 'device_id']);
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -100,8 +97,8 @@ function openDatabase() {
 }
 
 async function withDatabase<T>(fn: (db: IDBDatabase) => Promise<T>) {
-  if (typeof indexedDB === "undefined") {
-    throw new Error("IndexedDB is not available in this browser");
+  if (typeof indexedDB === 'undefined') {
+    throw new Error('IndexedDB is not available in this browser');
   }
 
   const db = await openDatabase();
@@ -122,9 +119,7 @@ function getAllFromIndex<T>(
   range?: IDBKeyRange,
 ): Promise<T[]> {
   return requestToPromise(
-    range
-      ? store.index(indexName).getAll(range)
-      : store.index(indexName).getAll(),
+    range ? store.index(indexName).getAll(range) : store.index(indexName).getAll(),
   ) as Promise<T[]>;
 }
 
@@ -155,7 +150,7 @@ export async function loadCachedDataFeed(
   targetUserId: string,
 ): Promise<CachedDataFeed> {
   return withDatabase(async (db) => {
-    const tx = db.transaction(FEEDS_STORE, "readonly");
+    const tx = db.transaction(FEEDS_STORE, 'readonly');
     const store = tx.objectStore(FEEDS_STORE);
     const cached = await requestToPromise<CachedDataFeed | undefined>(
       store.get(feedKey(viewerId, targetUserId)),
@@ -171,7 +166,7 @@ export async function mergeDataPageIntoCache(
   page: DataPage,
 ): Promise<CachedDataFeed> {
   return withDatabase(async (db) => {
-    const tx = db.transaction(FEEDS_STORE, "readwrite");
+    const tx = db.transaction(FEEDS_STORE, 'readwrite');
     const store = tx.objectStore(FEEDS_STORE);
     const existing =
       (await requestToPromise<CachedDataFeed | undefined>(
@@ -202,9 +197,7 @@ export async function mergeDataPageIntoCache(
       ...page.batches.map((batch) => batch.created_at),
       ...page.logs.map((log) => log.created_at),
     );
-    existing.since = Number.isFinite(latestCreatedAt)
-      ? latestCreatedAt
-      : existing.since;
+    existing.since = Number.isFinite(latestCreatedAt) ? latestCreatedAt : existing.since;
 
     store.put(existing);
     await transactionDone(tx);
@@ -218,7 +211,7 @@ export async function pruneCachedDataFeedDevices(
   deviceIds: string[],
 ): Promise<CachedDataFeed> {
   return withDatabase(async (db) => {
-    const tx = db.transaction(FEEDS_STORE, "readwrite");
+    const tx = db.transaction(FEEDS_STORE, 'readwrite');
     const store = tx.objectStore(FEEDS_STORE);
     const existing =
       (await requestToPromise<CachedDataFeed | undefined>(
@@ -228,9 +221,7 @@ export async function pruneCachedDataFeedDevices(
     const allowedDeviceIds = new Set(deviceIds);
     const next: CachedDataFeed = {
       ...existing,
-      batches: existing.batches.filter((batch) =>
-        allowedDeviceIds.has(batch.device_id),
-      ),
+      batches: existing.batches.filter((batch) => allowedDeviceIds.has(batch.device_id)),
       logs: existing.logs.filter((log) => allowedDeviceIds.has(log.device_id)),
     };
 
@@ -253,7 +244,7 @@ export async function removeDeviceFromCachedDataFeed(
   deviceId: string,
 ): Promise<CachedDataFeed> {
   return withDatabase(async (db) => {
-    const tx = db.transaction(FEEDS_STORE, "readwrite");
+    const tx = db.transaction(FEEDS_STORE, 'readwrite');
     const store = tx.objectStore(FEEDS_STORE);
     const existing =
       (await requestToPromise<CachedDataFeed | undefined>(
@@ -280,14 +271,14 @@ export async function removeDeviceFromCachedDataFeed(
 }
 
 export async function clearDataCache(): Promise<void> {
-  if (typeof indexedDB === "undefined") {
+  if (typeof indexedDB === 'undefined') {
     return;
   }
 
   await withDatabase(async (db) => {
     const tx = db.transaction(
       [FEEDS_STORE, DECRYPTED_EVENTS_STORE, MATERIALIZED_BATCHES_STORE],
-      "readwrite",
+      'readwrite',
     );
     tx.objectStore(FEEDS_STORE).clear();
     tx.objectStore(DECRYPTED_EVENTS_STORE).clear();
@@ -306,19 +297,17 @@ export async function getUnmaterializedBatches(
   if (batches.length === 0) return [];
 
   return withDatabase(async (db) => {
-    const tx = db.transaction(MATERIALIZED_BATCHES_STORE, "readonly");
+    const tx = db.transaction(MATERIALIZED_BATCHES_STORE, 'readonly');
     const store = tx.objectStore(MATERIALIZED_BATCHES_STORE);
     const records = await getAllFromIndex<MaterializedBatchRecord>(
       store,
-      "by_viewer",
+      'by_viewer',
       IDBKeyRange.only(viewerId),
     );
     await transactionDone(tx);
 
     const materializedIds = new Set(records.map((r) => r.batch_id));
-    return batches.filter(
-      (b) => !materializedIds.has(b.id) && b.created_at >= cutoffTs,
-    );
+    return batches.filter((b) => !materializedIds.has(b.id) && b.created_at >= cutoffTs);
   });
 }
 
@@ -330,10 +319,7 @@ export async function writeMaterializedEvents(
   events: FeedLog[],
 ): Promise<void> {
   return withDatabase(async (db) => {
-    const tx = db.transaction(
-      [DECRYPTED_EVENTS_STORE, MATERIALIZED_BATCHES_STORE],
-      "readwrite",
-    );
+    const tx = db.transaction([DECRYPTED_EVENTS_STORE, MATERIALIZED_BATCHES_STORE], 'readwrite');
     const eventsStore = tx.objectStore(DECRYPTED_EVENTS_STORE);
     const batchesStore = tx.objectStore(MATERIALIZED_BATCHES_STORE);
 
@@ -360,7 +346,7 @@ export async function queryDecryptedEvents(
   { deviceId, startTs, endTs }: DecryptedEventQuery,
 ): Promise<FeedLog[]> {
   return withDatabase(async (db) => {
-    const tx = db.transaction(DECRYPTED_EVENTS_STORE, "readonly");
+    const tx = db.transaction(DECRYPTED_EVENTS_STORE, 'readonly');
     const store = tx.objectStore(DECRYPTED_EVENTS_STORE);
 
     let records: StoredDecryptedEvent[];
@@ -368,28 +354,24 @@ export async function queryDecryptedEvents(
     if (startTs !== undefined && endTs !== undefined) {
       records = await getAllFromIndex<StoredDecryptedEvent>(
         store,
-        "by_viewer_ts",
+        'by_viewer_ts',
         IDBKeyRange.bound([viewerId, startTs], [viewerId, endTs]),
       );
     } else {
       records = await getAllFromIndex<StoredDecryptedEvent>(
         store,
-        "by_viewer_ts",
+        'by_viewer_ts',
         IDBKeyRange.bound([viewerId, 0], [viewerId, Infinity]),
       );
     }
 
     await transactionDone(tx);
 
-    const filtered = deviceId
-      ? records.filter((r) => r.device_id === deviceId)
-      : records;
+    const filtered = deviceId ? records.filter((r) => r.device_id === deviceId) : records;
 
     const toBackfill: StoredDecryptedEvent[] = [];
     const updated = filtered.map((record) => {
-      const hasDims =
-        typeof record.image_w === "number" &&
-        typeof record.image_h === "number";
+      const hasDims = typeof record.image_w === 'number' && typeof record.image_h === 'number';
       if (hasDims) return record;
       const image = record.data?.image;
       if (!(image instanceof Uint8Array)) return record;
@@ -406,7 +388,7 @@ export async function queryDecryptedEvents(
 
     if (toBackfill.length > 0) {
       void backfillDimensions(toBackfill).catch((err) =>
-        console.warn("[data-cache] dimension backfill failed", err),
+        console.warn('[data-cache] dimension backfill failed', err),
       );
     }
 
@@ -414,11 +396,9 @@ export async function queryDecryptedEvents(
   });
 }
 
-async function backfillDimensions(
-  records: StoredDecryptedEvent[],
-): Promise<void> {
+async function backfillDimensions(records: StoredDecryptedEvent[]): Promise<void> {
   await withDatabase(async (db) => {
-    const tx = db.transaction(DECRYPTED_EVENTS_STORE, "readwrite");
+    const tx = db.transaction(DECRYPTED_EVENTS_STORE, 'readwrite');
     const store = tx.objectStore(DECRYPTED_EVENTS_STORE);
     for (const record of records) {
       store.put(record);
@@ -432,20 +412,17 @@ export async function deleteDecryptedEventsForDevice(
   deviceId: string,
 ): Promise<void> {
   return withDatabase(async (db) => {
-    const tx = db.transaction(
-      [DECRYPTED_EVENTS_STORE, MATERIALIZED_BATCHES_STORE],
-      "readwrite",
-    );
+    const tx = db.transaction([DECRYPTED_EVENTS_STORE, MATERIALIZED_BATCHES_STORE], 'readwrite');
 
     await deleteByIndexCursor(
       tx.objectStore(DECRYPTED_EVENTS_STORE),
-      "by_viewer_device",
+      'by_viewer_device',
       IDBKeyRange.only([viewerId, deviceId]),
     );
 
     await deleteByIndexCursor(
       tx.objectStore(MATERIALIZED_BATCHES_STORE),
-      "by_viewer_device",
+      'by_viewer_device',
       IDBKeyRange.only([viewerId, deviceId]),
     );
 
@@ -458,20 +435,17 @@ export async function pruneDecryptedEventsBefore(
   cutoffTs: number,
 ): Promise<void> {
   return withDatabase(async (db) => {
-    const tx = db.transaction(
-      [DECRYPTED_EVENTS_STORE, MATERIALIZED_BATCHES_STORE],
-      "readwrite",
-    );
+    const tx = db.transaction([DECRYPTED_EVENTS_STORE, MATERIALIZED_BATCHES_STORE], 'readwrite');
 
     await deleteByIndexCursor(
       tx.objectStore(DECRYPTED_EVENTS_STORE),
-      "by_viewer_ts",
+      'by_viewer_ts',
       IDBKeyRange.bound([viewerId, 0], [viewerId, cutoffTs], false, true),
     );
 
     const batchRecords = await getAllFromIndex<MaterializedBatchRecord>(
       tx.objectStore(MATERIALIZED_BATCHES_STORE),
-      "by_viewer",
+      'by_viewer',
       IDBKeyRange.only(viewerId),
     );
     const batchesStore = tx.objectStore(MATERIALIZED_BATCHES_STORE);
@@ -486,15 +460,12 @@ export async function pruneDecryptedEventsBefore(
 }
 
 export async function clearDecryptedCache(): Promise<void> {
-  if (typeof indexedDB === "undefined") {
+  if (typeof indexedDB === 'undefined') {
     return;
   }
 
   await withDatabase(async (db) => {
-    const tx = db.transaction(
-      [DECRYPTED_EVENTS_STORE, MATERIALIZED_BATCHES_STORE],
-      "readwrite",
-    );
+    const tx = db.transaction([DECRYPTED_EVENTS_STORE, MATERIALIZED_BATCHES_STORE], 'readwrite');
     tx.objectStore(DECRYPTED_EVENTS_STORE).clear();
     tx.objectStore(MATERIALIZED_BATCHES_STORE).clear();
     await transactionDone(tx);

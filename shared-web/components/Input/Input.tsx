@@ -1,22 +1,17 @@
-import { JSX } from "preact";
-import "./Input.css";
+import { JSX } from 'preact';
+import './Input.css';
 
-type InputProps = Omit<JSX.IntrinsicElements["input"], "size"> & {
+type InputProps = Omit<JSX.IntrinsicElements['input'], 'size'> & {
   error?: boolean;
-  size?: "md" | "sm";
+  size?: 'md' | 'sm';
 };
 
 export function Input({ error, size, class: className, ...props }: InputProps) {
   return (
     <input
-      class={[
-        "vi-input",
-        size && `vi-input--${size}`,
-        error && "vi-input--error",
-        className,
-      ]
+      class={['vi-input', size && `vi-input--${size}`, error && 'vi-input--error', className]
         .filter(Boolean)
-        .join(" ")}
+        .join(' ')}
       {...props}
     />
   );

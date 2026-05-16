@@ -1,10 +1,10 @@
-import { ComponentChildren } from "preact";
-import "./Badge.css";
+import { ComponentChildren } from 'preact';
+import './Badge.css';
 
-type BadgeVariant = "green" | "gray" | "yellow" | "red";
+type BadgeVariant = 'green' | 'gray' | 'yellow' | 'red';
 
 export function Badge({
-  variant = "gray",
+  variant = 'gray',
   class: className,
   children,
 }: {
@@ -13,11 +13,7 @@ export function Badge({
   children?: ComponentChildren;
 }) {
   return (
-    <span
-      class={["vi-badge", `vi-badge--${variant}`, className]
-        .filter(Boolean)
-        .join(" ")}
-    >
+    <span class={['vi-badge', `vi-badge--${variant}`, className].filter(Boolean).join(' ')}>
       {children}
     </span>
   );

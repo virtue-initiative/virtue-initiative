@@ -1,4 +1,4 @@
-import "./SegmentedControl.css";
+import './SegmentedControl.css';
 
 type Segment = { label: string; value: string };
 type SegmentedControlProps = {
@@ -15,16 +15,13 @@ export function SegmentedControl({
   class: className,
 }: SegmentedControlProps) {
   return (
-    <div class={["vi-segmented-control", className].filter(Boolean).join(" ")}>
+    <div class={['vi-segmented-control', className].filter(Boolean).join(' ')}>
       {segments.map((seg) => (
         <button
           key={seg.value}
-          class={[
-            "vi-segmented-control__item",
-            seg.value === value && "is-active",
-          ]
+          class={['vi-segmented-control__item', seg.value === value && 'is-active']
             .filter(Boolean)
-            .join(" ")}
+            .join(' ')}
           onClick={() => onChange(seg.value)}
           type="button"
         >

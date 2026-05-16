@@ -1,8 +1,8 @@
-import { decode } from "@msgpack/msgpack";
-import { Batch } from "./api";
-import { decryptBatch, decompressGzip } from "./crypto";
-import { FeedLog, toUint8Array } from "./pages/Logs/shared";
-import { decodeWebpDimensions } from "./utils/webp-dimensions";
+import { decode } from '@msgpack/msgpack';
+import { Batch } from './api';
+import { decryptBatch, decompressGzip } from './crypto';
+import { FeedLog, toUint8Array } from './pages/Logs/shared';
+import { decodeWebpDimensions } from './utils/webp-dimensions';
 
 // Batch payload format must match client/core/src/batch.rs:
 //   msgpack({events: [msgpack(event), ...]}) → gzip → AES-256-GCM (nonce[12] || ciphertext+tag)
@@ -34,9 +34,7 @@ export async function decryptAndFlattenBatch(
 
     const event = decode(rawEvent) as Record<string, unknown>;
     const data =
-      event.data && typeof event.data === "object"
-        ? (event.data as Record<string, unknown>)
-        : {};
+      event.data && typeof event.data === 'object' ? (event.data as Record<string, unknown>) : {};
 
     if (Array.isArray(data.image)) {
       data.image = new Uint8Array(data.image as number[]);
@@ -53,15 +51,15 @@ export async function decryptAndFlattenBatch(
     }
 
     return {
-      id: typeof event.id === "string" ? event.id : `${batch.id}:${index}`,
+      id: typeof event.id === 'string' ? event.id : `${batch.id}:${index}`,
       device_id: batch.device_id,
-      ts: typeof event.ts === "number" ? event.ts : batch.end_time,
-      type: typeof event.type === "string" ? event.type : "unknown",
+      ts: typeof event.ts === 'number' ? event.ts : batch.end_time,
+      type: typeof event.type === 'string' ? event.type : 'unknown',
       data,
       created_at: batch.created_at,
-      risk: typeof event.risk === "number" ? event.risk : undefined,
-      batch_status: "unknown" as const,
-      source: "batch" as const,
+      risk: typeof event.risk === 'number' ? event.risk : undefined,
+      batch_status: 'unknown' as const,
+      source: 'batch' as const,
       image_w,
       image_h,
     };

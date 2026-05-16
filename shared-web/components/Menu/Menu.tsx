@@ -1,6 +1,6 @@
-import { ComponentChildren } from "preact";
-import { useState, useRef, useEffect } from "preact/hooks";
-import "./Menu.css";
+import { ComponentChildren } from 'preact';
+import { useState, useRef, useEffect } from 'preact/hooks';
+import './Menu.css';
 
 type MenuItem = {
   label: string;
@@ -21,15 +21,14 @@ export function Menu({ trigger, items, class: className }: MenuProps) {
   useEffect(() => {
     if (!open) return;
     function close(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node))
-        setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     }
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
   }, [open]);
 
   return (
-    <div class={["vi-menu", className].filter(Boolean).join(" ")} ref={ref}>
+    <div class={['vi-menu', className].filter(Boolean).join(' ')} ref={ref}>
       <div class="vi-menu__trigger" onClick={() => setOpen((o) => !o)}>
         {trigger}
       </div>
@@ -40,9 +39,9 @@ export function Menu({ trigger, items, class: className }: MenuProps) {
               <a
                 key={i}
                 href={item.href}
-                class={["vi-menu__item", item.danger && "vi-menu__item--danger"]
+                class={['vi-menu__item', item.danger && 'vi-menu__item--danger']
                   .filter(Boolean)
-                  .join(" ")}
+                  .join(' ')}
                 role="menuitem"
                 onClick={() => setOpen(false)}
               >
@@ -52,9 +51,9 @@ export function Menu({ trigger, items, class: className }: MenuProps) {
               <button
                 key={i}
                 type="button"
-                class={["vi-menu__item", item.danger && "vi-menu__item--danger"]
+                class={['vi-menu__item', item.danger && 'vi-menu__item--danger']
                   .filter(Boolean)
-                  .join(" ")}
+                  .join(' ')}
                 role="menuitem"
                 onClick={() => {
                   item.onClick?.();

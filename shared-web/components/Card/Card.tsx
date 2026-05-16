@@ -1,5 +1,5 @@
-import { ComponentChildren } from "preact";
-import "./Card.css";
+import { ComponentChildren } from 'preact';
+import './Card.css';
 
 export function Card({
   highlight,
@@ -12,9 +12,9 @@ export function Card({
   children?: ComponentChildren;
   [key: string]: any;
 }) {
-  const classes = ["vi-card", highlight && "vi-card--highlight", className]
+  const classes = ['vi-card', highlight && 'vi-card--highlight', className]
     .filter(Boolean)
-    .join(" ");
+    .join(' ');
   return (
     <div class={classes} {...props}>
       {children}
@@ -32,10 +32,7 @@ export function CardHeader({
   [key: string]: any;
 }) {
   return (
-    <div
-      class={["vi-card-header", className].filter(Boolean).join(" ")}
-      {...props}
-    >
+    <div class={['vi-card-header', className].filter(Boolean).join(' ')} {...props}>
       {children}
     </div>
   );
@@ -51,10 +48,7 @@ export function CardActions({
   [key: string]: any;
 }) {
   return (
-    <div
-      class={["vi-card-actions", className].filter(Boolean).join(" ")}
-      {...props}
-    >
+    <div class={['vi-card-actions', className].filter(Boolean).join(' ')} {...props}>
       {children}
     </div>
   );
@@ -70,10 +64,7 @@ export function CardGrid({
   [key: string]: any;
 }) {
   return (
-    <div
-      class={["vi-card-grid", className].filter(Boolean).join(" ")}
-      {...props}
-    >
+    <div class={['vi-card-grid', className].filter(Boolean).join(' ')} {...props}>
       {children}
     </div>
   );

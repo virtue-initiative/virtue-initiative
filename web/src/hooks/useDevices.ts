@@ -1,15 +1,12 @@
-import useSWR, { useSWRConfig } from "swr";
-import { api, Device, isToastHandledError } from "../api";
-import {
-  removeDeviceFromCachedDataFeed,
-  deleteDecryptedEventsForDevice,
-} from "../data-cache";
-import { useAuth } from "../context/auth";
-import { isLogsKey, swrKeys } from "./swr-keys";
+import useSWR, { useSWRConfig } from 'swr';
+import { api, Device, isToastHandledError } from '../api';
+import { removeDeviceFromCachedDataFeed, deleteDecryptedEventsForDevice } from '../data-cache';
+import { useAuth } from '../context/auth';
+import { isLogsKey, swrKeys } from './swr-keys';
 
 function requireToken(token: string | null): string {
   if (!token) {
-    throw new Error("You must be logged in to perform this action.");
+    throw new Error('You must be logged in to perform this action.');
   }
 
   return token;
@@ -43,16 +40,10 @@ export function useDevices(): UseDevicesResult {
 
     if (userId) {
       await removeDeviceFromCachedDataFeed(userId, userId, id).catch((err) => {
-        console.warn(
-          "[devices] failed to remove deleted device from cache",
-          err,
-        );
+        console.warn('[devices] failed to remove deleted device from cache', err);
       });
       await deleteDecryptedEventsForDevice(userId, id).catch((err) => {
-        console.warn(
-          "[devices] failed to wipe decrypted events for device",
-          err,
-        );
+        console.warn('[devices] failed to wipe decrypted events for device', err);
       });
     }
 

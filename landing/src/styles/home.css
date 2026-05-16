@@ -221,13 +221,13 @@
 }
 
 .faq-item summary::after {
-  content: "+";
+  content: '+';
   color: var(--text-muted);
   flex-shrink: 0;
 }
 
 .faq-item[open] summary::after {
-  content: "−";
+  content: '−';
 }
 
 .faq-item p {

@@ -1,19 +1,13 @@
-import "./Spinner.css";
+import './Spinner.css';
 
-type SpinnerSize = "sm" | "md" | "lg";
+type SpinnerSize = 'sm' | 'md' | 'lg';
 
-export function Spinner({
-  size = "md",
-  class: className,
-}: {
-  size?: SpinnerSize;
-  class?: string;
-}) {
+export function Spinner({ size = 'md', class: className }: { size?: SpinnerSize; class?: string }) {
   return (
     <span
-      class={["vi-spinner", size !== "md" && `vi-spinner--${size}`, className]
+      class={['vi-spinner', size !== 'md' && `vi-spinner--${size}`, className]
         .filter(Boolean)
-        .join(" ")}
+        .join(' ')}
       aria-label="Loading"
       role="status"
     />

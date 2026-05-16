@@ -1,8 +1,8 @@
-import { useEffect, useState } from "preact/hooks";
-import { useLocation } from "preact-iso";
-import { useAuth } from "../context/auth";
-import { ThemeButton } from "./ThemeButton";
-import { Button, IconButton } from "@virtueinitiative/shared-web";
+import { useEffect, useState } from 'preact/hooks';
+import { useLocation } from 'preact-iso';
+import { useAuth } from '../context/auth';
+import { ThemeButton } from './ThemeButton';
+import { Button, IconButton } from '@virtueinitiative/shared-web';
 
 function MenuIcon() {
   return (
@@ -33,11 +33,7 @@ function CloseIcon() {
       stroke="currentColor"
       aria-hidden="true"
     >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M6 18 18 6M6 6l12 12"
-      />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
     </svg>
   );
 }
@@ -50,7 +46,7 @@ export function Header() {
   if (!ready || !token) return null;
 
   const isActive = (routePath: string) =>
-    routePath === "/" ? currentPath === "/" : currentPath.startsWith(routePath);
+    routePath === '/' ? currentPath === '/' : currentPath.startsWith(routePath);
 
   useEffect(() => {
     setMobileMenuOpen(false);
@@ -76,9 +72,7 @@ export function Header() {
         <IconButton
           aria-expanded={mobileMenuOpen}
           aria-controls="mobile-header-menu"
-          aria-label={
-            mobileMenuOpen ? "Close navigation menu" : "Open navigation menu"
-          }
+          aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
           onClick={toggleMobileMenu}
         >
           <MenuIcon />
@@ -86,25 +80,13 @@ export function Header() {
       </div>
       <nav class="app-header-toolbar">
         <div class="app-header-nav-group">
-          <Button
-            href="/"
-            variant="flat"
-            class={isActive("/") ? "is-active" : ""}
-          >
+          <Button href="/" variant="flat" class={isActive('/') ? 'is-active' : ''}>
             Dashboard
           </Button>
-          <Button
-            href="/logs"
-            variant="flat"
-            class={isActive("/logs") ? "is-active" : ""}
-          >
+          <Button href="/logs" variant="flat" class={isActive('/logs') ? 'is-active' : ''}>
             Logs
           </Button>
-          <Button
-            href="/settings"
-            variant="flat"
-            class={isActive("/settings") ? "is-active" : ""}
-          >
+          <Button href="/settings" variant="flat" class={isActive('/settings') ? 'is-active' : ''}>
             Settings
           </Button>
         </div>
@@ -118,14 +100,14 @@ export function Header() {
         </div>
       </nav>
       <button
-        class={`app-drawer-backdrop app-header-mobile-backdrop${mobileMenuOpen ? " is-open" : ""}`}
+        class={`app-drawer-backdrop app-header-mobile-backdrop${mobileMenuOpen ? ' is-open' : ''}`}
         type="button"
         aria-label="Close navigation menu"
         onClick={closeMobileMenu}
       />
       <nav
         id="mobile-header-menu"
-        class={`app-header-mobile-menu${mobileMenuOpen ? " is-open" : ""}`}
+        class={`app-header-mobile-menu${mobileMenuOpen ? ' is-open' : ''}`}
       >
         <div class="app-drawer-header app-header-mobile-menu-header">
           <span class="app-header-mobile-menu-title">Menu</span>
@@ -141,7 +123,7 @@ export function Header() {
         <Button
           href="/"
           variant="flat"
-          class={isActive("/") ? "is-active" : ""}
+          class={isActive('/') ? 'is-active' : ''}
           onClick={closeMobileMenu}
         >
           Dashboard
@@ -149,7 +131,7 @@ export function Header() {
         <Button
           href="/logs"
           variant="flat"
-          class={isActive("/logs") ? "is-active" : ""}
+          class={isActive('/logs') ? 'is-active' : ''}
           onClick={closeMobileMenu}
         >
           Logs
@@ -157,7 +139,7 @@ export function Header() {
         <Button
           href="/settings"
           variant="flat"
-          class={isActive("/settings") ? "is-active" : ""}
+          class={isActive('/settings') ? 'is-active' : ''}
           onClick={closeMobileMenu}
         >
           Settings
