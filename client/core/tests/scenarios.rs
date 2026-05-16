@@ -45,13 +45,15 @@ fn service_stop_observation_records_to_lifecycle_observations_jsonl() {
         .assert_is_running(true)
         .assert_is_authenticated(true);
 
-    scenario.at_t(180_000).observe(LifecycleObservation::ServiceStopObserved {
-        role: ServiceRole::PrimaryService,
-        raw_reason: "sigterm".into(),
-        shutdown_in_progress: true,
-        explicit_user_stop: false,
-        detected_by: "scenario-test".into(),
-    });
+    scenario
+        .at_t(180_000)
+        .observe(LifecycleObservation::ServiceStopObserved {
+            role: ServiceRole::PrimaryService,
+            raw_reason: "sigterm".into(),
+            shutdown_in_progress: true,
+            explicit_user_stop: false,
+            detected_by: "scenario-test".into(),
+        });
 
     scenario
         .assert_lifecycle_observations_contain("service_stop_observed")

@@ -145,11 +145,15 @@ impl MockApiClient {
     }
 
     pub fn program_get_device_settings(&self, response: CoreResult<DeviceSettings>) {
-        self.state().get_device_settings_responses.push_back(response);
+        self.state()
+            .get_device_settings_responses
+            .push_back(response);
     }
 
     pub fn program_refresh_device_token(&self, response: CoreResult<String>) {
-        self.state().refresh_device_token_responses.push_back(response);
+        self.state()
+            .refresh_device_token_responses
+            .push_back(response);
     }
 
     pub fn program_batch(&self, response: CoreResult<UploadedBatchResponse>) {
@@ -173,7 +177,9 @@ impl Default for MockApiClient {
 
 impl ApiTransport for MockApiClient {
     fn reconfigure(&mut self, config: &Config) -> CoreResult<()> {
-        self.state().reconfigure_calls.push(config.api_base_url.clone());
+        self.state()
+            .reconfigure_calls
+            .push(config.api_base_url.clone());
         Ok(())
     }
 
