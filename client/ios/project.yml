@@ -3,28 +3,28 @@ options:
   createIntermediateGroups: true
 settings:
   base:
-    SWIFT_VERSION: "5.0"
-    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    SWIFT_VERSION: '5.0'
+    IPHONEOS_DEPLOYMENT_TARGET: '16.0'
     CODE_SIGN_STYLE: Automatic
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: ''
     VIRTUE_APP_BUNDLE_ID: org.virtueinitiative.virtueios
-    CURRENT_PROJECT_VERSION: "1"
-    MARKETING_VERSION: "0.0.5"
-    VIRTUE_BUILD_LABEL: "$(MARKETING_VERSION)"
-    LIBRARY_SEARCH_PATHS: "$(inherited) $(BUILT_PRODUCTS_DIR) $(TARGET_BUILD_DIR)"
+    CURRENT_PROJECT_VERSION: '1'
+    MARKETING_VERSION: '0.0.6'
+    VIRTUE_BUILD_LABEL: '$(MARKETING_VERSION)'
+    LIBRARY_SEARCH_PATHS: '$(inherited) $(BUILT_PRODUCTS_DIR) $(TARGET_BUILD_DIR)'
 targets:
   VirtueIOS:
     type: application
     platform: iOS
-    deploymentTarget: "16.0"
+    deploymentTarget: '16.0'
     settings:
       base:
         PRODUCT_NAME: VirtueIOS
-        PRODUCT_BUNDLE_IDENTIFIER: "$(VIRTUE_APP_BUNDLE_ID)"
+        PRODUCT_BUNDLE_IDENTIFIER: '$(VIRTUE_APP_BUNDLE_ID)'
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: app/Info.plist
         CODE_SIGN_ENTITLEMENTS: app/VirtueIOS.entitlements
-        OTHER_LDFLAGS: "$(inherited) -lvirtue_ios_rust"
+        OTHER_LDFLAGS: '$(inherited) -lvirtue_ios_rust'
     sources:
       - path: app/Sources
       - path: app/Shared
@@ -40,16 +40,16 @@ targets:
   VirtueSafariWebExtension:
     type: app-extension
     platform: iOS
-    deploymentTarget: "16.0"
+    deploymentTarget: '16.0'
     settings:
       base:
         PRODUCT_NAME: VirtueSafariWebExtension
-        PRODUCT_BUNDLE_IDENTIFIER: "$(VIRTUE_APP_BUNDLE_ID).broadcast"
+        PRODUCT_BUNDLE_IDENTIFIER: '$(VIRTUE_APP_BUNDLE_ID).broadcast'
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: app/SafariWebExtension/Info.plist
         CODE_SIGN_ENTITLEMENTS: app/SafariWebExtension/VirtueSafariWebExtension.entitlements
         APPLICATION_EXTENSION_API_ONLY: YES
-        OTHER_LDFLAGS: "$(inherited) -lvirtue_ios_rust"
+        OTHER_LDFLAGS: '$(inherited) -lvirtue_ios_rust'
     sources:
       - path: app/SafariWebExtension
       - path: app/Shared
