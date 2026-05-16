@@ -1,0 +1,20 @@
+#!/bin/bash
+
+pushd "$(dirname $0)/../.." > /dev/null
+
+# Store the current state of the git index
+commit=$(git status --porcelain)
+
+pushd web && npm run format && popd > /dev/null
+pushd api && npm run format && popd > /dev/null
+pushd landing && npm run format && popd > /dev/null
+pushd shared-web && npm run format && popd > /dev/null
+pushd client && cargo fmt --all && popd > /dev/null
+
+# Check if anything to be commited was changed by the formatters
+if [[ $(git status --porcelain) != "$commit" ]]; then
+  echo "Code was formatted. Please review the changes and stage them before committing."
+  exit 1
+fi
+
+popd > /dev/null

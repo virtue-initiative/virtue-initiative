@@ -39,6 +39,12 @@ npm run dev
 More information about each component can be found in their respective
 subfolders.
 
+Before commiting make sure you setup the hooks
+
+```
+git config --local core.hookspath scripts/hooks
+```
+
 ## Contributing
 
 If you are interested in contributing, you can reach out to us at
