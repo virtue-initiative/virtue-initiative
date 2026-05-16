@@ -23,7 +23,7 @@ use crate::storage::FileStateStore;
 const POST_LOGIN_PROOF_BATCH_COUNT: u32 = 3;
 const MAX_HASH_RETRIES_PER_LOOP: usize = 8;
 const MAX_DIRECT_LOG_RETRIES_PER_LOOP: usize = 8;
-const MAX_BATCH_ITEMS_PER_UPLOAD: usize = 25;
+const MAX_BATCH_ITEMS_PER_UPLOAD: usize = 200;
 const SERVICE_PING_INTERVAL_MS: i64 = 60_000;
 const SERVICE_PING_GRACE_MS: i64 = 10_000;
 const STOP_ALERT_THRESHOLD_MS: i64 = 10_000;
