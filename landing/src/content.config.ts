@@ -6,7 +6,8 @@ const blog = defineCollection({
   schema: z.object({
     title: z.string(),
     description: z.string(),
-    pubDate: z.coerce.date(),
+    // Fun trick to set time to 00:00:00, so that the date is actually correct
+    pubDate: z.coerce.date().transform((date) => new Date(date.toISOString().split('T')[0] + ' ')),
     author: z.string().optional(),
     draft: z.boolean().default(false),
   }),

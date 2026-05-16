@@ -18,7 +18,7 @@ Options:
   --cache-root <win-path>         Remote cache root. Default: C:/virtue-build/cache
   --target <triple>               Rust target for packaging modes. Default: x86_64-pc-windows-msvc
   --profile <Debug|Release>       Packaging profile. Default: Debug
-  --version <version>             Artifact label. Default: 0.0.5-dev
+  --version <version>             Artifact label. Default: 0.0.6-dev
   --clean                         Run cargo clean before packaging
   --skip-sync                     Reuse remote source tree without uploading local client/
   --log-dir <dir>                 Local directory for full remote run logs.
@@ -44,7 +44,7 @@ BUILD_ROOT="C:/virtue-build"
 CACHE_ROOT="C:/virtue-build/cache"
 TARGET="x86_64-pc-windows-msvc"
 PROFILE="Debug"
-VERSION="0.0.5-dev"
+VERSION="0.0.6-dev"
 CLEAN=0
 SKIP_SYNC=0
 LOG_DIR="$REPO_ROOT/client/windows/dist/remote-logs"
