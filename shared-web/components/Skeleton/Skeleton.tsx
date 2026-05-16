@@ -1,9 +1,9 @@
-import "./Skeleton.css";
+import './Skeleton.css';
 
-type SkeletonVariant = "text" | "rect" | "circle";
+type SkeletonVariant = 'text' | 'rect' | 'circle';
 
 export function Skeleton({
-  variant = "rect",
+  variant = 'rect',
   width,
   height,
   class: className,
@@ -15,9 +15,7 @@ export function Skeleton({
 }) {
   return (
     <span
-      class={["vi-skeleton", `vi-skeleton--${variant}`, className]
-        .filter(Boolean)
-        .join(" ")}
+      class={['vi-skeleton', `vi-skeleton--${variant}`, className].filter(Boolean).join(' ')}
       style={{ width, height }}
       aria-hidden="true"
     />

@@ -11,7 +11,7 @@
   background: #dcfce7;
   color: var(--accent);
 
-  [data-theme="dark"] & {
+  [data-theme='dark'] & {
     background: #14532d;
     color: #8be28b;
   }
@@ -21,7 +21,7 @@
   background: #f3f4f6;
   color: #6b7280;
 
-  [data-theme="dark"] & {
+  [data-theme='dark'] & {
     background: #1f2937;
     color: #9ca3af;
   }
@@ -31,7 +31,7 @@
   background: #fef9c3;
   color: #a16207;
 
-  [data-theme="dark"] & {
+  [data-theme='dark'] & {
     background: #2d1f07;
     color: #fbbf24;
   }
@@ -41,7 +41,7 @@
   background: #fee2e2;
   color: #b91c1c;
 
-  [data-theme="dark"] & {
+  [data-theme='dark'] & {
     background: #3b0a0a;
     color: #fca5a5;
   }

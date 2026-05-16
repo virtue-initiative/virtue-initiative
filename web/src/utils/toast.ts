@@ -7,7 +7,7 @@ export interface ToastOptions {
 
 type PushFn = (
   message: string,
-  variant: "error" | "success" | "info",
+  variant: 'error' | 'success' | 'info',
   opts?: { durationMs?: number | null; dismissible?: boolean },
 ) => void;
 
@@ -18,8 +18,8 @@ export function initToast(push: PushFn) {
 }
 
 export function sendToast(message: string, options: ToastOptions = {}) {
-  if (!_push || typeof window === "undefined") return;
-  _push(message, options.isError ? "error" : "success", {
+  if (!_push || typeof window === 'undefined') return;
+  _push(message, options.isError ? 'error' : 'success', {
     durationMs: options.durationMs === undefined ? 45_000 : options.durationMs,
     dismissible: options.dismissible ?? true,
   });

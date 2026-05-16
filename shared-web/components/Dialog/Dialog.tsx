@@ -1,7 +1,7 @@
-import { ComponentChildren, JSX } from "preact";
-import "./Dialog.css";
+import { ComponentChildren, JSX } from 'preact';
+import './Dialog.css';
 
-type DialogProps = Omit<JSX.IntrinsicElements["dialog"], "ref"> & {
+type DialogProps = Omit<JSX.IntrinsicElements['dialog'], 'ref'> & {
   children: ComponentChildren;
   dialogRef?: { current: HTMLDialogElement | null };
 };
@@ -23,7 +23,7 @@ type DialogHeaderProps = {
 };
 
 function mergeClasses(...classNames: Array<string | undefined>) {
-  return classNames.filter(Boolean).join(" ");
+  return classNames.filter(Boolean).join(' ');
 }
 
 function CloseIcon() {
@@ -36,22 +36,12 @@ function CloseIcon() {
       stroke="currentColor"
       aria-hidden="true"
     >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M6 18 18 6M6 6l12 12"
-      />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
     </svg>
   );
 }
 
-export function Dialog({
-  children,
-  dialogRef,
-  class: className,
-  onClick,
-  ...props
-}: DialogProps) {
+export function Dialog({ children, dialogRef, class: className, onClick, ...props }: DialogProps) {
   function handleClick(e: MouseEvent) {
     const dialog = e.currentTarget as HTMLDialogElement;
     if (e.target === e.currentTarget) {
@@ -64,7 +54,7 @@ export function Dialog({
     <dialog
       {...props}
       ref={dialogRef}
-      class={mergeClasses("vi-dialog", className as string | undefined)}
+      class={mergeClasses('vi-dialog', className as string | undefined)}
       onClick={handleClick}
     >
       {children}
@@ -72,13 +62,9 @@ export function Dialog({
   );
 }
 
-export function DialogActions({
-  children,
-  left,
-  class: className,
-}: DialogActionsProps) {
+export function DialogActions({ children, left, class: className }: DialogActionsProps) {
   return (
-    <div class={mergeClasses("vi-dialog-actions", className)}>
+    <div class={mergeClasses('vi-dialog-actions', className)}>
       {left && <div class="vi-dialog-actions-left">{left}</div>}
       <div class="vi-dialog-actions-right">{children}</div>
     </div>
@@ -89,30 +75,18 @@ export function DialogSecondaryActions({
   children,
   class: className,
 }: DialogSecondaryActionsProps) {
-  return (
-    <div class={mergeClasses("vi-dialog-secondary-actions", className)}>
-      {children}
-    </div>
-  );
+  return <div class={mergeClasses('vi-dialog-secondary-actions', className)}>{children}</div>;
 }
 
-export function DialogHeader({
-  children,
-  class: className,
-}: DialogHeaderProps) {
+export function DialogHeader({ children, class: className }: DialogHeaderProps) {
   function closeDialog(e: MouseEvent) {
-    (e.currentTarget as HTMLButtonElement).closest("dialog")?.close();
+    (e.currentTarget as HTMLButtonElement).closest('dialog')?.close();
   }
 
   return (
-    <div class={mergeClasses("vi-dialog-header", className)}>
+    <div class={mergeClasses('vi-dialog-header', className)}>
       <h3 class="vi-dialog-title">{children}</h3>
-      <button
-        class="vi-dialog-close"
-        type="button"
-        aria-label="Close dialog"
-        onClick={closeDialog}
-      >
+      <button class="vi-dialog-close" type="button" aria-label="Close dialog" onClick={closeDialog}>
         <CloseIcon />
       </button>
     </div>

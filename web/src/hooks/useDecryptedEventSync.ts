@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { Batch } from "../api";
-import { decryptAndFlattenBatch } from "../batch-materializer";
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { Batch } from '../api';
+import { decryptAndFlattenBatch } from '../batch-materializer';
 import {
   getUnmaterializedBatches,
   pruneDecryptedEventsBefore,
   writeMaterializedEvents,
-} from "../data-cache";
+} from '../data-cache';
 
 const DECRYPT_CONCURRENCY = 5;
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
@@ -34,10 +34,7 @@ export function useDecryptedEventSync({
   });
 
   // Stable key so the effect only re-fires when the batch set actually changes
-  const batchesKey = useMemo(
-    () => batches.map((b) => b.id).join(","),
-    [batches],
-  );
+  const batchesKey = useMemo(() => batches.map((b) => b.id).join(','), [batches]);
 
   // Keep unwrapEncryptedBatchKey stable across renders via ref
   const unwrapRef = useRef(unwrapEncryptedBatchKey);
@@ -54,14 +51,14 @@ export function useDecryptedEventSync({
       try {
         await pruneDecryptedEventsBefore(viewerId!, cutoff);
       } catch (err) {
-        console.warn("[sync] failed to prune old events", err);
+        console.warn('[sync] failed to prune old events', err);
       }
 
       let pending: Batch[];
       try {
         pending = await getUnmaterializedBatches(viewerId!, batches, cutoff);
       } catch (err) {
-        console.warn("[sync] failed to get unmaterialized batches", err);
+        console.warn('[sync] failed to get unmaterialized batches', err);
         return;
       }
 
@@ -79,10 +76,7 @@ export function useDecryptedEventSync({
         while (queue.length > 0 && !cancelled) {
           const batch = queue.shift()!;
           try {
-            const events = await decryptAndFlattenBatch(
-              batch,
-              unwrapRef.current,
-            );
+            const events = await decryptAndFlattenBatch(batch, unwrapRef.current);
             if (cancelled) return;
             await writeMaterializedEvents(
               viewerId!,
@@ -100,17 +94,14 @@ export function useDecryptedEventSync({
             }));
           } catch (err) {
             if (!cancelled) {
-              console.warn("[sync] failed to materialize batch", batch.id, err);
+              console.warn('[sync] failed to materialize batch', batch.id, err);
             }
           }
         }
       }
 
       await Promise.all(
-        Array.from(
-          { length: Math.min(DECRYPT_CONCURRENCY, pending.length) },
-          worker,
-        ),
+        Array.from({ length: Math.min(DECRYPT_CONCURRENCY, pending.length) }, worker),
       );
     }
 

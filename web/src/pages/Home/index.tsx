@@ -1,6 +1,6 @@
-import { useMemo, useRef, useState } from "preact/hooks";
-import { useLocation } from "preact-iso";
-import { Device, WatchingPartner, WatcherPartner } from "../../api";
+import { useMemo, useRef, useState } from 'preact/hooks';
+import { useLocation } from 'preact-iso';
+import { Device, WatchingPartner, WatcherPartner } from '../../api';
 import {
   Alert,
   Badge,
@@ -16,15 +16,15 @@ import {
   Field,
   Input,
   useToast,
-} from "@virtueinitiative/shared-web";
-import { useAuth } from "../../context/auth";
-import { useDevices } from "../../hooks/useDevices";
-import { usePartners } from "../../hooks/usePartners";
-import { formatRelativeTimestamp } from "../../utils/time";
-import "./style.css";
+} from '@virtueinitiative/shared-web';
+import { useAuth } from '../../context/auth';
+import { useDevices } from '../../hooks/useDevices';
+import { usePartners } from '../../hooks/usePartners';
+import { formatRelativeTimestamp } from '../../utils/time';
+import './style.css';
 
-const DOWNLOAD_URL = "https://virtueinitiative.org/download";
-const INSTALLATION_URL = "https://virtueinitiative.org/help/installation/";
+const DOWNLOAD_URL = 'https://virtueinitiative.org/download';
+const INSTALLATION_URL = 'https://virtueinitiative.org/help/installation/';
 
 function UserPlusIcon() {
   return (
@@ -85,28 +85,26 @@ export function Home() {
     return map;
   }, [deviceList]);
   const acceptedWatching = useMemo(
-    () => watchingList.filter((partner) => partner.status === "accepted"),
+    () => watchingList.filter((partner) => partner.status === 'accepted'),
     [watchingList],
   );
   const pendingWatching = useMemo(
-    () => watchingList.filter((partner) => partner.status === "pending"),
+    () => watchingList.filter((partner) => partner.status === 'pending'),
     [watchingList],
   );
   const acceptedWatchers = useMemo(
-    () => watchersList.filter((partner) => partner.status === "accepted"),
+    () => watchersList.filter((partner) => partner.status === 'accepted'),
     [watchersList],
   );
   const pendingWatchers = useMemo(
-    () => watchersList.filter((partner) => partner.status === "pending"),
+    () => watchersList.filter((partner) => partner.status === 'pending'),
     [watchersList],
   );
 
   return (
     <div class="dashboard">
       {error && <Alert variant="error">{error.message}</Alert>}
-      {dashboardLoading && !devices && !watching && !watchers && (
-        <p class="empty">Loading…</p>
-      )}
+      {dashboardLoading && !devices && !watching && !watchers && <p class="empty">Loading…</p>}
 
       {!dashboardLoading && (
         <>
@@ -184,8 +182,8 @@ function AddDeviceButton() {
       <Dialog dialogRef={dialogRef} class="device-setup-dialog">
         <DialogHeader>Add device</DialogHeader>
         <p class="invite-desc">
-          Set up Virtue on a phone or computer, then sign in with this account
-          so it starts appearing in your dashboard.
+          Set up Virtue on a phone or computer, then sign in with this account so it starts
+          appearing in your dashboard.
         </p>
         <ol class="device-setup-steps">
           <li>
@@ -193,9 +191,7 @@ function AddDeviceButton() {
             Choose the installer for the device you want to monitor.
           </li>
           <li>
-            <span class="device-setup-step-label">
-              Follow the installation instructions.
-            </span>
+            <span class="device-setup-step-label">Follow the installation instructions.</span>
             Use the platform-specific setup guide if you need it.
           </li>
           <li>
@@ -205,12 +201,7 @@ function AddDeviceButton() {
         </ol>
         <DialogActions
           left={
-            <Button
-              variant="ghost"
-              href={INSTALLATION_URL}
-              target="_blank"
-              rel="noreferrer"
-            >
+            <Button variant="ghost" href={INSTALLATION_URL} target="_blank" rel="noreferrer">
               View guide
             </Button>
           }
@@ -218,12 +209,7 @@ function AddDeviceButton() {
           <Button variant="ghost" type="button" onClick={close}>
             Close
           </Button>
-          <Button
-            variant="primary"
-            href={DOWNLOAD_URL}
-            target="_blank"
-            rel="noreferrer"
-          >
+          <Button variant="primary" href={DOWNLOAD_URL} target="_blank" rel="noreferrer">
             Download
           </Button>
         </DialogActions>
@@ -256,7 +242,7 @@ function PartnerArea({
       ) : (
         <CardGrid>
           {partners.map((partner) =>
-            partner.status === "pending" ? (
+            partner.status === 'pending' ? (
               <PendingPartnerCard
                 key={partner.id}
                 partner={partner}
@@ -268,7 +254,7 @@ function PartnerArea({
                 key={partner.id}
                 partner={partner}
                 devices={
-                  "digest_cadence" in partner
+                  'digest_cadence' in partner
                     ? (partnerDevicesByOwner.get(partner.user.id) ?? [])
                     : []
                 }
@@ -283,18 +269,14 @@ function PartnerArea({
   );
 }
 
-function InviteButton({
-  onInvitePartner,
-}: {
-  onInvitePartner: (email: string) => Promise<void>;
-}) {
-  const [email, setEmail] = useState("");
+function InviteButton({ onInvitePartner }: { onInvitePartner: (email: string) => Promise<void> }) {
+  const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const { push: pushToast } = useToast();
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   function open() {
-    setEmail("");
+    setEmail('');
     dialogRef.current?.showModal();
   }
 
@@ -309,10 +291,7 @@ function InviteButton({
       await onInvitePartner(email);
       close();
     } catch (err) {
-      pushToast(
-        err instanceof Error ? err.message : "Failed to send invite",
-        "error",
-      );
+      pushToast(err instanceof Error ? err.message : 'Failed to send invite', 'error');
     } finally {
       setLoading(false);
     }
@@ -320,20 +299,14 @@ function InviteButton({
 
   return (
     <>
-      <Button
-        variant="primary"
-        type="button"
-        onClick={open}
-        style={{ gap: "0.4rem" }}
-      >
+      <Button variant="primary" type="button" onClick={open} style={{ gap: '0.4rem' }}>
         <UserPlusIcon /> Invite partner
       </Button>
       <Dialog dialogRef={dialogRef}>
         <DialogHeader>Invite a partner</DialogHeader>
         <p class="invite-desc">
           Your partner can <b>view any screenshots and activity logs </b>
-          uploaded <b>after</b> you add them as a partner and they set up their
-          account.
+          uploaded <b>after</b> you add them as a partner and they set up their account.
         </p>
         <form onSubmit={handleSubmit}>
           <Field label="Partner's email">
@@ -351,7 +324,7 @@ function InviteButton({
               Cancel
             </Button>
             <Button variant="primary" type="submit" disabled={loading}>
-              {loading ? "Sending…" : "Send invite"}
+              {loading ? 'Sending…' : 'Send invite'}
             </Button>
           </DialogActions>
         </form>
@@ -369,26 +342,21 @@ function PendingPartnerCard({
   onRemoveWatching: (id: string) => Promise<void>;
   onRemoveWatcher: (id: string) => Promise<void>;
 }) {
-  const [action, setAction] = useState<"remove" | null>(null);
+  const [action, setAction] = useState<'remove' | null>(null);
   const { push: pushToast } = useToast();
   const confirmRef = useRef<HTMLDialogElement>(null);
   const partnerLabel = partner.user.name ?? partner.user.email;
-  const partnerEmailTooltip = partner.user.name
-    ? undefined
-    : partner.user.email;
+  const partnerEmailTooltip = partner.user.name ? undefined : partner.user.email;
   const partnerName = partnerLabel;
 
   async function removeConfirmed() {
-    setAction("remove");
+    setAction('remove');
     try {
-      await ("digest_cadence" in partner
+      await ('digest_cadence' in partner
         ? onRemoveWatching(partner.id)
         : onRemoveWatcher(partner.id));
     } catch (err) {
-      pushToast(
-        err instanceof Error ? err.message : "Failed to remove request",
-        "error",
-      );
+      pushToast(err instanceof Error ? err.message : 'Failed to remove request', 'error');
       setAction(null);
     }
   }
@@ -408,14 +376,12 @@ function PendingPartnerCard({
           onClick={() => confirmRef.current?.showModal()}
           disabled={action !== null}
         >
-          {action === "remove" ? "Removing…" : "Remove"}
+          {action === 'remove' ? 'Removing…' : 'Remove'}
         </Button>
       </CardActions>
       <Dialog dialogRef={confirmRef}>
         <DialogHeader>Remove {partnerName}?</DialogHeader>
-        <p class="invite-desc">
-          This will cancel the pending partner relationship.
-        </p>
+        <p class="invite-desc">This will cancel the pending partner relationship.</p>
         <DialogActions>
           <Button
             variant="ghost"
@@ -434,7 +400,7 @@ function PendingPartnerCard({
             }}
             disabled={action !== null}
           >
-            {action === "remove" ? "Removing…" : "Remove partner"}
+            {action === 'remove' ? 'Removing…' : 'Remove partner'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -454,33 +420,28 @@ function PartnerCard({
   onRemoveWatcher: (id: string) => Promise<void>;
 }) {
   const { route } = useLocation();
-  const isWatching = "digest_cadence" in partner;
-  const [action, setAction] = useState<"remove" | null>(null);
+  const isWatching = 'digest_cadence' in partner;
+  const [action, setAction] = useState<'remove' | null>(null);
   const { push: pushToast } = useToast();
   const confirmRef = useRef<HTMLDialogElement>(null);
   const partnerLabel = partner.user.name ?? partner.user.email;
-  const partnerEmailTooltip = partner.user.name
-    ? undefined
-    : partner.user.email;
+  const partnerEmailTooltip = partner.user.name ? undefined : partner.user.email;
   const partnerName = partnerLabel;
 
   async function removeConfirmed() {
-    setAction("remove");
+    setAction('remove');
     try {
-      await ("digest_cadence" in partner
+      await ('digest_cadence' in partner
         ? onRemoveWatching(partner.id)
         : onRemoveWatcher(partner.id));
     } catch (err) {
-      pushToast(
-        err instanceof Error ? err.message : "Failed to remove partner",
-        "error",
-      );
+      pushToast(err instanceof Error ? err.message : 'Failed to remove partner', 'error');
       setAction(null);
     }
   }
 
   return (
-    <Card class={isWatching ? undefined : "partner-card-compact"}>
+    <Card class={isWatching ? undefined : 'partner-card-compact'}>
       <CardHeader>
         <span class="vi-card__name" title={partnerEmailTooltip}>
           {partnerLabel}
@@ -493,21 +454,17 @@ function PartnerCard({
               key={device.id}
               class="partner-device-chip"
               type="button"
-              onClick={() =>
-                route(`/logs?user=${partner.user.id}&device_id=${device.id}`)
-              }
+              onClick={() => route(`/logs?user=${partner.user.id}&device_id=${device.id}`)}
               title={device.name}
             >
               <span
-                class={`partner-device-status ${device.status === "online" ? "partner-device-status-online" : "partner-device-status-offline"}`}
+                class={`partner-device-status ${device.status === 'online' ? 'partner-device-status-online' : 'partner-device-status-offline'}`}
               />
               <span>{device.name}</span>
             </button>
           ))}
           {devices.length > 4 && (
-            <p class="partner-device-more">
-              +{devices.length - 4} more devices
-            </p>
+            <p class="partner-device-more">+{devices.length - 4} more devices</p>
           )}
         </div>
       )}
@@ -527,14 +484,13 @@ function PartnerCard({
           onClick={() => confirmRef.current?.showModal()}
           disabled={action !== null}
         >
-          {action === "remove" ? "Removing…" : "Remove"}
+          {action === 'remove' ? 'Removing…' : 'Remove'}
         </Button>
       </CardActions>
       <Dialog dialogRef={confirmRef}>
         <DialogHeader>Remove {partnerName}?</DialogHeader>
         <p class="invite-desc">
-          This will remove your partner relationship with this person. The
-          partner will be notified.
+          This will remove your partner relationship with this person. The partner will be notified.
         </p>
         <DialogActions>
           <Button
@@ -554,7 +510,7 @@ function PartnerCard({
             }}
             disabled={action !== null}
           >
-            {action === "remove" ? "Removing…" : "Remove partner"}
+            {action === 'remove' ? 'Removing…' : 'Remove partner'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -604,7 +560,7 @@ function DeviceCard({
       await onUpdateDevice(device.id, { name });
       dialogRef.current?.close();
     } catch (err) {
-      pushToast(err instanceof Error ? err.message : "Failed to save", "error");
+      pushToast(err instanceof Error ? err.message : 'Failed to save', 'error');
     } finally {
       setSaving(false);
     }
@@ -616,10 +572,7 @@ function DeviceCard({
       await onRemoveDevice(device.id);
       closeDeleteDialog();
     } catch (err) {
-      pushToast(
-        err instanceof Error ? err.message : "Failed to delete device",
-        "error",
-      );
+      pushToast(err instanceof Error ? err.message : 'Failed to delete device', 'error');
     } finally {
       setDeleting(false);
     }
@@ -629,8 +582,8 @@ function DeviceCard({
     <Card>
       <CardHeader>
         <span class="vi-card__name">{device.name}</span>
-        <Badge variant={device.status === "online" ? "green" : "gray"}>
-          {device.status === "online" ? "Online" : "Offline"}
+        <Badge variant={device.status === 'online' ? 'green' : 'gray'}>
+          {device.status === 'online' ? 'Online' : 'Offline'}
         </Badge>
       </CardHeader>
       <dl class="vi-card__meta">
@@ -640,11 +593,7 @@ function DeviceCard({
         <dd>{formatRelativeTimestamp(device.last_upload_at)}</dd>
       </dl>
       <CardActions>
-        <Button
-          variant="ghost"
-          type="button"
-          onClick={() => route(`/logs?device_id=${device.id}`)}
-        >
+        <Button variant="ghost" type="button" onClick={() => route(`/logs?device_id=${device.id}`)}>
           View logs
         </Button>
         <Button variant="ghost" type="button" onClick={openEdit}>
@@ -674,20 +623,11 @@ function DeviceCard({
             </Button>
           </DialogSecondaryActions>
           <DialogActions>
-            <Button
-              variant="ghost"
-              type="button"
-              onClick={closeEdit}
-              disabled={saving || deleting}
-            >
+            <Button variant="ghost" type="button" onClick={closeEdit} disabled={saving || deleting}>
               Cancel
             </Button>
-            <Button
-              variant="primary"
-              type="submit"
-              disabled={saving || deleting}
-            >
-              {saving ? "Saving…" : "Save"}
+            <Button variant="primary" type="submit" disabled={saving || deleting}>
+              {saving ? 'Saving…' : 'Save'}
             </Button>
           </DialogActions>
         </form>
@@ -696,8 +636,8 @@ function DeviceCard({
       <Dialog dialogRef={deleteDialogRef}>
         <DialogHeader>Delete device</DialogHeader>
         <p class="invite-desc">
-          Delete "{device.name}"? This permanently removes its logs and uploads,
-          and your partners will be notified.
+          Delete "{device.name}"? This permanently removes its logs and uploads, and your partners
+          will be notified.
         </p>
         <DialogActions>
           <Button
@@ -714,7 +654,7 @@ function DeviceCard({
             onClick={() => handleDeleteConfirmed().catch(() => {})}
             disabled={saving || deleting}
           >
-            {deleting ? "Deleting…" : "Delete device"}
+            {deleting ? 'Deleting…' : 'Delete device'}
           </Button>
         </DialogActions>
       </Dialog>

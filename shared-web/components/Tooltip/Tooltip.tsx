@@ -1,5 +1,5 @@
-import { ComponentChildren } from "preact";
-import "./Tooltip.css";
+import { ComponentChildren } from 'preact';
+import './Tooltip.css';
 
 type TooltipProps = {
   content: string;
@@ -9,7 +9,7 @@ type TooltipProps = {
 
 export function Tooltip({ content, children, class: className }: TooltipProps) {
   return (
-    <span class={["vi-tooltip-wrapper", className].filter(Boolean).join(" ")}>
+    <span class={['vi-tooltip-wrapper', className].filter(Boolean).join(' ')}>
       {children}
       <span class="vi-tooltip" role="tooltip">
         {content}

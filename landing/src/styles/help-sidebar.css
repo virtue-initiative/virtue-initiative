@@ -35,7 +35,7 @@
 }
 
 .help-sidebar-section-summary::marker {
-  content: "";
+  content: '';
 }
 
 .help-sidebar-sublist {
@@ -108,7 +108,7 @@
 }
 
 .help-sidebar-toggle::before {
-  content: "";
+  content: '';
   width: 0.45rem;
   height: 0.45rem;
   border-right: 2px solid currentColor;
@@ -159,7 +159,7 @@
     height: 1.5rem;
   }
 
-  .help-sidebar-fab[aria-expanded="true"] {
+  .help-sidebar-fab[aria-expanded='true'] {
     background: var(--accent);
     border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
     color: white; /* literal: icon on accent fab */

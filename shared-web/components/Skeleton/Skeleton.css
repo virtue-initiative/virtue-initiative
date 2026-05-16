@@ -9,12 +9,7 @@
 
 .vi-skeleton {
   display: inline-block;
-  background: linear-gradient(
-    90deg,
-    var(--bg-subtle) 25%,
-    var(--border) 50%,
-    var(--bg-subtle) 75%
-  );
+  background: linear-gradient(90deg, var(--bg-subtle) 25%, var(--border) 50%, var(--bg-subtle) 75%);
   background-size: 200% 100%;
   animation: vi-shimmer 1.5s ease-in-out infinite;
   border-radius: var(--radius-sm);

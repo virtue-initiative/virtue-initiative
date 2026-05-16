@@ -1,5 +1,5 @@
-import { useDarkMode } from "../hooks/useDarkMode";
-import { IconButton } from "@virtueinitiative/shared-web";
+import { useDarkMode } from '../hooks/useDarkMode';
+import { IconButton } from '@virtueinitiative/shared-web';
 
 function MoonIcon() {
   return (
@@ -39,8 +39,8 @@ export function ThemeButton() {
   return (
     <IconButton
       onClick={toggle}
-      aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
-      title={dark ? "Switch to light mode" : "Switch to dark mode"}
+      aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+      title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
     >
       {dark ? <SunIcon /> : <MoonIcon />}
     </IconButton>

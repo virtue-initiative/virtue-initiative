@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { decodeWebpDimensions } from "./webp-dimensions";
+import { describe, expect, it } from 'vitest';
+import { decodeWebpDimensions } from './webp-dimensions';
 
 function makeVP8(width: number, height: number): Uint8Array {
   // Minimum 30-byte VP8 lossy WebP
@@ -86,51 +86,46 @@ function makeVP8X(width: number, height: number): Uint8Array {
   return buf;
 }
 
-describe("decodeWebpDimensions", () => {
-  it("parses VP8 lossy", () => {
+describe('decodeWebpDimensions', () => {
+  it('parses VP8 lossy', () => {
     expect(decodeWebpDimensions(makeVP8(1920, 1080))).toEqual({
       width: 1920,
       height: 1080,
     });
   });
 
-  it("parses VP8L lossless", () => {
+  it('parses VP8L lossless', () => {
     expect(decodeWebpDimensions(makeVP8L(800, 600))).toEqual({
       width: 800,
       height: 600,
     });
   });
 
-  it("parses VP8X extended", () => {
+  it('parses VP8X extended', () => {
     expect(decodeWebpDimensions(makeVP8X(3840, 2160))).toEqual({
       width: 3840,
       height: 2160,
     });
   });
 
-  it("returns undefined for empty buffer", () => {
+  it('returns undefined for empty buffer', () => {
     expect(decodeWebpDimensions(new Uint8Array(0))).toBeUndefined();
   });
 
-  it("returns undefined for truncated buffer (cut after WEBP)", () => {
+  it('returns undefined for truncated buffer (cut after WEBP)', () => {
     expect(
       decodeWebpDimensions(
-        new Uint8Array([
-          0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42,
-          0x50,
-        ]),
+        new Uint8Array([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50]),
       ),
     ).toBeUndefined();
   });
 
-  it("returns undefined for wrong magic (PNG header)", () => {
-    const png = new Uint8Array([
-      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-    ]);
+  it('returns undefined for wrong magic (PNG header)', () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     expect(decodeWebpDimensions(png)).toBeUndefined();
   });
 
-  it("returns undefined for unknown chunk type", () => {
+  it('returns undefined for unknown chunk type', () => {
     const buf = new Uint8Array(30);
     buf[0] = 0x52;
     buf[1] = 0x49;
@@ -148,7 +143,7 @@ describe("decodeWebpDimensions", () => {
     expect(decodeWebpDimensions(buf)).toBeUndefined();
   });
 
-  it("returns undefined for VP8 with bad sync code", () => {
+  it('returns undefined for VP8 with bad sync code', () => {
     const buf = makeVP8(640, 480);
     buf[23] = 0x00; // corrupt sync code
     expect(decodeWebpDimensions(buf)).toBeUndefined();

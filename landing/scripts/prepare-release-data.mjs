@@ -1,12 +1,12 @@
-import { access, mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { syncReleaseData } from "./fetch-release-data.mjs";
+import { access, mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { syncReleaseData } from './fetch-release-data.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const projectRoot = path.resolve(__dirname, "..");
-const outputPath = path.join(projectRoot, "src", "data", "releases.json");
+const projectRoot = path.resolve(__dirname, '..');
+const outputPath = path.join(projectRoot, 'src', 'data', 'releases.json');
 
 async function fileExists(filePath) {
   try {
@@ -35,7 +35,7 @@ async function writeFallbackReleaseData() {
 }
 
 async function main() {
-  if (process.env.VIRTUE_REQUIRE_RELEASE_SYNC === "1") {
+  if (process.env.VIRTUE_REQUIRE_RELEASE_SYNC === '1') {
     await syncReleaseData();
     return;
   }

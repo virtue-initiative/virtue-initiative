@@ -1,10 +1,10 @@
-import { ComponentChildren, JSX } from "preact";
-import "./Button.css";
+import { ComponentChildren, JSX } from 'preact';
+import './Button.css';
 
-type ButtonVariant = "primary" | "outline" | "ghost" | "danger" | "flat";
-type ButtonSize = "sm" | "md";
+type ButtonVariant = 'primary' | 'outline' | 'ghost' | 'danger' | 'flat';
+type ButtonSize = 'sm' | 'md';
 
-type ButtonProps = Omit<JSX.IntrinsicElements["button"], "size"> & {
+type ButtonProps = Omit<JSX.IntrinsicElements['button'], 'size'> & {
   variant?: ButtonVariant;
   size?: ButtonSize;
   children?: ComponentChildren;
@@ -14,7 +14,7 @@ type ButtonProps = Omit<JSX.IntrinsicElements["button"], "size"> & {
 };
 
 export function Button({
-  variant = "ghost",
+  variant = 'ghost',
   size,
   class: className,
   children,
@@ -24,13 +24,13 @@ export function Button({
   ...props
 }: ButtonProps) {
   const classes = [
-    "vi-btn",
+    'vi-btn',
     variant && `vi-btn--${variant}`,
-    size === "sm" && "vi-btn--sm",
+    size === 'sm' && 'vi-btn--sm',
     className,
   ]
     .filter(Boolean)
-    .join(" ");
+    .join(' ');
 
   if (href !== undefined) {
     return (
@@ -39,7 +39,7 @@ export function Button({
         class={classes}
         target={target}
         rel={rel}
-        {...(props as unknown as JSX.IntrinsicElements["a"])}
+        {...(props as unknown as JSX.IntrinsicElements['a'])}
       >
         {children}
       </a>

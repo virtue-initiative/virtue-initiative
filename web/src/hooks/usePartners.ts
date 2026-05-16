@@ -1,17 +1,17 @@
-import useSWR, { useSWRConfig } from "swr";
+import useSWR, { useSWRConfig } from 'swr';
 import {
   api,
   isToastHandledError,
   PartnerRelationships,
   WatchingPartner,
   WatcherPartner,
-} from "../api";
-import { useAuth } from "../context/auth";
-import { isLogsKey, swrKeys } from "./swr-keys";
+} from '../api';
+import { useAuth } from '../context/auth';
+import { isLogsKey, swrKeys } from './swr-keys';
 
 function requireToken(token: string | null): string {
   if (!token) {
-    throw new Error("You must be logged in to perform this action.");
+    throw new Error('You must be logged in to perform this action.');
   }
 
   return token;
@@ -33,9 +33,8 @@ export function usePartners(): UsePartnersResult {
   const { token } = useAuth();
   const { mutate } = useSWRConfig();
   const key = token ? swrKeys.partners(token) : null;
-  const { data, error, isLoading } = useSWR<PartnerRelationships, Error>(
-    key,
-    () => api.getPartners(requireToken(token)),
+  const { data, error, isLoading } = useSWR<PartnerRelationships, Error>(key, () =>
+    api.getPartners(requireToken(token)),
   );
 
   async function revalidatePartnerRelated(authToken: string) {

@@ -127,11 +127,7 @@
     border-left: 4px solid var(--accent);
     border-radius: 0 10px 10px 0;
     background:
-      linear-gradient(
-        90deg,
-        color-mix(in srgb, var(--accent) 10%, transparent),
-        transparent 55%
-      ),
+      linear-gradient(90deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent 55%),
       var(--bg-subtle);
     color: var(--text);
 

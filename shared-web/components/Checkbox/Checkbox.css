@@ -5,7 +5,7 @@
   cursor: pointer;
   font-size: var(--text-sm);
 
-  & input[type="checkbox"] {
+  & input[type='checkbox'] {
     width: 1rem;
     height: 1rem;
     accent-color: var(--accent);

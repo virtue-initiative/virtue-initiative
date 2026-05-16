@@ -1,5 +1,5 @@
 ---
-import type { HelpNavItem } from "../help/navigation";
+import type { HelpNavItem } from '../help/navigation';
 
 interface Props {
   currentPath: string;
@@ -13,9 +13,7 @@ function sectionContainsPath(item: HelpNavItem, pathname: string): boolean {
     return true;
   }
 
-  return (
-    item.items?.some((child) => sectionContainsPath(child, pathname)) ?? false
-  );
+  return item.items?.some((child) => sectionContainsPath(child, pathname)) ?? false;
 }
 ---
 
@@ -24,23 +22,17 @@ function sectionContainsPath(item: HelpNavItem, pathname: string): boolean {
     rootLinks.map((item) => (
       <li>
         {item.items && item.items.length > 0 ? (
-          <details
-            class="help-sidebar-section"
-            open={sectionContainsPath(item, currentPath)}
-          >
+          <details class="help-sidebar-section" open={sectionContainsPath(item, currentPath)}>
             <summary
               class:list={[
-                "help-sidebar-section-summary",
-                { "is-active": item.href === currentPath },
+                'help-sidebar-section-summary',
+                { 'is-active': item.href === currentPath },
               ]}
             >
               {item.href && (
                 <a
                   href={item.href}
-                  class:list={[
-                    "help-sidebar-item",
-                    { "is-active": item.href === currentPath },
-                  ]}
+                  class:list={['help-sidebar-item', { 'is-active': item.href === currentPath }]}
                 >
                   {item.label}
                 </a>
@@ -53,9 +45,9 @@ function sectionContainsPath(item: HelpNavItem, pathname: string): boolean {
                   <a
                     href={child.href}
                     class:list={[
-                      "help-sidebar-item",
-                      "help-sidebar-item-child",
-                      { "is-active": child.href === currentPath },
+                      'help-sidebar-item',
+                      'help-sidebar-item-child',
+                      { 'is-active': child.href === currentPath },
                     ]}
                   >
                     {child.label}
@@ -68,10 +60,7 @@ function sectionContainsPath(item: HelpNavItem, pathname: string): boolean {
           item.href && (
             <a
               href={item.href}
-              class:list={[
-                "help-sidebar-item",
-                { "is-active": item.href === currentPath },
-              ]}
+              class:list={['help-sidebar-item', { 'is-active': item.href === currentPath }]}
             >
               {item.label}
             </a>

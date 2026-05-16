@@ -1,13 +1,13 @@
 /// <reference types="vitest" />
-import { defineConfig, loadEnv, searchForWorkspaceRoot } from "vite";
-import preact from "@preact/preset-vite";
+import { defineConfig, loadEnv, searchForWorkspaceRoot } from 'vite';
+import preact from '@preact/preset-vite';
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
-  const rootDir = new URL(".", import.meta.url).pathname;
-  const env = loadEnv(mode, rootDir, "");
+  const rootDir = new URL('.', import.meta.url).pathname;
+  const env = loadEnv(mode, rootDir, '');
   const allowedHosts = env.__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS
-    ?.split(",")
+    ?.split(',')
     .map((host) => host.trim())
     .filter(Boolean);
 
@@ -16,28 +16,28 @@ export default defineConfig(({ mode }) => {
       preact({
         prerender: {
           enabled: true,
-          renderTarget: "#app",
-          additionalPrerenderRoutes: ["/404"],
+          renderTarget: '#app',
+          additionalPrerenderRoutes: ['/404'],
           previewMiddlewareEnabled: true,
-          previewMiddlewareFallback: "/",
+          previewMiddlewareFallback: '/',
         },
       }),
     ],
     server: {
       allowedHosts: allowedHosts?.length ? allowedHosts : undefined,
       fs: {
-        allow: [searchForWorkspaceRoot(rootDir), ".."],
+        allow: [searchForWorkspaceRoot(rootDir), '..'],
       },
     },
     optimizeDeps: {
-      exclude: ["@virtueinitiative/shared-web"],
+      exclude: ['@virtueinitiative/shared-web'],
     },
     resolve: {
       preserveSymlinks: false,
-      dedupe: ["preact"],
+      dedupe: ['preact'],
     },
     test: {
-      environment: "node",
+      environment: 'node',
     },
   };
 });

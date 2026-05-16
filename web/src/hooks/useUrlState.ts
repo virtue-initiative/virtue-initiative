@@ -1,8 +1,8 @@
-import { useState } from "preact/hooks";
+import { useState } from 'preact/hooks';
 
 export function useUrlState<T>(
   key: string,
-  type: "string" | "number" | "boolean" | "object",
+  type: 'string' | 'number' | 'boolean' | 'object',
   defaultValue: T,
 ): [T, (value: T) => void] {
   const [state, setState] = useState<T>(() => {
@@ -12,14 +12,14 @@ export function useUrlState<T>(
       return defaultValue;
     }
 
-    if (type === "string") {
+    if (type === 'string') {
       return storedValue as unknown as T;
-    } else if (type === "number") {
+    } else if (type === 'number') {
       const num = Number(storedValue);
       return isNaN(num) ? defaultValue : (num as unknown as T);
-    } else if (type === "boolean") {
-      return (storedValue === "true") as unknown as T;
-    } else if (type === "object") {
+    } else if (type === 'boolean') {
+      return (storedValue === 'true') as unknown as T;
+    } else if (type === 'object') {
       try {
         return JSON.parse(storedValue) as T;
       } catch {
@@ -32,13 +32,13 @@ export function useUrlState<T>(
     setState(value);
     const urlParams = new URLSearchParams(window.location.search);
 
-    if (type === "string") {
+    if (type === 'string') {
       urlParams.set(key, String(value));
-    } else if (type === "number") {
+    } else if (type === 'number') {
       urlParams.set(key, String(value));
-    } else if (type === "boolean") {
-      urlParams.set(key, value ? "true" : "false");
-    } else if (type === "object") {
+    } else if (type === 'boolean') {
+      urlParams.set(key, value ? 'true' : 'false');
+    } else if (type === 'object') {
       urlParams.set(key, JSON.stringify(value));
     }
 
@@ -46,11 +46,7 @@ export function useUrlState<T>(
       urlParams.delete(key);
     }
 
-    window.history.replaceState(
-      {},
-      "",
-      `${window.location.pathname}?${urlParams.toString()}`,
-    );
+    window.history.replaceState({}, '', `${window.location.pathname}?${urlParams.toString()}`);
   };
 
   return [state, setUrlState];

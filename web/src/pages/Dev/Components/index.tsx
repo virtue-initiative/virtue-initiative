@@ -1,5 +1,5 @@
-import * as preact from "preact";
-import { useRef, useState } from "preact/hooks";
+import * as preact from 'preact';
+import { useRef, useState } from 'preact/hooks';
 import {
   Alert,
   Avatar,
@@ -27,17 +27,14 @@ import {
   Tooltip,
   ToastProvider,
   useToast,
-} from "@virtueinitiative/shared-web";
-import "@virtueinitiative/shared-web/index.css";
-import "./Components.css";
+} from '@virtueinitiative/shared-web';
+import '@virtueinitiative/shared-web/index.css';
+import './Components.css';
 
 function ColorSwatch({ name, variable }: { name: string; variable: string }) {
   return (
     <div class="dev-swatch">
-      <div
-        class="dev-swatch__color"
-        style={{ background: `var(${variable})` }}
-      />
+      <div class="dev-swatch__color" style={{ background: `var(${variable})` }} />
       <div class="dev-swatch__info">
         <code class="dev-swatch__var">{variable}</code>
         <span class="dev-swatch__name">{name}</span>
@@ -46,13 +43,7 @@ function ColorSwatch({ name, variable }: { name: string; variable: string }) {
   );
 }
 
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: preact.ComponentChildren;
-}) {
+function Section({ title, children }: { title: string; children: preact.ComponentChildren }) {
   return (
     <section class="dev-section">
       <h2 class="dev-section__title">{title}</h2>
@@ -69,28 +60,19 @@ function ToastDemo() {
   const { push } = useToast();
   return (
     <Row>
-      <Button
-        variant="primary"
-        onClick={() => push("Success message!", "success")}
-      >
+      <Button variant="primary" onClick={() => push('Success message!', 'success')}>
         Success Toast
       </Button>
-      <Button
-        variant="ghost"
-        onClick={() => push("Something went wrong.", "error")}
-      >
+      <Button variant="ghost" onClick={() => push('Something went wrong.', 'error')}>
         Error Toast
       </Button>
-      <Button
-        variant="outline"
-        onClick={() => push("Here is some info.", "info")}
-      >
+      <Button variant="outline" onClick={() => push('Here is some info.', 'info')}>
         Info Toast
       </Button>
       <Button
         variant="flat"
         onClick={() =>
-          push("This stays until dismissed.", "info", {
+          push('This stays until dismissed.', 'info', {
             durationMs: null,
             dismissible: true,
           })
@@ -117,7 +99,7 @@ function DialogDemo() {
       </Button>
       <Dialog dialogRef={ref}>
         <DialogHeader>Example Dialog</DialogHeader>
-        <p style={{ margin: "0 0 1rem" }}>
+        <p style={{ margin: '0 0 1rem' }}>
           This is the shared-web Dialog component with vi-* classes.
         </p>
         <DialogActions>
@@ -134,12 +116,12 @@ function DialogDemo() {
 }
 
 export function ComponentsPage() {
-  const [tab, setTab] = useState("buttons");
-  const [seg, setSeg] = useState("one");
+  const [tab, setTab] = useState('buttons');
+  const [seg, setSeg] = useState('one');
   const [checkboxChecked, setCheckboxChecked] = useState(false);
-  const [radioVal, setRadioVal] = useState("a");
-  const [inputVal, setInputVal] = useState("");
-  const [selectVal, setSelectVal] = useState("");
+  const [radioVal, setRadioVal] = useState('a');
+  const [inputVal, setInputVal] = useState('');
+  const [selectVal, setSelectVal] = useState('');
 
   return (
     <ToastProvider>
@@ -147,8 +129,8 @@ export function ComponentsPage() {
         <header class="dev-header">
           <h1>Component Library Preview</h1>
           <p class="dev-subtitle">
-            All vi-* namespaced components — light &amp; dark via system
-            preference or <code>[data-theme]</code>
+            All vi-* namespaced components — light &amp; dark via system preference or{' '}
+            <code>[data-theme]</code>
           </p>
         </header>
 
@@ -174,8 +156,8 @@ export function ComponentsPage() {
                   class="dev-spacing-bar"
                   style={{
                     width: `var(--space-${n})`,
-                    height: "1rem",
-                    background: "var(--accent)",
+                    height: '1rem',
+                    background: 'var(--accent)',
                   }}
                 />
                 <code>--space-{n}</code>
@@ -255,12 +237,11 @@ export function ComponentsPage() {
               <p
                 style={{
                   margin: 0,
-                  color: "var(--text-muted)",
-                  fontSize: "var(--text-sm)",
+                  color: 'var(--text-muted)',
+                  fontSize: 'var(--text-sm)',
                 }}
               >
-                Card content here. Uses vi-card, vi-card-header,
-                vi-card-actions.
+                Card content here. Uses vi-card, vi-card-header, vi-card-actions.
               </p>
               <CardActions>
                 <Button variant="ghost" size="sm">
@@ -279,8 +260,8 @@ export function ComponentsPage() {
               <p
                 style={{
                   margin: 0,
-                  color: "var(--text-muted)",
-                  fontSize: "var(--text-sm)",
+                  color: 'var(--text-muted)',
+                  fontSize: 'var(--text-sm)',
                 }}
               >
                 This card has a colored border via vi-card--highlight.
@@ -291,17 +272,12 @@ export function ComponentsPage() {
 
         <Section title="Field + Input + Textarea + Select">
           <div class="dev-form-grid">
-            <Field
-              label="Email address"
-              helpText="We'll never share your email."
-            >
+            <Field label="Email address" helpText="We'll never share your email.">
               <Input
                 type="email"
                 placeholder="you@example.com"
                 value={inputVal}
-                onInput={(e) =>
-                  setInputVal((e.target as HTMLInputElement).value)
-                }
+                onInput={(e) => setInputVal((e.target as HTMLInputElement).value)}
               />
             </Field>
             <Field label="Bio">
@@ -310,9 +286,7 @@ export function ComponentsPage() {
             <Field label="Country">
               <Select
                 value={selectVal}
-                onChange={(e) =>
-                  setSelectVal((e.target as HTMLSelectElement).value)
-                }
+                onChange={(e) => setSelectVal((e.target as HTMLSelectElement).value)}
               >
                 <option value="">Select country…</option>
                 <option value="us">United States</option>
@@ -321,12 +295,7 @@ export function ComponentsPage() {
               </Select>
             </Field>
             <Field label="Username" error="Username is already taken.">
-              <Input
-                type="text"
-                placeholder="username"
-                error
-                value="taken_user"
-              />
+              <Input type="text" placeholder="username" error value="taken_user" />
             </Field>
           </div>
           <Row>
@@ -334,16 +303,12 @@ export function ComponentsPage() {
               <Input type="text" placeholder="Default size" />
             </Field>
             <Field label="Medium input">
-              <Input
-                size="md"
-                type="text"
-                placeholder="Matches button height"
-              />
+              <Input size="md" type="text" placeholder="Matches button height" />
             </Field>
-            <Button variant="ghost" style={{ alignSelf: "flex-end" }}>
+            <Button variant="ghost" style={{ alignSelf: 'flex-end' }}>
               Button
             </Button>
-            <IconButton style={{ alignSelf: "flex-end" }}>
+            <IconButton style={{ alignSelf: 'flex-end' }}>
               <svg
                 width="16"
                 height="16"
@@ -369,7 +334,7 @@ export function ComponentsPage() {
                 <option>Option B</option>
               </Select>
             </Field>
-            <Button variant="ghost" style={{ alignSelf: "flex-end" }}>
+            <Button variant="ghost" style={{ alignSelf: 'flex-end' }}>
               Button
             </Button>
           </Row>
@@ -383,7 +348,7 @@ export function ComponentsPage() {
                 <option>Option B</option>
               </Select>
             </Field>
-            <Button variant="ghost" size="sm" style={{ alignSelf: "flex-end" }}>
+            <Button variant="ghost" size="sm" style={{ alignSelf: 'flex-end' }}>
               Button SM
             </Button>
           </Row>
@@ -394,9 +359,7 @@ export function ComponentsPage() {
             <Checkbox
               label="Accept terms and conditions"
               checked={checkboxChecked}
-              onChange={(e) =>
-                setCheckboxChecked((e.target as HTMLInputElement).checked)
-              }
+              onChange={(e) => setCheckboxChecked((e.target as HTMLInputElement).checked)}
             />
           </Row>
           <Row>
@@ -404,38 +367,32 @@ export function ComponentsPage() {
               label="Option A"
               name="radio-demo"
               value="a"
-              checked={radioVal === "a"}
-              onChange={() => setRadioVal("a")}
+              checked={radioVal === 'a'}
+              onChange={() => setRadioVal('a')}
             />
             <Radio
               label="Option B"
               name="radio-demo"
               value="b"
-              checked={radioVal === "b"}
-              onChange={() => setRadioVal("b")}
+              checked={radioVal === 'b'}
+              onChange={() => setRadioVal('b')}
             />
             <Radio
               label="Option C"
               name="radio-demo"
               value="c"
-              checked={radioVal === "c"}
-              onChange={() => setRadioVal("c")}
+              checked={radioVal === 'c'}
+              onChange={() => setRadioVal('c')}
             />
           </Row>
         </Section>
 
         <Section title="Alert">
           <div class="dev-stack">
-            <Alert variant="success">
-              Your changes have been saved successfully.
-            </Alert>
-            <Alert variant="error">
-              Something went wrong. Please try again.
-            </Alert>
+            <Alert variant="success">Your changes have been saved successfully.</Alert>
+            <Alert variant="error">Something went wrong. Please try again.</Alert>
             <Alert variant="warning">Your subscription is expiring soon.</Alert>
-            <Alert variant="info">
-              New features are available. Check out the changelog.
-            </Alert>
+            <Alert variant="info">New features are available. Check out the changelog.</Alert>
           </div>
         </Section>
 
@@ -451,14 +408,14 @@ export function ComponentsPage() {
         <Section title="Tabs">
           <Tabs
             tabs={[
-              { label: "Overview", value: "overview" },
-              { label: "Details", value: "details" },
-              { label: "History", value: "history" },
+              { label: 'Overview', value: 'overview' },
+              { label: 'Details', value: 'details' },
+              { label: 'History', value: 'history' },
             ]}
             value={tab}
             onChange={setTab}
           />
-          <p style={{ marginTop: "1rem", color: "var(--text-muted)" }}>
+          <p style={{ marginTop: '1rem', color: 'var(--text-muted)' }}>
             Active tab: <strong>{tab}</strong>
           </p>
         </Section>
@@ -466,14 +423,14 @@ export function ComponentsPage() {
         <Section title="SegmentedControl">
           <SegmentedControl
             segments={[
-              { label: "One", value: "one" },
-              { label: "Two", value: "two" },
-              { label: "Three", value: "three" },
+              { label: 'One', value: 'one' },
+              { label: 'Two', value: 'two' },
+              { label: 'Three', value: 'three' },
             ]}
             value={seg}
             onChange={setSeg}
           />
-          <p style={{ marginTop: "1rem", color: "var(--text-muted)" }}>
+          <p style={{ marginTop: '1rem', color: 'var(--text-muted)' }}>
             Active: <strong>{seg}</strong>
           </p>
         </Section>
@@ -491,9 +448,7 @@ export function ComponentsPage() {
             <Skeleton variant="text" />
             <Skeleton variant="text" width="70%" />
             <Skeleton variant="rect" height="6rem" />
-            <div
-              style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}
-            >
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
               <Skeleton variant="circle" />
               <div style={{ flex: 1 }}>
                 <Skeleton variant="text" />
@@ -507,11 +462,11 @@ export function ComponentsPage() {
             <Menu
               trigger={<Button variant="ghost">Open Menu ▾</Button>}
               items={[
-                { label: "Edit", onClick: () => alert("Edit") },
-                { label: "Duplicate", onClick: () => alert("Duplicate") },
+                { label: 'Edit', onClick: () => alert('Edit') },
+                { label: 'Duplicate', onClick: () => alert('Duplicate') },
                 {
-                  label: "Delete",
-                  onClick: () => alert("Delete"),
+                  label: 'Delete',
+                  onClick: () => alert('Delete'),
                   danger: true,
                 },
               ]}

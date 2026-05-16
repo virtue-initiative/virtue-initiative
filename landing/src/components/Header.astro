@@ -1,6 +1,6 @@
 ---
-import { Button } from "@virtueinitiative/shared-web";
-import { APP_URL } from "../lib/app-url";
+import { Button } from '@virtueinitiative/shared-web';
+import { APP_URL } from '../lib/app-url';
 
 interface Props {
   tagline?: string;
@@ -17,10 +17,7 @@ const { tagline } = Astro.props;
         {tagline && <p class="site-tagline">{tagline}</p>}
       </div>
       <div class="site-header-actions">
-        <button
-          class="vi-icon-btn"
-          id="theme-toggle"
-          aria-label="Toggle dark mode"></button>
+        <button class="vi-icon-btn" id="theme-toggle" aria-label="Toggle dark mode"></button>
         <Button href={APP_URL} variant="primary">Login / Sign up</Button>
       </div>
     </div>

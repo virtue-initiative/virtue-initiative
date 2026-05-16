@@ -55,7 +55,7 @@
   background: #fee2e2;
   color: #b91c1c;
 
-  [data-theme="dark"] & {
+  [data-theme='dark'] & {
     background: #3b0a0a;
     color: #fca5a5;
   }
@@ -65,7 +65,7 @@
   background: #dcfce7;
   color: #15803d;
 
-  [data-theme="dark"] & {
+  [data-theme='dark'] & {
     background: #052e16;
     color: #8be28b;
   }
@@ -75,7 +75,7 @@
   background: #dbeafe;
   color: #1d4ed8;
 
-  [data-theme="dark"] & {
+  [data-theme='dark'] & {
     background: #0c1a3a;
     color: #93c5fd;
   }

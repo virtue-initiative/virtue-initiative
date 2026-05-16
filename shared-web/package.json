@@ -7,14 +7,15 @@
   "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "prettier:check": "cd .. && git ls-files -z -- shared-web | grep -zE '\\.(ts|tsx|cts|mts|js|jsx|cjs|mjs|json|json5|jsonc|css|scss|html|md|mdx|yml|yaml)$' | xargs -0 -r npx --prefix api prettier --check",
-    "prettier:write": "cd .. && git ls-files -z -- shared-web | grep -zE '\\.(ts|tsx|cts|mts|js|jsx|cjs|mjs|json|json5|jsonc|css|scss|html|md|mdx|yml|yaml)$' | xargs -0 -r npx --prefix api prettier --write"
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "peerDependencies": {
     "preact": ">=10"
   },
   "devDependencies": {
-    "preact": "^10.29.1"
+    "preact": "^10.29.1",
+    "prettier": "^3.8.3"
   },
   "exports": {
     ".": "./index.ts",

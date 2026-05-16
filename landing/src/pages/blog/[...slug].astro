@@ -1,9 +1,9 @@
 ---
-import { getCollection, render } from "astro:content";
-import SiteLayout from "../../layouts/SiteLayout.astro";
+import { getCollection, render } from 'astro:content';
+import SiteLayout from '../../layouts/SiteLayout.astro';
 
 export async function getStaticPaths() {
-  const posts = await getCollection("blog", ({ data }) => !data.draft);
+  const posts = await getCollection('blog', ({ data }) => !data.draft);
   return posts.map((post) => ({
     params: { slug: post.id },
     props: { post },
@@ -13,10 +13,10 @@ export async function getStaticPaths() {
 const { post } = Astro.props;
 const { Content } = await render(post);
 
-const formattedDate = post.data.pubDate.toLocaleDateString("en-US", {
-  year: "numeric",
-  month: "long",
-  day: "numeric",
+const formattedDate = post.data.pubDate.toLocaleDateString('en-US', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
 });
 ---
 

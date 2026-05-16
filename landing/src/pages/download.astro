@@ -1,9 +1,9 @@
 ---
-import { Button } from "@virtueinitiative/shared-web";
-import LaptopIcon from "../components/icons/LaptopIcon.astro";
-import MobileIcon from "../components/icons/MobileIcon.astro";
-import releaseData from "../data/releases.json";
-import SiteLayout from "../layouts/SiteLayout.astro";
+import { Button } from '@virtueinitiative/shared-web';
+import LaptopIcon from '../components/icons/LaptopIcon.astro';
+import MobileIcon from '../components/icons/MobileIcon.astro';
+import releaseData from '../data/releases.json';
+import SiteLayout from '../layouts/SiteLayout.astro';
 
 type ReleaseAsset = {
   name: string;
@@ -22,34 +22,34 @@ type Release = {
 type Platform = {
   label: string;
   detail: string;
-  kind: "laptop" | "mobile";
+  kind: 'laptop' | 'mobile';
   preferredMatches?: (assetName: string) => boolean;
   fallbackMatches: (assetName: string) => boolean;
 };
 
 const platforms: Platform[] = [
   {
-    label: "Linux",
-    detail: ".deb package",
-    kind: "laptop",
+    label: 'Linux',
+    detail: '.deb package',
+    kind: 'laptop',
     preferredMatches: (assetName) => /^virtue-linux_/i.test(assetName),
     fallbackMatches: (assetName) =>
       /\.deb$/i.test(assetName) &&
       (/^virtue-linux_/i.test(assetName) || /^virtue_/i.test(assetName)),
   },
   {
-    label: "macOS",
-    detail: ".dmg installer",
-    kind: "laptop",
+    label: 'macOS',
+    detail: '.dmg installer',
+    kind: 'laptop',
     preferredMatches: (assetName) => /^virtue-macos-/i.test(assetName),
     fallbackMatches: (assetName) =>
       /\.dmg$/i.test(assetName) &&
       (/^virtue-macos-/i.test(assetName) || /^Virtue-/i.test(assetName)),
   },
   {
-    label: "Windows",
-    detail: ".zip setup bundle",
-    kind: "laptop",
+    label: 'Windows',
+    detail: '.zip setup bundle',
+    kind: 'laptop',
     fallbackMatches: (assetName) =>
       (/\.exe$/i.test(assetName) && /windows-installer/i.test(assetName)) ||
       (/\.zip$/i.test(assetName) &&
@@ -57,41 +57,35 @@ const platforms: Platform[] = [
         /-setup\.zip$/i.test(assetName)),
   },
   {
-    label: "Android",
-    detail: ".apk package",
-    kind: "mobile",
-    fallbackMatches: (assetName) =>
-      /\.apk$/i.test(assetName) && /android/i.test(assetName),
+    label: 'Android',
+    detail: '.apk package',
+    kind: 'mobile',
+    fallbackMatches: (assetName) => /\.apk$/i.test(assetName) && /android/i.test(assetName),
   },
   {
-    label: "iOS",
-    detail: ".zip app bundle",
-    kind: "mobile",
-    fallbackMatches: (assetName) =>
-      /\.zip$/i.test(assetName) && /^VirtueIOS/i.test(assetName),
+    label: 'iOS',
+    detail: '.zip app bundle',
+    kind: 'mobile',
+    fallbackMatches: (assetName) => /\.zip$/i.test(assetName) && /^VirtueIOS/i.test(assetName),
   },
 ];
 
 function formatDate(value: string | null) {
-  if (!value) return "Unpublished";
+  if (!value) return 'Unpublished';
 
-  return new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
+  return new Intl.DateTimeFormat('en-US', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
   }).format(new Date(value));
 }
 
 function findPlatformAsset(release: Release, platform: Platform) {
   if (platform.preferredMatches) {
-    const preferred = release.assets.find((asset) =>
-      platform.preferredMatches?.(asset.name),
-    );
+    const preferred = release.assets.find((asset) => platform.preferredMatches?.(asset.name));
     if (preferred) return preferred;
   }
 
-  return (
-    release.assets.find((asset) => platform.fallbackMatches(asset.name)) ?? null
-  );
+  return release.assets.find((asset) => platform.fallbackMatches(asset.name)) ?? null;
 }
 
 const stableRelease = releaseData.stableRelease as Release | null;
@@ -100,20 +94,17 @@ const prereleaseRelease = releaseData.prereleaseRelease as Release | null;
 
 <SiteLayout pageTitle="Downloads" tagline="Download Virtue for your devices">
   <div class="dev-warning-banner">
-    <strong>Warning:</strong> Virtue is currently in early development and does not
-    work reliably. Downloads are provided for testing purposes only.
+    <strong>Warning:</strong> Virtue is currently in early development and does not work reliably. Downloads
+    are provided for testing purposes only.
   </div>
 
   <section class="download-hero">
     <h2>Downloads</h2>
     <p>
-      Choose the latest stable release when available. Development builds are
-      available from GitHub.
+      Choose the latest stable release when available. Development builds are available from GitHub.
     </p>
     <div class="section-actions">
-      <Button href="/help/installation" variant="outline"
-        >Installation guide</Button
-      >
+      <Button href="/help/installation" variant="outline">Installation guide</Button>
     </div>
   </section>
 
@@ -139,8 +130,7 @@ const prereleaseRelease = releaseData.prereleaseRelease as Release | null;
               <div class="download-grid">
                 {platforms.map((platform) => {
                   const asset = findPlatformAsset(stableRelease, platform);
-                  const Icon =
-                    platform.kind === "laptop" ? LaptopIcon : MobileIcon;
+                  const Icon = platform.kind === 'laptop' ? LaptopIcon : MobileIcon;
 
                   return asset ? (
                     <a
@@ -151,12 +141,8 @@ const prereleaseRelease = releaseData.prereleaseRelease as Release | null;
                         <Icon />
                       </span>
                       <span class="download-button-content">
-                        <span class="download-button-label">
-                          {platform.label}
-                        </span>
-                        <span class="download-button-detail">
-                          {platform.detail}
-                        </span>
+                        <span class="download-button-label">{platform.label}</span>
+                        <span class="download-button-detail">{platform.detail}</span>
                       </span>
                     </a>
                   ) : (
@@ -168,12 +154,8 @@ const prereleaseRelease = releaseData.prereleaseRelease as Release | null;
                         <Icon />
                       </span>
                       <span class="download-button-content">
-                        <span class="download-button-label">
-                          {platform.label}
-                        </span>
-                        <span class="download-button-detail">
-                          {platform.detail}
-                        </span>
+                        <span class="download-button-label">{platform.label}</span>
+                        <span class="download-button-detail">{platform.detail}</span>
                       </span>
                     </span>
                   );
@@ -206,8 +188,8 @@ const prereleaseRelease = releaseData.prereleaseRelease as Release | null;
       </div>
       <div class="release-card-body">
         <p>
-          Development builds are published on GitHub. Use the release page to
-          choose the latest dev asset for your platform.
+          Development builds are published on GitHub. Use the release page to choose the latest dev
+          asset for your platform.
         </p>
       </div>
     </div>

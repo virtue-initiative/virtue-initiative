@@ -1,7 +1,7 @@
-import { createContext } from "preact";
-import { useContext } from "preact/hooks";
+import { createContext } from 'preact';
+import { useContext } from 'preact/hooks';
 
-export type ToastVariant = "error" | "success" | "info";
+export type ToastVariant = 'error' | 'success' | 'info';
 
 export type ToastItem = {
   id: string;
@@ -26,6 +26,6 @@ export const ToastContext = createContext<ToastContextValue | null>(null);
 
 export function useToast() {
   const ctx = useContext(ToastContext);
-  if (!ctx) throw new Error("useToast must be used within ToastProvider");
+  if (!ctx) throw new Error('useToast must be used within ToastProvider');
   return ctx;
 }

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "preact/hooks";
-import { User } from "../../api";
+import { useEffect, useRef, useState } from 'preact/hooks';
+import { User } from '../../api';
 import {
   Alert,
   Button,
@@ -10,54 +10,33 @@ import {
   Field,
   Input,
   Select,
-} from "@virtueinitiative/shared-web";
-import { useAuth } from "../../context/auth";
-import { usePartners } from "../../hooks/usePartners";
-import {
-  formatDigestHour,
-  utcMinutesToLocalHour,
-  localHourToUtcMinutes,
-} from "../../utils/digest";
-import "./style.css";
-import { useUser } from "../../hooks/useUser";
+} from '@virtueinitiative/shared-web';
+import { useAuth } from '../../context/auth';
+import { usePartners } from '../../hooks/usePartners';
+import { formatDigestHour, utcMinutesToLocalHour, localHourToUtcMinutes } from '../../utils/digest';
+import './style.css';
+import { useUser } from '../../hooks/useUser';
 
 export function Settings() {
   const { token, logout } = useAuth();
-  const {
-    user,
-    error: userError,
-    isLoading: userLoading,
-    updateUser,
-    deleteUser,
-  } = useUser();
-  const {
-    watching,
-    error: partnersError,
-    isLoading: partnersLoading,
-  } = usePartners();
+  const { user, error: userError, isLoading: userLoading, updateUser, deleteUser } = useUser();
+  const { watching, error: partnersError, isLoading: partnersLoading } = usePartners();
 
-  const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
+  const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
   const [nameStatus, setNameStatus] = useState<string | null>(null);
   const [savedButtonUntil, setSavedButtonUntil] = useState<number>(0);
   const [profileSavePending, setProfileSavePending] = useState(false);
-  const [emailScheduleSavedButtonUntil, setEmailScheduleSavedButtonUntil] =
-    useState<number>(0);
+  const [emailScheduleSavedButtonUntil, setEmailScheduleSavedButtonUntil] = useState<number>(0);
   const [nameSaving, setNameSaving] = useState(false);
-  const [emailFrequency, setEmailFrequency] =
-    useState<User["email_frequency"]>("daily");
+  const [emailFrequency, setEmailFrequency] = useState<User['email_frequency']>('daily');
   const [emailDigestLocalHour, setEmailDigestLocalHour] = useState(6);
-  const [emailScheduleStatus, setEmailScheduleStatus] = useState<string | null>(
-    null,
-  );
+  const [emailScheduleStatus, setEmailScheduleStatus] = useState<string | null>(null);
   const [emailScheduleSaving, setEmailScheduleSaving] = useState(false);
-  const [deleteConfirmEmail, setDeleteConfirmEmail] = useState("");
-  const [deleteAccountStatus, setDeleteAccountStatus] = useState<string | null>(
-    null,
-  );
+  const [deleteConfirmEmail, setDeleteConfirmEmail] = useState('');
+  const [deleteAccountStatus, setDeleteAccountStatus] = useState<string | null>(null);
   const [deleteAccountPending, setDeleteAccountPending] = useState(false);
-  const [emailChangeVerificationTarget, setEmailChangeVerificationTarget] =
-    useState<string>("");
+  const [emailChangeVerificationTarget, setEmailChangeVerificationTarget] = useState<string>('');
   const emailChangeDialogRef = useRef<HTMLDialogElement>(null);
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
 
@@ -70,11 +49,9 @@ export function Settings() {
     }
 
     setEmail(user.email);
-    setName(user.name ?? "");
-    setEmailFrequency(user.email_frequency ?? "daily");
-    setEmailDigestLocalHour(
-      utcMinutesToLocalHour(user.email_digest_minutes_utc),
-    );
+    setName(user.name ?? '');
+    setEmailFrequency(user.email_frequency ?? 'daily');
+    setEmailDigestLocalHour(utcMinutesToLocalHour(user.email_digest_minutes_utc));
   }, [user]);
 
   useEffect(() => {
@@ -114,7 +91,7 @@ export function Settings() {
     profilePatch.email = normalizedEmail;
   }
 
-  if (user && trimmedName.length > 0 && trimmedName !== (user.name ?? "")) {
+  if (user && trimmedName.length > 0 && trimmedName !== (user.name ?? '')) {
     profilePatch.name = trimmedName;
   }
 
@@ -123,14 +100,10 @@ export function Settings() {
   const hasDigestScheduleChanges = Boolean(
     user && emailDigestMinutesUtc !== user.email_digest_minutes_utc,
   );
-  const hasEmailFrequencyChanges = Boolean(
-    user && emailFrequency !== user.email_frequency,
-  );
-  const hasEmailScheduleChanges =
-    hasDigestScheduleChanges || hasEmailFrequencyChanges;
+  const hasEmailFrequencyChanges = Boolean(user && emailFrequency !== user.email_frequency);
+  const hasEmailScheduleChanges = hasDigestScheduleChanges || hasEmailFrequencyChanges;
   const deleteConfirmationMatches =
-    Boolean(user) &&
-    deleteConfirmEmail.trim().toLowerCase() === user.email.toLowerCase();
+    Boolean(user) && deleteConfirmEmail.trim().toLowerCase() === user.email.toLowerCase();
 
   async function saveName(e: Event) {
     e.preventDefault();
@@ -149,16 +122,14 @@ export function Settings() {
       if (emailChanged && result.email_verification_required) {
         setNameStatus(null);
         setProfileSavePending(true);
-        setEmailChangeVerificationTarget(
-          result.pending_email ?? normalizedEmail,
-        );
+        setEmailChangeVerificationTarget(result.pending_email ?? normalizedEmail);
         emailChangeDialogRef.current?.showModal();
       } else {
         setProfileSavePending(false);
-        setNameStatus("Saved");
+        setNameStatus('Saved');
       }
     } catch (err) {
-      setNameStatus(err instanceof Error ? err.message : "Failed to save");
+      setNameStatus(err instanceof Error ? err.message : 'Failed to save');
     } finally {
       setNameSaving(false);
     }
@@ -175,8 +146,8 @@ export function Settings() {
     setEmailScheduleStatus(null);
 
     const schedulePatch: {
-      email_frequency?: User["email_frequency"];
-      email_digest_minutes_utc?: User["email_digest_minutes_utc"];
+      email_frequency?: User['email_frequency'];
+      email_digest_minutes_utc?: User['email_digest_minutes_utc'];
     } = {};
 
     if (hasEmailFrequencyChanges) {
@@ -193,23 +164,21 @@ export function Settings() {
       setEmailScheduleSavedButtonUntil(Date.now() + 3000);
       setEmailScheduleStatus(null);
     } catch (err) {
-      setEmailScheduleStatus(
-        err instanceof Error ? err.message : "Failed to save digest schedule",
-      );
+      setEmailScheduleStatus(err instanceof Error ? err.message : 'Failed to save digest schedule');
     } finally {
       setEmailScheduleSaving(false);
     }
   }
 
   function openDeleteDialog() {
-    setDeleteConfirmEmail("");
+    setDeleteConfirmEmail('');
     setDeleteAccountStatus(null);
     deleteDialogRef.current?.showModal();
   }
 
   function closeDeleteDialog() {
     if (deleteAccountPending) return;
-    setDeleteConfirmEmail("");
+    setDeleteConfirmEmail('');
     setDeleteAccountStatus(null);
     deleteDialogRef.current?.close();
   }
@@ -223,11 +192,11 @@ export function Settings() {
     setDeleteAccountPending(true);
     try {
       await deleteUser(user.email);
-      if (typeof window !== "undefined") {
+      if (typeof window !== 'undefined') {
         window.sessionStorage.setItem(
-          "virtue_global_link_message",
+          'virtue_global_link_message',
           JSON.stringify({
-            message: "Your account has been deleted.",
+            message: 'Your account has been deleted.',
             isError: false,
           }),
         );
@@ -235,9 +204,7 @@ export function Settings() {
       deleteDialogRef.current?.close();
       await logout();
     } catch (err) {
-      setDeleteAccountStatus(
-        err instanceof Error ? err.message : "Failed to delete account",
-      );
+      setDeleteAccountStatus(err instanceof Error ? err.message : 'Failed to delete account');
     } finally {
       setDeleteAccountPending(false);
     }
@@ -247,9 +214,7 @@ export function Settings() {
     <div class="settings-page">
       <h1 class="settings-title">Settings</h1>
       {loadError && <Alert variant="error">{loadError.message}</Alert>}
-      {settingsLoading && !user && !watching && (
-        <p class="hint-text">Loading…</p>
-      )}
+      {settingsLoading && !user && !watching && <p class="hint-text">Loading…</p>}
 
       {!settingsLoading && user && (
         <Card class="settings-section">
@@ -285,43 +250,30 @@ export function Settings() {
               />
             </Field>
             {nameStatus && (
-              <Alert
-                variant={
-                  nameStatus.toLowerCase().includes("saved")
-                    ? "success"
-                    : "error"
-                }
-              >
+              <Alert variant={nameStatus.toLowerCase().includes('saved') ? 'success' : 'error'}>
                 {nameStatus}
               </Alert>
             )}
             <Button
               variant="primary"
               type="submit"
-              disabled={
-                userLoading ||
-                nameSaving ||
-                profileSavePending ||
-                !hasProfileChanges
-              }
+              disabled={userLoading || nameSaving || profileSavePending || !hasProfileChanges}
             >
               {nameSaving
-                ? "Saving…"
+                ? 'Saving…'
                 : profileSavePending
-                  ? "Pending"
+                  ? 'Pending'
                   : savedButtonUntil > Date.now()
-                    ? "Saved"
-                    : "Save"}
+                    ? 'Saved'
+                    : 'Save'}
             </Button>
           </form>
           <Dialog dialogRef={emailChangeDialogRef} class="settings-dialog">
             <DialogHeader>Confirm your new email</DialogHeader>
             <p class="invite-desc">
-              We sent a verification link to{" "}
-              <strong>
-                {emailChangeVerificationTarget || "your new email"}
-              </strong>
-              . Your account email will change after you confirm that link.
+              We sent a verification link to{' '}
+              <strong>{emailChangeVerificationTarget || 'your new email'}</strong>. Your account
+              email will change after you confirm that link.
             </p>
             <DialogActions>
               <Button
@@ -340,17 +292,13 @@ export function Settings() {
         <Card class="settings-section">
           <h2>Email notifications</h2>
           <p class="hint-text settings-section-hint">
-            Choose how often and when you receive reminders to review your
-            partners' screenshots
+            Choose how often and when you receive reminders to review your partners' screenshots
           </p>
           <Field label="Email frequency">
             <Select
               value={emailFrequency}
               onChange={(e) => {
-                setEmailFrequency(
-                  (e.target as HTMLSelectElement)
-                    .value as User["email_frequency"],
-                );
+                setEmailFrequency((e.target as HTMLSelectElement).value as User['email_frequency']);
                 setEmailScheduleStatus(null);
                 setEmailScheduleSavedButtonUntil(0);
               }}
@@ -368,10 +316,7 @@ export function Settings() {
                 value={String(emailDigestLocalHour)}
                 onChange={(e) => {
                   setEmailDigestLocalHour(
-                    Number.parseInt(
-                      (e.target as HTMLSelectElement).value,
-                      10,
-                    ) || 0,
+                    Number.parseInt((e.target as HTMLSelectElement).value, 10) || 0,
                   );
                   setEmailScheduleStatus(null);
                   setEmailScheduleSavedButtonUntil(0);
@@ -385,34 +330,30 @@ export function Settings() {
                 ))}
               </Select>
             </Field>
-            {emailScheduleStatus && (
-              <Alert variant="error">{emailScheduleStatus}</Alert>
-            )}
+            {emailScheduleStatus && <Alert variant="error">{emailScheduleStatus}</Alert>}
             <Button
               variant="primary"
               type="submit"
-              disabled={
-                !user || emailScheduleSaving || !hasEmailScheduleChanges
-              }
+              disabled={!user || emailScheduleSaving || !hasEmailScheduleChanges}
             >
               {emailScheduleSaving
-                ? "Saving…"
+                ? 'Saving…'
                 : emailScheduleSavedButtonUntil > Date.now()
-                  ? "Saved"
-                  : "Save digest schedule"}
+                  ? 'Saved'
+                  : 'Save digest schedule'}
             </Button>
           </form>
           {(watching ?? []).length === 0 ? (
             <p class="hint-text settings-followup-hint">
-              You are not monitoring anyone yet. This setting will apply once
-              you accept a partner invite.
+              You are not monitoring anyone yet. This setting will apply once you accept a partner
+              invite.
             </p>
           ) : (
             <p class="hint-text settings-followup-hint">
-              Currently monitoring{" "}
+              Currently monitoring{' '}
               {(watching ?? [])
                 .map((partner) => partner.user.name ?? partner.user.email)
-                .join(", ")}
+                .join(', ')}
               .
             </p>
           )}
@@ -423,8 +364,8 @@ export function Settings() {
         <Card class="settings-section settings-danger-zone">
           <h2>Delete account</h2>
           <p class="hint-text settings-section-hint">
-            This permanently deletes your account, devices, partner
-            relationships, sessions, and stored logs. This cannot be undone.
+            This permanently deletes your account, devices, partner relationships, sessions, and
+            stored logs. This cannot be undone.
           </p>
           <Button
             variant="danger"
@@ -441,7 +382,7 @@ export function Settings() {
         <Dialog dialogRef={deleteDialogRef} class="settings-dialog">
           <DialogHeader>Delete account</DialogHeader>
           <p class="invite-desc">
-            This permanently removes your account and all associated data. Type{" "}
+            This permanently removes your account and all associated data. Type{' '}
             <strong>{user.email}</strong> to confirm.
           </p>
           <Field label="Confirm your email">
@@ -457,9 +398,7 @@ export function Settings() {
               disabled={deleteAccountPending}
             />
           </Field>
-          {deleteAccountStatus && (
-            <Alert variant="error">{deleteAccountStatus}</Alert>
-          )}
+          {deleteAccountStatus && <Alert variant="error">{deleteAccountStatus}</Alert>}
           <DialogActions>
             <Button
               variant="ghost"
@@ -475,7 +414,7 @@ export function Settings() {
               onClick={() => deleteAccountConfirmed().catch(() => {})}
               disabled={!deleteConfirmationMatches || deleteAccountPending}
             >
-              {deleteAccountPending ? "Deleting…" : "Delete account"}
+              {deleteAccountPending ? 'Deleting…' : 'Delete account'}
             </Button>
           </DialogActions>
         </Dialog>

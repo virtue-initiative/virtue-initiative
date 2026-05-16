@@ -1,4 +1,4 @@
-import * as preact from "preact";
+import * as preact from 'preact';
 import {
   LocationProvider,
   Router,
@@ -6,30 +6,30 @@ import {
   hydrate,
   prerender as ssr,
   useLocation,
-} from "preact-iso";
-import { useEffect, useState } from "preact/hooks";
-import { SWRConfig } from "swr";
+} from 'preact-iso';
+import { useEffect, useState } from 'preact/hooks';
+import { SWRConfig } from 'swr';
 
-import { AuthProvider, useAuth } from "./context/auth";
-import { E2EEProvider } from "./context/e2ee";
-import { Header } from "./components/Header";
-import { usePartners } from "./hooks/usePartners";
-import { Home } from "./pages/Home/index";
-import { Logs } from "./pages/Logs/index";
-import { Auth } from "./pages/Auth/index";
-import { VerifyEmail } from "./pages/VerifyEmail/index";
-import { Settings } from "./pages/Settings/index";
-import { NotFound } from "./pages/_404";
-import { appSWRConfig } from "./swr";
-import { ToastProvider, useToast } from "@virtueinitiative/shared-web";
-import { initToast } from "./utils/toast";
-import "./style.css";
+import { AuthProvider, useAuth } from './context/auth';
+import { E2EEProvider } from './context/e2ee';
+import { Header } from './components/Header';
+import { usePartners } from './hooks/usePartners';
+import { Home } from './pages/Home/index';
+import { Logs } from './pages/Logs/index';
+import { Auth } from './pages/Auth/index';
+import { VerifyEmail } from './pages/VerifyEmail/index';
+import { Settings } from './pages/Settings/index';
+import { NotFound } from './pages/_404';
+import { appSWRConfig } from './swr';
+import { ToastProvider, useToast } from '@virtueinitiative/shared-web';
+import { initToast } from './utils/toast';
+import './style.css';
 
 // Dev-only: component preview page. The dynamic import keeps it out of the production bundle.
 function DevComponentsPage() {
   const [Comp, setComp] = useState<null | (() => preact.JSX.Element)>(null);
   useEffect(() => {
-    import("./pages/Dev/Components/index").then((m) => {
+    import('./pages/Dev/Components/index').then((m) => {
       setComp(() => m.ComponentsPage as () => preact.JSX.Element);
     });
   }, []);
@@ -37,16 +37,16 @@ function DevComponentsPage() {
   return <Comp />;
 }
 
-const GLOBAL_MESSAGE_KEY = "virtue_global_link_message";
+const GLOBAL_MESSAGE_KEY = 'virtue_global_link_message';
 
 function navigate(path: string, replace = false) {
-  if (typeof window === "undefined") {
+  if (typeof window === 'undefined') {
     return;
   }
 
-  const method = replace ? "replaceState" : "pushState";
-  window.history[method]({}, "", path);
-  window.dispatchEvent(new PopStateEvent("popstate"));
+  const method = replace ? 'replaceState' : 'pushState';
+  window.history[method]({}, '', path);
+  window.dispatchEvent(new PopStateEvent('popstate'));
 }
 
 function GlobalEmailActionHandler() {
@@ -56,7 +56,7 @@ function GlobalEmailActionHandler() {
   const { push } = useToast();
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === 'undefined') return;
     const stored = window.sessionStorage.getItem(GLOBAL_MESSAGE_KEY);
     if (!stored) return;
     window.sessionStorage.removeItem(GLOBAL_MESSAGE_KEY);
@@ -66,9 +66,9 @@ function GlobalEmailActionHandler() {
         | Array<{ message: string; isError: boolean }>;
       const parsedList = Array.isArray(parsed) ? parsed : [parsed];
       for (const item of parsedList.filter(
-        (i) => typeof i.message === "string" && i.message.trim(),
+        (i) => typeof i.message === 'string' && i.message.trim(),
       )) {
-        push(item.message, item.isError ? "error" : "success");
+        push(item.message, item.isError ? 'error' : 'success');
       }
     } catch {
       window.sessionStorage.removeItem(GLOBAL_MESSAGE_KEY);
@@ -76,9 +76,9 @@ function GlobalEmailActionHandler() {
   }, [currentPath, push]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
-    const inviteToken = params.get("partner_invite_token");
+    const inviteToken = params.get('partner_invite_token');
     if (!inviteToken) return;
 
     if (!token) {
@@ -86,18 +86,15 @@ function GlobalEmailActionHandler() {
     }
 
     const nextUrl = new URL(window.location.href);
-    nextUrl.searchParams.delete("partner_invite_token");
-    window.history.replaceState({}, "", nextUrl.toString());
+    nextUrl.searchParams.delete('partner_invite_token');
+    window.history.replaceState({}, '', nextUrl.toString());
 
     acceptPartnerInvite(inviteToken)
       .then(() => {
-        push("Partner invite accepted.", "success");
+        push('Partner invite accepted.', 'success');
       })
       .catch((err: unknown) => {
-        push(
-          err instanceof Error ? err.message : "Failed to accept invite",
-          "error",
-        );
+        push(err instanceof Error ? err.message : 'Failed to accept invite', 'error');
       });
   }, [acceptPartnerInvite, token, push]);
 
@@ -106,12 +103,12 @@ function GlobalEmailActionHandler() {
 
 function RedirectToLogin() {
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === 'undefined') {
       return;
     }
 
     const target = `/login${window.location.search}`;
-    if (window.location.pathname !== "/login") {
+    if (window.location.pathname !== '/login') {
       navigate(target, true);
     }
   }, []);
@@ -121,7 +118,7 @@ function RedirectToLogin() {
 
 function RedirectToDashboard() {
   useEffect(() => {
-    navigate("/", true);
+    navigate('/', true);
   }, []);
 
   return <div class="splash">Loading…</div>;
@@ -142,10 +139,7 @@ function AppShell() {
           <Router>
             <Route path="/login" component={() => <Auth mode="login" />} />
             <Route path="/signup" component={() => <Auth mode="signup" />} />
-            <Route
-              path="/forgot-password"
-              component={() => <Auth mode="forgot-password" />}
-            />
+            <Route path="/forgot-password" component={() => <Auth mode="forgot-password" />} />
             <Route path="/verify-email" component={VerifyEmail} />
             <Route default component={RedirectToLogin} />
           </Router>
@@ -199,8 +193,8 @@ export function App() {
   );
 }
 
-if (typeof window !== "undefined") {
-  hydrate(<App />, document.getElementById("app"));
+if (typeof window !== 'undefined') {
+  hydrate(<App />, document.getElementById('app'));
 }
 
 export async function prerender(data) {
