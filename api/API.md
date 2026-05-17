@@ -521,7 +521,6 @@ Query parameters:
 - `device_id`: optional `UUID`
 - `user`: optional `UUID`
 - `since`: optional timestamp, default `0`
-- `limit`: optional integer, max `500`
 
 Response `200`:
 
@@ -538,13 +537,13 @@ Response `200`:
       "created_at": DateTime,
       "risk": 0.7 | undefined
     }
-  ],
-  "next_since": DateTime | undefined
+  ]
 }
 ```
 
 `batches` only include rows where the requester has a matching `encrypted_key` envelope.
-Responses are ordered oldest-to-newest within the requested sync page.
+Returns every batch and log with `created_at > since`, ordered oldest-to-newest. Callers
+should pass the largest `created_at` they've seen as `since` on subsequent syncs.
 
 ## Device API
 

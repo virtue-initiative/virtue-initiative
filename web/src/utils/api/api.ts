@@ -74,7 +74,6 @@ export interface DataLog {
 export interface DataPage {
   batches: Batch[];
   logs: DataLog[];
-  next_since?: number;
 }
 
 export interface WatchingPartner {
@@ -302,12 +301,12 @@ export const api = {
       body: JSON.stringify({ email, password_auth }),
     }),
 
-  signupRequest: (email: string, partner_invite_token?: string) =>
+  signupRequest: (email: string, to?: string) =>
     req<{ ok: boolean }>('/signup-request', {
       method: 'POST',
       body: JSON.stringify({
         email,
-        ...(partner_invite_token ? { partner_invite_token } : {}),
+        ...(to ? { to } : {}),
       }),
     }),
 
@@ -319,7 +318,6 @@ export const api = {
     priv_key: string;
     name?: string;
     email_digest_minutes_utc?: number;
-    partner_invite_token?: string;
   }) =>
     req<{
       access_token: string;
@@ -372,25 +370,12 @@ export const api = {
       token,
     ),
 
-  resendVerificationEmail: (email: string) =>
-    req<void>('/email-verification/resend', {
-      method: 'POST',
-      body: JSON.stringify({ email }),
-    }),
-
-  requestVerificationEmail: (token: string) =>
-    req<{ ok: boolean; already_verified?: boolean }>(
-      '/email-verification',
-      { method: 'POST' },
-      token,
-    ),
-
   verifyEmail: (token: string) =>
     req<{
       ok: boolean;
       email: string;
       access_token: string;
-      purpose: 'email_verification' | 'email_change';
+      purpose: 'email_change';
     }>('/email-verification/validate', {
       method: 'POST',
       body: JSON.stringify({ token }),
@@ -475,13 +460,11 @@ export const api = {
     params?: {
       user?: string;
       since?: number;
-      limit?: number;
     },
   ) => {
     const qs = new URLSearchParams();
     if (params?.user) qs.set('user', params.user);
     if (params?.since !== undefined) qs.set('since', String(params.since));
-    if (params?.limit) qs.set('limit', String(params.limit));
     const query = qs.toString();
     return req<DataPage>(`/data${query ? `?${query}` : ''}`, {}, token);
   },

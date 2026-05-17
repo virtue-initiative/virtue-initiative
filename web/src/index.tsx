@@ -14,7 +14,7 @@ import { Header } from './components/Header';
 import { Home } from './pages/Home/index';
 import { Logs } from './pages/Logs/index';
 import { Auth } from './pages/Auth/index';
-import { VerifyEmail } from './pages/VerifyEmail/index';
+import { InviteAccept } from './pages/InviteAccept/index';
 import { Settings } from './pages/Settings/index';
 import { NotFound } from './pages/_404';
 import { ToastProvider, useToast } from '@virtueinitiative/shared-web';
@@ -46,7 +46,6 @@ function navigate(path: string, replace = false) {
 }
 
 function GlobalEmailActionHandler() {
-  const api = useAPIContext();
   const { path: currentPath } = useLocation();
   const { push } = useToast();
 
@@ -70,28 +69,6 @@ function GlobalEmailActionHandler() {
     }
   }, [currentPath, push]);
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    const inviteToken = params.get('partner_invite_token');
-    if (!inviteToken) return;
-
-    if (!api) return;
-
-    const nextUrl = new URL(window.location.href);
-    nextUrl.searchParams.delete('partner_invite_token');
-    window.history.replaceState({}, '', nextUrl.toString());
-
-    api
-      .acceptInvite(inviteToken)
-      .then(() => {
-        push('Partner invite accepted.', 'success');
-      })
-      .catch((err: unknown) => {
-        push(err instanceof Error ? err.message : 'Failed to accept invite', 'error');
-      });
-  }, [api, push]);
-
   return null;
 }
 
@@ -101,7 +78,8 @@ function RedirectToLogin() {
       return;
     }
 
-    const target = `/login${window.location.search}`;
+    const fullPath = window.location.pathname + window.location.search;
+    const target = `/login?to=${encodeURIComponent(fullPath)}`;
     if (window.location.pathname !== '/login') {
       navigate(target, true);
     }
@@ -131,8 +109,6 @@ function AppShell() {
             <Route path="/login" component={() => <Auth mode="login" />} />
             <Route path="/signup" component={() => <Auth mode="signup" />} />
             <Route path="/forgot-password" component={() => <Auth mode="forgot-password" />} />
-            <Route path="/finish-signup" component={() => <Auth mode="finish-signup" />} />
-            <Route path="/verify-email" component={VerifyEmail} />
             <Route default component={RedirectToLogin} />
           </Router>
         </>
@@ -147,12 +123,11 @@ function AppShell() {
               <Route path="/login" component={RedirectToDashboard} />
               <Route path="/signup" component={RedirectToDashboard} />
               <Route path="/forgot-password" component={RedirectToDashboard} />
-              <Route path="/finish-signup" component={RedirectToDashboard} />
               <Route path="/" component={Home} />
               <Route path="/logs" component={Logs} />
               <Route path="/logs/gallery" component={Logs} />
               <Route path="/settings" component={Settings} />
-              <Route path="/verify-email" component={VerifyEmail} />
+              <Route path="/invite_accept" component={InviteAccept} />
               {import.meta.env.DEV && (
                 <Route path="/dev/components" component={DevComponentsPage} />
               )}

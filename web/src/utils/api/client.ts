@@ -25,7 +25,6 @@ import { FeedLog, getLogImage } from '../../pages/Logs/shared';
 import { decodeWebpDimensions } from '../webp-dimensions';
 import { Session } from './session';
 
-const SYNC_PAGE_SIZE = 250;
 const DECRYPT_CONCURRENCY = 5;
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -150,6 +149,13 @@ export class APIClient {
   }
 
   // ── Auth ─────────────────────────────────────────────────────────────────
+  async verifyEmailChange(token: string): Promise<void> {
+    await api.verifyEmail(token);
+    const user = await api.getUser(this.session.token);
+    this.userCache = user;
+    notify(this.userSubscribers, user);
+  }
+
   async requestResetPassword(email: string): Promise<void> {
     await api.requestPasswordReset(email);
   }
@@ -353,25 +359,12 @@ export class APIClient {
         .sort();
 
       const initialFeed = await loadCachedDataFeed(this.userId, targetUserId);
-      let since = initialFeed.since;
-
-      while (true) {
-        const page = await api.getData(this.session.token, {
-          user: targetUserId === this.userId ? undefined : targetUserId,
-          since,
-          limit: SYNC_PAGE_SIZE,
-        });
-
-        if (page.batches.length === 0 && page.logs.length === 0) {
-          break;
-        }
-
-        const updated = await mergeDataPageIntoCache(this.userId, targetUserId, page);
-        since = updated.since;
-
-        if (page.next_since === undefined) {
-          break;
-        }
+      const page = await api.getData(this.session.token, {
+        user: targetUserId === this.userId ? undefined : targetUserId,
+        since: initialFeed.since,
+      });
+      if (page.batches.length > 0 || page.logs.length > 0) {
+        await mergeDataPageIntoCache(this.userId, targetUserId, page);
       }
 
       let cachedFeed = await loadCachedDataFeed(this.userId, targetUserId);

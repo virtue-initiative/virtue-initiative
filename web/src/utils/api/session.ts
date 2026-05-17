@@ -87,7 +87,6 @@ export class Session {
     token: string,
     name: string | undefined,
     password: string,
-    partnerInviteToken?: string,
   ): Promise<Session> {
     const params = await api.getCurrentHashParams();
     const passwordSalt = generateRandomKeyBytes(params.salt_length);
@@ -106,7 +105,6 @@ export class Session {
       priv_key: encryptedPrivateKey.toBase64(),
       ...(name ? { name } : {}),
       email_digest_minutes_utc: localHourToUtcMinutes(DEFAULT_DIGEST_LOCAL_HOUR),
-      ...(partnerInviteToken ? { partner_invite_token: partnerInviteToken } : {}),
     });
     const userId = jwtSub(res.access_token);
     if (!userId) throw new Error('Signup access token is missing a subject');

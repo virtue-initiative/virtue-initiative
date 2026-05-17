@@ -46,7 +46,7 @@ const LOCAL_WEB_URL = 'http://localhost:5173';
 
 const signupRequestSchema = z.object({
   email: z.email(),
-  partner_invite_token: z.string().min(1).optional(),
+  to: z.string().optional(),
 });
 
 const signupSchema = z.object({
@@ -57,7 +57,6 @@ const signupSchema = z.object({
   priv_key: z.base64(),
   name: z.string().min(1).optional(),
   email_digest_minutes_utc: z.int().min(0).max(1439).optional(),
-  partner_invite_token: z.string().min(1).optional(),
 });
 
 const loginMaterialQuerySchema = z.object({
@@ -192,7 +191,7 @@ function getAppUrl(c: Context<{ Bindings: Env; Variables: Variables }>) {
 async function issueEmailToken(
   db: D1Database,
   user: { id: string; email: string },
-  purpose: 'email_verification' | 'email_change' | 'password_reset',
+  purpose: 'email_change' | 'password_reset',
   ttlMs: number,
 ) {
   await invalidateEmailTokens(db, user.id, purpose);
@@ -216,20 +215,8 @@ async function sendVerificationEmail(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   user: { id: string; email: string; name?: string | null },
   token: string,
-  options?: {
-    purpose?: 'email_verification' | 'email_change';
-    next?: '/settings';
-    partner_invite_token?: string;
-  },
 ) {
-  const params = new URLSearchParams({ token });
-  if (options?.next) {
-    params.set('next', options.next);
-  }
-  if (options?.partner_invite_token) {
-    params.set('partner_invite_token', options.partner_invite_token);
-  }
-  const verifyUrl = `${getAppUrl(c)}/verify-email?${params.toString()}`;
+  const verifyUrl = `${getAppUrl(c)}/settings?change_email_token=${encodeURIComponent(token)}`;
   const email = renderEmailVerificationTemplate({
     appName: c.env.APP_NAME,
     appUrl: getAppUrl(c),
@@ -246,7 +233,7 @@ async function sendVerificationEmail(
     text: email.text,
     html: email.html,
     related_user_id: user.id,
-    metadata: { purpose: options?.purpose ?? 'email_verification', verifyUrl },
+    metadata: { purpose: 'email_change', verifyUrl },
   });
 }
 
@@ -254,13 +241,13 @@ async function sendSignupConfirmationEmail(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   recipient: { email: string; name?: string | null },
   token: string,
-  options?: { partner_invite_token?: string },
+  options?: { to?: string },
 ) {
-  const params = new URLSearchParams({ token });
-  if (options?.partner_invite_token) {
-    params.set('partner_invite_token', options.partner_invite_token);
+  const params = new URLSearchParams({ signup_token: token });
+  if (options?.to) {
+    params.set('to', options.to);
   }
-  const verifyUrl = `${getAppUrl(c)}/finish-signup?${params.toString()}`;
+  const verifyUrl = `${getAppUrl(c)}/signup?${params.toString()}`;
   const email = renderEmailVerificationTemplate({
     appName: c.env.APP_NAME,
     appUrl: getAppUrl(c),
@@ -309,7 +296,7 @@ async function sendPasswordResetEmail(
 async function getValidTokenRecord(
   db: D1Database,
   rawToken: string,
-  purpose?: 'email_verification' | 'email_change' | 'password_reset' | 'signup',
+  purpose?: 'email_change' | 'password_reset' | 'signup',
 ) {
   const token = await findEmailTokenByHash(db, hashOpaqueToken(rawToken), purpose);
   if (!token || token.consumed_at || token.expires_at < Date.now()) {
@@ -334,7 +321,7 @@ auth.get('/user/login-material', validateZ('query', loginMaterialQuerySchema), a
 });
 
 auth.post('/signup-request', validateZ('json', signupRequestSchema), async (c) => {
-  const { email, partner_invite_token } = c.req.valid('json');
+  const { email, to } = c.req.valid('json');
   const normalizedEmail = email.trim().toLowerCase();
   const existingUser = await findUserByEmail(c.env.DB, normalizedEmail);
 
@@ -356,7 +343,7 @@ auth.post('/signup-request', validateZ('json', signupRequestSchema), async (c) =
   });
 
   await sendSignupConfirmationEmail(c, { email: normalizedEmail }, token, {
-    partner_invite_token: partner_invite_token ?? undefined,
+    to: to ?? undefined,
   });
 
   return c.json({ ok: true });
@@ -371,7 +358,6 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
     priv_key,
     name,
     email_digest_minutes_utc,
-    partner_invite_token,
   } = c.req.valid('json');
 
   const record = await getValidTokenRecord(c.env.DB, verification_token, 'signup');
@@ -417,9 +403,6 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
 
   await updateUser(c.env.DB, userId, { email_verified: true });
   await consumeEmailToken(c.env.DB, record.id, Date.now());
-  // partner_invite_token is accepted in the schema and forwarded to the client URL by
-  // GlobalEmailActionHandler; acceptance happens after login through /partner/accept.
-  void partner_invite_token;
 
   const accessToken = await createSession(c, userId);
 
@@ -576,7 +559,6 @@ auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema),
         name: name ?? user.name,
       },
       verificationToken,
-      { purpose: 'email_change', next: '/settings' },
     );
   }
 
@@ -623,35 +605,24 @@ auth.post('/email-verification/validate', validateZ('json', verifyEmailSchema), 
   const { token } = c.req.valid('json');
   const record = await getValidTokenRecord(c.env.DB, token);
 
-  if (
-    !record ||
-    !record.user_id ||
-    (record.purpose !== 'email_verification' && record.purpose !== 'email_change')
-  ) {
+  if (!record || !record.user_id || record.purpose !== 'email_change') {
     return c.json({ error: 'Invalid or expired token' }, 400);
   }
 
-  const verificationPurpose = record.purpose;
   const userId = record.user_id;
 
-  if (verificationPurpose === 'email_change') {
-    const existingUser = await findUserByEmail(c.env.DB, record.email);
-    if (existingUser && existingUser.id !== userId) {
-      return c.json({ error: 'Email is already in use' }, 409);
-    }
-
-    await updateUser(c.env.DB, userId, {
-      email: record.email,
-      email_verified: true,
-      email_bounced_at: null,
-    });
-    await consumeEmailToken(c.env.DB, record.id, Date.now());
-    await invalidateEmailTokens(c.env.DB, userId, 'email_change');
-  } else {
-    await updateUser(c.env.DB, userId, { email_verified: true, email_bounced_at: null });
-    await consumeEmailToken(c.env.DB, record.id, Date.now());
-    await invalidateEmailTokens(c.env.DB, userId, 'email_verification');
+  const existingUser = await findUserByEmail(c.env.DB, record.email);
+  if (existingUser && existingUser.id !== userId) {
+    return c.json({ error: 'Email is already in use' }, 409);
   }
+
+  await updateUser(c.env.DB, userId, {
+    email: record.email,
+    email_verified: true,
+    email_bounced_at: null,
+  });
+  await consumeEmailToken(c.env.DB, record.id, Date.now());
+  await invalidateEmailTokens(c.env.DB, userId, 'email_change');
 
   const accessToken = await createSession(c, userId);
 
@@ -659,60 +630,8 @@ auth.post('/email-verification/validate', validateZ('json', verifyEmailSchema), 
     ok: true,
     email: record.email,
     access_token: accessToken,
-    purpose: verificationPurpose,
+    purpose: 'email_change' as const,
   });
-});
-
-auth.post(
-  '/email-verification/resend',
-  validateZ('json', z.object({ email: z.email() })),
-  async (c) => {
-    const { email } = c.req.valid('json');
-    const user = await findUserByEmail(c.env.DB, email.trim().toLowerCase());
-
-    if (user && user.email_verified !== 1 && !user.email_bounced_at) {
-      const verificationToken = await issueEmailToken(
-        c.env.DB,
-        { id: user.id, email: user.email },
-        'email_verification',
-        EMAIL_VERIFICATION_TTL_MS,
-      );
-      await sendVerificationEmail(c, user, verificationToken);
-    }
-
-    return c.body(null, 204);
-  },
-);
-
-auth.post('/email-verification', authenticate('access'), async (c) => {
-  const user = await findUserById(c.env.DB, c.get('sub'));
-
-  if (!user) {
-    return c.json({ error: 'User account not found' }, 404);
-  }
-
-  if (user.email_verified === 1) {
-    return c.json({ ok: true, already_verified: true });
-  }
-
-  if (user.email_bounced_at) {
-    return c.json(
-      {
-        error:
-          'Your last verification email bounced. Please update your email address before requesting another verification email.',
-      },
-      409,
-    );
-  }
-
-  const verificationToken = await issueEmailToken(
-    c.env.DB,
-    { id: user.id, email: user.email },
-    'email_verification',
-    EMAIL_VERIFICATION_TTL_MS,
-  );
-  await sendVerificationEmail(c, user, verificationToken);
-  return c.json({ ok: true });
 });
 
 auth.post('/password-reset', validateZ('json', passwordResetRequestSchema), async (c) => {

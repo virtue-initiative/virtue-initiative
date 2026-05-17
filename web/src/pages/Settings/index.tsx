@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { User, usePartners, useUser, useAPIContext } from '../../utils/api';
+import { sendToast } from '../../utils/toast';
 import {
   Alert,
   Button,
@@ -49,6 +50,28 @@ export function Settings() {
     setEmailFrequency(user.email_frequency ?? 'daily');
     setEmailDigestLocalHour(utcMinutesToLocalHour(user.email_digest_minutes_utc));
   }, [user]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !api) return;
+    const params = new URLSearchParams(window.location.search);
+    const changeEmailToken = params.get('change_email_token');
+    if (!changeEmailToken) return;
+
+    params.delete('change_email_token');
+    const cleanUrl = params.toString() ? `/settings?${params.toString()}` : '/settings';
+    window.history.replaceState({}, '', cleanUrl);
+
+    api
+      .verifyEmailChange(changeEmailToken)
+      .then(() => {
+        sendToast('Email updated successfully.', { isError: false });
+      })
+      .catch((err: unknown) => {
+        sendToast(err instanceof Error ? err.message : 'Failed to update email.', {
+          isError: true,
+        });
+      });
+  }, [api]);
 
   useEffect(() => {
     if (savedButtonUntil <= 0) return;

@@ -7,22 +7,16 @@ export async function login(email: string, password: string): Promise<APIClient>
   return new APIClient(session);
 }
 
-export async function requestSignup(email: string, partnerInviteToken?: string): Promise<void> {
-  await api.signupRequest(email, partnerInviteToken);
+export async function requestSignup(email: string, to?: string): Promise<void> {
+  await api.signupRequest(email, to);
 }
 
 export async function finishSignup(
   verificationToken: string,
   name: string | undefined,
   password: string,
-  partnerInviteToken?: string,
 ): Promise<APIClient> {
-  const session = await Session.fromFinishSignup(
-    verificationToken,
-    name,
-    password,
-    partnerInviteToken,
-  );
+  const session = await Session.fromFinishSignup(verificationToken, name, password);
   return new APIClient(session);
 }
 

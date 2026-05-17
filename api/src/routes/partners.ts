@@ -113,7 +113,7 @@ partners.post(
       ownerEmail: currentUser.email,
       appName: c.env.APP_NAME,
       appUrl: getAppUrl(c),
-      inviteUrl: `${getAppUrl(c)}/?partner_invite_token=${encodeURIComponent(inviteToken)}`,
+      inviteUrl: `${getAppUrl(c)}/invite_accept?partner_token=${encodeURIComponent(inviteToken)}`,
     });
     await sendEmail({
       env: c.env,

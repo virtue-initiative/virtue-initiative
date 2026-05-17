@@ -570,7 +570,6 @@ export async function listBatches(
   db: D1Database,
   ownerIds: string[],
   filters: { deviceId?: string; since?: number },
-  limit: number,
 ) {
   if (ownerIds.length === 0) {
     return [];
@@ -591,8 +590,7 @@ export async function listBatches(
     params.push(filters.since);
   }
 
-  query += ' ORDER BY created_at ASC LIMIT ?';
-  params.push(limit);
+  query += ' ORDER BY created_at ASC';
 
   return allWithUuidFields<{
     id: string;
@@ -630,7 +628,6 @@ export async function listDeviceLogs(
   db: D1Database,
   ownerIds: string[],
   filters: { deviceId?: string; since?: number },
-  limit: number,
 ) {
   if (ownerIds.length === 0) {
     return [];
@@ -651,8 +648,7 @@ export async function listDeviceLogs(
     params.push(filters.since);
   }
 
-  query += ' ORDER BY created_at ASC LIMIT ?';
-  params.push(limit);
+  query += ' ORDER BY created_at ASC';
 
   return allWithUuidFields<{
     id: string;

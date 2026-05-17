@@ -1,9 +1,4 @@
-export const emailTokenPurposes = [
-  'email_verification',
-  'email_change',
-  'password_reset',
-  'partner_invite',
-] as const;
+export const emailTokenPurposes = ['email_change', 'password_reset', 'partner_invite'] as const;
 
 export type EmailTokenPurpose = (typeof emailTokenPurposes)[number];
 
