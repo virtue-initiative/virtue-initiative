@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Virtue brand colors matching iOS -->
+    <color name="virtue_green">#008900</color>
+    <color name="virtue_accent">#008900</color>
+
+    <!-- Material3 color scheme -->
+    <color name="md_theme_light_primary">#008900</color>
+    <color name="md_theme_light_onPrimary">#FFFFFF</color>
+    <color name="md_theme_light_primaryContainer">#C4F0C4</color>
+    <color name="md_theme_light_onPrimaryContainer">#002200</color>
+    <color name="md_theme_light_secondary">#526350</color>
+    <color name="md_theme_light_onSecondary">#FFFFFF</color>
+    <color name="md_theme_light_secondaryContainer">#D4E8D0</color>
+    <color name="md_theme_light_onSecondaryContainer">#0F1F10</color>
+    <color name="md_theme_light_background">#F9F9F7</color>
+    <color name="md_theme_light_onBackground">#1A1C19</color>
+    <color name="md_theme_light_surface">#F9F9F7</color>
+    <color name="page_background">#F9F9F7</color>
+    <color name="md_theme_light_onSurface">#1A1C19</color>
+    <color name="md_theme_light_surfaceVariant">#DFE4DA</color>
+    <color name="md_theme_light_onSurfaceVariant">#43483F</color>
+    <color name="md_theme_light_outline">#73796E</color>
+
+    <color name="md_theme_dark_primary">#A9D4A9</color>
+    <color name="md_theme_dark_onPrimary">#003A00</color>
+    <color name="md_theme_dark_primaryContainer">#005200</color>
+    <color name="md_theme_dark_onPrimaryContainer">#C4F0C4</color>
+    <color name="md_theme_dark_secondary">#B9CCB4</color>
+    <color name="md_theme_dark_onSecondary">#243423</color>
+    <color name="md_theme_dark_secondaryContainer">#3A4B39</color>
+    <color name="md_theme_dark_onSecondaryContainer">#D4E8D0</color>
+    <color name="md_theme_dark_background">#1A1C19</color>
+    <color name="md_theme_dark_onBackground">#E2E3DC</color>
+    <color name="md_theme_dark_surface">#1A1C19</color>
+    <color name="md_theme_dark_onSurface">#E2E3DC</color>
+    <color name="md_theme_dark_surfaceVariant">#43483F</color>
+    <color name="md_theme_dark_onSurfaceVariant">#C3C8BD</color>
+    <color name="md_theme_dark_outline">#8D9388</color>
+
+    <!-- Card and UI colors -->
+    <color name="card_background_light">#FFFFFF</color>
+    <color name="card_background_dark">#2C2C2E</color>
+    <color name="card_border_light">#E5E5EA</color>
+    <color name="card_border_dark">#48484A</color>
+</resources>
