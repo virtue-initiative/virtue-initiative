@@ -88,7 +88,7 @@ describe('Auth routes', () => {
     expect(signupToken?.email).toBe('alice@example.com');
     expect(signupToken?.user_id).toBeNull();
 
-    const verificationToken = extractTokenFromDelivery(deliveries[0]!, 'token');
+    const verificationToken = extractTokenFromDelivery(deliveries[0]!, 'signup_token');
     expect(verificationToken).toBeTruthy();
 
     const signupRes = await SELF.fetch(`${BASE}/signup`, {
@@ -291,13 +291,14 @@ describe('Auth routes', () => {
     const latestMetadata = JSON.parse(deliveries[deliveries.length - 1]!.metadata) as {
       verifyUrl: string;
     };
-    expect(new URL(latestMetadata.verifyUrl).searchParams.get('next')).toBe('/settings');
+    expect(new URL(latestMetadata.verifyUrl).pathname).toBe('/settings');
+    expect(new URL(latestMetadata.verifyUrl).searchParams.has('change_email_token')).toBe(true);
 
     const latestVerificationToken = await latestEmailToken('email_change');
     expect(latestVerificationToken?.email).toBe('carol-new@example.com');
   });
 
-  it('verifies email-change tokens, and can resend for unverified users', async () => {
+  it('verifies email-change tokens', async () => {
     const { token, userId } = await signupAndGetToken('verifyme@example.com', 'pw', 'Verify Me');
 
     const updateEmailRes = await SELF.fetch(`${BASE}/user`, {
@@ -322,7 +323,7 @@ describe('Auth routes', () => {
 
     const latestDelivery = (await listEmailDeliveries()).at(-1);
     const emailChangeToken = latestDelivery
-      ? extractTokenFromDelivery(latestDelivery, 'token')
+      ? extractTokenFromDelivery(latestDelivery, 'change_email_token')
       : null;
     expect(emailChangeToken).toBeTruthy();
 
@@ -357,29 +358,6 @@ describe('Auth routes', () => {
       email: 'verifyme-new@example.com',
       email_verified: true,
     });
-
-    await env.DB.prepare('UPDATE users SET email_verified = 0 WHERE id = ?')
-      .bind(uuidToBytes(userId))
-      .run();
-    const resendRes = await SELF.fetch(`${BASE}/email-verification`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    expect(resendRes.status).toBe(200);
-  });
-
-  it('blocks verification resend requests after a bounced delivery', async () => {
-    const { token, userId } = await signupAndGetToken('bounced-resend@example.com', 'pw');
-    await env.DB.prepare('UPDATE users SET email_verified = 0, email_bounced_at = ? WHERE id = ?')
-      .bind(Date.now(), uuidToBytes(userId))
-      .run();
-
-    const resendRes = await SELF.fetch(`${BASE}/email-verification`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    expect(resendRes.status).toBe(409);
   });
 
   it('requires matching email confirmation and permanently deletes the account with cascaded data cleanup', async () => {

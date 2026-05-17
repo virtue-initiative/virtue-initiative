@@ -96,7 +96,7 @@ export async function signupAndGetToken(
     throw new Error(`signup verification delivery not found for ${email}`);
   }
 
-  const verificationToken = extractTokenFromDelivery(signupDelivery, 'token');
+  const verificationToken = extractTokenFromDelivery(signupDelivery, 'signup_token');
   if (!verificationToken) {
     throw new Error(`signup verification token not found for ${email}`);
   }
