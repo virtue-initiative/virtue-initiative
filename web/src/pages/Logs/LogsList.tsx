@@ -1,12 +1,7 @@
-import { useEffect, useRef, useState } from "preact/hooks";
-import { useVirtualizer } from "@tanstack/react-virtual";
-import { formatRelativeTimestamp } from "../../utils/time";
-import {
-  FeedLog,
-  getLogImage,
-  humanizeLogType,
-  LogDetailDialog,
-} from "./shared";
+import { useEffect, useRef, useState } from 'preact/hooks';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { formatRelativeTimestamp } from '../../utils/time';
+import { FeedLog, formatDayAndTime, getLogImage, humanizeLogType, LogDetailDialog } from './shared';
 
 const ITEM_HEIGHT = 68;
 
@@ -22,7 +17,7 @@ function ThumbImage({ imageBytes }: { imageBytes: Uint8Array }) {
             imageBytes.byteOffset + imageBytes.byteLength,
           ) as ArrayBuffer,
         ],
-        { type: "image/webp" },
+        { type: 'image/webp' },
       ),
     );
     setSrc(url);
@@ -39,12 +34,14 @@ export function LogsList({
   hasMore,
   onLoadMore,
   deviceName,
+  onVisibleDateChange,
 }: {
   items: FeedLog[];
   loading: boolean;
   hasMore: boolean;
   onLoadMore: () => void;
   deviceName: (id: string) => string;
+  onVisibleDateChange?: (date: string | null) => void;
 }) {
   const [selectedItem, setSelectedItem] = useState<FeedLog | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -52,18 +49,23 @@ export function LogsList({
   const virtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () =>
-      (scrollRef.current?.closest(".logs-main") as HTMLElement | null) ??
-      scrollRef.current,
+      (scrollRef.current?.closest('.logs-main') as HTMLElement | null) ?? scrollRef.current,
     scrollMargin: scrollRef.current?.offsetTop ?? 0,
     estimateSize: () => ITEM_HEIGHT,
     overscan: 10,
     useAnimationFrameWithResizeObserver: true,
     onChange: (instance) => {
-      if (!hasMore || loading) return;
       const virtualItems = instance.getVirtualItems();
-      const lastItem = virtualItems[virtualItems.length - 1];
-      if (lastItem && lastItem.index >= items.length - 1) {
-        onLoadMore();
+      if (hasMore && !loading) {
+        const lastItem = virtualItems[virtualItems.length - 1];
+        if (lastItem && lastItem.index >= items.length - 1) {
+          onLoadMore();
+        }
+      }
+      if (onVisibleDateChange) {
+        const firstVisible = virtualItems[0];
+        const item = firstVisible ? items[firstVisible.index] : null;
+        onVisibleDateChange(item ? formatDayAndTime(item.ts) : null);
       }
     },
   });
@@ -76,26 +78,29 @@ export function LogsList({
     <>
       <div class="logs-virtual-scroll" ref={scrollRef}>
         <div
+          class="logs-virtual-scroll-inner"
           style={{
             height: `${virtualizer.getTotalSize()}px`,
-            width: "100%",
-            position: "relative",
+            width: '100%',
+            position: 'relative',
           }}
         >
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const item = items[virtualRow.index];
             const image = getLogImage(item);
+            const isFirst = virtualRow.index === 0;
+            const isLast = virtualRow.index === items.length - 1;
 
             return (
               <button
                 key={item.id}
-                class="logs-vrow"
+                class={`logs-vrow${isFirst ? ' logs-vrow--first' : ''}${isLast ? ' logs-vrow--last' : ''}`}
                 type="button"
                 style={{
-                  position: "absolute",
+                  position: 'absolute',
                   top: 0,
                   left: 0,
-                  width: "100%",
+                  width: '100%',
                   height: `${virtualRow.size}px`,
                   transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
                 }}
@@ -111,29 +116,19 @@ export function LogsList({
                 <div class="logs-vrow-body">
                   <div class="logs-vrow-top">
                     <span class="logs-type">{humanizeLogType(item.type)}</span>
-                    <span class="logs-device">
-                      {deviceName(item.device_id)}
-                    </span>
+                    <span class="logs-device">{deviceName(item.device_id)}</span>
                     {item.risk > 0.7 && (
-                      <span class="logs-verify-badge logs-verify-badge--failed">
-                        ⚠ High
-                      </span>
+                      <span class="logs-verify-badge logs-verify-badge--failed">⚠ High</span>
                     )}
                     {item.risk > 0.4 && item.risk <= 0.7 && (
-                      <span class="logs-verify-badge logs-verify-badge--moderate">
-                        Med
-                      </span>
+                      <span class="logs-verify-badge logs-verify-badge--moderate">Med</span>
                     )}
-                    {item.batch_status === "failed" && (
-                      <span class="logs-verify-badge logs-verify-badge--failed">
-                        ⚠ Unverified
-                      </span>
+                    {item.batch_status === 'failed' && (
+                      <span class="logs-verify-badge logs-verify-badge--failed">⚠ Unverified</span>
                     )}
                   </div>
                   <div class="logs-vrow-sub">
-                    <span class="logs-time">
-                      {formatRelativeTimestamp(item.ts)}
-                    </span>
+                    <span class="logs-time">{formatRelativeTimestamp(item.ts)}</span>
                   </div>
                 </div>
               </button>

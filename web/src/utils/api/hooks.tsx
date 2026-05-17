@@ -73,7 +73,7 @@ export function useUser(): User | null {
       setUser(null);
       return;
     }
-    const { user: initial, unsubscribe } = api.getUser(setUser);
+    const { user: initial, unsubscribe } = api.subscribeUser(setUser);
     setUser(initial);
     return unsubscribe;
   }, [api]);
@@ -81,43 +81,75 @@ export function useUser(): User | null {
   return user;
 }
 
-export function usePartners(): { watchers: WatcherPartner[]; watchings: WatchingPartner[] } {
+export function usePartners(): {
+  watchers: WatcherPartner[];
+  watchings: WatchingPartner[];
+  loaded: boolean;
+} {
   const api = useAPIContext();
   const [watchers, setWatchers] = useState<WatcherPartner[]>(() => api?.listWatchers() ?? []);
   const [watchings, setWatchings] = useState<WatchingPartner[]>(() => api?.listWatchings() ?? []);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     if (!api) {
       setWatchers([]);
       setWatchings([]);
+      setLoaded(false);
       return;
     }
-    const subWatchers = api.listWatchers(setWatchers);
-    const subWatchings = api.listWatchings(setWatchings);
+    let watchersLoaded = false;
+    let watchingsLoaded = false;
+    const maybeSetLoaded = () => {
+      if (watchersLoaded && watchingsLoaded) setLoaded(true);
+    };
+    const subWatchers = api.subscribeWatchers((w) => {
+      setWatchers(w);
+      watchersLoaded = true;
+      maybeSetLoaded();
+    });
+    const subWatchings = api.subscribeWatchings((w) => {
+      setWatchings(w);
+      watchingsLoaded = true;
+      maybeSetLoaded();
+    });
     setWatchers(subWatchers.watchers);
     setWatchings(subWatchings.watchings);
+    watchersLoaded = subWatchers.loaded;
+    watchingsLoaded = subWatchings.loaded;
+    maybeSetLoaded();
     return () => {
       subWatchers.unsubscribe();
       subWatchings.unsubscribe();
     };
   }, [api]);
 
-  return { watchers, watchings };
+  return { watchers, watchings, loaded };
 }
 
-export function useDevices(): Device[] {
+export function useDevices(): { devices: Device[]; loaded: boolean } {
   const api = useAPIContext();
   const [devices, setDevices] = useState<Device[]>(() => api?.listDevices() ?? []);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     if (!api) {
       setDevices([]);
+      setLoaded(false);
       return;
     }
-    const { devices: initial, unsubscribe } = api.listDevices(setDevices);
+    const {
+      devices: initial,
+      loaded: initialLoaded,
+      unsubscribe,
+    } = api.subscribeDevices((d) => {
+      setDevices(d);
+      setLoaded(true);
+    });
     setDevices(initial);
+    if (initialLoaded) setLoaded(true);
     return unsubscribe;
   }, [api]);
 
-  return devices;
+  return { devices, loaded };
 }

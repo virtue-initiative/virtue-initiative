@@ -107,13 +107,33 @@ export const LOG_TYPES = [
   'developer_log',
 ] as const;
 
+const _dayLabelFmt = new Intl.DateTimeFormat(undefined, {
+  weekday: 'long',
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+});
+export function formatDayLabel(ms: number): string {
+  return _dayLabelFmt.format(new Date(ms));
+}
+
+const _dayAndTimeFmt = new Intl.DateTimeFormat(undefined, {
+  weekday: 'long',
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+});
+export function formatDayAndTime(ms: number): string {
+  return _dayAndTimeFmt.format(new Date(ms));
+}
+
 export function LogImage({
   imageBytes,
-  onDimensions,
   onClick,
 }: {
   imageBytes: Uint8Array;
-  onDimensions?: (width: number, height: number) => void;
   onClick?: () => void;
 }) {
   const [imgSrc, setImgSrc] = useState<string | null>(null);
@@ -129,22 +149,7 @@ export function LogImage({
 
   return (
     <button class="logs-thumb-button" type="button" onClick={onClick} aria-label="View screenshot">
-      <img
-        class="logs-thumb-image"
-        src={imgSrc}
-        alt="screenshot"
-        loading="lazy"
-        onLoad={(event) => {
-          if (!onDimensions) {
-            return;
-          }
-
-          const image = event.currentTarget;
-          if (image.naturalWidth > 0 && image.naturalHeight > 0) {
-            onDimensions(image.naturalWidth, image.naturalHeight);
-          }
-        }}
-      />
+      <img class="logs-thumb-image" src={imgSrc} alt="screenshot" loading="lazy" />
     </button>
   );
 }

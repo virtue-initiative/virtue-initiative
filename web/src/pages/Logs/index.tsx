@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState, useCallback } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { Device, LogQueryResult, useAPIContext, useDevices, usePartners } from '../../utils/api';
 import { LogsGallery } from './LogsGallery';
 import { LogsList } from './LogsList';
 import { getRiskRating, type RiskRating } from '@virtueinitiative/shared-web/risk';
-import { FeedLog, getLogImage, humanizeLogType, LOG_TYPES } from './shared';
+import { FeedLog, formatDayLabel, getLogImage, humanizeLogType, LOG_TYPES } from './shared';
 import './style.css';
 import { useUrlState } from '../../hooks/useUrlState';
 import { Button, Field, IconButton, Select } from '@virtueinitiative/shared-web';
@@ -88,60 +88,34 @@ function CloseIcon() {
   );
 }
 
-function ChevronLeftIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      fill="none"
-      viewBox="0 0 24 24"
-      strokeWidth={2}
-      stroke="currentColor"
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
-    </svg>
-  );
+function dateToBoundsStart(d: string): number {
+  return new Date(d + 'T00:00:00').getTime();
 }
 
-function ChevronRightIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      fill="none"
-      viewBox="0 0 24 24"
-      strokeWidth={2}
-      stroke="currentColor"
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-    </svg>
-  );
+function dateToBoundsEnd(d: string): number {
+  return new Date(d + 'T23:59:59.999').getTime();
 }
 
-const dayLabelFormatter = new Intl.DateTimeFormat(undefined, {
-  weekday: 'long',
-  month: 'short',
-  day: 'numeric',
-  year: 'numeric',
-});
-
-function getDayBounds(offset: number): { startMs: number; endMs: number } {
-  const day = new Date();
-  day.setHours(0, 0, 0, 0);
-  day.setDate(day.getDate() + offset);
-  const end = new Date(day);
-  end.setHours(23, 59, 59, 999);
-  return { startMs: day.getTime(), endMs: end.getTime() };
-}
-
-function formatDayLabel(startMs: number): string {
-  return dayLabelFormatter.format(new Date(startMs));
+function shiftDate(dateStr: string, days: number): string {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
 export function Logs() {
   const api = useAPIContext();
   const userId = api?.userId ?? null;
   const { path } = useLocation();
-  const devices = useDevices();
-  const { watchings: watching } = usePartners();
+  const { devices, loaded: devicesLoaded } = useDevices();
+  const { watchings: watching, loaded: partnersLoaded } = usePartners();
+
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = shiftDate(today, -1);
+  const oneMonthAgo = (() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() - 1);
+    return d.toISOString().slice(0, 10);
+  })();
 
   const [selectedDevice, setSelectedDevice] = useUrlState<string | null>(
     'device_id',
@@ -151,7 +125,10 @@ export function Logs() {
   const [selectedUser, setSelectedUser] = useUrlState<string | null>('user_id', 'string', null);
   const [galleryFullscreen, setGalleryFullscreen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [dayOffset, setDayOffset] = useUrlState('day', 'number', 0);
+  const [startDate, setStartDate] = useUrlState('start', 'string', yesterday);
+  const [endDate, setEndDate] = useUrlState('end', 'string', today);
+  const [visibleDate, setVisibleDate] = useState<string | null>(null);
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   type RiskFilter = 'all' | RiskRating;
   const [riskFilter, setRiskFilter] = useUrlState<RiskFilter>('risk', 'string', 'all');
   const [rawTypeFilter, setTypeFilter] = useUrlState<string | string[] | null>(
@@ -160,21 +137,27 @@ export function Logs() {
     null,
   );
 
-  const { startMs: weekStart, endMs: weekEnd } = useMemo(
-    () => getDayBounds(dayOffset),
-    [dayOffset],
-  );
+  const weekStart = dateToBoundsStart(startDate);
+  const weekEnd = dateToBoundsEnd(endDate);
 
   const [logResult, setLogResult] = useState<LogQueryResult>({
     logs: [],
     complete: false,
   });
   const activeTargetUserId = selectedUser ?? userId;
+  const scopeKeyRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!api || !activeTargetUserId) {
       setLogResult({ logs: [], complete: false });
+      scopeKeyRef.current = null;
       return;
     }
+
+    const newScopeKey = `${activeTargetUserId}:${selectedDevice}`;
+    const scopeChanged = scopeKeyRef.current !== newScopeKey;
+    scopeKeyRef.current = newScopeKey;
+
     let cancelled = false;
     const initial = api.queryLogs(
       {
@@ -187,7 +170,9 @@ export function Logs() {
         if (!cancelled) setLogResult(next);
       },
     );
-    setLogResult(initial);
+    if (scopeChanged) {
+      setLogResult(initial);
+    }
     return () => {
       cancelled = true;
     };
@@ -197,7 +182,7 @@ export function Logs() {
   const logsLoading = !logResult.complete;
   const deviceList = devices;
   const watchingList = watching;
-  const sidebarLoading = false;
+  const sidebarLoading = !devicesLoaded || !partnersLoaded;
 
   const { knownUsers, deviceGroups } = useMemo(() => {
     if (!userId) {
@@ -282,16 +267,13 @@ export function Logs() {
     setSidebarOpen(false);
   }
 
-  const dayLabel = formatDayLabel(weekStart);
-  const prevDay = useCallback(() => setDayOffset(dayOffset - 1), [dayOffset, setDayOffset]);
-  const nextDay = useCallback(() => setDayOffset(dayOffset + 1), [dayOffset, setDayOffset]);
-
-  const title =
+  const baseTitle =
     sidebarLoading && selectedUser
       ? 'Loading…'
       : selectedUser
         ? `${groupLabel(selectedUser)}'s logs`
         : 'My logs';
+  const title = selectedDevice ? `${baseTitle} — ${deviceName(selectedDevice)}` : baseTitle;
   const isGallery = path === '/logs/gallery';
   const typeFilter = Array.isArray(rawTypeFilter) ? (rawTypeFilter[0] ?? null) : rawTypeFilter;
 
@@ -398,36 +380,67 @@ export function Logs() {
                 <MenuIcon />
                 <span>Devices</span>
               </Button>
-              <div class="logs-filter-switcher">
-                <Field label="Risk" class="logs-filter-field">
-                  <Select
-                    size="md"
-                    class="logs-filter-select"
-                    value={riskFilter}
-                    onChange={(e) =>
-                      setRiskFilter((e.target as HTMLSelectElement).value as RiskFilter)
-                    }
-                  >
-                    <option value="all">All</option>
-                    <option value="high">High</option>
-                    <option value="moderate">Medium</option>
-                  </Select>
-                </Field>
-                <Field label="Type" class="logs-filter-field">
-                  <Select
-                    size="md"
-                    class="logs-filter-select"
-                    value={typeFilter ?? ''}
-                    onChange={(e) => setTypeFilter((e.target as HTMLSelectElement).value || null)}
-                  >
-                    <option value="">All</option>
-                    {LOG_TYPES.map((type) => (
-                      <option key={type} value={type}>
-                        {humanizeLogType(type)}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
+              <div class="logs-filter-section">
+                <Button
+                  variant="ghost"
+                  size="md"
+                  class="logs-filter-toggle"
+                  type="button"
+                  onClick={() => setFiltersExpanded((v) => !v)}
+                >
+                  Edit Search
+                </Button>
+                <div class={`logs-filter-panel${filtersExpanded ? ' is-open' : ''}`}>
+                  <Field label="Start" class="logs-filter-field">
+                    <input
+                      type="date"
+                      class="logs-filter-date"
+                      value={startDate}
+                      min={oneMonthAgo}
+                      max={endDate}
+                      onChange={(e) => setStartDate((e.target as HTMLInputElement).value)}
+                    />
+                  </Field>
+                  <Field label="End" class="logs-filter-field">
+                    <input
+                      type="date"
+                      class="logs-filter-date"
+                      value={endDate}
+                      min={oneMonthAgo}
+                      max={today}
+                      onChange={(e) => setEndDate((e.target as HTMLInputElement).value)}
+                    />
+                  </Field>
+                  <Field label="Risk" class="logs-filter-field">
+                    <Select
+                      size="md"
+                      class="logs-filter-select"
+                      value={riskFilter}
+                      onChange={(e) =>
+                        setRiskFilter((e.target as HTMLSelectElement).value as RiskFilter)
+                      }
+                    >
+                      <option value="all">All</option>
+                      <option value="high">High</option>
+                      <option value="moderate">Medium</option>
+                    </Select>
+                  </Field>
+                  <Field label="Type" class="logs-filter-field">
+                    <Select
+                      size="md"
+                      class="logs-filter-select"
+                      value={typeFilter ?? ''}
+                      onChange={(e) => setTypeFilter((e.target as HTMLSelectElement).value || null)}
+                    >
+                      <option value="">All</option>
+                      {LOG_TYPES.map((type) => (
+                        <option key={type} value={type}>
+                          {humanizeLogType(type)}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                </div>
               </div>
               <div class="logs-header-view-controls">
                 {isGallery && (
@@ -458,17 +471,11 @@ export function Logs() {
             </div>
           </div>
 
-          <div class="logs-week-nav">
-            <IconButton aria-label="Previous day" onClick={prevDay}>
-              <ChevronLeftIcon />
-            </IconButton>
-            <span class="logs-week-label">{dayLabel}</span>
-            <IconButton aria-label="Next day" onClick={nextDay} disabled={dayOffset >= 0}>
-              <ChevronRightIcon />
-            </IconButton>
-          </div>
+          <p class="logs-summary">{logsLoading ? 'Syncing logs…' : 'Logs synced'}</p>
 
-          {logsLoading && <p class="logs-summary">Syncing logs…</p>}
+          <div class="logs-sticky-date" aria-live="polite">
+            {visibleDate ?? formatDayLabel(weekStart)}
+          </div>
 
           {isGallery ? (
             <LogsGallery
@@ -478,6 +485,7 @@ export function Logs() {
               onLoadMore={() => {}}
               deviceName={deviceName}
               fullscreen={galleryFullscreen}
+              onVisibleDateChange={setVisibleDate}
             />
           ) : (
             <LogsList
@@ -486,8 +494,36 @@ export function Logs() {
               hasMore={false}
               onLoadMore={() => {}}
               deviceName={deviceName}
+              onVisibleDateChange={setVisibleDate}
             />
           )}
+
+          <div class="logs-load-more">
+            <Button
+              variant="ghost"
+              size="md"
+              type="button"
+              onClick={() =>
+                setStartDate(
+                  shiftDate(startDate, -1) >= oneMonthAgo ? shiftDate(startDate, -1) : oneMonthAgo,
+                )
+              }
+            >
+              Load another day
+            </Button>
+            <Button
+              variant="ghost"
+              size="md"
+              type="button"
+              onClick={() =>
+                setStartDate(
+                  shiftDate(startDate, -7) >= oneMonthAgo ? shiftDate(startDate, -7) : oneMonthAgo,
+                )
+              }
+            >
+              Load another week
+            </Button>
+          </div>
         </section>
       </div>
     </div>

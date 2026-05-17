@@ -19,6 +19,7 @@
     "@tanstack/react-virtual": "^3.13.24",
     "@virtueinitiative/shared-web": "file:../shared-web",
     "dayjs": "^1.11.19",
+    "dexie": "^4.4.2",
     "hash-wasm": "^4.12.0",
     "preact": "^10.26.9",
     "preact-iso": "^2.11.1",

@@ -204,12 +204,6 @@ button.logs-sidebar-close {
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   padding-right: 0.25rem;
-
-  @media (max-width: 720px) {
-    overflow: visible;
-    padding-right: 0;
-    min-height: auto;
-  }
 }
 
 .logs-header {
@@ -224,6 +218,10 @@ button.logs-sidebar-close {
     margin: 0;
     font-size: 1.3rem;
     font-weight: 700;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 
@@ -290,8 +288,8 @@ button.logs-sidebar-backdrop.is-open {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     grid-template-areas:
-      "toggle  view-controls"
-      "filters filters";
+      'toggle  view-controls'
+      'filters filters';
     align-items: center;
     width: 100%;
     row-gap: 0.5rem;
@@ -309,9 +307,37 @@ button.logs-sidebar-backdrop.is-open {
     min-width: 0;
   }
 
-  .logs-filter-switcher {
+  .logs-filter-section {
     grid-area: filters;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  button.logs-filter-toggle {
+    display: inline-flex;
+  }
+
+  .logs-filter-panel {
+    display: none;
+  }
+
+  .logs-filter-panel.is-open {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .logs-filter-panel .logs-filter-field {
+    width: 100%;
+  }
+
+  .logs-filter-panel .logs-filter-date,
+  .logs-filter-panel .logs-filter-select {
+    width: 100%;
+    box-sizing: border-box;
   }
 }
 
@@ -424,7 +450,8 @@ button.logs-sidebar-backdrop.is-open {
   padding: 0 1rem;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-top: none;
+  border-radius: 0;
   cursor: pointer;
   text-align: left;
   color: inherit;
@@ -434,6 +461,19 @@ button.logs-sidebar-backdrop.is-open {
   &:hover {
     background: var(--bg-subtle);
   }
+}
+
+.logs-vrow--first {
+  border-top: 1px solid var(--border);
+  border-radius: 8px 8px 0 0;
+}
+
+.logs-vrow--last {
+  border-radius: 0 0 8px 8px;
+}
+
+.logs-vrow--first.logs-vrow--last {
+  border-radius: 8px;
 }
 
 .logs-vrow-thumb {
@@ -505,22 +545,50 @@ button.logs-sidebar-backdrop.is-open {
   margin-top: 0.5rem;
 }
 
-.logs-week-nav {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
-}
-
-.logs-week-label {
-  font-size: 0.9rem;
+.logs-sticky-date {
+  position: sticky;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 10;
+  width: fit-content;
+  margin-left: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.3rem 0.9rem;
+  font-size: 0.8rem;
   font-weight: 600;
   color: var(--text);
-  width: 14rem;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  margin-bottom: 0.75rem;
+  box-shadow: 0 2px 6px -1px rgba(0, 0, 0, 0.08);
+}
+
+.logs-load-more {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: center;
+  padding: 1.25rem 0 0.5rem;
+}
+
+.logs-filter-date {
+  height: 2rem;
+  padding: 0 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.875rem;
+  background: var(--surface);
+  color: var(--text);
+}
+
+button.logs-filter-toggle {
+  display: none;
+}
+
+.logs-filter-panel {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+  flex-wrap: wrap;
 }
 
 @media (max-width: 600px) {

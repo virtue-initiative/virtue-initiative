@@ -54,7 +54,7 @@ function UserPlusIcon() {
 export function Home() {
   const api = useAPIContext();
   const userId = api?.userId ?? null;
-  const devices = useDevices();
+  const { devices } = useDevices();
   const { watchings: watching, watchers } = usePartners();
   const updateDevice = (id: string, patch: { name?: string }) =>
     api ? api.updateDevice(id, patch) : Promise.reject(new Error('Not signed in'));
@@ -446,7 +446,7 @@ function PartnerCard({
               key={device.id}
               class="partner-device-chip"
               type="button"
-              onClick={() => route(`/logs?user=${partner.user.id}&device_id=${device.id}`)}
+              onClick={() => route(`/logs?user_id=${partner.user.id}&device_id=${device.id}`)}
               title={device.name}
             >
               <span
@@ -465,7 +465,7 @@ function PartnerCard({
           <Button
             variant="ghost"
             type="button"
-            onClick={() => route(`/logs?user=${partner.user.id}`)}
+            onClick={() => route(`/logs?user_id=${partner.user.id}`)}
           >
             View logs
           </Button>

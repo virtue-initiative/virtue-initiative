@@ -80,7 +80,6 @@ export class APIClient {
   private watchingsCache: WatchingPartner[] | null = null;
   private watchingsSubscribers = new Set<Subscriber<WatchingPartner[]>>();
   private partnersFetchInFlight: Promise<PartnerRelationships | null> | null = null;
-  private partnersChangeSubscribers = new Set<() => void>();
 
   private devicesCache: Device[] | null = null;
   private devicesSubscribers = new Set<Subscriber<Device[]>>();
@@ -98,22 +97,22 @@ export class APIClient {
   }
 
   // ── User ────────────────────────────────────────────────────────────────
-  getUser(): User | null;
-  getUser(cb: Subscriber<User | null>): { user: User | null; unsubscribe: () => void };
-  getUser(
-    cb?: Subscriber<User | null>,
-  ): User | null | { user: User | null; unsubscribe: () => void } {
+  getUser(): User | null {
     if (this.userCache === null) {
       void this.fetchUser();
     }
-    if (cb) {
-      this.userSubscribers.add(cb);
-      return {
-        user: this.userCache,
-        unsubscribe: () => this.userSubscribers.delete(cb),
-      };
-    }
     return this.userCache;
+  }
+
+  subscribeUser(cb: Subscriber<User | null>): { user: User | null; unsubscribe: () => void } {
+    if (this.userCache === null) {
+      void this.fetchUser();
+    }
+    this.userSubscribers.add(cb);
+    return {
+      user: this.userCache,
+      unsubscribe: () => this.userSubscribers.delete(cb),
+    };
   }
 
   async updateSettings(settings: UserSettings): Promise<UpdateSettingsResult> {
@@ -174,42 +173,50 @@ export class APIClient {
   }
 
   // ── Partners ─────────────────────────────────────────────────────────────
-  listWatchers(): WatcherPartner[];
-  listWatchers(cb: Subscriber<WatcherPartner[]>): {
-    watchers: WatcherPartner[];
-    unsubscribe: () => void;
-  };
-  listWatchers(
-    cb?: Subscriber<WatcherPartner[]>,
-  ): WatcherPartner[] | { watchers: WatcherPartner[]; unsubscribe: () => void } {
+  listWatchers(): WatcherPartner[] {
     if (this.watchersCache === null) {
       void this.fetchPartners();
     }
-    const current = this.watchersCache ?? [];
-    if (cb) {
-      this.watchersSubscribers.add(cb);
-      return { watchers: current, unsubscribe: () => this.watchersSubscribers.delete(cb) };
-    }
-    return current;
+    return this.watchersCache ?? [];
   }
 
-  listWatchings(): WatchingPartner[];
-  listWatchings(cb: Subscriber<WatchingPartner[]>): {
-    watchings: WatchingPartner[];
+  subscribeWatchers(cb: Subscriber<WatcherPartner[]>): {
+    watchers: WatcherPartner[];
+    loaded: boolean;
     unsubscribe: () => void;
-  };
-  listWatchings(
-    cb?: Subscriber<WatchingPartner[]>,
-  ): WatchingPartner[] | { watchings: WatchingPartner[]; unsubscribe: () => void } {
+  } {
+    if (this.watchersCache === null) {
+      void this.fetchPartners();
+    }
+    this.watchersSubscribers.add(cb);
+    return {
+      watchers: this.watchersCache ?? [],
+      loaded: this.watchersCache !== null,
+      unsubscribe: () => this.watchersSubscribers.delete(cb),
+    };
+  }
+
+  listWatchings(): WatchingPartner[] {
     if (this.watchingsCache === null) {
       void this.fetchPartners();
     }
-    const current = this.watchingsCache ?? [];
-    if (cb) {
-      this.watchingsSubscribers.add(cb);
-      return { watchings: current, unsubscribe: () => this.watchingsSubscribers.delete(cb) };
+    return this.watchingsCache ?? [];
+  }
+
+  subscribeWatchings(cb: Subscriber<WatchingPartner[]>): {
+    watchings: WatchingPartner[];
+    loaded: boolean;
+    unsubscribe: () => void;
+  } {
+    if (this.watchingsCache === null) {
+      void this.fetchPartners();
     }
-    return current;
+    this.watchingsSubscribers.add(cb);
+    return {
+      watchings: this.watchingsCache ?? [],
+      loaded: this.watchingsCache !== null,
+      unsubscribe: () => this.watchingsSubscribers.delete(cb),
+    };
   }
 
   async invitePartner(email: string): Promise<void> {
@@ -235,11 +242,6 @@ export class APIClient {
     await this.fetchDevices(true);
   }
 
-  onPartnersChange(cb: () => void): () => void {
-    this.partnersChangeSubscribers.add(cb);
-    return () => this.partnersChangeSubscribers.delete(cb);
-  }
-
   private async fetchPartners(force = false): Promise<PartnerRelationships | null> {
     if (this.partnersFetchInFlight && !force) return this.partnersFetchInFlight;
     const p = (async () => {
@@ -249,13 +251,6 @@ export class APIClient {
         this.watchingsCache = result.watching;
         notify(this.watchersSubscribers, result.watchers);
         notify(this.watchingsSubscribers, result.watching);
-        for (const cb of this.partnersChangeSubscribers) {
-          try {
-            cb();
-          } catch (err) {
-            console.error('[api-client] partners-change subscriber threw', err);
-          }
-        }
         return result;
       } catch (err) {
         console.warn('[api-client] failed to fetch partners', err);
@@ -269,20 +264,27 @@ export class APIClient {
   }
 
   // ── Devices ─────────────────────────────────────────────────────────────
-  listDevices(): Device[];
-  listDevices(cb: Subscriber<Device[]>): { devices: Device[]; unsubscribe: () => void };
-  listDevices(
-    cb?: Subscriber<Device[]>,
-  ): Device[] | { devices: Device[]; unsubscribe: () => void } {
+  listDevices(): Device[] {
     if (this.devicesCache === null) {
       void this.fetchDevices();
     }
-    const current = this.devicesCache ?? [];
-    if (cb) {
-      this.devicesSubscribers.add(cb);
-      return { devices: current, unsubscribe: () => this.devicesSubscribers.delete(cb) };
+    return this.devicesCache ?? [];
+  }
+
+  subscribeDevices(cb: Subscriber<Device[]>): {
+    devices: Device[];
+    loaded: boolean;
+    unsubscribe: () => void;
+  } {
+    if (this.devicesCache === null) {
+      void this.fetchDevices();
     }
-    return current;
+    this.devicesSubscribers.add(cb);
+    return {
+      devices: this.devicesCache ?? [],
+      loaded: this.devicesCache !== null,
+      unsubscribe: () => this.devicesSubscribers.delete(cb),
+    };
   }
 
   async updateDevice(id: string, patch: { name?: string }): Promise<void> {
@@ -324,7 +326,6 @@ export class APIClient {
   queryLogs(query: LogQuery, cb?: (result: LogQueryResult) => void): LogQueryResult {
     const initial = queryLogsFromIDB(this.userId, query);
     let result: LogQueryResult = { logs: [], complete: false };
-    // Run sync query against IDB; we already have a promise from the function so resolve once
     initial
       .then((logs) => {
         result = { logs, complete: false };
@@ -332,7 +333,6 @@ export class APIClient {
       })
       .catch((err) => console.warn('[api-client] initial log query failed', err));
 
-    // Begin server-side sync + materialize in background
     if (cb) {
       void this.refreshLogs(query, cb);
     }
@@ -344,20 +344,17 @@ export class APIClient {
     const { userId: targetUserId, deviceId, startTime, endTime } = query;
 
     try {
-      // Cleanup old materialized events
       await pruneDecryptedEventsBefore(this.userId, Date.now() - THIRTY_DAYS_MS).catch(() => {});
 
-      // Load devices for the active user so we know which device ids belong to them
-      const devices = (await api.getDevices(this.session.token).catch(() => [])) as Device[];
+      const devices: Device[] = this.devicesCache ?? (await this.fetchDevices()) ?? [];
       const ownedIds = devices
         .filter((d) => d.owner === targetUserId)
         .map((d) => d.id)
         .sort();
 
-      let cachedFeed = await loadCachedDataFeed(this.userId, targetUserId);
-      cachedFeed = await pruneCachedDataFeedDevices(this.userId, targetUserId, ownedIds);
+      const initialFeed = await loadCachedDataFeed(this.userId, targetUserId);
+      let since = initialFeed.since;
 
-      let since = cachedFeed.since;
       while (true) {
         const page = await api.getData(this.session.token, {
           user: targetUserId === this.userId ? undefined : targetUserId,
@@ -377,10 +374,9 @@ export class APIClient {
         }
       }
 
-      cachedFeed = await loadCachedDataFeed(this.userId, targetUserId);
+      let cachedFeed = await loadCachedDataFeed(this.userId, targetUserId);
       cachedFeed = await pruneCachedDataFeedDevices(this.userId, targetUserId, ownedIds);
 
-      // Filter batches by date range
       const inRangeBatches = cachedFeed.batches.filter((batch) => {
         if (deviceId && batch.device_id !== deviceId) return false;
         if (startTime !== undefined && endTime !== undefined) {
@@ -390,9 +386,8 @@ export class APIClient {
       });
 
       const cutoff = Date.now() - THIRTY_DAYS_MS;
-      const unmaterialized = await getUnmaterializedBatches(this.userId, inRangeBatches, cutoff);
+      const unmaterialized = getUnmaterializedBatches(cachedFeed, inRangeBatches, cutoff);
 
-      // Emit a snapshot of what's already in IDB after the server sync
       const cachedLogs = await queryLogsFromIDB(this.userId, query);
       cb({
         logs: cachedLogs,
@@ -409,21 +404,17 @@ export class APIClient {
         while (queue.length > 0) {
           const batch = queue.shift()!;
           try {
-            const events = await decryptAndFlattenBatch(batch, (encryptedKey) =>
-              unwrapBatchKey(this.session.privateKey!, Uint8Array.fromBase64(encryptedKey)),
+            const events = await decryptAndFlattenBatch(
+              batch,
+              (encryptedKey) =>
+                unwrapBatchKey(this.session.privateKey!, Uint8Array.fromBase64(encryptedKey)),
+              '0'.repeat(64),
             );
-            await writeMaterializedEvents(
-              this.userId,
-              batch.id,
-              batch.device_id,
-              batch.created_at,
-              events,
-            );
+            await writeMaterializedEvents(this.userId, targetUserId, batch.id, events);
           } catch (err) {
             console.warn('[api-client] failed to materialize batch', batch.id, err);
           }
           processed++;
-          // Re-query and notify
           const updatedLogs = await queryLogsFromIDB(this.userId, query);
           cb({ logs: updatedLogs, complete: processed === total });
         }
@@ -469,7 +460,6 @@ async function queryLogsFromIDB(viewerId: string, query: LogQuery): Promise<Feed
     endTs: query.endTime,
   });
 
-  // Include direct (unencrypted) logs from the cached feed
   const directLogs: FeedLog[] = cachedFeed.logs
     .filter((log) => {
       if (query.deviceId && log.device_id !== query.deviceId) return false;
@@ -511,5 +501,4 @@ function toDirectLogEntry(entry: {
   };
 }
 
-// Suppress unused-import warning for Batch (used in type-only positions implicitly through inferred function args)
 export type { Batch };
