@@ -74,21 +74,15 @@ export async function signupAndGetToken(
   const password_salt = await passwordSaltFor(email);
   const pub_key = await publicKeyFor(email);
   const priv_key = privateKeyFor(email);
-  const res = await SELF.fetch(`${BASE}/signup`, {
+
+  const requestRes = await SELF.fetch(`${BASE}/signup-request`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      email,
-      password_auth,
-      password_salt,
-      pub_key,
-      priv_key,
-      ...(name ? { name } : {}),
-    }),
+    body: JSON.stringify({ email }),
   });
 
-  if (!res.ok) {
-    throw new Error(`signup failed: ${res.status} ${await res.text()}`);
+  if (!requestRes.ok) {
+    throw new Error(`signup-request failed: ${requestRes.status} ${await requestRes.text()}`);
   }
 
   const deliveries = await listMockEmailDeliveries();
@@ -107,44 +101,25 @@ export async function signupAndGetToken(
     throw new Error(`signup verification token not found for ${email}`);
   }
 
-  const verifyRes = await SELF.fetch(`${BASE}/email-verification/validate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token: verificationToken }),
-  });
-
-  if (!verifyRes.ok) {
-    throw new Error(`signup verification failed: ${verifyRes.status} ${await verifyRes.text()}`);
-  }
-
-  const loginRes = await SELF.fetch(`${BASE}/login`, {
+  const signupRes = await SELF.fetch(`${BASE}/signup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      email,
+      verification_token: verificationToken,
       password_auth,
+      password_salt,
+      pub_key,
+      priv_key,
+      ...(name ? { name } : {}),
     }),
   });
 
-  if (!loginRes.ok) {
-    throw new Error(
-      `login failed after signup verification: ${loginRes.status} ${await loginRes.text()}`,
-    );
+  if (!signupRes.ok) {
+    throw new Error(`signup failed: ${signupRes.status} ${await signupRes.text()}`);
   }
 
-  const loginBody = (await loginRes.json()) as { access_token: string };
-  const userRes = await SELF.fetch(`${BASE}/user`, {
-    headers: { Authorization: `Bearer ${loginBody.access_token}` },
-  });
-
-  if (!userRes.ok) {
-    throw new Error(
-      `failed to load user after signup verification: ${userRes.status} ${await userRes.text()}`,
-    );
-  }
-
-  const user = (await userRes.json()) as { id: string };
-  return { token: loginBody.access_token, userId: user.id };
+  const signupBody = (await signupRes.json()) as { access_token: string; user: { id: string } };
+  return { token: signupBody.access_token, userId: signupBody.user.id };
 }
 
 export function authHeaders(token: string): Record<string, string> {
@@ -181,7 +156,7 @@ export async function listEmailDeliveries() {
 }
 
 export async function latestEmailToken(
-  purpose: 'email_verification' | 'email_change' | 'password_reset',
+  purpose: 'email_verification' | 'email_change' | 'password_reset' | 'signup',
 ) {
   const token = await env.DB.prepare(
     `SELECT id, user_id, email, purpose, token_hash, expires_at, consumed_at, created_at

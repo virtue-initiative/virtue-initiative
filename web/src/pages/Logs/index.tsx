@@ -1,26 +1,13 @@
-import { useEffect, useMemo, useState, useCallback } from "preact/hooks";
-import { useLocation } from "preact-iso";
-import { Device } from "../../api";
-import { useAuth } from "../../context/auth";
-import { useDevices } from "../../hooks/useDevices";
-import { useLogs } from "../../hooks/useLogs";
-import { usePartners } from "../../hooks/usePartners";
-import { LogsGallery } from "./LogsGallery";
-import { LogsList } from "./LogsList";
-import {
-  getRiskRating,
-  type RiskRating,
-} from "@virtueinitiative/shared-web/risk";
-import { getLogImage, humanizeLogType, LOG_TYPES } from "./shared";
-import "./style.css";
-import { useUrlState } from "../../hooks/useUrlState";
-import {
-  Alert,
-  Button,
-  Field,
-  IconButton,
-  Select,
-} from "@virtueinitiative/shared-web";
+import { useEffect, useMemo, useState, useCallback } from 'preact/hooks';
+import { useLocation } from 'preact-iso';
+import { Device, LogQueryResult, useAPIContext, useDevices, usePartners } from '../../utils/api';
+import { LogsGallery } from './LogsGallery';
+import { LogsList } from './LogsList';
+import { getRiskRating, type RiskRating } from '@virtueinitiative/shared-web/risk';
+import { FeedLog, getLogImage, humanizeLogType, LOG_TYPES } from './shared';
+import './style.css';
+import { useUrlState } from '../../hooks/useUrlState';
+import { Button, Field, IconButton, Select } from '@virtueinitiative/shared-web';
 
 interface DeviceGroup {
   label: string;
@@ -96,11 +83,7 @@ function CloseIcon() {
       strokeWidth={1.5}
       stroke="currentColor"
     >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M6 18 18 6M6 6l12 12"
-      />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
     </svg>
   );
 }
@@ -114,11 +97,7 @@ function ChevronLeftIcon() {
       strokeWidth={2}
       stroke="currentColor"
     >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M15.75 19.5 8.25 12l7.5-7.5"
-      />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
     </svg>
   );
 }
@@ -132,20 +111,16 @@ function ChevronRightIcon() {
       strokeWidth={2}
       stroke="currentColor"
     >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="m8.25 4.5 7.5 7.5-7.5 7.5"
-      />
+      <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
     </svg>
   );
 }
 
 const dayLabelFormatter = new Intl.DateTimeFormat(undefined, {
-  weekday: "long",
-  month: "short",
-  day: "numeric",
-  year: "numeric",
+  weekday: 'long',
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
 });
 
 function getDayBounds(offset: number): { startMs: number; endMs: number } {
@@ -162,41 +137,26 @@ function formatDayLabel(startMs: number): string {
 }
 
 export function Logs() {
-  const { userId } = useAuth();
+  const api = useAPIContext();
+  const userId = api?.userId ?? null;
   const { path } = useLocation();
-  const {
-    devices,
-    error: devicesError,
-    isLoading: devicesLoading,
-  } = useDevices();
-  const {
-    watching,
-    error: partnersError,
-    isLoading: partnersLoading,
-  } = usePartners();
+  const devices = useDevices();
+  const { watchings: watching } = usePartners();
 
   const [selectedDevice, setSelectedDevice] = useUrlState<string | null>(
-    "device_id",
-    "string",
+    'device_id',
+    'string',
     null,
   );
-  const [selectedUser, setSelectedUser] = useUrlState<string | null>(
-    "user_id",
-    "string",
-    null,
-  );
+  const [selectedUser, setSelectedUser] = useUrlState<string | null>('user_id', 'string', null);
   const [galleryFullscreen, setGalleryFullscreen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [dayOffset, setDayOffset] = useUrlState("day", "number", 0);
-  type RiskFilter = "all" | RiskRating;
-  const [riskFilter, setRiskFilter] = useUrlState<RiskFilter>(
-    "risk",
-    "string",
-    "all",
-  );
+  const [dayOffset, setDayOffset] = useUrlState('day', 'number', 0);
+  type RiskFilter = 'all' | RiskRating;
+  const [riskFilter, setRiskFilter] = useUrlState<RiskFilter>('risk', 'string', 'all');
   const [rawTypeFilter, setTypeFilter] = useUrlState<string | string[] | null>(
-    "type",
-    "string",
+    'type',
+    'string',
     null,
   );
 
@@ -205,22 +165,39 @@ export function Logs() {
     [dayOffset],
   );
 
-  const {
-    logs,
-    batchStats,
-    error: logsError,
-    isLoading: logsLoading,
-  } = useLogs({
-    userId: selectedUser,
-    deviceId: selectedDevice,
-    startTime: weekStart,
-    endTime: weekEnd,
+  const [logResult, setLogResult] = useState<LogQueryResult>({
+    logs: [],
+    complete: false,
   });
+  const activeTargetUserId = selectedUser ?? userId;
+  useEffect(() => {
+    if (!api || !activeTargetUserId) {
+      setLogResult({ logs: [], complete: false });
+      return;
+    }
+    let cancelled = false;
+    const initial = api.queryLogs(
+      {
+        userId: activeTargetUserId,
+        deviceId: selectedDevice ?? undefined,
+        startTime: weekStart,
+        endTime: weekEnd,
+      },
+      (next) => {
+        if (!cancelled) setLogResult(next);
+      },
+    );
+    setLogResult(initial);
+    return () => {
+      cancelled = true;
+    };
+  }, [api, activeTargetUserId, selectedDevice, weekStart, weekEnd]);
 
-  const deviceList = devices ?? [];
-  const watchingList = watching ?? [];
-  const loadError = devicesError ?? partnersError;
-  const sidebarLoading = devicesLoading || partnersLoading;
+  const logs: FeedLog[] = logResult.logs;
+  const logsLoading = !logResult.complete;
+  const deviceList = devices;
+  const watchingList = watching;
+  const sidebarLoading = false;
 
   const { knownUsers, deviceGroups } = useMemo(() => {
     if (!userId) {
@@ -231,7 +208,7 @@ export function Logs() {
     }
 
     const labels = new Map<string, string>();
-    labels.set(userId, "My devices");
+    labels.set(userId, 'My devices');
     for (const partner of watchingList) {
       labels.set(partner.user.id, partner.user.name ?? partner.user.email);
     }
@@ -254,9 +231,7 @@ export function Logs() {
         label,
       })),
       deviceGroups: Array.from(grouped.entries())
-        .sort(([a], [b]) =>
-          a === userId ? -1 : b === userId ? 1 : a.localeCompare(b),
-        )
+        .sort(([a], [b]) => (a === userId ? -1 : b === userId ? 1 : a.localeCompare(b)))
         .map(([owner, ownerDevices]) => ({
           label: labels.get(owner) ?? `${owner.slice(0, 8)}…`,
           userId: owner === userId ? null : owner,
@@ -276,14 +251,11 @@ export function Logs() {
   );
 
   useEffect(() => {
-    if (sidebarLoading || loadError) {
+    if (sidebarLoading) {
       return;
     }
 
-    if (
-      selectedUser !== null &&
-      !deviceGroups.some((group) => group.userId === selectedUser)
-    ) {
+    if (selectedUser !== null && !deviceGroups.some((group) => group.userId === selectedUser)) {
       select(null, null);
       return;
     }
@@ -291,19 +263,9 @@ export function Logs() {
     if (selectedDevice && !activeDeviceIds.has(selectedDevice)) {
       select(selectedUser, null);
     }
-  }, [
-    activeDeviceIds,
-    deviceGroups,
-    loadError,
-    selectedDevice,
-    selectedUser,
-    sidebarLoading,
-  ]);
+  }, [activeDeviceIds, deviceGroups, selectedDevice, selectedUser, sidebarLoading]);
 
-  const allDevices = useMemo(
-    () => deviceGroups.flatMap((group) => group.devices),
-    [deviceGroups],
-  );
+  const allDevices = useMemo(() => deviceGroups.flatMap((group) => group.devices), [deviceGroups]);
 
   const deviceName = (id: string) =>
     allDevices.find((device) => device.id === id)?.name ?? `${id.slice(0, 8)}…`;
@@ -321,40 +283,27 @@ export function Logs() {
   }
 
   const dayLabel = formatDayLabel(weekStart);
-  const prevDay = useCallback(
-    () => setDayOffset(dayOffset - 1),
-    [dayOffset, setDayOffset],
-  );
-  const nextDay = useCallback(
-    () => setDayOffset(dayOffset + 1),
-    [dayOffset, setDayOffset],
-  );
+  const prevDay = useCallback(() => setDayOffset(dayOffset - 1), [dayOffset, setDayOffset]);
+  const nextDay = useCallback(() => setDayOffset(dayOffset + 1), [dayOffset, setDayOffset]);
 
   const title =
     sidebarLoading && selectedUser
-      ? "Loading…"
+      ? 'Loading…'
       : selectedUser
         ? `${groupLabel(selectedUser)}'s logs`
-        : "My logs";
-  const isGallery = path === "/logs/gallery";
-  const typeFilter = Array.isArray(rawTypeFilter)
-    ? (rawTypeFilter[0] ?? null)
-    : rawTypeFilter;
+        : 'My logs';
+  const isGallery = path === '/logs/gallery';
+  const typeFilter = Array.isArray(rawTypeFilter) ? (rawTypeFilter[0] ?? null) : rawTypeFilter;
 
   const items = useMemo(
     () =>
       (logs ?? []).filter((item) => {
         if (item.ts < weekStart || item.ts > weekEnd) return false;
         if (typeFilter !== null && typeFilter !== item.type) return false;
-        if (riskFilter !== "all") {
+        if (riskFilter !== 'all') {
           const rating = getRiskRating(item.risk);
-          if (riskFilter === "high" && rating !== "high") return false;
-          if (
-            riskFilter === "moderate" &&
-            rating !== "moderate" &&
-            rating !== "high"
-          )
-            return false;
+          if (riskFilter === 'high' && rating !== 'high') return false;
+          if (riskFilter === 'moderate' && rating !== 'moderate' && rating !== 'high') return false;
         }
         return true;
       }),
@@ -373,17 +322,17 @@ export function Logs() {
 
   return (
     <div
-      class={`logs-page${isGallery && galleryFullscreen ? " logs-page--gallery-fullscreen" : ""}`}
+      class={`logs-page${isGallery && galleryFullscreen ? ' logs-page--gallery-fullscreen' : ''}`}
     >
       <button
-        class={`app-drawer-backdrop logs-sidebar-backdrop${sidebarOpen ? " is-open" : ""}`}
+        class={`app-drawer-backdrop logs-sidebar-backdrop${sidebarOpen ? ' is-open' : ''}`}
         type="button"
         aria-label="Close logs sidebar"
         onClick={() => setSidebarOpen(false)}
       />
       <div class="logs-layout">
         {!(isGallery && galleryFullscreen) && (
-          <aside class={`logs-sidebar${sidebarOpen ? " is-open" : ""}`}>
+          <aside class={`logs-sidebar${sidebarOpen ? ' is-open' : ''}`}>
             <div class="app-drawer-header logs-sidebar-header">
               <h2>Devices</h2>
               <button
@@ -395,13 +344,8 @@ export function Logs() {
                 <CloseIcon />
               </button>
             </div>
-            {loadError && (
-              <p class="logs-sidebar-loading">{loadError.message}</p>
-            )}
-            {sidebarLoading && !loadError && (
-              <p class="logs-sidebar-loading">Loading…</p>
-            )}
-            {!sidebarLoading && deviceGroups.length === 0 && !loadError && (
+            {sidebarLoading && <p class="logs-sidebar-loading">Loading…</p>}
+            {!sidebarLoading && deviceGroups.length === 0 && (
               <div class="logs-sidebar-group">
                 <p class="logs-sidebar-group-label">My devices</p>
                 <p class="logs-sidebar-loading">No devices</p>
@@ -410,7 +354,7 @@ export function Logs() {
             {deviceGroups.map((group) => (
               <div class="logs-sidebar-group" key={group.label}>
                 <button
-                  class={`logs-device-button logs-device-button-group${selectedUser === group.userId && selectedDevice === null ? " is-active" : ""}`}
+                  class={`logs-device-button logs-device-button-group${selectedUser === group.userId && selectedDevice === null ? ' is-active' : ''}`}
                   title={group.label}
                   onClick={() => select(group.userId, null)}
                   type="button"
@@ -421,24 +365,20 @@ export function Logs() {
                   {group.devices.map((device) => (
                     <li key={device.id}>
                       <button
-                        class={`logs-device-button${selectedDevice === device.id ? " is-active" : ""}`}
+                        class={`logs-device-button${selectedDevice === device.id ? ' is-active' : ''}`}
                         onClick={() => select(group.userId, device.id)}
                         type="button"
                         title={device.name}
                       >
                         <span
-                          class={`logs-status-dot ${device.status === "online" ? "logs-status-dot--online" : "logs-status-dot--offline"}`}
+                          class={`logs-status-dot ${device.status === 'online' ? 'logs-status-dot--online' : 'logs-status-dot--offline'}`}
                         />
-                        <span class="logs-device-button-label">
-                          {device.name}
-                        </span>
+                        <span class="logs-device-button-label">{device.name}</span>
                       </button>
                     </li>
                   ))}
                 </ul>
-                {group.devices.length === 0 && (
-                  <p class="logs-sidebar-loading">No devices</p>
-                )}
+                {group.devices.length === 0 && <p class="logs-sidebar-loading">No devices</p>}
               </div>
             ))}
           </aside>
@@ -465,9 +405,7 @@ export function Logs() {
                     class="logs-filter-select"
                     value={riskFilter}
                     onChange={(e) =>
-                      setRiskFilter(
-                        (e.target as HTMLSelectElement).value as RiskFilter,
-                      )
+                      setRiskFilter((e.target as HTMLSelectElement).value as RiskFilter)
                     }
                   >
                     <option value="all">All</option>
@@ -479,12 +417,8 @@ export function Logs() {
                   <Select
                     size="md"
                     class="logs-filter-select"
-                    value={typeFilter ?? ""}
-                    onChange={(e) =>
-                      setTypeFilter(
-                        (e.target as HTMLSelectElement).value || null,
-                      )
-                    }
+                    value={typeFilter ?? ''}
+                    onChange={(e) => setTypeFilter((e.target as HTMLSelectElement).value || null)}
                   >
                     <option value="">All</option>
                     {LOG_TYPES.map((type) => (
@@ -500,27 +434,21 @@ export function Logs() {
                   <IconButton
                     class="logs-fullscreen-btn"
                     onClick={() => setGalleryFullscreen((prev) => !prev)}
-                    aria-label={
-                      galleryFullscreen ? "Exit fullscreen" : "Fullscreen"
-                    }
-                    title={galleryFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                    aria-label={galleryFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+                    title={galleryFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
                   >
-                    {galleryFullscreen ? (
-                      <ExitFullscreenIcon />
-                    ) : (
-                      <ExpandIcon />
-                    )}
+                    {galleryFullscreen ? <ExitFullscreenIcon /> : <ExpandIcon />}
                   </IconButton>
                 )}
                 <div class="vi-segmented-control logs-view-switcher">
                   <a
-                    class={`vi-segmented-control__item${!isGallery ? " is-active" : ""}`}
+                    class={`vi-segmented-control__item${!isGallery ? ' is-active' : ''}`}
                     href={`/logs${window.location.search}`}
                   >
                     List
                   </a>
                   <a
-                    class={`vi-segmented-control__item${isGallery ? " is-active" : ""}`}
+                    class={`vi-segmented-control__item${isGallery ? ' is-active' : ''}`}
                     href={`/logs/gallery${window.location.search}`}
                   >
                     Gallery
@@ -535,23 +463,12 @@ export function Logs() {
               <ChevronLeftIcon />
             </IconButton>
             <span class="logs-week-label">{dayLabel}</span>
-            <IconButton
-              aria-label="Next day"
-              onClick={nextDay}
-              disabled={dayOffset >= 0}
-            >
+            <IconButton aria-label="Next day" onClick={nextDay} disabled={dayOffset >= 0}>
               <ChevronRightIcon />
             </IconButton>
           </div>
 
-          {logsError && <Alert variant="error">{logsError.message}</Alert>}
-          {batchStats && batchStats.total > 0 && (
-            <p class="logs-summary">
-              {batchStats.decrypted}/{batchStats.total} block
-              {batchStats.total === 1 ? "" : "s"} decrypted
-              {batchStats.skipped > 0 && `, ${batchStats.skipped} unavailable`}
-            </p>
-          )}
+          {logsLoading && <p class="logs-summary">Syncing logs…</p>}
 
           {isGallery ? (
             <LogsGallery

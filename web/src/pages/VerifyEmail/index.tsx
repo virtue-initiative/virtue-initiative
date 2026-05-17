@@ -1,5 +1,6 @@
 import { useEffect } from 'preact/hooks';
-import { useAuth } from '../../context/auth';
+import { api, useSetAPIClient, APIClient } from '../../utils/api';
+import { Session } from '../../utils/api/session';
 
 const VERIFY_INFLIGHT_KEY = 'virtue_verify_email_inflight';
 const VERIFY_INFLIGHT_TTL_MS = 60_000;
@@ -40,7 +41,7 @@ function hasRecentInflightVerification() {
 }
 
 export function VerifyEmail() {
-  const { verifyEmail } = useAuth();
+  const setClient = useSetAPIClient();
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -67,11 +68,18 @@ export function VerifyEmail() {
     const cleanPath = params.toString() ? `/verify-email?${params.toString()}` : '/verify-email';
     window.history.replaceState({}, '', cleanPath);
 
-    verifyEmail(token)
-      .then((result) => {
+    api
+      .verifyEmail(token)
+      .then(async (result) => {
         const isEmailChange =
           result.purpose === 'email_change' || next === 'settings' || next === '/settings';
         window.sessionStorage.removeItem(VERIFY_INFLIGHT_KEY);
+        // After verification the API returns a new access token; restore the session against
+        // it so the client can be installed.
+        const session = await Session.restore();
+        if (session) {
+          setClient(new APIClient(session));
+        }
         window.sessionStorage.setItem(
           'virtue_global_link_message',
           JSON.stringify({
@@ -100,7 +108,7 @@ export function VerifyEmail() {
         );
         navigate('/login', true);
       });
-  }, [verifyEmail]);
+  }, [setClient]);
 
   return <div class="splash">Verifying email…</div>;
 }

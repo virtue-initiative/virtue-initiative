@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
-import { useAuth } from '../context/auth';
+import { useAPIContext } from '../utils/api';
 import { ThemeButton } from './ThemeButton';
 import { Button, IconButton } from '@virtueinitiative/shared-web';
 
@@ -39,18 +39,22 @@ function CloseIcon() {
 }
 
 export function Header() {
-  const { token, ready, logout } = useAuth();
+  const api = useAPIContext();
   const { path: currentPath } = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
-  if (!ready || !token) return null;
-
-  const isActive = (routePath: string) =>
-    routePath === '/' ? currentPath === '/' : currentPath.startsWith(routePath);
 
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [currentPath]);
+
+  if (!api) return null;
+
+  const logout = () => {
+    void api.logout();
+  };
+
+  const isActive = (routePath: string) =>
+    routePath === '/' ? currentPath === '/' : currentPath.startsWith(routePath);
 
   function toggleMobileMenu() {
     setMobileMenuOpen((open) => !open);

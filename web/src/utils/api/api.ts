@@ -1,4 +1,4 @@
-import { sendToast } from './utils/toast';
+import { sendToast } from '../toast';
 
 export interface User {
   id: string;
@@ -302,20 +302,27 @@ export const api = {
       body: JSON.stringify({ email, password_auth }),
     }),
 
-  signup: (
-    email: string,
-    payload: {
-      password_auth: string;
-      password_salt: string;
-      pub_key: string;
-      priv_key: string;
-      name?: string;
-      email_digest_minutes_utc?: number;
-      partner_invite_token?: string;
-    },
-  ) =>
+  signupRequest: (email: string, partner_invite_token?: string) =>
+    req<{ ok: boolean }>('/signup-request', {
+      method: 'POST',
+      body: JSON.stringify({
+        email,
+        ...(partner_invite_token ? { partner_invite_token } : {}),
+      }),
+    }),
+
+  signup: (payload: {
+    verification_token: string;
+    password_auth: string;
+    password_salt: string;
+    pub_key: string;
+    priv_key: string;
+    name?: string;
+    email_digest_minutes_utc?: number;
+    partner_invite_token?: string;
+  }) =>
     req<{
-      ok: boolean;
+      access_token: string;
       user: {
         id: string;
         email: string;
@@ -324,7 +331,7 @@ export const api = {
       };
     }>('/signup', {
       method: 'POST',
-      body: JSON.stringify({ email, ...payload }),
+      body: JSON.stringify(payload),
     }),
 
   logout: () => req<void>('/logout', { method: 'POST' }),

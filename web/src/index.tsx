@@ -8,19 +8,15 @@ import {
   useLocation,
 } from 'preact-iso';
 import { useEffect, useState } from 'preact/hooks';
-import { SWRConfig } from 'swr';
 
-import { AuthProvider, useAuth } from './context/auth';
-import { E2EEProvider } from './context/e2ee';
+import { APIProvider, useAPIContext } from './utils/api';
 import { Header } from './components/Header';
-import { usePartners } from './hooks/usePartners';
 import { Home } from './pages/Home/index';
 import { Logs } from './pages/Logs/index';
 import { Auth } from './pages/Auth/index';
 import { VerifyEmail } from './pages/VerifyEmail/index';
 import { Settings } from './pages/Settings/index';
 import { NotFound } from './pages/_404';
-import { appSWRConfig } from './swr';
 import { ToastProvider, useToast } from '@virtueinitiative/shared-web';
 import { initToast } from './utils/toast';
 import './style.css';
@@ -50,8 +46,7 @@ function navigate(path: string, replace = false) {
 }
 
 function GlobalEmailActionHandler() {
-  const { token } = useAuth();
-  const { acceptPartnerInvite } = usePartners();
+  const api = useAPIContext();
   const { path: currentPath } = useLocation();
   const { push } = useToast();
 
@@ -81,22 +76,21 @@ function GlobalEmailActionHandler() {
     const inviteToken = params.get('partner_invite_token');
     if (!inviteToken) return;
 
-    if (!token) {
-      return;
-    }
+    if (!api) return;
 
     const nextUrl = new URL(window.location.href);
     nextUrl.searchParams.delete('partner_invite_token');
     window.history.replaceState({}, '', nextUrl.toString());
 
-    acceptPartnerInvite(inviteToken)
+    api
+      .acceptInvite(inviteToken)
       .then(() => {
         push('Partner invite accepted.', 'success');
       })
       .catch((err: unknown) => {
         push(err instanceof Error ? err.message : 'Failed to accept invite', 'error');
       });
-  }, [acceptPartnerInvite, token, push]);
+  }, [api, push]);
 
   return null;
 }
@@ -125,28 +119,26 @@ function RedirectToDashboard() {
 }
 
 function AppShell() {
-  const { token, ready } = useAuth();
-
-  if (!ready) {
-    return <div class="splash">Loading…</div>;
-  }
+  const api = useAPIContext();
+  const authenticated = api !== null;
 
   return (
     <LocationProvider>
-      {!token && (
+      {!authenticated && (
         <>
           <GlobalEmailActionHandler />
           <Router>
             <Route path="/login" component={() => <Auth mode="login" />} />
             <Route path="/signup" component={() => <Auth mode="signup" />} />
             <Route path="/forgot-password" component={() => <Auth mode="forgot-password" />} />
+            <Route path="/finish-signup" component={() => <Auth mode="finish-signup" />} />
             <Route path="/verify-email" component={VerifyEmail} />
             <Route default component={RedirectToLogin} />
           </Router>
         </>
       )}
 
-      {token && (
+      {authenticated && (
         <div class="app-shell">
           <Header />
           <main class="app-main">
@@ -155,6 +147,7 @@ function AppShell() {
               <Route path="/login" component={RedirectToDashboard} />
               <Route path="/signup" component={RedirectToDashboard} />
               <Route path="/forgot-password" component={RedirectToDashboard} />
+              <Route path="/finish-signup" component={RedirectToDashboard} />
               <Route path="/" component={Home} />
               <Route path="/logs" component={Logs} />
               <Route path="/logs/gallery" component={Logs} />
@@ -182,13 +175,9 @@ export function App() {
   return (
     <ToastProvider>
       <ToastBridge />
-      <AuthProvider>
-        <SWRConfig value={appSWRConfig}>
-          <E2EEProvider>
-            <AppShell />
-          </E2EEProvider>
-        </SWRConfig>
-      </AuthProvider>
+      <APIProvider>
+        <AppShell />
+      </APIProvider>
     </ToastProvider>
   );
 }

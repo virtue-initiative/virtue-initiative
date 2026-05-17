@@ -1,6 +1,13 @@
 import { useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
-import { Device, WatchingPartner, WatcherPartner } from '../../api';
+import {
+  Device,
+  WatchingPartner,
+  WatcherPartner,
+  useAPIContext,
+  useDevices,
+  usePartners,
+} from '../../utils/api';
 import {
   Alert,
   Badge,
@@ -17,9 +24,6 @@ import {
   Input,
   useToast,
 } from '@virtueinitiative/shared-web';
-import { useAuth } from '../../context/auth';
-import { useDevices } from '../../hooks/useDevices';
-import { usePartners } from '../../hooks/usePartners';
 import { formatRelativeTimestamp } from '../../utils/time';
 import './style.css';
 
@@ -48,28 +52,23 @@ function UserPlusIcon() {
 }
 
 export function Home() {
-  const { userId } = useAuth();
-  const {
-    devices,
-    error: devicesError,
-    isLoading: devicesLoading,
-    updateDevice,
-    removeDevice,
-  } = useDevices();
-  const {
-    watching,
-    watchers,
-    error: partnersError,
-    isLoading: partnersLoading,
-    invitePartner,
-    removeWatching,
-    removeWatcher,
-  } = usePartners();
-  const error = devicesError ?? partnersError;
-  const dashboardLoading = devicesLoading || partnersLoading;
-  const deviceList = devices ?? [];
-  const watchingList = watching ?? [];
-  const watchersList = watchers ?? [];
+  const api = useAPIContext();
+  const userId = api?.userId ?? null;
+  const devices = useDevices();
+  const { watchings: watching, watchers } = usePartners();
+  const updateDevice = (id: string, patch: { name?: string }) =>
+    api ? api.updateDevice(id, patch) : Promise.reject(new Error('Not signed in'));
+  const removeDevice = (id: string) =>
+    api ? api.removeDevice(id) : Promise.reject(new Error('Not signed in'));
+  const invitePartner = (email: string) =>
+    api ? api.invitePartner(email) : Promise.reject(new Error('Not signed in'));
+  const removeWatching = (id: string) =>
+    api ? api.stopWatching(id) : Promise.reject(new Error('Not signed in'));
+  const removeWatcher = (id: string) =>
+    api ? api.removeWatcher(id) : Promise.reject(new Error('Not signed in'));
+  const deviceList = devices;
+  const watchingList = watching;
+  const watchersList = watchers;
 
   const ownDevices = useMemo(
     () => deviceList.filter((device) => device.owner === userId),
@@ -103,62 +102,55 @@ export function Home() {
 
   return (
     <div class="dashboard">
-      {error && <Alert variant="error">{error.message}</Alert>}
-      {dashboardLoading && !devices && !watching && !watchers && <p class="empty">Loading…</p>}
+      <section class="dashboard-section">
+        <div class="dashboard-section-header">
+          <h2>My devices</h2>
+          <AddDeviceButton />
+        </div>
+        {ownDevices.length === 0 ? (
+          <p class="empty">No devices</p>
+        ) : (
+          <CardGrid>
+            {ownDevices.map((device) => (
+              <DeviceCard
+                key={device.id}
+                device={device}
+                onUpdateDevice={updateDevice}
+                onRemoveDevice={removeDevice}
+              />
+            ))}
+          </CardGrid>
+        )}
+      </section>
 
-      {!dashboardLoading && (
-        <>
-          <section class="dashboard-section">
-            <div class="dashboard-section-header">
-              <h2>My devices</h2>
-              <AddDeviceButton />
-            </div>
-            {ownDevices.length === 0 ? (
-              <p class="empty">No devices</p>
-            ) : (
-              <CardGrid>
-                {ownDevices.map((device) => (
-                  <DeviceCard
-                    key={device.id}
-                    device={device}
-                    onUpdateDevice={updateDevice}
-                    onRemoveDevice={removeDevice}
-                  />
-                ))}
-              </CardGrid>
-            )}
-          </section>
+      <section class="dashboard-section">
+        <div class="dashboard-section-header">
+          <h2>You monitor</h2>
+        </div>
+        <PartnerArea
+          emptyLabel="You cannot monitor anyone yet."
+          pending={pendingWatching}
+          accepted={acceptedWatching}
+          partnerDevicesByOwner={devicesByOwner}
+          onRemoveWatching={removeWatching}
+          onRemoveWatcher={removeWatcher}
+        />
+      </section>
 
-          <section class="dashboard-section">
-            <div class="dashboard-section-header">
-              <h2>You monitor</h2>
-            </div>
-            <PartnerArea
-              emptyLabel="You cannot monitor anyone yet."
-              pending={pendingWatching}
-              accepted={acceptedWatching}
-              partnerDevicesByOwner={devicesByOwner}
-              onRemoveWatching={removeWatching}
-              onRemoveWatcher={removeWatcher}
-            />
-          </section>
-
-          <section class="dashboard-section">
-            <div class="dashboard-section-header">
-              <h2>Monitor you</h2>
-              <InviteButton onInvitePartner={invitePartner} />
-            </div>
-            <PartnerArea
-              emptyLabel="No one can monitor you yet."
-              pending={pendingWatchers}
-              accepted={acceptedWatchers}
-              partnerDevicesByOwner={devicesByOwner}
-              onRemoveWatching={removeWatching}
-              onRemoveWatcher={removeWatcher}
-            />
-          </section>
-        </>
-      )}
+      <section class="dashboard-section">
+        <div class="dashboard-section-header">
+          <h2>Monitor you</h2>
+          <InviteButton onInvitePartner={invitePartner} />
+        </div>
+        <PartnerArea
+          emptyLabel="No one can monitor you yet."
+          pending={pendingWatchers}
+          accepted={acceptedWatchers}
+          partnerDevicesByOwner={devicesByOwner}
+          onRemoveWatching={removeWatching}
+          onRemoveWatcher={removeWatcher}
+        />
+      </section>
     </div>
   );
 }

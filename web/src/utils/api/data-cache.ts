@@ -1,6 +1,6 @@
 import { Batch, DataLog, DataPage } from './api';
-import { FeedLog } from './pages/Logs/shared';
-import { decodeWebpDimensions } from './utils/webp-dimensions';
+import { FeedLog } from '../../pages/Logs/shared';
+import { decodeWebpDimensions } from '../webp-dimensions';
 
 const DB_NAME = 'virtue-data-cache';
 const DB_VERSION = 2;
@@ -31,6 +31,7 @@ interface MaterializedBatchRecord {
 
 export interface DecryptedEventQuery {
   deviceId?: string;
+  allowedDeviceIds?: string[];
   startTs?: number;
   endTs?: number;
 }
@@ -343,7 +344,7 @@ export async function writeMaterializedEvents(
 
 export async function queryDecryptedEvents(
   viewerId: string,
-  { deviceId, startTs, endTs }: DecryptedEventQuery,
+  { deviceId, allowedDeviceIds, startTs, endTs }: DecryptedEventQuery,
 ): Promise<FeedLog[]> {
   return withDatabase(async (db) => {
     const tx = db.transaction(DECRYPTED_EVENTS_STORE, 'readonly');
@@ -367,7 +368,15 @@ export async function queryDecryptedEvents(
 
     await transactionDone(tx);
 
-    const filtered = deviceId ? records.filter((r) => r.device_id === deviceId) : records;
+    let filtered: StoredDecryptedEvent[];
+    if (deviceId) {
+      filtered = records.filter((r) => r.device_id === deviceId);
+    } else if (allowedDeviceIds) {
+      const allowed = new Set(allowedDeviceIds);
+      filtered = records.filter((r) => allowed.has(r.device_id));
+    } else {
+      filtered = records;
+    }
 
     const toBackfill: StoredDecryptedEvent[] = [];
     const updated = filtered.map((record) => {

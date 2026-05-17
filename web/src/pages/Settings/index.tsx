@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { User } from '../../api';
+import { User, usePartners, useUser, useAPIContext } from '../../utils/api';
 import {
   Alert,
   Button,
@@ -11,16 +11,13 @@ import {
   Input,
   Select,
 } from '@virtueinitiative/shared-web';
-import { useAuth } from '../../context/auth';
-import { usePartners } from '../../hooks/usePartners';
 import { formatDigestHour, utcMinutesToLocalHour, localHourToUtcMinutes } from '../../utils/digest';
 import './style.css';
-import { useUser } from '../../hooks/useUser';
 
 export function Settings() {
-  const { token, logout } = useAuth();
-  const { user, error: userError, isLoading: userLoading, updateUser, deleteUser } = useUser();
-  const { watching, error: partnersError, isLoading: partnersLoading } = usePartners();
+  const api = useAPIContext();
+  const user = useUser();
+  const { watchings: watching } = usePartners();
 
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
@@ -40,8 +37,7 @@ export function Settings() {
   const emailChangeDialogRef = useRef<HTMLDialogElement>(null);
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
 
-  const loadError = userError ?? partnersError;
-  const settingsLoading = userLoading || partnersLoading;
+  const settingsLoading = !user;
 
   useEffect(() => {
     if (!user) {
@@ -103,11 +99,11 @@ export function Settings() {
   const hasEmailFrequencyChanges = Boolean(user && emailFrequency !== user.email_frequency);
   const hasEmailScheduleChanges = hasDigestScheduleChanges || hasEmailFrequencyChanges;
   const deleteConfirmationMatches =
-    Boolean(user) && deleteConfirmEmail.trim().toLowerCase() === user.email.toLowerCase();
+    Boolean(user) && deleteConfirmEmail.trim().toLowerCase() === user!.email.toLowerCase();
 
   async function saveName(e: Event) {
     e.preventDefault();
-    if (!token) return;
+    if (!api) return;
     if (!hasProfileChanges) {
       setNameStatus(null);
       setProfileSavePending(false);
@@ -117,7 +113,7 @@ export function Settings() {
     setNameSaving(true);
     try {
       const emailChanged = Boolean(profilePatch.email);
-      const result = await updateUser(profilePatch);
+      const result = await api.updateSettings(profilePatch);
       setSavedButtonUntil(Date.now() + 3000);
       if (emailChanged && result.email_verification_required) {
         setNameStatus(null);
@@ -137,7 +133,7 @@ export function Settings() {
 
   async function saveEmailSchedule(e: Event) {
     e.preventDefault();
-    if (!token || !user) return;
+    if (!api || !user) return;
     if (!hasEmailScheduleChanges) {
       setEmailScheduleStatus(null);
       return;
@@ -160,7 +156,7 @@ export function Settings() {
 
     setEmailScheduleSaving(true);
     try {
-      await updateUser(schedulePatch);
+      await api.updateSettings(schedulePatch);
       setEmailScheduleSavedButtonUntil(Date.now() + 3000);
       setEmailScheduleStatus(null);
     } catch (err) {
@@ -184,14 +180,14 @@ export function Settings() {
   }
 
   async function deleteAccountConfirmed() {
-    if (!token || !user || !deleteConfirmationMatches) {
+    if (!api || !user || !deleteConfirmationMatches) {
       return;
     }
 
     setDeleteAccountStatus(null);
     setDeleteAccountPending(true);
     try {
-      await deleteUser(user.email);
+      await api.deleteUser(user.email);
       if (typeof window !== 'undefined') {
         window.sessionStorage.setItem(
           'virtue_global_link_message',
@@ -202,7 +198,7 @@ export function Settings() {
         );
       }
       deleteDialogRef.current?.close();
-      await logout();
+      await api.logout();
     } catch (err) {
       setDeleteAccountStatus(err instanceof Error ? err.message : 'Failed to delete account');
     } finally {
@@ -213,8 +209,7 @@ export function Settings() {
   return (
     <div class="settings-page">
       <h1 class="settings-title">Settings</h1>
-      {loadError && <Alert variant="error">{loadError.message}</Alert>}
-      {settingsLoading && !user && !watching && <p class="hint-text">Loading…</p>}
+      {settingsLoading && <p class="hint-text">Loading…</p>}
 
       {!settingsLoading && user && (
         <Card class="settings-section">
@@ -257,7 +252,7 @@ export function Settings() {
             <Button
               variant="primary"
               type="submit"
-              disabled={userLoading || nameSaving || profileSavePending || !hasProfileChanges}
+              disabled={!api || nameSaving || profileSavePending || !hasProfileChanges}
             >
               {nameSaving
                 ? 'Saving…'
@@ -343,7 +338,7 @@ export function Settings() {
                   : 'Save digest schedule'}
             </Button>
           </form>
-          {(watching ?? []).length === 0 ? (
+          {watching.length === 0 ? (
             <p class="hint-text settings-followup-hint">
               You are not monitoring anyone yet. This setting will apply once you accept a partner
               invite.
@@ -351,10 +346,7 @@ export function Settings() {
           ) : (
             <p class="hint-text settings-followup-hint">
               Currently monitoring{' '}
-              {(watching ?? [])
-                .map((partner) => partner.user.name ?? partner.user.email)
-                .join(', ')}
-              .
+              {watching.map((partner) => partner.user.name ?? partner.user.email).join(', ')}.
             </p>
           )}
         </Card>

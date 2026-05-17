@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { useAuth } from '../../context/auth';
+import { api, finishSignup, login, requestSignup, useSetAPIClient } from '../../utils/api';
 import {
   derivePasswordMaterial,
   encryptData,
   generateRandomKeyBytes,
   generateUserKeyPair,
-} from '../../crypto';
-import { api } from '../../api';
+} from '../../utils/api/crypto';
 import './style.css';
 import { ThemeButton } from '../../components/ThemeButton';
 import {
@@ -21,7 +20,7 @@ import {
   SegmentedControl,
 } from '@virtueinitiative/shared-web';
 
-type AuthMode = 'login' | 'signup' | 'forgot' | 'reset';
+type AuthMode = 'login' | 'signup' | 'forgot' | 'reset' | 'finish-signup';
 
 function navigate(path: string, replace = false) {
   if (typeof window === 'undefined') {
@@ -33,8 +32,8 @@ function navigate(path: string, replace = false) {
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
 
-export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' }) {
-  const { login, signup, rememberWrappingKey } = useAuth();
+export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' | 'finish-signup' }) {
+  const setClient = useSetAPIClient();
   const inviteToken = useMemo(() => {
     if (typeof window === 'undefined') return '';
     return new URLSearchParams(window.location.search).get('partner_invite_token') ?? '';
@@ -43,11 +42,22 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
     if (typeof window === 'undefined') return '';
     return new URLSearchParams(window.location.search).get('token') ?? '';
   }, []);
-  const authMode: AuthMode = mode === 'forgot-password' ? (resetToken ? 'reset' : 'forgot') : mode;
+  const finishSignupToken = useMemo(() => {
+    if (typeof window === 'undefined') return '';
+    if (mode !== 'finish-signup') return '';
+    return new URLSearchParams(window.location.search).get('token') ?? '';
+  }, [mode]);
+  const authMode: AuthMode =
+    mode === 'forgot-password'
+      ? resetToken
+        ? 'reset'
+        : 'forgot'
+      : mode === 'finish-signup'
+        ? 'finish-signup'
+        : mode;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -83,18 +93,35 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
 
     try {
       if (authMode === 'login') {
-        await login(email, password);
+        const client = await login(email, password);
+        setClient(client);
       } else if (authMode === 'signup') {
+        await requestSignup(email, inviteToken || undefined);
+        setStatus(null);
+        setSignupVerificationEmail(email);
+        signupVerificationDialogRef.current?.showModal();
+        setPassword('');
+        setConfirm('');
+      } else if (authMode === 'finish-signup') {
+        if (!finishSignupToken) {
+          throw new Error('Signup token is missing');
+        }
         if (password !== confirm) {
           throw new Error('Passwords do not match');
         }
-        const result = await signup(email, password, name || undefined, inviteToken || undefined);
-        setStatus(null);
-        setSignupVerificationEmail(result.email);
-        signupVerificationDialogRef.current?.showModal();
-        setEmail(result.email);
+        const client = await finishSignup(
+          finishSignupToken,
+          undefined,
+          password,
+          inviteToken || undefined,
+        );
+        setClient(client);
         setPassword('');
         setConfirm('');
+        navigate(
+          inviteToken ? `/?partner_invite_token=${encodeURIComponent(inviteToken)}` : '/',
+          true,
+        );
       } else if (authMode === 'forgot') {
         await api.requestPasswordReset(email);
         setStatus('If that email exists, a reset link has been sent.');
@@ -110,8 +137,8 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
         }
         const rotatedKeys = await buildResetKeyMaterial(password);
         await api.resetPassword(resetToken, rotatedKeys.payload);
-        await rememberWrappingKey(rotatedKeys.wrappingKey);
-        await login(email, password);
+        const client = await login(email, password);
+        setClient(client);
         if (typeof window !== 'undefined') {
           window.sessionStorage.setItem(
             'virtue_global_link_message',
@@ -226,6 +253,11 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
             </Alert>
           </>
         )}
+        {authMode === 'finish-signup' && (
+          <p class="hint-text auth-flow-hint">
+            Welcome! Finish creating your account by choosing a password.
+          </p>
+        )}
         {inviteToken && (
           <p class="hint-text auth-flow-hint">
             This sign-in or sign-up will also accept your pending partner invite.
@@ -233,32 +265,30 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
         )}
 
         <form class="auth-form" onSubmit={handleSubmit}>
-          {authMode === 'signup' && (
-            <Field label="Name (optional)">
+          {authMode !== 'finish-signup' && (
+            <Field label="Email">
               <Input
-                type="text"
-                value={name}
-                onInput={(e) => setName((e.target as HTMLInputElement).value)}
-                placeholder="Your name"
-                autoComplete="name"
+                type="email"
+                value={email}
+                onInput={(e) => setEmail((e.target as HTMLInputElement).value)}
+                placeholder="you@example.com"
+                autoComplete="email"
+                required
+                disabled={authMode === 'reset'}
               />
             </Field>
           )}
 
-          <Field label="Email">
-            <Input
-              type="email"
-              value={email}
-              onInput={(e) => setEmail((e.target as HTMLInputElement).value)}
-              placeholder="you@example.com"
-              autoComplete="email"
-              required
-              disabled={authMode === 'reset'}
-            />
-          </Field>
-
-          {authMode !== 'forgot' && (
-            <Field label={authMode === 'reset' ? 'New password' : 'Password'}>
+          {authMode !== 'forgot' && authMode !== 'signup' && (
+            <Field
+              label={
+                authMode === 'reset'
+                  ? 'New password'
+                  : authMode === 'finish-signup'
+                    ? 'Choose a password'
+                    : 'Password'
+              }
+            >
               <Input
                 type="password"
                 value={password}
@@ -277,7 +307,7 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
             </Field>
           )}
 
-          {(authMode === 'signup' || authMode === 'reset') && (
+          {(authMode === 'reset' || authMode === 'finish-signup') && (
             <Field label="Confirm password">
               <Input
                 type="password"
@@ -291,7 +321,7 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
             </Field>
           )}
 
-          {authMode === 'signup' && (
+          {(authMode === 'signup' || authMode === 'finish-signup') && (
             <p class="hint-text">
               During sign-up, Virtue creates an end-to-end encryption key for your account. It
               protects your uploaded logs, screenshots, and blocks so only you and partners you
@@ -330,10 +360,12 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
               : authMode === 'login'
                 ? 'Log in'
                 : authMode === 'signup'
-                  ? 'Create account'
-                  : authMode === 'forgot'
-                    ? 'Send reset link'
-                    : 'Reset password'}
+                  ? 'Send verification email'
+                  : authMode === 'finish-signup'
+                    ? 'Create account'
+                    : authMode === 'forgot'
+                      ? 'Send reset link'
+                      : 'Reset password'}
           </Button>
         </form>
 
@@ -351,11 +383,11 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
         </div>
 
         <Dialog dialogRef={signupVerificationDialogRef}>
-          <DialogHeader>Verify your email</DialogHeader>
+          <DialogHeader>Check your email</DialogHeader>
           <p class="invite-desc">
             We sent a verification link to{' '}
-            <strong>{signupVerificationEmail || 'your email'}</strong>. You need to verify your
-            email before you can log in.
+            <strong>{signupVerificationEmail || 'your email'}</strong>. Open the link from your
+            email to finish setting up your account.
           </p>
           <DialogActions>
             <Button
