@@ -313,6 +313,44 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeStopD
     to_jstring_result(&mut env, result)
 }
 
+#[no_mangle]
+pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeNoteUserStop(
+    mut env: JNIEnv,
+    _class: JClass,
+    source: JString,
+) -> jstring {
+    let result = (|| -> Result<()> {
+        let core = core()?;
+        let source: String = env.get_string(&source)?.into();
+        let hooks = AndroidPlatformHooks {
+            java_vm: core.java_vm.clone(),
+        };
+        let mut service = MonitorService::setup(build_core_config(core, "android-device"), hooks)?;
+        service.note_stop_requested_by_user(ServiceRole::PrimaryService, &source)?;
+        Ok(())
+    })();
+
+    to_jstring_result(&mut env, result)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeGetStatusJson(
+    env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    let json = core()
+        .ok()
+        .and_then(|core| {
+            let path = core.state_dir.join("status.json");
+            fs::read_to_string(&path).ok()
+        })
+        .unwrap_or_else(|| "{}".to_string());
+
+    env.new_string(json)
+        .map(|s| s.into_raw())
+        .unwrap_or(std::ptr::null_mut())
+}
+
 fn run_daemon_loop(core: &AndroidCore) -> Result<()> {
     let hooks = AndroidPlatformHooks {
         java_vm: core.java_vm.clone(),
@@ -334,11 +372,16 @@ fn run_daemon_loop(core: &AndroidCore) -> Result<()> {
         sleep_interruptible(&core.stop, sleep_duration);
     }
 
+    let explicit_user_stop = service
+        .take_stop_intent(ServiceRole::PrimaryService)
+        .ok()
+        .flatten()
+        .is_some();
     let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStopObserved {
         role: ServiceRole::PrimaryService,
         raw_reason: "android_stop_request".to_string(),
         shutdown_in_progress: false,
-        explicit_user_stop: false,
+        explicit_user_stop,
         detected_by: "android_foreground_service".to_string(),
     });
     let _ = service.shutdown();

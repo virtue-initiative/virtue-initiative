@@ -21,14 +21,27 @@ object NativeBridge {
             val baseApiUrl = overrides.baseApiUrl ?: ""
             val captureIntervalSeconds = overrides.captureIntervalSeconds ?: ""
             val batchWindowSeconds = overrides.batchWindowSeconds ?: ""
+            val dataDir = context.filesDir.resolve("core-data")
 
-            val error = nativeInit(
+            var error = nativeInit(
                 context.filesDir.resolve("core-config").absolutePath,
-                context.filesDir.resolve("core-data").absolutePath,
+                dataDir.absolutePath,
                 baseApiUrl,
                 captureIntervalSeconds,
                 batchWindowSeconds
             )
+            if (error != null && error.contains("serialization error")) {
+                // Corrupted state files — wipe and retry once
+                android.util.Log.w("NativeBridge", "Init serialization error, wiping core-data: $error")
+                dataDir.deleteRecursively()
+                error = nativeInit(
+                    context.filesDir.resolve("core-config").absolutePath,
+                    dataDir.absolutePath,
+                    baseApiUrl,
+                    captureIntervalSeconds,
+                    batchWindowSeconds
+                )
+            }
             if (error == null) {
                 initialized = true
             }
@@ -79,4 +92,6 @@ object NativeBridge {
     external fun nativeGetDeviceId(): String?
     external fun nativeRunDaemonLoop(): String?
     external fun nativeStopDaemon(): String?
+    external fun nativeNoteUserStop(source: String): String?
+    external fun nativeGetStatusJson(): String
 }

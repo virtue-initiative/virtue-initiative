@@ -1,3 +1,59 @@
 <resources>
     <string name="app_name">Virtue</string>
+
+    <!-- App branding -->
+    <string name="app_title">Virtue Initiative</string>
+    <string name="app_website">virtueinitiative.org</string>
+
+    <!-- Section labels -->
+    <string name="section_status">STATUS</string>
+    <string name="section_account">ACCOUNT</string>
+    <string name="section_overrides">RUNTIME OVERRIDES</string>
+
+    <!-- Status -->
+    <string name="status_signed_out">Signed out</string>
+    <string name="status_monitoring">Monitoring active</string>
+    <string name="status_paused">Monitoring paused</string>
+    <string name="status_waiting">Waiting for first capture</string>
+
+    <!-- Account -->
+    <string name="account_signed_in">Signed in</string>
+    <string name="account_device_id">Device ID: %s</string>
+    <string name="email_hint">Email</string>
+    <string name="password_hint">Password</string>
+
+    <!-- Buttons -->
+    <string name="btn_sign_in">Sign In</string>
+    <string name="btn_sign_out">Sign Out</string>
+    <string name="btn_runtime_overrides">Runtime Overrides</string>
+    <string name="btn_status_details">Status Details</string>
+    <string name="btn_pause_monitoring">Pause Monitoring</string>
+    <string name="btn_resume_monitoring">Resume Monitoring</string>
+    <string name="btn_apply_overrides">Apply Overrides</string>
+    <string name="btn_done">Done</string>
+
+    <!-- Override fields -->
+    <string name="override_api_url">API base URL</string>
+    <string name="override_api_url_hint">e.g., http://10.0.2.2:8787</string>
+    <string name="override_capture_interval">Capture interval (seconds)</string>
+    <string name="override_batch_window">Batch window (seconds)</string>
+
+    <!-- Messages -->
+    <string name="msg_sign_in_to_start">Sign in to start monitoring</string>
+    <string name="msg_grant_permission">After signing in, grant screenshot permission to enable monitoring.</string>
+    <string name="msg_overrides_applied">Overrides applied</string>
+
+    <!-- Dialogs -->
+    <string name="dialog_sign_out_title">Sign out?</string>
+    <string name="dialog_sign_out_message">Logging out will alert people monitoring you and will recreate a new device on your next login. Continue?</string>
+    <string name="dialog_pause_title">Pause monitoring?</string>
+    <string name="dialog_pause_message">This will stop monitoring on this device. People monitoring you may be alerted.</string>
+    <string name="dialog_resume_title">Resume monitoring?</string>
+    <string name="dialog_resume_message">Resume monitoring on this device?</string>
+    <string name="dialog_cancel">Cancel</string>
+    <string name="dialog_confirm">Confirm</string>
+
+    <!-- Accessibility service -->
+    <string name="accessibility_service_label">Virtue Screen Monitor</string>
+    <string name="accessibility_service_description">Virtue uses accessibility permission to capture screenshots for accountability monitoring. No interaction data is collected.</string>
 </resources>

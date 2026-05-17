@@ -10,9 +10,10 @@ class BootReceiver : BroadcastReceiver() {
         if (initError != null) return
 
         if (!NativeBridge.nativeIsLoggedIn()) return
-        if (ProjectionPermissionStore.load(context) == null) return
 
+        // The AccessibilityService is restarted automatically by Android after boot.
+        // Just ensure the foreground notification service is alive to keep the process warm.
         KeepAliveWorker.schedule(context)
-        ScreenshotService.startFromStoredProjection(context, "boot")
+        ScreenshotService.start(context)
     }
 }
