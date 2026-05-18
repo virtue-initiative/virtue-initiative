@@ -47,20 +47,6 @@ export interface Batch {
   created_at: number;
 }
 
-// Known event data shapes — keeps type information at call sites.
-// The fallback branch preserves compatibility with future or unknown event types.
-export type LogEventData =
-  | {
-      type: 'screenshot';
-      data: { image: Uint8Array | number[]; content_type: string };
-    }
-  | { type: 'system_event'; data: Record<string, unknown> }
-  | { type: 'lifecycle_alert'; data: Record<string, unknown> }
-  | { type: 'lifecycle_marker'; data: Record<string, unknown> }
-  | { type: 'lifecycle_transition'; data: Record<string, unknown> }
-  | { type: 'developer_log'; data: Record<string, unknown> }
-  | { type: string; data: Record<string, unknown> };
-
 export interface DataLog {
   id: string;
   device_id: string;
@@ -124,17 +110,11 @@ const NETWORK_ERROR_MESSAGE = "Error: Couldn't connect to the network. Try reloa
 const NETWORK_TOAST_THROTTLE_MS = 3_000;
 let lastNetworkToastAt = 0;
 
-type ToastHandledError = Error & { toastHandled?: boolean };
-
 type ReauthHandler = () => Promise<string | null>;
 
 interface RequestOptions {
   allowReauth?: boolean;
   retrying?: boolean;
-}
-
-export function isToastHandledError(error: unknown): error is ToastHandledError {
-  return error instanceof Error && (error as ToastHandledError).toastHandled === true;
 }
 
 let reauthHandler: ReauthHandler | null = null;

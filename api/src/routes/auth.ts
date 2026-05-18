@@ -216,7 +216,7 @@ async function sendVerificationEmail(
   user: { id: string; email: string; name?: string | null },
   token: string,
 ) {
-  const verifyUrl = `${getAppUrl(c)}/settings?change_email_token=${encodeURIComponent(token)}`;
+  const verifyUrl = `${getAppUrl(c)}/verify-email?token=${encodeURIComponent(token)}`;
   const email = renderEmailVerificationTemplate({
     appName: c.env.APP_NAME,
     appUrl: getAppUrl(c),

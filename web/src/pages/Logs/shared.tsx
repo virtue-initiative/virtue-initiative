@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { DataLog } from '../../utils/api/api';
 import { BatchVerification } from '../../utils/api/crypto';
-import { formatDate, formatDayHeading, formatTime, localDateKey } from '../../utils/time';
+import { formatDate, formatTime } from '../../utils/time';
 
 export type FeedLog = DataLog & {
   batch_status: BatchVerification;
@@ -9,34 +9,6 @@ export type FeedLog = DataLog & {
   image_w?: number;
   image_h?: number;
 };
-
-export interface LogDayGroup<T extends { ts: number }> {
-  key: string;
-  label: string;
-  items: T[];
-}
-
-export function groupLogsByDay<T extends { ts: number }>(items: T[]): LogDayGroup<T>[] {
-  const groups: LogDayGroup<T>[] = [];
-  const byKey = new Map<string, LogDayGroup<T>>();
-
-  for (const item of items) {
-    const key = localDateKey(item.ts);
-    let group = byKey.get(key);
-    if (!group) {
-      group = {
-        key,
-        label: formatDayHeading(item.ts),
-        items: [],
-      };
-      byKey.set(key, group);
-      groups.push(group);
-    }
-    group.items.push(item);
-  }
-
-  return groups;
-}
 
 export function toUint8Array(value: unknown): Uint8Array | undefined {
   if (!value) return undefined;
@@ -56,19 +28,7 @@ export function getLogImage(log: DataLog): Uint8Array | undefined {
   return toUint8Array(log.data.image);
 }
 
-export function getLogImageRatio(log: FeedLog): number | undefined {
-  if (
-    typeof log.image_w === 'number' &&
-    typeof log.image_h === 'number' &&
-    log.image_w > 0 &&
-    log.image_h > 0
-  ) {
-    return log.image_w / log.image_h;
-  }
-  return undefined;
-}
-
-export function getLogMetadata(log: DataLog) {
+function getLogMetadata(log: DataLog) {
   return Object.entries(log.data)
     .filter(([key]) => key !== 'image')
     .map(
@@ -77,7 +37,7 @@ export function getLogMetadata(log: DataLog) {
     );
 }
 
-export function describeRiskLevel(risk: number | undefined): string | null {
+function describeRiskLevel(risk: number | undefined): string | null {
   if (typeof risk !== 'number' || Number.isNaN(risk)) {
     return null;
   }

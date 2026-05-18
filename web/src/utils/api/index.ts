@@ -20,11 +20,6 @@ export async function finishSignup(
   return new APIClient(session);
 }
 
-export async function getSession(): Promise<APIClient | null> {
-  const session = await Session.restore();
-  return session ? new APIClient(session) : null;
-}
-
 export {
   APIProvider,
   useAPIContext,
@@ -35,19 +30,6 @@ export {
 } from './hooks';
 
 export { APIClient } from './client';
-export type { LogQuery, LogQueryResult, UserSettings, UpdateSettingsResult } from './client';
-export type {
-  User,
-  Device,
-  WatcherPartner,
-  WatchingPartner,
-  PartnerRelationships,
-  Batch,
-  DataLog,
-  DataPage,
-  LoginMaterial,
-  HashParams,
-  PasswordResetValidation,
-  PartnerInviteValidation,
-} from './api';
-export { api, isToastHandledError } from './api';
+export type { LogQueryResult } from './client';
+export type { User, Device, WatcherPartner, WatchingPartner } from './api';
+export { api } from './api';

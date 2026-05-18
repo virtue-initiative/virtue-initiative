@@ -16,6 +16,7 @@ import { Logs } from './pages/Logs/index';
 import { Auth } from './pages/Auth/index';
 import { InviteAccept } from './pages/InviteAccept/index';
 import { Settings } from './pages/Settings/index';
+import { VerifyEmail } from './pages/VerifyEmail/index';
 import { NotFound } from './pages/_404';
 import { ToastProvider, useToast } from '@virtueinitiative/shared-web';
 import { initToast } from './utils/toast';
@@ -109,6 +110,7 @@ function AppShell() {
             <Route path="/login" component={() => <Auth mode="login" />} />
             <Route path="/signup" component={() => <Auth mode="signup" />} />
             <Route path="/forgot-password" component={() => <Auth mode="forgot-password" />} />
+            <Route path="/verify-email" component={VerifyEmail} />
             <Route default component={RedirectToLogin} />
           </Router>
         </>
@@ -127,6 +129,7 @@ function AppShell() {
               <Route path="/logs" component={Logs} />
               <Route path="/logs/gallery" component={Logs} />
               <Route path="/settings" component={Settings} />
+              <Route path="/verify-email" component={VerifyEmail} />
               <Route path="/invite_accept" component={InviteAccept} />
               {import.meta.env.DEV && (
                 <Route path="/dev/components" component={DevComponentsPage} />

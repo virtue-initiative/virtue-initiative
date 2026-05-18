@@ -10,7 +10,7 @@ import {
 } from './crypto';
 import { DEFAULT_DIGEST_LOCAL_HOUR, localHourToUtcMinutes } from '../digest';
 
-export const WRAPPING_KEY_STORAGE = 'virtue_wrapping_key';
+const WRAPPING_KEY_STORAGE = 'virtue_wrapping_key';
 
 async function saveWrappingKey(wk: CryptoKey): Promise<void> {
   const raw = await crypto.subtle.exportKey('raw', wk);
