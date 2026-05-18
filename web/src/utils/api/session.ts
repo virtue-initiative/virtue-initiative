@@ -8,7 +8,6 @@ import {
   generateUserKeyPair,
   importUserPrivateKey,
 } from './crypto';
-import { DEFAULT_DIGEST_LOCAL_HOUR, localHourToUtcMinutes } from '../digest';
 
 const WRAPPING_KEY_STORAGE = 'virtue_wrapping_key';
 
@@ -72,7 +71,11 @@ export class Session {
       Uint8Array.fromBase64(material.password_salt),
       material.params,
     );
-    const res = await api.login(email, passwordAuth.toBase64());
+    const res = await api.login(
+      email,
+      passwordAuth.toBase64(),
+      Intl.DateTimeFormat().resolvedOptions().timeZone,
+    );
     const userId = jwtSub(res.access_token);
     if (!userId) throw new Error('Login token is missing a subject');
     await saveWrappingKey(wrappingKey);
@@ -104,7 +107,6 @@ export class Session {
       pub_key: keyPair.publicKey.toBase64(),
       priv_key: encryptedPrivateKey.toBase64(),
       ...(name ? { name } : {}),
-      email_digest_minutes_utc: localHourToUtcMinutes(DEFAULT_DIGEST_LOCAL_HOUR),
     });
     const userId = jwtSub(res.access_token);
     if (!userId) throw new Error('Signup access token is missing a subject');

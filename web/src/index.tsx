@@ -130,7 +130,7 @@ function AppShell() {
               <Route path="/logs/gallery" component={Logs} />
               <Route path="/settings" component={Settings} />
               <Route path="/verify-email" component={VerifyEmail} />
-              <Route path="/invite_accept" component={InviteAccept} />
+              <Route path="/invite-accept" component={InviteAccept} />
               {import.meta.env.DEV && (
                 <Route path="/dev/components" component={DevComponentsPage} />
               )}

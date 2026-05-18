@@ -11,7 +11,6 @@ import {
   Input,
   Select,
 } from '@virtueinitiative/shared-web';
-import { formatDigestHour, utcMinutesToLocalHour, localHourToUtcMinutes } from '../../utils/digest';
 import { usePromise } from '../../hooks/usePromise';
 import './style.css';
 
@@ -26,8 +25,8 @@ export function Settings() {
   const [settingsShowSaved, setSettingsShowSaved] = useState(false);
   const [emailStatus, setEmailStatus] = useState<string | null>(null);
   const [emailSaving, setEmailSave] = usePromise();
-  const [emailFrequency, setEmailFrequency] = useState<User['email_frequency']>('daily');
-  const [emailDigestLocalHour, setEmailDigestLocalHour] = useState(6);
+  const [emailFrequency, setEmailFrequency] =
+    useState<User['settings']['email_frequency']>('daily');
   const [deleteConfirmEmail, setDeleteConfirmEmail] = useState('');
   const [deleteAccountStatus, setDeleteAccountStatus] = useState<string | null>(null);
   const [deleteAccountPending, setDeleteAccountSave] = usePromise();
@@ -39,21 +38,18 @@ export function Settings() {
     if (!user) return;
     setEmail(user.email);
     setName(user.name ?? '');
-    setEmailFrequency(user.email_frequency ?? 'daily');
-    setEmailDigestLocalHour(utcMinutesToLocalHour(user.email_digest_minutes_utc));
+    setEmailFrequency(user.settings.email_frequency ?? 'daily');
   }, [user]);
 
   if (!user) return <p class="hint-text">Loading…</p>;
 
   const normalizedEmail = email.trim().toLowerCase();
   const trimmedName = name.trim();
-  const emailDigestMinutesUtc = localHourToUtcMinutes(emailDigestLocalHour);
 
   const hasNameChange = trimmedName.length > 0 && trimmedName !== (user.name ?? '');
   const hasEmailChanged = normalizedEmail !== user.email;
-  const hasDigestScheduleChanges = emailDigestMinutesUtc !== user.email_digest_minutes_utc;
-  const hasEmailFrequencyChanges = emailFrequency !== user.email_frequency;
-  const hasSettingsChanges = hasNameChange || hasDigestScheduleChanges || hasEmailFrequencyChanges;
+  const hasEmailFrequencyChanges = emailFrequency !== user.settings.email_frequency;
+  const hasSettingsChanges = hasNameChange || hasEmailFrequencyChanges;
 
   const deleteConfirmationMatches =
     deleteConfirmEmail.trim().toLowerCase() === user.email.toLowerCase();
@@ -64,8 +60,7 @@ export function Settings() {
     setSettingsStatus(null);
     const patch: Parameters<typeof api.updateSettings>[0] = {};
     if (hasNameChange) patch.name = trimmedName;
-    if (hasEmailFrequencyChanges) patch.email_frequency = emailFrequency;
-    if (hasDigestScheduleChanges) patch.email_digest_minutes_utc = emailDigestMinutesUtc;
+    if (hasEmailFrequencyChanges) patch.settings = { email_frequency: emailFrequency };
     setSettingsSave(
       api
         .updateSettings(patch)
@@ -155,7 +150,9 @@ export function Settings() {
             <Select
               value={emailFrequency}
               onChange={(e) => {
-                setEmailFrequency((e.target as HTMLSelectElement).value as User['email_frequency']);
+                setEmailFrequency(
+                  (e.target as HTMLSelectElement).value as User['settings']['email_frequency'],
+                );
                 setSettingsStatus(null);
                 setSettingsShowSaved(false);
               }}
@@ -165,25 +162,6 @@ export function Settings() {
               <option value="alerts-only">Alerts only</option>
               <option value="daily">Daily</option>
               <option value="weekly">Weekly</option>
-            </Select>
-          </Field>
-          <Field label="Digest delivery time">
-            <Select
-              value={String(emailDigestLocalHour)}
-              onChange={(e) => {
-                setEmailDigestLocalHour(
-                  Number.parseInt((e.target as HTMLSelectElement).value, 10) || 0,
-                );
-                setSettingsStatus(null);
-                setSettingsShowSaved(false);
-              }}
-              disabled={settingsSaving}
-            >
-              {Array.from({ length: 24 }, (_, hour) => (
-                <option key={hour} value={hour}>
-                  {formatDigestHour(hour)}
-                </option>
-              ))}
             </Select>
           </Field>
           {settingsStatus && <Alert variant="error">{settingsStatus}</Alert>}

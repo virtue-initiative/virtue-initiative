@@ -19,9 +19,8 @@ import {
   updatePartnerNotificationPreference,
 } from '../lib/db';
 import { renderPartnerAcceptedTemplate, renderPartnerInviteTemplate } from '../lib/email/templates';
-import { PARTNER_INVITE_TTL_MS } from '../lib/email-domain';
+import { DEFAULT_EMAIL_FREQUENCY, PARTNER_INVITE_TTL_MS } from '../lib/email-domain';
 import { sendEmail } from '../lib/email';
-import { DEFAULT_EMAIL_FREQUENCY } from '../lib/email-domain';
 import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
 
@@ -113,7 +112,7 @@ partners.post(
       ownerEmail: currentUser.email,
       appName: c.env.APP_NAME,
       appUrl: getAppUrl(c),
-      inviteUrl: `${getAppUrl(c)}/invite_accept?partner_token=${encodeURIComponent(inviteToken)}`,
+      inviteUrl: `${getAppUrl(c)}/invite-accept?partner_token=${encodeURIComponent(inviteToken)}`,
     });
     await sendEmail({
       env: c.env,
@@ -265,7 +264,7 @@ partners.get('/partner', authenticate('access'), async (c) => {
       },
       status: partner.status,
       digest_cadence: toPublicNotificationCadence(
-        partner.email_frequency ?? DEFAULT_EMAIL_FREQUENCY,
+        partner.settings.email_frequency ?? DEFAULT_EMAIL_FREQUENCY,
       ),
       created_at: partner.created_at,
     })),

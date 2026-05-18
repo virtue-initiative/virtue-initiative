@@ -19,7 +19,6 @@ import {
   updateUser,
   consumeEmailToken,
 } from '../lib/db';
-import { DEFAULT_DIGEST_MINUTES_UTC, normalizeDigestMinutesUtc } from '../lib/digest-schedule';
 import {
   renderEmailVerificationTemplate,
   renderPasswordResetTemplate,
@@ -56,7 +55,6 @@ const signupSchema = z.object({
   pub_key: z.base64(),
   priv_key: z.base64(),
   name: z.string().min(1).optional(),
-  email_digest_minutes_utc: z.int().min(0).max(1439).optional(),
 });
 
 const loginMaterialQuerySchema = z.object({
@@ -66,6 +64,7 @@ const loginMaterialQuerySchema = z.object({
 const loginSchema = z.object({
   email: z.email(),
   password_auth: z.base64(),
+  timezone: z.string().optional(),
 });
 
 const verifyEmailSchema = z.object({
@@ -92,8 +91,12 @@ const updateUserSchema = z
   .object({
     email: z.email().optional(),
     name: z.string().min(1).optional(),
-    email_frequency: z.enum(['none', 'alerts-only', 'daily', 'weekly']).optional(),
-    email_digest_minutes_utc: z.int().min(0).max(1439).optional(),
+    settings: z
+      .object({
+        email_frequency: z.enum(['none', 'alerts-only', 'daily', 'weekly']).optional(),
+        timezone: z.string().optional(),
+      })
+      .optional(),
     pub_key: z.base64().optional(),
     priv_key: z.base64().optional(),
   })
@@ -350,15 +353,8 @@ auth.post('/signup-request', validateZ('json', signupRequestSchema), async (c) =
 });
 
 auth.post('/signup', validateZ('json', signupSchema), async (c) => {
-  const {
-    verification_token,
-    password_auth,
-    password_salt,
-    pub_key,
-    priv_key,
-    name,
-    email_digest_minutes_utc,
-  } = c.req.valid('json');
+  const { verification_token, password_auth, password_salt, pub_key, priv_key, name } =
+    c.req.valid('json');
 
   const record = await getValidTokenRecord(c.env.DB, verification_token, 'signup');
   if (!record) {
@@ -398,7 +394,6 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
     pub_key: decodedPublicKey,
     priv_key: decodedPrivateKey,
     name,
-    email_digest_minutes_utc: normalizeDigestMinutesUtc(email_digest_minutes_utc),
   });
 
   await updateUser(c.env.DB, userId, { email_verified: true });
@@ -421,7 +416,7 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
 });
 
 auth.post('/login', validateZ('json', loginSchema), async (c) => {
-  const { email, password_auth } = c.req.valid('json');
+  const { email, password_auth, timezone } = c.req.valid('json');
   const normalizedEmail = email.trim().toLowerCase();
   const user = await findUserByEmail(c.env.DB, normalizedEmail);
 
@@ -438,6 +433,10 @@ auth.post('/login', validateZ('json', loginSchema), async (c) => {
 
   if (user.email_verified !== 1) {
     return c.json({ error: 'Please verify your email before logging in.' }, 403);
+  }
+
+  if (timezone) {
+    await updateUser(c.env.DB, user.id, { settings: { timezone } });
   }
 
   const accessToken = await createSession(c, user.id);
@@ -496,8 +495,7 @@ auth.get('/user', authenticate('access'), async (c) => {
     email: user.email,
     email_verified: user.email_verified === 1,
     email_bounced_at: user.email_bounced_at,
-    email_frequency: user.email_frequency,
-    email_digest_minutes_utc: user.email_digest_minutes_utc ?? DEFAULT_DIGEST_MINUTES_UTC,
+    settings: user.settings,
     ...(user.name ? { name: user.name } : {}),
     ...(user.pub_key ? { pub_key: encodeBase64(user.pub_key) } : {}),
     ...(user.priv_key ? { priv_key: encodeBase64(user.priv_key) } : {}),
@@ -506,8 +504,7 @@ auth.get('/user', authenticate('access'), async (c) => {
 
 auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema), async (c) => {
   const userId = c.get('sub');
-  const { email, name, email_frequency, email_digest_minutes_utc, pub_key, priv_key } =
-    c.req.valid('json');
+  const { email, name, settings, pub_key, priv_key } = c.req.valid('json');
   const normalizedEmail = email?.trim().toLowerCase();
   const user = await findUserById(c.env.DB, userId);
 
@@ -535,11 +532,7 @@ auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema),
 
   await updateUser(c.env.DB, userId, {
     name,
-    email_frequency,
-    email_digest_minutes_utc:
-      email_digest_minutes_utc !== undefined
-        ? normalizeDigestMinutesUtc(email_digest_minutes_utc)
-        : undefined,
+    settings,
     pub_key: decodedPublicKey,
     priv_key: decodedPrivateKey,
   });

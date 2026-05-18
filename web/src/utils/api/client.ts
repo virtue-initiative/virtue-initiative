@@ -31,8 +31,7 @@ const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 export interface UserSettings {
   email?: string;
   name?: string;
-  email_frequency?: User['email_frequency'];
-  email_digest_minutes_utc?: User['email_digest_minutes_utc'];
+  settings?: { email_frequency?: User['settings']['email_frequency']; timezone?: string };
   pub_key?: string;
   priv_key?: string;
 }

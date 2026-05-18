@@ -227,13 +227,13 @@ describe('Auth routes', () => {
     const body = (await getRes.json()) as {
       name: string;
       email_verified: boolean;
-      email_digest_minutes_utc: number;
+      settings: { email_frequency: string; timezone: string };
       pub_key: string;
       priv_key: string;
     };
     expect(body.name).toBe('Updated Carol');
     expect(body.email_verified).toBe(true);
-    expect(body.email_digest_minutes_utc).toBe(360);
+    expect(body.settings).toMatchObject({ email_frequency: 'daily', timezone: 'UTC' });
     expect(body.pub_key).toBe(nextPubKey);
     expect(body.priv_key).toBe(nextPrivKey);
     await markUserEmailVerified(userId);
@@ -261,24 +261,24 @@ describe('Auth routes', () => {
     expect(updatedBody.email_verified).toBe(true);
     expect(updatedBody.email_bounced_at).toBeNull();
 
-    const updateDigestRes = await SELF.fetch(`${BASE}/user`, {
+    const updateSettingsRes = await SELF.fetch(`${BASE}/user`, {
       method: 'PATCH',
       headers: authHeaders(token),
       body: JSON.stringify({
-        email_digest_minutes_utc: 540,
+        settings: { email_frequency: 'weekly' },
       }),
     });
-    expect(updateDigestRes.status).toBe(200);
+    expect(updateSettingsRes.status).toBe(200);
 
-    const digestUserRes = await SELF.fetch(`${BASE}/user`, {
+    const settingsUserRes = await SELF.fetch(`${BASE}/user`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(
-      (await digestUserRes.json()) as {
-        email_digest_minutes_utc: number;
+      (await settingsUserRes.json()) as {
+        settings: { email_frequency: string };
       },
     ).toMatchObject({
-      email_digest_minutes_utc: 540,
+      settings: { email_frequency: 'weekly' },
     });
 
     const deliveries = await listEmailDeliveries();
@@ -291,8 +291,8 @@ describe('Auth routes', () => {
     const latestMetadata = JSON.parse(deliveries[deliveries.length - 1]!.metadata) as {
       verifyUrl: string;
     };
-    expect(new URL(latestMetadata.verifyUrl).pathname).toBe('/settings');
-    expect(new URL(latestMetadata.verifyUrl).searchParams.has('change_email_token')).toBe(true);
+    expect(new URL(latestMetadata.verifyUrl).pathname).toBe('/verify-email');
+    expect(new URL(latestMetadata.verifyUrl).searchParams.has('token')).toBe(true);
 
     const latestVerificationToken = await latestEmailToken('email_change');
     expect(latestVerificationToken?.email).toBe('carol-new@example.com');
@@ -323,7 +323,7 @@ describe('Auth routes', () => {
 
     const latestDelivery = (await listEmailDeliveries()).at(-1);
     const emailChangeToken = latestDelivery
-      ? extractTokenFromDelivery(latestDelivery, 'change_email_token')
+      ? extractTokenFromDelivery(latestDelivery, 'token')
       : null;
     expect(emailChangeToken).toBeTruthy();
 

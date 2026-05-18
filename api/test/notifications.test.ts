@@ -64,7 +64,7 @@ describe('Notification routes and tamper alerts', () => {
       method: 'PATCH',
       headers: authHeaders(partnerToken),
       body: JSON.stringify({
-        email_frequency: 'alerts-only',
+        settings: { email_frequency: 'alerts-only' },
       }),
     });
     expect(patchRes.status).toBe(200);
@@ -73,8 +73,8 @@ describe('Notification routes and tamper alerts', () => {
       headers: { Authorization: `Bearer ${partnerToken}` },
     });
     expect(userRes.status).toBe(200);
-    expect((await userRes.json()) as { email_frequency: string }).toMatchObject({
-      email_frequency: 'alerts-only',
+    expect((await userRes.json()) as { settings: { email_frequency: string } }).toMatchObject({
+      settings: { email_frequency: 'alerts-only' },
     });
 
     const updatedRes = await SELF.fetch(`${BASE}/partner`, {
@@ -267,7 +267,7 @@ describe('Notification routes and tamper alerts', () => {
     await SELF.fetch(`${BASE}/user`, {
       method: 'PATCH',
       headers: authHeaders(partnerToken),
-      body: JSON.stringify({ email_frequency: 'none' }),
+      body: JSON.stringify({ settings: { email_frequency: 'none' } }),
     });
 
     const device = await createDeviceForUser(ownerToken, 'Muted Device', 'linux');

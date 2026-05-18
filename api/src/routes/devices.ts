@@ -113,7 +113,7 @@ devices.delete('/:id', authenticate('access'), async (c) => {
 
   const targets = await listAcceptedNotificationTargetsForUser(c.env.DB, c.get('sub'));
   for (const target of targets) {
-    if ((target.email_frequency ?? 'daily') === 'none') {
+    if (target.settings.email_frequency === 'none') {
       continue;
     }
 

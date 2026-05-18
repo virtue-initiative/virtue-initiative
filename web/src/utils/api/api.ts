@@ -5,8 +5,7 @@ export interface User {
   email: string;
   email_verified: boolean;
   email_bounced_at: number | null;
-  email_frequency: 'none' | 'alerts-only' | 'daily' | 'weekly';
-  email_digest_minutes_utc: number;
+  settings: { email_frequency: 'none' | 'alerts-only' | 'daily' | 'weekly'; timezone: string };
   name?: string;
   pub_key?: string;
   priv_key?: string;
@@ -275,10 +274,10 @@ export const api = {
     return req<LoginMaterial>(`/user/login-material?${qs.toString()}`);
   },
 
-  login: (email: string, password_auth: string) =>
+  login: (email: string, password_auth: string, timezone?: string) =>
     req<{ access_token: string }>('/login', {
       method: 'POST',
-      body: JSON.stringify({ email, password_auth }),
+      body: JSON.stringify({ email, password_auth, ...(timezone ? { timezone } : {}) }),
     }),
 
   signupRequest: (email: string, to?: string) =>
@@ -297,7 +296,6 @@ export const api = {
     pub_key: string;
     priv_key: string;
     name?: string;
-    email_digest_minutes_utc?: number;
   }) =>
     req<{
       access_token: string;
@@ -321,8 +319,7 @@ export const api = {
     fields: {
       email?: string;
       name?: string;
-      email_frequency?: User['email_frequency'];
-      email_digest_minutes_utc?: User['email_digest_minutes_utc'];
+      settings?: { email_frequency?: User['settings']['email_frequency']; timezone?: string };
       pub_key?: string;
       priv_key?: string;
     },
