@@ -25,69 +25,51 @@ const listDataSchema = z.object({
   device_id: z.uuid().optional(),
   user: z.uuid().optional(),
   since: z.coerce.number().int().nonnegative().optional().default(0),
-  limit: z.coerce.number().int().positive().max(500).optional().default(250),
 });
 
 data.get('/', authenticate('access'), validateZ('query', listDataSchema), async (c) => {
   const requesterId = c.get('sub');
-  const { device_id, user, since, limit } = c.req.valid('query');
+  const { device_id, user, since } = c.req.valid('query');
   const targetUserId = user ?? requesterId;
 
   if (!(await canViewUserData(c.env.DB, targetUserId, requesterId))) {
     return c.json({ error: 'Forbidden' }, 403);
   }
 
-  const fetchLimit = limit + 1;
   const [batches, logs] = await Promise.all([
-    listBatches(c.env.DB, [targetUserId], { deviceId: device_id, since }, fetchLimit),
-    listDeviceLogs(c.env.DB, [targetUserId], { deviceId: device_id, since }, fetchLimit),
+    listBatches(c.env.DB, [targetUserId], { deviceId: device_id, since }),
+    listDeviceLogs(c.env.DB, [targetUserId], { deviceId: device_id, since }),
   ]);
 
-  const combined = [
-    ...batches.map((batch) => ({
-      created_at: batch.created_at,
-      kind: 'batch' as const,
-      value: batch,
-    })),
-    ...logs.map((log) => ({ created_at: log.created_at, kind: 'log' as const, value: log })),
-  ].sort((a, b) => a.created_at - b.created_at);
-
-  const page = combined.slice(0, limit);
-  const nextSince = combined.length > limit ? page[page.length - 1]?.created_at : undefined;
-
   return c.json({
-    batches: page
-      .filter((item) => item.kind === 'batch')
-      .map((item) => {
-        const encryptedKey = getEncryptedKeyForUser(item.value.access_keys, requesterId);
+    batches: batches
+      .map((batch) => {
+        const encryptedKey = getEncryptedKeyForUser(batch.access_keys, requesterId);
         if (!encryptedKey) {
           return null;
         }
 
         return {
-          device_id: item.value.device_id,
-          id: item.value.id,
-          start_time: item.value.start_time,
-          end_time: item.value.end_time,
-          end_hash: item.value.end_hash,
-          url: item.value.url,
+          device_id: batch.device_id,
+          id: batch.id,
+          start_time: batch.start_time,
+          end_time: batch.end_time,
+          end_hash: batch.end_hash,
+          url: batch.url,
           encrypted_key: encryptedKey,
-          created_at: item.value.created_at,
+          created_at: batch.created_at,
         };
       })
       .filter((item) => item !== null),
-    logs: page
-      .filter((item) => item.kind === 'log')
-      .map((item) => ({
-        id: item.value.id,
-        device_id: item.value.device_id,
-        ts: item.value.ts,
-        type: item.value.type,
-        data: JSON.parse(item.value.data) as Record<string, unknown>,
-        created_at: item.value.created_at,
-        ...(item.value.risk !== null ? { risk: item.value.risk } : {}),
-      })),
-    ...(nextSince !== undefined ? { next_since: nextSince } : {}),
+    logs: logs.map((log) => ({
+      id: log.id,
+      device_id: log.device_id,
+      ts: log.ts,
+      type: log.type,
+      data: JSON.parse(log.data) as Record<string, unknown>,
+      created_at: log.created_at,
+      ...(log.risk !== null ? { risk: log.risk } : {}),
+    })),
   });
 });
 

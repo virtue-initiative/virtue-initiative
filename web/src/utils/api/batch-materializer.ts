@@ -1,14 +1,15 @@
 import { decode } from '@msgpack/msgpack';
 import { Batch } from './api';
-import { decryptBatch, decompressGzip } from './crypto';
-import { FeedLog, toUint8Array } from './pages/Logs/shared';
-import { decodeWebpDimensions } from './utils/webp-dimensions';
+import { decryptBatch, decompressGzip, verifyBatch } from './crypto';
+import { FeedLog, toUint8Array } from '../../pages/Logs/shared';
+import { decodeWebpDimensions } from '../webp-dimensions';
 
 // Batch payload format must match client/core/src/batch.rs:
 //   msgpack({events: [msgpack(event), ...]}) → gzip → AES-256-GCM (nonce[12] || ciphertext+tag)
 export async function decryptAndFlattenBatch(
   batch: Batch,
   openBatchKey: (encryptedKey: string) => Promise<CryptoKey>,
+  startChainHash: string,
 ): Promise<FeedLog[]> {
   const response = await fetch(batch.url);
   if (!response.ok) {
@@ -25,6 +26,9 @@ export async function decryptAndFlattenBatch(
   const decompressed = await decompressGzip(decrypted);
   const decoded = decode(decompressed) as unknown;
   const eventBytes = Array.isArray(decoded) ? decoded : [];
+
+  const rawEventBytes = eventBytes.map((e) => toUint8Array(e) ?? new Uint8Array());
+  const batch_status = await verifyBatch(rawEventBytes, startChainHash, batch.end_hash);
 
   return eventBytes.map((encodedEvent, index) => {
     const rawEvent = toUint8Array(encodedEvent);
@@ -58,7 +62,7 @@ export async function decryptAndFlattenBatch(
       data,
       created_at: batch.created_at,
       risk: typeof event.risk === 'number' ? event.risk : undefined,
-      batch_status: 'unknown' as const,
+      batch_status,
       source: 'batch' as const,
       image_w,
       image_h,

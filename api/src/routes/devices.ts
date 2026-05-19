@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import { z } from 'zod';
 import { authenticate } from '../middleware/auth';
 import { validateZ } from '../middleware/validation';
 import {
@@ -16,16 +15,11 @@ import { sendEmail } from '../lib/email';
 import { renderDeviceDeletedTemplate } from '../lib/email/templates';
 import { deleteObject } from '../lib/r2';
 import { Env, Variables } from '../types/bindings';
+import { updateDeviceSchema, type PatchDeviceResponse } from '../../../shared-web/types';
 
 const devices = new Hono<{ Bindings: Env; Variables: Variables }>();
 const ONLINE_WINDOW_MS = 2 * 60 * 60 * 1000;
 const LOCAL_WEB_URL = 'http://localhost:5173';
-
-const updateDeviceSchema = z
-  .object({
-    name: z.string().min(1).optional(),
-  })
-  .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
 
 function getAppUrl(requestUrl: string, env: Env) {
   const url = new URL(requestUrl);
@@ -66,7 +60,7 @@ devices.patch('/:id', authenticate('access'), validateZ('json', updateDeviceSche
   const { name } = c.req.valid('json');
   await updateDevice(c.env.DB, deviceId, { name });
 
-  return c.json({ id: deviceId, updated: true });
+  return c.json<PatchDeviceResponse>({ id: deviceId, updated: true });
 });
 
 devices.delete('/:id', authenticate('access'), async (c) => {
@@ -113,7 +107,7 @@ devices.delete('/:id', authenticate('access'), async (c) => {
 
   const targets = await listAcceptedNotificationTargetsForUser(c.env.DB, c.get('sub'));
   for (const target of targets) {
-    if ((target.email_frequency ?? 'daily') === 'none') {
+    if (target.settings.email_frequency === 'none') {
       continue;
     }
 

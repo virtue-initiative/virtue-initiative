@@ -1,7 +1,6 @@
 import { Context, Hono } from 'hono';
 import { getCookie, deleteCookie, setCookie } from 'hono/cookie';
 import { v4 as uuidv4 } from 'uuid';
-import { z } from 'zod';
 import { authenticate } from '../middleware/auth';
 import { validateZ } from '../middleware/validation';
 import {
@@ -19,7 +18,6 @@ import {
   updateUser,
   consumeEmailToken,
 } from '../lib/db';
-import { DEFAULT_DIGEST_MINUTES_UTC, normalizeDigestMinutesUtc } from '../lib/digest-schedule';
 import {
   renderEmailVerificationTemplate,
   renderPasswordResetTemplate,
@@ -27,6 +25,22 @@ import {
 import { sendEmail } from '../lib/email';
 import { decodeBase64, encodeBase64 } from '../lib/encoding';
 import { EMAIL_VERIFICATION_TTL_MS, PASSWORD_RESET_TTL_MS } from '../lib/email-domain';
+import {
+  signupRequestSchema,
+  signupSchema,
+  loginMaterialQuerySchema,
+  loginSchema,
+  verifyEmailSchema,
+  passwordResetRequestSchema,
+  passwordResetValidateSchema,
+  passwordResetSchema,
+  updateUserSchema,
+  deleteUserSchema,
+  type AccessTokenResponse,
+  type SignupResponse,
+  type EmailVerifyResponse,
+  type UpdateUserResponse,
+} from '../../../shared-web/types';
 import { generateAccessToken } from '../lib/jwt';
 import {
   CURRENT_HASH_PARAMS,
@@ -43,61 +57,6 @@ const auth = new Hono<{ Bindings: Env; Variables: Variables }>();
 const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 const REFRESH_TOKEN_TTL_SECONDS = 365 * 24 * 60 * 60;
 const LOCAL_WEB_URL = 'http://localhost:5173';
-
-const signupSchema = z.object({
-  email: z.email(),
-  password_auth: z.base64(),
-  password_salt: z.base64(),
-  pub_key: z.base64(),
-  priv_key: z.base64(),
-  name: z.string().min(1).optional(),
-  email_digest_minutes_utc: z.int().min(0).max(1439).optional(),
-  partner_invite_token: z.string().min(1).optional(),
-});
-
-const loginMaterialQuerySchema = z.object({
-  email: z.email(),
-});
-
-const loginSchema = z.object({
-  email: z.email(),
-  password_auth: z.base64(),
-});
-
-const verifyEmailSchema = z.object({
-  token: z.string().min(1),
-});
-
-const passwordResetRequestSchema = z.object({
-  email: z.email(),
-});
-
-const passwordResetValidateSchema = z.object({
-  token: z.string().min(1),
-});
-
-const passwordResetSchema = z.object({
-  token: z.string().min(1),
-  password_auth: z.base64(),
-  password_salt: z.base64(),
-  pub_key: z.base64(),
-  priv_key: z.base64(),
-});
-
-const updateUserSchema = z
-  .object({
-    email: z.email().optional(),
-    name: z.string().min(1).optional(),
-    email_frequency: z.enum(['none', 'alerts-only', 'daily', 'weekly']).optional(),
-    email_digest_minutes_utc: z.int().min(0).max(1439).optional(),
-    pub_key: z.base64().optional(),
-    priv_key: z.base64().optional(),
-  })
-  .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
-
-const deleteUserSchema = z.object({
-  confirm_email: z.email(),
-});
 
 function buildHashParamsResponse() {
   return {
@@ -187,7 +146,7 @@ function getAppUrl(c: Context<{ Bindings: Env; Variables: Variables }>) {
 async function issueEmailToken(
   db: D1Database,
   user: { id: string; email: string },
-  purpose: 'email_verification' | 'email_change' | 'password_reset',
+  purpose: 'email_change' | 'password_reset',
   ttlMs: number,
 ) {
   await invalidateEmailTokens(db, user.id, purpose);
@@ -211,20 +170,8 @@ async function sendVerificationEmail(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   user: { id: string; email: string; name?: string | null },
   token: string,
-  options?: {
-    purpose?: 'email_verification' | 'email_change';
-    next?: '/settings';
-    partner_invite_token?: string;
-  },
 ) {
-  const params = new URLSearchParams({ token });
-  if (options?.next) {
-    params.set('next', options.next);
-  }
-  if (options?.partner_invite_token) {
-    params.set('partner_invite_token', options.partner_invite_token);
-  }
-  const verifyUrl = `${getAppUrl(c)}/verify-email?${params.toString()}`;
+  const verifyUrl = `${getAppUrl(c)}/verify-email?token=${encodeURIComponent(token)}`;
   const email = renderEmailVerificationTemplate({
     appName: c.env.APP_NAME,
     appUrl: getAppUrl(c),
@@ -241,7 +188,37 @@ async function sendVerificationEmail(
     text: email.text,
     html: email.html,
     related_user_id: user.id,
-    metadata: { purpose: options?.purpose ?? 'email_verification', verifyUrl },
+    metadata: { purpose: 'email_change', verifyUrl },
+  });
+}
+
+async function sendSignupConfirmationEmail(
+  c: Context<{ Bindings: Env; Variables: Variables }>,
+  recipient: { email: string; name?: string | null },
+  token: string,
+  options?: { to?: string },
+) {
+  const params = new URLSearchParams({ signup_token: token });
+  if (options?.to) {
+    params.set('to', options.to);
+  }
+  const verifyUrl = `${getAppUrl(c)}/signup?${params.toString()}`;
+  const email = renderEmailVerificationTemplate({
+    appName: c.env.APP_NAME,
+    appUrl: getAppUrl(c),
+    recipientName: recipient.name,
+    verifyUrl,
+  });
+
+  await sendEmail({
+    env: c.env,
+    db: c.env.DB,
+    kind: 'email_verification',
+    recipient: recipient.email,
+    subject: email.subject,
+    text: email.text,
+    html: email.html,
+    metadata: { purpose: 'signup', verifyUrl },
   });
 }
 
@@ -274,13 +251,16 @@ async function sendPasswordResetEmail(
 async function getValidTokenRecord(
   db: D1Database,
   rawToken: string,
-  purpose?: 'email_verification' | 'email_change' | 'password_reset',
+  purpose?: 'email_change' | 'password_reset' | 'signup',
 ) {
   const token = await findEmailTokenByHash(db, hashOpaqueToken(rawToken), purpose);
-  if (!token || !token.user_id || token.consumed_at || token.expires_at < Date.now()) {
+  if (!token || token.consumed_at || token.expires_at < Date.now()) {
     return null;
   }
-  return { ...token, user_id: token.user_id };
+  if (token.purpose !== 'signup' && !token.user_id) {
+    return null;
+  }
+  return token;
 }
 
 auth.get('/current-hash-params', async (c) => c.json(buildHashParamsResponse()));
@@ -295,22 +275,49 @@ auth.get('/user/login-material', validateZ('query', loginMaterialQuerySchema), a
   });
 });
 
-auth.post('/signup', validateZ('json', signupSchema), async (c) => {
-  const {
-    email,
-    password_auth,
-    password_salt,
-    pub_key,
-    priv_key,
-    name,
-    email_digest_minutes_utc,
-    partner_invite_token,
-  } = c.req.valid('json');
+auth.post('/signup-request', validateZ('json', signupRequestSchema), async (c) => {
+  const { email, to } = c.req.valid('json');
   const normalizedEmail = email.trim().toLowerCase();
   const existingUser = await findUserByEmail(c.env.DB, normalizedEmail);
 
   if (existingUser) {
-    return c.json({ error: 'User already exists' }, 409);
+    return c.json({ error: 'An account already exists for that email' }, 409);
+  }
+
+  const token = generateOpaqueToken();
+  const now = Date.now();
+
+  await createEmailToken(c.env.DB, {
+    id: uuidv4(),
+    user_id: null,
+    email: normalizedEmail,
+    purpose: 'signup',
+    token_hash: hashOpaqueToken(token),
+    expires_at: now + EMAIL_VERIFICATION_TTL_MS,
+    created_at: now,
+  });
+
+  await sendSignupConfirmationEmail(c, { email: normalizedEmail }, token, {
+    to: to ?? undefined,
+  });
+
+  return c.json({ ok: true });
+});
+
+auth.post('/signup', validateZ('json', signupSchema), async (c) => {
+  const { verification_token, password_auth, password_salt, pub_key, priv_key, name } =
+    c.req.valid('json');
+
+  const record = await getValidTokenRecord(c.env.DB, verification_token, 'signup');
+  if (!record) {
+    return c.json({ error: 'Invalid or expired verification token' }, 400);
+  }
+
+  const normalizedEmail = record.email;
+  const existingUser = await findUserByEmail(c.env.DB, normalizedEmail);
+
+  if (existingUser) {
+    return c.json({ error: 'An account already exists for that email' }, 409);
   }
 
   let decodedPasswordAuth: ArrayBuffer;
@@ -339,25 +346,20 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
     pub_key: decodedPublicKey,
     priv_key: decodedPrivateKey,
     name,
-    email_digest_minutes_utc: normalizeDigestMinutesUtc(email_digest_minutes_utc),
-  });
-  const verificationToken = await issueEmailToken(
-    c.env.DB,
-    { id: userId, email: normalizedEmail },
-    'email_verification',
-    EMAIL_VERIFICATION_TTL_MS,
-  );
-  await sendVerificationEmail(c, { id: userId, email: normalizedEmail, name }, verificationToken, {
-    partner_invite_token: partner_invite_token ?? undefined,
   });
 
-  return c.json(
+  await updateUser(c.env.DB, userId, { email_verified: true });
+  await consumeEmailToken(c.env.DB, record.id, Date.now());
+
+  const accessToken = await createSession(c, userId);
+
+  return c.json<SignupResponse>(
     {
-      ok: true,
+      access_token: accessToken,
       user: {
         id: userId,
         email: normalizedEmail,
-        email_verified: false,
+        email_verified: true,
         ...(name ? { name } : {}),
       },
     },
@@ -366,7 +368,7 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
 });
 
 auth.post('/login', validateZ('json', loginSchema), async (c) => {
-  const { email, password_auth } = c.req.valid('json');
+  const { email, password_auth, timezone } = c.req.valid('json');
   const normalizedEmail = email.trim().toLowerCase();
   const user = await findUserByEmail(c.env.DB, normalizedEmail);
 
@@ -385,8 +387,12 @@ auth.post('/login', validateZ('json', loginSchema), async (c) => {
     return c.json({ error: 'Please verify your email before logging in.' }, 403);
   }
 
+  if (timezone) {
+    await updateUser(c.env.DB, user.id, { settings: { timezone } });
+  }
+
   const accessToken = await createSession(c, user.id);
-  return c.json({ access_token: accessToken });
+  return c.json<AccessTokenResponse>({ access_token: accessToken });
 });
 
 auth.post('/logout', async (c) => {
@@ -426,7 +432,7 @@ auth.post('/token', async (c) => {
     ACCESS_TOKEN_TTL_SECONDS,
   );
 
-  return c.json({ access_token: accessToken }, 201);
+  return c.json<AccessTokenResponse>({ access_token: accessToken }, 201);
 });
 
 auth.get('/user', authenticate('access'), async (c) => {
@@ -441,8 +447,7 @@ auth.get('/user', authenticate('access'), async (c) => {
     email: user.email,
     email_verified: user.email_verified === 1,
     email_bounced_at: user.email_bounced_at,
-    email_frequency: user.email_frequency,
-    email_digest_minutes_utc: user.email_digest_minutes_utc ?? DEFAULT_DIGEST_MINUTES_UTC,
+    settings: user.settings,
     ...(user.name ? { name: user.name } : {}),
     ...(user.pub_key ? { pub_key: encodeBase64(user.pub_key) } : {}),
     ...(user.priv_key ? { priv_key: encodeBase64(user.priv_key) } : {}),
@@ -451,8 +456,7 @@ auth.get('/user', authenticate('access'), async (c) => {
 
 auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema), async (c) => {
   const userId = c.get('sub');
-  const { email, name, email_frequency, email_digest_minutes_utc, pub_key, priv_key } =
-    c.req.valid('json');
+  const { email, name, settings, pub_key, priv_key } = c.req.valid('json');
   const normalizedEmail = email?.trim().toLowerCase();
   const user = await findUserById(c.env.DB, userId);
 
@@ -480,11 +484,7 @@ auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema),
 
   await updateUser(c.env.DB, userId, {
     name,
-    email_frequency,
-    email_digest_minutes_utc:
-      email_digest_minutes_utc !== undefined
-        ? normalizeDigestMinutesUtc(email_digest_minutes_utc)
-        : undefined,
+    settings,
     pub_key: decodedPublicKey,
     priv_key: decodedPrivateKey,
   });
@@ -504,11 +504,10 @@ auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema),
         name: name ?? user.name,
       },
       verificationToken,
-      { purpose: 'email_change', next: '/settings' },
     );
   }
 
-  return c.json({
+  return c.json<UpdateUserResponse>({
     ok: true,
     ...(emailChanged
       ? {
@@ -551,91 +550,33 @@ auth.post('/email-verification/validate', validateZ('json', verifyEmailSchema), 
   const { token } = c.req.valid('json');
   const record = await getValidTokenRecord(c.env.DB, token);
 
-  if (!record || (record.purpose !== 'email_verification' && record.purpose !== 'email_change')) {
+  if (!record || !record.user_id || record.purpose !== 'email_change') {
     return c.json({ error: 'Invalid or expired token' }, 400);
   }
 
-  const verificationPurpose = record.purpose;
+  const userId = record.user_id;
 
-  if (verificationPurpose === 'email_change') {
-    const existingUser = await findUserByEmail(c.env.DB, record.email);
-    if (existingUser && existingUser.id !== record.user_id) {
-      return c.json({ error: 'Email is already in use' }, 409);
-    }
-
-    await updateUser(c.env.DB, record.user_id, {
-      email: record.email,
-      email_verified: true,
-      email_bounced_at: null,
-    });
-    await consumeEmailToken(c.env.DB, record.id, Date.now());
-    await invalidateEmailTokens(c.env.DB, record.user_id, 'email_change');
-  } else {
-    await updateUser(c.env.DB, record.user_id, { email_verified: true, email_bounced_at: null });
-    await consumeEmailToken(c.env.DB, record.id, Date.now());
-    await invalidateEmailTokens(c.env.DB, record.user_id, 'email_verification');
+  const existingUser = await findUserByEmail(c.env.DB, record.email);
+  if (existingUser && existingUser.id !== userId) {
+    return c.json({ error: 'Email is already in use' }, 409);
   }
 
-  const accessToken = await createSession(c, record.user_id);
+  await updateUser(c.env.DB, userId, {
+    email: record.email,
+    email_verified: true,
+    email_bounced_at: null,
+  });
+  await consumeEmailToken(c.env.DB, record.id, Date.now());
+  await invalidateEmailTokens(c.env.DB, userId, 'email_change');
 
-  return c.json({
+  const accessToken = await createSession(c, userId);
+
+  return c.json<EmailVerifyResponse>({
     ok: true,
     email: record.email,
     access_token: accessToken,
-    purpose: verificationPurpose,
+    purpose: 'email_change',
   });
-});
-
-auth.post(
-  '/email-verification/resend',
-  validateZ('json', z.object({ email: z.email() })),
-  async (c) => {
-    const { email } = c.req.valid('json');
-    const user = await findUserByEmail(c.env.DB, email.trim().toLowerCase());
-
-    if (user && user.email_verified !== 1 && !user.email_bounced_at) {
-      const verificationToken = await issueEmailToken(
-        c.env.DB,
-        { id: user.id, email: user.email },
-        'email_verification',
-        EMAIL_VERIFICATION_TTL_MS,
-      );
-      await sendVerificationEmail(c, user, verificationToken);
-    }
-
-    return c.body(null, 204);
-  },
-);
-
-auth.post('/email-verification', authenticate('access'), async (c) => {
-  const user = await findUserById(c.env.DB, c.get('sub'));
-
-  if (!user) {
-    return c.json({ error: 'User account not found' }, 404);
-  }
-
-  if (user.email_verified === 1) {
-    return c.json({ ok: true, already_verified: true });
-  }
-
-  if (user.email_bounced_at) {
-    return c.json(
-      {
-        error:
-          'Your last verification email bounced. Please update your email address before requesting another verification email.',
-      },
-      409,
-    );
-  }
-
-  const verificationToken = await issueEmailToken(
-    c.env.DB,
-    { id: user.id, email: user.email },
-    'email_verification',
-    EMAIL_VERIFICATION_TTL_MS,
-  );
-  await sendVerificationEmail(c, user, verificationToken);
-  return c.json({ ok: true });
 });
 
 auth.post('/password-reset', validateZ('json', passwordResetRequestSchema), async (c) => {

@@ -44,7 +44,7 @@ HTTP status codes: 400 bad request, 401 unauthorized, 403 forbidden, 404 not fou
 
 ## Type source of truth
 
-The TypeScript types in `api/src/routes/` and `api/src/lib/db.ts` are the canonical definitions. `web/src/api.ts` mirrors the shapes that the API actually returns — keep them in sync when changing API response shapes.
+Response shapes shared with the web are defined as Zod schemas in `shared-web/types.ts` and imported from there by both the API (`src/lib/email-domain.ts` re-exports `emailFrequencySchema` and friends) and the web. When changing an API response shape, update `shared-web/types.ts` first, then update the route handler to match.
 
 ## Bindings
 

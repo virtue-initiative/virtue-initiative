@@ -1,0 +1,10 @@
+{
+  "name": "virtue-initiative",
+  "private": true,
+  "workspaces": [
+    "api",
+    "shared-web",
+    "web",
+    "landing"
+  ]
+}

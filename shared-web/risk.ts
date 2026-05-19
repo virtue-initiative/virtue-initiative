@@ -36,3 +36,23 @@ export function hasTamperRisk(risk: number | null | undefined) {
 export function isHighRisk(risk: number | null | undefined) {
   return getRiskRating(risk) === 'high';
 }
+
+export function getRiskLevel(risk: number | null | undefined): 'high' | 'medium' | 'low' {
+  const rating = getRiskRating(risk);
+  if (rating === 'high') return 'high';
+  if (rating === 'moderate') return 'medium';
+  return 'low';
+}
+
+export function describeRiskLevel(risk: number | null | undefined): string | null {
+  if (risk == null || typeof risk !== 'number' || Number.isNaN(risk)) {
+    return null;
+  }
+
+  const percentage = Math.round(Math.max(0, Math.min(1, risk)) * 100);
+  const level = getRiskLevel(risk);
+
+  if (level === 'high') return `High risk (${percentage}%)`;
+  if (level === 'medium') return `Moderate risk (${percentage}%)`;
+  return `Risk ${percentage}%`;
+}

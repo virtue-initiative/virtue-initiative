@@ -136,18 +136,44 @@ Response `200`:
 }
 ```
 
-### `POST /signup`
+### `POST /signup-request`
 
 Request:
 
 ```js
 {
   "email": "user@example.com",
-  "name": "Name" | undefined,
+  "partner_invite_token": "opaque-string" | undefined
+}
+```
+
+Response `200`:
+
+```js
+{ "ok": true }
+```
+
+Notes:
+
+- Stores a short-lived pending signup token (`email_tokens` row with `purpose='signup'` and `user_id=NULL`).
+- Sends a verification email with a link to `/finish-signup?token=...`.
+- Does **not** create a user account.
+- Returns `409` if an account already exists for the email.
+
+### `POST /signup`
+
+Request:
+
+```js
+{
+  "verification_token": "opaque-string",
   "password_auth": Base64,
   "password_salt": Base64,
   "pub_key": Base64,
-  "priv_key": Base64
+  "priv_key": Base64,
+  "name": "Name" | undefined,
+  "email_digest_minutes_utc": Number | undefined,
+  "partner_invite_token": "opaque-string" | undefined
 }
 ```
 
@@ -155,11 +181,11 @@ Response `201`:
 
 ```js
 {
-  "ok": true,
+  "access_token": AccessToken,
   "user": {
     "id": UUID,
     "email": "user@example.com",
-    "email_verified": false,
+    "email_verified": true,
     "name": "Name" | undefined
   }
 }
@@ -167,9 +193,11 @@ Response `201`:
 
 Notes:
 
-- Signup creates the account immediately with `email_verified = false`.
-- Signup sends a verification email.
-- Signup does **not** return an access token or set the `refresh_token` cookie.
+- Looks up the pending signup record by `verification_token`; returns `400` if expired/not found.
+- Creates the account using `email` from the pending record + crypto material from the body.
+- Account is created with `email_verified = true`. Sets the `refresh_token` cookie and returns an access token.
+- The signup token is consumed on success.
+- `partner_invite_token` is accepted for forwarding to the client and should be applied by the client through `POST /partner/accept` after signup.
 
 ### `POST /login`
 
@@ -493,7 +521,6 @@ Query parameters:
 - `device_id`: optional `UUID`
 - `user`: optional `UUID`
 - `since`: optional timestamp, default `0`
-- `limit`: optional integer, max `500`
 
 Response `200`:
 
@@ -510,13 +537,13 @@ Response `200`:
       "created_at": DateTime,
       "risk": 0.7 | undefined
     }
-  ],
-  "next_since": DateTime | undefined
+  ]
 }
 ```
 
 `batches` only include rows where the requester has a matching `encrypted_key` envelope.
-Responses are ordered oldest-to-newest within the requested sync page.
+Returns every batch and log with `created_at > since`, ordered oldest-to-newest. Callers
+should pass the largest `created_at` they've seen as `since` on subsequent syncs.
 
 ## Device API
 

@@ -1,141 +1,61 @@
-import { sendToast } from './utils/toast';
-
-export interface User {
-  id: string;
-  email: string;
-  email_verified: boolean;
-  email_bounced_at: number | null;
-  email_frequency: 'none' | 'alerts-only' | 'daily' | 'weekly';
-  email_digest_minutes_utc: number;
-  name?: string;
-  pub_key?: string;
-  priv_key?: string;
-}
-
-export interface HashParams {
-  version: string;
-  algorithm: string;
-  memory_cost_kib: number;
-  time_cost: number;
-  parallelism: number;
-  salt_length: number;
-  hkdf_hash: string;
-}
-
-export interface LoginMaterial {
-  password_salt: string;
-  params: HashParams;
-}
-
-export interface Device {
-  id: string;
-  owner: string;
-  name: string;
-  platform: string;
-  last_upload_at: number | null;
-  status: 'online' | 'offline';
-}
-
-export interface Batch {
-  id: string;
-  device_id: string;
-  start_time: number;
-  end_time: number;
-  end_hash: string;
-  url: string;
-  encrypted_key: string;
-  created_at: number;
-}
-
-// Known event data shapes — keeps type information at call sites.
-// The fallback branch preserves compatibility with future or unknown event types.
-export type LogEventData =
-  | {
-      type: 'screenshot';
-      data: { image: Uint8Array | number[]; content_type: string };
-    }
-  | { type: 'system_event'; data: Record<string, unknown> }
-  | { type: 'lifecycle_alert'; data: Record<string, unknown> }
-  | { type: 'lifecycle_marker'; data: Record<string, unknown> }
-  | { type: 'lifecycle_transition'; data: Record<string, unknown> }
-  | { type: 'developer_log'; data: Record<string, unknown> }
-  | { type: string; data: Record<string, unknown> };
-
-export interface DataLog {
-  id: string;
-  device_id: string;
-  ts: number;
-  type: string;
-  data: Record<string, unknown>;
-  created_at: number;
-  risk?: number;
-}
-
-export interface DataPage {
-  batches: Batch[];
-  logs: DataLog[];
-  next_since?: number;
-}
-
-export interface WatchingPartner {
-  id: string;
-  user: {
-    id: string;
-    email: string;
-    name?: string;
-  };
-  status: 'pending' | 'accepted';
-  digest_cadence: 'none' | 'alerts-only' | 'daily' | 'weekly';
-  created_at?: number;
-}
-
-export interface WatcherPartner {
-  id: string;
-  user: {
-    id?: string;
-    email: string;
-    name?: string;
-  };
-  status: 'pending' | 'accepted';
-  created_at?: number;
-}
-
-export interface PartnerRelationships {
-  watching: WatchingPartner[];
-  watchers: WatcherPartner[];
-}
-
-export interface PartnerInviteValidation {
-  ok: boolean;
-  partnership_id: string;
-  owner: {
-    id: string;
-    email: string;
-    name?: string;
-  };
-}
-
-export interface PasswordResetValidation {
-  ok: boolean;
-  email: string;
-}
+import { sendToast } from '../toast';
+import type {
+  EmailFrequency,
+  User,
+  HashParams,
+  LoginMaterial,
+  Device,
+  Batch,
+  DataLog,
+  DataPage,
+  WatchingPartner,
+  WatcherPartner,
+  PartnerRelationships,
+  PartnerInviteValidation,
+  PasswordResetValidation,
+  SignupPayload,
+  SignupResponse,
+  AccessTokenResponse,
+  EmailVerifyResponse,
+  UpdateUserPayload,
+  UpdateUserResponse,
+  CreatePartnerResponse,
+  PatchDeviceResponse,
+} from '@virtueinitiative/shared-web/types';
+export type {
+  EmailFrequency,
+  User,
+  HashParams,
+  LoginMaterial,
+  Device,
+  Batch,
+  DataLog,
+  DataPage,
+  WatchingPartner,
+  WatcherPartner,
+  PartnerRelationships,
+  PartnerInviteValidation,
+  PasswordResetValidation,
+  SignupPayload,
+  SignupResponse,
+  AccessTokenResponse,
+  EmailVerifyResponse,
+  UpdateUserPayload,
+  UpdateUserResponse,
+  CreatePartnerResponse,
+  PatchDeviceResponse,
+};
 
 const BASE = (import.meta as any).env?.VITE_API_URL ?? 'http://localhost:8787';
 const NETWORK_ERROR_MESSAGE = "Error: Couldn't connect to the network. Try reloading.";
 const NETWORK_TOAST_THROTTLE_MS = 3_000;
 let lastNetworkToastAt = 0;
 
-type ToastHandledError = Error & { toastHandled?: boolean };
-
 type ReauthHandler = () => Promise<string | null>;
 
 interface RequestOptions {
   allowReauth?: boolean;
   retrying?: boolean;
-}
-
-export function isToastHandledError(error: unknown): error is ToastHandledError {
-  return error instanceof Error && (error as ToastHandledError).toastHandled === true;
 }
 
 let reauthHandler: ReauthHandler | null = null;
@@ -285,7 +205,7 @@ async function req<T>(
 
 export const api = {
   refreshToken: () =>
-    req<{ access_token: string }>('/token', { method: 'POST' }, undefined, {
+    req<AccessTokenResponse>('/token', { method: 'POST' }, undefined, {
       allowReauth: false,
     }),
 
@@ -296,57 +216,33 @@ export const api = {
     return req<LoginMaterial>(`/user/login-material?${qs.toString()}`);
   },
 
-  login: (email: string, password_auth: string) =>
-    req<{ access_token: string }>('/login', {
+  login: (email: string, password_auth: string, timezone?: string) =>
+    req<AccessTokenResponse>('/login', {
       method: 'POST',
-      body: JSON.stringify({ email, password_auth }),
+      body: JSON.stringify({ email, password_auth, ...(timezone ? { timezone } : {}) }),
     }),
 
-  signup: (
-    email: string,
-    payload: {
-      password_auth: string;
-      password_salt: string;
-      pub_key: string;
-      priv_key: string;
-      name?: string;
-      email_digest_minutes_utc?: number;
-      partner_invite_token?: string;
-    },
-  ) =>
-    req<{
-      ok: boolean;
-      user: {
-        id: string;
-        email: string;
-        name?: string;
-        email_verified: boolean;
-      };
-    }>('/signup', {
+  signupRequest: (email: string, to?: string) =>
+    req<{ ok: boolean }>('/signup-request', {
       method: 'POST',
-      body: JSON.stringify({ email, ...payload }),
+      body: JSON.stringify({
+        email,
+        ...(to ? { to } : {}),
+      }),
+    }),
+
+  signup: (payload: SignupPayload) =>
+    req<SignupResponse>('/signup', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     }),
 
   logout: () => req<void>('/logout', { method: 'POST' }),
 
   getUser: (token: string) => req<User>('/user', {}, token),
 
-  updateUser: (
-    token: string,
-    fields: {
-      email?: string;
-      name?: string;
-      email_frequency?: User['email_frequency'];
-      email_digest_minutes_utc?: User['email_digest_minutes_utc'];
-      pub_key?: string;
-      priv_key?: string;
-    },
-  ) =>
-    req<{
-      ok: boolean;
-      email_verification_required?: boolean;
-      pending_email?: string;
-    }>(
+  updateUser: (token: string, fields: UpdateUserPayload) =>
+    req<UpdateUserResponse>(
       '/user',
       {
         method: 'PATCH',
@@ -365,26 +261,8 @@ export const api = {
       token,
     ),
 
-  resendVerificationEmail: (email: string) =>
-    req<void>('/email-verification/resend', {
-      method: 'POST',
-      body: JSON.stringify({ email }),
-    }),
-
-  requestVerificationEmail: (token: string) =>
-    req<{ ok: boolean; already_verified?: boolean }>(
-      '/email-verification',
-      { method: 'POST' },
-      token,
-    ),
-
   verifyEmail: (token: string) =>
-    req<{
-      ok: boolean;
-      email: string;
-      access_token: string;
-      purpose: 'email_verification' | 'email_change';
-    }>('/email-verification/validate', {
+    req<EmailVerifyResponse>('/email-verification/validate', {
       method: 'POST',
       body: JSON.stringify({ token }),
     }),
@@ -418,7 +296,7 @@ export const api = {
   getDevices: (token: string) => req<Device[]>('/device', {}, token),
 
   patchDevice: (token: string, id: string, patch: { name?: string }) =>
-    req<{ id: string; updated: boolean }>(
+    req<PatchDeviceResponse>(
       `/device/${id}`,
       {
         method: 'PATCH',
@@ -433,7 +311,7 @@ export const api = {
   getPartners: (token: string) => req<PartnerRelationships>('/partner', {}, token),
 
   invitePartner: (token: string, email: string) =>
-    req<{ id: string; status: string }>(
+    req<CreatePartnerResponse>(
       '/partner',
       {
         method: 'POST',
@@ -468,13 +346,11 @@ export const api = {
     params?: {
       user?: string;
       since?: number;
-      limit?: number;
     },
   ) => {
     const qs = new URLSearchParams();
     if (params?.user) qs.set('user', params.user);
     if (params?.since !== undefined) qs.set('since', String(params.since));
-    if (params?.limit) qs.set('limit', String(params.limit));
     const query = qs.toString();
     return req<DataPage>(`/data${query ? `?${query}` : ''}`, {}, token);
   },

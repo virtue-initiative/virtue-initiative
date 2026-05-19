@@ -1,34 +1,46 @@
 import { DigestFrequency } from './email-domain';
 
-export const DEFAULT_DIGEST_MINUTES_UTC = 6 * 60;
 const DAY_MS = 24 * 60 * 60 * 1000;
-const MINUTE_MS = 60 * 1000;
-const DAY_MINUTES = 24 * 60;
-const DIGEST_RUN_TOLERANCE_MS = 60 * MINUTE_MS;
+const DIGEST_RUN_TOLERANCE_MS = 60 * 60 * 1000;
 
-function startOfUtcDay(timestamp: number) {
-  const date = new Date(timestamp);
-  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
-}
+function get6amUtcMs(timezone: string, referenceMs: number): number {
+  const dateStr = new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(
+    new Date(referenceMs),
+  );
+  const noonUtcMs = new Date(`${dateStr}T12:00:00Z`).getTime();
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(noonUtcMs));
 
-export function normalizeDigestMinutesUtc(minutes: number | null | undefined) {
-  if (minutes == null || !Number.isInteger(minutes)) {
-    return DEFAULT_DIGEST_MINUTES_UTC;
-  }
-
-  return ((minutes % DAY_MINUTES) + DAY_MINUTES) % DAY_MINUTES;
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? '0');
+  const localMs = Date.UTC(
+    get('year'),
+    get('month') - 1,
+    get('day'),
+    get('hour'),
+    get('minute'),
+    get('second'),
+  );
+  const offsetMs = localMs - noonUtcMs;
+  return new Date(`${dateStr}T06:00:00Z`).getTime() - offsetMs;
 }
 
 export function getDigestWindowForRun(input: {
   cadence: DigestFrequency;
   now: number;
-  utcMinutes: number;
+  timezone: string;
 }) {
-  const utcMinutes = normalizeDigestMinutesUtc(input.utcMinutes);
-  let end = startOfUtcDay(input.now) + utcMinutes * MINUTE_MS;
+  let end = get6amUtcMs(input.timezone, input.now);
 
   if (input.now < end) {
-    end -= DAY_MS;
+    end = get6amUtcMs(input.timezone, input.now - DAY_MS);
   }
 
   if (input.now < end || input.now >= end + DIGEST_RUN_TOLERANCE_MS) {
@@ -36,10 +48,11 @@ export function getDigestWindowForRun(input: {
   }
 
   if (input.cadence === 'weekly') {
-    const dayOffset = (new Date(end).getUTCDay() + 6) % 7;
-    end -= dayOffset * DAY_MS;
-
-    if (input.now < end || input.now >= end + DIGEST_RUN_TOLERANCE_MS) {
+    const weekday = new Intl.DateTimeFormat('en-US', {
+      weekday: 'short',
+      timeZone: input.timezone,
+    }).format(new Date(end));
+    if (weekday !== 'Mon') {
       return null;
     }
   }

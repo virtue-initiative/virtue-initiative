@@ -70,7 +70,7 @@ function flatten(items: HelpNavItem[]): HelpNavItem[] {
   return items.flatMap((item) => [item, ...(item.items ? flatten(item.items) : [])]);
 }
 
-export const flatHelpSidebar = flatten(helpSidebar);
+const flatHelpSidebar = flatten(helpSidebar);
 
 export function findHelpItem(pathname: string) {
   return flatHelpSidebar.find((item) => item.href === pathname);

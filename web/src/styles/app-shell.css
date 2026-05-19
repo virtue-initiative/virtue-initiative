@@ -40,16 +40,4 @@
   #app {
     min-height: 100svh;
   }
-
-  .app-shell {
-    height: auto;
-    min-height: 100svh;
-    overflow-x: hidden;
-    overflow-y: visible;
-  }
-
-  .app-main {
-    overflow-x: hidden;
-    overflow-y: visible;
-  }
 }

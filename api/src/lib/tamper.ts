@@ -1,9 +1,4 @@
-import {
-  DEFAULT_EMAIL_FREQUENCY,
-  DEFAULT_IMMEDIATE_TAMPER_SEVERITY,
-  TamperSeverity,
-  severityAtLeast,
-} from './email-domain';
+import { DEFAULT_IMMEDIATE_TAMPER_SEVERITY, TamperSeverity, severityAtLeast } from './email-domain';
 import { findUserById, listAcceptedNotificationTargetsForUser } from './db';
 import { sendEmail } from './email';
 import { renderTamperAlertTemplate } from './email/templates';
@@ -43,7 +38,7 @@ export async function notifyPartnersAboutRiskLog(
 
   const targets = await listAcceptedNotificationTargetsForUser(db, input.userId);
   for (const target of targets) {
-    if ((target.email_frequency ?? DEFAULT_EMAIL_FREQUENCY) === 'none') {
+    if (target.settings.email_frequency === 'none') {
       continue;
     }
 
@@ -73,7 +68,7 @@ export async function notifyPartnersAboutRiskLog(
       related_user_id: input.userId,
       related_partnership_id: target.partnership_id,
       metadata: {
-        email_frequency: target.email_frequency ?? DEFAULT_EMAIL_FREQUENCY,
+        email_frequency: target.settings.email_frequency,
         logId: input.logId,
         deviceName: input.deviceName,
         risk: input.risk,

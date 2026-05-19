@@ -64,7 +64,7 @@ describe('Notification scheduler', () => {
       method: 'PATCH',
       headers: authHeaders(partnerToken),
       body: JSON.stringify({
-        email_digest_minutes_utc: 11 * 60,
+        settings: { timezone: 'America/New_York' },
       }),
     });
 
@@ -342,7 +342,7 @@ describe('Notification scheduler', () => {
     await SELF.fetch(`${BASE}/user`, {
       method: 'PATCH',
       headers: authHeaders(partnerToken),
-      body: JSON.stringify({ email_frequency: 'weekly' }),
+      body: JSON.stringify({ settings: { email_frequency: 'weekly' } }),
     });
 
     const device = await createDeviceForUser(ownerToken, 'Twice Device', 'linux');

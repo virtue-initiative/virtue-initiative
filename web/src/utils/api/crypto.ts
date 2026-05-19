@@ -176,7 +176,7 @@ export async function decompressGzip(data: Uint8Array): Promise<Uint8Array> {
 // SHA-256(currentState[32] || contentHash[32])
 // currentState: rolling state from the server (or 32 zero bytes initially)
 // contentHash:  SHA-256 of the plaintext log item being recorded
-export async function computeNewState(
+async function computeNewState(
   currentState: Uint8Array,
   contentHash: Uint8Array,
 ): Promise<Uint8Array> {
