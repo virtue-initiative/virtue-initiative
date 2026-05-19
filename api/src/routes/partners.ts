@@ -1,6 +1,5 @@
 import { Context, Hono } from 'hono';
 import { v4 as uuidv4 } from 'uuid';
-import { z } from 'zod';
 import { authenticate } from '../middleware/auth';
 import { validateZ } from '../middleware/validation';
 import {
@@ -19,7 +18,17 @@ import {
   updatePartnerNotificationPreference,
 } from '../lib/db';
 import { renderPartnerAcceptedTemplate, renderPartnerInviteTemplate } from '../lib/email/templates';
-import { DEFAULT_EMAIL_FREQUENCY, PARTNER_INVITE_TTL_MS } from '../lib/email-domain';
+import {
+  DEFAULT_EMAIL_FREQUENCY,
+  emailFrequencies,
+  PARTNER_INVITE_TTL_MS,
+} from '../lib/email-domain';
+import {
+  createPartnerSchema,
+  inviteTokenSchema,
+  updateWatchingSchema,
+  type CreatePartnerResponse,
+} from '../../../shared-web/types';
 import { sendEmail } from '../lib/email';
 import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
@@ -36,28 +45,12 @@ function getAppUrl(c: Context<{ Bindings: Env; Variables: Variables }>) {
   return c.env.APP_URL;
 }
 
-const createPartnerSchema = z.object({
-  email: z.email(),
-});
-
-const inviteTokenSchema = z.object({
-  token: z.string().min(1),
-});
-
-const publicNotificationCadences = ['none', 'alerts-only', 'daily', 'weekly'] as const;
-
-const updateWatchingSchema = z
-  .object({
-    digest_cadence: z.enum(publicNotificationCadences).optional(),
-  })
-  .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
-
 function toPublicNotificationCadence(emailFrequency: string | null | undefined) {
-  if (!emailFrequency || !publicNotificationCadences.includes(emailFrequency as never)) {
+  if (!emailFrequency || !(emailFrequencies as readonly string[]).includes(emailFrequency)) {
     return 'daily' as const;
   }
 
-  return emailFrequency as (typeof publicNotificationCadences)[number];
+  return emailFrequency as (typeof emailFrequencies)[number];
 }
 
 partners.post(
@@ -127,7 +120,7 @@ partners.post(
       metadata: { partnerEmail: email, inviteToken },
     });
 
-    return c.json({ id, status: 'pending' }, 201);
+    return c.json<CreatePartnerResponse>({ id, status: 'pending' }, 201);
   },
 );
 

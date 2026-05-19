@@ -1,3 +1,9 @@
+import { emailFrequencies, emailFrequencySchema } from '../../../shared-web/types';
+import type { EmailFrequency } from '../../../shared-web/types';
+
+export { emailFrequencies, emailFrequencySchema };
+export type { EmailFrequency };
+
 export const emailTokenPurposes = ['email_change', 'password_reset', 'partner_invite'] as const;
 
 export type EmailTokenPurpose = (typeof emailTokenPurposes)[number];
@@ -6,10 +12,7 @@ export const tamperSeverities = ['info', 'warning', 'critical'] as const;
 
 export type TamperSeverity = (typeof tamperSeverities)[number];
 
-export const emailFrequencies = ['none', 'alerts-only', 'daily', 'weekly'] as const;
-
-export type EmailFrequency = (typeof emailFrequencies)[number];
-export type DigestFrequency = Extract<EmailFrequency, 'daily' | 'weekly'>;
+export type DigestFrequency = Extract<(typeof emailFrequencies)[number], 'daily' | 'weekly'>;
 
 export const emailKinds = [
   'email_verification',

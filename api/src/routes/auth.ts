@@ -1,7 +1,6 @@
 import { Context, Hono } from 'hono';
 import { getCookie, deleteCookie, setCookie } from 'hono/cookie';
 import { v4 as uuidv4 } from 'uuid';
-import { z } from 'zod';
 import { authenticate } from '../middleware/auth';
 import { validateZ } from '../middleware/validation';
 import {
@@ -26,6 +25,22 @@ import {
 import { sendEmail } from '../lib/email';
 import { decodeBase64, encodeBase64 } from '../lib/encoding';
 import { EMAIL_VERIFICATION_TTL_MS, PASSWORD_RESET_TTL_MS } from '../lib/email-domain';
+import {
+  signupRequestSchema,
+  signupSchema,
+  loginMaterialQuerySchema,
+  loginSchema,
+  verifyEmailSchema,
+  passwordResetRequestSchema,
+  passwordResetValidateSchema,
+  passwordResetSchema,
+  updateUserSchema,
+  deleteUserSchema,
+  type AccessTokenResponse,
+  type SignupResponse,
+  type EmailVerifyResponse,
+  type UpdateUserResponse,
+} from '../../../shared-web/types';
 import { generateAccessToken } from '../lib/jwt';
 import {
   CURRENT_HASH_PARAMS,
@@ -42,69 +57,6 @@ const auth = new Hono<{ Bindings: Env; Variables: Variables }>();
 const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 const REFRESH_TOKEN_TTL_SECONDS = 365 * 24 * 60 * 60;
 const LOCAL_WEB_URL = 'http://localhost:5173';
-
-const signupRequestSchema = z.object({
-  email: z.email(),
-  to: z.string().optional(),
-});
-
-const signupSchema = z.object({
-  verification_token: z.string().min(1),
-  password_auth: z.base64(),
-  password_salt: z.base64(),
-  pub_key: z.base64(),
-  priv_key: z.base64(),
-  name: z.string().min(1).optional(),
-});
-
-const loginMaterialQuerySchema = z.object({
-  email: z.email(),
-});
-
-const loginSchema = z.object({
-  email: z.email(),
-  password_auth: z.base64(),
-  timezone: z.string().optional(),
-});
-
-const verifyEmailSchema = z.object({
-  token: z.string().min(1),
-});
-
-const passwordResetRequestSchema = z.object({
-  email: z.email(),
-});
-
-const passwordResetValidateSchema = z.object({
-  token: z.string().min(1),
-});
-
-const passwordResetSchema = z.object({
-  token: z.string().min(1),
-  password_auth: z.base64(),
-  password_salt: z.base64(),
-  pub_key: z.base64(),
-  priv_key: z.base64(),
-});
-
-const updateUserSchema = z
-  .object({
-    email: z.email().optional(),
-    name: z.string().min(1).optional(),
-    settings: z
-      .object({
-        email_frequency: z.enum(['none', 'alerts-only', 'daily', 'weekly']).optional(),
-        timezone: z.string().optional(),
-      })
-      .optional(),
-    pub_key: z.base64().optional(),
-    priv_key: z.base64().optional(),
-  })
-  .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
-
-const deleteUserSchema = z.object({
-  confirm_email: z.email(),
-});
 
 function buildHashParamsResponse() {
   return {
@@ -401,7 +353,7 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
 
   const accessToken = await createSession(c, userId);
 
-  return c.json(
+  return c.json<SignupResponse>(
     {
       access_token: accessToken,
       user: {
@@ -440,7 +392,7 @@ auth.post('/login', validateZ('json', loginSchema), async (c) => {
   }
 
   const accessToken = await createSession(c, user.id);
-  return c.json({ access_token: accessToken });
+  return c.json<AccessTokenResponse>({ access_token: accessToken });
 });
 
 auth.post('/logout', async (c) => {
@@ -480,7 +432,7 @@ auth.post('/token', async (c) => {
     ACCESS_TOKEN_TTL_SECONDS,
   );
 
-  return c.json({ access_token: accessToken }, 201);
+  return c.json<AccessTokenResponse>({ access_token: accessToken }, 201);
 });
 
 auth.get('/user', authenticate('access'), async (c) => {
@@ -555,7 +507,7 @@ auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema),
     );
   }
 
-  return c.json({
+  return c.json<UpdateUserResponse>({
     ok: true,
     ...(emailChanged
       ? {
@@ -619,11 +571,11 @@ auth.post('/email-verification/validate', validateZ('json', verifyEmailSchema), 
 
   const accessToken = await createSession(c, userId);
 
-  return c.json({
+  return c.json<EmailVerifyResponse>({
     ok: true,
     email: record.email,
     access_token: accessToken,
-    purpose: 'email_change' as const,
+    purpose: 'email_change',
   });
 });
 

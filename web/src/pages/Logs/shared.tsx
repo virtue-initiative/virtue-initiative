@@ -3,6 +3,7 @@ import { DataLog } from '../../utils/api/api';
 import { BatchVerification } from '../../utils/api/crypto';
 import { formatDate, formatTime } from '../../utils/time';
 import { Dialog, DialogHeader } from '@virtueinitiative/shared-web';
+import { describeRiskLevel, getRiskLevel } from '@virtueinitiative/shared-web/risk';
 import { loadEventImage } from '../../utils/api/data-cache';
 
 export type FeedLog = DataLog & {
@@ -37,23 +38,6 @@ function getLogMetadata(log: DataLog) {
       ([key, value]) =>
         [key, typeof value === 'string' ? value : JSON.stringify(value)] as [string, string],
     );
-}
-
-function describeRiskLevel(risk: number | undefined): string | null {
-  if (typeof risk !== 'number' || Number.isNaN(risk)) {
-    return null;
-  }
-
-  const percentage = Math.round(Math.max(0, Math.min(1, risk)) * 100);
-
-  if (risk > 0.7) {
-    return `High risk (${percentage}%)`;
-  }
-  if (risk > 0.4) {
-    return `Moderate risk (${percentage}%)`;
-  }
-
-  return `Risk ${percentage}%`;
 }
 
 export function humanizeLogType(type: string): string {
@@ -200,9 +184,9 @@ export function LogDetailDialog({
         {formatDate(item.ts)} {formatTime(item.ts)}
       </p>
       <div class="logs-detail-badges">
-        {item.risk > 0.7 ? (
+        {getRiskLevel(item.risk) === 'high' ? (
           <span class="logs-verify-badge logs-verify-badge--failed">⚠ {riskLabel}</span>
-        ) : item.risk > 0.4 ? (
+        ) : getRiskLevel(item.risk) === 'medium' ? (
           <span class="logs-verify-badge logs-verify-badge--moderate">{riskLabel}</span>
         ) : (
           <span class="logs-detail-risk-neutral">{riskLabel}</span>

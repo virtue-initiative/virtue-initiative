@@ -24,27 +24,10 @@ jobs:
         with:
           node-version: '24'
           cache: 'npm'
-          cache-dependency-path: |
-            api/package-lock.json
-            shared-web/package-lock.json
-            web/package-lock.json
-            landing/package-lock.json
+          cache-dependency-path: package-lock.json
 
-      - name: Install API dependencies
+      - name: Install dependencies
         run: npm ci
-        working-directory: api
-
-      - name: Install shared-web dependencies
-        run: npm ci
-        working-directory: shared-web
-
-      - name: Install Web dependencies
-        run: npm ci
-        working-directory: web
-
-      - name: Install Landing dependencies
-        run: npm ci
-        working-directory: landing
 
       - name: API Prettier check
         run: npm run format:check

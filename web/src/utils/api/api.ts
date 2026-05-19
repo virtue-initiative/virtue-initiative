@@ -1,108 +1,50 @@
 import { sendToast } from '../toast';
-
-export interface User {
-  id: string;
-  email: string;
-  email_verified: boolean;
-  email_bounced_at: number | null;
-  settings: { email_frequency: 'none' | 'alerts-only' | 'daily' | 'weekly'; timezone: string };
-  name?: string;
-  pub_key?: string;
-  priv_key?: string;
-}
-
-export interface HashParams {
-  version: string;
-  algorithm: string;
-  memory_cost_kib: number;
-  time_cost: number;
-  parallelism: number;
-  salt_length: number;
-  hkdf_hash: string;
-}
-
-export interface LoginMaterial {
-  password_salt: string;
-  params: HashParams;
-}
-
-export interface Device {
-  id: string;
-  owner: string;
-  name: string;
-  platform: string;
-  last_upload_at: number | null;
-  status: 'online' | 'offline';
-}
-
-export interface Batch {
-  id: string;
-  device_id: string;
-  start_time: number;
-  end_time: number;
-  end_hash: string;
-  url: string;
-  encrypted_key: string;
-  created_at: number;
-}
-
-export interface DataLog {
-  id: string;
-  device_id: string;
-  ts: number;
-  type: string;
-  data: Record<string, unknown>;
-  created_at: number;
-  risk?: number;
-}
-
-export interface DataPage {
-  batches: Batch[];
-  logs: DataLog[];
-}
-
-export interface WatchingPartner {
-  id: string;
-  user: {
-    id: string;
-    email: string;
-    name?: string;
-  };
-  status: 'pending' | 'accepted';
-  digest_cadence: 'none' | 'alerts-only' | 'daily' | 'weekly';
-  created_at?: number;
-}
-
-export interface WatcherPartner {
-  id: string;
-  user: {
-    id?: string;
-    email: string;
-    name?: string;
-  };
-  status: 'pending' | 'accepted';
-  created_at?: number;
-}
-
-export interface PartnerRelationships {
-  watching: WatchingPartner[];
-  watchers: WatcherPartner[];
-}
-
-export interface PartnerInviteValidation {
-  ok: boolean;
-  partnership_id: string;
-  owner: {
-    id: string;
-    email: string;
-    name?: string;
-  };
-}
-
-export interface PasswordResetValidation {
-  ok: boolean;
-  email: string;
-}
+import type {
+  EmailFrequency,
+  User,
+  HashParams,
+  LoginMaterial,
+  Device,
+  Batch,
+  DataLog,
+  DataPage,
+  WatchingPartner,
+  WatcherPartner,
+  PartnerRelationships,
+  PartnerInviteValidation,
+  PasswordResetValidation,
+  SignupPayload,
+  SignupResponse,
+  AccessTokenResponse,
+  EmailVerifyResponse,
+  UpdateUserPayload,
+  UpdateUserResponse,
+  CreatePartnerResponse,
+  PatchDeviceResponse,
+} from '@virtueinitiative/shared-web/types';
+export type {
+  EmailFrequency,
+  User,
+  HashParams,
+  LoginMaterial,
+  Device,
+  Batch,
+  DataLog,
+  DataPage,
+  WatchingPartner,
+  WatcherPartner,
+  PartnerRelationships,
+  PartnerInviteValidation,
+  PasswordResetValidation,
+  SignupPayload,
+  SignupResponse,
+  AccessTokenResponse,
+  EmailVerifyResponse,
+  UpdateUserPayload,
+  UpdateUserResponse,
+  CreatePartnerResponse,
+  PatchDeviceResponse,
+};
 
 const BASE = (import.meta as any).env?.VITE_API_URL ?? 'http://localhost:8787';
 const NETWORK_ERROR_MESSAGE = "Error: Couldn't connect to the network. Try reloading.";
@@ -263,7 +205,7 @@ async function req<T>(
 
 export const api = {
   refreshToken: () =>
-    req<{ access_token: string }>('/token', { method: 'POST' }, undefined, {
+    req<AccessTokenResponse>('/token', { method: 'POST' }, undefined, {
       allowReauth: false,
     }),
 
@@ -275,7 +217,7 @@ export const api = {
   },
 
   login: (email: string, password_auth: string, timezone?: string) =>
-    req<{ access_token: string }>('/login', {
+    req<AccessTokenResponse>('/login', {
       method: 'POST',
       body: JSON.stringify({ email, password_auth, ...(timezone ? { timezone } : {}) }),
     }),
@@ -289,23 +231,8 @@ export const api = {
       }),
     }),
 
-  signup: (payload: {
-    verification_token: string;
-    password_auth: string;
-    password_salt: string;
-    pub_key: string;
-    priv_key: string;
-    name?: string;
-  }) =>
-    req<{
-      access_token: string;
-      user: {
-        id: string;
-        email: string;
-        name?: string;
-        email_verified: boolean;
-      };
-    }>('/signup', {
+  signup: (payload: SignupPayload) =>
+    req<SignupResponse>('/signup', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
@@ -314,21 +241,8 @@ export const api = {
 
   getUser: (token: string) => req<User>('/user', {}, token),
 
-  updateUser: (
-    token: string,
-    fields: {
-      email?: string;
-      name?: string;
-      settings?: { email_frequency?: User['settings']['email_frequency']; timezone?: string };
-      pub_key?: string;
-      priv_key?: string;
-    },
-  ) =>
-    req<{
-      ok: boolean;
-      email_verification_required?: boolean;
-      pending_email?: string;
-    }>(
+  updateUser: (token: string, fields: UpdateUserPayload) =>
+    req<UpdateUserResponse>(
       '/user',
       {
         method: 'PATCH',
@@ -348,12 +262,7 @@ export const api = {
     ),
 
   verifyEmail: (token: string) =>
-    req<{
-      ok: boolean;
-      email: string;
-      access_token: string;
-      purpose: 'email_change';
-    }>('/email-verification/validate', {
+    req<EmailVerifyResponse>('/email-verification/validate', {
       method: 'POST',
       body: JSON.stringify({ token }),
     }),
@@ -387,7 +296,7 @@ export const api = {
   getDevices: (token: string) => req<Device[]>('/device', {}, token),
 
   patchDevice: (token: string, id: string, patch: { name?: string }) =>
-    req<{ id: string; updated: boolean }>(
+    req<PatchDeviceResponse>(
       `/device/${id}`,
       {
         method: 'PATCH',
@@ -402,7 +311,7 @@ export const api = {
   getPartners: (token: string) => req<PartnerRelationships>('/partner', {}, token),
 
   invitePartner: (token: string, email: string) =>
-    req<{ id: string; status: string }>(
+    req<CreatePartnerResponse>(
       '/partner',
       {
         method: 'POST',
