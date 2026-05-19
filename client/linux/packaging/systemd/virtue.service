@@ -1,7 +1,7 @@
 [Unit]
 Description=Virtue Monitoring Agent
 Wants=network-online.target
-After=network-online.target graphical-session.target
+After=network-online.target graphical-session.target time-sync.target
 PartOf=graphical-session.target
 
 [Service]
