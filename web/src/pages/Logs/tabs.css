@@ -1,9 +1,11 @@
 .logs-view-switcher .vi-segmented-control__item {
-  padding: 0.3rem 0.85rem;
+  padding: 0 0.85rem;
   font-size: 0.85rem;
 }
 
 .logs-view-switcher {
+  box-sizing: border-box;
+  height: var(--button-height);
   max-width: 100%;
   min-width: 0;
 }
@@ -18,7 +20,8 @@
 }
 
 .logs-filter-date {
-  height: 2rem;
+  box-sizing: border-box;
+  height: var(--button-height);
   padding: 0 0.4rem;
   border: 1px solid var(--border);
   border-radius: 6px;
