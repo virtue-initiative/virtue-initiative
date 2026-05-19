@@ -2,7 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { api as rawApi, PartnerInviteValidation } from '../../utils/api/api';
 import { useAPIContext } from '../../utils/api';
 import { Button, Card } from '@virtueinitiative/shared-web';
-import './style.css';
+import '../../styles/email-link.css';
 
 function navigate(path: string) {
   if (typeof window === 'undefined') return;
@@ -52,13 +52,13 @@ export function InviteAccept() {
   }, [apiClient]);
 
   return (
-    <div class="invite-accept-page">
-      <Card class="invite-accept-card">
-        {state.status === 'loading' && <p class="hint-text">Processing invite…</p>}
+    <div class="email-link-page">
+      <Card class="email-link-card">
+        {state.status === 'loading' && <p>Processing invite…</p>}
         {state.status === 'success' && (
           <>
             <h2>Invite accepted</h2>
-            <p class="invite-desc">
+            <p>
               Invite from <strong>{state.ownerName ?? state.ownerEmail}</strong> accepted. You can
               now view their monitoring data.
             </p>
@@ -70,7 +70,7 @@ export function InviteAccept() {
         {state.status === 'error' && (
           <>
             <h2>Invite error</h2>
-            <p class="invite-desc">{state.message}</p>
+            <p>{state.message}</p>
             <Button variant="primary" type="button" onClick={() => navigate('/')}>
               Back to dashboard
             </Button>

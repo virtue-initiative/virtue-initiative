@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api } from '../../utils/api';
 import { Card, Button } from '@virtueinitiative/shared-web';
-import '../Auth/style.css';
-import './style.css';
+import '../../styles/email-link.css';
 
 type State = 'loading' | 'success' | 'error';
 
@@ -22,8 +21,8 @@ export function VerifyEmail() {
   }, []);
 
   return (
-    <div class="auth-page">
-      <Card class="verify-email-card">
+    <div class="email-link-page">
+      <Card class="email-link-card">
         {state === 'loading' && <p>Verifying…</p>}
         {state === 'success' && (
           <>
