@@ -4,7 +4,9 @@ import { Device, LogQueryResult, useAPIContext, useDevices, usePartners } from '
 import { LogsGallery } from './LogsGallery';
 import { LogsList } from './LogsList';
 import { getRiskRating, type RiskRating } from '@virtueinitiative/shared-web/risk';
-import { FeedLog, formatDayLabel, humanizeLogType, LOG_TYPES } from './shared';
+import { FeedLog, formatDayLabel, getLogCategory, LOG_TYPES } from './shared';
+
+const LOG_CATEGORIES = [...new Set(LOG_TYPES.map(getLogCategory))];
 import './style.css';
 import { useUrlState } from '../../hooks/useUrlState';
 import { Button, Field, IconButton, Select } from '@virtueinitiative/shared-web';
@@ -281,7 +283,7 @@ export function Logs() {
     () =>
       (logs ?? []).filter((item) => {
         if (item.ts < weekStart || item.ts > weekEnd) return false;
-        if (typeFilter !== null && typeFilter !== item.type) return false;
+        if (typeFilter !== null && getLogCategory(item.type) !== typeFilter) return false;
         if (riskFilter !== 'all') {
           const rating = getRiskRating(item.risk);
           if (riskFilter === 'high' && rating !== 'high') return false;
@@ -430,9 +432,9 @@ export function Logs() {
                       onChange={(e) => setTypeFilter((e.target as HTMLSelectElement).value || null)}
                     >
                       <option value="">All</option>
-                      {LOG_TYPES.map((type) => (
-                        <option key={type} value={type}>
-                          {humanizeLogType(type)}
+                      {LOG_CATEGORIES.map((cat) => (
+                        <option key={cat} value={cat}>
+                          {cat}
                         </option>
                       ))}
                     </Select>

@@ -21,6 +21,7 @@ type DialogSecondaryActionsProps = {
 type DialogHeaderProps = {
   children: ComponentChildren;
   class?: string;
+  actions?: ComponentChildren;
 };
 
 function mergeClasses(...classNames: Array<string | undefined>) {
@@ -90,7 +91,7 @@ export function DialogSecondaryActions({
   return <div class={mergeClasses('vi-dialog-secondary-actions', className)}>{children}</div>;
 }
 
-export function DialogHeader({ children, class: className }: DialogHeaderProps) {
+export function DialogHeader({ children, class: className, actions }: DialogHeaderProps) {
   function closeDialog(e: MouseEvent) {
     (e.currentTarget as HTMLButtonElement).closest('dialog')?.close();
   }
@@ -98,6 +99,7 @@ export function DialogHeader({ children, class: className }: DialogHeaderProps) 
   return (
     <div class={mergeClasses('vi-dialog-header', className)}>
       <h3 class="vi-dialog-title">{children}</h3>
+      {actions && <div class="vi-dialog-header-actions">{actions}</div>}
       <button class="vi-dialog-close" type="button" aria-label="Close dialog" onClick={closeDialog}>
         <CloseIcon />
       </button>

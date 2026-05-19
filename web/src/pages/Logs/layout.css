@@ -487,6 +487,16 @@ button.logs-sidebar-backdrop.is-open {
   white-space: nowrap;
 }
 
+.logs-vrow-message {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
 /* Detail dialog */
 .logs-detail-dialog {
   max-height: calc(100dvh - 2rem);
