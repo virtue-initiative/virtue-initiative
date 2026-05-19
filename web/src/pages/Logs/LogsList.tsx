@@ -1,32 +1,9 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useRef, useState } from 'preact/hooks';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { formatRelativeTimestamp } from '../../utils/time';
-import { FeedLog, formatDayAndTime, getLogImage, humanizeLogType, LogDetailDialog } from './shared';
+import { EventImage, FeedLog, formatDayAndTime, humanizeLogType, LogDetailDialog } from './shared';
 
 const ITEM_HEIGHT = 68;
-
-function ThumbImage({ imageBytes }: { imageBytes: Uint8Array }) {
-  const [src, setSrc] = useState<string | null>(null);
-
-  useEffect(() => {
-    const url = URL.createObjectURL(
-      new Blob(
-        [
-          imageBytes.buffer.slice(
-            imageBytes.byteOffset,
-            imageBytes.byteOffset + imageBytes.byteLength,
-          ) as ArrayBuffer,
-        ],
-        { type: 'image/webp' },
-      ),
-    );
-    setSrc(url);
-    return () => URL.revokeObjectURL(url);
-  }, [imageBytes]);
-
-  if (!src) return <div class="logs-thumb-placeholder" />;
-  return <img class="logs-thumb-image" src={src} alt="" loading="lazy" />;
-}
 
 export function LogsList({
   items,
@@ -35,6 +12,7 @@ export function LogsList({
   onLoadMore,
   deviceName,
   onVisibleDateChange,
+  viewerId,
 }: {
   items: FeedLog[];
   loading: boolean;
@@ -42,6 +20,7 @@ export function LogsList({
   onLoadMore: () => void;
   deviceName: (id: string) => string;
   onVisibleDateChange?: (date: string | null) => void;
+  viewerId: string;
 }) {
   const [selectedItem, setSelectedItem] = useState<FeedLog | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -87,7 +66,6 @@ export function LogsList({
         >
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const item = items[virtualRow.index];
-            const image = getLogImage(item);
             const isFirst = virtualRow.index === 0;
             const isLast = virtualRow.index === items.length - 1;
 
@@ -107,8 +85,8 @@ export function LogsList({
                 onClick={() => setSelectedItem(item)}
               >
                 <div class="logs-vrow-thumb">
-                  {image ? (
-                    <ThumbImage imageBytes={image} />
+                  {item.image_w !== undefined ? (
+                    <EventImage eventId={item.id} viewerId={viewerId} />
                   ) : (
                     <div class="logs-thumb-placeholder" />
                   )}
@@ -142,6 +120,7 @@ export function LogsList({
           item={selectedItem}
           deviceName={deviceName}
           onClose={() => setSelectedItem(null)}
+          viewerId={viewerId}
         />
       )}
     </>

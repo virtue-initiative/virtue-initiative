@@ -4,6 +4,7 @@ import './Dialog.css';
 type DialogProps = Omit<JSX.IntrinsicElements['dialog'], 'ref'> & {
   children: ComponentChildren;
   dialogRef?: { current: HTMLDialogElement | null };
+  size?: 'md' | 'lg';
 };
 
 type DialogActionsProps = {
@@ -41,7 +42,14 @@ function CloseIcon() {
   );
 }
 
-export function Dialog({ children, dialogRef, class: className, onClick, ...props }: DialogProps) {
+export function Dialog({
+  children,
+  dialogRef,
+  class: className,
+  size,
+  onClick,
+  ...props
+}: DialogProps) {
   function handleClick(e: MouseEvent) {
     const dialog = e.currentTarget as HTMLDialogElement;
     if (e.target === e.currentTarget) {
@@ -54,7 +62,11 @@ export function Dialog({ children, dialogRef, class: className, onClick, ...prop
     <dialog
       {...props}
       ref={dialogRef}
-      class={mergeClasses('vi-dialog', className as string | undefined)}
+      class={mergeClasses(
+        'vi-dialog',
+        size && `vi-dialog--${size}`,
+        className as string | undefined,
+      )}
       onClick={handleClick}
     >
       {children}

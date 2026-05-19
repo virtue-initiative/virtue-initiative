@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { DataLog } from '../../utils/api/api';
 import { BatchVerification } from '../../utils/api/crypto';
 import { formatDate, formatTime } from '../../utils/time';
+import { Dialog, DialogHeader } from '@virtueinitiative/shared-web';
+import { loadEventImage } from '../../utils/api/data-cache';
 
 export type FeedLog = DataLog & {
   batch_status: BatchVerification;
@@ -89,111 +91,146 @@ export function formatDayAndTime(ms: number): string {
   return _dayAndTimeFmt.format(new Date(ms));
 }
 
-export function LogImage({
-  imageBytes,
+export function EventImage({
+  eventId,
+  viewerId,
   onClick,
 }: {
-  imageBytes: Uint8Array;
+  eventId: string;
+  viewerId: string;
   onClick?: () => void;
 }) {
   const [imgSrc, setImgSrc] = useState<string | null>(null);
 
   useEffect(() => {
-    const imageData = Uint8Array.from(imageBytes);
-    const url = URL.createObjectURL(new Blob([imageData], { type: 'image/webp' }));
-    setImgSrc(url);
-    return () => URL.revokeObjectURL(url);
-  }, [imageBytes]);
+    let url: string | null = null;
+    loadEventImage(viewerId, eventId)
+      .then((bytes) => {
+        if (!bytes) return;
+        url = URL.createObjectURL(
+          new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'image/webp' }),
+        );
+        setImgSrc(url);
+      })
+      .catch(() => {});
+    return () => {
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [viewerId, eventId]);
 
-  if (!imgSrc) return null;
+  if (!imgSrc) return <div class="logs-thumb-placeholder" />;
 
-  return (
-    <button class="logs-thumb-button" type="button" onClick={onClick} aria-label="View screenshot">
-      <img class="logs-thumb-image" src={imgSrc} alt="screenshot" loading="lazy" />
-    </button>
-  );
+  if (onClick) {
+    return (
+      <button
+        class="logs-thumb-button"
+        type="button"
+        onClick={onClick}
+        aria-label="View screenshot"
+      >
+        <img class="logs-thumb-image" src={imgSrc} alt="screenshot" loading="lazy" />
+      </button>
+    );
+  }
+
+  return <img class="logs-thumb-image" src={imgSrc} alt="" loading="lazy" />;
 }
 
 export function LogDetailDialog({
   item,
   deviceName,
   onClose,
+  viewerId,
 }: {
   item: FeedLog;
   deviceName: (id: string) => string;
   onClose: () => void;
+  viewerId: string;
 }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
   const [imgSrc, setImgSrc] = useState<string | null>(null);
   const [lightboxOpen, setLightboxOpen] = useState(false);
-  const imageBytes = getLogImage(item);
   const metadata = getLogMetadata(item);
   const riskLabel = describeRiskLevel(item.risk) ?? 'Risk unavailable';
 
   useEffect(() => {
-    if (!imageBytes) return;
-    const url = URL.createObjectURL(
-      new Blob([imageBytes as Uint8Array<ArrayBuffer>], { type: 'image/webp' }),
-    );
-    setImgSrc(url);
-    return () => URL.revokeObjectURL(url);
-  }, [imageBytes]);
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    dialog.showModal();
+    dialog.addEventListener('close', onClose);
+    return () => dialog.removeEventListener('close', onClose);
+  }, []);
+
+  useEffect(() => {
+    // Prefer inline image bytes (freshly decrypted, not yet persisted to IDB),
+    // fall back to async IDB load for events already stored without inline image.
+    const inlineBytes = getLogImage(item);
+    let url: string | null = null;
+    let cancelled = false;
+
+    const setUrl = (bytes: Uint8Array) => {
+      if (cancelled) return;
+      url = URL.createObjectURL(
+        new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'image/webp' }),
+      );
+      setImgSrc(url);
+    };
+
+    if (inlineBytes) {
+      setUrl(inlineBytes);
+    } else if (item.image_w !== undefined) {
+      loadEventImage(viewerId, item.id)
+        .then((bytes) => {
+          if (bytes) setUrl(bytes);
+        })
+        .catch(() => {});
+    }
+
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [item.id, viewerId]);
 
   return (
-    <>
-      <div class="logs-detail-overlay" onClick={onClose}>
-        <div
-          class="logs-detail-dialog"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Log details"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div class="logs-detail-header">
-            <div>
-              <span class="logs-type">{humanizeLogType(item.type)}</span>
-              <span class="logs-device logs-device--indented">{deviceName(item.device_id)}</span>
-            </div>
-            <button class="logs-detail-close" type="button" aria-label="Close" onClick={onClose}>
-              ×
-            </button>
-          </div>
-          <p class="logs-detail-time">
-            {formatDate(item.ts)} {formatTime(item.ts)}
-          </p>
-          <div class="logs-detail-badges">
-            {item.risk > 0.7 ? (
-              <span class="logs-verify-badge logs-verify-badge--failed">⚠ {riskLabel}</span>
-            ) : item.risk > 0.4 ? (
-              <span class="logs-verify-badge logs-verify-badge--moderate">{riskLabel}</span>
-            ) : (
-              <span class="logs-detail-risk-neutral">{riskLabel}</span>
-            )}
-            {item.batch_status === 'failed' && (
-              <span class="logs-verify-badge logs-verify-badge--failed">⚠ Unverified</span>
-            )}
-          </div>
-          {imgSrc && (
-            <button
-              class="logs-detail-image-button"
-              type="button"
-              onClick={() => setLightboxOpen(true)}
-              aria-label="Open image fullscreen"
-            >
-              <img class="logs-detail-image" src={imgSrc} alt="screenshot" />
-            </button>
-          )}
-          {metadata.length > 0 && (
-            <dl class="logs-meta logs-detail-meta">
-              {metadata.map(([key, value], i) => (
-                <>
-                  <dt key={`k-${i}`}>{key}</dt>
-                  <dd key={`v-${i}`}>{value}</dd>
-                </>
-              ))}
-            </dl>
-          )}
-        </div>
+    <Dialog dialogRef={dialogRef} size="lg" class="logs-detail-dialog">
+      <DialogHeader>{humanizeLogType(item.type)}</DialogHeader>
+      <p class="logs-detail-device">{deviceName(item.device_id)}</p>
+      <p class="logs-detail-time">
+        {formatDate(item.ts)} {formatTime(item.ts)}
+      </p>
+      <div class="logs-detail-badges">
+        {item.risk > 0.7 ? (
+          <span class="logs-verify-badge logs-verify-badge--failed">⚠ {riskLabel}</span>
+        ) : item.risk > 0.4 ? (
+          <span class="logs-verify-badge logs-verify-badge--moderate">{riskLabel}</span>
+        ) : (
+          <span class="logs-detail-risk-neutral">{riskLabel}</span>
+        )}
+        {item.batch_status === 'failed' && (
+          <span class="logs-verify-badge logs-verify-badge--failed">⚠ Unverified</span>
+        )}
       </div>
+      {imgSrc && (
+        <button
+          class="logs-detail-image-button"
+          type="button"
+          onClick={() => setLightboxOpen(true)}
+          aria-label="Open image fullscreen"
+        >
+          <img class="logs-detail-image" src={imgSrc} alt="screenshot" />
+        </button>
+      )}
+      {metadata.length > 0 && (
+        <dl class="logs-meta logs-detail-meta">
+          {metadata.map(([key, value], i) => (
+            <>
+              <dt key={`k-${i}`}>{key}</dt>
+              <dd key={`v-${i}`}>{value}</dd>
+            </>
+          ))}
+        </dl>
+      )}
       {lightboxOpen && (
         <div class="logs-lightbox-overlay" onClick={() => setLightboxOpen(false)}>
           <div class="logs-lightbox-frame">
@@ -206,6 +243,6 @@ export function LogDetailDialog({
           </div>
         </div>
       )}
-    </>
+    </Dialog>
   );
 }

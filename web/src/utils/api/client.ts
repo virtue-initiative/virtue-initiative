@@ -391,6 +391,7 @@ export class APIClient {
       const queue = [...unmaterialized].sort((a, b) => b.created_at - a.created_at);
       let processed = 0;
       const total = queue.length;
+      let querying = false;
 
       const worker = async () => {
         while (queue.length > 0) {
@@ -407,8 +408,13 @@ export class APIClient {
             console.warn('[api-client] failed to materialize batch', batch.id, err);
           }
           processed++;
-          const updatedLogs = await queryLogsFromIDB(this.userId, query);
-          cb({ logs: updatedLogs, complete: processed === total });
+          const isLast = processed === total;
+          if (!querying || isLast) {
+            querying = true;
+            const updatedLogs = await queryLogsFromIDB(this.userId, query);
+            querying = false;
+            cb({ logs: updatedLogs, complete: isLast });
+          }
         }
       };
 

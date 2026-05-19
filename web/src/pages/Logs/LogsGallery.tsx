@@ -5,7 +5,7 @@ import {
   observeElementOffset,
   elementScroll,
 } from '@tanstack/react-virtual';
-import { FeedLog, formatDayAndTime, getLogImage, LogDetailDialog, LogImage } from './shared';
+import { EventImage, FeedLog, formatDayAndTime, LogDetailDialog } from './shared';
 import { buildGalleryRows } from './gallery-layout';
 
 const TARGET_ROW_HEIGHT = 140;
@@ -21,6 +21,7 @@ export function LogsGallery({
   fullscreen,
   deviceName,
   onVisibleDateChange,
+  viewerId,
 }: {
   items: FeedLog[];
   loading: boolean;
@@ -29,6 +30,7 @@ export function LogsGallery({
   deviceName: (id: string) => string;
   fullscreen: boolean;
   onVisibleDateChange?: (date: string | null) => void;
+  viewerId: string;
 }) {
   const [wrapperEl, setWrapperEl] = useState<HTMLDivElement | null>(null);
   const [selectedItem, setSelectedItem] = useState<FeedLog | null>(null);
@@ -130,8 +132,6 @@ export function LogsGallery({
               }}
             >
               {rowItems.map((item, k) => {
-                const image = getLogImage(item);
-                if (!image) return null;
                 const cellWidth = row.widths[k];
                 return (
                   <div
@@ -143,7 +143,11 @@ export function LogsGallery({
                       flexShrink: 0,
                     }}
                   >
-                    <LogImage imageBytes={image} onClick={() => setSelectedItem(item)} />
+                    <EventImage
+                      eventId={item.id}
+                      viewerId={viewerId}
+                      onClick={() => setSelectedItem(item)}
+                    />
                   </div>
                 );
               })}
@@ -157,6 +161,7 @@ export function LogsGallery({
           item={selectedItem}
           deviceName={deviceName}
           onClose={() => setSelectedItem(null)}
+          viewerId={viewerId}
         />
       )}
     </div>

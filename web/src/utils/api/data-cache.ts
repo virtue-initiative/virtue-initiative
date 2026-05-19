@@ -16,6 +16,12 @@ interface StoredDecryptedEvent extends FeedLog {
   viewer_id: string;
 }
 
+interface StoredEventImage {
+  id: string;
+  viewer_id: string;
+  data: Uint8Array;
+}
+
 export interface DecryptedEventQuery {
   deviceId?: string;
   allowedDeviceIds?: string[];
@@ -26,6 +32,7 @@ export interface DecryptedEventQuery {
 class VirtueDB extends Dexie {
   feeds!: Table<CachedDataFeed, string>;
   decryptedEvents!: Table<StoredDecryptedEvent, string>;
+  eventImages!: Table<StoredEventImage, string>;
 
   constructor() {
     super('virtue-data-cache');
@@ -42,6 +49,26 @@ class VirtueDB extends Dexie {
             feed.materialized_batch_ids ??= [];
           }),
       );
+    this.version(4)
+      .stores({
+        eventImages: 'id, viewer_id',
+      })
+      .upgrade(async (tx) => {
+        const events = await tx.table('decryptedEvents').toArray();
+        for (const event of events) {
+          const img = event.data?.image;
+          if (!img) continue;
+          const imgBytes =
+            img instanceof Uint8Array ? img : Array.isArray(img) ? new Uint8Array(img) : undefined;
+          if (!imgBytes) continue;
+          await tx
+            .table('eventImages')
+            .put({ id: event.id, viewer_id: event.viewer_id, data: imgBytes });
+          const newData = { ...event.data };
+          delete newData.image;
+          await tx.table('decryptedEvents').put({ ...event, data: newData });
+        }
+      });
   }
 }
 
@@ -165,6 +192,7 @@ export async function clearDataCache(): Promise<void> {
   if (typeof indexedDB === 'undefined') return;
   await db.feeds.clear();
   await db.decryptedEvents.clear();
+  await db.eventImages.clear();
 }
 
 // Returns batches that haven't been decrypted yet and are within the cutoff window.
@@ -184,9 +212,15 @@ export async function writeMaterializedEvents(
   batchId: string,
   events: FeedLog[],
 ): Promise<void> {
-  await db.transaction('rw', [db.decryptedEvents, db.feeds], async () => {
+  await db.transaction('rw', [db.decryptedEvents, db.eventImages, db.feeds], async () => {
     for (const event of events) {
-      await db.decryptedEvents.put({ ...event, viewer_id: viewerId });
+      const imageData = event.data.image instanceof Uint8Array ? event.data.image : undefined;
+      const dataWithoutImage = { ...event.data };
+      delete dataWithoutImage.image;
+      await db.decryptedEvents.put({ ...event, data: dataWithoutImage, viewer_id: viewerId });
+      if (imageData) {
+        await db.eventImages.put({ id: event.id, viewer_id: viewerId, data: imageData });
+      }
     }
     const feed = await getFeed(viewerId, targetUserId);
     if (!feed.materialized_batch_ids.includes(batchId)) {
@@ -196,6 +230,15 @@ export async function writeMaterializedEvents(
       });
     }
   });
+}
+
+export async function loadEventImage(
+  viewerId: string,
+  eventId: string,
+): Promise<Uint8Array | undefined> {
+  const record = await db.eventImages.get(eventId);
+  if (!record || record.viewer_id !== viewerId) return undefined;
+  return record.data;
 }
 
 export async function queryDecryptedEvents(
@@ -233,7 +276,12 @@ export async function deleteDecryptedEventsForDevice(
   viewerId: string,
   deviceId: string,
 ): Promise<void> {
-  await db.decryptedEvents.where('[viewer_id+device_id]').equals([viewerId, deviceId]).delete();
+  const toDelete = (await db.decryptedEvents
+    .where('[viewer_id+device_id]')
+    .equals([viewerId, deviceId])
+    .primaryKeys()) as string[];
+  await db.decryptedEvents.bulkDelete(toDelete);
+  await db.eventImages.bulkDelete(toDelete);
   const feed = await getFeed(viewerId, viewerId);
   if (feed) {
     const deviceBatchIds = new Set(
@@ -252,8 +300,10 @@ export async function pruneDecryptedEventsBefore(
   viewerId: string,
   cutoffTs: number,
 ): Promise<void> {
-  await db.decryptedEvents
+  const toDelete = (await db.decryptedEvents
     .where('[viewer_id+ts]')
     .between([viewerId, 0], [viewerId, cutoffTs], true, false)
-    .delete();
+    .primaryKeys()) as string[];
+  await db.decryptedEvents.bulkDelete(toDelete);
+  await db.eventImages.bulkDelete(toDelete);
 }

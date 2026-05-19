@@ -21,6 +21,10 @@
   }
 }
 
+.vi-dialog--lg {
+  max-width: min(56rem, calc(100vw - 1.5rem));
+}
+
 .vi-dialog-title {
   margin: 0;
   font-size: var(--text-lg);

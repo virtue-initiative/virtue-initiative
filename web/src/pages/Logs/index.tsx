@@ -4,7 +4,7 @@ import { Device, LogQueryResult, useAPIContext, useDevices, usePartners } from '
 import { LogsGallery } from './LogsGallery';
 import { LogsList } from './LogsList';
 import { getRiskRating, type RiskRating } from '@virtueinitiative/shared-web/risk';
-import { FeedLog, formatDayLabel, getLogImage, humanizeLogType, LOG_TYPES } from './shared';
+import { FeedLog, formatDayLabel, humanizeLogType, LOG_TYPES } from './shared';
 import './style.css';
 import { useUrlState } from '../../hooks/useUrlState';
 import { Button, Field, IconButton, Select } from '@virtueinitiative/shared-web';
@@ -291,10 +291,7 @@ export function Logs() {
       }),
     [logs, riskFilter, typeFilter, weekStart, weekEnd],
   );
-  const galleryItems = useMemo(
-    () => items.filter((item) => getLogImage(item) !== undefined),
-    [items],
-  );
+  const galleryItems = useMemo(() => items.filter((item) => item.image_w !== undefined), [items]);
 
   useEffect(() => {
     if (!isGallery) {
@@ -486,6 +483,7 @@ export function Logs() {
               deviceName={deviceName}
               fullscreen={galleryFullscreen}
               onVisibleDateChange={setVisibleDate}
+              viewerId={userId ?? ''}
             />
           ) : (
             <LogsList
@@ -495,6 +493,7 @@ export function Logs() {
               onLoadMore={() => {}}
               deviceName={deviceName}
               onVisibleDateChange={setVisibleDate}
+              viewerId={userId ?? ''}
             />
           )}
 
