@@ -4,6 +4,9 @@ mod daemon;
 mod tray;
 
 use std::io::{self, Write};
+
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use std::process::Command;
 use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -123,9 +126,12 @@ async fn daemon_command(paths: ClientPaths, command: Option<DaemonCommands>) -> 
 fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
     let email = match email {
         Some(email) => email,
-        None => prompt_line("Email")?,
+        None => {
+            let mut rl = rustyline::DefaultEditor::new()?;
+            rl.readline("Email: ")?
+        }
     };
-    let password = rpassword::prompt_password("Password: ")?;
+    let password = prompt_password("Password: ")?;
 
     let mut service = MonitorService::setup(build_core_config(&paths), LinuxPlatformHooks::new())?;
     let login_result = service.login(&email, &password).context("login failed")?;
@@ -452,15 +458,62 @@ fn dev_upload_batch(paths: ClientPaths) -> Result<()> {
     Ok(())
 }
 
-fn prompt_line(label: &str) -> Result<String> {
-    print!("{label}: ");
+fn prompt_password(label: &str) -> Result<String> {
+    print!("{label}");
     io::stdout().flush().context("failed flushing stdout")?;
 
-    let mut value = String::new();
-    io::stdin()
-        .read_line(&mut value)
-        .context("failed reading stdin")?;
-    Ok(value.trim().to_string())
+    enable_raw_mode().context("failed enabling raw terminal mode")?;
+    let mut password = String::new();
+
+    let result = (|| {
+        loop {
+            match crossterm::event::read().context("failed reading terminal event")? {
+                Event::Key(KeyEvent {
+                    code: KeyCode::Enter,
+                    ..
+                }) => break,
+                Event::Key(KeyEvent {
+                    code: KeyCode::Char('c'),
+                    modifiers,
+                    ..
+                }) if modifiers.contains(KeyModifiers::CONTROL) => {
+                    return Err(anyhow::anyhow!("interrupted"));
+                }
+                Event::Key(KeyEvent {
+                    code: KeyCode::Char('d'),
+                    modifiers,
+                    ..
+                }) if modifiers.contains(KeyModifiers::CONTROL) => {
+                    return Err(anyhow::anyhow!("interrupted"));
+                }
+                Event::Key(KeyEvent {
+                    code: KeyCode::Backspace,
+                    ..
+                }) => {
+                    if !password.is_empty() {
+                        password.pop();
+                        print!("\x08 \x08");
+                        io::stdout().flush().context("failed flushing stdout")?;
+                    }
+                }
+                Event::Key(KeyEvent {
+                    code: KeyCode::Char(c),
+                    modifiers,
+                    ..
+                }) if !modifiers.contains(KeyModifiers::CONTROL) => {
+                    password.push(c);
+                    print!("*");
+                    io::stdout().flush().context("failed flushing stdout")?;
+                }
+                _ => {}
+            }
+        }
+        Ok(password)
+    })();
+
+    disable_raw_mode().context("failed disabling raw terminal mode")?;
+    println!();
+    result
 }
 
 fn prompt_yes_no(prompt: &str, default_yes: bool) -> Result<bool> {
