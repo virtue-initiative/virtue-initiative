@@ -489,12 +489,10 @@ fn prompt_password(label: &str) -> Result<String> {
                 Event::Key(KeyEvent {
                     code: KeyCode::Backspace,
                     ..
-                }) => {
-                    if !password.is_empty() {
-                        password.pop();
-                        print!("\x08 \x08");
-                        io::stdout().flush().context("failed flushing stdout")?;
-                    }
+                }) if !password.is_empty() => {
+                    password.pop();
+                    print!("\x08 \x08");
+                    io::stdout().flush().context("failed flushing stdout")?;
                 }
                 Event::Key(KeyEvent {
                     code: KeyCode::Char(c),
