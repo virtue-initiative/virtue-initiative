@@ -38,17 +38,21 @@ async fn upsert_hash_state_tx(
     device_id: &str,
     state: &[u8; 32],
     updated_at: i64,
+    hashed_at: i64,
 ) -> sqlx::Result<()> {
     sqlx::query(
-        "INSERT INTO hash_states (device_id, state, updated_at)
-         VALUES (?, ?, ?)
+        "INSERT INTO hash_states (device_id, state, updated_at, count, hashed_at)
+         VALUES (?, ?, ?, 1, ?)
          ON CONFLICT(device_id) DO UPDATE SET
              state = excluded.state,
-             updated_at = excluded.updated_at",
+             updated_at = excluded.updated_at,
+             count = count + 1,
+             hashed_at = excluded.hashed_at",
     )
     .bind(device_id)
     .bind(state.as_slice())
     .bind(updated_at)
+    .bind(hashed_at)
     .execute(&mut *tx)
     .await?;
     Ok(())
@@ -72,7 +76,8 @@ pub async fn update_hash_chain(
     input[32..].copy_from_slice(new_hash);
 
     let next: [u8; 32] = sha2::Sha256::digest(input).into();
-    upsert_hash_state_tx(&mut tx, device_id, &next, now_ms()).await?;
+    let now = now_ms();
+    upsert_hash_state_tx(&mut tx, device_id, &next, now, now).await?;
 
     tx.commit().await?;
     Ok(())
@@ -80,11 +85,12 @@ pub async fn update_hash_chain(
 
 pub async fn reset_hash_state(pool: &SqlitePool, device_id: &str) -> sqlx::Result<()> {
     sqlx::query(
-        "INSERT INTO hash_states (device_id, state, updated_at)
-         VALUES (?, ?, ?)
+        "INSERT INTO hash_states (device_id, state, updated_at, count)
+         VALUES (?, ?, ?, 0)
          ON CONFLICT(device_id) DO UPDATE SET
              state = excluded.state,
-             updated_at = excluded.updated_at",
+             updated_at = excluded.updated_at,
+             count = 0",
     )
     .bind(device_id)
     .bind([0u8; 32].as_slice())
@@ -92,6 +98,23 @@ pub async fn reset_hash_state(pool: &SqlitePool, device_id: &str) -> sqlx::Resul
     .execute(pool)
     .await?;
     Ok(())
+}
+
+pub struct HashInfo {
+    pub count: i64,
+    pub hashed_at: Option<i64>,
+    pub updated_at: i64,
+}
+
+pub async fn get_hash_info(pool: &SqlitePool, device_id: &str) -> sqlx::Result<Option<HashInfo>> {
+    let row = sqlx::query_as::<_, (i64, Option<i64>, i64)>(
+        "SELECT count, hashed_at, updated_at FROM hash_states WHERE device_id = ?",
+    )
+    .bind(device_id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(|(count, hashed_at, updated_at)| HashInfo { count, hashed_at, updated_at }))
 }
 
 #[cfg(test)]

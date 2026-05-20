@@ -1128,6 +1128,16 @@ impl<P: PlatformHooks, A: ApiTransport> MonitorService<P, A> {
             self.refresh_device_settings()?;
             let batch_items = self.batch_upload_candidates(&audit_state);
             self.try_upload_pending_batch(batch_items, now_ms)?;
+        } else if !self.can_upload_batch(&audit_state)
+            && self
+                .status
+                .last_batch_at_ms
+                .is_some_and(|last| now_ms - last >= self.config.batch_interval.as_millis() as i64)
+        {
+            // Batch interval expired but no items are ready to upload (e.g., all are
+            // waiting on hash uploads). Advance the timer so next_run_at_ms doesn't
+            // return a past timestamp and spin the loop.
+            self.status.last_batch_at_ms = Some(now_ms);
         }
         Ok(())
     }

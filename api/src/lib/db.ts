@@ -454,12 +454,16 @@ export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
     platform: string;
     created_at: number;
     last_upload_at: number | null;
+    last_hash_at: number | null;
+    pending_count: number;
   }>(
     db
       .prepare(
-        `SELECT d.id, d.owner, d.name, d.platform, d.created_at, MAX(b.end_time) AS last_upload_at
+        `SELECT d.id, d.owner, d.name, d.platform, d.created_at, MAX(b.end_time) AS last_upload_at,
+                hs.hashed_at AS last_hash_at, COALESCE(hs.count, 0) AS pending_count
          FROM devices d
          LEFT JOIN batches b ON b.device_id = d.id
+         LEFT JOIN hash_states hs ON hs.device_id = d.id
          WHERE d.owner IN (${placeholders(ownerIds.length)})
          GROUP BY d.id
          ORDER BY d.created_at DESC`,
@@ -1248,9 +1252,13 @@ export async function getHashState(db: D1Database, deviceId: string) {
     device_id: string;
     state: ArrayBuffer;
     updated_at: number;
+    count: number;
+    hashed_at: number | null;
   }>(
     db
-      .prepare('SELECT device_id, state, updated_at FROM hash_states WHERE device_id = ?')
+      .prepare(
+        'SELECT device_id, state, updated_at, count, hashed_at FROM hash_states WHERE device_id = ?',
+      )
       .bind(uuidToBytes(deviceId)),
     ['device_id'],
   );
@@ -1258,22 +1266,59 @@ export async function getHashState(db: D1Database, deviceId: string) {
 
 export async function upsertHashState(
   db: D1Database,
-  input: { device_id: string; state: ArrayBuffer; updated_at: number },
+  input: { device_id: string; state: ArrayBuffer; updated_at: number; hashed_at: number },
 ) {
   return db
     .prepare(
-      `INSERT INTO hash_states (device_id, state, updated_at)
-       VALUES (?, ?, ?)
-       ON CONFLICT(device_id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at`,
+      `INSERT INTO hash_states (device_id, state, updated_at, count, hashed_at)
+       VALUES (?, ?, ?, 1, ?)
+       ON CONFLICT(device_id) DO UPDATE SET
+           state = excluded.state,
+           updated_at = excluded.updated_at,
+           count = count + 1,
+           hashed_at = excluded.hashed_at`,
     )
-    .bind(uuidToBytes(input.device_id), input.state, input.updated_at)
+    .bind(uuidToBytes(input.device_id), input.state, input.updated_at, input.hashed_at)
     .run();
 }
 
 export async function resetHashState(db: D1Database, deviceId: string, updatedAt: number) {
-  return upsertHashState(db, {
-    device_id: deviceId,
-    state: new Uint8Array(32).buffer,
-    updated_at: updatedAt,
-  });
+  return db
+    .prepare(
+      `INSERT INTO hash_states (device_id, state, updated_at, count)
+       VALUES (?, ?, ?, 0)
+       ON CONFLICT(device_id) DO UPDATE SET
+           state = excluded.state,
+           updated_at = excluded.updated_at,
+           count = 0`,
+    )
+    .bind(uuidToBytes(deviceId), new Uint8Array(32).buffer, updatedAt)
+    .run();
+}
+
+export async function incrementHashCount(db: D1Database, deviceId: string, now: number) {
+  return db
+    .prepare(
+      `INSERT INTO hash_states (device_id, state, updated_at, count, hashed_at)
+       VALUES (?, ?, ?, 1, ?)
+       ON CONFLICT(device_id) DO UPDATE SET
+           count = count + 1,
+           hashed_at = excluded.hashed_at,
+           updated_at = excluded.updated_at`,
+    )
+    .bind(uuidToBytes(deviceId), new Uint8Array(32).buffer, now, now)
+    .run();
+}
+
+export async function resetHashCount(db: D1Database, deviceId: string, now: number) {
+  return db
+    .prepare(
+      `INSERT INTO hash_states (device_id, state, updated_at, count)
+       VALUES (?, ?, ?, 0)
+       ON CONFLICT(device_id) DO UPDATE SET
+           count = 0,
+           updated_at = excluded.updated_at`,
+    )
+    .bind(uuidToBytes(deviceId), new Uint8Array(32).buffer, now)
+    .run();
 }

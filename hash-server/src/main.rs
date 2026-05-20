@@ -10,7 +10,7 @@ use axum::{
 };
 use jsonwebtoken::DecodingKey;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
-use std::{str::FromStr, sync::Arc};
+use std::{str::FromStr, sync::Arc, time::Duration};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing_subscriber::{EnvFilter, fmt};
 
@@ -22,6 +22,7 @@ pub struct AppState {
 pub fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/hash", post(routes::post_hash).get(routes::get_hash).delete(routes::delete_hash))
+        .route("/hash/info", get(routes::get_hash_info))
         .route("/health", get(routes::health))
         .layer(DefaultBodyLimit::max(64))
         .with_state(state)
@@ -54,6 +55,7 @@ async fn main() -> anyhow::Result<()> {
 
     let opts = SqliteConnectOptions::from_str(&database_url)?
         .journal_mode(SqliteJournalMode::Wal)
+        .busy_timeout(Duration::from_secs(30))
         .create_if_missing(true);
 
     let pool = SqlitePoolOptions::new()
