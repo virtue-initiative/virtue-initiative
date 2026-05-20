@@ -37,7 +37,16 @@ export default defineConfig(({ mode }) => {
       dedupe: ['preact'],
     },
     test: {
-      environment: 'node',
+      environment: 'happy-dom',
+      globals: true,
+      setupFiles: ['./src/test-setup.ts'],
+      silent: true,
+      server: {
+        deps: {
+          // Inline so Vite applies the react→preact/compat alias (avoids duplicate hook system)
+          inline: ['@tanstack/react-virtual', '@tanstack/virtual-core'],
+        },
+      },
     },
   };
 });
