@@ -14,6 +14,7 @@ export default defineWorkersConfig({
             AWS_ACCESS_KEY_ID: 'test-aws-key',
             AWS_SECRET_ACCESS_KEY: 'test-aws-secret',
             EMAIL_DELIVERY_MODE: 'log',
+            HASH_SERVER_URL: 'http://localhost/api',
           },
         },
       },
