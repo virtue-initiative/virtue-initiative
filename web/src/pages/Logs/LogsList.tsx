@@ -1,7 +1,14 @@
 import { useRef, useState } from 'preact/hooks';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { formatRelativeTimestamp } from '../../utils/time';
-import { EventImage, FeedLog, formatDayAndTime, humanizeLogType, LogDetailDialog } from './shared';
+import {
+  EventImage,
+  FeedLog,
+  formatDayAndTime,
+  getLogCategory,
+  getLogMessage,
+  LogDetailDialog,
+} from './shared';
 import { getRiskLevel } from '@virtueinitiative/shared-web/risk';
 
 const ITEM_HEIGHT = 68;
@@ -94,7 +101,7 @@ export function LogsList({
                 </div>
                 <div class="logs-vrow-body">
                   <div class="logs-vrow-top">
-                    <span class="logs-type">{humanizeLogType(item.type)}</span>
+                    <span class="logs-type">{getLogCategory(item.type)}</span>
                     <span class="logs-device">{deviceName(item.device_id)}</span>
                     {getRiskLevel(item.risk) === 'high' && (
                       <span class="logs-verify-badge logs-verify-badge--failed">⚠ High</span>
@@ -107,6 +114,9 @@ export function LogsList({
                     )}
                   </div>
                   <div class="logs-vrow-sub">
+                    <span class="logs-vrow-message">
+                      {getLogMessage(item, deviceName(item.device_id))}
+                    </span>
                     <span class="logs-time">{formatRelativeTimestamp(item.ts)}</span>
                   </div>
                 </div>

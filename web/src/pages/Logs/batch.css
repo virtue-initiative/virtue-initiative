@@ -18,22 +18,14 @@
 
 /* Detail dialog content */
 
-.logs-detail-device {
-  font-size: 0.8rem;
-  color: var(--text-muted);
+.logs-detail-dialog .vi-dialog-header {
+  margin-bottom: 0.2rem;
 }
 
-.logs-detail-time {
+.logs-detail-subtitle {
   font-size: 0.8rem;
   color: var(--text-muted);
-  margin: 0 0 0.5rem;
-}
-
-.logs-detail-badges {
-  display: flex;
-  gap: 0.4rem;
-  flex-wrap: wrap;
-  margin-bottom: 0.75rem;
+  margin: 0 0 0.75rem;
 }
 
 .logs-detail-image-button {
@@ -66,5 +58,24 @@
 }
 
 .logs-detail-meta {
-  margin-top: 0.25rem;
+  margin-top: 0.5rem;
+}
+
+.logs-detail-message {
+  font-size: 1rem;
+  font-weight: 500;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.logs-detail-more {
+  margin-top: 1rem;
+  font-size: 0.85rem;
+
+  & summary {
+    cursor: pointer;
+    color: var(--text-muted);
+    font-weight: 500;
+    user-select: none;
+    margin-bottom: 0.5rem;
+  }
 }

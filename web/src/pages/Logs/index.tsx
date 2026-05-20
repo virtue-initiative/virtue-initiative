@@ -4,10 +4,19 @@ import { Device, LogQueryResult, useAPIContext, useDevices, usePartners } from '
 import { LogsGallery } from './LogsGallery';
 import { LogsList } from './LogsList';
 import { getRiskRating, type RiskRating } from '@virtueinitiative/shared-web/risk';
-import { FeedLog, formatDayLabel, humanizeLogType, LOG_TYPES } from './shared';
+import { FeedLog, formatDayLabel, getLogCategory, LOG_TYPES } from './shared';
+
+const LOG_CATEGORIES = [...new Set(LOG_TYPES.map(getLogCategory))];
 import './style.css';
 import { useUrlState } from '../../hooks/useUrlState';
-import { Button, Field, IconButton, Select } from '@virtueinitiative/shared-web';
+import {
+  Button,
+  Dialog,
+  DialogHeader,
+  Field,
+  IconButton,
+  Select,
+} from '@virtueinitiative/shared-web';
 
 interface DeviceGroup {
   label: string;
@@ -128,7 +137,7 @@ export function Logs() {
   const [startDate, setStartDate] = useUrlState('start', 'string', yesterday);
   const [endDate, setEndDate] = useUrlState('end', 'string', today);
   const [visibleDate, setVisibleDate] = useState<string | null>(null);
-  const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const filterDialogRef = useRef<HTMLDialogElement>(null);
   type RiskFilter = 'all' | RiskRating;
   const [riskFilter, setRiskFilter] = useUrlState<RiskFilter>('risk', 'string', 'all');
   const [rawTypeFilter, setTypeFilter] = useUrlState<string | string[] | null>(
@@ -281,7 +290,7 @@ export function Logs() {
     () =>
       (logs ?? []).filter((item) => {
         if (item.ts < weekStart || item.ts > weekEnd) return false;
-        if (typeFilter !== null && typeFilter !== item.type) return false;
+        if (typeFilter !== null && getLogCategory(item.type) !== typeFilter) return false;
         if (riskFilter !== 'all') {
           const rating = getRiskRating(item.risk);
           if (riskFilter === 'high' && rating !== 'high') return false;
@@ -291,7 +300,20 @@ export function Logs() {
       }),
     [logs, riskFilter, typeFilter, weekStart, weekEnd],
   );
-  const galleryItems = useMemo(() => items.filter((item) => item.image_w !== undefined), [items]);
+  const galleryItems = useMemo(
+    () =>
+      (logs ?? []).filter((item) => {
+        if (item.ts < weekStart || item.ts > weekEnd) return false;
+        if (item.image_w === undefined) return false;
+        if (riskFilter !== 'all') {
+          const rating = getRiskRating(item.risk);
+          if (riskFilter === 'high' && rating !== 'high') return false;
+          if (riskFilter === 'moderate' && rating !== 'moderate' && rating !== 'high') return false;
+        }
+        return true;
+      }),
+    [logs, riskFilter, weekStart, weekEnd],
+  );
 
   useEffect(() => {
     if (!isGallery) {
@@ -378,16 +400,7 @@ export function Logs() {
                 <span>Devices</span>
               </Button>
               <div class="logs-filter-section">
-                <Button
-                  variant="ghost"
-                  size="md"
-                  class="logs-filter-toggle"
-                  type="button"
-                  onClick={() => setFiltersExpanded((v) => !v)}
-                >
-                  Edit Search
-                </Button>
-                <div class={`logs-filter-panel${filtersExpanded ? ' is-open' : ''}`}>
+                <div class="logs-inline-filters">
                   <Field label="Start" class="logs-filter-field">
                     <input
                       type="date"
@@ -422,22 +435,35 @@ export function Logs() {
                       <option value="moderate">Medium</option>
                     </Select>
                   </Field>
-                  <Field label="Type" class="logs-filter-field">
-                    <Select
-                      size="md"
-                      class="logs-filter-select"
-                      value={typeFilter ?? ''}
-                      onChange={(e) => setTypeFilter((e.target as HTMLSelectElement).value || null)}
-                    >
-                      <option value="">All</option>
-                      {LOG_TYPES.map((type) => (
-                        <option key={type} value={type}>
-                          {humanizeLogType(type)}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
+                  {!isGallery && (
+                    <Field label="Type" class="logs-filter-field">
+                      <Select
+                        size="md"
+                        class="logs-filter-select"
+                        value={typeFilter ?? ''}
+                        onChange={(e) =>
+                          setTypeFilter((e.target as HTMLSelectElement).value || null)
+                        }
+                      >
+                        <option value="">All</option>
+                        {LOG_CATEGORIES.map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                  )}
                 </div>
+                <Button
+                  variant="ghost"
+                  size="md"
+                  class="logs-filter-toggle"
+                  type="button"
+                  onClick={() => filterDialogRef.current?.showModal()}
+                >
+                  Edit Search
+                </Button>
               </div>
               <div class="logs-header-view-controls">
                 {isGallery && (
@@ -523,6 +549,63 @@ export function Logs() {
               Load another week
             </Button>
           </div>
+
+          <Dialog dialogRef={filterDialogRef} size="lg" class="logs-filter-dialog">
+            <DialogHeader>Search filters</DialogHeader>
+            <div class="logs-filter-dialog-fields">
+              <Field label="Start" class="logs-filter-field">
+                <input
+                  type="date"
+                  class="logs-filter-date"
+                  value={startDate}
+                  min={oneMonthAgo}
+                  max={endDate}
+                  onChange={(e) => setStartDate((e.target as HTMLInputElement).value)}
+                />
+              </Field>
+              <Field label="End" class="logs-filter-field">
+                <input
+                  type="date"
+                  class="logs-filter-date"
+                  value={endDate}
+                  min={oneMonthAgo}
+                  max={today}
+                  onChange={(e) => setEndDate((e.target as HTMLInputElement).value)}
+                />
+              </Field>
+              <Field label="Risk" class="logs-filter-field">
+                <Select
+                  size="md"
+                  class="logs-filter-select"
+                  value={riskFilter}
+                  onChange={(e) =>
+                    setRiskFilter((e.target as HTMLSelectElement).value as RiskFilter)
+                  }
+                >
+                  <option value="all">All</option>
+                  <option value="high">High</option>
+                  <option value="moderate">Medium</option>
+                </Select>
+              </Field>
+              {!isGallery && (
+                <Field label="Type" class="logs-filter-field">
+                  <Select
+                    size="md"
+                    class="logs-filter-select"
+                    value={typeFilter ?? ''}
+                    onChange={(e) => setTypeFilter((e.target as HTMLSelectElement).value || null)}
+                  >
+                    <option value="">All</option>
+                    {LOG_CATEGORIES.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              )}
+            </div>
+          </Dialog>
         </section>
       </div>
     </div>
