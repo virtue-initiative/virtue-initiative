@@ -12,6 +12,12 @@ export default defineConfig(({ mode }) => {
     .filter(Boolean);
 
   return {
+    define:
+      mode === 'test'
+        ? {
+            'import.meta.env.VITE_API_URL': JSON.stringify('http://localhost:8787'),
+          }
+        : undefined,
     plugins: [
       preact({
         prerender: {

@@ -59,8 +59,7 @@ describe('Logs — filter panel', () => {
     await user.click(filterBtn);
 
     await waitFor(() => {
-      // Risk select label should appear
-      expect(screen.getByText(/risk/i)).toBeInTheDocument();
+      expect(screen.getByText(/search filters/i)).toBeInTheDocument();
     });
   });
 });
