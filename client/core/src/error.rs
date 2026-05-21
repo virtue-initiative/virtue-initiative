@@ -10,6 +10,12 @@ pub enum CoreError {
     Io(#[from] io::Error),
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),
+    #[error("serialization error in {context}: {source}")]
+    SerdeContext {
+        context: String,
+        #[source]
+        source: serde_json::Error,
+    },
     #[error("messagepack encode error: {0}")]
     MessagePackEncode(#[from] rmp_serde::encode::Error),
     #[error("image error: {0}")]
@@ -20,7 +26,7 @@ pub enum CoreError {
     Base64(#[from] base64::DecodeError),
     #[error("argon2 error: {0}")]
     Argon2(String),
-    #[error("request failed with status {status}: {message}")]
+    #[error("{message}")]
     HttpStatus { status: u16, message: String },
     #[error("service has not been authenticated")]
     NotAuthenticated,

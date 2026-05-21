@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, NaiveDate, Utc};
 
-use crate::error::CoreResult;
+use crate::error::{CoreError, CoreResult};
 use crate::lifecycle::{
     LifecycleObservation, ServicePingLog, ServiceRole, ServiceStopMarker, StopIntent,
 };
@@ -246,8 +246,13 @@ impl FileStateStore {
             return Ok(None);
         }
 
-        let bytes = fs::read(path)?;
-        Ok(Some(serde_json::from_slice(&bytes)?))
+        let bytes = fs::read(&path)?;
+        Ok(Some(serde_json::from_slice(&bytes).map_err(|e| {
+            CoreError::SerdeContext {
+                context: path.display().to_string(),
+                source: e,
+            }
+        })?))
     }
 
     fn append_record_to_path(&self, path: &Path, record: &AuditRecord) -> CoreResult<()> {
@@ -287,7 +292,7 @@ impl FileStateStore {
         let file = fs::File::open(path)?;
         let reader = BufReader::new(file);
         let mut records = Vec::new();
-        for line in reader.lines() {
+        for (line_num, line) in reader.lines().enumerate() {
             let line = line?;
             let trimmed = line.trim();
             if trimmed.is_empty() {
@@ -296,7 +301,12 @@ impl FileStateStore {
             match serde_json::from_str(trimmed) {
                 Ok(record) => records.push(record),
                 Err(err) if err.is_eof() => break,
-                Err(err) => return Err(err.into()),
+                Err(err) => {
+                    return Err(CoreError::SerdeContext {
+                        context: format!("{}:{}", path.display(), line_num + 1),
+                        source: err,
+                    });
+                }
             }
         }
         Ok(records)

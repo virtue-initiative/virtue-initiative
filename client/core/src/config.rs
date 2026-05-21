@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-use crate::error::CoreResult;
+use crate::error::{CoreError, CoreResult};
 
 const MIN_CAPTURE_INTERVAL_SECONDS: u64 = 15;
 const MIN_BATCH_INTERVAL_SECONDS: u64 = 1;
@@ -65,7 +65,11 @@ impl Config {
             return Ok(());
         }
 
-        let overrides: RuntimeConfigFile = serde_json::from_slice(&bytes)?;
+        let overrides: RuntimeConfigFile =
+            serde_json::from_slice(&bytes).map_err(|e| CoreError::SerdeContext {
+                context: path.display().to_string(),
+                source: e,
+            })?;
         if let Some(api_base_url) = overrides.api_base_url {
             let normalized = normalize_base_url(api_base_url);
             if !normalized.is_empty() {
