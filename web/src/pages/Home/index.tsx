@@ -583,6 +583,8 @@ function DeviceCard({
         <dd>{device.platform}</dd>
         <dt>Last upload</dt>
         <dd>{formatRelativeTimestamp(device.last_upload_at)}</dd>
+        <dt>Last activity</dt>
+        <dd>{formatRelativeTimestamp(device.last_hash_at)}</dd>
       </dl>
       <CardActions>
         <Button variant="ghost" type="button" onClick={() => route(`/logs?device_id=${device.id}`)}>

@@ -2,7 +2,8 @@ import { Context, Next } from 'hono';
 import { Env, Variables } from '../types/bindings';
 import { JWTType, verifyJWT } from '../lib/jwt';
 
-export function authenticate(type: JWTType) {
+export function authenticate(type: JWTType | JWTType[]) {
+  const allowed = Array.isArray(type) ? type : [type];
   return async function authMiddleware(
     c: Context<{ Bindings: Env; Variables: Variables }>,
     next: Next,
@@ -16,7 +17,7 @@ export function authenticate(type: JWTType) {
     try {
       const payload = await verifyJWT(authHeader.slice(7), c.env.JWT_PUBLIC_KEY);
 
-      if (payload.type !== type) {
+      if (!allowed.includes(payload.type)) {
         return c.json({ error: 'Unauthorized', details: { reason: 'Invalid token type' } }, 401);
       }
 
