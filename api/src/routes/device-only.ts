@@ -3,7 +3,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { authenticate } from '../middleware/auth';
 import { validateZ } from '../middleware/validation';
-import { getRequestApiBaseUrl } from '../lib/base-path';
 import {
   createBatch,
   createDevice,
@@ -15,6 +14,7 @@ import {
   deleteSessionByRefreshTokenHash,
   listBatchAccessRecipientsForOwner,
   resetHashState as resetStoredHashState,
+  resetHashCount,
 } from '../lib/db';
 import { encodeBase64, encodeHex } from '../lib/encoding';
 import { generateToken } from '../lib/jwt';
@@ -78,10 +78,6 @@ function getConfiguredHashBaseUrl(env: Env) {
   return trimmed ? trimmed : null;
 }
 
-function getHashBaseUrl(requestUrl: string, env: Env) {
-  return getConfiguredHashBaseUrl(env) ?? getRequestApiBaseUrl(requestUrl, env.API_BASE_PATH);
-}
-
 function parseAccessKeysPayload(raw: string) {
   const parsed = JSON.parse(raw) as unknown;
   const payload = accessKeysSchema.parse(parsed);
@@ -122,15 +118,16 @@ async function readHashState(
 async function resetHashState(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   device: { id: string; owner: string },
-  hashBaseUrl: string | null,
+  _hashBaseUrl: string | null,
   serverToken: string,
 ) {
-  if (!hashBaseUrl) {
+  const configuredHashBaseUrl = getConfiguredHashBaseUrl(c.env);
+  if (!configuredHashBaseUrl) {
     await resetStoredHashState(c.env.DB, device.id, Date.now());
     return;
   }
 
-  const response = await fetch(`${hashBaseUrl}/hash`, {
+  const response = await fetch(`${configuredHashBaseUrl}/hash`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${serverToken}` },
   });
@@ -138,6 +135,8 @@ async function resetHashState(
   if (!response.ok) {
     throw new Error(`Failed to reset hash state: ${response.status} ${await response.text()}`);
   }
+
+  await resetHashCount(c.env.DB, device.id, Date.now());
 }
 
 async function createDeviceSession(
@@ -191,6 +190,11 @@ deviceOnly.get('/device', authenticate('device-access'), async (c) => {
     return c.json({ error: 'Not found' }, 404);
   }
 
+  const hashBaseUrl = getConfiguredHashBaseUrl(c.env);
+  if (!hashBaseUrl) {
+    return c.json({ error: 'Hash server not configured' }, 500);
+  }
+
   const recipients = await listBatchAccessRecipientsForOwner(c.env.DB, device.owner);
   const owner = recipients.find((recipient) => recipient.id === device.owner);
 
@@ -212,7 +216,7 @@ deviceOnly.get('/device', authenticate('device-access'), async (c) => {
         user_id: recipient.id,
         pub_key: encodeBase64(recipient.pub_key!),
       })),
-    hash_base_url: getHashBaseUrl(c.req.url, c.env),
+    hash_base_url: hashBaseUrl,
   });
 });
 

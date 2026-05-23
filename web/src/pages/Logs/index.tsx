@@ -17,6 +17,8 @@ import {
   IconButton,
   Select,
 } from '@virtueinitiative/shared-web';
+import { loadCachedDataFeed } from '../../utils/api/data-cache';
+import { formatRelativeTimestamp } from '../../utils/time';
 
 interface DeviceGroup {
   label: string;
@@ -192,6 +194,36 @@ export function Logs() {
   const deviceList = devices;
   const watchingList = watching;
   const sidebarLoading = !devicesLoaded || !partnersLoaded;
+
+  const selectedDeviceInfo = selectedDevice
+    ? (deviceList.find((d) => d.id === selectedDevice) ?? null)
+    : null;
+
+  const [estimatedNextUpload, setEstimatedNextUpload] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!userId || !activeTargetUserId || !selectedDevice || !selectedDeviceInfo?.last_upload_at) {
+      setEstimatedNextUpload(null);
+      return;
+    }
+    loadCachedDataFeed(userId, activeTargetUserId)
+      .then((feed) => {
+        const batches = feed.batches
+          .filter((b) => b.device_id === selectedDevice)
+          .sort((a, b) => a.end_time - b.end_time);
+        if (batches.length < 2) {
+          setEstimatedNextUpload(null);
+          return;
+        }
+        const intervals = batches.slice(1).map((b, i) => b.end_time - batches[i].end_time);
+        intervals.sort((a, b) => a - b);
+        const median = intervals[Math.floor(intervals.length / 2)];
+        if (median > 0 && selectedDeviceInfo.last_upload_at) {
+          setEstimatedNextUpload(selectedDeviceInfo.last_upload_at + median);
+        }
+      })
+      .catch(() => {});
+  }, [userId, activeTargetUserId, selectedDevice, selectedDeviceInfo?.last_upload_at]);
 
   const { knownUsers, deviceGroups } = useMemo(() => {
     if (!userId) {
@@ -494,7 +526,17 @@ export function Logs() {
             </div>
           </div>
 
-          <p class="logs-summary">{logsLoading ? 'Syncing logs…' : 'Logs synced'}</p>
+          <p class="logs-summary">
+            {logsLoading ? 'Syncing logs…' : 'Logs synced'}
+            {!logsLoading && selectedDeviceInfo && selectedDeviceInfo.pending_count > 0 && (
+              <>
+                {` · ${selectedDeviceInfo.pending_count} item${selectedDeviceInfo.pending_count !== 1 ? 's' : ''} pending upload`}
+                {estimatedNextUpload && estimatedNextUpload > Date.now()
+                  ? ` · expected ${formatRelativeTimestamp(estimatedNextUpload)}`
+                  : null}
+              </>
+            )}
+          </p>
 
           <div class="logs-sticky-date" aria-live="polite">
             {visibleDate ?? formatDayLabel(weekStart)}

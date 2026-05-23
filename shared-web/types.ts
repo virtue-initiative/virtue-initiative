@@ -42,6 +42,8 @@ export const deviceSchema = z.object({
   name: z.string(),
   platform: z.string(),
   last_upload_at: z.number().nullable(),
+  last_hash_at: z.number().nullable(),
+  pending_count: z.number(),
   status: z.enum(['online', 'offline']),
 });
 export type Device = z.infer<typeof deviceSchema>;

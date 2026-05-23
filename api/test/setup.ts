@@ -113,6 +113,8 @@ CREATE TABLE IF NOT EXISTS hash_states (
   device_id BLOB PRIMARY KEY,
   state BLOB NOT NULL,
   updated_at INTEGER NOT NULL,
+  count INTEGER NOT NULL DEFAULT 0,
+  hashed_at INTEGER,
   FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
 );
 `;

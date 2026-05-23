@@ -212,8 +212,6 @@ export async function verifyBatch(
   startChainHash: string,
   endChainHash: string,
 ): Promise<BatchVerification> {
-  if (startChainHash === ZEROS_HEX && endChainHash === ZEROS_HEX) return 'unknown';
-
   // Convert startChainHash hex to bytes
   const startBytes = new Uint8Array(32);
   for (let i = 0; i < 32; i++) {

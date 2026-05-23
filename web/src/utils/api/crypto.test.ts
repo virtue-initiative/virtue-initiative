@@ -80,9 +80,9 @@ describe('generateUserKeyPair / encryptForPublicKey / unwrapBatchKey', () => {
 describe('verifyBatch', () => {
   const zeros = '0'.repeat(64);
 
-  it('returns "unknown" when both hashes are zeros', async () => {
+  it('returns "verified" when both hashes are zeros and events list is empty', async () => {
     const result = await verifyBatch([], zeros, zeros);
-    expect(result).toBe('unknown');
+    expect(result).toBe('verified');
   });
 
   it('returns "verified" for an empty event list with matching hash chain', async () => {

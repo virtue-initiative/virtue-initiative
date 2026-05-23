@@ -14,6 +14,7 @@ import {
 import { sendEmail } from '../lib/email';
 import { renderDeviceDeletedTemplate } from '../lib/email/templates';
 import { deleteObject } from '../lib/r2';
+import { generateToken } from '../lib/jwt';
 import { Env, Variables } from '../types/bindings';
 import { updateDeviceSchema, type PatchDeviceResponse } from '../../../shared-web/types';
 
@@ -34,18 +35,45 @@ devices.get('/', authenticate('access'), async (c) => {
   const ownerIds = await listVisibleOwnerIds(c.env.DB, c.get('sub'));
   const rows = await listDevicesForOwners(c.env.DB, ownerIds);
 
+  const hashServerUrl = c.env.HASH_SERVER_URL?.trim() || null;
+  const hashInfo = new Map<string, { count: number; hashed_at: number | null }>();
+
+  if (hashServerUrl) {
+    await Promise.all(
+      rows.map(async (device) => {
+        try {
+          const token = await generateToken('server', device.id, c.env.JWT_PRIVATE_KEY, 60);
+          const resp = await fetch(`${hashServerUrl}/hash/info`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (resp.ok) {
+            const info = (await resp.json()) as { count: number; hashed_at: number | null };
+            hashInfo.set(device.id, info);
+          }
+        } catch {
+          // fall back to D1 values for this device
+        }
+      }),
+    );
+  }
+
   return c.json(
-    rows.map((device) => ({
-      id: device.id,
-      owner: device.owner,
-      name: device.name,
-      platform: device.platform,
-      last_upload_at: device.last_upload_at,
-      status:
-        device.last_upload_at && Date.now() - device.last_upload_at < ONLINE_WINDOW_MS
-          ? 'online'
-          : 'offline',
-    })),
+    rows.map((device) => {
+      const hi = hashInfo.get(device.id);
+      return {
+        id: device.id,
+        owner: device.owner,
+        name: device.name,
+        platform: device.platform,
+        last_upload_at: device.last_upload_at,
+        last_hash_at: hi ? hi.hashed_at : device.last_hash_at,
+        pending_count: hi ? hi.count : device.pending_count,
+        status:
+          device.last_upload_at && Date.now() - device.last_upload_at < ONLINE_WINDOW_MS
+            ? 'online'
+            : 'offline',
+      };
+    }),
   );
 });
 
