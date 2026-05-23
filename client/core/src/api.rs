@@ -392,12 +392,16 @@ impl ReqwestApiClient {
 
         let fallback = response
             .text()
-            .unwrap_or_else(|_| String::from("request failed"));
-        let message = serde_json::from_str::<ApiErrorResponse>(&fallback)
-            .ok()
-            .and_then(|body| body.error)
-            .filter(|message| !message.is_empty())
-            .unwrap_or(fallback);
+            .unwrap_or_else(|_| format!("HTTP {} error", status.as_u16()));
+        let message = match serde_json::from_str::<ApiErrorResponse>(&fallback) {
+            Ok(body) => body
+                .details
+                .as_ref()
+                .and_then(format_api_details)
+                .or_else(|| body.error.filter(|s| !s.is_empty()))
+                .unwrap_or(fallback),
+            Err(_) => fallback,
+        };
 
         Err(CoreError::HttpStatus {
             status: status.as_u16(),
@@ -406,7 +410,45 @@ impl ReqwestApiClient {
     }
 }
 
+fn format_api_details(details: &serde_json::Value) -> Option<String> {
+    // Manual format: {"errors": ["msg"]}
+    if let Some(errors) = details.get("errors").and_then(|e| e.as_array()) {
+        let msgs: Vec<&str> = errors.iter().filter_map(|e| e.as_str()).collect();
+        if !msgs.is_empty() {
+            return Some(msgs.join("; "));
+        }
+    }
+
+    // Zod treeify format: {_errors: [...], field: {_errors: [...]}}
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(obj) = details.as_object() {
+        if let Some(errs) = obj.get("_errors").and_then(|e| e.as_array()) {
+            for e in errs.iter().filter_map(|e| e.as_str()) {
+                parts.push(e.to_string());
+            }
+        }
+        for (key, value) in obj {
+            if key == "_errors" {
+                continue;
+            }
+            if let Some(field_errs) = value.get("_errors").and_then(|e| e.as_array()) {
+                let msgs: Vec<&str> = field_errs.iter().filter_map(|e| e.as_str()).collect();
+                if !msgs.is_empty() {
+                    parts.push(msgs.join(", "));
+                }
+            }
+        }
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("; "))
+    }
+}
+
 #[derive(Deserialize)]
 struct ApiErrorResponse {
     error: Option<String>,
+    details: Option<serde_json::Value>,
 }
