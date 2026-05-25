@@ -53,7 +53,7 @@ Install the `.dmg`, drag to Applications, and launch.
 6. Use tray → Logout; confirm the confirmation prompt and a high-risk logout log.
 7. `kill <daemon-pid>` outside a system shutdown; confirm a 0.5-risk stop log followed by a startup classification based on the stop marker (zero-risk if within 10 seconds, otherwise high-risk).
 8. `kill -9 <daemon-pid>`; confirm no stop log is emitted and the next startup emits a high-risk log if the gap exceeds the 70-second ping window.
-9. Revoke Screen Recording in System Settings; confirm capture stops and the permission change is recorded as an informational event (not high-risk); restoring permission resumes capture.
+9. Revoke Screen Recording in System Settings; confirm capture stops and a high-risk log is emitted for the permission loss; restoring permission resumes capture.
 
 ## Windows
 
@@ -92,8 +92,8 @@ Install the APK and launch.
 2. Confirm screenshots appear in the web app within ~10 minutes.
 3. Swipe the app away from Recents; confirm monitoring continues via the foreground service.
 4. Reboot the device; confirm monitoring restarts automatically and new activity appears in the web app.
-5. Force-stop the app from Android Settings → Apps; confirm monitoring stops and resumes on next launch. No tamper alert is expected — Android service-stop tamper is not currently tracked.
-6. Revoke screen-capture permission mid-session; confirm new captures stop without crashing and resume when permission is re-granted.
+5. Force-stop the app from Android Settings → Apps; confirm a high-risk tamper log is emitted and monitoring resumes on next launch.
+6. Revoke screen-capture permission mid-session; confirm a high-risk log is emitted for the permission loss, the app does not crash, and capture resumes when permission is re-granted.
 7. Sign out; confirm a high-risk logout log, the service stops, and the login screen is shown.
 
 ## iOS
@@ -102,7 +102,7 @@ Build and run on a device or simulator.
 
 1. Log in and enable the Safari extension in iOS Settings with All Websites access.
 2. Browse in Safari and confirm screenshots appear in the web app within ~5 minutes.
-3. Disable the Safari extension; confirm new captures stop and any queued data still uploads. No tamper alert is expected — iOS service-stop tamper is not currently tracked.
+3. Disable the Safari extension; confirm a high-risk tamper log is emitted, new captures stop, and any queued data still uploads.
 4. Force-quit Safari or the extension and reopen; confirm capture resumes when Safari is active again.
 5. Sign out; confirm a high-risk logout log and the login screen is shown.
 
