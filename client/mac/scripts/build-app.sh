@@ -27,12 +27,19 @@ if [[ ! -f "$ICON_SOURCE" ]]; then
   exit 1
 fi
 
-VIRTUE_BUILD_LABEL="$BUILD_LABEL" cargo build --release -p virtue-mac
+if [[ "${ARCH_SUFFIX}" == "-intel" ]]; then
+  CARGO_TARGET="x86_64-apple-darwin"
+  VIRTUE_BUILD_LABEL="$BUILD_LABEL" cargo build --release --target "$CARGO_TARGET" -p virtue-mac
+  BINARY_PATH="target/${CARGO_TARGET}/release/virtue-mac"
+else
+  VIRTUE_BUILD_LABEL="$BUILD_LABEL" cargo build --release -p virtue-mac
+  BINARY_PATH="target/release/virtue-mac"
+fi
 
 rm -rf "$APP_ROOT"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
-install -m 0755 target/release/virtue-mac "${MACOS_DIR}/Virtue"
+install -m 0755 "$BINARY_PATH" "${MACOS_DIR}/Virtue"
 install -m 0644 "$ICON_SOURCE" "${RESOURCES_DIR}/AppIcon.icns"
 
 cat > "${CONTENTS_DIR}/Info.plist" <<PLIST
