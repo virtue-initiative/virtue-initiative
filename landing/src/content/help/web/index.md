@@ -6,5 +6,3 @@ sidebar_position: 1
 
 This section contains instructions for doing things on the [Virtue Initiative
 webapp](/app).
-
-- [Inviting a partner](/help/web/inviting-a-partner)
