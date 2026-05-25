@@ -9,3 +9,5 @@ backends.
 
 - [Testing](/help/developer/testing)
 - [Developer overrides](/help/developer/overrides)
+- [Security and encryption](/help/developer/security)
+- [Tamper protection](/help/developer/tamper-controls)

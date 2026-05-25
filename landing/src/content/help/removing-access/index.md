@@ -24,3 +24,7 @@ systems](/help/removing-access/filtering).
 
 Implementing some of or all of these greatly helps in fighting against
 pornography.
+
+- [Whitelisting](/help/removing-access/whitelisting)
+- [Filtering](/help/removing-access/filtering)
+- [Disable the browser](/help/removing-access/disable-browser)
