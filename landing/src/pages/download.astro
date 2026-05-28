@@ -38,13 +38,21 @@ const platforms: Platform[] = [
       (/^virtue-linux_/i.test(assetName) || /^virtue_/i.test(assetName)),
   },
   {
-    label: 'macOS',
+    label: 'macOS (Apple Silicon)',
     detail: '.dmg installer',
     kind: 'laptop',
-    preferredMatches: (assetName) => /^virtue-macos-/i.test(assetName),
+    preferredMatches: (assetName) => /^virtue-macos-apple-silicon-/i.test(assetName),
+    fallbackMatches: (assetName) =>
+      /\.dmg$/i.test(assetName) && /^virtue-macos-apple-silicon-/i.test(assetName),
+  },
+  {
+    label: 'macOS (Intel)',
+    detail: '.dmg installer',
+    kind: 'laptop',
+    preferredMatches: (assetName) => /^virtue-macos-intel-/i.test(assetName),
     fallbackMatches: (assetName) =>
       /\.dmg$/i.test(assetName) &&
-      (/^virtue-macos-/i.test(assetName) || /^Virtue-/i.test(assetName)),
+      (/^virtue-macos-intel-/i.test(assetName) || /^Virtue-/i.test(assetName)),
   },
   {
     label: 'Windows',

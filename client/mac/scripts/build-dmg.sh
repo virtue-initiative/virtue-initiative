@@ -15,16 +15,17 @@ cd "$CLIENT_ROOT"
 source "${CLIENT_ROOT}/scripts/version.sh"
 
 BUILD_LABEL="$(virtue_build_label)"
+ARCH_SUFFIX="${VIRTUE_ARCH_SUFFIX:-}"
 APP_NAME="Virtue.app"
-DMG_NAME="virtue-macos-${BUILD_LABEL}.dmg"
-DMG_PATH="target/macos/${DMG_NAME}"
-TEMP_DMG_PATH="target/macos/Virtue-${BUILD_LABEL}-temp.dmg"
-STAGING_DIR="target/macos/dmg-staging"
+DMG_NAME="virtue-macos${ARCH_SUFFIX}-${BUILD_LABEL}.dmg"
+DMG_PATH="target/macos${ARCH_SUFFIX}/${DMG_NAME}"
+TEMP_DMG_PATH="target/macos${ARCH_SUFFIX}/Virtue-${BUILD_LABEL}-temp.dmg"
+STAGING_DIR="target/macos${ARCH_SUFFIX}/dmg-staging"
 VOLUME_NAME="Virtue"
 
 rm -rf "$STAGING_DIR" "$DMG_PATH" "$TEMP_DMG_PATH"
 mkdir -p "$STAGING_DIR"
-cp -R "target/macos/${APP_NAME}" "$STAGING_DIR/${APP_NAME}"
+cp -R "target/macos${ARCH_SUFFIX}/${APP_NAME}" "$STAGING_DIR/${APP_NAME}"
 ln -s /Applications "$STAGING_DIR/Applications"
 
 hdiutil create \
