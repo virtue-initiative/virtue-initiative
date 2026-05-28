@@ -2,8 +2,6 @@
 import HelpSidebarNav from '../components/HelpSidebarNav.astro';
 import Footer from '../components/Footer.astro';
 import Header from '../components/Header.astro';
-import ThemeHeadScript from '../components/ThemeHeadScript.astro';
-import ThemeScript from '../components/ThemeScript.astro';
 import { helpSidebar } from '../help/navigation';
 import '../styles/global.css';
 
@@ -26,7 +24,13 @@ const rootLinks = [{ label: 'Help', href: '/help' }, ...helpSidebar];
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <ThemeHeadScript />
+    <!-- These colors must stay in sync with tokens.css :root for --bg and --text. They cannot reference CSS custom properties because they paint before global.css loads. -->
+    <style is:inline>
+      html {
+        background: #f4efe3;
+        color: #1b1a16;
+      }
+    </style>
     <title>{title}</title>
   </head>
   <body class="help-page">
@@ -83,7 +87,6 @@ const rootLinks = [{ label: 'Help', href: '/help' }, ...helpSidebar];
       </nav>
     </aside>
     <Footer />
-    <ThemeScript />
     <script is:inline>
       const toggle = document.querySelector('[data-help-sidebar-toggle]');
       const drawer = document.getElementById('help-sidebar-drawer');
