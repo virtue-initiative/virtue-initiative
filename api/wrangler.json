@@ -43,8 +43,7 @@
         "APP_NAME": "Virtue Initiative",
         "AWS_SES_REGION": "us-east-1",
         "AWS_SES_FROM_EMAIL": "notifications@virtueinitiative.org",
-        "EMAIL_DELIVERY_MODE": "ses",
-        "HASH_SERVER_URL": "https://app.virtueinitiative.org"
+        "EMAIL_DELIVERY_MODE": "ses"
       },
       "routes": [
         {
@@ -82,8 +81,7 @@
         "APP_NAME": "Virtue Initiative",
         "AWS_SES_REGION": "us-east-1",
         "AWS_SES_FROM_EMAIL": "notifications@virtueinitiative.org",
-        "EMAIL_DELIVERY_MODE": "ses",
-        "HASH_SERVER_URL": "https://staging.app.virtueinitiative.org"
+        "EMAIL_DELIVERY_MODE": "ses"
       },
       "routes": [
         {
