@@ -119,11 +119,3 @@ ad-hoc rem values for gaps and margins.
   forest; segmented control fills the active item forest with paper text.
 - **Toast** — paper surface with a hairline border and a 3px status-colored
   left rule.
-
-## Dark theme
-
-The prototype is light-first. Dark theme (`[data-theme='dark']`) maps the same
-roles onto a dark forest base (`#0F1A13` bg, warm off-white `#E6DFC8` text, muted
-moss borders). All tokens — including the palette aliases — are re-declared under
-the dark selector, so components that reference tokens render correctly in both
-themes without theme-specific overrides.
