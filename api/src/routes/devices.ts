@@ -5,6 +5,7 @@ import {
   deleteDeviceById,
   findOwnedDevice,
   findUserById,
+  getHashState,
   listBatchUrlsForDevice,
   listAcceptedNotificationTargetsForUser,
   listDevicesForOwners,
@@ -38,7 +39,18 @@ devices.get('/', authenticate('access'), async (c) => {
   const hashServerUrl = c.env.HASH_SERVER_URL?.trim() || null;
   const hashInfo = new Map<string, { count: number; hashed_at: number | null }>();
 
-  if (hashServerUrl) {
+  if (hashServerUrl?.endsWith('/api/hash')) {
+    // Hack: when the hash server is this API itself, skip the HTTP round-trip
+    // and read the hash state directly from D1.
+    await Promise.all(
+      rows.map(async (device) => {
+        const state = await getHashState(c.env.DB, device.id);
+        if (state) {
+          hashInfo.set(device.id, { count: state.count, hashed_at: state.hashed_at });
+        }
+      }),
+    );
+  } else if (hashServerUrl) {
     await Promise.all(
       rows.map(async (device) => {
         try {
