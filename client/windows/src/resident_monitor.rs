@@ -336,7 +336,6 @@ fn run_monitor_loop(shutdown: Arc<AtomicBool>, command_rx: Receiver<MonitorComma
                     update_snapshot(|snapshot| {
                         snapshot.logged_in = status.is_authenticated;
                         snapshot.pending_request_count = status.pending_request_count;
-                        snapshot.last_screenshot_at_ms = status.last_screenshot_at_ms;
                         snapshot.last_error = None;
                         snapshot.state = if status.is_authenticated {
                             "running".to_string()

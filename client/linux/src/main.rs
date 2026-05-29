@@ -13,7 +13,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
-use virtue_core::audit::derive_state;
 use virtue_core::storage::FileStateStore;
 use virtue_core::{AuthState, EventData, LogEntry, MonitorService, ServiceRole, ServiceStatus};
 
@@ -586,7 +585,6 @@ fn load_service_status(
     auth: &AuthState,
     config: &virtue_core::Config,
 ) -> Result<ServiceStatus> {
-    let pending_request_count = derive_state(&store.load_audit_records()?).pending_request_count;
     let mut status = store.load_status()?.unwrap_or(ServiceStatus {
         is_authenticated: auth.device_credentials.is_some(),
         is_running: false,
@@ -595,14 +593,11 @@ fn load_service_status(
             .as_ref()
             .map(|device| device.device_id.clone()),
         last_loop_at_ms: None,
-        last_screenshot_at_ms: None,
-        last_batch_at_ms: None,
-        pending_request_count,
+        pending_request_count: 0,
         lifecycle: virtue_core::LifecycleStatus::for_platform(&config.platform_name),
     });
     status.is_running =
         status.is_running && has_fresh_status_heartbeat(&status, config, current_time_utc_ms()?);
-    status.pending_request_count = pending_request_count;
     status.lifecycle.capabilities =
         virtue_core::LifecycleCapabilities::for_platform(&config.platform_name);
     Ok(status)
@@ -657,8 +652,6 @@ mod tests {
             is_running: true,
             device_id: Some("device-1".to_string()),
             last_loop_at_ms,
-            last_screenshot_at_ms: None,
-            last_batch_at_ms: None,
             pending_request_count: 0,
             lifecycle: virtue_core::LifecycleStatus::for_platform("linux"),
         }

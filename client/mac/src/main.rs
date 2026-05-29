@@ -15,7 +15,6 @@ use tao::event::Event;
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use virtue_core::audit::derive_state;
 use virtue_core::storage::FileStateStore;
 use virtue_core::{
     AuthState, CapturePermissionState, CoreError, MonitorService, ServiceRole, ServiceStatus,
@@ -605,7 +604,6 @@ fn refresh_main_window_status(
 }
 
 fn load_service_status(store: &FileStateStore, auth: &AuthState) -> Result<ServiceStatus> {
-    let pending_request_count = derive_state(&store.load_audit_records()?).pending_request_count;
     let mut status = store.load_status()?.unwrap_or(ServiceStatus {
         is_authenticated: auth.device_credentials.is_some(),
         is_running: false,
@@ -614,12 +612,9 @@ fn load_service_status(store: &FileStateStore, auth: &AuthState) -> Result<Servi
             .as_ref()
             .map(|device| device.device_id.clone()),
         last_loop_at_ms: None,
-        last_screenshot_at_ms: None,
-        last_batch_at_ms: None,
-        pending_request_count,
+        pending_request_count: 0,
         lifecycle: virtue_core::LifecycleStatus::for_platform("macos"),
     });
-    status.pending_request_count = pending_request_count;
     status.lifecycle.capabilities = virtue_core::LifecycleCapabilities::for_platform("macos");
     Ok(status)
 }

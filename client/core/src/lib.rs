@@ -1,11 +1,10 @@
 pub mod api;
-pub mod audit;
-pub mod batch;
+pub mod auth;
 pub mod build_info;
 pub mod config;
 pub mod crypto;
 pub mod error;
-pub mod image_pipeline;
+pub mod events;
 pub mod lifecycle;
 pub mod model;
 pub mod platform;
@@ -15,6 +14,7 @@ pub mod storage;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
+pub use auth::Auth;
 pub use build_info::{BUILD_LABEL, build_label};
 pub use config::Config;
 pub use error::{CoreError, CoreResult};
@@ -25,9 +25,8 @@ pub use lifecycle::{
     ServiceRole, ServiceRuntimeState, ServiceStopMarker, StopIntent, UserSessionState,
 };
 pub use model::{
-    AuditLogPayload, AuditRecord, AuditState, AuthState, BatchEvent, BatchEventData, BatchUpload,
-    BufferedBatchEvent, DeviceCredentials, DeviceSettings, EventData, LogEntry, LoginStatus,
-    LoopOutcome, Screenshot, ServiceStatus,
+    AuthState, BatchLogEntry, BatchUpload, DeviceCredentials, DeviceSettings, EventData, LogEntry,
+    LoginStatus, LoopOutcome, Screenshot, ServiceStatus,
 };
 pub use platform::PlatformHooks;
 pub use service::MonitorService;

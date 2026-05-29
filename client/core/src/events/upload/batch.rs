@@ -5,14 +5,14 @@ use flate2::write::GzEncoder;
 
 use crate::crypto::{CryptoEngine, encode_batch_event};
 use crate::error::{CoreError, CoreResult};
-use crate::model::{BatchRecipient, BatchUpload, BufferedBatchEvent};
+use crate::model::{BatchLogEntry, BatchRecipient, BatchUpload};
 
 #[derive(Debug, Default, Clone)]
 pub struct BatchBuilder;
 
 impl BatchBuilder {
     pub fn build_upload(
-        items: &[BufferedBatchEvent],
+        items: &[BatchLogEntry],
         crypto: &CryptoEngine,
         recipients: &[BatchRecipient],
         end_time_ms: i64,
@@ -59,11 +59,11 @@ impl BatchBuilder {
 #[cfg(test)]
 mod tests {
     use crate::crypto::encode_batch_event;
-    use crate::model::{BatchEvent, EventData};
+    use crate::model::{EventData, LogEntry};
 
     #[test]
     fn batch_payload_is_array_of_encoded_event_bytes() {
-        let event = BatchEvent {
+        let event = LogEntry {
             ts: 123,
             kind: "developer_log".to_string(),
             risk: Some(0.5),

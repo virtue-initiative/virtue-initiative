@@ -92,14 +92,33 @@ That means platform crates do not need to restart the daemon just to change API 
 Current files:
 
 - `status.json`: last known runtime status
-- `auth.json`: user access token and device credentials
-- `device_settings.json`: latest device settings returned by `GET /d/device`
-- `audit.jsonl`: append-only upload audit log and retry source
+- `auth.json`: user access token and device credentials (owned by `Auth`)
+- `device_settings.json`: latest device settings returned by `GET /d/device` (owned by `UploadObserver`)
+- `event_state.json`: serialized observer state (screenshot schedule, upload queues, lifecycle state)
 - `errors.log`: local append-only operational error log
 
 `core` should be able to restart and continue uploading without platform-specific recovery logic.
 
 The runtime config override file is not part of the core state store. It is read separately from `Config.runtime_config_file`.
+
+## Auth / Event System Split
+
+Auth is resolved **before** the event system runs. `Auth` (`src/auth.rs`) is a standalone
+component owned by `MonitorService` — not an observer. It persists to `auth.json` whenever
+credentials change (login, logout, token refresh).
+
+The event loop is gated entirely on `Auth::is_authenticated()`. When the daemon is not
+authenticated, no captures or uploads are attempted.
+
+`device_settings` is owned exclusively by `UploadObserver`. It is persisted to
+`device_settings.json` via `UploadObserver::set_settings` and reloaded from disk each
+loop iteration via `UploadObserver::reload_settings_from_disk`. No other observer accesses it.
+Screenshots are captured on their schedule regardless of settings — captures that arrive
+before settings are established queue in the upload observer until settings supply a recipient
+key.
+
+Cross-process auth changes (written by a separate `login`/`logout` CLI) are picked up each
+`loop_iteration` by reloading `auth.json` and `device_settings.json` from disk.
 
 ## Device/Auth Model
 

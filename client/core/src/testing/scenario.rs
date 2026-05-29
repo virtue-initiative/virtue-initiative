@@ -44,7 +44,6 @@ impl Scenario {
                 access_token: "scenario-device-access".into(),
                 refresh_token: "scenario-device-refresh".into(),
             }),
-            post_login_proof_batches_remaining: 0,
         };
         let settings = DeviceSettings {
             device_id: "scenario-device".into(),
@@ -62,16 +61,9 @@ impl Scenario {
 
     fn build(auth: Option<AuthState>, settings: Option<DeviceSettings>) -> Self {
         let state_dir = scenario_temp_dir();
-        if auth.is_some() || settings.is_some() {
+        if let Some(ref auth) = auth {
             let storage = FileStateStore::new(&state_dir).expect("create file state store");
-            if let Some(auth) = auth {
-                storage.save_auth_state(&auth).expect("seed auth state");
-            }
-            if let Some(settings) = settings {
-                storage
-                    .save_device_settings(Some(&settings))
-                    .expect("seed device settings");
-            }
+            storage.save_auth_state(auth).expect("seed auth state");
         }
         let config = scenario_config(state_dir.clone());
         let clock = MockClock::default();
@@ -79,8 +71,15 @@ impl Scenario {
         let api = MockApiClient::new();
         let api_handle = api.clone();
         let platform_handle = platform.clone();
-        let service = MonitorService::setup_with_api(config, platform, api)
+        let mut service = MonitorService::setup_with_api(config, platform, api)
             .expect("scenario service must construct");
+        if let Some(settings) = settings {
+            service
+                .event_loop
+                .observers
+                .upload
+                .set_settings(Some(settings));
+        }
         Self {
             service,
             platform: platform_handle,

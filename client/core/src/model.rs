@@ -5,6 +5,9 @@ use serde_json::{Map, Value};
 
 use crate::lifecycle::LifecycleStatus;
 
+// Removed: AuditLogPayload, AuditRecord, StoredAuditRecord, AuditLogItem, AuditState
+// Replaced by UploadObserver state in events.rs
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Screenshot {
     pub captured_at_ms: i64,
@@ -60,77 +63,9 @@ pub struct LogEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BufferedBatchEvent {
-    pub event: BatchEvent,
+pub struct BatchLogEntry {
+    pub event: LogEntry,
     pub content_hash: [u8; 32],
-}
-
-pub type BatchEvent = LogEntry;
-pub type BatchEventData = EventData;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", content = "data", rename_all = "snake_case")]
-pub enum AuditLogPayload {
-    Direct(LogEntry),
-    Batch(BufferedBatchEvent),
-}
-
-impl AuditLogPayload {
-    pub fn for_direct_log(log: LogEntry) -> Self {
-        Self::Direct(log)
-    }
-
-    pub fn for_batch_event(event: BufferedBatchEvent) -> Self {
-        Self::Batch(event)
-    }
-
-    pub fn as_direct_log(&self) -> Option<&LogEntry> {
-        match self {
-            Self::Direct(log) => Some(log),
-            Self::Batch(_) => None,
-        }
-    }
-
-    pub fn as_batch_event(&self) -> Option<&BufferedBatchEvent> {
-        match self {
-            Self::Direct(_) => None,
-            Self::Batch(event) => Some(event),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum AuditRecord {
-    Log {
-        local_id: String,
-        should_be_in_batch: bool,
-        #[serde(default)]
-        requires_hash_upload: bool,
-        log: AuditLogPayload,
-    },
-    LocalLog {
-        log: LogEntry,
-    },
-    HashUploaded {
-        local_id: String,
-    },
-    LogUploaded {
-        local_id: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        server_id: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        batch_id: Option<String>,
-    },
-    BatchUploaded {
-        server_id: String,
-    },
-}
-
-#[derive(Debug, Clone)]
-pub struct StoredAuditRecord {
-    pub audit_day: String,
-    pub record: AuditRecord,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -195,8 +130,6 @@ pub struct LoginStatus {
 pub struct AuthState {
     pub user_access_token: Option<String>,
     pub device_credentials: Option<DeviceCredentials>,
-    #[serde(default)]
-    pub post_login_proof_batches_remaining: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -205,8 +138,6 @@ pub struct ServiceStatus {
     pub is_running: bool,
     pub device_id: Option<String>,
     pub last_loop_at_ms: Option<i64>,
-    pub last_screenshot_at_ms: Option<i64>,
-    pub last_batch_at_ms: Option<i64>,
     pub pending_request_count: usize,
     #[serde(default)]
     pub lifecycle: LifecycleStatus,
@@ -217,22 +148,4 @@ pub struct LoopOutcome {
     pub ran_at_ms: i64,
     pub next_run_at_ms: i64,
     pub status: ServiceStatus,
-}
-
-#[derive(Debug, Clone)]
-pub struct AuditLogItem {
-    pub audit_day: String,
-    pub local_id: String,
-    pub should_be_in_batch: bool,
-    pub requires_hash_upload: bool,
-    pub payload: AuditLogPayload,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct AuditState {
-    pub items: Vec<AuditLogItem>,
-    pub pending_hash_uploads: Vec<AuditLogItem>,
-    pub pending_direct_uploads: Vec<AuditLogItem>,
-    pub pending_batch_uploads: Vec<AuditLogItem>,
-    pub pending_request_count: usize,
 }
