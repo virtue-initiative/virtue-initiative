@@ -7,7 +7,6 @@ import {
   generateUserKeyPair,
 } from '../../utils/api/crypto';
 import './style.css';
-import { ThemeButton } from '../../components/ThemeButton';
 import {
   Alert,
   Button,
@@ -185,7 +184,6 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
       <Card class="auth-card">
         <div class="auth-header">
           <h1 class="auth-title">The Virtue Initiative</h1>
-          <ThemeButton />
         </div>
         <p class="auth-subtitle">Accountability starts here.</p>
 

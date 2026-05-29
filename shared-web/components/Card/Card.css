@@ -1,12 +1,20 @@
 .vi-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   padding: 1.25rem;
 }
 
 .vi-card--highlight {
   border-color: var(--accent);
+}
+
+.vi-card--tight {
+  padding: var(--space-3);
+}
+
+.vi-card--flush {
+  padding: 0;
 }
 
 .vi-card-header {

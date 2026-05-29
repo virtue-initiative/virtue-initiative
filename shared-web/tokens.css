@@ -1,13 +1,15 @@
 /* Breakpoint contract: @media (min-width: 480px) → sm  |  720px → md  |  960px → lg */
 
 :root {
-  --font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  --font-serif: 'Source Serif 4', Georgia, serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
   --button-height: 2.25rem;
   --button-padding-x: 0.8rem;
   --danger: #ef4444;
   --danger-strong: #dc2626;
-  --warning: #f59e0b;
-  --success: #008900;
+  --warning: #9c6b2e;
+  --success: #4f7a5a;
   --overlay: #0006;
   --overlay-strong: #000a;
   --shadow-sm: 0 1px 3px #0002;
@@ -24,10 +26,10 @@
   --space-8: 4rem;
 
   /* radius */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 18px;
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
   --radius-full: 999px;
 
   /* typography */
@@ -55,32 +57,33 @@
 /* Theme */
 :root {
   color-scheme: light;
-  --bg: #f9f9f7;
-  --surface: #ffffff;
-  --bg-subtle: #f3f2ef;
-  --border: #e0ddd8;
-  --text: #1a1a1a;
-  --text-muted: #6b6860;
-  --accent: #008900;
-  --success: var(--accent);
-  --control-border-hover: #c9c5bf;
+  --bg: #f4efe3;
+  --surface: #fbf7ea;
+  --bg-subtle: #ebe4ce;
+  --border: #d9d1bc;
+  --text: #1b1a16;
+  --text-muted: #6a6655;
+  --accent: #1e3a2e;
+  --success: #4f7a5a;
+  --control-border-hover: #c9c0a8;
   --control-active-bg: var(--bg-subtle);
-  --control-active-border: #b6ddb6;
+  --control-active-border: #4d6b58;
   --control-active-text: var(--accent);
-}
 
-[data-theme='dark'] {
-  color-scheme: dark;
-  --bg: #111713;
-  --surface: #1a1f1c;
-  --bg-subtle: #1e2421;
-  --border: #2c332e;
-  --text: #e6e3df;
-  --text-muted: #9a9890;
-  --accent: #00a300;
-  --success: var(--accent);
-  --control-border-hover: #3f4c44;
-  --control-active-bg: #142314;
-  --control-active-border: #165816;
-  --control-active-text: #8be28b;
+  /* Warm institutional palette */
+  --ink-2: #3a382f;
+  --ink-3: #6a6655; /* same as --text-muted */
+  --ink-4: #9c9682;
+  --rule-2: #e8e1cb;
+  --paper: #f4efe3; /* alias for --bg */
+  --paper-2: #ebe4ce; /* alias for --bg-subtle */
+  --paper-3: #fbf7ea; /* alias for --surface */
+  --forest: #1e3a2e; /* alias for --accent */
+  --forest-2: #163026;
+  --forest-3: #2c4d3e;
+  --moss: #4d6b58;
+  --moss-2: #7a8f76;
+  --ochre: #a67f3d;
+  --ochre-soft: #c9a56b;
+  --good: #4f7a5a; /* alias for --success */
 }

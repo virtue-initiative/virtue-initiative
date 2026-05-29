@@ -3,7 +3,7 @@
   width: 100%;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   padding: 0.55rem 0.75rem;
   font-size: var(--text-base);
   line-height: 1;

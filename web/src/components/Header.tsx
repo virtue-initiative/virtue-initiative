@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { useAPIContext } from '../utils/api';
-import { ThemeButton } from './ThemeButton';
 import { Button, IconButton } from '@virtueinitiative/shared-web';
 
 function MenuIcon() {
@@ -72,7 +71,6 @@ export function Header() {
         </a>
       </div>
       <div class="app-header-mobile-actions">
-        <ThemeButton />
         <IconButton
           aria-expanded={mobileMenuOpen}
           aria-controls="mobile-header-menu"
@@ -96,8 +94,6 @@ export function Header() {
         </div>
 
         <div class="app-header-action-group">
-          <ThemeButton />
-
           <Button variant="ghost" onClick={logout} type="button">
             Log out
           </Button>

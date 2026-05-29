@@ -14,7 +14,6 @@ import {
   deleteSessionByRefreshTokenHash,
   listBatchAccessRecipientsForOwner,
   resetHashState as resetStoredHashState,
-  resetHashCount,
 } from '../lib/db';
 import { encodeBase64, encodeHex } from '../lib/encoding';
 import { generateToken } from '../lib/jwt';
@@ -73,11 +72,6 @@ const deviceLogSchema = z.object({
   data: z.record(z.string(), z.unknown()).optional().default({}),
 });
 
-function getConfiguredHashBaseUrl(env: Env) {
-  const trimmed = env.HASH_SERVER_URL?.trim();
-  return trimmed ? trimmed : null;
-}
-
 function parseAccessKeysPayload(raw: string) {
   const parsed = JSON.parse(raw) as unknown;
   const payload = accessKeysSchema.parse(parsed);
@@ -96,47 +90,16 @@ function parseAccessKeysPayload(raw: string) {
 async function readHashState(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   deviceId: string,
-  authorization: string,
-  hashBaseUrl: string | null,
 ) {
-  if (!hashBaseUrl) {
-    const state = await getHashState(c.env.DB, deviceId);
-    return state ? state.state : ZERO_STATE.buffer;
-  }
-
-  const response = await fetch(`${hashBaseUrl}/hash`, {
-    headers: { Authorization: authorization },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to read hash state: ${response.status} ${await response.text()}`);
-  }
-
-  return response.arrayBuffer();
+  const state = await getHashState(c.env.DB, deviceId);
+  return state ? state.state : ZERO_STATE.buffer;
 }
 
 async function resetHashState(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   device: { id: string; owner: string },
-  _hashBaseUrl: string | null,
-  serverToken: string,
 ) {
-  const configuredHashBaseUrl = getConfiguredHashBaseUrl(c.env);
-  if (!configuredHashBaseUrl) {
-    await resetStoredHashState(c.env.DB, device.id, Date.now());
-    return;
-  }
-
-  const response = await fetch(`${configuredHashBaseUrl}/hash`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${serverToken}` },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to reset hash state: ${response.status} ${await response.text()}`);
-  }
-
-  await resetHashCount(c.env.DB, device.id, Date.now());
+  await resetStoredHashState(c.env.DB, device.id, Date.now());
 }
 
 async function createDeviceSession(
@@ -190,7 +153,7 @@ deviceOnly.get('/device', authenticate('device-access'), async (c) => {
     return c.json({ error: 'Not found' }, 404);
   }
 
-  const hashBaseUrl = getConfiguredHashBaseUrl(c.env);
+  const hashBaseUrl = c.env.HASH_SERVER_URL?.trim();
   if (!hashBaseUrl) {
     return c.json({ error: 'Hash server not configured' }, 500);
   }
@@ -271,14 +234,8 @@ deviceOnly.post(
     }
 
     const { start_time, end_time, access_keys, file } = c.req.valid('form');
-    const authorization = c.req.header('Authorization');
 
-    if (!authorization) {
-      return c.json({ error: 'Unauthorized' }, 401);
-    }
-
-    const configuredHashBaseUrl = getConfiguredHashBaseUrl(c.env);
-    const hashState = await readHashState(c, device.id, authorization, configuredHashBaseUrl);
+    const hashState = await readHashState(c, device.id);
     const endHash = encodeHex(hashState);
     const batchId = uuidv4();
     const key = `user/${device.owner}/batches/${batchId}.enc`;
@@ -310,12 +267,7 @@ deviceOnly.post(
       access_keys: JSON.stringify(parsedAccessKeys),
       created_at: createdAt,
     });
-    await resetHashState(
-      c,
-      device,
-      configuredHashBaseUrl,
-      await generateToken('server', device.id, c.env.JWT_PRIVATE_KEY, 60),
-    );
+    await resetHashState(c, device);
 
     return c.json({ id: batchId, start_time, end_time, end_hash: endHash, url }, 201);
   },

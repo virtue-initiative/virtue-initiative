@@ -29,8 +29,12 @@
   }
 
   &.is-active {
-    background: var(--surface);
-    color: var(--text);
+    background: var(--forest);
+    color: var(--paper-3);
     box-shadow: var(--shadow-sm);
+
+    &:hover {
+      color: var(--paper-3);
+    }
   }
 }
