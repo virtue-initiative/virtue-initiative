@@ -66,6 +66,15 @@ pub fn build_core_config(paths: &ClientPaths) -> Config {
     )
 }
 
+fn xdg_base_dir(env_name: &str, fallback_suffix: &str) -> Result<PathBuf> {
+    if let Some(value) = std::env::var_os(env_name).filter(|value| !value.is_empty()) {
+        return Ok(PathBuf::from(value));
+    }
+
+    let home = dirs::home_dir().context("failed to resolve home directory")?;
+    Ok(home.join(fallback_suffix))
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -105,13 +114,4 @@ mod tests {
             PathBuf::from("/home/testuser/.config/virtue")
         );
     }
-}
-
-fn xdg_base_dir(env_name: &str, fallback_suffix: &str) -> Result<PathBuf> {
-    if let Some(value) = std::env::var_os(env_name).filter(|value| !value.is_empty()) {
-        return Ok(PathBuf::from(value));
-    }
-
-    let home = dirs::home_dir().context("failed to resolve home directory")?;
-    Ok(home.join(fallback_suffix))
 }
