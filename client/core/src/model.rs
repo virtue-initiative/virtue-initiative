@@ -3,11 +3,6 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::lifecycle::LifecycleStatus;
-
-// Removed: AuditLogPayload, AuditRecord, StoredAuditRecord, AuditLogItem, AuditState
-// Replaced by UploadObserver state in events.rs
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Screenshot {
     pub captured_at_ms: i64,
@@ -139,13 +134,61 @@ pub struct ServiceStatus {
     pub device_id: Option<String>,
     pub last_loop_at_ms: Option<i64>,
     pub pending_request_count: usize,
-    #[serde(default)]
-    pub lifecycle: LifecycleStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoopOutcome {
     pub ran_at_ms: i64,
-    pub next_run_at_ms: i64,
     pub status: ServiceStatus,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum UserSessionState {
+    LoggedIn,
+    LoggedOut,
+    #[default]
+    Unknown,
+}
+
+impl UserSessionState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::LoggedIn => "logged_in",
+            Self::LoggedOut => "logged_out",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct StopIntent {
+    pub source: String,
+    pub requested_at_ms: i64,
+}
+
+impl Default for StopIntent {
+    fn default() -> Self {
+        Self {
+            source: String::new(),
+            requested_at_ms: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ServiceStopMarker {
+    pub origin: String,
+    pub stopped_at_ms: i64,
+}
+
+impl Default for ServiceStopMarker {
+    fn default() -> Self {
+        Self {
+            origin: String::new(),
+            stopped_at_ms: 0,
+        }
+    }
 }

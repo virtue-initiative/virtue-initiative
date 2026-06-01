@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use crate::config::Config;
 use crate::error::CoreResult;
-use crate::lifecycle::LifecycleObservation;
+use crate::events::{Event, ProcessStoppedReason};
 use crate::model::{AuthState, BatchRecipient, DeviceCredentials, DeviceSettings, ServiceStatus};
 use crate::service::MonitorService;
 use crate::storage::FileStateStore;
@@ -74,11 +74,7 @@ impl Scenario {
         let mut service = MonitorService::setup_with_api(config, platform, api)
             .expect("scenario service must construct");
         if let Some(settings) = settings {
-            service
-                .event_loop
-                .observers
-                .upload
-                .set_settings(Some(settings));
+            service.upload_obs_mut().set_settings(Some(settings));
         }
         Self {
             service,
@@ -114,15 +110,16 @@ impl Scenario {
         self.service.loop_iteration().map(|_| ())
     }
 
-    pub fn observe(&mut self, observation: LifecycleObservation) -> &mut Self {
-        self.service
-            .record_lifecycle_observation(observation)
-            .expect("record_lifecycle_observation must not error");
+    pub fn queue_event(&mut self, event: Event) -> &mut Self {
+        self.service.queue_event(event);
         self
     }
 
     pub fn shutdown(&mut self) -> &mut Self {
-        self.service.shutdown().expect("shutdown must not error");
+        self.service
+            .queue_event(Event::ProcessStopped(ProcessStoppedReason::Shutdown));
+        let _ = self.service.run_event_loop_iter();
+        let _ = self.service.mark_stopped();
         self
     }
 
@@ -143,10 +140,6 @@ impl Scenario {
 
     pub fn read_errors_log(&self) -> String {
         self.read_file("errors.log")
-    }
-
-    pub fn read_lifecycle_observations_jsonl(&self) -> String {
-        self.read_file("lifecycle_observations.jsonl")
     }
 
     // --- assertions ---
@@ -214,15 +207,6 @@ impl Scenario {
         assert_eq!(
             actual, expected,
             "expected {expected} log uploads, recorded {actual}"
-        );
-        self
-    }
-
-    pub fn assert_lifecycle_observations_contain(&self, needle: &str) -> &Self {
-        let contents = self.read_lifecycle_observations_jsonl();
-        assert!(
-            contents.contains(needle),
-            "expected lifecycle_observations.jsonl to contain `{needle}`, got:\n{contents}"
         );
         self
     }

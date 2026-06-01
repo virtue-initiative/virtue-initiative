@@ -220,4 +220,23 @@ impl PlatformHooks for LinuxPlatformHooks {
         i64::try_from(duration.as_millis())
             .map_err(|_| CoreError::InvalidState("system clock overflow"))
     }
+
+    fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>> {
+        Ok(None)
+    }
+
+    fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
+        let stat = std::fs::read_to_string("/proc/stat")
+            .map_err(|e| CoreError::CommandFailed(e.to_string()))?;
+        for line in stat.lines() {
+            if let Some(rest) = line.strip_prefix("btime ") {
+                let secs: i64 = rest
+                    .trim()
+                    .parse()
+                    .map_err(|_| CoreError::InvalidState("btime parse"))?;
+                return Ok(Some(secs * 1000));
+            }
+        }
+        Ok(None)
+    }
 }

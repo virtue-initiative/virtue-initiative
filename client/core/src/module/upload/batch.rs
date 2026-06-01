@@ -7,6 +7,8 @@ use crate::crypto::{CryptoEngine, encode_batch_event};
 use crate::error::{CoreError, CoreResult};
 use crate::model::{BatchLogEntry, BatchRecipient, BatchUpload};
 
+pub(crate) const MAX_BATCH_ITEMS_PER_UPLOAD: usize = 200;
+
 #[derive(Debug, Default, Clone)]
 pub struct BatchBuilder;
 

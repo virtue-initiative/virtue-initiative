@@ -1,10 +1,8 @@
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::error::CoreResult;
-use crate::lifecycle::{LifecycleObservation, ServicePingLog, StopIntent};
-use crate::model::{AuthState, ServiceStatus};
+use crate::model::{AuthState, ServiceStatus, StopIntent};
 
 #[derive(Debug, Clone)]
 pub struct FileStateStore {
@@ -35,6 +33,7 @@ impl FileStateStore {
     }
 
     pub fn append_error_log(&self, line: &str) -> CoreResult<()> {
+        use std::io::Write;
         let path = self.root.join("errors.log");
         let mut file = fs::OpenOptions::new()
             .create(true)
@@ -63,17 +62,6 @@ impl FileStateStore {
         }
     }
 
-    pub fn append_service_ping_log(&self, ping: &ServicePingLog) -> CoreResult<()> {
-        self.append_json_line("service_ping_log.jsonl", ping)
-    }
-
-    pub fn append_lifecycle_observation(
-        &self,
-        observation: &LifecycleObservation,
-    ) -> CoreResult<()> {
-        self.append_json_line("lifecycle_observations.jsonl", observation)
-    }
-
     fn write_json<T: serde::Serialize + ?Sized>(&self, name: &str, value: &T) -> CoreResult<()> {
         let path = self.root.join(name);
         let bytes = serde_json::to_vec_pretty(value)?;
@@ -94,23 +82,6 @@ impl FileStateStore {
             }
         })?))
     }
-
-    fn append_json_line<T: serde::Serialize + ?Sized>(
-        &self,
-        name: &str,
-        value: &T,
-    ) -> CoreResult<()> {
-        let path = self.root.join(name);
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)?;
-        let mut line = serde_json::to_vec(value)?;
-        line.push(b'\n');
-        file.write_all(&line)?;
-        file.flush()?;
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -120,8 +91,6 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::*;
-    use crate::lifecycle::ServiceRole;
-
     static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn temp_state_dir() -> PathBuf {
@@ -139,7 +108,6 @@ mod tests {
         let state_dir = temp_state_dir();
         let store = FileStateStore::new(&state_dir).expect("create store");
         let intent = StopIntent {
-            role: ServiceRole::PrimaryService,
             source: "tray_close".to_string(),
             requested_at_ms: 1_234,
         };

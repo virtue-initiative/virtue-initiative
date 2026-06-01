@@ -14,7 +14,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use virtue_core::storage::FileStateStore;
-use virtue_core::{AuthState, EventData, LogEntry, MonitorService, ServiceRole, ServiceStatus};
+use virtue_core::{AuthState, EventData, LogEntry, MonitorService, ServiceStatus};
 
 use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_backend};
 use crate::config::{ClientPaths, build_core_config};
@@ -189,49 +189,6 @@ fn status(paths: ClientPaths) -> Result<()> {
     println!("running: {}", status.is_running);
     println!("pending_request_count: {}", status.pending_request_count);
     println!(
-        "lifecycle_primary_service: {}",
-        status.lifecycle.snapshot.primary_service.as_str()
-    );
-    println!(
-        "lifecycle_computer_power: {}",
-        status.lifecycle.snapshot.computer_power.as_str()
-    );
-    println!(
-        "lifecycle_capture_permission: {}",
-        status.lifecycle.snapshot.capture_permission.as_str()
-    );
-    println!(
-        "lifecycle_capture_availability: {}",
-        status.lifecycle.snapshot.capture_availability.as_str()
-    );
-    println!(
-        "last_stop_origin: {}",
-        status
-            .lifecycle
-            .last_stop_origin
-            .map(|value| value.as_str())
-            .unwrap_or("<none>")
-    );
-    println!(
-        "last_lifecycle_risk: {}",
-        status
-            .lifecycle
-            .last_emitted_risk
-            .map(format_risk)
-            .unwrap_or_else(|| "<none>".to_string())
-    );
-    if let Some(transition) = &status.lifecycle.last_transition {
-        println!(
-            "last_transition: {} {} -> {}",
-            transition.domain.as_str(),
-            transition.from,
-            transition.to
-        );
-        println!("last_transition_origin: {}", transition.origin.as_str());
-    } else {
-        println!("last_transition: <none>");
-    }
-    println!(
         "device_id: {}",
         status.device_id.as_deref().unwrap_or("<none>")
     );
@@ -248,50 +205,6 @@ fn status(paths: ClientPaths) -> Result<()> {
             Some(CaptureBackend::X11) => "x11",
             None => "<unknown>",
         }
-    );
-    println!(
-        "capability_startup: {}",
-        status.lifecycle.capabilities.startup.as_str()
-    );
-    println!(
-        "capability_shutdown: {}",
-        status.lifecycle.capabilities.shutdown.as_str()
-    );
-    println!(
-        "capability_suspend: {}",
-        status.lifecycle.capabilities.suspend.as_str()
-    );
-    println!(
-        "capability_wake: {}",
-        status.lifecycle.capabilities.wake.as_str()
-    );
-    println!(
-        "capability_explicit_user_stop: {}",
-        status.lifecycle.capabilities.explicit_user_stop.as_str()
-    );
-    println!(
-        "capability_capture_permission: {}",
-        status.lifecycle.capabilities.capture_permission.as_str()
-    );
-    println!(
-        "capability_capture_availability: {}",
-        status.lifecycle.capabilities.capture_availability.as_str()
-    );
-    println!(
-        "capability_user_login: {}",
-        status.lifecycle.capabilities.user_login.as_str()
-    );
-    println!(
-        "capability_user_logout: {}",
-        status.lifecycle.capabilities.user_logout.as_str()
-    );
-    println!(
-        "capability_capture_worker: {}",
-        status.lifecycle.capabilities.capture_worker.as_str()
-    );
-    println!(
-        "capability_next_boot_recovery: {}",
-        status.lifecycle.capabilities.next_boot_recovery.as_str()
     );
 
     Ok(())
@@ -317,10 +230,10 @@ fn daemon_stop(paths: ClientPaths, yes: bool) -> Result<()> {
     }
 
     let mut service = MonitorService::setup(build_core_config(&paths), LinuxPlatformHooks::new())?;
-    service.note_stop_requested_by_user(ServiceRole::PrimaryService, "cli_daemon_stop")?;
+    service.note_stop_requested_by_user("cli_daemon_stop")?;
 
     if let Err(err) = run_systemctl_user(["stop", "virtue.service"]) {
-        let _ = service.take_stop_intent(ServiceRole::PrimaryService);
+        let _ = service.take_stop_intent();
         return Err(err);
     }
 
@@ -594,12 +507,9 @@ fn load_service_status(
             .map(|device| device.device_id.clone()),
         last_loop_at_ms: None,
         pending_request_count: 0,
-        lifecycle: virtue_core::LifecycleStatus::for_platform(&config.platform_name),
     });
     status.is_running =
         status.is_running && has_fresh_status_heartbeat(&status, config, current_time_utc_ms()?);
-    status.lifecycle.capabilities =
-        virtue_core::LifecycleCapabilities::for_platform(&config.platform_name);
     Ok(status)
 }
 
@@ -653,7 +563,6 @@ mod tests {
             device_id: Some("device-1".to_string()),
             last_loop_at_ms,
             pending_request_count: 0,
-            lifecycle: virtue_core::LifecycleStatus::for_platform("linux"),
         }
     }
 

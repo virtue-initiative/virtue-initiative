@@ -16,9 +16,7 @@ use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use virtue_core::storage::FileStateStore;
-use virtue_core::{
-    AuthState, CapturePermissionState, CoreError, MonitorService, ServiceRole, ServiceStatus,
-};
+use virtue_core::{AuthState, CoreError, MonitorService, ServiceStatus};
 
 use crate::capture::{
     MacPlatformHooks, ScreenCaptureAccessRequestOutcome, has_screen_capture_access,
@@ -229,7 +227,7 @@ fn open_app_dialog(
     let dialog_details = ui::LoggedInDialogDetails {
         build_label: BUILD_LABEL,
         email,
-        show_permission_actions: app_status.capture_permission != CapturePermissionState::Granted,
+        show_permission_actions: !app_status.has_capture_permission,
     };
     *main_window = Some(ui::show_main_window(&dialog_details)?);
     Ok(())
@@ -341,10 +339,10 @@ fn stop_monitoring(paths: &ClientPaths) -> Result<bool> {
     }
 
     let mut service = MonitorService::setup(build_core_config(paths), MacPlatformHooks::new())?;
-    service.note_stop_requested_by_user(ServiceRole::PrimaryService, "tray_stop_monitoring")?;
+    service.note_stop_requested_by_user("tray_stop_monitoring")?;
 
     if let Err(err) = launch_agent::stop_agent(paths).context("failed to stop background service") {
-        let _ = service.take_stop_intent(ServiceRole::PrimaryService);
+        let _ = service.take_stop_intent();
         return Err(err);
     }
 
@@ -380,13 +378,9 @@ fn service_is_running(paths: &ClientPaths) -> Result<bool> {
 fn maybe_request_screen_capture_access_for_logged_in_user(paths: &ClientPaths) -> Result<()> {
     let store = FileStateStore::new(&paths.state_dir)?;
     let auth = store.load_auth_state()?;
-    if auth.device_credentials.is_some() {
-        let service_status = load_service_status(&store, &auth)?;
-        if service_status.lifecycle.snapshot.capture_permission != CapturePermissionState::Granted {
-            request_screen_capture_access_for_monitoring()?;
-        }
+    if auth.device_credentials.is_some() && !has_screen_capture_access() {
+        request_screen_capture_access_for_monitoring()?;
     }
-
     Ok(())
 }
 
@@ -434,60 +428,6 @@ fn render_status_text(paths: &ClientPaths) -> Result<String> {
         service_status.pending_request_count
     ));
     lines.push(format!(
-        "lifecycle_primary_service: {}",
-        service_status.lifecycle.snapshot.primary_service.as_str()
-    ));
-    lines.push(format!(
-        "lifecycle_computer_power: {}",
-        service_status.lifecycle.snapshot.computer_power.as_str()
-    ));
-    lines.push(format!(
-        "lifecycle_capture_permission: {}",
-        service_status
-            .lifecycle
-            .snapshot
-            .capture_permission
-            .as_str()
-    ));
-    lines.push(format!(
-        "lifecycle_capture_availability: {}",
-        service_status
-            .lifecycle
-            .snapshot
-            .capture_availability
-            .as_str()
-    ));
-    lines.push(format!(
-        "last_stop_origin: {}",
-        service_status
-            .lifecycle
-            .last_stop_origin
-            .map(|value| value.as_str())
-            .unwrap_or("<none>")
-    ));
-    lines.push(format!(
-        "last_lifecycle_risk: {}",
-        service_status
-            .lifecycle
-            .last_emitted_risk
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "<none>".to_string())
-    ));
-    if let Some(transition) = &service_status.lifecycle.last_transition {
-        lines.push(format!(
-            "last_transition: {} {} -> {}",
-            transition.domain.as_str(),
-            transition.from,
-            transition.to
-        ));
-        lines.push(format!(
-            "last_transition_origin: {}",
-            transition.origin.as_str()
-        ));
-    } else {
-        lines.push("last_transition: <none>".to_string());
-    }
-    lines.push(format!(
         "device_id: {}",
         service_status.device_id.as_deref().unwrap_or("<none>")
     ));
@@ -501,70 +441,6 @@ fn render_status_text(paths: &ClientPaths) -> Result<String> {
     ));
     lines.push(format!("base_api_url: {}", config.api_base_url));
     lines.push("backend: screencapture".to_string());
-    lines.push(format!(
-        "capability_startup: {}",
-        service_status.lifecycle.capabilities.startup.as_str()
-    ));
-    lines.push(format!(
-        "capability_shutdown: {}",
-        service_status.lifecycle.capabilities.shutdown.as_str()
-    ));
-    lines.push(format!(
-        "capability_suspend: {}",
-        service_status.lifecycle.capabilities.suspend.as_str()
-    ));
-    lines.push(format!(
-        "capability_wake: {}",
-        service_status.lifecycle.capabilities.wake.as_str()
-    ));
-    lines.push(format!(
-        "capability_explicit_user_stop: {}",
-        service_status
-            .lifecycle
-            .capabilities
-            .explicit_user_stop
-            .as_str()
-    ));
-    lines.push(format!(
-        "capability_capture_permission: {}",
-        service_status
-            .lifecycle
-            .capabilities
-            .capture_permission
-            .as_str()
-    ));
-    lines.push(format!(
-        "capability_capture_availability: {}",
-        service_status
-            .lifecycle
-            .capabilities
-            .capture_availability
-            .as_str()
-    ));
-    lines.push(format!(
-        "capability_user_login: {}",
-        service_status.lifecycle.capabilities.user_login.as_str()
-    ));
-    lines.push(format!(
-        "capability_user_logout: {}",
-        service_status.lifecycle.capabilities.user_logout.as_str()
-    ));
-    lines.push(format!(
-        "capability_capture_worker: {}",
-        service_status
-            .lifecycle
-            .capabilities
-            .capture_worker
-            .as_str()
-    ));
-    lines.push(format!(
-        "capability_next_boot_recovery: {}",
-        service_status
-            .lifecycle
-            .capabilities
-            .next_boot_recovery
-            .as_str()
-    ));
     Ok(lines.join("\n"))
 }
 
@@ -572,19 +448,18 @@ fn render_status_text(paths: &ClientPaths) -> Result<String> {
 struct AppStatus {
     logged_in: bool,
     email: Option<String>,
-    capture_permission: CapturePermissionState,
+    has_capture_permission: bool,
 }
 
 fn collect_status(paths: &ClientPaths) -> Result<AppStatus> {
     let store = FileStateStore::new(&paths.state_dir)?;
     let state = load_state(&paths.ui_state_file)?;
     let auth = store.load_auth_state()?;
-    let service_status = load_service_status(&store, &auth)?;
 
     Ok(AppStatus {
         logged_in: auth.device_credentials.is_some(),
         email: state.email,
-        capture_permission: service_status.lifecycle.snapshot.capture_permission,
+        has_capture_permission: has_screen_capture_access(),
     })
 }
 
@@ -598,13 +473,13 @@ fn refresh_main_window_status(
 
     let app_status = collect_status(paths)?;
     main_window.update_permission_section(ui::PermissionSectionState {
-        show_permission_actions: app_status.capture_permission != CapturePermissionState::Granted,
+        show_permission_actions: !app_status.has_capture_permission,
     });
     Ok(())
 }
 
 fn load_service_status(store: &FileStateStore, auth: &AuthState) -> Result<ServiceStatus> {
-    let mut status = store.load_status()?.unwrap_or(ServiceStatus {
+    Ok(store.load_status()?.unwrap_or(ServiceStatus {
         is_authenticated: auth.device_credentials.is_some(),
         is_running: false,
         device_id: auth
@@ -613,10 +488,7 @@ fn load_service_status(store: &FileStateStore, auth: &AuthState) -> Result<Servi
             .map(|device| device.device_id.clone()),
         last_loop_at_ms: None,
         pending_request_count: 0,
-        lifecycle: virtue_core::LifecycleStatus::for_platform("macos"),
-    });
-    status.lifecycle.capabilities = virtue_core::LifecycleCapabilities::for_platform("macos");
-    Ok(status)
+    }))
 }
 
 fn build_tray_icon() -> Result<Icon> {

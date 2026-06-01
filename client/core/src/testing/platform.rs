@@ -72,4 +72,12 @@ impl PlatformHooks for TestPlatformHooks {
     fn get_time_utc_ms(&self) -> CoreResult<i64> {
         Ok(self.clock.now_ms())
     }
+
+    fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>> {
+        Ok(None)
+    }
+
+    fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
+        Ok(None)
+    }
 }

@@ -10,7 +10,7 @@
 //! through `virtue_core`'s public API only, which is the same surface
 //! platform crates would use.
 
-use virtue_core::lifecycle::{LifecycleObservation, ServiceRole};
+use virtue_core::events::{Event, ProcessStoppedReason};
 use virtue_core::testing::Scenario;
 
 #[test]
@@ -38,7 +38,7 @@ fn fresh_unauthenticated_service_loops_cleanly_with_no_uploads() {
 }
 
 #[test]
-fn service_stop_observation_records_to_lifecycle_observations_jsonl() {
+fn service_stop_transitions_service_to_not_running() {
     let mut scenario = Scenario::authenticated();
 
     scenario
@@ -47,18 +47,9 @@ fn service_stop_observation_records_to_lifecycle_observations_jsonl() {
 
     scenario
         .at_t(180_000)
-        .observe(LifecycleObservation::ServiceStopObserved {
-            role: ServiceRole::PrimaryService,
-            raw_reason: "sigterm".into(),
-            shutdown_in_progress: true,
-            explicit_user_stop: false,
-            detected_by: "scenario-test".into(),
-        });
+        .queue_event(Event::ProcessStopped(ProcessStoppedReason::Shutdown));
+    let _ = scenario.service.run_event_loop_iter();
+    let _ = scenario.service.mark_stopped();
 
-    scenario
-        .assert_lifecycle_observations_contain("service_stop_observed")
-        .assert_lifecycle_observations_contain("sigterm")
-        .assert_lifecycle_observations_contain("scenario-test");
-
-    scenario.shutdown().assert_is_running(false);
+    scenario.assert_is_running(false);
 }

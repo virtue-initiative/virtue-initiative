@@ -1,18 +1,24 @@
 pub mod api;
 mod batch;
 
+use std::any::Any;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 pub use api::UploadApi;
 use batch::BatchBuilder;
+pub(crate) use batch::MAX_BATCH_ITEMS_PER_UPLOAD;
 
-use super::{Event, MAX_BATCH_ITEMS_PER_UPLOAD, POST_LOGIN_PROOF_BATCH_COUNT, log_error};
 use crate::api::ApiTransport;
-use crate::crypto::CryptoEngine;
+use crate::crypto::{CryptoEngine, prepare_log_batch_event};
 use crate::error::CoreResult;
-use crate::model::{BatchLogEntry, BatchRecipient, DeviceSettings, LogEntry};
+use crate::events::log_error;
+use crate::events::{Event, Observer, ProcessStoppedReason, StateType};
+use crate::model::{BatchLogEntry, BatchRecipient, DeviceCredentials, DeviceSettings, LogEntry};
+use crate::platform::PlatformHooks;
+
+pub(crate) const POST_LOGIN_PROOF_BATCH_COUNT: u32 = 3;
 
 const MAX_HASH_RETRIES_PER_LOOP: usize = 8;
 const MAX_DIRECT_LOG_RETRIES_PER_LOOP: usize = 8;
@@ -57,18 +63,27 @@ impl UploadObserverState {
     }
 }
 
-pub struct UploadObserver<A: ApiTransport + Clone> {
+pub struct UploadObserver<A: ApiTransport + Clone + 'static> {
     pub state: UploadObserverState,
     pub upload_api: UploadApi<A>,
     pub config: UploadConfig,
+    platform: Box<dyn PlatformHooks>,
 }
 
-impl<A: ApiTransport + Clone> UploadObserver<A> {
-    pub fn new(state: UploadObserverState, api: A, config: UploadConfig) -> Self {
+impl<A: ApiTransport + Clone + 'static> UploadObserver<A> {
+    pub fn new(
+        platform: Box<dyn PlatformHooks>,
+        api: A,
+        config: UploadConfig,
+        initial_credentials: Option<DeviceCredentials>,
+    ) -> Self {
+        let mut upload_api = UploadApi::new(api);
+        upload_api.set_credentials(initial_credentials);
         Self {
-            state,
-            upload_api: UploadApi::new(api),
+            state: UploadObserverState::default(),
+            upload_api,
             config,
+            platform,
         }
     }
 
@@ -84,44 +99,7 @@ impl<A: ApiTransport + Clone> UploadObserver<A> {
         self.try_upload_batch(now_ms)
     }
 
-    pub(super) fn on_event(&mut self, event: &Event, now_ms: i64) -> CoreResult<Vec<Event>> {
-        match event {
-            Event::ScreenshotCaptured { data } => self.handle_screenshot_captured(data, now_ms),
-            Event::BatchUpload { data } => {
-                self.state.pending_batch_events.push(data.clone());
-                Ok(vec![])
-            }
-            Event::ImmediateUpload { entry } => {
-                let keep = match self.try_upload_direct(entry) {
-                    Ok(true) => false,
-                    Ok(false) | Err(_) => true,
-                };
-                if keep {
-                    self.state.pending_immediate_events.push(entry.clone());
-                }
-                Ok(vec![])
-            }
-            Event::Tick { now_ms } => {
-                self.retry_pending_hashes()?;
-                self.retry_pending_immediates()?;
-                self.maybe_upload_batch(*now_ms)?;
-                Ok(vec![])
-            }
-            Event::Shutdown => {
-                if !self.state.pending_batch_events.is_empty() {
-                    let _ = self.try_upload_batch(now_ms);
-                }
-                Ok(vec![])
-            }
-            Event::LifecycleObserved { .. } => Ok(vec![]),
-        }
-    }
-
-    fn handle_screenshot_captured(
-        &mut self,
-        data: &BatchLogEntry,
-        now_ms: i64,
-    ) -> CoreResult<Vec<Event>> {
+    fn handle_screenshot_captured(&mut self, data: &BatchLogEntry, now_ms: i64) -> CoreResult<()> {
         let hash_base_url = self
             .state
             .settings
@@ -145,7 +123,7 @@ impl<A: ApiTransport + Clone> UploadObserver<A> {
         if should_upload {
             let _ = self.try_upload_batch(now_ms);
         }
-        Ok(vec![])
+        Ok(())
     }
 
     fn retry_pending_hashes(&mut self) -> CoreResult<()> {
@@ -294,6 +272,74 @@ impl<A: ApiTransport + Clone> UploadObserver<A> {
                 Ok(false)
             }
         }
+    }
+}
+
+impl<A: ApiTransport + Clone + 'static> Observer for UploadObserver<A> {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn name(&self) -> &'static str {
+        "upload"
+    }
+
+    fn save_state(&self) -> CoreResult<StateType> {
+        Ok(serde_json::to_value(&self.state)?)
+    }
+
+    fn load_state(&mut self, state: StateType) -> CoreResult<()> {
+        self.state = serde_json::from_value(state)?;
+        Ok(())
+    }
+
+    fn on_event(&mut self, event: &Event) -> CoreResult<()> {
+        match event {
+            Event::Ping => {
+                let now_ms = self.platform.get_time_utc_ms()?;
+                self.retry_pending_hashes()?;
+                self.retry_pending_immediates()?;
+                self.maybe_upload_batch(now_ms)?;
+            }
+            Event::ProcessStopped(ProcessStoppedReason::Shutdown) => {
+                let now_ms = self.platform.get_time_utc_ms()?;
+                if !self.state.pending_batch_events.is_empty() {
+                    let _ = self.try_upload_batch(now_ms);
+                }
+            }
+            Event::BatchUpload { data } => {
+                self.state.pending_batch_events.push(data.clone());
+            }
+            Event::Upload { risk, kind, data } => {
+                let now_ms = self.platform.get_time_utc_ms()?;
+                match prepare_log_batch_event(now_ms, kind, Some(*risk), data.clone()) {
+                    Ok(batch_entry) => {
+                        if kind == "screenshot" {
+                            self.handle_screenshot_captured(&batch_entry, now_ms)?;
+                        } else if *risk >= crate::module::lifecycle::HIGH_RISK_LIFECYCLE_ALERT {
+                            self.state.pending_immediate_events.push(batch_entry.event);
+                        } else {
+                            self.state.pending_batch_events.push(batch_entry);
+                        }
+                    }
+                    Err(err) => log_error("prepare_log_batch_event failed", Some(&err)),
+                }
+            }
+            Event::ImmediateUpload { entry } => {
+                let keep = match self.try_upload_direct(entry) {
+                    Ok(true) => false,
+                    Ok(false) | Err(_) => true,
+                };
+                if keep {
+                    self.state.pending_immediate_events.push(entry.clone());
+                }
+            }
+            _ => {}
+        }
+        Ok(())
     }
 }
 

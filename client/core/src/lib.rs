@@ -5,8 +5,8 @@ pub mod config;
 pub mod crypto;
 pub mod error;
 pub mod events;
-pub mod lifecycle;
 pub mod model;
+pub mod module;
 pub mod platform;
 pub mod service;
 pub mod storage;
@@ -18,15 +18,10 @@ pub use auth::Auth;
 pub use build_info::{BUILD_LABEL, build_label};
 pub use config::Config;
 pub use error::{CoreError, CoreResult};
-pub use lifecycle::{
-    CaptureAvailabilityState, CapturePermissionState, ComputerPowerState, LifecycleCapabilities,
-    LifecycleCapabilitySupport, LifecycleConfidence, LifecycleDomain, LifecycleObservation,
-    LifecycleOrigin, LifecycleSnapshot, LifecycleStatus, LifecycleTransition, ServicePingLog,
-    ServiceRole, ServiceRuntimeState, ServiceStopMarker, StopIntent, UserSessionState,
-};
 pub use model::{
     AuthState, BatchLogEntry, BatchUpload, DeviceCredentials, DeviceSettings, EventData, LogEntry,
     LoginStatus, LoopOutcome, Screenshot, ServiceStatus,
 };
+pub use model::{ServiceStopMarker, StopIntent, UserSessionState};
 pub use platform::PlatformHooks;
 pub use service::MonitorService;

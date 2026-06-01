@@ -12,10 +12,11 @@ use jni::sys::{jboolean, jstring};
 use jni::{JNIEnv, JavaVM};
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
+use virtue_core::events::{Event, ProcessStoppedReason};
 use virtue_core::storage::FileStateStore;
 use virtue_core::{
-    AuthState, Config, CoreError, CoreResult, DeviceSettings, LifecycleObservation,
-    MonitorService, PlatformHooks, Screenshot, ServiceRole, ServiceStatus,
+    AuthState, Config, CoreError, CoreResult, DeviceSettings, MonitorService, PlatformHooks,
+    Screenshot, ServiceStatus,
 };
 
 static CORE: OnceCell<AndroidCore> = OnceCell::new();
@@ -24,6 +25,7 @@ const DEFAULT_BASE_API_URL: &str = "https://api.virtueinitiative.org";
 const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
 const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
 const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
+const LOOP_INTERVAL: Duration = Duration::from_secs(60);
 
 const SCREENSHOT_SERVICE_CLASS: &str = "org/virtueinitiative/virtue/ScreenshotService";
 const CAPTURE_STATUS_READY: i32 = 0;
@@ -117,6 +119,14 @@ impl PlatformHooks for AndroidPlatformHooks {
             .map_err(|err| CoreError::CommandFailed(err.to_string()))?;
         i64::try_from(duration.as_millis())
             .map_err(|_| CoreError::InvalidState("system clock overflow"))
+    }
+
+    fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>> {
+        Ok(None)
+    }
+
+    fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
+        Ok(None)
     }
 }
 
@@ -326,7 +336,7 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeNoteU
             java_vm: core.java_vm.clone(),
         };
         let mut service = MonitorService::setup(build_core_config(core, "android-device"), hooks)?;
-        service.note_stop_requested_by_user(ServiceRole::PrimaryService, &source)?;
+        service.note_stop_requested_by_user(&source)?;
         Ok(())
     })();
 
@@ -356,14 +366,12 @@ fn run_daemon_loop(core: &AndroidCore) -> Result<()> {
         java_vm: core.java_vm.clone(),
     };
     let mut service = MonitorService::setup(build_core_config(core, "android-device"), hooks)?;
-    let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStarted {
-        role: ServiceRole::PrimaryService,
-        detected_by: "android_foreground_service".to_string(),
-    });
+    service.queue_event(Event::ProcessStarted);
+    let _ = service.run_event_loop_iter();
 
     while !core.stop.load(Ordering::SeqCst) {
         let sleep_duration = match service.loop_iteration() {
-            Ok(outcome) => duration_until(outcome.next_run_at_ms),
+            Ok(_outcome) => LOOP_INTERVAL,
             Err(err) => {
                 eprintln!("android-daemon: {err}");
                 ERROR_RETRY_INTERVAL
@@ -372,19 +380,15 @@ fn run_daemon_loop(core: &AndroidCore) -> Result<()> {
         sleep_interruptible(&core.stop, sleep_duration);
     }
 
-    let explicit_user_stop = service
-        .take_stop_intent(ServiceRole::PrimaryService)
-        .ok()
-        .flatten()
-        .is_some();
-    let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStopObserved {
-        role: ServiceRole::PrimaryService,
-        raw_reason: "android_stop_request".to_string(),
-        shutdown_in_progress: false,
-        explicit_user_stop,
-        detected_by: "android_foreground_service".to_string(),
-    });
-    let _ = service.shutdown();
+    let explicit_user_stop = service.take_stop_intent().ok().flatten().is_some();
+    let reason = if explicit_user_stop {
+        ProcessStoppedReason::User
+    } else {
+        ProcessStoppedReason::Other
+    };
+    service.queue_event(Event::ProcessStopped(reason));
+    let _ = service.run_event_loop_iter();
+    let _ = service.mark_stopped();
     Ok(())
 }
 
@@ -397,14 +401,6 @@ fn sleep_interruptible(stop: &AtomicBool, duration: Duration) {
     }
 }
 
-fn duration_until(next_run_at_ms: i64) -> Duration {
-    let now_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as i64)
-        .unwrap_or(next_run_at_ms);
-    let delta_ms = next_run_at_ms.saturating_sub(now_ms);
-    Duration::from_millis(delta_ms.max(0) as u64)
-}
 
 fn build_core_config(core: &AndroidCore, device_name: &str) -> Config {
     Config::new(

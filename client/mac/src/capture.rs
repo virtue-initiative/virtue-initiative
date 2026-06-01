@@ -141,4 +141,12 @@ impl PlatformHooks for MacPlatformHooks {
         i64::try_from(duration.as_millis())
             .map_err(|_| CoreError::InvalidState("system clock overflow"))
     }
+
+    fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>> {
+        Ok(None)
+    }
+
+    fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
+        Ok(None)
+    }
 }
