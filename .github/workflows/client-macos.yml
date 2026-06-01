@@ -31,7 +31,7 @@ jobs:
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: "v1"
+          prefix-key: 'v1'
           workspaces: |
             client -> target
 
@@ -49,6 +49,14 @@ jobs:
 
       - name: Rust lint (macOS client)
         run: cargo clippy -p virtue-mac --all-targets -- -D warnings
+        working-directory: client
+
+      - name: Rust tests (core)
+        run: cargo test -p virtue-core
+        working-directory: client
+
+      - name: Rust scenario tests (core)
+        run: cargo test -p virtue-core --features testing --test scenarios
         working-directory: client
 
       - name: Build macOS app bundle and DMG
