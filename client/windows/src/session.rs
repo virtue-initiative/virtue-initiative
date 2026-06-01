@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use virtue_core::storage::FileStateStore;
 use virtue_core::{CoreError, CoreResult, MonitorService, PlatformHooks, Screenshot};
 
+use crate::capture::{read_last_shutdown_time_utc_ms, read_last_startup_time_utc_ms};
 use crate::config::{ClientPaths, ClientState, build_core_config, load_state, save_state};
 use crate::resident_monitor;
 
@@ -20,6 +21,14 @@ impl PlatformHooks for SessionPlatformHooks {
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|err| CoreError::CommandFailed(err.to_string()))?;
         i64::try_from(now.as_millis()).map_err(|_| CoreError::InvalidState("system clock overflow"))
+    }
+
+    fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>> {
+        read_last_shutdown_time_utc_ms()
+    }
+
+    fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
+        read_last_startup_time_utc_ms()
     }
 }
 

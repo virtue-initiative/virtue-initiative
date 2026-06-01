@@ -11,6 +11,12 @@ use windows::Win32::Graphics::Gdi::{
     SelectObject,
 };
 #[cfg(target_os = "windows")]
+use windows::Win32::System::Registry::{
+    HKEY_LOCAL_MACHINE, KEY_READ, RegCloseKey, RegOpenKeyExW, RegQueryValueExW,
+};
+#[cfg(target_os = "windows")]
+use windows::Win32::System::SystemInformation::GetTickCount64;
+#[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
 
 #[cfg(target_os = "windows")]
@@ -114,6 +120,81 @@ pub fn capture_screen_png() -> Result<Vec<u8>> {
     Err(anyhow!("windows capture is only supported on Windows"))
 }
 
+#[cfg(target_os = "windows")]
+pub fn read_last_startup_time_utc_ms() -> CoreResult<Option<i64>> {
+    let uptime_ms = unsafe { GetTickCount64() };
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| CoreError::CommandFailed(e.to_string()))?
+        .as_millis();
+    let startup_ms = now_ms.saturating_sub(uptime_ms as u128);
+    Ok(Some(
+        i64::try_from(startup_ms).map_err(|_| CoreError::InvalidState("clock overflow"))?,
+    ))
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn read_last_startup_time_utc_ms() -> CoreResult<Option<i64>> {
+    Ok(None)
+}
+
+// Reads HKLM\SYSTEM\CurrentControlSet\Control\Windows\ShutdownTime (REG_BINARY FILETIME).
+#[cfg(target_os = "windows")]
+pub fn read_last_shutdown_time_utc_ms() -> CoreResult<Option<i64>> {
+    use windows::core::PCWSTR;
+
+    const FILETIME_TO_UNIX_OFFSET: u64 = 116_444_736_000_000_000;
+
+    let key_path: Vec<u16> = "SYSTEM\\CurrentControlSet\\Control\\Windows\0"
+        .encode_utf16()
+        .collect();
+    let value_name: Vec<u16> = "ShutdownTime\0".encode_utf16().collect();
+
+    unsafe {
+        let mut hkey = windows::Win32::System::Registry::HKEY::default();
+        let open_result = RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            PCWSTR::from_raw(key_path.as_ptr()),
+            Some(0),
+            KEY_READ,
+            &mut hkey,
+        );
+        if open_result.is_err() {
+            return Ok(None);
+        }
+
+        let mut data = [0u8; 8];
+        let mut data_size = 8u32;
+        let query_result = RegQueryValueExW(
+            hkey,
+            PCWSTR::from_raw(value_name.as_ptr()),
+            None,
+            None,
+            Some(data.as_mut_ptr()),
+            Some(&mut data_size),
+        );
+        let _ = RegCloseKey(hkey);
+
+        if query_result.is_err() || data_size != 8 {
+            return Ok(None);
+        }
+
+        let filetime = u64::from_le_bytes(data);
+        if filetime < FILETIME_TO_UNIX_OFFSET {
+            return Ok(None);
+        }
+        let unix_ms = (filetime - FILETIME_TO_UNIX_OFFSET) / 10_000;
+        Ok(Some(i64::try_from(unix_ms).map_err(|_| {
+            CoreError::InvalidState("shutdown time overflow")
+        })?))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn read_last_shutdown_time_utc_ms() -> CoreResult<Option<i64>> {
+    Ok(None)
+}
+
 #[derive(Clone)]
 pub struct WindowsPlatformHooks;
 
@@ -149,10 +230,10 @@ impl PlatformHooks for WindowsPlatformHooks {
     }
 
     fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>> {
-        Ok(None)
+        read_last_shutdown_time_utc_ms()
     }
 
     fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
-        Ok(None)
+        read_last_startup_time_utc_ms()
     }
 }
