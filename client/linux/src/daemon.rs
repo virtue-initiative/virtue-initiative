@@ -213,18 +213,77 @@ async fn sleep_interruptible(shutdown: &Arc<AtomicBool>, duration: Duration) {
     }
 }
 
-fn record_shutdown_transition(service: &mut MonitorService<LinuxPlatformHooks>) {
-    let system_state = read_systemd_state();
-    let shutting_down =
-        matches!(system_state.as_deref(), Some("stopping")) || is_shutdown_job_queued();
-    let explicit_user_stop = service.take_stop_intent().ok().flatten().is_some();
-    let reason = if shutting_down {
+fn classify_shutdown_reason(
+    system_state: Option<&str>,
+    shutdown_job_queued: bool,
+    explicit_user_stop: bool,
+) -> ProcessStoppedReason {
+    let shutting_down = matches!(system_state, Some("stopping")) || shutdown_job_queued;
+    if shutting_down {
         ProcessStoppedReason::Shutdown
     } else if explicit_user_stop {
         ProcessStoppedReason::User
     } else {
         ProcessStoppedReason::Other
-    };
+    }
+}
+
+fn record_shutdown_transition(service: &mut MonitorService<LinuxPlatformHooks>) {
+    let system_state = read_systemd_state();
+    let shutdown_job_queued = is_shutdown_job_queued();
+    let explicit_user_stop = service.take_stop_intent().ok().flatten().is_some();
+    let reason = classify_shutdown_reason(
+        system_state.as_deref(),
+        shutdown_job_queued,
+        explicit_user_stop,
+    );
     service.queue_event(Event::ProcessStopped(reason));
     let _ = service.run_event_loop_iter();
+}
+
+#[cfg(test)]
+mod tests {
+    use virtue_core::events::ProcessStoppedReason;
+
+    use super::classify_shutdown_reason;
+
+    #[test]
+    fn classify_shutdown_reason_produces_shutdown_on_systemd_stopping_state() {
+        assert!(matches!(
+            classify_shutdown_reason(Some("stopping"), false, false),
+            ProcessStoppedReason::Shutdown
+        ));
+    }
+
+    #[test]
+    fn classify_shutdown_reason_produces_shutdown_when_job_queued() {
+        assert!(matches!(
+            classify_shutdown_reason(None, true, false),
+            ProcessStoppedReason::Shutdown
+        ));
+    }
+
+    #[test]
+    fn classify_shutdown_reason_produces_user_on_user_stop() {
+        assert!(matches!(
+            classify_shutdown_reason(None, false, true),
+            ProcessStoppedReason::User
+        ));
+    }
+
+    #[test]
+    fn classify_shutdown_reason_produces_other_by_default() {
+        assert!(matches!(
+            classify_shutdown_reason(None, false, false),
+            ProcessStoppedReason::Other
+        ));
+    }
+
+    #[test]
+    fn classify_shutdown_reason_shutdown_takes_priority_over_user_stop() {
+        assert!(matches!(
+            classify_shutdown_reason(Some("stopping"), false, true),
+            ProcessStoppedReason::Shutdown
+        ));
+    }
 }

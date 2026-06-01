@@ -17,17 +17,19 @@ pub struct CaptureProbe {
 }
 
 pub fn detect_backend() -> Option<CaptureBackend> {
-    let wayland_available = env_var_nonempty("WAYLAND_DISPLAY").is_some();
-    let x11_available = resolve_x11_display().is_some();
+    detect_backend_from(
+        env_var_nonempty("WAYLAND_DISPLAY").is_some(),
+        resolve_x11_display().is_some(),
+    )
+}
 
+fn detect_backend_from(wayland_available: bool, x11_available: bool) -> Option<CaptureBackend> {
     if wayland_available {
         return Some(CaptureBackend::Wayland);
     }
-
     if x11_available {
         return Some(CaptureBackend::X11);
     }
-
     None
 }
 
@@ -194,6 +196,15 @@ fn run_capture_command(
     Ok(output.stdout)
 }
 
+fn parse_btime_ms(proc_stat: &str) -> Option<i64> {
+    for line in proc_stat.lines() {
+        if let Some(rest) = line.strip_prefix("btime ") {
+            return rest.trim().parse::<i64>().ok().map(|secs| secs * 1000);
+        }
+    }
+    None
+}
+
 #[derive(Clone)]
 pub struct LinuxPlatformHooks;
 
@@ -228,15 +239,76 @@ impl PlatformHooks for LinuxPlatformHooks {
     fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
         let stat = std::fs::read_to_string("/proc/stat")
             .map_err(|e| CoreError::CommandFailed(e.to_string()))?;
-        for line in stat.lines() {
-            if let Some(rest) = line.strip_prefix("btime ") {
-                let secs: i64 = rest
-                    .trim()
-                    .parse()
-                    .map_err(|_| CoreError::InvalidState("btime parse"))?;
-                return Ok(Some(secs * 1000));
-            }
-        }
-        Ok(None)
+        Ok(parse_btime_ms(&stat))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use virtue_core::PlatformHooks;
+
+    #[test]
+    fn is_session_unavailable_text_matches_known_error_strings() {
+        assert!(is_session_unavailable_text("no graphical session detected"));
+        assert!(is_session_unavailable_text("X11 display unavailable"));
+        assert!(is_session_unavailable_text("unable to open X server"));
+        assert!(is_session_unavailable_text("can't open display"));
+    }
+
+    #[test]
+    fn is_session_unavailable_text_rejects_unrelated_errors() {
+        assert!(!is_session_unavailable_text("permission denied"));
+        assert!(!is_session_unavailable_text("command not found: grim"));
+        assert!(!is_session_unavailable_text(""));
+        assert!(!is_session_unavailable_text("out of memory"));
+    }
+
+    #[test]
+    fn detect_backend_returns_wayland_when_wayland_available() {
+        assert!(matches!(
+            detect_backend_from(true, false),
+            Some(CaptureBackend::Wayland)
+        ));
+    }
+
+    #[test]
+    fn detect_backend_prefers_wayland_over_x11() {
+        assert!(matches!(
+            detect_backend_from(true, true),
+            Some(CaptureBackend::Wayland)
+        ));
+    }
+
+    #[test]
+    fn detect_backend_returns_x11_when_only_x11_available() {
+        assert!(matches!(
+            detect_backend_from(false, true),
+            Some(CaptureBackend::X11)
+        ));
+    }
+
+    #[test]
+    fn detect_backend_returns_none_when_no_display() {
+        assert!(detect_backend_from(false, false).is_none());
+    }
+
+    #[test]
+    fn platform_hooks_get_time_utc_ms_is_positive() {
+        let hooks = LinuxPlatformHooks::new();
+        let ms = hooks.get_time_utc_ms().expect("clock should not fail");
+        assert!(ms > 0);
+    }
+
+    #[test]
+    fn parse_btime_ms_extracts_boot_time_from_proc_stat() {
+        let content = "cpu  1234 0 5678 9999\nbtime 1717200000\ncpu0 0 0 0 0\n";
+        assert_eq!(parse_btime_ms(content), Some(1_717_200_000_000));
+    }
+
+    #[test]
+    fn parse_btime_ms_returns_none_when_btime_absent() {
+        let content = "cpu  1234 0 5678 9999\nprocs_running 1\n";
+        assert_eq!(parse_btime_ms(content), None);
     }
 }

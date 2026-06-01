@@ -23,16 +23,18 @@ impl ClientPaths {
             .context("failed to resolve config directory")?;
         let state_root = xdg_base_dir("XDG_STATE_HOME", ".local/state")
             .context("failed to resolve state directory")?;
+        Ok(Self::from_roots(config_root, state_root))
+    }
 
+    fn from_roots(config_root: PathBuf, state_root: PathBuf) -> Self {
         let config_dir = config_root.join("virtue");
         let data_dir = state_root.join("virtue");
-
-        Ok(Self {
+        Self {
             state_dir: data_dir.clone(),
             runtime_config_file: config_dir.join("config.json"),
             config_dir,
             data_dir,
-        })
+        }
     }
 
     pub fn ensure_dirs(&self) -> Result<()> {
@@ -62,6 +64,47 @@ pub fn build_core_config(paths: &ClientPaths) -> Config {
         Duration::from_secs(DEFAULT_CAPTURE_INTERVAL_SECONDS),
         Duration::from_secs(DEFAULT_BATCH_WINDOW_SECONDS),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::ClientPaths;
+
+    #[test]
+    fn state_dir_is_under_state_root() {
+        let paths = ClientPaths::from_roots(PathBuf::from("/tmp/cfg"), PathBuf::from("/tmp/state"));
+        assert_eq!(paths.state_dir, PathBuf::from("/tmp/state/virtue"));
+        assert_eq!(paths.data_dir, PathBuf::from("/tmp/state/virtue"));
+    }
+
+    #[test]
+    fn config_dir_and_runtime_file_are_under_config_root() {
+        let paths = ClientPaths::from_roots(
+            PathBuf::from("/home/user/.config"),
+            PathBuf::from("/home/user/.local/state"),
+        );
+        assert_eq!(paths.config_dir, PathBuf::from("/home/user/.config/virtue"));
+        assert_eq!(
+            paths.runtime_config_file,
+            PathBuf::from("/home/user/.config/virtue/config.json")
+        );
+    }
+
+    #[test]
+    fn fallback_paths_follow_xdg_spec_conventions() {
+        let home = PathBuf::from("/home/testuser");
+        let paths = ClientPaths::from_roots(home.join(".config"), home.join(".local/state"));
+        assert_eq!(
+            paths.state_dir,
+            PathBuf::from("/home/testuser/.local/state/virtue")
+        );
+        assert_eq!(
+            paths.config_dir,
+            PathBuf::from("/home/testuser/.config/virtue")
+        );
+    }
 }
 
 fn xdg_base_dir(env_name: &str, fallback_suffix: &str) -> Result<PathBuf> {

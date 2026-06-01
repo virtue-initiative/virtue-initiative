@@ -321,4 +321,25 @@ mod tests {
         );
         assert_eq!(next_missing_watcher_retry_delay(3), None);
     }
+
+    #[test]
+    fn tray_backoff_caps_at_max_schedule_entry() {
+        for failure_count in 3..=10 {
+            assert_eq!(
+                next_missing_watcher_retry_delay(failure_count),
+                None,
+                "expected None for failure_count={failure_count}"
+            );
+        }
+    }
+
+    #[test]
+    fn tray_backoff_schedule_is_strictly_increasing() {
+        let delays: Vec<Duration> = (0..3)
+            .map(|i| next_missing_watcher_retry_delay(i).unwrap())
+            .collect();
+        for window in delays.windows(2) {
+            assert!(window[1] > window[0]);
+        }
+    }
 }

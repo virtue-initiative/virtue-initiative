@@ -49,7 +49,10 @@ enum Commands {
         command: Option<DaemonCommands>,
     },
     #[command(about = "Show current auth, capture, and upload status")]
-    Status,
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
     #[command(about = "Developer-only commands for test logs and batch uploads")]
     Dev {
         #[command(subcommand)]
@@ -110,7 +113,7 @@ async fn run() -> Result<()> {
         Commands::Login { email } => login(paths, email),
         Commands::Logout { yes } => logout(paths, yes),
         Commands::Daemon { command } => daemon_command(paths, command).await,
-        Commands::Status => status(paths),
+        Commands::Status { json } => status(paths, json),
         Commands::Dev { command } => dev(paths, command),
     }
 }
@@ -179,34 +182,48 @@ fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
     Ok(())
 }
 
-fn status(paths: ClientPaths) -> Result<()> {
+fn status(paths: ClientPaths, json: bool) -> Result<()> {
     let store = FileStateStore::new(&paths.state_dir)?;
     let auth = store.load_auth_state()?;
     let mut config = build_core_config(&paths);
     config.refresh_from_runtime_file()?;
     let status = load_service_status(&store, &auth, &config)?;
 
-    println!("logged_in: {}", auth.device_credentials.is_some());
-    println!("running: {}", status.is_running);
-    println!("pending_request_count: {}", status.pending_request_count);
-    println!(
-        "device_id: {}",
-        status.device_id.as_deref().unwrap_or("<none>")
-    );
-    println!(
-        "capture_interval_seconds: {}",
-        config.screenshot_interval.as_secs()
-    );
-    println!("batch_window_seconds: {}", config.batch_interval.as_secs());
-    println!("base_api_url: {}", config.api_base_url);
-    println!(
-        "backend: {}",
-        match detect_backend() {
-            Some(CaptureBackend::Wayland) => "wayland",
-            Some(CaptureBackend::X11) => "x11",
-            None => "<unknown>",
-        }
-    );
+    let logged_in = auth.device_credentials.is_some();
+    let device_id = status.device_id.as_deref().unwrap_or("<none>").to_string();
+    let backend = match detect_backend() {
+        Some(CaptureBackend::Wayland) => "wayland",
+        Some(CaptureBackend::X11) => "x11",
+        None => "<unknown>",
+    };
+
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "logged_in": logged_in,
+                "running": status.is_running,
+                "pending_request_count": status.pending_request_count,
+                "device_id": device_id,
+                "capture_interval_seconds": config.screenshot_interval.as_secs(),
+                "batch_window_seconds": config.batch_interval.as_secs(),
+                "base_api_url": config.api_base_url,
+                "backend": backend,
+            })
+        );
+    } else {
+        println!("logged_in: {logged_in}");
+        println!("running: {}", status.is_running);
+        println!("pending_request_count: {}", status.pending_request_count);
+        println!("device_id: {device_id}");
+        println!(
+            "capture_interval_seconds: {}",
+            config.screenshot_interval.as_secs()
+        );
+        println!("batch_window_seconds: {}", config.batch_interval.as_secs());
+        println!("base_api_url: {}", config.api_base_url);
+        println!("backend: {backend}");
+    }
 
     Ok(())
 }
@@ -581,6 +598,45 @@ mod tests {
         let status = test_status(None);
 
         assert!(!has_fresh_status_heartbeat(&status, &config, 64_000));
+    }
+
+    #[test]
+    fn cli_accepts_login_command() {
+        let cli = Cli::try_parse_from(["virtue", "login"]).expect("login command should parse");
+        assert!(matches!(cli.command, Commands::Login { email: None }));
+    }
+
+    #[test]
+    fn cli_accepts_logout_command() {
+        let cli = Cli::try_parse_from(["virtue", "logout"]).expect("logout command should parse");
+        assert!(matches!(cli.command, Commands::Logout { yes: false }));
+    }
+
+    #[test]
+    fn cli_accepts_status_command() {
+        let cli = Cli::try_parse_from(["virtue", "status"]).expect("status command should parse");
+        assert!(matches!(cli.command, Commands::Status { json: false }));
+    }
+
+    #[test]
+    fn cli_accepts_status_json_flag() {
+        let cli = Cli::try_parse_from(["virtue", "status", "--json"])
+            .expect("status --json should parse");
+        assert!(matches!(cli.command, Commands::Status { json: true }));
+    }
+
+    #[test]
+    fn heartbeat_is_fresh_just_at_threshold() {
+        let config = test_config();
+        let status = test_status(Some(0));
+        assert!(has_fresh_status_heartbeat(&status, &config, 60_000));
+    }
+
+    #[test]
+    fn status_is_stale_after_multiple_intervals() {
+        let config = test_config();
+        let status = test_status(Some(0));
+        assert!(!has_fresh_status_heartbeat(&status, &config, 180_000));
     }
 
     #[test]
