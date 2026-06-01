@@ -11,6 +11,7 @@
 //! platform crates would use.
 
 use virtue_core::events::{Event, ProcessStoppedReason, UploadKind};
+use virtue_core::module::lifecycle::LifecycleObserverState;
 use virtue_core::testing::Scenario;
 
 #[test]
@@ -255,6 +256,60 @@ fn logout_clears_pending_state() {
         scenario.api.state().batch_uploads.len(),
         0,
         "pending batch events should be discarded (not uploaded) on logout"
+    );
+}
+
+// ── LifecycleObserver alert paths ─────────────────────────────────────────────
+
+#[test]
+fn ping_after_suspend_without_resume_emits_alert() {
+    let mut scenario = Scenario::authenticated();
+    // old_last_ping=5_000 > last_suspend+1000=4_000, and resume=0 < suspend=3_000
+    // → PingAfterSuspend fires when the next Ping is processed.
+    scenario.set_lifecycle_observer_state(LifecycleObserverState {
+        last_ping: 5_000,
+        last_computer_suspend: 3_000,
+        last_computer_resume: 0,
+        ..Default::default()
+    });
+    scenario.at_t(10_000).loop_iteration();
+    assert!(
+        scenario.api.state().log_uploads.len() >= 1,
+        "expected a PingAfterSuspend log upload"
+    );
+}
+
+#[test]
+fn unexpected_process_start_after_long_ping_gap_emits_alert() {
+    let mut scenario = Scenario::authenticated();
+    // ping_gap = 99_000 > 7_000; TestPlatformHooks returns boot=0 so
+    // now_ms - boot = 100_000 > 7_000 → UnexpectedProcessStart fires.
+    scenario.set_lifecycle_observer_state(LifecycleObserverState {
+        last_ping: 1_000,
+        ..Default::default()
+    });
+    scenario.queue_event(Event::ProcessStarted);
+    scenario.at_t(100_000).loop_iteration();
+    assert!(
+        scenario.api.state().log_uploads.len() >= 1,
+        "expected an UnexpectedProcessStart log upload"
+    );
+}
+
+#[test]
+fn process_killed_before_shutdown_emits_alert() {
+    let mut scenario = Scenario::authenticated();
+    // stopped_other=1_000 > started=0 and last_shutdown=9_000 - stopped=1_000 = 8_000 > 7_000
+    // → ProcessKilledBeforeShutdown fires on the next event (auto-Ping from iter).
+    scenario.set_lifecycle_observer_state(LifecycleObserverState {
+        last_process_stopped_other: 1_000,
+        last_process_stopped_shutdown: 9_000,
+        ..Default::default()
+    });
+    scenario.at_t(20_000).loop_iteration();
+    assert!(
+        scenario.api.state().hash_uploads.len() >= 1,
+        "expected a ProcessKilledBeforeShutdown hash upload"
     );
 }
 

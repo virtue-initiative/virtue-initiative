@@ -7,6 +7,7 @@ use crate::config::Config;
 use crate::error::CoreResult;
 use crate::events::{Event, ProcessStoppedReason};
 use crate::model::{AuthState, BatchRecipient, DeviceCredentials, DeviceSettings, ServiceStatus};
+use crate::module::lifecycle::{LifecycleObserver, LifecycleObserverState};
 use crate::module::screenshot::ScreenshotObserver;
 use crate::service::MonitorService;
 use crate::storage::FileStateStore;
@@ -251,6 +252,16 @@ impl Scenario {
             .expect("screenshot observer at index 1")
             .state
             .last_screenshot_at_ms = ms;
+        self
+    }
+
+    /// Override the full lifecycle observer state for fine-grained alert testing.
+    pub fn set_lifecycle_observer_state(&mut self, state: LifecycleObserverState) -> &mut Self {
+        self.service.event_loop.observers[0] // LIFECYCLE_IDX = 0
+            .as_any_mut()
+            .downcast_mut::<LifecycleObserver>()
+            .expect("lifecycle observer at index 0")
+            .state = state;
         self
     }
 

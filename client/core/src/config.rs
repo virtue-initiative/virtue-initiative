@@ -98,3 +98,92 @@ struct RuntimeConfigFile {
 fn normalize_base_url(value: String) -> String {
     value.trim().trim_end_matches('/').to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use std::fs;
+    use std::time::Duration;
+
+    fn base_config(runtime_file: Option<std::path::PathBuf>) -> Config {
+        Config::new(
+            "https://default.example.com",
+            "test-device",
+            "test-platform",
+            env::temp_dir(),
+            runtime_file,
+            Duration::from_secs(60),
+            Duration::from_secs(60),
+        )
+    }
+
+    #[test]
+    fn refresh_with_no_runtime_file_leaves_defaults() {
+        let mut config = base_config(None);
+        config.refresh_from_runtime_file().expect("no error");
+        assert_eq!(config.api_base_url, "https://default.example.com");
+        assert_eq!(config.screenshot_interval, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn refresh_with_missing_file_leaves_defaults() {
+        let path = env::temp_dir().join(format!(
+            "virtue-core-cfg-missing-{}.json",
+            std::process::id()
+        ));
+        let mut config = base_config(Some(path));
+        config.refresh_from_runtime_file().expect("no error");
+        assert_eq!(config.api_base_url, "https://default.example.com");
+    }
+
+    #[test]
+    fn refresh_with_empty_file_leaves_defaults() {
+        let path =
+            env::temp_dir().join(format!("virtue-core-cfg-empty-{}.json", std::process::id()));
+        fs::write(&path, b"").expect("write empty file");
+        let mut config = base_config(Some(path.clone()));
+        config.refresh_from_runtime_file().expect("no error");
+        assert_eq!(config.api_base_url, "https://default.example.com");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn refresh_overrides_api_base_url() {
+        let path = env::temp_dir().join(format!("virtue-core-cfg-url-{}.json", std::process::id()));
+        fs::write(&path, br#"{"api_base_url":"https://new.example.com/"}"#).expect("write file");
+        let mut config = base_config(Some(path.clone()));
+        config.refresh_from_runtime_file().expect("no error");
+        assert_eq!(config.api_base_url, "https://new.example.com");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn refresh_clamps_capture_interval_below_minimum() {
+        let path = env::temp_dir().join(format!(
+            "virtue-core-cfg-interval-{}.json",
+            std::process::id()
+        ));
+        fs::write(&path, br#"{"capture_interval_seconds":5}"#).expect("write file");
+        let mut config = base_config(Some(path.clone()));
+        config.refresh_from_runtime_file().expect("no error");
+        assert_eq!(
+            config.screenshot_interval,
+            Duration::from_secs(MIN_CAPTURE_INTERVAL_SECONDS)
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn refresh_with_invalid_json_returns_error() {
+        let path = env::temp_dir().join(format!(
+            "virtue-core-cfg-badjson-{}.json",
+            std::process::id()
+        ));
+        fs::write(&path, b"not valid json at all").expect("write file");
+        let mut config = base_config(Some(path.clone()));
+        let result = config.refresh_from_runtime_file();
+        assert!(result.is_err());
+        let _ = fs::remove_file(path);
+    }
+}
