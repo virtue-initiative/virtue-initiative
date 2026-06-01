@@ -1,0 +1,32 @@
+GIMP Palette
+Name: Virtue Initiative — Warm Institutional
+Columns: 3
+#
+# Paper / backgrounds
+244 239 227	bg / paper #F4EFE3
+251 247 234	surface / paper-3 #FBF7EA
+235 228 206	bg-subtle / paper-2 #EBE4CE
+# Rules / borders
+217 209 188	border #D9D1BC
+232 225 203	rule-2 #E8E1CB
+201 192 168	control-border-hover #C9C0A8
+# Ink / text
+ 27  26  22	text / ink #1B1A16
+ 58  56  47	ink-2 #3A382F
+106 102  85	text-muted / ink-3 #6A6655
+156 150 130	ink-4 #9C9682
+# Forest (primary)
+ 30  58  46	accent / forest #1E3A2E
+ 22  48  38	forest-2 #163026
+ 44  77  62	forest-3 #2C4D3E
+# Moss (secondary green)
+ 77 107  88	moss #4D6B58
+122 143 118	moss-2 #7A8F76
+# Ochre (accent)
+166 127  61	ochre #A67F3D
+201 165 107	ochre-soft #C9A56B
+# Status
+ 79 122  90	success / good #4F7A5A
+156 107  46	warning #9C6B2E
+239  68  68	danger #ef4444
+220  38  38	danger-strong #dc2626

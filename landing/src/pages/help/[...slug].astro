@@ -46,13 +46,18 @@ const EntryContent = entry.Content;
 ---
 
 <HelpLayout currentPath={currentPath} pageTitle={currentItem?.label ?? 'Help'}>
-  {
-    contentHtml ? (
-      <article class="help-content-card help-doc" set:html={contentHtml} />
-    ) : (
-      <article class="help-content-card help-doc">
-        <EntryContent />
-      </article>
-    )
-  }
+  <article class="help-content-card help-doc">
+    {contentHtml ? <Fragment set:html={contentHtml} /> : <EntryContent />}
+    {
+      currentItem?.items && currentItem.items.length > 0 && (
+        <ul class="help-child-index">
+          {currentItem.items.map((child) => (
+            <li>
+              <a href={child.href}>{child.label}</a>
+            </li>
+          ))}
+        </ul>
+      )
+    }
+  </article>
 </HelpLayout>
