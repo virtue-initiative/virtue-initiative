@@ -53,24 +53,21 @@ impl Observer for CaptureAvailabilityObserver {
     }
 
     fn on_event(&mut self, event: &Event) -> CoreResult<()> {
-        match event {
-            Event::CaptureFailed => {
-                let now_ms = self.platform.get_time_utc_ms()?;
-                self.state.recent_failures_ms.push(now_ms);
-                self.state
-                    .recent_failures_ms
-                    .retain(|&t| now_ms - t <= FAILURE_WINDOW_MS);
-                if self.state.recent_failures_ms.len() >= FAILURE_THRESHOLD {
-                    self.sender
-                        .send(Event::Upload {
-                            risk: 0.5,
-                            kind: UploadKind::CaptureFailed,
-                        })
-                        .ok();
-                    self.state.recent_failures_ms.clear();
-                }
+        if let Event::CaptureFailed = event {
+            let now_ms = self.platform.get_time_utc_ms()?;
+            self.state.recent_failures_ms.push(now_ms);
+            self.state
+                .recent_failures_ms
+                .retain(|&t| now_ms - t <= FAILURE_WINDOW_MS);
+            if self.state.recent_failures_ms.len() >= FAILURE_THRESHOLD {
+                self.sender
+                    .send(Event::Upload {
+                        risk: 0.5,
+                        kind: UploadKind::CaptureFailed,
+                    })
+                    .ok();
+                self.state.recent_failures_ms.clear();
             }
-            _ => {}
         }
         Ok(())
     }

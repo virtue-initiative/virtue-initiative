@@ -146,34 +146,16 @@ impl UserSessionState {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default)]
 pub struct StopIntent {
     pub source: String,
     pub requested_at_ms: i64,
 }
 
-impl Default for StopIntent {
-    fn default() -> Self {
-        Self {
-            source: String::new(),
-            requested_at_ms: 0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default)]
 pub struct ServiceStopMarker {
     pub origin: String,
     pub stopped_at_ms: i64,
-}
-
-impl Default for ServiceStopMarker {
-    fn default() -> Self {
-        Self {
-            origin: String::new(),
-            stopped_at_ms: 0,
-        }
-    }
 }

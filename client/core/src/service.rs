@@ -130,10 +130,10 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
             if !self.upload_obs_mut().has_settings() {
                 let _ = self.refresh_device_settings();
             }
-            if self.auth.is_authenticated() {
-                if let Err(err) = self.event_loop.iter() {
-                    log_error("loop iteration failed", Some(&err));
-                }
+            if self.auth.is_authenticated()
+                && let Err(err) = self.event_loop.iter()
+            {
+                log_error("loop iteration failed", Some(&err));
             }
         }
 
