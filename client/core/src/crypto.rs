@@ -14,7 +14,7 @@ use rand_core::{OsRng as HpkeOsRng, TryRngCore};
 use sha2::{Digest, Sha256};
 
 use crate::error::{CoreError, CoreResult};
-use crate::model::{BatchLogEntry, BatchRecipient, EventData, HashParams, LogEntry, Screenshot};
+use crate::model::{BatchRecipient, HashParams, LogEntry};
 
 type HpkeKem = X25519HkdfSha256;
 type HpkeKdf = HkdfSha256;
@@ -100,46 +100,6 @@ pub fn derive_password_auth(
     hkdf.expand(b"auth", &mut password_auth)
         .map_err(|_| CoreError::Crypto("HKDF expand failed"))?;
     Ok(password_auth)
-}
-
-pub fn buffer_batch_event(event: LogEntry) -> CoreResult<BatchLogEntry> {
-    let encoded = encode_batch_event(&event)?;
-    Ok(BatchLogEntry {
-        content_hash: compute_event_hash(&encoded),
-        event,
-    })
-}
-
-pub fn prepare_screenshot_event(screenshot: Screenshot) -> CoreResult<BatchLogEntry> {
-    prepare_screenshot_batch_event(screenshot, "screenshot", None, EventData::default())
-}
-
-pub fn prepare_screenshot_batch_event(
-    screenshot: Screenshot,
-    kind: impl Into<String>,
-    risk: Option<f32>,
-    data: EventData,
-) -> CoreResult<BatchLogEntry> {
-    buffer_batch_event(LogEntry {
-        ts: screenshot.captured_at_ms,
-        kind: kind.into(),
-        risk,
-        data: data.with_screenshot(screenshot.bytes, screenshot.content_type),
-    })
-}
-
-pub fn prepare_log_batch_event(
-    ts: i64,
-    kind: impl Into<String>,
-    risk: Option<f32>,
-    data: EventData,
-) -> CoreResult<BatchLogEntry> {
-    buffer_batch_event(LogEntry {
-        ts,
-        kind: kind.into(),
-        risk,
-        data,
-    })
 }
 
 pub fn encode_batch_event(event: &LogEntry) -> CoreResult<Vec<u8>> {

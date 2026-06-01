@@ -3,9 +3,9 @@ use std::io::Write;
 use flate2::Compression;
 use flate2::write::GzEncoder;
 
-use crate::crypto::{CryptoEngine, encode_batch_event};
+use crate::crypto::CryptoEngine;
 use crate::error::{CoreError, CoreResult};
-use crate::model::{BatchLogEntry, BatchRecipient, BatchUpload};
+use crate::model::{BatchRecipient, BatchUpload};
 
 pub(crate) const MAX_BATCH_ITEMS_PER_UPLOAD: usize = 200;
 
@@ -14,25 +14,24 @@ pub struct BatchBuilder;
 
 impl BatchBuilder {
     pub fn build_upload(
-        items: &[BatchLogEntry],
+        encoded_events: &[Vec<u8>],
         crypto: &CryptoEngine,
         recipients: &[BatchRecipient],
+        start_time_ms: i64,
         end_time_ms: i64,
     ) -> CoreResult<BatchUpload> {
-        let first = items.first().ok_or(CoreError::InvalidState(
-            "cannot build a batch from an empty buffer",
-        ))?;
+        if encoded_events.is_empty() {
+            return Err(CoreError::InvalidState(
+                "cannot build a batch from an empty buffer",
+            ));
+        }
         if recipients.is_empty() {
             return Err(CoreError::InvalidState(
                 "cannot build a batch without any recipients",
             ));
         }
 
-        let encoded_events = items
-            .iter()
-            .map(|item| encode_batch_event(&item.event))
-            .collect::<CoreResult<Vec<_>>>()?;
-        let msgpack = rmp_serde::to_vec_named(&encoded_events)?;
+        let msgpack = rmp_serde::to_vec_named(encoded_events)?;
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(&msgpack)?;
@@ -50,7 +49,7 @@ impl BatchBuilder {
             .collect::<CoreResult<Vec<_>>>()?;
 
         Ok(BatchUpload {
-            start_time_ms: first.event.ts,
+            start_time_ms,
             end_time_ms,
             bytes: encrypted,
             access_keys,
@@ -61,18 +60,21 @@ impl BatchBuilder {
 #[cfg(test)]
 mod tests {
     use crate::crypto::encode_batch_event;
-    use crate::model::{EventData, LogEntry};
+    use crate::events::UploadKind;
+    use crate::model::LogEntry;
 
     #[test]
     fn batch_payload_is_array_of_encoded_event_bytes() {
-        let event = LogEntry {
+        let entry = LogEntry {
             ts: 123,
-            kind: "developer_log".to_string(),
             risk: Some(0.5),
-            data: EventData::from_pairs([("source".to_string(), "test".to_string())]),
+            event: UploadKind::Dev {
+                title: "test".to_string(),
+                details: None,
+            },
         };
 
-        let encoded_event = encode_batch_event(&event).expect("encode event");
+        let encoded_event = encode_batch_event(&entry).expect("encode event");
         let encoded_batch =
             rmp_serde::to_vec_named(&vec![encoded_event.clone()]).expect("encode batch");
         let decoded_batch: Vec<Vec<u8>> =

@@ -4,8 +4,9 @@ use std::sync::mpsc::Sender;
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
-use crate::events::{Event, Observer, ProcessStoppedReason, StateType};
-use crate::model::EventData;
+use crate::events::{
+    AlertReason, Event, LifecycleKind, Observer, ProcessStoppedReason, StateType, UploadKind,
+};
 use crate::platform::PlatformHooks;
 
 pub(crate) const HIGH_RISK_LIFECYCLE_ALERT: f32 = 0.9;
@@ -81,11 +82,9 @@ impl Observer for LifecycleObserver {
             self.sender
                 .send(Event::Upload {
                     risk: 0.5,
-                    kind: "lifecycle_alert".to_string(),
-                    data: EventData::from_pairs([(
-                        "alert_reason".to_string(),
-                        "process_killed_before_shutdown".to_string(),
-                    )]),
+                    kind: UploadKind::LifecycleAlert {
+                        reason: AlertReason::ProcessKilledBeforeShutdown,
+                    },
                 })
                 .ok();
             self.state.last_process_stopped_other = 0;
@@ -93,19 +92,18 @@ impl Observer for LifecycleObserver {
 
         // Forward lifecycle events as batch log entries
         let lifecycle_kind = match event {
-            Event::ProcessStarted => Some("process_started"),
-            Event::ProcessStopped(_) => Some("process_stopped"),
-            Event::ComputerSuspended => Some("computer_suspended"),
-            Event::ComputerResumed => Some("computer_resumed"),
-            Event::UserSessionChanged(_) => Some("user_session_changed"),
+            Event::ProcessStarted => Some(LifecycleKind::ProcessStarted),
+            Event::ProcessStopped(_) => Some(LifecycleKind::ProcessStopped),
+            Event::ComputerSuspended => Some(LifecycleKind::ComputerSuspended),
+            Event::ComputerResumed => Some(LifecycleKind::ComputerResumed),
+            Event::UserSessionChanged(_) => Some(LifecycleKind::UserSessionChanged),
             _ => None,
         };
         if let Some(kind) = lifecycle_kind {
             self.sender
                 .send(Event::Upload {
                     risk: 0.0,
-                    kind: kind.to_string(),
-                    data: EventData::default(),
+                    kind: UploadKind::Lifecycle { kind },
                 })
                 .ok();
         }
@@ -141,11 +139,9 @@ impl Observer for LifecycleObserver {
             self.sender
                 .send(Event::Upload {
                     risk: HIGH_RISK_LIFECYCLE_ALERT,
-                    kind: "lifecycle_alert".to_string(),
-                    data: EventData::from_pairs([(
-                        "alert_reason".to_string(),
-                        "user_stopped_process".to_string(),
-                    )]),
+                    kind: UploadKind::LifecycleAlert {
+                        reason: AlertReason::UserStoppedProcess,
+                    },
                 })
                 .ok();
         }
@@ -165,11 +161,9 @@ impl Observer for LifecycleObserver {
                 self.sender
                     .send(Event::Upload {
                         risk: HIGH_RISK_LIFECYCLE_ALERT,
-                        kind: "lifecycle_alert".to_string(),
-                        data: EventData::from_pairs([(
-                            "alert_reason".to_string(),
-                            "unexpected_process_start".to_string(),
-                        )]),
+                        kind: UploadKind::LifecycleAlert {
+                            reason: AlertReason::UnexpectedProcessStart,
+                        },
                     })
                     .ok();
             }
@@ -183,11 +177,9 @@ impl Observer for LifecycleObserver {
                 self.sender
                     .send(Event::Upload {
                         risk: HIGH_RISK_LIFECYCLE_ALERT,
-                        kind: "lifecycle_alert".to_string(),
-                        data: EventData::from_pairs([(
-                            "alert_reason".to_string(),
-                            "ping_gap_while_running".to_string(),
-                        )]),
+                        kind: UploadKind::LifecycleAlert {
+                            reason: AlertReason::PingGapWhileRunning,
+                        },
                     })
                     .ok();
             }
@@ -198,11 +190,9 @@ impl Observer for LifecycleObserver {
                 self.sender
                     .send(Event::Upload {
                         risk: HIGH_RISK_LIFECYCLE_ALERT,
-                        kind: "lifecycle_alert".to_string(),
-                        data: EventData::from_pairs([(
-                            "alert_reason".to_string(),
-                            "ping_after_suspend".to_string(),
-                        )]),
+                        kind: UploadKind::LifecycleAlert {
+                            reason: AlertReason::PingAfterSuspend,
+                        },
                     })
                     .ok();
             }

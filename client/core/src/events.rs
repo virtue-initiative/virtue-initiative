@@ -3,8 +3,10 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 
+use serde::{Deserialize, Serialize};
+
 use crate::error::{CoreError, CoreResult};
-use crate::model::{EventData, LogEntry, UserSessionState};
+use crate::model::UserSessionState;
 
 pub enum ProcessStoppedReason {
     Other,
@@ -12,20 +14,53 @@ pub enum ProcessStoppedReason {
     User,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum LifecycleKind {
+    ProcessStarted,
+    ProcessStopped,
+    ComputerSuspended,
+    ComputerResumed,
+    UserSessionChanged,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum AlertReason {
+    ProcessKilledBeforeShutdown,
+    UserStoppedProcess,
+    UnexpectedProcessStart,
+    PingGapWhileRunning,
+    PingAfterSuspend,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+pub enum UploadKind {
+    Screenshot {
+        image: Vec<u8>,
+        content_type: String,
+    },
+    Lifecycle {
+        kind: LifecycleKind,
+    },
+    LifecycleAlert {
+        reason: AlertReason,
+    },
+    Alert {
+        message: String,
+    },
+    CaptureFailed,
+    Dev {
+        title: String,
+        details: Option<String>,
+    },
+}
+
 pub enum Event {
     Ping,
     ProcessStarted,
-    ImmediateUpload {
-        entry: LogEntry,
-    },
-    BatchUpload {
-        data: crate::model::BatchLogEntry,
-    },
-    Upload {
-        risk: f32,
-        kind: String,
-        data: EventData,
-    },
+    Upload { risk: f32, kind: UploadKind },
     ProcessStopped(ProcessStoppedReason),
     ComputerSuspended,
     ComputerResumed,

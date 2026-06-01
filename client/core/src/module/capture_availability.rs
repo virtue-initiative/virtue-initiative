@@ -4,8 +4,7 @@ use std::sync::mpsc::Sender;
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
-use crate::events::{Event, Observer, StateType};
-use crate::model::EventData;
+use crate::events::{Event, Observer, StateType, UploadKind};
 use crate::platform::PlatformHooks;
 
 const FAILURE_WINDOW_MS: i64 = 30 * 60 * 1_000;
@@ -65,8 +64,7 @@ impl Observer for CaptureAvailabilityObserver {
                     self.sender
                         .send(Event::Upload {
                             risk: 0.5,
-                            kind: "capture_failure_spike".to_string(),
-                            data: EventData::default(),
+                            kind: UploadKind::CaptureFailed,
                         })
                         .ok();
                     self.state.recent_failures_ms.clear();

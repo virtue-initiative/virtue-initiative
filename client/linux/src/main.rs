@@ -13,8 +13,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
+use virtue_core::events::UploadKind;
 use virtue_core::storage::FileStateStore;
-use virtue_core::{AuthState, EventData, LogEntry, MonitorService, ServiceStatus};
+use virtue_core::{AuthState, MonitorService, ServiceStatus};
 
 use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_backend};
 use crate::config::{ClientPaths, build_core_config};
@@ -302,12 +303,14 @@ fn dev_upload_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
         .title
         .unwrap_or_else(|| "Developer CLI log".to_string());
     let mut service = MonitorService::setup(build_core_config(&paths), LinuxPlatformHooks::new())?;
-    service.send_log(LogEntry {
-        ts: current_time_utc_ms()?,
-        kind: "developer_log".to_string(),
-        risk: Some(args.risk),
-        data: developer_log_data("upload_log", &title, args.details.as_deref()),
-    })?;
+    // Use risk >= 1.0 so this always routes through the immediate (POST /log) path.
+    service.send_log(
+        1.0_f32,
+        UploadKind::Dev {
+            title,
+            details: args.details,
+        },
+    )?;
 
     println!(
         "Recorded immediate developer log with risk {}.",
@@ -322,9 +325,11 @@ fn dev_add_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
         .unwrap_or_else(|| "Developer CLI batched log".to_string());
     let mut service = MonitorService::setup(build_core_config(&paths), LinuxPlatformHooks::new())?;
     service.queue_batch_log(
-        "developer_log",
-        Some(args.risk),
-        developer_log_data("add_log", &title, args.details.as_deref()),
+        args.risk,
+        UploadKind::Dev {
+            title,
+            details: args.details,
+        },
     )?;
 
     println!(
@@ -335,15 +340,8 @@ fn dev_add_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
 }
 
 fn dev_add_screenshot(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
-    let title = args
-        .title
-        .unwrap_or_else(|| "Developer CLI screenshot".to_string());
     let mut service = MonitorService::setup(build_core_config(&paths), LinuxPlatformHooks::new())?;
-    service.capture_batch_screenshot(
-        "developer_screenshot",
-        Some(args.risk),
-        developer_log_data("add_screenshot", &title, args.details.as_deref()),
-    )?;
+    service.capture_batch_screenshot(Some(args.risk))?;
 
     println!(
         "Captured and queued a developer screenshot with risk {}.",
@@ -472,18 +470,6 @@ fn format_risk(risk: f32) -> String {
         value.pop();
     }
     value
-}
-
-fn developer_log_data(command: &str, title: &str, details: Option<&str>) -> EventData {
-    let mut data = EventData::from_pairs([
-        ("source".to_string(), "linux_dev_cli".to_string()),
-        ("command".to_string(), command.to_string()),
-        ("title".to_string(), title.to_string()),
-    ]);
-    if let Some(details) = details.filter(|value| !value.trim().is_empty()) {
-        data.insert("details", serde_json::Value::String(details.to_string()));
-    }
-    data
 }
 
 fn current_time_utc_ms() -> Result<i64> {

@@ -260,29 +260,12 @@ impl ApiTransport for ReqwestApiClient {
         device_access_token: &str,
         log: &LogEntry,
     ) -> CoreResult<UploadedLogResponse> {
-        let data = serde_json::Value::Object(log.data.object());
-
-        #[derive(Serialize)]
-        struct UploadLogRequest<'a> {
-            ts: i64,
-            #[serde(rename = "type")]
-            kind: &'a str,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            risk: Option<f32>,
-            data: &'a serde_json::Value,
-        }
-
         self.send_json(
             Method::POST,
             None,
             "/d/log",
             Some(device_access_token),
-            Some(&UploadLogRequest {
-                ts: log.ts,
-                kind: &log.kind,
-                risk: log.risk,
-                data: &data,
-            }),
+            Some(log),
         )
     }
 

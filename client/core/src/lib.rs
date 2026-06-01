@@ -19,8 +19,8 @@ pub use build_info::{BUILD_LABEL, build_label};
 pub use config::Config;
 pub use error::{CoreError, CoreResult};
 pub use model::{
-    AuthState, BatchLogEntry, BatchUpload, DeviceCredentials, DeviceSettings, EventData, LogEntry,
-    LoginStatus, LoopOutcome, Screenshot, ServiceStatus,
+    AuthState, BatchUpload, DeviceCredentials, DeviceSettings, EventData, LogEntry, LoginStatus,
+    LoopOutcome, Screenshot, ServiceStatus,
 };
 pub use model::{ServiceStopMarker, StopIntent, UserSessionState};
 pub use platform::PlatformHooks;

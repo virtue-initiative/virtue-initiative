@@ -11,11 +11,11 @@ use batch::BatchBuilder;
 pub(crate) use batch::MAX_BATCH_ITEMS_PER_UPLOAD;
 
 use crate::api::ApiTransport;
-use crate::crypto::{CryptoEngine, prepare_log_batch_event};
+use crate::crypto::{CryptoEngine, compute_event_hash, encode_batch_event};
 use crate::error::CoreResult;
 use crate::events::log_error;
 use crate::events::{Event, Observer, ProcessStoppedReason, StateType};
-use crate::model::{BatchLogEntry, BatchRecipient, DeviceCredentials, DeviceSettings, LogEntry};
+use crate::model::{BatchRecipient, DeviceCredentials, DeviceSettings, LogEntry};
 use crate::platform::PlatformHooks;
 
 pub(crate) const POST_LOGIN_PROOF_BATCH_COUNT: u32 = 3;
@@ -29,8 +29,8 @@ pub struct UploadConfig {
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct UploadObserverState {
-    pub pending_batch_events: Vec<BatchLogEntry>,
-    pub pending_hash_events: Vec<BatchLogEntry>,
+    pub pending_batch_events: Vec<(i64, Vec<u8>)>,
+    pub pending_hash_events: Vec<LogEntry>,
     pub pending_immediate_events: Vec<LogEntry>,
     pub last_batch_at_ms: Option<i64>,
     pub post_login_proof_batches_remaining: u32,
@@ -99,33 +99,6 @@ impl<A: ApiTransport + Clone + 'static> UploadObserver<A> {
         self.try_upload_batch(now_ms)
     }
 
-    fn handle_screenshot_captured(&mut self, data: &BatchLogEntry, now_ms: i64) -> CoreResult<()> {
-        let hash_base_url = self
-            .state
-            .settings
-            .as_ref()
-            .and_then(|s| s.hash_base_url.clone());
-        match self.try_upload_hash(hash_base_url.as_deref(), data) {
-            Ok(true) => self.state.pending_batch_events.push(data.clone()),
-            Ok(false) | Err(_) => self.state.pending_hash_events.push(data.clone()),
-        }
-        let batch_interval_ms = self.config.batch_interval.as_millis() as i64;
-        let can = self.state.settings.as_ref().map_or(false, can_capture);
-        let should_upload = !self.state.pending_batch_events.is_empty()
-            && can
-            && (self.state.post_login_proof_batches_remaining > 0
-                || self
-                    .state
-                    .last_batch_at_ms
-                    .map(|last| now_ms - last >= batch_interval_ms)
-                    .unwrap_or(true)
-                || self.state.pending_batch_events.len() >= MAX_BATCH_ITEMS_PER_UPLOAD);
-        if should_upload {
-            let _ = self.try_upload_batch(now_ms);
-        }
-        Ok(())
-    }
-
     fn retry_pending_hashes(&mut self) -> CoreResult<()> {
         let events = std::mem::take(&mut self.state.pending_hash_events);
         let mut still_pending = Vec::new();
@@ -141,9 +114,18 @@ impl<A: ApiTransport + Clone + 'static> UploadObserver<A> {
                 still_pending.push(event);
                 continue;
             }
-            match self.try_upload_hash(hash_base_url.as_deref(), &event) {
+            let encoded = match encode_batch_event(&event) {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    log_error("encode_batch_event failed permanently", Some(&err));
+                    retried += 1;
+                    continue;
+                }
+            };
+            let hash = compute_event_hash(&encoded);
+            match self.try_upload_hash(hash_base_url.as_deref(), &hash) {
                 Ok(true) => {
-                    self.state.pending_batch_events.push(event);
+                    self.state.pending_batch_events.push((event.ts, encoded));
                     retried += 1;
                 }
                 Ok(false) | Err(_) => {
@@ -183,7 +165,7 @@ impl<A: ApiTransport + Clone + 'static> UploadObserver<A> {
     }
 
     fn maybe_upload_batch(&mut self, now_ms: i64) -> CoreResult<()> {
-        let can = self.state.settings.as_ref().map_or(false, can_capture);
+        let can = self.state.settings.as_ref().is_some_and(can_capture);
         if self.state.pending_batch_events.is_empty() || !can {
             return Ok(());
         }
@@ -193,7 +175,8 @@ impl<A: ApiTransport + Clone + 'static> UploadObserver<A> {
                 .state
                 .last_batch_at_ms
                 .map(|last| now_ms - last >= batch_interval_ms)
-                .unwrap_or(true);
+                .unwrap_or(true)
+            || self.state.pending_batch_events.len() >= MAX_BATCH_ITEMS_PER_UPLOAD;
         if should {
             self.try_upload_batch(now_ms)?;
         }
@@ -214,9 +197,17 @@ impl<A: ApiTransport + Clone + 'static> UploadObserver<A> {
             .len()
             .min(MAX_BATCH_ITEMS_PER_UPLOAD);
         let mut items = self.state.pending_batch_events[..count].to_vec();
-        items.sort_by_key(|e| e.event.ts);
+        items.sort_by_key(|(ts, _)| *ts);
+        let start_time_ms = items[0].0;
+        let encoded: Vec<Vec<u8>> = items.into_iter().map(|(_, bytes)| bytes).collect();
         let recipients = batch_recipients(settings)?;
-        let batch = BatchBuilder::build_upload(&items, &CryptoEngine, &recipients, now_ms)?;
+        let batch = BatchBuilder::build_upload(
+            &encoded,
+            &CryptoEngine,
+            &recipients,
+            start_time_ms,
+            now_ms,
+        )?;
         match self.upload_api.upload_batch(&batch) {
             Ok(_) => {
                 self.state.pending_batch_events.drain(..count);
@@ -242,12 +233,9 @@ impl<A: ApiTransport + Clone + 'static> UploadObserver<A> {
     fn try_upload_hash(
         &mut self,
         hash_base_url: Option<&str>,
-        event: &BatchLogEntry,
+        content_hash: &[u8; 32],
     ) -> CoreResult<bool> {
-        match self
-            .upload_api
-            .upload_hash(hash_base_url, &event.content_hash)
-        {
+        match self.upload_api.upload_hash(hash_base_url, content_hash) {
             Ok(()) => Ok(true),
             Err(err) if err.is_bad_request() => {
                 log_error("hash upload failed permanently", Some(&err));
@@ -310,31 +298,20 @@ impl<A: ApiTransport + Clone + 'static> Observer for UploadObserver<A> {
                     let _ = self.try_upload_batch(now_ms);
                 }
             }
-            Event::BatchUpload { data } => {
-                self.state.pending_batch_events.push(data.clone());
-            }
-            Event::Upload { risk, kind, data } => {
+            Event::Upload { risk, kind } => {
                 let now_ms = self.platform.get_time_utc_ms()?;
-                match prepare_log_batch_event(now_ms, kind, Some(*risk), data.clone()) {
-                    Ok(batch_entry) => {
-                        if kind == "screenshot" {
-                            self.handle_screenshot_captured(&batch_entry, now_ms)?;
-                        } else if *risk >= crate::module::lifecycle::HIGH_RISK_LIFECYCLE_ALERT {
-                            self.state.pending_immediate_events.push(batch_entry.event);
-                        } else {
-                            self.state.pending_batch_events.push(batch_entry);
-                        }
-                    }
-                    Err(err) => log_error("prepare_log_batch_event failed", Some(&err)),
-                }
-            }
-            Event::ImmediateUpload { entry } => {
-                let keep = match self.try_upload_direct(entry) {
-                    Ok(true) => false,
-                    Ok(false) | Err(_) => true,
+                let entry = LogEntry {
+                    ts: now_ms,
+                    risk: Some(*risk),
+                    event: kind.clone(),
                 };
-                if keep {
-                    self.state.pending_immediate_events.push(entry.clone());
+                if *risk >= crate::module::lifecycle::HIGH_RISK_LIFECYCLE_ALERT {
+                    self.state.pending_immediate_events.push(entry);
+                    self.retry_pending_immediates()?;
+                } else {
+                    self.state.pending_hash_events.push(entry);
+                    self.retry_pending_hashes()?;
+                    self.maybe_upload_batch(now_ms)?;
                 }
             }
             _ => {}

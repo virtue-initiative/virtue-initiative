@@ -1,12 +1,10 @@
 use crate::api::{ApiTransport, ReqwestApiClient};
 use crate::auth::Auth;
 use crate::config::Config;
-use crate::crypto::prepare_log_batch_event;
 use crate::error::{CoreError, CoreResult};
+use crate::events::UploadKind;
 use crate::events::{Event, EventLoop, log_error};
-use crate::model::{
-    EventData, LogEntry, LoginStatus, LoopOutcome, ServiceStatus, StopIntent, UserSessionState,
-};
+use crate::model::{LoginStatus, LoopOutcome, ServiceStatus, StopIntent, UserSessionState};
 use crate::module::capture_availability::CaptureAvailabilityObserver;
 use crate::module::lifecycle::LifecycleObserver;
 use crate::module::screenshot::image_pipeline::ImagePipeline;
@@ -180,42 +178,30 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
         Ok(intent)
     }
 
-    pub fn send_log(&mut self, log: LogEntry) -> CoreResult<()> {
+    pub fn send_log(&mut self, risk: f32, kind: UploadKind) -> CoreResult<()> {
         self.ensure_running()?;
-        self.event_loop
-            .queue_event(Event::ImmediateUpload { entry: log });
+        self.event_loop.queue_event(Event::Upload { risk, kind });
         let _ = self.event_loop.iter();
         self.persist_state()
     }
 
-    pub fn queue_batch_log(
-        &mut self,
-        kind: &str,
-        risk: Option<f32>,
-        data: EventData,
-    ) -> CoreResult<()> {
+    pub fn queue_batch_log(&mut self, risk: f32, kind: UploadKind) -> CoreResult<()> {
         self.ensure_running()?;
-        let event = prepare_log_batch_event(self.platform.get_time_utc_ms()?, kind, risk, data)?;
-        self.event_loop
-            .queue_event(Event::BatchUpload { data: event });
+        self.event_loop.queue_event(Event::Upload { risk, kind });
         let _ = self.event_loop.iter();
         self.persist_state()
     }
 
-    pub fn capture_batch_screenshot(
-        &mut self,
-        kind: &str,
-        risk: Option<f32>,
-        data: EventData,
-    ) -> CoreResult<()> {
+    pub fn capture_batch_screenshot(&mut self, risk: Option<f32>) -> CoreResult<()> {
         self.ensure_running()?;
         let screenshot = self.platform.take_screenshot()?;
         let processed = ImagePipeline.process(screenshot)?;
-        let event_data = data.with_screenshot(processed.bytes, processed.content_type);
         self.event_loop.queue_event(Event::Upload {
             risk: risk.unwrap_or(0.0),
-            kind: kind.to_string(),
-            data: event_data,
+            kind: UploadKind::Screenshot {
+                image: processed.bytes,
+                content_type: processed.content_type,
+            },
         });
         if self.auth.is_authenticated() {
             let _ = self.event_loop.iter();
@@ -412,6 +398,7 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
 
     // ─── Typed observer accessors ─────────────────────────────────────────────
 
+    #[cfg_attr(not(test), allow(dead_code))]
     fn screenshot_obs(&self) -> &ScreenshotObserver {
         self.event_loop.observers[SCREENSHOT_IDX]
             .as_any()
@@ -459,7 +446,8 @@ mod tests {
 
     use super::*;
     use crate::api::ReqwestApiClient;
-    use crate::model::{BatchRecipient, DeviceCredentials, DeviceSettings};
+    use crate::events::UploadKind;
+    use crate::model::{BatchRecipient, DeviceCredentials, DeviceSettings, LogEntry};
 
     static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -586,7 +574,10 @@ mod tests {
             .state
             .pending_batch_events
             .iter()
-            .map(|e| e.event.clone())
+            .map(|(_, bytes)| {
+                rmp_serde::from_slice::<LogEntry>(bytes)
+                    .expect("decode log entry from batch events")
+            })
             .collect()
     }
 
@@ -634,9 +625,10 @@ mod tests {
             .pending_immediate_events
             .push(LogEntry {
                 ts: 1,
-                kind: "system_event".to_string(),
                 risk: None,
-                data: EventData::from_pairs([("event".to_string(), "test".to_string())]),
+                event: UploadKind::Alert {
+                    message: "test".to_string(),
+                },
             });
 
         let status = service.status().expect("load status");
@@ -646,33 +638,26 @@ mod tests {
     }
 
     #[test]
-    fn queue_batch_log_creates_pending_batch_item_without_hash_upload() {
+    fn queue_batch_log_creates_pending_hash_event() {
         let state_dir = temp_state_dir();
         let mut service = build_service(state_dir.clone());
 
         service
             .queue_batch_log(
-                "developer_log",
-                Some(0.7),
-                EventData::from_pairs([
-                    ("source".to_string(), "test".to_string()),
-                    ("title".to_string(), "Developer test".to_string()),
-                ]),
+                0.7,
+                UploadKind::Dev {
+                    title: "Developer test".to_string(),
+                    details: None,
+                },
             )
             .expect("queue batch log");
 
-        assert_eq!(service.upload_obs().state.pending_hash_events.len(), 0);
-        assert_eq!(service.upload_obs().state.pending_batch_events.len(), 1);
-        let batch_event = &service.upload_obs().state.pending_batch_events[0];
-        assert_eq!(batch_event.event.kind, "developer_log");
-        assert_eq!(batch_event.event.risk, Some(0.7));
-        assert_eq!(
-            batch_event.event.data,
-            EventData::from_pairs([
-                ("source".to_string(), "test".to_string()),
-                ("title".to_string(), "Developer test".to_string()),
-            ])
-        );
+        // Without credentials, the hash upload defers — event stays in pending_hash_events.
+        assert_eq!(service.upload_obs().state.pending_batch_events.len(), 0);
+        assert_eq!(service.upload_obs().state.pending_hash_events.len(), 1);
+        let entry = &service.upload_obs().state.pending_hash_events[0];
+        assert!(matches!(&entry.event, UploadKind::Dev { title, .. } if title == "Developer test"));
+        assert_eq!(entry.risk, Some(0.7));
 
         let _ = fs::remove_dir_all(state_dir);
     }

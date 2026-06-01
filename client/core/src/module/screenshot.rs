@@ -7,8 +7,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
-use crate::events::{Event, Observer, StateType};
-use crate::model::EventData;
+use crate::events::{Event, Observer, StateType, UploadKind};
 use crate::platform::PlatformHooks;
 
 pub struct ScreenshotConfig {
@@ -89,13 +88,14 @@ impl Observer for ScreenshotObserver {
             }
         };
         let processed = image_pipeline::ImagePipeline.process(screenshot)?;
-        let data = EventData::default().with_screenshot(processed.bytes, processed.content_type);
         self.state.last_screenshot_at_ms = Some(now_ms);
         self.sender
             .send(Event::Upload {
                 risk: 0.0,
-                kind: "screenshot".to_string(),
-                data,
+                kind: UploadKind::Screenshot {
+                    image: processed.bytes,
+                    content_type: processed.content_type,
+                },
             })
             .ok();
         Ok(())

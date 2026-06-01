@@ -3,6 +3,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::events::UploadKind;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Screenshot {
     pub captured_at_ms: i64,
@@ -28,15 +30,6 @@ impl EventData {
         self.0.clone().into_iter().collect()
     }
 
-    pub fn with_screenshot(mut self, image: Vec<u8>, content_type: impl Into<String>) -> Self {
-        self.insert(
-            "image",
-            Value::Array(image.into_iter().map(Value::from).collect()),
-        );
-        self.insert("content_type", Value::String(content_type.into()));
-        self
-    }
-
     pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
         let mut data = Self::default();
         for (key, value) in pairs {
@@ -49,18 +42,10 @@ impl EventData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
     pub ts: i64,
-    #[serde(rename = "type")]
-    pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub risk: Option<f32>,
-    #[serde(default)]
-    pub data: EventData,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BatchLogEntry {
-    pub event: LogEntry,
-    pub content_hash: [u8; 32],
+    #[serde(flatten)]
+    pub event: UploadKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
