@@ -7,6 +7,7 @@ use crate::config::Config;
 use crate::error::CoreResult;
 use crate::events::{Event, ProcessStoppedReason};
 use crate::model::{AuthState, BatchRecipient, DeviceCredentials, DeviceSettings, ServiceStatus};
+use crate::module::screenshot::ScreenshotObserver;
 use crate::service::MonitorService;
 use crate::storage::FileStateStore;
 use crate::testing::api::MockApiClient;
@@ -51,7 +52,8 @@ impl Scenario {
             platform: "test-platform".into(),
             owner: Some(BatchRecipient {
                 user_id: "scenario-user".into(),
-                pub_key_base64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
+                // X25519 base point (u=9); any valid curve point works here.
+                pub_key_base64: "CQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
             }),
             partners: Vec::new(),
             hash_base_url: None,
@@ -209,6 +211,74 @@ impl Scenario {
             "expected {expected} log uploads, recorded {actual}"
         );
         self
+    }
+
+    /// Assert how many times the platform's `take_screenshot()` was called.
+    pub fn assert_screenshot_call_count(&self, expected: u64) -> &Self {
+        let actual = self.platform.take_call_count();
+        assert_eq!(
+            actual, expected,
+            "expected take_screenshot call count {expected}, got {actual}"
+        );
+        self
+    }
+
+    /// Assert the number of pending upload requests
+    /// (hash events + immediate events + 1 if any batch events are pending).
+    pub fn assert_pending_request_count(&self, expected: usize) -> &Self {
+        let actual = self.service.upload_obs().state.pending_request_count();
+        assert_eq!(
+            actual, expected,
+            "expected {expected} pending requests, got {actual}"
+        );
+        self
+    }
+
+    // --- state setters (for fine-grained timing control in tests) ---
+
+    /// Override the last-batch-uploaded timestamp.
+    pub fn set_last_batch_at_ms(&mut self, ms: Option<i64>) -> &mut Self {
+        self.service.upload_obs_mut().state.last_batch_at_ms = ms;
+        self
+    }
+
+    /// Override the last-screenshot timestamp so interval-based tests can
+    /// suppress or force a screenshot on the next loop.
+    pub fn set_last_screenshot_at_ms(&mut self, ms: Option<i64>) -> &mut Self {
+        self.service.event_loop.observers[1] // matches SCREENSHOT_IDX in service.rs
+            .as_any_mut()
+            .downcast_mut::<ScreenshotObserver>()
+            .expect("screenshot observer at index 1")
+            .state
+            .last_screenshot_at_ms = ms;
+        self
+    }
+
+    // --- alternate constructors ---
+
+    /// Build an authenticated service that reuses an *existing* state directory.
+    /// Use this in restart/persistence tests where you want the second service
+    /// to load state written by a first `Scenario`.
+    ///
+    /// The `Drop` impl will still attempt to remove the directory, but since
+    /// both the first and second `Scenario` reference the same path the first
+    /// successful removal is enough; the second attempt fails silently.
+    pub fn authenticated_with_state_dir(state_dir: PathBuf) -> Self {
+        let config = scenario_config(state_dir.clone());
+        let clock = MockClock::default();
+        let platform = TestPlatformHooks::with_clock(clock.clone());
+        let api = MockApiClient::new();
+        let api_handle = api.clone();
+        let platform_handle = platform.clone();
+        let service = MonitorService::setup_with_api(config, platform, api)
+            .expect("scenario service must construct");
+        Self {
+            service,
+            platform: platform_handle,
+            api: api_handle,
+            clock,
+            state_dir,
+        }
     }
 }
 

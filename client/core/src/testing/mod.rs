@@ -6,7 +6,7 @@ pub mod scenario;
 
 pub use api::{BatchCall, HashCall, LogCall, MockApiClient, MockApiState, RegisterDeviceCall};
 pub use clock::MockClock;
-pub use fixtures::{TINY_PNG_BYTES, tiny_png_screenshot};
+pub use fixtures::{tiny_png_bytes, tiny_png_screenshot};
 pub use platform::TestPlatformHooks;
 pub use scenario::Scenario;
 
