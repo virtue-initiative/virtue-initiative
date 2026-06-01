@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{CoreError, CoreResult};
 use crate::model::UserSessionState;
 
+#[derive(Debug)]
 pub enum ProcessStoppedReason {
     Other,
     Shutdown,
@@ -18,7 +19,9 @@ pub enum ProcessStoppedReason {
 #[serde(rename_all = "snake_case")]
 pub enum LifecycleKind {
     ProcessStarted,
-    ProcessStopped,
+    ProcessStoppedUser,
+    ProcessStoppedShutdown,
+    ProcessStoppedOther,
     ComputerSuspended,
     ComputerResumed,
     UserSessionChanged,
@@ -31,7 +34,7 @@ pub enum AlertReason {
     UserStoppedProcess,
     UnexpectedProcessStart,
     PingGapWhileRunning,
-    PingAfterSuspend,
+    MissingResume,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -43,6 +46,8 @@ pub enum UploadKind {
     },
     Lifecycle {
         kind: LifecycleKind,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        session_state: Option<UserSessionState>,
     },
     LifecycleAlert {
         reason: AlertReason,
@@ -57,6 +62,7 @@ pub enum UploadKind {
     },
 }
 
+#[derive(Debug)]
 pub enum Event {
     Ping,
     ProcessStarted,

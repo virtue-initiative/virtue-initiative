@@ -310,7 +310,6 @@ async fn run_daemon_service_loop(
         }
     }
 
-    service.queue_event(Event::ProcessStopped(ProcessStoppedReason::Shutdown));
     let _ = service.run_event_loop_iter();
     let _ = service.mark_stopped();
     Ok(())

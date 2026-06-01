@@ -284,7 +284,6 @@ fn run_monitor_loop(shutdown: Arc<AtomicBool>, command_rx: Receiver<MonitorComma
     }
 
     drain_commands(&mut service, &command_rx);
-    service.queue_event(Event::ProcessStopped(ProcessStoppedReason::Shutdown));
     let _ = service.run_event_loop_iter();
     let _ = service.mark_stopped();
 }
