@@ -42,7 +42,8 @@ body {
   height: 76px;
 }
 
-.site-header-copy {}
+.site-header-copy {
+}
 
 .site-header-actions {
   display: flex;
@@ -108,7 +109,7 @@ body {
   padding-inline: 1.5rem;
 }
 
-.site-main>* {
+.site-main > * {
   min-width: 0;
 }
 
