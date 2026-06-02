@@ -39,6 +39,7 @@
   --text-lg: 1.125rem;
   --text-xl: 1.25rem;
   --text-2xl: 1.5rem;
+  --text-3xl: 2rem;
   --line-tight: 1.2;
   --line-normal: 1.5;
 
@@ -72,18 +73,24 @@
 
   /* Warm institutional palette */
   --ink-2: #3a382f;
-  --ink-3: #6a6655; /* same as --text-muted */
+  --ink-3: #6a6655;
+  /* same as --text-muted */
   --ink-4: #9c9682;
   --rule-2: #e8e1cb;
-  --paper: #f4efe3; /* alias for --bg */
-  --paper-2: #ebe4ce; /* alias for --bg-subtle */
-  --paper-3: #fbf7ea; /* alias for --surface */
-  --forest: #1e3a2e; /* alias for --accent */
+  --paper: #f4efe3;
+  /* alias for --bg */
+  --paper-2: #ebe4ce;
+  /* alias for --bg-subtle */
+  --paper-3: #fbf7ea;
+  /* alias for --surface */
+  --forest: #1e3a2e;
+  /* alias for --accent */
   --forest-2: #163026;
   --forest-3: #2c4d3e;
   --moss: #4d6b58;
   --moss-2: #7a8f76;
   --ochre: #a67f3d;
   --ochre-soft: #c9a56b;
-  --good: #4f7a5a; /* alias for --success */
+  --good: #4f7a5a;
+  /* alias for --success */
 }
