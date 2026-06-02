@@ -25,6 +25,8 @@ pub enum LifecycleStatus {
 pub struct LifecycleObserverState {
     pub status: LifecycleStatus,
 
+    pub last_login: i64,
+
     // Running
     pub last_process_stopped_other: i64,
     pub last_process_stopped_shutdown: i64,
@@ -34,6 +36,7 @@ pub struct LifecycleObserverState {
     pub last_ping: i64,
     pub last_process_started: i64,
     pub last_running_started: i64,
+    pub last_sent_boot: i64,
 
     // Suspended
     pub pings_while_suspended: i64,
@@ -68,22 +71,37 @@ impl LifecycleObserver {
     fn on_event_while_running(&mut self, event: &Event) -> CoreResult<()> {
         let now_ms = self.platform_hooks.get_time_utc_ms()?;
         let last_shutdown = self.compute_last_shutdown()?;
-        let old_last_ping = self.state.last_ping;
 
-        // ALERT: process killed >10s before shutdown
-        if self.state.last_process_stopped_other > self.state.last_process_started
-            && last_shutdown - self.state.last_process_stopped_other > 10000
-        {
-            self.sender.send(Event::Upload {
-                risk: 0.5,
-                kind: UploadKind::LifecycleAlert {
-                    reason: AlertReason::ProcessKilledBeforeShutdown,
-                },
-            })?;
-            self.state.last_process_stopped_other = 0;
-        }
+        let old = self.state.clone();
 
         // Forward lifecycle events as batch log entries
+
+        if last_shutdown > 0 && last_shutdown < self.state.last_process_stopped_other {
+            // We missed the shutdown event, fill in with best effort
+            self.sender.send(Event::Upload {
+                risk: 0.0,
+                kind: UploadKind::Lifecycle {
+                    kind: LifecycleKind::ProcessStoppedShutdown,
+                    session_state: None,
+                },
+            })?;
+            self.state.last_process_stopped_shutdown = last_shutdown;
+        }
+
+        if let Some(boot_ms) = self.platform_hooks.get_last_startup_time_utc_ms()? {
+            if boot_ms > self.state.last_sent_boot {
+                // New boot we haven't recorded yet, fill in with best effort
+                self.sender.send(Event::Upload {
+                    risk: 0.0,
+                    kind: UploadKind::Lifecycle {
+                        kind: LifecycleKind::ComputerBooted,
+                        session_state: None,
+                    },
+                })?;
+                self.state.last_sent_boot = boot_ms;
+            }
+        }
+
         let lifecycle_event: Option<(LifecycleKind, Option<UserSessionState>)> = match event {
             Event::ProcessStarted => Some((LifecycleKind::ProcessStarted, None)),
             Event::ProcessStopped(reason) => match reason {
@@ -134,7 +152,25 @@ impl LifecycleObserver {
             Event::Ping => {
                 self.state.last_ping = now_ms;
             }
+            Event::UserSessionChanged(UserSessionState::LoggedIn) => {
+                self.state.last_login = now_ms;
+            }
             _ => {}
+        }
+
+        // ALERT: process killed >10s before shutdown
+        if old.last_process_stopped_other > old.last_process_started
+            && last_shutdown - old.last_process_stopped_other > 10000
+        {
+            self.sender.send(Event::Upload {
+                risk: 0.5,
+                kind: UploadKind::LifecycleAlert {
+                    reason: AlertReason::ProcessKilledBeforeShutdown,
+                },
+            })?;
+            if !matches!(event, Event::ProcessStopped(ProcessStoppedReason::Other)) {
+                self.state.last_process_stopped_other = 0;
+            }
         }
 
         // ALERT: user explicitly stopped the process
@@ -147,18 +183,21 @@ impl LifecycleObserver {
             })?;
         }
 
-        // ALERT: ProcessStarted after suspicious gap (state.last_ping is old value here)
-        if matches!(event, Event::ProcessStarted) {
+        // ALERT: ProcessStarted after suspicious gap
+        if matches!(event, Event::ProcessStarted)
+            && now_ms - old.last_login > 60000
+            && old.last_process_started > old.last_process_stopped_user
+        {
             let boot_ms = self
                 .platform_hooks
                 .get_last_startup_time_utc_ms()?
                 .unwrap_or(0);
-            let ping_gap = if old_last_ping > 0 {
-                now_ms - old_last_ping
+            let ping_gap = if old.last_ping > 0 {
+                now_ms - old.last_ping
             } else {
                 i64::MAX
             };
-            if ping_gap > 10000 && (now_ms - boot_ms) > 10000 {
+            if ping_gap > 10000 && (now_ms - boot_ms) > 60000 {
                 self.sender.send(Event::Upload {
                     risk: HIGH_RISK_LIFECYCLE_ALERT,
                     kind: UploadKind::LifecycleAlert {
@@ -169,10 +208,10 @@ impl LifecycleObserver {
         }
 
         // ALERT: Ping gap while computer was running (not sleeping)
-        if matches!(event, Event::Ping) {
-            let ping_gap = now_ms - old_last_ping;
-            let start_gap = now_ms - self.state.last_running_started;
-            if old_last_ping > 0 && ping_gap > 10000 && start_gap > 10000 {
+        if matches!(event, Event::Ping) && now_ms - old.last_login > 60000 {
+            let ping_gap = now_ms - old.last_ping;
+            let start_gap = now_ms - old.last_running_started;
+            if old.last_ping > 0 && ping_gap > 10000 && start_gap > 10000 {
                 self.sender.send(Event::Upload {
                     risk: HIGH_RISK_LIFECYCLE_ALERT,
                     kind: UploadKind::LifecycleAlert {
@@ -196,6 +235,7 @@ impl LifecycleObserver {
             self.state.pings_while_suspended = 0;
             self.state.status = LifecycleStatus::Running;
             self.state.last_running_started = now_ms;
+            self.state.last_computer_resume = now_ms;
             self.sender.send(Event::Upload {
                 risk: 0.0,
                 kind: UploadKind::Lifecycle {

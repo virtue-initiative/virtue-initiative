@@ -10,16 +10,12 @@ use objc2::rc::autoreleasepool;
 use objc2_app_kit::{NSWorkspace, NSWorkspaceWillPowerOffNotification};
 use objc2_foundation::{NSDate, NSRunLoop};
 use tokio::sync::mpsc;
-use tokio::time::sleep;
-use virtue_core::MonitorService;
 use virtue_core::events::{Event, ProcessStoppedReason};
+use virtue_core::{MonitorService, iter_sleep};
 
 use crate::capture::{MacPlatformHooks, has_screen_capture_access, is_permission_missing_error};
 use crate::config::{ClientPaths, build_core_config};
 
-const IDLE_LOOP_INTERVAL: Duration = Duration::from_secs(1);
-const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
-const LOOP_INTERVAL: Duration = Duration::from_secs(60);
 const POST_WAKE_CAPTURE_STATE_SUPPRESSION: Duration = Duration::from_secs(30);
 
 type IoObject = u32;
@@ -240,15 +236,12 @@ async fn run_daemon_service_loop(
             break;
         }
 
-        let sleep_duration = if sleeping {
-            IDLE_LOOP_INTERVAL
-        } else {
+        if !sleeping {
             match service.loop_iteration() {
                 Ok(_outcome) => {
                     if !has_screen_capture_access() {
                         suppress_capture_state_until = None;
                     }
-                    LOOP_INTERVAL
                 }
                 Err(err) => {
                     let error_text = err.to_string();
@@ -260,10 +253,9 @@ async fn run_daemon_service_loop(
                         }
                     }
                     eprintln!("daemon: {error_text}");
-                    ERROR_RETRY_INTERVAL
                 }
             }
-        };
+        }
 
         tokio::select! {
             signal = signal_rx.recv() => {
@@ -306,7 +298,7 @@ async fn run_daemon_service_loop(
                     None => {}
                 }
             }
-            _ = sleep_interruptible(&shutdown, sleep_duration) => {}
+            _ = iter_sleep() => {}
         }
     }
 
@@ -338,13 +330,4 @@ fn spawn_signal_handler(shutdown: Arc<AtomicBool>, signal_tx: mpsc::UnboundedSen
         shutdown.store(true, Ordering::SeqCst);
         let _ = signal_tx.send(signal_name.to_string());
     });
-}
-
-async fn sleep_interruptible(shutdown: &Arc<AtomicBool>, duration: Duration) {
-    let mut remaining = duration;
-    while remaining > Duration::ZERO && !shutdown.load(Ordering::SeqCst) {
-        let tick = remaining.min(Duration::from_secs(1));
-        sleep(tick).await;
-        remaining = remaining.saturating_sub(tick);
-    }
 }

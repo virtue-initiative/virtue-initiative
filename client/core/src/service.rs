@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::api::{ApiTransport, ReqwestApiClient};
 use crate::auth::Auth;
 use crate::config::Config;
@@ -12,6 +14,12 @@ use crate::module::screenshot::{ScreenshotConfig, ScreenshotObserver};
 use crate::module::upload::{UploadConfig, UploadObserver};
 use crate::platform::PlatformHooks;
 use crate::storage::FileStateStore;
+
+pub const ITER_INTERVAL: Duration = Duration::from_secs(1);
+
+pub async fn iter_sleep() {
+    tokio::time::sleep(ITER_INTERVAL).await;
+}
 
 const SCREENSHOT_IDX: usize = 1;
 const UPLOAD_IDX: usize = 2;

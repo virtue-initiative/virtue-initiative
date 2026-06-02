@@ -9,13 +9,10 @@ use std::time::Duration;
 use anyhow::Result;
 use serde::Serialize;
 use virtue_core::events::{Event, ProcessStoppedReason};
-use virtue_core::{MonitorService, UserSessionState};
+use virtue_core::{ITER_INTERVAL, MonitorService, UserSessionState};
 
 use crate::capture::WindowsPlatformHooks;
 use crate::config::{ClientPaths, build_core_config};
-
-const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
-const LOOP_INTERVAL: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -242,7 +239,6 @@ fn run_monitor_loop(shutdown: Arc<AtomicBool>, command_rx: Receiver<MonitorComma
         };
 
     service.queue_event(Event::ProcessStarted);
-    service.queue_event(Event::UserSessionChanged(UserSessionState::LoggedIn));
     let _ = service.run_event_loop_iter();
 
     loop {
@@ -270,7 +266,6 @@ fn run_monitor_loop(shutdown: Arc<AtomicBool>, command_rx: Receiver<MonitorComma
                         snapshot.state = "running".to_string();
                     });
                 }
-                wait_for_commands(&mut service, &command_rx, &shutdown, LOOP_INTERVAL);
             }
             Err(err) => {
                 let message = err.to_string();
@@ -278,9 +273,9 @@ fn run_monitor_loop(shutdown: Arc<AtomicBool>, command_rx: Receiver<MonitorComma
                     snapshot.state = "error".to_string();
                     snapshot.last_error = Some(message);
                 });
-                wait_for_commands(&mut service, &command_rx, &shutdown, ERROR_RETRY_INTERVAL);
             }
         }
+        wait_for_commands(&mut service, &command_rx, &shutdown, ITER_INTERVAL);
     }
 
     drain_commands(&mut service, &command_rx);

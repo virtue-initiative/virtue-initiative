@@ -15,8 +15,6 @@ use windows::Win32::System::Registry::{
     HKEY_LOCAL_MACHINE, KEY_READ, RegCloseKey, RegOpenKeyExW, RegQueryValueExW,
 };
 #[cfg(target_os = "windows")]
-use windows::Win32::System::SystemInformation::GetTickCount64;
-#[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
 
 #[cfg(target_os = "windows")]
@@ -120,17 +118,55 @@ pub fn capture_screen_png() -> Result<Vec<u8>> {
     Err(anyhow!("windows capture is only supported on Windows"))
 }
 
+// Reads the logon time of the current user session via the process token and LSA.
+// Uses logon time rather than system uptime because Virtue starts at user login, not system boot.
 #[cfg(target_os = "windows")]
 pub fn read_last_startup_time_utc_ms() -> CoreResult<Option<i64>> {
-    let uptime_ms = unsafe { GetTickCount64() };
-    let now_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| CoreError::CommandFailed(e.to_string()))?
-        .as_millis();
-    let startup_ms = now_ms.saturating_sub(uptime_ms as u128);
-    Ok(Some(
-        i64::try_from(startup_ms).map_err(|_| CoreError::InvalidState("clock overflow"))?,
-    ))
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::Security::Authentication::Identity::{
+        LsaFreeReturnBuffer, LsaGetLogonSessionData, SECURITY_LOGON_SESSION_DATA,
+    };
+    use windows::Win32::Security::{
+        GetTokenInformation, OpenProcessToken, TOKEN_QUERY, TOKEN_STATISTICS, TokenStatistics,
+    };
+    use windows::Win32::System::Threading::GetCurrentProcess;
+
+    const FILETIME_TO_UNIX_OFFSET_100NS: i64 = 116_444_736_000_000_000;
+
+    unsafe {
+        let mut token = windows::Win32::Foundation::HANDLE::default();
+        OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token)
+            .map_err(|e| CoreError::CommandFailed(e.to_string()))?;
+
+        let mut stats = TOKEN_STATISTICS::default();
+        let mut returned = 0u32;
+        let token_result = GetTokenInformation(
+            token,
+            TokenStatistics,
+            Some(&mut stats as *mut _ as *mut core::ffi::c_void),
+            std::mem::size_of::<TOKEN_STATISTICS>() as u32,
+            &mut returned,
+        );
+        let _ = CloseHandle(token);
+        token_result.map_err(|e| CoreError::CommandFailed(e.to_string()))?;
+
+        let mut session_data: *mut SECURITY_LOGON_SESSION_DATA = std::ptr::null_mut();
+        LsaGetLogonSessionData(&stats.AuthenticationId, &mut session_data)
+            .map_err(|e| CoreError::CommandFailed(e.to_string()))?;
+
+        if session_data.is_null() {
+            return Ok(None);
+        }
+
+        let logon_time = (*session_data).LogonTime.QuadPart;
+        let _ = LsaFreeReturnBuffer(session_data as *mut core::ffi::c_void);
+
+        if logon_time <= 0 || logon_time < FILETIME_TO_UNIX_OFFSET_100NS {
+            return Ok(None);
+        }
+        let unix_ms = (logon_time - FILETIME_TO_UNIX_OFFSET_100NS) / 10_000;
+        Ok(Some(unix_ms))
+    }
 }
 
 #[cfg(not(target_os = "windows"))]

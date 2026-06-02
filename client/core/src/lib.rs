@@ -24,4 +24,4 @@ pub use model::{
 };
 pub use model::{ServiceStopMarker, StopIntent, UserSessionState};
 pub use platform::PlatformHooks;
-pub use service::MonitorService;
+pub use service::{ITER_INTERVAL, MonitorService, iter_sleep};

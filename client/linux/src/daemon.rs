@@ -1,14 +1,12 @@
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use tokio::sync::mpsc;
-use tokio::time::sleep;
-use virtue_core::MonitorService;
 use virtue_core::events::{Event, ProcessStoppedReason};
+use virtue_core::{MonitorService, iter_sleep};
 use zbus::proxy;
 
 use crate::capture::{LinuxPlatformHooks, is_session_unavailable_text};
@@ -16,8 +14,6 @@ use crate::config::{ClientPaths, build_core_config};
 use crate::tray;
 
 const SESSION_UNAVAILABLE_LOG_INTERVAL: Duration = Duration::from_secs(5 * 60);
-const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
-const LOOP_INTERVAL: Duration = Duration::from_secs(1);
 
 #[proxy(
     interface = "org.freedesktop.login1.Manager",
@@ -50,10 +46,9 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
             break;
         }
 
-        let sleep_duration = match service.loop_iteration() {
+        match service.loop_iteration() {
             Ok(_outcome) => {
                 last_session_unavailable_log = None;
-                LOOP_INTERVAL
             }
             Err(err) => {
                 let message = err.to_string();
@@ -67,9 +62,8 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
                 } else {
                     eprintln!("daemon: {message}");
                 }
-                ERROR_RETRY_INTERVAL
             }
-        };
+        }
 
         tokio::select! {
             signal = signal_rx.recv() => {
@@ -89,7 +83,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
                     let _ = service.run_event_loop_iter();
                 }
             }
-            _ = sleep_interruptible(&shutdown, sleep_duration) => {}
+            _ = iter_sleep() => {}
         }
     }
 
@@ -201,15 +195,6 @@ fn spawn_suspend_watcher(sleep_tx: mpsc::UnboundedSender<bool>) {
             }
         }
     });
-}
-
-async fn sleep_interruptible(shutdown: &Arc<AtomicBool>, duration: Duration) {
-    let mut remaining = duration;
-    while remaining > Duration::ZERO && !shutdown.load(Ordering::SeqCst) {
-        let tick = remaining.min(Duration::from_secs(1));
-        sleep(tick).await;
-        remaining = remaining.saturating_sub(tick);
-    }
 }
 
 fn classify_shutdown_reason(

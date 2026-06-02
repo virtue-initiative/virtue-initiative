@@ -25,6 +25,7 @@ pub enum LifecycleKind {
     ComputerSuspended,
     ComputerResumed,
     UserSessionChanged,
+    ComputerBooted,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
