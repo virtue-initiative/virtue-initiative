@@ -18,6 +18,7 @@ body {
   color: var(--text);
   font-family: var(--font);
   line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
 ::selection {
