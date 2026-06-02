@@ -11,7 +11,7 @@
 //! platform crates would use.
 
 use virtue_core::events::{Event, ProcessStoppedReason, UploadKind};
-use virtue_core::module::lifecycle::LifecycleObserverState;
+use virtue_core::module::lifecycle::{LifecycleObserverState, LifecycleStatus};
 use virtue_core::testing::Scenario;
 
 #[test]
@@ -86,7 +86,7 @@ fn screenshot_retaken_after_interval() {
 fn process_started_emits_lifecycle_upload() {
     let mut scenario = Scenario::authenticated();
     scenario.queue_event(Event::ProcessStarted);
-    // t=0 keeps boot-gap check below 7 s threshold so only the lifecycle
+    // t=0 keeps boot-gap check below 10 s threshold so only the lifecycle
     // upload fires, not an UnexpectedProcessStart alert.
     scenario.at_t(0).loop_iteration();
     assert!(
@@ -111,9 +111,9 @@ fn ping_gap_while_running_emits_alert() {
     let mut scenario = Scenario::authenticated();
     // First loop establishes last_ping = 1_000.
     scenario.at_t(1_000).loop_iteration();
-    // Second loop: gap = 9_000 ms > 7_000 ms threshold, no resume event →
+    // Second loop: gap = 11_000 ms > 10_000 ms threshold, no resume event →
     // PingGapWhileRunning alert fires at HIGH_RISK → immediate log upload.
-    scenario.at_t(10_000).loop_iteration();
+    scenario.at_t(12_000).loop_iteration();
     assert!(
         scenario.api.state().log_uploads.len() >= 1,
         "expected a PingGapWhileRunning log upload"
@@ -124,11 +124,12 @@ fn ping_gap_while_running_emits_alert() {
 fn computer_resume_suppresses_ping_gap_alert() {
     let mut scenario = Scenario::authenticated();
     scenario.at_t(1_000).loop_iteration();
-    // Queue ComputerResumed before the second loop so it is processed first
-    // in the same iter() drain, setting last_computer_resume = 10_000.
-    // resume_gap = 10_000 − 10_000 = 0, which is NOT > 7_000 → no alert.
+    // A suspend+resume pair resets last_running_started to the resume time.
+    // The Ping at t=12_000 sees ping_gap=11_000 > 10_000 but start_gap=0,
+    // so the PingGapWhileRunning alert is suppressed.
+    scenario.queue_event(Event::ComputerSuspended);
     scenario.queue_event(Event::ComputerResumed);
-    scenario.at_t(10_000).loop_iteration();
+    scenario.at_t(12_000).loop_iteration();
     assert_eq!(
         scenario.api.state().log_uploads.len(),
         0,
@@ -264,26 +265,26 @@ fn logout_clears_pending_state() {
 #[test]
 fn ping_after_suspend_without_resume_emits_alert() {
     let mut scenario = Scenario::authenticated();
-    // old_last_ping=5_000 > last_suspend+1000=4_000, and resume=0 < suspend=3_000
-    // → PingAfterSuspend fires when the next Ping is processed.
+    // status=Suspended with 3 pings already counted; the next Ping from
+    // loop_iteration makes it 4 > 3, triggering MissingResume (risk=0.6 →
+    // hash upload).
     scenario.set_lifecycle_observer_state(LifecycleObserverState {
-        last_ping: 5_000,
-        last_computer_suspend: 3_000,
-        last_computer_resume: 0,
+        status: LifecycleStatus::Suspended,
+        pings_while_suspended: 3,
         ..Default::default()
     });
     scenario.at_t(10_000).loop_iteration();
     assert!(
-        scenario.api.state().log_uploads.len() >= 1,
-        "expected a PingAfterSuspend log upload"
+        scenario.api.state().hash_uploads.len() >= 1,
+        "expected a MissingResume hash upload after 4 pings while suspended"
     );
 }
 
 #[test]
 fn unexpected_process_start_after_long_ping_gap_emits_alert() {
     let mut scenario = Scenario::authenticated();
-    // ping_gap = 99_000 > 7_000; TestPlatformHooks returns boot=0 so
-    // now_ms - boot = 100_000 > 7_000 → UnexpectedProcessStart fires.
+    // ping_gap = 99_000 > 10_000; TestPlatformHooks returns boot=0 so
+    // now_ms - boot = 100_000 > 10_000 → UnexpectedProcessStart fires.
     scenario.set_lifecycle_observer_state(LifecycleObserverState {
         last_ping: 1_000,
         ..Default::default()
@@ -299,11 +300,11 @@ fn unexpected_process_start_after_long_ping_gap_emits_alert() {
 #[test]
 fn process_killed_before_shutdown_emits_alert() {
     let mut scenario = Scenario::authenticated();
-    // stopped_other=1_000 > started=0 and last_shutdown=9_000 - stopped=1_000 = 8_000 > 7_000
+    // stopped_other=1_000 > started=0 and last_shutdown=12_000 - stopped=1_000 = 11_000 > 10_000
     // → ProcessKilledBeforeShutdown fires on the next event (auto-Ping from iter).
     scenario.set_lifecycle_observer_state(LifecycleObserverState {
         last_process_stopped_other: 1_000,
-        last_process_stopped_shutdown: 9_000,
+        last_process_stopped_shutdown: 12_000,
         ..Default::default()
     });
     scenario.at_t(20_000).loop_iteration();
