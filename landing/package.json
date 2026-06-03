@@ -35,5 +35,8 @@
     "prettier-plugin-astro": "^0.14.1",
     "typescript": "^5.9.3",
     "wrangler": "^4.70.0"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-darwin-x64": "^4.59.0"
   }
 }
