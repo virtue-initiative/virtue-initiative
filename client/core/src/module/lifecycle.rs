@@ -7,7 +7,6 @@ use crate::error::CoreResult;
 use crate::events::{
     AlertReason, Event, LifecycleKind, Observer, ProcessStoppedReason, StateType, UploadKind,
 };
-use crate::model::UserSessionState;
 use crate::platform::PlatformHooks;
 
 pub(crate) const HIGH_RISK_LIFECYCLE_ALERT: f32 = 0.9;
@@ -82,7 +81,6 @@ impl LifecycleObserver {
                 risk: 0.0,
                 kind: UploadKind::Lifecycle {
                     kind: LifecycleKind::ProcessStoppedShutdown,
-                    session_state: None,
                 },
             })?;
             self.state.last_process_stopped_shutdown = last_shutdown;
@@ -95,35 +93,30 @@ impl LifecycleObserver {
                     risk: 0.0,
                     kind: UploadKind::Lifecycle {
                         kind: LifecycleKind::ComputerBooted,
-                        session_state: None,
                     },
                 })?;
                 self.state.last_sent_boot = boot_ms;
             }
         }
 
-        let lifecycle_event: Option<(LifecycleKind, Option<UserSessionState>)> = match event {
-            Event::ProcessStarted => Some((LifecycleKind::ProcessStarted, None)),
+        let lifecycle_event: Option<(LifecycleKind, f32)> = match event {
+            Event::ProcessStarted => Some((LifecycleKind::ProcessStarted, 0.0)),
             Event::ProcessStopped(reason) => match reason {
-                ProcessStoppedReason::Other => Some((LifecycleKind::ProcessStoppedOther, None)),
+                ProcessStoppedReason::Other => Some((LifecycleKind::ProcessStoppedOther, 0.0)),
                 ProcessStoppedReason::Shutdown => {
-                    Some((LifecycleKind::ProcessStoppedShutdown, None))
+                    Some((LifecycleKind::ProcessStoppedShutdown, 0.0))
                 }
-                ProcessStoppedReason::User => Some((LifecycleKind::ProcessStoppedUser, None)),
+                ProcessStoppedReason::User => Some((LifecycleKind::ProcessStoppedUser, 0.0)),
             },
-            Event::ComputerSuspended => Some((LifecycleKind::ComputerSuspended, None)),
-            Event::UserSessionChanged(state) => {
-                Some((LifecycleKind::UserSessionChanged, Some(*state)))
-            }
+            Event::ComputerSuspended => Some((LifecycleKind::ComputerSuspended, 0.0)),
+            Event::Login => Some((LifecycleKind::Login, 0.0)),
+            Event::Logout => Some((LifecycleKind::Logout, HIGH_RISK_LIFECYCLE_ALERT)),
             _ => None,
         };
-        if let Some((kind, session_state)) = lifecycle_event {
+        if let Some((kind, risk)) = lifecycle_event {
             self.sender.send(Event::Upload {
-                risk: 0.0,
-                kind: UploadKind::Lifecycle {
-                    kind,
-                    session_state,
-                },
+                risk,
+                kind: UploadKind::Lifecycle { kind },
             })?;
         }
 
@@ -152,14 +145,14 @@ impl LifecycleObserver {
             Event::Ping => {
                 self.state.last_ping = now_ms;
             }
-            Event::UserSessionChanged(UserSessionState::LoggedIn) => {
+            Event::Login => {
                 self.state.last_login = now_ms;
             }
             _ => {}
         }
 
         // ALERT: process killed >10s before shutdown
-        if old.last_process_stopped_other > old.last_process_started
+        if matches!(event, Event::ProcessStarted)
             && last_shutdown - old.last_process_stopped_other > 10000
         {
             self.sender.send(Event::Upload {
@@ -168,9 +161,6 @@ impl LifecycleObserver {
                     reason: AlertReason::ProcessKilledBeforeShutdown,
                 },
             })?;
-            if !matches!(event, Event::ProcessStopped(ProcessStoppedReason::Other)) {
-                self.state.last_process_stopped_other = 0;
-            }
         }
 
         // ALERT: user explicitly stopped the process
@@ -240,7 +230,6 @@ impl LifecycleObserver {
                 risk: 0.0,
                 kind: UploadKind::Lifecycle {
                     kind: LifecycleKind::ComputerResumed,
-                    session_state: None,
                 },
             })?;
         }

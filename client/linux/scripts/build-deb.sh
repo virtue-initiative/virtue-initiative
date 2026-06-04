@@ -11,7 +11,13 @@ BUILD_LABEL="$(virtue_build_label)"
 ARCH="$(dpkg --print-architecture)"
 PKG_NAME="virtue"
 
-VIRTUE_BUILD_LABEL="$BUILD_LABEL" cargo build --release -p virtue-linux
+TYPE="--release"
+
+if [[ "$1" == "--debug" ]]; then
+    TYPE=""
+fi
+
+VIRTUE_BUILD_LABEL="$BUILD_LABEL" cargo build -p virtue-linux
 
 
 PKG_DIR="target/debian/${PKG_NAME}_${BUILD_LABEL}_${ARCH}"

@@ -6,7 +6,6 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, CoreResult};
-use crate::model::UserSessionState;
 
 #[derive(Debug)]
 pub enum ProcessStoppedReason {
@@ -24,7 +23,8 @@ pub enum LifecycleKind {
     ProcessStoppedOther,
     ComputerSuspended,
     ComputerResumed,
-    UserSessionChanged,
+    Login,
+    Logout,
     ComputerBooted,
 }
 
@@ -47,8 +47,6 @@ pub enum UploadKind {
     },
     Lifecycle {
         kind: LifecycleKind,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        session_state: Option<UserSessionState>,
     },
     LifecycleAlert {
         reason: AlertReason,
@@ -71,7 +69,8 @@ pub enum Event {
     ProcessStopped(ProcessStoppedReason),
     ComputerSuspended,
     ComputerResumed,
-    UserSessionChanged(UserSessionState),
+    Login,
+    Logout,
     CaptureFailed,
 }
 
@@ -138,6 +137,8 @@ impl EventLoop {
     pub fn iter(&mut self) -> CoreResult<()> {
         self.tx.send(Event::Ping).ok();
         while let Ok(event) = self.rx.try_recv() {
+            #[cfg(debug_assertions)]
+            eprintln!("[core event] {event:?}");
             for observer in &mut self.observers {
                 observer.on_event(&event)?;
             }

@@ -70,8 +70,19 @@ impl Observer for ScreenshotObserver {
         if !matches!(event, Event::Ping) {
             return Ok(());
         }
+
         let now_ms = self.platform.get_time_utc_ms()?;
         let interval_ms = self.config.screenshot_interval.as_millis() as i64;
+
+        // Sanity check
+        if let Some(last) = self.state.last_screenshot_at_ms {
+            // Somehow got a time in the future, reset the schedule
+            if now_ms < last {
+                self.state.last_screenshot_at_ms = None;
+            }
+        }
+
+
         let should = self
             .state
             .last_screenshot_at_ms

@@ -30,10 +30,12 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     let _tray = tray::start_daemon_tray(paths.clone());
 
     let shutdown = Arc::new(AtomicBool::new(false));
-    let mut service = MonitorService::setup(build_core_config(paths), LinuxPlatformHooks::new())?;
+    let mut service = tokio::task::block_in_place(|| {
+        MonitorService::setup(build_core_config(paths), LinuxPlatformHooks::new())
+    })?;
 
     service.queue_event(Event::ProcessStarted);
-    let _ = service.run_event_loop_iter();
+    tokio::task::block_in_place(|| service.run_event_loop_iter()).ok();
 
     let (signal_tx, mut signal_rx) = mpsc::unbounded_channel::<String>();
     spawn_signal_handler(shutdown.clone(), signal_tx);
@@ -46,7 +48,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
             break;
         }
 
-        match service.loop_iteration() {
+        match tokio::task::block_in_place(|| service.loop_iteration()) {
             Ok(_outcome) => {
                 last_session_unavailable_log = None;
             }
@@ -68,7 +70,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
         tokio::select! {
             signal = signal_rx.recv() => {
                 if signal.is_some() {
-                    record_shutdown_transition(&mut service);
+                    tokio::task::block_in_place(|| record_shutdown_transition(&mut service));
                 }
                 break;
             }
@@ -80,15 +82,15 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
                         Event::ComputerResumed
                     };
                     service.queue_event(event);
-                    let _ = service.run_event_loop_iter();
+                    tokio::task::block_in_place(|| service.run_event_loop_iter()).ok();
                 }
             }
             _ = iter_sleep() => {}
         }
     }
 
-    let _ = service.run_event_loop_iter();
-    let _ = service.mark_stopped();
+    tokio::task::block_in_place(|| service.run_event_loop_iter()).ok();
+    tokio::task::block_in_place(|| service.mark_stopped()).ok();
     Ok(())
 }
 

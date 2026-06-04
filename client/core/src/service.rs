@@ -6,7 +6,7 @@ use crate::config::Config;
 use crate::error::{CoreError, CoreResult};
 use crate::events::UploadKind;
 use crate::events::{Event, EventLoop, log_error};
-use crate::model::{LoginStatus, LoopOutcome, ServiceStatus, StopIntent, UserSessionState};
+use crate::model::{LoginStatus, LoopOutcome, ServiceStatus, StopIntent};
 use crate::module::capture_availability::CaptureAvailabilityObserver;
 use crate::module::lifecycle::LifecycleObserver;
 use crate::module::screenshot::image_pipeline::ImagePipeline;
@@ -276,8 +276,7 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
         self.status.is_authenticated = true;
         self.status.device_id = Some(device.device_id.clone());
 
-        self.event_loop
-            .queue_event(Event::UserSessionChanged(UserSessionState::LoggedIn));
+        self.event_loop.queue_event(Event::Login);
         let _ = self.event_loop.iter();
         self.persist_state()?;
 
@@ -302,8 +301,7 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
         self.screenshot_obs_mut().reset_schedule();
 
         if was_authenticated {
-            self.event_loop
-                .queue_event(Event::UserSessionChanged(UserSessionState::LoggedOut));
+            self.event_loop.queue_event(Event::Logout);
             let _ = self.event_loop.iter();
         }
 

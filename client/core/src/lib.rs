@@ -22,6 +22,6 @@ pub use model::{
     AuthState, BatchUpload, DeviceCredentials, DeviceSettings, EventData, LogEntry, LoginStatus,
     LoopOutcome, Screenshot, ServiceStatus,
 };
-pub use model::{ServiceStopMarker, StopIntent, UserSessionState};
+pub use model::{ServiceStopMarker, StopIntent};
 pub use platform::PlatformHooks;
 pub use service::{ITER_INTERVAL, MonitorService, iter_sleep};

@@ -127,25 +127,6 @@ pub struct LoopOutcome {
     pub status: ServiceStatus,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum UserSessionState {
-    LoggedIn,
-    LoggedOut,
-    #[default]
-    Unknown,
-}
-
-impl UserSessionState {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::LoggedIn => "logged_in",
-            Self::LoggedOut => "logged_out",
-            Self::Unknown => "unknown",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default)]
 pub struct StopIntent {

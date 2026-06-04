@@ -210,6 +210,8 @@ impl<A: ApiTransport + Clone + 'static> UploadObserver<A> {
         )?;
         match self.upload_api.upload_batch(&batch) {
             Ok(_) => {
+                #[cfg(debug_assertions)]
+                eprintln!("[upload] batch ok: {count} events, start_ms={start_time_ms}");
                 self.state.pending_batch_events.drain(..count);
                 if self.state.post_login_proof_batches_remaining > 0 {
                     self.state.post_login_proof_batches_remaining -= 1;
@@ -236,7 +238,11 @@ impl<A: ApiTransport + Clone + 'static> UploadObserver<A> {
         content_hash: &[u8; 32],
     ) -> CoreResult<bool> {
         match self.upload_api.upload_hash(hash_base_url, content_hash) {
-            Ok(()) => Ok(true),
+            Ok(()) => {
+                #[cfg(debug_assertions)]
+                eprintln!("[upload] hash ok: {}", hex::encode(&content_hash[..8]));
+                Ok(true)
+            }
             Err(err) if err.is_bad_request() => {
                 log_error("hash upload failed permanently", Some(&err));
                 Ok(true)
@@ -288,6 +294,15 @@ impl<A: ApiTransport + Clone + 'static> Observer for UploadObserver<A> {
         match event {
             Event::Ping => {
                 let now_ms = self.platform.get_time_utc_ms()?;
+
+                // Sanity check
+                if let Some(last) = self.state.last_batch_at_ms {
+                    // Somehow got a time in the future, reset the schedule
+                    if now_ms < last {
+                        self.state.last_batch_at_ms = None;
+                    }
+                }
+
                 self.retry_pending_hashes()?;
                 self.retry_pending_immediates()?;
                 self.maybe_upload_batch(now_ms)?;

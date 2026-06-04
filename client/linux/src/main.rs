@@ -110,11 +110,11 @@ async fn run() -> Result<()> {
     paths.ensure_dirs()?;
 
     match cli.command {
-        Commands::Login { email } => login(paths, email),
-        Commands::Logout { yes } => logout(paths, yes),
+        Commands::Login { email } => tokio::task::block_in_place(|| login(paths, email)),
+        Commands::Logout { yes } => tokio::task::block_in_place(|| logout(paths, yes)),
         Commands::Daemon { command } => daemon_command(paths, command).await,
         Commands::Status { json } => status(paths, json),
-        Commands::Dev { command } => dev(paths, command),
+        Commands::Dev { command } => tokio::task::block_in_place(|| dev(paths, command)),
     }
 }
 
@@ -122,7 +122,7 @@ async fn daemon_command(paths: ClientPaths, command: Option<DaemonCommands>) -> 
     match command {
         None => daemon::run_daemon(&paths).await,
         Some(DaemonCommands::Start) => daemon_start(),
-        Some(DaemonCommands::Stop { yes }) => daemon_stop(paths, yes),
+        Some(DaemonCommands::Stop { yes }) => tokio::task::block_in_place(|| daemon_stop(paths, yes)),
     }
 }
 

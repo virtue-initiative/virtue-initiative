@@ -9,7 +9,7 @@ use std::time::Duration;
 use anyhow::Result;
 use serde::Serialize;
 use virtue_core::events::{Event, ProcessStoppedReason};
-use virtue_core::{ITER_INTERVAL, MonitorService, UserSessionState};
+use virtue_core::{ITER_INTERVAL, MonitorService};
 
 use crate::capture::WindowsPlatformHooks;
 use crate::config::{ClientPaths, build_core_config};
@@ -45,7 +45,8 @@ struct MonitorWorker {
 enum MonitorCommand {
     NoteStopRequested { source: String },
     ProcessStopped(ProcessStoppedReason),
-    UserSessionChanged(UserSessionState),
+    Login,
+    Logout,
     ComputerSuspended,
     ComputerResumed,
 }
@@ -146,24 +147,18 @@ pub fn stop_monitoring_for_system_shutdown() -> Result<()> {
 }
 
 pub fn stop_monitoring_for_session_logoff() -> Result<()> {
-    send_command(MonitorCommand::UserSessionChanged(
-        UserSessionState::LoggedOut,
-    ))?;
+    send_command(MonitorCommand::Logout)?;
     send_command(MonitorCommand::ProcessStopped(ProcessStoppedReason::Other))?;
     stop_monitoring()?;
     Ok(())
 }
 
 pub fn notify_session_logon() -> Result<()> {
-    send_command(MonitorCommand::UserSessionChanged(
-        UserSessionState::LoggedIn,
-    ))
+    send_command(MonitorCommand::Login)
 }
 
 pub fn notify_session_logoff() -> Result<()> {
-    send_command(MonitorCommand::UserSessionChanged(
-        UserSessionState::LoggedOut,
-    ))
+    send_command(MonitorCommand::Logout)
 }
 
 pub fn notify_suspend() -> Result<()> {
@@ -292,8 +287,12 @@ fn handle_command(service: &mut MonitorService<WindowsPlatformHooks>, command: M
             service.queue_event(Event::ProcessStopped(reason));
             let _ = service.run_event_loop_iter();
         }
-        MonitorCommand::UserSessionChanged(state) => {
-            service.queue_event(Event::UserSessionChanged(state));
+        MonitorCommand::Login => {
+            service.queue_event(Event::Login);
+            let _ = service.run_event_loop_iter();
+        }
+        MonitorCommand::Logout => {
+            service.queue_event(Event::Logout);
             let _ = service.run_event_loop_iter();
         }
         MonitorCommand::ComputerSuspended => {
