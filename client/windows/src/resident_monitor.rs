@@ -9,6 +9,7 @@ use std::time::Duration;
 use anyhow::Result;
 use serde::Serialize;
 use virtue_core::events::{Event, ProcessStoppedReason};
+use virtue_core::ipc::{IpcListener, is_allowed_inbound, register_connect_tx};
 use virtue_core::{ITER_INTERVAL, MonitorService};
 
 use crate::capture::WindowsPlatformHooks;
@@ -236,7 +237,44 @@ fn run_monitor_loop(shutdown: Arc<AtomicBool>, command_rx: Receiver<MonitorComma
     service.queue_event(Event::ProcessStarted);
     let _ = service.run_event_loop_iter();
 
+    // Bind in-process IPC listener and register the connect sender so that
+    // ControllerClient::connect() works without a process-wide global in ipc.rs.
+    let sock_path = paths.state_dir.join("daemon.sock");
+    let (ipc_accept_tx, ipc_accept_rx) =
+        mpsc::channel::<(virtue_core::ipc::IpcSender, virtue_core::ipc::IpcReceiver)>();
+    if let Ok(listener) = IpcListener::bind(&sock_path) {
+        register_connect_tx(listener.connect_tx.clone());
+        thread::spawn(move || {
+            loop {
+                match listener.blocking_accept() {
+                    Ok(pair) => {
+                        if ipc_accept_tx.send(pair).is_err() {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("resident_monitor: ipc accept error: {e}");
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
     loop {
+        // Wire up any newly accepted IPC connections.
+        while let Ok((sender, mut receiver)) = ipc_accept_rx.try_recv() {
+            service.add_ipc_client(sender);
+            let event_tx = service.event_queue_sender();
+            thread::spawn(move || {
+                while let Ok(event) = receiver.recv_event() {
+                    if is_allowed_inbound(&event) {
+                        event_tx.send(event).ok();
+                    }
+                }
+            });
+        }
+
         drain_commands(&mut service, &command_rx);
         if shutdown.load(Ordering::SeqCst) {
             break;
@@ -244,23 +282,17 @@ fn run_monitor_loop(shutdown: Arc<AtomicBool>, command_rx: Receiver<MonitorComma
 
         match service.loop_iteration() {
             Ok(_outcome) => {
-                if let Ok(status) = service.status() {
-                    update_snapshot(|snapshot| {
-                        snapshot.logged_in = status.is_authenticated;
-                        snapshot.pending_request_count = status.pending_request_count;
-                        snapshot.last_error = None;
-                        snapshot.state = if status.is_authenticated {
-                            "running".to_string()
-                        } else {
-                            "signed_out".to_string()
-                        };
-                    });
-                } else {
-                    update_snapshot(|snapshot| {
-                        snapshot.last_error = None;
-                        snapshot.state = "running".to_string();
-                    });
-                }
+                let status = service.current_status();
+                update_snapshot(|snapshot| {
+                    snapshot.logged_in = status.is_authenticated;
+                    snapshot.pending_request_count = status.pending_request_count;
+                    snapshot.last_error = None;
+                    snapshot.state = if status.is_authenticated {
+                        "running".to_string()
+                    } else {
+                        "signed_out".to_string()
+                    };
+                });
             }
             Err(err) => {
                 let message = err.to_string();
@@ -288,11 +320,11 @@ fn handle_command(service: &mut MonitorService<WindowsPlatformHooks>, command: M
             let _ = service.run_event_loop_iter();
         }
         MonitorCommand::Login => {
-            service.queue_event(Event::Login);
+            service.queue_event(Event::UserSessionLogin);
             let _ = service.run_event_loop_iter();
         }
         MonitorCommand::Logout => {
-            service.queue_event(Event::Logout);
+            service.queue_event(Event::UserSessionLogout);
             let _ = service.run_event_loop_iter();
         }
         MonitorCommand::ComputerSuspended => {

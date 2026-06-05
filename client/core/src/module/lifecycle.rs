@@ -75,7 +75,11 @@ impl LifecycleObserver {
 
         // Forward lifecycle events as batch log entries
 
-        if last_shutdown > 0 && last_shutdown < self.state.last_process_stopped_other {
+        if last_shutdown > 0
+            && self.state.last_process_stopped_other > 0
+            && last_shutdown > self.state.last_process_stopped_other
+            && self.state.last_process_stopped_shutdown < last_shutdown
+        {
             // We missed the shutdown event, fill in with best effort
             self.sender.send(Event::Upload {
                 risk: 0.0,
@@ -86,17 +90,17 @@ impl LifecycleObserver {
             self.state.last_process_stopped_shutdown = last_shutdown;
         }
 
-        if let Some(boot_ms) = self.platform_hooks.get_last_startup_time_utc_ms()? {
-            if boot_ms > self.state.last_sent_boot {
-                // New boot we haven't recorded yet, fill in with best effort
-                self.sender.send(Event::Upload {
-                    risk: 0.0,
-                    kind: UploadKind::Lifecycle {
-                        kind: LifecycleKind::ComputerBooted,
-                    },
-                })?;
-                self.state.last_sent_boot = boot_ms;
-            }
+        if let Some(boot_ms) = self.platform_hooks.get_last_startup_time_utc_ms()?
+            && boot_ms > self.state.last_sent_boot
+        {
+            // New boot we haven't recorded yet, fill in with best effort
+            self.sender.send(Event::Upload {
+                risk: 0.0,
+                kind: UploadKind::Lifecycle {
+                    kind: LifecycleKind::ComputerBooted,
+                },
+            })?;
+            self.state.last_sent_boot = boot_ms;
         }
 
         let lifecycle_event: Option<(LifecycleKind, f32)> = match event {
@@ -109,8 +113,8 @@ impl LifecycleObserver {
                 ProcessStoppedReason::User => Some((LifecycleKind::ProcessStoppedUser, 0.0)),
             },
             Event::ComputerSuspended => Some((LifecycleKind::ComputerSuspended, 0.0)),
-            Event::Login => Some((LifecycleKind::Login, 0.0)),
-            Event::Logout => Some((LifecycleKind::Logout, HIGH_RISK_LIFECYCLE_ALERT)),
+            Event::UserSessionLogin => Some((LifecycleKind::Login, 0.0)),
+            Event::UserSessionLogout => Some((LifecycleKind::Logout, HIGH_RISK_LIFECYCLE_ALERT)),
             _ => None,
         };
         if let Some((kind, risk)) = lifecycle_event {
@@ -145,7 +149,7 @@ impl LifecycleObserver {
             Event::Ping => {
                 self.state.last_ping = now_ms;
             }
-            Event::Login => {
+            Event::UserSessionLogin | Event::Login { .. } => {
                 self.state.last_login = now_ms;
             }
             _ => {}
@@ -153,6 +157,7 @@ impl LifecycleObserver {
 
         // ALERT: process killed >10s before shutdown
         if matches!(event, Event::ProcessStarted)
+            && old.last_process_stopped_other > 0
             && last_shutdown - old.last_process_stopped_other > 10000
         {
             self.sender.send(Event::Upload {
@@ -234,16 +239,48 @@ impl LifecycleObserver {
             })?;
         }
 
+        // ProcessStopped and UserSessionLogout must be recorded even while suspended
+        // so the server audit trail is correct and missed-shutdown detection stays accurate.
+        match event {
+            Event::ProcessStopped(reason) => {
+                let kind = match reason {
+                    ProcessStoppedReason::Other => LifecycleKind::ProcessStoppedOther,
+                    ProcessStoppedReason::Shutdown => LifecycleKind::ProcessStoppedShutdown,
+                    ProcessStoppedReason::User => LifecycleKind::ProcessStoppedUser,
+                };
+                self.sender.send(Event::Upload {
+                    risk: 0.0,
+                    kind: UploadKind::Lifecycle { kind },
+                })?;
+                match reason {
+                    ProcessStoppedReason::Other => self.state.last_process_stopped_other = now_ms,
+                    ProcessStoppedReason::Shutdown => {
+                        self.state.last_process_stopped_shutdown = now_ms
+                    }
+                    ProcessStoppedReason::User => self.state.last_process_stopped_user = now_ms,
+                }
+            }
+            Event::UserSessionLogout => {
+                self.sender.send(Event::Upload {
+                    risk: HIGH_RISK_LIFECYCLE_ALERT,
+                    kind: UploadKind::Lifecycle {
+                        kind: LifecycleKind::Logout,
+                    },
+                })?;
+            }
+            _ => {}
+        }
+
         if self.state.pings_while_suspended > 3 {
-            // We somehow missed the resume event
+            // Reset before sending so re-entrant processing of the queued Upload
+            // event doesn't re-trigger this block while still in Suspended state.
+            self.state.pings_while_suspended = 0;
             self.sender.send(Event::Upload {
                 risk: MEDIUM_RISK_LIFECYCLE_ALERT,
                 kind: UploadKind::LifecycleAlert {
                     reason: AlertReason::MissingResume,
                 },
             })?;
-
-            // Fill in missing resume event
             self.sender.send(Event::ComputerResumed)?;
         }
 

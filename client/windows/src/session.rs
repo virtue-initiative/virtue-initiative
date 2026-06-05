@@ -1,36 +1,8 @@
 use anyhow::{Context, Result};
+use virtue_core::ControllerClient;
 use virtue_core::storage::FileStateStore;
-use virtue_core::{CoreError, CoreResult, MonitorService, PlatformHooks, Screenshot};
 
-use crate::capture::{read_last_shutdown_time_utc_ms, read_last_startup_time_utc_ms};
-use crate::config::{ClientPaths, ClientState, build_core_config, load_state, save_state};
-use crate::resident_monitor;
-
-#[derive(Clone)]
-struct SessionPlatformHooks;
-
-impl PlatformHooks for SessionPlatformHooks {
-    fn take_screenshot(&self) -> CoreResult<Screenshot> {
-        Err(CoreError::CommandFailed(
-            "screenshot capture is unavailable in auth session".to_string(),
-        ))
-    }
-
-    fn get_time_utc_ms(&self) -> CoreResult<i64> {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|err| CoreError::CommandFailed(err.to_string()))?;
-        i64::try_from(now.as_millis()).map_err(|_| CoreError::InvalidState("system clock overflow"))
-    }
-
-    fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>> {
-        read_last_shutdown_time_utc_ms()
-    }
-
-    fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
-        read_last_startup_time_utc_ms()
-    }
-}
+use crate::config::{ClientPaths, ClientState, load_state, save_state};
 
 #[derive(Clone)]
 pub struct SessionManager {
@@ -66,10 +38,16 @@ impl SessionManager {
         })
     }
 
-    pub fn login_blocking(&self, email: &str, password: &str, device_name: &str) -> Result<String> {
-        let mut service =
-            MonitorService::setup(build_core_config(&self.paths), SessionPlatformHooks)?;
-        let result = service.login(email, password).context("login failed")?;
+    pub fn login_blocking(
+        &self,
+        email: &str,
+        password: &str,
+        _device_name: &str,
+    ) -> Result<String> {
+        let sock = self.paths.state_dir.join("daemon.sock");
+        let mut client = ControllerClient::connect(&sock)
+            .context("failed to connect to daemon (is monitoring running?)")?;
+        let device_id = client.login(email, password).context("login failed")?;
 
         save_state(
             &self.paths.ui_state_file,
@@ -77,22 +55,17 @@ impl SessionManager {
                 email: Some(email.to_string()),
             },
         )?;
-        resident_monitor::note_login_state(true);
 
-        Ok(result
-            .device
-            .as_ref()
-            .map(|device| device.device_id.clone())
-            .unwrap_or_else(|| device_name.to_string()))
+        Ok(device_id)
     }
 
     pub fn logout_blocking(&self) -> Result<()> {
-        let mut service =
-            MonitorService::setup(build_core_config(&self.paths), SessionPlatformHooks)?;
-        service.logout()?;
+        let sock = self.paths.state_dir.join("daemon.sock");
+        let mut client = ControllerClient::connect(&sock)
+            .context("failed to connect to daemon (is monitoring running?)")?;
+        client.logout().context("logout failed")?;
 
         save_state(&self.paths.ui_state_file, &ClientState { email: None })?;
-        resident_monitor::note_login_state(false);
         Ok(())
     }
 }

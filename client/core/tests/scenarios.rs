@@ -109,11 +109,12 @@ fn user_stopped_process_emits_high_risk_upload() {
 #[test]
 fn ping_gap_while_running_emits_alert() {
     let mut scenario = Scenario::authenticated();
-    // First loop establishes last_ping = 1_000.
-    scenario.at_t(1_000).loop_iteration();
+    // Run past the 60 s login-grace window so the alert guard passes.
+    // First loop establishes last_ping = 61_000.
+    scenario.at_t(61_000).loop_iteration();
     // Second loop: gap = 11_000 ms > 10_000 ms threshold, no resume event →
     // PingGapWhileRunning alert fires at HIGH_RISK → immediate log upload.
-    scenario.at_t(12_000).loop_iteration();
+    scenario.at_t(72_000).loop_iteration();
     assert!(
         scenario.api.state().log_uploads.len() >= 1,
         "expected a PingGapWhileRunning log upload"
@@ -251,7 +252,9 @@ fn logout_clears_pending_state() {
         0,
         "precondition: no batch should have been flushed yet"
     );
-    scenario.service.logout().expect("logout must succeed");
+    // Trigger logout via IPC event (AuthObserver handles it internally).
+    scenario.queue_event(Event::LogoutRequested);
+    scenario.at_t(30_000).loop_iteration();
     // Logout discards pending batch events instead of flushing them.
     assert_eq!(
         scenario.api.state().batch_uploads.len(),
@@ -285,8 +288,12 @@ fn unexpected_process_start_after_long_ping_gap_emits_alert() {
     let mut scenario = Scenario::authenticated();
     // ping_gap = 99_000 > 10_000; TestPlatformHooks returns boot=0 so
     // now_ms - boot = 100_000 > 10_000 → UnexpectedProcessStart fires.
+    // last_process_started must be non-zero to indicate a prior run (the alert
+    // is suppressed on the very first process start to avoid false positives on
+    // fresh installs).
     scenario.set_lifecycle_observer_state(LifecycleObserverState {
         last_ping: 1_000,
+        last_process_started: 1,
         ..Default::default()
     });
     scenario.queue_event(Event::ProcessStarted);

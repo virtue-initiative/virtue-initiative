@@ -127,9 +127,9 @@ pub fn read_last_startup_time_utc_ms() -> CoreResult<Option<i64>> {
         LsaFreeReturnBuffer, LsaGetLogonSessionData, SECURITY_LOGON_SESSION_DATA,
     };
     use windows::Win32::Security::{
-        GetTokenInformation, OpenProcessToken, TOKEN_QUERY, TOKEN_STATISTICS, TokenStatistics,
+        GetTokenInformation, TOKEN_QUERY, TOKEN_STATISTICS, TokenStatistics,
     };
-    use windows::Win32::System::Threading::GetCurrentProcess;
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
     const FILETIME_TO_UNIX_OFFSET_100NS: i64 = 116_444_736_000_000_000;
 
@@ -152,13 +152,14 @@ pub fn read_last_startup_time_utc_ms() -> CoreResult<Option<i64>> {
 
         let mut session_data: *mut SECURITY_LOGON_SESSION_DATA = std::ptr::null_mut();
         LsaGetLogonSessionData(&stats.AuthenticationId, &mut session_data)
+            .ok()
             .map_err(|e| CoreError::CommandFailed(e.to_string()))?;
 
         if session_data.is_null() {
             return Ok(None);
         }
 
-        let logon_time = (*session_data).LogonTime.QuadPart;
+        let logon_time = (*session_data).LogonTime;
         let _ = LsaFreeReturnBuffer(session_data as *mut core::ffi::c_void);
 
         if logon_time <= 0 || logon_time < FILETIME_TO_UNIX_OFFSET_100NS {

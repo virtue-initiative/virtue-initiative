@@ -11,6 +11,7 @@ use objc2_app_kit::{NSWorkspace, NSWorkspaceWillPowerOffNotification};
 use objc2_foundation::{NSDate, NSRunLoop};
 use tokio::sync::mpsc;
 use virtue_core::events::{Event, ProcessStoppedReason};
+use virtue_core::ipc::is_allowed_inbound;
 use virtue_core::{MonitorService, iter_sleep};
 
 use crate::capture::{MacPlatformHooks, has_screen_capture_access, is_permission_missing_error};
@@ -229,6 +230,33 @@ async fn run_daemon_service_loop(
     service.queue_event(Event::ProcessStarted);
     let _ = service.run_event_loop_iter();
 
+    // Bind IPC listener and spawn an accept thread.
+    let sock_path = paths.state_dir.join("daemon.sock");
+    let (ipc_accept_tx, mut ipc_accept_rx) =
+        mpsc::unbounded_channel::<(virtue_core::ipc::IpcSender, virtue_core::ipc::IpcReceiver)>();
+    if let Ok(listener) = service.bind_ipc(&sock_path) {
+        tokio::task::spawn_blocking(move || {
+            loop {
+                match listener.blocking_accept() {
+                    Ok(pair) => {
+                        if ipc_accept_tx.send(pair).is_err() {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("daemon: ipc accept error: {e}");
+                        break;
+                    }
+                }
+            }
+        });
+    } else {
+        eprintln!(
+            "daemon: failed to bind IPC listener at {}",
+            sock_path.display()
+        );
+    }
+
     let mut sleeping = false;
     let mut suppress_capture_state_until: Option<Instant> = None;
     loop {
@@ -236,8 +264,21 @@ async fn run_daemon_service_loop(
             break;
         }
 
+        // Wire up any newly accepted IPC connections.
+        while let Ok((sender, mut receiver)) = ipc_accept_rx.try_recv() {
+            service.add_ipc_client(sender);
+            let event_tx = service.event_queue_sender();
+            std::thread::spawn(move || {
+                while let Ok(event) = receiver.recv_event() {
+                    if is_allowed_inbound(&event) {
+                        event_tx.send(event).ok();
+                    }
+                }
+            });
+        }
+
         if !sleeping {
-            match service.loop_iteration() {
+            match tokio::task::block_in_place(|| service.loop_iteration()) {
                 Ok(_outcome) => {
                     if !has_screen_capture_access() {
                         suppress_capture_state_until = None;

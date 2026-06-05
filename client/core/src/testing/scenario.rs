@@ -72,6 +72,12 @@ impl Scenario {
         let clock = MockClock::default();
         let platform = TestPlatformHooks::with_clock(clock.clone());
         let api = MockApiClient::new();
+        // When settings are pre-seeded, configure the mock API to return the
+        // same settings so AuthObserver's startup refresh doesn't overwrite them
+        // with owner-less defaults.
+        if let Some(ref s) = settings {
+            api.state().default_device_settings = s.clone();
+        }
         let api_handle = api.clone();
         let platform_handle = platform.clone();
         let mut service = MonitorService::setup_with_api(config, platform, api)
@@ -147,13 +153,10 @@ impl Scenario {
 
     // --- assertions ---
 
-    /// Pull the current `ServiceStatus` (reads from disk) and pass it to
-    /// the closure. Closure should use `assert!` / `assert_eq!`.
+    /// Pull the current `ServiceStatus` and pass it to the closure.
+    /// Closure should use `assert!` / `assert_eq!`.
     pub fn assert_status(&self, check: impl FnOnce(&ServiceStatus)) -> &Self {
-        let status = self
-            .service
-            .status()
-            .expect("fetch service status for assertion");
+        let status = self.service.current_status();
         check(&status);
         self
     }

@@ -2,6 +2,7 @@ pub mod api;
 mod batch;
 
 use std::any::Any;
+use std::sync::mpsc::Sender;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -68,6 +69,8 @@ pub struct UploadObserver<A: ApiTransport + Clone + 'static> {
     pub upload_api: UploadApi<A>,
     pub config: UploadConfig,
     platform: Box<dyn PlatformHooks>,
+    pub(crate) authenticated: bool,
+    sender: Sender<Event>,
 }
 
 impl<A: ApiTransport + Clone + 'static> UploadObserver<A> {
@@ -76,7 +79,9 @@ impl<A: ApiTransport + Clone + 'static> UploadObserver<A> {
         api: A,
         config: UploadConfig,
         initial_credentials: Option<DeviceCredentials>,
+        sender: Sender<Event>,
     ) -> Self {
+        let authenticated = initial_credentials.is_some();
         let mut upload_api = UploadApi::new(api);
         upload_api.set_credentials(initial_credentials);
         Self {
@@ -84,6 +89,8 @@ impl<A: ApiTransport + Clone + 'static> UploadObserver<A> {
             upload_api,
             config,
             platform,
+            authenticated,
+            sender,
         }
     }
 
@@ -117,18 +124,26 @@ impl<A: ApiTransport + Clone + 'static> UploadObserver<A> {
             let encoded = match encode_batch_event(&event) {
                 Ok(bytes) => bytes,
                 Err(err) => {
-                    log_error("encode_batch_event failed permanently", Some(&err));
-                    retried += 1;
+                    log_error(
+                        "encode_batch_event failed, keeping event for retry",
+                        Some(&err),
+                    );
+                    still_pending.push(event);
+                    stop = true;
                     continue;
                 }
             };
             let hash = compute_event_hash(&encoded);
             match self.try_upload_hash(hash_base_url.as_deref(), &hash) {
-                Ok(true) => {
+                Ok(Some(true)) => {
                     self.state.pending_batch_events.push((event.ts, encoded));
                     retried += 1;
                 }
-                Ok(false) | Err(_) => {
+                Ok(None) => {
+                    // Permanently rejected by server — discard without promoting to batch
+                    retried += 1;
+                }
+                Ok(Some(false)) | Err(_) => {
                     still_pending.push(event);
                     stop = true;
                     retried += 1;
@@ -219,7 +234,11 @@ impl<A: ApiTransport + Clone + 'static> UploadObserver<A> {
                 self.state.last_batch_at_ms = Some(now_ms);
                 Ok(())
             }
-            Err(err) if err.is_not_found() => Err(err),
+            Err(err) if err.is_not_found() => {
+                log_error("batch upload: device deregistered, logging out", Some(&err));
+                self.sender.send(Event::LogoutRequested).ok();
+                Ok(())
+            }
             Err(err) if err.is_bad_request() => {
                 log_error("batch upload failed permanently", Some(&err));
                 self.state.pending_batch_events.drain(..count);
@@ -236,20 +255,23 @@ impl<A: ApiTransport + Clone + 'static> UploadObserver<A> {
         &mut self,
         hash_base_url: Option<&str>,
         content_hash: &[u8; 32],
-    ) -> CoreResult<bool> {
+    ) -> CoreResult<Option<bool>> {
         match self.upload_api.upload_hash(hash_base_url, content_hash) {
             Ok(()) => {
                 #[cfg(debug_assertions)]
                 eprintln!("[upload] hash ok: {}", hex::encode(&content_hash[..8]));
-                Ok(true)
+                Ok(Some(true))
             }
             Err(err) if err.is_bad_request() => {
-                log_error("hash upload failed permanently", Some(&err));
-                Ok(true)
+                log_error(
+                    "hash upload failed permanently, discarding event",
+                    Some(&err),
+                );
+                Ok(None)
             }
             Err(err) => {
                 log_error("hash upload deferred", Some(&err));
-                Ok(false)
+                Ok(Some(false))
             }
         }
     }
@@ -292,7 +314,28 @@ impl<A: ApiTransport + Clone + 'static> Observer for UploadObserver<A> {
 
     fn on_event(&mut self, event: &Event) -> CoreResult<()> {
         match event {
+            Event::Login {
+                credentials,
+                settings,
+            } => {
+                self.authenticated = true;
+                self.upload_api.set_credentials(Some(credentials.clone()));
+                self.set_settings(Some(settings.clone()));
+                self.state.reset_for_login();
+            }
+            Event::Logout => {
+                self.authenticated = false;
+                self.upload_api.set_credentials(None);
+                self.set_settings(None);
+                self.state.reset_for_logout();
+            }
+            Event::DeviceSettingsRefreshed { settings } => {
+                self.set_settings(Some(settings.clone()));
+            }
             Event::Ping => {
+                if !self.authenticated {
+                    return Ok(());
+                }
                 let now_ms = self.platform.get_time_utc_ms()?;
 
                 // Sanity check
@@ -308,12 +351,17 @@ impl<A: ApiTransport + Clone + 'static> Observer for UploadObserver<A> {
                 self.maybe_upload_batch(now_ms)?;
             }
             Event::ProcessStopped(ProcessStoppedReason::Shutdown) => {
-                let now_ms = self.platform.get_time_utc_ms()?;
-                if !self.state.pending_batch_events.is_empty() {
-                    let _ = self.try_upload_batch(now_ms);
+                if self.authenticated {
+                    let now_ms = self.platform.get_time_utc_ms()?;
+                    if !self.state.pending_batch_events.is_empty() {
+                        let _ = self.try_upload_batch(now_ms);
+                    }
                 }
             }
             Event::Upload { risk, kind } => {
+                if !self.authenticated {
+                    return Ok(());
+                }
                 let now_ms = self.platform.get_time_utc_ms()?;
                 let entry = LogEntry {
                     ts: now_ms,

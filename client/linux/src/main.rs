@@ -9,13 +9,12 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use std::process::Command;
 use std::process::ExitCode;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use virtue_core::events::UploadKind;
 use virtue_core::storage::FileStateStore;
-use virtue_core::{AuthState, MonitorService, ServiceStatus};
+use virtue_core::{AuthState, ControllerClient, MonitorService, ServiceStatus};
 
 use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_backend};
 use crate::config::{ClientPaths, build_core_config};
@@ -122,7 +121,9 @@ async fn daemon_command(paths: ClientPaths, command: Option<DaemonCommands>) -> 
     match command {
         None => daemon::run_daemon(&paths).await,
         Some(DaemonCommands::Start) => daemon_start(),
-        Some(DaemonCommands::Stop { yes }) => tokio::task::block_in_place(|| daemon_stop(paths, yes)),
+        Some(DaemonCommands::Stop { yes }) => {
+            tokio::task::block_in_place(|| daemon_stop(paths, yes))
+        }
     }
 }
 
@@ -136,19 +137,14 @@ fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
     };
     let password = prompt_password("Password: ")?;
 
-    let mut service = MonitorService::setup(build_core_config(&paths), LinuxPlatformHooks::new())?;
-    let login_result = service.login(&email, &password).context("login failed")?;
+    let sock = paths.state_dir.join("daemon.sock");
+    let mut client =
+        ControllerClient::connect(&sock).context("failed to connect to daemon (is it running?)")?;
+    let device_id = client.login(&email, &password).context("login failed")?;
 
     let probe = probe_backend();
     println!("{}", probe.guidance);
-    println!(
-        "Logged in. Device id: {}",
-        login_result
-            .device
-            .as_ref()
-            .map(|device| device.device_id.as_str())
-            .unwrap_or("<unknown>")
-    );
+    println!("Logged in. Device id: {device_id}");
     if !probe.captured_ok {
         println!(
             "Capture is not yet working; service will run and log missed captures until fixed."
@@ -175,8 +171,10 @@ fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
         return Ok(());
     }
 
-    let mut service = MonitorService::setup(build_core_config(&paths), LinuxPlatformHooks::new())?;
-    service.logout()?;
+    let sock = paths.state_dir.join("daemon.sock");
+    let mut client =
+        ControllerClient::connect(&sock).context("failed to connect to daemon (is it running?)")?;
+    client.logout().context("logout failed")?;
 
     println!("Logged out. Monitoring is disabled on this device until you run `virtue login`.");
     Ok(())
@@ -187,7 +185,7 @@ fn status(paths: ClientPaths, json: bool) -> Result<()> {
     let auth = store.load_auth_state()?;
     let mut config = build_core_config(&paths);
     config.refresh_from_runtime_file()?;
-    let status = load_service_status(&store, &auth, &config)?;
+    let status = load_service_status(&paths, &auth, &config)?;
 
     let logged_in = auth.device_credentials.is_some();
     let device_id = status.device_id.as_deref().unwrap_or("<none>").to_string();
@@ -247,13 +245,14 @@ fn daemon_stop(paths: ClientPaths, yes: bool) -> Result<()> {
         return Ok(());
     }
 
-    let mut service = MonitorService::setup(build_core_config(&paths), LinuxPlatformHooks::new())?;
-    service.note_stop_requested_by_user("cli_daemon_stop")?;
+    let sock = paths.state_dir.join("daemon.sock");
+    let mut client =
+        ControllerClient::connect(&sock).context("failed to connect to daemon (is it running?)")?;
+    client
+        .request_user_stop("cli_daemon_stop")
+        .context("failed to record stop intent")?;
 
-    if let Err(err) = run_systemctl_user(["stop", "virtue.service"]) {
-        let _ = service.take_stop_intent();
-        return Err(err);
-    }
+    run_systemctl_user(["stop", "virtue.service"])?;
 
     println!("Stopped virtue.service.");
     Ok(())
@@ -341,7 +340,7 @@ fn dev_add_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
         .title
         .unwrap_or_else(|| "Developer CLI batched log".to_string());
     let mut service = MonitorService::setup(build_core_config(&paths), LinuxPlatformHooks::new())?;
-    service.queue_batch_log(
+    service.send_log(
         args.risk,
         UploadKind::Dev {
             title,
@@ -489,19 +488,19 @@ fn format_risk(risk: f32) -> String {
     value
 }
 
-fn current_time_utc_ms() -> Result<i64> {
-    let duration = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .context("system clock before UNIX epoch")?;
-    i64::try_from(duration.as_millis()).context("system clock overflow")
-}
-
 fn load_service_status(
-    store: &FileStateStore,
+    paths: &ClientPaths,
     auth: &AuthState,
-    config: &virtue_core::Config,
+    _config: &virtue_core::Config,
 ) -> Result<ServiceStatus> {
-    let mut status = store.load_status()?.unwrap_or(ServiceStatus {
+    // Try to get live status from the daemon via IPC; fall back to defaults.
+    let sock = paths.state_dir.join("daemon.sock");
+    if let Ok(mut client) = ControllerClient::connect(&sock) {
+        if let Ok(status) = client.get_status() {
+            return Ok(status);
+        }
+    }
+    Ok(ServiceStatus {
         is_authenticated: auth.device_credentials.is_some(),
         is_running: false,
         device_id: auth
@@ -510,95 +509,13 @@ fn load_service_status(
             .map(|device| device.device_id.clone()),
         last_loop_at_ms: None,
         pending_request_count: 0,
-    });
-    status.is_running =
-        status.is_running && has_fresh_status_heartbeat(&status, config, current_time_utc_ms()?);
-    Ok(status)
-}
-
-fn has_fresh_status_heartbeat(
-    status: &ServiceStatus,
-    config: &virtue_core::Config,
-    now_ms: i64,
-) -> bool {
-    let Some(last_loop_at_ms) = status.last_loop_at_ms else {
-        return false;
-    };
-
-    let heartbeat_window_ms = status_heartbeat_window(config).as_millis() as i64;
-    now_ms.saturating_sub(last_loop_at_ms) <= heartbeat_window_ms
-}
-
-fn status_heartbeat_window(config: &virtue_core::Config) -> Duration {
-    let base_interval = config
-        .screenshot_interval
-        .min(config.batch_interval)
-        .max(Duration::from_secs(30));
-    base_interval.checked_mul(2).unwrap_or(base_interval)
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        Cli, Commands, DaemonCommands, has_fresh_status_heartbeat, status_heartbeat_window,
-    };
+    use super::{Cli, Commands, DaemonCommands};
     use clap::Parser;
-    use std::path::PathBuf;
-    use std::time::Duration;
-    use virtue_core::{Config, ServiceStatus};
-
-    fn test_config() -> Config {
-        Config::new(
-            "https://example.invalid",
-            "test-device",
-            "linux",
-            PathBuf::from("/tmp/virtue-status-test"),
-            None,
-            Duration::from_secs(30),
-            Duration::from_secs(60),
-        )
-    }
-
-    fn test_status(last_loop_at_ms: Option<i64>) -> ServiceStatus {
-        ServiceStatus {
-            is_authenticated: true,
-            is_running: true,
-            device_id: Some("device-1".to_string()),
-            last_loop_at_ms,
-            pending_request_count: 0,
-        }
-    }
-
-    #[test]
-    fn status_heartbeat_window_uses_fastest_loop_interval_with_grace() {
-        let config = test_config();
-
-        assert_eq!(status_heartbeat_window(&config), Duration::from_secs(60));
-    }
-
-    #[test]
-    fn heartbeat_is_stale_when_last_loop_is_too_old() {
-        let config = test_config();
-        let status = test_status(Some(1_000));
-
-        assert!(!has_fresh_status_heartbeat(&status, &config, 62_000));
-    }
-
-    #[test]
-    fn heartbeat_is_fresh_when_last_loop_is_recent() {
-        let config = test_config();
-        let status = test_status(Some(5_000));
-
-        assert!(has_fresh_status_heartbeat(&status, &config, 64_000));
-    }
-
-    #[test]
-    fn heartbeat_is_stale_when_status_has_never_looped() {
-        let config = test_config();
-        let status = test_status(None);
-
-        assert!(!has_fresh_status_heartbeat(&status, &config, 64_000));
-    }
 
     #[test]
     fn cli_accepts_login_command() {
@@ -623,20 +540,6 @@ mod tests {
         let cli = Cli::try_parse_from(["virtue", "status", "--json"])
             .expect("status --json should parse");
         assert!(matches!(cli.command, Commands::Status { json: true }));
-    }
-
-    #[test]
-    fn heartbeat_is_fresh_just_at_threshold() {
-        let config = test_config();
-        let status = test_status(Some(0));
-        assert!(has_fresh_status_heartbeat(&status, &config, 60_000));
-    }
-
-    #[test]
-    fn status_is_stale_after_multiple_intervals() {
-        let config = test_config();
-        let status = test_status(Some(0));
-        assert!(!has_fresh_status_heartbeat(&status, &config, 180_000));
     }
 
     #[test]

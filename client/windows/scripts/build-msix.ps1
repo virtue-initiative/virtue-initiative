@@ -186,7 +186,7 @@ function Ensure-PackageSigningCertificate {
     )
 
     $friendlyName = "Virtue MSIX Dev Signing"
-    $storePath = "Cert:\CurrentUser\My"
+    $storePath = "Cert:\LocalMachine\My"
     $existing = Get-ChildItem -Path $storePath |
         Where-Object {
             $_.Subject -eq $Publisher -and
@@ -222,13 +222,14 @@ function Ensure-PackageSigningCertificate {
 
     [pscustomobject]@{
         Certificate = $existing
-        PfxPath = $pfxPath
-        CerPath = $cerPath
-        Password = $plainPassword
+        Thumbprint  = $existing.Thumbprint
+        PfxPath     = $pfxPath
+        CerPath     = $cerPath
+        Password    = $plainPassword
     }
 }
 
-function Get-SigningCertificateFromPfx {
+function Import-PfxToMachineStore {
     param(
         [string]$CertificatePath,
         [string]$CertificatePassword
@@ -241,11 +242,25 @@ function Get-SigningCertificateFromPfx {
         throw "Signing certificate not found at $CertificatePath"
     }
 
-    return New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(
-        $CertificatePath,
-        $CertificatePassword,
-        [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable
-    )
+    $flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::MachineKeySet `
+           -bor [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::PersistKeySet `
+           -bor [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable
+    $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(
+        $CertificatePath, $CertificatePassword, $flags)
+
+    if (-not $cert.HasPrivateKey) {
+        throw "Signing certificate at $CertificatePath does not include a private key."
+    }
+    if ($cert.NotAfter -le (Get-Date)) {
+        throw "Signing certificate at $CertificatePath is expired."
+    }
+
+    $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("My", "LocalMachine")
+    $store.Open("ReadWrite")
+    $store.Add($cert)
+    $store.Close()
+
+    return $cert
 }
 
 function Resolve-SigningConfiguration {
@@ -258,39 +273,36 @@ function Resolve-SigningConfiguration {
     )
 
     if (-not [string]::IsNullOrWhiteSpace($SigningCertificatePath)) {
-        $certificate = Get-SigningCertificateFromPfx `
+        $certificate = Import-PfxToMachineStore `
             -CertificatePath $SigningCertificatePath `
             -CertificatePassword $SigningCertificatePassword
 
-        if (-not $certificate.HasPrivateKey) {
-            throw "Signing certificate at $SigningCertificatePath does not include a private key."
-        }
-        if ($certificate.NotAfter -le (Get-Date)) {
-            throw "Signing certificate at $SigningCertificatePath is expired."
-        }
-
         return [pscustomobject]@{
-            Mode = "Trusted"
-            Publisher = $certificate.Subject
-            Certificate = $certificate
-            PfxPath = $SigningCertificatePath
-            Password = $SigningCertificatePassword
-            CerPath = $null
-            TimestampUrl = $SigningTimestampUrl
+            Mode                       = "Trusted"
+            Publisher                  = $certificate.Subject
+            Certificate                = $certificate
+            Thumbprint                 = $certificate.Thumbprint
+            PfxPath                    = $SigningCertificatePath
+            Password                   = $SigningCertificatePassword
+            CerPath                    = $null
+            TimestampUrl               = $SigningTimestampUrl
             RequiresCertificateBootstrap = $false
+            ImportedToMachineStore     = $true
         }
     }
 
     $devCertificate = Ensure-PackageSigningCertificate -Publisher $ManifestPublisher -CertificateRoot $CertificateRoot
     return [pscustomobject]@{
-        Mode = "Dev"
-        Publisher = $ManifestPublisher
-        Certificate = $devCertificate.Certificate
-        PfxPath = $devCertificate.PfxPath
-        Password = $devCertificate.Password
-        CerPath = $devCertificate.CerPath
-        TimestampUrl = $null
+        Mode                       = "Dev"
+        Publisher                  = $ManifestPublisher
+        Certificate                = $devCertificate.Certificate
+        Thumbprint                 = $devCertificate.Thumbprint
+        PfxPath                    = $devCertificate.PfxPath
+        Password                   = $devCertificate.Password
+        CerPath                    = $devCertificate.CerPath
+        TimestampUrl               = $null
         RequiresCertificateBootstrap = $true
+        ImportedToMachineStore     = $false
     }
 }
 
@@ -646,11 +658,9 @@ try {
         $signArgs = @(
             "sign",
             "/fd", "SHA256",
-            "/f", $signingCertificate.PfxPath
+            "/sha1", $signingCertificate.Thumbprint,
+            "/sm"
         )
-        if (-not [string]::IsNullOrWhiteSpace($signingCertificate.Password)) {
-            $signArgs += @("/p", $signingCertificate.Password)
-        }
         if (-not [string]::IsNullOrWhiteSpace($signingCertificate.TimestampUrl)) {
             $signArgs += @("/tr", $signingCertificate.TimestampUrl, "/td", "SHA256")
         }
@@ -724,6 +734,15 @@ finally {
     if ($null -ne $originalManifestText) {
         $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
         [System.IO.File]::WriteAllText($WindowsAppManifest, $originalManifestText, $utf8NoBom)
+    }
+    if ($null -ne $signingCertificate -and $signingCertificate.ImportedToMachineStore -and $signingCertificate.Mode -eq "Trusted") {
+        try {
+            $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("My", "LocalMachine")
+            $store.Open("ReadWrite")
+            $toRemove = $store.Certificates | Where-Object { $_.Thumbprint -eq $signingCertificate.Thumbprint } | Select-Object -First 1
+            if ($toRemove) { $store.Remove($toRemove) }
+            $store.Close()
+        } catch {}
     }
     Pop-Location
 }

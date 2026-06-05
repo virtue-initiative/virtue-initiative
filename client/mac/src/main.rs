@@ -16,7 +16,7 @@ use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use virtue_core::storage::FileStateStore;
-use virtue_core::{AuthState, CoreError, MonitorService, ServiceStatus};
+use virtue_core::{AuthState, ControllerClient, CoreError, ServiceStatus};
 
 use crate::capture::{
     MacPlatformHooks, ScreenCaptureAccessRequestOutcome, has_screen_capture_access,
@@ -291,19 +291,17 @@ fn handle_main_window_event(
 }
 
 fn login(paths: &ClientPaths, email: &str, password: &str) -> Result<String> {
-    let mut service = MonitorService::setup(build_core_config(paths), MacPlatformHooks::new())?;
-    let login_result = service.login(email, password).context("login failed")?;
+    let sock = paths.state_dir.join("daemon.sock");
+    let mut client =
+        ControllerClient::connect(&sock).context("failed to connect to daemon (is it running?)")?;
+    let device_id = client.login(email, password).context("login failed")?;
     save_state(
         &paths.ui_state_file,
         &ClientState {
             email: Some(email.to_string()),
         },
     )?;
-    Ok(login_result
-        .device
-        .as_ref()
-        .map(|device| device.device_id.clone())
-        .unwrap_or_else(|| "<unknown>".to_string()))
+    Ok(device_id)
 }
 
 fn login_error_message(err: &anyhow::Error) -> String {
@@ -326,8 +324,10 @@ fn login_error_message(err: &anyhow::Error) -> String {
 }
 
 fn logout(paths: &ClientPaths) -> Result<()> {
-    let mut service = MonitorService::setup(build_core_config(paths), MacPlatformHooks::new())?;
-    service.logout()?;
+    let sock = paths.state_dir.join("daemon.sock");
+    let mut client =
+        ControllerClient::connect(&sock).context("failed to connect to daemon (is it running?)")?;
+    client.logout().context("logout failed")?;
     launch_agent::stop_agent(paths).context("failed to unregister background service")?;
     save_state(&paths.ui_state_file, &ClientState { email: None })?;
     Ok(())
@@ -338,14 +338,14 @@ fn stop_monitoring(paths: &ClientPaths) -> Result<bool> {
         return Ok(false);
     }
 
-    let mut service = MonitorService::setup(build_core_config(paths), MacPlatformHooks::new())?;
-    service.note_stop_requested_by_user("tray_stop_monitoring")?;
+    let sock = paths.state_dir.join("daemon.sock");
+    let mut client =
+        ControllerClient::connect(&sock).context("failed to connect to daemon (is it running?)")?;
+    client
+        .request_user_stop("tray_stop_monitoring")
+        .context("failed to record stop intent")?;
 
-    if let Err(err) = launch_agent::stop_agent(paths).context("failed to stop background service") {
-        let _ = service.take_stop_intent();
-        return Err(err);
-    }
-
+    launch_agent::stop_agent(paths).context("failed to stop background service")?;
     Ok(true)
 }
 

@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use tokio::sync::mpsc;
 use virtue_core::events::{Event, ProcessStoppedReason};
+use virtue_core::ipc::is_allowed_inbound;
 use virtue_core::{MonitorService, iter_sleep};
 use zbus::proxy;
 
@@ -37,6 +38,33 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     service.queue_event(Event::ProcessStarted);
     tokio::task::block_in_place(|| service.run_event_loop_iter()).ok();
 
+    // Bind IPC listener and spawn an accept thread.
+    let sock_path = paths.state_dir.join("daemon.sock");
+    let (ipc_accept_tx, mut ipc_accept_rx) =
+        mpsc::unbounded_channel::<(virtue_core::ipc::IpcSender, virtue_core::ipc::IpcReceiver)>();
+    if let Ok(listener) = service.bind_ipc(&sock_path) {
+        tokio::task::spawn_blocking(move || {
+            loop {
+                match listener.blocking_accept() {
+                    Ok(pair) => {
+                        if ipc_accept_tx.send(pair).is_err() {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("daemon: ipc accept error: {e}");
+                        break;
+                    }
+                }
+            }
+        });
+    } else {
+        eprintln!(
+            "daemon: failed to bind IPC listener at {}",
+            sock_path.display()
+        );
+    }
+
     let (signal_tx, mut signal_rx) = mpsc::unbounded_channel::<String>();
     spawn_signal_handler(shutdown.clone(), signal_tx);
     let (sleep_tx, mut sleep_rx) = mpsc::unbounded_channel::<bool>();
@@ -46,6 +74,19 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     loop {
         if shutdown.load(Ordering::SeqCst) {
             break;
+        }
+
+        // Wire up any newly accepted IPC connections.
+        while let Ok((sender, mut receiver)) = ipc_accept_rx.try_recv() {
+            service.add_ipc_client(sender);
+            let event_tx = service.event_queue_sender();
+            std::thread::spawn(move || {
+                while let Ok(event) = receiver.recv_event() {
+                    if is_allowed_inbound(&event) {
+                        event_tx.send(event).ok();
+                    }
+                }
+            });
         }
 
         match tokio::task::block_in_place(|| service.loop_iteration()) {

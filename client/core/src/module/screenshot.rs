@@ -15,8 +15,10 @@ pub struct ScreenshotConfig {
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
+#[serde(default)]
 pub struct ScreenshotObserverState {
     pub last_screenshot_at_ms: Option<i64>,
+    pub authenticated: bool,
 }
 
 pub struct ScreenshotObserver {
@@ -31,9 +33,13 @@ impl ScreenshotObserver {
         platform: Box<dyn PlatformHooks>,
         sender: Sender<Event>,
         config: ScreenshotConfig,
+        authenticated: bool,
     ) -> Self {
         Self {
-            state: ScreenshotObserverState::default(),
+            state: ScreenshotObserverState {
+                last_screenshot_at_ms: None,
+                authenticated,
+            },
             platform,
             config,
             sender,
@@ -62,26 +68,45 @@ impl Observer for ScreenshotObserver {
     }
 
     fn load_state(&mut self, state: StateType) -> CoreResult<()> {
+        let authenticated_at_startup = self.state.authenticated;
         self.state = serde_json::from_value(state)?;
+        // Always derive authenticated from current auth at startup, not persisted state.
+        self.state.authenticated = authenticated_at_startup;
+        if !self.state.authenticated {
+            self.state.last_screenshot_at_ms = None;
+        }
         Ok(())
     }
 
     fn on_event(&mut self, event: &Event) -> CoreResult<()> {
-        if !matches!(event, Event::Ping) {
+        match event {
+            Event::Login { .. } => {
+                self.state.authenticated = true;
+                self.state.last_screenshot_at_ms = None;
+                return Ok(());
+            }
+            Event::Logout => {
+                self.state.authenticated = false;
+                self.state.last_screenshot_at_ms = None;
+                return Ok(());
+            }
+            Event::Ping => {}
+            _ => return Ok(()),
+        }
+
+        if !self.state.authenticated {
             return Ok(());
         }
 
         let now_ms = self.platform.get_time_utc_ms()?;
         let interval_ms = self.config.screenshot_interval.as_millis() as i64;
 
-        // Sanity check
+        // Sanity check: reset if time went backwards.
         if let Some(last) = self.state.last_screenshot_at_ms {
-            // Somehow got a time in the future, reset the schedule
             if now_ms < last {
                 self.state.last_screenshot_at_ms = None;
             }
         }
-
 
         let should = self
             .state

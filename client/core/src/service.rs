@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::time::Duration;
 
 use crate::api::{ApiTransport, ReqwestApiClient};
@@ -6,11 +7,15 @@ use crate::config::Config;
 use crate::error::{CoreError, CoreResult};
 use crate::events::UploadKind;
 use crate::events::{Event, EventLoop, log_error};
-use crate::model::{LoginStatus, LoopOutcome, ServiceStatus, StopIntent};
+use crate::ipc::{IpcError, IpcListener, IpcSender};
+use crate::model::{LoopOutcome, ServiceStatus, StopIntent};
+use crate::module::auth::AuthObserver;
 use crate::module::capture_availability::CaptureAvailabilityObserver;
 use crate::module::lifecycle::LifecycleObserver;
+use crate::module::request_handler::RequestObserver;
 use crate::module::screenshot::image_pipeline::ImagePipeline;
 use crate::module::screenshot::{ScreenshotConfig, ScreenshotObserver};
+use crate::module::status::StatusObserver;
 use crate::module::upload::{UploadConfig, UploadObserver};
 use crate::platform::PlatformHooks;
 use crate::storage::FileStateStore;
@@ -23,6 +28,9 @@ pub async fn iter_sleep() {
 
 const SCREENSHOT_IDX: usize = 1;
 const UPLOAD_IDX: usize = 2;
+const REQUEST_HANDLER_IDX: usize = 4;
+const AUTH_IDX: usize = 5;
+const STATUS_IDX: usize = 6;
 
 pub struct MonitorService<
     P: PlatformHooks + Clone + 'static,
@@ -30,11 +38,10 @@ pub struct MonitorService<
 > {
     config: Config,
     platform: P,
-    api: A,
     storage: FileStateStore,
-    status: ServiceStatus,
-    pub(crate) auth: Auth,
+    pub(crate) is_running: bool,
     pub(crate) event_loop: EventLoop,
+    _phantom: std::marker::PhantomData<A>,
 }
 
 impl<P: PlatformHooks + Clone + 'static> MonitorService<P, ReqwestApiClient> {
@@ -52,6 +59,8 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
         let state_file_path = config.state_dir.join("event_state.json");
 
         let auth = Auth::load(&storage)?;
+        let is_authenticated = auth.is_authenticated();
+        let device_id = auth.device_id().map(|s| s.to_string());
 
         let mut event_loop = EventLoop::new(state_file_path.clone(), vec![]);
         let tx = event_loop.tx.clone();
@@ -63,6 +72,7 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
             ScreenshotConfig {
                 screenshot_interval: config.screenshot_interval,
             },
+            is_authenticated,
         );
         let upload_obs = UploadObserver::new(
             Box::new(platform.clone()),
@@ -71,55 +81,49 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
                 batch_interval: config.batch_interval,
             },
             auth.device_credentials.clone(),
+            tx.clone(),
         );
         let capture_availability_obs =
             CaptureAvailabilityObserver::new(tx.clone(), Box::new(platform.clone()));
+        let request_handler = RequestObserver::new();
+        let auth_obs = AuthObserver::new(
+            auth,
+            api,
+            config.device_name.clone(),
+            config.platform_name.clone(),
+            storage.clone(),
+            tx.clone(),
+        );
+        let initial_status = ServiceStatus {
+            is_authenticated,
+            is_running: true,
+            device_id,
+            last_loop_at_ms: None,
+            pending_request_count: 0,
+        };
+        let status_obs =
+            StatusObserver::new(initial_status, Box::new(platform.clone()), tx.clone());
 
         event_loop.observers = vec![
-            Box::new(lifecycle_obs),
-            Box::new(screenshot_obs),
-            Box::new(upload_obs),
-            Box::new(capture_availability_obs),
+            Box::new(lifecycle_obs),            // 0
+            Box::new(screenshot_obs),           // 1
+            Box::new(upload_obs),               // 2
+            Box::new(capture_availability_obs), // 3
+            Box::new(request_handler),          // 4
+            Box::new(auth_obs),                 // 5
+            Box::new(status_obs),               // 6
         ];
         event_loop.load_state(&state_file_path)?;
 
-        let is_authenticated = auth.is_authenticated();
-        let device_id = auth.device_id().map(|s| s.to_string());
-
-        let pending_count = Self::upload_obs_in(&event_loop)
-            .state
-            .pending_request_count();
-        let mut status = storage.load_status()?.unwrap_or(ServiceStatus {
-            is_authenticated,
-            is_running: true,
-            device_id: device_id.clone(),
-            last_loop_at_ms: None,
-            pending_request_count: pending_count,
-        });
-        status.is_running = true;
-        status.is_authenticated = is_authenticated;
-        status.device_id = device_id;
-
-        let mut service = Self {
+        let service = Self {
             config,
             platform,
-            api,
             storage,
-            status,
-            auth,
+            is_running: true,
             event_loop,
+            _phantom: std::marker::PhantomData,
         };
 
-        if !service.auth.is_authenticated() {
-            service.screenshot_obs_mut().reset_schedule();
-            service.upload_obs_mut().state.last_batch_at_ms = None;
-        }
-        service.persist_state()?;
-
-        if service.auth.is_authenticated() {
-            let _ = service.refresh_device_settings();
-        }
-        service.persist_state()?;
         Ok(service)
     }
 
@@ -127,29 +131,23 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
         self.ensure_running()?;
         self.refresh_runtime_config()?;
 
-        self.auth = Auth::load(&self.storage)?;
-        let creds = self.auth.device_credentials.clone();
-        self.upload_obs_mut().upload_api.set_credentials(creds);
+        // Sync pending_request_count into StatusObserver before IPC drain.
+        let pending = self.upload_obs().state.pending_request_count();
+        self.status_obs_mut().status.pending_request_count = pending;
 
-        let now_ms = self.platform.get_time_utc_ms()?;
-        self.status.last_loop_at_ms = Some(now_ms);
-
-        if self.auth.is_authenticated() {
-            if !self.upload_obs_mut().has_settings() {
-                let _ = self.refresh_device_settings();
-            }
-            if self.auth.is_authenticated()
-                && let Err(err) = self.event_loop.iter()
-            {
-                log_error("loop iteration failed", Some(&err));
-            }
+        // Process IPC requests without triggering screenshot capture.
+        if let Err(err) = self.event_loop.drain_for_ipc() {
+            log_error("ipc event drain failed", Some(&err));
         }
 
-        self.persist_state()?;
+        if let Err(err) = self.event_loop.iter() {
+            log_error("loop iteration failed", Some(&err));
+        }
 
+        let status = self.status_obs().status.clone();
         Ok(LoopOutcome {
-            ran_at_ms: now_ms,
-            status: self.status.clone(),
+            ran_at_ms: status.last_loop_at_ms.unwrap_or(0),
+            status,
         })
     }
 
@@ -158,15 +156,13 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
     }
 
     pub fn run_event_loop_iter(&mut self) -> CoreResult<()> {
-        if self.auth.is_authenticated() {
-            let _ = self.event_loop.iter();
-        }
-        self.persist_state()
+        self.event_loop.iter()
     }
 
     pub fn mark_stopped(&mut self) -> CoreResult<()> {
-        self.status.is_running = false;
-        self.persist_state()
+        self.is_running = false;
+        self.status_obs_mut().status.is_running = false;
+        self.event_loop.persist()
     }
 
     pub fn note_stop_requested_by_user(&mut self, source: &str) -> CoreResult<()> {
@@ -190,14 +186,7 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
         self.ensure_running()?;
         self.event_loop.queue_event(Event::Upload { risk, kind });
         let _ = self.event_loop.iter();
-        self.persist_state()
-    }
-
-    pub fn queue_batch_log(&mut self, risk: f32, kind: UploadKind) -> CoreResult<()> {
-        self.ensure_running()?;
-        self.event_loop.queue_event(Event::Upload { risk, kind });
-        let _ = self.event_loop.iter();
-        self.persist_state()
+        self.event_loop.persist()
     }
 
     pub fn capture_batch_screenshot(&mut self, risk: Option<f32>) -> CoreResult<()> {
@@ -211,15 +200,13 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
                 content_type: processed.content_type,
             },
         });
-        if self.auth.is_authenticated() {
-            let _ = self.event_loop.iter();
-        }
-        self.persist_state()
+        let _ = self.event_loop.iter();
+        self.event_loop.persist()
     }
 
     pub fn upload_pending_batch_now(&mut self) -> CoreResult<(usize, usize)> {
         self.ensure_running()?;
-        if !self.auth.is_authenticated() {
+        if !self.auth_obs().auth.is_authenticated() {
             return Ok((0, 0));
         }
         let count = self
@@ -229,165 +216,28 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
             .len()
             .min(crate::module::upload::MAX_BATCH_ITEMS_PER_UPLOAD);
         if count == 0 {
-            self.persist_state()?;
+            self.event_loop.persist()?;
             return Ok((0, 0));
         }
         let now_ms = self.platform.get_time_utc_ms()?;
         self.upload_obs_mut().force_upload_now(now_ms)?;
         let remaining = self.upload_obs().state.pending_batch_events.len();
-        self.persist_state()?;
+        self.event_loop.persist()?;
         Ok((count, remaining))
     }
 
-    pub fn login(&mut self, username: &str, password: &str) -> CoreResult<LoginStatus> {
-        self.ensure_running()?;
-
-        let access_token = self.api.login(username, password)?;
-        let mut device = self.api.register_device(
-            &access_token,
-            &self.config.device_name,
-            &self.config.platform_name,
-        )?;
-
-        self.storage.clear_stop_intent()?;
-
-        let settings = self
-            .api
-            .get_device_settings(&device.access_token)
-            .or_else(|err| {
-                if err.is_unauthorized() {
-                    let refreshed = self.api.refresh_device_token(&device.refresh_token)?;
-                    device.access_token = refreshed.clone();
-                    self.api.get_device_settings(&refreshed)
-                } else {
-                    Err(err)
-                }
-            })?;
-
-        self.auth.set_login(access_token.clone(), device.clone());
-        self.auth.persist(&self.storage)?;
-        self.upload_obs_mut()
-            .upload_api
-            .set_credentials(Some(device.clone()));
-        self.upload_obs_mut().set_settings(Some(settings));
-        self.upload_obs_mut().state.reset_for_login();
-        self.screenshot_obs_mut().reset_schedule();
-
-        self.status.is_authenticated = true;
-        self.status.device_id = Some(device.device_id.clone());
-
-        self.event_loop.queue_event(Event::Login);
-        let _ = self.event_loop.iter();
-        self.persist_state()?;
-
-        Ok(LoginStatus {
-            access_token,
-            device: Some(device),
-        })
-    }
-
-    pub fn logout(&mut self) -> CoreResult<()> {
-        self.ensure_running()?;
-
-        let was_authenticated = self.auth.is_authenticated();
-
-        if let Some(token) = self.auth.user_access_token.clone() {
-            let _ = self.api.logout(&token);
-        }
-
-        self.upload_obs_mut().upload_api.set_credentials(None);
-        self.upload_obs_mut().set_settings(None);
-        self.upload_obs_mut().state.reset_for_logout();
-        self.screenshot_obs_mut().reset_schedule();
-
-        if was_authenticated {
-            self.event_loop.queue_event(Event::Logout);
-            let _ = self.event_loop.iter();
-        }
-
-        self.auth.clear();
-        self.auth.persist(&self.storage)?;
-
-        self.storage.clear_stop_intent()?;
-        self.status.is_authenticated = false;
-        self.status.device_id = None;
-        self.persist_state()
-    }
-
-    pub fn status(&self) -> CoreResult<ServiceStatus> {
-        let mut status = self
-            .storage
-            .load_status()?
-            .unwrap_or_else(|| self.status.clone());
+    pub fn current_status(&self) -> ServiceStatus {
+        let mut status = self.status_obs().status.clone();
         status.pending_request_count = self.upload_obs().state.pending_request_count();
-        Ok(status)
-    }
-
-    fn refresh_device_settings(&mut self) -> CoreResult<()> {
-        let mut credentials = self
-            .auth
-            .device_credentials
-            .clone()
-            .ok_or(CoreError::NotAuthenticated)?;
-
-        let result = match self.api.get_device_settings(&credentials.access_token) {
-            Err(err) if err.is_unauthorized() => {
-                let refreshed = self.api.refresh_device_token(&credentials.refresh_token)?;
-                credentials.access_token = refreshed.clone();
-                self.auth.set_credentials(credentials.clone());
-                self.auth.persist(&self.storage)?;
-                self.upload_obs_mut()
-                    .upload_api
-                    .set_credentials(Some(credentials));
-                self.api.get_device_settings(&refreshed)
-            }
-            other => other,
-        };
-
-        match result {
-            Ok(settings) => {
-                self.upload_obs_mut().set_settings(Some(settings));
-                Ok(())
-            }
-            Err(err) if err.is_not_found() => {
-                log_error("device not found; clearing local auth", Some(&err));
-                self.clear_auth()?;
-                Err(CoreError::NotAuthenticated)
-            }
-            Err(err) => {
-                log_error("device settings refresh failed", Some(&err));
-                Err(err)
-            }
-        }
-    }
-
-    fn clear_auth(&mut self) -> CoreResult<()> {
-        self.auth.clear();
-        self.auth.persist(&self.storage)?;
-        self.upload_obs_mut().upload_api.set_credentials(None);
-        self.upload_obs_mut().set_settings(None);
-        self.upload_obs_mut().state.reset_for_logout();
-        self.screenshot_obs_mut().reset_schedule();
-        self.storage.clear_stop_intent()?;
-        self.status.is_authenticated = false;
-        self.status.device_id = None;
-        self.persist_state()
-    }
-
-    fn persist_state(&mut self) -> CoreResult<()> {
-        self.status.is_authenticated = self.auth.is_authenticated();
-        self.status.device_id = self.auth.device_id().map(|s| s.to_string());
-        self.status.pending_request_count = self.upload_obs().state.pending_request_count();
-        self.storage.save_status(&self.status)?;
-        self.event_loop.persist()?;
-        Ok(())
+        status
     }
 
     fn refresh_runtime_config(&mut self) -> CoreResult<()> {
         let previous_base_url = self.config.api_base_url.clone();
         self.config.refresh_from_runtime_file()?;
         if self.config.api_base_url != previous_base_url {
-            self.api.reconfigure(&self.config)?;
+            let config = self.config.clone();
+            self.auth_obs_mut().api.reconfigure(&config)?;
         }
         self.screenshot_obs_mut().config.screenshot_interval = self.config.screenshot_interval;
         self.upload_obs_mut().config.batch_interval = self.config.batch_interval;
@@ -395,17 +245,36 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
     }
 
     fn ensure_running(&self) -> CoreResult<()> {
-        if self.status.is_running {
+        if self.is_running {
             Ok(())
         } else {
             Err(CoreError::Shutdown)
         }
     }
 
+    // ─── IPC ──────────────────────────────────────────────────────────────────
+
+    /// Bind the daemon's IPC listener at the given socket path.
+    pub fn bind_ipc(&self, path: &Path) -> Result<IpcListener, IpcError> {
+        IpcListener::bind(path)
+    }
+
+    /// Register a new controller connection with the `RequestObserver` so it
+    /// receives event broadcasts.
+    pub fn add_ipc_client(&mut self, sender: IpcSender) {
+        self.request_handler_mut().add_client(sender);
+    }
+
+    /// Clone the event-loop sender so a receiver thread can forward inbound
+    /// IPC events into the daemon's event queue.
+    pub fn event_queue_sender(&self) -> std::sync::mpsc::Sender<Event> {
+        self.event_loop.tx.clone()
+    }
+
     // ─── Typed observer accessors ─────────────────────────────────────────────
 
     #[cfg_attr(not(test), allow(dead_code))]
-    fn screenshot_obs(&self) -> &ScreenshotObserver {
+    pub(crate) fn screenshot_obs(&self) -> &ScreenshotObserver {
         self.event_loop.observers[SCREENSHOT_IDX]
             .as_any()
             .downcast_ref::<ScreenshotObserver>()
@@ -433,12 +302,39 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
             .expect("upload observer at index 2")
     }
 
-    // Static versions for use before self is fully constructed
-    fn upload_obs_in(event_loop: &EventLoop) -> &UploadObserver<A> {
-        event_loop.observers[UPLOAD_IDX]
+    fn request_handler_mut(&mut self) -> &mut RequestObserver {
+        self.event_loop.observers[REQUEST_HANDLER_IDX]
+            .as_any_mut()
+            .downcast_mut::<RequestObserver>()
+            .expect("request handler observer at index 4")
+    }
+
+    fn auth_obs(&self) -> &AuthObserver<A> {
+        self.event_loop.observers[AUTH_IDX]
             .as_any()
-            .downcast_ref::<UploadObserver<A>>()
-            .expect("upload observer at index 2")
+            .downcast_ref::<AuthObserver<A>>()
+            .expect("auth observer at index 5")
+    }
+
+    fn auth_obs_mut(&mut self) -> &mut AuthObserver<A> {
+        self.event_loop.observers[AUTH_IDX]
+            .as_any_mut()
+            .downcast_mut::<AuthObserver<A>>()
+            .expect("auth observer at index 5")
+    }
+
+    fn status_obs(&self) -> &StatusObserver {
+        self.event_loop.observers[STATUS_IDX]
+            .as_any()
+            .downcast_ref::<StatusObserver>()
+            .expect("status observer at index 6")
+    }
+
+    fn status_obs_mut(&mut self) -> &mut StatusObserver {
+        self.event_loop.observers[STATUS_IDX]
+            .as_any_mut()
+            .downcast_mut::<StatusObserver>()
+            .expect("status observer at index 6")
     }
 }
 
@@ -555,13 +451,14 @@ mod tests {
             access_token: "device-access".to_string(),
             refresh_token: "device-refresh".to_string(),
         };
-        service.auth.device_credentials = Some(creds.clone());
+        service.auth_obs_mut().auth.device_credentials = Some(creds.clone());
         service
             .upload_obs_mut()
             .upload_api
             .set_credentials(Some(creds));
-        service.status.is_authenticated = true;
-        service.status.device_id = Some("device-1".to_string());
+        service.upload_obs_mut().authenticated = true;
+        service.status_obs_mut().status.is_authenticated = true;
+        service.status_obs_mut().status.device_id = Some("device-1".to_string());
     }
 
     #[allow(dead_code)]
@@ -590,17 +487,9 @@ mod tests {
     #[test]
     fn setup_clears_stale_capture_schedule_when_logged_out() {
         let state_dir = temp_state_dir();
-        let storage = FileStateStore::new(&state_dir).expect("create file state store");
-        storage
-            .save_status(&ServiceStatus {
-                is_authenticated: false,
-                is_running: true,
-                device_id: None,
-                last_loop_at_ms: Some(1),
-                pending_request_count: 0,
-            })
-            .expect("save stale status");
 
+        // No auth.json = not authenticated; ScreenshotObserver starts unauthenticated
+        // and clears any stale schedule on load_state.
         let service = MonitorService::setup(test_config(state_dir.clone()), TestPlatform::new(0))
             .expect("setup service");
 
@@ -614,16 +503,6 @@ mod tests {
     fn status_derives_pending_request_count_from_observer_state() {
         let state_dir = temp_state_dir();
         let mut service = build_service(state_dir.clone());
-        service
-            .storage
-            .save_status(&ServiceStatus {
-                is_authenticated: true,
-                is_running: true,
-                device_id: Some("device-1".to_string()),
-                last_loop_at_ms: Some(1),
-                pending_request_count: 0,
-            })
-            .expect("save stale status");
 
         service
             .upload_obs_mut()
@@ -637,19 +516,22 @@ mod tests {
                 },
             });
 
-        let status = service.status().expect("load status");
+        let status = service.current_status();
         assert_eq!(status.pending_request_count, 1);
 
         let _ = fs::remove_dir_all(state_dir);
     }
 
     #[test]
-    fn queue_batch_log_creates_pending_hash_event() {
+    fn send_log_creates_pending_hash_event() {
         let state_dir = temp_state_dir();
         let mut service = build_service(state_dir.clone());
 
+        // Authenticate so that Upload events are not dropped by UploadObserver.
+        authenticate_service(&mut service);
+
         service
-            .queue_batch_log(
+            .send_log(
                 0.7,
                 UploadKind::Dev {
                     title: "Developer test".to_string(),
@@ -658,7 +540,7 @@ mod tests {
             )
             .expect("queue batch log");
 
-        // Without credentials, the hash upload defers — event stays in pending_hash_events.
+        // Without credentials reaching the network, the hash upload defers — event stays in pending_hash_events.
         assert_eq!(service.upload_obs().state.pending_batch_events.len(), 0);
         assert_eq!(service.upload_obs().state.pending_hash_events.len(), 1);
         let entry = &service.upload_obs().state.pending_hash_events[0];
