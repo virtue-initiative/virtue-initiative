@@ -41,10 +41,6 @@ impl ScreenshotObserver {
             sender,
         }
     }
-
-    pub fn reset_schedule(&mut self) {
-        self.state.last_screenshot_at_ms = None;
-    }
 }
 
 impl Observer for ScreenshotObserver {

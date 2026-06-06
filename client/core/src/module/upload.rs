@@ -76,6 +76,31 @@ pub struct UploadObserver<A: ApiTransport + Clone + 'static> {
     sender: Sender<Event>,
 }
 
+/// Drains a retry queue, calling `try_one` on each item up to `max_retries` times per call.
+/// `try_one` returns `None` if the item was consumed (success or permanent failure), or
+/// `Some(item)` to push it back and stop processing further items this iteration.
+fn drain_retry_queue<T>(
+    events: Vec<T>,
+    max_retries: usize,
+    mut try_one: impl FnMut(T) -> Option<T>,
+) -> Vec<T> {
+    let mut still_pending = Vec::with_capacity(events.len());
+    let mut stop = false;
+    let mut retried = 0;
+    for event in events {
+        if stop || retried >= max_retries {
+            still_pending.push(event);
+            continue;
+        }
+        retried += 1;
+        if let Some(e) = try_one(event) {
+            still_pending.push(e);
+            stop = true;
+        }
+    }
+    still_pending
+}
+
 impl<A: ApiTransport + Clone + 'static> UploadObserver<A> {
     pub fn new(
         platform: Box<dyn PlatformHooks>,
@@ -97,84 +122,51 @@ impl<A: ApiTransport + Clone + 'static> UploadObserver<A> {
         self.state.settings = settings;
     }
 
-    pub fn has_settings(&self) -> bool {
-        self.state.settings.is_some()
-    }
-
     pub fn force_upload_now(&mut self, now_ms: i64) -> CoreResult<()> {
         self.try_upload_batch(now_ms)
     }
 
     fn retry_pending_hashes(&mut self) -> CoreResult<()> {
-        let events = std::mem::take(&mut self.state.pending_hash_events);
-        let mut still_pending = Vec::new();
-        let mut stop = false;
-        let mut retried = 0;
         let hash_base_url = self
             .state
             .settings
             .as_ref()
             .and_then(|s| s.hash_base_url.clone());
-        for event in events {
-            if stop || retried >= MAX_HASH_RETRIES_PER_LOOP {
-                still_pending.push(event);
-                continue;
-            }
-            let encoded = match encode_batch_event(&event) {
-                Ok(bytes) => bytes,
-                Err(err) => {
-                    log_error(
-                        "encode_batch_event failed, keeping event for retry",
-                        Some(&err),
-                    );
-                    still_pending.push(event);
-                    stop = true;
-                    continue;
+        let events = std::mem::take(&mut self.state.pending_hash_events);
+        self.state.pending_hash_events =
+            drain_retry_queue(events, MAX_HASH_RETRIES_PER_LOOP, |event| {
+                let encoded = match encode_batch_event(&event) {
+                    Ok(bytes) => bytes,
+                    Err(err) => {
+                        log_error(
+                            "encode_batch_event failed, keeping event for retry",
+                            Some(&err),
+                        );
+                        return Some(event);
+                    }
+                };
+                let hash = compute_event_hash(&encoded);
+                match self.try_upload_hash(hash_base_url.as_deref(), &hash) {
+                    Ok(Some(true)) => {
+                        self.state.pending_batch_events.push((event.ts, encoded));
+                        None
+                    }
+                    Ok(None) => None, // Permanently rejected by server — discard without promoting to batch
+                    Ok(Some(false)) | Err(_) => Some(event),
                 }
-            };
-            let hash = compute_event_hash(&encoded);
-            match self.try_upload_hash(hash_base_url.as_deref(), &hash) {
-                Ok(Some(true)) => {
-                    self.state.pending_batch_events.push((event.ts, encoded));
-                    retried += 1;
-                }
-                Ok(None) => {
-                    // Permanently rejected by server — discard without promoting to batch
-                    retried += 1;
-                }
-                Ok(Some(false)) | Err(_) => {
-                    still_pending.push(event);
-                    stop = true;
-                    retried += 1;
-                }
-            }
-        }
-        self.state.pending_hash_events = still_pending;
+            });
         Ok(())
     }
 
     fn retry_pending_immediates(&mut self) -> CoreResult<()> {
         let events = std::mem::take(&mut self.state.pending_immediate_events);
-        let mut still_pending = Vec::new();
-        let mut stop = false;
-        let mut retried = 0;
-        for entry in events {
-            if stop || retried >= MAX_DIRECT_LOG_RETRIES_PER_LOOP {
-                still_pending.push(entry);
-                continue;
-            }
-            match self.try_upload_direct(&entry) {
-                Ok(true) => {
-                    retried += 1;
-                }
-                Ok(false) | Err(_) => {
-                    still_pending.push(entry);
-                    stop = true;
-                    retried += 1;
-                }
-            }
-        }
-        self.state.pending_immediate_events = still_pending;
+        self.state.pending_immediate_events =
+            drain_retry_queue(events, MAX_DIRECT_LOG_RETRIES_PER_LOOP, |entry| match self
+                .try_upload_direct(&entry)
+            {
+                Ok(true) => None,
+                Ok(false) | Err(_) => Some(entry),
+            });
         Ok(())
     }
 

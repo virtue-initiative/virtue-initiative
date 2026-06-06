@@ -8,6 +8,24 @@ use serde::{Deserialize, Serialize};
 use crate::error::{CoreError, CoreResult};
 use crate::model::{DeviceCredentials, DeviceSettings, ServiceStatus};
 
+/// Wraps a value so that its `Debug` output is always `[REDACTED]`.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Redacted<T>(pub T);
+
+impl<T> std::fmt::Debug for Redacted<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[REDACTED]")
+    }
+}
+
+impl<T: std::ops::Deref<Target = str>> std::ops::Deref for Redacted<T> {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum ProcessStoppedReason {
@@ -83,7 +101,7 @@ pub enum PartialStatus {
     Upload { pending_request_count: usize },
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum Event {
     Ping,
@@ -119,7 +137,7 @@ pub enum Event {
     // ── controller → daemon requests ──────────────────────────────────────
     LoginRequested {
         email: String,
-        password: String,
+        password: Redacted<String>,
     },
     LogoutRequested,
     UserStopRequested {
@@ -135,63 +153,6 @@ pub enum Event {
         success: bool,
         error: Option<String>,
     },
-}
-
-impl std::fmt::Debug for Event {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Event::Ping => write!(f, "Ping"),
-            Event::ProcessStarted => write!(f, "ProcessStarted"),
-            Event::Upload { risk, kind } => f
-                .debug_struct("Upload")
-                .field("risk", risk)
-                .field("kind", kind)
-                .finish(),
-            Event::ProcessStopped(r) => write!(f, "ProcessStopped({r:?})"),
-            Event::ComputerSuspended => write!(f, "ComputerSuspended"),
-            Event::ComputerResumed => write!(f, "ComputerResumed"),
-            Event::UserSessionLogin => write!(f, "UserSessionLogin"),
-            Event::UserSessionLogout => write!(f, "UserSessionLogout"),
-            Event::Login { credentials, .. } => f
-                .debug_struct("Login")
-                .field("device_id", &credentials.device_id)
-                .finish(),
-            Event::Logout => write!(f, "Logout"),
-            Event::DeviceSettingsRefreshed { .. } => write!(f, "DeviceSettingsRefreshed"),
-            Event::CaptureFailed => write!(f, "CaptureFailed"),
-            Event::StatusRequest => write!(f, "StatusRequest"),
-            Event::PartialStatus(p) => write!(f, "PartialStatus({p:?})"),
-            Event::StatusResponse { status } => f
-                .debug_struct("StatusResponse")
-                .field("status", status)
-                .finish(),
-            Event::LoginRequested { email, .. } => f
-                .debug_struct("LoginRequested")
-                .field("email", email)
-                .field("password", &"[REDACTED]")
-                .finish(),
-            Event::LogoutRequested => write!(f, "LogoutRequested"),
-            Event::UserStopRequested { source } => f
-                .debug_struct("UserStopRequested")
-                .field("source", source)
-                .finish(),
-            Event::LoginResult {
-                success,
-                error,
-                device_id,
-            } => f
-                .debug_struct("LoginResult")
-                .field("success", success)
-                .field("error", error)
-                .field("device_id", device_id)
-                .finish(),
-            Event::LogoutResult { success, error } => f
-                .debug_struct("LogoutResult")
-                .field("success", success)
-                .field("error", error)
-                .finish(),
-        }
-    }
 }
 
 pub type StateType = serde_json::Value;

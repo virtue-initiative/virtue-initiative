@@ -272,7 +272,7 @@ pub use mpsc_impl::{
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::Event;
+    use crate::events::{Event, Redacted};
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
@@ -317,7 +317,7 @@ mod tests {
         ctrl_sender
             .send(&Event::LoginRequested {
                 email: "test@example.com".into(),
-                password: "secret".into(),
+                password: Redacted("secret".into()),
             })
             .expect("send login request");
 
@@ -359,7 +359,7 @@ mod tests {
         ctrl_sender
             .send(&Event::LoginRequested {
                 email: "a@b.com".into(),
-                password: "pw".into(),
+                password: Redacted("pw".into()),
             })
             .expect("send request");
         let req = daemon_receiver.recv_event().expect("recv request");

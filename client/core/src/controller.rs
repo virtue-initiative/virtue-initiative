@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::events::{Event, ProcessStoppedReason};
+use crate::events::{Event, ProcessStoppedReason, Redacted};
 use crate::ipc::{self, IpcError, IpcReceiver, IpcSender};
 use crate::model::ServiceStatus;
 
@@ -23,7 +23,7 @@ impl ControllerClient {
     pub fn login(&mut self, email: &str, password: &str) -> Result<String, IpcError> {
         self.sender.send(&Event::LoginRequested {
             email: email.to_string(),
-            password: password.to_string(),
+            password: Redacted(password.to_string()),
         })?;
         loop {
             match self.recv_event()? {
