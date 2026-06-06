@@ -17,7 +17,7 @@ if [[ "${1:-}" == "--debug" ]]; then
     TYPE=""
 fi
 
-VIRTUE_BUILD_LABEL="$BUILD_LABEL" cargo build -p virtue-linux
+VIRTUE_BUILD_LABEL="$BUILD_LABEL" cargo build $TYPE -p virtue-linux
 
 
 PKG_DIR="target/debian/${PKG_NAME}_${BUILD_LABEL}_${ARCH}"

@@ -484,20 +484,20 @@ fn read_auth_state(state_dir: &std::path::Path) -> Result<AuthState> {
     }
     let bytes = std::fs::read(&path)?;
     let state: serde_json::Value = serde_json::from_slice(&bytes)?;
-    if let Some(auth) = state.get("auth") {
-        if !auth.is_null() {
-            return Ok(serde_json::from_value(auth.clone())?);
-        }
+    if let Some(auth) = state.get("auth")
+        && !auth.is_null()
+    {
+        return Ok(serde_json::from_value(auth.clone())?);
     }
     Ok(AuthState::default())
 }
 
 fn load_service_status(paths: &ClientPaths, auth: &AuthState) -> Result<ServiceStatus> {
     let sock = paths.state_dir.join("daemon.sock");
-    if let Ok(mut client) = ControllerClient::connect(&sock) {
-        if let Ok(status) = client.get_status() {
-            return Ok(status);
-        }
+    if let Ok(mut client) = ControllerClient::connect(&sock)
+        && let Ok(status) = client.get_status()
+    {
+        return Ok(status);
     }
     Ok(ServiceStatus {
         is_authenticated: auth.device_credentials.is_some(),

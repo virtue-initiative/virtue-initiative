@@ -30,9 +30,7 @@ impl SessionManager {
             .and_then(|mut c| c.get_status().ok());
 
         Ok(SessionStatus {
-            logged_in: service_status
-                .as_ref()
-                .map_or(false, |s| s.is_authenticated),
+            logged_in: service_status.as_ref().is_some_and(|s| s.is_authenticated),
             device_id: service_status.and_then(|s| s.device_id),
             email: state.email,
         })
