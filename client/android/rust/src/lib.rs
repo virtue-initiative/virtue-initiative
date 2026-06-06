@@ -13,7 +13,6 @@ use jni::{JNIEnv, JavaVM};
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
 use virtue_core::events::{Event, ProcessStoppedReason};
-use virtue_core::storage::FileStateStore;
 use virtue_core::{
     AuthState, Config, CoreError, CoreResult, DeviceSettings, MonitorService, PlatformHooks,
     Screenshot, ServiceStatus,
@@ -221,7 +220,11 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeLogin
             java_vm: core.java_vm.clone(),
         };
         let mut service = MonitorService::setup(build_core_config(core, &device_name), hooks)?;
-        service.login(&email, &password)?;
+        service.queue_event(Event::LoginRequested { email, password });
+        service.run_event_loop_iter()?;
+        if !service.current_status().is_authenticated {
+            return Err(anyhow!("Login failed. Check your credentials and try again."));
+        }
         Ok(())
     })();
 
@@ -239,7 +242,8 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeLogou
             java_vm: core.java_vm.clone(),
         };
         let mut service = MonitorService::setup(build_core_config(core, "android-device"), hooks)?;
-        service.logout()?;
+        service.queue_event(Event::LogoutRequested);
+        service.run_event_loop_iter()?;
         Ok(())
     })();
 
@@ -252,10 +256,11 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeIsLog
     _class: JClass,
 ) -> jboolean {
     match core()
-        .and_then(|core| Ok(FileStateStore::new(&core.state_dir)?.load_auth_state()?))
+        .ok()
+        .and_then(|core| read_auth_state(&core.state_dir))
         .map(|auth| auth.device_credentials.is_some())
     {
-        Ok(true) => 1,
+        Some(true) => 1,
         _ => 0,
     }
 }
@@ -266,8 +271,8 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeGetDe
     _class: JClass,
 ) -> jstring {
     let device_id = core()
-        .and_then(|core| Ok(FileStateStore::new(&core.state_dir)?.load_auth_state()?))
         .ok()
+        .and_then(|core| read_auth_state(&core.state_dir))
         .and_then(|auth| auth.device_credentials.map(|device| device.device_id));
 
     match device_id {
@@ -336,7 +341,8 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeNoteU
             java_vm: core.java_vm.clone(),
         };
         let mut service = MonitorService::setup(build_core_config(core, "android-device"), hooks)?;
-        service.note_stop_requested_by_user(&source)?;
+        service.queue_event(Event::UserStopRequested { source });
+        service.run_event_loop_iter()?;
         Ok(())
     })();
 
@@ -380,7 +386,7 @@ fn run_daemon_loop(core: &AndroidCore) -> Result<()> {
         sleep_interruptible(&core.stop, sleep_duration);
     }
 
-    let explicit_user_stop = service.take_stop_intent().ok().flatten().is_some();
+    let explicit_user_stop = service.consume_user_stop_request();
     let reason = if explicit_user_stop {
         ProcessStoppedReason::User
     } else {
@@ -479,6 +485,13 @@ fn sanitize_json_file<T: DeserializeOwned>(root: &Path, name: &str) -> Result<()
 
     fs::remove_file(&path).with_context(|| format!("failed removing {}", path.display()))?;
     Ok(())
+}
+
+fn read_auth_state(state_dir: &Path) -> Option<AuthState> {
+    let path = state_dir.join("event_state.json");
+    let bytes = fs::read(&path).ok()?;
+    let state: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    serde_json::from_value(state.get("auth")?.clone()).ok()
 }
 
 fn core() -> Result<&'static AndroidCore> {
