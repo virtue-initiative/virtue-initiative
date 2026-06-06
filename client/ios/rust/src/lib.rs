@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, Context, Result};
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
-use virtue_core::events::{Event, ProcessStoppedReason};
+use virtue_core::events::{Event, ProcessStoppedReason, Redacted};
 use virtue_core::{
     AuthState, Config, CoreError, CoreResult, DeviceSettings, MonitorService, PlatformHooks,
     Screenshot, ServiceStatus,
@@ -207,7 +207,7 @@ pub extern "C" fn virtue_ios_native_login(
         with_ephemeral_service(core, &device_name, |service| {
             service.queue_event(Event::LoginRequested {
                 email: email.clone(),
-                password: password.clone(),
+                password: Redacted(password.clone()),
             });
             service.run_event_loop_iter()?;
             if !service.current_status().is_authenticated {

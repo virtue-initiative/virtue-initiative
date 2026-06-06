@@ -12,7 +12,7 @@ use jni::sys::{jboolean, jstring};
 use jni::{JNIEnv, JavaVM};
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
-use virtue_core::events::{Event, ProcessStoppedReason};
+use virtue_core::events::{Event, ProcessStoppedReason, Redacted};
 use virtue_core::{
     AuthState, Config, CoreError, CoreResult, DeviceSettings, MonitorService, PlatformHooks,
     Screenshot, ServiceStatus,
@@ -220,7 +220,7 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeLogin
             java_vm: core.java_vm.clone(),
         };
         let mut service = MonitorService::setup(build_core_config(core, &device_name), hooks)?;
-        service.queue_event(Event::LoginRequested { email, password });
+        service.queue_event(Event::LoginRequested { email, password: Redacted(password) });
         service.run_event_loop_iter()?;
         if !service.current_status().is_authenticated {
             return Err(anyhow!("Login failed. Check your credentials and try again."));
