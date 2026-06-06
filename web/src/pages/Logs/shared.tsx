@@ -64,18 +64,15 @@ export function getLogMessage(log: DataLog, deviceName: string): string {
   switch (log.type) {
     case 'lifecycle': {
       const kind = d.kind as string | undefined;
-      const sessionState = d.session_state as string | undefined;
       if (kind === 'process_started') return `Monitoring started on ${deviceName}`;
       if (kind === 'process_stopped_user') return `Monitoring stopped by user on ${deviceName}`;
       if (kind === 'process_stopped_shutdown') return `${deviceName} shut down`;
       if (kind === 'process_stopped_other') return `Monitoring stopped on ${deviceName}`;
       if (kind === 'computer_suspended') return `${deviceName} went to sleep`;
       if (kind === 'computer_resumed') return `${deviceName} woke up`;
-      if (kind === 'user_session_changed') {
-        if (sessionState === 'logged_in') return `User logged in on ${deviceName}`;
-        if (sessionState === 'logged_out') return `User logged out on ${deviceName}`;
-        return `User session changed on ${deviceName}`;
-      }
+      if (kind === 'computer_booted') return `${deviceName} booted`;
+      if (kind === 'login') return `User logged in on ${deviceName}`;
+      if (kind === 'logout') return `User logged out on ${deviceName}`;
       return `Lifecycle event on ${deviceName}`;
     }
     case 'lifecycle_alert': {
