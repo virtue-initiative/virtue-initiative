@@ -15,12 +15,11 @@ use tao::event::Event;
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use virtue_core::storage::FileStateStore;
 use virtue_core::{AuthState, ControllerClient, CoreError, ServiceStatus};
 
 use crate::capture::{
-    MacPlatformHooks, ScreenCaptureAccessRequestOutcome, has_screen_capture_access,
-    open_screen_capture_settings, request_screen_capture_access_if_needed,
+    ScreenCaptureAccessRequestOutcome, has_screen_capture_access, open_screen_capture_settings,
+    request_screen_capture_access_if_needed,
 };
 use crate::config::{ClientPaths, ClientState, build_core_config, load_state, save_state};
 use crate::runtime_env::apply_runtime_env;
@@ -370,14 +369,16 @@ fn ensure_background_service_running(paths: &ClientPaths) -> Result<()> {
 }
 
 fn service_is_running(paths: &ClientPaths) -> Result<bool> {
-    let store = FileStateStore::new(&paths.state_dir)?;
-    let auth = store.load_auth_state()?;
-    Ok(load_service_status(&store, &auth)?.is_running)
+    let sock = paths.state_dir.join("daemon.sock");
+    Ok(ControllerClient::connect(&sock)
+        .ok()
+        .and_then(|mut c| c.get_status().ok())
+        .map(|s| s.is_running)
+        .unwrap_or(false))
 }
 
 fn maybe_request_screen_capture_access_for_logged_in_user(paths: &ClientPaths) -> Result<()> {
-    let store = FileStateStore::new(&paths.state_dir)?;
-    let auth = store.load_auth_state()?;
+    let auth = read_auth_state(&paths.state_dir)?;
     if auth.device_credentials.is_some() && !has_screen_capture_access() {
         request_screen_capture_access_for_monitoring()?;
     }
@@ -415,9 +416,8 @@ fn status(paths: ClientPaths) -> Result<()> {
 }
 
 fn render_status_text(paths: &ClientPaths) -> Result<String> {
-    let store = FileStateStore::new(&paths.state_dir)?;
-    let auth = store.load_auth_state()?;
-    let service_status = load_service_status(&store, &auth)?;
+    let auth = read_auth_state(&paths.state_dir)?;
+    let service_status = load_service_status(paths, &auth)?;
     let mut config = build_core_config(paths);
     config.refresh_from_runtime_file()?;
     let mut lines = Vec::new();
@@ -452,9 +452,8 @@ struct AppStatus {
 }
 
 fn collect_status(paths: &ClientPaths) -> Result<AppStatus> {
-    let store = FileStateStore::new(&paths.state_dir)?;
     let state = load_state(&paths.ui_state_file)?;
-    let auth = store.load_auth_state()?;
+    let auth = read_auth_state(&paths.state_dir)?;
 
     Ok(AppStatus {
         logged_in: auth.device_credentials.is_some(),
@@ -478,8 +477,29 @@ fn refresh_main_window_status(
     Ok(())
 }
 
-fn load_service_status(store: &FileStateStore, auth: &AuthState) -> Result<ServiceStatus> {
-    Ok(store.load_status()?.unwrap_or(ServiceStatus {
+fn read_auth_state(state_dir: &std::path::Path) -> Result<AuthState> {
+    let path = state_dir.join("event_state.json");
+    if !path.exists() {
+        return Ok(AuthState::default());
+    }
+    let bytes = std::fs::read(&path)?;
+    let state: serde_json::Value = serde_json::from_slice(&bytes)?;
+    if let Some(auth) = state.get("auth") {
+        if !auth.is_null() {
+            return Ok(serde_json::from_value(auth.clone())?);
+        }
+    }
+    Ok(AuthState::default())
+}
+
+fn load_service_status(paths: &ClientPaths, auth: &AuthState) -> Result<ServiceStatus> {
+    let sock = paths.state_dir.join("daemon.sock");
+    if let Ok(mut client) = ControllerClient::connect(&sock) {
+        if let Ok(status) = client.get_status() {
+            return Ok(status);
+        }
+    }
+    Ok(ServiceStatus {
         is_authenticated: auth.device_credentials.is_some(),
         is_running: false,
         device_id: auth
@@ -488,7 +508,7 @@ fn load_service_status(store: &FileStateStore, auth: &AuthState) -> Result<Servi
             .map(|device| device.device_id.clone()),
         last_loop_at_ms: None,
         pending_request_count: 0,
-    }))
+    })
 }
 
 fn build_tray_icon() -> Result<Icon> {

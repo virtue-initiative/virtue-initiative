@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use virtue_core::ControllerClient;
-use virtue_core::storage::FileStateStore;
 
 use crate::config::{ClientPaths, ClientState, load_state, save_state};
 
@@ -25,15 +24,16 @@ impl SessionManager {
 
     pub fn status(&self) -> Result<SessionStatus> {
         let state = load_state(&self.paths.ui_state_file)?;
-        let store = FileStateStore::new(&self.paths.state_dir)?;
-        let auth = store.load_auth_state()?;
+        let sock = self.paths.state_dir.join("daemon.sock");
+        let service_status = ControllerClient::connect(&sock)
+            .ok()
+            .and_then(|mut c| c.get_status().ok());
 
         Ok(SessionStatus {
-            logged_in: auth.device_credentials.is_some(),
-            device_id: auth
-                .device_credentials
+            logged_in: service_status
                 .as_ref()
-                .map(|device| device.device_id.clone()),
+                .map_or(false, |s| s.is_authenticated),
+            device_id: service_status.and_then(|s| s.device_id),
             email: state.email,
         })
     }

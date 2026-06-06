@@ -301,7 +301,7 @@ async fn run_daemon_service_loop(
         tokio::select! {
             signal = signal_rx.recv() => {
                 if let Some(_signal_name) = signal {
-                    let explicit_user_stop = service.take_stop_intent().ok().flatten().is_some();
+                    let explicit_user_stop = service.consume_user_stop_request();
                     let reason = if system_shutdown_requested.load(Ordering::SeqCst) {
                         ProcessStoppedReason::Shutdown
                     } else if explicit_user_stop {

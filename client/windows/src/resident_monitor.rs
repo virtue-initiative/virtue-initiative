@@ -313,7 +313,8 @@ fn run_monitor_loop(shutdown: Arc<AtomicBool>, command_rx: Receiver<MonitorComma
 fn handle_command(service: &mut MonitorService<WindowsPlatformHooks>, command: MonitorCommand) {
     match command {
         MonitorCommand::NoteStopRequested { source } => {
-            let _ = service.note_stop_requested_by_user(&source);
+            service.queue_event(Event::UserStopRequested { source });
+            let _ = service.run_event_loop_iter();
         }
         MonitorCommand::ProcessStopped(reason) => {
             service.queue_event(Event::ProcessStopped(reason));

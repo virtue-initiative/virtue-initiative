@@ -11,7 +11,6 @@ use anyhow::{anyhow, Context, Result};
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
 use virtue_core::events::{Event, ProcessStoppedReason};
-use virtue_core::storage::FileStateStore;
 use virtue_core::{
     AuthState, Config, CoreError, CoreResult, DeviceSettings, MonitorService, PlatformHooks,
     Screenshot, ServiceStatus,
@@ -206,7 +205,14 @@ pub extern "C" fn virtue_ios_native_login(
         let core = core()?;
 
         with_ephemeral_service(core, &device_name, |service| {
-            service.login(&email, &password)?;
+            service.queue_event(Event::LoginRequested {
+                email: email.clone(),
+                password: password.clone(),
+            });
+            service.run_event_loop_iter()?;
+            if !service.current_status().is_authenticated {
+                return Err(anyhow!("login failed"));
+            }
             Ok(())
         })
     })();
@@ -219,7 +225,8 @@ pub extern "C" fn virtue_ios_native_logout() -> *mut c_char {
     let result = (|| -> Result<()> {
         let core = core()?;
         with_ephemeral_service(core, "ios-device", |service| {
-            service.logout()?;
+            service.queue_event(Event::LogoutRequested);
+            service.run_event_loop_iter()?;
             Ok(())
         })
     })();
@@ -230,17 +237,15 @@ pub extern "C" fn virtue_ios_native_logout() -> *mut c_char {
 #[no_mangle]
 pub extern "C" fn virtue_ios_native_is_logged_in() -> bool {
     core()
-        .and_then(|core| Ok(FileStateStore::new(&core.state_dir)?.load_auth_state()?))
-        .map(|auth| auth.device_credentials.is_some())
+        .map(|core| read_auth_state(&core.state_dir).device_credentials.is_some())
         .unwrap_or(false)
 }
 
 #[no_mangle]
 pub extern "C" fn virtue_ios_native_get_device_id() -> *mut c_char {
     let device_id = core()
-        .and_then(|core| Ok(FileStateStore::new(&core.state_dir)?.load_auth_state()?))
         .ok()
-        .and_then(|auth| auth.device_credentials.map(|device| device.device_id));
+        .and_then(|core| read_auth_state(&core.state_dir).device_credentials.map(|d| d.device_id));
 
     match device_id {
         Some(value) => CString::new(value)
@@ -333,7 +338,10 @@ pub extern "C" fn virtue_ios_native_request_pause_monitoring(
         };
 
         with_ephemeral_service(core, "ios-device", |service| {
-            service.note_stop_requested_by_user(&source)?;
+            service.queue_event(Event::UserStopRequested {
+                source: source.clone(),
+            });
+            service.run_event_loop_iter()?;
             Ok(())
         })
     })();
@@ -360,7 +368,7 @@ fn run_daemon_loop(core: &IosCore) -> Result<()> {
     let _ = service.run_event_loop_iter();
 
     while !core.stop.load(Ordering::SeqCst) {
-        if let Some(_intent) = service.take_stop_intent()? {
+        if service.consume_user_stop_request() {
             set_stop_request(
                 core,
                 StopRequest {
@@ -383,7 +391,7 @@ fn run_daemon_loop(core: &IosCore) -> Result<()> {
         sleep_interruptible(&core.stop, sleep_duration);
     }
 
-    let stop_request = if let Some(_intent) = service.take_stop_intent()? {
+    let stop_request = if service.consume_user_stop_request() {
         Some(StopRequest {
             raw_reason: "user_pause".to_string(),
             detected_by: "ios_extension_daemon".to_string(),
@@ -522,6 +530,20 @@ fn sanitize_json_file<T: DeserializeOwned>(root: &Path, name: &str) -> Result<()
 
     fs::remove_file(&path).with_context(|| format!("failed removing {}", path.display()))?;
     Ok(())
+}
+
+fn read_auth_state(state_dir: &Path) -> AuthState {
+    let path = state_dir.join("event_state.json");
+    let Ok(bytes) = std::fs::read(&path) else {
+        return AuthState::default();
+    };
+    let Ok(state) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return AuthState::default();
+    };
+    state
+        .get("auth")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default()
 }
 
 fn core() -> Result<&'static IosCore> {
