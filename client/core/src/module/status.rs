@@ -2,26 +2,54 @@ use std::any::Any;
 use std::sync::mpsc::Sender;
 
 use crate::error::CoreResult;
-use crate::events::{Event, Observer, StateType};
+use crate::events::{Event, Observer, PartialStatus, StateType};
 use crate::model::ServiceStatus;
-use crate::platform::PlatformHooks;
 
+/// Assembles a `StatusResponse` from the `PartialStatus` fragments that other
+/// observers emit in reply to a `StatusRequest`. Holds no persistent state of
+/// its own: it accumulates fragments transiently and, once it has heard from
+/// every expected observer, sends the combined `ServiceStatus` and resets.
 pub struct StatusObserver {
-    pub status: ServiceStatus,
-    platform: Box<dyn PlatformHooks>,
+    /// Number of `PartialStatus` fragments to wait for before responding.
+    expected_count: usize,
+    /// Fragments received since the current `StatusRequest`.
+    received: usize,
+    /// Status assembled from fragments received so far.
+    pending: ServiceStatus,
     tx: Sender<Event>,
 }
 
 impl StatusObserver {
-    pub fn new(
-        initial_status: ServiceStatus,
-        platform: Box<dyn PlatformHooks>,
-        tx: Sender<Event>,
-    ) -> Self {
+    pub fn new(expected_count: usize, tx: Sender<Event>) -> Self {
         Self {
-            status: initial_status,
-            platform,
+            expected_count,
+            received: 0,
+            pending: ServiceStatus::default(),
             tx,
+        }
+    }
+
+    fn merge(&mut self, partial: &PartialStatus) {
+        match partial {
+            PartialStatus::Auth {
+                is_authenticated,
+                device_id,
+            } => {
+                self.pending.is_authenticated = *is_authenticated;
+                self.pending.device_id = device_id.clone();
+            }
+            PartialStatus::Lifecycle {
+                is_running,
+                last_loop_at_ms,
+            } => {
+                self.pending.is_running = *is_running;
+                self.pending.last_loop_at_ms = *last_loop_at_ms;
+            }
+            PartialStatus::Upload {
+                pending_request_count,
+            } => {
+                self.pending.pending_request_count = *pending_request_count;
+            }
         }
     }
 }
@@ -48,24 +76,22 @@ impl Observer for StatusObserver {
 
     fn on_event(&mut self, event: &Event) -> CoreResult<()> {
         match event {
-            Event::Ping => {
-                let now_ms = self.platform.get_time_utc_ms()?;
-                self.status.last_loop_at_ms = Some(now_ms);
-            }
-            Event::Login { credentials, .. } => {
-                self.status.is_authenticated = true;
-                self.status.device_id = Some(credentials.device_id.clone());
-            }
-            Event::Logout => {
-                self.status.is_authenticated = false;
-                self.status.device_id = None;
-            }
             Event::StatusRequest => {
-                self.tx
-                    .send(Event::StatusResponse {
-                        status: self.status.clone(),
-                    })
-                    .ok();
+                // Begin collecting fragments for a fresh response.
+                self.pending = ServiceStatus::default();
+                self.received = 0;
+            }
+            Event::PartialStatus(partial) => {
+                self.merge(partial);
+                self.received += 1;
+                if self.received >= self.expected_count {
+                    self.tx
+                        .send(Event::StatusResponse {
+                            status: self.pending.clone(),
+                        })
+                        .ok();
+                    self.received = 0;
+                }
             }
             _ => {}
         }

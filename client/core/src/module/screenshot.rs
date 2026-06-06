@@ -33,13 +33,9 @@ impl ScreenshotObserver {
         platform: Box<dyn PlatformHooks>,
         sender: Sender<Event>,
         config: ScreenshotConfig,
-        authenticated: bool,
     ) -> Self {
         Self {
-            state: ScreenshotObserverState {
-                last_screenshot_at_ms: None,
-                authenticated,
-            },
+            state: ScreenshotObserverState::default(),
             platform,
             config,
             sender,
@@ -68,10 +64,7 @@ impl Observer for ScreenshotObserver {
     }
 
     fn load_state(&mut self, state: StateType) -> CoreResult<()> {
-        let authenticated_at_startup = self.state.authenticated;
         self.state = serde_json::from_value(state)?;
-        // Always derive authenticated from current auth at startup, not persisted state.
-        self.state.authenticated = authenticated_at_startup;
         if !self.state.authenticated {
             self.state.last_screenshot_at_ms = None;
         }

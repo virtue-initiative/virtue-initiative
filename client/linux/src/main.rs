@@ -13,8 +13,7 @@ use std::process::ExitCode;
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use virtue_core::events::UploadKind;
-use virtue_core::storage::FileStateStore;
-use virtue_core::{AuthState, ControllerClient, MonitorService, ServiceStatus};
+use virtue_core::{ControllerClient, MonitorService, ServiceStatus};
 
 use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_backend};
 use crate::config::{ClientPaths, build_core_config};
@@ -155,13 +154,6 @@ fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
 }
 
 fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
-    let store = FileStateStore::new(&paths.state_dir)?;
-    let auth = store.load_auth_state()?;
-    if auth.device_credentials.is_none() {
-        println!("Already logged out.");
-        return Ok(());
-    }
-
     println!(
         "Warning: logging out will alert people monitoring you and will recreate a new device on login."
     );
@@ -181,13 +173,11 @@ fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
 }
 
 fn status(paths: ClientPaths, json: bool) -> Result<()> {
-    let store = FileStateStore::new(&paths.state_dir)?;
-    let auth = store.load_auth_state()?;
     let mut config = build_core_config(&paths);
     config.refresh_from_runtime_file()?;
-    let status = load_service_status(&paths, &auth, &config)?;
+    let status = load_service_status(&paths)?;
 
-    let logged_in = auth.device_credentials.is_some();
+    let logged_in = status.is_authenticated;
     let device_id = status.device_id.as_deref().unwrap_or("<none>").to_string();
     let backend = match detect_backend() {
         Some(CaptureBackend::Wayland) => "wayland",
@@ -488,11 +478,7 @@ fn format_risk(risk: f32) -> String {
     value
 }
 
-fn load_service_status(
-    paths: &ClientPaths,
-    auth: &AuthState,
-    _config: &virtue_core::Config,
-) -> Result<ServiceStatus> {
+fn load_service_status(paths: &ClientPaths) -> Result<ServiceStatus> {
     // Try to get live status from the daemon via IPC; fall back to defaults.
     let sock = paths.state_dir.join("daemon.sock");
     if let Ok(mut client) = ControllerClient::connect(&sock) {
@@ -500,16 +486,7 @@ fn load_service_status(
             return Ok(status);
         }
     }
-    Ok(ServiceStatus {
-        is_authenticated: auth.device_credentials.is_some(),
-        is_running: false,
-        device_id: auth
-            .device_credentials
-            .as_ref()
-            .map(|device| device.device_id.clone()),
-        last_loop_at_ms: None,
-        pending_request_count: 0,
-    })
+    Ok(ServiceStatus::default())
 }
 
 #[cfg(test)]

@@ -2,13 +2,12 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::api::{ApiTransport, ReqwestApiClient};
-use crate::auth::Auth;
 use crate::config::Config;
 use crate::error::{CoreError, CoreResult};
 use crate::events::UploadKind;
 use crate::events::{Event, EventLoop, log_error};
 use crate::ipc::{IpcError, IpcListener, IpcSender};
-use crate::model::{LoopOutcome, ServiceStatus, StopIntent};
+use crate::model::{LoopOutcome, ServiceStatus};
 use crate::module::auth::AuthObserver;
 use crate::module::capture_availability::CaptureAvailabilityObserver;
 use crate::module::lifecycle::LifecycleObserver;
@@ -18,7 +17,6 @@ use crate::module::screenshot::{ScreenshotConfig, ScreenshotObserver};
 use crate::module::status::StatusObserver;
 use crate::module::upload::{UploadConfig, UploadObserver};
 use crate::platform::PlatformHooks;
-use crate::storage::FileStateStore;
 
 pub const ITER_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -26,11 +24,15 @@ pub async fn iter_sleep() {
     tokio::time::sleep(ITER_INTERVAL).await;
 }
 
+const LIFECYCLE_IDX: usize = 0;
 const SCREENSHOT_IDX: usize = 1;
 const UPLOAD_IDX: usize = 2;
 const REQUEST_HANDLER_IDX: usize = 4;
 const AUTH_IDX: usize = 5;
-const STATUS_IDX: usize = 6;
+
+/// Number of observers that emit a `PartialStatus` in reply to a
+/// `StatusRequest`: `AuthObserver`, `LifecycleObserver`, and `UploadObserver`.
+const STATUS_PARTIAL_COUNT: usize = 3;
 
 pub struct MonitorService<
     P: PlatformHooks + Clone + 'static,
@@ -38,7 +40,6 @@ pub struct MonitorService<
 > {
     config: Config,
     platform: P,
-    storage: FileStateStore,
     pub(crate) is_running: bool,
     pub(crate) event_loop: EventLoop,
     _phantom: std::marker::PhantomData<A>,
@@ -55,12 +56,7 @@ impl<P: PlatformHooks + Clone + 'static> MonitorService<P, ReqwestApiClient> {
 impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> MonitorService<P, A> {
     pub fn setup_with_api(mut config: Config, platform: P, api: A) -> CoreResult<Self> {
         config.refresh_from_runtime_file()?;
-        let storage = FileStateStore::new(&config.state_dir)?;
         let state_file_path = config.state_dir.join("event_state.json");
-
-        let auth = Auth::load(&storage)?;
-        let is_authenticated = auth.is_authenticated();
-        let device_id = auth.device_id().map(|s| s.to_string());
 
         let mut event_loop = EventLoop::new(state_file_path.clone(), vec![]);
         let tx = event_loop.tx.clone();
@@ -72,7 +68,6 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
             ScreenshotConfig {
                 screenshot_interval: config.screenshot_interval,
             },
-            is_authenticated,
         );
         let upload_obs = UploadObserver::new(
             Box::new(platform.clone()),
@@ -80,29 +75,18 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
             UploadConfig {
                 batch_interval: config.batch_interval,
             },
-            auth.device_credentials.clone(),
             tx.clone(),
         );
         let capture_availability_obs =
             CaptureAvailabilityObserver::new(tx.clone(), Box::new(platform.clone()));
         let request_handler = RequestObserver::new();
         let auth_obs = AuthObserver::new(
-            auth,
             api,
             config.device_name.clone(),
             config.platform_name.clone(),
-            storage.clone(),
             tx.clone(),
         );
-        let initial_status = ServiceStatus {
-            is_authenticated,
-            is_running: true,
-            device_id,
-            last_loop_at_ms: None,
-            pending_request_count: 0,
-        };
-        let status_obs =
-            StatusObserver::new(initial_status, Box::new(platform.clone()), tx.clone());
+        let status_obs = StatusObserver::new(STATUS_PARTIAL_COUNT, tx.clone());
 
         event_loop.observers = vec![
             Box::new(lifecycle_obs),            // 0
@@ -118,7 +102,6 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
         let service = Self {
             config,
             platform,
-            storage,
             is_running: true,
             event_loop,
             _phantom: std::marker::PhantomData,
@@ -131,10 +114,6 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
         self.ensure_running()?;
         self.refresh_runtime_config()?;
 
-        // Sync pending_request_count into StatusObserver before IPC drain.
-        let pending = self.upload_obs().state.pending_request_count();
-        self.status_obs_mut().status.pending_request_count = pending;
-
         // Process IPC requests without triggering screenshot capture.
         if let Err(err) = self.event_loop.drain_for_ipc() {
             log_error("ipc event drain failed", Some(&err));
@@ -144,7 +123,7 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
             log_error("loop iteration failed", Some(&err));
         }
 
-        let status = self.status_obs().status.clone();
+        let status = self.current_status();
         Ok(LoopOutcome {
             ran_at_ms: status.last_loop_at_ms.unwrap_or(0),
             status,
@@ -161,25 +140,12 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
 
     pub fn mark_stopped(&mut self) -> CoreResult<()> {
         self.is_running = false;
-        self.status_obs_mut().status.is_running = false;
         self.event_loop.persist()
     }
 
-    pub fn note_stop_requested_by_user(&mut self, source: &str) -> CoreResult<()> {
-        let requested_at_ms = self.platform.get_time_utc_ms()?;
-        self.storage.save_stop_intent(&StopIntent {
-            source: source.to_string(),
-            requested_at_ms,
-        })?;
-        Ok(())
-    }
-
-    pub fn take_stop_intent(&mut self) -> CoreResult<Option<StopIntent>> {
-        let intent = self.storage.load_stop_intent()?;
-        if intent.is_some() {
-            self.storage.clear_stop_intent()?;
-        }
-        Ok(intent)
+    pub fn consume_user_stop_request(&mut self) -> bool {
+        let _ = self.event_loop.drain_for_ipc();
+        self.lifecycle_obs_mut().take_user_stop_requested()
     }
 
     pub fn send_log(&mut self, risk: f32, kind: UploadKind) -> CoreResult<()> {
@@ -206,7 +172,7 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
 
     pub fn upload_pending_batch_now(&mut self) -> CoreResult<(usize, usize)> {
         self.ensure_running()?;
-        if !self.auth_obs().auth.is_authenticated() {
+        if self.auth_obs().state.device_credentials.is_none() {
             return Ok((0, 0));
         }
         let count = self
@@ -226,10 +192,19 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
         Ok((count, remaining))
     }
 
+    /// Assemble the current status directly from the observers that own each
+    /// field. Mirrors what the `StatusObserver` builds from `PartialStatus`
+    /// fragments over IPC, but for in-process callers.
     pub fn current_status(&self) -> ServiceStatus {
-        let mut status = self.status_obs().status.clone();
-        status.pending_request_count = self.upload_obs().state.pending_request_count();
-        status
+        let credentials = &self.auth_obs().state.device_credentials;
+        let last_ping = self.lifecycle_obs().state.last_ping;
+        ServiceStatus {
+            is_authenticated: credentials.is_some(),
+            is_running: self.is_running,
+            device_id: credentials.as_ref().map(|c| c.device_id.clone()),
+            last_loop_at_ms: (last_ping > 0).then_some(last_ping),
+            pending_request_count: self.upload_obs().state.pending_request_count(),
+        }
     }
 
     fn refresh_runtime_config(&mut self) -> CoreResult<()> {
@@ -272,6 +247,20 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
     }
 
     // ─── Typed observer accessors ─────────────────────────────────────────────
+
+    fn lifecycle_obs(&self) -> &LifecycleObserver {
+        self.event_loop.observers[LIFECYCLE_IDX]
+            .as_any()
+            .downcast_ref::<LifecycleObserver>()
+            .expect("lifecycle observer at index 0")
+    }
+
+    fn lifecycle_obs_mut(&mut self) -> &mut LifecycleObserver {
+        self.event_loop.observers[LIFECYCLE_IDX]
+            .as_any_mut()
+            .downcast_mut::<LifecycleObserver>()
+            .expect("lifecycle observer at index 0")
+    }
 
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn screenshot_obs(&self) -> &ScreenshotObserver {
@@ -321,20 +310,6 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
             .as_any_mut()
             .downcast_mut::<AuthObserver<A>>()
             .expect("auth observer at index 5")
-    }
-
-    fn status_obs(&self) -> &StatusObserver {
-        self.event_loop.observers[STATUS_IDX]
-            .as_any()
-            .downcast_ref::<StatusObserver>()
-            .expect("status observer at index 6")
-    }
-
-    fn status_obs_mut(&mut self) -> &mut StatusObserver {
-        self.event_loop.observers[STATUS_IDX]
-            .as_any_mut()
-            .downcast_mut::<StatusObserver>()
-            .expect("status observer at index 6")
     }
 }
 
@@ -451,14 +426,12 @@ mod tests {
             access_token: "device-access".to_string(),
             refresh_token: "device-refresh".to_string(),
         };
-        service.auth_obs_mut().auth.device_credentials = Some(creds.clone());
+        service.auth_obs_mut().state.device_credentials = Some(creds.clone());
         service
             .upload_obs_mut()
             .upload_api
             .set_credentials(Some(creds));
         service.upload_obs_mut().authenticated = true;
-        service.status_obs_mut().status.is_authenticated = true;
-        service.status_obs_mut().status.device_id = Some("device-1".to_string());
     }
 
     #[allow(dead_code)]

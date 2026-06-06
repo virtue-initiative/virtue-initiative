@@ -63,6 +63,26 @@ pub enum UploadKind {
     },
 }
 
+/// A single piece of `ServiceStatus` reported by one observer in response to a
+/// `StatusRequest`. Each observer emits only the fields it owns; the
+/// `StatusObserver` merges them into a complete `ServiceStatus`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+pub enum PartialStatus {
+    /// Reported by `AuthObserver`.
+    Auth {
+        is_authenticated: bool,
+        device_id: Option<String>,
+    },
+    /// Reported by `LifecycleObserver`.
+    Lifecycle {
+        is_running: bool,
+        last_loop_at_ms: Option<i64>,
+    },
+    /// Reported by `UploadObserver`.
+    Upload { pending_request_count: usize },
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum Event {
@@ -90,6 +110,9 @@ pub enum Event {
     CaptureFailed,
     // ── IPC status query ──────────────────────────────────────────────────
     StatusRequest,
+    /// Emitted by an observer in response to `StatusRequest`; collected by the
+    /// `StatusObserver` to assemble the `StatusResponse`.
+    PartialStatus(PartialStatus),
     StatusResponse {
         status: ServiceStatus,
     },
@@ -137,6 +160,7 @@ impl std::fmt::Debug for Event {
             Event::DeviceSettingsRefreshed { .. } => write!(f, "DeviceSettingsRefreshed"),
             Event::CaptureFailed => write!(f, "CaptureFailed"),
             Event::StatusRequest => write!(f, "StatusRequest"),
+            Event::PartialStatus(p) => write!(f, "PartialStatus({p:?})"),
             Event::StatusResponse { status } => f
                 .debug_struct("StatusResponse")
                 .field("status", status)

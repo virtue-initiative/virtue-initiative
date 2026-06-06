@@ -1,40 +1,42 @@
 use std::any::Any;
 use std::sync::mpsc::Sender;
 
+use serde::{Deserialize, Serialize};
+
 use crate::api::ApiTransport;
-use crate::auth::Auth;
 use crate::error::CoreResult;
-use crate::events::{Event, Observer, StateType, log_error};
-use crate::storage::FileStateStore;
+use crate::events::{Event, Observer, PartialStatus, StateType, log_error};
+use crate::model::DeviceCredentials;
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct AuthObserverState {
+    pub user_access_token: Option<String>,
+    pub device_credentials: Option<DeviceCredentials>,
+}
 
 pub struct AuthObserver<A: ApiTransport> {
-    pub auth: Auth,
+    pub(crate) state: AuthObserverState,
     pub(crate) api: A,
     device_name: String,
     platform_name: String,
-    storage: FileStateStore,
     tx: Sender<Event>,
     needs_settings_refresh: bool,
 }
 
 impl<A: ApiTransport> AuthObserver<A> {
     pub fn new(
-        auth: Auth,
         api: A,
         device_name: String,
         platform_name: String,
-        storage: FileStateStore,
         tx: Sender<Event>,
     ) -> Self {
-        let needs_settings_refresh = auth.is_authenticated();
         Self {
-            auth,
+            state: AuthObserverState::default(),
             api,
             device_name,
             platform_name,
-            storage,
             tx,
-            needs_settings_refresh,
+            needs_settings_refresh: false,
         }
     }
 
@@ -81,7 +83,6 @@ impl<A: ApiTransport> AuthObserver<A> {
         let mut device =
             self.api
                 .register_device(&access_token, &self.device_name, &self.platform_name)?;
-        self.storage.clear_stop_intent()?;
 
         let settings = self
             .api
@@ -96,33 +97,32 @@ impl<A: ApiTransport> AuthObserver<A> {
                 }
             })?;
 
-        self.auth.set_login(access_token, device.clone());
-        self.auth.persist(&self.storage)?;
+        self.state.user_access_token = Some(access_token);
+        self.state.device_credentials = Some(device.clone());
         self.needs_settings_refresh = false;
         Ok((device, settings))
     }
 
     fn handle_logout_requested(&mut self) {
-        if let Some(token) = self.auth.user_access_token.clone() {
+        if let Some(token) = self.state.user_access_token.clone() {
             let _ = self.api.logout(&token);
         }
-        self.auth.clear();
-        let result = self.auth.persist(&self.storage);
-        self.storage.clear_stop_intent().ok();
+
+        self.state.user_access_token = None;
+        self.state.device_credentials = None;
         self.needs_settings_refresh = false;
-        if result.is_ok() {
-            self.tx.send(Event::Logout).ok();
-        }
+
+        self.tx.send(Event::Logout).ok();
         self.tx
             .send(Event::LogoutResult {
-                success: result.is_ok(),
-                error: result.err().map(|e| e.to_string()),
+                success: true,
+                error: None,
             })
             .ok();
     }
 
     fn handle_ping(&mut self) {
-        if !self.auth.is_authenticated() || !self.needs_settings_refresh {
+        if self.state.device_credentials.is_none() || !self.needs_settings_refresh {
             return;
         }
         match self.refresh_settings() {
@@ -140,7 +140,7 @@ impl<A: ApiTransport> AuthObserver<A> {
 
     fn refresh_settings(&mut self) -> CoreResult<crate::model::DeviceSettings> {
         let mut credentials = self
-            .auth
+            .state
             .device_credentials
             .clone()
             .ok_or(crate::error::CoreError::NotAuthenticated)?;
@@ -149,15 +149,14 @@ impl<A: ApiTransport> AuthObserver<A> {
             Err(err) if err.is_unauthorized() => {
                 let refreshed = self.api.refresh_device_token(&credentials.refresh_token)?;
                 credentials.access_token = refreshed.clone();
-                self.auth.set_credentials(credentials);
-                self.auth.persist(&self.storage)?;
+                self.state.device_credentials = Some(credentials);
                 let settings = self.api.get_device_settings(&refreshed)?;
                 Ok(settings)
             }
             Err(err) if err.is_not_found() => {
                 log_error("device not found; clearing local auth", Some(&err));
-                self.auth.clear();
-                self.auth.persist(&self.storage)?;
+                self.state.user_access_token = None;
+                self.state.device_credentials = None;
                 self.tx.send(Event::Logout).ok();
                 Err(crate::error::CoreError::NotAuthenticated)
             }
@@ -179,10 +178,15 @@ impl<A: ApiTransport + 'static> Observer for AuthObserver<A> {
     }
 
     fn save_state(&self) -> CoreResult<StateType> {
-        Ok(serde_json::Value::Null)
+        Ok(serde_json::to_value(&self.state)?)
     }
 
-    fn load_state(&mut self, _state: StateType) -> CoreResult<()> {
+    fn load_state(&mut self, state: StateType) -> CoreResult<()> {
+        // Null was written by a prior version that didn't persist auth here.
+        if !state.is_null() {
+            self.state = serde_json::from_value(state)?;
+        }
+        self.needs_settings_refresh = self.state.device_credentials.is_some();
         Ok(())
     }
 
@@ -196,6 +200,19 @@ impl<A: ApiTransport + 'static> Observer for AuthObserver<A> {
             }
             Event::Ping => {
                 self.handle_ping();
+            }
+            Event::StatusRequest => {
+                let device_id = self
+                    .state
+                    .device_credentials
+                    .as_ref()
+                    .map(|c| c.device_id.clone());
+                self.tx
+                    .send(Event::PartialStatus(PartialStatus::Auth {
+                        is_authenticated: self.state.device_credentials.is_some(),
+                        device_id,
+                    }))
+                    .ok();
             }
             _ => {}
         }

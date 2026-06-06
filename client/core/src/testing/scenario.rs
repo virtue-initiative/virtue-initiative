@@ -8,9 +8,9 @@ use crate::error::CoreResult;
 use crate::events::{Event, ProcessStoppedReason};
 use crate::model::{AuthState, BatchRecipient, DeviceCredentials, DeviceSettings, ServiceStatus};
 use crate::module::lifecycle::{LifecycleObserver, LifecycleObserverState};
+use crate::module::upload::UploadObserverState;
 use crate::module::screenshot::ScreenshotObserver;
 use crate::service::MonitorService;
-use crate::storage::FileStateStore;
 use crate::testing::api::MockApiClient;
 use crate::testing::clock::MockClock;
 use crate::testing::platform::TestPlatformHooks;
@@ -65,8 +65,18 @@ impl Scenario {
     fn build(auth: Option<AuthState>, settings: Option<DeviceSettings>) -> Self {
         let state_dir = scenario_temp_dir();
         if let Some(ref auth) = auth {
-            let storage = FileStateStore::new(&state_dir).expect("create file state store");
-            storage.save_auth_state(auth).expect("seed auth state");
+            let upload_state = UploadObserverState {
+                device_credentials: auth.device_credentials.clone(),
+                ..Default::default()
+            };
+            let event_state = serde_json::json!({
+                "auth": auth,
+                "screenshot": { "authenticated": true, "last_screenshot_at_ms": null },
+                "upload": upload_state,
+            });
+            let path = state_dir.join("event_state.json");
+            fs::write(&path, serde_json::to_vec_pretty(&event_state).unwrap())
+                .expect("seed event state with auth");
         }
         let config = scenario_config(state_dir.clone());
         let clock = MockClock::default();

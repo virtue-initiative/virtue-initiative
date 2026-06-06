@@ -127,16 +127,3 @@ pub struct LoopOutcome {
     pub status: ServiceStatus,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(default)]
-pub struct StopIntent {
-    pub source: String,
-    pub requested_at_ms: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(default)]
-pub struct ServiceStopMarker {
-    pub origin: String,
-    pub stopped_at_ms: i64,
-}

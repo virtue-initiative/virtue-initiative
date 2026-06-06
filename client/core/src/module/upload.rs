@@ -15,7 +15,7 @@ use crate::api::ApiTransport;
 use crate::crypto::{CryptoEngine, compute_event_hash, encode_batch_event};
 use crate::error::CoreResult;
 use crate::events::log_error;
-use crate::events::{Event, Observer, ProcessStoppedReason, StateType};
+use crate::events::{Event, Observer, PartialStatus, ProcessStoppedReason, StateType};
 use crate::model::{BatchRecipient, DeviceCredentials, DeviceSettings, LogEntry};
 use crate::platform::PlatformHooks;
 
@@ -37,6 +37,8 @@ pub struct UploadObserverState {
     pub post_login_proof_batches_remaining: u32,
     #[serde(default)]
     pub settings: Option<DeviceSettings>,
+    #[serde(default)]
+    pub device_credentials: Option<DeviceCredentials>,
 }
 
 impl UploadObserverState {
@@ -55,6 +57,7 @@ impl UploadObserverState {
         self.last_batch_at_ms = None;
         self.post_login_proof_batches_remaining = 0;
         self.settings = None;
+        self.device_credentials = None;
     }
 
     pub fn pending_request_count(&self) -> usize {
@@ -78,18 +81,14 @@ impl<A: ApiTransport + Clone + 'static> UploadObserver<A> {
         platform: Box<dyn PlatformHooks>,
         api: A,
         config: UploadConfig,
-        initial_credentials: Option<DeviceCredentials>,
         sender: Sender<Event>,
     ) -> Self {
-        let authenticated = initial_credentials.is_some();
-        let mut upload_api = UploadApi::new(api);
-        upload_api.set_credentials(initial_credentials);
         Self {
             state: UploadObserverState::default(),
-            upload_api,
+            upload_api: UploadApi::new(api),
             config,
             platform,
-            authenticated,
+            authenticated: false,
             sender,
         }
     }
@@ -304,11 +303,19 @@ impl<A: ApiTransport + Clone + 'static> Observer for UploadObserver<A> {
     }
 
     fn save_state(&self) -> CoreResult<StateType> {
-        Ok(serde_json::to_value(&self.state)?)
+        // Persist the credentials that upload_api actually used last (may be
+        // fresher than state.device_credentials after a 401 token refresh).
+        let mut state = self.state.clone();
+        state.device_credentials = self.upload_api.credentials().cloned();
+        Ok(serde_json::to_value(&state)?)
     }
 
     fn load_state(&mut self, state: StateType) -> CoreResult<()> {
         self.state = serde_json::from_value(state)?;
+        if let Some(creds) = self.state.device_credentials.clone() {
+            self.upload_api.set_credentials(Some(creds));
+            self.authenticated = true;
+        }
         Ok(())
     }
 
@@ -321,6 +328,7 @@ impl<A: ApiTransport + Clone + 'static> Observer for UploadObserver<A> {
                 self.authenticated = true;
                 self.upload_api.set_credentials(Some(credentials.clone()));
                 self.set_settings(Some(settings.clone()));
+                self.state.device_credentials = Some(credentials.clone());
                 self.state.reset_for_login();
             }
             Event::Logout => {
@@ -331,6 +339,13 @@ impl<A: ApiTransport + Clone + 'static> Observer for UploadObserver<A> {
             }
             Event::DeviceSettingsRefreshed { settings } => {
                 self.set_settings(Some(settings.clone()));
+            }
+            Event::StatusRequest => {
+                self.sender
+                    .send(Event::PartialStatus(PartialStatus::Upload {
+                        pending_request_count: self.state.pending_request_count(),
+                    }))
+                    .ok();
             }
             Event::Ping => {
                 if !self.authenticated {

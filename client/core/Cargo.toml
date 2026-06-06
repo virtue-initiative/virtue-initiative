@@ -16,6 +16,11 @@ name = "scenarios"
 path = "tests/scenarios.rs"
 required-features = ["testing"]
 
+[[test]]
+name = "module_tests"
+path = "tests/module_tests.rs"
+required-features = ["testing"]
+
 [build-dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 

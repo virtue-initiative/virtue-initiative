@@ -48,11 +48,12 @@ impl Observer for RequestObserver {
     }
 
     fn on_event(&mut self, event: &Event) -> CoreResult<()> {
-        // Forward events to connected controllers; skip large data events and
-        // internal auth events that carry sensitive credentials.
+        // Forward events to connected controllers; skip large data events,
+        // internal auth events that carry sensitive credentials, and the
+        // intra-loop status fragments that assemble a StatusResponse.
         if !matches!(
             event,
-            Event::Upload { .. } | Event::Ping | Event::Login { .. }
+            Event::Upload { .. } | Event::Ping | Event::Login { .. } | Event::PartialStatus(_)
         ) {
             self.clients.retain_mut(|c| c.send(event).is_ok());
         }

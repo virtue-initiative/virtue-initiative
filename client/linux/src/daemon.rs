@@ -258,7 +258,7 @@ fn classify_shutdown_reason(
 fn record_shutdown_transition(service: &mut MonitorService<LinuxPlatformHooks>) {
     let system_state = read_systemd_state();
     let shutdown_job_queued = is_shutdown_job_queued();
-    let explicit_user_stop = service.take_stop_intent().ok().flatten().is_some();
+    let explicit_user_stop = service.consume_user_stop_request();
     let reason = classify_shutdown_reason(
         system_state.as_deref(),
         shutdown_job_queued,

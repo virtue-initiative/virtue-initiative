@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
 use crate::events::{
-    AlertReason, Event, LifecycleKind, Observer, ProcessStoppedReason, StateType, UploadKind,
+    AlertReason, Event, LifecycleKind, Observer, PartialStatus, ProcessStoppedReason, StateType,
+    UploadKind,
 };
 use crate::platform::PlatformHooks;
 
@@ -39,6 +40,9 @@ pub struct LifecycleObserverState {
 
     // Suspended
     pub pings_while_suspended: i64,
+
+    // User stop tracking
+    pub user_stop_requested: bool,
 }
 
 pub struct LifecycleObserver {
@@ -54,6 +58,12 @@ impl LifecycleObserver {
             platform_hooks,
             sender,
         }
+    }
+
+    pub fn take_user_stop_requested(&mut self) -> bool {
+        let v = self.state.user_stop_requested;
+        self.state.user_stop_requested = false;
+        v
     }
 
     fn compute_last_shutdown(&self) -> CoreResult<i64> {
@@ -148,6 +158,9 @@ impl LifecycleObserver {
             }
             Event::Ping => {
                 self.state.last_ping = now_ms;
+            }
+            Event::UserStopRequested { .. } => {
+                self.state.user_stop_requested = true;
             }
             Event::UserSessionLogin | Event::Login { .. } => {
                 self.state.last_login = now_ms;
@@ -310,6 +323,17 @@ impl Observer for LifecycleObserver {
     }
 
     fn on_event(&mut self, event: &Event) -> CoreResult<()> {
+        if matches!(event, Event::StatusRequest) {
+            // Responding at all means the monitor process is running.
+            let last_loop_at_ms = (self.state.last_ping > 0).then_some(self.state.last_ping);
+            self.sender
+                .send(Event::PartialStatus(PartialStatus::Lifecycle {
+                    is_running: true,
+                    last_loop_at_ms,
+                }))
+                .ok();
+            return Ok(());
+        }
         match self.state.status {
             LifecycleStatus::Running => self.on_event_while_running(event),
             LifecycleStatus::Suspended => self.on_event_while_suspended(event),
