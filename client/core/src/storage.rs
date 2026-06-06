@@ -27,22 +27,3 @@ impl FileStateStore {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::fs;
-    use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    use super::*;
-    static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-    fn temp_state_dir() -> PathBuf {
-        let path = std::env::temp_dir().join(format!(
-            "virtue-storage-test-{}-{}",
-            std::process::id(),
-            TEST_DIR_COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(&path).expect("create temp state dir");
-        path
-    }
-}
