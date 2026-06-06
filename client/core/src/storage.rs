@@ -25,7 +25,6 @@ impl FileStateStore {
         writeln!(file, "{line}")?;
         Ok(())
     }
-
 }
 
 #[cfg(test)]

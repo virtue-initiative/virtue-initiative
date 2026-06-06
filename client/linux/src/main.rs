@@ -481,10 +481,10 @@ fn format_risk(risk: f32) -> String {
 fn load_service_status(paths: &ClientPaths) -> Result<ServiceStatus> {
     // Try to get live status from the daemon via IPC; fall back to defaults.
     let sock = paths.state_dir.join("daemon.sock");
-    if let Ok(mut client) = ControllerClient::connect(&sock) {
-        if let Ok(status) = client.get_status() {
-            return Ok(status);
-        }
+    if let Ok(mut client) = ControllerClient::connect(&sock)
+        && let Ok(status) = client.get_status()
+    {
+        return Ok(status);
     }
     Ok(ServiceStatus::default())
 }

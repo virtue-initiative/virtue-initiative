@@ -11,6 +11,7 @@
 use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
+use virtue_core::CoreError;
 use virtue_core::events::{
     AlertReason, Event, LifecycleKind, Observer, PartialStatus, ProcessStoppedReason, UploadKind,
 };
@@ -23,7 +24,6 @@ use virtue_core::module::screenshot::{ScreenshotConfig, ScreenshotObserver};
 use virtue_core::module::status::StatusObserver;
 use virtue_core::module::upload::{UploadConfig, UploadObserver};
 use virtue_core::testing::{MockApiClient, MockClock, TestPlatformHooks};
-use virtue_core::CoreError;
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 
@@ -107,7 +107,9 @@ mod lifecycle {
         obs.on_event(&Event::StatusRequest).unwrap();
         let events = drain(&rx);
         match &events[0] {
-            Event::PartialStatus(PartialStatus::Lifecycle { last_loop_at_ms, .. }) => {
+            Event::PartialStatus(PartialStatus::Lifecycle {
+                last_loop_at_ms, ..
+            }) => {
                 assert_eq!(*last_loop_at_ms, None);
             }
             other => panic!("unexpected: {other:?}"),
@@ -203,7 +205,10 @@ mod lifecycle {
         });
         assert!(alert.is_some(), "expected UserStoppedProcess alert");
         if let Some(Event::Upload { risk, .. }) = alert {
-            assert!(*risk >= 0.9, "user-stop alert should be high risk, got {risk}");
+            assert!(
+                *risk >= 0.9,
+                "user-stop alert should be high risk, got {risk}"
+            );
         }
         assert_eq!(obs.state.last_process_stopped_user, 4000);
     }
@@ -306,7 +311,10 @@ mod lifecycle {
             events.iter().any(|e| matches!(e, Event::ComputerResumed)),
             "expected synthetic ComputerResumed event"
         );
-        assert_eq!(obs.state.pings_while_suspended, 0, "counter should be reset");
+        assert_eq!(
+            obs.state.pings_while_suspended, 0,
+            "counter should be reset"
+        );
     }
 
     #[test]
@@ -331,7 +339,10 @@ mod lifecycle {
         });
         assert!(alert.is_some(), "expected PingGapWhileRunning alert");
         if let Some(Event::Upload { risk, .. }) = alert {
-            assert!(*risk >= 0.9, "ping gap alert should be high risk, got {risk}");
+            assert!(
+                *risk >= 0.9,
+                "ping gap alert should be high risk, got {risk}"
+            );
         }
         assert_eq!(obs.state.last_ping, 100_000);
     }
@@ -442,7 +453,10 @@ mod lifecycle {
             source: "tray".into(),
         })
         .unwrap();
-        assert!(obs.take_user_stop_requested(), "flag should be set after UserStopRequested");
+        assert!(
+            obs.take_user_stop_requested(),
+            "flag should be set after UserStopRequested"
+        );
         assert!(
             !obs.take_user_stop_requested(),
             "flag should be cleared after take"
@@ -486,7 +500,10 @@ mod lifecycle {
         });
         assert!(upload.is_some(), "expected Logout lifecycle upload");
         if let Some(Event::Upload { risk, .. }) = upload {
-            assert!(*risk >= 0.9, "logout upload should be high risk, got {risk}");
+            assert!(
+                *risk >= 0.9,
+                "logout upload should be high risk, got {risk}"
+            );
         }
     }
 
@@ -777,7 +794,9 @@ mod auth {
             "successful login should emit Login event"
         );
         assert!(
-            events.iter().any(|e| matches!(e, Event::LoginResult { success: true, .. })),
+            events
+                .iter()
+                .any(|e| matches!(e, Event::LoginResult { success: true, .. })),
             "successful login should emit LoginResult with success=true"
         );
         // Verify API calls happened
@@ -836,7 +855,9 @@ mod auth {
             "logout should emit Logout event"
         );
         assert!(
-            events.iter().any(|e| matches!(e, Event::LogoutResult { success: true, .. })),
+            events
+                .iter()
+                .any(|e| matches!(e, Event::LogoutResult { success: true, .. })),
             "logout should emit successful LogoutResult"
         );
         assert_eq!(
@@ -885,7 +906,9 @@ mod auth {
         obs.on_event(&Event::Ping).unwrap();
         let events = drain(&rx);
         assert!(
-            events.iter().any(|e| matches!(e, Event::DeviceSettingsRefreshed { .. })),
+            events
+                .iter()
+                .any(|e| matches!(e, Event::DeviceSettingsRefreshed { .. })),
             "ping should refresh device settings when needed"
         );
         assert!(!api.state().get_device_settings_calls.is_empty());
@@ -959,7 +982,9 @@ mod auth {
         obs3.on_event(&Event::Ping).unwrap();
         let events = drain(&rx3);
         assert!(
-            events.iter().any(|e| matches!(e, Event::DeviceSettingsRefreshed { .. })),
+            events
+                .iter()
+                .any(|e| matches!(e, Event::DeviceSettingsRefreshed { .. })),
             "credentials should survive save/load round-trip"
         );
         drop(tx);
@@ -988,7 +1013,9 @@ mod status {
         .unwrap();
         let events = drain(&rx);
         assert!(
-            events.iter().any(|e| matches!(e, Event::StatusResponse { .. })),
+            events
+                .iter()
+                .any(|e| matches!(e, Event::StatusResponse { .. })),
             "expected StatusResponse"
         );
     }
@@ -1118,10 +1145,7 @@ mod capture_availability {
             obs.on_event(&Event::CaptureFailed).unwrap();
         }
         let events = drain(&rx);
-        assert!(
-            events.is_empty(),
-            "4 failures should not trigger an upload"
-        );
+        assert!(events.is_empty(), "4 failures should not trigger an upload");
         assert_eq!(obs.state.recent_failures_ms.len(), 4);
     }
 
@@ -1269,7 +1293,10 @@ mod capture_availability {
 mod upload {
     use super::*;
 
-    fn make(platform: TestPlatformHooks, api: MockApiClient) -> (UploadObserver<MockApiClient>, Receiver<Event>) {
+    fn make(
+        platform: TestPlatformHooks,
+        api: MockApiClient,
+    ) -> (UploadObserver<MockApiClient>, Receiver<Event>) {
         let (tx, rx) = mpsc::channel();
         let config = UploadConfig {
             batch_interval: Duration::from_secs(60),
@@ -1570,10 +1597,7 @@ mod upload {
             settings: new_settings,
         })
         .unwrap();
-        assert_eq!(
-            obs.state.settings.as_ref().unwrap().device_id,
-            "new-device"
-        );
+        assert_eq!(obs.state.settings.as_ref().unwrap().device_id, "new-device");
         assert_eq!(
             obs.state
                 .settings
@@ -1723,8 +1747,7 @@ mod request_handler {
         }
 
         fn wait_for_events(rx: &Receiver<Event>, count: usize) -> Vec<Event> {
-            let deadline =
-                std::time::Instant::now() + std::time::Duration::from_millis(500);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
             let mut collected = Vec::new();
             while collected.len() < count && std::time::Instant::now() < deadline {
                 if let Ok(ev) = rx.try_recv() {
@@ -1773,7 +1796,11 @@ mod request_handler {
             obs.on_event(&Event::Logout).unwrap();
 
             let received = wait_for_events(&proxy_rx, 3);
-            assert_eq!(received.len(), 3, "all 3 allowed events should be forwarded");
+            assert_eq!(
+                received.len(),
+                3,
+                "all 3 allowed events should be forwarded"
+            );
             assert!(matches!(received[0], Event::UserSessionLogin));
             assert!(matches!(received[1], Event::ComputerSuspended));
             assert!(matches!(received[2], Event::Logout));

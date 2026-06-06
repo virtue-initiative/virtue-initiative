@@ -126,4 +126,3 @@ pub struct LoopOutcome {
     pub ran_at_ms: i64,
     pub status: ServiceStatus,
 }
-

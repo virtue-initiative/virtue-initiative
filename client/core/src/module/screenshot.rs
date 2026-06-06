@@ -95,10 +95,10 @@ impl Observer for ScreenshotObserver {
         let interval_ms = self.config.screenshot_interval.as_millis() as i64;
 
         // Sanity check: reset if time went backwards.
-        if let Some(last) = self.state.last_screenshot_at_ms {
-            if now_ms < last {
-                self.state.last_screenshot_at_ms = None;
-            }
+        if let Some(last) = self.state.last_screenshot_at_ms
+            && now_ms < last
+        {
+            self.state.last_screenshot_at_ms = None;
         }
 
         let should = self

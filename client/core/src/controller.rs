@@ -69,9 +69,8 @@ impl ControllerClient {
     pub fn get_status(&mut self) -> Result<ServiceStatus, IpcError> {
         self.sender.send(&Event::StatusRequest)?;
         loop {
-            match self.recv_event()? {
-                Event::StatusResponse { status } => return Ok(status),
-                _ => {}
+            if let Event::StatusResponse { status } = self.recv_event()? {
+                return Ok(status);
             }
         }
     }

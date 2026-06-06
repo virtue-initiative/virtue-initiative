@@ -41,7 +41,13 @@ pub enum CoreError {
     #[error("external command failed: {0}")]
     CommandFailed(String),
     #[error("sending event failed: {0}")]
-    SendError(#[from] SendError<Event>),
+    SendError(Box<SendError<Event>>),
+}
+
+impl From<SendError<Event>> for CoreError {
+    fn from(e: SendError<Event>) -> Self {
+        CoreError::SendError(Box::new(e))
+    }
 }
 
 impl CoreError {

@@ -24,12 +24,7 @@ pub struct AuthObserver<A: ApiTransport> {
 }
 
 impl<A: ApiTransport> AuthObserver<A> {
-    pub fn new(
-        api: A,
-        device_name: String,
-        platform_name: String,
-        tx: Sender<Event>,
-    ) -> Self {
+    pub fn new(api: A, device_name: String, platform_name: String, tx: Sender<Event>) -> Self {
         Self {
             state: AuthObserverState::default(),
             api,
