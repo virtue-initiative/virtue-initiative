@@ -26,6 +26,18 @@ impl<T: std::ops::Deref<Target = str>> std::ops::Deref for Redacted<T> {
     }
 }
 
+impl From<String> for Redacted<String> {
+    fn from(s: String) -> Self {
+        Redacted(s)
+    }
+}
+
+impl From<&str> for Redacted<String> {
+    fn from(s: &str) -> Self {
+        Redacted(s.to_string())
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum ProcessStoppedReason {
@@ -153,6 +165,11 @@ pub enum Event {
         success: bool,
         error: Option<String>,
     },
+    // ── internal observer errors ──────────────────────────────────────────
+    Error {
+        source: String,
+        message: String,
+    },
 }
 
 pub type StateType = serde_json::Value;
@@ -197,8 +214,7 @@ impl EventLoop {
         if path.exists() {
             let bytes = std::fs::read(path)?;
             let state: serde_json::Value = serde_json::from_slice(&bytes)?;
-            if state.is_object() {
-                let map = state.as_object().unwrap();
+            if let Some(map) = state.as_object() {
                 for observer in &mut self.observers {
                     if let Some(observer_state) = map.get(observer.name()) {
                         observer.load_state(observer_state.clone())?;
@@ -229,7 +245,14 @@ impl EventLoop {
             #[cfg(debug_assertions)]
             eprintln!("[core ipc event] {event:?}");
             for observer in &mut self.observers {
-                observer.on_event(&event)?;
+                if let Err(e) = observer.on_event(&event) {
+                    self.tx
+                        .send(Event::Error {
+                            source: observer.name().to_string(),
+                            message: e.to_string(),
+                        })
+                        .ok();
+                }
             }
         }
         Ok(())
@@ -241,7 +264,14 @@ impl EventLoop {
             #[cfg(debug_assertions)]
             eprintln!("[core event] {event:?}");
             for observer in &mut self.observers {
-                observer.on_event(&event)?;
+                if let Err(e) = observer.on_event(&event) {
+                    self.tx
+                        .send(Event::Error {
+                            source: observer.name().to_string(),
+                            message: e.to_string(),
+                        })
+                        .ok();
+                }
             }
         }
         self.persist()

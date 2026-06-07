@@ -79,7 +79,14 @@ impl LifecycleObserver {
 
     fn on_event_while_running(&mut self, event: &Event) -> CoreResult<()> {
         let now_ms = self.platform_hooks.get_time_utc_ms()?;
-        let last_shutdown = self.compute_last_shutdown()?;
+        let startup_time_ms = self.platform_hooks.get_last_startup_time_utc_ms()?;
+
+        // Only pay the platform I/O cost for shutdown time when we might actually use it.
+        let last_shutdown = if self.state.last_process_stopped_other > 0 {
+            self.compute_last_shutdown()?
+        } else {
+            0
+        };
 
         let old = self.state.clone();
 
@@ -100,7 +107,7 @@ impl LifecycleObserver {
             self.state.last_process_stopped_shutdown = last_shutdown;
         }
 
-        if let Some(boot_ms) = self.platform_hooks.get_last_startup_time_utc_ms()?
+        if let Some(boot_ms) = startup_time_ms
             && boot_ms > self.state.last_sent_boot
         {
             // New boot we haven't recorded yet, fill in with best effort
@@ -196,10 +203,7 @@ impl LifecycleObserver {
             && now_ms - old.last_login > 60000
             && old.last_process_started > old.last_process_stopped_user
         {
-            let boot_ms = self
-                .platform_hooks
-                .get_last_startup_time_utc_ms()?
-                .unwrap_or(0);
+            let boot_ms = startup_time_ms.unwrap_or(0);
             let ping_gap = if old.last_ping > 0 {
                 now_ms - old.last_ping
             } else {

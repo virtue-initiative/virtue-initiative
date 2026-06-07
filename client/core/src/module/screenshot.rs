@@ -107,9 +107,9 @@ impl Observer for ScreenshotObserver {
         }
         let screenshot = match self.platform.take_screenshot() {
             Ok(s) => s,
-            Err(e) => {
+            Err(_) => {
                 self.sender.send(Event::CaptureFailed).ok();
-                return Err(e);
+                return Ok(());
             }
         };
         let processed = image_pipeline::ImagePipeline.process(screenshot)?;

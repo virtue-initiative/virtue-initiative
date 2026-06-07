@@ -225,14 +225,12 @@ impl<A: ApiTransport + Clone + 'static> UploadObserver<A> {
                 self.state.last_batch_at_ms = Some(now_ms);
                 Ok(())
             }
-            Err(err) if err.is_not_found() => {
-                log_error("batch upload: device deregistered, logging out", Some(&err));
+            Err(err) if err.is_not_found() || err.is_unauthorized() => {
+                log_error(
+                    "batch upload: device deregistered or unauth, logging out",
+                    Some(&err),
+                );
                 self.sender.send(Event::LogoutRequested).ok();
-                Ok(())
-            }
-            Err(err) if err.is_bad_request() => {
-                log_error("batch upload failed permanently", Some(&err));
-                self.state.pending_batch_events.drain(..count);
                 Ok(())
             }
             Err(err) => {
@@ -252,13 +250,6 @@ impl<A: ApiTransport + Clone + 'static> UploadObserver<A> {
                 #[cfg(debug_assertions)]
                 eprintln!("[upload] hash ok: {}", hex::encode(&content_hash[..8]));
                 Ok(Some(true))
-            }
-            Err(err) if err.is_bad_request() => {
-                log_error(
-                    "hash upload failed permanently, discarding event",
-                    Some(&err),
-                );
-                Ok(None)
             }
             Err(err) => {
                 log_error("hash upload deferred", Some(&err));
