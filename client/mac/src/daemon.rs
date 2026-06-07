@@ -8,7 +8,6 @@ use anyhow::Result;
 use block2::RcBlock;
 use objc2::rc::autoreleasepool;
 use objc2_app_kit::{NSWorkspace, NSWorkspaceWillPowerOffNotification};
-use objc2_foundation::{NSDate, NSRunLoop};
 use tokio::sync::mpsc;
 use virtue_core::events::{Event, ProcessStoppedReason};
 use virtue_core::ipc::is_allowed_inbound;
@@ -92,11 +91,8 @@ impl ShutdownWatcher {
                     None,
                     &callback,
                 );
-                let run_loop = NSRunLoop::currentRunLoop();
-
                 while !worker_stop.load(Ordering::SeqCst) {
-                    let next_tick = NSDate::dateWithTimeIntervalSinceNow(0.5);
-                    run_loop.runUntilDate(&next_tick);
+                    thread::sleep(Duration::from_millis(500));
                 }
 
                 center.removeObserver((*observer).as_ref());
