@@ -11,5 +11,10 @@ pub trait ScreenshotHooks: Send + Sync + 'static {
 }
 
 pub trait PlatformHooks: ScreenshotHooks {
-    type CustomEvent: Send + Clone + std::fmt::Debug + serde::Serialize + for<'de> serde::Deserialize<'de> + 'static;
+    type CustomEvent: Send
+        + Clone
+        + std::fmt::Debug
+        + serde::Serialize
+        + for<'de> serde::Deserialize<'de>
+        + 'static;
 }

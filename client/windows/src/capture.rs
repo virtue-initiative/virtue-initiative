@@ -2,7 +2,7 @@ use std::io::Cursor;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
-use virtue_core::{CoreError, CoreResult, PlatformHooks, ScreenshotHooks, Screenshot};
+use virtue_core::{CoreError, CoreResult, PlatformHooks, Screenshot, ScreenshotHooks};
 
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Gdi::{

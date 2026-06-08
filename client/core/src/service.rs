@@ -79,8 +79,10 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
             },
             tx.clone(),
         );
-        let capture_availability_obs =
-            CaptureAvailabilityObserver::<P::CustomEvent>::new(tx.clone(), Box::new(platform.clone()));
+        let capture_availability_obs = CaptureAvailabilityObserver::<P::CustomEvent>::new(
+            tx.clone(),
+            Box::new(platform.clone()),
+        );
         let request_handler = RequestObserver::new();
         let auth_obs = AuthObserver::<A, P::CustomEvent>::new(
             api,
@@ -91,13 +93,13 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
         let status_obs = StatusObserver::<P::CustomEvent>::new(STATUS_PARTIAL_COUNT, tx.clone());
 
         event_loop.observers = vec![
-            Box::new(lifecycle_obs) as Box<dyn Observer<P::CustomEvent>>,  // 0
-            Box::new(screenshot_obs),           // 1
-            Box::new(upload_obs),               // 2
-            Box::new(capture_availability_obs), // 3
-            Box::new(request_handler),          // 4
-            Box::new(auth_obs),                 // 5
-            Box::new(status_obs),               // 6
+            Box::new(lifecycle_obs) as Box<dyn Observer<P::CustomEvent>>, // 0
+            Box::new(screenshot_obs),                                     // 1
+            Box::new(upload_obs),                                         // 2
+            Box::new(capture_availability_obs),                           // 3
+            Box::new(request_handler),                                    // 4
+            Box::new(auth_obs),                                           // 5
+            Box::new(status_obs),                                         // 6
         ];
         event_loop.load_state(&state_file_path)?;
 

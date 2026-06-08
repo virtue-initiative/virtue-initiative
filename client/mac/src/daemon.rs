@@ -13,7 +13,9 @@ use virtue_core::events::{Event, ProcessStoppedReason};
 use virtue_core::ipc::is_allowed_inbound;
 use virtue_core::{MonitorService, iter_sleep};
 
-use crate::capture::{MacEvent, MacPlatformHooks, has_screen_capture_access, is_permission_missing_error};
+use crate::capture::{
+    MacEvent, MacPlatformHooks, has_screen_capture_access, is_permission_missing_error,
+};
 use crate::capture_reporter::CaptureReporterObserver;
 use crate::config::{ClientPaths, build_core_config};
 
@@ -225,8 +227,7 @@ async fn run_daemon_service_loop(
     let mut service = MonitorService::setup(build_core_config(paths), MacPlatformHooks::new())?;
 
     // Register the Mac-specific capture availability reporter.
-    let capture_reporter =
-        CaptureReporterObserver::new(service.event_queue_sender());
+    let capture_reporter = CaptureReporterObserver::new(service.event_queue_sender());
     service.add_observer(Box::new(capture_reporter));
 
     service.queue_event(Event::ProcessStarted);

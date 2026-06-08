@@ -23,10 +23,11 @@ impl ControllerClient {
     /// Send `LoginRequested` and block until `LoginResult` is received.
     /// Returns the new device ID on success.
     pub fn login(&mut self, email: &str, password: &str) -> Result<String, IpcError> {
-        self.sender.send::<serde_json::Value>(&Event::LoginRequested {
-            email: email.to_string(),
-            password: Redacted(password.to_string()),
-        })?;
+        self.sender
+            .send::<serde_json::Value>(&Event::LoginRequested {
+                email: email.to_string(),
+                password: Redacted(password.to_string()),
+            })?;
         loop {
             match self.recv_event_internal()? {
                 Event::LoginResult {
@@ -50,7 +51,8 @@ impl ControllerClient {
 
     /// Send `LogoutRequested` and block until `LogoutResult` is received.
     pub fn logout(&mut self) -> Result<(), IpcError> {
-        self.sender.send::<serde_json::Value>(&Event::LogoutRequested)?;
+        self.sender
+            .send::<serde_json::Value>(&Event::LogoutRequested)?;
         loop {
             match self.recv_event_internal()? {
                 Event::LogoutResult { success: true, .. } => return Ok(()),
@@ -69,7 +71,8 @@ impl ControllerClient {
 
     /// Send `StatusRequest` and block until `StatusResponse` is received.
     pub fn get_status(&mut self) -> Result<ServiceStatus, IpcError> {
-        self.sender.send::<serde_json::Value>(&Event::StatusRequest)?;
+        self.sender
+            .send::<serde_json::Value>(&Event::StatusRequest)?;
         loop {
             if let Event::StatusResponse { status } = self.recv_event_internal()? {
                 return Ok(status);
@@ -79,12 +82,16 @@ impl ControllerClient {
 
     /// Send `StatusRequest`, block until `StatusResponse`, and call `handler`
     /// for each `Custom` event received while waiting.
-    pub fn get_status_with_handler<C, F>(&mut self, mut handler: F) -> Result<ServiceStatus, IpcError>
+    pub fn get_status_with_handler<C, F>(
+        &mut self,
+        mut handler: F,
+    ) -> Result<ServiceStatus, IpcError>
     where
         C: DeserializeOwned,
         F: FnMut(C),
     {
-        self.sender.send::<serde_json::Value>(&Event::StatusRequest)?;
+        self.sender
+            .send::<serde_json::Value>(&Event::StatusRequest)?;
         loop {
             match self.recv_event::<C>()? {
                 Event::StatusResponse { status } => return Ok(status),
@@ -96,31 +103,37 @@ impl ControllerClient {
 
     /// Fire-and-forget: ask the daemon to record a user-initiated stop.
     pub fn request_user_stop(&mut self, source: &str) -> Result<(), IpcError> {
-        self.sender.send::<serde_json::Value>(&Event::UserStopRequested {
-            source: source.to_string(),
-        })
+        self.sender
+            .send::<serde_json::Value>(&Event::UserStopRequested {
+                source: source.to_string(),
+            })
     }
 
     pub fn note_suspended(&mut self) -> Result<(), IpcError> {
-        self.sender.send::<serde_json::Value>(&Event::ComputerSuspended)
+        self.sender
+            .send::<serde_json::Value>(&Event::ComputerSuspended)
     }
 
     pub fn note_resumed(&mut self) -> Result<(), IpcError> {
-        self.sender.send::<serde_json::Value>(&Event::ComputerResumed)
+        self.sender
+            .send::<serde_json::Value>(&Event::ComputerResumed)
     }
 
     /// Send the OS-level user session login event (e.g. Windows logon).
     pub fn note_login(&mut self) -> Result<(), IpcError> {
-        self.sender.send::<serde_json::Value>(&Event::UserSessionLogin)
+        self.sender
+            .send::<serde_json::Value>(&Event::UserSessionLogin)
     }
 
     /// Send the OS-level user session logout event (e.g. Windows logoff).
     pub fn note_logout(&mut self) -> Result<(), IpcError> {
-        self.sender.send::<serde_json::Value>(&Event::UserSessionLogout)
+        self.sender
+            .send::<serde_json::Value>(&Event::UserSessionLogout)
     }
 
     pub fn note_process_stopped(&mut self, reason: ProcessStoppedReason) -> Result<(), IpcError> {
-        self.sender.send::<serde_json::Value>(&Event::ProcessStopped(reason))
+        self.sender
+            .send::<serde_json::Value>(&Event::ProcessStopped(reason))
     }
 
     /// Receive an event with a custom payload type `C`.

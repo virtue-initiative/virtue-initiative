@@ -2,7 +2,7 @@ use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
-use virtue_core::{CoreError, CoreResult, PlatformHooks, ScreenshotHooks, Screenshot};
+use virtue_core::{CoreError, CoreResult, PlatformHooks, Screenshot, ScreenshotHooks};
 
 #[derive(Clone, Copy, Debug)]
 pub enum CaptureBackend {

@@ -18,7 +18,10 @@ use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use virtue_core::{AuthState, ControllerClient, CoreError, ServiceStatus};
 
-use crate::capture::{MacEvent, has_screen_capture_access, open_screen_capture_settings, request_screen_capture_access};
+use crate::capture::{
+    MacEvent, has_screen_capture_access, open_screen_capture_settings,
+    request_screen_capture_access,
+};
 use crate::config::{ClientPaths, ClientState, build_core_config, load_state, save_state};
 use crate::runtime_env::apply_runtime_env;
 
@@ -112,7 +115,12 @@ fn run_tray(paths: ClientPaths) -> Result<()> {
 
     event_loop.run(move |event, _event_loop_target, control_flow| {
         if let Event::UserEvent(main_window_event) = event {
-            match handle_main_window_event(&paths, &mut main_window, main_window_event, &mut relaunching) {
+            match handle_main_window_event(
+                &paths,
+                &mut main_window,
+                main_window_event,
+                &mut relaunching,
+            ) {
                 Ok(true) => {
                     *control_flow = ControlFlow::Exit;
                     return;

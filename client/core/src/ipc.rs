@@ -89,7 +89,10 @@ mod unix_impl {
     }
 
     impl IpcSender {
-        pub fn send<C: serde::Serialize>(&mut self, event: &super::Event<C>) -> Result<(), IpcError> {
+        pub fn send<C: serde::Serialize>(
+            &mut self,
+            event: &super::Event<C>,
+        ) -> Result<(), IpcError> {
             let json = serde_json::to_string(event)?;
             self.writer.write_all(json.as_bytes())?;
             self.writer.write_all(b"\n")?;
@@ -363,7 +366,9 @@ mod tests {
             connect_in_process(&listener.connect_tx).expect("connect");
         let (mut daemon_sender, mut daemon_receiver) = listener.blocking_accept().expect("accept");
 
-        daemon_sender.send::<()>(&Event::UserSessionLogin).expect("send");
+        daemon_sender
+            .send::<()>(&Event::UserSessionLogin)
+            .expect("send");
         let received = ctrl_receiver.recv_event::<()>().expect("recv");
         assert!(matches!(received, Event::UserSessionLogin));
 

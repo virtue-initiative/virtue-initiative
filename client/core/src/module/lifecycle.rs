@@ -98,12 +98,14 @@ impl<C: 'static> LifecycleObserver<C> {
             && self.state.last_process_stopped_shutdown < last_shutdown
         {
             // We missed the shutdown event, fill in with best effort
-            self.sender.send(Event::Upload {
-                risk: 0.0,
-                kind: UploadKind::Lifecycle {
-                    kind: LifecycleKind::ProcessStoppedShutdown,
-                },
-            }).ok();
+            self.sender
+                .send(Event::Upload {
+                    risk: 0.0,
+                    kind: UploadKind::Lifecycle {
+                        kind: LifecycleKind::ProcessStoppedShutdown,
+                    },
+                })
+                .ok();
             self.state.last_process_stopped_shutdown = last_shutdown;
         }
 
@@ -111,12 +113,14 @@ impl<C: 'static> LifecycleObserver<C> {
             && boot_ms > self.state.last_sent_boot
         {
             // New boot we haven't recorded yet, fill in with best effort
-            self.sender.send(Event::Upload {
-                risk: 0.0,
-                kind: UploadKind::Lifecycle {
-                    kind: LifecycleKind::ComputerBooted,
-                },
-            }).ok();
+            self.sender
+                .send(Event::Upload {
+                    risk: 0.0,
+                    kind: UploadKind::Lifecycle {
+                        kind: LifecycleKind::ComputerBooted,
+                    },
+                })
+                .ok();
             self.state.last_sent_boot = boot_ms;
         }
 
@@ -135,10 +139,12 @@ impl<C: 'static> LifecycleObserver<C> {
             _ => None,
         };
         if let Some((kind, risk)) = lifecycle_event {
-            self.sender.send(Event::Upload {
-                risk,
-                kind: UploadKind::Lifecycle { kind },
-            }).ok();
+            self.sender
+                .send(Event::Upload {
+                    risk,
+                    kind: UploadKind::Lifecycle { kind },
+                })
+                .ok();
         }
 
         // Update state timestamps
@@ -180,22 +186,26 @@ impl<C: 'static> LifecycleObserver<C> {
             && old.last_process_stopped_other > 0
             && last_shutdown - old.last_process_stopped_other > 10000
         {
-            self.sender.send(Event::Upload {
-                risk: 0.5,
-                kind: UploadKind::LifecycleAlert {
-                    reason: AlertReason::ProcessKilledBeforeShutdown,
-                },
-            }).ok();
+            self.sender
+                .send(Event::Upload {
+                    risk: 0.5,
+                    kind: UploadKind::LifecycleAlert {
+                        reason: AlertReason::ProcessKilledBeforeShutdown,
+                    },
+                })
+                .ok();
         }
 
         // ALERT: user explicitly stopped the process
         if matches!(event, Event::ProcessStopped(ProcessStoppedReason::User)) {
-            self.sender.send(Event::Upload {
-                risk: HIGH_RISK_LIFECYCLE_ALERT,
-                kind: UploadKind::LifecycleAlert {
-                    reason: AlertReason::UserStoppedProcess,
-                },
-            }).ok();
+            self.sender
+                .send(Event::Upload {
+                    risk: HIGH_RISK_LIFECYCLE_ALERT,
+                    kind: UploadKind::LifecycleAlert {
+                        reason: AlertReason::UserStoppedProcess,
+                    },
+                })
+                .ok();
         }
 
         // ALERT: ProcessStarted after suspicious gap
@@ -210,12 +220,14 @@ impl<C: 'static> LifecycleObserver<C> {
                 i64::MAX
             };
             if ping_gap > 10000 && (now_ms - boot_ms) > 60000 {
-                self.sender.send(Event::Upload {
-                    risk: HIGH_RISK_LIFECYCLE_ALERT,
-                    kind: UploadKind::LifecycleAlert {
-                        reason: AlertReason::UnexpectedProcessStart,
-                    },
-                }).ok();
+                self.sender
+                    .send(Event::Upload {
+                        risk: HIGH_RISK_LIFECYCLE_ALERT,
+                        kind: UploadKind::LifecycleAlert {
+                            reason: AlertReason::UnexpectedProcessStart,
+                        },
+                    })
+                    .ok();
             }
         }
 
@@ -224,12 +236,14 @@ impl<C: 'static> LifecycleObserver<C> {
             let ping_gap = now_ms - old.last_ping;
             let start_gap = now_ms - old.last_running_started;
             if old.last_ping > 0 && ping_gap > 10000 && start_gap > 10000 {
-                self.sender.send(Event::Upload {
-                    risk: HIGH_RISK_LIFECYCLE_ALERT,
-                    kind: UploadKind::LifecycleAlert {
-                        reason: AlertReason::PingGapWhileRunning,
-                    },
-                }).ok();
+                self.sender
+                    .send(Event::Upload {
+                        risk: HIGH_RISK_LIFECYCLE_ALERT,
+                        kind: UploadKind::LifecycleAlert {
+                            reason: AlertReason::PingGapWhileRunning,
+                        },
+                    })
+                    .ok();
             }
         }
 
@@ -248,12 +262,14 @@ impl<C: 'static> LifecycleObserver<C> {
             self.state.status = LifecycleStatus::Running;
             self.state.last_running_started = now_ms;
             self.state.last_computer_resume = now_ms;
-            self.sender.send(Event::Upload {
-                risk: 0.0,
-                kind: UploadKind::Lifecycle {
-                    kind: LifecycleKind::ComputerResumed,
-                },
-            }).ok();
+            self.sender
+                .send(Event::Upload {
+                    risk: 0.0,
+                    kind: UploadKind::Lifecycle {
+                        kind: LifecycleKind::ComputerResumed,
+                    },
+                })
+                .ok();
         }
 
         // ProcessStopped and UserSessionLogout must be recorded even while suspended
@@ -265,10 +281,12 @@ impl<C: 'static> LifecycleObserver<C> {
                     ProcessStoppedReason::Shutdown => LifecycleKind::ProcessStoppedShutdown,
                     ProcessStoppedReason::User => LifecycleKind::ProcessStoppedUser,
                 };
-                self.sender.send(Event::Upload {
-                    risk: 0.0,
-                    kind: UploadKind::Lifecycle { kind },
-                }).ok();
+                self.sender
+                    .send(Event::Upload {
+                        risk: 0.0,
+                        kind: UploadKind::Lifecycle { kind },
+                    })
+                    .ok();
                 match reason {
                     ProcessStoppedReason::Other => self.state.last_process_stopped_other = now_ms,
                     ProcessStoppedReason::Shutdown => {
@@ -278,12 +296,14 @@ impl<C: 'static> LifecycleObserver<C> {
                 }
             }
             Event::UserSessionLogout => {
-                self.sender.send(Event::Upload {
-                    risk: HIGH_RISK_LIFECYCLE_ALERT,
-                    kind: UploadKind::Lifecycle {
-                        kind: LifecycleKind::Logout,
-                    },
-                }).ok();
+                self.sender
+                    .send(Event::Upload {
+                        risk: HIGH_RISK_LIFECYCLE_ALERT,
+                        kind: UploadKind::Lifecycle {
+                            kind: LifecycleKind::Logout,
+                        },
+                    })
+                    .ok();
             }
             _ => {}
         }
@@ -292,12 +312,14 @@ impl<C: 'static> LifecycleObserver<C> {
             // Reset before sending so re-entrant processing of the queued Upload
             // event doesn't re-trigger this block while still in Suspended state.
             self.state.pings_while_suspended = 0;
-            self.sender.send(Event::Upload {
-                risk: MEDIUM_RISK_LIFECYCLE_ALERT,
-                kind: UploadKind::LifecycleAlert {
-                    reason: AlertReason::MissingResume,
-                },
-            }).ok();
+            self.sender
+                .send(Event::Upload {
+                    risk: MEDIUM_RISK_LIFECYCLE_ALERT,
+                    kind: UploadKind::LifecycleAlert {
+                        reason: AlertReason::MissingResume,
+                    },
+                })
+                .ok();
             self.sender.send(Event::ComputerResumed).ok();
         }
 

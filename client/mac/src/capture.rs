@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use virtue_core::{CoreError, CoreResult, PlatformHooks, ScreenshotHooks, Screenshot};
+use virtue_core::{CoreError, CoreResult, PlatformHooks, Screenshot, ScreenshotHooks};
 
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {

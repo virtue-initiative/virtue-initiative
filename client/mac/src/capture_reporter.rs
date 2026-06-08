@@ -50,14 +50,18 @@ impl Observer<MacEvent> for CaptureReporterObserver {
                 if self.last_available != Some(available) {
                     self.last_available = Some(available);
                     self.sender
-                        .send(Event::Custom(MacEvent::CaptureAvailabilityChanged(available)))
+                        .send(Event::Custom(MacEvent::CaptureAvailabilityChanged(
+                            available,
+                        )))
                         .ok();
                 }
             }
             Event::StatusRequest => {
                 if let Some(available) = self.last_available {
                     self.sender
-                        .send(Event::Custom(MacEvent::CaptureAvailabilityChanged(available)))
+                        .send(Event::Custom(MacEvent::CaptureAvailabilityChanged(
+                            available,
+                        )))
                         .ok();
                 }
             }

@@ -20,7 +20,7 @@ mod tests {
     use super::*;
     use crate::api::ApiTransport;
     use crate::config::Config;
-    use crate::platform::PlatformHooks;
+    use crate::platform::ScreenshotHooks;
     use crate::service::MonitorService;
 
     static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
