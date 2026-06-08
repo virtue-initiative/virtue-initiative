@@ -2,7 +2,7 @@ use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
-use virtue_core::{CoreError, CoreResult, PlatformHooks, Screenshot};
+use virtue_core::{CoreError, CoreResult, PlatformHooks, ScreenshotHooks, Screenshot};
 
 #[derive(Clone, Copy, Debug)]
 pub enum CaptureBackend {
@@ -214,7 +214,7 @@ impl LinuxPlatformHooks {
     }
 }
 
-impl PlatformHooks for LinuxPlatformHooks {
+impl ScreenshotHooks for LinuxPlatformHooks {
     fn take_screenshot(&self) -> CoreResult<Screenshot> {
         let bytes = capture_screen().map_err(|err| CoreError::CommandFailed(err.to_string()))?;
         Ok(Screenshot {
@@ -243,10 +243,14 @@ impl PlatformHooks for LinuxPlatformHooks {
     }
 }
 
+impl PlatformHooks for LinuxPlatformHooks {
+    type CustomEvent = ();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use virtue_core::PlatformHooks;
+    use virtue_core::ScreenshotHooks;
 
     #[test]
     fn is_session_unavailable_text_matches_known_error_strings() {

@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::error::CoreResult;
 use crate::model::Screenshot;
-use crate::platform::PlatformHooks;
+use crate::platform::{PlatformHooks, ScreenshotHooks};
 use crate::testing::clock::MockClock;
 use crate::testing::fixtures::tiny_png_screenshot;
 
@@ -58,7 +58,7 @@ impl Default for TestPlatformHooks {
     }
 }
 
-impl PlatformHooks for TestPlatformHooks {
+impl ScreenshotHooks for TestPlatformHooks {
     fn take_screenshot(&self) -> CoreResult<Screenshot> {
         let mut inner = self.lock();
         inner.take_call_count += 1;
@@ -80,4 +80,8 @@ impl PlatformHooks for TestPlatformHooks {
     fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
         Ok(None)
     }
+}
+
+impl PlatformHooks for TestPlatformHooks {
+    type CustomEvent = ();
 }

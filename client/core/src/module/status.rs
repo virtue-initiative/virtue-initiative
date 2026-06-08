@@ -9,18 +9,18 @@ use crate::model::ServiceStatus;
 /// observers emit in reply to a `StatusRequest`. Holds no persistent state of
 /// its own: it accumulates fragments transiently and, once it has heard from
 /// every expected observer, sends the combined `ServiceStatus` and resets.
-pub struct StatusObserver {
+pub struct StatusObserver<C = ()> {
     /// Number of `PartialStatus` fragments to wait for before responding.
     expected_count: usize,
     /// Fragments received since the current `StatusRequest`.
     received: usize,
     /// Status assembled from fragments received so far.
     pending: ServiceStatus,
-    tx: Sender<Event>,
+    tx: Sender<Event<C>>,
 }
 
-impl StatusObserver {
-    pub fn new(expected_count: usize, tx: Sender<Event>) -> Self {
+impl<C: 'static> StatusObserver<C> {
+    pub fn new(expected_count: usize, tx: Sender<Event<C>>) -> Self {
         Self {
             expected_count,
             received: 0,
@@ -54,7 +54,7 @@ impl StatusObserver {
     }
 }
 
-impl Observer for StatusObserver {
+impl<C: 'static> Observer<C> for StatusObserver<C> {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -74,7 +74,7 @@ impl Observer for StatusObserver {
         Ok(())
     }
 
-    fn on_event(&mut self, event: &Event) -> CoreResult<()> {
+    fn on_event(&mut self, event: &Event<C>) -> CoreResult<()> {
         match event {
             Event::StatusRequest => {
                 // Begin collecting fragments for a fresh response.

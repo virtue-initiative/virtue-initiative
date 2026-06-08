@@ -31,18 +31,18 @@ pub struct AuthObserverState {
     pub device_credentials: Option<DeviceCredentials>,
 }
 
-pub struct AuthObserver<A: ApiTransport> {
+pub struct AuthObserver<A: ApiTransport, C = ()> {
     pub(crate) state: AuthObserverState,
     pub(crate) api: A,
     device_name: String,
     platform_name: String,
-    tx: Sender<Event>,
+    tx: Sender<Event<C>>,
     needs_settings_refresh: bool,
     pings_without_refresh: u32,
 }
 
-impl<A: ApiTransport> AuthObserver<A> {
-    pub fn new(api: A, device_name: String, platform_name: String, tx: Sender<Event>) -> Self {
+impl<A: ApiTransport, C: 'static> AuthObserver<A, C> {
+    pub fn new(api: A, device_name: String, platform_name: String, tx: Sender<Event<C>>) -> Self {
         Self {
             state: AuthObserverState::default(),
             api,
@@ -182,7 +182,7 @@ impl<A: ApiTransport> AuthObserver<A> {
     }
 }
 
-impl<A: ApiTransport + 'static> Observer for AuthObserver<A> {
+impl<C: 'static, A: ApiTransport + 'static> Observer<C> for AuthObserver<A, C> {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -207,7 +207,7 @@ impl<A: ApiTransport + 'static> Observer for AuthObserver<A> {
         Ok(())
     }
 
-    fn on_event(&mut self, event: &Event) -> CoreResult<()> {
+    fn on_event(&mut self, event: &Event<C>) -> CoreResult<()> {
         match event {
             Event::LoginRequested { email, password } => {
                 self.handle_login_requested(email, password);

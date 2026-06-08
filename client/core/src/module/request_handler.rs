@@ -1,5 +1,7 @@
 use std::any::Any;
 
+use serde::Serialize;
+
 use crate::error::CoreResult;
 use crate::events::{Event, Observer, StateType};
 use crate::ipc::IpcSender;
@@ -26,7 +28,7 @@ impl RequestObserver {
     }
 }
 
-impl Observer for RequestObserver {
+impl<C: Serialize + 'static> Observer<C> for RequestObserver {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -47,7 +49,7 @@ impl Observer for RequestObserver {
         Ok(())
     }
 
-    fn on_event(&mut self, event: &Event) -> CoreResult<()> {
+    fn on_event(&mut self, event: &Event<C>) -> CoreResult<()> {
         // Forward events to connected controllers; skip large data events,
         // internal auth events that carry sensitive credentials, and the
         // intra-loop status fragments that assemble a StatusResponse.

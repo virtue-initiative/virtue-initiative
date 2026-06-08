@@ -5,7 +5,7 @@ use crate::api::{ApiTransport, ReqwestApiClient};
 use crate::config::Config;
 use crate::error::{CoreError, CoreResult};
 use crate::events::UploadKind;
-use crate::events::{Event, EventLoop, log_error};
+use crate::events::{Event, EventLoop, Observer, log_error};
 use crate::ipc::{IpcError, IpcListener, IpcSender};
 use crate::model::{LoopOutcome, ServiceStatus};
 use crate::module::auth::AuthObserver;
@@ -41,7 +41,7 @@ pub struct MonitorService<
     config: Config,
     platform: P,
     pub(crate) is_running: bool,
-    pub(crate) event_loop: EventLoop,
+    pub(crate) event_loop: EventLoop<P::CustomEvent>,
     _phantom: std::marker::PhantomData<A>,
 }
 
@@ -58,18 +58,20 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
         config.refresh_from_runtime_file()?;
         let state_file_path = config.state_dir.join("event_state.json");
 
-        let mut event_loop = EventLoop::new(state_file_path.clone(), vec![]);
+        let mut event_loop: EventLoop<P::CustomEvent> =
+            EventLoop::new(state_file_path.clone(), vec![]);
         let tx = event_loop.tx.clone();
 
-        let lifecycle_obs = LifecycleObserver::new(Box::new(platform.clone()), tx.clone());
-        let screenshot_obs = ScreenshotObserver::new(
+        let lifecycle_obs =
+            LifecycleObserver::<P::CustomEvent>::new(Box::new(platform.clone()), tx.clone());
+        let screenshot_obs = ScreenshotObserver::<P::CustomEvent>::new(
             Box::new(platform.clone()),
             tx.clone(),
             ScreenshotConfig {
                 screenshot_interval: config.screenshot_interval,
             },
         );
-        let upload_obs = UploadObserver::new(
+        let upload_obs = UploadObserver::<A, P::CustomEvent>::new(
             Box::new(platform.clone()),
             api.clone(),
             UploadConfig {
@@ -78,18 +80,18 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
             tx.clone(),
         );
         let capture_availability_obs =
-            CaptureAvailabilityObserver::new(tx.clone(), Box::new(platform.clone()));
+            CaptureAvailabilityObserver::<P::CustomEvent>::new(tx.clone(), Box::new(platform.clone()));
         let request_handler = RequestObserver::new();
-        let auth_obs = AuthObserver::new(
+        let auth_obs = AuthObserver::<A, P::CustomEvent>::new(
             api,
             config.device_name.clone(),
             config.platform_name.clone(),
             tx.clone(),
         );
-        let status_obs = StatusObserver::new(STATUS_PARTIAL_COUNT, tx.clone());
+        let status_obs = StatusObserver::<P::CustomEvent>::new(STATUS_PARTIAL_COUNT, tx.clone());
 
         event_loop.observers = vec![
-            Box::new(lifecycle_obs),            // 0
+            Box::new(lifecycle_obs) as Box<dyn Observer<P::CustomEvent>>,  // 0
             Box::new(screenshot_obs),           // 1
             Box::new(upload_obs),               // 2
             Box::new(capture_availability_obs), // 3
@@ -130,7 +132,11 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
         })
     }
 
-    pub fn queue_event(&mut self, event: Event) {
+    pub fn add_observer(&mut self, observer: Box<dyn Observer<P::CustomEvent>>) {
+        self.event_loop.observers.push(observer);
+    }
+
+    pub fn queue_event(&mut self, event: Event<P::CustomEvent>) {
         self.event_loop.queue_event(event);
     }
 
@@ -242,52 +248,52 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
 
     /// Clone the event-loop sender so a receiver thread can forward inbound
     /// IPC events into the daemon's event queue.
-    pub fn event_queue_sender(&self) -> std::sync::mpsc::Sender<Event> {
+    pub fn event_queue_sender(&self) -> std::sync::mpsc::Sender<Event<P::CustomEvent>> {
         self.event_loop.tx.clone()
     }
 
     // ─── Typed observer accessors ─────────────────────────────────────────────
 
-    fn lifecycle_obs(&self) -> &LifecycleObserver {
+    fn lifecycle_obs(&self) -> &LifecycleObserver<P::CustomEvent> {
         self.event_loop.observers[LIFECYCLE_IDX]
             .as_any()
-            .downcast_ref::<LifecycleObserver>()
+            .downcast_ref::<LifecycleObserver<P::CustomEvent>>()
             .expect("lifecycle observer at index 0")
     }
 
-    fn lifecycle_obs_mut(&mut self) -> &mut LifecycleObserver {
+    fn lifecycle_obs_mut(&mut self) -> &mut LifecycleObserver<P::CustomEvent> {
         self.event_loop.observers[LIFECYCLE_IDX]
             .as_any_mut()
-            .downcast_mut::<LifecycleObserver>()
+            .downcast_mut::<LifecycleObserver<P::CustomEvent>>()
             .expect("lifecycle observer at index 0")
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn screenshot_obs(&self) -> &ScreenshotObserver {
+    pub(crate) fn screenshot_obs(&self) -> &ScreenshotObserver<P::CustomEvent> {
         self.event_loop.observers[SCREENSHOT_IDX]
             .as_any()
-            .downcast_ref::<ScreenshotObserver>()
+            .downcast_ref::<ScreenshotObserver<P::CustomEvent>>()
             .expect("screenshot observer at index 1")
     }
 
-    fn screenshot_obs_mut(&mut self) -> &mut ScreenshotObserver {
+    fn screenshot_obs_mut(&mut self) -> &mut ScreenshotObserver<P::CustomEvent> {
         self.event_loop.observers[SCREENSHOT_IDX]
             .as_any_mut()
-            .downcast_mut::<ScreenshotObserver>()
+            .downcast_mut::<ScreenshotObserver<P::CustomEvent>>()
             .expect("screenshot observer at index 1")
     }
 
-    pub(crate) fn upload_obs(&self) -> &UploadObserver<A> {
+    pub(crate) fn upload_obs(&self) -> &UploadObserver<A, P::CustomEvent> {
         self.event_loop.observers[UPLOAD_IDX]
             .as_any()
-            .downcast_ref::<UploadObserver<A>>()
+            .downcast_ref::<UploadObserver<A, P::CustomEvent>>()
             .expect("upload observer at index 2")
     }
 
-    pub(crate) fn upload_obs_mut(&mut self) -> &mut UploadObserver<A> {
+    pub(crate) fn upload_obs_mut(&mut self) -> &mut UploadObserver<A, P::CustomEvent> {
         self.event_loop.observers[UPLOAD_IDX]
             .as_any_mut()
-            .downcast_mut::<UploadObserver<A>>()
+            .downcast_mut::<UploadObserver<A, P::CustomEvent>>()
             .expect("upload observer at index 2")
     }
 
@@ -298,17 +304,17 @@ impl<P: PlatformHooks + Clone + 'static, A: ApiTransport + Clone + 'static> Moni
             .expect("request handler observer at index 4")
     }
 
-    fn auth_obs(&self) -> &AuthObserver<A> {
+    fn auth_obs(&self) -> &AuthObserver<A, P::CustomEvent> {
         self.event_loop.observers[AUTH_IDX]
             .as_any()
-            .downcast_ref::<AuthObserver<A>>()
+            .downcast_ref::<AuthObserver<A, P::CustomEvent>>()
             .expect("auth observer at index 5")
     }
 
-    fn auth_obs_mut(&mut self) -> &mut AuthObserver<A> {
+    fn auth_obs_mut(&mut self) -> &mut AuthObserver<A, P::CustomEvent> {
         self.event_loop.observers[AUTH_IDX]
             .as_any_mut()
-            .downcast_mut::<AuthObserver<A>>()
+            .downcast_mut::<AuthObserver<A, P::CustomEvent>>()
             .expect("auth observer at index 5")
     }
 }
@@ -325,6 +331,7 @@ mod tests {
     use crate::api::ReqwestApiClient;
     use crate::events::UploadKind;
     use crate::model::{BatchRecipient, DeviceCredentials, DeviceSettings, LogEntry};
+    use crate::platform::ScreenshotHooks;
 
     static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -333,7 +340,7 @@ mod tests {
         now_ms: Arc<AtomicI64>,
     }
 
-    impl PlatformHooks for TestPlatform {
+    impl ScreenshotHooks for TestPlatform {
         fn take_screenshot(&self) -> CoreResult<crate::model::Screenshot> {
             Ok(crate::model::Screenshot {
                 captured_at_ms: 0,
@@ -353,6 +360,10 @@ mod tests {
         fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
             Ok(None)
         }
+    }
+
+    impl PlatformHooks for TestPlatform {
+        type CustomEvent = ();
     }
 
     impl TestPlatform {

@@ -13,7 +13,7 @@ use serde::de::DeserializeOwned;
 use virtue_core::events::{Event, ProcessStoppedReason, Redacted};
 use virtue_core::{
     AuthState, Config, CoreError, CoreResult, DeviceSettings, MonitorService, PlatformHooks,
-    Screenshot, ServiceStatus,
+    ScreenshotHooks, Screenshot, ServiceStatus,
 };
 
 static CORE: OnceCell<IosCore> = OnceCell::new();
@@ -80,7 +80,7 @@ impl IosPlatformHooks {
     }
 }
 
-impl PlatformHooks for IosPlatformHooks {
+impl ScreenshotHooks for IosPlatformHooks {
     fn take_screenshot(&self) -> CoreResult<Screenshot> {
         match self.capture_status() {
             CAPTURE_STATUS_READY => {
@@ -121,6 +121,10 @@ impl PlatformHooks for IosPlatformHooks {
     fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
         Ok(None)
     }
+}
+
+impl PlatformHooks for IosPlatformHooks {
+    type CustomEvent = ();
 }
 
 #[no_mangle]

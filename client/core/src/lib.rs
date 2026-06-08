@@ -26,5 +26,5 @@ pub use model::{
     AuthState, BatchUpload, DeviceCredentials, DeviceSettings, EventData, LogEntry, LoginStatus,
     LoopOutcome, Screenshot, ServiceStatus,
 };
-pub use platform::PlatformHooks;
+pub use platform::{PlatformHooks, ScreenshotHooks};
 pub use service::{ITER_INTERVAL, MonitorService, iter_sleep};

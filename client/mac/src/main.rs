@@ -1,4 +1,5 @@
 mod capture;
+mod capture_reporter;
 mod config;
 mod daemon;
 mod launch_agent;
@@ -17,10 +18,7 @@ use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use virtue_core::{AuthState, ControllerClient, CoreError, ServiceStatus};
 
-use crate::capture::{
-    ScreenCaptureAccessRequestOutcome, has_screen_capture_access, open_screen_capture_settings,
-    request_screen_capture_access_if_needed,
-};
+use crate::capture::{MacEvent, has_screen_capture_access, open_screen_capture_settings, request_screen_capture_access};
 use crate::config::{ClientPaths, ClientState, build_core_config, load_state, save_state};
 use crate::runtime_env::apply_runtime_env;
 
@@ -105,6 +103,7 @@ fn run_tray(paths: ClientPaths) -> Result<()> {
 
     let mut main_window = None;
     let mut next_status_poll_at = Instant::now();
+    let mut relaunching = false;
 
     if let Err(err) = open_app_dialog(&paths, &mut main_window) {
         eprintln!("initial dialog failed: {err:#}");
@@ -113,7 +112,7 @@ fn run_tray(paths: ClientPaths) -> Result<()> {
 
     event_loop.run(move |event, _event_loop_target, control_flow| {
         if let Event::UserEvent(main_window_event) = event {
-            match handle_main_window_event(&paths, &mut main_window, main_window_event) {
+            match handle_main_window_event(&paths, &mut main_window, main_window_event, &mut relaunching) {
                 Ok(true) => {
                     *control_flow = ControlFlow::Exit;
                     return;
@@ -171,7 +170,7 @@ fn run_tray(paths: ClientPaths) -> Result<()> {
             }
         }
 
-        if main_window.is_some() && Instant::now() >= next_status_poll_at {
+        if main_window.is_some() && !relaunching && Instant::now() >= next_status_poll_at {
             if let Err(err) = refresh_main_window_status(&paths, main_window.as_ref()) {
                 eprintln!("main window status refresh failed: {err:#}");
             }
@@ -236,6 +235,7 @@ fn handle_main_window_event(
     paths: &ClientPaths,
     main_window: &mut Option<ui::MainWindowHandle>,
     event: ui::MainWindowEvent,
+    relaunching: &mut bool,
 ) -> Result<bool> {
     match event {
         ui::MainWindowEvent::Closed => {
@@ -254,8 +254,27 @@ fn handle_main_window_event(
             Ok(false)
         }
         ui::MainWindowEvent::Action(ui::LoggedInAction::RelaunchToAcceptPermissions) => {
-            relaunch_background_service(paths)?;
-            ui::show_info("Virtue background service relaunched.")?;
+            *relaunching = true;
+            if let Some(window) = main_window.as_ref() {
+                window.set_relaunch_button_state("Restarting...", false);
+            }
+            let paths = paths.clone();
+            thread::spawn(move || {
+                let result = relaunch_background_service(&paths);
+                let error = result.err().map(|e| e.to_string());
+                let _ = ui::send_main_window_event(ui::MainWindowEvent::RelaunchDone(error));
+            });
+            Ok(false)
+        }
+        ui::MainWindowEvent::RelaunchDone(error) => {
+            *relaunching = false;
+            if let Some(window) = main_window.as_ref() {
+                window.set_relaunch_button_state("Relaunch to Accept Permissions", true);
+            }
+            match error {
+                None => ui::show_info("Virtue background service relaunched.")?,
+                Some(msg) => ui::show_error(&format!("Relaunch failed:\n{msg}"))?,
+            }
             Ok(false)
         }
         ui::MainWindowEvent::Action(ui::LoggedInAction::StopMonitoring) => {
@@ -386,15 +405,10 @@ fn maybe_request_screen_capture_access_for_logged_in_user(paths: &ClientPaths) -
 }
 
 fn request_screen_capture_access_for_monitoring() -> Result<()> {
-    if has_screen_capture_access() {
+    if request_screen_capture_access() {
         return Ok(());
     }
-
-    match request_screen_capture_access_if_needed() {
-        ScreenCaptureAccessRequestOutcome::AlreadyGranted
-        | ScreenCaptureAccessRequestOutcome::Granted => Ok(()),
-        ScreenCaptureAccessRequestOutcome::Missing => open_screen_capture_settings(),
-    }
+    open_screen_capture_settings()
 }
 
 fn relaunch_background_service(paths: &ClientPaths) -> Result<()> {
@@ -455,10 +469,23 @@ fn collect_status(paths: &ClientPaths) -> Result<AppStatus> {
     let state = load_state(&paths.ui_state_file)?;
     let auth = read_auth_state(&paths.state_dir)?;
 
+    // Get capture permission from daemon via IPC — tray never holds the TCC grant itself.
+    let has_capture_permission = {
+        let sock = paths.state_dir.join("daemon.sock");
+        let mut available = false;
+        if let Ok(mut client) = ControllerClient::connect(&sock) {
+            let _ = client.get_status_with_handler::<MacEvent, _>(|ev| {
+                let MacEvent::CaptureAvailabilityChanged(a) = ev;
+                available = a;
+            });
+        }
+        available
+    };
+
     Ok(AppStatus {
         logged_in: auth.device_credentials.is_some(),
         email: state.email,
-        has_capture_permission: has_screen_capture_access(),
+        has_capture_permission,
     })
 }
 

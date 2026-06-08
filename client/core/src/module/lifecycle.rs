@@ -8,7 +8,7 @@ use crate::events::{
     AlertReason, Event, LifecycleKind, Observer, PartialStatus, ProcessStoppedReason, StateType,
     UploadKind,
 };
-use crate::platform::PlatformHooks;
+use crate::platform::ScreenshotHooks;
 
 pub(crate) const HIGH_RISK_LIFECYCLE_ALERT: f32 = 0.9;
 pub(crate) const MEDIUM_RISK_LIFECYCLE_ALERT: f32 = 0.6;
@@ -45,14 +45,14 @@ pub struct LifecycleObserverState {
     pub user_stop_requested: bool,
 }
 
-pub struct LifecycleObserver {
+pub struct LifecycleObserver<C = ()> {
     pub state: LifecycleObserverState,
-    platform_hooks: Box<dyn PlatformHooks>,
-    sender: Sender<Event>,
+    platform_hooks: Box<dyn ScreenshotHooks>,
+    sender: Sender<Event<C>>,
 }
 
-impl LifecycleObserver {
-    pub fn new(platform_hooks: Box<dyn PlatformHooks>, sender: Sender<Event>) -> Self {
+impl<C: 'static> LifecycleObserver<C> {
+    pub fn new(platform_hooks: Box<dyn ScreenshotHooks>, sender: Sender<Event<C>>) -> Self {
         Self {
             state: LifecycleObserverState::default(),
             platform_hooks,
@@ -77,7 +77,7 @@ impl LifecycleObserver {
             .unwrap_or(0))
     }
 
-    fn on_event_while_running(&mut self, event: &Event) -> CoreResult<()> {
+    fn on_event_while_running(&mut self, event: &Event<C>) -> CoreResult<()> {
         let now_ms = self.platform_hooks.get_time_utc_ms()?;
         let startup_time_ms = self.platform_hooks.get_last_startup_time_utc_ms()?;
 
@@ -103,7 +103,7 @@ impl LifecycleObserver {
                 kind: UploadKind::Lifecycle {
                     kind: LifecycleKind::ProcessStoppedShutdown,
                 },
-            })?;
+            }).ok();
             self.state.last_process_stopped_shutdown = last_shutdown;
         }
 
@@ -116,7 +116,7 @@ impl LifecycleObserver {
                 kind: UploadKind::Lifecycle {
                     kind: LifecycleKind::ComputerBooted,
                 },
-            })?;
+            }).ok();
             self.state.last_sent_boot = boot_ms;
         }
 
@@ -138,7 +138,7 @@ impl LifecycleObserver {
             self.sender.send(Event::Upload {
                 risk,
                 kind: UploadKind::Lifecycle { kind },
-            })?;
+            }).ok();
         }
 
         // Update state timestamps
@@ -185,7 +185,7 @@ impl LifecycleObserver {
                 kind: UploadKind::LifecycleAlert {
                     reason: AlertReason::ProcessKilledBeforeShutdown,
                 },
-            })?;
+            }).ok();
         }
 
         // ALERT: user explicitly stopped the process
@@ -195,7 +195,7 @@ impl LifecycleObserver {
                 kind: UploadKind::LifecycleAlert {
                     reason: AlertReason::UserStoppedProcess,
                 },
-            })?;
+            }).ok();
         }
 
         // ALERT: ProcessStarted after suspicious gap
@@ -215,7 +215,7 @@ impl LifecycleObserver {
                     kind: UploadKind::LifecycleAlert {
                         reason: AlertReason::UnexpectedProcessStart,
                     },
-                })?;
+                }).ok();
             }
         }
 
@@ -229,14 +229,14 @@ impl LifecycleObserver {
                     kind: UploadKind::LifecycleAlert {
                         reason: AlertReason::PingGapWhileRunning,
                     },
-                })?;
+                }).ok();
             }
         }
 
         Ok(())
     }
 
-    fn on_event_while_suspended(&mut self, event: &Event) -> CoreResult<()> {
+    fn on_event_while_suspended(&mut self, event: &Event<C>) -> CoreResult<()> {
         let now_ms = self.platform_hooks.get_time_utc_ms()?;
 
         if matches!(event, Event::Ping) {
@@ -253,7 +253,7 @@ impl LifecycleObserver {
                 kind: UploadKind::Lifecycle {
                     kind: LifecycleKind::ComputerResumed,
                 },
-            })?;
+            }).ok();
         }
 
         // ProcessStopped and UserSessionLogout must be recorded even while suspended
@@ -268,7 +268,7 @@ impl LifecycleObserver {
                 self.sender.send(Event::Upload {
                     risk: 0.0,
                     kind: UploadKind::Lifecycle { kind },
-                })?;
+                }).ok();
                 match reason {
                     ProcessStoppedReason::Other => self.state.last_process_stopped_other = now_ms,
                     ProcessStoppedReason::Shutdown => {
@@ -283,7 +283,7 @@ impl LifecycleObserver {
                     kind: UploadKind::Lifecycle {
                         kind: LifecycleKind::Logout,
                     },
-                })?;
+                }).ok();
             }
             _ => {}
         }
@@ -297,15 +297,15 @@ impl LifecycleObserver {
                 kind: UploadKind::LifecycleAlert {
                     reason: AlertReason::MissingResume,
                 },
-            })?;
-            self.sender.send(Event::ComputerResumed)?;
+            }).ok();
+            self.sender.send(Event::ComputerResumed).ok();
         }
 
         Ok(())
     }
 }
 
-impl Observer for LifecycleObserver {
+impl<C: 'static> Observer<C> for LifecycleObserver<C> {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -326,7 +326,7 @@ impl Observer for LifecycleObserver {
         Ok(())
     }
 
-    fn on_event(&mut self, event: &Event) -> CoreResult<()> {
+    fn on_event(&mut self, event: &Event<C>) -> CoreResult<()> {
         if matches!(event, Event::StatusRequest) {
             // Responding at all means the monitor process is running.
             let last_loop_at_ms = (self.state.last_ping > 0).then_some(self.state.last_ping);

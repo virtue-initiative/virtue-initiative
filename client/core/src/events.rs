@@ -115,7 +115,7 @@ pub enum PartialStatus {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
-pub enum Event {
+pub enum Event<C = ()> {
     Ping,
     ProcessStarted,
     Upload {
@@ -138,6 +138,7 @@ pub enum Event {
         settings: DeviceSettings,
     },
     CaptureFailed,
+    Custom(C),
     // ── IPC status query ──────────────────────────────────────────────────
     StatusRequest,
     /// Emitted by an observer in response to `StatusRequest`; collected by the
@@ -174,10 +175,10 @@ pub enum Event {
 
 pub type StateType = serde_json::Value;
 
-pub trait Observer: Any {
+pub trait Observer<C: 'static = ()>: Any {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
-    fn on_event(&mut self, event: &Event) -> CoreResult<()>;
+    fn on_event(&mut self, event: &Event<C>) -> CoreResult<()>;
     fn save_state(&self) -> CoreResult<StateType>;
     fn load_state(&mut self, state: StateType) -> CoreResult<()>;
     fn name(&self) -> &'static str;
@@ -192,15 +193,15 @@ pub fn log_error(msg: &str, err: Option<&dyn std::fmt::Display>) {
 
 // ─── EventLoop ───────────────────────────────────────────────────────────────
 
-pub struct EventLoop {
-    pub observers: Vec<Box<dyn Observer>>,
-    pub tx: Sender<Event>,
-    rx: Receiver<Event>,
+pub struct EventLoop<C: 'static = ()> {
+    pub observers: Vec<Box<dyn Observer<C>>>,
+    pub tx: Sender<Event<C>>,
+    rx: Receiver<Event<C>>,
     pub(crate) state_file_path: PathBuf,
 }
 
-impl EventLoop {
-    pub fn new(state_file_path: PathBuf, observers: Vec<Box<dyn Observer>>) -> Self {
+impl<C: 'static> EventLoop<C> {
+    pub fn new(state_file_path: PathBuf, observers: Vec<Box<dyn Observer<C>>>) -> Self {
         let (tx, rx) = mpsc::channel();
         Self {
             observers,
@@ -227,20 +228,23 @@ impl EventLoop {
         Ok(())
     }
 
-    pub fn observer_mut<T: Observer + 'static>(&mut self) -> &mut T {
+    pub fn observer_mut<T: 'static>(&mut self) -> &mut T {
         self.observers
             .iter_mut()
             .find_map(|o| o.as_any_mut().downcast_mut::<T>())
             .expect("observer of requested type not found in event loop")
     }
 
-    pub fn queue_event(&mut self, event: Event) {
+    pub fn queue_event(&mut self, event: Event<C>) {
         self.tx.send(event).ok();
     }
 
     /// Drains queued events through all observers without sending a Ping first.
     /// Used to process inbound IPC requests without triggering screenshot capture.
-    pub fn drain_for_ipc(&mut self) -> CoreResult<()> {
+    pub fn drain_for_ipc(&mut self) -> CoreResult<()>
+    where
+        C: std::fmt::Debug,
+    {
         while let Ok(event) = self.rx.try_recv() {
             #[cfg(debug_assertions)]
             eprintln!("[core ipc event] {event:?}");
@@ -258,7 +262,10 @@ impl EventLoop {
         Ok(())
     }
 
-    pub fn iter(&mut self) -> CoreResult<()> {
+    pub fn iter(&mut self) -> CoreResult<()>
+    where
+        C: std::fmt::Debug,
+    {
         self.tx.send(Event::Ping).ok();
         while let Ok(event) = self.rx.try_recv() {
             #[cfg(debug_assertions)]

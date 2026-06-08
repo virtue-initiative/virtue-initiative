@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
 use crate::events::{Event, Observer, StateType, UploadKind};
-use crate::platform::PlatformHooks;
+use crate::platform::ScreenshotHooks;
 
 pub struct ScreenshotConfig {
     pub screenshot_interval: Duration,
@@ -21,17 +21,17 @@ pub struct ScreenshotObserverState {
     pub authenticated: bool,
 }
 
-pub struct ScreenshotObserver {
+pub struct ScreenshotObserver<C = ()> {
     pub state: ScreenshotObserverState,
-    platform: Box<dyn PlatformHooks>,
+    platform: Box<dyn ScreenshotHooks>,
     pub config: ScreenshotConfig,
-    sender: Sender<Event>,
+    sender: Sender<Event<C>>,
 }
 
-impl ScreenshotObserver {
+impl<C: 'static> ScreenshotObserver<C> {
     pub fn new(
-        platform: Box<dyn PlatformHooks>,
-        sender: Sender<Event>,
+        platform: Box<dyn ScreenshotHooks>,
+        sender: Sender<Event<C>>,
         config: ScreenshotConfig,
     ) -> Self {
         Self {
@@ -43,7 +43,7 @@ impl ScreenshotObserver {
     }
 }
 
-impl Observer for ScreenshotObserver {
+impl<C: 'static> Observer<C> for ScreenshotObserver<C> {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -67,7 +67,7 @@ impl Observer for ScreenshotObserver {
         Ok(())
     }
 
-    fn on_event(&mut self, event: &Event) -> CoreResult<()> {
+    fn on_event(&mut self, event: &Event<C>) -> CoreResult<()> {
         match event {
             Event::Login { .. } => {
                 self.state.authenticated = true;

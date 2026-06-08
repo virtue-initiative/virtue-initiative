@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
 use crate::events::{Event, Observer, StateType, UploadKind};
-use crate::platform::PlatformHooks;
+use crate::platform::ScreenshotHooks;
 
 const FAILURE_WINDOW_MS: i64 = 30 * 60 * 1_000;
 const FAILURE_THRESHOLD: usize = 5;
@@ -15,14 +15,14 @@ pub struct CaptureAvailabilityObserverState {
     pub recent_failures_ms: Vec<i64>,
 }
 
-pub struct CaptureAvailabilityObserver {
+pub struct CaptureAvailabilityObserver<C = ()> {
     pub state: CaptureAvailabilityObserverState,
-    sender: Sender<Event>,
-    platform: Box<dyn PlatformHooks>,
+    sender: Sender<Event<C>>,
+    platform: Box<dyn ScreenshotHooks>,
 }
 
-impl CaptureAvailabilityObserver {
-    pub fn new(sender: Sender<Event>, platform: Box<dyn PlatformHooks>) -> Self {
+impl<C: 'static> CaptureAvailabilityObserver<C> {
+    pub fn new(sender: Sender<Event<C>>, platform: Box<dyn ScreenshotHooks>) -> Self {
         Self {
             state: CaptureAvailabilityObserverState::default(),
             sender,
@@ -31,7 +31,7 @@ impl CaptureAvailabilityObserver {
     }
 }
 
-impl Observer for CaptureAvailabilityObserver {
+impl<C: 'static> Observer<C> for CaptureAvailabilityObserver<C> {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -52,7 +52,7 @@ impl Observer for CaptureAvailabilityObserver {
         Ok(())
     }
 
-    fn on_event(&mut self, event: &Event) -> CoreResult<()> {
+    fn on_event(&mut self, event: &Event<C>) -> CoreResult<()> {
         if let Event::CaptureFailed = event {
             let now_ms = self.platform.get_time_utc_ms()?;
             self.state.recent_failures_ms.push(now_ms);

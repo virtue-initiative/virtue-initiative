@@ -13,7 +13,8 @@ use virtue_core::events::{Event, ProcessStoppedReason};
 use virtue_core::ipc::is_allowed_inbound;
 use virtue_core::{MonitorService, iter_sleep};
 
-use crate::capture::{MacPlatformHooks, has_screen_capture_access, is_permission_missing_error};
+use crate::capture::{MacEvent, MacPlatformHooks, has_screen_capture_access, is_permission_missing_error};
+use crate::capture_reporter::CaptureReporterObserver;
 use crate::config::{ClientPaths, build_core_config};
 
 const POST_WAKE_CAPTURE_STATE_SUPPRESSION: Duration = Duration::from_secs(30);
@@ -223,6 +224,11 @@ async fn run_daemon_service_loop(
 
     let mut service = MonitorService::setup(build_core_config(paths), MacPlatformHooks::new())?;
 
+    // Register the Mac-specific capture availability reporter.
+    let capture_reporter =
+        CaptureReporterObserver::new(service.event_queue_sender());
+    service.add_observer(Box::new(capture_reporter));
+
     service.queue_event(Event::ProcessStarted);
     let _ = service.run_event_loop_iter();
 
@@ -265,7 +271,7 @@ async fn run_daemon_service_loop(
             service.add_ipc_client(sender);
             let event_tx = service.event_queue_sender();
             std::thread::spawn(move || {
-                while let Ok(event) = receiver.recv_event() {
+                while let Ok(event) = receiver.recv_event::<MacEvent>() {
                     if is_allowed_inbound(&event) {
                         event_tx.send(event).ok();
                     }

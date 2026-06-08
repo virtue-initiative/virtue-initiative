@@ -2,7 +2,7 @@ use std::io::Cursor;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
-use virtue_core::{CoreError, CoreResult, PlatformHooks, Screenshot};
+use virtue_core::{CoreError, CoreResult, PlatformHooks, ScreenshotHooks, Screenshot};
 
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Gdi::{
@@ -247,7 +247,7 @@ impl Default for WindowsPlatformHooks {
     }
 }
 
-impl PlatformHooks for WindowsPlatformHooks {
+impl ScreenshotHooks for WindowsPlatformHooks {
     fn take_screenshot(&self) -> CoreResult<Screenshot> {
         let bytes =
             capture_screen_png().map_err(|err| CoreError::CommandFailed(err.to_string()))?;
@@ -273,4 +273,8 @@ impl PlatformHooks for WindowsPlatformHooks {
     fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
         read_last_startup_time_utc_ms()
     }
+}
+
+impl PlatformHooks for WindowsPlatformHooks {
+    type CustomEvent = ();
 }

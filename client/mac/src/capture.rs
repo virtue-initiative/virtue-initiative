@@ -4,22 +4,20 @@ use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use virtue_core::{CoreError, CoreResult, PlatformHooks, Screenshot};
+use virtue_core::{CoreError, CoreResult, PlatformHooks, ScreenshotHooks, Screenshot};
 
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
     fn CGPreflightScreenCaptureAccess() -> bool;
-    #[allow(dead_code)]
     fn CGRequestScreenCaptureAccess() -> bool;
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ScreenCaptureAccessRequestOutcome {
-    AlreadyGranted,
-    Granted,
-    Missing,
+/// Mac-specific custom events that extend the core event set.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MacEvent {
+    CaptureAvailabilityChanged(bool),
 }
 
 pub fn capture_screen() -> Result<Vec<u8>> {
@@ -38,15 +36,13 @@ pub fn has_screen_capture_access() -> bool {
     unsafe { CGPreflightScreenCaptureAccess() }
 }
 
-#[allow(dead_code)]
-pub fn request_screen_capture_access_if_needed() -> ScreenCaptureAccessRequestOutcome {
+/// Request screen capture access and return whether it is now granted.
+pub fn request_screen_capture_access() -> bool {
     if has_screen_capture_access() {
-        return ScreenCaptureAccessRequestOutcome::AlreadyGranted;
+        return true;
     }
 
-    if unsafe { CGRequestScreenCaptureAccess() } {
-        return ScreenCaptureAccessRequestOutcome::Granted;
-    }
+    let _ = unsafe { CGRequestScreenCaptureAccess() };
 
     // Some macOS/TCC states do not visibly present the prompt from
     // CGRequestScreenCaptureAccess alone. Make one explicit throwaway capture
@@ -55,11 +51,7 @@ pub fn request_screen_capture_access_if_needed() -> ScreenCaptureAccessRequestOu
     let _ = run_capture_command("/usr/sbin/screencapture", &["-x", "-t", "png"])
         .or_else(|_| run_capture_command("screencapture", &["-x", "-t", "png"]));
 
-    if has_screen_capture_access() {
-        ScreenCaptureAccessRequestOutcome::Granted
-    } else {
-        ScreenCaptureAccessRequestOutcome::Missing
-    }
+    has_screen_capture_access()
 }
 
 pub fn open_screen_capture_settings() -> Result<()> {
@@ -124,7 +116,7 @@ impl MacPlatformHooks {
     }
 }
 
-impl PlatformHooks for MacPlatformHooks {
+impl ScreenshotHooks for MacPlatformHooks {
     fn take_screenshot(&self) -> CoreResult<Screenshot> {
         let bytes = capture_screen().map_err(|err| CoreError::CommandFailed(err.to_string()))?;
         Ok(Screenshot {
@@ -149,4 +141,8 @@ impl PlatformHooks for MacPlatformHooks {
     fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
         Ok(None)
     }
+}
+
+impl PlatformHooks for MacPlatformHooks {
+    type CustomEvent = MacEvent;
 }

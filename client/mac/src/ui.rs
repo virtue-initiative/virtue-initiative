@@ -43,10 +43,21 @@ pub enum LoggedInAction {
     Status,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum MainWindowEvent {
     Action(LoggedInAction),
     Closed,
+    /// Sent from background thread when relaunch completes. `None` = success.
+    RelaunchDone(Option<String>),
+}
+
+pub fn send_main_window_event(event: MainWindowEvent) -> Result<()> {
+    MAIN_WINDOW_EVENT_PROXY
+        .get()
+        .context("main window event proxy not initialized")?
+        .send_event(event)
+        .map_err(|_| anyhow!("event loop closed"))?;
+    Ok(())
 }
 
 pub struct LoggedInDialogDetails<'a> {
@@ -309,6 +320,16 @@ impl MainWindowController {
             .setHidden(!state.show_permission_actions);
     }
 
+    fn set_relaunch_button_state(&self, title: &str, enabled: bool) {
+        let btn = self
+            .ivars()
+            .relaunch_button
+            .get()
+            .expect("relaunch button must be set");
+        btn.setTitle(&NSString::from_str(title));
+        btn.setEnabled(enabled);
+    }
+
     fn emit(&self, event: MainWindowEvent) -> Result<()> {
         let proxy = self
             .ivars()
@@ -344,6 +365,10 @@ impl MainWindowHandle {
 
     pub fn update_permission_section(&self, state: PermissionSectionState) {
         self.controller.update_permission_section(state);
+    }
+
+    pub fn set_relaunch_button_state(&self, title: &str, enabled: bool) {
+        self.controller.set_relaunch_button_state(title, enabled);
     }
 }
 

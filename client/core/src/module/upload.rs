@@ -17,7 +17,7 @@ use crate::error::CoreResult;
 use crate::events::log_error;
 use crate::events::{Event, Observer, PartialStatus, ProcessStoppedReason, StateType};
 use crate::model::{BatchRecipient, DeviceCredentials, DeviceSettings, LogEntry};
-use crate::platform::PlatformHooks;
+use crate::platform::ScreenshotHooks;
 
 pub(crate) const POST_LOGIN_PROOF_BATCH_COUNT: u32 = 3;
 
@@ -67,13 +67,13 @@ impl UploadObserverState {
     }
 }
 
-pub struct UploadObserver<A: ApiTransport + Clone + 'static> {
+pub struct UploadObserver<A: ApiTransport + Clone + 'static, C = ()> {
     pub state: UploadObserverState,
     pub upload_api: UploadApi<A>,
     pub config: UploadConfig,
-    platform: Box<dyn PlatformHooks>,
+    platform: Box<dyn ScreenshotHooks>,
     pub(crate) authenticated: bool,
-    sender: Sender<Event>,
+    sender: Sender<Event<C>>,
 }
 
 /// Drains a retry queue, calling `try_one` on each item up to `max_retries` times per call.
@@ -101,12 +101,12 @@ fn drain_retry_queue<T>(
     still_pending
 }
 
-impl<A: ApiTransport + Clone + 'static> UploadObserver<A> {
+impl<A: ApiTransport + Clone + 'static, C: 'static> UploadObserver<A, C> {
     pub fn new(
-        platform: Box<dyn PlatformHooks>,
+        platform: Box<dyn ScreenshotHooks>,
         api: A,
         config: UploadConfig,
-        sender: Sender<Event>,
+        sender: Sender<Event<C>>,
     ) -> Self {
         Self {
             state: UploadObserverState::default(),
@@ -273,7 +273,7 @@ impl<A: ApiTransport + Clone + 'static> UploadObserver<A> {
     }
 }
 
-impl<A: ApiTransport + Clone + 'static> Observer for UploadObserver<A> {
+impl<C: 'static, A: ApiTransport + Clone + 'static> Observer<C> for UploadObserver<A, C> {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -302,7 +302,7 @@ impl<A: ApiTransport + Clone + 'static> Observer for UploadObserver<A> {
         Ok(())
     }
 
-    fn on_event(&mut self, event: &Event) -> CoreResult<()> {
+    fn on_event(&mut self, event: &Event<C>) -> CoreResult<()> {
         match event {
             Event::Login {
                 credentials,
