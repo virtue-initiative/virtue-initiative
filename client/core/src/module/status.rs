@@ -1,18 +1,26 @@
-use std::sync::{Arc, Mutex};
+use std::any::Any;
 
 use crate::error::CoreResult;
 use crate::events::bus::{Emitter, EventBus, Observer, StateType};
 use crate::events::types::{PartialStatus, StatusRequest, StatusResponse};
 use crate::model::ServiceStatus;
 
-struct StatusInner {
+pub struct StatusModule {
     expected_count: usize,
     received: usize,
     pending: ServiceStatus,
 }
 
-impl StatusInner {
-    fn merge(&mut self, partial: &PartialStatus) {
+impl StatusModule {
+    pub fn new(expected_count: usize) -> Self {
+        Self {
+            expected_count,
+            received: 0,
+            pending: ServiceStatus::default(),
+        }
+    }
+
+    fn handle_partial(&mut self, partial: &PartialStatus, emitter: &Emitter) {
         match partial {
             PartialStatus::Auth {
                 is_authenticated,
@@ -34,10 +42,6 @@ impl StatusInner {
                 self.pending.pending_request_count = *pending_request_count;
             }
         }
-    }
-
-    fn handle_partial(&mut self, partial: &PartialStatus, emitter: &Emitter) {
-        self.merge(partial);
         self.received += 1;
         if self.received >= self.expected_count {
             let _ = emitter.send(StatusResponse {
@@ -48,46 +52,31 @@ impl StatusInner {
     }
 }
 
-pub struct StatusModule {
-    inner: Arc<Mutex<StatusInner>>,
-}
-
-impl StatusModule {
-    pub fn new(expected_count: usize) -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(StatusInner {
-                expected_count,
-                received: 0,
-                pending: ServiceStatus::default(),
-            })),
-        }
-    }
-}
-
 impl Observer for StatusModule {
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
     fn name(&self) -> &'static str {
         "status"
     }
 
-    fn init(&mut self, bus: &mut EventBus, _state: StateType) -> CoreResult<()> {
-        let emitter = bus.emitter();
-
-        let inner = Arc::clone(&self.inner);
-        bus.subscribe(move |_: &StatusRequest| {
-            let mut g = inner.lock().unwrap();
-            g.pending = ServiceStatus::default();
-            g.received = 0;
-            Ok(())
-        });
-
-        let inner = Arc::clone(&self.inner);
-        let e = emitter.clone();
-        bus.subscribe(move |partial: &PartialStatus| {
-            inner.lock().unwrap().handle_partial(partial, &e);
-            Ok(())
-        });
-
+    fn init(&mut self, _bus: &mut EventBus, _state: StateType) -> CoreResult<()> {
         Ok(())
+    }
+
+    fn on_event(&mut self, event: &dyn Any, emitter: &Emitter) -> CoreResult<()> {
+        crate::dispatch_event!(event, {
+            _: StatusRequest => {
+                self.pending = ServiceStatus::default();
+                self.received = 0;
+                Ok(())
+            },
+            partial: PartialStatus => {
+                self.handle_partial(partial, emitter);
+                Ok(())
+            },
+        })
     }
 
     fn save(&self) -> CoreResult<StateType> {

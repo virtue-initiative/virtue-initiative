@@ -8,6 +8,32 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::error::{CoreError, CoreResult};
 
+/// Match a `&dyn Any` event against typed arms, like a `match` statement.
+///
+/// Each arm has the form `$pat: $Type => $expr`. The pattern `_` discards the
+/// typed reference; any identifier binds it for use in the expression body.
+/// Falls through to `Ok(())` when no arm matches.
+///
+/// ```rust,ignore
+/// fn on_event(&mut self, event: &dyn Any, emitter: &Emitter) -> CoreResult<()> {
+///     dispatch_event!(event, {
+///         _: Ping          => self.handle_ping(emitter),
+///         ev: ProcessStopped => self.handle_stopped(&ev.0, emitter),
+///     })
+/// }
+/// ```
+#[macro_export]
+macro_rules! dispatch_event {
+    ($event:expr, { $($binding:tt : $ty:ty => $body:expr),* $(,)? }) => {{
+        $(
+            if let Some($binding) = ($event as &dyn ::std::any::Any).downcast_ref::<$ty>() {
+                return $body;
+            }
+        )*
+        Ok(())
+    }};
+}
+
 pub fn log_error(msg: &str, err: Option<&dyn std::fmt::Display>) {
     match err {
         Some(e) => eprintln!("[core error] {msg}: {e}"),
@@ -48,13 +74,21 @@ pub struct Error {
 /// mutable handle to the bus (to register subscriptions and grab an
 /// [`Emitter`]) and the state it previously returned from [`Observer::save`]
 /// (or [`StateType::Null`] on a fresh start).
-pub trait Observer {
+pub trait Observer: 'static {
     /// Register subscriptions and restore any previously-saved `state`.
     fn init(&mut self, bus: &mut EventBus, state: StateType) -> CoreResult<()>;
+    /// Handle a single on_evented event. Called for every event during `iter`.
+    /// Modules that use this instead of closure subscriptions implement their
+    /// logic here with `&mut self`, eliminating the need for `Arc<Mutex<Inner>>`.
+    fn on_event(&mut self, _event: &dyn Any, _emitter: &Emitter) -> CoreResult<()> {
+        Ok(())
+    }
     /// Snapshot this observer's durable state so it can be restored later.
     fn save(&self) -> CoreResult<StateType>;
     /// Stable, unique key used to namespace this observer's saved state.
     fn name(&self) -> &'static str;
+    /// Downcast to a concrete type. Required by test helpers to inspect state.
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
 /// A boxed, type-erased subscription callback. The bus only ever invokes a
@@ -169,25 +203,38 @@ impl EventBus {
 
     /// Run one full processing pass.
     ///
-    /// Drains every queued event, dispatching each to its subscribers. Because
+    /// Drains every queued event, on_eventing each to its subscribers. Because
     /// handlers publish through a cloned [`Sender`], events they emit land back
     /// on the same queue and are processed within this same call — so a single
     /// `iter` settles the entire cascade. Once the queue is empty, the state of
     /// every observer is collected and returned.
     pub fn iter(&mut self) -> CoreResult<StateType> {
         while let Ok(event) = self.rx.try_recv() {
-            self.dispatch(&event);
+            // Subscription-based on_event (existing modules).
+            {
+                let event_any: &dyn Any = &*event;
+                if let Some(handlers) = self.handlers.get(&event_any.type_id()) {
+                    for handler in handlers {
+                        handler(event_any);
+                    }
+                }
+            }
+            // Direct on_event (modules using the new &mut self pattern).
+            let emitter = self.emitter();
+            for observer in &mut self.observers {
+                observer.on_event(&*event, &emitter)?;
+            }
         }
         self.save()
     }
 
-    fn dispatch(&self, event: &AnyEvent) {
-        let event: &dyn Any = &**event;
-        if let Some(handlers) = self.handlers.get(&event.type_id()) {
-            for handler in handlers {
-                handler(event);
-            }
-        }
+    /// Get a mutable reference to the observer with the given name.
+    /// Used by test helpers to inspect or seed module state.
+    pub fn observer_mut(&mut self, name: &str) -> Option<&mut dyn Observer> {
+        self.observers
+            .iter_mut()
+            .find(|o| o.name() == name)
+            .map(|o| o.as_mut())
     }
 
     /// Collect every observer's durable state into a JSON object keyed by name.
@@ -251,7 +298,6 @@ impl EventChannel for EventBus {
 mod tests {
     use super::*;
     use serde::Deserialize;
-    use std::sync::{Arc, Mutex};
 
     #[derive(Serialize, Deserialize, Clone)]
     struct Tick {
@@ -266,29 +312,33 @@ mod tests {
     /// Emits a `Tock` for every `Tick`, and counts how many `Tock`s it sees so
     /// we can assert that cascaded events are processed within a single `iter`.
     struct Counter {
-        seen: Arc<Mutex<u32>>,
+        seen: u32,
     }
 
     impl Observer for Counter {
-        fn init(&mut self, bus: &mut EventBus, state: StateType) -> CoreResult<()> {
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+
+        fn init(&mut self, _bus: &mut EventBus, state: StateType) -> CoreResult<()> {
             if let Some(prev) = state.as_u64() {
-                *self.seen.lock().unwrap() = prev as u32;
+                self.seen = prev as u32;
             }
-
-            let emitter = bus.emitter();
-            bus.subscribe(move |tick: &Tick| emitter.send(Tock { n: tick.n }));
-
-            let seen = Arc::clone(&self.seen);
-            bus.subscribe(move |_tock: &Tock| {
-                *seen.lock().unwrap() += 1;
-                Ok(())
-            });
-
             Ok(())
         }
 
+        fn on_event(&mut self, event: &dyn Any, emitter: &Emitter) -> CoreResult<()> {
+            crate::dispatch_event!(event, {
+                tick: Tick => emitter.send(Tock { n: tick.n }),
+                _: Tock => {
+                    self.seen += 1;
+                    Ok(())
+                },
+            })
+        }
+
         fn save(&self) -> CoreResult<StateType> {
-            Ok(StateType::from(*self.seen.lock().unwrap()))
+            Ok(StateType::from(self.seen))
         }
 
         fn name(&self) -> &'static str {
@@ -298,14 +348,7 @@ mod tests {
 
     #[test]
     fn cascades_within_single_iter_and_saves_state() {
-        let seen = Arc::new(Mutex::new(0));
-        let mut bus = EventBus::new(
-            vec![Box::new(Counter {
-                seen: Arc::clone(&seen),
-            })],
-            StateType::Null,
-        )
-        .unwrap();
+        let mut bus = EventBus::new(vec![Box::new(Counter { seen: 0 })], StateType::Null).unwrap();
 
         bus.send(Tick { n: 1 }).unwrap();
         bus.send(Tick { n: 2 }).unwrap();
@@ -313,20 +356,20 @@ mod tests {
 
         let state = bus.iter().unwrap();
 
-        assert_eq!(*seen.lock().unwrap(), 3);
+        let seen = bus
+            .observer_mut("counter")
+            .unwrap()
+            .as_any_mut()
+            .downcast_mut::<Counter>()
+            .unwrap()
+            .seen;
+        assert_eq!(seen, 3);
         assert_eq!(state["counter"].as_u64(), Some(3));
     }
 
     #[test]
     fn request_returns_response_over_event_channel() {
-        let seen = Arc::new(Mutex::new(0));
-        let mut bus = EventBus::new(
-            vec![Box::new(Counter {
-                seen: Arc::clone(&seen),
-            })],
-            StateType::Null,
-        )
-        .unwrap();
+        let mut bus = EventBus::new(vec![Box::new(Counter { seen: 0 })], StateType::Null).unwrap();
 
         let reply: Tock = bus.request(Tick { n: 9 }).unwrap();
         assert_eq!(reply.n, 9);
@@ -340,24 +383,29 @@ mod tests {
                 .collect(),
         );
 
-        let seen = Arc::new(Mutex::new(0));
-        let _bus = EventBus::new(
-            vec![Box::new(Counter {
-                seen: Arc::clone(&seen),
-            })],
-            saved,
-        )
-        .unwrap();
+        let mut bus = EventBus::new(vec![Box::new(Counter { seen: 0 })], saved).unwrap();
 
-        assert_eq!(*seen.lock().unwrap(), 7);
+        let seen = bus
+            .observer_mut("counter")
+            .unwrap()
+            .as_any_mut()
+            .downcast_mut::<Counter>()
+            .unwrap()
+            .seen;
+        assert_eq!(seen, 7);
     }
 
     #[test]
-    fn failing_handler_emits_error_event() {
+    fn failing_subscription_emits_error_event() {
+        // Subscription closures that return Err are caught by the bus and
+        // re-emitted as Error events — this tests that contract.
         struct Failing;
         impl Observer for Failing {
+            fn as_any_mut(&mut self) -> &mut dyn Any {
+                self
+            }
             fn init(&mut self, bus: &mut EventBus, _state: StateType) -> CoreResult<()> {
-                bus.subscribe(|_tick: &Tick| Err(CoreError::InvalidState("boom")));
+                bus.subscribe(|_: &Tick| Err(CoreError::InvalidState("boom")));
                 Ok(())
             }
             fn save(&self) -> CoreResult<StateType> {
@@ -369,16 +417,22 @@ mod tests {
         }
 
         struct Capture {
-            errors: Arc<Mutex<Vec<Error>>>,
+            errors: Vec<Error>,
         }
         impl Observer for Capture {
-            fn init(&mut self, bus: &mut EventBus, _state: StateType) -> CoreResult<()> {
-                let errors = Arc::clone(&self.errors);
-                bus.subscribe(move |err: &Error| {
-                    errors.lock().unwrap().push(err.clone());
-                    Ok(())
-                });
+            fn as_any_mut(&mut self) -> &mut dyn Any {
+                self
+            }
+            fn init(&mut self, _bus: &mut EventBus, _state: StateType) -> CoreResult<()> {
                 Ok(())
+            }
+            fn on_event(&mut self, event: &dyn Any, _emitter: &Emitter) -> CoreResult<()> {
+                crate::dispatch_event!(event, {
+                    err: Error => {
+                        self.errors.push(err.clone());
+                        Ok(())
+                    },
+                })
             }
             fn save(&self) -> CoreResult<StateType> {
                 Ok(StateType::Null)
@@ -388,14 +442,8 @@ mod tests {
             }
         }
 
-        let errors = Arc::new(Mutex::new(Vec::new()));
         let mut bus = EventBus::new(
-            vec![
-                Box::new(Failing),
-                Box::new(Capture {
-                    errors: Arc::clone(&errors),
-                }),
-            ],
+            vec![Box::new(Failing), Box::new(Capture { errors: Vec::new() })],
             StateType::Null,
         )
         .unwrap();
@@ -403,7 +451,13 @@ mod tests {
         bus.send(Tick { n: 1 }).unwrap();
         bus.iter().unwrap();
 
-        let errors = errors.lock().unwrap();
+        let errors = &bus
+            .observer_mut("capture")
+            .unwrap()
+            .as_any_mut()
+            .downcast_mut::<Capture>()
+            .unwrap()
+            .errors;
         assert_eq!(errors.len(), 1);
         assert!(errors[0].message.contains("boom"));
         assert!(errors[0].source.contains("Tick"));

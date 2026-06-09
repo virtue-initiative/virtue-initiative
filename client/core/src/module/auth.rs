@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::any::Any;
 
 use serde::{Deserialize, Serialize};
 
@@ -34,8 +34,8 @@ pub struct AuthObserverState {
     pub device_credentials: Option<DeviceCredentials>,
 }
 
-pub(crate) struct AuthInner<A: ApiTransport> {
-    pub(crate) state: AuthObserverState,
+pub struct AuthModule<A: ApiTransport + Send + Sync + 'static> {
+    pub state: AuthObserverState,
     api: A,
     device_name: String,
     platform_name: String,
@@ -43,7 +43,18 @@ pub(crate) struct AuthInner<A: ApiTransport> {
     pings_without_refresh: u32,
 }
 
-impl<A: ApiTransport> AuthInner<A> {
+impl<A: ApiTransport + Send + Sync + 'static> AuthModule<A> {
+    pub fn new(api: A, device_name: String, platform_name: String) -> Self {
+        Self {
+            state: AuthObserverState::default(),
+            api,
+            device_name,
+            platform_name,
+            needs_settings_refresh: false,
+            pings_without_refresh: 0,
+        }
+    }
+
     fn handle_login_requested(&mut self, email: &str, password: &str, emitter: &Emitter) {
         match self.do_login(email, password) {
             Ok((credentials, settings)) => {
@@ -151,91 +162,52 @@ impl<A: ApiTransport> AuthInner<A> {
     }
 }
 
-pub struct AuthModule<A: ApiTransport + Send + Sync + 'static> {
-    pub(crate) inner: Arc<Mutex<AuthInner<A>>>,
-}
-
-impl<A: ApiTransport + Send + Sync + 'static> AuthModule<A> {
-    pub fn new(api: A, device_name: String, platform_name: String) -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(AuthInner {
-                state: AuthObserverState::default(),
-                api,
-                device_name,
-                platform_name,
-                needs_settings_refresh: false,
-                pings_without_refresh: 0,
-            })),
-        }
-    }
-}
-
 impl<A: ApiTransport + Send + Sync + 'static> Observer for AuthModule<A> {
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
     fn name(&self) -> &'static str {
         "auth"
     }
 
-    fn init(&mut self, bus: &mut EventBus, state: StateType) -> CoreResult<()> {
-        {
-            let mut g = self.inner.lock().unwrap();
-            // Null was written by a prior version that didn't persist auth here.
-            if !state.is_null() {
-                g.state = serde_json::from_value(state)?;
-            }
-            g.needs_settings_refresh = g.state.device_credentials.is_some();
+    fn init(&mut self, _bus: &mut EventBus, state: StateType) -> CoreResult<()> {
+        if !state.is_null() {
+            self.state = serde_json::from_value(state)?;
         }
-
-        let emitter = bus.emitter();
-
-        let inner = Arc::clone(&self.inner);
-        let e = emitter.clone();
-        bus.subscribe(move |ev: &LoginRequested| {
-            inner
-                .lock()
-                .unwrap()
-                .handle_login_requested(&ev.email, &ev.password, &e);
-            Ok(())
-        });
-
-        let inner = Arc::clone(&self.inner);
-        let e = emitter.clone();
-        bus.subscribe(move |_: &LogoutRequested| {
-            inner.lock().unwrap().handle_logout_requested(&e);
-            Ok(())
-        });
-
-        let inner = Arc::clone(&self.inner);
-        let e = emitter.clone();
-        bus.subscribe(move |_: &Ping| {
-            inner.lock().unwrap().handle_ping(&e);
-            Ok(())
-        });
-
-        let inner = Arc::clone(&self.inner);
-        let e = emitter.clone();
-        bus.subscribe(move |_: &StatusRequest| {
-            let g = inner.lock().unwrap();
-            let device_id = g
-                .state
-                .device_credentials
-                .as_ref()
-                .map(|c| c.device_id.clone());
-            let _ = e.send(PartialStatus::Auth {
-                is_authenticated: g.state.device_credentials.is_some(),
-                device_id,
-            });
-            Ok(())
-        });
-
-        let inner = Arc::clone(&self.inner);
-        bus.subscribe(move |ev: &ConfigChanged| {
-            inner.lock().unwrap().api.reconfigure(&ev.api_base_url)
-        });
-
+        self.needs_settings_refresh = self.state.device_credentials.is_some();
         Ok(())
     }
 
+    fn on_event(&mut self, event: &dyn Any, emitter: &Emitter) -> CoreResult<()> {
+        crate::dispatch_event!(event, {
+            ev: LoginRequested => {
+                self.handle_login_requested(&ev.email, &ev.password, emitter);
+                Ok(())
+            },
+            _: LogoutRequested => {
+                self.handle_logout_requested(emitter);
+                Ok(())
+            },
+            _: Ping => {
+                self.handle_ping(emitter);
+                Ok(())
+            },
+            _: StatusRequest => {
+                let device_id = self.state.device_credentials
+                    .as_ref()
+                    .map(|c| c.device_id.clone());
+                let _ = emitter.send(PartialStatus::Auth {
+                    is_authenticated: self.state.device_credentials.is_some(),
+                    device_id,
+                });
+                Ok(())
+            },
+            ev: ConfigChanged => self.api.reconfigure(&ev.api_base_url),
+        })
+    }
+
     fn save(&self) -> CoreResult<StateType> {
-        Ok(serde_json::to_value(&self.inner.lock().unwrap().state)?)
+        Ok(serde_json::to_value(&self.state)?)
     }
 }

@@ -1,58 +1,56 @@
-use std::sync::{Arc, Mutex};
+use std::any::Any;
 
 use crate::config::Config;
 use crate::error::CoreResult;
-use crate::events::bus::{EventBus, Observer, StateType};
+use crate::events::bus::{Emitter, EventBus, Observer, StateType};
 use crate::events::types::{ConfigChanged, Ping};
 
-struct ConfigInner {
-    config: Config,
-}
-
 pub struct ConfigModule {
-    inner: Arc<Mutex<ConfigInner>>,
+    config: Config,
 }
 
 impl ConfigModule {
     pub fn new(config: Config) -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(ConfigInner { config })),
-        }
+        Self { config }
     }
 }
 
 impl Observer for ConfigModule {
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
     fn name(&self) -> &'static str {
         "config"
     }
 
-    fn init(&mut self, bus: &mut EventBus, _state: StateType) -> CoreResult<()> {
-        let emitter = bus.emitter();
-
-        let inner = Arc::clone(&self.inner);
-        bus.subscribe(move |_: &Ping| {
-            let mut g = inner.lock().unwrap();
-            let old_url = g.config.api_base_url.clone();
-            let old_screenshot = g.config.screenshot_interval;
-            let old_batch = g.config.batch_interval;
-
-            g.config.refresh_from_runtime_file()?;
-
-            let changed = g.config.api_base_url != old_url
-                || g.config.screenshot_interval != old_screenshot
-                || g.config.batch_interval != old_batch;
-
-            if changed {
-                let _ = emitter.send(ConfigChanged {
-                    api_base_url: g.config.api_base_url.clone(),
-                    screenshot_interval_ms: g.config.screenshot_interval.as_millis() as u64,
-                    batch_interval_ms: g.config.batch_interval.as_millis() as u64,
-                });
-            }
-            Ok(())
-        });
-
+    fn init(&mut self, _bus: &mut EventBus, _state: StateType) -> CoreResult<()> {
         Ok(())
+    }
+
+    fn on_event(&mut self, event: &dyn Any, emitter: &Emitter) -> CoreResult<()> {
+        crate::dispatch_event!(event, {
+            _: Ping => {
+                let old_url = self.config.api_base_url.clone();
+                let old_screenshot = self.config.screenshot_interval;
+                let old_batch = self.config.batch_interval;
+
+                self.config.refresh_from_runtime_file()?;
+
+                let changed = self.config.api_base_url != old_url
+                    || self.config.screenshot_interval != old_screenshot
+                    || self.config.batch_interval != old_batch;
+
+                if changed {
+                    let _ = emitter.send(ConfigChanged {
+                        api_base_url: self.config.api_base_url.clone(),
+                        screenshot_interval_ms: self.config.screenshot_interval.as_millis() as u64,
+                        batch_interval_ms: self.config.batch_interval.as_millis() as u64,
+                    });
+                }
+                Ok(())
+            },
+        })
     }
 
     fn save(&self) -> CoreResult<StateType> {
@@ -62,16 +60,16 @@ impl Observer for ConfigModule {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
     use super::*;
-    use crate::events::bus::EventBus;
+    use crate::events::bus::{EventBus, Observer, StateType};
     use crate::events::types::ConfigChanged;
 
     #[test]
     fn config_module_emits_config_changed_on_ping_when_override_changes_interval() {
         use std::fs;
-        use std::sync::Arc;
         use std::sync::atomic::{AtomicU64, Ordering};
 
         static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -100,6 +98,9 @@ mod tests {
             received: Arc<Mutex<Vec<ConfigChanged>>>,
         }
         impl Observer for Capture {
+            fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+                self
+            }
             fn init(&mut self, bus: &mut EventBus, _state: StateType) -> CoreResult<()> {
                 let r = Arc::clone(&self.received);
                 bus.subscribe(move |ev: &ConfigChanged| {

@@ -1,7 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::config::Config;
@@ -12,10 +11,10 @@ use crate::model::{AuthState, BatchRecipient, DeviceCredentials, DeviceSettings,
 use crate::module::auth::AuthModule;
 use crate::module::capture_availability::CaptureAvailabilityModule;
 use crate::module::config::ConfigModule;
-use crate::module::lifecycle::{LifecycleInner, LifecycleModule, LifecycleObserverState};
-use crate::module::screenshot::{ScreenshotInner, ScreenshotModule};
+use crate::module::lifecycle::{LifecycleModule, LifecycleObserverState};
+use crate::module::screenshot::ScreenshotModule;
 use crate::module::status::StatusModule;
-use crate::module::upload::{UploadInner, UploadModule, UploadObserverState};
+use crate::module::upload::{UploadModule, UploadObserverState};
 use crate::state::load_state;
 use crate::testing::api::MockApiClient;
 use crate::testing::clock::MockClock;
@@ -26,17 +25,11 @@ static SCENARIO_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 const STATUS_PARTIAL_COUNT: usize = 3;
 
 /// Test harness wrapping an `EventBus` with the default 7 modules.
-///
-/// Retains `Arc<Mutex<Inner>>` references to key modules for direct state
-/// inspection and mutation in tests.
 pub struct Scenario {
     pub bus: EventBus,
     pub api: MockApiClient,
     pub clock: MockClock,
     pub state_dir: PathBuf,
-    lifecycle_inner: Arc<Mutex<LifecycleInner>>,
-    screenshot_inner: Arc<Mutex<ScreenshotInner>>,
-    upload_inner: Arc<Mutex<UploadInner<MockApiClient>>>,
 }
 
 impl Scenario {
@@ -105,22 +98,17 @@ impl Scenario {
 
         let api_handle = api.clone();
 
-        // Build modules explicitly to retain Arc refs
-        let lifecycle_module = LifecycleModule::new(Box::new(platform.clone()));
-        let lifecycle_inner = Arc::clone(&lifecycle_module.inner);
-
-        let screenshot_module =
-            ScreenshotModule::new(Box::new(platform.clone()), screenshot_interval_ms);
-        let screenshot_inner = Arc::clone(&screenshot_module.inner);
-
-        let upload_module =
-            UploadModule::new(Box::new(platform.clone()), api.clone(), batch_interval_ms);
-        let upload_inner = Arc::clone(&upload_module.inner);
-
         let observers: Vec<Box<dyn Observer>> = vec![
-            Box::new(lifecycle_module),
-            Box::new(screenshot_module),
-            Box::new(upload_module),
+            Box::new(LifecycleModule::new(Box::new(platform.clone()))),
+            Box::new(ScreenshotModule::new(
+                Box::new(platform.clone()),
+                screenshot_interval_ms,
+            )),
+            Box::new(UploadModule::new(
+                Box::new(platform.clone()),
+                api.clone(),
+                batch_interval_ms,
+            )),
             Box::new(CaptureAvailabilityModule::new(Box::new(platform.clone()))),
             Box::new(AuthModule::new(api, device_name, platform_name)),
             Box::new(StatusModule::new(STATUS_PARTIAL_COUNT)),
@@ -131,9 +119,15 @@ impl Scenario {
         let saved_state = load_state(&state_path).unwrap_or(StateType::Null);
         let mut bus = EventBus::new(observers, saved_state).expect("scenario bus must construct");
 
-        // Pre-set device settings in upload module if provided (mirrors old set_settings call)
+        // Pre-set device settings in upload module if provided
         if let Some(s) = settings {
-            upload_inner.lock().unwrap().state.settings = Some(s);
+            bus.observer_mut("upload")
+                .expect("upload module must exist")
+                .as_any_mut()
+                .downcast_mut::<UploadModule<MockApiClient>>()
+                .expect("upload module is UploadModule<MockApiClient>")
+                .state
+                .settings = Some(s);
         }
 
         // Perform one iter so the bus is in a clean state after init
@@ -144,9 +138,6 @@ impl Scenario {
             api: api_handle,
             clock,
             state_dir,
-            lifecycle_inner,
-            screenshot_inner,
-            upload_inner,
         }
     }
 
@@ -294,11 +285,14 @@ impl Scenario {
         self
     }
 
-    pub fn assert_pending_request_count(&self, expected: usize) -> &Self {
+    pub fn assert_pending_request_count(&mut self, expected: usize) -> &mut Self {
         let actual = self
-            .upload_inner
-            .lock()
-            .unwrap()
+            .bus
+            .observer_mut("upload")
+            .expect("upload module must exist")
+            .as_any_mut()
+            .downcast_mut::<UploadModule<MockApiClient>>()
+            .expect("upload module is UploadModule<MockApiClient>")
             .state
             .pending_request_count();
         assert_eq!(
@@ -311,21 +305,37 @@ impl Scenario {
     // --- state setters ---
 
     pub fn set_last_batch_at_ms(&mut self, ms: Option<i64>) -> &mut Self {
-        self.upload_inner.lock().unwrap().state.last_batch_at_ms = ms;
+        self.bus
+            .observer_mut("upload")
+            .expect("upload module must exist")
+            .as_any_mut()
+            .downcast_mut::<UploadModule<MockApiClient>>()
+            .expect("upload module is UploadModule<MockApiClient>")
+            .state
+            .last_batch_at_ms = ms;
         self
     }
 
     pub fn set_last_screenshot_at_ms(&mut self, ms: Option<i64>) -> &mut Self {
-        self.screenshot_inner
-            .lock()
-            .unwrap()
+        self.bus
+            .observer_mut("screenshot")
+            .expect("screenshot module must exist")
+            .as_any_mut()
+            .downcast_mut::<ScreenshotModule>()
+            .expect("screenshot module is ScreenshotModule")
             .state
             .last_screenshot_at_ms = ms;
         self
     }
 
     pub fn set_lifecycle_observer_state(&mut self, state: LifecycleObserverState) -> &mut Self {
-        self.lifecycle_inner.lock().unwrap().state = state;
+        self.bus
+            .observer_mut("lifecycle")
+            .expect("lifecycle module must exist")
+            .as_any_mut()
+            .downcast_mut::<LifecycleModule>()
+            .expect("lifecycle module is LifecycleModule")
+            .state = state;
         self
     }
 
@@ -344,19 +354,17 @@ impl Scenario {
         let api = MockApiClient::new();
         let api_handle = api.clone();
 
-        let lifecycle_module = LifecycleModule::new(Box::new(platform.clone()));
-        let lifecycle_inner = Arc::clone(&lifecycle_module.inner);
-        let screenshot_module =
-            ScreenshotModule::new(Box::new(platform.clone()), screenshot_interval_ms);
-        let screenshot_inner = Arc::clone(&screenshot_module.inner);
-        let upload_module =
-            UploadModule::new(Box::new(platform.clone()), api.clone(), batch_interval_ms);
-        let upload_inner = Arc::clone(&upload_module.inner);
-
         let observers: Vec<Box<dyn Observer>> = vec![
-            Box::new(lifecycle_module),
-            Box::new(screenshot_module),
-            Box::new(upload_module),
+            Box::new(LifecycleModule::new(Box::new(platform.clone()))),
+            Box::new(ScreenshotModule::new(
+                Box::new(platform.clone()),
+                screenshot_interval_ms,
+            )),
+            Box::new(UploadModule::new(
+                Box::new(platform.clone()),
+                api.clone(),
+                batch_interval_ms,
+            )),
             Box::new(CaptureAvailabilityModule::new(Box::new(platform.clone()))),
             Box::new(AuthModule::new(api, device_name, platform_name)),
             Box::new(StatusModule::new(STATUS_PARTIAL_COUNT)),
@@ -373,9 +381,6 @@ impl Scenario {
             api: api_handle,
             clock,
             state_dir,
-            lifecycle_inner,
-            screenshot_inner,
-            upload_inner,
         }
     }
 }

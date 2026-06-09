@@ -1,7 +1,7 @@
 pub mod api;
 mod batch;
 
-use std::sync::{Arc, Mutex};
+use std::any::Any;
 
 use serde::{Deserialize, Serialize};
 
@@ -89,7 +89,7 @@ fn drain_retry_queue<T>(
     still_pending
 }
 
-pub struct UploadInner<A: ApiTransport + Clone> {
+pub struct UploadModule<A: ApiTransport + Clone + Send + Sync + 'static> {
     pub state: UploadObserverState,
     pub upload_api: UploadApi<A>,
     pub batch_interval_ms: i64,
@@ -97,7 +97,17 @@ pub struct UploadInner<A: ApiTransport + Clone> {
     pub authenticated: bool,
 }
 
-impl<A: ApiTransport + Clone + 'static> UploadInner<A> {
+impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
+    pub fn new(platform: Box<dyn ScreenshotHooks>, api: A, batch_interval_ms: i64) -> Self {
+        Self {
+            state: UploadObserverState::default(),
+            upload_api: UploadApi::new(api),
+            batch_interval_ms,
+            platform,
+            authenticated: false,
+        }
+    }
+
     fn retry_pending_hashes(&mut self) -> CoreResult<()> {
         let hash_base_url = self
             .state
@@ -260,127 +270,81 @@ impl<A: ApiTransport + Clone + 'static> UploadInner<A> {
     }
 }
 
-pub struct UploadModule<A: ApiTransport + Clone + Send + Sync + 'static> {
-    pub inner: Arc<Mutex<UploadInner<A>>>,
-}
-
-impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
-    pub fn new(platform: Box<dyn ScreenshotHooks>, api: A, batch_interval_ms: i64) -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(UploadInner {
-                state: UploadObserverState::default(),
-                upload_api: UploadApi::new(api),
-                batch_interval_ms,
-                platform,
-                authenticated: false,
-            })),
-        }
-    }
-}
-
 impl<A: ApiTransport + Clone + Send + Sync + 'static> Observer for UploadModule<A> {
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
     fn name(&self) -> &'static str {
         "upload"
     }
 
-    fn init(&mut self, bus: &mut EventBus, state: StateType) -> CoreResult<()> {
+    fn init(&mut self, _bus: &mut EventBus, state: StateType) -> CoreResult<()> {
         if !state.is_null() {
-            let mut g = self.inner.lock().unwrap();
-            g.state = serde_json::from_value(state)?;
-            if let Some(creds) = g.state.device_credentials.clone() {
-                g.upload_api.set_credentials(Some(creds));
-                g.authenticated = true;
+            self.state = serde_json::from_value(state)?;
+            if let Some(creds) = self.state.device_credentials.clone() {
+                self.upload_api.set_credentials(Some(creds));
+                self.authenticated = true;
             }
         }
-
-        let emitter = bus.emitter();
-
-        let inner = Arc::clone(&self.inner);
-        bus.subscribe(move |ev: &Login| {
-            let mut g = inner.lock().unwrap();
-            g.authenticated = true;
-            g.upload_api.set_credentials(Some(ev.credentials.clone()));
-            g.state.settings = Some(ev.settings.clone());
-            g.state.device_credentials = Some(ev.credentials.clone());
-            g.state.reset_for_login();
-            Ok(())
-        });
-
-        let inner = Arc::clone(&self.inner);
-        bus.subscribe(move |_: &Logout| {
-            let mut g = inner.lock().unwrap();
-            g.authenticated = false;
-            g.upload_api.set_credentials(None);
-            g.state.reset_for_logout();
-            Ok(())
-        });
-
-        let inner = Arc::clone(&self.inner);
-        bus.subscribe(move |ev: &DeviceSettingsRefreshed| {
-            inner.lock().unwrap().state.settings = Some(ev.settings.clone());
-            Ok(())
-        });
-
-        let inner = Arc::clone(&self.inner);
-        let e = emitter.clone();
-        bus.subscribe(move |_: &StatusRequest| {
-            let g = inner.lock().unwrap();
-            let _ = e.send(PartialStatus::Upload {
-                pending_request_count: g.state.pending_request_count(),
-            });
-            Ok(())
-        });
-
-        let inner = Arc::clone(&self.inner);
-        let e = emitter.clone();
-        bus.subscribe(move |_: &Ping| inner.lock().unwrap().handle_ping(&e));
-
-        let inner = Arc::clone(&self.inner);
-        let e = emitter.clone();
-        bus.subscribe(move |ev: &ProcessStopped| {
-            if matches!(ev.0, ProcessStoppedReason::Shutdown) {
-                let mut g = inner.lock().unwrap();
-                if g.authenticated && !g.state.pending_batch_events.is_empty() {
-                    let now_ms = g.platform.get_time_utc_ms()?;
-                    let _ = g.try_upload_batch(now_ms, &e);
-                }
-            }
-            Ok(())
-        });
-
-        let inner = Arc::clone(&self.inner);
-        let e = emitter.clone();
-        bus.subscribe(move |ev: &Upload| {
-            inner
-                .lock()
-                .unwrap()
-                .handle_upload(ev.risk, ev.kind.clone(), &e)
-        });
-
-        let inner = Arc::clone(&self.inner);
-        let e = emitter.clone();
-        bus.subscribe(move |_: &FlushBatchNow| {
-            let mut g = inner.lock().unwrap();
-            if g.authenticated {
-                let now_ms = g.platform.get_time_utc_ms()?;
-                g.try_upload_batch(now_ms, &e)?;
-            }
-            Ok(())
-        });
-
-        let inner = Arc::clone(&self.inner);
-        bus.subscribe(move |ev: &ConfigChanged| {
-            inner.lock().unwrap().batch_interval_ms = ev.batch_interval_ms as i64;
-            Ok(())
-        });
-
         Ok(())
     }
 
+    fn on_event(&mut self, event: &dyn Any, emitter: &Emitter) -> CoreResult<()> {
+        crate::dispatch_event!(event, {
+            ev: Login => {
+                self.authenticated = true;
+                self.upload_api.set_credentials(Some(ev.credentials.clone()));
+                self.state.settings = Some(ev.settings.clone());
+                self.state.device_credentials = Some(ev.credentials.clone());
+                self.state.reset_for_login();
+                Ok(())
+            },
+            _: Logout => {
+                self.authenticated = false;
+                self.upload_api.set_credentials(None);
+                self.state.reset_for_logout();
+                Ok(())
+            },
+            ev: DeviceSettingsRefreshed => {
+                self.state.settings = Some(ev.settings.clone());
+                Ok(())
+            },
+            _: StatusRequest => {
+                let _ = emitter.send(PartialStatus::Upload {
+                    pending_request_count: self.state.pending_request_count(),
+                });
+                Ok(())
+            },
+            _: Ping => self.handle_ping(emitter),
+            ev: ProcessStopped => {
+                if matches!(ev.0, ProcessStoppedReason::Shutdown)
+                    && self.authenticated
+                    && !self.state.pending_batch_events.is_empty()
+                {
+                    let now_ms = self.platform.get_time_utc_ms()?;
+                    let _ = self.try_upload_batch(now_ms, emitter);
+                }
+                Ok(())
+            },
+            ev: Upload => self.handle_upload(ev.risk, ev.kind.clone(), emitter),
+            _: FlushBatchNow => {
+                if self.authenticated {
+                    let now_ms = self.platform.get_time_utc_ms()?;
+                    self.try_upload_batch(now_ms, emitter)?;
+                }
+                Ok(())
+            },
+            ev: ConfigChanged => {
+                self.batch_interval_ms = ev.batch_interval_ms as i64;
+                Ok(())
+            },
+        })
+    }
+
     fn save(&self) -> CoreResult<StateType> {
-        let g = self.inner.lock().unwrap();
-        let mut state = g.state.clone();
-        state.device_credentials = g.upload_api.credentials().cloned();
+        let mut state = self.state.clone();
+        state.device_credentials = self.upload_api.credentials().cloned();
         Ok(serde_json::to_value(&state)?)
     }
 }

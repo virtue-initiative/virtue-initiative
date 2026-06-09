@@ -21,7 +21,7 @@ use virtue_core::model::{
     ProcessStoppedReason, UploadKind,
 };
 use virtue_core::module::capture_availability::CaptureAvailabilityModule;
-use virtue_core::module::lifecycle::{LifecycleModule, LifecycleObserverState, LifecycleStatus};
+use virtue_core::module::lifecycle::{LifecycleModule, LifecycleStatus};
 use virtue_core::module::screenshot::ScreenshotModule;
 use virtue_core::module::status::StatusModule;
 use virtue_core::module::upload::UploadModule;
@@ -208,8 +208,8 @@ mod lifecycle {
         platform.clock.set(1_000);
         let mut module = LifecycleModule::new(Box::new(platform));
         // Pre-set state to suspended with 3 pings already counted.
-        module.inner.lock().unwrap().state.status = LifecycleStatus::Suspended;
-        module.inner.lock().unwrap().state.pings_while_suspended = 3;
+        module.state.status = LifecycleStatus::Suspended;
+        module.state.pings_while_suspended = 3;
 
         let uploads: Arc<Mutex<Vec<Upload>>> = Arc::new(Mutex::new(Vec::new()));
         let u = Arc::clone(&uploads);
@@ -277,12 +277,9 @@ mod lifecycle {
         let platform = TestPlatformHooks::new();
         platform.clock.set(100_000);
         let mut module = LifecycleModule::new(Box::new(platform));
-        {
-            let mut inner = module.inner.lock().unwrap();
-            inner.state.last_login = 0;
-            inner.state.last_ping = 1_000;
-            inner.state.last_running_started = 1_000;
-        }
+        module.state.last_login = 0;
+        module.state.last_ping = 1_000;
+        module.state.last_running_started = 1_000;
 
         let uploads: Arc<Mutex<Vec<Upload>>> = Arc::new(Mutex::new(Vec::new()));
         let u = Arc::clone(&uploads);
@@ -316,12 +313,9 @@ mod lifecycle {
         let platform = TestPlatformHooks::new();
         platform.clock.set(30_000);
         let mut module = LifecycleModule::new(Box::new(platform));
-        {
-            let mut inner = module.inner.lock().unwrap();
-            inner.state.last_login = 20_000;
-            inner.state.last_ping = 1_000;
-            inner.state.last_running_started = 1_000;
-        }
+        module.state.last_login = 20_000;
+        module.state.last_ping = 1_000;
+        module.state.last_running_started = 1_000;
 
         let uploads: Arc<Mutex<Vec<Upload>>> = Arc::new(Mutex::new(Vec::new()));
         let u = Arc::clone(&uploads);
@@ -351,11 +345,8 @@ mod lifecycle {
         let platform = TestPlatformHooks::new();
         platform.clock.set(20_000);
         let mut module = LifecycleModule::new(Box::new(platform));
-        {
-            let mut inner = module.inner.lock().unwrap();
-            inner.state.last_process_stopped_other = 1_000;
-            inner.state.last_process_stopped_shutdown = 12_000;
-        }
+        module.state.last_process_stopped_other = 1_000;
+        module.state.last_process_stopped_shutdown = 12_000;
 
         let uploads: Arc<Mutex<Vec<Upload>>> = Arc::new(Mutex::new(Vec::new()));
         let u = Arc::clone(&uploads);
@@ -385,29 +376,29 @@ mod lifecycle {
         let platform = TestPlatformHooks::new();
         platform.clock.set(1_000);
         let mut module = LifecycleModule::new(Box::new(platform));
-        {
-            let mut inner = module.inner.lock().unwrap();
-            inner.state.last_login = 42_000;
-            inner.state.last_ping = 99_000;
-            inner.state.pings_while_suspended = 2;
-            inner.state.last_running_started = 55_000;
-        }
-        let inner_ref = Arc::clone(&module.inner);
+        module.state.last_login = 42_000;
+        module.state.last_ping = 99_000;
+        module.state.pings_while_suspended = 2;
+        module.state.last_running_started = 55_000;
+
         let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
         let saved = bus.save().unwrap();
 
         // Load into a new bus and verify state was restored.
         let platform2 = TestPlatformHooks::new();
         let module2 = LifecycleModule::new(Box::new(platform2));
-        let inner2 = Arc::clone(&module2.inner);
-        let _bus2 = EventBus::new(vec![Box::new(module2)], saved).unwrap();
+        let mut bus2 = EventBus::new(vec![Box::new(module2)], saved).unwrap();
 
-        let s = inner2.lock().unwrap();
-        assert_eq!(s.state.last_login, 42_000);
-        assert_eq!(s.state.last_ping, 99_000);
-        assert_eq!(s.state.pings_while_suspended, 2);
-        assert_eq!(s.state.last_running_started, 55_000);
-        drop(inner_ref);
+        let m = bus2
+            .observer_mut("lifecycle")
+            .unwrap()
+            .as_any_mut()
+            .downcast_mut::<LifecycleModule>()
+            .unwrap();
+        assert_eq!(m.state.last_login, 42_000);
+        assert_eq!(m.state.last_ping, 99_000);
+        assert_eq!(m.state.pings_while_suspended, 2);
+        assert_eq!(m.state.last_running_started, 55_000);
     }
 }
 
@@ -466,10 +457,9 @@ mod screenshot {
     fn screenshot_not_retaken_before_interval() {
         let platform = TestPlatformHooks::new();
         platform.clock.set(30_000);
-        let module = ScreenshotModule::new(Box::new(platform.clone()), 60_000);
-        let inner = Arc::clone(&module.inner);
-        inner.lock().unwrap().state.authenticated = true;
-        inner.lock().unwrap().state.last_screenshot_at_ms = Some(0);
+        let mut module = ScreenshotModule::new(Box::new(platform.clone()), 60_000);
+        module.state.authenticated = true;
+        module.state.last_screenshot_at_ms = Some(0);
 
         let uploads: Arc<Mutex<Vec<Upload>>> = Arc::new(Mutex::new(Vec::new()));
         let u = Arc::clone(&uploads);
@@ -488,10 +478,9 @@ mod screenshot {
     fn screenshot_retaken_after_interval() {
         let platform = TestPlatformHooks::new();
         platform.clock.set(61_000);
-        let module = ScreenshotModule::new(Box::new(platform.clone()), 60_000);
-        let inner = Arc::clone(&module.inner);
-        inner.lock().unwrap().state.authenticated = true;
-        inner.lock().unwrap().state.last_screenshot_at_ms = Some(0);
+        let mut module = ScreenshotModule::new(Box::new(platform.clone()), 60_000);
+        module.state.authenticated = true;
+        module.state.last_screenshot_at_ms = Some(0);
 
         let uploads: Arc<Mutex<Vec<Upload>>> = Arc::new(Mutex::new(Vec::new()));
         let u = Arc::clone(&uploads);
@@ -515,18 +504,22 @@ mod screenshot {
     #[test]
     fn logout_clears_authenticated_and_schedule() {
         let platform = TestPlatformHooks::new();
-        let module = ScreenshotModule::new(Box::new(platform), 60_000);
-        let inner = Arc::clone(&module.inner);
-        inner.lock().unwrap().state.authenticated = true;
-        inner.lock().unwrap().state.last_screenshot_at_ms = Some(500);
+        let mut module = ScreenshotModule::new(Box::new(platform), 60_000);
+        module.state.authenticated = true;
+        module.state.last_screenshot_at_ms = Some(500);
 
         let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
         bus.send(Logout).unwrap();
         bus.iter().unwrap();
 
-        let s = inner.lock().unwrap();
-        assert!(!s.state.authenticated);
-        assert_eq!(s.state.last_screenshot_at_ms, None);
+        let m = bus
+            .observer_mut("screenshot")
+            .unwrap()
+            .as_any_mut()
+            .downcast_mut::<ScreenshotModule>()
+            .unwrap();
+        assert!(!m.state.authenticated);
+        assert_eq!(m.state.last_screenshot_at_ms, None);
     }
 }
 
@@ -688,7 +681,6 @@ mod upload {
         let api = MockApiClient::new();
         let platform = TestPlatformHooks::new();
         let module = UploadModule::new(Box::new(platform), api.clone(), 60_000);
-        let inner = Arc::clone(&module.inner);
         let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
         bus.send(Upload {
             risk: 0.0,
@@ -700,7 +692,13 @@ mod upload {
         .unwrap();
         bus.iter().unwrap();
         assert!(api.state().hash_uploads.is_empty());
-        assert_eq!(inner.lock().unwrap().state.pending_hash_events.len(), 0);
+        let m = bus
+            .observer_mut("upload")
+            .unwrap()
+            .as_any_mut()
+            .downcast_mut::<UploadModule<MockApiClient>>()
+            .unwrap();
+        assert_eq!(m.state.pending_hash_events.len(), 0);
     }
 
     #[test]
@@ -708,20 +706,24 @@ mod upload {
         let api = MockApiClient::new();
         let platform = TestPlatformHooks::new();
         let module = UploadModule::new(Box::new(platform), api, 60_000);
-        let inner = Arc::clone(&module.inner);
         let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
         bus.send(login_event()).unwrap();
         bus.iter().unwrap();
-        let s = inner.lock().unwrap();
+        let m = bus
+            .observer_mut("upload")
+            .unwrap()
+            .as_any_mut()
+            .downcast_mut::<UploadModule<MockApiClient>>()
+            .unwrap();
         assert!(
-            s.state.settings.is_some(),
+            m.state.settings.is_some(),
             "login should set device settings"
         );
         assert!(
-            s.state.device_credentials.is_some(),
+            m.state.device_credentials.is_some(),
             "login should set credentials"
         );
-        assert_eq!(s.state.post_login_proof_batches_remaining, 3);
+        assert_eq!(m.state.post_login_proof_batches_remaining, 3);
     }
 
     #[test]
@@ -729,24 +731,28 @@ mod upload {
         let api = MockApiClient::new();
         let platform = TestPlatformHooks::new();
         let module = UploadModule::new(Box::new(platform), api, 60_000);
-        let inner = Arc::clone(&module.inner);
         let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
         bus.send(login_event()).unwrap();
         bus.iter().unwrap();
         bus.send(Logout).unwrap();
         bus.iter().unwrap();
-        let s = inner.lock().unwrap();
-        assert!(s.state.settings.is_none(), "logout should clear settings");
+        let m = bus
+            .observer_mut("upload")
+            .unwrap()
+            .as_any_mut()
+            .downcast_mut::<UploadModule<MockApiClient>>()
+            .unwrap();
+        assert!(m.state.settings.is_none(), "logout should clear settings");
         assert!(
-            s.state.device_credentials.is_none(),
+            m.state.device_credentials.is_none(),
             "logout should clear credentials"
         );
         assert!(
-            s.state.pending_hash_events.is_empty(),
+            m.state.pending_hash_events.is_empty(),
             "logout should clear pending events"
         );
         assert!(
-            s.state.pending_batch_events.is_empty(),
+            m.state.pending_batch_events.is_empty(),
             "logout should clear batch queue"
         );
     }
@@ -757,7 +763,6 @@ mod upload {
         let platform = TestPlatformHooks::new();
         platform.clock.set(1_000);
         let module = UploadModule::new(Box::new(platform), api, 60_000);
-        let inner = Arc::clone(&module.inner);
 
         let partials: Arc<Mutex<Vec<PartialStatus>>> = Arc::new(Mutex::new(Vec::new()));
         let p = Arc::clone(&partials);
@@ -769,12 +774,17 @@ mod upload {
 
         // Manually insert pending items
         {
-            let mut s = inner.lock().unwrap();
-            s.authenticated = true;
-            s.state.device_credentials = Some(valid_credentials());
-            s.state.post_login_proof_batches_remaining = 0;
-            s.state.last_batch_at_ms = Some(1_000);
-            s.state.pending_hash_events.push(LogEntry {
+            let m = bus
+                .observer_mut("upload")
+                .unwrap()
+                .as_any_mut()
+                .downcast_mut::<UploadModule<MockApiClient>>()
+                .unwrap();
+            m.authenticated = true;
+            m.state.device_credentials = Some(valid_credentials());
+            m.state.post_login_proof_batches_remaining = 0;
+            m.state.last_batch_at_ms = Some(1_000);
+            m.state.pending_hash_events.push(LogEntry {
                 ts: 0,
                 risk: Some(0.0),
                 event: UploadKind::Dev {
@@ -782,7 +792,7 @@ mod upload {
                     details: None,
                 },
             });
-            s.state.pending_batch_events.push((500, vec![1, 2, 3]));
+            m.state.pending_batch_events.push((500, vec![1, 2, 3]));
         }
 
         bus.send(StatusRequest).unwrap();

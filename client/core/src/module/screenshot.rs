@@ -1,6 +1,6 @@
 pub mod image_pipeline;
 
-use std::sync::{Arc, Mutex};
+use std::any::Any;
 
 use serde::{Deserialize, Serialize};
 
@@ -17,13 +17,21 @@ pub struct ScreenshotObserverState {
     pub authenticated: bool,
 }
 
-pub struct ScreenshotInner {
+pub struct ScreenshotModule {
     pub state: ScreenshotObserverState,
     platform: Box<dyn ScreenshotHooks>,
     pub screenshot_interval_ms: i64,
 }
 
-impl ScreenshotInner {
+impl ScreenshotModule {
+    pub fn new(platform: Box<dyn ScreenshotHooks>, screenshot_interval_ms: i64) -> Self {
+        Self {
+            state: ScreenshotObserverState::default(),
+            platform,
+            screenshot_interval_ms,
+        }
+    }
+
     fn handle_ping(&mut self, emitter: &Emitter) -> CoreResult<()> {
         if !self.state.authenticated {
             return Ok(());
@@ -67,68 +75,46 @@ impl ScreenshotInner {
     }
 }
 
-pub struct ScreenshotModule {
-    pub inner: Arc<Mutex<ScreenshotInner>>,
-}
-
-impl ScreenshotModule {
-    pub fn new(platform: Box<dyn ScreenshotHooks>, screenshot_interval_ms: i64) -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(ScreenshotInner {
-                state: ScreenshotObserverState::default(),
-                platform,
-                screenshot_interval_ms,
-            })),
-        }
-    }
-}
-
 impl Observer for ScreenshotModule {
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
     fn name(&self) -> &'static str {
         "screenshot"
     }
 
-    fn init(&mut self, bus: &mut EventBus, state: StateType) -> CoreResult<()> {
+    fn init(&mut self, _bus: &mut EventBus, state: StateType) -> CoreResult<()> {
         if !state.is_null() {
-            let mut g = self.inner.lock().unwrap();
-            g.state = serde_json::from_value(state)?;
-            if !g.state.authenticated {
-                g.state.last_screenshot_at_ms = None;
+            self.state = serde_json::from_value(state)?;
+            if !self.state.authenticated {
+                self.state.last_screenshot_at_ms = None;
             }
         }
-
-        let emitter = bus.emitter();
-
-        let inner = Arc::clone(&self.inner);
-        bus.subscribe(move |_: &Login| {
-            let mut g = inner.lock().unwrap();
-            g.state.authenticated = true;
-            g.state.last_screenshot_at_ms = None;
-            Ok(())
-        });
-
-        let inner = Arc::clone(&self.inner);
-        bus.subscribe(move |_: &Logout| {
-            let mut g = inner.lock().unwrap();
-            g.state.authenticated = false;
-            g.state.last_screenshot_at_ms = None;
-            Ok(())
-        });
-
-        let inner = Arc::clone(&self.inner);
-        let e = emitter.clone();
-        bus.subscribe(move |_: &Ping| inner.lock().unwrap().handle_ping(&e));
-
-        let inner = Arc::clone(&self.inner);
-        bus.subscribe(move |ev: &ConfigChanged| {
-            inner.lock().unwrap().screenshot_interval_ms = ev.screenshot_interval_ms as i64;
-            Ok(())
-        });
-
         Ok(())
     }
 
+    fn on_event(&mut self, event: &dyn Any, emitter: &Emitter) -> CoreResult<()> {
+        crate::dispatch_event!(event, {
+            _: Login => {
+                self.state.authenticated = true;
+                self.state.last_screenshot_at_ms = None;
+                Ok(())
+            },
+            _: Logout => {
+                self.state.authenticated = false;
+                self.state.last_screenshot_at_ms = None;
+                Ok(())
+            },
+            _: Ping => self.handle_ping(emitter),
+            ev: ConfigChanged => {
+                self.screenshot_interval_ms = ev.screenshot_interval_ms as i64;
+                Ok(())
+            },
+        })
+    }
+
     fn save(&self) -> CoreResult<StateType> {
-        Ok(serde_json::to_value(&self.inner.lock().unwrap().state)?)
+        Ok(serde_json::to_value(&self.state)?)
     }
 }
