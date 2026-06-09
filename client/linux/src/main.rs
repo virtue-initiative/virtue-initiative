@@ -13,7 +13,10 @@ use std::process::ExitCode;
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use virtue_core::events::UploadKind;
-use virtue_core::{ControllerClient, MonitorService, ServiceStatus};
+use virtue_core::{
+    ClientController, EventBus, EventChannel, FlushBatchNow, Ping, ScreenshotHooks, ServiceStatus,
+    StatusRequest, StatusResponse, Upload, build_default_modules_reqwest, load_state, store_state,
+};
 
 use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_backend};
 use crate::config::{ClientPaths, build_core_config};
@@ -138,7 +141,7 @@ fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
 
     let sock = paths.state_dir.join("daemon.sock");
     let mut client =
-        ControllerClient::connect(&sock).context("failed to connect to daemon (is it running?)")?;
+        ClientController::connect(&sock).context("failed to connect to daemon (is it running?)")?;
     let device_id = client.login(&email, &password).context("login failed")?;
 
     let probe = probe_backend();
@@ -165,7 +168,7 @@ fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
 
     let sock = paths.state_dir.join("daemon.sock");
     let mut client =
-        ControllerClient::connect(&sock).context("failed to connect to daemon (is it running?)")?;
+        ClientController::connect(&sock).context("failed to connect to daemon (is it running?)")?;
     client.logout().context("logout failed")?;
 
     println!("Logged out. Monitoring is disabled on this device until you run `virtue login`.");
@@ -236,8 +239,8 @@ fn daemon_stop(paths: ClientPaths, yes: bool) -> Result<()> {
     }
 
     let sock = paths.state_dir.join("daemon.sock");
-    let mut client =
-        ControllerClient::connect(&sock).context("failed to connect to daemon (is it running?)")?;
+    let client =
+        ClientController::connect(&sock).context("failed to connect to daemon (is it running?)")?;
     client
         .request_user_stop("cli_daemon_stop")
         .context("failed to record stop intent")?;
@@ -304,19 +307,29 @@ fn dev(paths: ClientPaths, command: DevCommands) -> Result<()> {
     }
 }
 
+fn make_dev_bus(paths: &ClientPaths) -> Result<(EventBus, std::path::PathBuf)> {
+    let state_path = paths.state_dir.join("event_state.json");
+    let modules =
+        build_default_modules_reqwest(build_core_config(paths), LinuxPlatformHooks::new())?;
+    let bus = EventBus::new(modules, load_state(&state_path)?)?;
+    Ok((bus, state_path))
+}
+
 fn dev_upload_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
     let title = args
         .title
         .unwrap_or_else(|| "Developer CLI log".to_string());
-    let mut service = MonitorService::setup(build_core_config(&paths), LinuxPlatformHooks::new())?;
-    // Use risk >= 1.0 so this always routes through the immediate (POST /log) path.
-    service.send_log(
-        1.0_f32,
-        UploadKind::Dev {
+    let (mut bus, state_path) = make_dev_bus(&paths)?;
+    // risk >= 1.0 routes through the immediate POST /log path.
+    bus.send(Upload {
+        risk: 1.0_f32,
+        kind: UploadKind::Dev {
             title,
             details: args.details,
         },
-    )?;
+    })?;
+    bus.send(Ping)?;
+    store_state(&state_path, &bus.iter()?)?;
 
     println!(
         "Recorded immediate developer log with risk {}.",
@@ -329,14 +342,16 @@ fn dev_add_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
     let title = args
         .title
         .unwrap_or_else(|| "Developer CLI batched log".to_string());
-    let mut service = MonitorService::setup(build_core_config(&paths), LinuxPlatformHooks::new())?;
-    service.send_log(
-        args.risk,
-        UploadKind::Dev {
+    let (mut bus, state_path) = make_dev_bus(&paths)?;
+    bus.send(Upload {
+        risk: args.risk,
+        kind: UploadKind::Dev {
             title,
             details: args.details,
         },
-    )?;
+    })?;
+    bus.send(Ping)?;
+    store_state(&state_path, &bus.iter()?)?;
 
     println!(
         "Queued developer log in the next batch with risk {}.",
@@ -346,8 +361,20 @@ fn dev_add_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
 }
 
 fn dev_add_screenshot(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
-    let mut service = MonitorService::setup(build_core_config(&paths), LinuxPlatformHooks::new())?;
-    service.capture_batch_screenshot(Some(args.risk))?;
+    let platform = LinuxPlatformHooks::new();
+    let screenshot = platform
+        .take_screenshot()
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let (mut bus, state_path) = make_dev_bus(&paths)?;
+    bus.send(Upload {
+        risk: args.risk,
+        kind: UploadKind::Screenshot {
+            image: screenshot.bytes,
+            content_type: screenshot.content_type,
+        },
+    })?;
+    bus.send(Ping)?;
+    store_state(&state_path, &bus.iter()?)?;
 
     println!(
         "Captured and queued a developer screenshot with risk {}.",
@@ -357,13 +384,25 @@ fn dev_add_screenshot(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()
 }
 
 fn dev_upload_batch(paths: ClientPaths) -> Result<()> {
-    let mut service = MonitorService::setup(build_core_config(&paths), LinuxPlatformHooks::new())?;
-    let (attempted, remaining) = service.upload_pending_batch_now()?;
+    let (mut bus, state_path) = make_dev_bus(&paths)?;
 
-    if attempted == 0 {
+    let before: StatusResponse = bus.request(StatusRequest)?;
+    let initial_pending = before.status.pending_request_count;
+
+    if initial_pending == 0 {
         println!("No pending batch items to upload.");
         return Ok(());
     }
+
+    bus.send(FlushBatchNow)?;
+    bus.send(Ping)?;
+    bus.iter()?;
+
+    let after: StatusResponse = bus.request(StatusRequest)?;
+    let remaining = after.status.pending_request_count;
+    let attempted = initial_pending.saturating_sub(remaining);
+
+    store_state(&state_path, &bus.iter()?)?;
 
     if remaining == 0 {
         println!("Processed {attempted} batch item(s); no batch items remain queued.");
@@ -481,7 +520,7 @@ fn format_risk(risk: f32) -> String {
 fn load_service_status(paths: &ClientPaths) -> Result<ServiceStatus> {
     // Try to get live status from the daemon via IPC; fall back to defaults.
     let sock = paths.state_dir.join("daemon.sock");
-    if let Ok(mut client) = ControllerClient::connect(&sock)
+    if let Ok(mut client) = ClientController::connect(&sock)
         && let Ok(status) = client.get_status()
     {
         return Ok(status);

@@ -4,7 +4,7 @@ use std::thread;
 use std::time::Duration;
 
 use ksni::blocking::TrayMethods;
-use virtue_core::ControllerClient;
+use virtue_core::ClientController;
 
 use crate::config::ClientPaths;
 
@@ -140,7 +140,7 @@ fn run_one_tray_session(
 
 fn build_tooltip(paths: &ClientPaths) -> String {
     let sock = paths.state_dir.join("daemon.sock");
-    let is_authenticated = ControllerClient::connect(&sock)
+    let is_authenticated = ClientController::connect(&sock)
         .ok()
         .and_then(|mut c| c.get_status().ok())
         .map(|s| s.is_authenticated)

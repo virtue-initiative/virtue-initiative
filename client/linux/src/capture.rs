@@ -243,9 +243,7 @@ impl ScreenshotHooks for LinuxPlatformHooks {
     }
 }
 
-impl PlatformHooks for LinuxPlatformHooks {
-    type CustomEvent = ();
-}
+impl PlatformHooks for LinuxPlatformHooks {}
 
 #[cfg(test)]
 mod tests {

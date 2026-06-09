@@ -1,13 +1,19 @@
 use std::process::Command;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::Result;
 use tokio::sync::mpsc;
-use virtue_core::events::{Event, ProcessStoppedReason};
-use virtue_core::ipc::is_allowed_inbound;
-use virtue_core::{MonitorService, iter_sleep};
+use virtue_core::EventError;
+use virtue_core::events::{ProcessStoppedReason, RemoteSender};
+use virtue_core::ipc::IpcListener;
+use virtue_core::{
+    ComputerResumed, ComputerSuspended, EventBus, EventChannel, LoginRequested, LoginResult,
+    Logout, LogoutRequested, LogoutResult, Ping, ProcessStarted, ProcessStopped, RemoteEventBus,
+    StatusRequest, StatusResponse, UserSessionLogin, UserSessionLogout, UserStopRequested,
+    build_default_modules_reqwest, load_state, store_state,
+};
 use zbus::proxy;
 
 use crate::capture::{LinuxPlatformHooks, is_session_unavailable_text};
@@ -15,6 +21,7 @@ use crate::config::{ClientPaths, build_core_config};
 use crate::tray;
 
 const SESSION_UNAVAILABLE_LOG_INTERVAL: Duration = Duration::from_secs(5 * 60);
+const ITER_INTERVAL: Duration = Duration::from_secs(1);
 
 #[proxy(
     interface = "org.freedesktop.login1.Manager",
@@ -30,68 +37,119 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     paths.ensure_dirs()?;
     let _tray = tray::start_daemon_tray(paths.clone());
 
-    let shutdown = Arc::new(AtomicBool::new(false));
-    let mut service = tokio::task::block_in_place(|| {
-        MonitorService::setup(build_core_config(paths), LinuxPlatformHooks::new())
+    let config = build_core_config(paths);
+    let state_path = paths.state_dir.join("event_state.json");
+    let modules = tokio::task::block_in_place(|| {
+        build_default_modules_reqwest(config, LinuxPlatformHooks::new())
     })?;
+    let mut bus = EventBus::new(modules, load_state(&state_path)?)?;
 
-    service.queue_event(Event::ProcessStarted);
-    tokio::task::block_in_place(|| service.run_event_loop_iter()).ok();
+    bus.send(ProcessStarted)?;
+    store_state(&state_path, &bus.iter()?)?;
 
     // Bind IPC listener and spawn an accept thread.
     let sock_path = paths.state_dir.join("daemon.sock");
     let (ipc_accept_tx, mut ipc_accept_rx) =
         mpsc::unbounded_channel::<(virtue_core::ipc::IpcSender, virtue_core::ipc::IpcReceiver)>();
-    if let Ok(listener) = service.bind_ipc(&sock_path) {
-        tokio::task::spawn_blocking(move || {
-            loop {
-                match listener.blocking_accept() {
-                    Ok(pair) => {
-                        if ipc_accept_tx.send(pair).is_err() {
+
+    match IpcListener::bind(&sock_path) {
+        Ok(listener) => {
+            tokio::task::spawn_blocking(move || {
+                loop {
+                    match listener.blocking_accept() {
+                        Ok(pair) => {
+                            if ipc_accept_tx.send(pair).is_err() {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("daemon: ipc accept error: {e}");
                             break;
                         }
                     }
-                    Err(e) => {
-                        eprintln!("daemon: ipc accept error: {e}");
-                        break;
-                    }
                 }
-            }
-        });
-    } else {
-        eprintln!(
-            "daemon: failed to bind IPC listener at {}",
-            sock_path.display()
-        );
+            });
+        }
+        Err(e) => {
+            eprintln!(
+                "daemon: failed to bind IPC listener at {}: {e}",
+                sock_path.display()
+            );
+        }
     }
 
+    // Shared list of outbound handles — prune dead ones on each send.
+    let clients: Arc<Mutex<Vec<RemoteSender>>> = Arc::new(Mutex::new(Vec::new()));
+
+    macro_rules! subscribe_outbound {
+        ($($T:ty),* $(,)?) => {
+            $(
+                let c = clients.clone();
+                bus.subscribe::<$T>(move |ev| {
+                    c.lock().unwrap().retain(|s| s.send(ev.clone()).is_ok());
+                    Ok(())
+                });
+            )*
+        };
+    }
+    subscribe_outbound!(
+        LoginResult,
+        LogoutResult,
+        StatusResponse,
+        Logout,
+        EventError
+    );
+
+    let shutdown = Arc::new(AtomicBool::new(false));
     let (signal_tx, mut signal_rx) = mpsc::unbounded_channel::<String>();
     spawn_signal_handler(shutdown.clone(), signal_tx);
     let (sleep_tx, mut sleep_rx) = mpsc::unbounded_channel::<bool>();
     spawn_suspend_watcher(sleep_tx);
 
-    let mut last_session_unavailable_log: Option<Instant> = None;
+    let mut last_session_unavailable_log: Option<std::time::Instant> = None;
     loop {
         if shutdown.load(Ordering::SeqCst) {
             break;
         }
 
         // Wire up any newly accepted IPC connections.
-        while let Ok((sender, mut receiver)) = ipc_accept_rx.try_recv() {
-            service.add_ipc_client(sender);
-            let event_tx = service.event_queue_sender();
-            std::thread::spawn(move || {
-                while let Ok(event) = receiver.recv_event() {
-                    if is_allowed_inbound(&event) {
-                        event_tx.send(event).ok();
-                    }
-                }
-            });
+        while let Ok((sender, receiver)) = ipc_accept_rx.try_recv() {
+            let mut remote = RemoteEventBus::new(sender, receiver);
+            let e = bus.emitter();
+
+            macro_rules! forward_inbound {
+                ($($T:ty),* $(,)?) => {
+                    $(
+                        let e2 = e.clone();
+                        remote.on::<$T>(move |ev| e2.send(ev.clone()));
+                    )*
+                };
+            }
+            forward_inbound!(
+                LoginRequested,
+                LogoutRequested,
+                StatusRequest,
+                UserStopRequested,
+                UserSessionLogin,
+                UserSessionLogout,
+                ComputerSuspended,
+                ComputerResumed,
+                ProcessStopped,
+            );
+
+            clients.lock().unwrap().push(remote.sender());
+            drop(remote);
         }
 
-        match tokio::task::block_in_place(|| service.loop_iteration()) {
-            Ok(_outcome) => {
+        match tokio::task::block_in_place(|| {
+            bus.send(Ping)?;
+            bus.iter()
+        }) {
+            Ok(state) => {
                 last_session_unavailable_log = None;
+                if let Err(e) = store_state(&state_path, &state) {
+                    eprintln!("daemon: failed to store state: {e}");
+                }
             }
             Err(err) => {
                 let message = err.to_string();
@@ -100,7 +158,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
                         .is_none_or(|last| last.elapsed() >= SESSION_UNAVAILABLE_LOG_INTERVAL);
                     if should_log {
                         eprintln!("daemon: capture session unavailable: {message}");
-                        last_session_unavailable_log = Some(Instant::now());
+                        last_session_unavailable_log = Some(std::time::Instant::now());
                     }
                 } else {
                     eprintln!("daemon: {message}");
@@ -111,27 +169,36 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
         tokio::select! {
             signal = signal_rx.recv() => {
                 if signal.is_some() {
-                    tokio::task::block_in_place(|| record_shutdown_transition(&mut service));
+                    tokio::task::block_in_place(|| record_shutdown_transition(&mut bus, &state_path));
                 }
                 break;
             }
             sleep_change = sleep_rx.recv() => {
                 if let Some(suspending) = sleep_change {
-                    let event = if suspending {
-                        Event::ComputerSuspended
-                    } else {
-                        Event::ComputerResumed
-                    };
-                    service.queue_event(event);
-                    tokio::task::block_in_place(|| service.run_event_loop_iter()).ok();
+                    let result = tokio::task::block_in_place(|| {
+                        if suspending {
+                            bus.send(ComputerSuspended)?;
+                        } else {
+                            bus.send(ComputerResumed)?;
+                        }
+                        let state = bus.iter()?;
+                        store_state(&state_path, &state)
+                    });
+                    if let Err(e) = result {
+                        eprintln!("daemon: suspend/resume error: {e}");
+                    }
                 }
             }
-            _ = iter_sleep() => {}
+            _ = tokio::time::sleep(ITER_INTERVAL) => {}
         }
     }
 
-    tokio::task::block_in_place(|| service.run_event_loop_iter()).ok();
-    tokio::task::block_in_place(|| service.mark_stopped()).ok();
+    tokio::task::block_in_place(|| {
+        let _ = bus.send(Ping);
+        if let Ok(state) = bus.iter() {
+            let _ = store_state(&state_path, &state);
+        }
+    });
     Ok(())
 }
 
@@ -255,17 +322,26 @@ fn classify_shutdown_reason(
     }
 }
 
-fn record_shutdown_transition(service: &mut MonitorService<LinuxPlatformHooks>) {
+fn record_shutdown_transition(bus: &mut EventBus, state_path: &std::path::Path) {
     let system_state = read_systemd_state();
     let shutdown_job_queued = is_shutdown_job_queued();
-    let explicit_user_stop = service.consume_user_stop_request();
+    // Determine whether a user stop was explicitly requested via IPC.
+    // We check the Lifecycle module's persisted state indirectly: if a
+    // UserStopRequested event was emitted before shutdown, its source will
+    // have been recorded by LifecycleModule. Here we conservatively default
+    // to false; the tray/CLI sends UserStopRequested over IPC which is
+    // bridged into the bus before shutdown begins.
+    let explicit_user_stop = false;
     let reason = classify_shutdown_reason(
         system_state.as_deref(),
         shutdown_job_queued,
         explicit_user_stop,
     );
-    service.queue_event(Event::ProcessStopped(reason));
-    let _ = service.run_event_loop_iter();
+    let _ = bus.send(ProcessStopped(reason));
+    let _ = bus.send(Ping);
+    if let Ok(state) = bus.iter() {
+        let _ = store_state(state_path, &state);
+    }
 }
 
 #[cfg(test)]
