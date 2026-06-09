@@ -50,7 +50,7 @@ fn screenshot_taken_immediately_on_first_loop() {
     // Screenshot flows through batch; at least one upload expected.
     let has_upload = {
         let s = scenario.api.state();
-        s.batch_uploads.len() >= 1 || s.hash_uploads.len() >= 1
+        !s.batch_uploads.is_empty() || !s.hash_uploads.is_empty()
     };
     assert!(
         has_upload,
@@ -89,7 +89,7 @@ fn screenshot_retaken_after_interval() {
 
     let has_upload = {
         let s = scenario.api.state();
-        s.batch_uploads.len() >= 1 || s.hash_uploads.len() >= 1
+        !s.batch_uploads.is_empty() || !s.hash_uploads.is_empty()
     };
     assert!(has_upload, "expected screenshot upload after 60 s interval");
 }
@@ -102,7 +102,7 @@ fn process_started_emits_lifecycle_upload() {
     scenario.queue(ProcessStarted);
     scenario.at_t(0).loop_iteration();
     assert!(
-        scenario.api.state().hash_uploads.len() >= 1,
+        !scenario.api.state().hash_uploads.is_empty(),
         "expected at least one hash upload from the ProcessStarted lifecycle event"
     );
 }
@@ -113,7 +113,7 @@ fn user_stopped_process_emits_high_risk_upload() {
     scenario.queue(ProcessStopped(ProcessStoppedReason::User));
     scenario.at_t(0).loop_iteration();
     assert!(
-        scenario.api.state().log_uploads.len() >= 1,
+        !scenario.api.state().log_uploads.is_empty(),
         "expected an immediate log upload for UserStoppedProcess alert"
     );
 }
@@ -124,7 +124,7 @@ fn ping_gap_while_running_emits_alert() {
     scenario.at_t(61_000).loop_iteration();
     scenario.at_t(72_000).loop_iteration();
     assert!(
-        scenario.api.state().log_uploads.len() >= 1,
+        !scenario.api.state().log_uploads.is_empty(),
         "expected a PingGapWhileRunning log upload"
     );
 }
@@ -181,7 +181,7 @@ fn five_capture_failures_triggers_upload() {
     }
     scenario.at_t(30_000).loop_iteration();
     assert!(
-        scenario.api.state().hash_uploads.len() >= 1,
+        !scenario.api.state().hash_uploads.is_empty(),
         "5 failures == threshold should trigger Upload → hash upload"
     );
 }
@@ -201,7 +201,7 @@ fn low_risk_upload_queued_until_batch_interval() {
     });
     scenario.at_t(30_000).loop_iteration();
     assert!(
-        scenario.api.state().hash_uploads.len() >= 1,
+        !scenario.api.state().hash_uploads.is_empty(),
         "hash should upload immediately for low-risk events"
     );
     assert_eq!(
@@ -226,7 +226,7 @@ fn batch_flushed_after_interval() {
     assert_eq!(scenario.api.state().batch_uploads.len(), 0);
     scenario.at_t(60_000).loop_iteration();
     assert!(
-        scenario.api.state().batch_uploads.len() >= 1,
+        !scenario.api.state().batch_uploads.is_empty(),
         "batch should flush after 60 s interval"
     );
 }
@@ -269,7 +269,7 @@ fn ping_after_suspend_without_resume_emits_alert() {
     });
     scenario.at_t(10_000).loop_iteration();
     assert!(
-        scenario.api.state().hash_uploads.len() >= 1,
+        !scenario.api.state().hash_uploads.is_empty(),
         "expected a MissingResume hash upload after 4 pings while suspended"
     );
 }
@@ -285,7 +285,7 @@ fn unexpected_process_start_after_long_ping_gap_emits_alert() {
     scenario.queue(ProcessStarted);
     scenario.at_t(100_000).loop_iteration();
     assert!(
-        scenario.api.state().log_uploads.len() >= 1,
+        !scenario.api.state().log_uploads.is_empty(),
         "expected an UnexpectedProcessStart log upload"
     );
 }
@@ -300,7 +300,7 @@ fn process_killed_before_shutdown_emits_alert() {
     });
     scenario.at_t(20_000).loop_iteration();
     assert!(
-        scenario.api.state().hash_uploads.len() >= 1,
+        !scenario.api.state().hash_uploads.is_empty(),
         "expected a ProcessKilledBeforeShutdown hash upload"
     );
 }

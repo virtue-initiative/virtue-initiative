@@ -71,23 +71,18 @@ impl RemoteEventBus {
         let reader_handlers = Arc::clone(&handlers);
 
         let _reader = thread::spawn(move || {
-            loop {
-                match receiver.recv_line() {
-                    Ok(line) => {
-                        if line.is_empty() {
-                            continue;
-                        }
-                        let Ok(envelope) = serde_json::from_str::<Envelope>(&line) else {
-                            continue;
-                        };
-                        let guard = reader_handlers.lock().unwrap();
-                        if let Some(hs) = guard.get(&envelope.kind) {
-                            for h in hs {
-                                h(&envelope.data);
-                            }
-                        }
+            while let Ok(line) = receiver.recv_line() {
+                if line.is_empty() {
+                    continue;
+                }
+                let Ok(envelope) = serde_json::from_str::<Envelope>(&line) else {
+                    continue;
+                };
+                let guard = reader_handlers.lock().unwrap();
+                if let Some(hs) = guard.get(&envelope.kind) {
+                    for h in hs {
+                        h(&envelope.data);
                     }
-                    Err(_) => break,
                 }
             }
         });
@@ -119,13 +114,13 @@ impl RemoteEventBus {
         f: impl Fn(&E) -> CoreResult<()> + Send + Sync + 'static,
     ) {
         let handler: RemoteHandler = Box::new(move |data: &serde_json::Value| {
-            if let Ok(event) = serde_json::from_value::<E>(data.clone()) {
-                if let Err(err) = f(&event) {
-                    log_error(
-                        &format!("remote handler for {} failed", type_name::<E>()),
-                        Some(&err),
-                    );
-                }
+            if let Ok(event) = serde_json::from_value::<E>(data.clone())
+                && let Err(err) = f(&event)
+            {
+                log_error(
+                    &format!("remote handler for {} failed", type_name::<E>()),
+                    Some(&err),
+                );
             }
         });
         self.handlers

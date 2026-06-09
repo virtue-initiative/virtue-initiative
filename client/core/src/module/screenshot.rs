@@ -40,10 +40,10 @@ impl ScreenshotModule {
         let now_ms = self.platform.get_time_utc_ms()?;
 
         // Sanity check: reset if time went backwards.
-        if let Some(last) = self.state.last_screenshot_at_ms {
-            if now_ms < last {
-                self.state.last_screenshot_at_ms = None;
-            }
+        if let Some(last) = self.state.last_screenshot_at_ms
+            && now_ms < last
+        {
+            self.state.last_screenshot_at_ms = None;
         }
 
         let should = self
@@ -116,5 +116,153 @@ impl Observer for ScreenshotModule {
 
     fn save(&self) -> CoreResult<StateType> {
         Ok(serde_json::to_value(&self.state)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::ScreenshotModule;
+    use crate::events::bus::{EventBus, StateType};
+    use crate::events::types::{Login, Logout, Ping, Upload};
+    use crate::model::{BatchRecipient, DeviceCredentials, DeviceSettings, UploadKind};
+    use crate::testing::TestPlatformHooks;
+
+    fn valid_credentials() -> DeviceCredentials {
+        DeviceCredentials {
+            device_id: "test-device".into(),
+            access_token: "test-access".into(),
+            refresh_token: "test-refresh".into(),
+        }
+    }
+
+    fn valid_settings() -> DeviceSettings {
+        DeviceSettings {
+            device_id: "test-device".into(),
+            name: "test device".into(),
+            platform: "test".into(),
+            owner: Some(BatchRecipient {
+                user_id: "test-user".into(),
+                pub_key_base64: "CQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
+            }),
+            partners: Vec::new(),
+            hash_base_url: None,
+        }
+    }
+
+    fn make(ts: i64) -> (EventBus, Arc<Mutex<Vec<Upload>>>, TestPlatformHooks) {
+        let platform = TestPlatformHooks::new();
+        platform.clock.set(ts);
+        let platform_clone = platform.clone();
+        let module = ScreenshotModule::new(Box::new(platform), 60_000);
+        let uploads: Arc<Mutex<Vec<Upload>>> = Arc::new(Mutex::new(Vec::new()));
+        let u = Arc::clone(&uploads);
+        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
+        bus.subscribe(move |ev: &Upload| {
+            u.lock().unwrap().push(ev.clone());
+            Ok(())
+        });
+        (bus, uploads, platform_clone)
+    }
+
+    #[test]
+    fn ping_when_unauthenticated_does_nothing() {
+        let (mut bus, uploads, platform) = make(1_000);
+        bus.send(Ping).unwrap();
+        bus.iter().unwrap();
+        assert!(uploads.lock().unwrap().is_empty());
+        assert_eq!(platform.take_call_count(), 0);
+    }
+
+    #[test]
+    fn login_then_ping_takes_screenshot() {
+        let (mut bus, uploads, platform) = make(1_000);
+        bus.send(Login {
+            credentials: valid_credentials(),
+            settings: valid_settings(),
+        })
+        .unwrap();
+        bus.iter().unwrap();
+        uploads.lock().unwrap().clear();
+
+        bus.send(Ping).unwrap();
+        bus.iter().unwrap();
+        let u = uploads.lock().unwrap();
+        assert!(
+            u.iter()
+                .any(|e| matches!(e.kind, UploadKind::Screenshot { .. })),
+            "expected Screenshot upload after first ping post-login"
+        );
+        assert_eq!(platform.take_call_count(), 1);
+    }
+
+    #[test]
+    fn screenshot_not_retaken_before_interval() {
+        let platform = TestPlatformHooks::new();
+        platform.clock.set(30_000);
+        let mut module = ScreenshotModule::new(Box::new(platform.clone()), 60_000);
+        module.state.authenticated = true;
+        module.state.last_screenshot_at_ms = Some(0);
+
+        let uploads: Arc<Mutex<Vec<Upload>>> = Arc::new(Mutex::new(Vec::new()));
+        let u = Arc::clone(&uploads);
+        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
+        bus.subscribe(move |ev: &Upload| {
+            u.lock().unwrap().push(ev.clone());
+            Ok(())
+        });
+
+        bus.send(Ping).unwrap();
+        bus.iter().unwrap();
+        assert_eq!(platform.take_call_count(), 0);
+    }
+
+    #[test]
+    fn screenshot_retaken_after_interval() {
+        let platform = TestPlatformHooks::new();
+        platform.clock.set(61_000);
+        let mut module = ScreenshotModule::new(Box::new(platform.clone()), 60_000);
+        module.state.authenticated = true;
+        module.state.last_screenshot_at_ms = Some(0);
+
+        let uploads: Arc<Mutex<Vec<Upload>>> = Arc::new(Mutex::new(Vec::new()));
+        let u = Arc::clone(&uploads);
+        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
+        bus.subscribe(move |ev: &Upload| {
+            u.lock().unwrap().push(ev.clone());
+            Ok(())
+        });
+
+        bus.send(Ping).unwrap();
+        bus.iter().unwrap();
+        let u = uploads.lock().unwrap();
+        assert!(
+            u.iter()
+                .any(|e| matches!(e.kind, UploadKind::Screenshot { .. })),
+            "expected screenshot after interval elapsed"
+        );
+        assert_eq!(platform.take_call_count(), 1);
+    }
+
+    #[test]
+    fn logout_clears_authenticated_and_schedule() {
+        let platform = TestPlatformHooks::new();
+        let mut module = ScreenshotModule::new(Box::new(platform), 60_000);
+        module.state.authenticated = true;
+        module.state.last_screenshot_at_ms = Some(500);
+
+        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
+        bus.send(Logout).unwrap();
+        bus.iter().unwrap();
+
+        let m = bus
+            .observer_mut("screenshot")
+            .unwrap()
+            .as_any_mut()
+            .downcast_mut::<ScreenshotModule>()
+            .unwrap();
+        assert!(!m.state.authenticated);
+        assert_eq!(m.state.last_screenshot_at_ms, None);
     }
 }

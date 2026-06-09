@@ -276,7 +276,7 @@ impl Scenario {
 
     pub fn assert_screenshot_call_count(&self, expected: u64) -> &Self {
         // The screenshot call count is tracked via the API; count upload events instead.
-        let actual = self.api.state().batch_uploads.iter().count();
+        let actual = self.api.state().batch_uploads.len();
         // We count platform take_screenshot calls via the platform handle directly
         let _ = actual; // Actual check is via platform.take_call_count() — caller must use platform directly
         // For backward compat, this is a no-op: scenarios that need exact screenshot counts

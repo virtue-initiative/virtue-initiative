@@ -211,3 +211,127 @@ impl<A: ApiTransport + Send + Sync + 'static> Observer for AuthModule<A> {
         Ok(serde_json::to_value(&self.state)?)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::AuthModule;
+    use crate::error::CoreError;
+    use crate::events::bus::{EventBus, StateType};
+    use crate::events::types::{
+        Login, LoginRequested, LoginResult, Logout, LogoutRequested, PartialStatus, StatusRequest,
+    };
+    use crate::model::Redacted;
+    use crate::testing::MockApiClient;
+
+    fn make() -> (EventBus, MockApiClient) {
+        let api = MockApiClient::new();
+        let module = AuthModule::new(api.clone(), "test-device".into(), "test-platform".into());
+        let bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
+        (bus, api)
+    }
+
+    #[test]
+    fn login_success_emits_login_and_result() {
+        let (mut bus, _api) = make();
+        let logins: Arc<Mutex<Vec<Login>>> = Arc::new(Mutex::new(Vec::new()));
+        let results: Arc<Mutex<Vec<LoginResult>>> = Arc::new(Mutex::new(Vec::new()));
+        let l = Arc::clone(&logins);
+        let r = Arc::clone(&results);
+        bus.subscribe(move |ev: &Login| {
+            l.lock().unwrap().push(ev.clone());
+            Ok(())
+        });
+        bus.subscribe(move |ev: &LoginResult| {
+            r.lock().unwrap().push(ev.clone());
+            Ok(())
+        });
+
+        bus.send(LoginRequested {
+            email: "alice@example.org".into(),
+            password: Redacted("secret".into()),
+        })
+        .unwrap();
+        bus.iter().unwrap();
+
+        assert_eq!(logins.lock().unwrap().len(), 1, "expected Login event");
+        let results = results.lock().unwrap();
+        assert_eq!(results.len(), 1, "expected LoginResult event");
+        assert!(results[0].success, "login result should be success");
+        assert!(
+            results[0].device_id.is_some(),
+            "login result should carry device_id"
+        );
+    }
+
+    #[test]
+    fn login_failure_emits_failed_result() {
+        let (mut bus, api) = make();
+        api.program_login(Err(CoreError::InvalidState("bad credentials")));
+
+        let results: Arc<Mutex<Vec<LoginResult>>> = Arc::new(Mutex::new(Vec::new()));
+        let r = Arc::clone(&results);
+        bus.subscribe(move |ev: &LoginResult| {
+            r.lock().unwrap().push(ev.clone());
+            Ok(())
+        });
+
+        bus.send(LoginRequested {
+            email: "alice@example.org".into(),
+            password: Redacted("wrong".into()),
+        })
+        .unwrap();
+        bus.iter().unwrap();
+
+        let results = results.lock().unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].success, "login result should be failure");
+        assert!(
+            results[0].error.is_some(),
+            "failed login should carry error message"
+        );
+    }
+
+    #[test]
+    fn logout_requested_emits_logout_and_result() {
+        let (mut bus, _api) = make();
+        let logouts: Arc<Mutex<Vec<Logout>>> = Arc::new(Mutex::new(Vec::new()));
+        let l = Arc::clone(&logouts);
+        bus.subscribe(move |ev: &Logout| {
+            l.lock().unwrap().push(ev.clone());
+            Ok(())
+        });
+
+        bus.send(LogoutRequested).unwrap();
+        bus.iter().unwrap();
+
+        assert_eq!(logouts.lock().unwrap().len(), 1, "expected Logout event");
+    }
+
+    #[test]
+    fn status_request_emits_auth_partial_status() {
+        let (mut bus, _api) = make();
+        let partials: Arc<Mutex<Vec<PartialStatus>>> = Arc::new(Mutex::new(Vec::new()));
+        let p = Arc::clone(&partials);
+        bus.subscribe(move |ev: &PartialStatus| {
+            p.lock().unwrap().push(ev.clone());
+            Ok(())
+        });
+
+        bus.send(StatusRequest).unwrap();
+        bus.iter().unwrap();
+
+        let p = partials.lock().unwrap();
+        assert!(
+            p.iter().any(|s| matches!(
+                s,
+                PartialStatus::Auth {
+                    is_authenticated: false,
+                    ..
+                }
+            )),
+            "expected unauthenticated PartialStatus::Auth"
+        );
+    }
+}

@@ -231,10 +231,10 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
         }
         let now_ms = self.platform.get_time_utc_ms()?;
 
-        if let Some(last) = self.state.last_batch_at_ms {
-            if now_ms < last {
-                self.state.last_batch_at_ms = None;
-            }
+        if let Some(last) = self.state.last_batch_at_ms
+            && now_ms < last
+        {
+            self.state.last_batch_at_ms = None;
         }
 
         self.retry_pending_hashes()?;
@@ -363,4 +363,177 @@ fn batch_recipients(settings: &DeviceSettings) -> CoreResult<Vec<BatchRecipient>
     recipients.push(owner);
     recipients.extend(settings.partners.clone());
     Ok(recipients)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::UploadModule;
+    use crate::events::bus::{EventBus, StateType};
+    use crate::events::types::{Login, Logout, PartialStatus, StatusRequest, Upload};
+    use crate::model::{BatchRecipient, DeviceCredentials, DeviceSettings, LogEntry, UploadKind};
+    use crate::testing::{MockApiClient, TestPlatformHooks};
+
+    fn valid_credentials() -> DeviceCredentials {
+        DeviceCredentials {
+            device_id: "test-device".into(),
+            access_token: "test-access".into(),
+            refresh_token: "test-refresh".into(),
+        }
+    }
+
+    fn valid_settings() -> DeviceSettings {
+        DeviceSettings {
+            device_id: "test-device".into(),
+            name: "test device".into(),
+            platform: "test".into(),
+            owner: Some(BatchRecipient {
+                user_id: "test-user".into(),
+                pub_key_base64: "CQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
+            }),
+            partners: Vec::new(),
+            hash_base_url: None,
+        }
+    }
+
+    fn login_event() -> Login {
+        Login {
+            credentials: valid_credentials(),
+            settings: valid_settings(),
+        }
+    }
+
+    #[test]
+    fn upload_when_unauthenticated_is_silently_ignored() {
+        let api = MockApiClient::new();
+        let platform = TestPlatformHooks::new();
+        let module = UploadModule::new(Box::new(platform), api.clone(), 60_000);
+        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
+        bus.send(Upload {
+            risk: 0.0,
+            kind: UploadKind::Dev {
+                title: "ignored".into(),
+                details: None,
+            },
+        })
+        .unwrap();
+        bus.iter().unwrap();
+        assert!(api.state().hash_uploads.is_empty());
+        let m = bus
+            .observer_mut("upload")
+            .unwrap()
+            .as_any_mut()
+            .downcast_mut::<UploadModule<MockApiClient>>()
+            .unwrap();
+        assert_eq!(m.state.pending_hash_events.len(), 0);
+    }
+
+    #[test]
+    fn login_sets_authenticated_credentials_and_settings() {
+        let api = MockApiClient::new();
+        let platform = TestPlatformHooks::new();
+        let module = UploadModule::new(Box::new(platform), api, 60_000);
+        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
+        bus.send(login_event()).unwrap();
+        bus.iter().unwrap();
+        let m = bus
+            .observer_mut("upload")
+            .unwrap()
+            .as_any_mut()
+            .downcast_mut::<UploadModule<MockApiClient>>()
+            .unwrap();
+        assert!(
+            m.state.settings.is_some(),
+            "login should set device settings"
+        );
+        assert!(
+            m.state.device_credentials.is_some(),
+            "login should set credentials"
+        );
+        assert_eq!(m.state.post_login_proof_batches_remaining, 3);
+    }
+
+    #[test]
+    fn logout_clears_authenticated_state() {
+        let api = MockApiClient::new();
+        let platform = TestPlatformHooks::new();
+        let module = UploadModule::new(Box::new(platform), api, 60_000);
+        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
+        bus.send(login_event()).unwrap();
+        bus.iter().unwrap();
+        bus.send(Logout).unwrap();
+        bus.iter().unwrap();
+        let m = bus
+            .observer_mut("upload")
+            .unwrap()
+            .as_any_mut()
+            .downcast_mut::<UploadModule<MockApiClient>>()
+            .unwrap();
+        assert!(m.state.settings.is_none(), "logout should clear settings");
+        assert!(
+            m.state.device_credentials.is_none(),
+            "logout should clear credentials"
+        );
+        assert!(
+            m.state.pending_hash_events.is_empty(),
+            "logout should clear pending events"
+        );
+        assert!(
+            m.state.pending_batch_events.is_empty(),
+            "logout should clear batch queue"
+        );
+    }
+
+    #[test]
+    fn status_request_emits_pending_request_count() {
+        let api = MockApiClient::new();
+        let platform = TestPlatformHooks::new();
+        platform.clock.set(1_000);
+        let module = UploadModule::new(Box::new(platform), api, 60_000);
+
+        let partials: Arc<Mutex<Vec<PartialStatus>>> = Arc::new(Mutex::new(Vec::new()));
+        let p = Arc::clone(&partials);
+        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
+        bus.subscribe(move |ev: &PartialStatus| {
+            p.lock().unwrap().push(ev.clone());
+            Ok(())
+        });
+
+        {
+            let m = bus
+                .observer_mut("upload")
+                .unwrap()
+                .as_any_mut()
+                .downcast_mut::<UploadModule<MockApiClient>>()
+                .unwrap();
+            m.authenticated = true;
+            m.state.device_credentials = Some(valid_credentials());
+            m.state.post_login_proof_batches_remaining = 0;
+            m.state.last_batch_at_ms = Some(1_000);
+            m.state.pending_hash_events.push(LogEntry {
+                ts: 0,
+                risk: Some(0.0),
+                event: UploadKind::Dev {
+                    title: "a".into(),
+                    details: None,
+                },
+            });
+            m.state.pending_batch_events.push((500, vec![1, 2, 3]));
+        }
+
+        bus.send(StatusRequest).unwrap();
+        bus.iter().unwrap();
+
+        let p = partials.lock().unwrap();
+        assert!(
+            p.iter().any(|s| matches!(
+                s,
+                PartialStatus::Upload {
+                    pending_request_count: 2,
+                }
+            )),
+            "expected PartialStatus::Upload with pending_request_count=2"
+        );
+    }
 }

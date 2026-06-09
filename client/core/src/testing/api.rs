@@ -9,14 +9,14 @@ use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, LogEntry};
 /// programmed canned response or a sensible default success.
 ///
 /// Cheap to clone — the underlying state is `Arc<Mutex<_>>`, so handing a
-/// clone to the test and moving another into the service is the intended
-/// usage:
+/// clone to the test and moving another into the bus is the intended usage:
 ///
 /// ```ignore
 /// let mock = MockApiClient::new();
 /// let inspector = mock.clone();
-/// let svc = MonitorService::setup_with_api(cfg, platform, mock)?;
-/// // ... drive the service ...
+/// let observers = build_default_modules(cfg, platform, mock)?;
+/// let mut bus = EventBus::new(observers, StateType::Null)?;
+/// // ... drive the bus ...
 /// assert_eq!(inspector.state().batch_uploads.len(), 2);
 /// ```
 #[derive(Clone)]

@@ -68,3 +68,56 @@ impl Observer for CaptureAvailabilityModule {
         Ok(serde_json::to_value(&self.state)?)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::CaptureAvailabilityModule;
+    use crate::events::bus::{EventBus, StateType};
+    use crate::events::types::{CaptureFailed, Upload};
+    use crate::model::UploadKind;
+    use crate::testing::TestPlatformHooks;
+
+    fn make(ts: i64) -> (EventBus, Arc<Mutex<Vec<Upload>>>) {
+        let platform = TestPlatformHooks::new();
+        platform.clock.set(ts);
+        let module = CaptureAvailabilityModule::new(Box::new(platform));
+        let uploads: Arc<Mutex<Vec<Upload>>> = Arc::new(Mutex::new(Vec::new()));
+        let u = Arc::clone(&uploads);
+        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
+        bus.subscribe(move |ev: &Upload| {
+            u.lock().unwrap().push(ev.clone());
+            Ok(())
+        });
+        (bus, uploads)
+    }
+
+    #[test]
+    fn four_failures_below_threshold_no_upload() {
+        let (mut bus, uploads) = make(1_000);
+        for _ in 0..4 {
+            bus.send(CaptureFailed).unwrap();
+        }
+        bus.iter().unwrap();
+        assert!(
+            uploads.lock().unwrap().is_empty(),
+            "4 failures should not trigger an upload"
+        );
+    }
+
+    #[test]
+    fn fifth_failure_triggers_capture_failed_upload() {
+        let (mut bus, uploads) = make(1_000);
+        for _ in 0..5 {
+            bus.send(CaptureFailed).unwrap();
+        }
+        bus.iter().unwrap();
+        let u = uploads.lock().unwrap();
+        assert!(
+            u.iter()
+                .any(|e| matches!(e.kind, UploadKind::CaptureFailed)),
+            "5 failures should trigger a CaptureFailed upload"
+        );
+    }
+}

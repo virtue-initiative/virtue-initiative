@@ -1,410 +1,220 @@
-# Overall Core Architecture
+# Core Architecture
 
-This folder contains a Rust core implementation for Virtue screenshot monitoring.
+Shared Rust library used by all platform clients.
 
-The main design rule is:
+## Design rule
 
-- platform crates capture raw screen data
-- `core` owns request flow, persistence, retrying, hashing, batch construction, compression, encryption, and upload semantics
+Platform crates provide only raw screen data. `core` owns everything else:
+request flow, persistence, retrying, hashing, batch construction, compression,
+encryption, and upload semantics.
 
-## Workspace Layout
+## Workspace layout
 
-```text
+```
 client/
   core/
     architecture.md
     Cargo.toml
     src/
-      api.rs
-      batch.rs
-      config.rs
-      crypto.rs
-      error.rs
-      lib.rs
-      model.rs
-      platform.rs
-      service.rs
-      storage.rs
-  linux/
-    ...
+      api.rs            — ApiTransport trait + ReqwestApiClient
+      assembly.rs       — build_default_modules() factory
+      config.rs         — Config struct + runtime override file
+      controller.rs     — ClientController (IPC client for CLI)
+      crypto.rs         — AES-256-GCM, HPKE key wrap, hash computation
+      error.rs          — CoreError / CoreResult
+      events/
+        bus.rs          — EventBus, Observer, Emitter, dispatch_event!
+        remote.rs       — RemoteEventBus (cross-process, JSON lines)
+        types.rs        — 30+ typed event structs
+      ipc.rs            — Unix / in-process IPC primitives
+      model.rs          — Shared structs (ServiceStatus, Screenshot, …)
+      module/
+        auth.rs         — AuthModule: login / logout / device settings
+        capture_availability.rs — CaptureAvailabilityModule: failure threshold
+        config.rs       — ConfigModule: runtime override file hot-reload
+        lifecycle.rs    — LifecycleModule: process/suspend/ping-gap alerts
+        screenshot.rs   — ScreenshotModule: interval scheduling + capture
+        status.rs       — StatusModule: partial-status aggregation
+        upload.rs       — UploadModule: hash/batch/immediate queues
+      platform.rs       — ScreenshotHooks / PlatformHooks traits
+      state.rs          — load_state / store_state (event_state.json)
+      storage.rs        — auth.json, device_settings.json, stop_intent.json
+      testing/          — MockApiClient, TestPlatformHooks, MockClock, Scenario
+  linux/  mac/  windows/  android/  ios/   — platform wrappers
 ```
 
-## Public Surface
+## Event bus model
 
-`core` exposes `MonitorService<P>` where `P: PlatformHooks`.
-
-Public methods:
+`core` is structured around a typed, in-process event bus.
 
 ```rust
-MonitorService::setup(config, platform) -> Result<Self>
-MonitorService::loop_iteration() -> Result<LoopOutcome>
-MonitorService::shutdown() -> Result<()>
-MonitorService::send_log(log) -> Result<()>
-MonitorService::login(username, password) -> Result<LoginStatus>
-MonitorService::logout() -> Result<()>
-MonitorService::status() -> Result<ServiceStatus>
+// Build the default set of 7 observer modules.
+let observers = build_default_modules(config, platform, api)?;
+let mut bus = EventBus::new(observers, saved_state)?;
+
+// One loop iteration: send Ping, process all cascaded events.
+bus.send(Ping)?;
+let state = bus.iter()?;   // returns serialisable snapshot of all observer state
+
+// Request/response status check.
+let resp: StatusResponse = bus.request(StatusRequest)?;
 ```
 
-`PlatformHooks` stays intentionally small:
+### Observer trait
+
+Each module implements `Observer`:
 
 ```rust
-take_screenshot() -> Result<Screenshot>
-get_time_utc_ms() -> Result<i64>
-```
-
-Everything else belongs to `core`.
-
-## Config Model
-
-`Config` contains:
-
-- `api_base_url`
-- `device_name`
-- `platform_name`
-- `state_dir`
-- `runtime_config_file`
-- `screenshot_interval`
-- `batch_interval`
-
-`runtime_config_file` is optional. When present, `core` treats it as a small JSON override file owned by the platform crate.
-
-Currently supported override keys:
-
-```text
-{
-  api_base_url?: string,
-  capture_interval_seconds?: integer,
-  batch_window_seconds?: integer
+pub trait Observer: 'static {
+    fn init(&mut self, bus: &mut EventBus, state: StateType) -> CoreResult<()>;
+    fn on_event(&mut self, event: &dyn Any, emitter: &Emitter) -> CoreResult<()>;
+    fn save(&self) -> CoreResult<StateType>;
+    fn name(&self) -> &'static str;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 ```
 
-The override file is applied:
+- **`init`** — called once at bus construction; restore saved state here and
+  register subscription closures on `bus` if needed.
+- **`on_event`** — called for every event in the queue; emit follow-up events
+  via `emitter.send(...)`.
+- **`save`** — snapshot durable state; the bus aggregates these into a JSON
+  object keyed by `Observer::name`.
+- **`as_any_mut`** — enables test helpers to `downcast_mut` to the concrete type.
 
-- once during `MonitorService::setup()`
-- again at the start of every `loop_iteration()`
+Use `crate::dispatch_event!(event, { pat: Type => expr, … })` inside `on_event`
+to pattern-match typed events without boilerplate.
 
-That means platform crates do not need to restart the daemon just to change API base URL or timing overrides.
+### The 7 default modules
 
-## Core State Model
+| Module                      | Key inputs                                                                              | Key outputs                                                                                        |
+| --------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `LifecycleModule`           | `Ping`, `ProcessStarted/Stopped`, `ComputerSuspended/Resumed`, `UserSession*`           | `Upload` (lifecycle + alert events)                                                                |
+| `ScreenshotModule`          | `Login`, `Logout`, `Ping`, `ConfigChanged`                                              | `Upload` (screenshot), `CaptureFailed`                                                             |
+| `UploadModule`              | `Login`, `Logout`, `Upload`, `Ping`, `ProcessStopped`, `FlushBatchNow`, `ConfigChanged` | network I/O via `ApiTransport`; `LogoutRequested` on 404                                           |
+| `CaptureAvailabilityModule` | `CaptureFailed`                                                                         | `Upload` (capture-failed alert)                                                                    |
+| `AuthModule`                | `LoginRequested`, `LogoutRequested`, `Ping`, `StatusRequest`, `ConfigChanged`           | `Login`, `Logout`, `LoginResult`, `LogoutResult`, `DeviceSettingsRefreshed`, `PartialStatus::Auth` |
+| `StatusModule`              | `StatusRequest`, `PartialStatus` (from 3 sources)                                       | `StatusResponse`                                                                                   |
+| `ConfigModule`              | `Ping`                                                                                  | `ConfigChanged`                                                                                    |
 
-`core` persists its own restart-safe state under `Config.state_dir`.
+### Request/response status flow
 
-Current files:
+`StatusRequest` triggers the three modules that contribute to service status
+(`LifecycleModule`, `AuthModule`, `UploadModule`) to each emit one
+`PartialStatus` fragment. `StatusModule` collects all three and emits a single
+`StatusResponse`. The `EventBus::request` helper handles this synchronously:
 
-- `status.json`: last known runtime status
-- `auth.json`: user access token and device credentials (owned by `Auth`)
-- `device_settings.json`: latest device settings returned by `GET /d/device` (owned by `UploadObserver`)
-- `event_state.json`: serialized observer state (screenshot schedule, upload queues, lifecycle state)
-- `errors.log`: local append-only operational error log
+```rust
+let resp: StatusResponse = bus.request(StatusRequest)?;
+assert!(resp.status.is_authenticated);
+```
 
-`core` should be able to restart and continue uploading without platform-specific recovery logic.
+### State persistence
 
-The runtime config override file is not part of the core state store. It is read separately from `Config.runtime_config_file`.
+Each `bus.iter()` call returns the aggregated state snapshot. The caller is
+responsible for persisting it (e.g. to `event_state.json`) and reloading on the
+next startup:
 
-## Auth / Event System Split
+```rust
+let state = load_state(&state_path).unwrap_or(StateType::Null);
+let bus = EventBus::new(observers, state)?;
+```
 
-Auth is resolved **before** the event system runs. `Auth` (`src/auth.rs`) is a standalone
-component owned by `MonitorService` — not an observer. It persists to `auth.json` whenever
-credentials change (login, logout, token refresh).
+### IPC: relay and transport split
 
-The event loop is gated entirely on `Auth::is_authenticated()`. When the daemon is not
-authenticated, no captures or uploads are attempted.
+Cross-process communication uses two layers:
 
-`device_settings` is owned exclusively by `UploadObserver`. It is persisted to
-`device_settings.json` via `UploadObserver::set_settings` and reloaded from disk each
-loop iteration via `UploadObserver::reload_settings_from_disk`. No other observer accesses it.
-Screenshots are captured on their schedule regardless of settings — captures that arrive
-before settings are established queue in the upload observer until settings supply a recipient
-key.
+- **`IpcListener` / IPC transport** (`ipc.rs`) — low-level Unix-socket or
+  in-process channel; provides raw line send/recv.
+- **`RemoteEventBus`** (`events/remote.rs`) — typed JSON-line event channel
+  built on top of the transport; implements `EventChannel` so `ClientController`
+  works against both in-process and cross-process peers.
 
-Cross-process auth changes (written by a separate `login`/`logout` CLI) are picked up each
-`loop_iteration` by reloading `auth.json` and `device_settings.json` from disk.
+The daemon binds an `IpcListener`, wraps it in a `RemoteEventBus`, and bridges
+it to the main `EventBus` by subscribing to forwarded event types (e.g.
+`StatusRequest`, `LoginRequested`, `LogoutRequested`). Non-forwarded types
+(`Upload`, `Ping`) never cross the socket boundary.
 
-## Device/Auth Model
+## Config model
 
-The device-side runtime uses:
+`Config` fields:
 
-- user access token from `POST /login`
-- device id, device access token, and device refresh token from `POST /d/device`
-- device settings from `GET /d/device`
+- `api_base_url` — REST API base URL
+- `device_name` — stable device identifier
+- `platform_name` — e.g. `"linux"`, `"mac"`, `"windows"`
+- `state_dir` — directory for all state files
+- `runtime_config_file` — optional path to `config_override.json` (hot-reloaded)
+- `screenshot_interval` — default 60 s
+- `batch_interval` — default 60 s
 
-The service primarily depends on device credentials after login. User refresh-cookie handling is not a core runtime dependency for background upload.
+Override keys supported in `config_override.json`:
 
-The device settings response is important because it provides:
-
-- `owner` public key
-- accepted partner public keys
-- `hash_base_url`
-
-Login authenticates with the same password-derived flow as the web app:
-
-1. log in with the argon2id-hashed password
-2. persist the returned user access token
-3. register the device and persist device credentials
-4. call `GET /d/device`
-5. cache the recipient public keys used for per-upload batch-key wrapping
-
-The core runtime does not persist a reusable batch key. Each upload generates a fresh random AES-256-GCM batch key and wraps it separately for the owner and each accepted partner using HPKE.
-
-## Screenshot Model
-
-Each screenshot event remains plaintext inside the batch payload.
-
-That means:
-
-- individual screenshots are not encrypted one by one
-- the `image` bytes inside each event are raw batch contents
-- only the final batch blob is encrypted before upload
-
-The intended screenshot event shape is:
-
-```text
+```json
 {
-  ts: <ms epoch>,
-  type: "screenshot",
-  data: {
-    image: <bytes>,
-    content_type: "image/webp"
-  }
+  "api_base_url": "https://...",
+  "capture_interval_seconds": 30,
+  "batch_window_seconds": 120
 }
 ```
 
-The web app already expects decrypted batch events to contain screenshot bytes this way.
+`ConfigModule` re-reads this file on every `Ping` and emits `ConfigChanged`
+only when a value actually changes.
 
-Before the event is built, the raw captured frame is processed in `core`:
+## State files (under `Config.state_dir`)
 
-1. decode source bytes
-2. apply a light blur
-3. resize so the smaller dimension is 128 px
-4. encode as low-quality WebP
+| File               | Owner          | Purpose                                                                               |
+| ------------------ | -------------- | ------------------------------------------------------------------------------------- |
+| `event_state.json` | `EventBus`     | Serialised observer state (screenshot schedule, upload queues, lifecycle state, auth) |
+| `errors.log`       | `UploadModule` | Permanent failures (400 responses); append-only                                       |
 
-That keeps the platform boundary simple while preserving the older client behavior of aggressively reducing image detail and size before batching.
+Auth and device settings are now stored inside `event_state.json` under the
+`auth` and `upload` keys respectively (they were previously separate files, but
+are now owned entirely by their observer modules).
 
-## Batch Blob Format
+## PlatformHooks
 
-The batch blob format must match the existing web app.
+Keep the trait minimal. Platforms implement only:
 
-### Plain batch payload
-
-The plaintext batch payload is:
-
-1. a MessagePack object
-2. containing `events: [...]`
-3. where each event includes plaintext screenshot bytes
-
-Example logical structure:
-
-```text
-{
-  events: [
-    {
-      ts: 1710000000000,
-      type: "screenshot",
-      data: {
-        image: <bytes>,
-        content_type: "image/webp"
-      }
-    }
-  ]
-}
+```rust
+fn take_screenshot(&self) -> CoreResult<Screenshot>;
+fn get_time_utc_ms(&self) -> CoreResult<i64>;
+fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>>;
+fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>>;
 ```
 
-### Compression
+Everything else belongs in `core`.
 
-Before encryption, the MessagePack payload is gzip-compressed.
+## Batch blob format
 
-Pipeline:
+See `../CLAUDE.md` (repo root) for the exact wire format. Summary:
 
-```text
-events -> msgpack -> gzip
+```
+events → encode_batch_event() per event → BatchBuilder::build_upload()
+       → msgpack({events: [...]}) → gzip → AES-256-GCM
+wire:  nonce[12 bytes] || ciphertext+tag
 ```
 
-### Encryption
+Each upload also wraps the batch key per recipient using HPKE
+(`DhkemX25519HkdfSha256 / HkdfSha256 / Aes256Gcm`).
 
-After compression, the whole blob is encrypted with a fresh random AES-256-GCM batch key.
+## Hash chain
 
-Serialized wire format:
+Per-event content hashes are uploaded to `POST /hash` independently of batches:
 
-```text
-nonce[12 bytes] || ciphertext_plus_tag
+```
+content_hash = sha256(ts_le64 || type_utf8 || sorted(key_utf8 || encoded_value))
+new_state    = sha256(current_state[32] || content_hash[32])
 ```
 
-For upload, the client also builds per-recipient HPKE envelopes for that batch key:
+## Testing
 
-```text
-owner: HPKE(public_key, batch_key)
-partner_1: HPKE(public_key, batch_key)
-partner_2: HPKE(public_key, batch_key)
-...
-```
+The `testing` feature (auto-enabled under `cfg(test)`) exposes:
 
-Those envelopes are sent alongside the blob in the `access_keys` form field for `POST /d/batch`.
+- `MockApiClient` — records calls, serves canned responses
+- `TestPlatformHooks` / `MockClock` — controllable time, queued screenshots
+- `Scenario` — full 7-module bus with helper methods for time control,
+  state seeding, and API assertions
+- `fixtures` — minimal valid PNG for unit tests
 
-### Upload
-
-That final encrypted blob becomes the `file` field for `POST /d/batch`.
-
-## Hash Chain Model
-
-Hash uploads are not hashes of encrypted batches.
-
-They are hashes of individual plaintext events.
-
-The event content hash must match the web app verification logic:
-
-```text
-content_hash = sha256(
-  ts_le_64 ||
-  type_utf8 ||
-  sorted(data entries as key_utf8 || encoded_value)
-)
-```
-
-Value encoding rules:
-
-- strings: UTF-8 bytes
-- numbers: 8-byte little-endian integer form
-- booleans: one byte `0` or `1`
-- byte arrays: raw bytes
-
-The rolling hash update sent to the hash service is:
-
-```text
-new_state = sha256(current_state || content_hash)
-```
-
-The client does not compute server state itself, but it must produce compatible per-event `content_hash` bytes for `POST /hash`.
-
-## Loop Semantics
-
-`loop_iteration()` should:
-
-1. reload runtime config overrides from `Config.runtime_config_file`
-2. reload persisted auth, settings, and audit-log state
-3. get current UTC time
-4. write/update current status
-5. retry unresolved audit-log work
-6. if screenshot interval elapsed:
-   - capture screenshot through platform hooks
-   - normalize it into a batch event
-   - compute its plaintext content hash
-   - append a screenshot `log` record to `audit.jsonl`
-   - attempt `POST /hash`
-7. if batch interval elapsed and unresolved batched audit items exist:
-   - build batch payload
-   - MessagePack encode
-   - gzip compress
-   - AES-GCM encrypt
-   - attempt `POST /d/batch`
-8. persist all updated state
-9. return the next due time
-
-## Retry Model
-
-All retry behavior lives in `core`.
-
-Audit records are append-only JSON lines.
-
-When work succeeds:
-
-- append a success record to disk
-
-When work fails:
-
-- leave the original `log` record unresolved
-- retry it in future loop iterations based on replayed audit state
-
-Exception:
-
-- `400 Bad Request` errors are treated as permanent client-side failures
-- they are written to `errors.log`
-- they are dropped instead of retried
-
-For device-authenticated endpoints:
-
-- if the request returns `401`
-- use `POST /d/token` with the stored device refresh token
-- persist the new device access token
-- retry the original request once
-
-Replayable work tracked by the audit log:
-
-- upload hash
-- upload batch
-- upload log
-
-## API Mapping
-
-The core API client should implement:
-
-- `POST /login`
-- `POST /logout`
-- `POST /d/device`
-- `GET /d/device`
-- `POST /d/token`
-- `POST /d/batch`
-- `POST /d/log`
-- `POST /hash`
-
-Additional important details from the existing system:
-
-- login password must be argon2id-hashed before sending, matching the web app
-- wrapping key derivation must mirror the web app PBKDF2 flow from plaintext password + user id
-- encrypted batch key unwrap happens from `GET /d/device`, not `/user`
-- multipart upload must send `file`, `start_time`, and `end_time`
-- `POST /hash` sends exactly 32 bytes with `application/octet-stream`
-- hash uploads may target `device_settings.hash_base_url` when present
-
-## Implementation Notes
-
-### Password hashing
-
-Login must mirror the web app:
-
-- Argon2id
-- salt = lowercased email
-- iterations = 3
-- memory = 65536
-- parallelism = 1
-- output length = 32 bytes
-- send lowercase hex digest as the password field
-
-### MessagePack compatibility
-
-The decrypted payload is consumed by `@msgpack/msgpack` in the web app.
-
-The simplest compatible shape is:
-
-```text
-{
-  events: [
-    {
-      ts: number,
-      type: string,
-      data: {
-        image: binary,
-        content_type: string
-      }
-    }
-  ]
-}
-```
-
-### Compression compatibility
-
-The web app uses `DecompressionStream("gzip")`, so the Rust client must emit standard gzip data.
-
-### Encryption compatibility
-
-The web app expects:
-
-- first 12 bytes = AES-GCM nonce
-- remainder = ciphertext plus authentication tag
-
-### Service shutdown
-
-`shutdown()` should:
-
-- attempt to upload a shutdown log
-- persist state
-- mark status as no longer running
+Integration tests live in `core/tests/scenarios.rs` and use `Scenario`.
+Per-module behavioral tests live in each module file under `#[cfg(test)] mod tests`.

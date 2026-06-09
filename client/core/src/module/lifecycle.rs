@@ -87,16 +87,16 @@ impl LifecycleModule {
             self.state.last_process_stopped_shutdown = last_shutdown;
         }
 
-        if let Some(boot_ms) = startup_time_ms {
-            if boot_ms > self.state.last_sent_boot {
-                let _ = emitter.send(Upload {
-                    risk: 0.0,
-                    kind: UploadKind::Lifecycle {
-                        kind: LifecycleKind::ComputerBooted,
-                    },
-                });
-                self.state.last_sent_boot = boot_ms;
-            }
+        if let Some(boot_ms) = startup_time_ms
+            && boot_ms > self.state.last_sent_boot
+        {
+            let _ = emitter.send(Upload {
+                risk: 0.0,
+                kind: UploadKind::Lifecycle {
+                    kind: LifecycleKind::ComputerBooted,
+                },
+            });
+            self.state.last_sent_boot = boot_ms;
         }
 
         Ok(())
@@ -347,5 +347,355 @@ impl Observer for LifecycleModule {
 
     fn save(&self) -> CoreResult<StateType> {
         Ok(serde_json::to_value(&self.state)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::{LifecycleModule, LifecycleStatus};
+    use crate::events::bus::{EventBus, StateType};
+    use crate::events::types::{
+        ComputerResumed, ComputerSuspended, PartialStatus, Ping, ProcessStarted, ProcessStopped,
+        StatusRequest, Upload, UserSessionLogin, UserSessionLogout,
+    };
+    use crate::model::{AlertReason, LifecycleKind, ProcessStoppedReason, UploadKind};
+    use crate::testing::TestPlatformHooks;
+
+    type BusWithCapture = (
+        EventBus,
+        Arc<Mutex<Vec<Upload>>>,
+        Arc<Mutex<Vec<PartialStatus>>>,
+    );
+
+    fn make(ts: i64) -> BusWithCapture {
+        let platform = TestPlatformHooks::new();
+        platform.clock.set(ts);
+        let module = LifecycleModule::new(Box::new(platform));
+        let uploads: Arc<Mutex<Vec<Upload>>> = Arc::new(Mutex::new(Vec::new()));
+        let partials: Arc<Mutex<Vec<PartialStatus>>> = Arc::new(Mutex::new(Vec::new()));
+        let u = Arc::clone(&uploads);
+        let p = Arc::clone(&partials);
+        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
+        bus.subscribe(move |ev: &Upload| {
+            u.lock().unwrap().push(ev.clone());
+            Ok(())
+        });
+        bus.subscribe(move |ev: &PartialStatus| {
+            p.lock().unwrap().push(ev.clone());
+            Ok(())
+        });
+        (bus, uploads, partials)
+    }
+
+    #[test]
+    fn status_request_emits_lifecycle_partial_status() {
+        let (mut bus, _, partials) = make(1_000);
+        bus.send(StatusRequest).unwrap();
+        bus.iter().unwrap();
+        let p = partials.lock().unwrap();
+        assert!(
+            p.iter()
+                .any(|s| matches!(s, PartialStatus::Lifecycle { .. })),
+            "expected PartialStatus::Lifecycle"
+        );
+    }
+
+    #[test]
+    fn process_started_emits_lifecycle_upload() {
+        let (mut bus, uploads, _) = make(1_000);
+        bus.send(ProcessStarted).unwrap();
+        bus.iter().unwrap();
+        let u = uploads.lock().unwrap();
+        assert!(
+            u.iter().any(|e| matches!(
+                e.kind,
+                UploadKind::Lifecycle {
+                    kind: LifecycleKind::ProcessStarted
+                }
+            )),
+            "expected ProcessStarted lifecycle upload"
+        );
+    }
+
+    #[test]
+    fn process_stopped_shutdown_emits_upload() {
+        let (mut bus, uploads, _) = make(2_000);
+        bus.send(ProcessStopped(ProcessStoppedReason::Shutdown))
+            .unwrap();
+        bus.iter().unwrap();
+        let u = uploads.lock().unwrap();
+        assert!(
+            u.iter().any(|e| matches!(
+                e.kind,
+                UploadKind::Lifecycle {
+                    kind: LifecycleKind::ProcessStoppedShutdown
+                }
+            )),
+            "expected ProcessStoppedShutdown lifecycle upload"
+        );
+    }
+
+    #[test]
+    fn process_stopped_user_emits_upload_and_high_risk_alert() {
+        let (mut bus, uploads, _) = make(4_000);
+        bus.send(ProcessStopped(ProcessStoppedReason::User))
+            .unwrap();
+        bus.iter().unwrap();
+        let u = uploads.lock().unwrap();
+        assert!(
+            u.iter().any(|e| matches!(
+                e.kind,
+                UploadKind::Lifecycle {
+                    kind: LifecycleKind::ProcessStoppedUser
+                }
+            )),
+            "expected ProcessStoppedUser lifecycle upload"
+        );
+        let alert = u.iter().find(|e| {
+            matches!(
+                e.kind,
+                UploadKind::LifecycleAlert {
+                    reason: AlertReason::UserStoppedProcess
+                }
+            )
+        });
+        assert!(alert.is_some(), "expected UserStoppedProcess alert");
+        assert!(alert.unwrap().risk >= 0.9, "alert should be high risk");
+    }
+
+    #[test]
+    fn computer_suspended_emits_upload() {
+        let (mut bus, uploads, _) = make(5_000);
+        bus.send(ComputerSuspended).unwrap();
+        bus.iter().unwrap();
+        let u = uploads.lock().unwrap();
+        assert!(
+            u.iter().any(|e| matches!(
+                e.kind,
+                UploadKind::Lifecycle {
+                    kind: LifecycleKind::ComputerSuspended
+                }
+            )),
+            "expected ComputerSuspended lifecycle upload"
+        );
+    }
+
+    #[test]
+    fn computer_resumed_after_suspend_emits_upload() {
+        let (mut bus, uploads, _) = make(6_000);
+        bus.send(ComputerSuspended).unwrap();
+        bus.iter().unwrap();
+        uploads.lock().unwrap().clear();
+        bus.send(ComputerResumed).unwrap();
+        bus.iter().unwrap();
+        let u = uploads.lock().unwrap();
+        assert!(
+            u.iter().any(|e| matches!(
+                e.kind,
+                UploadKind::Lifecycle {
+                    kind: LifecycleKind::ComputerResumed
+                }
+            )),
+            "expected ComputerResumed lifecycle upload"
+        );
+    }
+
+    #[test]
+    fn fourth_ping_while_suspended_triggers_missing_resume_alert() {
+        let platform = TestPlatformHooks::new();
+        platform.clock.set(1_000);
+        let mut module = LifecycleModule::new(Box::new(platform));
+        module.state.status = LifecycleStatus::Suspended;
+        module.state.pings_while_suspended = 3;
+
+        let uploads: Arc<Mutex<Vec<Upload>>> = Arc::new(Mutex::new(Vec::new()));
+        let u = Arc::clone(&uploads);
+        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
+        bus.subscribe(move |ev: &Upload| {
+            u.lock().unwrap().push(ev.clone());
+            Ok(())
+        });
+
+        bus.send(Ping).unwrap();
+        bus.iter().unwrap();
+
+        let u = uploads.lock().unwrap();
+        assert!(
+            u.iter().any(|e| matches!(
+                e.kind,
+                UploadKind::LifecycleAlert {
+                    reason: AlertReason::MissingResume
+                }
+            )),
+            "expected MissingResume alert on 4th ping while suspended"
+        );
+    }
+
+    #[test]
+    fn session_login_emits_lifecycle_upload() {
+        let (mut bus, uploads, _) = make(1_000);
+        bus.send(UserSessionLogin).unwrap();
+        bus.iter().unwrap();
+        let u = uploads.lock().unwrap();
+        assert!(
+            u.iter().any(|e| matches!(
+                e.kind,
+                UploadKind::Lifecycle {
+                    kind: LifecycleKind::Login
+                }
+            )),
+            "expected Login lifecycle upload"
+        );
+    }
+
+    #[test]
+    fn session_logout_emits_high_risk_lifecycle_upload() {
+        let (mut bus, uploads, _) = make(1_000);
+        bus.send(UserSessionLogout).unwrap();
+        bus.iter().unwrap();
+        let u = uploads.lock().unwrap();
+        let upload = u.iter().find(|e| {
+            matches!(
+                e.kind,
+                UploadKind::Lifecycle {
+                    kind: LifecycleKind::Logout
+                }
+            )
+        });
+        assert!(upload.is_some(), "expected Logout lifecycle upload");
+        assert!(
+            upload.unwrap().risk >= 0.9,
+            "logout upload should be high risk"
+        );
+    }
+
+    #[test]
+    fn ping_gap_while_running_emits_high_risk_alert() {
+        let platform = TestPlatformHooks::new();
+        platform.clock.set(100_000);
+        let mut module = LifecycleModule::new(Box::new(platform));
+        module.state.last_login = 0;
+        module.state.last_ping = 1_000;
+        module.state.last_running_started = 1_000;
+
+        let uploads: Arc<Mutex<Vec<Upload>>> = Arc::new(Mutex::new(Vec::new()));
+        let u = Arc::clone(&uploads);
+        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
+        bus.subscribe(move |ev: &Upload| {
+            u.lock().unwrap().push(ev.clone());
+            Ok(())
+        });
+
+        bus.send(Ping).unwrap();
+        bus.iter().unwrap();
+
+        let u = uploads.lock().unwrap();
+        let alert = u.iter().find(|e| {
+            matches!(
+                e.kind,
+                UploadKind::LifecycleAlert {
+                    reason: AlertReason::PingGapWhileRunning
+                }
+            )
+        });
+        assert!(alert.is_some(), "expected PingGapWhileRunning alert");
+        assert!(
+            alert.unwrap().risk >= 0.9,
+            "ping gap alert should be high risk"
+        );
+    }
+
+    #[test]
+    fn ping_within_login_grace_period_does_not_emit_alert() {
+        let platform = TestPlatformHooks::new();
+        platform.clock.set(30_000);
+        let mut module = LifecycleModule::new(Box::new(platform));
+        module.state.last_login = 20_000;
+        module.state.last_ping = 1_000;
+        module.state.last_running_started = 1_000;
+
+        let uploads: Arc<Mutex<Vec<Upload>>> = Arc::new(Mutex::new(Vec::new()));
+        let u = Arc::clone(&uploads);
+        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
+        bus.subscribe(move |ev: &Upload| {
+            u.lock().unwrap().push(ev.clone());
+            Ok(())
+        });
+
+        bus.send(Ping).unwrap();
+        bus.iter().unwrap();
+
+        let u = uploads.lock().unwrap();
+        assert!(
+            !u.iter().any(|e| matches!(
+                e.kind,
+                UploadKind::LifecycleAlert {
+                    reason: AlertReason::PingGapWhileRunning
+                }
+            )),
+            "ping gap alert should be suppressed within 60 s login grace window"
+        );
+    }
+
+    #[test]
+    fn process_killed_before_shutdown_emits_alert() {
+        let platform = TestPlatformHooks::new();
+        platform.clock.set(20_000);
+        let mut module = LifecycleModule::new(Box::new(platform));
+        module.state.last_process_stopped_other = 1_000;
+        module.state.last_process_stopped_shutdown = 12_000;
+
+        let uploads: Arc<Mutex<Vec<Upload>>> = Arc::new(Mutex::new(Vec::new()));
+        let u = Arc::clone(&uploads);
+        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
+        bus.subscribe(move |ev: &Upload| {
+            u.lock().unwrap().push(ev.clone());
+            Ok(())
+        });
+
+        bus.send(ProcessStarted).unwrap();
+        bus.iter().unwrap();
+
+        let u = uploads.lock().unwrap();
+        assert!(
+            u.iter().any(|e| matches!(
+                e.kind,
+                UploadKind::LifecycleAlert {
+                    reason: AlertReason::ProcessKilledBeforeShutdown
+                }
+            )),
+            "expected ProcessKilledBeforeShutdown alert"
+        );
+    }
+
+    #[test]
+    fn state_round_trips_through_save_and_load() {
+        let platform = TestPlatformHooks::new();
+        platform.clock.set(1_000);
+        let mut module = LifecycleModule::new(Box::new(platform));
+        module.state.last_login = 42_000;
+        module.state.last_ping = 99_000;
+        module.state.pings_while_suspended = 2;
+        module.state.last_running_started = 55_000;
+
+        let bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
+        let saved = bus.save().unwrap();
+
+        let platform2 = TestPlatformHooks::new();
+        let module2 = LifecycleModule::new(Box::new(platform2));
+        let mut bus2 = EventBus::new(vec![Box::new(module2)], saved).unwrap();
+
+        let m = bus2
+            .observer_mut("lifecycle")
+            .unwrap()
+            .as_any_mut()
+            .downcast_mut::<LifecycleModule>()
+            .unwrap();
+        assert_eq!(m.state.last_login, 42_000);
+        assert_eq!(m.state.last_ping, 99_000);
+        assert_eq!(m.state.pings_while_suspended, 2);
+        assert_eq!(m.state.last_running_started, 55_000);
     }
 }
