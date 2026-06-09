@@ -1,8 +1,8 @@
-use std::{io, sync::mpsc::SendError};
+use std::io;
 
 use thiserror::Error;
 
-use crate::events::Event;
+use crate::ipc::IpcError;
 
 pub type CoreResult<T> = Result<T, CoreError>;
 
@@ -40,13 +40,13 @@ pub enum CoreError {
     Crypto(&'static str),
     #[error("external command failed: {0}")]
     CommandFailed(String),
-    #[error("sending event failed: {0}")]
-    SendError(Box<SendError<Event>>),
+    #[error("IPC error: {0}")]
+    Ipc(String),
 }
 
-impl From<SendError<Event>> for CoreError {
-    fn from(e: SendError<Event>) -> Self {
-        CoreError::SendError(Box::new(e))
+impl From<IpcError> for CoreError {
+    fn from(e: IpcError) -> Self {
+        CoreError::Ipc(e.to_string())
     }
 }
 

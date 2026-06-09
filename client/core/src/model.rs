@@ -3,7 +3,111 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::events::UploadKind;
+// ── Payload types (shared by event system and upload pipeline) ────────────────
+
+/// Wraps a value so that its `Debug` output is always `[REDACTED]`.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Redacted<T>(pub T);
+
+impl<T> std::fmt::Debug for Redacted<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[REDACTED]")
+    }
+}
+
+impl<T: std::ops::Deref<Target = str>> std::ops::Deref for Redacted<T> {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for Redacted<String> {
+    fn from(s: String) -> Self {
+        Redacted(s)
+    }
+}
+
+impl From<&str> for Redacted<String> {
+    fn from(s: &str) -> Self {
+        Redacted(s.to_string())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessStoppedReason {
+    Other,
+    Shutdown,
+    User,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum LifecycleKind {
+    ProcessStarted,
+    ProcessStoppedUser,
+    ProcessStoppedShutdown,
+    ProcessStoppedOther,
+    ComputerSuspended,
+    ComputerResumed,
+    Login,
+    Logout,
+    ComputerBooted,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum AlertReason {
+    ProcessKilledBeforeShutdown,
+    UserStoppedProcess,
+    UnexpectedProcessStart,
+    PingGapWhileRunning,
+    MissingResume,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+pub enum UploadKind {
+    Screenshot {
+        image: Vec<u8>,
+        content_type: String,
+    },
+    Lifecycle {
+        kind: LifecycleKind,
+    },
+    LifecycleAlert {
+        reason: AlertReason,
+    },
+    Alert {
+        message: String,
+    },
+    CaptureFailed,
+    Dev {
+        title: String,
+        details: Option<String>,
+    },
+}
+
+/// A single piece of `ServiceStatus` reported by one module in response to a
+/// `StatusRequest`. Each module emits only the fields it owns; the status
+/// module merges them into a complete `ServiceStatus`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+pub enum PartialStatus {
+    Auth {
+        is_authenticated: bool,
+        device_id: Option<String>,
+    },
+    Lifecycle {
+        is_running: bool,
+        last_loop_at_ms: Option<i64>,
+    },
+    Upload {
+        pending_request_count: usize,
+    },
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Screenshot {

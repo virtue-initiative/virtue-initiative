@@ -1,7 +1,5 @@
 use std::fmt;
 
-use crate::events::Event;
-
 // ── Error ─────────────────────────────────────────────────────────────────────
 
 #[derive(Debug)]
@@ -47,25 +45,6 @@ impl From<serde_json::Error> for IpcError {
     }
 }
 
-// ── Inbound event filter ──────────────────────────────────────────────────────
-
-/// Whether an event received from a controller is allowed to be forwarded to
-/// the daemon's event loop.
-pub fn is_allowed_inbound<C>(event: &Event<C>) -> bool {
-    matches!(
-        event,
-        Event::UserSessionLogin
-            | Event::UserSessionLogout
-            | Event::ComputerSuspended
-            | Event::ComputerResumed
-            | Event::ProcessStopped(_)
-            | Event::LoginRequested { .. }
-            | Event::LogoutRequested
-            | Event::UserStopRequested { .. }
-            | Event::StatusRequest
-    )
-}
-
 // ── Unix domain socket transport (Linux / macOS) ──────────────────────────────
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -89,43 +68,35 @@ mod unix_impl {
     }
 
     impl IpcSender {
-        pub fn send<C: serde::Serialize>(
-            &mut self,
-            event: &super::Event<C>,
-        ) -> Result<(), IpcError> {
-            let json = serde_json::to_string(event)?;
-            self.writer.write_all(json.as_bytes())?;
-            self.writer.write_all(b"\n")?;
+        pub fn send_line(&mut self, line: &str) -> Result<(), IpcError> {
+            self.writer.write_all(line.as_bytes())?;
+            if !line.ends_with('\n') {
+                self.writer.write_all(b"\n")?;
+            }
             self.writer.flush()?;
             Ok(())
         }
     }
 
     impl IpcReceiver {
-        pub fn recv_event<C: for<'de> serde::Deserialize<'de>>(
-            &mut self,
-        ) -> Result<super::Event<C>, IpcError> {
+        pub fn recv_line(&mut self) -> Result<String, IpcError> {
             let mut line = String::new();
             let n = self.reader.read_line(&mut line)?;
             if n == 0 {
                 return Err(IpcError::Disconnected);
             }
-            Ok(serde_json::from_str(line.trim())?)
+            Ok(line.trim_end_matches('\n').to_string())
         }
 
-        pub fn try_recv_event<C: for<'de> serde::Deserialize<'de>>(
-            &mut self,
-        ) -> Result<Option<super::Event<C>>, IpcError> {
-            // If BufReader's buffer already holds a complete line, parse it without
-            // touching the socket — avoids spurious WouldBlock on a buffered newline.
+        pub fn try_recv_line(&mut self) -> Result<Option<String>, IpcError> {
             if self.reader.buffer().contains(&b'\n') {
-                return self.recv_event::<C>().map(Some);
+                return self.recv_line().map(Some);
             }
             self.reader.get_ref().set_nonblocking(true)?;
-            let result = self.recv_event::<C>();
+            let result = self.recv_line();
             let _ = self.reader.get_ref().set_nonblocking(false);
             match result {
-                Ok(ev) => Ok(Some(ev)),
+                Ok(line) => Ok(Some(line)),
                 Err(IpcError::Io(ref e)) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
                 Err(e) => Err(e),
             }
@@ -186,7 +157,6 @@ mod mpsc_impl {
 
     use super::IpcError;
 
-    // Set explicitly by the platform after IpcListener::bind() via register_connect_tx().
     static CONNECT_TX: OnceLock<mpsc::SyncSender<(IpcSender, IpcReceiver)>> = OnceLock::new();
 
     pub struct IpcSender {
@@ -203,28 +173,21 @@ mod mpsc_impl {
     }
 
     impl IpcSender {
-        pub fn send<C: serde::Serialize>(
-            &mut self,
-            event: &super::Event<C>,
-        ) -> Result<(), IpcError> {
-            let json = serde_json::to_string(event)?;
-            self.tx.send(json).map_err(|_| IpcError::Disconnected)
+        pub fn send_line(&mut self, line: &str) -> Result<(), IpcError> {
+            self.tx
+                .send(line.trim_end_matches('\n').to_string())
+                .map_err(|_| IpcError::Disconnected)
         }
     }
 
     impl IpcReceiver {
-        pub fn recv_event<C: for<'de> serde::Deserialize<'de>>(
-            &mut self,
-        ) -> Result<super::Event<C>, IpcError> {
-            let json = self.rx.recv().map_err(|_| IpcError::Disconnected)?;
-            Ok(serde_json::from_str(&json)?)
+        pub fn recv_line(&mut self) -> Result<String, IpcError> {
+            self.rx.recv().map_err(|_| IpcError::Disconnected)
         }
 
-        pub fn try_recv_event<C: for<'de> serde::Deserialize<'de>>(
-            &mut self,
-        ) -> Result<Option<super::Event<C>>, IpcError> {
+        pub fn try_recv_line(&mut self) -> Result<Option<String>, IpcError> {
             match self.rx.try_recv() {
-                Ok(json) => Ok(Some(serde_json::from_str(&json)?)),
+                Ok(line) => Ok(Some(line)),
                 Err(mpsc::TryRecvError::Empty) => Ok(None),
                 Err(mpsc::TryRecvError::Disconnected) => Err(IpcError::Disconnected),
             }
@@ -245,13 +208,10 @@ mod mpsc_impl {
         }
     }
 
-    /// Register the listener's connect sender so that `connect()` works.
-    /// Must be called by the platform after `IpcListener::bind()`.
     pub fn register_connect_tx(tx: mpsc::SyncSender<(IpcSender, IpcReceiver)>) {
         CONNECT_TX.set(tx).ok();
     }
 
-    /// Connect using an explicit sender — avoids any global state.
     pub fn connect_in_process(
         tx: &mpsc::SyncSender<(IpcSender, IpcReceiver)>,
     ) -> Result<(IpcSender, IpcReceiver), IpcError> {
@@ -286,7 +246,6 @@ pub use mpsc_impl::{
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::{Event, Redacted};
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
@@ -303,54 +262,10 @@ mod tests {
 
         let (mut daemon_sender, _daemon_receiver) = listener.blocking_accept().expect("accept");
 
-        let event = Event::UserSessionLogin;
-        daemon_sender.send::<()>(&event).expect("send");
+        daemon_sender.send_line("hello world").expect("send");
 
-        let received = ctrl_receiver.recv_event::<()>().expect("recv");
-        assert!(matches!(received, Event::UserSessionLogin));
-
-        let _ = std::fs::remove_file(&sock);
-    }
-
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    #[test]
-    fn unix_socket_login_request_response_round_trips() {
-        let sock =
-            std::env::temp_dir().join(format!("virtue-ipc-test-login-{}.sock", std::process::id()));
-        let listener = IpcListener::bind(&sock).expect("bind");
-
-        let sock2 = sock.clone();
-        let ctrl = std::thread::spawn(move || connect(&sock2).expect("connect"))
-            .join()
-            .expect("connect thread");
-        let (mut ctrl_sender, mut ctrl_receiver) = ctrl;
-
-        let (mut daemon_sender, mut daemon_receiver) = listener.blocking_accept().expect("accept");
-
-        // Controller sends LoginRequested
-        ctrl_sender
-            .send::<()>(&Event::LoginRequested {
-                email: "test@example.com".into(),
-                password: Redacted("secret".into()),
-            })
-            .expect("send login request");
-
-        // Daemon receives it
-        let req = daemon_receiver.recv_event::<()>().expect("recv request");
-        assert!(matches!(req, Event::LoginRequested { .. }));
-
-        // Daemon responds with LoginResult
-        daemon_sender
-            .send::<()>(&Event::LoginResult {
-                success: true,
-                error: None,
-                device_id: Some("device-123".into()),
-            })
-            .expect("send login result");
-
-        // Controller receives it
-        let result = ctrl_receiver.recv_event::<()>().expect("recv result");
-        assert!(matches!(result, Event::LoginResult { success: true, .. }));
+        let received = ctrl_receiver.recv_line().expect("recv");
+        assert_eq!(received, "hello world");
 
         let _ = std::fs::remove_file(&sock);
     }
@@ -364,21 +279,14 @@ mod tests {
 
         let (mut ctrl_sender, mut ctrl_receiver) =
             connect_in_process(&listener.connect_tx).expect("connect");
-        let (mut daemon_sender, mut daemon_receiver) = listener.blocking_accept().expect("accept");
+        let (mut daemon_sender, _daemon_receiver) = listener.blocking_accept().expect("accept");
 
-        daemon_sender
-            .send::<()>(&Event::UserSessionLogin)
-            .expect("send");
-        let received = ctrl_receiver.recv_event::<()>().expect("recv");
-        assert!(matches!(received, Event::UserSessionLogin));
+        daemon_sender.send_line("test message").expect("send");
+        let received = ctrl_receiver.recv_line().expect("recv");
+        assert_eq!(received, "test message");
 
-        ctrl_sender
-            .send::<()>(&Event::LoginRequested {
-                email: "a@b.com".into(),
-                password: Redacted("pw".into()),
-            })
-            .expect("send request");
-        let req = daemon_receiver.recv_event::<()>().expect("recv request");
-        assert!(matches!(req, Event::LoginRequested { .. }));
+        ctrl_sender.send_line("request").expect("send request");
+        let req = _daemon_receiver.recv_line().expect("recv request");
+        assert_eq!(req, "request");
     }
 }

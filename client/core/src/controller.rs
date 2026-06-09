@@ -1,154 +1,104 @@
-use std::path::Path;
-
-use serde::de::DeserializeOwned;
-
-use crate::events::{Event, ProcessStoppedReason, Redacted};
-use crate::ipc::{self, IpcError, IpcReceiver, IpcSender};
+use crate::error::{CoreError, CoreResult};
+use crate::events::{
+    ComputerResumed, ComputerSuspended, Event, EventChannel, LoginRequested, LoginResult,
+    LogoutRequested, LogoutResult, ProcessStopped, ProcessStoppedReason, Redacted, StatusRequest,
+    StatusResponse, UserSessionLogin, UserSessionLogout, UserStopRequested,
+};
 use crate::model::ServiceStatus;
 
-/// High-level client for communicating with a running daemon over IPC.
-/// Mirrors the `MonitorService` API but routes requests through the daemon
-/// instead of executing them in-process.
-pub struct ControllerClient {
-    sender: IpcSender,
-    receiver: IpcReceiver,
+/// High-level client for communicating with a daemon over any [`EventChannel`].
+///
+/// Generic over `C` so the same implementation works whether `C` is an
+/// in-process [`EventBus`] (tests, fully in-process use) or a
+/// [`RemoteEventBus`] (Linux/macOS socket, Windows in-process channel).
+///
+/// [`EventBus`]: crate::events::EventBus
+/// [`RemoteEventBus`]: crate::events::RemoteEventBus
+pub struct ClientController<C: EventChannel> {
+    channel: C,
 }
 
-impl ControllerClient {
-    pub fn connect(path: &Path) -> Result<Self, IpcError> {
-        let (sender, receiver) = ipc::connect(path)?;
-        Ok(Self { sender, receiver })
+impl<C: EventChannel> ClientController<C> {
+    pub fn new(channel: C) -> Self {
+        Self { channel }
     }
 
     /// Send `LoginRequested` and block until `LoginResult` is received.
-    /// Returns the new device ID on success.
-    pub fn login(&mut self, email: &str, password: &str) -> Result<String, IpcError> {
-        self.sender
-            .send::<serde_json::Value>(&Event::LoginRequested {
-                email: email.to_string(),
-                password: Redacted(password.to_string()),
-            })?;
-        loop {
-            match self.recv_event_internal()? {
-                Event::LoginResult {
-                    success: true,
-                    device_id,
-                    ..
-                } => return Ok(device_id.unwrap_or_default()),
-                Event::LoginResult {
-                    success: false,
-                    error,
-                    ..
-                } => {
-                    return Err(IpcError::Remote(
-                        error.unwrap_or_else(|| "login failed".to_string()),
-                    ));
-                }
-                _ => {}
-            }
+    /// Returns the device ID on success.
+    pub fn login(&mut self, email: &str, password: &str) -> CoreResult<String> {
+        let r: LoginResult = self.channel.request(LoginRequested {
+            email: email.into(),
+            password: Redacted(password.into()),
+        })?;
+        if r.success {
+            Ok(r.device_id.unwrap_or_default())
+        } else {
+            Err(CoreError::CommandFailed(
+                r.error.unwrap_or_else(|| "login failed".to_string()),
+            ))
         }
     }
 
     /// Send `LogoutRequested` and block until `LogoutResult` is received.
-    pub fn logout(&mut self) -> Result<(), IpcError> {
-        self.sender
-            .send::<serde_json::Value>(&Event::LogoutRequested)?;
-        loop {
-            match self.recv_event_internal()? {
-                Event::LogoutResult { success: true, .. } => return Ok(()),
-                Event::LogoutResult {
-                    success: false,
-                    error,
-                } => {
-                    return Err(IpcError::Remote(
-                        error.unwrap_or_else(|| "logout failed".to_string()),
-                    ));
-                }
-                _ => {}
-            }
+    pub fn logout(&mut self) -> CoreResult<()> {
+        let r: LogoutResult = self.channel.request(LogoutRequested)?;
+        if r.success {
+            Ok(())
+        } else {
+            Err(CoreError::CommandFailed(
+                r.error.unwrap_or_else(|| "logout failed".to_string()),
+            ))
         }
     }
 
     /// Send `StatusRequest` and block until `StatusResponse` is received.
-    pub fn get_status(&mut self) -> Result<ServiceStatus, IpcError> {
-        self.sender
-            .send::<serde_json::Value>(&Event::StatusRequest)?;
-        loop {
-            if let Event::StatusResponse { status } = self.recv_event_internal()? {
-                return Ok(status);
-            }
-        }
+    pub fn get_status(&mut self) -> CoreResult<ServiceStatus> {
+        let r: StatusResponse = self.channel.request(StatusRequest)?;
+        Ok(r.status)
     }
 
-    /// Send `StatusRequest`, block until `StatusResponse`, and call `handler`
-    /// for each `Custom` event received while waiting.
-    pub fn get_status_with_handler<C, F>(
-        &mut self,
-        mut handler: F,
-    ) -> Result<ServiceStatus, IpcError>
-    where
-        C: DeserializeOwned,
-        F: FnMut(C),
-    {
-        self.sender
-            .send::<serde_json::Value>(&Event::StatusRequest)?;
-        loop {
-            match self.recv_event::<C>()? {
-                Event::StatusResponse { status } => return Ok(status),
-                Event::Custom(c) => handler(c),
-                _ => {}
-            }
-        }
+    pub fn request_user_stop(&self, source: &str) -> CoreResult<()> {
+        self.channel.publish(UserStopRequested {
+            source: source.into(),
+        })
     }
 
-    /// Fire-and-forget: ask the daemon to record a user-initiated stop.
-    pub fn request_user_stop(&mut self, source: &str) -> Result<(), IpcError> {
-        self.sender
-            .send::<serde_json::Value>(&Event::UserStopRequested {
-                source: source.to_string(),
-            })
+    pub fn note_suspended(&self) -> CoreResult<()> {
+        self.channel.publish(ComputerSuspended)
     }
 
-    pub fn note_suspended(&mut self) -> Result<(), IpcError> {
-        self.sender
-            .send::<serde_json::Value>(&Event::ComputerSuspended)
+    pub fn note_resumed(&self) -> CoreResult<()> {
+        self.channel.publish(ComputerResumed)
     }
 
-    pub fn note_resumed(&mut self) -> Result<(), IpcError> {
-        self.sender
-            .send::<serde_json::Value>(&Event::ComputerResumed)
+    pub fn note_login(&self) -> CoreResult<()> {
+        self.channel.publish(UserSessionLogin)
     }
 
-    /// Send the OS-level user session login event (e.g. Windows logon).
-    pub fn note_login(&mut self) -> Result<(), IpcError> {
-        self.sender
-            .send::<serde_json::Value>(&Event::UserSessionLogin)
+    pub fn note_logout(&self) -> CoreResult<()> {
+        self.channel.publish(UserSessionLogout)
     }
 
-    /// Send the OS-level user session logout event (e.g. Windows logoff).
-    pub fn note_logout(&mut self) -> Result<(), IpcError> {
-        self.sender
-            .send::<serde_json::Value>(&Event::UserSessionLogout)
+    pub fn note_process_stopped(&self, reason: ProcessStoppedReason) -> CoreResult<()> {
+        self.channel.publish(ProcessStopped(reason))
     }
 
-    pub fn note_process_stopped(&mut self, reason: ProcessStoppedReason) -> Result<(), IpcError> {
-        self.sender
-            .send::<serde_json::Value>(&Event::ProcessStopped(reason))
+    /// Register a handler for events the daemon pushes unprompted
+    /// (e.g. `CaptureAvailabilityChanged` on macOS).
+    pub fn on<E: Event>(&mut self, handler: impl Fn(&E) -> CoreResult<()> + Send + Sync + 'static) {
+        self.channel.on(handler)
     }
+}
 
-    /// Receive an event with a custom payload type `C`.
-    pub fn recv_event<C: DeserializeOwned>(&mut self) -> Result<Event<C>, IpcError> {
-        self.receiver.recv_event::<C>()
-    }
-
-    /// Non-blocking receive with a custom payload type `C`.
-    pub fn try_recv_event<C: DeserializeOwned>(&mut self) -> Result<Option<Event<C>>, IpcError> {
-        self.receiver.try_recv_event::<C>()
-    }
-
-    /// Internal helper that uses `serde_json::Value` as the custom event type,
-    /// tolerating any daemon-side custom variant without needing the concrete type.
-    fn recv_event_internal(&mut self) -> Result<Event<serde_json::Value>, IpcError> {
-        self.receiver.recv_event::<serde_json::Value>()
+impl ClientController<crate::events::RemoteEventBus> {
+    /// Connect to the daemon at `path` and return a controller backed by a
+    /// [`RemoteEventBus`].
+    ///
+    /// [`RemoteEventBus`]: crate::events::RemoteEventBus
+    pub fn connect(path: &std::path::Path) -> CoreResult<Self> {
+        let (sender, receiver) = crate::ipc::connect(path).map_err(CoreError::from)?;
+        Ok(Self::new(crate::events::RemoteEventBus::new(
+            sender, receiver,
+        )))
     }
 }
