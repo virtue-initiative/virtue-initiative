@@ -8,6 +8,7 @@ pub mod events;
 pub mod ipc;
 pub mod model;
 pub mod module;
+pub mod new_events;
 pub mod platform;
 pub mod service;
 pub mod storage;
