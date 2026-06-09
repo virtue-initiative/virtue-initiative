@@ -90,15 +90,14 @@ impl<C: EventChannel> ClientController<C> {
     }
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 impl ClientController<crate::events::RemoteEventBus> {
     /// Connect to the daemon at `path` and return a controller backed by a
     /// [`RemoteEventBus`].
     ///
     /// [`RemoteEventBus`]: crate::events::RemoteEventBus
     pub fn connect(path: &std::path::Path) -> CoreResult<Self> {
-        let (sender, receiver) = crate::ipc::connect(path).map_err(CoreError::from)?;
-        Ok(Self::new(crate::events::RemoteEventBus::new(
-            sender, receiver,
-        )))
+        let bus = crate::events::RemoteEventBus::connect(path).map_err(CoreError::from)?;
+        Ok(Self::new(bus))
     }
 }

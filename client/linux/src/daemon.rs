@@ -7,12 +7,11 @@ use anyhow::Result;
 use tokio::sync::mpsc;
 use virtue_core::EventError;
 use virtue_core::events::{ProcessStoppedReason, RemoteSender};
-use virtue_core::ipc::IpcListener;
 use virtue_core::{
-    ComputerResumed, ComputerSuspended, EventBus, EventChannel, LoginRequested, LoginResult,
-    Logout, LogoutRequested, LogoutResult, Ping, ProcessStarted, ProcessStopped, RemoteEventBus,
-    StatusRequest, StatusResponse, UserSessionLogin, UserSessionLogout, UserStopRequested,
-    build_default_modules_reqwest, load_state, store_state,
+    ComputerResumed, ComputerSuspended, EventBus, EventChannel, IpcListener, LoginRequested,
+    LoginResult, Logout, LogoutRequested, LogoutResult, Ping, ProcessStarted, ProcessStopped,
+    RemoteEventBus, StatusRequest, StatusResponse, UserSessionLogin, UserSessionLogout,
+    UserStopRequested, build_default_modules_reqwest, load_state, store_state,
 };
 use zbus::proxy;
 
@@ -49,16 +48,15 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
 
     // Bind IPC listener and spawn an accept thread.
     let sock_path = paths.state_dir.join("daemon.sock");
-    let (ipc_accept_tx, mut ipc_accept_rx) =
-        mpsc::unbounded_channel::<(virtue_core::ipc::IpcSender, virtue_core::ipc::IpcReceiver)>();
+    let (ipc_accept_tx, mut ipc_accept_rx) = mpsc::unbounded_channel::<RemoteEventBus>();
 
     match IpcListener::bind(&sock_path) {
         Ok(listener) => {
             tokio::task::spawn_blocking(move || {
                 loop {
                     match listener.blocking_accept() {
-                        Ok(pair) => {
-                            if ipc_accept_tx.send(pair).is_err() {
+                        Ok(remote) => {
+                            if ipc_accept_tx.send(remote).is_err() {
                                 break;
                             }
                         }
@@ -113,8 +111,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
         }
 
         // Wire up any newly accepted IPC connections.
-        while let Ok((sender, receiver)) = ipc_accept_rx.try_recv() {
-            let mut remote = RemoteEventBus::new(sender, receiver);
+        while let Ok(mut remote) = ipc_accept_rx.try_recv() {
             let e = bus.emitter();
 
             macro_rules! forward_inbound {

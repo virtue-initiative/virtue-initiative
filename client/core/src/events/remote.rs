@@ -1,14 +1,129 @@
 use std::any::type_name;
 use std::collections::HashMap;
+use std::fmt;
+use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, CoreResult};
-use crate::ipc::{IpcReceiver, IpcSender};
 
 use super::bus::{Event, EventChannel, log_error};
+
+// ── IPC error ─────────────────────────────────────────────────────────────────
+
+#[derive(Debug)]
+pub enum IpcError {
+    DaemonNotRunning,
+    Disconnected,
+    Io(std::io::Error),
+    Protocol(serde_json::Error),
+    Remote(String),
+}
+
+impl fmt::Display for IpcError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            IpcError::DaemonNotRunning => write!(f, "daemon is not running"),
+            IpcError::Disconnected => write!(f, "connection to daemon closed"),
+            IpcError::Io(e) => write!(f, "I/O error: {e}"),
+            IpcError::Protocol(e) => write!(f, "protocol error: {e}"),
+            IpcError::Remote(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
+impl std::error::Error for IpcError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            IpcError::Io(e) => Some(e),
+            IpcError::Protocol(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for IpcError {
+    fn from(e: std::io::Error) -> Self {
+        IpcError::Io(e)
+    }
+}
+
+impl From<serde_json::Error> for IpcError {
+    fn from(e: serde_json::Error) -> Self {
+        IpcError::Protocol(e)
+    }
+}
+
+// ── Unix domain socket transport (private) ────────────────────────────────────
+
+struct IpcSender {
+    writer: BufWriter<UnixStream>,
+}
+
+struct IpcReceiver {
+    reader: BufReader<UnixStream>,
+}
+
+impl IpcSender {
+    fn send_line(&mut self, line: &str) -> Result<(), IpcError> {
+        self.writer.write_all(line.as_bytes())?;
+        if !line.ends_with('\n') {
+            self.writer.write_all(b"\n")?;
+        }
+        self.writer.flush()?;
+        Ok(())
+    }
+}
+
+impl IpcReceiver {
+    fn recv_line(&mut self) -> Result<String, IpcError> {
+        let mut line = String::new();
+        let n = self.reader.read_line(&mut line)?;
+        if n == 0 {
+            return Err(IpcError::Disconnected);
+        }
+        Ok(line.trim_end_matches('\n').to_string())
+    }
+}
+
+fn make_pair(stream: UnixStream) -> Result<(IpcSender, IpcReceiver), IpcError> {
+    let read_stream = stream.try_clone()?;
+    Ok((
+        IpcSender {
+            writer: BufWriter::new(stream),
+        },
+        IpcReceiver {
+            reader: BufReader::new(read_stream),
+        },
+    ))
+}
+
+// ── IpcListener ───────────────────────────────────────────────────────────────
+
+pub struct IpcListener {
+    listener: UnixListener,
+}
+
+impl IpcListener {
+    pub fn bind(path: &Path) -> Result<Self, IpcError> {
+        let _ = std::fs::remove_file(path);
+        let listener = UnixListener::bind(path)?;
+        Ok(Self { listener })
+    }
+
+    pub fn blocking_accept(&self) -> Result<RemoteEventBus, IpcError> {
+        let (stream, _) = self.listener.accept()?;
+        stream.set_nonblocking(false)?;
+        let (sender, receiver) = make_pair(stream)?;
+        Ok(RemoteEventBus::from_pair(sender, receiver))
+    }
+}
+
+// ── RemoteEventBus ────────────────────────────────────────────────────────────
 
 type RemoteHandler = Box<dyn Fn(&serde_json::Value) + Send + Sync>;
 
@@ -45,7 +160,7 @@ impl RemoteSender {
     }
 }
 
-/// A stateless cross-process event bus backed by an [`IpcSender`]/[`IpcReceiver`] pair.
+/// A stateless cross-process event bus backed by a Unix socket connection.
 ///
 /// Inbound events are decoded on a background reader thread and dispatched to
 /// registered handlers. There are no in-process observers or persisted state —
@@ -63,8 +178,7 @@ pub struct RemoteEventBus {
 }
 
 impl RemoteEventBus {
-    /// Create a bus and start the background reader thread.
-    pub fn new(sender: IpcSender, mut receiver: IpcReceiver) -> Self {
+    fn from_pair(sender: IpcSender, mut receiver: IpcReceiver) -> Self {
         let writer = Arc::new(Mutex::new(sender));
         let handlers: Arc<Mutex<HashMap<String, Vec<RemoteHandler>>>> =
             Arc::new(Mutex::new(HashMap::new()));
@@ -92,6 +206,22 @@ impl RemoteEventBus {
             handlers,
             _reader,
         }
+    }
+
+    /// Connect to a daemon at `path` and return a bus for that connection.
+    pub fn connect(path: &Path) -> Result<Self, IpcError> {
+        let stream = UnixStream::connect(path).map_err(|e| {
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+            ) {
+                IpcError::DaemonNotRunning
+            } else {
+                IpcError::Io(e)
+            }
+        })?;
+        let (sender, receiver) = make_pair(stream)?;
+        Ok(Self::from_pair(sender, receiver))
     }
 
     /// Serialize `event` and write it as one JSON line.
@@ -170,47 +300,28 @@ mod tests {
     }
 
     fn make_bus_pair() -> (RemoteEventBus, RemoteEventBus) {
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
-        {
-            use std::time::{SystemTime, UNIX_EPOCH};
-            let nonce = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .subsec_nanos();
-            let sock = std::env::temp_dir().join(format!(
-                "virtue-remote-test-{}-{}.sock",
-                std::process::id(),
-                nonce
-            ));
-            let listener = crate::ipc::IpcListener::bind(&sock).expect("bind");
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos();
+        let sock = std::env::temp_dir().join(format!(
+            "virtue-remote-test-{}-{}.sock",
+            std::process::id(),
+            nonce
+        ));
+        let listener = IpcListener::bind(&sock).expect("bind");
 
-            let sock2 = sock.clone();
-            let client_handle =
-                thread::spawn(move || crate::ipc::connect(&sock2).expect("connect"));
+        let sock2 = sock.clone();
+        let client_handle =
+            thread::spawn(move || RemoteEventBus::connect(&sock2).expect("connect"));
 
-            let (d_sender, d_receiver) = listener.blocking_accept().expect("accept");
-            let (c_sender, c_receiver) = client_handle.join().expect("connect thread");
+        let daemon_bus = listener.blocking_accept().expect("accept");
+        let client_bus = client_handle.join().expect("connect thread");
 
-            let _ = std::fs::remove_file(sock);
+        let _ = std::fs::remove_file(sock);
 
-            (
-                RemoteEventBus::new(d_sender, d_receiver),
-                RemoteEventBus::new(c_sender, c_receiver),
-            )
-        }
-
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-        {
-            use std::path::Path;
-            let listener = crate::ipc::IpcListener::bind(Path::new("/ignored")).expect("bind");
-            let (c_sender, c_receiver) =
-                crate::ipc::connect_in_process(&listener.connect_tx).expect("connect");
-            let (d_sender, d_receiver) = listener.blocking_accept().expect("accept");
-            (
-                RemoteEventBus::new(d_sender, d_receiver),
-                RemoteEventBus::new(c_sender, c_receiver),
-            )
-        }
+        (daemon_bus, client_bus)
     }
 
     #[test]
@@ -242,5 +353,34 @@ mod tests {
         // Client uses EventChannel::request to do the round trip.
         let pong: Pong = client_bus.request(Ping { val: 7 }).expect("request");
         assert_eq!(pong.val, 7);
+    }
+
+    #[test]
+    fn unix_socket_send_recv_round_trips() {
+        let sock =
+            std::env::temp_dir().join(format!("virtue-ipc-test-{}.sock", std::process::id()));
+        let listener = IpcListener::bind(&sock).expect("bind");
+
+        let sock2 = sock.clone();
+        let client_handle =
+            thread::spawn(move || RemoteEventBus::connect(&sock2).expect("connect"));
+
+        let mut daemon_bus = listener.blocking_accept().expect("accept");
+        let mut client_bus = client_handle.join().expect("connect thread");
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        client_bus.subscribe(move |msg: &Ping| {
+            tx.send(msg.val).ok();
+            Ok(())
+        });
+
+        daemon_bus.send(Ping { val: 99 }).expect("send");
+
+        let received = rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("timed out");
+        assert_eq!(received, 99);
+
+        let _ = std::fs::remove_file(&sock);
     }
 }

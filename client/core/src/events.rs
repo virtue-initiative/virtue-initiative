@@ -1,9 +1,11 @@
 pub mod bus;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub mod remote;
 pub mod types;
 
 pub use bus::{Emitter, Error, Event, EventBus, EventChannel, Observer, StateType};
-pub use remote::{RemoteEventBus, RemoteSender};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub use remote::{IpcError, IpcListener, RemoteEventBus, RemoteSender};
 pub use types::{
     AlertReason, DeviceCredentials, DeviceSettings, LifecycleKind, ProcessStoppedReason, Redacted,
     UploadKind,

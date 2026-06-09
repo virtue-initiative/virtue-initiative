@@ -6,7 +6,6 @@ pub mod controller;
 pub mod crypto;
 pub mod error;
 pub mod events;
-pub mod ipc;
 pub mod model;
 pub mod module;
 pub mod platform;
@@ -51,8 +50,6 @@ pub use events::{
     ProcessStopped,
     ProcessStoppedReason,
     Redacted,
-    RemoteEventBus,
-    RemoteSender,
     StateType,
     StatusRequest,
     StatusResponse,
@@ -62,9 +59,8 @@ pub use events::{
     UserSessionLogout,
     UserStopRequested,
 };
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
-pub use ipc::register_connect_tx;
-pub use ipc::{IpcError, IpcListener};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub use events::{IpcError, IpcListener, RemoteEventBus, RemoteSender};
 pub use model::{
     AuthState, BatchUpload, EventData, LogEntry, LoginStatus, LoopOutcome, Screenshot,
     ServiceStatus,

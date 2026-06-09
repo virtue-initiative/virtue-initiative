@@ -2,7 +2,8 @@ use std::io;
 
 use thiserror::Error;
 
-use crate::ipc::IpcError;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use crate::events::remote::IpcError;
 
 pub type CoreResult<T> = Result<T, CoreError>;
 
@@ -44,6 +45,7 @@ pub enum CoreError {
     Ipc(String),
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 impl From<IpcError> for CoreError {
     fn from(e: IpcError) -> Self {
         CoreError::Ipc(e.to_string())
