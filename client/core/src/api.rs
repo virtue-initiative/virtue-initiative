@@ -48,8 +48,8 @@ pub trait ApiTransport: Send + Sync {
         content_hash: &[u8; 32],
     ) -> CoreResult<()>;
 
-    /// Apply an updated config (e.g., changed `api_base_url`) to the transport in place.
-    fn reconfigure(&mut self, config: &Config) -> CoreResult<()>;
+    /// Apply an updated API base URL to the transport in place.
+    fn reconfigure(&mut self, api_base_url: &str) -> CoreResult<()>;
 }
 
 #[derive(Debug, Clone)]
@@ -69,8 +69,8 @@ impl ReqwestApiClient {
 }
 
 impl ApiTransport for ReqwestApiClient {
-    fn reconfigure(&mut self, config: &Config) -> CoreResult<()> {
-        self.base_url = config.api_base_url.trim_end_matches('/').to_string();
+    fn reconfigure(&mut self, api_base_url: &str) -> CoreResult<()> {
+        self.base_url = api_base_url.trim_end_matches('/').to_string();
         Ok(())
     }
 

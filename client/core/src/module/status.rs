@@ -1,34 +1,17 @@
-use std::any::Any;
-use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 
 use crate::error::CoreResult;
-use crate::events::{Event, Observer, PartialStatus, StateType};
+use crate::events::bus::{Emitter, EventBus, Observer, StateType};
+use crate::events::types::{PartialStatus, StatusRequest, StatusResponse};
 use crate::model::ServiceStatus;
 
-/// Assembles a `StatusResponse` from the `PartialStatus` fragments that other
-/// observers emit in reply to a `StatusRequest`. Holds no persistent state of
-/// its own: it accumulates fragments transiently and, once it has heard from
-/// every expected observer, sends the combined `ServiceStatus` and resets.
-pub struct StatusObserver<C = ()> {
-    /// Number of `PartialStatus` fragments to wait for before responding.
+struct StatusInner {
     expected_count: usize,
-    /// Fragments received since the current `StatusRequest`.
     received: usize,
-    /// Status assembled from fragments received so far.
     pending: ServiceStatus,
-    tx: Sender<Event<C>>,
 }
 
-impl<C: 'static> StatusObserver<C> {
-    pub fn new(expected_count: usize, tx: Sender<Event<C>>) -> Self {
-        Self {
-            expected_count,
-            received: 0,
-            pending: ServiceStatus::default(),
-            tx,
-        }
-    }
-
+impl StatusInner {
     fn merge(&mut self, partial: &PartialStatus) {
         match partial {
             PartialStatus::Auth {
@@ -52,49 +35,62 @@ impl<C: 'static> StatusObserver<C> {
             }
         }
     }
+
+    fn handle_partial(&mut self, partial: &PartialStatus, emitter: &Emitter) {
+        self.merge(partial);
+        self.received += 1;
+        if self.received >= self.expected_count {
+            let _ = emitter.send(StatusResponse {
+                status: self.pending.clone(),
+            });
+            self.received = 0;
+        }
+    }
 }
 
-impl<C: 'static> Observer<C> for StatusObserver<C> {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
+pub struct StatusModule {
+    inner: Arc<Mutex<StatusInner>>,
+}
 
+impl StatusModule {
+    pub fn new(expected_count: usize) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(StatusInner {
+                expected_count,
+                received: 0,
+                pending: ServiceStatus::default(),
+            })),
+        }
+    }
+}
+
+impl Observer for StatusModule {
     fn name(&self) -> &'static str {
         "status"
     }
 
-    fn save_state(&self) -> CoreResult<StateType> {
-        Ok(serde_json::Value::Null)
-    }
+    fn init(&mut self, bus: &mut EventBus, _state: StateType) -> CoreResult<()> {
+        let emitter = bus.emitter();
 
-    fn load_state(&mut self, _state: StateType) -> CoreResult<()> {
+        let inner = Arc::clone(&self.inner);
+        bus.subscribe(move |_: &StatusRequest| {
+            let mut g = inner.lock().unwrap();
+            g.pending = ServiceStatus::default();
+            g.received = 0;
+            Ok(())
+        });
+
+        let inner = Arc::clone(&self.inner);
+        let e = emitter.clone();
+        bus.subscribe(move |partial: &PartialStatus| {
+            inner.lock().unwrap().handle_partial(partial, &e);
+            Ok(())
+        });
+
         Ok(())
     }
 
-    fn on_event(&mut self, event: &Event<C>) -> CoreResult<()> {
-        match event {
-            Event::StatusRequest => {
-                // Begin collecting fragments for a fresh response.
-                self.pending = ServiceStatus::default();
-                self.received = 0;
-            }
-            Event::PartialStatus(partial) => {
-                self.merge(partial);
-                self.received += 1;
-                if self.received >= self.expected_count {
-                    self.tx
-                        .send(Event::StatusResponse {
-                            status: self.pending.clone(),
-                        })
-                        .ok();
-                    self.received = 0;
-                }
-            }
-            _ => {}
-        }
-        Ok(())
+    fn save(&self) -> CoreResult<StateType> {
+        Ok(StateType::Null)
     }
 }

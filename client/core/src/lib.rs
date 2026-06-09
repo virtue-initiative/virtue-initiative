@@ -1,4 +1,5 @@
 pub mod api;
+pub mod assembly;
 pub mod build_info;
 pub mod config;
 pub mod controller;
@@ -7,19 +8,15 @@ pub mod error;
 pub mod events;
 pub mod ipc;
 pub mod model;
+pub mod module;
 pub mod platform;
 pub mod state;
 pub mod storage;
 
-// Temporarily excluded: depend on the old Event<C> system; will be migrated in plan 02.
-#[cfg(any())]
-pub mod module;
-#[cfg(any())]
-pub mod service;
-#[cfg(any())]
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
+pub use assembly::{build_default_modules, build_default_modules_reqwest};
 pub use build_info::{BUILD_LABEL, build_label};
 pub use config::Config;
 pub use controller::ClientController;

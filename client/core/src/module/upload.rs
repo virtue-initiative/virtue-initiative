@@ -1,9 +1,7 @@
 pub mod api;
 mod batch;
 
-use std::any::Any;
-use std::sync::mpsc::Sender;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
@@ -14,19 +12,20 @@ pub(crate) use batch::MAX_BATCH_ITEMS_PER_UPLOAD;
 use crate::api::ApiTransport;
 use crate::crypto::{CryptoEngine, compute_event_hash, encode_batch_event};
 use crate::error::CoreResult;
-use crate::events::log_error;
-use crate::events::{Event, Observer, PartialStatus, ProcessStoppedReason, StateType};
-use crate::model::{BatchRecipient, DeviceCredentials, DeviceSettings, LogEntry};
+use crate::events::bus::{Emitter, EventBus, Observer, StateType, log_error};
+use crate::events::types::{
+    ConfigChanged, DeviceSettingsRefreshed, FlushBatchNow, Login, Logout, LogoutRequested,
+    PartialStatus, Ping, ProcessStopped, StatusRequest, Upload,
+};
+use crate::model::{
+    BatchRecipient, DeviceCredentials, DeviceSettings, LogEntry, ProcessStoppedReason,
+};
 use crate::platform::ScreenshotHooks;
 
 pub(crate) const POST_LOGIN_PROOF_BATCH_COUNT: u32 = 3;
 
 const MAX_HASH_RETRIES_PER_LOOP: usize = 8;
 const MAX_DIRECT_LOG_RETRIES_PER_LOOP: usize = 8;
-
-pub struct UploadConfig {
-    pub batch_interval: Duration,
-}
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct UploadObserverState {
@@ -67,18 +66,7 @@ impl UploadObserverState {
     }
 }
 
-pub struct UploadObserver<A: ApiTransport + Clone + 'static, C = ()> {
-    pub state: UploadObserverState,
-    pub upload_api: UploadApi<A>,
-    pub config: UploadConfig,
-    platform: Box<dyn ScreenshotHooks>,
-    pub(crate) authenticated: bool,
-    sender: Sender<Event<C>>,
-}
-
 /// Drains a retry queue, calling `try_one` on each item up to `max_retries` times per call.
-/// `try_one` returns `None` if the item was consumed (success or permanent failure), or
-/// `Some(item)` to push it back and stop processing further items this iteration.
 fn drain_retry_queue<T>(
     events: Vec<T>,
     max_retries: usize,
@@ -101,31 +89,15 @@ fn drain_retry_queue<T>(
     still_pending
 }
 
-impl<A: ApiTransport + Clone + 'static, C: 'static> UploadObserver<A, C> {
-    pub fn new(
-        platform: Box<dyn ScreenshotHooks>,
-        api: A,
-        config: UploadConfig,
-        sender: Sender<Event<C>>,
-    ) -> Self {
-        Self {
-            state: UploadObserverState::default(),
-            upload_api: UploadApi::new(api),
-            config,
-            platform,
-            authenticated: false,
-            sender,
-        }
-    }
+pub struct UploadInner<A: ApiTransport + Clone> {
+    pub state: UploadObserverState,
+    pub upload_api: UploadApi<A>,
+    pub batch_interval_ms: i64,
+    platform: Box<dyn ScreenshotHooks>,
+    pub authenticated: bool,
+}
 
-    pub fn set_settings(&mut self, settings: Option<DeviceSettings>) {
-        self.state.settings = settings;
-    }
-
-    pub fn force_upload_now(&mut self, now_ms: i64) -> CoreResult<()> {
-        self.try_upload_batch(now_ms)
-    }
-
+impl<A: ApiTransport + Clone + 'static> UploadInner<A> {
     fn retry_pending_hashes(&mut self) -> CoreResult<()> {
         let hash_base_url = self
             .state
@@ -146,13 +118,12 @@ impl<A: ApiTransport + Clone + 'static, C: 'static> UploadObserver<A, C> {
                     }
                 };
                 let hash = compute_event_hash(&encoded);
-                match self.try_upload_hash(hash_base_url.as_deref(), &hash) {
-                    Ok(Some(true)) => {
+                match self.upload_api.upload_hash(hash_base_url.as_deref(), &hash) {
+                    Ok(()) => {
                         self.state.pending_batch_events.push((event.ts, encoded));
                         None
                     }
-                    Ok(None) => None, // Permanently rejected by server — discard without promoting to batch
-                    Ok(Some(false)) | Err(_) => Some(event),
+                    Err(_) => Some(event),
                 }
             });
         Ok(())
@@ -162,34 +133,38 @@ impl<A: ApiTransport + Clone + 'static, C: 'static> UploadObserver<A, C> {
         let events = std::mem::take(&mut self.state.pending_immediate_events);
         self.state.pending_immediate_events =
             drain_retry_queue(events, MAX_DIRECT_LOG_RETRIES_PER_LOOP, |entry| match self
-                .try_upload_direct(&entry)
+                .upload_api
+                .upload_log(&entry)
             {
-                Ok(true) => None,
-                Ok(false) | Err(_) => Some(entry),
+                Ok(()) => None,
+                Err(err) if err.is_bad_request() => {
+                    log_error("direct log upload failed permanently", Some(&err));
+                    None
+                }
+                Err(_) => Some(entry),
             });
         Ok(())
     }
 
-    fn maybe_upload_batch(&mut self, now_ms: i64) -> CoreResult<()> {
+    fn maybe_upload_batch(&mut self, now_ms: i64, emitter: &Emitter) -> CoreResult<()> {
         let can = self.state.settings.as_ref().is_some_and(can_capture);
         if self.state.pending_batch_events.is_empty() || !can {
             return Ok(());
         }
-        let batch_interval_ms = self.config.batch_interval.as_millis() as i64;
         let should = self.state.post_login_proof_batches_remaining > 0
             || self
                 .state
                 .last_batch_at_ms
-                .map(|last| now_ms - last >= batch_interval_ms)
+                .map(|last| now_ms - last >= self.batch_interval_ms)
                 .unwrap_or(true)
             || self.state.pending_batch_events.len() >= MAX_BATCH_ITEMS_PER_UPLOAD;
         if should {
-            self.try_upload_batch(now_ms)?;
+            self.try_upload_batch(now_ms, emitter)?;
         }
         Ok(())
     }
 
-    pub fn try_upload_batch(&mut self, now_ms: i64) -> CoreResult<()> {
+    pub(crate) fn try_upload_batch(&mut self, now_ms: i64, emitter: &Emitter) -> CoreResult<()> {
         if self.state.pending_batch_events.is_empty() {
             return Ok(());
         }
@@ -230,7 +205,7 @@ impl<A: ApiTransport + Clone + 'static, C: 'static> UploadObserver<A, C> {
                     "batch upload: device deregistered or unauth, logging out",
                     Some(&err),
                 );
-                self.sender.send(Event::LogoutRequested).ok();
+                let _ = emitter.send(LogoutRequested);
                 Ok(())
             }
             Err(err) => {
@@ -240,144 +215,173 @@ impl<A: ApiTransport + Clone + 'static, C: 'static> UploadObserver<A, C> {
         }
     }
 
-    fn try_upload_hash(
-        &mut self,
-        hash_base_url: Option<&str>,
-        content_hash: &[u8; 32],
-    ) -> CoreResult<Option<bool>> {
-        match self.upload_api.upload_hash(hash_base_url, content_hash) {
-            Ok(()) => {
-                #[cfg(debug_assertions)]
-                eprintln!("[upload] hash ok: {}", hex::encode(&content_hash[..8]));
-                Ok(Some(true))
-            }
-            Err(err) => {
-                log_error("hash upload deferred", Some(&err));
-                Ok(Some(false))
+    fn handle_ping(&mut self, emitter: &Emitter) -> CoreResult<()> {
+        if !self.authenticated {
+            return Ok(());
+        }
+        let now_ms = self.platform.get_time_utc_ms()?;
+
+        if let Some(last) = self.state.last_batch_at_ms {
+            if now_ms < last {
+                self.state.last_batch_at_ms = None;
             }
         }
+
+        self.retry_pending_hashes()?;
+        self.retry_pending_immediates()?;
+        self.maybe_upload_batch(now_ms, emitter)?;
+        Ok(())
     }
 
-    fn try_upload_direct(&mut self, entry: &LogEntry) -> CoreResult<bool> {
-        match self.upload_api.upload_log(entry) {
-            Ok(_) => Ok(true),
-            Err(err) if err.is_bad_request() => {
-                log_error("direct log upload failed permanently", Some(&err));
-                Ok(true)
-            }
-            Err(err) => {
-                log_error("direct log upload deferred", Some(&err));
-                Ok(false)
-            }
+    fn handle_upload(
+        &mut self,
+        risk: f32,
+        kind: crate::model::UploadKind,
+        emitter: &Emitter,
+    ) -> CoreResult<()> {
+        if !self.authenticated {
+            return Ok(());
+        }
+        let now_ms = self.platform.get_time_utc_ms()?;
+        let entry = LogEntry {
+            ts: now_ms,
+            risk: Some(risk),
+            event: kind,
+        };
+        if risk >= crate::module::lifecycle::HIGH_RISK_LIFECYCLE_ALERT {
+            self.state.pending_immediate_events.push(entry);
+            self.retry_pending_immediates()?;
+        } else {
+            self.state.pending_hash_events.push(entry);
+            self.retry_pending_hashes()?;
+            self.maybe_upload_batch(now_ms, emitter)?;
+        }
+        Ok(())
+    }
+}
+
+pub struct UploadModule<A: ApiTransport + Clone + Send + Sync + 'static> {
+    pub inner: Arc<Mutex<UploadInner<A>>>,
+}
+
+impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
+    pub fn new(platform: Box<dyn ScreenshotHooks>, api: A, batch_interval_ms: i64) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(UploadInner {
+                state: UploadObserverState::default(),
+                upload_api: UploadApi::new(api),
+                batch_interval_ms,
+                platform,
+                authenticated: false,
+            })),
         }
     }
 }
 
-impl<C: 'static, A: ApiTransport + Clone + 'static> Observer<C> for UploadObserver<A, C> {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
+impl<A: ApiTransport + Clone + Send + Sync + 'static> Observer for UploadModule<A> {
     fn name(&self) -> &'static str {
         "upload"
     }
 
-    fn save_state(&self) -> CoreResult<StateType> {
-        // Persist the credentials that upload_api actually used last (may be
-        // fresher than state.device_credentials after a 401 token refresh).
-        let mut state = self.state.clone();
-        state.device_credentials = self.upload_api.credentials().cloned();
+    fn init(&mut self, bus: &mut EventBus, state: StateType) -> CoreResult<()> {
+        if !state.is_null() {
+            let mut g = self.inner.lock().unwrap();
+            g.state = serde_json::from_value(state)?;
+            if let Some(creds) = g.state.device_credentials.clone() {
+                g.upload_api.set_credentials(Some(creds));
+                g.authenticated = true;
+            }
+        }
+
+        let emitter = bus.emitter();
+
+        let inner = Arc::clone(&self.inner);
+        bus.subscribe(move |ev: &Login| {
+            let mut g = inner.lock().unwrap();
+            g.authenticated = true;
+            g.upload_api.set_credentials(Some(ev.credentials.clone()));
+            g.state.settings = Some(ev.settings.clone());
+            g.state.device_credentials = Some(ev.credentials.clone());
+            g.state.reset_for_login();
+            Ok(())
+        });
+
+        let inner = Arc::clone(&self.inner);
+        bus.subscribe(move |_: &Logout| {
+            let mut g = inner.lock().unwrap();
+            g.authenticated = false;
+            g.upload_api.set_credentials(None);
+            g.state.reset_for_logout();
+            Ok(())
+        });
+
+        let inner = Arc::clone(&self.inner);
+        bus.subscribe(move |ev: &DeviceSettingsRefreshed| {
+            inner.lock().unwrap().state.settings = Some(ev.settings.clone());
+            Ok(())
+        });
+
+        let inner = Arc::clone(&self.inner);
+        let e = emitter.clone();
+        bus.subscribe(move |_: &StatusRequest| {
+            let g = inner.lock().unwrap();
+            let _ = e.send(PartialStatus::Upload {
+                pending_request_count: g.state.pending_request_count(),
+            });
+            Ok(())
+        });
+
+        let inner = Arc::clone(&self.inner);
+        let e = emitter.clone();
+        bus.subscribe(move |_: &Ping| inner.lock().unwrap().handle_ping(&e));
+
+        let inner = Arc::clone(&self.inner);
+        let e = emitter.clone();
+        bus.subscribe(move |ev: &ProcessStopped| {
+            if matches!(ev.0, ProcessStoppedReason::Shutdown) {
+                let mut g = inner.lock().unwrap();
+                if g.authenticated && !g.state.pending_batch_events.is_empty() {
+                    let now_ms = g.platform.get_time_utc_ms()?;
+                    let _ = g.try_upload_batch(now_ms, &e);
+                }
+            }
+            Ok(())
+        });
+
+        let inner = Arc::clone(&self.inner);
+        let e = emitter.clone();
+        bus.subscribe(move |ev: &Upload| {
+            inner
+                .lock()
+                .unwrap()
+                .handle_upload(ev.risk, ev.kind.clone(), &e)
+        });
+
+        let inner = Arc::clone(&self.inner);
+        let e = emitter.clone();
+        bus.subscribe(move |_: &FlushBatchNow| {
+            let mut g = inner.lock().unwrap();
+            if g.authenticated {
+                let now_ms = g.platform.get_time_utc_ms()?;
+                g.try_upload_batch(now_ms, &e)?;
+            }
+            Ok(())
+        });
+
+        let inner = Arc::clone(&self.inner);
+        bus.subscribe(move |ev: &ConfigChanged| {
+            inner.lock().unwrap().batch_interval_ms = ev.batch_interval_ms as i64;
+            Ok(())
+        });
+
+        Ok(())
+    }
+
+    fn save(&self) -> CoreResult<StateType> {
+        let g = self.inner.lock().unwrap();
+        let mut state = g.state.clone();
+        state.device_credentials = g.upload_api.credentials().cloned();
         Ok(serde_json::to_value(&state)?)
-    }
-
-    fn load_state(&mut self, state: StateType) -> CoreResult<()> {
-        self.state = serde_json::from_value(state)?;
-        if let Some(creds) = self.state.device_credentials.clone() {
-            self.upload_api.set_credentials(Some(creds));
-            self.authenticated = true;
-        }
-        Ok(())
-    }
-
-    fn on_event(&mut self, event: &Event<C>) -> CoreResult<()> {
-        match event {
-            Event::Login {
-                credentials,
-                settings,
-            } => {
-                self.authenticated = true;
-                self.upload_api.set_credentials(Some(credentials.clone()));
-                self.set_settings(Some(settings.clone()));
-                self.state.device_credentials = Some(credentials.clone());
-                self.state.reset_for_login();
-            }
-            Event::Logout => {
-                self.authenticated = false;
-                self.upload_api.set_credentials(None);
-                self.set_settings(None);
-                self.state.reset_for_logout();
-            }
-            Event::DeviceSettingsRefreshed { settings } => {
-                self.set_settings(Some(settings.clone()));
-            }
-            Event::StatusRequest => {
-                self.sender
-                    .send(Event::PartialStatus(PartialStatus::Upload {
-                        pending_request_count: self.state.pending_request_count(),
-                    }))
-                    .ok();
-            }
-            Event::Ping => {
-                if !self.authenticated {
-                    return Ok(());
-                }
-                let now_ms = self.platform.get_time_utc_ms()?;
-
-                // Sanity check
-                if let Some(last) = self.state.last_batch_at_ms {
-                    // Somehow got a time in the future, reset the schedule
-                    if now_ms < last {
-                        self.state.last_batch_at_ms = None;
-                    }
-                }
-
-                self.retry_pending_hashes()?;
-                self.retry_pending_immediates()?;
-                self.maybe_upload_batch(now_ms)?;
-            }
-            Event::ProcessStopped(ProcessStoppedReason::Shutdown) => {
-                if self.authenticated {
-                    let now_ms = self.platform.get_time_utc_ms()?;
-                    if !self.state.pending_batch_events.is_empty() {
-                        let _ = self.try_upload_batch(now_ms);
-                    }
-                }
-            }
-            Event::Upload { risk, kind } => {
-                if !self.authenticated {
-                    return Ok(());
-                }
-                let now_ms = self.platform.get_time_utc_ms()?;
-                let entry = LogEntry {
-                    ts: now_ms,
-                    risk: Some(*risk),
-                    event: kind.clone(),
-                };
-                if *risk >= crate::module::lifecycle::HIGH_RISK_LIFECYCLE_ALERT {
-                    self.state.pending_immediate_events.push(entry);
-                    self.retry_pending_immediates()?;
-                } else {
-                    self.state.pending_hash_events.push(entry);
-                    self.retry_pending_hashes()?;
-                    self.maybe_upload_batch(now_ms)?;
-                }
-            }
-            _ => {}
-        }
-        Ok(())
     }
 }
 

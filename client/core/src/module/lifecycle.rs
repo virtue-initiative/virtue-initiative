@@ -1,13 +1,14 @@
-use std::any::Any;
-use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
-use crate::events::{
-    AlertReason, Event, LifecycleKind, Observer, PartialStatus, ProcessStoppedReason, StateType,
-    UploadKind,
+use crate::events::bus::{Emitter, EventBus, Observer, StateType};
+use crate::events::types::{
+    AlertReason, ComputerResumed, ComputerSuspended, Login, PartialStatus, Ping, ProcessStarted,
+    ProcessStopped, StatusRequest, Upload, UserSessionLogin, UserSessionLogout, UserStopRequested,
 };
+use crate::model::{LifecycleKind, ProcessStoppedReason, UploadKind};
 use crate::platform::ScreenshotHooks;
 
 pub(crate) const HIGH_RISK_LIFECYCLE_ALERT: f32 = 0.9;
@@ -21,7 +22,7 @@ pub enum LifecycleStatus {
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
-#[serde(default)] // Handle upgrades gracefully by defaulting missing fields
+#[serde(default)]
 pub struct LifecycleObserverState {
     pub status: LifecycleStatus,
 
@@ -45,172 +46,57 @@ pub struct LifecycleObserverState {
     pub user_stop_requested: bool,
 }
 
-pub struct LifecycleObserver<C = ()> {
+pub struct LifecycleInner {
     pub state: LifecycleObserverState,
-    platform_hooks: Box<dyn ScreenshotHooks>,
-    sender: Sender<Event<C>>,
+    platform: Box<dyn ScreenshotHooks>,
 }
 
-impl<C: 'static> LifecycleObserver<C> {
-    pub fn new(platform_hooks: Box<dyn ScreenshotHooks>, sender: Sender<Event<C>>) -> Self {
-        Self {
-            state: LifecycleObserverState::default(),
-            platform_hooks,
-            sender,
-        }
-    }
-
-    pub fn take_user_stop_requested(&mut self) -> bool {
-        let v = self.state.user_stop_requested;
-        self.state.user_stop_requested = false;
-        v
-    }
-
+impl LifecycleInner {
     fn compute_last_shutdown(&self) -> CoreResult<i64> {
         let stored = self.state.last_process_stopped_shutdown;
         if stored > 0 {
             return Ok(stored);
         }
-        Ok(self
-            .platform_hooks
-            .get_last_shutdown_time_utc_ms()?
-            .unwrap_or(0))
+        Ok(self.platform.get_last_shutdown_time_utc_ms()?.unwrap_or(0))
     }
 
-    fn on_event_while_running(&mut self, event: &Event<C>) -> CoreResult<()> {
-        let now_ms = self.platform_hooks.get_time_utc_ms()?;
-        let startup_time_ms = self.platform_hooks.get_last_startup_time_utc_ms()?;
-
-        // Only pay the platform I/O cost for shutdown time when we might actually use it.
+    fn handle_process_started(&mut self, emitter: &Emitter) -> CoreResult<()> {
+        let now_ms = self.platform.get_time_utc_ms()?;
+        let startup_time_ms = self.platform.get_last_startup_time_utc_ms()?;
         let last_shutdown = if self.state.last_process_stopped_other > 0 {
             self.compute_last_shutdown()?
         } else {
             0
         };
-
         let old = self.state.clone();
 
-        // Forward lifecycle events as batch log entries
+        self.maybe_backfill_missed_events(last_shutdown, startup_time_ms, emitter)?;
 
-        if last_shutdown > 0
-            && self.state.last_process_stopped_other > 0
-            && last_shutdown > self.state.last_process_stopped_other
-            && self.state.last_process_stopped_shutdown < last_shutdown
-        {
-            // We missed the shutdown event, fill in with best effort
-            self.sender
-                .send(Event::Upload {
-                    risk: 0.0,
-                    kind: UploadKind::Lifecycle {
-                        kind: LifecycleKind::ProcessStoppedShutdown,
-                    },
-                })
-                .ok();
-            self.state.last_process_stopped_shutdown = last_shutdown;
-        }
-
-        if let Some(boot_ms) = startup_time_ms
-            && boot_ms > self.state.last_sent_boot
-        {
-            // New boot we haven't recorded yet, fill in with best effort
-            self.sender
-                .send(Event::Upload {
-                    risk: 0.0,
-                    kind: UploadKind::Lifecycle {
-                        kind: LifecycleKind::ComputerBooted,
-                    },
-                })
-                .ok();
-            self.state.last_sent_boot = boot_ms;
-        }
-
-        let lifecycle_event: Option<(LifecycleKind, f32)> = match event {
-            Event::ProcessStarted => Some((LifecycleKind::ProcessStarted, 0.0)),
-            Event::ProcessStopped(reason) => match reason {
-                ProcessStoppedReason::Other => Some((LifecycleKind::ProcessStoppedOther, 0.0)),
-                ProcessStoppedReason::Shutdown => {
-                    Some((LifecycleKind::ProcessStoppedShutdown, 0.0))
-                }
-                ProcessStoppedReason::User => Some((LifecycleKind::ProcessStoppedUser, 0.0)),
+        // Forward lifecycle event
+        let _ = emitter.send(Upload {
+            risk: 0.0,
+            kind: UploadKind::Lifecycle {
+                kind: LifecycleKind::ProcessStarted,
             },
-            Event::ComputerSuspended => Some((LifecycleKind::ComputerSuspended, 0.0)),
-            Event::UserSessionLogin => Some((LifecycleKind::Login, 0.0)),
-            Event::UserSessionLogout => Some((LifecycleKind::Logout, HIGH_RISK_LIFECYCLE_ALERT)),
-            _ => None,
-        };
-        if let Some((kind, risk)) = lifecycle_event {
-            self.sender
-                .send(Event::Upload {
-                    risk,
-                    kind: UploadKind::Lifecycle { kind },
-                })
-                .ok();
-        }
+        });
 
-        // Update state timestamps
-        match event {
-            Event::ProcessStopped(ProcessStoppedReason::Other) => {
-                self.state.last_process_stopped_other = now_ms;
-            }
-            Event::ProcessStopped(ProcessStoppedReason::Shutdown) => {
-                self.state.last_process_stopped_shutdown = now_ms;
-            }
-            Event::ProcessStopped(ProcessStoppedReason::User) => {
-                self.state.last_process_stopped_user = now_ms;
-            }
-            Event::ProcessStarted => {
-                self.state.last_process_started = now_ms;
-                self.state.last_running_started = now_ms;
-            }
-            Event::ComputerSuspended => {
-                self.state.last_computer_suspend = now_ms;
-                self.state.status = LifecycleStatus::Suspended;
-            }
-            Event::ComputerResumed => {
-                self.state.last_computer_resume = now_ms;
-            }
-            Event::Ping => {
-                self.state.last_ping = now_ms;
-            }
-            Event::UserStopRequested { .. } => {
-                self.state.user_stop_requested = true;
-            }
-            Event::UserSessionLogin | Event::Login { .. } => {
-                self.state.last_login = now_ms;
-            }
-            _ => {}
-        }
+        self.state.last_process_started = now_ms;
+        self.state.last_running_started = now_ms;
 
         // ALERT: process killed >10s before shutdown
-        if matches!(event, Event::ProcessStarted)
-            && old.last_process_stopped_other > 0
+        if old.last_process_stopped_other > 0
             && last_shutdown - old.last_process_stopped_other > 10000
         {
-            self.sender
-                .send(Event::Upload {
-                    risk: 0.5,
-                    kind: UploadKind::LifecycleAlert {
-                        reason: AlertReason::ProcessKilledBeforeShutdown,
-                    },
-                })
-                .ok();
-        }
-
-        // ALERT: user explicitly stopped the process
-        if matches!(event, Event::ProcessStopped(ProcessStoppedReason::User)) {
-            self.sender
-                .send(Event::Upload {
-                    risk: HIGH_RISK_LIFECYCLE_ALERT,
-                    kind: UploadKind::LifecycleAlert {
-                        reason: AlertReason::UserStoppedProcess,
-                    },
-                })
-                .ok();
+            let _ = emitter.send(Upload {
+                risk: 0.5,
+                kind: UploadKind::LifecycleAlert {
+                    reason: AlertReason::ProcessKilledBeforeShutdown,
+                },
+            });
         }
 
         // ALERT: ProcessStarted after suspicious gap
-        if matches!(event, Event::ProcessStarted)
-            && now_ms - old.last_login > 60000
+        if now_ms - old.last_login > 60000
             && old.last_process_started > old.last_process_stopped_user
         {
             let boot_ms = startup_time_ms.unwrap_or(0);
@@ -220,149 +106,331 @@ impl<C: 'static> LifecycleObserver<C> {
                 i64::MAX
             };
             if ping_gap > 10000 && (now_ms - boot_ms) > 60000 {
-                self.sender
-                    .send(Event::Upload {
-                        risk: HIGH_RISK_LIFECYCLE_ALERT,
-                        kind: UploadKind::LifecycleAlert {
-                            reason: AlertReason::UnexpectedProcessStart,
-                        },
-                    })
-                    .ok();
-            }
-        }
-
-        // ALERT: Ping gap while computer was running (not sleeping)
-        if matches!(event, Event::Ping) && now_ms - old.last_login > 60000 {
-            let ping_gap = now_ms - old.last_ping;
-            let start_gap = now_ms - old.last_running_started;
-            if old.last_ping > 0 && ping_gap > 10000 && start_gap > 10000 {
-                self.sender
-                    .send(Event::Upload {
-                        risk: HIGH_RISK_LIFECYCLE_ALERT,
-                        kind: UploadKind::LifecycleAlert {
-                            reason: AlertReason::PingGapWhileRunning,
-                        },
-                    })
-                    .ok();
+                let _ = emitter.send(Upload {
+                    risk: HIGH_RISK_LIFECYCLE_ALERT,
+                    kind: UploadKind::LifecycleAlert {
+                        reason: AlertReason::UnexpectedProcessStart,
+                    },
+                });
             }
         }
 
         Ok(())
     }
 
-    fn on_event_while_suspended(&mut self, event: &Event<C>) -> CoreResult<()> {
-        let now_ms = self.platform_hooks.get_time_utc_ms()?;
-
-        if matches!(event, Event::Ping) {
-            self.state.pings_while_suspended += 1;
+    fn maybe_backfill_missed_events(
+        &mut self,
+        last_shutdown: i64,
+        startup_time_ms: Option<i64>,
+        emitter: &Emitter,
+    ) -> CoreResult<()> {
+        if last_shutdown > 0
+            && self.state.last_process_stopped_other > 0
+            && last_shutdown > self.state.last_process_stopped_other
+            && self.state.last_process_stopped_shutdown < last_shutdown
+        {
+            let _ = emitter.send(Upload {
+                risk: 0.0,
+                kind: UploadKind::Lifecycle {
+                    kind: LifecycleKind::ProcessStoppedShutdown,
+                },
+            });
+            self.state.last_process_stopped_shutdown = last_shutdown;
         }
 
-        if matches!(event, Event::ComputerResumed) {
-            self.state.pings_while_suspended = 0;
-            self.state.status = LifecycleStatus::Running;
-            self.state.last_running_started = now_ms;
-            self.state.last_computer_resume = now_ms;
-            self.sender
-                .send(Event::Upload {
+        if let Some(boot_ms) = startup_time_ms {
+            if boot_ms > self.state.last_sent_boot {
+                let _ = emitter.send(Upload {
                     risk: 0.0,
                     kind: UploadKind::Lifecycle {
-                        kind: LifecycleKind::ComputerResumed,
+                        kind: LifecycleKind::ComputerBooted,
                     },
-                })
-                .ok();
+                });
+                self.state.last_sent_boot = boot_ms;
+            }
         }
 
-        // ProcessStopped and UserSessionLogout must be recorded even while suspended
-        // so the server audit trail is correct and missed-shutdown detection stays accurate.
-        match event {
-            Event::ProcessStopped(reason) => {
-                let kind = match reason {
-                    ProcessStoppedReason::Other => LifecycleKind::ProcessStoppedOther,
-                    ProcessStoppedReason::Shutdown => LifecycleKind::ProcessStoppedShutdown,
-                    ProcessStoppedReason::User => LifecycleKind::ProcessStoppedUser,
-                };
-                self.sender
-                    .send(Event::Upload {
-                        risk: 0.0,
-                        kind: UploadKind::Lifecycle { kind },
-                    })
-                    .ok();
-                match reason {
-                    ProcessStoppedReason::Other => self.state.last_process_stopped_other = now_ms,
-                    ProcessStoppedReason::Shutdown => {
-                        self.state.last_process_stopped_shutdown = now_ms
-                    }
-                    ProcessStoppedReason::User => self.state.last_process_stopped_user = now_ms,
-                }
-            }
-            Event::UserSessionLogout => {
-                self.sender
-                    .send(Event::Upload {
-                        risk: HIGH_RISK_LIFECYCLE_ALERT,
-                        kind: UploadKind::Lifecycle {
-                            kind: LifecycleKind::Logout,
-                        },
-                    })
-                    .ok();
-            }
-            _ => {}
-        }
+        Ok(())
+    }
 
-        if self.state.pings_while_suspended > 3 {
-            // Reset before sending so re-entrant processing of the queued Upload
-            // event doesn't re-trigger this block while still in Suspended state.
-            self.state.pings_while_suspended = 0;
-            self.sender
-                .send(Event::Upload {
-                    risk: MEDIUM_RISK_LIFECYCLE_ALERT,
+    fn handle_process_stopped_running(
+        &mut self,
+        reason: &ProcessStoppedReason,
+        emitter: &Emitter,
+    ) -> CoreResult<()> {
+        let now_ms = self.platform.get_time_utc_ms()?;
+        let startup_time_ms = self.platform.get_last_startup_time_utc_ms()?;
+        let last_shutdown = if self.state.last_process_stopped_other > 0 {
+            self.compute_last_shutdown()?
+        } else {
+            0
+        };
+        self.maybe_backfill_missed_events(last_shutdown, startup_time_ms, emitter)?;
+
+        let kind = match reason {
+            ProcessStoppedReason::Other => LifecycleKind::ProcessStoppedOther,
+            ProcessStoppedReason::Shutdown => LifecycleKind::ProcessStoppedShutdown,
+            ProcessStoppedReason::User => LifecycleKind::ProcessStoppedUser,
+        };
+        let _ = emitter.send(Upload {
+            risk: 0.0,
+            kind: UploadKind::Lifecycle { kind },
+        });
+
+        match reason {
+            ProcessStoppedReason::Other => self.state.last_process_stopped_other = now_ms,
+            ProcessStoppedReason::Shutdown => self.state.last_process_stopped_shutdown = now_ms,
+            ProcessStoppedReason::User => {
+                self.state.last_process_stopped_user = now_ms;
+                let _ = emitter.send(Upload {
+                    risk: HIGH_RISK_LIFECYCLE_ALERT,
                     kind: UploadKind::LifecycleAlert {
-                        reason: AlertReason::MissingResume,
+                        reason: AlertReason::UserStoppedProcess,
                     },
-                })
-                .ok();
-            self.sender.send(Event::ComputerResumed).ok();
+                });
+            }
         }
 
+        Ok(())
+    }
+
+    fn handle_process_stopped_suspended(
+        &mut self,
+        reason: &ProcessStoppedReason,
+        emitter: &Emitter,
+    ) -> CoreResult<()> {
+        let now_ms = self.platform.get_time_utc_ms()?;
+        let kind = match reason {
+            ProcessStoppedReason::Other => LifecycleKind::ProcessStoppedOther,
+            ProcessStoppedReason::Shutdown => LifecycleKind::ProcessStoppedShutdown,
+            ProcessStoppedReason::User => LifecycleKind::ProcessStoppedUser,
+        };
+        let _ = emitter.send(Upload {
+            risk: 0.0,
+            kind: UploadKind::Lifecycle { kind },
+        });
+        match reason {
+            ProcessStoppedReason::Other => self.state.last_process_stopped_other = now_ms,
+            ProcessStoppedReason::Shutdown => self.state.last_process_stopped_shutdown = now_ms,
+            ProcessStoppedReason::User => self.state.last_process_stopped_user = now_ms,
+        }
+        Ok(())
+    }
+
+    fn handle_ping_running(&mut self, emitter: &Emitter) -> CoreResult<()> {
+        let now_ms = self.platform.get_time_utc_ms()?;
+        let startup_time_ms = self.platform.get_last_startup_time_utc_ms()?;
+        let last_shutdown = if self.state.last_process_stopped_other > 0 {
+            self.compute_last_shutdown()?
+        } else {
+            0
+        };
+        let old = self.state.clone();
+        self.maybe_backfill_missed_events(last_shutdown, startup_time_ms, emitter)?;
+        self.state.last_ping = now_ms;
+
+        if now_ms - old.last_login > 60000 {
+            let ping_gap = now_ms - old.last_ping;
+            let start_gap = now_ms - old.last_running_started;
+            if old.last_ping > 0 && ping_gap > 10000 && start_gap > 10000 {
+                let _ = emitter.send(Upload {
+                    risk: HIGH_RISK_LIFECYCLE_ALERT,
+                    kind: UploadKind::LifecycleAlert {
+                        reason: AlertReason::PingGapWhileRunning,
+                    },
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    fn handle_ping_suspended(&mut self, emitter: &Emitter) -> CoreResult<()> {
+        self.state.pings_while_suspended += 1;
+        if self.state.pings_while_suspended > 3 {
+            self.state.pings_while_suspended = 0;
+            let _ = emitter.send(Upload {
+                risk: MEDIUM_RISK_LIFECYCLE_ALERT,
+                kind: UploadKind::LifecycleAlert {
+                    reason: AlertReason::MissingResume,
+                },
+            });
+            let _ = emitter.send(ComputerResumed);
+        }
         Ok(())
     }
 }
 
-impl<C: 'static> Observer<C> for LifecycleObserver<C> {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
+pub struct LifecycleModule {
+    pub inner: Arc<Mutex<LifecycleInner>>,
+}
 
+impl LifecycleModule {
+    pub fn new(platform: Box<dyn ScreenshotHooks>) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(LifecycleInner {
+                state: LifecycleObserverState::default(),
+                platform,
+            })),
+        }
+    }
+}
+
+impl Observer for LifecycleModule {
     fn name(&self) -> &'static str {
         "lifecycle"
     }
 
-    fn save_state(&self) -> CoreResult<StateType> {
-        Ok(serde_json::to_value(&self.state)?)
-    }
+    fn init(&mut self, bus: &mut EventBus, state: StateType) -> CoreResult<()> {
+        if !state.is_null() {
+            self.inner.lock().unwrap().state = serde_json::from_value(state)?;
+        }
 
-    fn load_state(&mut self, state: StateType) -> CoreResult<()> {
-        self.state = serde_json::from_value(state)?;
+        let emitter = bus.emitter();
+
+        // StatusRequest: always respond
+        let inner = Arc::clone(&self.inner);
+        let e = emitter.clone();
+        bus.subscribe(move |_: &StatusRequest| {
+            let g = inner.lock().unwrap();
+            let last_loop_at_ms = (g.state.last_ping > 0).then_some(g.state.last_ping);
+            let _ = e.send(PartialStatus::Lifecycle {
+                is_running: true,
+                last_loop_at_ms,
+            });
+            Ok(())
+        });
+
+        // ProcessStarted: only while Running
+        let inner = Arc::clone(&self.inner);
+        let e = emitter.clone();
+        bus.subscribe(move |_: &ProcessStarted| {
+            let mut g = inner.lock().unwrap();
+            if matches!(g.state.status, LifecycleStatus::Running) {
+                g.handle_process_started(&e)?;
+            }
+            Ok(())
+        });
+
+        // ProcessStopped: both states
+        let inner = Arc::clone(&self.inner);
+        let e = emitter.clone();
+        bus.subscribe(move |ev: &ProcessStopped| {
+            let mut g = inner.lock().unwrap();
+            match g.state.status.clone() {
+                LifecycleStatus::Running => g.handle_process_stopped_running(&ev.0, &e)?,
+                LifecycleStatus::Suspended => g.handle_process_stopped_suspended(&ev.0, &e)?,
+            }
+            Ok(())
+        });
+
+        // ComputerSuspended: only while Running → transitions to Suspended
+        let inner = Arc::clone(&self.inner);
+        let e = emitter.clone();
+        bus.subscribe(move |_: &ComputerSuspended| {
+            let mut g = inner.lock().unwrap();
+            if matches!(g.state.status, LifecycleStatus::Running) {
+                let now_ms = g.platform.get_time_utc_ms()?;
+                let _ = e.send(Upload {
+                    risk: 0.0,
+                    kind: UploadKind::Lifecycle {
+                        kind: LifecycleKind::ComputerSuspended,
+                    },
+                });
+                g.state.last_computer_suspend = now_ms;
+                g.state.status = LifecycleStatus::Suspended;
+            }
+            Ok(())
+        });
+
+        // ComputerResumed: only while Suspended → transitions to Running
+        let inner = Arc::clone(&self.inner);
+        let e = emitter.clone();
+        bus.subscribe(move |_: &ComputerResumed| {
+            let mut g = inner.lock().unwrap();
+            if matches!(g.state.status, LifecycleStatus::Suspended) {
+                let now_ms = g.platform.get_time_utc_ms()?;
+                g.state.pings_while_suspended = 0;
+                g.state.status = LifecycleStatus::Running;
+                g.state.last_running_started = now_ms;
+                g.state.last_computer_resume = now_ms;
+                let _ = e.send(Upload {
+                    risk: 0.0,
+                    kind: UploadKind::Lifecycle {
+                        kind: LifecycleKind::ComputerResumed,
+                    },
+                });
+            }
+            Ok(())
+        });
+
+        // UserSessionLogin: only while Running
+        let inner = Arc::clone(&self.inner);
+        let e = emitter.clone();
+        bus.subscribe(move |_: &UserSessionLogin| {
+            let mut g = inner.lock().unwrap();
+            if matches!(g.state.status, LifecycleStatus::Running) {
+                let now_ms = g.platform.get_time_utc_ms()?;
+                let _ = e.send(Upload {
+                    risk: 0.0,
+                    kind: UploadKind::Lifecycle {
+                        kind: LifecycleKind::Login,
+                    },
+                });
+                g.state.last_login = now_ms;
+            }
+            Ok(())
+        });
+
+        // UserSessionLogout: both states
+        let inner = Arc::clone(&self.inner);
+        let e = emitter.clone();
+        bus.subscribe(move |_: &UserSessionLogout| {
+            let g = inner.lock().unwrap();
+            let _ = e.send(Upload {
+                risk: HIGH_RISK_LIFECYCLE_ALERT,
+                kind: UploadKind::Lifecycle {
+                    kind: LifecycleKind::Logout,
+                },
+            });
+            drop(g);
+            Ok(())
+        });
+
+        // Ping: different logic per state
+        let inner = Arc::clone(&self.inner);
+        let e = emitter.clone();
+        bus.subscribe(move |_: &Ping| {
+            let mut g = inner.lock().unwrap();
+            match g.state.status.clone() {
+                LifecycleStatus::Running => g.handle_ping_running(&e)?,
+                LifecycleStatus::Suspended => g.handle_ping_suspended(&e)?,
+            }
+            Ok(())
+        });
+
+        // Login (auth event): update last_login timestamp while Running
+        let inner = Arc::clone(&self.inner);
+        bus.subscribe(move |_: &Login| {
+            let mut g = inner.lock().unwrap();
+            if matches!(g.state.status, LifecycleStatus::Running) {
+                let now_ms = g.platform.get_time_utc_ms()?;
+                g.state.last_login = now_ms;
+            }
+            Ok(())
+        });
+
+        // UserStopRequested: record intent
+        let inner = Arc::clone(&self.inner);
+        bus.subscribe(move |_: &UserStopRequested| {
+            inner.lock().unwrap().state.user_stop_requested = true;
+            Ok(())
+        });
+
         Ok(())
     }
 
-    fn on_event(&mut self, event: &Event<C>) -> CoreResult<()> {
-        if matches!(event, Event::StatusRequest) {
-            // Responding at all means the monitor process is running.
-            let last_loop_at_ms = (self.state.last_ping > 0).then_some(self.state.last_ping);
-            self.sender
-                .send(Event::PartialStatus(PartialStatus::Lifecycle {
-                    is_running: true,
-                    last_loop_at_ms,
-                }))
-                .ok();
-            return Ok(());
-        }
-        match self.state.status {
-            LifecycleStatus::Running => self.on_event_while_running(event),
-            LifecycleStatus::Suspended => self.on_event_while_suspended(event),
-        }
+    fn save(&self) -> CoreResult<StateType> {
+        Ok(serde_json::to_value(&self.inner.lock().unwrap().state)?)
     }
 }

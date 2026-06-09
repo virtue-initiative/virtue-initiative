@@ -2,7 +2,6 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use crate::api::{ApiTransport, UploadedBatchResponse, UploadedLogResponse};
-use crate::config::Config;
 use crate::error::CoreResult;
 use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, LogEntry};
 
@@ -176,10 +175,10 @@ impl Default for MockApiClient {
 }
 
 impl ApiTransport for MockApiClient {
-    fn reconfigure(&mut self, config: &Config) -> CoreResult<()> {
+    fn reconfigure(&mut self, api_base_url: &str) -> CoreResult<()> {
         self.state()
             .reconfigure_calls
-            .push(config.api_base_url.clone());
+            .push(api_base_url.to_string());
         Ok(())
     }
 

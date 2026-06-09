@@ -1,10 +1,11 @@
-use std::any::Any;
-use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
-use crate::events::{Event, Observer, StateType, UploadKind};
+use crate::events::bus::{EventBus, Observer, StateType};
+use crate::events::types::{CaptureFailed, Upload};
+use crate::model::UploadKind;
 use crate::platform::ScreenshotHooks;
 
 const FAILURE_WINDOW_MS: i64 = 30 * 60 * 1_000;
@@ -15,60 +16,60 @@ pub struct CaptureAvailabilityObserverState {
     pub recent_failures_ms: Vec<i64>,
 }
 
-pub struct CaptureAvailabilityObserver<C = ()> {
-    pub state: CaptureAvailabilityObserverState,
-    sender: Sender<Event<C>>,
+pub(crate) struct CaptureAvailabilityInner {
+    pub(crate) state: CaptureAvailabilityObserverState,
     platform: Box<dyn ScreenshotHooks>,
 }
 
-impl<C: 'static> CaptureAvailabilityObserver<C> {
-    pub fn new(sender: Sender<Event<C>>, platform: Box<dyn ScreenshotHooks>) -> Self {
+pub struct CaptureAvailabilityModule {
+    pub(crate) inner: Arc<Mutex<CaptureAvailabilityInner>>,
+}
+
+impl CaptureAvailabilityModule {
+    pub fn new(platform: Box<dyn ScreenshotHooks>) -> Self {
         Self {
-            state: CaptureAvailabilityObserverState::default(),
-            sender,
-            platform,
+            inner: Arc::new(Mutex::new(CaptureAvailabilityInner {
+                state: CaptureAvailabilityObserverState::default(),
+                platform,
+            })),
         }
     }
 }
 
-impl<C: 'static> Observer<C> for CaptureAvailabilityObserver<C> {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
+impl Observer for CaptureAvailabilityModule {
     fn name(&self) -> &'static str {
         "capture_availability"
     }
 
-    fn save_state(&self) -> CoreResult<StateType> {
-        Ok(serde_json::to_value(&self.state)?)
-    }
+    fn init(&mut self, bus: &mut EventBus, state: StateType) -> CoreResult<()> {
+        if !state.is_null() {
+            self.inner.lock().unwrap().state = serde_json::from_value(state)?;
+        }
 
-    fn load_state(&mut self, state: StateType) -> CoreResult<()> {
-        self.state = serde_json::from_value(state)?;
-        Ok(())
-    }
+        let emitter = bus.emitter();
 
-    fn on_event(&mut self, event: &Event<C>) -> CoreResult<()> {
-        if let Event::CaptureFailed = event {
-            let now_ms = self.platform.get_time_utc_ms()?;
-            self.state.recent_failures_ms.push(now_ms);
-            self.state
+        let inner = Arc::clone(&self.inner);
+        bus.subscribe(move |_: &CaptureFailed| {
+            let mut g = inner.lock().unwrap();
+            let now_ms = g.platform.get_time_utc_ms()?;
+            g.state.recent_failures_ms.push(now_ms);
+            g.state
                 .recent_failures_ms
                 .retain(|&t| now_ms - t <= FAILURE_WINDOW_MS);
-            if self.state.recent_failures_ms.len() >= FAILURE_THRESHOLD {
-                self.sender
-                    .send(Event::Upload {
-                        risk: 0.5,
-                        kind: UploadKind::CaptureFailed,
-                    })
-                    .ok();
-                self.state.recent_failures_ms.clear();
+            if g.state.recent_failures_ms.len() >= FAILURE_THRESHOLD {
+                let _ = emitter.send(Upload {
+                    risk: 0.5,
+                    kind: UploadKind::CaptureFailed,
+                });
+                g.state.recent_failures_ms.clear();
             }
-        }
+            Ok(())
+        });
+
         Ok(())
+    }
+
+    fn save(&self) -> CoreResult<StateType> {
+        Ok(serde_json::to_value(&self.inner.lock().unwrap().state)?)
     }
 }

@@ -82,6 +82,4 @@ impl ScreenshotHooks for TestPlatformHooks {
     }
 }
 
-impl PlatformHooks for TestPlatformHooks {
-    type CustomEvent = ();
-}
+impl PlatformHooks for TestPlatformHooks {}
