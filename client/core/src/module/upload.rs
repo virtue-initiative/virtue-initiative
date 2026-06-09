@@ -12,13 +12,24 @@ pub(crate) use batch::MAX_BATCH_ITEMS_PER_UPLOAD;
 use crate::api::ApiTransport;
 use crate::crypto::{CryptoEngine, compute_event_hash, encode_batch_event};
 use crate::error::CoreResult;
+use crate::events::Ping;
 use crate::events::bus::{Emitter, EventBus, Observer, StateType, log_error};
-use crate::events::types::{
-    ConfigChanged, DeviceSettingsRefreshed, FlushBatchNow, Login, Logout, LogoutRequested,
-    PartialStatus, Ping, ProcessStopped, StatusRequest, Upload,
-};
+use crate::model::PartialStatus;
+use crate::module::auth::{DeviceSettingsRefreshed, Login, Logout, LogoutRequested};
+use crate::module::config::ConfigChanged;
+use crate::module::lifecycle::ProcessStopped;
+use crate::module::status::StatusRequest;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Upload {
+    pub risk: f32,
+    pub kind: UploadKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlushBatchNow;
 use crate::model::{
-    BatchRecipient, DeviceCredentials, DeviceSettings, LogEntry, ProcessStoppedReason,
+    BatchRecipient, DeviceCredentials, DeviceSettings, LogEntry, ProcessStoppedReason, UploadKind,
 };
 use crate::platform::ScreenshotHooks;
 
@@ -369,10 +380,13 @@ fn batch_recipients(settings: &DeviceSettings) -> CoreResult<Vec<BatchRecipient>
 mod tests {
     use std::sync::{Arc, Mutex};
 
+    use super::Upload;
     use super::UploadModule;
     use crate::events::bus::{EventBus, StateType};
-    use crate::events::types::{Login, Logout, PartialStatus, StatusRequest, Upload};
+    use crate::model::PartialStatus;
     use crate::model::{BatchRecipient, DeviceCredentials, DeviceSettings, LogEntry, UploadKind};
+    use crate::module::auth::{Login, Logout};
+    use crate::module::status::StatusRequest;
     use crate::testing::{MockApiClient, TestPlatformHooks};
 
     fn valid_credentials() -> DeviceCredentials {

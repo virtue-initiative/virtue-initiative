@@ -4,12 +4,48 @@ use serde::{Deserialize, Serialize};
 
 use crate::api::ApiTransport;
 use crate::error::{CoreError, CoreResult};
+use crate::events::Ping;
 use crate::events::bus::{Emitter, EventBus, Observer, StateType, log_error};
-use crate::events::types::{
-    ConfigChanged, DeviceSettingsRefreshed, Login, LoginRequested, LoginResult, Logout,
-    LogoutRequested, LogoutResult, PartialStatus, Ping, StatusRequest,
-};
-use crate::model::DeviceCredentials;
+use crate::model::PartialStatus;
+use crate::model::{DeviceCredentials, DeviceSettings, Redacted};
+use crate::module::config::ConfigChanged;
+use crate::module::status::StatusRequest;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Login {
+    pub credentials: DeviceCredentials,
+    pub settings: DeviceSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Logout;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoginRequested {
+    pub email: String,
+    pub password: Redacted<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoginResult {
+    pub success: bool,
+    pub error: Option<String>,
+    pub device_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogoutRequested;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogoutResult {
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceSettingsRefreshed {
+    pub settings: DeviceSettings,
+}
 
 const SETTINGS_REFRESH_INTERVAL_PINGS: u32 = 3600;
 
@@ -216,13 +252,13 @@ impl<A: ApiTransport + Send + Sync + 'static> Observer for AuthModule<A> {
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use super::AuthModule;
+    use super::{AuthModule, LoginRequested, LoginResult, LogoutRequested};
+    use super::{Login, Logout};
     use crate::error::CoreError;
     use crate::events::bus::{EventBus, StateType};
-    use crate::events::types::{
-        Login, LoginRequested, LoginResult, Logout, LogoutRequested, PartialStatus, StatusRequest,
-    };
+    use crate::model::PartialStatus;
     use crate::model::Redacted;
+    use crate::module::status::StatusRequest;
     use crate::testing::MockApiClient;
 
     fn make() -> (EventBus, MockApiClient) {

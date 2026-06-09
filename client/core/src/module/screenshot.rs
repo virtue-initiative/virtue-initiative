@@ -5,10 +5,16 @@ use std::any::Any;
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
+use crate::events::Ping;
 use crate::events::bus::{Emitter, EventBus, Observer, StateType};
-use crate::events::types::{CaptureFailed, ConfigChanged, Login, Logout, Ping, Upload};
 use crate::model::UploadKind;
+use crate::module::auth::{Login, Logout};
+use crate::module::config::ConfigChanged;
+use crate::module::upload::Upload;
 use crate::platform::ScreenshotHooks;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CaptureFailed;
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 #[serde(default)]
@@ -124,9 +130,11 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::ScreenshotModule;
+    use crate::events::Ping;
     use crate::events::bus::{EventBus, StateType};
-    use crate::events::types::{Login, Logout, Ping, Upload};
     use crate::model::{BatchRecipient, DeviceCredentials, DeviceSettings, UploadKind};
+    use crate::module::auth::{Login, Logout};
+    use crate::module::upload::Upload;
     use crate::testing::TestPlatformHooks;
 
     fn valid_credentials() -> DeviceCredentials {

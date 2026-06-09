@@ -4,8 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
 use crate::events::bus::{Emitter, EventBus, Observer, StateType};
-use crate::events::types::{CaptureFailed, Upload};
 use crate::model::UploadKind;
+use crate::module::screenshot::CaptureFailed;
+use crate::module::upload::Upload;
 use crate::platform::ScreenshotHooks;
 
 const FAILURE_WINDOW_MS: i64 = 30 * 60 * 1_000;
@@ -75,8 +76,9 @@ mod tests {
 
     use super::CaptureAvailabilityModule;
     use crate::events::bus::{EventBus, StateType};
-    use crate::events::types::{CaptureFailed, Upload};
     use crate::model::UploadKind;
+    use crate::module::screenshot::CaptureFailed;
+    use crate::module::upload::Upload;
     use crate::testing::TestPlatformHooks;
 
     fn make(ts: i64) -> (EventBus, Arc<Mutex<Vec<Upload>>>) {

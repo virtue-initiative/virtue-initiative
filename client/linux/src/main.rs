@@ -12,10 +12,10 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
-use virtue_core::events::UploadKind;
 use virtue_core::{
     ClientController, EventBus, EventChannel, FlushBatchNow, Ping, ScreenshotHooks, ServiceStatus,
-    StatusRequest, StatusResponse, Upload, build_default_modules_reqwest, load_state, store_state,
+    StatusRequest, StatusResponse, Upload, UploadKind, build_default_modules_reqwest, load_state,
+    store_state,
 };
 
 use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_backend};

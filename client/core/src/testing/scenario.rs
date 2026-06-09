@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use crate::config::Config;
 use crate::error::CoreResult;
+use crate::events::Ping;
 use crate::events::bus::{EventBus, Observer, StateType};
-use crate::events::types::{Ping, StatusRequest, StatusResponse};
 use crate::model::{AuthState, BatchRecipient, DeviceCredentials, DeviceSettings, ServiceStatus};
 use crate::module::auth::AuthModule;
 use crate::module::capture_availability::CaptureAvailabilityModule;
@@ -14,6 +14,7 @@ use crate::module::config::ConfigModule;
 use crate::module::lifecycle::{LifecycleModule, LifecycleObserverState};
 use crate::module::screenshot::ScreenshotModule;
 use crate::module::status::StatusModule;
+use crate::module::status::{StatusRequest, StatusResponse};
 use crate::module::upload::{UploadModule, UploadObserverState};
 use crate::state::load_state;
 use crate::testing::api::MockApiClient;

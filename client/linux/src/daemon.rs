@@ -6,7 +6,8 @@ use std::time::Duration;
 use anyhow::Result;
 use tokio::sync::mpsc;
 use virtue_core::EventError;
-use virtue_core::events::{ProcessStoppedReason, RemoteSender};
+use virtue_core::ProcessStoppedReason;
+use virtue_core::events::RemoteSender;
 use virtue_core::{
     ComputerResumed, ComputerSuspended, EventBus, EventChannel, IpcListener, LoginRequested,
     LoginResult, Logout, LogoutRequested, LogoutResult, Ping, ProcessStarted, ProcessStopped,
@@ -343,7 +344,7 @@ fn record_shutdown_transition(bus: &mut EventBus, state_path: &std::path::Path) 
 
 #[cfg(test)]
 mod tests {
-    use virtue_core::events::ProcessStoppedReason;
+    use virtue_core::ProcessStoppedReason;
 
     use super::classify_shutdown_reason;
 

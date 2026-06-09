@@ -1,9 +1,18 @@
 use std::any::Any;
 
+use serde::{Deserialize, Serialize};
+
 use crate::config::Config;
 use crate::error::CoreResult;
+use crate::events::Ping;
 use crate::events::bus::{Emitter, EventBus, Observer, StateType};
-use crate::events::types::{ConfigChanged, Ping};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigChanged {
+    pub api_base_url: String,
+    pub screenshot_interval_ms: u64,
+    pub batch_interval_ms: u64,
+}
 
 pub struct ConfigModule {
     config: Config,
@@ -63,9 +72,9 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
+    use super::ConfigChanged;
     use super::*;
     use crate::events::bus::{EventBus, Observer, StateType};
-    use crate::events::types::ConfigChanged;
 
     #[test]
     fn config_module_emits_config_changed_on_ping_when_override_changes_interval() {

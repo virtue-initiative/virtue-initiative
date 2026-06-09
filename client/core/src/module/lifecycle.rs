@@ -3,12 +3,36 @@ use std::any::Any;
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
+use crate::events::Ping;
 use crate::events::bus::{Emitter, EventBus, Observer, StateType};
-use crate::events::types::{
-    AlertReason, ComputerResumed, ComputerSuspended, Login, PartialStatus, Ping, ProcessStarted,
-    ProcessStopped, StatusRequest, Upload, UserSessionLogin, UserSessionLogout, UserStopRequested,
-};
+use crate::model::{AlertReason, PartialStatus};
 use crate::model::{LifecycleKind, ProcessStoppedReason, UploadKind};
+use crate::module::auth::Login;
+use crate::module::status::StatusRequest;
+use crate::module::upload::Upload;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessStarted;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessStopped(pub ProcessStoppedReason);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComputerSuspended;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComputerResumed;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserSessionLogin;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserSessionLogout;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserStopRequested {
+    pub source: String,
+}
 use crate::platform::ScreenshotHooks;
 
 pub(crate) const HIGH_RISK_LIFECYCLE_ALERT: f32 = 0.9;
@@ -354,13 +378,17 @@ impl Observer for LifecycleModule {
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use super::{LifecycleModule, LifecycleStatus};
-    use crate::events::bus::{EventBus, StateType};
-    use crate::events::types::{
-        ComputerResumed, ComputerSuspended, PartialStatus, Ping, ProcessStarted, ProcessStopped,
-        StatusRequest, Upload, UserSessionLogin, UserSessionLogout,
+    use super::{
+        ComputerResumed, ComputerSuspended, ProcessStarted, ProcessStopped, UserSessionLogin,
+        UserSessionLogout,
     };
+    use super::{LifecycleModule, LifecycleStatus};
+    use crate::events::Ping;
+    use crate::events::bus::{EventBus, StateType};
+    use crate::model::PartialStatus;
     use crate::model::{AlertReason, LifecycleKind, ProcessStoppedReason, UploadKind};
+    use crate::module::status::StatusRequest;
+    use crate::module::upload::Upload;
     use crate::testing::TestPlatformHooks;
 
     type BusWithCapture = (

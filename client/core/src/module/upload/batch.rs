@@ -60,8 +60,8 @@ impl BatchBuilder {
 #[cfg(test)]
 mod tests {
     use crate::crypto::encode_batch_event;
-    use crate::events::UploadKind;
     use crate::model::LogEntry;
+    use crate::model::UploadKind;
 
     #[test]
     fn batch_payload_is_array_of_encoded_event_bytes() {

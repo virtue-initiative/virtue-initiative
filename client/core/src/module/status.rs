@@ -1,9 +1,19 @@
 use std::any::Any;
 
+use serde::{Deserialize, Serialize};
+
 use crate::error::CoreResult;
 use crate::events::bus::{Emitter, EventBus, Observer, StateType};
-use crate::events::types::{PartialStatus, StatusRequest, StatusResponse};
+use crate::model::PartialStatus;
 use crate::model::ServiceStatus;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatusRequest;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatusResponse {
+    pub status: ServiceStatus,
+}
 
 pub struct StatusModule {
     expected_count: usize,
@@ -89,8 +99,9 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::StatusModule;
+    use super::{StatusRequest, StatusResponse};
     use crate::events::bus::{EventBus, StateType};
-    use crate::events::types::{PartialStatus, StatusRequest, StatusResponse};
+    use crate::model::PartialStatus;
 
     fn make(expected_count: usize) -> (EventBus, Arc<Mutex<Vec<StatusResponse>>>) {
         let module = StatusModule::new(expected_count);

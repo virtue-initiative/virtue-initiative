@@ -21,8 +21,9 @@ mod tests {
     use crate::api::ApiTransport;
     use crate::assembly::build_default_modules;
     use crate::config::Config;
+    use crate::events::Ping;
     use crate::events::bus::{EventBus, EventChannel, StateType};
-    use crate::events::types::{Ping, StatusRequest, StatusResponse};
+    use crate::module::status::{StatusRequest, StatusResponse};
     use crate::platform::ScreenshotHooks;
 
     static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);

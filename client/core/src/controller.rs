@@ -1,10 +1,13 @@
 use crate::error::{CoreError, CoreResult};
-use crate::events::{
-    ComputerResumed, ComputerSuspended, Event, EventChannel, LoginRequested, LoginResult,
-    LogoutRequested, LogoutResult, ProcessStopped, ProcessStoppedReason, Redacted, StatusRequest,
-    StatusResponse, UserSessionLogin, UserSessionLogout, UserStopRequested,
-};
+use crate::events::{Event, EventChannel};
 use crate::model::ServiceStatus;
+use crate::model::{ProcessStoppedReason, Redacted};
+use crate::module::auth::{LoginRequested, LoginResult, LogoutRequested, LogoutResult};
+use crate::module::lifecycle::{
+    ComputerResumed, ComputerSuspended, ProcessStopped, UserSessionLogin, UserSessionLogout,
+    UserStopRequested,
+};
+use crate::module::status::{StatusRequest, StatusResponse};
 
 /// High-level client for communicating with a daemon over any [`EventChannel`].
 ///
