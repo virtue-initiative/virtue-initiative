@@ -169,22 +169,53 @@ impl RemoteSender {
 /// Implements [`EventChannel`] so it is interchangeable with an in-process
 /// [`EventBus`] in `ClientController` and similar generic callers.
 ///
+/// # Reader thread lifecycle
+///
+/// The reader thread is not started until [`start`] is called. On the server
+/// (daemon) side this lets you register all inbound handlers before any
+/// messages can be dispatched, eliminating the race where an early message
+/// arrives before handlers are wired up. [`connect`] calls [`start`]
+/// automatically so client callers need not worry about it.
+///
+/// [`start`]: RemoteEventBus::start
+/// [`connect`]: RemoteEventBus::connect
 /// [`EventBus`]: super::bus::EventBus
 pub struct RemoteEventBus {
     writer: Arc<Mutex<IpcSender>>,
     handlers: Arc<Mutex<HashMap<String, Vec<RemoteHandler>>>>,
+    // Receiver stored here until start() is called; None afterwards.
+    pending_receiver: Option<IpcReceiver>,
     // Kept alive so the reader thread runs for the lifetime of this bus.
-    _reader: thread::JoinHandle<()>,
+    _reader: Option<thread::JoinHandle<()>>,
 }
 
 impl RemoteEventBus {
-    fn from_pair(sender: IpcSender, mut receiver: IpcReceiver) -> Self {
+    fn from_pair(sender: IpcSender, receiver: IpcReceiver) -> Self {
         let writer = Arc::new(Mutex::new(sender));
         let handlers: Arc<Mutex<HashMap<String, Vec<RemoteHandler>>>> =
             Arc::new(Mutex::new(HashMap::new()));
-        let reader_handlers = Arc::clone(&handlers);
 
-        let _reader = thread::spawn(move || {
+        Self {
+            writer,
+            handlers,
+            pending_receiver: Some(receiver),
+            _reader: None,
+        }
+    }
+
+    /// Start the background reader thread.
+    ///
+    /// Must be called after all inbound handlers have been registered with
+    /// [`on`] / [`subscribe`]. Calling it a second time is a no-op.
+    ///
+    /// [`on`]: RemoteEventBus::subscribe
+    /// [`subscribe`]: RemoteEventBus::subscribe
+    pub fn start(&mut self) {
+        let Some(mut receiver) = self.pending_receiver.take() else {
+            return;
+        };
+        let reader_handlers = Arc::clone(&self.handlers);
+        self._reader = Some(thread::spawn(move || {
             while let Ok(line) = receiver.recv_line() {
                 if line.is_empty() {
                     continue;
@@ -199,13 +230,7 @@ impl RemoteEventBus {
                     }
                 }
             }
-        });
-
-        Self {
-            writer,
-            handlers,
-            _reader,
-        }
+        }));
     }
 
     /// Connect to a daemon at `path` and return a bus for that connection.
@@ -221,7 +246,9 @@ impl RemoteEventBus {
             }
         })?;
         let (sender, receiver) = make_pair(stream)?;
-        Ok(Self::from_pair(sender, receiver))
+        let mut bus = Self::from_pair(sender, receiver);
+        bus.start();
+        Ok(bus)
     }
 
     /// Serialize `event` and write it as one JSON line.
@@ -316,10 +343,14 @@ mod tests {
         let client_handle =
             thread::spawn(move || RemoteEventBus::connect(&sock2).expect("connect"));
 
-        let daemon_bus = listener.blocking_accept().expect("accept");
+        let mut daemon_bus = listener.blocking_accept().expect("accept");
         let client_bus = client_handle.join().expect("connect thread");
 
         let _ = std::fs::remove_file(sock);
+
+        // In tests handlers are registered after make_bus_pair returns, but
+        // no messages are in flight yet, so starting the reader here is safe.
+        daemon_bus.start();
 
         (daemon_bus, client_bus)
     }
