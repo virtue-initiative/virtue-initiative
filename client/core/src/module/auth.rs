@@ -250,49 +250,31 @@ impl<A: ApiTransport + Send + Sync + 'static> Observer for AuthModule<A> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
-
-    use super::{AuthModule, LoginRequested, LoginResult, LogoutRequested};
-    use super::{Login, Logout};
+    use super::{AuthModule, Login, LoginRequested, LoginResult, Logout, LogoutRequested};
     use crate::error::CoreError;
-    use crate::events::bus::{EventBus, StateType};
-    use crate::model::PartialStatus;
-    use crate::model::Redacted;
+    use crate::model::{PartialStatus, Redacted};
     use crate::module::status::StatusRequest;
-    use crate::testing::MockApiClient;
-
-    fn make() -> (EventBus, MockApiClient) {
-        let api = MockApiClient::new();
-        let module = AuthModule::new(api.clone(), "test-device".into(), "test-platform".into());
-        let bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
-        (bus, api)
-    }
+    use crate::testing::EventTester;
 
     #[test]
     fn login_success_emits_login_and_result() {
-        let (mut bus, _api) = make();
-        let logins: Arc<Mutex<Vec<Login>>> = Arc::new(Mutex::new(Vec::new()));
-        let results: Arc<Mutex<Vec<LoginResult>>> = Arc::new(Mutex::new(Vec::new()));
-        let l = Arc::clone(&logins);
-        let r = Arc::clone(&results);
-        bus.subscribe(move |ev: &Login| {
-            l.lock().unwrap().push(ev.clone());
-            Ok(())
-        });
-        bus.subscribe(move |ev: &LoginResult| {
-            r.lock().unwrap().push(ev.clone());
-            Ok(())
-        });
-
-        bus.send(LoginRequested {
-            email: "alice@example.org".into(),
-            password: Redacted("secret".into()),
-        })
-        .unwrap();
-        bus.iter().unwrap();
-
-        assert_eq!(logins.lock().unwrap().len(), 1, "expected Login event");
-        let results = results.lock().unwrap();
+        let mut b = EventTester::builder();
+        b.capture::<Login>().capture::<LoginResult>();
+        b.add(AuthModule::new(
+            b.api(),
+            "test-device".into(),
+            "test-platform".into(),
+        ));
+        let mut t = b.build();
+        t.emit(
+            1,
+            LoginRequested {
+                email: "alice@example.org".into(),
+                password: Redacted("secret".into()),
+            },
+        );
+        assert_eq!(t.captured::<Login>().len(), 1, "expected Login event");
+        let results = t.captured::<LoginResult>();
         assert_eq!(results.len(), 1, "expected LoginResult event");
         assert!(results[0].success, "login result should be success");
         assert!(
@@ -303,24 +285,24 @@ mod tests {
 
     #[test]
     fn login_failure_emits_failed_result() {
-        let (mut bus, api) = make();
-        api.program_login(Err(CoreError::InvalidState("bad credentials")));
-
-        let results: Arc<Mutex<Vec<LoginResult>>> = Arc::new(Mutex::new(Vec::new()));
-        let r = Arc::clone(&results);
-        bus.subscribe(move |ev: &LoginResult| {
-            r.lock().unwrap().push(ev.clone());
-            Ok(())
-        });
-
-        bus.send(LoginRequested {
-            email: "alice@example.org".into(),
-            password: Redacted("wrong".into()),
-        })
-        .unwrap();
-        bus.iter().unwrap();
-
-        let results = results.lock().unwrap();
+        let mut b = EventTester::builder();
+        b.capture::<LoginResult>();
+        b.add(AuthModule::new(
+            b.api(),
+            "test-device".into(),
+            "test-platform".into(),
+        ));
+        let mut t = b.build();
+        t.api
+            .program_login(Err(CoreError::InvalidState("bad credentials")));
+        t.emit(
+            1,
+            LoginRequested {
+                email: "alice@example.org".into(),
+                password: Redacted("wrong".into()),
+            },
+        );
+        let results = t.captured::<LoginResult>();
         assert_eq!(results.len(), 1);
         assert!(!results[0].success, "login result should be failure");
         assert!(
@@ -331,43 +313,31 @@ mod tests {
 
     #[test]
     fn logout_requested_emits_logout_and_result() {
-        let (mut bus, _api) = make();
-        let logouts: Arc<Mutex<Vec<Logout>>> = Arc::new(Mutex::new(Vec::new()));
-        let l = Arc::clone(&logouts);
-        bus.subscribe(move |ev: &Logout| {
-            l.lock().unwrap().push(ev.clone());
-            Ok(())
-        });
-
-        bus.send(LogoutRequested).unwrap();
-        bus.iter().unwrap();
-
-        assert_eq!(logouts.lock().unwrap().len(), 1, "expected Logout event");
+        let mut b = EventTester::builder();
+        b.capture::<Logout>();
+        b.add(AuthModule::new(
+            b.api(),
+            "test-device".into(),
+            "test-platform".into(),
+        ));
+        let mut t = b.build();
+        t.emit(1, LogoutRequested);
+        assert_eq!(t.captured::<Logout>().len(), 1, "expected Logout event");
     }
 
     #[test]
     fn status_request_emits_auth_partial_status() {
-        let (mut bus, _api) = make();
-        let partials: Arc<Mutex<Vec<PartialStatus>>> = Arc::new(Mutex::new(Vec::new()));
-        let p = Arc::clone(&partials);
-        bus.subscribe(move |ev: &PartialStatus| {
-            p.lock().unwrap().push(ev.clone());
-            Ok(())
-        });
-
-        bus.send(StatusRequest).unwrap();
-        bus.iter().unwrap();
-
-        let p = partials.lock().unwrap();
-        assert!(
-            p.iter().any(|s| matches!(
-                s,
-                PartialStatus::Auth {
-                    is_authenticated: false,
-                    ..
-                }
-            )),
-            "expected unauthenticated PartialStatus::Auth"
-        );
+        let mut b = EventTester::builder();
+        b.add(AuthModule::new(
+            b.api(),
+            "test-device".into(),
+            "test-platform".into(),
+        ));
+        let mut t = b.build();
+        t.emit(1, StatusRequest);
+        t.assert_like::<PartialStatus>(crate::like!(PartialStatus::Auth {
+            is_authenticated: false,
+            ..
+        }));
     }
 }

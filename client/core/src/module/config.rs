@@ -69,19 +69,19 @@ impl Observer for ConfigModule {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
+    use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::Duration;
 
-    use super::ConfigChanged;
-    use super::*;
-    use crate::events::bus::{EventBus, Observer, StateType};
+    use super::{ConfigChanged, ConfigModule};
+    use crate::config::Config;
+    use crate::events::Ping;
+    use crate::testing::EventTester;
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
 
     #[test]
     fn config_module_emits_config_changed_on_ping_when_override_changes_interval() {
-        use std::fs;
-        use std::sync::atomic::{AtomicU64, Ordering};
-
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
             "virtue-config-test-{}-{}",
             std::process::id(),
@@ -100,57 +100,23 @@ mod tests {
             Duration::from_secs(3600),
         );
 
-        let config_module = ConfigModule::new(config);
-
-        let received = Arc::new(Mutex::new(Vec::<ConfigChanged>::new()));
-        struct Capture {
-            received: Arc<Mutex<Vec<ConfigChanged>>>,
-        }
-        impl Observer for Capture {
-            fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-                self
-            }
-            fn init(&mut self, bus: &mut EventBus, _state: StateType) -> CoreResult<()> {
-                let r = Arc::clone(&self.received);
-                bus.subscribe(move |ev: &ConfigChanged| {
-                    r.lock().unwrap().push(ev.clone());
-                    Ok(())
-                });
-                Ok(())
-            }
-            fn save(&self) -> CoreResult<StateType> {
-                Ok(StateType::Null)
-            }
-            fn name(&self) -> &'static str {
-                "capture"
-            }
-        }
-
-        let mut bus = EventBus::new(
-            vec![
-                Box::new(config_module),
-                Box::new(Capture {
-                    received: Arc::clone(&received),
-                }),
-            ],
-            StateType::Null,
-        )
-        .unwrap();
+        let mut b = EventTester::builder();
+        b.capture::<ConfigChanged>();
+        b.add(ConfigModule::new(config));
+        let mut t = b.build();
 
         // No override yet: ping should not emit ConfigChanged
-        bus.send(Ping).unwrap();
-        bus.iter().unwrap();
+        t.emit(1, Ping);
         assert!(
-            received.lock().unwrap().is_empty(),
+            t.captured::<ConfigChanged>().is_empty(),
             "no change expected before override file exists"
         );
 
         // Write override with new screenshot interval
         fs::write(&override_file, r#"{"capture_interval_seconds": 15}"#).unwrap();
-        bus.send(Ping).unwrap();
-        bus.iter().unwrap();
+        t.emit(2, Ping);
 
-        let events = received.lock().unwrap();
+        let events = t.captured::<ConfigChanged>();
         assert_eq!(events.len(), 1, "expected one ConfigChanged after override");
         assert_eq!(
             events[0].screenshot_interval_ms, 15_000,

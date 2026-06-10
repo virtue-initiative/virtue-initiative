@@ -378,16 +378,13 @@ fn batch_recipients(settings: &DeviceSettings) -> CoreResult<Vec<BatchRecipient>
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
-
-    use super::Upload;
-    use super::UploadModule;
-    use crate::events::bus::{EventBus, StateType};
-    use crate::model::PartialStatus;
-    use crate::model::{BatchRecipient, DeviceCredentials, DeviceSettings, LogEntry, UploadKind};
+    use super::{Upload, UploadModule};
+    use crate::model::{
+        BatchRecipient, DeviceCredentials, DeviceSettings, LogEntry, PartialStatus, UploadKind,
+    };
     use crate::module::auth::{Login, Logout};
     use crate::module::status::StatusRequest;
-    use crate::testing::{MockApiClient, TestPlatformHooks};
+    use crate::testing::{EventTester, MockApiClient};
 
     fn valid_credentials() -> DeviceCredentials {
         DeviceCredentials {
@@ -420,43 +417,36 @@ mod tests {
 
     #[test]
     fn upload_when_unauthenticated_is_silently_ignored() {
-        let api = MockApiClient::new();
-        let platform = TestPlatformHooks::new();
-        let module = UploadModule::new(Box::new(platform), api.clone(), 60_000);
-        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
-        bus.send(Upload {
-            risk: 0.0,
-            kind: UploadKind::Dev {
-                title: "ignored".into(),
-                details: None,
+        let mut b = EventTester::builder();
+        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
+        let mut t = b.build();
+        t.emit(
+            1,
+            Upload {
+                risk: 0.0,
+                kind: UploadKind::Dev {
+                    title: "ignored".into(),
+                    details: None,
+                },
             },
-        })
-        .unwrap();
-        bus.iter().unwrap();
-        assert!(api.state().hash_uploads.is_empty());
-        let m = bus
-            .observer_mut("upload")
-            .unwrap()
-            .as_any_mut()
-            .downcast_mut::<UploadModule<MockApiClient>>()
-            .unwrap();
-        assert_eq!(m.state.pending_hash_events.len(), 0);
+        );
+        assert!(t.api.state().hash_uploads.is_empty());
+        assert_eq!(
+            t.observer::<UploadModule<MockApiClient>>()
+                .state
+                .pending_hash_events
+                .len(),
+            0
+        );
     }
 
     #[test]
     fn login_sets_authenticated_credentials_and_settings() {
-        let api = MockApiClient::new();
-        let platform = TestPlatformHooks::new();
-        let module = UploadModule::new(Box::new(platform), api, 60_000);
-        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
-        bus.send(login_event()).unwrap();
-        bus.iter().unwrap();
-        let m = bus
-            .observer_mut("upload")
-            .unwrap()
-            .as_any_mut()
-            .downcast_mut::<UploadModule<MockApiClient>>()
-            .unwrap();
+        let mut b = EventTester::builder();
+        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
+        let mut t = b.build();
+        t.emit(1, login_event());
+        let m = t.observer::<UploadModule<MockApiClient>>();
         assert!(
             m.state.settings.is_some(),
             "login should set device settings"
@@ -470,20 +460,12 @@ mod tests {
 
     #[test]
     fn logout_clears_authenticated_state() {
-        let api = MockApiClient::new();
-        let platform = TestPlatformHooks::new();
-        let module = UploadModule::new(Box::new(platform), api, 60_000);
-        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
-        bus.send(login_event()).unwrap();
-        bus.iter().unwrap();
-        bus.send(Logout).unwrap();
-        bus.iter().unwrap();
-        let m = bus
-            .observer_mut("upload")
-            .unwrap()
-            .as_any_mut()
-            .downcast_mut::<UploadModule<MockApiClient>>()
-            .unwrap();
+        let mut b = EventTester::builder();
+        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
+        let mut t = b.build();
+        t.emit(1, login_event());
+        t.emit(1, Logout);
+        let m = t.observer::<UploadModule<MockApiClient>>();
         assert!(m.state.settings.is_none(), "logout should clear settings");
         assert!(
             m.state.device_credentials.is_none(),
@@ -501,26 +483,11 @@ mod tests {
 
     #[test]
     fn status_request_emits_pending_request_count() {
-        let api = MockApiClient::new();
-        let platform = TestPlatformHooks::new();
-        platform.clock.set(1_000);
-        let module = UploadModule::new(Box::new(platform), api, 60_000);
-
-        let partials: Arc<Mutex<Vec<PartialStatus>>> = Arc::new(Mutex::new(Vec::new()));
-        let p = Arc::clone(&partials);
-        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
-        bus.subscribe(move |ev: &PartialStatus| {
-            p.lock().unwrap().push(ev.clone());
-            Ok(())
-        });
-
+        let mut b = EventTester::builder();
+        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
+        let mut t = b.build();
         {
-            let m = bus
-                .observer_mut("upload")
-                .unwrap()
-                .as_any_mut()
-                .downcast_mut::<UploadModule<MockApiClient>>()
-                .unwrap();
+            let m = t.observer::<UploadModule<MockApiClient>>();
             m.authenticated = true;
             m.state.device_credentials = Some(valid_credentials());
             m.state.post_login_proof_batches_remaining = 0;
@@ -535,19 +502,9 @@ mod tests {
             });
             m.state.pending_batch_events.push((500, vec![1, 2, 3]));
         }
-
-        bus.send(StatusRequest).unwrap();
-        bus.iter().unwrap();
-
-        let p = partials.lock().unwrap();
-        assert!(
-            p.iter().any(|s| matches!(
-                s,
-                PartialStatus::Upload {
-                    pending_request_count: 2,
-                }
-            )),
-            "expected PartialStatus::Upload with pending_request_count=2"
-        );
+        t.emit(1, StatusRequest);
+        t.assert_like::<PartialStatus>(crate::like!(PartialStatus::Upload {
+            pending_request_count: 2,
+        }));
     }
 }

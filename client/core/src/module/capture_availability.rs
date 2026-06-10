@@ -72,54 +72,37 @@ impl Observer for CaptureAvailabilityModule {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
-
     use super::CaptureAvailabilityModule;
-    use crate::events::bus::{EventBus, StateType};
     use crate::model::UploadKind;
     use crate::module::screenshot::CaptureFailed;
     use crate::module::upload::Upload;
-    use crate::testing::TestPlatformHooks;
-
-    fn make(ts: i64) -> (EventBus, Arc<Mutex<Vec<Upload>>>) {
-        let platform = TestPlatformHooks::new();
-        platform.clock.set(ts);
-        let module = CaptureAvailabilityModule::new(Box::new(platform));
-        let uploads: Arc<Mutex<Vec<Upload>>> = Arc::new(Mutex::new(Vec::new()));
-        let u = Arc::clone(&uploads);
-        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
-        bus.subscribe(move |ev: &Upload| {
-            u.lock().unwrap().push(ev.clone());
-            Ok(())
-        });
-        (bus, uploads)
-    }
+    use crate::testing::EventTester;
 
     #[test]
     fn four_failures_below_threshold_no_upload() {
-        let (mut bus, uploads) = make(1_000);
+        let mut b = EventTester::builder();
+        b.add(CaptureAvailabilityModule::new(Box::new(b.platform())));
+        let mut t = b.build();
         for _ in 0..4 {
-            bus.send(CaptureFailed).unwrap();
+            t.emit(1, CaptureFailed);
         }
-        bus.iter().unwrap();
         assert!(
-            uploads.lock().unwrap().is_empty(),
+            t.captured::<Upload>().is_empty(),
             "4 failures should not trigger an upload"
         );
     }
 
     #[test]
     fn fifth_failure_triggers_capture_failed_upload() {
-        let (mut bus, uploads) = make(1_000);
+        let mut b = EventTester::builder();
+        b.add(CaptureAvailabilityModule::new(Box::new(b.platform())));
+        let mut t = b.build();
         for _ in 0..5 {
-            bus.send(CaptureFailed).unwrap();
+            t.emit(1, CaptureFailed);
         }
-        bus.iter().unwrap();
-        let u = uploads.lock().unwrap();
-        assert!(
-            u.iter()
-                .any(|e| matches!(e.kind, UploadKind::CaptureFailed)),
-            "5 failures should trigger a CaptureFailed upload"
-        );
+        t.assert_like(crate::like!(Upload {
+            kind: UploadKind::CaptureFailed,
+            ..
+        }));
     }
 }
