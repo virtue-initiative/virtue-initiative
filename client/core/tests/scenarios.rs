@@ -7,13 +7,12 @@
 //! Run with:
 //!   cargo test -p virtue-core --features testing --test scenarios
 
-use virtue_core::events::types::{
-    CaptureFailed, ComputerResumed, ComputerSuspended, LogoutRequested, ProcessStarted,
-    ProcessStopped, Upload,
-};
 use virtue_core::module::lifecycle::{LifecycleObserverState, LifecycleStatus};
 use virtue_core::testing::Scenario;
-use virtue_core::{ProcessStoppedReason, UploadKind};
+use virtue_core::{
+    CaptureFailed, ComputerResumed, ComputerSuspended, LogoutRequested, ProcessStarted,
+    ProcessStopped, ProcessStoppedReason, Upload, UploadKind,
+};
 
 // ── Basic unauthenticated loop ────────────────────────────────────────────────
 
