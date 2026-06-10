@@ -61,6 +61,7 @@ pub enum LifecycleKind {
 #[serde(rename_all = "snake_case")]
 pub enum AlertReason {
     ProcessKilledBeforeShutdown,
+    ForceKilledBeforeShutdown,
     UserStoppedProcess,
     UnexpectedProcessStart,
     PingGapWhileRunning,

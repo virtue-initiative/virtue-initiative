@@ -10,10 +10,10 @@ use objc2::rc::autoreleasepool;
 use objc2_app_kit::{NSWorkspace, NSWorkspaceWillPowerOffNotification};
 use tokio::sync::mpsc;
 use virtue_core::{
-    ComputerResumed, ComputerSuspended, EventBus, EventError, FlushBatchNow, IpcListener,
-    LoginRequested, LoginResult, Logout, LogoutRequested, LogoutResult, Ping, ProcessStarted,
-    ProcessStopped, ProcessStoppedReason, RemoteEventBus, RemoteSender, StatusRequest,
-    StatusResponse, UserSessionLogin, UserSessionLogout, UserStopRequested,
+    ComputerResumed, ComputerSuspended, EventBus, EventChannel, EventError, FlushBatchNow,
+    IpcListener, LoginRequested, LoginResult, Logout, LogoutRequested, LogoutResult, Ping,
+    ProcessStarted, ProcessStopped, ProcessStoppedReason, RemoteEventBus, RemoteSender,
+    StatusRequest, StatusResponse, UserSessionLogin, UserSessionLogout, UserStopRequested,
     build_default_modules_reqwest, load_state, store_state,
 };
 

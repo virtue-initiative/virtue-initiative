@@ -365,7 +365,7 @@ fn stop_monitoring(paths: &ClientPaths) -> Result<bool> {
     }
 
     let sock = paths.state_dir.join("daemon.sock");
-    let mut client =
+    let client =
         ClientController::connect(&sock).context("failed to connect to daemon (is it running?)")?;
     client
         .request_user_stop("tray_stop_monitoring")

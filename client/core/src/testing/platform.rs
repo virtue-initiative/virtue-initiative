@@ -17,6 +17,8 @@ struct TestPlatformInner {
     queued_screenshots: VecDeque<CoreResult<Screenshot>>,
     take_call_count: u64,
     default_screenshot: Screenshot,
+    last_shutdown_time_ms: Option<i64>,
+    last_startup_time_ms: Option<i64>,
 }
 
 impl TestPlatformHooks {
@@ -31,6 +33,8 @@ impl TestPlatformHooks {
                 queued_screenshots: VecDeque::new(),
                 take_call_count: 0,
                 default_screenshot: tiny_png_screenshot(),
+                last_shutdown_time_ms: None,
+                last_startup_time_ms: None,
             })),
         }
     }
@@ -45,6 +49,14 @@ impl TestPlatformHooks {
 
     pub fn take_call_count(&self) -> u64 {
         self.lock().take_call_count
+    }
+
+    pub fn set_last_shutdown_time(&self, ms: Option<i64>) {
+        self.lock().last_shutdown_time_ms = ms;
+    }
+
+    pub fn set_last_startup_time(&self, ms: Option<i64>) {
+        self.lock().last_startup_time_ms = ms;
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, TestPlatformInner> {
@@ -74,11 +86,11 @@ impl ScreenshotHooks for TestPlatformHooks {
     }
 
     fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>> {
-        Ok(None)
+        Ok(self.lock().last_shutdown_time_ms)
     }
 
     fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
-        Ok(None)
+        Ok(self.lock().last_startup_time_ms)
     }
 }
 

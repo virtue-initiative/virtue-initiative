@@ -129,7 +129,8 @@ impl LifecycleModule {
     fn handle_process_started(&mut self, emitter: &Emitter) -> CoreResult<()> {
         let now_ms = self.platform.get_time_utc_ms()?;
         let startup_time_ms = self.platform.get_last_startup_time_utc_ms()?;
-        let last_shutdown = if self.state.last_process_stopped_other > 0 {
+        let last_shutdown = if self.state.last_process_stopped_other > 0 || self.state.last_ping > 0
+        {
             self.compute_last_shutdown()?
         } else {
             0
@@ -155,6 +156,23 @@ impl LifecycleModule {
                 risk: 0.5,
                 kind: UploadKind::LifecycleAlert {
                     reason: AlertReason::ProcessKilledBeforeShutdown,
+                },
+            });
+        }
+
+        // Detect force kill: process was actively pinging but disappeared without any
+        // ProcessStopped event, and the computer then shut down 30+ s after the last ping.
+        if last_shutdown > 0
+            && old.last_ping > 0
+            && old.last_ping >= old.last_process_started
+            && old.last_ping > old.last_process_stopped_other
+            && old.last_ping > old.last_process_stopped_user
+            && last_shutdown - old.last_ping > 30_000
+        {
+            let _ = emitter.send(Upload {
+                risk: HIGH_RISK_LIFECYCLE_ALERT,
+                kind: UploadKind::LifecycleAlert {
+                    reason: AlertReason::ForceKilledBeforeShutdown,
                 },
             });
         }
@@ -382,17 +400,18 @@ mod tests {
         ComputerResumed, ComputerSuspended, ProcessStarted, ProcessStopped, UserSessionLogin,
         UserSessionLogout,
     };
-    use super::{LifecycleModule, LifecycleStatus};
+    use super::{LifecycleModule, LifecycleObserverState, LifecycleStatus};
     use crate::events::Ping;
     use crate::events::bus::{EventBus, StateType};
     use crate::model::PartialStatus;
     use crate::model::{AlertReason, LifecycleKind, ProcessStoppedReason, UploadKind};
     use crate::module::status::StatusRequest;
     use crate::module::upload::Upload;
-    use crate::testing::TestPlatformHooks;
+    use crate::testing::{MockClock, TestPlatformHooks};
 
     type BusWithCapture = (
         EventBus,
+        MockClock,
         Arc<Mutex<Vec<Upload>>>,
         Arc<Mutex<Vec<PartialStatus>>>,
     );
@@ -400,6 +419,7 @@ mod tests {
     fn make(ts: i64) -> BusWithCapture {
         let platform = TestPlatformHooks::new();
         platform.clock.set(ts);
+        let clock = platform.clock.clone();
         let module = LifecycleModule::new(Box::new(platform));
         let uploads: Arc<Mutex<Vec<Upload>>> = Arc::new(Mutex::new(Vec::new()));
         let partials: Arc<Mutex<Vec<PartialStatus>>> = Arc::new(Mutex::new(Vec::new()));
@@ -414,12 +434,22 @@ mod tests {
             p.lock().unwrap().push(ev.clone());
             Ok(())
         });
-        (bus, uploads, partials)
+        (bus, clock, uploads, partials)
+    }
+
+    fn get_state(bus: &mut EventBus) -> LifecycleObserverState {
+        bus.observer_mut("lifecycle")
+            .unwrap()
+            .as_any_mut()
+            .downcast_mut::<LifecycleModule>()
+            .unwrap()
+            .state
+            .clone()
     }
 
     #[test]
     fn status_request_emits_lifecycle_partial_status() {
-        let (mut bus, _, partials) = make(1_000);
+        let (mut bus, _clock, _, partials) = make(1_000);
         bus.send(StatusRequest).unwrap();
         bus.iter().unwrap();
         let p = partials.lock().unwrap();
@@ -432,7 +462,7 @@ mod tests {
 
     #[test]
     fn process_started_emits_lifecycle_upload() {
-        let (mut bus, uploads, _) = make(1_000);
+        let (mut bus, _clock, uploads, _) = make(1_000);
         bus.send(ProcessStarted).unwrap();
         bus.iter().unwrap();
         let u = uploads.lock().unwrap();
@@ -445,11 +475,15 @@ mod tests {
             )),
             "expected ProcessStarted lifecycle upload"
         );
+        drop(u);
+        let s = get_state(&mut bus);
+        assert_eq!(s.last_process_started, 1_000);
+        assert_eq!(s.last_running_started, 1_000);
     }
 
     #[test]
     fn process_stopped_shutdown_emits_upload() {
-        let (mut bus, uploads, _) = make(2_000);
+        let (mut bus, _clock, uploads, _) = make(2_000);
         bus.send(ProcessStopped(ProcessStoppedReason::Shutdown))
             .unwrap();
         bus.iter().unwrap();
@@ -463,11 +497,14 @@ mod tests {
             )),
             "expected ProcessStoppedShutdown lifecycle upload"
         );
+        drop(u);
+        let s = get_state(&mut bus);
+        assert_eq!(s.last_process_stopped_shutdown, 2_000);
     }
 
     #[test]
     fn process_stopped_user_emits_upload_and_high_risk_alert() {
-        let (mut bus, uploads, _) = make(4_000);
+        let (mut bus, _clock, uploads, _) = make(4_000);
         bus.send(ProcessStopped(ProcessStoppedReason::User))
             .unwrap();
         bus.iter().unwrap();
@@ -491,11 +528,14 @@ mod tests {
         });
         assert!(alert.is_some(), "expected UserStoppedProcess alert");
         assert!(alert.unwrap().risk >= 0.9, "alert should be high risk");
+        drop(u);
+        let s = get_state(&mut bus);
+        assert_eq!(s.last_process_stopped_user, 4_000);
     }
 
     #[test]
     fn computer_suspended_emits_upload() {
-        let (mut bus, uploads, _) = make(5_000);
+        let (mut bus, _clock, uploads, _) = make(5_000);
         bus.send(ComputerSuspended).unwrap();
         bus.iter().unwrap();
         let u = uploads.lock().unwrap();
@@ -508,14 +548,19 @@ mod tests {
             )),
             "expected ComputerSuspended lifecycle upload"
         );
+        drop(u);
+        let s = get_state(&mut bus);
+        assert!(matches!(s.status, LifecycleStatus::Suspended));
+        assert_eq!(s.last_computer_suspend, 5_000);
     }
 
     #[test]
     fn computer_resumed_after_suspend_emits_upload() {
-        let (mut bus, uploads, _) = make(6_000);
+        let (mut bus, clock, uploads, _) = make(6_000);
         bus.send(ComputerSuspended).unwrap();
         bus.iter().unwrap();
         uploads.lock().unwrap().clear();
+        clock.advance(1_000);
         bus.send(ComputerResumed).unwrap();
         bus.iter().unwrap();
         let u = uploads.lock().unwrap();
@@ -528,24 +573,29 @@ mod tests {
             )),
             "expected ComputerResumed lifecycle upload"
         );
+        drop(u);
+        let s = get_state(&mut bus);
+        assert!(matches!(s.status, LifecycleStatus::Running));
+        assert_eq!(s.last_computer_resume, 7_000);
+        assert_eq!(s.last_running_started, 7_000);
     }
 
     #[test]
     fn fourth_ping_while_suspended_triggers_missing_resume_alert() {
-        let platform = TestPlatformHooks::new();
-        platform.clock.set(1_000);
-        let mut module = LifecycleModule::new(Box::new(platform));
-        module.state.status = LifecycleStatus::Suspended;
-        module.state.pings_while_suspended = 3;
+        let (mut bus, _clock, uploads, _) = make(1_000);
+        bus.send(ComputerSuspended).unwrap();
+        bus.iter().unwrap();
+        uploads.lock().unwrap().clear();
 
-        let uploads: Arc<Mutex<Vec<Upload>>> = Arc::new(Mutex::new(Vec::new()));
-        let u = Arc::clone(&uploads);
-        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
-        bus.subscribe(move |ev: &Upload| {
-            u.lock().unwrap().push(ev.clone());
-            Ok(())
-        });
+        // 3 pings — counter increments to 3 but stays below the >3 threshold
+        for _ in 0..3 {
+            bus.send(Ping).unwrap();
+            bus.iter().unwrap();
+        }
+        assert_eq!(get_state(&mut bus).pings_while_suspended, 3);
+        uploads.lock().unwrap().clear();
 
+        // 4th ping pushes counter past threshold, fires MissingResume and auto-sends ComputerResumed
         bus.send(Ping).unwrap();
         bus.iter().unwrap();
 
@@ -559,11 +609,21 @@ mod tests {
             )),
             "expected MissingResume alert on 4th ping while suspended"
         );
+        drop(u);
+        let s = get_state(&mut bus);
+        assert_eq!(
+            s.pings_while_suspended, 0,
+            "counter should reset after alert"
+        );
+        assert!(
+            matches!(s.status, LifecycleStatus::Running),
+            "auto-sent ComputerResumed should restore Running status"
+        );
     }
 
     #[test]
     fn session_login_emits_lifecycle_upload() {
-        let (mut bus, uploads, _) = make(1_000);
+        let (mut bus, _clock, uploads, _) = make(1_000);
         bus.send(UserSessionLogin).unwrap();
         bus.iter().unwrap();
         let u = uploads.lock().unwrap();
@@ -576,11 +636,14 @@ mod tests {
             )),
             "expected Login lifecycle upload"
         );
+        drop(u);
+        let s = get_state(&mut bus);
+        assert_eq!(s.last_login, 1_000);
     }
 
     #[test]
     fn session_logout_emits_high_risk_lifecycle_upload() {
-        let (mut bus, uploads, _) = make(1_000);
+        let (mut bus, _clock, uploads, _) = make(1_000);
         bus.send(UserSessionLogout).unwrap();
         bus.iter().unwrap();
         let u = uploads.lock().unwrap();
@@ -601,21 +664,18 @@ mod tests {
 
     #[test]
     fn ping_gap_while_running_emits_high_risk_alert() {
-        let platform = TestPlatformHooks::new();
-        platform.clock.set(100_000);
-        let mut module = LifecycleModule::new(Box::new(platform));
-        module.state.last_login = 0;
-        module.state.last_ping = 1_000;
-        module.state.last_running_started = 1_000;
+        let (mut bus, clock, uploads, _) = make(1_000);
+        // ProcessStarted initialises last_running_started; first Ping seeds last_ping.
+        // Both happen within the 60 s login grace window so no spurious alerts fire.
+        bus.send(ProcessStarted).unwrap();
+        bus.iter().unwrap();
+        bus.send(Ping).unwrap();
+        bus.iter().unwrap();
+        assert_eq!(get_state(&mut bus).last_ping, 1_000);
+        uploads.lock().unwrap().clear();
 
-        let uploads: Arc<Mutex<Vec<Upload>>> = Arc::new(Mutex::new(Vec::new()));
-        let u = Arc::clone(&uploads);
-        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
-        bus.subscribe(move |ev: &Upload| {
-            u.lock().unwrap().push(ev.clone());
-            Ok(())
-        });
-
+        // Jump forward past both the 60 s login grace and the 10 s ping-gap threshold
+        clock.set(100_000);
         bus.send(Ping).unwrap();
         bus.iter().unwrap();
 
@@ -633,25 +693,27 @@ mod tests {
             alert.unwrap().risk >= 0.9,
             "ping gap alert should be high risk"
         );
+        drop(u);
+        assert_eq!(get_state(&mut bus).last_ping, 100_000);
     }
 
     #[test]
     fn ping_within_login_grace_period_does_not_emit_alert() {
-        let platform = TestPlatformHooks::new();
-        platform.clock.set(30_000);
-        let mut module = LifecycleModule::new(Box::new(platform));
-        module.state.last_login = 20_000;
-        module.state.last_ping = 1_000;
-        module.state.last_running_started = 1_000;
+        let (mut bus, clock, uploads, _) = make(1_000);
+        // Establish last_running_started and last_ping at t=1_000
+        bus.send(ProcessStarted).unwrap();
+        bus.iter().unwrap();
+        bus.send(Ping).unwrap();
+        bus.iter().unwrap();
+        uploads.lock().unwrap().clear();
 
-        let uploads: Arc<Mutex<Vec<Upload>>> = Arc::new(Mutex::new(Vec::new()));
-        let u = Arc::clone(&uploads);
-        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
-        bus.subscribe(move |ev: &Upload| {
-            u.lock().unwrap().push(ev.clone());
-            Ok(())
-        });
+        // User logs in at t=20_000; next ping at t=30_000 is within the 60 s grace window
+        clock.set(20_000);
+        bus.send(UserSessionLogin).unwrap();
+        bus.iter().unwrap();
+        assert_eq!(get_state(&mut bus).last_login, 20_000);
 
+        clock.set(30_000);
         bus.send(Ping).unwrap();
         bus.iter().unwrap();
 
@@ -669,20 +731,24 @@ mod tests {
 
     #[test]
     fn process_killed_before_shutdown_emits_alert() {
-        let platform = TestPlatformHooks::new();
-        platform.clock.set(20_000);
-        let mut module = LifecycleModule::new(Box::new(platform));
-        module.state.last_process_stopped_other = 1_000;
-        module.state.last_process_stopped_shutdown = 12_000;
+        let (mut bus, clock, uploads, _) = make(1_000);
+        // Process starts, then is killed unexpectedly (Other), then the computer shuts down cleanly
+        bus.send(ProcessStarted).unwrap();
+        bus.iter().unwrap();
+        bus.send(ProcessStopped(ProcessStoppedReason::Other))
+            .unwrap();
+        bus.iter().unwrap();
+        assert_eq!(get_state(&mut bus).last_process_stopped_other, 1_000);
 
-        let uploads: Arc<Mutex<Vec<Upload>>> = Arc::new(Mutex::new(Vec::new()));
-        let u = Arc::clone(&uploads);
-        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
-        bus.subscribe(move |ev: &Upload| {
-            u.lock().unwrap().push(ev.clone());
-            Ok(())
-        });
+        clock.set(12_000);
+        bus.send(ProcessStopped(ProcessStoppedReason::Shutdown))
+            .unwrap();
+        bus.iter().unwrap();
+        assert_eq!(get_state(&mut bus).last_process_stopped_shutdown, 12_000);
+        uploads.lock().unwrap().clear();
 
+        // On the next start the gap (12_000 - 1_000 = 11_000 ms) exceeds the 10 s threshold
+        clock.set(20_000);
         bus.send(ProcessStarted).unwrap();
         bus.iter().unwrap();
 
@@ -699,31 +765,158 @@ mod tests {
     }
 
     #[test]
-    fn state_round_trips_through_save_and_load() {
+    fn force_killed_process_with_platform_shutdown_emits_high_risk_alert() {
+        // Scenario (all times in ms):
+        //   01_000  ProcessStarted  (run 1)
+        //   02_000  Ping, Ping      (run 1 active)
+        //   10_000  ProcessStopped(Other)  (run 1 killed)
+        //   12_000  ProcessStarted  (run 2)
+        //   13–15k  Ping, Ping, Ping  (run 2 active)
+        //   [20_000 force-killed — no event]
+        //   [70_000 computer shuts down — detected only via platform hook]
+        //   [100_000 computer boots]
+        //   110_000 ProcessStarted  (run 3) → should emit high-risk alert
+
+        // Build bus manually so we can keep a handle to the platform after boxing.
         let platform = TestPlatformHooks::new();
         platform.clock.set(1_000);
-        let mut module = LifecycleModule::new(Box::new(platform));
-        module.state.last_login = 42_000;
-        module.state.last_ping = 99_000;
-        module.state.pings_while_suspended = 2;
-        module.state.last_running_started = 55_000;
+        let clock = platform.clock.clone();
+        let platform_handle = platform.clone();
 
-        let bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
+        let uploads: Arc<Mutex<Vec<Upload>>> = Arc::new(Mutex::new(Vec::new()));
+        let u_ref = Arc::clone(&uploads);
+        let module = LifecycleModule::new(Box::new(platform));
+        let mut bus = EventBus::new(vec![Box::new(module)], StateType::Null).unwrap();
+        bus.subscribe(move |ev: &Upload| {
+            u_ref.lock().unwrap().push(ev.clone());
+            Ok(())
+        });
+
+        // Run 1
+        bus.send(ProcessStarted).unwrap();
+        bus.iter().unwrap();
+        for t in [2_000i64, 3_000] {
+            clock.set(t);
+            bus.send(Ping).unwrap();
+            bus.iter().unwrap();
+        }
+        clock.set(10_000);
+        bus.send(ProcessStopped(ProcessStoppedReason::Other))
+            .unwrap();
+        bus.iter().unwrap();
+        assert_eq!(get_state(&mut bus).last_process_stopped_other, 10_000);
+
+        // Run 2 — process starts, pings, then is force-killed (no ProcessStopped event)
+        clock.set(12_000);
+        bus.send(ProcessStarted).unwrap();
+        bus.iter().unwrap();
+        for t in [13_000i64, 14_000, 15_000] {
+            clock.set(t);
+            bus.send(Ping).unwrap();
+            bus.iter().unwrap();
+        }
+        assert_eq!(get_state(&mut bus).last_ping, 15_000);
+        assert_eq!(
+            get_state(&mut bus).last_process_stopped_shutdown,
+            0,
+            "no shutdown recorded yet"
+        );
+
+        // Computer shuts down at t=70_000 (55 s after last ping), boots at t=100_000.
+        // Only the platform hook carries this information — no events were sent.
+        platform_handle.set_last_shutdown_time(Some(70_000));
+        platform_handle.set_last_startup_time(Some(100_000));
+        uploads.lock().unwrap().clear();
+
+        // Run 3 — process starts; lifecycle should detect the force-kill gap
+        clock.set(110_000);
+        bus.send(ProcessStarted).unwrap();
+        bus.iter().unwrap();
+
+        let u = uploads.lock().unwrap();
+        let alert = u.iter().find(|e| {
+            matches!(
+                e.kind,
+                UploadKind::LifecycleAlert {
+                    reason: AlertReason::ForceKilledBeforeShutdown
+                }
+            )
+        });
+        assert!(
+            alert.is_some(),
+            "expected ForceKilledBeforeShutdown alert (55 s gap between last ping and shutdown)"
+        );
+        assert!(alert.unwrap().risk >= 0.9, "alert should be high risk");
+
+        // The backfill path should emit a ProcessStoppedShutdown upload for the missing event
+        assert!(
+            u.iter().any(|e| matches!(
+                e.kind,
+                UploadKind::Lifecycle {
+                    kind: LifecycleKind::ProcessStoppedShutdown
+                }
+            )),
+            "expected backfilled ProcessStoppedShutdown upload"
+        );
+        // UnexpectedProcessStart should be suppressed: boot was only 10 s ago
+        assert!(
+            !u.iter().any(|e| matches!(
+                e.kind,
+                UploadKind::LifecycleAlert {
+                    reason: AlertReason::UnexpectedProcessStart
+                }
+            )),
+            "UnexpectedProcessStart should be suppressed by fresh-boot guard"
+        );
+        drop(u);
+
+        let s = get_state(&mut bus);
+        assert_eq!(
+            s.last_process_stopped_shutdown, 70_000,
+            "shutdown time should be backfilled into state"
+        );
+    }
+
+    #[test]
+    fn state_round_trips_through_save_and_load() {
+        let (mut bus, clock, _, _) = make(30_000);
+        // Build up recognisable state entirely through events
+        bus.send(UserSessionLogin).unwrap(); // last_login = 30_000
+        bus.iter().unwrap();
+
+        clock.set(55_000);
+        bus.send(ProcessStarted).unwrap(); // last_running_started = 55_000
+        bus.iter().unwrap();
+
+        clock.set(99_000);
+        bus.send(Ping).unwrap(); // last_ping = 99_000 (first ping, so no gap alert)
+        bus.iter().unwrap();
+
+        bus.send(ComputerSuspended).unwrap(); // status = Suspended
+        bus.iter().unwrap();
+        bus.send(Ping).unwrap(); // pings_while_suspended = 1
+        bus.iter().unwrap();
+        bus.send(Ping).unwrap(); // pings_while_suspended = 2
+        bus.iter().unwrap();
+
+        let s = get_state(&mut bus);
+        assert_eq!(s.last_login, 30_000);
+        assert_eq!(s.last_running_started, 55_000);
+        assert_eq!(s.last_ping, 99_000);
+        assert_eq!(s.pings_while_suspended, 2);
+        assert!(matches!(s.status, LifecycleStatus::Suspended));
+
         let saved = bus.save().unwrap();
 
         let platform2 = TestPlatformHooks::new();
         let module2 = LifecycleModule::new(Box::new(platform2));
         let mut bus2 = EventBus::new(vec![Box::new(module2)], saved).unwrap();
 
-        let m = bus2
-            .observer_mut("lifecycle")
-            .unwrap()
-            .as_any_mut()
-            .downcast_mut::<LifecycleModule>()
-            .unwrap();
-        assert_eq!(m.state.last_login, 42_000);
-        assert_eq!(m.state.last_ping, 99_000);
-        assert_eq!(m.state.pings_while_suspended, 2);
-        assert_eq!(m.state.last_running_started, 55_000);
+        let s2 = get_state(&mut bus2);
+        assert_eq!(s2.last_login, 30_000);
+        assert_eq!(s2.last_running_started, 55_000);
+        assert_eq!(s2.last_ping, 99_000);
+        assert_eq!(s2.pings_while_suspended, 2);
+        assert!(matches!(s2.status, LifecycleStatus::Suspended));
     }
 }
