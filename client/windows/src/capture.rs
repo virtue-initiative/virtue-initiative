@@ -275,6 +275,4 @@ impl ScreenshotHooks for WindowsPlatformHooks {
     }
 }
 
-impl PlatformHooks for WindowsPlatformHooks {
-    type CustomEvent = ();
-}
+impl PlatformHooks for WindowsPlatformHooks {}

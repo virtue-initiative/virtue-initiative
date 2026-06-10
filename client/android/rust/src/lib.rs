@@ -12,10 +12,12 @@ use jni::sys::{jboolean, jstring};
 use jni::{JNIEnv, JavaVM};
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
-use virtue_core::events::{Event, ProcessStoppedReason, Redacted};
 use virtue_core::{
-    AuthState, Config, CoreError, CoreResult, DeviceSettings, MonitorService, PlatformHooks,
-    ScreenshotHooks, Screenshot, ServiceStatus,
+    AuthState, Config, CoreError, CoreResult, DeviceSettings, EventBus, EventChannel,
+    LoginRequested, LoginResult, LogoutRequested, Ping, PlatformHooks, ProcessStarted,
+    ProcessStopped, ProcessStoppedReason, Redacted, Screenshot, ScreenshotHooks,
+    StatusRequest, StatusResponse, UserStopRequested, build_default_modules_reqwest, load_state,
+    store_state,
 };
 
 static CORE: OnceCell<AndroidCore> = OnceCell::new();
@@ -129,9 +131,7 @@ impl ScreenshotHooks for AndroidPlatformHooks {
     }
 }
 
-impl PlatformHooks for AndroidPlatformHooks {
-    type CustomEvent = ();
-}
+impl PlatformHooks for AndroidPlatformHooks {}
 
 #[no_mangle]
 pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeInit(
@@ -220,15 +220,20 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeLogin
         let password: String = env.get_string(&password)?.into();
         let device_name: String = env.get_string(&device_name)?.into();
         let core = core()?;
-        let hooks = AndroidPlatformHooks {
-            java_vm: core.java_vm.clone(),
-        };
-        let mut service = MonitorService::setup(build_core_config(core, &device_name), hooks)?;
-        service.queue_event(Event::LoginRequested { email, password: Redacted(password) });
-        service.run_event_loop_iter()?;
-        if !service.current_status().is_authenticated {
-            return Err(anyhow!("Login failed. Check your credentials and try again."));
+        let (mut bus, state_path) = build_bus(core, &device_name)?;
+        let result = bus.request::<LoginRequested, LoginResult>(LoginRequested {
+            email,
+            password: Redacted(password),
+        })?;
+        if !result.success {
+            return Err(anyhow!(
+                result
+                    .error
+                    .unwrap_or_else(|| "Login failed. Check your credentials and try again.".to_string())
+            ));
         }
+        let state = bus.iter()?;
+        store_state(&state_path, &state)?;
         Ok(())
     })();
 
@@ -242,12 +247,10 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeLogou
 ) -> jstring {
     let result = (|| -> Result<()> {
         let core = core()?;
-        let hooks = AndroidPlatformHooks {
-            java_vm: core.java_vm.clone(),
-        };
-        let mut service = MonitorService::setup(build_core_config(core, "android-device"), hooks)?;
-        service.queue_event(Event::LogoutRequested);
-        service.run_event_loop_iter()?;
+        let (mut bus, state_path) = build_bus(core, "android-device")?;
+        bus.send(LogoutRequested)?;
+        let state = bus.iter()?;
+        store_state(&state_path, &state)?;
         Ok(())
     })();
 
@@ -341,12 +344,10 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeNoteU
     let result = (|| -> Result<()> {
         let core = core()?;
         let source: String = env.get_string(&source)?.into();
-        let hooks = AndroidPlatformHooks {
-            java_vm: core.java_vm.clone(),
-        };
-        let mut service = MonitorService::setup(build_core_config(core, "android-device"), hooks)?;
-        service.queue_event(Event::UserStopRequested { source });
-        service.run_event_loop_iter()?;
+        let (mut bus, state_path) = build_bus(core, "android-device")?;
+        bus.send(UserStopRequested { source })?;
+        let state = bus.iter()?;
+        store_state(&state_path, &state)?;
         Ok(())
     })();
 
@@ -358,30 +359,46 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeGetSt
     env: JNIEnv,
     _class: JClass,
 ) -> jstring {
-    let json = core()
-        .ok()
-        .and_then(|core| {
-            let path = core.state_dir.join("status.json");
-            fs::read_to_string(&path).ok()
-        })
-        .unwrap_or_else(|| "{}".to_string());
+    let json = (|| -> Result<String> {
+        let core = core()?;
+        let (mut bus, _) = build_bus(core, "android-device")?;
+        let response = bus.request::<StatusRequest, StatusResponse>(StatusRequest)?;
+        Ok(serde_json::to_string(&response.status)?)
+    })()
+    .unwrap_or_else(|_| "{}".to_string());
 
     env.new_string(json)
         .map(|s| s.into_raw())
         .unwrap_or(std::ptr::null_mut())
 }
 
+fn build_bus(core: &AndroidCore, device: &str) -> Result<(EventBus, PathBuf)> {
+    let cfg = build_core_config(core, device);
+    let modules = build_default_modules_reqwest(
+        cfg,
+        AndroidPlatformHooks {
+            java_vm: core.java_vm.clone(),
+        },
+    )?;
+    let state_path = core.state_dir.join("event_state.json");
+    let bus = EventBus::new(modules, load_state(&state_path)?)?;
+    Ok((bus, state_path))
+}
+
 fn run_daemon_loop(core: &AndroidCore) -> Result<()> {
-    let hooks = AndroidPlatformHooks {
-        java_vm: core.java_vm.clone(),
-    };
-    let mut service = MonitorService::setup(build_core_config(core, "android-device"), hooks)?;
-    service.queue_event(Event::ProcessStarted);
-    let _ = service.run_event_loop_iter();
+    let (mut bus, state_path) = build_bus(core, "android-device")?;
+    bus.send(ProcessStarted)?;
+    let state = bus.iter()?;
+    store_state(&state_path, &state)?;
 
     while !core.stop.load(Ordering::SeqCst) {
-        let sleep_duration = match service.loop_iteration() {
-            Ok(_outcome) => LOOP_INTERVAL,
+        let sleep_duration = match (|| -> Result<()> {
+            bus.send(Ping)?;
+            let state = bus.iter()?;
+            store_state(&state_path, &state)?;
+            Ok(())
+        })() {
+            Ok(()) => LOOP_INTERVAL,
             Err(err) => {
                 eprintln!("android-daemon: {err}");
                 ERROR_RETRY_INTERVAL
@@ -390,15 +407,9 @@ fn run_daemon_loop(core: &AndroidCore) -> Result<()> {
         sleep_interruptible(&core.stop, sleep_duration);
     }
 
-    let explicit_user_stop = service.consume_user_stop_request();
-    let reason = if explicit_user_stop {
-        ProcessStoppedReason::User
-    } else {
-        ProcessStoppedReason::Other
-    };
-    service.queue_event(Event::ProcessStopped(reason));
-    let _ = service.run_event_loop_iter();
-    let _ = service.mark_stopped();
+    bus.send(ProcessStopped(ProcessStoppedReason::Other))?;
+    let state = bus.iter()?;
+    let _ = store_state(&state_path, &state);
     Ok(())
 }
 
@@ -410,7 +421,6 @@ fn sleep_interruptible(stop: &AtomicBool, duration: Duration) {
         remaining = remaining.saturating_sub(tick);
     }
 }
-
 
 fn build_core_config(core: &AndroidCore, device_name: &str) -> Config {
     Config::new(
@@ -466,8 +476,6 @@ fn parse_u64(value: &str) -> Result<u64> {
 }
 
 fn sanitize_state_dir(root: &Path) -> Result<()> {
-    sanitize_json_file::<AuthState>(root, "auth.json")?;
-    sanitize_json_file::<ServiceStatus>(root, "status.json")?;
     sanitize_json_file::<Option<DeviceSettings>>(root, "device_settings.json")?;
     Ok(())
 }

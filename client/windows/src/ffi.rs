@@ -95,7 +95,6 @@ struct MonitorStatusPayload {
     state: String,
     logged_in: bool,
     pending_request_count: usize,
-    last_screenshot_at_ms: Option<i64>,
     last_error: Option<String>,
 }
 
@@ -105,7 +104,6 @@ impl From<MonitorStatusSnapshot> for MonitorStatusPayload {
             state: value.state,
             logged_in: value.logged_in,
             pending_request_count: value.pending_request_count,
-            last_screenshot_at_ms: value.last_screenshot_at_ms,
             last_error: value.last_error,
         }
     }

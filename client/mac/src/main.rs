@@ -16,10 +16,10 @@ use tao::event::Event;
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use virtue_core::{AuthState, ControllerClient, CoreError, ServiceStatus};
+use virtue_core::{AuthState, ClientController, CoreError, ServiceStatus};
 
 use crate::capture::{
-    MacEvent, has_screen_capture_access, open_screen_capture_settings,
+    CaptureAvailabilityChanged, has_screen_capture_access, open_screen_capture_settings,
     request_screen_capture_access,
 };
 use crate::config::{ClientPaths, ClientState, build_core_config, load_state, save_state};
@@ -319,7 +319,7 @@ fn handle_main_window_event(
 fn login(paths: &ClientPaths, email: &str, password: &str) -> Result<String> {
     let sock = paths.state_dir.join("daemon.sock");
     let mut client =
-        ControllerClient::connect(&sock).context("failed to connect to daemon (is it running?)")?;
+        ClientController::connect(&sock).context("failed to connect to daemon (is it running?)")?;
     let device_id = client.login(email, password).context("login failed")?;
     save_state(
         &paths.ui_state_file,
@@ -352,7 +352,7 @@ fn login_error_message(err: &anyhow::Error) -> String {
 fn logout(paths: &ClientPaths) -> Result<()> {
     let sock = paths.state_dir.join("daemon.sock");
     let mut client =
-        ControllerClient::connect(&sock).context("failed to connect to daemon (is it running?)")?;
+        ClientController::connect(&sock).context("failed to connect to daemon (is it running?)")?;
     client.logout().context("logout failed")?;
     launch_agent::stop_agent(paths).context("failed to unregister background service")?;
     save_state(&paths.ui_state_file, &ClientState { email: None })?;
@@ -366,7 +366,7 @@ fn stop_monitoring(paths: &ClientPaths) -> Result<bool> {
 
     let sock = paths.state_dir.join("daemon.sock");
     let mut client =
-        ControllerClient::connect(&sock).context("failed to connect to daemon (is it running?)")?;
+        ClientController::connect(&sock).context("failed to connect to daemon (is it running?)")?;
     client
         .request_user_stop("tray_stop_monitoring")
         .context("failed to record stop intent")?;
@@ -397,7 +397,7 @@ fn ensure_background_service_running(paths: &ClientPaths) -> Result<()> {
 
 fn service_is_running(paths: &ClientPaths) -> Result<bool> {
     let sock = paths.state_dir.join("daemon.sock");
-    Ok(ControllerClient::connect(&sock)
+    Ok(ClientController::connect(&sock)
         .ok()
         .and_then(|mut c| c.get_status().ok())
         .map(|s| s.is_running)
@@ -481,11 +481,16 @@ fn collect_status(paths: &ClientPaths) -> Result<AppStatus> {
     let has_capture_permission = {
         let sock = paths.state_dir.join("daemon.sock");
         let mut available = false;
-        if let Ok(mut client) = ControllerClient::connect(&sock) {
-            let _ = client.get_status_with_handler::<MacEvent, _>(|ev| {
-                let MacEvent::CaptureAvailabilityChanged(a) = ev;
-                available = a;
+        if let Ok(mut controller) = ClientController::connect(&sock) {
+            let (tx, rx) = std::sync::mpsc::channel::<bool>();
+            controller.on::<CaptureAvailabilityChanged>(move |ev| {
+                tx.send(ev.0).ok();
+                Ok(())
             });
+            let _ = controller.get_status();
+            available = rx
+                .recv_timeout(std::time::Duration::from_millis(500))
+                .unwrap_or(false);
         }
         available
     };
@@ -529,7 +534,7 @@ fn read_auth_state(state_dir: &std::path::Path) -> Result<AuthState> {
 
 fn load_service_status(paths: &ClientPaths, auth: &AuthState) -> Result<ServiceStatus> {
     let sock = paths.state_dir.join("daemon.sock");
-    if let Ok(mut client) = ControllerClient::connect(&sock)
+    if let Ok(mut client) = ClientController::connect(&sock)
         && let Ok(status) = client.get_status()
     {
         return Ok(status);

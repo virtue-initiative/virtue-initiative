@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
-use virtue_core::ControllerClient;
 
 use crate::config::{ClientPaths, ClientState, load_state, save_state};
+use crate::resident_monitor;
 
 #[derive(Clone)]
 pub struct SessionManager {
@@ -24,14 +24,11 @@ impl SessionManager {
 
     pub fn status(&self) -> Result<SessionStatus> {
         let state = load_state(&self.paths.ui_state_file)?;
-        let sock = self.paths.state_dir.join("daemon.sock");
-        let service_status = ControllerClient::connect(&sock)
-            .ok()
-            .and_then(|mut c| c.get_status().ok());
+        let snapshot = resident_monitor::status_snapshot();
 
         Ok(SessionStatus {
-            logged_in: service_status.as_ref().is_some_and(|s| s.is_authenticated),
-            device_id: service_status.and_then(|s| s.device_id),
+            logged_in: snapshot.logged_in,
+            device_id: None,
             email: state.email,
         })
     }
@@ -42,10 +39,7 @@ impl SessionManager {
         password: &str,
         _device_name: &str,
     ) -> Result<String> {
-        let sock = self.paths.state_dir.join("daemon.sock");
-        let mut client = ControllerClient::connect(&sock)
-            .context("failed to connect to daemon (is monitoring running?)")?;
-        let device_id = client.login(email, password).context("login failed")?;
+        let device_id = resident_monitor::app_login(email, password).context("login failed")?;
 
         save_state(
             &self.paths.ui_state_file,
@@ -58,11 +52,7 @@ impl SessionManager {
     }
 
     pub fn logout_blocking(&self) -> Result<()> {
-        let sock = self.paths.state_dir.join("daemon.sock");
-        let mut client = ControllerClient::connect(&sock)
-            .context("failed to connect to daemon (is monitoring running?)")?;
-        client.logout().context("logout failed")?;
-
+        resident_monitor::app_logout().context("logout failed")?;
         save_state(&self.paths.ui_state_file, &ClientState { email: None })?;
         Ok(())
     }

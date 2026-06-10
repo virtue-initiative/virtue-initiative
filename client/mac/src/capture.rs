@@ -14,11 +14,9 @@ unsafe extern "C" {
     fn CGRequestScreenCaptureAccess() -> bool;
 }
 
-/// Mac-specific custom events that extend the core event set.
+/// Emitted by the daemon when macOS screen-capture permission changes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum MacEvent {
-    CaptureAvailabilityChanged(bool),
-}
+pub struct CaptureAvailabilityChanged(pub bool);
 
 pub fn capture_screen() -> Result<Vec<u8>> {
     if !has_screen_capture_access() {
@@ -143,6 +141,4 @@ impl ScreenshotHooks for MacPlatformHooks {
     }
 }
 
-impl PlatformHooks for MacPlatformHooks {
-    type CustomEvent = MacEvent;
-}
+impl PlatformHooks for MacPlatformHooks {}

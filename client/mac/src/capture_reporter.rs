@@ -1,32 +1,24 @@
 use std::any::Any;
-use std::sync::mpsc::Sender;
 
-use virtue_core::CoreResult;
-use virtue_core::events::{Event, Observer, StateType};
+use virtue_core::{CoreResult, Emitter, EventBus, Observer, Ping, StateType, StatusRequest};
 
-use crate::capture::{MacEvent, has_screen_capture_access};
+use crate::capture::{CaptureAvailabilityChanged, has_screen_capture_access};
 
 /// Observer that monitors macOS screen-capture permission availability and
-/// emits `Event::Custom(MacEvent::CaptureAvailabilityChanged)` when it changes.
-pub struct CaptureReporterObserver {
-    sender: Sender<Event<MacEvent>>,
+/// emits `CaptureAvailabilityChanged` when it changes or on `StatusRequest`.
+pub struct CaptureReporterModule {
     last_available: Option<bool>,
 }
 
-impl CaptureReporterObserver {
-    pub fn new(sender: Sender<Event<MacEvent>>) -> Self {
+impl CaptureReporterModule {
+    pub fn new() -> Self {
         Self {
-            sender,
             last_available: None,
         }
     }
 }
 
-impl Observer<MacEvent> for CaptureReporterObserver {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
+impl Observer for CaptureReporterModule {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
@@ -35,38 +27,30 @@ impl Observer<MacEvent> for CaptureReporterObserver {
         "capture_reporter"
     }
 
-    fn save_state(&self) -> CoreResult<StateType> {
-        Ok(serde_json::Value::Null)
-    }
-
-    fn load_state(&mut self, _state: StateType) -> CoreResult<()> {
+    fn init(&mut self, _bus: &mut EventBus, _state: StateType) -> CoreResult<()> {
         Ok(())
     }
 
-    fn on_event(&mut self, event: &Event<MacEvent>) -> CoreResult<()> {
-        match event {
-            Event::Ping => {
+    fn on_event(&mut self, event: &dyn Any, emitter: &Emitter) -> CoreResult<()> {
+        virtue_core::dispatch_event!(event, {
+            _: Ping => {
                 let available = has_screen_capture_access();
                 if self.last_available != Some(available) {
                     self.last_available = Some(available);
-                    self.sender
-                        .send(Event::Custom(MacEvent::CaptureAvailabilityChanged(
-                            available,
-                        )))
-                        .ok();
+                    let _ = emitter.send(CaptureAvailabilityChanged(available));
                 }
-            }
-            Event::StatusRequest => {
+                Ok(())
+            },
+            _: StatusRequest => {
                 if let Some(available) = self.last_available {
-                    self.sender
-                        .send(Event::Custom(MacEvent::CaptureAvailabilityChanged(
-                            available,
-                        )))
-                        .ok();
+                    let _ = emitter.send(CaptureAvailabilityChanged(available));
                 }
-            }
-            _ => {}
-        }
-        Ok(())
+                Ok(())
+            },
+        })
+    }
+
+    fn save(&self) -> CoreResult<StateType> {
+        Ok(StateType::Null)
     }
 }

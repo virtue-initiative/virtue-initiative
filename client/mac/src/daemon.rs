@@ -1,6 +1,6 @@
 use std::ffi::c_void;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -9,17 +9,23 @@ use block2::RcBlock;
 use objc2::rc::autoreleasepool;
 use objc2_app_kit::{NSWorkspace, NSWorkspaceWillPowerOffNotification};
 use tokio::sync::mpsc;
-use virtue_core::events::{Event, ProcessStoppedReason};
-use virtue_core::ipc::is_allowed_inbound;
-use virtue_core::{MonitorService, iter_sleep};
+use virtue_core::{
+    ComputerResumed, ComputerSuspended, EventBus, EventError, FlushBatchNow, IpcListener,
+    LoginRequested, LoginResult, Logout, LogoutRequested, LogoutResult, Ping, ProcessStarted,
+    ProcessStopped, ProcessStoppedReason, RemoteEventBus, RemoteSender, StatusRequest,
+    StatusResponse, UserSessionLogin, UserSessionLogout, UserStopRequested,
+    build_default_modules_reqwest, load_state, store_state,
+};
 
 use crate::capture::{
-    MacEvent, MacPlatformHooks, has_screen_capture_access, is_permission_missing_error,
+    CaptureAvailabilityChanged, MacPlatformHooks, has_screen_capture_access,
+    is_permission_missing_error,
 };
-use crate::capture_reporter::CaptureReporterObserver;
+use crate::capture_reporter::CaptureReporterModule;
 use crate::config::{ClientPaths, build_core_config};
 
 const POST_WAKE_CAPTURE_STATE_SUPPRESSION: Duration = Duration::from_secs(30);
+const ITER_INTERVAL: Duration = Duration::from_secs(1);
 
 type IoObject = u32;
 type IoConnect = u32;
@@ -219,46 +225,76 @@ async fn run_daemon_service_loop(
 ) -> Result<()> {
     paths.ensure_dirs()?;
 
-    let shutdown = Arc::new(AtomicBool::new(false));
-    let system_shutdown_requested = Arc::new(AtomicBool::new(false));
-    let (signal_tx, mut signal_rx) = mpsc::unbounded_channel::<String>();
-    spawn_signal_handler(shutdown.clone(), signal_tx);
+    let config = build_core_config(paths);
+    let state_path = paths.state_dir.join("event_state.json");
 
-    let mut service = MonitorService::setup(build_core_config(paths), MacPlatformHooks::new())?;
+    let mut modules = tokio::task::block_in_place(|| {
+        build_default_modules_reqwest(config, MacPlatformHooks::new())
+    })?;
+    modules.push(Box::new(CaptureReporterModule::new()));
+    let mut bus = EventBus::new(modules, load_state(&state_path)?)?;
 
-    // Register the Mac-specific capture availability reporter.
-    let capture_reporter = CaptureReporterObserver::new(service.event_queue_sender());
-    service.add_observer(Box::new(capture_reporter));
-
-    service.queue_event(Event::ProcessStarted);
-    let _ = service.run_event_loop_iter();
+    bus.send(ProcessStarted)?;
+    store_state(&state_path, &bus.iter()?)?;
 
     // Bind IPC listener and spawn an accept thread.
     let sock_path = paths.state_dir.join("daemon.sock");
-    let (ipc_accept_tx, mut ipc_accept_rx) =
-        mpsc::unbounded_channel::<(virtue_core::ipc::IpcSender, virtue_core::ipc::IpcReceiver)>();
-    if let Ok(listener) = service.bind_ipc(&sock_path) {
-        tokio::task::spawn_blocking(move || {
-            loop {
-                match listener.blocking_accept() {
-                    Ok(pair) => {
-                        if ipc_accept_tx.send(pair).is_err() {
+    let (ipc_accept_tx, mut ipc_accept_rx) = mpsc::unbounded_channel::<RemoteEventBus>();
+
+    match IpcListener::bind(&sock_path) {
+        Ok(listener) => {
+            tokio::task::spawn_blocking(move || {
+                loop {
+                    match listener.blocking_accept() {
+                        Ok(remote) => {
+                            if ipc_accept_tx.send(remote).is_err() {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("daemon: ipc accept error: {e}");
                             break;
                         }
                     }
-                    Err(e) => {
-                        eprintln!("daemon: ipc accept error: {e}");
-                        break;
-                    }
                 }
-            }
-        });
-    } else {
-        eprintln!(
-            "daemon: failed to bind IPC listener at {}",
-            sock_path.display()
-        );
+            });
+        }
+        Err(e) => {
+            eprintln!(
+                "daemon: failed to bind IPC listener at {}: {e}",
+                sock_path.display()
+            );
+        }
     }
+
+    // Shared list of outbound handles — prune dead ones on each send.
+    let clients: Arc<Mutex<Vec<RemoteSender>>> = Arc::new(Mutex::new(Vec::new()));
+
+    macro_rules! subscribe_outbound {
+        ($($T:ty),* $(,)?) => {
+            $(
+                let c = clients.clone();
+                bus.subscribe::<$T>(move |ev| {
+                    c.lock().unwrap().retain(|s| s.send(ev.clone()).is_ok());
+                    Ok(())
+                });
+            )*
+        };
+    }
+    subscribe_outbound!(
+        LoginResult,
+        LogoutResult,
+        StatusResponse,
+        Logout,
+        EventError,
+        CaptureAvailabilityChanged,
+    );
+
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let system_shutdown_requested = Arc::new(AtomicBool::new(false));
+    let user_stop_requested = Arc::new(AtomicBool::new(false));
+    let (signal_tx, mut signal_rx) = mpsc::unbounded_channel::<String>();
+    spawn_signal_handler(shutdown.clone(), signal_tx);
 
     let mut sleeping = false;
     let mut suppress_capture_state_until: Option<Instant> = None;
@@ -268,23 +304,51 @@ async fn run_daemon_service_loop(
         }
 
         // Wire up any newly accepted IPC connections.
-        while let Ok((sender, mut receiver)) = ipc_accept_rx.try_recv() {
-            service.add_ipc_client(sender);
-            let event_tx = service.event_queue_sender();
-            std::thread::spawn(move || {
-                while let Ok(event) = receiver.recv_event::<MacEvent>() {
-                    if is_allowed_inbound(&event) {
-                        event_tx.send(event).ok();
-                    }
-                }
+        while let Ok(mut remote) = ipc_accept_rx.try_recv() {
+            let e = bus.emitter();
+            let usr = user_stop_requested.clone();
+
+            macro_rules! forward_inbound {
+                ($($T:ty),* $(,)?) => {
+                    $(
+                        let e2 = e.clone();
+                        remote.on::<$T>(move |ev| e2.send(ev.clone()));
+                    )*
+                };
+            }
+            forward_inbound!(
+                LoginRequested,
+                LogoutRequested,
+                StatusRequest,
+                UserSessionLogin,
+                UserSessionLogout,
+                ComputerSuspended,
+                ComputerResumed,
+                ProcessStopped,
+            );
+
+            // Track user-stop requests separately so we can classify shutdown reason.
+            let e2 = e.clone();
+            remote.on::<UserStopRequested>(move |ev| {
+                usr.store(true, Ordering::SeqCst);
+                e2.send(ev.clone())
             });
+
+            clients.lock().unwrap().push(remote.sender());
+            drop(remote);
         }
 
         if !sleeping {
-            match tokio::task::block_in_place(|| service.loop_iteration()) {
-                Ok(_outcome) => {
+            match tokio::task::block_in_place(|| {
+                bus.send(Ping)?;
+                bus.iter()
+            }) {
+                Ok(state) => {
                     if !has_screen_capture_access() {
                         suppress_capture_state_until = None;
+                    }
+                    if let Err(e) = store_state(&state_path, &state) {
+                        eprintln!("daemon: failed to store state: {e}");
                     }
                 }
                 Err(err) => {
@@ -303,17 +367,20 @@ async fn run_daemon_service_loop(
 
         tokio::select! {
             signal = signal_rx.recv() => {
-                if let Some(_signal_name) = signal {
-                    let explicit_user_stop = service.consume_user_stop_request();
+                if signal.is_some() {
                     let reason = if system_shutdown_requested.load(Ordering::SeqCst) {
                         ProcessStoppedReason::Shutdown
-                    } else if explicit_user_stop {
+                    } else if user_stop_requested.load(Ordering::SeqCst) {
                         ProcessStoppedReason::User
                     } else {
                         ProcessStoppedReason::Other
                     };
-                    service.queue_event(Event::ProcessStopped(reason));
-                    let _ = service.run_event_loop_iter();
+                    tokio::task::block_in_place(|| {
+                        let _ = bus.send(ProcessStopped(reason));
+                        if let Ok(state) = bus.iter() {
+                            let _ = store_state(&state_path, &state);
+                        }
+                    });
                 }
                 break;
             }
@@ -321,33 +388,49 @@ async fn run_daemon_service_loop(
                 match power_event {
                     Some(PowerEvent::WillPowerOff) => {
                         system_shutdown_requested.store(true, Ordering::SeqCst);
-                        service.queue_event(Event::ProcessStopped(ProcessStoppedReason::Shutdown));
-                        let _ = service.run_event_loop_iter();
+                        tokio::task::block_in_place(|| {
+                            let _ = bus.send(ProcessStopped(ProcessStoppedReason::Shutdown));
+                            if let Ok(state) = bus.iter() {
+                                let _ = store_state(&state_path, &state);
+                            }
+                        });
                         shutdown.store(true, Ordering::SeqCst);
                     }
                     Some(PowerEvent::WillSleep) => {
                         sleeping = true;
                         suppress_capture_state_until = None;
-                        service.queue_event(Event::ComputerSuspended);
-                        let _ = service.run_event_loop_iter();
+                        tokio::task::block_in_place(|| {
+                            let _ = bus.send(ComputerSuspended);
+                            if let Ok(state) = bus.iter() {
+                                let _ = store_state(&state_path, &state);
+                            }
+                        });
                     }
                     Some(PowerEvent::DidWake) => {
                         sleeping = false;
                         suppress_capture_state_until =
                             Some(Instant::now() + POST_WAKE_CAPTURE_STATE_SUPPRESSION);
-                        service.queue_event(Event::ComputerResumed);
-                        let _ = service.run_event_loop_iter();
-                        let _ = service.upload_pending_batch_now();
+                        tokio::task::block_in_place(|| {
+                            let _ = bus.send(ComputerResumed);
+                            let _ = bus.send(FlushBatchNow);
+                            if let Ok(state) = bus.iter() {
+                                let _ = store_state(&state_path, &state);
+                            }
+                        });
                     }
                     None => {}
                 }
             }
-            _ = iter_sleep() => {}
+            _ = tokio::time::sleep(ITER_INTERVAL) => {}
         }
     }
 
-    let _ = service.run_event_loop_iter();
-    let _ = service.mark_stopped();
+    tokio::task::block_in_place(|| {
+        let _ = bus.send(Ping);
+        if let Ok(state) = bus.iter() {
+            let _ = store_state(&state_path, &state);
+        }
+    });
     Ok(())
 }
 

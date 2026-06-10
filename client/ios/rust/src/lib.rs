@@ -10,10 +10,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, Context, Result};
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
-use virtue_core::events::{Event, ProcessStoppedReason, Redacted};
 use virtue_core::{
-    AuthState, Config, CoreError, CoreResult, DeviceSettings, MonitorService, PlatformHooks,
-    ScreenshotHooks, Screenshot, ServiceStatus,
+    AuthState, Config, CoreError, CoreResult, DeviceSettings, EventBus, EventChannel,
+    LoginRequested, LoginResult, LogoutRequested, Ping, PlatformHooks, ProcessStarted,
+    ProcessStopped, ProcessStoppedReason, Redacted, Screenshot, ScreenshotHooks,
+    UserStopRequested, build_default_modules_reqwest, load_state, store_state,
 };
 
 static CORE: OnceCell<IosCore> = OnceCell::new();
@@ -123,9 +124,7 @@ impl ScreenshotHooks for IosPlatformHooks {
     }
 }
 
-impl PlatformHooks for IosPlatformHooks {
-    type CustomEvent = ();
-}
+impl PlatformHooks for IosPlatformHooks {}
 
 #[no_mangle]
 pub extern "C" fn virtue_ios_native_init(
@@ -207,18 +206,21 @@ pub extern "C" fn virtue_ios_native_login(
         let password = c_string_or_empty(password);
         let device_name = c_string_or_empty(device_name);
         let core = core()?;
-
-        with_ephemeral_service(core, &device_name, |service| {
-            service.queue_event(Event::LoginRequested {
-                email: email.clone(),
-                password: Redacted(password.clone()),
-            });
-            service.run_event_loop_iter()?;
-            if !service.current_status().is_authenticated {
-                return Err(anyhow!("login failed"));
-            }
-            Ok(())
-        })
+        let (mut bus, state_path) = build_bus(core, &device_name)?;
+        let result = bus.request::<LoginRequested, LoginResult>(LoginRequested {
+            email,
+            password: Redacted(password),
+        })?;
+        if !result.success {
+            return Err(anyhow!(
+                result
+                    .error
+                    .unwrap_or_else(|| "Login failed. Check your credentials and try again.".to_string())
+            ));
+        }
+        let state = bus.iter()?;
+        store_state(&state_path, &state)?;
+        Ok(())
     })();
 
     into_c_result(result)
@@ -228,11 +230,11 @@ pub extern "C" fn virtue_ios_native_login(
 pub extern "C" fn virtue_ios_native_logout() -> *mut c_char {
     let result = (|| -> Result<()> {
         let core = core()?;
-        with_ephemeral_service(core, "ios-device", |service| {
-            service.queue_event(Event::LogoutRequested);
-            service.run_event_loop_iter()?;
-            Ok(())
-        })
+        let (mut bus, state_path) = build_bus(core, "ios-device")?;
+        bus.send(LogoutRequested)?;
+        let state = bus.iter()?;
+        store_state(&state_path, &state)?;
+        Ok(())
     })();
 
     into_c_result(result)
@@ -340,14 +342,11 @@ pub extern "C" fn virtue_ios_native_request_pause_monitoring(
             "" => "ios_pause_button".to_string(),
             value => value.to_string(),
         };
-
-        with_ephemeral_service(core, "ios-device", |service| {
-            service.queue_event(Event::UserStopRequested {
-                source: source.clone(),
-            });
-            service.run_event_loop_iter()?;
-            Ok(())
-        })
+        let (mut bus, state_path) = build_bus(core, "ios-device")?;
+        bus.send(UserStopRequested { source })?;
+        let state = bus.iter()?;
+        store_state(&state_path, &state)?;
+        Ok(())
     })();
 
     into_c_result(result)
@@ -366,27 +365,19 @@ pub unsafe extern "C" fn virtue_ios_free_string(value: *mut c_char) {
 }
 
 fn run_daemon_loop(core: &IosCore) -> Result<()> {
-    let mut service =
-        MonitorService::setup(build_core_config(core, "ios-device"), IosPlatformHooks)?;
-    service.queue_event(Event::ProcessStarted);
-    let _ = service.run_event_loop_iter();
+    let (mut bus, state_path) = build_bus(core, "ios-device")?;
+    bus.send(ProcessStarted)?;
+    let state = bus.iter()?;
+    store_state(&state_path, &state)?;
 
     while !core.stop.load(Ordering::SeqCst) {
-        if service.consume_user_stop_request() {
-            set_stop_request(
-                core,
-                StopRequest {
-                    raw_reason: "user_pause".to_string(),
-                    detected_by: "ios_extension_daemon".to_string(),
-                    explicit_user_stop: true,
-                },
-            )?;
-            core.stop.store(true, Ordering::SeqCst);
-            continue;
-        }
-
-        let sleep_duration = match service.loop_iteration() {
-            Ok(_outcome) => LOOP_INTERVAL,
+        let sleep_duration = match (|| -> Result<()> {
+            bus.send(Ping)?;
+            let state = bus.iter()?;
+            store_state(&state_path, &state)?;
+            Ok(())
+        })() {
+            Ok(()) => LOOP_INTERVAL,
             Err(err) => {
                 eprintln!("ios-daemon: {err}");
                 ERROR_RETRY_INTERVAL
@@ -395,17 +386,7 @@ fn run_daemon_loop(core: &IosCore) -> Result<()> {
         sleep_interruptible(&core.stop, sleep_duration);
     }
 
-    let stop_request = if service.consume_user_stop_request() {
-        Some(StopRequest {
-            raw_reason: "user_pause".to_string(),
-            detected_by: "ios_extension_daemon".to_string(),
-            explicit_user_stop: true,
-        })
-    } else {
-        take_stop_request(core)?
-    };
-
-    let stop_request = stop_request.unwrap_or_else(|| StopRequest {
+    let stop_request = take_stop_request(core)?.unwrap_or_else(|| StopRequest {
         raw_reason: "ios_stop_request".to_string(),
         detected_by: "ios_extension_daemon".to_string(),
         explicit_user_stop: false,
@@ -415,9 +396,9 @@ fn run_daemon_loop(core: &IosCore) -> Result<()> {
     } else {
         ProcessStoppedReason::Other
     };
-    service.queue_event(Event::ProcessStopped(reason));
-    let _ = service.run_event_loop_iter();
-    let _ = service.mark_stopped();
+    bus.send(ProcessStopped(reason))?;
+    let state = bus.iter()?;
+    let _ = store_state(&state_path, &state);
     Ok(())
 }
 
@@ -430,6 +411,14 @@ fn sleep_interruptible(stop: &AtomicBool, duration: Duration) {
     }
 }
 
+fn build_bus(core: &IosCore, device: &str) -> Result<(EventBus, PathBuf)> {
+    let cfg = build_core_config(core, device);
+    let modules = build_default_modules_reqwest(cfg, IosPlatformHooks)?;
+    let state_path = core.state_dir.join("event_state.json");
+    let bus = EventBus::new(modules, load_state(&state_path)?)?;
+    Ok((bus, state_path))
+}
+
 fn build_core_config(core: &IosCore, device_name: &str) -> Config {
     Config::new(
         DEFAULT_BASE_API_URL,
@@ -440,16 +429,6 @@ fn build_core_config(core: &IosCore, device_name: &str) -> Config {
         Duration::from_secs(DEFAULT_CAPTURE_INTERVAL_SECONDS),
         Duration::from_secs(DEFAULT_BATCH_WINDOW_SECONDS),
     )
-}
-
-fn with_ephemeral_service<T>(
-    core: &IosCore,
-    device_name: &str,
-    action: impl FnOnce(&mut MonitorService<IosPlatformHooks>) -> Result<T>,
-) -> Result<T> {
-    let mut service =
-        MonitorService::setup(build_core_config(core, device_name), IosPlatformHooks)?;
-    action(&mut service)
 }
 
 fn set_stop_request(core: &IosCore, request: StopRequest) -> Result<()> {
@@ -511,8 +490,6 @@ fn parse_u64(value: &str) -> Result<u64> {
 }
 
 fn sanitize_state_dir(root: &Path) -> Result<()> {
-    sanitize_json_file::<AuthState>(root, "auth.json")?;
-    sanitize_json_file::<ServiceStatus>(root, "status.json")?;
     sanitize_json_file::<Option<DeviceSettings>>(root, "device_settings.json")?;
     Ok(())
 }

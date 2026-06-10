@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::OnceLock;
@@ -8,12 +9,17 @@ use std::time::Duration;
 
 use anyhow::Result;
 use serde::Serialize;
-use virtue_core::events::{Event, ProcessStoppedReason};
-use virtue_core::ipc::{IpcListener, is_allowed_inbound, register_connect_tx};
-use virtue_core::{ITER_INTERVAL, MonitorService};
+use virtue_core::{
+    ComputerResumed, ComputerSuspended, CoreError, EventBus, EventChannel, LoginRequested,
+    LoginResult, LogoutRequested, LogoutResult, Ping, ProcessStarted, ProcessStopped,
+    ProcessStoppedReason, Redacted, StatusRequest, StatusResponse, UserSessionLogin,
+    UserSessionLogout, UserStopRequested, build_default_modules_reqwest, load_state, store_state,
+};
 
 use crate::capture::WindowsPlatformHooks;
 use crate::config::{ClientPaths, build_core_config};
+
+const ITER_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,7 +27,6 @@ pub struct MonitorStatusSnapshot {
     pub state: String,
     pub logged_in: bool,
     pub pending_request_count: usize,
-    pub last_screenshot_at_ms: Option<i64>,
     pub last_error: Option<String>,
 }
 
@@ -31,7 +36,6 @@ impl Default for MonitorStatusSnapshot {
             state: "stopped".to_string(),
             logged_in: false,
             pending_request_count: 0,
-            last_screenshot_at_ms: None,
             last_error: None,
         }
     }
@@ -44,12 +48,22 @@ struct MonitorWorker {
 }
 
 enum MonitorCommand {
-    NoteStopRequested { source: String },
+    NoteStopRequested {
+        source: String,
+    },
     ProcessStopped(ProcessStoppedReason),
     Login,
     Logout,
     ComputerSuspended,
     ComputerResumed,
+    AppLogin {
+        email: String,
+        password: String,
+        response: mpsc::SyncSender<virtue_core::CoreResult<String>>,
+    },
+    AppLogout {
+        response: mpsc::SyncSender<virtue_core::CoreResult<()>>,
+    },
 }
 
 #[derive(Default)]
@@ -195,161 +209,237 @@ pub fn note_login_state(logged_in: bool) {
             snapshot.state = "signed_out".to_string();
             snapshot.last_error = None;
             snapshot.pending_request_count = 0;
-            snapshot.last_screenshot_at_ms = None;
         } else if snapshot.state == "signed_out" || snapshot.state == "stopped" {
             snapshot.state = "starting".to_string();
         }
     });
 }
 
+pub fn app_login(email: &str, password: &str) -> Result<String> {
+    let (tx, rx) = mpsc::sync_channel(1);
+    {
+        let state = controller().state.lock().expect("monitor controller lock");
+        match state.worker.as_ref() {
+            Some(worker) => {
+                let _ = worker.command_tx.send(MonitorCommand::AppLogin {
+                    email: email.to_string(),
+                    password: password.to_string(),
+                    response: tx,
+                });
+            }
+            None => return Err(anyhow::anyhow!("monitoring is not running")),
+        }
+    }
+    rx.recv()
+        .map_err(|_| anyhow::anyhow!("monitoring thread disconnected before login completed"))?
+        .map_err(anyhow::Error::from)
+}
+
+pub fn app_logout() -> Result<()> {
+    let (tx, rx) = mpsc::sync_channel(1);
+    {
+        let state = controller().state.lock().expect("monitor controller lock");
+        match state.worker.as_ref() {
+            Some(worker) => {
+                let _ = worker
+                    .command_tx
+                    .send(MonitorCommand::AppLogout { response: tx });
+            }
+            None => return Err(anyhow::anyhow!("monitoring is not running")),
+        }
+    }
+    rx.recv()
+        .map_err(|_| anyhow::anyhow!("monitoring thread disconnected before logout completed"))?
+        .map_err(anyhow::Error::from)
+}
+
 fn run_monitor_loop(shutdown: Arc<AtomicBool>, command_rx: Receiver<MonitorCommand>) {
     let paths = match ClientPaths::discover() {
         Ok(paths) => paths,
         Err(err) => {
-            update_snapshot(|snapshot| {
-                snapshot.state = "error".to_string();
-                snapshot.last_error = Some(err.to_string());
+            update_snapshot(|s| {
+                s.state = "error".to_string();
+                s.last_error = Some(err.to_string());
             });
             return;
         }
     };
 
     if let Err(err) = paths.ensure_dirs() {
-        update_snapshot(|snapshot| {
-            snapshot.state = "error".to_string();
-            snapshot.last_error = Some(err.to_string());
+        update_snapshot(|s| {
+            s.state = "error".to_string();
+            s.last_error = Some(err.to_string());
         });
         return;
     }
 
-    let mut service =
-        match MonitorService::setup(build_core_config(&paths), WindowsPlatformHooks::new()) {
-            Ok(service) => service,
-            Err(err) => {
-                update_snapshot(|snapshot| {
-                    snapshot.state = "error".to_string();
-                    snapshot.last_error = Some(format!("{err:#}"));
-                });
-                return;
-            }
-        };
+    let state_path = paths.state_dir.join("event_state.json");
+    let config = build_core_config(&paths);
 
-    service.queue_event(Event::ProcessStarted);
-    let _ = service.run_event_loop_iter();
+    let modules = match build_default_modules_reqwest(config, WindowsPlatformHooks::new()) {
+        Ok(m) => m,
+        Err(err) => {
+            update_snapshot(|s| {
+                s.state = "error".to_string();
+                s.last_error = Some(format!("{err:#}"));
+            });
+            return;
+        }
+    };
 
-    // Bind in-process IPC listener and register the connect sender so that
-    // ControllerClient::connect() works without a process-wide global in ipc.rs.
-    let sock_path = paths.state_dir.join("daemon.sock");
-    let (ipc_accept_tx, ipc_accept_rx) =
-        mpsc::channel::<(virtue_core::ipc::IpcSender, virtue_core::ipc::IpcReceiver)>();
-    if let Ok(listener) = IpcListener::bind(&sock_path) {
-        register_connect_tx(listener.connect_tx.clone());
-        thread::spawn(move || {
-            loop {
-                match listener.blocking_accept() {
-                    Ok(pair) => {
-                        if ipc_accept_tx.send(pair).is_err() {
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("resident_monitor: ipc accept error: {e}");
-                        break;
-                    }
-                }
-            }
+    let bus_state = load_state(&state_path).unwrap_or(serde_json::Value::Null);
+
+    let mut bus = match EventBus::new(modules, bus_state) {
+        Ok(b) => b,
+        Err(err) => {
+            update_snapshot(|s| {
+                s.state = "error".to_string();
+                s.last_error = Some(format!("{err:#}"));
+            });
+            return;
+        }
+    };
+
+    if let Err(err) = (|| -> anyhow::Result<()> {
+        bus.send(ProcessStarted)?;
+        store_state(&state_path, &bus.iter()?)?;
+        Ok(())
+    })() {
+        update_snapshot(|s| {
+            s.state = "error".to_string();
+            s.last_error = Some(format!("{err:#}"));
         });
+        return;
     }
 
     loop {
-        // Wire up any newly accepted IPC connections.
-        while let Ok((sender, mut receiver)) = ipc_accept_rx.try_recv() {
-            service.add_ipc_client(sender);
-            let event_tx = service.event_queue_sender();
-            thread::spawn(move || {
-                while let Ok(event) = receiver.recv_event() {
-                    if is_allowed_inbound(&event) {
-                        event_tx.send(event).ok();
-                    }
-                }
-            });
-        }
-
-        drain_commands(&mut service, &command_rx);
+        drain_commands(&mut bus, &state_path, &command_rx);
         if shutdown.load(Ordering::SeqCst) {
             break;
         }
 
-        match service.loop_iteration() {
-            Ok(_outcome) => {
-                let status = service.current_status();
-                update_snapshot(|snapshot| {
-                    snapshot.logged_in = status.is_authenticated;
-                    snapshot.pending_request_count = status.pending_request_count;
-                    snapshot.last_error = None;
-                    snapshot.state = if status.is_authenticated {
-                        "running".to_string()
-                    } else {
-                        "signed_out".to_string()
-                    };
-                });
-            }
+        let tick_result = (|| -> anyhow::Result<()> {
+            bus.send(Ping)?;
+            let state = bus.iter()?;
+            store_state(&state_path, &state)?;
+            Ok(())
+        })();
+
+        match tick_result {
+            Ok(()) => match bus.request::<StatusRequest, StatusResponse>(StatusRequest) {
+                Ok(resp) => {
+                    update_snapshot(|s| {
+                        s.logged_in = resp.status.is_authenticated;
+                        s.pending_request_count = resp.status.pending_request_count;
+                        s.state = if resp.status.is_authenticated {
+                            "running".into()
+                        } else {
+                            "signed_out".into()
+                        };
+                        s.last_error = None;
+                    });
+                }
+                Err(err) => {
+                    update_snapshot(|s| {
+                        s.state = "error".into();
+                        s.last_error = Some(err.to_string());
+                    });
+                }
+            },
             Err(err) => {
-                let message = err.to_string();
-                update_snapshot(|snapshot| {
-                    snapshot.state = "error".to_string();
-                    snapshot.last_error = Some(message);
+                update_snapshot(|s| {
+                    s.state = "error".into();
+                    s.last_error = Some(err.to_string());
                 });
             }
         }
-        wait_for_commands(&mut service, &command_rx, &shutdown, ITER_INTERVAL);
+
+        wait_for_commands(&mut bus, &state_path, &command_rx, &shutdown, ITER_INTERVAL);
     }
 
-    drain_commands(&mut service, &command_rx);
-    let _ = service.run_event_loop_iter();
-    let _ = service.mark_stopped();
+    drain_commands(&mut bus, &state_path, &command_rx);
+    let _ = bus.send(Ping);
+    if let Ok(state) = bus.iter() {
+        let _ = store_state(&state_path, &state);
+    }
 }
 
-fn handle_command(service: &mut MonitorService<WindowsPlatformHooks>, command: MonitorCommand) {
+fn handle_command(bus: &mut EventBus, state_path: &Path, command: MonitorCommand) -> Result<()> {
     match command {
         MonitorCommand::NoteStopRequested { source } => {
-            service.queue_event(Event::UserStopRequested { source });
-            let _ = service.run_event_loop_iter();
+            bus.send(UserStopRequested { source })?;
+            store_state(state_path, &bus.iter()?)?;
         }
         MonitorCommand::ProcessStopped(reason) => {
-            service.queue_event(Event::ProcessStopped(reason));
-            let _ = service.run_event_loop_iter();
+            bus.send(ProcessStopped(reason))?;
+            store_state(state_path, &bus.iter()?)?;
         }
         MonitorCommand::Login => {
-            service.queue_event(Event::UserSessionLogin);
-            let _ = service.run_event_loop_iter();
+            bus.send(UserSessionLogin)?;
+            store_state(state_path, &bus.iter()?)?;
         }
         MonitorCommand::Logout => {
-            service.queue_event(Event::UserSessionLogout);
-            let _ = service.run_event_loop_iter();
+            bus.send(UserSessionLogout)?;
+            store_state(state_path, &bus.iter()?)?;
         }
         MonitorCommand::ComputerSuspended => {
-            service.queue_event(Event::ComputerSuspended);
-            let _ = service.run_event_loop_iter();
+            bus.send(ComputerSuspended)?;
+            store_state(state_path, &bus.iter()?)?;
         }
         MonitorCommand::ComputerResumed => {
-            service.queue_event(Event::ComputerResumed);
-            let _ = service.run_event_loop_iter();
+            bus.send(ComputerResumed)?;
+            store_state(state_path, &bus.iter()?)?;
+        }
+        MonitorCommand::AppLogin {
+            email,
+            password,
+            response,
+        } => {
+            let request_result = bus.request::<LoginRequested, LoginResult>(LoginRequested {
+                email,
+                password: Redacted(password),
+            });
+            let _ = store_state(state_path, &bus.iter()?);
+            let result = request_result.and_then(|r| {
+                if r.success {
+                    Ok(r.device_id.unwrap_or_default())
+                } else {
+                    Err(CoreError::CommandFailed(
+                        r.error.unwrap_or_else(|| "login failed".to_string()),
+                    ))
+                }
+            });
+            let _ = response.send(result);
+        }
+        MonitorCommand::AppLogout { response } => {
+            let request_result = bus.request::<LogoutRequested, LogoutResult>(LogoutRequested);
+            let _ = store_state(state_path, &bus.iter()?);
+            let result = request_result.and_then(|r| {
+                if r.success {
+                    Ok(())
+                } else {
+                    Err(CoreError::CommandFailed(
+                        r.error.unwrap_or_else(|| "logout failed".to_string()),
+                    ))
+                }
+            });
+            let _ = response.send(result);
         }
     }
+    Ok(())
 }
 
-fn drain_commands(
-    service: &mut MonitorService<WindowsPlatformHooks>,
-    command_rx: &Receiver<MonitorCommand>,
-) {
+fn drain_commands(bus: &mut EventBus, state_path: &Path, command_rx: &Receiver<MonitorCommand>) {
     while let Ok(command) = command_rx.try_recv() {
-        handle_command(service, command);
+        if let Err(e) = handle_command(bus, state_path, command) {
+            eprintln!("resident_monitor: command error: {e}");
+        }
     }
 }
 
 fn wait_for_commands(
-    service: &mut MonitorService<WindowsPlatformHooks>,
+    bus: &mut EventBus,
+    state_path: &Path,
     command_rx: &Receiver<MonitorCommand>,
     shutdown: &Arc<AtomicBool>,
     duration: Duration,
@@ -357,13 +447,17 @@ fn wait_for_commands(
     let mut remaining = duration;
     while remaining > Duration::ZERO {
         if shutdown.load(Ordering::SeqCst) {
-            drain_commands(service, command_rx);
+            drain_commands(bus, state_path, command_rx);
             return;
         }
 
         let tick = remaining.min(Duration::from_secs(1));
         match command_rx.recv_timeout(tick) {
-            Ok(command) => handle_command(service, command),
+            Ok(command) => {
+                if let Err(e) = handle_command(bus, state_path, command) {
+                    eprintln!("resident_monitor: command error: {e}");
+                }
+            }
             Err(RecvTimeoutError::Timeout) => {
                 remaining = remaining.saturating_sub(tick);
             }
