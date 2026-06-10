@@ -365,7 +365,7 @@ mod tests {
         let client_handle =
             thread::spawn(move || RemoteEventBus::connect(&sock2).expect("connect"));
 
-        let mut daemon_bus = listener.blocking_accept().expect("accept");
+        let daemon_bus = listener.blocking_accept().expect("accept");
         let mut client_bus = client_handle.join().expect("connect thread");
 
         let (tx, rx) = std::sync::mpsc::channel();
