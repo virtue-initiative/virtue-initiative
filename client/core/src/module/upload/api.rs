@@ -72,8 +72,8 @@ impl<A: ApiTransport + Clone> UploadApi<A> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::UploadKind;
     use crate::error::CoreError;
-    use crate::model::UploadKind;
     use crate::model::{DeviceCredentials, LogEntry};
     use crate::testing::api::MockApiClient;
 

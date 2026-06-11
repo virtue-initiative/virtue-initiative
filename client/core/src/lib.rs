@@ -6,6 +6,8 @@ pub mod controller;
 pub mod crypto;
 pub mod error;
 pub mod events;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub mod ipc_bridge;
 pub mod model;
 pub mod module;
 pub mod platform;
@@ -25,6 +27,8 @@ pub use events::{
 };
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use events::{IpcError, IpcListener, RemoteEventBus, RemoteSender};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub use ipc_bridge::IpcBridge;
 pub use model::{
     AlertReason, DeviceCredentials, DeviceSettings, LifecycleKind, PartialStatus,
     ProcessStoppedReason, Redacted, UploadKind,

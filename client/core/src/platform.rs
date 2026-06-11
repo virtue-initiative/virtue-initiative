@@ -1,11 +1,21 @@
-use crate::error::CoreResult;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::error::{CoreError, CoreResult};
 use crate::model::Screenshot;
 
 /// Object-safe subset of platform capabilities. Used as a trait object
 /// (`Box<dyn ScreenshotHooks>`) in modules.
 pub trait ScreenshotHooks: Send + Sync + 'static {
     fn take_screenshot(&self) -> CoreResult<Screenshot>;
-    fn get_time_utc_ms(&self) -> CoreResult<i64>;
+
+    fn get_time_utc_ms(&self) -> CoreResult<i64> {
+        let duration = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| CoreError::CommandFailed(e.to_string()))?;
+        i64::try_from(duration.as_millis())
+            .map_err(|_| CoreError::InvalidState("system clock overflow"))
+    }
+
     fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>>;
     fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>>;
 }

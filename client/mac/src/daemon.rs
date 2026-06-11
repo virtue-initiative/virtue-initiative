@@ -1,6 +1,6 @@
 use std::ffi::c_void;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -10,10 +10,8 @@ use objc2::rc::autoreleasepool;
 use objc2_app_kit::{NSWorkspace, NSWorkspaceWillPowerOffNotification};
 use tokio::sync::mpsc;
 use virtue_core::{
-    ComputerResumed, ComputerSuspended, EventBus, EventChannel, EventError, FlushBatchNow,
-    IpcListener, LoginRequested, LoginResult, Logout, LogoutRequested, LogoutResult, Ping,
-    ProcessStarted, ProcessStopped, ProcessStoppedReason, RemoteSender, StatusRequest,
-    StatusResponse, UserSessionLogin, UserSessionLogout, UserStopRequested,
+    ComputerResumed, ComputerSuspended, EventBus, EventChannel, FlushBatchNow, IpcBridge, Ping,
+    ProcessStarted, ProcessStopped, ProcessStoppedReason, UserStopRequested,
     build_default_modules_reqwest, load_state, store_state,
 };
 
@@ -237,103 +235,17 @@ async fn run_daemon_service_loop(
     bus.send(ProcessStarted)?;
     store_state(&state_path, &bus.iter()?)?;
 
-    // Shared list of outbound handles — prune dead ones on each send.
-    let clients: Arc<Mutex<Vec<RemoteSender>>> = Arc::new(Mutex::new(Vec::new()));
-
-    macro_rules! subscribe_outbound {
-        ($($T:ty),* $(,)?) => {
-            $(
-                let c = clients.clone();
-                bus.subscribe::<$T>(move |ev| {
-                    c.lock().unwrap().retain(|s| s.send(ev.clone()).is_ok());
-                    Ok(())
-                });
-            )*
-        };
+    let mut ipc = IpcBridge::bind(&paths.state_dir.join("daemon.sock"));
+    if let Some(ipc) = &mut ipc {
+        ipc.subscribe_standard_outbound(&mut bus);
+        ipc.subscribe_outbound::<CaptureAvailabilityChanged>(&mut bus);
     }
-    subscribe_outbound!(
-        LoginResult,
-        LogoutResult,
-        StatusResponse,
-        Logout,
-        EventError,
-        CaptureAvailabilityChanged,
-    );
 
     let shutdown = Arc::new(AtomicBool::new(false));
     let system_shutdown_requested = Arc::new(AtomicBool::new(false));
     let user_stop_requested = Arc::new(AtomicBool::new(false));
     let (signal_tx, mut signal_rx) = mpsc::unbounded_channel::<String>();
     spawn_signal_handler(shutdown.clone(), signal_tx);
-
-    // Bind IPC listener and spawn an accept thread.
-    //
-    // Handlers are registered in the accept task (before the reader thread
-    // starts) so that messages sent by the client immediately after connecting
-    // are never silently dropped due to a race between the reader thread and
-    // the main loop processing the new connection.
-    let sock_path = paths.state_dir.join("daemon.sock");
-    let (ipc_accept_tx, mut ipc_accept_rx) = mpsc::unbounded_channel::<RemoteSender>();
-
-    match IpcListener::bind(&sock_path) {
-        Ok(listener) => {
-            let emitter_for_accept = bus.emitter();
-            let user_stop_for_accept = user_stop_requested.clone();
-            tokio::task::spawn_blocking(move || {
-                loop {
-                    match listener.blocking_accept() {
-                        Ok(mut remote) => {
-                            let e = emitter_for_accept.clone();
-                            let usr = user_stop_for_accept.clone();
-
-                            // Register all inbound handlers before starting the
-                            // reader thread so no early messages are discarded.
-                            macro_rules! forward_inbound {
-                                ($($T:ty),* $(,)?) => {
-                                    $(
-                                        let e2 = e.clone();
-                                        remote.on::<$T>(move |ev| e2.send(ev.clone()));
-                                    )*
-                                };
-                            }
-                            forward_inbound!(
-                                LoginRequested,
-                                LogoutRequested,
-                                StatusRequest,
-                                UserSessionLogin,
-                                UserSessionLogout,
-                                ComputerSuspended,
-                                ComputerResumed,
-                                ProcessStopped,
-                            );
-
-                            let e2 = e.clone();
-                            remote.on::<UserStopRequested>(move |ev| {
-                                usr.store(true, Ordering::SeqCst);
-                                e2.send(ev.clone())
-                            });
-
-                            remote.start();
-
-                            if ipc_accept_tx.send(remote.sender()).is_err() {
-                                break;
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("daemon: ipc accept error: {e}");
-                            break;
-                        }
-                    }
-                }
-            });
-        }
-        Err(e) => {
-            eprintln!(
-                "daemon: failed to bind IPC listener at {}: {e}",
-                sock_path.display()
-            );
-        }
-    }
 
     let mut sleeping = false;
     let mut suppress_capture_state_until: Option<Instant> = None;
@@ -342,9 +254,18 @@ async fn run_daemon_service_loop(
             break;
         }
 
-        // Register newly accepted IPC connections for outbound events.
-        while let Ok(sender) = ipc_accept_rx.try_recv() {
-            clients.lock().unwrap().push(sender);
+        // Wire up any newly accepted IPC connections.
+        if let Some(ipc) = &mut ipc {
+            let usr = user_stop_requested.clone();
+            ipc.accept_pending(&mut bus, move |remote, e| {
+                IpcBridge::forward_standard_inbound(remote, e);
+                // Track user-stop separately to classify shutdown reason accurately.
+                let usr = usr.clone();
+                remote.on::<UserStopRequested>(move |_ev| {
+                    usr.store(true, Ordering::SeqCst);
+                    Ok(())
+                });
+            });
         }
 
         if !sleeping {

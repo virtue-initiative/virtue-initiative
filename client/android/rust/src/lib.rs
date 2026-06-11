@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use jni::objects::{JByteArray, JClass, JString};
@@ -112,14 +112,6 @@ impl ScreenshotHooks for AndroidPlatformHooks {
                 "unexpected capture status code: {other}"
             ))),
         }
-    }
-
-    fn get_time_utc_ms(&self) -> CoreResult<i64> {
-        let duration = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|err| CoreError::CommandFailed(err.to_string()))?;
-        i64::try_from(duration.as_millis())
-            .map_err(|_| CoreError::InvalidState("system clock overflow"))
     }
 
     fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>> {

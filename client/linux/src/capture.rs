@@ -1,5 +1,4 @@
 use std::process::{Command, Stdio};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
 use virtue_core::{CoreError, CoreResult, PlatformHooks, Screenshot, ScreenshotHooks};
@@ -243,14 +242,6 @@ impl ScreenshotHooks for LinuxPlatformHooks {
             bytes,
             content_type: "image/png".to_string(),
         })
-    }
-
-    fn get_time_utc_ms(&self) -> CoreResult<i64> {
-        let duration = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|err| CoreError::CommandFailed(err.to_string()))?;
-        i64::try_from(duration.as_millis())
-            .map_err(|_| CoreError::InvalidState("system clock overflow"))
     }
 
     fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>> {

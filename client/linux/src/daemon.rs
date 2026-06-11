@@ -1,17 +1,13 @@
 use std::process::Command;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Result;
 use tokio::sync::mpsc;
-use virtue_core::EventError;
 use virtue_core::ProcessStoppedReason;
-use virtue_core::events::RemoteSender;
 use virtue_core::{
-    ComputerResumed, ComputerSuspended, EventBus, EventChannel, IpcListener, LoginRequested,
-    LoginResult, Logout, LogoutRequested, LogoutResult, Ping, ProcessStarted, ProcessStopped,
-    StatusRequest, StatusResponse, UserSessionLogin, UserSessionLogout, UserStopRequested,
+    ComputerResumed, ComputerSuspended, EventBus, IpcBridge, Ping, ProcessStarted, ProcessStopped,
     build_default_modules_reqwest, load_state, store_state,
 };
 use zbus::proxy;
@@ -49,88 +45,10 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
         store_state(&state_path, &bus.iter()?)
     })?;
 
-    // Shared list of outbound handles — prune dead ones on each send.
-    let clients: Arc<Mutex<Vec<RemoteSender>>> = Arc::new(Mutex::new(Vec::new()));
-
-    // Bind IPC listener and spawn an accept thread.
-    //
-    // For each accepted connection: all inbound handlers are registered and the
-    // sender is pushed into `clients` BEFORE the reader thread is started.
-    // This guarantees that any response emitted while bus.iter() is running
-    // (which may have started before try_recv ran) will still reach the client,
-    // eliminating the race where StatusResponse fires against an empty clients list.
-    let sock_path = paths.state_dir.join("daemon.sock");
-
-    match IpcListener::bind(&sock_path) {
-        Ok(listener) => {
-            let emitter_for_accept = bus.emitter();
-            let clients_for_accept = clients.clone();
-            tokio::task::spawn_blocking(move || {
-                loop {
-                    match listener.blocking_accept() {
-                        Ok(mut remote) => {
-                            let e = emitter_for_accept.clone();
-
-                            macro_rules! forward_inbound {
-                                ($($T:ty),* $(,)?) => {
-                                    $(
-                                        let e2 = e.clone();
-                                        remote.on::<$T>(move |ev| e2.send(ev.clone()));
-                                    )*
-                                };
-                            }
-                            forward_inbound!(
-                                LoginRequested,
-                                LogoutRequested,
-                                StatusRequest,
-                                UserStopRequested,
-                                UserSessionLogin,
-                                UserSessionLogout,
-                                ComputerSuspended,
-                                ComputerResumed,
-                                ProcessStopped,
-                            );
-
-                            // Push the sender before starting the reader thread so
-                            // responses to events queued by the reader are never
-                            // lost due to timing with the main loop.
-                            clients_for_accept.lock().unwrap().push(remote.sender());
-                            remote.start();
-                        }
-                        Err(e) => {
-                            eprintln!("daemon: ipc accept error: {e}");
-                            break;
-                        }
-                    }
-                }
-            });
-        }
-        Err(e) => {
-            eprintln!(
-                "daemon: failed to bind IPC listener at {}: {e}",
-                sock_path.display()
-            );
-        }
+    let mut ipc = IpcBridge::bind(&paths.state_dir.join("daemon.sock"));
+    if let Some(ipc) = &mut ipc {
+        ipc.subscribe_standard_outbound(&mut bus);
     }
-
-    macro_rules! subscribe_outbound {
-        ($($T:ty),* $(,)?) => {
-            $(
-                let c = clients.clone();
-                bus.subscribe::<$T>(move |ev| {
-                    c.lock().unwrap().retain(|s| s.send(ev.clone()).is_ok());
-                    Ok(())
-                });
-            )*
-        };
-    }
-    subscribe_outbound!(
-        LoginResult,
-        LogoutResult,
-        StatusResponse,
-        Logout,
-        EventError
-    );
 
     let shutdown = Arc::new(AtomicBool::new(false));
     let (signal_tx, mut signal_rx) = mpsc::unbounded_channel::<String>();
@@ -143,6 +61,11 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     loop {
         if shutdown.load(Ordering::SeqCst) {
             break;
+        }
+
+        // Wire up any newly accepted IPC connections.
+        if let Some(ipc) = &mut ipc {
+            ipc.accept_pending(&mut bus, IpcBridge::forward_standard_inbound);
         }
 
         match tokio::task::block_in_place(|| {

@@ -25,8 +25,7 @@ client/
       events/
         bus.rs          — EventBus, Observer, Emitter, dispatch_event!
         remote.rs       — RemoteEventBus (cross-process, JSON lines)
-        types.rs        — 30+ typed event structs
-      ipc.rs            — Unix / in-process IPC primitives
+      ipc_bridge.rs     — IpcBridge (Linux/Mac daemon IPC accept loop)
       model.rs          — Shared structs (ServiceStatus, Screenshot, …)
       module/
         auth.rs         — AuthModule: login / logout / device settings
@@ -124,16 +123,69 @@ let bus = EventBus::new(observers, state)?;
 
 Cross-process communication uses two layers:
 
-- **`IpcListener` / IPC transport** (`ipc.rs`) — low-level Unix-socket or
-  in-process channel; provides raw line send/recv.
-- **`RemoteEventBus`** (`events/remote.rs`) — typed JSON-line event channel
-  built on top of the transport; implements `EventChannel` so `ClientController`
-  works against both in-process and cross-process peers.
+- **`IpcListener` / IPC transport** (`events/remote.rs`) — low-level Unix-socket;
+  provides raw JSON-line send/recv via `RemoteEventBus`.
+- **`RemoteEventBus`** (`events/remote.rs`) — typed JSON-line event channel;
+  implements `EventChannel` so `ClientController` works against both in-process
+  and cross-process peers.
 
-The daemon binds an `IpcListener`, wraps it in a `RemoteEventBus`, and bridges
-it to the main `EventBus` by subscribing to forwarded event types (e.g.
-`StatusRequest`, `LoginRequested`, `LogoutRequested`). Non-forwarded types
-(`Upload`, `Ping`) never cross the socket boundary.
+The daemon binds an `IpcListener`, wraps each accepted connection in a
+`RemoteEventBus`, and bridges it to the main `EventBus` by forwarding typed
+events in both directions. Non-forwarded types (`Upload`, `Ping`) never cross
+the socket boundary.
+
+#### IpcBridge (`ipc_bridge.rs`)
+
+`IpcBridge` encapsulates the boilerplate shared by the Linux and Mac daemons:
+the accept thread, the list of connected outbound senders, and the fan-out
+subscription. Typical usage:
+
+```rust
+// Once, before the main loop:
+let mut ipc = IpcBridge::bind(&paths.state_dir.join("daemon.sock"));
+if let Some(ipc) = &mut ipc {
+    ipc.subscribe_standard_outbound(&mut bus);         // LoginResult, LogoutResult, …
+    ipc.subscribe_outbound::<MyPlatformEvent>(&mut bus); // platform-specific extras
+}
+
+// Each main-loop iteration:
+if let Some(ipc) = &mut ipc {
+    ipc.accept_pending(&mut bus, IpcBridge::forward_standard_inbound);
+    // or a custom setup closure for platforms that need extra per-connection handlers
+}
+```
+
+`forward_standard_inbound` registers handlers for the standard controller→daemon
+set (`LoginRequested`, `LogoutRequested`, `StatusRequest`, `UserStopRequested`,
+`UserSessionLogin/Logout`, `ComputerSuspended/Resumed`, `ProcessStopped`).
+Platform daemons can pass a custom closure to `accept_pending` to add extra
+handlers per-connection (Mac uses this to track `UserStopRequested` separately
+for shutdown-reason classification).
+
+## Platform process model
+
+Each platform uses a different integration pattern:
+
+### Linux / Mac — separate daemon process
+
+The daemon runs as a separate process. Communication between the CLI/tray and the
+daemon uses Unix-domain sockets (`daemon.sock`) via `IpcBridge`. The main event
+loop sends `Ping` on each tick and calls `ipc.accept_pending()` to wire up newly
+connected controllers.
+
+### Windows — in-process `ResidentMonitor` thread
+
+There is no separate daemon process. `ResidentMonitor` runs the event bus on a
+background thread inside the host process. The CLI communicates via an in-process
+`mpsc` channel rather than a Unix socket.
+
+### Android / iOS — JNI/C FFI entry points
+
+Each JNI or C FFI call builds a fresh `EventBus`, sends one or more events, calls
+`bus.iter()`, persists the resulting state, and returns. There is no long-running
+daemon loop from the host language's perspective; the Rust code holds no
+cross-call state beyond what is serialised to `event_state.json`. No IPC
+sockets are used.
 
 ## Config model
 
@@ -177,10 +229,15 @@ Keep the trait minimal. Platforms implement only:
 
 ```rust
 fn take_screenshot(&self) -> CoreResult<Screenshot>;
-fn get_time_utc_ms(&self) -> CoreResult<i64>;
+fn get_time_utc_ms(&self) -> CoreResult<i64>;          // default: SystemTime::now()
 fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>>;
 fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>>;
 ```
+
+`get_time_utc_ms` has a default implementation using `SystemTime::now()` that is correct for
+all production platforms. Only `TestPlatformHooks` overrides it (delegates to `MockClock` for
+time-controlled tests). Platform crates implement only `take_screenshot`,
+`get_last_shutdown_time_utc_ms`, and `get_last_startup_time_utc_ms`.
 
 Everything else belongs in `core`.
 
