@@ -44,8 +44,10 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     })?;
     let mut bus = EventBus::new(modules, load_state(&state_path)?)?;
 
-    bus.send(ProcessStarted)?;
-    store_state(&state_path, &bus.iter()?)?;
+    tokio::task::block_in_place(|| {
+        bus.send(ProcessStarted)?;
+        store_state(&state_path, &bus.iter()?)
+    })?;
 
     // Shared list of outbound handles — prune dead ones on each send.
     let clients: Arc<Mutex<Vec<RemoteSender>>> = Arc::new(Mutex::new(Vec::new()));
