@@ -59,12 +59,15 @@ where
 
 /// Convenience wrapper that defaults to [`ReqwestApiClient`].
 pub fn build_default_modules_reqwest<P>(
-    config: Config,
+    mut config: Config,
     platform: P,
 ) -> CoreResult<Vec<Box<dyn Observer>>>
 where
     P: ScreenshotHooks + Clone,
 {
+    // Refresh before building the API client so the override URL is used from
+    // the start. build_default_modules will refresh again — that's harmless.
+    config.refresh_from_runtime_file()?;
     let api = ReqwestApiClient::new(&config)?;
     build_default_modules(config, platform, api)
 }
