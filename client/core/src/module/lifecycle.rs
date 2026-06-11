@@ -750,6 +750,7 @@ mod tests {
 
         // Computer shuts down at 70s (55 s after last ping), boots at 100s.
         // Only the platform hook carries this — no events were sent.
+        // Platform hooks are now implemented on Linux/Mac; this mock mirrors a real capability.
         t.platform.set_last_shutdown_time(Some(70_000));
         t.platform.set_last_startup_time(Some(100_000));
         t.clear_captured();

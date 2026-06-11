@@ -309,6 +309,20 @@ impl EventChannel for RemoteEventBus {
     fn pump(&mut self) -> CoreResult<()> {
         Ok(())
     }
+
+    fn request<Req: crate::events::Event, Resp: crate::events::Event + Clone>(
+        &mut self,
+        request: Req,
+    ) -> CoreResult<Resp> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.on::<Resp>(move |resp| {
+            let _ = tx.send(resp.clone());
+            Ok(())
+        });
+        self.publish(request)?;
+        rx.recv_timeout(std::time::Duration::from_secs(10))
+            .map_err(|_| CoreError::InvalidState("daemon did not respond within 10 seconds"))
+    }
 }
 
 #[cfg(test)]

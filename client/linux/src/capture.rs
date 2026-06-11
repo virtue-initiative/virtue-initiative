@@ -205,6 +205,27 @@ fn parse_btime_ms(proc_stat: &str) -> Option<i64> {
     None
 }
 
+// Parses `journalctl --list-boots -o json` output and returns the last-entry timestamp
+// (µs → ms) of the previous boot (index == -1). Returns None if there is no previous boot,
+// the output is unparseable, or journald has no persistent log.
+fn parse_last_shutdown_ms(json: &str) -> Option<i64> {
+    let entries: Vec<serde_json::Value> = serde_json::from_str(json).ok()?;
+    for entry in &entries {
+        let Some(index) = entry.get("index").and_then(|v| v.as_i64()) else {
+            continue;
+        };
+        if index != -1 {
+            continue;
+        }
+        let last_entry = entry.get("last_entry")?;
+        let us = last_entry
+            .as_i64()
+            .or_else(|| last_entry.as_str()?.parse::<i64>().ok())?;
+        return Some(us / 1000);
+    }
+    None
+}
+
 #[derive(Clone)]
 pub struct LinuxPlatformHooks;
 
@@ -233,7 +254,21 @@ impl ScreenshotHooks for LinuxPlatformHooks {
     }
 
     fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>> {
-        Ok(None)
+        let output = Command::new("journalctl")
+            .args(["--list-boots", "-o", "json"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+            .ok();
+        let Some(output) = output else {
+            return Ok(None);
+        };
+        if !output.status.success() {
+            return Ok(None);
+        }
+        let json = String::from_utf8_lossy(&output.stdout);
+        Ok(parse_last_shutdown_ms(&json))
     }
 
     fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
@@ -312,5 +347,40 @@ mod tests {
     fn parse_btime_ms_returns_none_when_btime_absent() {
         let content = "cpu  1234 0 5678 9999\nprocs_running 1\n";
         assert_eq!(parse_btime_ms(content), None);
+    }
+
+    #[test]
+    fn parse_last_shutdown_ms_extracts_previous_boot_last_entry() {
+        let json = r#"[
+            {"index":-1,"boot_id":"aaa","first_entry":1717200000000000,"last_entry":1717286400000000},
+            {"index":0,"boot_id":"bbb","first_entry":1717300000000000,"last_entry":1717310000000000}
+        ]"#;
+        assert_eq!(parse_last_shutdown_ms(json), Some(1_717_286_400_000));
+    }
+
+    #[test]
+    fn parse_last_shutdown_ms_handles_string_timestamps() {
+        let json = r#"[
+            {"index":-1,"boot_id":"aaa","first_entry":"1717200000000000","last_entry":"1717286400000000"},
+            {"index":0,"boot_id":"bbb","first_entry":"1717300000000000","last_entry":"1717310000000000"}
+        ]"#;
+        assert_eq!(parse_last_shutdown_ms(json), Some(1_717_286_400_000));
+    }
+
+    #[test]
+    fn parse_last_shutdown_ms_returns_none_when_only_current_boot() {
+        let json = r#"[{"index":0,"boot_id":"bbb","first_entry":1717300000000000,"last_entry":1717310000000000}]"#;
+        assert_eq!(parse_last_shutdown_ms(json), None);
+    }
+
+    #[test]
+    fn parse_last_shutdown_ms_returns_none_on_empty_array() {
+        assert_eq!(parse_last_shutdown_ms("[]"), None);
+    }
+
+    #[test]
+    fn parse_last_shutdown_ms_returns_none_on_invalid_json() {
+        assert_eq!(parse_last_shutdown_ms("not json"), None);
+        assert_eq!(parse_last_shutdown_ms(""), None);
     }
 }

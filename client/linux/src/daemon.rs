@@ -206,7 +206,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
             }
         });
     }
-    Ok(())
+    std::process::exit(0);
 }
 
 const SYSTEMCTL_TIMEOUT: Duration = Duration::from_secs(2);

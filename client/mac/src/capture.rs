@@ -105,6 +105,44 @@ fn temporary_capture_path() -> PathBuf {
     std::env::temp_dir().join(file_name)
 }
 
+// Parses `sysctl -n kern.boottime` output (e.g. "{ sec = 1718000000, usec = 123456 } ...")
+// and returns the boot time in milliseconds since epoch.
+fn parse_boottime_ms(s: &str) -> Option<i64> {
+    let sec_start = s.find("sec = ")?;
+    let rest = &s[sec_start + 6..];
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    rest[..end].parse::<i64>().ok().map(|secs| secs * 1000)
+}
+
+// Parses `last -1 -F shutdown` output and returns the shutdown time in milliseconds.
+// The `-F` flag on macOS BSD last includes the year and seconds, e.g.:
+//   "shutdown  ~          Mon Jun 10 22:45:00 2024"
+// Returns None if no shutdown line is found or the date is unparseable.
+fn parse_last_shutdown_mac(s: &str) -> Option<i64> {
+    use chrono::{Local, NaiveDateTime, TimeZone};
+
+    for line in s.lines() {
+        if !line.starts_with("shutdown") {
+            continue;
+        }
+        let tokens: Vec<&str> = line.split_whitespace().collect();
+        for w in tokens.windows(5) {
+            let Ok(day) = w[2].parse::<u32>() else {
+                continue;
+            };
+            let normalized = format!("{} {} {:02} {} {}", w[0], w[1], day, w[3], w[4]);
+            if let Ok(dt) = NaiveDateTime::parse_from_str(&normalized, "%a %b %d %H:%M:%S %Y") {
+                if let chrono::LocalResult::Single(local) = Local.from_local_datetime(&dt) {
+                    return Some(local.timestamp_millis());
+                }
+            }
+        }
+    }
+    None
+}
+
 #[derive(Clone)]
 pub struct MacPlatformHooks;
 
@@ -133,12 +171,95 @@ impl ScreenshotHooks for MacPlatformHooks {
     }
 
     fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>> {
-        Ok(None)
+        let output = Command::new("last")
+            .args(["-1", "-F", "shutdown"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+            .ok();
+        let Some(output) = output else {
+            return Ok(None);
+        };
+        if !output.status.success() {
+            return Ok(None);
+        }
+        let text = String::from_utf8_lossy(&output.stdout);
+        Ok(parse_last_shutdown_mac(&text))
     }
 
     fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
-        Ok(None)
+        let output = Command::new("sysctl")
+            .args(["-n", "kern.boottime"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+            .ok();
+        let Some(output) = output else {
+            return Ok(None);
+        };
+        if !output.status.success() {
+            return Ok(None);
+        }
+        let text = String::from_utf8_lossy(&output.stdout);
+        Ok(parse_boottime_ms(&text))
     }
 }
 
 impl PlatformHooks for MacPlatformHooks {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_boottime_ms_extracts_sec_from_sysctl_output() {
+        let input = "{ sec = 1718000000, usec = 123456 } Tue Jun 10 12:00:00 2024\n";
+        assert_eq!(parse_boottime_ms(input), Some(1_718_000_000_000));
+    }
+
+    #[test]
+    fn parse_boottime_ms_returns_none_on_empty_input() {
+        assert_eq!(parse_boottime_ms(""), None);
+    }
+
+    #[test]
+    fn parse_boottime_ms_returns_none_when_sec_absent() {
+        assert_eq!(parse_boottime_ms("{ usec = 123456 }"), None);
+    }
+
+    #[test]
+    fn parse_last_shutdown_mac_extracts_timestamp_from_last_output() {
+        // Standard `last -F shutdown` output format
+        let input = "shutdown  ~          Mon Jun 10 22:45:00 2024\n\nwtmp begins ...\n";
+        let result = parse_last_shutdown_mac(input);
+        assert!(result.is_some(), "expected Some timestamp, got None");
+        // Should be somewhere around 2024-06-10 (1717286400000 ± timezone offset)
+        let ms = result.unwrap();
+        assert!(ms > 1_700_000_000_000, "timestamp not in expected range");
+        assert!(ms < 1_800_000_000_000, "timestamp not in expected range");
+    }
+
+    #[test]
+    fn parse_last_shutdown_mac_handles_single_digit_day() {
+        // Space-padded day in original output becomes bare digit after split_whitespace
+        let input = "shutdown  ~          Mon Jun  5 09:00:00 2024\n";
+        let result = parse_last_shutdown_mac(input);
+        assert!(
+            result.is_some(),
+            "expected Some timestamp for single-digit day"
+        );
+    }
+
+    #[test]
+    fn parse_last_shutdown_mac_returns_none_when_no_shutdown_line() {
+        let input = "reboot    ~          Mon Jun 10 22:45:00 2024\n\nwtmp begins ...\n";
+        assert_eq!(parse_last_shutdown_mac(input), None);
+    }
+
+    #[test]
+    fn parse_last_shutdown_mac_returns_none_on_empty_input() {
+        assert_eq!(parse_last_shutdown_mac(""), None);
+    }
+}
