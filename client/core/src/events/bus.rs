@@ -8,16 +8,17 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::error::{CoreError, CoreResult};
 
-/// Private trait that bundles `Any + Debug` so the channel can hold type-erased
-/// events that are still printable in debug builds.
-trait AnyDebugEvent: Any + std::fmt::Debug + Send + Sync {
-    fn as_any(&self) -> &dyn Any;
-}
-impl<T: Any + std::fmt::Debug + Send + Sync> AnyDebugEvent for T {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+/// Private marker trait that bundles `Any + Debug` so the channel can hold
+/// type-erased events that are still printable in debug builds.
+///
+/// To recover the concrete type, upcast a `&dyn AnyDebugEvent` to `&dyn Any`
+/// (e.g. `&*event as &dyn Any`) and `downcast_ref`. Do **not** add an inherent
+/// `as_any(&self)` helper here: because the blanket impl below also covers
+/// `Box<dyn AnyDebugEvent>`, calling such a method on the box would resolve to
+/// the impl *for the box* and yield a `&dyn Any` of the box rather than the
+/// inner event — silently breaking every downcast.
+trait AnyDebugEvent: Any + std::fmt::Debug + Send + Sync {}
+impl<T: Any + std::fmt::Debug + Send + Sync> AnyDebugEvent for T {}
 
 /// Match a `&dyn Any` event against typed arms, like a `match` statement.
 ///
@@ -224,19 +225,42 @@ impl EventBus {
             if cfg!(debug_assertions) {
                 println!("Event: {:?}", &*event);
             }
-            // Subscription-based on_event (existing modules).
-            {
-                let event_any: &dyn Any = event.as_any();
-                if let Some(handlers) = self.handlers.get(&event_any.type_id()) {
-                    for handler in handlers {
-                        handler(event_any);
-                    }
+            // Upcast the boxed event to `&dyn Any` ONCE, dereferencing to the
+            // inner `dyn AnyDebugEvent` first. Upcasting the box directly would
+            // yield a `&dyn Any` of the box, so no `type_id`/downcast would match.
+            let event_any: &dyn Any = &*event;
+
+            // Subscription-based handlers (closure subscriptions).
+            if let Some(handlers) = self.handlers.get(&event_any.type_id()) {
+                for handler in handlers {
+                    handler(event_any);
                 }
             }
-            // Direct on_event (modules using the new &mut self pattern).
+
+            // Direct on_event (modules using the &mut self pattern).
+            //
+            // Mirror the subscription path: a failing observer is logged and
+            // turned into an `Error` event rather than aborting the drain. If we
+            // propagated here, one module's failure (e.g. a `Ping` handler whose
+            // capture session is unavailable) would strand every event still
+            // queued behind it — including the `PartialStatus` replies a
+            // `StatusRequest` just enqueued — so the cascade would never settle
+            // and no `StatusResponse` would be produced.
             let emitter = self.emitter();
+            let is_error_event = event_any.is::<Error>();
             for observer in &mut self.observers {
-                observer.on_event(event.as_any(), &emitter)?;
+                if let Err(err) = observer.on_event(event_any, &emitter) {
+                    log_error(
+                        &format!("observer '{}' failed", observer.name()),
+                        Some(&err),
+                    );
+                    if !is_error_event {
+                        let _ = emitter.send(Error {
+                            source: observer.name().to_string(),
+                            message: err.to_string(),
+                        });
+                    }
+                }
             }
         }
         self.save()
@@ -321,12 +345,12 @@ mod tests {
     use super::*;
     use serde::Deserialize;
 
-    #[derive(Serialize, Deserialize, Clone)]
+    #[derive(Serialize, Deserialize, Clone, Debug)]
     struct Tick {
         n: u32,
     }
 
-    #[derive(Serialize, Deserialize, Clone)]
+    #[derive(Serialize, Deserialize, Clone, Debug)]
     struct Tock {
         n: u32,
     }
@@ -366,6 +390,21 @@ mod tests {
         fn name(&self) -> &'static str {
             "counter"
         }
+    }
+
+    #[test]
+    fn boxed_event_downcasts_to_concrete_type() {
+        // Regression: a boxed event must downcast back to its concrete type.
+        // Recovering the type by upcasting the box directly (rather than the
+        // inner trait object) used to yield a `&dyn Any` of the box and silently
+        // break every dispatch.
+        let boxed: AnyEvent = Box::new(Tick { n: 5 });
+        let event_any: &dyn Any = &*boxed;
+        assert!(
+            event_any.is::<Tick>(),
+            "boxed event must report its concrete type"
+        );
+        assert_eq!(event_any.downcast_ref::<Tick>().map(|t| t.n), Some(5));
     }
 
     #[test]
@@ -483,5 +522,55 @@ mod tests {
         assert_eq!(errors.len(), 1);
         assert!(errors[0].message.contains("boom"));
         assert!(errors[0].source.contains("Tick"));
+    }
+
+    #[test]
+    fn failing_on_event_observer_does_not_strand_later_observers() {
+        // Regression: an observer whose `on_event` returns Err must not abort the
+        // drain. Otherwise events queued behind the failing one (here, the `Tock`
+        // that `Counter` cascades from `Tick`) never get processed.
+        struct AlwaysFails;
+        impl Observer for AlwaysFails {
+            fn as_any_mut(&mut self) -> &mut dyn Any {
+                self
+            }
+            fn init(&mut self, _bus: &mut EventBus, _state: StateType) -> CoreResult<()> {
+                Ok(())
+            }
+            fn on_event(&mut self, event: &dyn Any, _emitter: &Emitter) -> CoreResult<()> {
+                crate::dispatch_event!(event, {
+                    _: Tick => Err(CoreError::InvalidState("boom")),
+                })
+            }
+            fn save(&self) -> CoreResult<StateType> {
+                Ok(StateType::Null)
+            }
+            fn name(&self) -> &'static str {
+                "always_fails"
+            }
+        }
+
+        // AlwaysFails is ordered before Counter, so its failure on `Tick` would
+        // (pre-fix) abort the drain before Counter's cascaded `Tock` is handled.
+        let mut bus = EventBus::new(
+            vec![Box::new(AlwaysFails), Box::new(Counter { seen: 0 })],
+            StateType::Null,
+        )
+        .unwrap();
+
+        bus.send(Tick { n: 1 }).unwrap();
+        bus.iter().unwrap();
+
+        let seen = bus
+            .observer_mut("counter")
+            .unwrap()
+            .as_any_mut()
+            .downcast_mut::<Counter>()
+            .unwrap()
+            .seen;
+        assert_eq!(
+            seen, 1,
+            "cascade must complete despite the failing observer"
+        );
     }
 }
