@@ -60,7 +60,10 @@ pub struct ReqwestApiClient {
 
 impl ReqwestApiClient {
     pub fn new(config: &Config) -> CoreResult<Self> {
-        let client = Client::builder().cookie_store(true).build()?;
+        let client = Client::builder()
+            .cookie_store(true)
+            .timeout(std::time::Duration::from_secs(5))
+            .build()?;
         Ok(Self {
             base_url: config.api_base_url.trim_end_matches('/').to_string(),
             client,

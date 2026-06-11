@@ -8,6 +8,17 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::error::{CoreError, CoreResult};
 
+/// Private trait that bundles `Any + Debug` so the channel can hold type-erased
+/// events that are still printable in debug builds.
+trait AnyDebugEvent: Any + std::fmt::Debug + Send + Sync {
+    fn as_any(&self) -> &dyn Any;
+}
+impl<T: Any + std::fmt::Debug + Send + Sync> AnyDebugEvent for T {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
 /// Match a `&dyn Any` event against typed arms, like a `match` statement.
 ///
 /// Each arm has the form `$pat: $Type => $expr`. The pattern `_` discards the
@@ -45,15 +56,15 @@ pub fn log_error(msg: &str, err: Option<&dyn std::fmt::Display>) {
 pub type StateType = serde_json::Value;
 
 /// A type-erased event as it travels through the in-process channel.
-type AnyEvent = Box<dyn Any + Send + Sync>;
+type AnyEvent = Box<dyn AnyDebugEvent>;
 
 /// Anything that can be published on the bus.
 ///
 /// The blanket impl means any `Serialize + DeserializeOwned` value that is
 /// `Send + Sync + 'static` is automatically an `Event` — no derive needed.
-pub trait Event: Serialize + DeserializeOwned + Send + Sync + 'static {}
+pub trait Event: Serialize + DeserializeOwned + std::fmt::Debug + Send + Sync + 'static {}
 
-impl<T> Event for T where T: Serialize + DeserializeOwned + Send + Sync + 'static {}
+impl<T> Event for T where T: Serialize + DeserializeOwned + std::fmt::Debug + Send + Sync + 'static {}
 
 /// Emitted by the bus when a subscription handler returns `Err`.
 ///
@@ -210,9 +221,12 @@ impl EventBus {
     /// every observer is collected and returned.
     pub fn iter(&mut self) -> CoreResult<StateType> {
         while let Ok(event) = self.rx.try_recv() {
+            if cfg!(debug_assertions) {
+                println!("Event: {:?}", &*event);
+            }
             // Subscription-based on_event (existing modules).
             {
-                let event_any: &dyn Any = &*event;
+                let event_any: &dyn Any = event.as_any();
                 if let Some(handlers) = self.handlers.get(&event_any.type_id()) {
                     for handler in handlers {
                         handler(event_any);
@@ -222,7 +236,7 @@ impl EventBus {
             // Direct on_event (modules using the new &mut self pattern).
             let emitter = self.emitter();
             for observer in &mut self.observers {
-                observer.on_event(&*event, &emitter)?;
+                observer.on_event(event.as_any(), &emitter)?;
             }
         }
         self.save()
@@ -264,7 +278,8 @@ pub trait EventChannel {
     /// [`RemoteEventBus`] (whose reader thread does the work) is a no-op.
     fn pump(&mut self) -> CoreResult<()>;
 
-    /// Publish `request` and block until a matching `Resp` is observed.
+    /// Publish `request` and block until a matching `Resp` is observed, or 5
+    /// seconds elapse.
     fn request<Req: Event, Resp: Event + Clone>(&mut self, request: Req) -> CoreResult<Resp> {
         let (tx, rx) = mpsc::channel();
         self.on::<Resp>(move |resp| {
@@ -275,8 +290,15 @@ pub trait EventChannel {
         });
         self.publish(request)?;
         self.pump()?;
-        rx.recv()
-            .map_err(|_| CoreError::InvalidState("event channel closed before response"))
+        rx.recv_timeout(std::time::Duration::from_secs(5))
+            .map_err(|e| match e {
+                mpsc::RecvTimeoutError::Timeout => {
+                    CoreError::CommandFailed("timed out waiting for daemon response".into())
+                }
+                mpsc::RecvTimeoutError::Disconnected => {
+                    CoreError::InvalidState("event channel closed before response")
+                }
+            })
     }
 }
 

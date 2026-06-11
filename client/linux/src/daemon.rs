@@ -11,8 +11,8 @@ use virtue_core::events::RemoteSender;
 use virtue_core::{
     ComputerResumed, ComputerSuspended, EventBus, EventChannel, IpcListener, LoginRequested,
     LoginResult, Logout, LogoutRequested, LogoutResult, Ping, ProcessStarted, ProcessStopped,
-    RemoteEventBus, StatusRequest, StatusResponse, UserSessionLogin, UserSessionLogout,
-    UserStopRequested, build_default_modules_reqwest, load_state, store_state,
+    StatusRequest, StatusResponse, UserSessionLogin, UserSessionLogout, UserStopRequested,
+    build_default_modules_reqwest, load_state, store_state,
 };
 use zbus::proxy;
 
@@ -47,19 +47,53 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     bus.send(ProcessStarted)?;
     store_state(&state_path, &bus.iter()?)?;
 
+    // Shared list of outbound handles — prune dead ones on each send.
+    let clients: Arc<Mutex<Vec<RemoteSender>>> = Arc::new(Mutex::new(Vec::new()));
+
     // Bind IPC listener and spawn an accept thread.
+    //
+    // For each accepted connection: all inbound handlers are registered and the
+    // sender is pushed into `clients` BEFORE the reader thread is started.
+    // This guarantees that any response emitted while bus.iter() is running
+    // (which may have started before try_recv ran) will still reach the client,
+    // eliminating the race where StatusResponse fires against an empty clients list.
     let sock_path = paths.state_dir.join("daemon.sock");
-    let (ipc_accept_tx, mut ipc_accept_rx) = mpsc::unbounded_channel::<RemoteEventBus>();
 
     match IpcListener::bind(&sock_path) {
         Ok(listener) => {
+            let emitter_for_accept = bus.emitter();
+            let clients_for_accept = clients.clone();
             tokio::task::spawn_blocking(move || {
                 loop {
                     match listener.blocking_accept() {
-                        Ok(remote) => {
-                            if ipc_accept_tx.send(remote).is_err() {
-                                break;
+                        Ok(mut remote) => {
+                            let e = emitter_for_accept.clone();
+
+                            macro_rules! forward_inbound {
+                                ($($T:ty),* $(,)?) => {
+                                    $(
+                                        let e2 = e.clone();
+                                        remote.on::<$T>(move |ev| e2.send(ev.clone()));
+                                    )*
+                                };
                             }
+                            forward_inbound!(
+                                LoginRequested,
+                                LogoutRequested,
+                                StatusRequest,
+                                UserStopRequested,
+                                UserSessionLogin,
+                                UserSessionLogout,
+                                ComputerSuspended,
+                                ComputerResumed,
+                                ProcessStopped,
+                            );
+
+                            // Push the sender before starting the reader thread so
+                            // responses to events queued by the reader are never
+                            // lost due to timing with the main loop.
+                            clients_for_accept.lock().unwrap().push(remote.sender());
+                            remote.start();
                         }
                         Err(e) => {
                             eprintln!("daemon: ipc accept error: {e}");
@@ -76,9 +110,6 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
             );
         }
     }
-
-    // Shared list of outbound handles — prune dead ones on each send.
-    let clients: Arc<Mutex<Vec<RemoteSender>>> = Arc::new(Mutex::new(Vec::new()));
 
     macro_rules! subscribe_outbound {
         ($($T:ty),* $(,)?) => {
@@ -106,37 +137,10 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     spawn_suspend_watcher(sleep_tx);
 
     let mut last_session_unavailable_log: Option<std::time::Instant> = None;
+    let mut shutdown_cleanup_done = false;
     loop {
         if shutdown.load(Ordering::SeqCst) {
             break;
-        }
-
-        // Wire up any newly accepted IPC connections.
-        while let Ok(mut remote) = ipc_accept_rx.try_recv() {
-            let e = bus.emitter();
-
-            macro_rules! forward_inbound {
-                ($($T:ty),* $(,)?) => {
-                    $(
-                        let e2 = e.clone();
-                        remote.on::<$T>(move |ev| e2.send(ev.clone()));
-                    )*
-                };
-            }
-            forward_inbound!(
-                LoginRequested,
-                LogoutRequested,
-                StatusRequest,
-                UserStopRequested,
-                UserSessionLogin,
-                UserSessionLogout,
-                ComputerSuspended,
-                ComputerResumed,
-                ProcessStopped,
-            );
-
-            clients.lock().unwrap().push(remote.sender());
-            drop(remote);
         }
 
         match tokio::task::block_in_place(|| {
@@ -168,6 +172,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
             signal = signal_rx.recv() => {
                 if signal.is_some() {
                     tokio::task::block_in_place(|| record_shutdown_transition(&mut bus, &state_path));
+                    shutdown_cleanup_done = true;
                 }
                 break;
             }
@@ -191,53 +196,72 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
         }
     }
 
-    tokio::task::block_in_place(|| {
-        let _ = bus.send(Ping);
-        if let Ok(state) = bus.iter() {
-            let _ = store_state(&state_path, &state);
-        }
-    });
+    if !shutdown_cleanup_done {
+        tokio::task::block_in_place(|| {
+            let _ = bus.send(Ping);
+            if let Ok(state) = bus.iter() {
+                let _ = store_state(&state_path, &state);
+            }
+        });
+    }
     Ok(())
 }
 
-fn read_systemd_state() -> Option<String> {
-    let output = Command::new("systemctl")
-        .arg("is-system-running")
-        .output()
-        .ok()?;
-    let stdout = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .to_ascii_lowercase();
-    if !stdout.is_empty() {
-        return Some(stdout);
-    }
+const SYSTEMCTL_TIMEOUT: Duration = Duration::from_secs(2);
 
-    let stderr = String::from_utf8_lossy(&output.stderr)
-        .trim()
-        .to_ascii_lowercase();
-    if !stderr.is_empty() {
-        return Some(stderr);
-    }
-    None
+fn run_with_timeout<F, T>(f: F) -> Option<T>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(SYSTEMCTL_TIMEOUT).ok()
+}
+
+fn read_systemd_state() -> Option<String> {
+    run_with_timeout(|| {
+        let output = Command::new("systemctl")
+            .arg("is-system-running")
+            .output()
+            .ok()?;
+        let stdout = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .to_ascii_lowercase();
+        if !stdout.is_empty() {
+            return Some(stdout);
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr)
+            .trim()
+            .to_ascii_lowercase();
+        if !stderr.is_empty() {
+            Some(stderr)
+        } else {
+            None
+        }
+    })
+    .flatten()
 }
 
 fn is_shutdown_job_queued() -> bool {
-    let output = match Command::new("systemctl")
-        .args(["list-jobs", "--no-legend", "--no-pager"])
-        .output()
-    {
-        Ok(value) => value,
-        Err(_) => return false,
-    };
-
-    if !output.status.success() {
-        return false;
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
-    stdout.lines().any(|line| {
-        line.contains("shutdown.target") && (line.contains(" start ") || line.ends_with(" start"))
+    run_with_timeout(|| {
+        let output = Command::new("systemctl")
+            .args(["list-jobs", "--no-legend", "--no-pager"])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+        Some(stdout.lines().any(|line| {
+            line.contains("shutdown.target")
+                && (line.contains(" start ") || line.ends_with(" start"))
+        }))
     })
+    .flatten()
+    .unwrap_or(false)
 }
 
 fn spawn_signal_handler(shutdown: Arc<AtomicBool>, signal_tx: mpsc::UnboundedSender<String>) {
