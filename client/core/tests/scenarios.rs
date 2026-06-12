@@ -120,8 +120,8 @@ fn user_stopped_process_emits_high_risk_upload() {
 #[test]
 fn ping_gap_while_running_emits_alert() {
     let mut scenario = Scenario::authenticated();
-    scenario.at_t(61_000).loop_iteration();
-    scenario.at_t(72_000).loop_iteration();
+    scenario.at_t(121_000).loop_iteration();
+    scenario.at_t(132_000).loop_iteration();
     assert!(
         !scenario.api.state().log_uploads.is_empty(),
         "expected a PingGapWhileRunning log upload"
@@ -282,7 +282,7 @@ fn unexpected_process_start_after_long_ping_gap_emits_alert() {
         ..Default::default()
     });
     scenario.queue(ProcessStarted);
-    scenario.at_t(100_000).loop_iteration();
+    scenario.at_t(130_000).loop_iteration();
     assert!(
         !scenario.api.state().log_uploads.is_empty(),
         "expected an UnexpectedProcessStart log upload"

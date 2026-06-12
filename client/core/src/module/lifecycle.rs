@@ -177,7 +177,7 @@ impl LifecycleModule {
             });
         }
 
-        if now_ms - old.last_login > 60000
+        if now_ms - old.last_login > 120000
             && old.last_process_started > old.last_process_stopped_user
         {
             let boot_ms = startup_time_ms.unwrap_or(0);
@@ -186,7 +186,7 @@ impl LifecycleModule {
             } else {
                 i64::MAX
             };
-            if ping_gap > 10000 && (now_ms - boot_ms) > 60000 {
+            if ping_gap > 10000 && (now_ms - boot_ms) > 120000 {
                 let _ = emitter.send(Upload {
                     risk: HIGH_RISK_LIFECYCLE_ALERT,
                     kind: UploadKind::LifecycleAlert {
@@ -266,7 +266,7 @@ impl LifecycleModule {
         self.maybe_backfill_missed_events(last_shutdown, startup_time_ms, emitter)?;
         self.state.last_ping = now_ms;
 
-        if now_ms - old.last_login > 60000 {
+        if now_ms - old.last_login > 120000 {
             let ping_gap = now_ms - old.last_ping;
             let start_gap = now_ms - old.last_running_started;
             if old.last_ping > 0 && ping_gap > 10000 && start_gap > 10000 {
@@ -636,21 +636,21 @@ mod tests {
         b.add(LifecycleModule::new(Box::new(b.platform())));
         let mut t = b.build();
 
-        // ProcessStarted + first Ping both at 1s — within 60s grace window, no alert.
+        // ProcessStarted + first Ping both at 1s — within 120s grace window, no alert.
         t.emit(1, ProcessStarted);
         t.emit(1, Ping);
         assert_eq!(t.observer::<LifecycleModule>().state.last_ping, 1_000);
         t.clear_captured();
 
-        // Jump to 100s: past 60s grace window and 10s ping-gap threshold.
-        t.emit(100, Ping);
+        // Jump to 200s: past 120s grace window and 10s ping-gap threshold.
+        t.emit(200, Ping);
         t.assert_like(crate::like!(Upload {
             kind: UploadKind::LifecycleAlert {
                 reason: AlertReason::PingGapWhileRunning
             },
             ..
         }));
-        assert_eq!(t.observer::<LifecycleModule>().state.last_ping, 100_000);
+        assert_eq!(t.observer::<LifecycleModule>().state.last_ping, 200_000);
         let alert = t
             .captured::<Upload>()
             .into_iter()
