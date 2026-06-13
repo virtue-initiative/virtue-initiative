@@ -5,13 +5,30 @@ import argparse
 import json
 import re
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 BORDER_RATIO = 0.06
-TRIM_ALPHA_THRESHOLD = 2
+
+# Opaque background painted behind the (transparent) logo on any icon that is
+# shown against a surface rather than overlaid on the OS (favicons, app icons).
+# Override per run with --background "#rrggbb".
+ICON_BACKGROUND_HEX = "#f4efe3"
+# Corner radius of "rounded" backgrounds, as a fraction of the icon side. ~0.22
+# matches the iOS/macOS squircle look.
+ROUNDED_RADIUS_RATIO = 0.22
+# Logo size as a fraction of the icon side when it sits on a background, leaving
+# a margin so the artwork doesn't crowd the edge. (The master already carries a
+# ~6% transparent border, so the visible art is a bit smaller than these.)
+CONTENT_SCALE_ROUNDED = 0.80
+CONTENT_SCALE_SQUARE = 0.84
+CONTENT_SCALE_CIRCLE = 0.72
+# Supersampling factor used when rasterizing rounded/circle masks so their
+# edges stay smooth even at favicon sizes.
+MASK_SUPERSAMPLE = 4
 IOS_APP_ICON_SPECS = (
     {"idiom": "iphone", "size": "20x20", "scale": "2x", "pixels": 40},
     {"idiom": "iphone", "size": "20x20", "scale": "3x", "pixels": 60},
@@ -100,35 +117,105 @@ def recolor_with_theme(raw: Image.Image, rgb: tuple[int, int, int]) -> Image.Ima
     # return recolored
 
 
-def save_png(master: Image.Image, path: Path, size: int) -> None:
+@dataclass(frozen=True)
+class Background:
+    """An opaque fill painted behind the logo.
+
+    shape:         "square" (full bleed), "rounded" (squircle), or "circle".
+    content_scale: logo size relative to the icon side, to keep the artwork
+                   inside the visible region (e.g. away from a circle's edge).
+    """
+
+    color: tuple[int, int, int]
+    shape: str = "square"
+    content_scale: float = 1.0
+
+
+def _shape_mask(size: int, shape: str) -> Image.Image | None:
+    """Anti-aliased alpha mask for a non-square background, or None for square."""
+    if shape == "square":
+        return None
+    hi = size * MASK_SUPERSAMPLE
+    mask = Image.new("L", (hi, hi), 0)
+    draw = ImageDraw.Draw(mask)
+    if shape == "circle":
+        draw.ellipse((0, 0, hi - 1, hi - 1), fill=255)
+    elif shape == "rounded":
+        radius = max(1, round(hi * ROUNDED_RADIUS_RATIO))
+        draw.rounded_rectangle((0, 0, hi - 1, hi - 1), radius=radius, fill=255)
+    else:
+        raise ValueError(f"unknown background shape: {shape!r}")
+    return mask.resize((size, size), Image.Resampling.LANCZOS)
+
+
+def render_master(
+    master: Image.Image, size: int, background: Background | None
+) -> Image.Image:
+    """Resize the logo to `size`, optionally compositing it onto a background."""
+    content_scale = background.content_scale if background else 1.0
+    content_size = max(1, round(size * content_scale))
+    content = master.resize((content_size, content_size), Image.Resampling.LANCZOS)
+    offset = (size - content_size) // 2
+
+    if background is None:
+        if content_size == size:
+            return content
+        base = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    else:
+        base = Image.new("RGBA", (size, size), (*background.color, 255))
+        mask = _shape_mask(size, background.shape)
+        if mask is not None:
+            base.putalpha(mask)
+
+    base.alpha_composite(content, (offset, offset))
+    return base
+
+
+def save_png(
+    master: Image.Image, path: Path, size: int, background: Background | None = None
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    out = master.resize((size, size), Image.Resampling.LANCZOS)
-    out.save(path, format="PNG", optimize=True)
+    render_master(master, size, background).save(path, format="PNG", optimize=True)
 
 
 def save_png_with_canvas(
-    master: Image.Image, path: Path, width: int, height: int, content_size: int
+    master: Image.Image,
+    path: Path,
+    width: int,
+    height: int,
+    content_size: int,
+    background: Background | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    content = master.resize((content_size, content_size), Image.Resampling.LANCZOS)
+    content = render_master(master, content_size, background)
     canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     x = (width - content_size) // 2
     y = (height - content_size) // 2
-    canvas.paste(content, (x, y), content)
+    canvas.alpha_composite(content, (x, y))
     canvas.save(path, format="PNG", optimize=True)
 
 
-def save_ico(master: Image.Image, path: Path, sizes: Iterable[int]) -> None:
+def save_ico(
+    master: Image.Image,
+    path: Path,
+    sizes: Iterable[int],
+    background: Background | None = None,
+) -> None:
     sorted_sizes = sorted(set(sizes))
     path.parent.mkdir(parents=True, exist_ok=True)
-    out = master.resize((sorted_sizes[-1], sorted_sizes[-1]), Image.Resampling.LANCZOS)
+    out = render_master(master, sorted_sizes[-1], background)
     out.save(path, format="ICO", sizes=[(size, size) for size in sorted_sizes])
 
 
-def save_icns(master: Image.Image, path: Path, sizes: Iterable[int]) -> None:
+def save_icns(
+    master: Image.Image,
+    path: Path,
+    sizes: Iterable[int],
+    background: Background | None = None,
+) -> None:
     sorted_sizes = sorted(set(sizes))
     path.parent.mkdir(parents=True, exist_ok=True)
-    out = master.resize((sorted_sizes[-1], sorted_sizes[-1]), Image.Resampling.LANCZOS)
+    out = render_master(master, sorted_sizes[-1], background)
     out.save(path, format="ICNS", sizes=[(size, size) for size in sorted_sizes])
 
 
@@ -139,18 +226,11 @@ def ios_icon_filename(spec: dict[str, str | int]) -> str:
     return f"Icon-App-{idiom}-{size}@{scale}.png"
 
 
-def flatten_onto_background(
-    image: Image.Image, background_rgb: tuple[int, int, int]
-) -> Image.Image:
-    base = Image.new("RGBA", image.size, (*background_rgb, 255))
-    base.alpha_composite(image)
-    return base
-
-
-def save_ios_app_icons(master: Image.Image, assets_dir: Path) -> list[Path]:
+def save_ios_app_icons(
+    master: Image.Image, assets_dir: Path, background: Background
+) -> list[Path]:
     app_icon_dir = assets_dir / "AppIcon.appiconset"
     outputs = [assets_dir / "Contents.json", app_icon_dir / "Contents.json"]
-    ios_master = flatten_onto_background(master, (255, 255, 255))
 
     if app_icon_dir.exists():
         shutil.rmtree(app_icon_dir)
@@ -169,7 +249,9 @@ def save_ios_app_icons(master: Image.Image, assets_dir: Path) -> list[Path]:
     for spec in IOS_APP_ICON_SPECS:
         filename = ios_icon_filename(spec)
         target_path = app_icon_dir / filename
-        save_png(ios_master, target_path, int(spec["pixels"]))
+        # iOS requires fully opaque icons and applies its own corner mask, so
+        # these are full-bleed squares rather than pre-rounded.
+        save_png(master, target_path, int(spec["pixels"]), background)
         outputs.append(target_path)
         contents_images.append(
             {
@@ -198,30 +280,26 @@ def preprocess_logo(
 ) -> Image.Image:
     raw = Image.open(raw_path).convert("RGBA")
     raw = recolor_with_theme(raw, theme_rgb)
-    alpha = raw.getchannel("A")
-    mask = alpha.point(
-        lambda x: 255 if x >= TRIM_ALPHA_THRESHOLD else 0,
-        mode="L",
-    )
-    bbox = mask.getbbox()
-    if bbox is None:
+
+    if raw.getbbox() is None:
         raise SystemExit(f"{raw_path} has no non-transparent pixels")
 
-    trimmed = raw.crop(bbox)
-
+    # Preserve the source framing: we never crop to the artwork's bounding box,
+    # so any padding baked into the SVG/export survives. We only pad a non-square
+    # source to a square, then scale the whole thing down to leave a uniform
+    # transparent border (the script's own padding).
     side = max(raw.width, raw.height)
+    if raw.width != raw.height:
+        squared = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+        squared.alpha_composite(raw, ((side - raw.width) // 2, (side - raw.height) // 2))
+        raw = squared
+
     content_target = max(1, int(round(side * (1.0 - (2.0 * BORDER_RATIO)))))
-    scale = min(content_target / trimmed.width, content_target / trimmed.height)
-    scaled_size = (
-        max(1, int(round(trimmed.width * scale))),
-        max(1, int(round(trimmed.height * scale))),
-    )
-    trimmed = trimmed.resize(scaled_size, Image.Resampling.LANCZOS)
+    scaled = raw.resize((content_target, content_target), Image.Resampling.LANCZOS)
 
     canvas = Image.new("RGBA", (side, side), (0, 0, 0, 0))
-    x = (side - scaled_size[0]) // 2
-    y = (side - scaled_size[1]) // 2
-    canvas.paste(trimmed, (x, y), trimmed)
+    offset = (side - content_target) // 2
+    canvas.alpha_composite(scaled, (offset, offset))
 
     if out_path is not None:
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -237,6 +315,14 @@ def parse_args() -> argparse.Namespace:
         default="all",
         help="Limit generated outputs to a specific target set.",
     )
+    parser.add_argument(
+        "--background",
+        default=ICON_BACKGROUND_HEX,
+        help=(
+            "Opaque background color (#rrggbb) painted behind the logo on "
+            f"favicons and app icons. Defaults to {ICON_BACKGROUND_HEX}."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -248,6 +334,19 @@ def main() -> None:
     svg_path = images_dir / "logo.svg"
     prepped_path = images_dir / "logo-prepped.png"
     theme_rgb = load_theme_color(root)
+
+    try:
+        background_rgb = parse_hex_color(args.background)
+    except ValueError as exc:
+        raise SystemExit(f"invalid --background color: {exc}") from exc
+
+    # Full-bleed square for icons the OS masks itself (iOS, Android, PWA), a
+    # squircle for standalone icons shown as-is (favicons, desktop apps), and a
+    # circle for Android's round launcher icon. Tray icons and Windows tiles are
+    # left transparent on purpose (they sit on a system-provided surface).
+    rounded_bg = Background(background_rgb, "rounded", CONTENT_SCALE_ROUNDED)
+    square_bg = Background(background_rgb, "square", CONTENT_SCALE_SQUARE)
+    circle_bg = Background(background_rgb, "circle", CONTENT_SCALE_CIRCLE)
 
     if not raw_path.exists():
         raise SystemExit(f"missing source image: {raw_path}")
@@ -269,12 +368,14 @@ def main() -> None:
         copy_file(svg_path, landing_public / "logo.svg")
 
         for path in [web_public, landing_public]:
-            save_ico(master, path / "favicon.ico", [16, 32, 48])
-            save_png(master, path / "favicon-16x16.png", 16)
-            save_png(master, path / "favicon-32x32.png", 32)
-            save_png(master, path / "apple-touch-icon.png", 180)
-            save_png(master, path / "android-chrome-192x192.png", 192)
-            save_png(master, path / "android-chrome-512x512.png", 512)
+            save_ico(master, path / "favicon.ico", [16, 32, 48], rounded_bg)
+            save_png(master, path / "favicon-16x16.png", 16, rounded_bg)
+            save_png(master, path / "favicon-32x32.png", 32, rounded_bg)
+            # apple-touch and android-chrome are masked by the OS / browser, so
+            # they use a full-bleed square background.
+            save_png(master, path / "apple-touch-icon.png", 180, square_bg)
+            save_png(master, path / "android-chrome-192x192.png", 192, square_bg)
+            save_png(master, path / "android-chrome-512x512.png", 512, square_bg)
             outputs.extend(
                 [
                     path / "favicon.ico",
@@ -289,7 +390,14 @@ def main() -> None:
         outputs.append(landing_public / "logo.svg")
 
         mac_assets = root / "client" / "mac" / "assets"
-        save_icns(master, mac_assets / "AppIcon.icns", [16, 32, 64, 128, 256, 512, 1024])
+        # macOS does not mask app icons, so bake the squircle in. The tray icon
+        # stays transparent so it tints with the menu bar.
+        save_icns(
+            master,
+            mac_assets / "AppIcon.icns",
+            [16, 32, 64, 128, 256, 512, 1024],
+            rounded_bg,
+        )
         save_png(master, mac_assets / "tray-icon.png", 32)
         outputs.extend([mac_assets / "AppIcon.icns", mac_assets / "tray-icon.png"])
 
@@ -298,8 +406,16 @@ def main() -> None:
         outputs.append(linux_assets / "tray-icon.png")
 
         windows_assets = root / "client" / "windows" / "assets"
-        save_ico(master, windows_assets / "app-icon.ico", [16, 24, 32, 40, 48, 64, 128, 256])
-        save_png(master, windows_assets / "app-icon.png", 256)
+        # app-icon is the window/taskbar icon and gets a background. The Store
+        # tiles and *_altform-unplated images stay transparent: Windows draws a
+        # themed plate behind tiles, and "unplated" means no plate at all.
+        save_ico(
+            master,
+            windows_assets / "app-icon.ico",
+            [16, 24, 32, 40, 48, 64, 128, 256],
+            rounded_bg,
+        )
+        save_png(master, windows_assets / "app-icon.png", 256, rounded_bg)
         save_png(master, windows_assets / "Square44x44Logo.png", 44)
         save_png(master, windows_assets / "Square150x150Logo.png", 150)
         save_png(master, windows_assets / "StoreLogo.png", 50)
@@ -335,13 +451,20 @@ def main() -> None:
             "mipmap-xxxhdpi": 192,
         }
         for bucket, size in android_sizes.items():
-            save_png(master, android_base / bucket / "ic_launcher.png", size)
-            save_png(master, android_base / bucket / "ic_launcher_round.png", size)
+            # No adaptive-icon XML here, so the PNGs are shown directly: a
+            # squircle for the standard icon and a true circle for the round one.
+            save_png(master, android_base / bucket / "ic_launcher.png", size, rounded_bg)
+            save_png(
+                master,
+                android_base / bucket / "ic_launcher_round.png",
+                size,
+                circle_bg,
+            )
             outputs.append(android_base / bucket / "ic_launcher.png")
             outputs.append(android_base / bucket / "ic_launcher_round.png")
 
     ios_assets = root / "client" / "ios" / "app" / "Assets.xcassets"
-    outputs.extend(save_ios_app_icons(master, ios_assets))
+    outputs.extend(save_ios_app_icons(master, ios_assets, square_bg))
 
     print("Generated icon assets:")
     for path in outputs:

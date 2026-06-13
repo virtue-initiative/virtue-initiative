@@ -38,5 +38,8 @@
     "vite": "^7.0.4",
     "vitest": "^3.2.4",
     "wrangler": "^4.68.0"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-darwin-x64": "^4.59.0"
   }
 }

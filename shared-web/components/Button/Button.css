@@ -53,7 +53,6 @@
 .vi-btn--ghost {
   background: transparent;
   color: var(--text-muted);
-  border: 1px solid var(--border);
 
   &:hover:not(:disabled) {
     background: var(--bg-subtle);
@@ -100,4 +99,9 @@
   min-height: 1.9rem;
   padding: 0 0.65rem;
   font-size: 0.8125rem;
+}
+
+.vi-btn--lg {
+  min-height: 3rem;
+  padding: 0 1.5rem;
 }

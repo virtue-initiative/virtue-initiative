@@ -39,7 +39,7 @@ devices.get('/', authenticate('access'), async (c) => {
   const hashServerUrl = c.env.HASH_SERVER_URL?.trim() || null;
   const hashInfo = new Map<string, { count: number; hashed_at: number | null }>();
 
-  if (hashServerUrl?.endsWith('/api/hash')) {
+  if (hashServerUrl?.endsWith('/api')) {
     // Hack: when the hash server is this API itself, skip the HTTP round-trip
     // and read the hash state directly from D1.
     await Promise.all(

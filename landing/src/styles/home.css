@@ -1,7 +1,7 @@
 .home-page {
   display: flex;
   flex-direction: column;
-  gap: 5.5rem;
+  gap: 3.5rem;
 }
 
 .home-page h1,
@@ -20,28 +20,37 @@
   max-width: 34rem;
 }
 
+.home-hero-copy .eyebrow {
+  margin-bottom: 28px;
+}
+
 .home-hero-logo {
   display: none;
 }
 
 .home-hero-logo img {
-  width: min(10.2rem, 100%);
+  width: min(15rem, 100%);
   height: auto;
   display: block;
 }
 
 .home-hero h1 {
-  font-size: clamp(1.9rem, 3.3vw, 2.72rem);
-  line-height: 1.1;
-  letter-spacing: -0.03em;
-  font-weight: 700;
+  font-family: var(--font-serif);
+  font-size: 4em;
+  line-height: 1.05;
+  margin: 0px 0px 28px;
+  letter-spacing: -0.018em;
+  text-wrap: balance;
+  font-weight: 400;
 }
 
 .home-hero-lead {
-  margin-top: 1.35rem;
-  font-size: var(--text-lg);
-  line-height: 1.8;
-  color: var(--text);
+  font-size: 1.1em;
+  line-height: 1.6;
+  color: var(--ink-2);
+  margin: 0px 0px 36px;
+  max-width: 540px;
+  text-wrap: pretty;
 }
 
 .home-hero-note {
@@ -58,7 +67,7 @@
 .home-section {
   display: flex;
   flex-direction: column;
-  gap: var(--space-5);
+  gap: var(--space-2);
 }
 
 .home-section-split {
@@ -90,15 +99,28 @@
 }
 
 .home-section-heading h2 {
-  font-size: var(--text-lg);
-  font-weight: 600;
-  color: var(--text-muted);
+  font-family: var(--font-serif);
+  font-size: var(--text-3xl);
+  font-weight: 400;
   letter-spacing: -0.01em;
 }
 
 .home-section-heading p {
   color: var(--text-muted);
   font-size: var(--text-base);
+}
+
+.home-text-icon-button-container {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 500;
+}
+
+.home-row-with-spacing {
+  display: flex;
+  align-items: center;
+  gap: 9px;
 }
 
 .steps-grid {
