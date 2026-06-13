@@ -6,6 +6,7 @@ import {
   FeedLog,
   formatDayAndTime,
   getLogCategory,
+  getLogIcon,
   getLogMessage,
   LogDetailDialog,
 } from './shared';
@@ -96,12 +97,12 @@ export function LogsList({
                   {item.image_w !== undefined ? (
                     <EventImage eventId={item.id} viewerId={viewerId} />
                   ) : (
-                    <div class="logs-thumb-placeholder" />
+                    <div class="logs-thumb-placeholder logs-thumb-icon">{getLogIcon(item)}</div>
                   )}
                 </div>
                 <div class="logs-vrow-body">
                   <div class="logs-vrow-top">
-                    <span class="logs-type">{getLogCategory(item.type)}</span>
+                    <span class="logs-type">{getLogCategory(item)}</span>
                     <span class="logs-device">{deviceName(item.device_id)}</span>
                     {getRiskLevel(item.risk) === 'high' && (
                       <span class="logs-verify-badge logs-verify-badge--failed">⚠ High</span>

@@ -40,13 +40,32 @@ function getLogMetadata(log: DataLog) {
     );
 }
 
-export function getLogCategory(type: string): string {
-  switch (type) {
+export function getLogCategory(log: DataLog): string {
+  const kind = log.data.kind as string | undefined;
+  const reason = log.data.reason as string | undefined;
+  switch (log.type) {
     case 'screenshot':
       return 'Screenshot';
     case 'lifecycle':
+      if (kind === 'computer_booted') return 'Boot';
+      if (kind === 'computer_suspended') return 'Sleep';
+      if (kind === 'computer_resumed') return 'Wake';
+      if (kind === 'login') return 'Login';
+      if (kind === 'logout') return 'Logout';
+      if (kind === 'process_started') return 'Monitoring On';
+      if (
+        kind === 'process_stopped_user' ||
+        kind === 'process_stopped_shutdown' ||
+        kind === 'process_stopped_other'
+      )
+        return 'Monitoring Off';
+      if (kind === 'screenshot_paused') return 'Paused';
+      if (kind === 'screenshot_resumed') return 'Resumed';
       return 'Lifecycle';
     case 'lifecycle_alert':
+      if (reason === 'ping_gap_while_running') return 'Alert: Gap';
+      if (reason === 'process_killed_before_shutdown' || reason === 'force_killed_before_shutdown')
+        return 'Alert: Killed';
       return 'Alert';
     case 'alert':
       return 'Alert';
@@ -55,7 +74,39 @@ export function getLogCategory(type: string): string {
     case 'dev':
       return 'Developer';
     default:
-      return type.replace(/_/g, ' ');
+      return log.type.replace(/_/g, ' ');
+  }
+}
+
+export function getLogIcon(log: DataLog): string {
+  const kind = log.data.kind as string | undefined;
+  switch (log.type) {
+    case 'lifecycle':
+      if (kind === 'computer_booted') return '🖥️';
+      if (kind === 'computer_suspended') return '🌙';
+      if (kind === 'computer_resumed') return '☀️';
+      if (kind === 'login') return '🔓';
+      if (kind === 'logout') return '🔒';
+      if (kind === 'process_started') return '▶️';
+      if (
+        kind === 'process_stopped_user' ||
+        kind === 'process_stopped_shutdown' ||
+        kind === 'process_stopped_other'
+      )
+        return '⏹️';
+      if (kind === 'screenshot_paused') return '⏸️';
+      if (kind === 'screenshot_resumed') return '▶️';
+      return '📋';
+    case 'lifecycle_alert':
+      return '⚠️';
+    case 'alert':
+      return '⚠️';
+    case 'capture_failed':
+      return '❌';
+    case 'dev':
+      return '🛠️';
+    default:
+      return '📋';
   }
 }
 
@@ -73,6 +124,8 @@ export function getLogMessage(log: DataLog, deviceName: string): string {
       if (kind === 'computer_booted') return `${deviceName} booted`;
       if (kind === 'login') return `User logged in on ${deviceName}`;
       if (kind === 'logout') return `User logged out on ${deviceName}`;
+      if (kind === 'screenshot_paused') return `Screenshots paused on ${deviceName}`;
+      if (kind === 'screenshot_resumed') return `Screenshots resumed on ${deviceName}`;
       return `Lifecycle event on ${deviceName}`;
     }
     case 'lifecycle_alert': {
@@ -84,6 +137,8 @@ export function getLogMessage(log: DataLog, deviceName: string): string {
       if (reason === 'process_killed_before_shutdown')
         return `Process killed before shutdown on ${deviceName}`;
       if (reason === 'missing_resume') return `Missing resume event on ${deviceName}`;
+      if (reason === 'force_killed_before_shutdown')
+        return `Process force-killed before shutdown on ${deviceName}`;
       return `Alert on ${deviceName}`;
     }
     case 'screenshot':
@@ -256,12 +311,15 @@ export function LogDetailDialog({
           </>
         }
       >
-        {getLogCategory(item.type)}
+        {getLogCategory(item)}
       </DialogHeader>
       <p class="logs-detail-subtitle">
         On {deviceName(item.device_id)} at {formatDate(item.ts)} {formatTime(item.ts)}
       </p>
       <p class="logs-detail-message">{getLogMessage(item, deviceName(item.device_id))}</p>
+      {!imgSrc && item.type !== 'screenshot' && (
+        <div class="logs-detail-icon">{getLogIcon(item)}</div>
+      )}
       {imgSrc && (
         <button
           class="logs-detail-image-button"
