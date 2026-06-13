@@ -41,8 +41,8 @@ function getLogMetadata(log: DataLog) {
 }
 
 export function getLogCategory(log: DataLog): string {
-  const kind = log.data.kind as string | undefined;
-  const reason = log.data.reason as string | undefined;
+  const kind = log.data?.kind as string | undefined;
+  const reason = log.data?.reason as string | undefined;
   switch (log.type) {
     case 'screenshot':
       return 'Screenshot';
@@ -74,12 +74,12 @@ export function getLogCategory(log: DataLog): string {
     case 'dev':
       return 'Developer';
     default:
-      return log.type.replace(/_/g, ' ');
+      return (log.type ?? '').replace(/_/g, ' ');
   }
 }
 
 export function getLogIcon(log: DataLog): string {
-  const kind = log.data.kind as string | undefined;
+  const kind = log.data?.kind as string | undefined;
   switch (log.type) {
     case 'lifecycle':
       if (kind === 'computer_booted') return '🖥️';
