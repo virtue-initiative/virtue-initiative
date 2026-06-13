@@ -245,6 +245,7 @@ impl MainWindowController {
         unsafe { msg_send![super(this), init] }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn set_all(
         &self,
         window: Retained<NSWindow>,

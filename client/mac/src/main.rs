@@ -119,10 +119,10 @@ fn build_tray_menu(logged_in: bool) -> (Menu, TrayMenu) {
 
 fn run_tray(paths: ClientPaths) -> Result<()> {
     // Try to start the daemon. If we can't confirm it's running, fail hard with a modal.
-    if let Ok(exe) = std::env::current_exe() {
-        if let Err(err) = launch_agent::ensure_agent_running(&paths, &exe) {
-            eprintln!("warning: launch agent setup failed: {err:#}");
-        }
+    if let Ok(exe) = std::env::current_exe()
+        && let Err(err) = launch_agent::ensure_agent_running(&paths, &exe)
+    {
+        eprintln!("warning: launch agent setup failed: {err:#}");
     }
     if let Err(err) = ensure_background_service_running(&paths) {
         eprintln!("error: {err:#}");
@@ -228,10 +228,8 @@ fn run_tray(paths: ClientPaths) -> Result<()> {
                     tray_menu = new_tray_menu;
                     tray_icon.set_menu(Some(Box::new(new_menu)));
                 }
-                if has_capture_permission {
-                    if let Some(window) = main_window.as_ref() {
-                        window.update_permission_phase(None);
-                    }
+                if has_capture_permission && let Some(window) = main_window.as_ref() {
+                    window.update_permission_phase(None);
                 }
             } else {
                 match handle_main_window_event(
@@ -595,10 +593,10 @@ fn stop_background_service(paths: &ClientPaths, user_initiated: bool) -> Result<
 /// was already processed before we deliver SIGTERM via `bootout`.
 fn signal_user_stop(paths: &ClientPaths) {
     let sock = paths.state_dir.join("daemon.sock");
-    if let Ok(mut client) = ClientController::connect(&sock) {
-        if client.request_user_stop("mac_tray_stop").is_ok() {
-            let _ = client.get_status();
-        }
+    if let Ok(mut client) = ClientController::connect(&sock)
+        && client.request_user_stop("mac_tray_stop").is_ok()
+    {
+        let _ = client.get_status();
     }
 }
 

@@ -116,10 +116,10 @@ fn parse_last_shutdown_mac(s: &str) -> Option<i64> {
                 continue;
             };
             let normalized = format!("{} {} {:02} {} {}", w[0], w[1], day, w[3], w[4]);
-            if let Ok(dt) = NaiveDateTime::parse_from_str(&normalized, "%a %b %d %H:%M:%S %Y") {
-                if let chrono::LocalResult::Single(local) = Local.from_local_datetime(&dt) {
-                    return Some(local.timestamp_millis());
-                }
+            if let Ok(dt) = NaiveDateTime::parse_from_str(&normalized, "%a %b %d %H:%M:%S %Y")
+                && let chrono::LocalResult::Single(local) = Local.from_local_datetime(&dt)
+            {
+                return Some(local.timestamp_millis());
             }
         }
     }
