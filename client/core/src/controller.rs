@@ -7,6 +7,7 @@ use crate::module::lifecycle::{
     ComputerResumed, ComputerSuspended, ProcessStopped, UserSessionLogin, UserSessionLogout,
     UserStopRequested,
 };
+use crate::module::screenshot::{ScreenshotPaused, ScreenshotResumed};
 use crate::module::status::{StatusRequest, StatusResponse};
 
 /// High-level client for communicating with a daemon over any [`EventChannel`].
@@ -84,6 +85,14 @@ impl<C: EventChannel> ClientController<C> {
 
     pub fn note_process_stopped(&self, reason: ProcessStoppedReason) -> CoreResult<()> {
         self.channel.publish(ProcessStopped(reason))
+    }
+
+    pub fn pause_screenshots(&self) -> CoreResult<()> {
+        self.channel.publish(ScreenshotPaused)
+    }
+
+    pub fn resume_screenshots(&self) -> CoreResult<()> {
+        self.channel.publish(ScreenshotResumed)
     }
 
     /// Register a handler for events the daemon pushes unprompted

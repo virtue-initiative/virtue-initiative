@@ -7,17 +7,17 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use jni::objects::{JByteArray, JClass, JString};
+use jni::objects::{JByteArray, JClass, JString, JValue};
 use jni::sys::{jboolean, jstring};
 use jni::{JNIEnv, JavaVM};
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
 use virtue_core::{
-    AuthState, Config, CoreError, CoreResult, DeviceSettings, EventBus, EventChannel,
-    LoginRequested, LoginResult, LogoutRequested, Ping, PlatformHooks, ProcessStarted,
-    ProcessStopped, ProcessStoppedReason, Redacted, Screenshot, ScreenshotHooks,
-    StatusRequest, StatusResponse, UserStopRequested, build_default_modules_reqwest, load_state,
-    store_state,
+    build_default_modules_reqwest, load_state, store_state, AuthState, Config, CoreError,
+    CoreResult, DeviceSettings, EventBus, EventChannel, LoginRequested, LoginResult,
+    LogoutRequested, Ping, PlatformHooks, ProcessStarted, ProcessStopped, ProcessStoppedReason,
+    Redacted, Screenshot, ScreenshotHooks, ScreenshotPaused, ScreenshotResumed, StatusRequest,
+    StatusResponse, UserStopRequested,
 };
 
 static CORE: OnceCell<AndroidCore> = OnceCell::new();
@@ -26,7 +26,7 @@ const DEFAULT_BASE_API_URL: &str = "https://api.virtueinitiative.org";
 const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
 const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
 const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
-const LOOP_INTERVAL: Duration = Duration::from_secs(60);
+const LOOP_INTERVAL: Duration = Duration::from_secs(1);
 
 const SCREENSHOT_SERVICE_CLASS: &str = "org/virtueinitiative/virtue/ScreenshotService";
 const CAPTURE_STATUS_READY: i32 = 0;
@@ -38,6 +38,7 @@ struct AndroidCore {
     runtime_config_file: PathBuf,
     java_vm: Arc<JavaVM>,
     stop: Arc<AtomicBool>,
+    user_stop: Arc<AtomicBool>,
     daemon_running: Mutex<bool>,
 }
 
@@ -119,7 +120,30 @@ impl ScreenshotHooks for AndroidPlatformHooks {
     }
 
     fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
-        Ok(None)
+        let mut env = self.java_vm.attach_current_thread().map_err(|err| {
+            CoreError::CommandFailed(format!("attach_current_thread failed: {err}"))
+        })?;
+
+        let uptime_ms: i64 = env
+            .call_static_method("android/os/SystemClock", "elapsedRealtime", "()J", &[])
+            .map_err(|err| {
+                CoreError::CommandFailed(format!(
+                    "failed to get boot time from system clock: {err}"
+                ))
+            })?
+            .j()
+            .map_err(|err| {
+                CoreError::CommandFailed(format!(
+                    "failed to get boot time from system clock: {err}"
+                ))
+            })?;
+
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|err| CoreError::CommandFailed(format!("system time error: {err}")))?
+            .as_millis() as i64;
+
+        Ok(Some(now_ms - uptime_ms))
     }
 }
 
@@ -163,6 +187,7 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeInit(
                 runtime_config_file,
                 java_vm,
                 stop: Arc::new(AtomicBool::new(false)),
+                user_stop: Arc::new(AtomicBool::new(false)),
                 daemon_running: Mutex::new(false),
             })
             .map_err(|_| anyhow!("core already initialized"))?;
@@ -218,11 +243,9 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeLogin
             password: Redacted(password),
         })?;
         if !result.success {
-            return Err(anyhow!(
-                result
-                    .error
-                    .unwrap_or_else(|| "Login failed. Check your credentials and try again.".to_string())
-            ));
+            return Err(anyhow!(result.error.unwrap_or_else(|| {
+                "Login failed. Check your credentials and try again.".to_string()
+            })));
         }
         let state = bus.iter()?;
         store_state(&state_path, &state)?;
@@ -301,6 +324,7 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeRunDa
             *guard = true;
         }
         core.stop.store(false, Ordering::SeqCst);
+        core.user_stop.store(false, Ordering::SeqCst);
 
         let daemon_result = run_daemon_loop(core);
 
@@ -340,6 +364,7 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeNoteU
         bus.send(UserStopRequested { source })?;
         let state = bus.iter()?;
         store_state(&state_path, &state)?;
+        core.user_stop.store(true, Ordering::SeqCst);
         Ok(())
     })();
 
@@ -364,6 +389,40 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeGetSt
         .unwrap_or(std::ptr::null_mut())
 }
 
+pub fn is_interactive(env: &mut JNIEnv) -> jni::errors::Result<bool> {
+    let activity_thread = env
+        .call_static_method(
+            "android/app/ActivityThread",
+            "currentApplication",
+            "()Landroid/app/Application;",
+            &[],
+        )?
+        .l()?;
+
+    let power_service = env
+        .get_static_field(
+            "android/content/Context",
+            "POWER_SERVICE",
+            "Ljava/lang/String;",
+        )?
+        .l()?;
+
+    let power_manager = env
+        .call_method(
+            &activity_thread,
+            "getSystemService",
+            "(Ljava/lang/String;)Ljava/lang/Object;",
+            &[JValue::Object(&power_service)],
+        )?
+        .l()?;
+
+    let interactive = env
+        .call_method(&power_manager, "isInteractive", "()Z", &[])?
+        .z()?;
+
+    Ok(interactive)
+}
+
 fn build_bus(core: &AndroidCore, device: &str) -> Result<(EventBus, PathBuf)> {
     let cfg = build_core_config(core, device);
     let modules = build_default_modules_reqwest(
@@ -383,7 +442,23 @@ fn run_daemon_loop(core: &AndroidCore) -> Result<()> {
     let state = bus.iter()?;
     store_state(&state_path, &state)?;
 
+    // Starts as false since we assume we're booting or something similar
+    // Otherwise it stays paused until the state is updated
+    let mut was_interactive = false;
+
     while !core.stop.load(Ordering::SeqCst) {
+        let mut env = core.java_vm.attach_current_thread()?;
+        let current_interactive = is_interactive(&mut env)?;
+
+        if current_interactive != was_interactive {
+            was_interactive = current_interactive;
+            if !current_interactive {
+                bus.send(ScreenshotPaused)?;
+            } else {
+                bus.send(ScreenshotResumed)?;
+            }
+        }
+
         let sleep_duration = match (|| -> Result<()> {
             bus.send(Ping)?;
             let state = bus.iter()?;
@@ -399,7 +474,12 @@ fn run_daemon_loop(core: &AndroidCore) -> Result<()> {
         sleep_interruptible(&core.stop, sleep_duration);
     }
 
-    bus.send(ProcessStopped(ProcessStoppedReason::Other))?;
+    let reason = if core.user_stop.load(Ordering::SeqCst) {
+        ProcessStoppedReason::User
+    } else {
+        ProcessStoppedReason::Other
+    };
+    bus.send(ProcessStopped(reason))?;
     let state = bus.iter()?;
     let _ = store_state(&state_path, &state);
     Ok(())

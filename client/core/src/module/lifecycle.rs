@@ -8,6 +8,7 @@ use crate::events::bus::{Emitter, EventBus, Observer, StateType};
 use crate::model::{AlertReason, PartialStatus};
 use crate::model::{LifecycleKind, ProcessStoppedReason, UploadKind};
 use crate::module::auth::Login;
+use crate::module::screenshot::{ScreenshotPaused, ScreenshotResumed};
 use crate::module::status::StatusRequest;
 use crate::module::upload::Upload;
 
@@ -364,6 +365,7 @@ impl Observer for LifecycleModule {
                         risk: 0.0,
                         kind: UploadKind::Lifecycle { kind: LifecycleKind::Login },
                     });
+                    let _ = emitter.send(ScreenshotResumed {});
                     self.state.last_login = now_ms;
                 }
                 Ok(())
@@ -373,6 +375,7 @@ impl Observer for LifecycleModule {
                     risk: HIGH_RISK_LIFECYCLE_ALERT,
                     kind: UploadKind::Lifecycle { kind: LifecycleKind::Logout },
                 });
+                let _ = emitter.send(ScreenshotPaused {});
                 Ok(())
             },
             _: StatusRequest => {

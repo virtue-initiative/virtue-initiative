@@ -46,7 +46,7 @@ pub use module::lifecycle::{
     ComputerResumed, ComputerSuspended, ProcessStarted, ProcessStopped, UserSessionLogin,
     UserSessionLogout, UserStopRequested,
 };
-pub use module::screenshot::CaptureFailed;
+pub use module::screenshot::{CaptureFailed, ScreenshotPaused, ScreenshotResumed};
 pub use module::status::{StatusRequest, StatusResponse};
 pub use module::upload::FlushBatchNow;
 pub use module::upload::Upload;

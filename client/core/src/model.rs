@@ -52,6 +52,8 @@ pub enum LifecycleKind {
     ProcessStoppedOther,
     ComputerSuspended,
     ComputerResumed,
+    ScreenshotPaused,
+    ScreenshotResumed,
     Login,
     Logout,
     ComputerBooted,

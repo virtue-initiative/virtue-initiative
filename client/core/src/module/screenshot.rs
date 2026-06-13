@@ -4,11 +4,11 @@ use std::any::Any;
 
 use serde::{Deserialize, Serialize};
 
+use crate::LifecycleKind;
 use crate::error::CoreResult;
 use crate::events::Ping;
 use crate::events::bus::{Emitter, EventBus, Observer, StateType};
 use crate::model::UploadKind;
-use crate::module::auth::{Login, Logout};
 use crate::module::config::ConfigChanged;
 use crate::module::upload::Upload;
 use crate::platform::ScreenshotHooks;
@@ -16,11 +16,17 @@ use crate::platform::ScreenshotHooks;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CaptureFailed;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScreenshotPaused;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScreenshotResumed;
+
 #[derive(Serialize, Deserialize, Default, Clone)]
 #[serde(default)]
 pub struct ScreenshotObserverState {
     pub last_screenshot_at_ms: Option<i64>,
-    pub authenticated: bool,
+    pub enabled: bool,
 }
 
 pub struct ScreenshotModule {
@@ -39,7 +45,7 @@ impl ScreenshotModule {
     }
 
     fn handle_ping(&mut self, emitter: &Emitter) -> CoreResult<()> {
-        if !self.state.authenticated {
+        if !self.state.enabled {
             return Ok(());
         }
 
@@ -93,7 +99,7 @@ impl Observer for ScreenshotModule {
     fn init(&mut self, _bus: &mut EventBus, state: StateType) -> CoreResult<()> {
         if !state.is_null() {
             self.state = serde_json::from_value(state)?;
-            if !self.state.authenticated {
+            if !self.state.enabled {
                 self.state.last_screenshot_at_ms = None;
             }
         }
@@ -102,14 +108,22 @@ impl Observer for ScreenshotModule {
 
     fn on_event(&mut self, event: &dyn Any, emitter: &Emitter) -> CoreResult<()> {
         crate::dispatch_event!(event, {
-            _: Login => {
-                self.state.authenticated = true;
+            _: ScreenshotPaused => {
+                self.state.enabled = false;
                 self.state.last_screenshot_at_ms = None;
+                emitter.send(Upload {
+                    risk: 0.0,
+                    kind: UploadKind::Lifecycle { kind: LifecycleKind::ScreenshotPaused },
+                })?;
                 Ok(())
             },
-            _: Logout => {
-                self.state.authenticated = false;
+            _: ScreenshotResumed => {
+                self.state.enabled = true;
                 self.state.last_screenshot_at_ms = None;
+                emitter.send(Upload {
+                    risk: 0.0,
+                    kind: UploadKind::Lifecycle { kind: LifecycleKind::ScreenshotResumed },
+                })?;
                 Ok(())
             },
             _: Ping => self.handle_ping(emitter),
@@ -127,34 +141,11 @@ impl Observer for ScreenshotModule {
 
 #[cfg(test)]
 mod tests {
-    use super::ScreenshotModule;
+    use super::*;
     use crate::events::Ping;
-    use crate::model::{BatchRecipient, DeviceCredentials, DeviceSettings, UploadKind};
-    use crate::module::auth::{Login, Logout};
+    use crate::model::UploadKind;
     use crate::module::upload::Upload;
     use crate::testing::EventTester;
-
-    fn valid_credentials() -> DeviceCredentials {
-        DeviceCredentials {
-            device_id: "test-device".into(),
-            access_token: "test-access".into(),
-            refresh_token: "test-refresh".into(),
-        }
-    }
-
-    fn valid_settings() -> DeviceSettings {
-        DeviceSettings {
-            device_id: "test-device".into(),
-            name: "test device".into(),
-            platform: "test".into(),
-            owner: Some(BatchRecipient {
-                user_id: "test-user".into(),
-                pub_key_base64: "CQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
-            }),
-            partners: Vec::new(),
-            hash_base_url: None,
-        }
-    }
 
     #[test]
     fn ping_when_unauthenticated_does_nothing() {
@@ -167,17 +158,11 @@ mod tests {
     }
 
     #[test]
-    fn login_then_ping_takes_screenshot() {
+    fn resume_then_ping_takes_screenshot() {
         let mut b = EventTester::builder();
         b.add(ScreenshotModule::new(Box::new(b.platform()), 60_000));
         let mut t = b.build();
-        t.emit(
-            1,
-            Login {
-                credentials: valid_credentials(),
-                settings: valid_settings(),
-            },
-        );
+        t.emit(1, ScreenshotResumed);
         t.clear_captured();
         t.emit(1, Ping);
         t.assert_like(crate::like!(Upload {
@@ -192,7 +177,7 @@ mod tests {
         let mut b = EventTester::builder();
         b.clock.set(30_000);
         let mut module = ScreenshotModule::new(Box::new(b.platform()), 60_000);
-        module.state.authenticated = true;
+        module.state.enabled = true;
         module.state.last_screenshot_at_ms = Some(0);
         b.add(module);
         let mut t = b.build();
@@ -205,7 +190,7 @@ mod tests {
         let mut b = EventTester::builder();
         b.clock.set(61_000);
         let mut module = ScreenshotModule::new(Box::new(b.platform()), 60_000);
-        module.state.authenticated = true;
+        module.state.enabled = true;
         module.state.last_screenshot_at_ms = Some(0);
         b.add(module);
         let mut t = b.build();
@@ -218,15 +203,15 @@ mod tests {
     }
 
     #[test]
-    fn logout_clears_authenticated_and_schedule() {
+    fn pause_disables_and_resets_schedule() {
         let mut b = EventTester::builder();
         let mut module = ScreenshotModule::new(Box::new(b.platform()), 60_000);
-        module.state.authenticated = true;
+        module.state.enabled = true;
         module.state.last_screenshot_at_ms = Some(500);
         b.add(module);
         let mut t = b.build();
-        t.emit(1, Logout);
-        assert!(!t.observer::<ScreenshotModule>().state.authenticated);
+        t.emit(1, ScreenshotResumed);
+        assert!(!t.observer::<ScreenshotModule>().state.enabled);
         assert_eq!(
             t.observer::<ScreenshotModule>().state.last_screenshot_at_ms,
             None
