@@ -2,13 +2,16 @@
 <!-- Created with Inkscape (http://www.inkscape.org/) -->
 
 <svg
-   width="22.73848mm"
-   height="28.103165mm"
-   viewBox="0 0 22.73848 28.103165"
+   width="60mm"
+   height="60mm"
+   viewBox="0 0 60 60"
    version="1.1"
    id="svg5"
    inkscape:version="1.2.2 (b0a8486541, 2022-12-01)"
-   sodipodi:docname="logo-ideas.svg"
+   sodipodi:docname="logo.svg"
+   inkscape:export-filename="logo-raw.png"
+   inkscape:export-xdpi="433.49335"
+   inkscape:export-ydpi="433.49335"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
@@ -24,64 +27,34 @@
      inkscape:deskcolor="#d1d1d1"
      inkscape:document-units="mm"
      showgrid="false"
-     inkscape:zoom="2.0351299"
-     inkscape:cx="469.25752"
-     inkscape:cy="938.51504"
+     inkscape:zoom="3.3898111"
+     inkscape:cx="87.615501"
+     inkscape:cy="116.23066"
      inkscape:window-width="1918"
      inkscape:window-height="1059"
      inkscape:window-x="0"
      inkscape:window-y="19"
      inkscape:window-maximized="1"
-     inkscape:current-layer="layer1" />
+     inkscape:current-layer="layer2" />
   <defs
-     id="defs2">
-    <inkscape:path-effect
-       effect="fill_between_many"
-       method="originald"
-       linkedpaths="#path236-5-2-1-3,0,1"
-       id="path-effect1229-73-2"
-       is_visible="true"
-       lpeversion="0"
-       join="true"
-       close="true"
-       autoreverse="true" />
-  </defs>
+     id="defs2" />
   <g
-     inkscape:label="Layer 1"
      inkscape:groupmode="layer"
-     id="layer1"
-     transform="translate(-158.45082,-253.87925)">
-    <g
-       id="g936">
-      <path
-         inkscape:original-d="M 0,0"
-         inkscape:path-effect="#path-effect1229-73-2"
-         d="m 147.20773,185.92859 13.83658,61.7445 1.67776,-60.51967 z"
-         id="path1231-6-4"
-         class="UnoptimicedTransforms"
-         transform="matrix(0.44156349,0,0,0.44156349,93.868921,172.19963)" />
-      <path
-         id="path236-5-2-1-3"
-         style="fill:#00bf00;fill-opacity:1;stroke:#00bf00;stroke-width:1.90083;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:1;paint-order:markers stroke fill"
-         class="UnoptimicedTransforms"
-         d="m 147.20773,185.92859 13.83658,61.7445 1.67776,-60.51967 z"
-         sodipodi:nodetypes="cccc"
-         transform="matrix(0.44156349,0,0,0.44156349,93.868921,172.19963)" />
-      <path
-         style="fill:#005d00;fill-opacity:1;stroke:#005d00;stroke-width:0.839412;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
-         d="m 170.48525,281.08944 -4.76537,-26.25024 -0.7398,26.71832 z"
-         id="path236-3-3-9-29-0"
-         sodipodi:nodetypes="cccc" />
-      <path
-         style="fill:#00bf00;fill-opacity:1;stroke:#00bf00;stroke-width:0.700761;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
-         d="m 176.44149,255.29514 -6.9497,24.20213 11.3468,-20.76097 z"
-         id="path236-6-5-1-3-7"
-         sodipodi:nodetypes="cccc" />
-      <path
-         style="fill:#009b00;fill-opacity:1;stroke:#009b00;stroke-width:0.70032;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
-         d="m 173.40463,280.90329 7.43464,-22.18277 -12.43085,22.6311 z"
-         id="path236-3-7-6-2-1-8"
-         sodipodi:nodetypes="cccc" />
-    </g>
+     id="layer2"
+     inkscape:label="Layer 2"
+     transform="translate(-18.45851,-195.68394)">
+    <path
+       style="fill:#163026;stroke:#163026;stroke-width:0.388117;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none"
+       d="m 22.333852,203.13976 19.617861,46.49865 6.207601,-14.75956 -12.019272,-31.74121 z"
+       id="path145706-7-3"
+       sodipodi:nodetypes="ccccc" />
+    <path
+       style="fill:#163026;stroke:#163026;stroke-width:0.388117;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none"
+       d="m 64.839239,203.1606 -21.288034,49.2949 c 0,0 6.922226,8.9725 12.372314,-4.64125 6.834393,-17.43578 13.178419,-27.2295 18.632133,-44.65905 z"
+       id="path145708-4-6"
+       sodipodi:nodetypes="ccccc"
+       inkscape:export-filename="logo-raw.png"
+       inkscape:export-xdpi="765.15002"
+       inkscape:export-ydpi="765.15002" />
   </g>
 </svg>
