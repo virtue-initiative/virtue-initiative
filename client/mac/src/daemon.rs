@@ -15,11 +15,7 @@ use virtue_core::{
     build_default_modules_reqwest, load_state, store_state,
 };
 
-use crate::capture::{
-    CaptureAvailabilityChanged, MacPlatformHooks, has_screen_capture_access,
-    is_permission_missing_error,
-};
-use crate::capture_reporter::CaptureReporterModule;
+use crate::capture::{MacPlatformHooks, has_screen_capture_access, is_permission_missing_error};
 use crate::config::{ClientPaths, build_core_config};
 
 const POST_WAKE_CAPTURE_STATE_SUPPRESSION: Duration = Duration::from_secs(30);
@@ -226,10 +222,9 @@ async fn run_daemon_service_loop(
     let config = build_core_config(paths);
     let state_path = paths.state_dir.join("event_state.json");
 
-    let mut modules = tokio::task::block_in_place(|| {
+    let modules = tokio::task::block_in_place(|| {
         build_default_modules_reqwest(config, MacPlatformHooks::new())
     })?;
-    modules.push(Box::new(CaptureReporterModule::new()));
     let mut bus = EventBus::new(modules, load_state(&state_path)?)?;
 
     bus.send(ProcessStarted)?;
@@ -238,7 +233,6 @@ async fn run_daemon_service_loop(
     let mut ipc = IpcBridge::bind(&paths.state_dir.join("daemon.sock"));
     if let Some(ipc) = &mut ipc {
         ipc.subscribe_standard_outbound(&mut bus);
-        ipc.subscribe_outbound::<CaptureAvailabilityChanged>(&mut bus);
     }
 
     let shutdown = Arc::new(AtomicBool::new(false));

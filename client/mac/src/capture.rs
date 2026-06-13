@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, anyhow};
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use virtue_core::{CoreError, CoreResult, PlatformHooks, Screenshot, ScreenshotHooks};
 
@@ -12,10 +11,6 @@ unsafe extern "C" {
     fn CGPreflightScreenCaptureAccess() -> bool;
     fn CGRequestScreenCaptureAccess() -> bool;
 }
-
-/// Emitted by the daemon when macOS screen-capture permission changes.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CaptureAvailabilityChanged(pub bool);
 
 pub fn capture_screen() -> Result<Vec<u8>> {
     if !has_screen_capture_access() {
@@ -49,17 +44,6 @@ pub fn request_screen_capture_access() -> bool {
         .or_else(|_| run_capture_command("screencapture", &["-x", "-t", "png"]));
 
     has_screen_capture_access()
-}
-
-pub fn open_screen_capture_settings() -> Result<()> {
-    Command::new("/usr/bin/open")
-        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .context("failed to open Screen Recording settings")?;
-    Ok(())
 }
 
 pub fn is_permission_missing_error(text: &str) -> bool {
