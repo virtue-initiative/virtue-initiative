@@ -95,8 +95,7 @@ impl<C: EventChannel> ClientController<C> {
         self.channel.publish(ScreenshotResumed)
     }
 
-    /// Register a handler for events the daemon pushes unprompted
-    /// (e.g. `CaptureAvailabilityChanged` on macOS).
+    /// Register a handler for events the daemon pushes unprompted.
     pub fn on<E: Event>(&mut self, handler: impl Fn(&E) -> CoreResult<()> + Send + Sync + 'static) {
         self.channel.on(handler)
     }

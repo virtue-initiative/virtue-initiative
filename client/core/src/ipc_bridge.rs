@@ -54,11 +54,13 @@ impl IpcBridge {
     }
 
     /// Broadcast events of type `E` from the bus to all connected remote clients.
-    /// Dead senders are pruned on each fanout.
+    /// Dead senders (disconnected peers, or whose write fails) are pruned.
     pub fn subscribe_outbound<E: Event + Clone>(&self, bus: &mut EventBus) {
         let c = self.clients.clone();
         bus.subscribe::<E>(move |ev| {
-            c.lock().unwrap().retain(|s| s.send(ev.clone()).is_ok());
+            c.lock()
+                .unwrap()
+                .retain(|s| s.is_connected() && s.send(ev.clone()).is_ok());
             Ok(())
         });
     }
@@ -106,6 +108,11 @@ impl IpcBridge {
         bus: &mut EventBus,
         setup: impl Fn(&mut RemoteEventBus, &Emitter),
     ) {
+        // Drop senders for peers that have disconnected. This runs every daemon
+        // loop iteration so dead connections are reclaimed even when no outbound
+        // event is being broadcast, preventing the socket fds from leaking.
+        self.clients.lock().unwrap().retain(|s| s.is_connected());
+
         while let Ok(mut remote) = self.accept_rx.try_recv() {
             let e = bus.emitter();
             setup(&mut remote, &e);

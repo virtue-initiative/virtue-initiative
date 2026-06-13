@@ -4,6 +4,7 @@ use std::fmt;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -90,8 +91,26 @@ impl IpcReceiver {
     }
 }
 
-fn make_pair(stream: UnixStream) -> Result<(IpcSender, IpcReceiver), IpcError> {
+/// Shuts the socket down when the last holder (the owning bus and any of its
+/// senders) drops. `shutdown` acts on the whole socket regardless of how many
+/// dup'd fds (from `try_clone`) reference it, so this reliably unblocks the
+/// reader thread and makes the peer see EOF — closing `close()` alone cannot
+/// guarantee with cloned fds.
+struct ConnectionGuard {
+    stream: UnixStream,
+}
+
+impl Drop for ConnectionGuard {
+    fn drop(&mut self) {
+        let _ = self.stream.shutdown(std::net::Shutdown::Both);
+    }
+}
+
+fn make_pair(
+    stream: UnixStream,
+) -> Result<(IpcSender, IpcReceiver, Arc<ConnectionGuard>), IpcError> {
     let read_stream = stream.try_clone()?;
+    let guard_stream = stream.try_clone()?;
     Ok((
         IpcSender {
             writer: BufWriter::new(stream),
@@ -99,6 +118,9 @@ fn make_pair(stream: UnixStream) -> Result<(IpcSender, IpcReceiver), IpcError> {
         IpcReceiver {
             reader: BufReader::new(read_stream),
         },
+        Arc::new(ConnectionGuard {
+            stream: guard_stream,
+        }),
     ))
 }
 
@@ -118,8 +140,8 @@ impl IpcListener {
     pub fn blocking_accept(&self) -> Result<RemoteEventBus, IpcError> {
         let (stream, _) = self.listener.accept()?;
         stream.set_nonblocking(false)?;
-        let (sender, receiver) = make_pair(stream)?;
-        Ok(RemoteEventBus::from_pair(sender, receiver))
+        let (sender, receiver, guard) = make_pair(stream)?;
+        Ok(RemoteEventBus::from_pair(sender, receiver, guard))
     }
 }
 
@@ -143,9 +165,22 @@ struct Envelope {
 #[derive(Clone)]
 pub struct RemoteSender {
     writer: Arc<Mutex<IpcSender>>,
+    // Cleared by the owning bus's reader thread when the peer disconnects, so
+    // holders (e.g. the daemon's client list) can drop dead senders promptly
+    // instead of leaking the socket fd until a write happens to fail.
+    connected: Arc<AtomicBool>,
+    // Shuts the socket down once this (and the owning bus) is dropped. The
+    // daemon keeps a connection alive via its sender after dropping the bus, so
+    // the guard must live on the sender too.
+    _guard: Arc<ConnectionGuard>,
 }
 
 impl RemoteSender {
+    /// Whether the peer is still connected (reader thread still running).
+    pub fn is_connected(&self) -> bool {
+        self.connected.load(Ordering::Relaxed)
+    }
+
     pub fn send<E: Event>(&self, event: E) -> CoreResult<()> {
         let envelope = Envelope {
             kind: type_name::<E>().to_string(),
@@ -187,10 +222,16 @@ pub struct RemoteEventBus {
     pending_receiver: Option<IpcReceiver>,
     // Kept alive so the reader thread runs for the lifetime of this bus.
     _reader: Option<thread::JoinHandle<()>>,
+    // True while the peer is connected; the reader thread clears it on EOF so
+    // outstanding `RemoteSender`s can be pruned.
+    connected: Arc<AtomicBool>,
+    // Shuts the socket down when the last holder drops, terminating the reader
+    // thread and signalling the peer. Cloned into senders via `sender()`.
+    guard: Arc<ConnectionGuard>,
 }
 
 impl RemoteEventBus {
-    fn from_pair(sender: IpcSender, receiver: IpcReceiver) -> Self {
+    fn from_pair(sender: IpcSender, receiver: IpcReceiver, guard: Arc<ConnectionGuard>) -> Self {
         let writer = Arc::new(Mutex::new(sender));
         let handlers: Arc<Mutex<HashMap<String, Vec<RemoteHandler>>>> =
             Arc::new(Mutex::new(HashMap::new()));
@@ -200,7 +241,14 @@ impl RemoteEventBus {
             handlers,
             pending_receiver: Some(receiver),
             _reader: None,
+            connected: Arc::new(AtomicBool::new(true)),
+            guard,
         }
+    }
+
+    /// Whether the peer is still connected (reader thread still running).
+    pub fn is_connected(&self) -> bool {
+        self.connected.load(Ordering::Relaxed)
     }
 
     /// Start the background reader thread.
@@ -215,6 +263,7 @@ impl RemoteEventBus {
             return;
         };
         let reader_handlers = Arc::clone(&self.handlers);
+        let connected = Arc::clone(&self.connected);
         self._reader = Some(thread::spawn(move || {
             while let Ok(line) = receiver.recv_line() {
                 if line.is_empty() {
@@ -230,6 +279,9 @@ impl RemoteEventBus {
                     }
                 }
             }
+            // recv_line returned Err: the peer disconnected. Mark this
+            // connection dead so holders of its sender can prune it.
+            connected.store(false, Ordering::Relaxed);
         }));
     }
 
@@ -245,8 +297,8 @@ impl RemoteEventBus {
                 IpcError::Io(e)
             }
         })?;
-        let (sender, receiver) = make_pair(stream)?;
-        let mut bus = Self::from_pair(sender, receiver);
+        let (sender, receiver, guard) = make_pair(stream)?;
+        let mut bus = Self::from_pair(sender, receiver, guard);
         bus.start();
         Ok(bus)
     }
@@ -292,6 +344,8 @@ impl RemoteEventBus {
     pub fn sender(&self) -> RemoteSender {
         RemoteSender {
             writer: Arc::clone(&self.writer),
+            connected: Arc::clone(&self.connected),
+            _guard: Arc::clone(&self.guard),
         }
     }
 }
@@ -427,5 +481,25 @@ mod tests {
         assert_eq!(received, 99);
 
         let _ = std::fs::remove_file(&sock);
+    }
+
+    #[test]
+    fn sender_reports_disconnected_after_client_drops() {
+        let (daemon_bus, client_bus) = make_bus_pair();
+        let sender = daemon_bus.sender();
+        assert!(sender.is_connected(), "should start connected");
+
+        // Client goes away; the daemon's reader thread should observe EOF and
+        // clear the connected flag so the sender can be pruned.
+        drop(client_bus);
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while sender.is_connected() && std::time::Instant::now() < deadline {
+            thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            !sender.is_connected(),
+            "sender should report disconnected after the client drops"
+        );
     }
 }
