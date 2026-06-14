@@ -23,7 +23,7 @@ import {
   IconButton,
   Select,
 } from '@virtueinitiative/shared-web';
-import { loadCachedDataFeed } from '../../utils/api/data-cache';
+import { cacheClient } from '../../utils/cache/client';
 import { formatRelativeTimestamp } from '../../utils/time';
 
 interface DeviceGroup {
@@ -212,16 +212,14 @@ export function Logs() {
       setEstimatedNextUpload(null);
       return;
     }
-    loadCachedDataFeed(userId, activeTargetUserId)
-      .then((feed) => {
-        const batches = feed.batches
-          .filter((b) => b.device_id === selectedDevice)
-          .sort((a, b) => a.end_time - b.end_time);
-        if (batches.length < 2) {
+    cacheClient
+      ?.getDeviceBatchEndTimes(userId, activeTargetUserId, selectedDevice)
+      .then((endTimes) => {
+        if (endTimes.length < 2) {
           setEstimatedNextUpload(null);
           return;
         }
-        const intervals = batches.slice(1).map((b, i) => b.end_time - batches[i].end_time);
+        const intervals = endTimes.slice(1).map((t, i) => t - endTimes[i]);
         intervals.sort((a, b) => a - b);
         const median = intervals[Math.floor(intervals.length / 2)];
         if (median > 0 && selectedDeviceInfo.last_upload_at) {

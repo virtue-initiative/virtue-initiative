@@ -1,5 +1,5 @@
 import { api, setReauthHandler, User } from './api';
-import { clearDataCache } from './data-cache';
+import { cacheClient } from '../cache/client';
 import {
   decryptBatch,
   derivePasswordMaterial,
@@ -165,7 +165,7 @@ export class Session {
   private async invalidate(): Promise<void> {
     this.invalidated = true;
     setReauthHandler(null);
-    await clearDataCache().catch(() => {});
+    await cacheClient?.clearCache().catch(() => {});
     clearWrappingKey();
     this.onInvalidate?.();
   }

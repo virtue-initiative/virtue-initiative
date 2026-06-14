@@ -1,5 +1,5 @@
 import { decode } from '@msgpack/msgpack';
-import { Batch } from './api';
+import type { Batch } from './api';
 import { decryptBatch, decompressGzip, verifyBatch } from './crypto';
 import { FeedLog, toUint8Array } from '../../pages/Logs/shared';
 import { decodeWebpDimensions } from '../webp-dimensions';

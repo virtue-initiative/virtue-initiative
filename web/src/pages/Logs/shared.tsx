@@ -4,7 +4,7 @@ import { BatchVerification } from '../../utils/api/crypto';
 import { formatDate, formatTime } from '../../utils/time';
 import { Dialog, DialogHeader } from '@virtueinitiative/shared-web';
 import { describeRiskLevel, getRiskLevel } from '@virtueinitiative/shared-web/risk';
-import { loadEventImage } from '../../utils/api/data-cache';
+import { loadEventImage } from '../../utils/api/event-image';
 
 export type FeedLog = DataLog & {
   batch_status: BatchVerification;
