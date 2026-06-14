@@ -75,7 +75,7 @@ impl Scenario {
             };
             let event_state = serde_json::json!({
                 "auth": auth,
-                "screenshot": { "authenticated": true, "last_screenshot_at_ms": null },
+                "screenshot": { "enabled": true, "last_screenshot_at_ms": null },
                 "upload": upload_state,
             });
             let path = state_dir.join("event_state.json");

@@ -297,7 +297,9 @@ fn process_killed_before_shutdown_emits_alert() {
         last_process_stopped_shutdown: 12_000,
         ..Default::default()
     });
-    scenario.at_t(20_000).loop_iteration();
+    scenario.at_t(20_000);
+    scenario.queue(ProcessStarted);
+    scenario.loop_iteration();
     assert!(
         !scenario.api.state().hash_uploads.is_empty(),
         "expected a ProcessKilledBeforeShutdown hash upload"
