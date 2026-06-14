@@ -210,7 +210,7 @@ mod tests {
         module.state.last_screenshot_at_ms = Some(500);
         b.add(module);
         let mut t = b.build();
-        t.emit(1, ScreenshotResumed);
+        t.emit(1, ScreenshotPaused);
         assert!(!t.observer::<ScreenshotModule>().state.enabled);
         assert_eq!(
             t.observer::<ScreenshotModule>().state.last_screenshot_at_ms,
