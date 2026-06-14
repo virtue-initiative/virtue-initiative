@@ -11,10 +11,11 @@ use anyhow::{anyhow, Context, Result};
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
 use virtue_core::{
-    AuthState, Config, CoreError, CoreResult, DeviceSettings, EventBus, EventChannel,
-    LoginRequested, LoginResult, LogoutRequested, Ping, PlatformHooks, ProcessStarted,
-    ProcessStopped, ProcessStoppedReason, Redacted, Screenshot, ScreenshotHooks,
-    UserStopRequested, build_default_modules_reqwest, load_state, store_state,
+    build_default_modules_reqwest, load_state, store_state, AuthState, Config, CoreError,
+    CoreResult, DeviceSettings, EventBus, EventChannel, LoginRequested, LoginResult,
+    LogoutRequested, Ping, PlatformHooks, ProcessStarted, ProcessStopped, ProcessStoppedReason,
+    Redacted, Screenshot, ScreenshotHooks, ScreenshotResumed, StatusRequest, StatusResponse,
+    UserStopRequested,
 };
 
 static CORE: OnceCell<IosCore> = OnceCell::new();
@@ -23,7 +24,13 @@ const DEFAULT_BASE_API_URL: &str = "https://api.virtueinitiative.org";
 const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
 const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
 const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
-const LOOP_INTERVAL: Duration = Duration::from_secs(60);
+// Ping every second (like the Android client). The lifecycle module flags a
+// `PingGapWhileRunning` alert once the gap between pings exceeds 10s, so a long
+// loop interval trips it on every iteration. Safari can suspend/kill the
+// extension at any time; a fresh `ProcessStarted` resets the start-gap guard so
+// the post-resume gap is not misreported. Capture cadence is governed
+// separately by `capture_interval_seconds`, not this loop interval.
+const LOOP_INTERVAL: Duration = Duration::from_secs(1);
 
 const CAPTURE_STATUS_READY: c_int = 0;
 const CAPTURE_STATUS_PERMISSION_MISSING: c_int = 1;
@@ -204,11 +211,9 @@ pub extern "C" fn virtue_ios_native_login(
             password: Redacted(password),
         })?;
         if !result.success {
-            return Err(anyhow!(
-                result
-                    .error
-                    .unwrap_or_else(|| "Login failed. Check your credentials and try again.".to_string())
-            ));
+            return Err(anyhow!(result.error.unwrap_or_else(|| {
+                "Login failed. Check your credentials and try again.".to_string()
+            })));
         }
         let state = bus.iter()?;
         store_state(&state_path, &state)?;
@@ -235,21 +240,51 @@ pub extern "C" fn virtue_ios_native_logout() -> *mut c_char {
 #[no_mangle]
 pub extern "C" fn virtue_ios_native_is_logged_in() -> bool {
     core()
-        .map(|core| read_auth_state(&core.state_dir).device_credentials.is_some())
+        .map(|core| {
+            read_auth_state(&core.state_dir)
+                .device_credentials
+                .is_some()
+        })
         .unwrap_or(false)
 }
 
 #[no_mangle]
 pub extern "C" fn virtue_ios_native_get_device_id() -> *mut c_char {
-    let device_id = core()
-        .ok()
-        .and_then(|core| read_auth_state(&core.state_dir).device_credentials.map(|d| d.device_id));
+    let device_id = core().ok().and_then(|core| {
+        read_auth_state(&core.state_dir)
+            .device_credentials
+            .map(|d| d.device_id)
+    });
 
     match device_id {
         Some(value) => CString::new(value)
             .map(CString::into_raw)
             .unwrap_or(std::ptr::null_mut()),
         None => std::ptr::null_mut(),
+    }
+}
+
+/// Build a transient bus from the shared event state and ask it for a status
+/// snapshot. Returns a JSON-serialized `ServiceStatus` (caller frees with
+/// `virtue_ios_free_string`), or null on failure.
+///
+/// Status is no longer published to a `status.json` file by the core; it is
+/// produced on demand via a `StatusRequest`/`StatusResponse` round-trip on the
+/// event bus, mirroring the Android client.
+#[no_mangle]
+pub extern "C" fn virtue_ios_native_get_status_json() -> *mut c_char {
+    let json = (|| -> Result<String> {
+        let core = core()?;
+        let (mut bus, _) = build_bus(core, "ios-device")?;
+        let response = bus.request::<StatusRequest, StatusResponse>(StatusRequest)?;
+        Ok(serde_json::to_string(&response.status)?)
+    })();
+
+    match json {
+        Ok(value) => CString::new(value)
+            .map(CString::into_raw)
+            .unwrap_or(std::ptr::null_mut()),
+        Err(_) => std::ptr::null_mut(),
     }
 }
 
@@ -300,9 +335,7 @@ pub extern "C" fn virtue_ios_native_stop_daemon() -> *mut c_char {
 }
 
 #[no_mangle]
-pub extern "C" fn virtue_ios_native_pause_monitoring(
-    source: *const c_char,
-) -> *mut c_char {
+pub extern "C" fn virtue_ios_native_pause_monitoring(source: *const c_char) -> *mut c_char {
     let result = (|| -> Result<()> {
         let core = core()?;
         let _source = match c_string_or_empty(source).trim() {
@@ -325,9 +358,7 @@ pub extern "C" fn virtue_ios_native_pause_monitoring(
 }
 
 #[no_mangle]
-pub extern "C" fn virtue_ios_native_request_pause_monitoring(
-    source: *const c_char,
-) -> *mut c_char {
+pub extern "C" fn virtue_ios_native_request_pause_monitoring(source: *const c_char) -> *mut c_char {
     let result = (|| -> Result<()> {
         let core = core()?;
         let source = match c_string_or_empty(source).trim() {
@@ -359,6 +390,15 @@ pub unsafe extern "C" fn virtue_ios_free_string(value: *mut c_char) {
 fn run_daemon_loop(core: &IosCore) -> Result<()> {
     let (mut bus, state_path) = build_bus(core, "ios-device")?;
     bus.send(ProcessStarted)?;
+    // Enable screenshot capture. The screenshot module only captures while it is
+    // "enabled", which the lifecycle module otherwise flips on via
+    // `UserSessionLogin` — a desktop-only OS event that never fires on iOS.
+    // The Safari extension only starts this daemon while monitoring is enabled
+    // (it sends `UserStopRequested`/stops the loop when the user pauses), so the
+    // loop running at all means capture should be on. Mirrors how the Android
+    // client drives `ScreenshotResumed` from its daemon loop rather than relying
+    // on a session-login event.
+    bus.send(ScreenshotResumed)?;
     let state = bus.iter()?;
     store_state(&state_path, &state)?;
 

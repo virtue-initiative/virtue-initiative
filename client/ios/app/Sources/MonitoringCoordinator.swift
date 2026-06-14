@@ -348,7 +348,7 @@ final class MonitoringCoordinator: ObservableObject {
             ? VirtueShared.defaultBaseApiUrl
             : runtimeOverrides().baseApiUrl
 
-        let serviceStatus = loadJSONFile(named: "status.json", as: CoreServiceStatus.self)
+        let serviceStatus = loadCoreStatus()
 
         pendingRequestCount = serviceStatus?.pendingRequestCount ?? 0
         lastCoreLoop = formatMillisTimestamp(serviceStatus?.lastLoopAtMs)
@@ -445,12 +445,14 @@ final class MonitoringCoordinator: ObservableObject {
         return (value?.isEmpty == false) ? value! : fallback
     }
 
-    private func loadJSONFile<T: Decodable>(named name: String, as type: T.Type) -> T? {
-        let fileURL = dataDir.appendingPathComponent(name, isDirectory: false)
-        guard let data = try? Data(contentsOf: fileURL), !data.isEmpty else {
+    private func loadCoreStatus() -> CoreServiceStatus? {
+        guard let json = NativeBridge.getStatusJson(),
+              let data = json.data(using: .utf8),
+              !data.isEmpty
+        else {
             return nil
         }
-        return try? JSONDecoder().decode(type, from: data)
+        return try? JSONDecoder().decode(CoreServiceStatus.self, from: data)
     }
 
     private func timestamp(forKey key: String, defaults: UserDefaults) -> TimeInterval? {
