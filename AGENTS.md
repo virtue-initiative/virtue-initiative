@@ -142,12 +142,13 @@ cargo build -p virtue-core
 cargo build -p virtue-mac
 cargo clippy -p virtue-core --all-targets -- -D warnings
 cargo clippy -p virtue-mac --all-targets -- -D warnings
+cargo test -p virtue-core
+cargo test -p virtue-core --features testing --test scenarios
 ./mac/scripts/build-dmg.sh
 ```
 
 Notes:
 
-- CI does not currently run `cargo test` for macOS.
 - `build-dmg.sh` validates the app bundle and DMG packaging path.
 
 ### Windows client CI (`.github/workflows/client-windows.yml`)
@@ -161,6 +162,9 @@ cargo build --target x86_64-pc-windows-msvc -p virtue-core
 cargo build --target x86_64-pc-windows-msvc -p virtue-windows
 cargo clippy --target x86_64-pc-windows-msvc -p virtue-core --all-targets -- -D warnings
 cargo clippy --target x86_64-pc-windows-msvc -p virtue-windows --all-targets -- -D warnings
+cargo test --target x86_64-pc-windows-msvc -p virtue-core
+cargo test --target x86_64-pc-windows-msvc -p virtue-core --features testing --test scenarios
+cargo test --target x86_64-pc-windows-msvc -p virtue-windows
 ./windows/scripts/build-installer.ps1 -Profile Debug
 ```
 

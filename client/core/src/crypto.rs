@@ -14,9 +14,7 @@ use rand_core::{OsRng as HpkeOsRng, TryRngCore};
 use sha2::{Digest, Sha256};
 
 use crate::error::{CoreError, CoreResult};
-use crate::model::{
-    BatchEvent, BatchEventData, BatchRecipient, BufferedBatchEvent, HashParams, Screenshot,
-};
+use crate::model::{BatchRecipient, HashParams, LogEntry};
 
 type HpkeKem = X25519HkdfSha256;
 type HpkeKdf = HkdfSha256;
@@ -104,50 +102,136 @@ pub fn derive_password_auth(
     Ok(password_auth)
 }
 
-pub fn buffer_batch_event(event: BatchEvent) -> CoreResult<BufferedBatchEvent> {
-    let encoded = encode_batch_event(&event)?;
-    Ok(BufferedBatchEvent {
-        content_hash: compute_event_hash(&encoded),
-        event,
-    })
-}
-
-pub fn prepare_screenshot_event(screenshot: Screenshot) -> CoreResult<BufferedBatchEvent> {
-    prepare_screenshot_batch_event(screenshot, "screenshot", None, BatchEventData::default())
-}
-
-pub fn prepare_screenshot_batch_event(
-    screenshot: Screenshot,
-    kind: impl Into<String>,
-    risk: Option<f32>,
-    data: BatchEventData,
-) -> CoreResult<BufferedBatchEvent> {
-    buffer_batch_event(BatchEvent {
-        ts: screenshot.captured_at_ms,
-        kind: kind.into(),
-        risk,
-        data: data.with_screenshot(screenshot.bytes, screenshot.content_type),
-    })
-}
-
-pub fn prepare_log_batch_event(
-    ts: i64,
-    kind: impl Into<String>,
-    risk: Option<f32>,
-    data: BatchEventData,
-) -> CoreResult<BufferedBatchEvent> {
-    buffer_batch_event(BatchEvent {
-        ts,
-        kind: kind.into(),
-        risk,
-        data,
-    })
-}
-
-pub fn encode_batch_event(event: &BatchEvent) -> CoreResult<Vec<u8>> {
+pub fn encode_batch_event(event: &LogEntry) -> CoreResult<Vec<u8>> {
     Ok(rmp_serde::to_vec_named(event)?)
 }
 
 pub fn compute_event_hash(encoded_event: &[u8]) -> [u8; 32] {
     Sha256::digest(encoded_event).into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CryptoEngine, compute_event_hash, derive_password_auth};
+    use crate::model::{BatchRecipient, HashParams};
+    use aes_gcm::Aes256Gcm;
+    use aes_gcm::Nonce;
+    use aes_gcm::aead::{Aead, KeyInit};
+    use base64::Engine;
+    use hpke::aead::AesGcm256;
+    use hpke::kdf::HkdfSha256;
+    use hpke::kem::{Kem as KemTrait, X25519HkdfSha256};
+    use hpke::{Deserializable, OpModeR, Serializable, setup_receiver};
+    use rand_core::{OsRng as HpkeOsRng, TryRngCore};
+
+    fn low_cost_params() -> HashParams {
+        HashParams {
+            version: "1".to_string(),
+            algorithm: "argon2id".to_string(),
+            memory_cost_kib: 64,
+            time_cost: 1,
+            parallelism: 1,
+            salt_length: 16,
+            hkdf_hash: "sha256".to_string(),
+        }
+    }
+
+    #[test]
+    fn generate_batch_key_produces_32_distinct_bytes() {
+        let engine = CryptoEngine;
+        let key1 = engine.generate_batch_key();
+        let key2 = engine.generate_batch_key();
+        assert_ne!(key1, [0_u8; 32], "key must not be all-zero");
+        assert_ne!(key1, key2, "two keys must differ");
+    }
+
+    #[test]
+    fn encrypt_batch_blob_nonce_is_first_12_bytes() {
+        let engine = CryptoEngine;
+        let key = engine.generate_batch_key();
+        let plaintext = b"hello, world!";
+        let blob = engine.encrypt_batch_blob(&key, plaintext).expect("encrypt");
+        assert_eq!(blob.len(), 12 + plaintext.len() + 16);
+    }
+
+    #[test]
+    fn encrypt_batch_blob_round_trips() {
+        let engine = CryptoEngine;
+        let key = engine.generate_batch_key();
+        let plaintext = b"test plaintext for round-trip";
+        let blob = engine.encrypt_batch_blob(&key, plaintext).expect("encrypt");
+        let nonce = Nonce::from_slice(&blob[..12]);
+        let cipher = Aes256Gcm::new_from_slice(&key).expect("valid key");
+        let decrypted = cipher.decrypt(nonce, &blob[12..]).expect("decrypt");
+        assert_eq!(decrypted.as_slice(), plaintext);
+    }
+
+    #[test]
+    fn derive_password_auth_is_deterministic() {
+        let params = low_cost_params();
+        let out1 =
+            derive_password_auth("testpassword", b"user@example.com", &params).expect("first call");
+        let out2 = derive_password_auth("testpassword", b"user@example.com", &params)
+            .expect("second call");
+        assert_eq!(out1, out2);
+        assert_ne!(out1, [0_u8; 32]);
+    }
+
+    #[test]
+    fn derive_password_auth_changes_with_different_inputs() {
+        let params = low_cost_params();
+        let out1 = derive_password_auth("password1", b"user@example.com", &params).expect("call 1");
+        let out2 = derive_password_auth("password2", b"user@example.com", &params).expect("call 2");
+        assert_ne!(out1, out2);
+    }
+
+    #[test]
+    fn compute_event_hash_is_deterministic() {
+        let h1 = compute_event_hash(b"hello");
+        let h2 = compute_event_hash(b"hello");
+        assert_eq!(h1, h2);
+        let h3 = compute_event_hash(b"world");
+        assert_ne!(h1, h3);
+    }
+
+    #[test]
+    fn wrap_and_unwrap_batch_key_round_trips() {
+        let mut csprng = HpkeOsRng.unwrap_err();
+        let (private_key, public_key) = <X25519HkdfSha256 as KemTrait>::gen_keypair(&mut csprng);
+        let pub_key_bytes = public_key.to_bytes();
+        let pub_key_b64 = base64::engine::general_purpose::STANDARD.encode(&pub_key_bytes[..]);
+
+        let engine = CryptoEngine;
+        let batch_key = engine.generate_batch_key();
+        let recipient = BatchRecipient {
+            user_id: "test-user".to_string(),
+            pub_key_base64: pub_key_b64,
+        };
+
+        let wrapped = engine
+            .wrap_batch_key_for_recipient(&recipient, &batch_key)
+            .expect("wrap must succeed");
+
+        let envelope = base64::engine::general_purpose::STANDARD
+            .decode(&wrapped)
+            .expect("base64 decode");
+
+        // X25519 encapped key is 32 bytes
+        let encapped_key =
+            <<X25519HkdfSha256 as KemTrait>::EncappedKey as Deserializable>::from_bytes(
+                &envelope[..32],
+            )
+            .expect("deserialize encapped key");
+
+        let mut receiver_ctx = setup_receiver::<AesGcm256, HkdfSha256, X25519HkdfSha256>(
+            &OpModeR::Base,
+            &private_key,
+            &encapped_key,
+            b"",
+        )
+        .expect("setup_receiver must succeed");
+
+        let recovered = receiver_ctx.open(&envelope[32..], b"").expect("open");
+        assert_eq!(recovered, batch_key.to_vec());
+    }
 }

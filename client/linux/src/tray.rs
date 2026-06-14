@@ -4,7 +4,7 @@ use std::thread;
 use std::time::Duration;
 
 use ksni::blocking::TrayMethods;
-use virtue_core::storage::FileStateStore;
+use virtue_core::ClientController;
 
 use crate::config::ClientPaths;
 
@@ -139,16 +139,14 @@ fn run_one_tray_session(
 }
 
 fn build_tooltip(paths: &ClientPaths) -> String {
-    let store = FileStateStore::new(&paths.state_dir).ok();
-    let auth = store
-        .as_ref()
-        .and_then(|store| store.load_auth_state().ok());
+    let sock = paths.state_dir.join("daemon.sock");
+    let is_authenticated = ClientController::connect(&sock)
+        .ok()
+        .and_then(|mut c| c.get_status().ok())
+        .map(|s| s.is_authenticated)
+        .unwrap_or(false);
 
-    if auth
-        .as_ref()
-        .and_then(|auth| auth.device_credentials.as_ref())
-        .is_some()
-    {
+    if is_authenticated {
         "Signed in. Run 'virtue status' from a terminal for details.".to_string()
     } else {
         "Not signed in. Run 'virtue login' from a terminal.".to_string()
@@ -320,5 +318,26 @@ mod tests {
             Some(Duration::from_secs(60))
         );
         assert_eq!(next_missing_watcher_retry_delay(3), None);
+    }
+
+    #[test]
+    fn tray_backoff_caps_at_max_schedule_entry() {
+        for failure_count in 3..=10 {
+            assert_eq!(
+                next_missing_watcher_retry_delay(failure_count),
+                None,
+                "expected None for failure_count={failure_count}"
+            );
+        }
+    }
+
+    #[test]
+    fn tray_backoff_schedule_is_strictly_increasing() {
+        let delays: Vec<Duration> = (0..3)
+            .map(|i| next_missing_watcher_retry_delay(i).unwrap())
+            .collect();
+        for window in delays.windows(2) {
+            assert!(window[1] > window[0]);
+        }
     }
 }

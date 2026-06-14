@@ -31,7 +31,7 @@ jobs:
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: "v1"
+          prefix-key: 'v1'
           workspaces: |
             client -> target
 
@@ -51,6 +51,14 @@ jobs:
         run: cargo clippy -p virtue-mac --all-targets -- -D warnings
         working-directory: client
 
+      - name: Rust tests (core)
+        run: cargo test -p virtue-core
+        working-directory: client
+
+      - name: Rust scenario tests (core)
+        run: cargo test -p virtue-core --features testing --test scenarios
+        working-directory: client
+
       - name: Add Intel cross-compilation target
         run: rustup target add x86_64-apple-darwin
 
@@ -58,13 +66,13 @@ jobs:
         run: ./mac/scripts/build-dmg.sh
         working-directory: client
         env:
-          VIRTUE_ARCH_SUFFIX: "-apple-silicon"
+          VIRTUE_ARCH_SUFFIX: '-apple-silicon'
 
       - name: Build macOS Intel app bundle and DMG
         run: ./mac/scripts/build-dmg.sh
         working-directory: client
         env:
-          VIRTUE_ARCH_SUFFIX: "-intel"
+          VIRTUE_ARCH_SUFFIX: '-intel'
 
       - name: Resolve version info
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')

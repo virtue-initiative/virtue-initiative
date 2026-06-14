@@ -1,12 +1,14 @@
 pub mod api;
 pub mod clock;
+pub mod event_tester;
 pub mod fixtures;
 pub mod platform;
 pub mod scenario;
 
 pub use api::{BatchCall, HashCall, LogCall, MockApiClient, MockApiState, RegisterDeviceCall};
 pub use clock::MockClock;
-pub use fixtures::{TINY_PNG_BYTES, tiny_png_screenshot};
+pub use event_tester::{EventTester, EventTesterBuilder};
+pub use fixtures::{tiny_png_bytes, tiny_png_screenshot};
 pub use platform::TestPlatformHooks;
 pub use scenario::Scenario;
 
@@ -19,9 +21,12 @@ mod tests {
 
     use super::*;
     use crate::api::ApiTransport;
+    use crate::assembly::build_default_modules;
     use crate::config::Config;
-    use crate::platform::PlatformHooks;
-    use crate::service::MonitorService;
+    use crate::events::Ping;
+    use crate::events::bus::{EventBus, EventChannel, StateType};
+    use crate::module::status::{StatusRequest, StatusResponse};
+    use crate::platform::ScreenshotHooks;
 
     static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -98,24 +103,26 @@ mod tests {
         assert_eq!(response.id, "canned-batch");
         assert_eq!(inspector.state().batch_uploads.len(), 1);
 
-        // Next call (no canned) falls back to default id generator.
         let second = api.upload_batch("tok", &batch).unwrap();
         assert_eq!(second.id, "mock-batch-1");
     }
 
     #[test]
-    fn monitor_service_setup_with_mocks_constructs_and_runs_one_iteration() {
+    fn bus_with_default_modules_constructs_and_runs_one_ping() {
         let state_dir = temp_state_dir();
         let config = test_config(state_dir.clone());
         let platform = TestPlatformHooks::new();
         let api = MockApiClient::new();
         let inspector = api.clone();
 
-        let mut service = MonitorService::setup_with_api(config, platform, api)
-            .expect("service should construct with mocks");
+        let observers =
+            build_default_modules(config, platform, api).expect("build modules must succeed");
+        let mut bus = EventBus::new(observers, StateType::Null).expect("bus must construct");
 
-        // No auth state yet → loop should not panic and should not upload anything.
-        let _ = service.loop_iteration();
+        // No auth state → ping must not upload anything.
+        bus.send(Ping).unwrap();
+        bus.iter().unwrap();
+
         let state = inspector.state();
         assert!(
             state.batch_uploads.is_empty(),
@@ -125,6 +132,11 @@ mod tests {
             state.log_uploads.is_empty(),
             "unauthenticated loop must not upload logs"
         );
+
+        // Status request must return a valid response.
+        let status: StatusResponse = bus.request(StatusRequest).unwrap();
+        assert!(!status.status.is_authenticated);
+        assert!(status.status.is_running);
 
         fs::remove_dir_all(&state_dir).ok();
     }

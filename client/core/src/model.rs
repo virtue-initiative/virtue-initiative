@@ -3,7 +3,114 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::lifecycle::LifecycleStatus;
+// ── Payload types (shared by event system and upload pipeline) ────────────────
+
+/// Wraps a value so that its `Debug` output is always `[REDACTED]`.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Redacted<T>(pub T);
+
+impl<T> std::fmt::Debug for Redacted<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[REDACTED]")
+    }
+}
+
+impl<T: std::ops::Deref<Target = str>> std::ops::Deref for Redacted<T> {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for Redacted<String> {
+    fn from(s: String) -> Self {
+        Redacted(s)
+    }
+}
+
+impl From<&str> for Redacted<String> {
+    fn from(s: &str) -> Self {
+        Redacted(s.to_string())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessStoppedReason {
+    Other,
+    Shutdown,
+    User,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum LifecycleKind {
+    ProcessStarted,
+    ProcessStoppedUser,
+    ProcessStoppedShutdown,
+    ProcessStoppedOther,
+    ComputerSuspended,
+    ComputerResumed,
+    ScreenshotPaused,
+    ScreenshotResumed,
+    Login,
+    Logout,
+    ComputerBooted,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum AlertReason {
+    ProcessKilledBeforeShutdown,
+    ForceKilledBeforeShutdown,
+    UserStoppedProcess,
+    UnexpectedProcessStart,
+    PingGapWhileRunning,
+    MissingResume,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+pub enum UploadKind {
+    Screenshot {
+        image: Vec<u8>,
+        content_type: String,
+    },
+    Lifecycle {
+        kind: LifecycleKind,
+    },
+    LifecycleAlert {
+        reason: AlertReason,
+    },
+    Alert {
+        message: String,
+    },
+    CaptureFailed,
+    Dev {
+        title: String,
+        details: Option<String>,
+    },
+}
+
+/// A single piece of `ServiceStatus` reported by one module in response to a
+/// `StatusRequest`. Each module emits only the fields it owns; the status
+/// module merges them into a complete `ServiceStatus`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+pub enum PartialStatus {
+    Auth {
+        is_authenticated: bool,
+        device_id: Option<String>,
+    },
+    Lifecycle {
+        is_running: bool,
+        last_loop_at_ms: Option<i64>,
+    },
+    Upload {
+        pending_request_count: usize,
+    },
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Screenshot {
@@ -30,15 +137,6 @@ impl EventData {
         self.0.clone().into_iter().collect()
     }
 
-    pub fn with_screenshot(mut self, image: Vec<u8>, content_type: impl Into<String>) -> Self {
-        self.insert(
-            "image",
-            Value::Array(image.into_iter().map(Value::from).collect()),
-        );
-        self.insert("content_type", Value::String(content_type.into()));
-        self
-    }
-
     pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
         let mut data = Self::default();
         for (key, value) in pairs {
@@ -51,86 +149,10 @@ impl EventData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
     pub ts: i64,
-    #[serde(rename = "type")]
-    pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub risk: Option<f32>,
-    #[serde(default)]
-    pub data: EventData,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BufferedBatchEvent {
-    pub event: BatchEvent,
-    pub content_hash: [u8; 32],
-}
-
-pub type BatchEvent = LogEntry;
-pub type BatchEventData = EventData;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", content = "data", rename_all = "snake_case")]
-pub enum AuditLogPayload {
-    Direct(LogEntry),
-    Batch(BufferedBatchEvent),
-}
-
-impl AuditLogPayload {
-    pub fn for_direct_log(log: LogEntry) -> Self {
-        Self::Direct(log)
-    }
-
-    pub fn for_batch_event(event: BufferedBatchEvent) -> Self {
-        Self::Batch(event)
-    }
-
-    pub fn as_direct_log(&self) -> Option<&LogEntry> {
-        match self {
-            Self::Direct(log) => Some(log),
-            Self::Batch(_) => None,
-        }
-    }
-
-    pub fn as_batch_event(&self) -> Option<&BufferedBatchEvent> {
-        match self {
-            Self::Direct(_) => None,
-            Self::Batch(event) => Some(event),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum AuditRecord {
-    Log {
-        local_id: String,
-        should_be_in_batch: bool,
-        #[serde(default)]
-        requires_hash_upload: bool,
-        log: AuditLogPayload,
-    },
-    LocalLog {
-        log: LogEntry,
-    },
-    HashUploaded {
-        local_id: String,
-    },
-    LogUploaded {
-        local_id: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        server_id: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        batch_id: Option<String>,
-    },
-    BatchUploaded {
-        server_id: String,
-    },
-}
-
-#[derive(Debug, Clone)]
-pub struct StoredAuditRecord {
-    pub audit_day: String,
-    pub record: AuditRecord,
+    #[serde(flatten)]
+    pub event: UploadKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -195,8 +217,6 @@ pub struct LoginStatus {
 pub struct AuthState {
     pub user_access_token: Option<String>,
     pub device_credentials: Option<DeviceCredentials>,
-    #[serde(default)]
-    pub post_login_proof_batches_remaining: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -205,34 +225,11 @@ pub struct ServiceStatus {
     pub is_running: bool,
     pub device_id: Option<String>,
     pub last_loop_at_ms: Option<i64>,
-    pub last_screenshot_at_ms: Option<i64>,
-    pub last_batch_at_ms: Option<i64>,
     pub pending_request_count: usize,
-    #[serde(default)]
-    pub lifecycle: LifecycleStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoopOutcome {
     pub ran_at_ms: i64,
-    pub next_run_at_ms: i64,
     pub status: ServiceStatus,
-}
-
-#[derive(Debug, Clone)]
-pub struct AuditLogItem {
-    pub audit_day: String,
-    pub local_id: String,
-    pub should_be_in_batch: bool,
-    pub requires_hash_upload: bool,
-    pub payload: AuditLogPayload,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct AuditState {
-    pub items: Vec<AuditLogItem>,
-    pub pending_hash_uploads: Vec<AuditLogItem>,
-    pub pending_direct_uploads: Vec<AuditLogItem>,
-    pub pending_batch_uploads: Vec<AuditLogItem>,
-    pub pending_request_count: usize,
 }

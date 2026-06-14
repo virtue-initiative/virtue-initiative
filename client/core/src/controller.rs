@@ -1,0 +1,114 @@
+use crate::error::{CoreError, CoreResult};
+use crate::events::{Event, EventChannel};
+use crate::model::ServiceStatus;
+use crate::model::{ProcessStoppedReason, Redacted};
+use crate::module::auth::{LoginRequested, LoginResult, LogoutRequested, LogoutResult};
+use crate::module::lifecycle::{
+    ComputerResumed, ComputerSuspended, ProcessStopped, UserSessionLogin, UserSessionLogout,
+    UserStopRequested,
+};
+use crate::module::screenshot::{ScreenshotPaused, ScreenshotResumed};
+use crate::module::status::{StatusRequest, StatusResponse};
+
+/// High-level client for communicating with a daemon over any [`EventChannel`].
+///
+/// Generic over `C` so the same implementation works whether `C` is an
+/// in-process [`EventBus`] (tests, fully in-process use) or a
+/// [`RemoteEventBus`] (Linux/macOS socket, Windows in-process channel).
+///
+/// [`EventBus`]: crate::events::EventBus
+/// [`RemoteEventBus`]: crate::events::RemoteEventBus
+pub struct ClientController<C: EventChannel> {
+    channel: C,
+}
+
+impl<C: EventChannel> ClientController<C> {
+    pub fn new(channel: C) -> Self {
+        Self { channel }
+    }
+
+    /// Send `LoginRequested` and block until `LoginResult` is received.
+    /// Returns the device ID on success.
+    pub fn login(&mut self, email: &str, password: &str) -> CoreResult<String> {
+        let r: LoginResult = self.channel.request(LoginRequested {
+            email: email.into(),
+            password: Redacted(password.into()),
+        })?;
+        if r.success {
+            Ok(r.device_id.unwrap_or_default())
+        } else {
+            Err(CoreError::CommandFailed(
+                r.error.unwrap_or_else(|| "login failed".to_string()),
+            ))
+        }
+    }
+
+    /// Send `LogoutRequested` and block until `LogoutResult` is received.
+    pub fn logout(&mut self) -> CoreResult<()> {
+        let r: LogoutResult = self.channel.request(LogoutRequested)?;
+        if r.success {
+            Ok(())
+        } else {
+            Err(CoreError::CommandFailed(
+                r.error.unwrap_or_else(|| "logout failed".to_string()),
+            ))
+        }
+    }
+
+    /// Send `StatusRequest` and block until `StatusResponse` is received.
+    pub fn get_status(&mut self) -> CoreResult<ServiceStatus> {
+        let r: StatusResponse = self.channel.request(StatusRequest)?;
+        Ok(r.status)
+    }
+
+    pub fn request_user_stop(&self, source: &str) -> CoreResult<()> {
+        self.channel.publish(UserStopRequested {
+            source: source.into(),
+        })
+    }
+
+    pub fn note_suspended(&self) -> CoreResult<()> {
+        self.channel.publish(ComputerSuspended)
+    }
+
+    pub fn note_resumed(&self) -> CoreResult<()> {
+        self.channel.publish(ComputerResumed)
+    }
+
+    pub fn note_login(&self) -> CoreResult<()> {
+        self.channel.publish(UserSessionLogin)
+    }
+
+    pub fn note_logout(&self) -> CoreResult<()> {
+        self.channel.publish(UserSessionLogout)
+    }
+
+    pub fn note_process_stopped(&self, reason: ProcessStoppedReason) -> CoreResult<()> {
+        self.channel.publish(ProcessStopped(reason))
+    }
+
+    pub fn pause_screenshots(&self) -> CoreResult<()> {
+        self.channel.publish(ScreenshotPaused)
+    }
+
+    pub fn resume_screenshots(&self) -> CoreResult<()> {
+        self.channel.publish(ScreenshotResumed)
+    }
+
+    /// Register a handler for events the daemon pushes unprompted.
+    pub fn on<E: Event>(&mut self, handler: impl Fn(&E) -> CoreResult<()> + Send + Sync + 'static) {
+        self.channel.on(handler)
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+impl ClientController<crate::events::RemoteEventBus> {
+    /// Connect to the daemon at `path` and return a controller backed by a
+    /// [`RemoteEventBus`].
+    ///
+    /// [`RemoteEventBus`]: crate::events::RemoteEventBus
+    pub fn connect(path: &std::path::Path) -> CoreResult<Self> {
+        let bus = crate::events::RemoteEventBus::connect(path).map_err(CoreError::from)?;
+        Ok(Self::new(bus))
+    }
+}

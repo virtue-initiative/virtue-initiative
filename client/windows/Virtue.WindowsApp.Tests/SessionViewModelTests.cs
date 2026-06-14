@@ -162,6 +162,284 @@ public sealed class SessionViewModelTests
         Assert.Contains("non-JSON payload", ex.Message);
     }
 
+    [Fact]
+    public void RustInteropJson_DeserializesValidPayload()
+    {
+        const string json = """{"loggedIn":true,"deviceId":"dev-1","email":"u@example.com","buildLabel":"build-42"}""";
+
+        var result = RustInteropJson.DeserializePayload<SessionStatusPayload>(json);
+
+        Assert.True(result.LoggedIn);
+        Assert.Equal("dev-1", result.DeviceId);
+        Assert.Equal("u@example.com", result.Email);
+        Assert.Equal("build-42", result.BuildLabel);
+    }
+
+    [Fact]
+    public void RustInteropJson_SerializesDto()
+    {
+        var update = new RuntimeConfigUpdate("https://api.example.com", 30, 90);
+
+        var json = RustInteropJson.Serialize(update);
+
+        Assert.Contains("\"apiBaseUrl\"", json);
+        Assert.Contains("\"captureIntervalSeconds\"", json);
+        Assert.Contains("\"batchWindowSeconds\"", json);
+    }
+
+    [Fact]
+    public async Task LoginAsync_FailsWithMissingEmail()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234")
+        {
+            EmailInput = "   ",
+            PasswordInput = "secret",
+        };
+
+        await viewModel.LoginAsync();
+
+        Assert.Null(fakeClient.LastLogin);
+        Assert.Equal("Email is required.", viewModel.StatusText);
+    }
+
+    [Fact]
+    public async Task LoginAsync_FailsWithMissingPassword()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234")
+        {
+            EmailInput = "user@example.com",
+            PasswordInput = string.Empty,
+        };
+
+        await viewModel.LoginAsync();
+
+        Assert.Null(fakeClient.LastLogin);
+        Assert.Equal("Password is required.", viewModel.StatusText);
+    }
+
+    [Fact]
+    public async Task LogoutAsync_SignsOutAndUpdatesStatusText()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
+            MonitorStatus = new MonitorStatusPayload("running", true, 0, null, null),
+            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        await viewModel.LogoutAsync();
+
+        Assert.False(viewModel.LoggedIn);
+        Assert.Equal("Sign in to start monitoring.", viewModel.StatusText);
+    }
+
+    [Fact]
+    public async Task StopMonitoringAsync_CallsStopMonitoringAndUpdatesStatusText()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
+            MonitorStatus = new MonitorStatusPayload("running", true, 0, 123, null),
+            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        await viewModel.StopMonitoringAsync();
+
+        Assert.True(fakeClient.StopMonitoringCalled);
+        Assert.Equal("Monitoring is stopped on this device.", viewModel.StatusText);
+    }
+
+    [Fact]
+    public async Task SaveSettingsAsync_FailsWithNonNumericCaptureInterval()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(false, null, null, "build-123"),
+            MonitorStatus = new MonitorStatusPayload("signed_out", false, 0, null, null),
+            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 45, 90, @"C:\cfg\config.json", "build-123"),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234")
+        {
+            CaptureIntervalSeconds = "not-a-number",
+            BatchWindowSeconds = "90",
+        };
+
+        await viewModel.SaveSettingsAsync();
+
+        Assert.Null(fakeClient.LastRuntimeConfigUpdate);
+        Assert.Contains("not-a-number", viewModel.StatusText);
+    }
+
+    [Fact]
+    public async Task SaveSettingsAsync_FailsWithNegativeBatchWindow()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(false, null, null, "build-123"),
+            MonitorStatus = new MonitorStatusPayload("signed_out", false, 0, null, null),
+            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 45, 90, @"C:\cfg\config.json", "build-123"),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234")
+        {
+            CaptureIntervalSeconds = "45",
+            BatchWindowSeconds = "-1",
+        };
+
+        await viewModel.SaveSettingsAsync();
+
+        Assert.Null(fakeClient.LastRuntimeConfigUpdate);
+        Assert.Contains("-1", viewModel.StatusText);
+    }
+
+    [Theory]
+    [InlineData("running", true, null, "Virtue: monitoring active")]
+    [InlineData("stopped", true, null, "Virtue: monitoring stopped")]
+    [InlineData("error", true, "upload failed", "Virtue: upload failed")]
+    [InlineData("error", true, null, "Virtue: monitoring error")]
+    [InlineData("signed_out", false, null, "Virtue: sign in required")]
+    public async Task RefreshAsync_TrayTooltipReflectsMonitorState(
+        string monitorState, bool loggedIn, string? lastError, string expectedTooltip)
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(loggedIn, loggedIn ? "device-1" : null, loggedIn ? "user@example.com" : null, "build-123"),
+            MonitorStatus = new MonitorStatusPayload(monitorState, loggedIn, 0, null, lastError),
+            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        await viewModel.RefreshAsync();
+
+        Assert.Equal(expectedTooltip, viewModel.TrayTooltip);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_MonitorStateDisplayReplacesUnderscoresWithSpaces()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(false, null, null, "build-123"),
+            MonitorStatus = new MonitorStatusPayload("signed_out", false, 0, null, null),
+            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        await viewModel.RefreshAsync();
+
+        Assert.Equal("signed out", viewModel.MonitorStateDisplay);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_AccountSummaryAndLoggedInTextWhenSignedIn()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
+            MonitorStatus = new MonitorStatusPayload("running", true, 0, null, null),
+            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        await viewModel.RefreshAsync();
+
+        Assert.Equal("Yes", viewModel.LoggedInText);
+        Assert.Equal("user@example.com", viewModel.AccountSummary);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_AccountSummaryAndLoggedInTextWhenSignedOut()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(false, null, null, "build-123"),
+            MonitorStatus = new MonitorStatusPayload("signed_out", false, 0, null, null),
+            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        await viewModel.RefreshAsync();
+
+        Assert.Equal("No", viewModel.LoggedInText);
+        Assert.Equal("Not signed in", viewModel.AccountSummary);
+    }
+
+    [Fact]
+    public void BuildLabelText_WithNoWindowsPackageVersion()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient);
+
+        Assert.Equal("Build unknown", viewModel.BuildLabelText);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_PreservesUserEditedEmailWhenSignedOut()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(false, null, "server@example.com", "build-123"),
+            MonitorStatus = new MonitorStatusPayload("signed_out", false, 0, null, null),
+            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+        viewModel.EmailInput = "typed@example.com";
+
+        await viewModel.RefreshAsync();
+
+        Assert.Equal("typed@example.com", viewModel.EmailInput);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_OverwritesEmailInputWhenSignedIn()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(true, "device-1", "server@example.com", "build-123"),
+            MonitorStatus = new MonitorStatusPayload("running", true, 0, null, null),
+            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+        viewModel.EmailInput = "typed@example.com";
+
+        await viewModel.RefreshAsync();
+
+        Assert.Equal("server@example.com", viewModel.EmailInput);
+    }
+
+    [Fact]
+    public void TrayMenuController_RoutesAllSystemEvents()
+    {
+        var host = new NullTrayIconHost();
+        var controller = new TrayMenuController(host);
+        var logonRaised = false;
+        var logoffRaised = false;
+        var shutdownRaised = false;
+        var suspendRaised = false;
+        var resumeRaised = false;
+
+        controller.SessionLogonObserved += (_, _) => logonRaised = true;
+        controller.SessionLogoffObserved += (_, _) => logoffRaised = true;
+        controller.SystemShutdownObserved += (_, _) => shutdownRaised = true;
+        controller.SuspendObserved += (_, _) => suspendRaised = true;
+        controller.ResumeObserved += (_, _) => resumeRaised = true;
+
+        host.RequestSessionLogon();
+        host.RequestSessionLogoff();
+        host.RequestSystemShutdown();
+        host.RequestSuspend();
+        host.RequestResume();
+
+        Assert.True(logonRaised);
+        Assert.True(logoffRaised);
+        Assert.True(shutdownRaised);
+        Assert.True(suspendRaised);
+        Assert.True(resumeRaised);
+    }
+
     private sealed class FakeRustInteropClient : IRustInteropClient
     {
         public SessionStatusPayload SessionStatus { get; set; } = new(false, null, null, "build-unknown");

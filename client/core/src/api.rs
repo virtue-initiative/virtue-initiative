@@ -48,8 +48,8 @@ pub trait ApiTransport: Send + Sync {
         content_hash: &[u8; 32],
     ) -> CoreResult<()>;
 
-    /// Apply an updated config (e.g., changed `api_base_url`) to the transport in place.
-    fn reconfigure(&mut self, config: &Config) -> CoreResult<()>;
+    /// Apply an updated API base URL to the transport in place.
+    fn reconfigure(&mut self, api_base_url: &str) -> CoreResult<()>;
 }
 
 #[derive(Debug, Clone)]
@@ -60,7 +60,10 @@ pub struct ReqwestApiClient {
 
 impl ReqwestApiClient {
     pub fn new(config: &Config) -> CoreResult<Self> {
-        let client = Client::builder().cookie_store(true).build()?;
+        let client = Client::builder()
+            .cookie_store(true)
+            .timeout(std::time::Duration::from_secs(5))
+            .build()?;
         Ok(Self {
             base_url: config.api_base_url.trim_end_matches('/').to_string(),
             client,
@@ -69,8 +72,8 @@ impl ReqwestApiClient {
 }
 
 impl ApiTransport for ReqwestApiClient {
-    fn reconfigure(&mut self, config: &Config) -> CoreResult<()> {
-        self.base_url = config.api_base_url.trim_end_matches('/').to_string();
+    fn reconfigure(&mut self, api_base_url: &str) -> CoreResult<()> {
+        self.base_url = api_base_url.trim_end_matches('/').to_string();
         Ok(())
     }
 
@@ -260,29 +263,12 @@ impl ApiTransport for ReqwestApiClient {
         device_access_token: &str,
         log: &LogEntry,
     ) -> CoreResult<UploadedLogResponse> {
-        let data = serde_json::Value::Object(log.data.object());
-
-        #[derive(Serialize)]
-        struct UploadLogRequest<'a> {
-            ts: i64,
-            #[serde(rename = "type")]
-            kind: &'a str,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            risk: Option<f32>,
-            data: &'a serde_json::Value,
-        }
-
         self.send_json(
             Method::POST,
             None,
             "/d/log",
             Some(device_access_token),
-            Some(&UploadLogRequest {
-                ts: log.ts,
-                kind: &log.kind,
-                risk: log.risk,
-                data: &data,
-            }),
+            Some(log),
         )
     }
 

@@ -1,14 +1,17 @@
 use std::io::Cursor;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
-use virtue_core::{CoreError, CoreResult, PlatformHooks, Screenshot};
+use virtue_core::{CoreError, CoreResult, PlatformHooks, Screenshot, ScreenshotHooks};
 
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC,
     DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits, HGDIOBJ, ReleaseDC, SRCCOPY,
     SelectObject,
+};
+#[cfg(target_os = "windows")]
+use windows::Win32::System::Registry::{
+    HKEY_LOCAL_MACHINE, KEY_READ, RegCloseKey, RegOpenKeyExW, RegQueryValueExW,
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
@@ -114,6 +117,120 @@ pub fn capture_screen_png() -> Result<Vec<u8>> {
     Err(anyhow!("windows capture is only supported on Windows"))
 }
 
+// Reads the logon time of the current user session via the process token and LSA.
+// Uses logon time rather than system uptime because Virtue starts at user login, not system boot.
+#[cfg(target_os = "windows")]
+pub fn read_last_startup_time_utc_ms() -> CoreResult<Option<i64>> {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::Security::Authentication::Identity::{
+        LsaFreeReturnBuffer, LsaGetLogonSessionData, SECURITY_LOGON_SESSION_DATA,
+    };
+    use windows::Win32::Security::{
+        GetTokenInformation, TOKEN_QUERY, TOKEN_STATISTICS, TokenStatistics,
+    };
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    const FILETIME_TO_UNIX_OFFSET_100NS: i64 = 116_444_736_000_000_000;
+
+    unsafe {
+        let mut token = windows::Win32::Foundation::HANDLE::default();
+        OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token)
+            .map_err(|e| CoreError::CommandFailed(e.to_string()))?;
+
+        let mut stats = TOKEN_STATISTICS::default();
+        let mut returned = 0u32;
+        let token_result = GetTokenInformation(
+            token,
+            TokenStatistics,
+            Some(&mut stats as *mut _ as *mut core::ffi::c_void),
+            std::mem::size_of::<TOKEN_STATISTICS>() as u32,
+            &mut returned,
+        );
+        let _ = CloseHandle(token);
+        token_result.map_err(|e| CoreError::CommandFailed(e.to_string()))?;
+
+        let mut session_data: *mut SECURITY_LOGON_SESSION_DATA = std::ptr::null_mut();
+        LsaGetLogonSessionData(&stats.AuthenticationId, &mut session_data)
+            .ok()
+            .map_err(|e| CoreError::CommandFailed(e.to_string()))?;
+
+        if session_data.is_null() {
+            return Ok(None);
+        }
+
+        let logon_time = (*session_data).LogonTime;
+        let _ = LsaFreeReturnBuffer(session_data as *mut core::ffi::c_void);
+
+        if logon_time <= 0 || logon_time < FILETIME_TO_UNIX_OFFSET_100NS {
+            return Ok(None);
+        }
+        let unix_ms = (logon_time - FILETIME_TO_UNIX_OFFSET_100NS) / 10_000;
+        Ok(Some(unix_ms))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn read_last_startup_time_utc_ms() -> CoreResult<Option<i64>> {
+    Ok(None)
+}
+
+// Reads HKLM\SYSTEM\CurrentControlSet\Control\Windows\ShutdownTime (REG_BINARY FILETIME).
+#[cfg(target_os = "windows")]
+pub fn read_last_shutdown_time_utc_ms() -> CoreResult<Option<i64>> {
+    use windows::core::PCWSTR;
+
+    const FILETIME_TO_UNIX_OFFSET: u64 = 116_444_736_000_000_000;
+
+    let key_path: Vec<u16> = "SYSTEM\\CurrentControlSet\\Control\\Windows\0"
+        .encode_utf16()
+        .collect();
+    let value_name: Vec<u16> = "ShutdownTime\0".encode_utf16().collect();
+
+    unsafe {
+        let mut hkey = windows::Win32::System::Registry::HKEY::default();
+        let open_result = RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            PCWSTR::from_raw(key_path.as_ptr()),
+            Some(0),
+            KEY_READ,
+            &mut hkey,
+        );
+        if open_result.is_err() {
+            return Ok(None);
+        }
+
+        let mut data = [0u8; 8];
+        let mut data_size = 8u32;
+        let query_result = RegQueryValueExW(
+            hkey,
+            PCWSTR::from_raw(value_name.as_ptr()),
+            None,
+            None,
+            Some(data.as_mut_ptr()),
+            Some(&mut data_size),
+        );
+        let _ = RegCloseKey(hkey);
+
+        if query_result.is_err() || data_size != 8 {
+            return Ok(None);
+        }
+
+        let filetime = u64::from_le_bytes(data);
+        if filetime < FILETIME_TO_UNIX_OFFSET {
+            return Ok(None);
+        }
+        let unix_ms = (filetime - FILETIME_TO_UNIX_OFFSET) / 10_000;
+        Ok(Some(i64::try_from(unix_ms).map_err(|_| {
+            CoreError::InvalidState("shutdown time overflow")
+        })?))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn read_last_shutdown_time_utc_ms() -> CoreResult<Option<i64>> {
+    Ok(None)
+}
+
 #[derive(Clone)]
 pub struct WindowsPlatformHooks;
 
@@ -129,7 +246,7 @@ impl Default for WindowsPlatformHooks {
     }
 }
 
-impl PlatformHooks for WindowsPlatformHooks {
+impl ScreenshotHooks for WindowsPlatformHooks {
     fn take_screenshot(&self) -> CoreResult<Screenshot> {
         let bytes =
             capture_screen_png().map_err(|err| CoreError::CommandFailed(err.to_string()))?;
@@ -140,11 +257,13 @@ impl PlatformHooks for WindowsPlatformHooks {
         })
     }
 
-    fn get_time_utc_ms(&self) -> CoreResult<i64> {
-        let duration = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|err| CoreError::CommandFailed(err.to_string()))?;
-        i64::try_from(duration.as_millis())
-            .map_err(|_| CoreError::InvalidState("system clock overflow"))
+    fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>> {
+        read_last_shutdown_time_utc_ms()
+    }
+
+    fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
+        read_last_startup_time_utc_ms()
     }
 }
+
+impl PlatformHooks for WindowsPlatformHooks {}

@@ -2,6 +2,9 @@ use std::io;
 
 use thiserror::Error;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use crate::events::remote::IpcError;
+
 pub type CoreResult<T> = Result<T, CoreError>;
 
 #[derive(Debug, Error)]
@@ -38,6 +41,15 @@ pub enum CoreError {
     Crypto(&'static str),
     #[error("external command failed: {0}")]
     CommandFailed(String),
+    #[error("IPC error: {0}")]
+    Ipc(String),
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+impl From<IpcError> for CoreError {
+    fn from(e: IpcError) -> Self {
+        CoreError::Ipc(e.to_string())
+    }
 }
 
 impl CoreError {

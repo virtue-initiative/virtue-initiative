@@ -11,7 +11,15 @@ BUILD_LABEL="$(virtue_build_label)"
 ARCH="$(dpkg --print-architecture)"
 PKG_NAME="virtue"
 
-VIRTUE_BUILD_LABEL="$BUILD_LABEL" cargo build --release -p virtue-linux
+TYPEARG="--release"
+TYPE="release"
+
+if [[ "${1:-}" == "--debug" ]]; then
+    TYPE="debug"
+    TYPEARG=""
+fi
+
+VIRTUE_BUILD_LABEL="$BUILD_LABEL" cargo build $TYPEARG -p virtue-linux
 
 
 PKG_DIR="target/debian/${PKG_NAME}_${BUILD_LABEL}_${ARCH}"
@@ -23,7 +31,7 @@ mkdir -p "$PKG_DIR/usr/bin"
 mkdir -p "$PKG_DIR/usr/lib/systemd/user"
 mkdir -p "$PKG_DIR/usr/share/doc/virtue"
 
-install -m 0755 target/release/virtue "$PKG_DIR/usr/bin/virtue"
+install -m 0755 target/$TYPE/virtue "$PKG_DIR/usr/bin/virtue"
 install -m 0644 linux/packaging/systemd/virtue.service "$PKG_DIR/usr/lib/systemd/user/virtue.service"
 install -m 0644 linux/README.md "$PKG_DIR/usr/share/doc/virtue/README.md"
 install -m 0755 linux/packaging/debian/postinst "$PKG_DIR/DEBIAN/postinst"

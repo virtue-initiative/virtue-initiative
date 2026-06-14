@@ -393,6 +393,21 @@ button.logs-sidebar-backdrop.is-open {
   background: var(--bg-subtle);
 }
 
+.logs-thumb-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+}
+
+.logs-detail-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3rem;
+  padding: 1rem 0;
+}
+
 .logs-vrow-body {
   flex: 1;
   min-width: 0;

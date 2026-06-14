@@ -6,7 +6,13 @@ import { LogsList } from './LogsList';
 import { getRiskRating, type RiskRating } from '@virtueinitiative/shared-web/risk';
 import { FeedLog, formatDayLabel, getLogCategory, LOG_TYPES } from './shared';
 
-const LOG_CATEGORIES = [...new Set(LOG_TYPES.map(getLogCategory))];
+const LOG_CATEGORIES = [
+  ...new Set(
+    LOG_TYPES.map((type) =>
+      getLogCategory({ type, data: {}, id: '', device_id: '', ts: 0, created_at: 0 }),
+    ),
+  ),
+];
 import './style.css';
 import { useUrlState } from '../../hooks/useUrlState';
 import {
@@ -322,7 +328,8 @@ export function Logs() {
     () =>
       (logs ?? []).filter((item) => {
         if (item.ts < weekStart || item.ts > weekEnd) return false;
-        if (typeFilter !== null && getLogCategory(item.type) !== typeFilter) return false;
+        if (typeFilter !== null && getLogCategory({ ...item, data: {} }) !== typeFilter)
+          return false;
         if (riskFilter !== 'all') {
           const rating = getRiskRating(item.risk);
           if (riskFilter === 'high' && rating !== 'high') return false;

@@ -1,18 +1,24 @@
 use crate::model::Screenshot;
 
-/// 1x1 transparent PNG, the smallest valid PNG that decodes through `image`.
-pub const TINY_PNG_BYTES: &[u8] = &[
-    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
-    0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
-    0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
-    0x42, 0x60, 0x82,
-];
+/// Encode a 1×1 transparent RGBA image as PNG bytes using the `image` crate.
+/// Generated at call time so the bytes are always structurally correct and pass
+/// the CRC checks performed by the PNG decoder inside `ImagePipeline::process`.
+pub fn tiny_png_bytes() -> Vec<u8> {
+    let img = image::RgbaImage::new(1, 1);
+    let mut bytes = Vec::new();
+    image::DynamicImage::ImageRgba8(img)
+        .write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )
+        .expect("encode tiny test PNG");
+    bytes
+}
 
 pub fn tiny_png_screenshot() -> Screenshot {
     Screenshot {
         captured_at_ms: 0,
-        bytes: TINY_PNG_BYTES.to_vec(),
+        bytes: tiny_png_bytes(),
         content_type: "image/png".to_string(),
     }
 }

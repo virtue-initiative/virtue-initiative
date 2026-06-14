@@ -40,87 +40,119 @@ function getLogMetadata(log: DataLog) {
     );
 }
 
-export function getLogCategory(type: string): string {
-  switch (type) {
+export function getLogCategory(log: DataLog): string {
+  const kind = log.data?.kind as string | undefined;
+  const reason = log.data?.reason as string | undefined;
+  switch (log.type) {
     case 'screenshot':
       return 'Screenshot';
-    case 'system_event':
-      return 'System';
+    case 'lifecycle':
+      if (kind === 'computer_booted') return 'Boot';
+      if (kind === 'computer_suspended') return 'Sleep';
+      if (kind === 'computer_resumed') return 'Wake';
+      if (kind === 'login') return 'Login';
+      if (kind === 'logout') return 'Logout';
+      if (kind === 'process_started') return 'Monitoring On';
+      if (
+        kind === 'process_stopped_user' ||
+        kind === 'process_stopped_shutdown' ||
+        kind === 'process_stopped_other'
+      )
+        return 'Monitoring Off';
+      if (kind === 'screenshot_paused') return 'Paused';
+      if (kind === 'screenshot_resumed') return 'Resumed';
+      return 'Lifecycle';
     case 'lifecycle_alert':
+      if (reason === 'ping_gap_while_running') return 'Alert: Gap';
+      if (reason === 'process_killed_before_shutdown' || reason === 'force_killed_before_shutdown')
+        return 'Alert: Killed';
       return 'Alert';
-    case 'lifecycle_marker':
-      return 'Lifecycle';
-    case 'lifecycle_transition':
-      return 'Lifecycle';
-    case 'developer_log':
+    case 'alert':
+      return 'Alert';
+    case 'capture_failed':
+      return 'System';
+    case 'dev':
       return 'Developer';
     default:
-      return type.replace(/_/g, ' ');
+      return (log.type ?? '').replace(/_/g, ' ');
+  }
+}
+
+export function getLogIcon(log: DataLog): string {
+  const kind = log.data?.kind as string | undefined;
+  switch (log.type) {
+    case 'lifecycle':
+      if (kind === 'computer_booted') return '🖥️';
+      if (kind === 'computer_suspended') return '🌙';
+      if (kind === 'computer_resumed') return '☀️';
+      if (kind === 'login') return '🔓';
+      if (kind === 'logout') return '🔒';
+      if (kind === 'process_started') return '▶️';
+      if (
+        kind === 'process_stopped_user' ||
+        kind === 'process_stopped_shutdown' ||
+        kind === 'process_stopped_other'
+      )
+        return '⏹️';
+      if (kind === 'screenshot_paused') return '⏸️';
+      if (kind === 'screenshot_resumed') return '▶️';
+      return '📋';
+    case 'lifecycle_alert':
+      return '⚠️';
+    case 'alert':
+      return '⚠️';
+    case 'capture_failed':
+      return '❌';
+    case 'dev':
+      return '🛠️';
+    default:
+      return '📋';
   }
 }
 
 export function getLogMessage(log: DataLog, deviceName: string): string {
   const d = log.data;
   switch (log.type) {
-    case 'lifecycle_transition': {
-      const domain = d.domain as string | undefined;
-      const to = d.to as string | undefined;
-      if (domain === 'computer_power') {
-        if (to === 'started') return `${deviceName} booted`;
-        if (to === 'shutting_down') return `${deviceName} is shutting down`;
-        if (to === 'suspending') return `${deviceName} is suspending`;
-        if (to === 'suspended') return `${deviceName} went to sleep`;
-        if (to === 'waking') return `${deviceName} is waking`;
-        if (to === 'running') return `${deviceName} is running`;
-      }
-      if (domain === 'user_session') {
-        if (to === 'logged_in') return `User logged in on ${deviceName}`;
-        if (to === 'logged_out') return `User logged out on ${deviceName}`;
-      }
-      if (domain === 'capture_permission') {
-        if (to === 'granted') return `Screen capture permission granted on ${deviceName}`;
-        if (to === 'missing') return `Screen capture permission removed on ${deviceName}`;
-        if (to === 'unsupported') return `Screen capture not supported on ${deviceName}`;
-      }
-      if (domain === 'capture_availability') {
-        if (to === 'ready') return `Screen capture available on ${deviceName}`;
-        if (to === 'blocked') return `Screen capture blocked on ${deviceName}`;
-      }
-      if (domain === 'primary_service') {
-        if (to === 'running') return `Monitoring started on ${deviceName}`;
-        if (to === 'stopped') return `Monitoring stopped on ${deviceName}`;
-        if (to === 'crashed') return `Monitoring crashed on ${deviceName}`;
-      }
-      if (domain === 'capture_worker') {
-        if (to === 'running') return `Capture worker started on ${deviceName}`;
-        if (to === 'stopped') return `Capture worker stopped on ${deviceName}`;
-        if (to === 'crashed') return `Capture worker crashed on ${deviceName}`;
-      }
+    case 'lifecycle': {
+      const kind = d.kind as string | undefined;
+      if (kind === 'process_started') return `Monitoring started on ${deviceName}`;
+      if (kind === 'process_stopped_user') return `Monitoring stopped by user on ${deviceName}`;
+      if (kind === 'process_stopped_shutdown') return `${deviceName} shut down`;
+      if (kind === 'process_stopped_other') return `Monitoring stopped on ${deviceName}`;
+      if (kind === 'computer_suspended') return `${deviceName} went to sleep`;
+      if (kind === 'computer_resumed') return `${deviceName} woke up`;
+      if (kind === 'computer_booted') return `${deviceName} booted`;
+      if (kind === 'login') return `User logged in on ${deviceName}`;
+      if (kind === 'logout') return `User logged out on ${deviceName}`;
+      if (kind === 'screenshot_paused') return `Screenshots paused on ${deviceName}`;
+      if (kind === 'screenshot_resumed') return `Screenshots resumed on ${deviceName}`;
       return `Lifecycle event on ${deviceName}`;
     }
     case 'lifecycle_alert': {
-      const reason = d.alert_reason as string | undefined;
-      if (reason === 'user_initiated_stop') return `Monitoring stopped by user on ${deviceName}`;
-      if (reason === 'missing_stop_marker') return `Unexpected restart detected on ${deviceName}`;
-      if (reason === 'missing_stop_marker_after_ping_gap')
-        return `Monitoring gap detected on ${deviceName}`;
-      if (reason === 'extended_service_stop') return `Extended monitoring stop on ${deviceName}`;
-      if (reason === 'user_session_logout') return `User logged out on ${deviceName}`;
-      if (reason === 'capture_permission_changed')
-        return `Screen capture permission changed on ${deviceName}`;
+      const reason = d.reason as string | undefined;
+      if (reason === 'user_stopped_process') return `Monitoring stopped by user on ${deviceName}`;
+      if (reason === 'unexpected_process_start')
+        return `Unexpected restart detected on ${deviceName}`;
+      if (reason === 'ping_gap_while_running') return `Monitoring gap detected on ${deviceName}`;
+      if (reason === 'process_killed_before_shutdown')
+        return `Process killed before shutdown on ${deviceName}`;
+      if (reason === 'missing_resume') return `Missing resume event on ${deviceName}`;
+      if (reason === 'force_killed_before_shutdown')
+        return `Process force-killed before shutdown on ${deviceName}`;
       return `Alert on ${deviceName}`;
     }
-    case 'lifecycle_marker':
-      return `Lifecycle marker on ${deviceName}`;
     case 'screenshot':
       return `Screenshot captured on ${deviceName}`;
-    case 'system_event': {
-      const first = Object.values(d).find((v) => typeof v === 'string') as string | undefined;
-      return first ?? `System event on ${deviceName}`;
+    case 'alert': {
+      const message = d.message as string | undefined;
+      return message ?? `Alert on ${deviceName}`;
     }
-    case 'developer_log': {
-      const entry = Object.entries(d).find(([, v]) => typeof v === 'string');
-      return entry ? `${entry[0]}: ${entry[1]}` : `Developer log on ${deviceName}`;
+    case 'capture_failed':
+      return `Capture failed repeatedly on ${deviceName}`;
+    case 'dev': {
+      const title = d.title as string | undefined;
+      const details = d.details as string | undefined;
+      return title ? (details ? `${title}: ${details}` : title) : `Developer log on ${deviceName}`;
     }
     default:
       return `Event on ${deviceName}`;
@@ -129,11 +161,11 @@ export function getLogMessage(log: DataLog, deviceName: string): string {
 
 export const LOG_TYPES = [
   'screenshot',
-  'system_event',
+  'lifecycle',
   'lifecycle_alert',
-  'lifecycle_marker',
-  'lifecycle_transition',
-  'developer_log',
+  'alert',
+  'capture_failed',
+  'dev',
 ] as const;
 
 const _dayLabelFmt = new Intl.DateTimeFormat(undefined, {
@@ -279,12 +311,15 @@ export function LogDetailDialog({
           </>
         }
       >
-        {getLogCategory(item.type)}
+        {getLogCategory(item)}
       </DialogHeader>
       <p class="logs-detail-subtitle">
         On {deviceName(item.device_id)} at {formatDate(item.ts)} {formatTime(item.ts)}
       </p>
       <p class="logs-detail-message">{getLogMessage(item, deviceName(item.device_id))}</p>
+      {!imgSrc && item.type !== 'screenshot' && (
+        <div class="logs-detail-icon">{getLogIcon(item)}</div>
+      )}
       {imgSrc && (
         <button
           class="logs-detail-image-button"
