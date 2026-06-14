@@ -3,7 +3,7 @@ import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { decryptAndFlattenBatch } from '../api/batch-materializer';
 import { unwrapBatchKey } from '../api/crypto';
 import type { Batch, DataPage } from '../api/api';
-import type { FeedLog } from '../../pages/Logs/shared';
+import type { FeedLog } from '../../pages/Logs/types';
 
 export type {};
 
@@ -138,61 +138,68 @@ function sqlGetSince(viewerId: string, targetUserId: string): number {
 }
 
 function sqlMergeDataPage(viewerId: string, targetUserId: string, page: DataPage): void {
-  for (const batch of page.batches) {
-    db.exec(
-      `INSERT OR IGNORE INTO batches(id,viewer_id,target_user_id,device_id,url,encrypted_key,start_time,end_time,created_at,end_hash)
-       VALUES(?,?,?,?,?,?,?,?,?,?)`,
-      {
-        bind: [
-          batch.id,
-          viewerId,
-          targetUserId,
-          batch.device_id,
-          batch.url,
-          batch.encrypted_key,
-          batch.start_time,
-          batch.end_time,
-          batch.created_at,
-          batch.end_hash,
-        ],
-      },
-    );
-  }
-  for (const log of page.logs) {
-    db.exec(
-      `INSERT OR IGNORE INTO direct_logs(id,viewer_id,target_user_id,device_id,ts,type,data,created_at,risk)
-       VALUES(?,?,?,?,?,?,?,?,?)`,
-      {
-        bind: [
-          log.id,
-          viewerId,
-          targetUserId,
-          log.device_id,
-          log.ts,
-          log.type,
-          JSON.stringify(log.data),
-          log.created_at,
-          log.risk ?? null,
-        ],
-      },
-    );
-  }
+  db.exec('BEGIN');
+  try {
+    for (const batch of page.batches) {
+      db.exec(
+        `INSERT OR IGNORE INTO batches(id,viewer_id,target_user_id,device_id,url,encrypted_key,start_time,end_time,created_at,end_hash)
+         VALUES(?,?,?,?,?,?,?,?,?,?)`,
+        {
+          bind: [
+            batch.id,
+            viewerId,
+            targetUserId,
+            batch.device_id,
+            batch.url,
+            batch.encrypted_key,
+            batch.start_time,
+            batch.end_time,
+            batch.created_at,
+            batch.end_hash,
+          ],
+        },
+      );
+    }
+    for (const log of page.logs) {
+      db.exec(
+        `INSERT OR IGNORE INTO direct_logs(id,viewer_id,target_user_id,device_id,ts,type,data,created_at,risk)
+         VALUES(?,?,?,?,?,?,?,?,?)`,
+        {
+          bind: [
+            log.id,
+            viewerId,
+            targetUserId,
+            log.device_id,
+            log.ts,
+            log.type,
+            JSON.stringify(log.data),
+            log.created_at,
+            log.risk ?? null,
+          ],
+        },
+      );
+    }
 
-  const allCreatedAts = [
-    ...page.batches.map((b) => b.created_at),
-    ...page.logs.map((l) => l.created_at),
-  ];
-  if (allCreatedAts.length > 0) {
-    const maxCreatedAt = Math.max(...allCreatedAts);
-    db.exec(
-      `INSERT INTO feeds(viewer_id,target_user_id,since) VALUES(?,?,?)
-       ON CONFLICT(viewer_id,target_user_id) DO UPDATE SET since=MAX(since,?)`,
-      { bind: [viewerId, targetUserId, maxCreatedAt, maxCreatedAt] },
-    );
-  } else {
-    db.exec(`INSERT OR IGNORE INTO feeds(viewer_id,target_user_id,since) VALUES(?,?,0)`, {
-      bind: [viewerId, targetUserId],
-    });
+    const allCreatedAts = [
+      ...page.batches.map((b) => b.created_at),
+      ...page.logs.map((l) => l.created_at),
+    ];
+    if (allCreatedAts.length > 0) {
+      const maxCreatedAt = Math.max(...allCreatedAts);
+      db.exec(
+        `INSERT INTO feeds(viewer_id,target_user_id,since) VALUES(?,?,?)
+         ON CONFLICT(viewer_id,target_user_id) DO UPDATE SET since=MAX(since,?)`,
+        { bind: [viewerId, targetUserId, maxCreatedAt, maxCreatedAt] },
+      );
+    } else {
+      db.exec(`INSERT OR IGNORE INTO feeds(viewer_id,target_user_id,since) VALUES(?,?,0)`, {
+        bind: [viewerId, targetUserId],
+      });
+    }
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
   }
 }
 
@@ -232,43 +239,50 @@ function sqlWriteMaterializedEvents(
   batchId: string,
   events: FeedLog[],
 ): void {
-  for (const event of events) {
-    const imageData = event.data.image instanceof Uint8Array ? event.data.image : undefined;
-    const dataWithoutImage = { ...event.data };
-    delete dataWithoutImage.image;
+  db.exec('BEGIN');
+  try {
+    for (const event of events) {
+      const imageData = event.data.image instanceof Uint8Array ? event.data.image : undefined;
+      const dataWithoutImage = { ...event.data };
+      delete dataWithoutImage.image;
 
-    db.exec(
-      `INSERT OR REPLACE INTO events(id,viewer_id,target_user_id,device_id,ts,type,data,risk,batch_status,source,image_w,image_h,created_at)
-       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      {
-        bind: [
-          event.id,
-          viewerId,
-          targetUserId,
-          event.device_id,
-          event.ts,
-          event.type,
-          JSON.stringify(dataWithoutImage),
-          event.risk ?? null,
-          event.batch_status ?? null,
-          event.source ?? 'batch',
-          event.image_w ?? null,
-          event.image_h ?? null,
-          event.created_at,
-        ],
-      },
-    );
+      db.exec(
+        `INSERT OR REPLACE INTO events(id,viewer_id,target_user_id,device_id,ts,type,data,risk,batch_status,source,image_w,image_h,created_at)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        {
+          bind: [
+            event.id,
+            viewerId,
+            targetUserId,
+            event.device_id,
+            event.ts,
+            event.type,
+            JSON.stringify(dataWithoutImage),
+            event.risk ?? null,
+            event.batch_status ?? null,
+            event.source ?? 'batch',
+            event.image_w ?? null,
+            event.image_h ?? null,
+            event.created_at,
+          ],
+        },
+      );
 
-    if (imageData) {
-      db.exec(`INSERT OR REPLACE INTO event_images(event_id,data) VALUES(?,?)`, {
-        bind: [event.id, imageData],
-      });
+      if (imageData) {
+        db.exec(`INSERT OR REPLACE INTO event_images(event_id,data) VALUES(?,?)`, {
+          bind: [event.id, imageData],
+        });
+      }
     }
-  }
 
-  db.exec(`INSERT OR IGNORE INTO materialized_batch_ids(batch_id) VALUES(?)`, {
-    bind: [batchId],
-  });
+    db.exec(`INSERT OR IGNORE INTO materialized_batch_ids(batch_id) VALUES(?)`, {
+      bind: [batchId],
+    });
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
 }
 
 function sqlQueryEvents(

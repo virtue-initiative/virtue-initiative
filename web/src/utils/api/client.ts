@@ -7,7 +7,7 @@ import {
   WatcherPartner,
   WatchingPartner,
 } from './api';
-import { FeedLog } from '../../pages/Logs/shared';
+import { FeedLog } from '../../pages/Logs/types';
 import { Session } from './session';
 import { cacheClient } from '../cache/client';
 

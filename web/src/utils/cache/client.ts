@@ -1,4 +1,4 @@
-import type { FeedLog } from '../../pages/Logs/shared';
+import type { FeedLog } from '../../pages/Logs/types';
 
 export type CacheQuery = {
   userId?: string;

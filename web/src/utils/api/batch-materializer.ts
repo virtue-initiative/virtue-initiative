@@ -1,7 +1,7 @@
 import { decode } from '@msgpack/msgpack';
 import type { Batch } from './api';
 import { decryptBatch, decompressGzip, verifyBatch } from './crypto';
-import { FeedLog, toUint8Array } from '../../pages/Logs/shared';
+import { FeedLog, toUint8Array } from '../../pages/Logs/types';
 import { decodeWebpDimensions } from '../webp-dimensions';
 
 // Batch payload format must match client/core/src/batch.rs:

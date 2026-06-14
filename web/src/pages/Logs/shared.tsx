@@ -1,35 +1,12 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { DataLog } from '../../utils/api/api';
-import { BatchVerification } from '../../utils/api/crypto';
 import { formatDate, formatTime } from '../../utils/time';
 import { Dialog, DialogHeader } from '@virtueinitiative/shared-web';
 import { describeRiskLevel, getRiskLevel } from '@virtueinitiative/shared-web/risk';
 import { loadEventImage } from '../../utils/api/event-image';
-
-export type FeedLog = DataLog & {
-  batch_status: BatchVerification;
-  source: 'batch' | 'log';
-  image_w?: number;
-  image_h?: number;
-};
-
-export function toUint8Array(value: unknown): Uint8Array | undefined {
-  if (!value) return undefined;
-  if (value instanceof Uint8Array) return value;
-  if (Array.isArray(value)) return new Uint8Array(value as number[]);
-  if (typeof value === 'string') {
-    try {
-      return Uint8Array.fromBase64(value);
-    } catch {
-      return undefined;
-    }
-  }
-  return undefined;
-}
-
-export function getLogImage(log: DataLog): Uint8Array | undefined {
-  return toUint8Array(log.data.image);
-}
+import { type FeedLog, getLogImage, toUint8Array } from './types';
+export type { FeedLog };
+export { toUint8Array, getLogImage };
 
 function getLogMetadata(log: DataLog) {
   return Object.entries(log.data)
