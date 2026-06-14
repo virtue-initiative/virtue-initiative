@@ -1,4 +1,3 @@
-/target
-.env.dev
-.derived-data-*
-.codex
+AI
+node_modules
+.DS_Store

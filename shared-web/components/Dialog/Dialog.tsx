@@ -4,6 +4,7 @@ import './Dialog.css';
 type DialogProps = Omit<JSX.IntrinsicElements['dialog'], 'ref'> & {
   children: ComponentChildren;
   dialogRef?: { current: HTMLDialogElement | null };
+  size?: 'md' | 'lg';
 };
 
 type DialogActionsProps = {
@@ -20,6 +21,7 @@ type DialogSecondaryActionsProps = {
 type DialogHeaderProps = {
   children: ComponentChildren;
   class?: string;
+  actions?: ComponentChildren;
 };
 
 function mergeClasses(...classNames: Array<string | undefined>) {
@@ -41,7 +43,14 @@ function CloseIcon() {
   );
 }
 
-export function Dialog({ children, dialogRef, class: className, onClick, ...props }: DialogProps) {
+export function Dialog({
+  children,
+  dialogRef,
+  class: className,
+  size,
+  onClick,
+  ...props
+}: DialogProps) {
   function handleClick(e: MouseEvent) {
     const dialog = e.currentTarget as HTMLDialogElement;
     if (e.target === e.currentTarget) {
@@ -54,7 +63,11 @@ export function Dialog({ children, dialogRef, class: className, onClick, ...prop
     <dialog
       {...props}
       ref={dialogRef}
-      class={mergeClasses('vi-dialog', className as string | undefined)}
+      class={mergeClasses(
+        'vi-dialog',
+        size && `vi-dialog--${size}`,
+        className as string | undefined,
+      )}
       onClick={handleClick}
     >
       {children}
@@ -78,7 +91,7 @@ export function DialogSecondaryActions({
   return <div class={mergeClasses('vi-dialog-secondary-actions', className)}>{children}</div>;
 }
 
-export function DialogHeader({ children, class: className }: DialogHeaderProps) {
+export function DialogHeader({ children, class: className, actions }: DialogHeaderProps) {
   function closeDialog(e: MouseEvent) {
     (e.currentTarget as HTMLButtonElement).closest('dialog')?.close();
   }
@@ -86,6 +99,7 @@ export function DialogHeader({ children, class: className }: DialogHeaderProps) 
   return (
     <div class={mergeClasses('vi-dialog-header', className)}>
       <h3 class="vi-dialog-title">{children}</h3>
+      {actions && <div class="vi-dialog-header-actions">{actions}</div>}
       <button class="vi-dialog-close" type="button" aria-label="Close dialog" onClick={closeDialog}>
         <CloseIcon />
       </button>

@@ -1,27 +1,25 @@
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use anyhow::Result;
-use chrono::Utc;
 use serde::Serialize;
 use virtue_core::{
-    CaptureAvailabilityState, ComputerPowerState, LifecycleConfidence, LifecycleObservation,
-    LifecycleOrigin, MonitorService, ServiceRole, UserSessionState,
+    ComputerResumed, ComputerSuspended, CoreError, EventBus, EventChannel, LoginRequested,
+    LoginResult, LogoutRequested, LogoutResult, Ping, ProcessStarted, ProcessStopped,
+    ProcessStoppedReason, Redacted, StatusRequest, StatusResponse, UserSessionLogin,
+    UserSessionLogout, UserStopRequested, build_default_modules_reqwest, load_state, store_state,
 };
-
-#[cfg(target_os = "windows")]
-use windows::Win32::System::SystemInformation::GetTickCount64;
 
 use crate::capture::WindowsPlatformHooks;
 use crate::config::{ClientPaths, build_core_config};
 
-const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
-const SERVICE_PING_WAKE_PADDING_MS: i64 = 1_000;
+const ITER_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,7 +27,6 @@ pub struct MonitorStatusSnapshot {
     pub state: String,
     pub logged_in: bool,
     pub pending_request_count: usize,
-    pub last_screenshot_at_ms: Option<i64>,
     pub last_error: Option<String>,
 }
 
@@ -39,7 +36,6 @@ impl Default for MonitorStatusSnapshot {
             state: "stopped".to_string(),
             logged_in: false,
             pending_request_count: 0,
-            last_screenshot_at_ms: None,
             last_error: None,
         }
     }
@@ -55,22 +51,18 @@ enum MonitorCommand {
     NoteStopRequested {
         source: String,
     },
-    ServiceStopObserved {
-        raw_reason: String,
-        shutdown_in_progress: bool,
-        explicit_user_stop: bool,
-        detected_by: String,
+    ProcessStopped(ProcessStoppedReason),
+    Login,
+    Logout,
+    ComputerSuspended,
+    ComputerResumed,
+    AppLogin {
+        email: String,
+        password: String,
+        response: mpsc::SyncSender<virtue_core::CoreResult<String>>,
     },
-    UserSessionChanged {
-        state: UserSessionState,
-        origin: LifecycleOrigin,
-        detected_by: String,
-    },
-    ComputerPowerChanged {
-        state: ComputerPowerState,
-        origin: LifecycleOrigin,
-        detected_by: String,
-        confidence: LifecycleConfidence,
+    AppLogout {
+        response: mpsc::SyncSender<virtue_core::CoreResult<()>>,
     },
 }
 
@@ -156,81 +148,40 @@ pub fn stop_monitoring_from_tray_exit() -> Result<()> {
     send_command(MonitorCommand::NoteStopRequested {
         source: "tray_stop_monitoring".to_string(),
     })?;
-    send_command(MonitorCommand::ServiceStopObserved {
-        raw_reason: "tray_exit_menu".to_string(),
-        shutdown_in_progress: false,
-        explicit_user_stop: true,
-        detected_by: "tray_exit_menu".to_string(),
-    })?;
+    send_command(MonitorCommand::ProcessStopped(ProcessStoppedReason::User))?;
     stop_monitoring()?;
     Ok(())
 }
 
 pub fn stop_monitoring_for_system_shutdown() -> Result<()> {
-    send_command(MonitorCommand::ComputerPowerChanged {
-        state: ComputerPowerState::ShuttingDown,
-        origin: LifecycleOrigin::SystemShutdown,
-        detected_by: "wm_endsession_shutdown".to_string(),
-        confidence: LifecycleConfidence::Confirmed,
-    })?;
-    send_command(MonitorCommand::ServiceStopObserved {
-        raw_reason: "wm_endsession_shutdown".to_string(),
-        shutdown_in_progress: true,
-        explicit_user_stop: false,
-        detected_by: "wm_endsession_shutdown".to_string(),
-    })?;
+    send_command(MonitorCommand::ProcessStopped(
+        ProcessStoppedReason::Shutdown,
+    ))?;
     stop_monitoring()?;
     Ok(())
 }
 
 pub fn stop_monitoring_for_session_logoff() -> Result<()> {
-    send_command(MonitorCommand::UserSessionChanged {
-        state: UserSessionState::LoggedOut,
-        origin: LifecycleOrigin::SessionLogout,
-        detected_by: "wm_endsession_logoff".to_string(),
-    })?;
-    send_command(MonitorCommand::ServiceStopObserved {
-        raw_reason: "session_logout".to_string(),
-        shutdown_in_progress: false,
-        explicit_user_stop: false,
-        detected_by: "wm_endsession_logoff".to_string(),
-    })?;
+    send_command(MonitorCommand::Logout)?;
+    send_command(MonitorCommand::ProcessStopped(ProcessStoppedReason::Other))?;
     stop_monitoring()?;
     Ok(())
 }
 
 pub fn notify_session_logon() -> Result<()> {
-    send_command(MonitorCommand::UserSessionChanged {
-        state: UserSessionState::LoggedIn,
-        origin: LifecycleOrigin::Unknown,
-        detected_by: "wts_session_logon".to_string(),
-    })
+    send_command(MonitorCommand::Login)
 }
 
 pub fn notify_session_logoff() -> Result<()> {
-    send_command(MonitorCommand::UserSessionChanged {
-        state: UserSessionState::LoggedOut,
-        origin: LifecycleOrigin::SessionLogout,
-        detected_by: "wts_session_logoff".to_string(),
-    })
+    send_command(MonitorCommand::Logout)
 }
 
 pub fn notify_suspend() -> Result<()> {
-    send_command(MonitorCommand::ComputerPowerChanged {
-        state: ComputerPowerState::Suspended,
-        origin: LifecycleOrigin::SystemSuspend,
-        detected_by: "wm_powerbroadcast_suspend".to_string(),
-        confidence: LifecycleConfidence::Confirmed,
-    })
+    send_command(MonitorCommand::ComputerSuspended)
 }
 
 pub fn notify_resume() -> Result<()> {
-    send_command(MonitorCommand::ComputerPowerChanged {
-        state: ComputerPowerState::Running,
-        origin: LifecycleOrigin::SystemSuspend,
-        detected_by: "wm_powerbroadcast_resume".to_string(),
-        confidence: LifecycleConfidence::Confirmed,
-    })
+    send_command(MonitorCommand::ComputerResumed)
 }
 
 fn send_command(command: MonitorCommand) -> Result<()> {
@@ -258,192 +209,237 @@ pub fn note_login_state(logged_in: bool) {
             snapshot.state = "signed_out".to_string();
             snapshot.last_error = None;
             snapshot.pending_request_count = 0;
-            snapshot.last_screenshot_at_ms = None;
         } else if snapshot.state == "signed_out" || snapshot.state == "stopped" {
             snapshot.state = "starting".to_string();
         }
     });
 }
 
+pub fn app_login(email: &str, password: &str) -> Result<String> {
+    let (tx, rx) = mpsc::sync_channel(1);
+    {
+        let state = controller().state.lock().expect("monitor controller lock");
+        match state.worker.as_ref() {
+            Some(worker) => {
+                let _ = worker.command_tx.send(MonitorCommand::AppLogin {
+                    email: email.to_string(),
+                    password: password.to_string(),
+                    response: tx,
+                });
+            }
+            None => return Err(anyhow::anyhow!("monitoring is not running")),
+        }
+    }
+    rx.recv()
+        .map_err(|_| anyhow::anyhow!("monitoring thread disconnected before login completed"))?
+        .map_err(anyhow::Error::from)
+}
+
+pub fn app_logout() -> Result<()> {
+    let (tx, rx) = mpsc::sync_channel(1);
+    {
+        let state = controller().state.lock().expect("monitor controller lock");
+        match state.worker.as_ref() {
+            Some(worker) => {
+                let _ = worker
+                    .command_tx
+                    .send(MonitorCommand::AppLogout { response: tx });
+            }
+            None => return Err(anyhow::anyhow!("monitoring is not running")),
+        }
+    }
+    rx.recv()
+        .map_err(|_| anyhow::anyhow!("monitoring thread disconnected before logout completed"))?
+        .map_err(anyhow::Error::from)
+}
+
 fn run_monitor_loop(shutdown: Arc<AtomicBool>, command_rx: Receiver<MonitorCommand>) {
     let paths = match ClientPaths::discover() {
         Ok(paths) => paths,
         Err(err) => {
-            update_snapshot(|snapshot| {
-                snapshot.state = "error".to_string();
-                snapshot.last_error = Some(err.to_string());
+            update_snapshot(|s| {
+                s.state = "error".to_string();
+                s.last_error = Some(err.to_string());
             });
             return;
         }
     };
 
     if let Err(err) = paths.ensure_dirs() {
-        update_snapshot(|snapshot| {
-            snapshot.state = "error".to_string();
-            snapshot.last_error = Some(err.to_string());
+        update_snapshot(|s| {
+            s.state = "error".to_string();
+            s.last_error = Some(err.to_string());
         });
         return;
     }
 
-    let mut service =
-        match MonitorService::setup(build_core_config(&paths), WindowsPlatformHooks::new()) {
-            Ok(service) => service,
-            Err(err) => {
-                update_snapshot(|snapshot| {
-                    snapshot.state = "error".to_string();
-                    snapshot.last_error = Some(format!("{err:#}"));
-                });
-                return;
-            }
-        };
+    let state_path = paths.state_dir.join("event_state.json");
+    let config = build_core_config(&paths);
 
-    if let Some((boot_marker, booted_at_ms)) = current_boot_marker() {
-        let _ = service.record_lifecycle_observation(LifecycleObservation::BootObserved {
-            boot_marker,
-            booted_at_ms: Some(booted_at_ms),
-            detected_by: "windows_uptime_probe".to_string(),
+    let modules = match build_default_modules_reqwest(config, WindowsPlatformHooks::new()) {
+        Ok(m) => m,
+        Err(err) => {
+            update_snapshot(|s| {
+                s.state = "error".to_string();
+                s.last_error = Some(format!("{err:#}"));
+            });
+            return;
+        }
+    };
+
+    let bus_state = load_state(&state_path).unwrap_or(serde_json::Value::Null);
+
+    let mut bus = match EventBus::new(modules, bus_state) {
+        Ok(b) => b,
+        Err(err) => {
+            update_snapshot(|s| {
+                s.state = "error".to_string();
+                s.last_error = Some(format!("{err:#}"));
+            });
+            return;
+        }
+    };
+
+    if let Err(err) = (|| -> anyhow::Result<()> {
+        bus.send(ProcessStarted)?;
+        store_state(&state_path, &bus.iter()?)?;
+        Ok(())
+    })() {
+        update_snapshot(|s| {
+            s.state = "error".to_string();
+            s.last_error = Some(format!("{err:#}"));
         });
+        return;
     }
-    let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStarted {
-        role: ServiceRole::PrimaryService,
-        detected_by: "windows_resident_app".to_string(),
-    });
-    let _ = service.record_lifecycle_observation(LifecycleObservation::UserSessionChanged {
-        state: UserSessionState::LoggedIn,
-        origin: LifecycleOrigin::Unknown,
-        detected_by: "windows_app_launch".to_string(),
-    });
 
     loop {
-        drain_commands(&mut service, &command_rx);
+        drain_commands(&mut bus, &state_path, &command_rx);
         if shutdown.load(Ordering::SeqCst) {
             break;
         }
 
-        match service.loop_iteration() {
-            Ok(outcome) => {
-                let _ = service.record_lifecycle_observation(
-                    LifecycleObservation::CaptureAvailabilityChanged {
-                        state: CaptureAvailabilityState::Ready,
-                        detected_by: "successful_loop".to_string(),
-                    },
-                );
-                let _ = service.record_service_ping_if_due(
-                    ServiceRole::PrimaryService,
-                    "windows_resident_timer",
-                );
-                if let Ok(status) = service.status() {
-                    update_snapshot(|snapshot| {
-                        snapshot.logged_in = status.is_authenticated;
-                        snapshot.pending_request_count = status.pending_request_count;
-                        snapshot.last_screenshot_at_ms = status.last_screenshot_at_ms;
-                        snapshot.last_error = None;
-                        snapshot.state = if status.is_authenticated {
-                            "running".to_string()
-                        } else {
-                            "signed_out".to_string()
-                        };
-                    });
-                } else {
-                    update_snapshot(|snapshot| {
-                        snapshot.last_error = None;
-                        snapshot.state = "running".to_string();
-                    });
-                }
-                let sleep_duration = service
-                    .next_service_ping_due_at_ms(ServiceRole::PrimaryService)
-                    .ok()
-                    .flatten()
-                    .map(|due_at_ms| {
-                        duration_until(due_at_ms.saturating_add(SERVICE_PING_WAKE_PADDING_MS))
-                    })
-                    .map(|ping_duration| ping_duration.min(duration_until(outcome.next_run_at_ms)))
-                    .unwrap_or_else(|| duration_until(outcome.next_run_at_ms));
+        let tick_result = (|| -> anyhow::Result<()> {
+            bus.send(Ping)?;
+            let state = bus.iter()?;
+            store_state(&state_path, &state)?;
+            Ok(())
+        })();
 
-                wait_for_commands(&mut service, &command_rx, &shutdown, sleep_duration);
-            }
-            Err(err) => {
-                let message = err.to_string();
-                if is_capture_unavailable_error(&message) {
-                    let _ = service.record_lifecycle_observation(
-                        LifecycleObservation::CaptureAvailabilityChanged {
-                            state: CaptureAvailabilityState::Blocked,
-                            detected_by: "capture_error".to_string(),
-                        },
-                    );
+        match tick_result {
+            Ok(()) => match bus.request::<StatusRequest, StatusResponse>(StatusRequest) {
+                Ok(resp) => {
+                    update_snapshot(|s| {
+                        s.logged_in = resp.status.is_authenticated;
+                        s.pending_request_count = resp.status.pending_request_count;
+                        s.state = if resp.status.is_authenticated {
+                            "running".into()
+                        } else {
+                            "signed_out".into()
+                        };
+                        s.last_error = None;
+                    });
                 }
-                update_snapshot(|snapshot| {
-                    snapshot.state = "error".to_string();
-                    snapshot.last_error = Some(message);
+                Err(err) => {
+                    update_snapshot(|s| {
+                        s.state = "error".into();
+                        s.last_error = Some(err.to_string());
+                    });
+                }
+            },
+            Err(err) => {
+                update_snapshot(|s| {
+                    s.state = "error".into();
+                    s.last_error = Some(err.to_string());
                 });
-                wait_for_commands(&mut service, &command_rx, &shutdown, ERROR_RETRY_INTERVAL);
             }
         }
+
+        wait_for_commands(&mut bus, &state_path, &command_rx, &shutdown, ITER_INTERVAL);
     }
 
-    let _ = service.shutdown();
+    drain_commands(&mut bus, &state_path, &command_rx);
+    let _ = bus.send(Ping);
+    if let Ok(state) = bus.iter() {
+        let _ = store_state(&state_path, &state);
+    }
 }
 
-fn handle_command(service: &mut MonitorService<WindowsPlatformHooks>, command: MonitorCommand) {
+fn handle_command(bus: &mut EventBus, state_path: &Path, command: MonitorCommand) -> Result<()> {
     match command {
         MonitorCommand::NoteStopRequested { source } => {
-            let _ = service.note_stop_requested_by_user(ServiceRole::PrimaryService, &source);
+            bus.send(UserStopRequested { source })?;
+            store_state(state_path, &bus.iter()?)?;
         }
-        MonitorCommand::ServiceStopObserved {
-            raw_reason,
-            shutdown_in_progress,
-            explicit_user_stop,
-            detected_by,
-        } => {
-            let _ =
-                service.record_lifecycle_observation(LifecycleObservation::ServiceStopObserved {
-                    role: ServiceRole::PrimaryService,
-                    raw_reason,
-                    shutdown_in_progress,
-                    explicit_user_stop,
-                    detected_by,
-                });
+        MonitorCommand::ProcessStopped(reason) => {
+            bus.send(ProcessStopped(reason))?;
+            store_state(state_path, &bus.iter()?)?;
         }
-        MonitorCommand::UserSessionChanged {
-            state,
-            origin,
-            detected_by,
-        } => {
-            let _ =
-                service.record_lifecycle_observation(LifecycleObservation::UserSessionChanged {
-                    state,
-                    origin,
-                    detected_by,
-                });
+        MonitorCommand::Login => {
+            bus.send(UserSessionLogin)?;
+            store_state(state_path, &bus.iter()?)?;
         }
-        MonitorCommand::ComputerPowerChanged {
-            state,
-            origin,
-            detected_by,
-            confidence,
+        MonitorCommand::Logout => {
+            bus.send(UserSessionLogout)?;
+            store_state(state_path, &bus.iter()?)?;
+        }
+        MonitorCommand::ComputerSuspended => {
+            bus.send(ComputerSuspended)?;
+            store_state(state_path, &bus.iter()?)?;
+        }
+        MonitorCommand::ComputerResumed => {
+            bus.send(ComputerResumed)?;
+            store_state(state_path, &bus.iter()?)?;
+        }
+        MonitorCommand::AppLogin {
+            email,
+            password,
+            response,
         } => {
-            let _ =
-                service.record_lifecycle_observation(LifecycleObservation::ComputerPowerChanged {
-                    state,
-                    origin,
-                    detected_by,
-                    confidence,
-                });
+            let request_result = bus.request::<LoginRequested, LoginResult>(LoginRequested {
+                email,
+                password: Redacted(password),
+            });
+            let _ = store_state(state_path, &bus.iter()?);
+            let result = request_result.and_then(|r| {
+                if r.success {
+                    Ok(r.device_id.unwrap_or_default())
+                } else {
+                    Err(CoreError::CommandFailed(
+                        r.error.unwrap_or_else(|| "login failed".to_string()),
+                    ))
+                }
+            });
+            let _ = response.send(result);
+        }
+        MonitorCommand::AppLogout { response } => {
+            let request_result = bus.request::<LogoutRequested, LogoutResult>(LogoutRequested);
+            let _ = store_state(state_path, &bus.iter()?);
+            let result = request_result.and_then(|r| {
+                if r.success {
+                    Ok(())
+                } else {
+                    Err(CoreError::CommandFailed(
+                        r.error.unwrap_or_else(|| "logout failed".to_string()),
+                    ))
+                }
+            });
+            let _ = response.send(result);
         }
     }
+    Ok(())
 }
 
-fn drain_commands(
-    service: &mut MonitorService<WindowsPlatformHooks>,
-    command_rx: &Receiver<MonitorCommand>,
-) {
+fn drain_commands(bus: &mut EventBus, state_path: &Path, command_rx: &Receiver<MonitorCommand>) {
     while let Ok(command) = command_rx.try_recv() {
-        handle_command(service, command);
+        if let Err(e) = handle_command(bus, state_path, command) {
+            eprintln!("resident_monitor: command error: {e}");
+        }
     }
 }
 
 fn wait_for_commands(
-    service: &mut MonitorService<WindowsPlatformHooks>,
+    bus: &mut EventBus,
+    state_path: &Path,
     command_rx: &Receiver<MonitorCommand>,
     shutdown: &Arc<AtomicBool>,
     duration: Duration,
@@ -451,58 +447,23 @@ fn wait_for_commands(
     let mut remaining = duration;
     while remaining > Duration::ZERO {
         if shutdown.load(Ordering::SeqCst) {
-            drain_commands(service, command_rx);
+            drain_commands(bus, state_path, command_rx);
             return;
         }
 
         let tick = remaining.min(Duration::from_secs(1));
         match command_rx.recv_timeout(tick) {
-            Ok(command) => handle_command(service, command),
+            Ok(command) => {
+                if let Err(e) = handle_command(bus, state_path, command) {
+                    eprintln!("resident_monitor: command error: {e}");
+                }
+            }
             Err(RecvTimeoutError::Timeout) => {
                 remaining = remaining.saturating_sub(tick);
             }
             Err(RecvTimeoutError::Disconnected) => return,
         }
     }
-}
-
-fn is_capture_unavailable_error(message: &str) -> bool {
-    let normalized = message.to_ascii_lowercase();
-    [
-        "getdc failed",
-        "createcompatibledc failed",
-        "createcompatiblebitmap failed",
-        "selectobject failed",
-        "bitblt failed",
-        "getdibits failed",
-        "invalid screen size",
-    ]
-    .iter()
-    .any(|needle| normalized.contains(needle))
-}
-
-fn current_boot_marker() -> Option<(String, i64)> {
-    #[cfg(target_os = "windows")]
-    {
-        let now_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .ok()
-            .and_then(|duration| i64::try_from(duration.as_millis()).ok())?;
-        let uptime_ms = i64::try_from(unsafe { GetTickCount64() }).ok()?;
-        let booted_at_ms = now_ms.checked_sub(uptime_ms)?;
-        Some((format!("windows_boot_{booted_at_ms}"), booted_at_ms))
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        None
-    }
-}
-
-fn duration_until(next_run_at_ms: i64) -> Duration {
-    let now_ms = Utc::now().timestamp_millis();
-    let delta_ms = next_run_at_ms.saturating_sub(now_ms);
-    Duration::from_millis(delta_ms.max(0) as u64)
 }
 
 fn update_snapshot(update: impl FnOnce(&mut MonitorStatusSnapshot)) {

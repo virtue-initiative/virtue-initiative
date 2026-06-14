@@ -1,4 +1,4 @@
-import { DEFAULT_EMAIL_FREQUENCY, DigestFrequency, TamperSeverity } from './email-domain';
+import { DigestFrequency, TamperSeverity } from './email-domain';
 import { formatUtcDate, getDigestWindowForRun } from './digest-schedule';
 import {
   listBatchWindowsForUser,
@@ -122,7 +122,7 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
       continue;
     }
 
-    const emailFrequency = recipient.email_frequency ?? DEFAULT_EMAIL_FREQUENCY;
+    const { email_frequency: emailFrequency, timezone } = recipient.settings;
     if (emailFrequency !== 'daily' && emailFrequency !== 'weekly') {
       continue;
     }
@@ -130,7 +130,7 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
     const window = getDigestWindowForRun({
       cadence: emailFrequency,
       now,
-      utcMinutes: recipient.email_digest_minutes_utc,
+      timezone,
     });
     if (!window) {
       continue;
@@ -197,7 +197,7 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
       related_user_id: recipient.watcher_user_id,
       metadata: {
         email_frequency: emailFrequency,
-        email_digest_minutes_utc: recipient.email_digest_minutes_utc,
+        timezone,
         windowStart: window.start,
         windowEnd: window.end,
         partnershipIds: partnerSummaries.map((summary) => summary.partnershipId),

@@ -6,9 +6,11 @@
   justify-content: center;
   padding: 0 var(--button-padding-x);
   border: 1px solid transparent;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
+  font-family: var(--font);
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: 500;
+  letter-spacing: 0.005em;
   line-height: 1;
   cursor: pointer;
   text-decoration: none;
@@ -29,11 +31,11 @@
 
 .vi-btn--primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--paper-3);
   border-color: transparent;
 
   &:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--accent) 88%, black);
+    background: var(--forest-3);
   }
 }
 
@@ -44,18 +46,28 @@
 
   &:hover:not(:disabled) {
     background: var(--accent);
-    color: #fff;
+    color: var(--paper-3);
   }
 }
 
 .vi-btn--ghost {
   background: transparent;
   color: var(--text-muted);
-  border: 1px solid var(--border);
 
   &:hover:not(:disabled) {
     background: var(--bg-subtle);
     color: var(--text);
+  }
+}
+
+.vi-btn--quiet {
+  background: var(--bg-subtle);
+  color: var(--text);
+  border: 1px solid var(--border);
+
+  &:hover:not(:disabled) {
+    background: var(--paper-2);
+    border-color: var(--control-border-hover);
   }
 }
 
@@ -87,4 +99,9 @@
   min-height: 1.9rem;
   padding: 0 0.65rem;
   font-size: 0.8125rem;
+}
+
+.vi-btn--lg {
+  min-height: 3rem;
+  padding: 0 1.5rem;
 }

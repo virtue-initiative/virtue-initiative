@@ -1,6 +1,5 @@
 declare module 'cloudflare:test' {
-  interface ProvidedEnv extends Cloudflare.Env {
-    JWT_PRIVATE_KEY: string;
-    JWT_PUBLIC_KEY: string;
+  interface ProvidedEnv extends Cloudflare.StagingEnv {
+    EMAIL_DELIVERY_MODE: 'ses' | 'log';
   }
 }

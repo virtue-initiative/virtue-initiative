@@ -128,10 +128,7 @@ export function ComponentsPage() {
       <div class="dev-page">
         <header class="dev-header">
           <h1>Component Library Preview</h1>
-          <p class="dev-subtitle">
-            All vi-* namespaced components — light &amp; dark via system preference or{' '}
-            <code>[data-theme]</code>
-          </p>
+          <p class="dev-subtitle">All vi-* namespaced components</p>
         </header>
 
         <Section title="Token Palette — Colors">

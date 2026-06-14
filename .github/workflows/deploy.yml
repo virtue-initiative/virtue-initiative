@@ -27,16 +27,11 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: |
-            ${{ matrix.project }}/package-lock.json
-            ${{ matrix.project == 'web' && 'shared-web/package-lock.json' || '' }}
+          cache-dependency-path: package-lock.json
 
-      - name: Install shared-web dependencies
-        if: matrix.project == 'web'
+      - name: Install dependencies
         run: npm ci
-        working-directory: shared-web
-
-      - run: npm ci
+        working-directory: ${{ github.workspace }}
       - run: npm run ${{ github.ref_name == 'main' && 'deploy:prod' || 'deploy:staging' }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

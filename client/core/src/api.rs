@@ -48,8 +48,8 @@ pub trait ApiTransport: Send + Sync {
         content_hash: &[u8; 32],
     ) -> CoreResult<()>;
 
-    /// Apply an updated config (e.g., changed `api_base_url`) to the transport in place.
-    fn reconfigure(&mut self, config: &Config) -> CoreResult<()>;
+    /// Apply an updated API base URL to the transport in place.
+    fn reconfigure(&mut self, api_base_url: &str) -> CoreResult<()>;
 }
 
 #[derive(Debug, Clone)]
@@ -60,7 +60,10 @@ pub struct ReqwestApiClient {
 
 impl ReqwestApiClient {
     pub fn new(config: &Config) -> CoreResult<Self> {
-        let client = Client::builder().cookie_store(true).build()?;
+        let client = Client::builder()
+            .cookie_store(true)
+            .timeout(std::time::Duration::from_secs(5))
+            .build()?;
         Ok(Self {
             base_url: config.api_base_url.trim_end_matches('/').to_string(),
             client,
@@ -69,8 +72,8 @@ impl ReqwestApiClient {
 }
 
 impl ApiTransport for ReqwestApiClient {
-    fn reconfigure(&mut self, config: &Config) -> CoreResult<()> {
-        self.base_url = config.api_base_url.trim_end_matches('/').to_string();
+    fn reconfigure(&mut self, api_base_url: &str) -> CoreResult<()> {
+        self.base_url = api_base_url.trim_end_matches('/').to_string();
         Ok(())
     }
 
@@ -260,29 +263,12 @@ impl ApiTransport for ReqwestApiClient {
         device_access_token: &str,
         log: &LogEntry,
     ) -> CoreResult<UploadedLogResponse> {
-        let data = serde_json::Value::Object(log.data.object());
-
-        #[derive(Serialize)]
-        struct UploadLogRequest<'a> {
-            ts: i64,
-            #[serde(rename = "type")]
-            kind: &'a str,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            risk: Option<f32>,
-            data: &'a serde_json::Value,
-        }
-
         self.send_json(
             Method::POST,
             None,
             "/d/log",
             Some(device_access_token),
-            Some(&UploadLogRequest {
-                ts: log.ts,
-                kind: &log.kind,
-                risk: log.risk,
-                data: &data,
-            }),
+            Some(log),
         )
     }
 
@@ -392,12 +378,16 @@ impl ReqwestApiClient {
 
         let fallback = response
             .text()
-            .unwrap_or_else(|_| String::from("request failed"));
-        let message = serde_json::from_str::<ApiErrorResponse>(&fallback)
-            .ok()
-            .and_then(|body| body.error)
-            .filter(|message| !message.is_empty())
-            .unwrap_or(fallback);
+            .unwrap_or_else(|_| format!("HTTP {} error", status.as_u16()));
+        let message = match serde_json::from_str::<ApiErrorResponse>(&fallback) {
+            Ok(body) => body
+                .details
+                .as_ref()
+                .and_then(format_api_details)
+                .or_else(|| body.error.filter(|s| !s.is_empty()))
+                .unwrap_or(fallback),
+            Err(_) => fallback,
+        };
 
         Err(CoreError::HttpStatus {
             status: status.as_u16(),
@@ -406,7 +396,45 @@ impl ReqwestApiClient {
     }
 }
 
+fn format_api_details(details: &serde_json::Value) -> Option<String> {
+    // Manual format: {"errors": ["msg"]}
+    if let Some(errors) = details.get("errors").and_then(|e| e.as_array()) {
+        let msgs: Vec<&str> = errors.iter().filter_map(|e| e.as_str()).collect();
+        if !msgs.is_empty() {
+            return Some(msgs.join("; "));
+        }
+    }
+
+    // Zod treeify format: {_errors: [...], field: {_errors: [...]}}
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(obj) = details.as_object() {
+        if let Some(errs) = obj.get("_errors").and_then(|e| e.as_array()) {
+            for e in errs.iter().filter_map(|e| e.as_str()) {
+                parts.push(e.to_string());
+            }
+        }
+        for (key, value) in obj {
+            if key == "_errors" {
+                continue;
+            }
+            if let Some(field_errs) = value.get("_errors").and_then(|e| e.as_array()) {
+                let msgs: Vec<&str> = field_errs.iter().filter_map(|e| e.as_str()).collect();
+                if !msgs.is_empty() {
+                    parts.push(msgs.join(", "));
+                }
+            }
+        }
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("; "))
+    }
+}
+
 #[derive(Deserialize)]
 struct ApiErrorResponse {
     error: Option<String>,
+    details: Option<serde_json::Value>,
 }

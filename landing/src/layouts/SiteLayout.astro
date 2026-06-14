@@ -1,8 +1,6 @@
 ---
 import Footer from '../components/Footer.astro';
 import Header from '../components/Header.astro';
-import ThemeHeadScript from '../components/ThemeHeadScript.astro';
-import ThemeScript from '../components/ThemeScript.astro';
 import '../styles/global.css';
 
 interface Props {
@@ -23,7 +21,13 @@ const title = pageTitle ? `${pageTitle} - The Virtue Initiative` : 'The Virtue I
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <ThemeHeadScript />
+    <!-- These colors must stay in sync with tokens.css :root for --bg and --text. They cannot reference CSS custom properties because they paint before global.css loads. -->
+    <style is:inline>
+      html {
+        background: #f4efe3;
+        color: #1b1a16;
+      }
+    </style>
     <title>{title}</title>
   </head>
   <body>
@@ -32,6 +36,5 @@ const title = pageTitle ? `${pageTitle} - The Virtue Initiative` : 'The Virtue I
       <slot />
     </main>
     <Footer />
-    <ThemeScript />
   </body>
 </html>

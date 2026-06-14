@@ -11,18 +11,16 @@ import java.util.concurrent.TimeUnit
 class KeepAliveWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val initError = NativeBridge.ensureInitialized(applicationContext)
-        if (initError != null) {
-            return Result.retry()
+        if (initError != null) return Result.retry()
+
+        if (!NativeBridge.nativeIsLoggedIn()) return Result.success()
+
+        // If the accessibility service is connected it manages its own daemon loop.
+        // Just keep the foreground service alive as a process anchor.
+        if (VirtueAccessibilityService.isConnected()) {
+            ScreenshotService.start(applicationContext)
         }
 
-        if (!NativeBridge.nativeIsLoggedIn()) {
-            return Result.success()
-        }
-        if (ProjectionPermissionStore.load(applicationContext) == null) {
-            return Result.success()
-        }
-
-        ScreenshotService.startFromStoredProjection(applicationContext, "worker")
         return Result.success()
     }
 

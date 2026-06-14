@@ -18,7 +18,7 @@ Options:
   --cache-root <win-path>         Remote cache root. Default: C:/virtue-build/cache
   --target <triple>               Rust target for packaging modes. Default: x86_64-pc-windows-msvc
   --profile <Debug|Release>       Packaging profile. Default: Debug
-  --version <version>             Artifact label. Default: 0.0.6-dev
+  --version <version>             Artifact label. Default: 0.0.7-dev
   --clean                         Run cargo clean before packaging
   --skip-sync                     Reuse remote source tree without uploading local client/
   --log-dir <dir>                 Local directory for full remote run logs.
@@ -44,10 +44,12 @@ BUILD_ROOT="C:/virtue-build"
 CACHE_ROOT="C:/virtue-build/cache"
 TARGET="x86_64-pc-windows-msvc"
 PROFILE="Debug"
-VERSION="0.0.6-dev"
+VERSION="0.0.7-dev"
 CLEAN=0
 SKIP_SYNC=0
 LOG_DIR="$REPO_ROOT/client/windows/dist/remote-logs"
+SIGNING_CERT_PATH=""
+SIGNING_CERT_PASS=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -86,6 +88,14 @@ while [[ $# -gt 0 ]]; do
     --skip-sync)
       SKIP_SYNC=1
       shift
+      ;;
+    --signing-cert-path)
+      SIGNING_CERT_PATH="${2:-}"
+      shift 2
+      ;;
+    --signing-cert-pass)
+      SIGNING_CERT_PASS="${2:-}"
+      shift 2
       ;;
     --log-dir)
       LOG_DIR="${2:-}"
@@ -164,6 +174,8 @@ cat >"$TMP_DIR/$REMOTE_SCRIPT_NAME" <<EOF
 \$version = '$(ps_quote "$VERSION")'
 \$clean = $CLEAN_BOOL
 \$skipSync = $( [[ $SKIP_SYNC -eq 1 ]] && echo '$true' || echo '$false' )
+\$signingCertPath = '$(ps_quote "$SIGNING_CERT_PATH")'
+\$signingCertPass = '$(ps_quote "$SIGNING_CERT_PASS")'
 
 \$repoRoot = Join-Path \$buildRoot "src"
 \$clientDir = Join-Path \$repoRoot "client"
@@ -266,11 +278,20 @@ try {
         }
     } elseif (\$mode -eq "msix") {
         \$script = Join-Path \$clientDir "windows\\scripts\\build-msix.ps1"
-        if (\$clean) {
-            & \$script -Version \$version -Target \$target -Profile \$buildProfile -CacheRoot \$cacheRoot -Clean
-        } else {
-            & \$script -Version \$version -Target \$target -Profile \$buildProfile -CacheRoot \$cacheRoot
+        \$msixArgs = @{
+            Version = \$version
+            Target = \$target
+            Profile = \$buildProfile
+            CacheRoot = \$cacheRoot
         }
+        if (\$clean) { \$msixArgs['Clean'] = \$true }
+        if (-not [string]::IsNullOrWhiteSpace(\$signingCertPath)) {
+            \$msixArgs['SigningCertificatePath'] = \$signingCertPath
+        }
+        if (-not [string]::IsNullOrWhiteSpace(\$signingCertPass)) {
+            \$msixArgs['SigningCertificatePassword'] = \$signingCertPass
+        }
+        & \$script @msixArgs
         if (\$LASTEXITCODE -ne 0) {
             throw "build-msix.ps1 failed with exit code \$LASTEXITCODE"
         }

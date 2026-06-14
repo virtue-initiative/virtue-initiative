@@ -1,5 +1,18 @@
 type SqlValue = string | number | ArrayBuffer | null;
 
+function parseUserSettings(json: string | null): { email_frequency: string; timezone: string } {
+  try {
+    const parsed = JSON.parse(json ?? '{}') as Record<string, unknown>;
+    return {
+      email_frequency:
+        typeof parsed.email_frequency === 'string' ? parsed.email_frequency : 'daily',
+      timezone: typeof parsed.timezone === 'string' ? parsed.timezone : 'UTC',
+    };
+  } catch {
+    return { email_frequency: 'daily', timezone: 'UTC' };
+  }
+}
+
 function uuidToBytes(uuid: string): ArrayBuffer {
   const normalized = normalizeUuidString(uuid);
   const hex = normalized.replace(/-/g, '');
@@ -95,7 +108,7 @@ function placeholders(count: number) {
 export type SessionType = 'web' | 'device';
 
 export async function findUserByEmail(db: D1Database, email: string) {
-  return firstWithUuidFields<{
+  const raw = await firstWithUuidFields<{
     id: string;
     email: string;
     password_hash: string;
@@ -104,16 +117,14 @@ export async function findUserByEmail(db: D1Database, email: string) {
     name: string | null;
     email_verified: number;
     email_bounced_at: number | null;
-    email_frequency: string;
-    email_digest_minutes_utc: number;
+    settings: string;
     pub_key: ArrayBuffer | null;
     priv_key: ArrayBuffer | null;
   }>(
     db
       .prepare(
         `SELECT id, email, password_hash, password_salt, password_params_version,
-                name, email_verified, email_bounced_at, email_frequency,
-                email_digest_minutes_utc,
+                name, email_verified, email_bounced_at, settings,
                 pub_key, priv_key
          FROM users
          WHERE email = ?`,
@@ -121,24 +132,24 @@ export async function findUserByEmail(db: D1Database, email: string) {
       .bind(email),
     ['id'],
   );
+  if (!raw) return null;
+  return { ...raw, settings: parseUserSettings(raw.settings) };
 }
 
 export async function findUserById(db: D1Database, userId: string) {
-  return firstWithUuidFields<{
+  const raw = await firstWithUuidFields<{
     id: string;
     email: string;
     name: string | null;
     email_verified: number;
     email_bounced_at: number | null;
-    email_frequency: string;
-    email_digest_minutes_utc: number;
+    settings: string;
     pub_key: ArrayBuffer | null;
     priv_key: ArrayBuffer | null;
   }>(
     db
       .prepare(
-        `SELECT id, email, name, email_verified, email_bounced_at, email_frequency,
-                email_digest_minutes_utc,
+        `SELECT id, email, name, email_verified, email_bounced_at, settings,
                 pub_key, priv_key
          FROM users
          WHERE id = ?`,
@@ -146,6 +157,8 @@ export async function findUserById(db: D1Database, userId: string) {
       .bind(uuidToBytes(userId)),
     ['id'],
   );
+  if (!raw) return null;
+  return { ...raw, settings: parseUserSettings(raw.settings) };
 }
 
 export async function findUserPublicKeyByEmail(db: D1Database, email: string) {
@@ -200,14 +213,13 @@ export async function createUser(
     pub_key: ArrayBuffer;
     priv_key: ArrayBuffer;
     name?: string;
-    email_digest_minutes_utc?: number;
   },
 ) {
   return db
     .prepare(
       `INSERT INTO users (
         id, email, password_hash, password_salt, password_params_version,
-        name, email_verified, email_digest_minutes_utc,
+        name, email_verified, settings,
         pub_key, priv_key, created_at
       ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
     )
@@ -218,7 +230,7 @@ export async function createUser(
       input.passwordSalt,
       input.passwordParamsVersion,
       input.name ?? null,
-      input.email_digest_minutes_utc ?? 6 * 60,
+      JSON.stringify({ email_frequency: 'daily', timezone: 'UTC' }),
       input.pub_key,
       input.priv_key,
       Date.now(),
@@ -237,8 +249,7 @@ export async function updateUser(
     password_params_version?: string;
     email_verified?: boolean;
     email_bounced_at?: number | null;
-    email_frequency?: string;
-    email_digest_minutes_utc?: number;
+    settings?: { email_frequency?: string; timezone?: string };
     pub_key?: ArrayBuffer;
     priv_key?: ArrayBuffer;
   },
@@ -281,14 +292,15 @@ export async function updateUser(
     params.push(fields.email_bounced_at);
   }
 
-  if (fields.email_frequency !== undefined) {
-    updates.push('email_frequency = ?');
-    params.push(fields.email_frequency);
-  }
-
-  if (fields.email_digest_minutes_utc !== undefined) {
-    updates.push('email_digest_minutes_utc = ?');
-    params.push(fields.email_digest_minutes_utc);
+  if (fields.settings !== undefined) {
+    const patch: Record<string, string> = {};
+    if (fields.settings.email_frequency !== undefined)
+      patch.email_frequency = fields.settings.email_frequency;
+    if (fields.settings.timezone !== undefined) patch.timezone = fields.settings.timezone;
+    if (Object.keys(patch).length > 0) {
+      updates.push('settings = json_patch(settings, ?)');
+      params.push(JSON.stringify(patch));
+    }
   }
 
   if (fields.pub_key !== undefined) {
@@ -442,12 +454,16 @@ export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
     platform: string;
     created_at: number;
     last_upload_at: number | null;
+    last_hash_at: number | null;
+    pending_count: number;
   }>(
     db
       .prepare(
-        `SELECT d.id, d.owner, d.name, d.platform, d.created_at, MAX(b.end_time) AS last_upload_at
+        `SELECT d.id, d.owner, d.name, d.platform, d.created_at, MAX(b.end_time) AS last_upload_at,
+                hs.hashed_at AS last_hash_at, COALESCE(hs.count, 0) AS pending_count
          FROM devices d
          LEFT JOIN batches b ON b.device_id = d.id
+         LEFT JOIN hash_states hs ON hs.device_id = d.id
          WHERE d.owner IN (${placeholders(ownerIds.length)})
          GROUP BY d.id
          ORDER BY d.created_at DESC`,
@@ -570,7 +586,6 @@ export async function listBatches(
   db: D1Database,
   ownerIds: string[],
   filters: { deviceId?: string; since?: number },
-  limit: number,
 ) {
   if (ownerIds.length === 0) {
     return [];
@@ -591,8 +606,7 @@ export async function listBatches(
     params.push(filters.since);
   }
 
-  query += ' ORDER BY created_at ASC LIMIT ?';
-  params.push(limit);
+  query += ' ORDER BY created_at ASC';
 
   return allWithUuidFields<{
     id: string;
@@ -630,7 +644,6 @@ export async function listDeviceLogs(
   db: D1Database,
   ownerIds: string[],
   filters: { deviceId?: string; since?: number },
-  limit: number,
 ) {
   if (ownerIds.length === 0) {
     return [];
@@ -651,8 +664,7 @@ export async function listDeviceLogs(
     params.push(filters.since);
   }
 
-  query += ' ORDER BY created_at ASC LIMIT ?';
-  params.push(limit);
+  query += ' ORDER BY created_at ASC';
 
   return allWithUuidFields<{
     id: string;
@@ -921,20 +933,20 @@ export async function listOwnedPartners(db: D1Database, ownerId: string) {
 }
 
 export async function listIncomingPartners(db: D1Database, partnerUserId: string) {
-  return allWithUuidFields<{
+  const rows = await allWithUuidFields<{
     id: string;
     status: string;
     created_at: number;
     watching_user_id: string;
     watching_user_email: string;
     watching_user_name: string | null;
-    email_frequency: string;
+    settings: string;
   }>(
     db
       .prepare(
         `SELECT p.id, p.status, p.created_at,
                 u.id AS watching_user_id, u.email AS watching_user_email, u.name AS watching_user_name,
-                watcher.email_frequency
+                watcher.settings
           FROM partners p
           JOIN users u ON u.id = p.watching_user_id
           JOIN users watcher ON watcher.id = p.watcher_user_id
@@ -944,6 +956,7 @@ export async function listIncomingPartners(db: D1Database, partnerUserId: string
       .bind(uuidToBytes(partnerUserId)),
     ['id', 'watching_user_id'],
   );
+  return rows.map((row) => ({ ...row, settings: parseUserSettings(row.settings) }));
 }
 
 export async function deletePartnerById(db: D1Database, partnerId: string) {
@@ -967,20 +980,15 @@ export async function updatePartnerNotificationPreference(
     return null;
   }
 
-  const currentUser = await db
-    .prepare('SELECT email_frequency FROM users WHERE id = ?')
-    .bind(uuidToBytes(input.watcher_user_id))
-    .first<{ email_frequency: string }>();
-
-  const emailFrequency = input.email_frequency ?? currentUser?.email_frequency ?? 'daily';
-
-  await updateUser(db, input.watcher_user_id, {
-    email_frequency: emailFrequency,
-  });
+  if (input.email_frequency !== undefined) {
+    await updateUser(db, input.watcher_user_id, {
+      settings: { email_frequency: input.email_frequency },
+    });
+  }
 
   return {
     partnership_id: input.partnership_id,
-    email_frequency: emailFrequency,
+    email_frequency: input.email_frequency,
   };
 }
 
@@ -1010,12 +1018,12 @@ export async function listBatchAccessRecipientsForOwner(db: D1Database, ownerId:
 }
 
 export async function listAcceptedNotificationTargetsForUser(db: D1Database, userId: string) {
-  return allWithUuidFields<{
+  const rows = await allWithUuidFields<{
     partnership_id: string;
     watcher_email: string;
     watcher_user_id: string | null;
     watcher_name: string | null;
-    email_frequency: string;
+    settings: string;
   }>(
     db
       .prepare(
@@ -1023,7 +1031,7 @@ export async function listAcceptedNotificationTargetsForUser(db: D1Database, use
                 recipient.email AS watcher_email,
                 recipient.id AS watcher_user_id,
                 recipient.name AS watcher_name,
-                recipient.email_frequency
+                recipient.settings
           FROM partners p
           JOIN users recipient ON recipient.id = p.watcher_user_id
           WHERE p.watching_user_id = ? AND p.status = 'accepted'`,
@@ -1031,6 +1039,7 @@ export async function listAcceptedNotificationTargetsForUser(db: D1Database, use
       .bind(uuidToBytes(userId)),
     ['partnership_id', 'watcher_user_id'],
   );
+  return rows.map((row) => ({ ...row, settings: parseUserSettings(row.settings) }));
 }
 
 export async function createEmailToken(
@@ -1211,23 +1220,21 @@ export async function deleteSessionByRefreshTokenHash(
 }
 
 export async function listDigestEligiblePartnerships(db: D1Database) {
-  return allWithUuidFields<{
+  const rows = await allWithUuidFields<{
     partnership_id: string;
     watching_user_id: string;
     watcher_user_id: string;
     watcher_email: string;
     watching_user_email: string;
     watching_user_name: string | null;
-    email_frequency: string;
-    email_digest_minutes_utc: number;
+    settings: string;
   }>(
     db.prepare(
       `SELECT p.id AS partnership_id,
               p.watching_user_id,
               recipient.id AS watcher_user_id,
               recipient.email AS watcher_email,
-              recipient.email_frequency,
-              recipient.email_digest_minutes_utc,
+              recipient.settings,
               owner.email AS watching_user_email,
               owner.name AS watching_user_name
         FROM partners p
@@ -1237,6 +1244,7 @@ export async function listDigestEligiblePartnerships(db: D1Database) {
     ),
     ['partnership_id', 'watching_user_id', 'watcher_user_id'],
   );
+  return rows.map((row) => ({ ...row, settings: parseUserSettings(row.settings) }));
 }
 
 export async function getHashState(db: D1Database, deviceId: string) {
@@ -1244,9 +1252,13 @@ export async function getHashState(db: D1Database, deviceId: string) {
     device_id: string;
     state: ArrayBuffer;
     updated_at: number;
+    count: number;
+    hashed_at: number | null;
   }>(
     db
-      .prepare('SELECT device_id, state, updated_at FROM hash_states WHERE device_id = ?')
+      .prepare(
+        'SELECT device_id, state, updated_at, count, hashed_at FROM hash_states WHERE device_id = ?',
+      )
       .bind(uuidToBytes(deviceId)),
     ['device_id'],
   );
@@ -1254,22 +1266,59 @@ export async function getHashState(db: D1Database, deviceId: string) {
 
 export async function upsertHashState(
   db: D1Database,
-  input: { device_id: string; state: ArrayBuffer; updated_at: number },
+  input: { device_id: string; state: ArrayBuffer; updated_at: number; hashed_at: number },
 ) {
   return db
     .prepare(
-      `INSERT INTO hash_states (device_id, state, updated_at)
-       VALUES (?, ?, ?)
-       ON CONFLICT(device_id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at`,
+      `INSERT INTO hash_states (device_id, state, updated_at, count, hashed_at)
+       VALUES (?, ?, ?, 1, ?)
+       ON CONFLICT(device_id) DO UPDATE SET
+           state = excluded.state,
+           updated_at = excluded.updated_at,
+           count = count + 1,
+           hashed_at = excluded.hashed_at`,
     )
-    .bind(uuidToBytes(input.device_id), input.state, input.updated_at)
+    .bind(uuidToBytes(input.device_id), input.state, input.updated_at, input.hashed_at)
     .run();
 }
 
 export async function resetHashState(db: D1Database, deviceId: string, updatedAt: number) {
-  return upsertHashState(db, {
-    device_id: deviceId,
-    state: new Uint8Array(32).buffer,
-    updated_at: updatedAt,
-  });
+  return db
+    .prepare(
+      `INSERT INTO hash_states (device_id, state, updated_at, count)
+       VALUES (?, ?, ?, 0)
+       ON CONFLICT(device_id) DO UPDATE SET
+           state = excluded.state,
+           updated_at = excluded.updated_at,
+           count = 0`,
+    )
+    .bind(uuidToBytes(deviceId), new Uint8Array(32).buffer, updatedAt)
+    .run();
+}
+
+export async function incrementHashCount(db: D1Database, deviceId: string, now: number) {
+  return db
+    .prepare(
+      `INSERT INTO hash_states (device_id, state, updated_at, count, hashed_at)
+       VALUES (?, ?, ?, 1, ?)
+       ON CONFLICT(device_id) DO UPDATE SET
+           count = count + 1,
+           hashed_at = excluded.hashed_at,
+           updated_at = excluded.updated_at`,
+    )
+    .bind(uuidToBytes(deviceId), new Uint8Array(32).buffer, now, now)
+    .run();
+}
+
+export async function resetHashCount(db: D1Database, deviceId: string, now: number) {
+  return db
+    .prepare(
+      `INSERT INTO hash_states (device_id, state, updated_at, count)
+       VALUES (?, ?, ?, 0)
+       ON CONFLICT(device_id) DO UPDATE SET
+           count = 0,
+           updated_at = excluded.updated_at`,
+    )
+    .bind(uuidToBytes(deviceId), new Uint8Array(32).buffer, now)
+    .run();
 }

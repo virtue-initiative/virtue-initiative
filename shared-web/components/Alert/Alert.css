@@ -8,39 +8,19 @@
 .vi-alert--error {
   background: #fee2e2;
   color: #b91c1c;
-
-  [data-theme='dark'] & {
-    background: #3b0a0a;
-    color: #fca5a5;
-  }
 }
 
 .vi-alert--success {
-  background: #dcfce7;
-  color: var(--accent);
-
-  [data-theme='dark'] & {
-    background: #052e16;
-    color: #8be28b;
-  }
+  background: rgba(79, 122, 90, 0.12);
+  color: var(--good);
 }
 
 .vi-alert--warning {
-  background: #fef9c3;
-  color: #a16207;
-
-  [data-theme='dark'] & {
-    background: #2d1f07;
-    color: #fbbf24;
-  }
+  background: rgba(156, 107, 46, 0.12);
+  color: var(--warning);
 }
 
 .vi-alert--info {
   background: #dbeafe;
   color: #1d4ed8;
-
-  [data-theme='dark'] & {
-    background: #0c1a3a;
-    color: #93c5fd;
-  }
 }

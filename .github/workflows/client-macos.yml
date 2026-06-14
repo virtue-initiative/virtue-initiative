@@ -31,7 +31,7 @@ jobs:
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: "v1"
+          prefix-key: 'v1'
           workspaces: |
             client -> target
 
@@ -51,9 +51,28 @@ jobs:
         run: cargo clippy -p virtue-mac --all-targets -- -D warnings
         working-directory: client
 
-      - name: Build macOS app bundle and DMG
+      - name: Rust tests (core)
+        run: cargo test -p virtue-core
+        working-directory: client
+
+      - name: Rust scenario tests (core)
+        run: cargo test -p virtue-core --features testing --test scenarios
+        working-directory: client
+
+      - name: Add Intel cross-compilation target
+        run: rustup target add x86_64-apple-darwin
+
+      - name: Build macOS Apple Silicon app bundle and DMG
         run: ./mac/scripts/build-dmg.sh
         working-directory: client
+        env:
+          VIRTUE_ARCH_SUFFIX: '-apple-silicon'
+
+      - name: Build macOS Intel app bundle and DMG
+        run: ./mac/scripts/build-dmg.sh
+        working-directory: client
+        env:
+          VIRTUE_ARCH_SUFFIX: '-intel'
 
       - name: Resolve version info
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
@@ -65,12 +84,19 @@ jobs:
           echo "build_label=$(virtue_build_label)" >> "$GITHUB_OUTPUT"
         working-directory: client
 
-      - name: Upload macOS installer artifact
+      - name: Upload macOS Apple Silicon installer artifact
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         uses: actions/upload-artifact@v4
         with:
-          name: virtue-macos-${{ steps.version.outputs.build_label }}
-          path: client/target/macos/virtue-macos-${{ steps.version.outputs.build_label }}.dmg
+          name: virtue-macos-apple-silicon-${{ steps.version.outputs.build_label }}
+          path: client/target/macos-apple-silicon/virtue-macos-apple-silicon-${{ steps.version.outputs.build_label }}.dmg
+
+      - name: Upload macOS Intel installer artifact
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
+        uses: actions/upload-artifact@v4
+        with:
+          name: virtue-macos-intel-${{ steps.version.outputs.build_label }}
+          path: client/target/macos-intel/virtue-macos-intel-${{ steps.version.outputs.build_label }}.dmg
 
       - name: Clear existing macOS release assets
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
@@ -78,14 +104,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          ./scripts/clear-prerelease-assets.sh "${{ steps.version.outputs.release_tag }}" "virtue-macos-*.dmg"
+          ./scripts/clear-prerelease-assets.sh "${{ steps.version.outputs.release_tag }}" "virtue-macos-apple-silicon-*.dmg"
+          ./scripts/clear-prerelease-assets.sh "${{ steps.version.outputs.release_tag }}" "virtue-macos-intel-*.dmg"
           ./scripts/clear-prerelease-assets.sh "${{ steps.version.outputs.release_tag }}" "Virtue-*.dmg"
         working-directory: client
 
-      - name: Publish macOS release asset
+      - name: Publish macOS Apple Silicon release asset
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./scripts/publish-release.sh "${{ steps.version.outputs.release_tag }}" "${{ steps.version.outputs.build_label }}" "target/macos/virtue-macos-${{ steps.version.outputs.build_label }}.dmg" "${{ github.ref_name == 'main' && 'stable' || 'dev' }}"
+        run: ./scripts/publish-release.sh "${{ steps.version.outputs.release_tag }}" "${{ steps.version.outputs.build_label }}" "target/macos-apple-silicon/virtue-macos-apple-silicon-${{ steps.version.outputs.build_label }}.dmg" "${{ github.ref_name == 'main' && 'stable' || 'dev' }}"
+        working-directory: client
+
+      - name: Publish macOS Intel release asset
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/publish-release.sh "${{ steps.version.outputs.release_tag }}" "${{ steps.version.outputs.build_label }}" "target/macos-intel/virtue-macos-intel-${{ steps.version.outputs.build_label }}.dmg" "${{ github.ref_name == 'main' && 'stable' || 'dev' }}"
         working-directory: client

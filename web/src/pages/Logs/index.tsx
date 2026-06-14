@@ -1,26 +1,30 @@
-import { useEffect, useMemo, useState, useCallback } from "preact/hooks";
-import { useLocation } from "preact-iso";
-import { Device } from "../../api";
-import { useAuth } from "../../context/auth";
-import { useDevices } from "../../hooks/useDevices";
-import { useLogs } from "../../hooks/useLogs";
-import { usePartners } from "../../hooks/usePartners";
-import { LogsGallery } from "./LogsGallery";
-import { LogsList } from "./LogsList";
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useLocation } from 'preact-iso';
+import { Device, LogQueryResult, useAPIContext, useDevices, usePartners } from '../../utils/api';
+import { LogsGallery } from './LogsGallery';
+import { LogsList } from './LogsList';
+import { getRiskRating, type RiskRating } from '@virtueinitiative/shared-web/risk';
+import { FeedLog, formatDayLabel, getLogCategory, LOG_TYPES } from './shared';
+
+const LOG_CATEGORIES = [
+  ...new Set(
+    LOG_TYPES.map((type) =>
+      getLogCategory({ type, data: {}, id: '', device_id: '', ts: 0, created_at: 0 }),
+    ),
+  ),
+];
+import './style.css';
+import { useUrlState } from '../../hooks/useUrlState';
 import {
-  getRiskRating,
-  type RiskRating,
-} from "@virtueinitiative/shared-web/risk";
-import { getLogImage, humanizeLogType, LOG_TYPES } from "./shared";
-import "./style.css";
-import { useUrlState } from "../../hooks/useUrlState";
-import {
-  Alert,
   Button,
+  Dialog,
+  DialogHeader,
   Field,
   IconButton,
   Select,
-} from "@virtueinitiative/shared-web";
+} from '@virtueinitiative/shared-web';
+import { loadCachedDataFeed } from '../../utils/api/data-cache';
+import { formatRelativeTimestamp } from '../../utils/time';
 
 interface DeviceGroup {
   label: string;
@@ -96,131 +100,136 @@ function CloseIcon() {
       strokeWidth={1.5}
       stroke="currentColor"
     >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M6 18 18 6M6 6l12 12"
-      />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
     </svg>
   );
 }
 
-function ChevronLeftIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      fill="none"
-      viewBox="0 0 24 24"
-      strokeWidth={2}
-      stroke="currentColor"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M15.75 19.5 8.25 12l7.5-7.5"
-      />
-    </svg>
-  );
+function dateToBoundsStart(d: string): number {
+  return new Date(d + 'T00:00:00').getTime();
 }
 
-function ChevronRightIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      fill="none"
-      viewBox="0 0 24 24"
-      strokeWidth={2}
-      stroke="currentColor"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="m8.25 4.5 7.5 7.5-7.5 7.5"
-      />
-    </svg>
-  );
+function dateToBoundsEnd(d: string): number {
+  return new Date(d + 'T23:59:59.999').getTime();
 }
 
-const dayLabelFormatter = new Intl.DateTimeFormat(undefined, {
-  weekday: "long",
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-});
-
-function getDayBounds(offset: number): { startMs: number; endMs: number } {
-  const day = new Date();
-  day.setHours(0, 0, 0, 0);
-  day.setDate(day.getDate() + offset);
-  const end = new Date(day);
-  end.setHours(23, 59, 59, 999);
-  return { startMs: day.getTime(), endMs: end.getTime() };
-}
-
-function formatDayLabel(startMs: number): string {
-  return dayLabelFormatter.format(new Date(startMs));
+function shiftDate(dateStr: string, days: number): string {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
 export function Logs() {
-  const { userId } = useAuth();
+  const api = useAPIContext();
+  const userId = api?.userId ?? null;
   const { path } = useLocation();
-  const {
-    devices,
-    error: devicesError,
-    isLoading: devicesLoading,
-  } = useDevices();
-  const {
-    watching,
-    error: partnersError,
-    isLoading: partnersLoading,
-  } = usePartners();
+  const { devices, loaded: devicesLoaded } = useDevices();
+  const { watchings: watching, loaded: partnersLoaded } = usePartners();
+
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = shiftDate(today, -1);
+  const oneMonthAgo = (() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() - 1);
+    return d.toISOString().slice(0, 10);
+  })();
 
   const [selectedDevice, setSelectedDevice] = useUrlState<string | null>(
-    "device_id",
-    "string",
+    'device_id',
+    'string',
     null,
   );
-  const [selectedUser, setSelectedUser] = useUrlState<string | null>(
-    "user_id",
-    "string",
-    null,
-  );
+  const [selectedUser, setSelectedUser] = useUrlState<string | null>('user_id', 'string', null);
   const [galleryFullscreen, setGalleryFullscreen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [dayOffset, setDayOffset] = useUrlState("day", "number", 0);
-  type RiskFilter = "all" | RiskRating;
-  const [riskFilter, setRiskFilter] = useUrlState<RiskFilter>(
-    "risk",
-    "string",
-    "all",
-  );
+  const [startDate, setStartDate] = useUrlState('start', 'string', yesterday);
+  const [endDate, setEndDate] = useUrlState('end', 'string', today);
+  const [visibleDate, setVisibleDate] = useState<string | null>(null);
+  const filterDialogRef = useRef<HTMLDialogElement>(null);
+  type RiskFilter = 'all' | RiskRating;
+  const [riskFilter, setRiskFilter] = useUrlState<RiskFilter>('risk', 'string', 'all');
   const [rawTypeFilter, setTypeFilter] = useUrlState<string | string[] | null>(
-    "type",
-    "string",
+    'type',
+    'string',
     null,
   );
 
-  const { startMs: weekStart, endMs: weekEnd } = useMemo(
-    () => getDayBounds(dayOffset),
-    [dayOffset],
-  );
+  const weekStart = dateToBoundsStart(startDate);
+  const weekEnd = dateToBoundsEnd(endDate);
 
-  const {
-    logs,
-    batchStats,
-    error: logsError,
-    isLoading: logsLoading,
-  } = useLogs({
-    userId: selectedUser,
-    deviceId: selectedDevice,
-    startTime: weekStart,
-    endTime: weekEnd,
+  const [logResult, setLogResult] = useState<LogQueryResult>({
+    logs: [],
+    complete: false,
   });
+  const activeTargetUserId = selectedUser ?? userId;
+  const scopeKeyRef = useRef<string | null>(null);
 
-  const deviceList = devices ?? [];
-  const watchingList = watching ?? [];
-  const loadError = devicesError ?? partnersError;
-  const sidebarLoading = devicesLoading || partnersLoading;
+  useEffect(() => {
+    if (!api || !activeTargetUserId) {
+      setLogResult({ logs: [], complete: false });
+      scopeKeyRef.current = null;
+      return;
+    }
+
+    const newScopeKey = `${activeTargetUserId}:${selectedDevice}`;
+    const scopeChanged = scopeKeyRef.current !== newScopeKey;
+    scopeKeyRef.current = newScopeKey;
+
+    let cancelled = false;
+    const initial = api.queryLogs(
+      {
+        userId: activeTargetUserId,
+        deviceId: selectedDevice ?? undefined,
+        startTime: weekStart,
+        endTime: weekEnd,
+      },
+      (next) => {
+        if (!cancelled) setLogResult(next);
+      },
+    );
+    if (scopeChanged) {
+      setLogResult(initial);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [api, activeTargetUserId, selectedDevice, weekStart, weekEnd]);
+
+  const logs: FeedLog[] = logResult.logs;
+  const logsLoading = !logResult.complete;
+  const deviceList = devices;
+  const watchingList = watching;
+  const sidebarLoading = !devicesLoaded || !partnersLoaded;
+
+  const selectedDeviceInfo = selectedDevice
+    ? (deviceList.find((d) => d.id === selectedDevice) ?? null)
+    : null;
+
+  const [estimatedNextUpload, setEstimatedNextUpload] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!userId || !activeTargetUserId || !selectedDevice || !selectedDeviceInfo?.last_upload_at) {
+      setEstimatedNextUpload(null);
+      return;
+    }
+    loadCachedDataFeed(userId, activeTargetUserId)
+      .then((feed) => {
+        const batches = feed.batches
+          .filter((b) => b.device_id === selectedDevice)
+          .sort((a, b) => a.end_time - b.end_time);
+        if (batches.length < 2) {
+          setEstimatedNextUpload(null);
+          return;
+        }
+        const intervals = batches.slice(1).map((b, i) => b.end_time - batches[i].end_time);
+        intervals.sort((a, b) => a - b);
+        const median = intervals[Math.floor(intervals.length / 2)];
+        if (median > 0 && selectedDeviceInfo.last_upload_at) {
+          setEstimatedNextUpload(selectedDeviceInfo.last_upload_at + median);
+        }
+      })
+      .catch(() => {});
+  }, [userId, activeTargetUserId, selectedDevice, selectedDeviceInfo?.last_upload_at]);
 
   const { knownUsers, deviceGroups } = useMemo(() => {
     if (!userId) {
@@ -231,7 +240,7 @@ export function Logs() {
     }
 
     const labels = new Map<string, string>();
-    labels.set(userId, "My devices");
+    labels.set(userId, 'My devices');
     for (const partner of watchingList) {
       labels.set(partner.user.id, partner.user.name ?? partner.user.email);
     }
@@ -254,9 +263,7 @@ export function Logs() {
         label,
       })),
       deviceGroups: Array.from(grouped.entries())
-        .sort(([a], [b]) =>
-          a === userId ? -1 : b === userId ? 1 : a.localeCompare(b),
-        )
+        .sort(([a], [b]) => (a === userId ? -1 : b === userId ? 1 : a.localeCompare(b)))
         .map(([owner, ownerDevices]) => ({
           label: labels.get(owner) ?? `${owner.slice(0, 8)}…`,
           userId: owner === userId ? null : owner,
@@ -276,14 +283,11 @@ export function Logs() {
   );
 
   useEffect(() => {
-    if (sidebarLoading || loadError) {
+    if (sidebarLoading) {
       return;
     }
 
-    if (
-      selectedUser !== null &&
-      !deviceGroups.some((group) => group.userId === selectedUser)
-    ) {
+    if (selectedUser !== null && !deviceGroups.some((group) => group.userId === selectedUser)) {
       select(null, null);
       return;
     }
@@ -291,19 +295,9 @@ export function Logs() {
     if (selectedDevice && !activeDeviceIds.has(selectedDevice)) {
       select(selectedUser, null);
     }
-  }, [
-    activeDeviceIds,
-    deviceGroups,
-    loadError,
-    selectedDevice,
-    selectedUser,
-    sidebarLoading,
-  ]);
+  }, [activeDeviceIds, deviceGroups, selectedDevice, selectedUser, sidebarLoading]);
 
-  const allDevices = useMemo(
-    () => deviceGroups.flatMap((group) => group.devices),
-    [deviceGroups],
-  );
+  const allDevices = useMemo(() => deviceGroups.flatMap((group) => group.devices), [deviceGroups]);
 
   const deviceName = (id: string) =>
     allDevices.find((device) => device.id === id)?.name ?? `${id.slice(0, 8)}…`;
@@ -320,49 +314,44 @@ export function Logs() {
     setSidebarOpen(false);
   }
 
-  const dayLabel = formatDayLabel(weekStart);
-  const prevDay = useCallback(
-    () => setDayOffset(dayOffset - 1),
-    [dayOffset, setDayOffset],
-  );
-  const nextDay = useCallback(
-    () => setDayOffset(dayOffset + 1),
-    [dayOffset, setDayOffset],
-  );
-
-  const title =
+  const baseTitle =
     sidebarLoading && selectedUser
-      ? "Loading…"
+      ? 'Loading…'
       : selectedUser
         ? `${groupLabel(selectedUser)}'s logs`
-        : "My logs";
-  const isGallery = path === "/logs/gallery";
-  const typeFilter = Array.isArray(rawTypeFilter)
-    ? (rawTypeFilter[0] ?? null)
-    : rawTypeFilter;
+        : 'My logs';
+  const title = selectedDevice ? `${baseTitle} — ${deviceName(selectedDevice)}` : baseTitle;
+  const isGallery = path === '/logs/gallery';
+  const typeFilter = Array.isArray(rawTypeFilter) ? (rawTypeFilter[0] ?? null) : rawTypeFilter;
 
   const items = useMemo(
     () =>
       (logs ?? []).filter((item) => {
         if (item.ts < weekStart || item.ts > weekEnd) return false;
-        if (typeFilter !== null && typeFilter !== item.type) return false;
-        if (riskFilter !== "all") {
+        if (typeFilter !== null && getLogCategory({ ...item, data: {} }) !== typeFilter)
+          return false;
+        if (riskFilter !== 'all') {
           const rating = getRiskRating(item.risk);
-          if (riskFilter === "high" && rating !== "high") return false;
-          if (
-            riskFilter === "moderate" &&
-            rating !== "moderate" &&
-            rating !== "high"
-          )
-            return false;
+          if (riskFilter === 'high' && rating !== 'high') return false;
+          if (riskFilter === 'moderate' && rating !== 'moderate' && rating !== 'high') return false;
         }
         return true;
       }),
     [logs, riskFilter, typeFilter, weekStart, weekEnd],
   );
   const galleryItems = useMemo(
-    () => items.filter((item) => getLogImage(item) !== undefined),
-    [items],
+    () =>
+      (logs ?? []).filter((item) => {
+        if (item.ts < weekStart || item.ts > weekEnd) return false;
+        if (item.image_w === undefined) return false;
+        if (riskFilter !== 'all') {
+          const rating = getRiskRating(item.risk);
+          if (riskFilter === 'high' && rating !== 'high') return false;
+          if (riskFilter === 'moderate' && rating !== 'moderate' && rating !== 'high') return false;
+        }
+        return true;
+      }),
+    [logs, riskFilter, weekStart, weekEnd],
   );
 
   useEffect(() => {
@@ -373,17 +362,17 @@ export function Logs() {
 
   return (
     <div
-      class={`logs-page${isGallery && galleryFullscreen ? " logs-page--gallery-fullscreen" : ""}`}
+      class={`logs-page${isGallery && galleryFullscreen ? ' logs-page--gallery-fullscreen' : ''}`}
     >
       <button
-        class={`app-drawer-backdrop logs-sidebar-backdrop${sidebarOpen ? " is-open" : ""}`}
+        class={`app-drawer-backdrop logs-sidebar-backdrop${sidebarOpen ? ' is-open' : ''}`}
         type="button"
         aria-label="Close logs sidebar"
         onClick={() => setSidebarOpen(false)}
       />
       <div class="logs-layout">
         {!(isGallery && galleryFullscreen) && (
-          <aside class={`logs-sidebar${sidebarOpen ? " is-open" : ""}`}>
+          <aside class={`logs-sidebar${sidebarOpen ? ' is-open' : ''}`}>
             <div class="app-drawer-header logs-sidebar-header">
               <h2>Devices</h2>
               <button
@@ -395,13 +384,8 @@ export function Logs() {
                 <CloseIcon />
               </button>
             </div>
-            {loadError && (
-              <p class="logs-sidebar-loading">{loadError.message}</p>
-            )}
-            {sidebarLoading && !loadError && (
-              <p class="logs-sidebar-loading">Loading…</p>
-            )}
-            {!sidebarLoading && deviceGroups.length === 0 && !loadError && (
+            {sidebarLoading && <p class="logs-sidebar-loading">Loading…</p>}
+            {!sidebarLoading && deviceGroups.length === 0 && (
               <div class="logs-sidebar-group">
                 <p class="logs-sidebar-group-label">My devices</p>
                 <p class="logs-sidebar-loading">No devices</p>
@@ -410,7 +394,7 @@ export function Logs() {
             {deviceGroups.map((group) => (
               <div class="logs-sidebar-group" key={group.label}>
                 <button
-                  class={`logs-device-button logs-device-button-group${selectedUser === group.userId && selectedDevice === null ? " is-active" : ""}`}
+                  class={`logs-device-button logs-device-button-group${selectedUser === group.userId && selectedDevice === null ? ' is-active' : ''}`}
                   title={group.label}
                   onClick={() => select(group.userId, null)}
                   type="button"
@@ -421,24 +405,20 @@ export function Logs() {
                   {group.devices.map((device) => (
                     <li key={device.id}>
                       <button
-                        class={`logs-device-button${selectedDevice === device.id ? " is-active" : ""}`}
+                        class={`logs-device-button${selectedDevice === device.id ? ' is-active' : ''}`}
                         onClick={() => select(group.userId, device.id)}
                         type="button"
                         title={device.name}
                       >
                         <span
-                          class={`logs-status-dot ${device.status === "online" ? "logs-status-dot--online" : "logs-status-dot--offline"}`}
+                          class={`logs-status-dot ${device.status === 'online' ? 'logs-status-dot--online' : 'logs-status-dot--offline'}`}
                         />
-                        <span class="logs-device-button-label">
-                          {device.name}
-                        </span>
+                        <span class="logs-device-button-label">{device.name}</span>
                       </button>
                     </li>
                   ))}
                 </ul>
-                {group.devices.length === 0 && (
-                  <p class="logs-sidebar-loading">No devices</p>
-                )}
+                {group.devices.length === 0 && <p class="logs-sidebar-loading">No devices</p>}
               </div>
             ))}
           </aside>
@@ -458,69 +438,92 @@ export function Logs() {
                 <MenuIcon />
                 <span>Devices</span>
               </Button>
-              <div class="logs-filter-switcher">
-                <Field label="Risk" class="logs-filter-field">
-                  <Select
-                    size="md"
-                    class="logs-filter-select"
-                    value={riskFilter}
-                    onChange={(e) =>
-                      setRiskFilter(
-                        (e.target as HTMLSelectElement).value as RiskFilter,
-                      )
-                    }
-                  >
-                    <option value="all">All</option>
-                    <option value="high">High</option>
-                    <option value="moderate">Medium</option>
-                  </Select>
-                </Field>
-                <Field label="Type" class="logs-filter-field">
-                  <Select
-                    size="md"
-                    class="logs-filter-select"
-                    value={typeFilter ?? ""}
-                    onChange={(e) =>
-                      setTypeFilter(
-                        (e.target as HTMLSelectElement).value || null,
-                      )
-                    }
-                  >
-                    <option value="">All</option>
-                    {LOG_TYPES.map((type) => (
-                      <option key={type} value={type}>
-                        {humanizeLogType(type)}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
+              <div class="logs-filter-section">
+                <div class="logs-inline-filters">
+                  <Field label="Start" class="logs-filter-field">
+                    <input
+                      type="date"
+                      class="logs-filter-date"
+                      value={startDate}
+                      min={oneMonthAgo}
+                      max={endDate}
+                      onChange={(e) => setStartDate((e.target as HTMLInputElement).value)}
+                    />
+                  </Field>
+                  <Field label="End" class="logs-filter-field">
+                    <input
+                      type="date"
+                      class="logs-filter-date"
+                      value={endDate}
+                      min={oneMonthAgo}
+                      max={today}
+                      onChange={(e) => setEndDate((e.target as HTMLInputElement).value)}
+                    />
+                  </Field>
+                  <Field label="Risk" class="logs-filter-field">
+                    <Select
+                      size="md"
+                      class="logs-filter-select"
+                      value={riskFilter}
+                      onChange={(e) =>
+                        setRiskFilter((e.target as HTMLSelectElement).value as RiskFilter)
+                      }
+                    >
+                      <option value="all">All</option>
+                      <option value="high">High</option>
+                      <option value="moderate">Medium</option>
+                    </Select>
+                  </Field>
+                  {!isGallery && (
+                    <Field label="Type" class="logs-filter-field">
+                      <Select
+                        size="md"
+                        class="logs-filter-select"
+                        value={typeFilter ?? ''}
+                        onChange={(e) =>
+                          setTypeFilter((e.target as HTMLSelectElement).value || null)
+                        }
+                      >
+                        <option value="">All</option>
+                        {LOG_CATEGORIES.map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                  )}
+                </div>
+                <Button
+                  variant="ghost"
+                  size="md"
+                  class="logs-filter-toggle"
+                  type="button"
+                  onClick={() => filterDialogRef.current?.showModal()}
+                >
+                  Edit Search
+                </Button>
               </div>
               <div class="logs-header-view-controls">
                 {isGallery && (
                   <IconButton
                     class="logs-fullscreen-btn"
                     onClick={() => setGalleryFullscreen((prev) => !prev)}
-                    aria-label={
-                      galleryFullscreen ? "Exit fullscreen" : "Fullscreen"
-                    }
-                    title={galleryFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                    aria-label={galleryFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+                    title={galleryFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
                   >
-                    {galleryFullscreen ? (
-                      <ExitFullscreenIcon />
-                    ) : (
-                      <ExpandIcon />
-                    )}
+                    {galleryFullscreen ? <ExitFullscreenIcon /> : <ExpandIcon />}
                   </IconButton>
                 )}
                 <div class="vi-segmented-control logs-view-switcher">
                   <a
-                    class={`vi-segmented-control__item${!isGallery ? " is-active" : ""}`}
+                    class={`vi-segmented-control__item${!isGallery ? ' is-active' : ''}`}
                     href={`/logs${window.location.search}`}
                   >
                     List
                   </a>
                   <a
-                    class={`vi-segmented-control__item${isGallery ? " is-active" : ""}`}
+                    class={`vi-segmented-control__item${isGallery ? ' is-active' : ''}`}
                     href={`/logs/gallery${window.location.search}`}
                   >
                     Gallery
@@ -530,28 +533,21 @@ export function Logs() {
             </div>
           </div>
 
-          <div class="logs-week-nav">
-            <IconButton aria-label="Previous day" onClick={prevDay}>
-              <ChevronLeftIcon />
-            </IconButton>
-            <span class="logs-week-label">{dayLabel}</span>
-            <IconButton
-              aria-label="Next day"
-              onClick={nextDay}
-              disabled={dayOffset >= 0}
-            >
-              <ChevronRightIcon />
-            </IconButton>
-          </div>
+          <p class="logs-summary">
+            {logsLoading ? 'Syncing logs…' : 'Logs synced'}
+            {!logsLoading && selectedDeviceInfo && selectedDeviceInfo.pending_count > 0 && (
+              <>
+                {` · ${selectedDeviceInfo.pending_count} item${selectedDeviceInfo.pending_count !== 1 ? 's' : ''} pending upload`}
+                {estimatedNextUpload && estimatedNextUpload > Date.now()
+                  ? ` · expected ${formatRelativeTimestamp(estimatedNextUpload)}`
+                  : null}
+              </>
+            )}
+          </p>
 
-          {logsError && <Alert variant="error">{logsError.message}</Alert>}
-          {batchStats && batchStats.total > 0 && (
-            <p class="logs-summary">
-              {batchStats.decrypted}/{batchStats.total} block
-              {batchStats.total === 1 ? "" : "s"} decrypted
-              {batchStats.skipped > 0 && `, ${batchStats.skipped} unavailable`}
-            </p>
-          )}
+          <div class="logs-sticky-date" aria-live="polite">
+            {visibleDate ?? formatDayLabel(weekStart)}
+          </div>
 
           {isGallery ? (
             <LogsGallery
@@ -561,6 +557,8 @@ export function Logs() {
               onLoadMore={() => {}}
               deviceName={deviceName}
               fullscreen={galleryFullscreen}
+              onVisibleDateChange={setVisibleDate}
+              viewerId={userId ?? ''}
             />
           ) : (
             <LogsList
@@ -569,8 +567,94 @@ export function Logs() {
               hasMore={false}
               onLoadMore={() => {}}
               deviceName={deviceName}
+              onVisibleDateChange={setVisibleDate}
+              viewerId={userId ?? ''}
             />
           )}
+
+          <div class="logs-load-more">
+            <Button
+              variant="ghost"
+              size="md"
+              type="button"
+              onClick={() =>
+                setStartDate(
+                  shiftDate(startDate, -1) >= oneMonthAgo ? shiftDate(startDate, -1) : oneMonthAgo,
+                )
+              }
+            >
+              Load another day
+            </Button>
+            <Button
+              variant="ghost"
+              size="md"
+              type="button"
+              onClick={() =>
+                setStartDate(
+                  shiftDate(startDate, -7) >= oneMonthAgo ? shiftDate(startDate, -7) : oneMonthAgo,
+                )
+              }
+            >
+              Load another week
+            </Button>
+          </div>
+
+          <Dialog dialogRef={filterDialogRef} size="lg" class="logs-filter-dialog">
+            <DialogHeader>Search filters</DialogHeader>
+            <div class="logs-filter-dialog-fields">
+              <Field label="Start" class="logs-filter-field">
+                <input
+                  type="date"
+                  class="logs-filter-date"
+                  value={startDate}
+                  min={oneMonthAgo}
+                  max={endDate}
+                  onChange={(e) => setStartDate((e.target as HTMLInputElement).value)}
+                />
+              </Field>
+              <Field label="End" class="logs-filter-field">
+                <input
+                  type="date"
+                  class="logs-filter-date"
+                  value={endDate}
+                  min={oneMonthAgo}
+                  max={today}
+                  onChange={(e) => setEndDate((e.target as HTMLInputElement).value)}
+                />
+              </Field>
+              <Field label="Risk" class="logs-filter-field">
+                <Select
+                  size="md"
+                  class="logs-filter-select"
+                  value={riskFilter}
+                  onChange={(e) =>
+                    setRiskFilter((e.target as HTMLSelectElement).value as RiskFilter)
+                  }
+                >
+                  <option value="all">All</option>
+                  <option value="high">High</option>
+                  <option value="moderate">Medium</option>
+                </Select>
+              </Field>
+              {!isGallery && (
+                <Field label="Type" class="logs-filter-field">
+                  <Select
+                    size="md"
+                    class="logs-filter-select"
+                    value={typeFilter ?? ''}
+                    onChange={(e) => setTypeFilter((e.target as HTMLSelectElement).value || null)}
+                  >
+                    <option value="">All</option>
+                    {LOG_CATEGORIES.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              )}
+            </div>
+          </Dialog>
         </section>
       </div>
     </div>

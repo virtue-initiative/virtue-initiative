@@ -1,6 +1,7 @@
 ---
 import { Button } from '@virtueinitiative/shared-web';
 import { APP_URL } from '../lib/app-url';
+import RightArrowIcon from './icons/RightArrowIcon.astro';
 
 interface Props {
   tagline?: string;
@@ -11,14 +12,17 @@ const { tagline } = Astro.props;
 
 <header class="site-header-shell">
   <div class="site-container">
-    <div class="site-header-top">
+    <div class="site-header">
       <div class="site-header-copy">
         <a href="/" class="site-wordmark">The Virtue Initiative</a>
-        {tagline && <p class="site-tagline">{tagline}</p>}
+        {tagline && <p class="site-tagline eyebrow">{tagline}</p>}
       </div>
       <div class="site-header-actions">
-        <button class="vi-icon-btn" id="theme-toggle" aria-label="Toggle dark mode"></button>
-        <Button href={APP_URL} variant="primary">Login / Sign up</Button>
+        <Button href={APP_URL}
+          ><div class="site-header-text-icon-button-container">
+            <div>Sign in</div><RightArrowIcon />
+          </div></Button
+        >
       </div>
     </div>
   </div>

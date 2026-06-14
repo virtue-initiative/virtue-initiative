@@ -2,7 +2,7 @@ import { ComponentChildren, JSX } from 'preact';
 import './Button.css';
 
 type ButtonVariant = 'primary' | 'outline' | 'ghost' | 'danger' | 'flat';
-type ButtonSize = 'sm' | 'md';
+type ButtonSize = 'sm' | 'md' | 'lg';
 
 type ButtonProps = Omit<JSX.IntrinsicElements['button'], 'size'> & {
   variant?: ButtonVariant;
@@ -27,6 +27,7 @@ export function Button({
     'vi-btn',
     variant && `vi-btn--${variant}`,
     size === 'sm' && 'vi-btn--sm',
+    size === 'lg' && 'vi-btn--lg',
     className,
   ]
     .filter(Boolean)

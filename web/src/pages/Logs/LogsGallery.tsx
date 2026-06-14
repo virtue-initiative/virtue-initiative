@@ -1,21 +1,12 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "preact/hooks";
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
   useVirtualizer,
   observeElementRect,
   observeElementOffset,
   elementScroll,
-  observeWindowRect,
-  observeWindowOffset,
-  windowScroll,
-} from "@tanstack/react-virtual";
-import { FeedLog, getLogImage, LogDetailDialog, LogImage } from "./shared";
-import { buildGalleryRows } from "./gallery-layout";
+} from '@tanstack/react-virtual';
+import { EventImage, FeedLog, formatDayAndTime, LogDetailDialog } from './shared';
+import { buildGalleryRows } from './gallery-layout';
 
 const TARGET_ROW_HEIGHT = 140;
 const GAP_NORMAL = 8;
@@ -24,26 +15,13 @@ const DEFAULT_RATIO = 16 / 9;
 const MIN_ROW_SCALE = 0.6;
 const MAX_LAST_ROW_SCALE = 1.0;
 
-function useIsNarrowViewport() {
-  const [isNarrow, setIsNarrow] = useState(
-    () =>
-      typeof window !== "undefined" &&
-      window.matchMedia("(max-width: 720px)").matches,
-  );
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 720px)");
-    const handler = (e: MediaQueryListEvent) => setIsNarrow(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, []);
-  return isNarrow;
-}
-
 export function LogsGallery({
   items,
   loading,
   fullscreen,
   deviceName,
+  onVisibleDateChange,
+  viewerId,
 }: {
   items: FeedLog[];
   loading: boolean;
@@ -51,16 +29,14 @@ export function LogsGallery({
   onLoadMore: () => void;
   deviceName: (id: string) => string;
   fullscreen: boolean;
+  onVisibleDateChange?: (date: string | null) => void;
+  viewerId: string;
 }) {
   const [wrapperEl, setWrapperEl] = useState<HTMLDivElement | null>(null);
   const [selectedItem, setSelectedItem] = useState<FeedLog | null>(null);
-  const wrapperRef = useCallback(
-    (el: HTMLDivElement | null) => setWrapperEl(el),
-    [],
-  );
+  const wrapperRef = useCallback((el: HTMLDivElement | null) => setWrapperEl(el), []);
   const [containerWidth, setContainerWidth] = useState(0);
   const rafRef = useRef<number | null>(null);
-  const isNarrow = useIsNarrowViewport();
 
   useEffect(() => {
     if (!wrapperEl) return;
@@ -97,38 +73,27 @@ export function LogsGallery({
     [items, containerWidth, gap],
   );
 
-  const scrollMargin = isNarrow
-    ? wrapperEl
-      ? wrapperEl.getBoundingClientRect().top + window.scrollY
-      : 0
-    : (wrapperEl?.offsetTop ?? 0);
+  const scrollMargin = wrapperEl?.offsetTop ?? 0;
 
   const virtualizer = useVirtualizer({
     count: rows.length,
-    getScrollElement: () =>
-      isNarrow
-        ? typeof window !== "undefined"
-          ? (window as unknown as HTMLElement)
-          : null
-        : ((wrapperEl?.closest(".logs-main") as HTMLElement | null) ??
-          wrapperEl),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    observeElementRect: (isNarrow
-      ? observeWindowRect
-      : observeElementRect) as any,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    observeElementOffset: (isNarrow
-      ? observeWindowOffset
-      : observeElementOffset) as any,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    scrollToFn: (isNarrow ? windowScroll : elementScroll) as any,
+    getScrollElement: () => (wrapperEl?.closest('.logs-main') as HTMLElement | null) ?? wrapperEl,
+    observeElementRect,
+    observeElementOffset,
+    scrollToFn: elementScroll,
     scrollMargin,
     estimateSize: (index) => rows[index].height + gap,
     overscan: 3,
     getItemKey: (index) =>
-      items[rows[index].startIndex]?.id ??
-      `${rows[index].startIndex}-${rows[index].count}`,
+      items[rows[index].startIndex]?.id ?? `${rows[index].startIndex}-${rows[index].count}`,
     useAnimationFrameWithResizeObserver: true,
+    onChange: (instance) => {
+      if (!onVisibleDateChange) return;
+      const firstRow = instance.getVirtualItems()[0];
+      const row = firstRow ? rows[firstRow.index] : null;
+      const item = row ? items[row.startIndex] : null;
+      onVisibleDateChange(item ? formatDayAndTime(item.ts) : null);
+    },
   });
 
   useEffect(() => {
@@ -145,46 +110,42 @@ export function LogsGallery({
       <div
         style={{
           height: `${virtualizer.getTotalSize()}px`,
-          width: "100%",
-          position: "relative",
+          width: '100%',
+          position: 'relative',
         }}
       >
         {virtualizer.getVirtualItems().map((virtualRow) => {
           const row = rows[virtualRow.index];
-          const rowItems = items.slice(
-            row.startIndex,
-            row.startIndex + row.count,
-          );
+          const rowItems = items.slice(row.startIndex, row.startIndex + row.count);
           return (
             <div
               key={virtualRow.key}
               style={{
-                position: "absolute",
+                position: 'absolute',
                 top: `${virtualRow.start - virtualizer.options.scrollMargin}px`,
                 left: 0,
-                width: "100%",
+                width: '100%',
                 height: `${row.height}px`,
-                display: "flex",
+                display: 'flex',
                 gap: `${gap}px`,
-                flexWrap: "nowrap",
+                flexWrap: 'nowrap',
               }}
             >
               {rowItems.map((item, k) => {
-                const image = getLogImage(item);
-                if (!image) return null;
                 const cellWidth = row.widths[k];
                 return (
                   <div
                     key={item.id}
-                    class={`logs-gallery-item${item.batch_status === "failed" ? " logs-gallery-item--unverified" : ""}`}
+                    class={`logs-gallery-item${item.batch_status === 'failed' ? ' logs-gallery-item--unverified' : ''}`}
                     style={{
                       width: `${cellWidth}px`,
                       height: `${row.height}px`,
                       flexShrink: 0,
                     }}
                   >
-                    <LogImage
-                      imageBytes={image}
+                    <EventImage
+                      eventId={item.id}
+                      viewerId={viewerId}
                       onClick={() => setSelectedItem(item)}
                     />
                   </div>
@@ -200,6 +161,7 @@ export function LogsGallery({
           item={selectedItem}
           deviceName={deviceName}
           onClose={() => setSelectedItem(null)}
+          viewerId={viewerId}
         />
       )}
     </div>

@@ -4,18 +4,20 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use jni::objects::{JByteArray, JClass, JString};
+use jni::objects::{JByteArray, JClass, JString, JValue};
 use jni::sys::{jboolean, jstring};
 use jni::{JNIEnv, JavaVM};
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
-use virtue_core::storage::FileStateStore;
 use virtue_core::{
-    AuthState, Config, CoreError, CoreResult, DeviceSettings, LifecycleObservation,
-    MonitorService, PlatformHooks, Screenshot, ServiceRole, ServiceStatus,
+    build_default_modules_reqwest, load_state, store_state, AuthState, Config, CoreError,
+    CoreResult, DeviceSettings, EventBus, EventChannel, LoginRequested, LoginResult,
+    LogoutRequested, Ping, PlatformHooks, ProcessStarted, ProcessStopped, ProcessStoppedReason,
+    Redacted, Screenshot, ScreenshotHooks, ScreenshotPaused, ScreenshotResumed, StatusRequest,
+    StatusResponse, UserStopRequested,
 };
 
 static CORE: OnceCell<AndroidCore> = OnceCell::new();
@@ -24,6 +26,7 @@ const DEFAULT_BASE_API_URL: &str = "https://api.virtueinitiative.org";
 const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
 const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
 const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
+const LOOP_INTERVAL: Duration = Duration::from_secs(1);
 
 const SCREENSHOT_SERVICE_CLASS: &str = "org/virtueinitiative/virtue/ScreenshotService";
 const CAPTURE_STATUS_READY: i32 = 0;
@@ -35,6 +38,7 @@ struct AndroidCore {
     runtime_config_file: PathBuf,
     java_vm: Arc<JavaVM>,
     stop: Arc<AtomicBool>,
+    user_stop: Arc<AtomicBool>,
     daemon_running: Mutex<bool>,
 }
 
@@ -88,7 +92,7 @@ impl AndroidPlatformHooks {
     }
 }
 
-impl PlatformHooks for AndroidPlatformHooks {
+impl ScreenshotHooks for AndroidPlatformHooks {
     fn take_screenshot(&self) -> CoreResult<Screenshot> {
         match self.capture_status()? {
             CAPTURE_STATUS_READY => {
@@ -111,14 +115,39 @@ impl PlatformHooks for AndroidPlatformHooks {
         }
     }
 
-    fn get_time_utc_ms(&self) -> CoreResult<i64> {
-        let duration = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|err| CoreError::CommandFailed(err.to_string()))?;
-        i64::try_from(duration.as_millis())
-            .map_err(|_| CoreError::InvalidState("system clock overflow"))
+    fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>> {
+        Ok(None)
+    }
+
+    fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
+        let mut env = self.java_vm.attach_current_thread().map_err(|err| {
+            CoreError::CommandFailed(format!("attach_current_thread failed: {err}"))
+        })?;
+
+        let uptime_ms: i64 = env
+            .call_static_method("android/os/SystemClock", "elapsedRealtime", "()J", &[])
+            .map_err(|err| {
+                CoreError::CommandFailed(format!(
+                    "failed to get boot time from system clock: {err}"
+                ))
+            })?
+            .j()
+            .map_err(|err| {
+                CoreError::CommandFailed(format!(
+                    "failed to get boot time from system clock: {err}"
+                ))
+            })?;
+
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|err| CoreError::CommandFailed(format!("system time error: {err}")))?
+            .as_millis() as i64;
+
+        Ok(Some(now_ms - uptime_ms))
     }
 }
+
+impl PlatformHooks for AndroidPlatformHooks {}
 
 #[no_mangle]
 pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeInit(
@@ -158,6 +187,7 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeInit(
                 runtime_config_file,
                 java_vm,
                 stop: Arc::new(AtomicBool::new(false)),
+                user_stop: Arc::new(AtomicBool::new(false)),
                 daemon_running: Mutex::new(false),
             })
             .map_err(|_| anyhow!("core already initialized"))?;
@@ -207,11 +237,18 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeLogin
         let password: String = env.get_string(&password)?.into();
         let device_name: String = env.get_string(&device_name)?.into();
         let core = core()?;
-        let hooks = AndroidPlatformHooks {
-            java_vm: core.java_vm.clone(),
-        };
-        let mut service = MonitorService::setup(build_core_config(core, &device_name), hooks)?;
-        service.login(&email, &password)?;
+        let (mut bus, state_path) = build_bus(core, &device_name)?;
+        let result = bus.request::<LoginRequested, LoginResult>(LoginRequested {
+            email,
+            password: Redacted(password),
+        })?;
+        if !result.success {
+            return Err(anyhow!(result.error.unwrap_or_else(|| {
+                "Login failed. Check your credentials and try again.".to_string()
+            })));
+        }
+        let state = bus.iter()?;
+        store_state(&state_path, &state)?;
         Ok(())
     })();
 
@@ -225,11 +262,10 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeLogou
 ) -> jstring {
     let result = (|| -> Result<()> {
         let core = core()?;
-        let hooks = AndroidPlatformHooks {
-            java_vm: core.java_vm.clone(),
-        };
-        let mut service = MonitorService::setup(build_core_config(core, "android-device"), hooks)?;
-        service.logout()?;
+        let (mut bus, state_path) = build_bus(core, "android-device")?;
+        bus.send(LogoutRequested)?;
+        let state = bus.iter()?;
+        store_state(&state_path, &state)?;
         Ok(())
     })();
 
@@ -242,10 +278,11 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeIsLog
     _class: JClass,
 ) -> jboolean {
     match core()
-        .and_then(|core| Ok(FileStateStore::new(&core.state_dir)?.load_auth_state()?))
+        .ok()
+        .and_then(|core| read_auth_state(&core.state_dir))
         .map(|auth| auth.device_credentials.is_some())
     {
-        Ok(true) => 1,
+        Some(true) => 1,
         _ => 0,
     }
 }
@@ -256,8 +293,8 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeGetDe
     _class: JClass,
 ) -> jstring {
     let device_id = core()
-        .and_then(|core| Ok(FileStateStore::new(&core.state_dir)?.load_auth_state()?))
         .ok()
+        .and_then(|core| read_auth_state(&core.state_dir))
         .and_then(|auth| auth.device_credentials.map(|device| device.device_id));
 
     match device_id {
@@ -287,6 +324,7 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeRunDa
             *guard = true;
         }
         core.stop.store(false, Ordering::SeqCst);
+        core.user_stop.store(false, Ordering::SeqCst);
 
         let daemon_result = run_daemon_loop(core);
 
@@ -313,19 +351,121 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeStopD
     to_jstring_result(&mut env, result)
 }
 
+#[no_mangle]
+pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeNoteUserStop(
+    mut env: JNIEnv,
+    _class: JClass,
+    source: JString,
+) -> jstring {
+    let result = (|| -> Result<()> {
+        let core = core()?;
+        let source: String = env.get_string(&source)?.into();
+        let (mut bus, state_path) = build_bus(core, "android-device")?;
+        bus.send(UserStopRequested { source })?;
+        let state = bus.iter()?;
+        store_state(&state_path, &state)?;
+        core.user_stop.store(true, Ordering::SeqCst);
+        Ok(())
+    })();
+
+    to_jstring_result(&mut env, result)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeGetStatusJson(
+    env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    let json = (|| -> Result<String> {
+        let core = core()?;
+        let (mut bus, _) = build_bus(core, "android-device")?;
+        let response = bus.request::<StatusRequest, StatusResponse>(StatusRequest)?;
+        Ok(serde_json::to_string(&response.status)?)
+    })()
+    .unwrap_or_else(|_| "{}".to_string());
+
+    env.new_string(json)
+        .map(|s| s.into_raw())
+        .unwrap_or(std::ptr::null_mut())
+}
+
+pub fn is_interactive(env: &mut JNIEnv) -> jni::errors::Result<bool> {
+    let activity_thread = env
+        .call_static_method(
+            "android/app/ActivityThread",
+            "currentApplication",
+            "()Landroid/app/Application;",
+            &[],
+        )?
+        .l()?;
+
+    let power_service = env
+        .get_static_field(
+            "android/content/Context",
+            "POWER_SERVICE",
+            "Ljava/lang/String;",
+        )?
+        .l()?;
+
+    let power_manager = env
+        .call_method(
+            &activity_thread,
+            "getSystemService",
+            "(Ljava/lang/String;)Ljava/lang/Object;",
+            &[JValue::Object(&power_service)],
+        )?
+        .l()?;
+
+    let interactive = env
+        .call_method(&power_manager, "isInteractive", "()Z", &[])?
+        .z()?;
+
+    Ok(interactive)
+}
+
+fn build_bus(core: &AndroidCore, device: &str) -> Result<(EventBus, PathBuf)> {
+    let cfg = build_core_config(core, device);
+    let modules = build_default_modules_reqwest(
+        cfg,
+        AndroidPlatformHooks {
+            java_vm: core.java_vm.clone(),
+        },
+    )?;
+    let state_path = core.state_dir.join("event_state.json");
+    let bus = EventBus::new(modules, load_state(&state_path)?)?;
+    Ok((bus, state_path))
+}
+
 fn run_daemon_loop(core: &AndroidCore) -> Result<()> {
-    let hooks = AndroidPlatformHooks {
-        java_vm: core.java_vm.clone(),
-    };
-    let mut service = MonitorService::setup(build_core_config(core, "android-device"), hooks)?;
-    let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStarted {
-        role: ServiceRole::PrimaryService,
-        detected_by: "android_foreground_service".to_string(),
-    });
+    let (mut bus, state_path) = build_bus(core, "android-device")?;
+    bus.send(ProcessStarted)?;
+    let state = bus.iter()?;
+    store_state(&state_path, &state)?;
+
+    // Starts as false since we assume we're booting or something similar
+    // Otherwise it stays paused until the state is updated
+    let mut was_interactive = false;
 
     while !core.stop.load(Ordering::SeqCst) {
-        let sleep_duration = match service.loop_iteration() {
-            Ok(outcome) => duration_until(outcome.next_run_at_ms),
+        let mut env = core.java_vm.attach_current_thread()?;
+        let current_interactive = is_interactive(&mut env)?;
+
+        if current_interactive != was_interactive {
+            was_interactive = current_interactive;
+            if !current_interactive {
+                bus.send(ScreenshotPaused)?;
+            } else {
+                bus.send(ScreenshotResumed)?;
+            }
+        }
+
+        let sleep_duration = match (|| -> Result<()> {
+            bus.send(Ping)?;
+            let state = bus.iter()?;
+            store_state(&state_path, &state)?;
+            Ok(())
+        })() {
+            Ok(()) => LOOP_INTERVAL,
             Err(err) => {
                 eprintln!("android-daemon: {err}");
                 ERROR_RETRY_INTERVAL
@@ -334,14 +474,14 @@ fn run_daemon_loop(core: &AndroidCore) -> Result<()> {
         sleep_interruptible(&core.stop, sleep_duration);
     }
 
-    let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStopObserved {
-        role: ServiceRole::PrimaryService,
-        raw_reason: "android_stop_request".to_string(),
-        shutdown_in_progress: false,
-        explicit_user_stop: false,
-        detected_by: "android_foreground_service".to_string(),
-    });
-    let _ = service.shutdown();
+    let reason = if core.user_stop.load(Ordering::SeqCst) {
+        ProcessStoppedReason::User
+    } else {
+        ProcessStoppedReason::Other
+    };
+    bus.send(ProcessStopped(reason))?;
+    let state = bus.iter()?;
+    let _ = store_state(&state_path, &state);
     Ok(())
 }
 
@@ -352,15 +492,6 @@ fn sleep_interruptible(stop: &AtomicBool, duration: Duration) {
         thread::sleep(tick);
         remaining = remaining.saturating_sub(tick);
     }
-}
-
-fn duration_until(next_run_at_ms: i64) -> Duration {
-    let now_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as i64)
-        .unwrap_or(next_run_at_ms);
-    let delta_ms = next_run_at_ms.saturating_sub(now_ms);
-    Duration::from_millis(delta_ms.max(0) as u64)
 }
 
 fn build_core_config(core: &AndroidCore, device_name: &str) -> Config {
@@ -417,8 +548,6 @@ fn parse_u64(value: &str) -> Result<u64> {
 }
 
 fn sanitize_state_dir(root: &Path) -> Result<()> {
-    sanitize_json_file::<AuthState>(root, "auth.json")?;
-    sanitize_json_file::<ServiceStatus>(root, "status.json")?;
     sanitize_json_file::<Option<DeviceSettings>>(root, "device_settings.json")?;
     Ok(())
 }
@@ -440,6 +569,13 @@ fn sanitize_json_file<T: DeserializeOwned>(root: &Path, name: &str) -> Result<()
 
     fs::remove_file(&path).with_context(|| format!("failed removing {}", path.display()))?;
     Ok(())
+}
+
+fn read_auth_state(state_dir: &Path) -> Option<AuthState> {
+    let path = state_dir.join("event_state.json");
+    let bytes = fs::read(&path).ok()?;
+    let state: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    serde_json::from_value(state.get("auth")?.clone()).ok()
 }
 
 fn core() -> Result<&'static AndroidCore> {

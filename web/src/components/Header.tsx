@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
-import { useAuth } from '../context/auth';
-import { ThemeButton } from './ThemeButton';
+import { useAPIContext } from '../utils/api';
 import { Button, IconButton } from '@virtueinitiative/shared-web';
 
 function MenuIcon() {
@@ -39,18 +38,22 @@ function CloseIcon() {
 }
 
 export function Header() {
-  const { token, ready, logout } = useAuth();
+  const api = useAPIContext();
   const { path: currentPath } = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
-  if (!ready || !token) return null;
-
-  const isActive = (routePath: string) =>
-    routePath === '/' ? currentPath === '/' : currentPath.startsWith(routePath);
 
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [currentPath]);
+
+  if (!api) return null;
+
+  const logout = () => {
+    void api.logout();
+  };
+
+  const isActive = (routePath: string) =>
+    routePath === '/' ? currentPath === '/' : currentPath.startsWith(routePath);
 
   function toggleMobileMenu() {
     setMobileMenuOpen((open) => !open);
@@ -68,7 +71,6 @@ export function Header() {
         </a>
       </div>
       <div class="app-header-mobile-actions">
-        <ThemeButton />
         <IconButton
           aria-expanded={mobileMenuOpen}
           aria-controls="mobile-header-menu"
@@ -92,8 +94,6 @@ export function Header() {
         </div>
 
         <div class="app-header-action-group">
-          <ThemeButton />
-
           <Button variant="ghost" onClick={logout} type="button">
             Log out
           </Button>

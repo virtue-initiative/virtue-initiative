@@ -181,7 +181,7 @@ fn is_missing_target_error(stderr: &str) -> bool {
         || lower.contains("not loaded")
 }
 
-const STOP_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
+const STOP_WAIT_TIMEOUT: Duration = Duration::from_secs(10);
 const STOP_WAIT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 fn wait_for_loaded_state(

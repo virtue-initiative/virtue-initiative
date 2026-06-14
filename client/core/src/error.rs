@@ -2,6 +2,9 @@ use std::io;
 
 use thiserror::Error;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use crate::events::remote::IpcError;
+
 pub type CoreResult<T> = Result<T, CoreError>;
 
 #[derive(Debug, Error)]
@@ -10,6 +13,12 @@ pub enum CoreError {
     Io(#[from] io::Error),
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),
+    #[error("serialization error in {context}: {source}")]
+    SerdeContext {
+        context: String,
+        #[source]
+        source: serde_json::Error,
+    },
     #[error("messagepack encode error: {0}")]
     MessagePackEncode(#[from] rmp_serde::encode::Error),
     #[error("image error: {0}")]
@@ -20,7 +29,7 @@ pub enum CoreError {
     Base64(#[from] base64::DecodeError),
     #[error("argon2 error: {0}")]
     Argon2(String),
-    #[error("request failed with status {status}: {message}")]
+    #[error("{message}")]
     HttpStatus { status: u16, message: String },
     #[error("service has not been authenticated")]
     NotAuthenticated,
@@ -32,6 +41,15 @@ pub enum CoreError {
     Crypto(&'static str),
     #[error("external command failed: {0}")]
     CommandFailed(String),
+    #[error("IPC error: {0}")]
+    Ipc(String),
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+impl From<IpcError> for CoreError {
+    fn from(e: IpcError) -> Self {
+        CoreError::Ipc(e.to_string())
+    }
 }
 
 impl CoreError {

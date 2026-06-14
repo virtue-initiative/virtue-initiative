@@ -1,8 +1,7 @@
 use std::process::{Command, Stdio};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
-use virtue_core::{CoreError, CoreResult, PlatformHooks, Screenshot};
+use virtue_core::{CoreError, CoreResult, PlatformHooks, Screenshot, ScreenshotHooks};
 
 #[derive(Clone, Copy, Debug)]
 pub enum CaptureBackend {
@@ -17,17 +16,19 @@ pub struct CaptureProbe {
 }
 
 pub fn detect_backend() -> Option<CaptureBackend> {
-    let wayland_available = env_var_nonempty("WAYLAND_DISPLAY").is_some();
-    let x11_available = resolve_x11_display().is_some();
+    detect_backend_from(
+        env_var_nonempty("WAYLAND_DISPLAY").is_some(),
+        resolve_x11_display().is_some(),
+    )
+}
 
+fn detect_backend_from(wayland_available: bool, x11_available: bool) -> Option<CaptureBackend> {
     if wayland_available {
         return Some(CaptureBackend::Wayland);
     }
-
     if x11_available {
         return Some(CaptureBackend::X11);
     }
-
     None
 }
 
@@ -194,6 +195,36 @@ fn run_capture_command(
     Ok(output.stdout)
 }
 
+fn parse_btime_ms(proc_stat: &str) -> Option<i64> {
+    for line in proc_stat.lines() {
+        if let Some(rest) = line.strip_prefix("btime ") {
+            return rest.trim().parse::<i64>().ok().map(|secs| secs * 1000);
+        }
+    }
+    None
+}
+
+// Parses `journalctl --list-boots -o json` output and returns the last-entry timestamp
+// (µs → ms) of the previous boot (index == -1). Returns None if there is no previous boot,
+// the output is unparseable, or journald has no persistent log.
+fn parse_last_shutdown_ms(json: &str) -> Option<i64> {
+    let entries: Vec<serde_json::Value> = serde_json::from_str(json).ok()?;
+    for entry in &entries {
+        let Some(index) = entry.get("index").and_then(|v| v.as_i64()) else {
+            continue;
+        };
+        if index != -1 {
+            continue;
+        }
+        let last_entry = entry.get("last_entry")?;
+        let us = last_entry
+            .as_i64()
+            .or_else(|| last_entry.as_str()?.parse::<i64>().ok())?;
+        return Some(us / 1000);
+    }
+    None
+}
+
 #[derive(Clone)]
 pub struct LinuxPlatformHooks;
 
@@ -203,7 +234,7 @@ impl LinuxPlatformHooks {
     }
 }
 
-impl PlatformHooks for LinuxPlatformHooks {
+impl ScreenshotHooks for LinuxPlatformHooks {
     fn take_screenshot(&self) -> CoreResult<Screenshot> {
         let bytes = capture_screen().map_err(|err| CoreError::CommandFailed(err.to_string()))?;
         Ok(Screenshot {
@@ -213,11 +244,134 @@ impl PlatformHooks for LinuxPlatformHooks {
         })
     }
 
-    fn get_time_utc_ms(&self) -> CoreResult<i64> {
-        let duration = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|err| CoreError::CommandFailed(err.to_string()))?;
-        i64::try_from(duration.as_millis())
-            .map_err(|_| CoreError::InvalidState("system clock overflow"))
+    fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>> {
+        let output = Command::new("journalctl")
+            .args(["--list-boots", "-o", "json"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+            .ok();
+        let Some(output) = output else {
+            return Ok(None);
+        };
+        if !output.status.success() {
+            return Ok(None);
+        }
+        let json = String::from_utf8_lossy(&output.stdout);
+        Ok(parse_last_shutdown_ms(&json))
+    }
+
+    fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
+        let stat = std::fs::read_to_string("/proc/stat")
+            .map_err(|e| CoreError::CommandFailed(e.to_string()))?;
+        Ok(parse_btime_ms(&stat))
+    }
+}
+
+impl PlatformHooks for LinuxPlatformHooks {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use virtue_core::ScreenshotHooks;
+
+    #[test]
+    fn is_session_unavailable_text_matches_known_error_strings() {
+        assert!(is_session_unavailable_text("no graphical session detected"));
+        assert!(is_session_unavailable_text("X11 display unavailable"));
+        assert!(is_session_unavailable_text("unable to open X server"));
+        assert!(is_session_unavailable_text("can't open display"));
+    }
+
+    #[test]
+    fn is_session_unavailable_text_rejects_unrelated_errors() {
+        assert!(!is_session_unavailable_text("permission denied"));
+        assert!(!is_session_unavailable_text("command not found: grim"));
+        assert!(!is_session_unavailable_text(""));
+        assert!(!is_session_unavailable_text("out of memory"));
+    }
+
+    #[test]
+    fn detect_backend_returns_wayland_when_wayland_available() {
+        assert!(matches!(
+            detect_backend_from(true, false),
+            Some(CaptureBackend::Wayland)
+        ));
+    }
+
+    #[test]
+    fn detect_backend_prefers_wayland_over_x11() {
+        assert!(matches!(
+            detect_backend_from(true, true),
+            Some(CaptureBackend::Wayland)
+        ));
+    }
+
+    #[test]
+    fn detect_backend_returns_x11_when_only_x11_available() {
+        assert!(matches!(
+            detect_backend_from(false, true),
+            Some(CaptureBackend::X11)
+        ));
+    }
+
+    #[test]
+    fn detect_backend_returns_none_when_no_display() {
+        assert!(detect_backend_from(false, false).is_none());
+    }
+
+    #[test]
+    fn platform_hooks_get_time_utc_ms_is_positive() {
+        let hooks = LinuxPlatformHooks::new();
+        let ms = hooks.get_time_utc_ms().expect("clock should not fail");
+        assert!(ms > 0);
+    }
+
+    #[test]
+    fn parse_btime_ms_extracts_boot_time_from_proc_stat() {
+        let content = "cpu  1234 0 5678 9999\nbtime 1717200000\ncpu0 0 0 0 0\n";
+        assert_eq!(parse_btime_ms(content), Some(1_717_200_000_000));
+    }
+
+    #[test]
+    fn parse_btime_ms_returns_none_when_btime_absent() {
+        let content = "cpu  1234 0 5678 9999\nprocs_running 1\n";
+        assert_eq!(parse_btime_ms(content), None);
+    }
+
+    #[test]
+    fn parse_last_shutdown_ms_extracts_previous_boot_last_entry() {
+        let json = r#"[
+            {"index":-1,"boot_id":"aaa","first_entry":1717200000000000,"last_entry":1717286400000000},
+            {"index":0,"boot_id":"bbb","first_entry":1717300000000000,"last_entry":1717310000000000}
+        ]"#;
+        assert_eq!(parse_last_shutdown_ms(json), Some(1_717_286_400_000));
+    }
+
+    #[test]
+    fn parse_last_shutdown_ms_handles_string_timestamps() {
+        let json = r#"[
+            {"index":-1,"boot_id":"aaa","first_entry":"1717200000000000","last_entry":"1717286400000000"},
+            {"index":0,"boot_id":"bbb","first_entry":"1717300000000000","last_entry":"1717310000000000"}
+        ]"#;
+        assert_eq!(parse_last_shutdown_ms(json), Some(1_717_286_400_000));
+    }
+
+    #[test]
+    fn parse_last_shutdown_ms_returns_none_when_only_current_boot() {
+        let json = r#"[{"index":0,"boot_id":"bbb","first_entry":1717300000000000,"last_entry":1717310000000000}]"#;
+        assert_eq!(parse_last_shutdown_ms(json), None);
+    }
+
+    #[test]
+    fn parse_last_shutdown_ms_returns_none_on_empty_array() {
+        assert_eq!(parse_last_shutdown_ms("[]"), None);
+    }
+
+    #[test]
+    fn parse_last_shutdown_ms_returns_none_on_invalid_json() {
+        assert_eq!(parse_last_shutdown_ms("not json"), None);
+        assert_eq!(parse_last_shutdown_ms(""), None);
     }
 }

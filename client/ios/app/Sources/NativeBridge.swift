@@ -32,6 +32,9 @@ private func virtue_ios_native_is_logged_in() -> Bool
 @_silgen_name("virtue_ios_native_get_device_id")
 private func virtue_ios_native_get_device_id() -> UnsafeMutablePointer<CChar>?
 
+@_silgen_name("virtue_ios_native_get_status_json")
+private func virtue_ios_native_get_status_json() -> UnsafeMutablePointer<CChar>?
+
 @_silgen_name("virtue_ios_native_run_daemon_loop")
 private func virtue_ios_native_run_daemon_loop() -> UnsafeMutablePointer<CChar>?
 
@@ -115,6 +118,16 @@ enum NativeBridge {
 
     static func getDeviceId() -> String? {
         guard let ptr = virtue_ios_native_get_device_id() else {
+            return nil
+        }
+
+        let value = String(cString: ptr)
+        virtue_ios_free_string(ptr)
+        return value
+    }
+
+    static func getStatusJson() -> String? {
+        guard let ptr = virtue_ios_native_get_status_json() else {
             return nil
         }
 

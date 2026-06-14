@@ -12,6 +12,12 @@ export default defineConfig(({ mode }) => {
     .filter(Boolean);
 
   return {
+    define:
+      mode === 'test'
+        ? {
+            'import.meta.env.VITE_API_URL': JSON.stringify('http://localhost:8787'),
+          }
+        : undefined,
     plugins: [
       preact({
         prerender: {
@@ -37,7 +43,16 @@ export default defineConfig(({ mode }) => {
       dedupe: ['preact'],
     },
     test: {
-      environment: 'node',
+      environment: 'happy-dom',
+      globals: true,
+      setupFiles: ['./src/test-setup.ts'],
+      silent: true,
+      server: {
+        deps: {
+          // Inline so Vite applies the react→preact/compat alias (avoids duplicate hook system)
+          inline: ['@tanstack/react-virtual', '@tanstack/virtual-core'],
+        },
+      },
     },
   };
 });

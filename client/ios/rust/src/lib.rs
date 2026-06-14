@@ -5,16 +5,17 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
-use virtue_core::storage::FileStateStore;
 use virtue_core::{
-    AuthState, CaptureAvailabilityState, CapturePermissionState, Config, CoreError, CoreResult,
-    DeviceSettings, LifecycleObservation, LifecycleOrigin, MonitorService, PlatformHooks,
-    Screenshot, ServiceRole, ServiceStatus, ServiceStopMarker,
+    build_default_modules_reqwest, load_state, store_state, AuthState, Config, CoreError,
+    CoreResult, DeviceSettings, EventBus, EventChannel, LoginRequested, LoginResult,
+    LogoutRequested, Ping, PlatformHooks, ProcessStarted, ProcessStopped, ProcessStoppedReason,
+    Redacted, Screenshot, ScreenshotHooks, ScreenshotResumed, StatusRequest, StatusResponse,
+    UserStopRequested,
 };
 
 static CORE: OnceCell<IosCore> = OnceCell::new();
@@ -23,6 +24,13 @@ const DEFAULT_BASE_API_URL: &str = "https://api.virtueinitiative.org";
 const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
 const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
 const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
+// Ping every second (like the Android client). The lifecycle module flags a
+// `PingGapWhileRunning` alert once the gap between pings exceeds 10s, so a long
+// loop interval trips it on every iteration. Safari can suspend/kill the
+// extension at any time; a fresh `ProcessStarted` resets the start-gap guard so
+// the post-resume gap is not misreported. Capture cadence is governed
+// separately by `capture_interval_seconds`, not this loop interval.
+const LOOP_INTERVAL: Duration = Duration::from_secs(1);
 
 const CAPTURE_STATUS_READY: c_int = 0;
 const CAPTURE_STATUS_PERMISSION_MISSING: c_int = 1;
@@ -53,12 +61,6 @@ struct IosCore {
 #[derive(Clone)]
 struct IosPlatformHooks;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct CaptureState {
-    permission: CapturePermissionState,
-    availability: CaptureAvailabilityState,
-}
-
 impl IosPlatformHooks {
     fn capture_status(&self) -> c_int {
         unsafe { virtue_ios_capture_status() }
@@ -86,7 +88,7 @@ impl IosPlatformHooks {
     }
 }
 
-impl PlatformHooks for IosPlatformHooks {
+impl ScreenshotHooks for IosPlatformHooks {
     fn take_screenshot(&self) -> CoreResult<Screenshot> {
         match self.capture_status() {
             CAPTURE_STATUS_READY => {
@@ -112,14 +114,16 @@ impl PlatformHooks for IosPlatformHooks {
         }
     }
 
-    fn get_time_utc_ms(&self) -> CoreResult<i64> {
-        let duration = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|err| CoreError::CommandFailed(err.to_string()))?;
-        i64::try_from(duration.as_millis())
-            .map_err(|_| CoreError::InvalidState("system clock overflow"))
+    fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>> {
+        Ok(None)
+    }
+
+    fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
+        Ok(None)
     }
 }
+
+impl PlatformHooks for IosPlatformHooks {}
 
 #[no_mangle]
 pub extern "C" fn virtue_ios_native_init(
@@ -201,11 +205,19 @@ pub extern "C" fn virtue_ios_native_login(
         let password = c_string_or_empty(password);
         let device_name = c_string_or_empty(device_name);
         let core = core()?;
-
-        with_ephemeral_service(core, &device_name, |service| {
-            service.login(&email, &password)?;
-            Ok(())
-        })
+        let (mut bus, state_path) = build_bus(core, &device_name)?;
+        let result = bus.request::<LoginRequested, LoginResult>(LoginRequested {
+            email,
+            password: Redacted(password),
+        })?;
+        if !result.success {
+            return Err(anyhow!(result.error.unwrap_or_else(|| {
+                "Login failed. Check your credentials and try again.".to_string()
+            })));
+        }
+        let state = bus.iter()?;
+        store_state(&state_path, &state)?;
+        Ok(())
     })();
 
     into_c_result(result)
@@ -215,10 +227,11 @@ pub extern "C" fn virtue_ios_native_login(
 pub extern "C" fn virtue_ios_native_logout() -> *mut c_char {
     let result = (|| -> Result<()> {
         let core = core()?;
-        with_ephemeral_service(core, "ios-device", |service| {
-            service.logout()?;
-            Ok(())
-        })
+        let (mut bus, state_path) = build_bus(core, "ios-device")?;
+        bus.send(LogoutRequested)?;
+        let state = bus.iter()?;
+        store_state(&state_path, &state)?;
+        Ok(())
     })();
 
     into_c_result(result)
@@ -227,23 +240,51 @@ pub extern "C" fn virtue_ios_native_logout() -> *mut c_char {
 #[no_mangle]
 pub extern "C" fn virtue_ios_native_is_logged_in() -> bool {
     core()
-        .and_then(|core| Ok(FileStateStore::new(&core.state_dir)?.load_auth_state()?))
-        .map(|auth| auth.device_credentials.is_some())
+        .map(|core| {
+            read_auth_state(&core.state_dir)
+                .device_credentials
+                .is_some()
+        })
         .unwrap_or(false)
 }
 
 #[no_mangle]
 pub extern "C" fn virtue_ios_native_get_device_id() -> *mut c_char {
-    let device_id = core()
-        .and_then(|core| Ok(FileStateStore::new(&core.state_dir)?.load_auth_state()?))
-        .ok()
-        .and_then(|auth| auth.device_credentials.map(|device| device.device_id));
+    let device_id = core().ok().and_then(|core| {
+        read_auth_state(&core.state_dir)
+            .device_credentials
+            .map(|d| d.device_id)
+    });
 
     match device_id {
         Some(value) => CString::new(value)
             .map(CString::into_raw)
             .unwrap_or(std::ptr::null_mut()),
         None => std::ptr::null_mut(),
+    }
+}
+
+/// Build a transient bus from the shared event state and ask it for a status
+/// snapshot. Returns a JSON-serialized `ServiceStatus` (caller frees with
+/// `virtue_ios_free_string`), or null on failure.
+///
+/// Status is no longer published to a `status.json` file by the core; it is
+/// produced on demand via a `StatusRequest`/`StatusResponse` round-trip on the
+/// event bus, mirroring the Android client.
+#[no_mangle]
+pub extern "C" fn virtue_ios_native_get_status_json() -> *mut c_char {
+    let json = (|| -> Result<String> {
+        let core = core()?;
+        let (mut bus, _) = build_bus(core, "ios-device")?;
+        let response = bus.request::<StatusRequest, StatusResponse>(StatusRequest)?;
+        Ok(serde_json::to_string(&response.status)?)
+    })();
+
+    match json {
+        Ok(value) => CString::new(value)
+            .map(CString::into_raw)
+            .unwrap_or(std::ptr::null_mut()),
+        Err(_) => std::ptr::null_mut(),
     }
 }
 
@@ -294,9 +335,7 @@ pub extern "C" fn virtue_ios_native_stop_daemon() -> *mut c_char {
 }
 
 #[no_mangle]
-pub extern "C" fn virtue_ios_native_pause_monitoring(
-    source: *const c_char,
-) -> *mut c_char {
+pub extern "C" fn virtue_ios_native_pause_monitoring(source: *const c_char) -> *mut c_char {
     let result = (|| -> Result<()> {
         let core = core()?;
         let _source = match c_string_or_empty(source).trim() {
@@ -319,20 +358,18 @@ pub extern "C" fn virtue_ios_native_pause_monitoring(
 }
 
 #[no_mangle]
-pub extern "C" fn virtue_ios_native_request_pause_monitoring(
-    source: *const c_char,
-) -> *mut c_char {
+pub extern "C" fn virtue_ios_native_request_pause_monitoring(source: *const c_char) -> *mut c_char {
     let result = (|| -> Result<()> {
         let core = core()?;
         let source = match c_string_or_empty(source).trim() {
             "" => "ios_pause_button".to_string(),
             value => value.to_string(),
         };
-
-        with_ephemeral_service(core, "ios-device", |service| {
-            service.note_stop_requested_by_user(ServiceRole::PrimaryService, &source)?;
-            Ok(())
-        })
+        let (mut bus, state_path) = build_bus(core, "ios-device")?;
+        bus.send(UserStopRequested { source })?;
+        let state = bus.iter()?;
+        store_state(&state_path, &state)?;
+        Ok(())
     })();
 
     into_c_result(result)
@@ -351,54 +388,29 @@ pub unsafe extern "C" fn virtue_ios_free_string(value: *mut c_char) {
 }
 
 fn run_daemon_loop(core: &IosCore) -> Result<()> {
-    let mut service =
-        MonitorService::setup(build_core_config(core, "ios-device"), IosPlatformHooks)?;
-    seed_ephemeral_service_stop_marker(&core.state_dir, ServiceRole::PrimaryService)?;
-    let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStarted {
-        role: ServiceRole::PrimaryService,
-        detected_by: "ios_extension_daemon".to_string(),
-    });
-    let mut last_capture_state = None;
-    sync_capture_state(
-        &mut service,
-        &mut last_capture_state,
-        "ios_extension_capture_poll",
-    );
+    let (mut bus, state_path) = build_bus(core, "ios-device")?;
+    bus.send(ProcessStarted)?;
+    // Enable screenshot capture. The screenshot module only captures while it is
+    // "enabled", which the lifecycle module otherwise flips on via
+    // `UserSessionLogin` — a desktop-only OS event that never fires on iOS.
+    // The Safari extension only starts this daemon while monitoring is enabled
+    // (it sends `UserStopRequested`/stops the loop when the user pauses), so the
+    // loop running at all means capture should be on. Mirrors how the Android
+    // client drives `ScreenshotResumed` from its daemon loop rather than relying
+    // on a session-login event.
+    bus.send(ScreenshotResumed)?;
+    let state = bus.iter()?;
+    store_state(&state_path, &state)?;
 
     while !core.stop.load(Ordering::SeqCst) {
-        if let Some(_intent) = service.take_stop_intent(ServiceRole::PrimaryService)? {
-            set_stop_request(
-                core,
-                StopRequest {
-                    raw_reason: "user_pause".to_string(),
-                    detected_by: "ios_extension_daemon".to_string(),
-                    explicit_user_stop: true,
-                },
-            )?;
-            core.stop.store(true, Ordering::SeqCst);
-            continue;
-        }
-
-        sync_capture_state(
-            &mut service,
-            &mut last_capture_state,
-            "ios_extension_capture_poll",
-        );
-        let sleep_duration = match service.loop_iteration() {
-            Ok(outcome) => {
-                sync_capture_state(
-                    &mut service,
-                    &mut last_capture_state,
-                    "ios_extension_capture_poll",
-                );
-                duration_until(outcome.next_run_at_ms)
-            }
+        let sleep_duration = match (|| -> Result<()> {
+            bus.send(Ping)?;
+            let state = bus.iter()?;
+            store_state(&state_path, &state)?;
+            Ok(())
+        })() {
+            Ok(()) => LOOP_INTERVAL,
             Err(err) => {
-                sync_capture_state(
-                    &mut service,
-                    &mut last_capture_state,
-                    "ios_extension_capture_poll",
-                );
                 eprintln!("ios-daemon: {err}");
                 ERROR_RETRY_INTERVAL
             }
@@ -406,76 +418,20 @@ fn run_daemon_loop(core: &IosCore) -> Result<()> {
         sleep_interruptible(&core.stop, sleep_duration);
     }
 
-    let stop_request = if let Some(_intent) = service.take_stop_intent(ServiceRole::PrimaryService)? {
-        Some(StopRequest {
-            raw_reason: "user_pause".to_string(),
-            detected_by: "ios_extension_daemon".to_string(),
-            explicit_user_stop: true,
-        })
-    } else {
-        take_stop_request(core)?
-    };
-
-    let stop_request = stop_request.unwrap_or_else(|| StopRequest {
+    let stop_request = take_stop_request(core)?.unwrap_or_else(|| StopRequest {
         raw_reason: "ios_stop_request".to_string(),
         detected_by: "ios_extension_daemon".to_string(),
         explicit_user_stop: false,
     });
-    let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStopObserved {
-        role: ServiceRole::PrimaryService,
-        raw_reason: stop_request.raw_reason,
-        shutdown_in_progress: false,
-        explicit_user_stop: stop_request.explicit_user_stop,
-        detected_by: stop_request.detected_by,
-    });
-    let _ = service.shutdown();
+    let reason = if stop_request.explicit_user_stop {
+        ProcessStoppedReason::User
+    } else {
+        ProcessStoppedReason::Other
+    };
+    bus.send(ProcessStopped(reason))?;
+    let state = bus.iter()?;
+    let _ = store_state(&state_path, &state);
     Ok(())
-}
-
-fn sync_capture_state<P: PlatformHooks>(
-    service: &mut MonitorService<P>,
-    last_capture_state: &mut Option<CaptureState>,
-    detected_by: &str,
-) {
-    let current_state = current_capture_state();
-    if last_capture_state.as_ref() == Some(&current_state) {
-        return;
-    }
-
-    let _ = service.record_lifecycle_observation(LifecycleObservation::CapturePermissionChanged {
-        state: current_state.permission,
-        detected_by: detected_by.to_string(),
-    });
-    let _ = service.record_lifecycle_observation(LifecycleObservation::CaptureAvailabilityChanged {
-        state: current_state.availability,
-        detected_by: detected_by.to_string(),
-    });
-    *last_capture_state = Some(current_state);
-}
-
-fn current_capture_state() -> CaptureState {
-    match unsafe { virtue_ios_capture_status() } {
-        CAPTURE_STATUS_READY => CaptureState {
-            permission: CapturePermissionState::Granted,
-            availability: CaptureAvailabilityState::Ready,
-        },
-        CAPTURE_STATUS_PERMISSION_MISSING => CaptureState {
-            permission: CapturePermissionState::Missing,
-            availability: CaptureAvailabilityState::Blocked,
-        },
-        CAPTURE_STATUS_SESSION_UNAVAILABLE => CaptureState {
-            permission: CapturePermissionState::Granted,
-            availability: CaptureAvailabilityState::Blocked,
-        },
-        CAPTURE_STATUS_UNKNOWN => CaptureState {
-            permission: CapturePermissionState::Unknown,
-            availability: CaptureAvailabilityState::Unknown,
-        },
-        _ => CaptureState {
-            permission: CapturePermissionState::Unknown,
-            availability: CaptureAvailabilityState::Unknown,
-        },
-    }
 }
 
 fn sleep_interruptible(stop: &AtomicBool, duration: Duration) {
@@ -487,13 +443,12 @@ fn sleep_interruptible(stop: &AtomicBool, duration: Duration) {
     }
 }
 
-fn duration_until(next_run_at_ms: i64) -> Duration {
-    let now_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as i64)
-        .unwrap_or(next_run_at_ms);
-    let delta_ms = next_run_at_ms.saturating_sub(now_ms);
-    Duration::from_millis(delta_ms.max(0) as u64)
+fn build_bus(core: &IosCore, device: &str) -> Result<(EventBus, PathBuf)> {
+    let cfg = build_core_config(core, device);
+    let modules = build_default_modules_reqwest(cfg, IosPlatformHooks)?;
+    let state_path = core.state_dir.join("event_state.json");
+    let bus = EventBus::new(modules, load_state(&state_path)?)?;
+    Ok((bus, state_path))
 }
 
 fn build_core_config(core: &IosCore, device_name: &str) -> Config {
@@ -506,24 +461,6 @@ fn build_core_config(core: &IosCore, device_name: &str) -> Config {
         Duration::from_secs(DEFAULT_CAPTURE_INTERVAL_SECONDS),
         Duration::from_secs(DEFAULT_BATCH_WINDOW_SECONDS),
     )
-}
-
-fn with_ephemeral_service<T>(
-    core: &IosCore,
-    device_name: &str,
-    action: impl FnOnce(&mut MonitorService<IosPlatformHooks>) -> Result<T>,
-) -> Result<T> {
-    let mut service =
-        MonitorService::setup(build_core_config(core, device_name), IosPlatformHooks)?;
-    let result = action(&mut service);
-    let shutdown_result = service.shutdown();
-
-    match (result, shutdown_result) {
-        (Ok(value), Ok(())) => Ok(value),
-        (Err(err), Ok(())) => Err(err),
-        (Ok(_), Err(err)) => Err(err.into()),
-        (Err(err), Err(_shutdown_err)) => Err(err),
-    }
 }
 
 fn set_stop_request(core: &IosCore, request: StopRequest) -> Result<()> {
@@ -585,8 +522,6 @@ fn parse_u64(value: &str) -> Result<u64> {
 }
 
 fn sanitize_state_dir(root: &Path) -> Result<()> {
-    sanitize_json_file::<AuthState>(root, "auth.json")?;
-    sanitize_json_file::<ServiceStatus>(root, "status.json")?;
     sanitize_json_file::<Option<DeviceSettings>>(root, "device_settings.json")?;
     Ok(())
 }
@@ -610,18 +545,18 @@ fn sanitize_json_file<T: DeserializeOwned>(root: &Path, name: &str) -> Result<()
     Ok(())
 }
 
-fn seed_ephemeral_service_stop_marker(state_dir: &Path, role: ServiceRole) -> Result<()> {
-    let store = FileStateStore::new(state_dir)?;
-    let stopped_at_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as i64)
-        .unwrap_or(0);
-    store.save_service_stop_marker(&ServiceStopMarker {
-        role,
-        origin: LifecycleOrigin::SystemShutdown,
-        stopped_at_ms,
-    })?;
-    Ok(())
+fn read_auth_state(state_dir: &Path) -> AuthState {
+    let path = state_dir.join("event_state.json");
+    let Ok(bytes) = std::fs::read(&path) else {
+        return AuthState::default();
+    };
+    let Ok(state) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return AuthState::default();
+    };
+    state
+        .get("auth")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default()
 }
 
 fn core() -> Result<&'static IosCore> {

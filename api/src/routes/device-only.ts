@@ -3,7 +3,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { authenticate } from '../middleware/auth';
 import { validateZ } from '../middleware/validation';
-import { getRequestApiBaseUrl } from '../lib/base-path';
 import {
   createBatch,
   createDevice,
@@ -73,15 +72,6 @@ const deviceLogSchema = z.object({
   data: z.record(z.string(), z.unknown()).optional().default({}),
 });
 
-function getConfiguredHashBaseUrl(env: Env) {
-  const trimmed = env.HASH_SERVER_URL?.trim();
-  return trimmed ? trimmed : null;
-}
-
-function getHashBaseUrl(requestUrl: string, env: Env) {
-  return getConfiguredHashBaseUrl(env) ?? getRequestApiBaseUrl(requestUrl, env.API_BASE_PATH);
-}
-
 function parseAccessKeysPayload(raw: string) {
   const parsed = JSON.parse(raw) as unknown;
   const payload = accessKeysSchema.parse(parsed);
@@ -100,44 +90,16 @@ function parseAccessKeysPayload(raw: string) {
 async function readHashState(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   deviceId: string,
-  authorization: string,
-  hashBaseUrl: string | null,
 ) {
-  if (!hashBaseUrl) {
-    const state = await getHashState(c.env.DB, deviceId);
-    return state ? state.state : ZERO_STATE.buffer;
-  }
-
-  const response = await fetch(`${hashBaseUrl}/hash`, {
-    headers: { Authorization: authorization },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to read hash state: ${response.status} ${await response.text()}`);
-  }
-
-  return response.arrayBuffer();
+  const state = await getHashState(c.env.DB, deviceId);
+  return state ? state.state : ZERO_STATE.buffer;
 }
 
 async function resetHashState(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   device: { id: string; owner: string },
-  hashBaseUrl: string | null,
-  serverToken: string,
 ) {
-  if (!hashBaseUrl) {
-    await resetStoredHashState(c.env.DB, device.id, Date.now());
-    return;
-  }
-
-  const response = await fetch(`${hashBaseUrl}/hash`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${serverToken}` },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to reset hash state: ${response.status} ${await response.text()}`);
-  }
+  await resetStoredHashState(c.env.DB, device.id, Date.now());
 }
 
 async function createDeviceSession(
@@ -191,6 +153,11 @@ deviceOnly.get('/device', authenticate('device-access'), async (c) => {
     return c.json({ error: 'Not found' }, 404);
   }
 
+  const hashBaseUrl = c.env.HASH_SERVER_URL?.trim();
+  if (!hashBaseUrl) {
+    return c.json({ error: 'Hash server not configured' }, 500);
+  }
+
   const recipients = await listBatchAccessRecipientsForOwner(c.env.DB, device.owner);
   const owner = recipients.find((recipient) => recipient.id === device.owner);
 
@@ -212,7 +179,7 @@ deviceOnly.get('/device', authenticate('device-access'), async (c) => {
         user_id: recipient.id,
         pub_key: encodeBase64(recipient.pub_key!),
       })),
-    hash_base_url: getHashBaseUrl(c.req.url, c.env),
+    hash_base_url: hashBaseUrl,
   });
 });
 
@@ -267,14 +234,8 @@ deviceOnly.post(
     }
 
     const { start_time, end_time, access_keys, file } = c.req.valid('form');
-    const authorization = c.req.header('Authorization');
 
-    if (!authorization) {
-      return c.json({ error: 'Unauthorized' }, 401);
-    }
-
-    const configuredHashBaseUrl = getConfiguredHashBaseUrl(c.env);
-    const hashState = await readHashState(c, device.id, authorization, configuredHashBaseUrl);
+    const hashState = await readHashState(c, device.id);
     const endHash = encodeHex(hashState);
     const batchId = uuidv4();
     const key = `user/${device.owner}/batches/${batchId}.enc`;
@@ -306,12 +267,7 @@ deviceOnly.post(
       access_keys: JSON.stringify(parsedAccessKeys),
       created_at: createdAt,
     });
-    await resetHashState(
-      c,
-      device,
-      configuredHashBaseUrl,
-      await generateToken('server', device.id, c.env.JWT_PRIVATE_KEY, 60),
-    );
+    await resetHashState(c, device);
 
     return c.json({ id: batchId, start_time, end_time, end_hash: endHash, url }, 201);
   },

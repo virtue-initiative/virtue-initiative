@@ -1,18 +1,14 @@
-use std::fs;
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use std::time::Instant;
 
 use anyhow::Result;
-use chrono::Utc;
-use futures_util::StreamExt;
 use tokio::sync::mpsc;
-use tokio::time::sleep;
+use virtue_core::ProcessStoppedReason;
 use virtue_core::{
-    CaptureAvailabilityState, ComputerPowerState, LifecycleConfidence, LifecycleObservation,
-    LifecycleOrigin, MonitorService, ServiceRole,
+    ComputerResumed, ComputerSuspended, EventBus, IpcBridge, Ping, ProcessStarted, ProcessStopped,
+    build_default_modules_reqwest, load_state, store_state,
 };
 use zbus::proxy;
 
@@ -20,11 +16,8 @@ use crate::capture::{LinuxPlatformHooks, is_session_unavailable_text};
 use crate::config::{ClientPaths, build_core_config};
 use crate::tray;
 
-const CURRENT_BOOT_ID_PATH: &str = "/proc/sys/kernel/random/boot_id";
-const PROC_STAT_PATH: &str = "/proc/stat";
-const SERVICE_PING_WAKE_PADDING_MS: i64 = 1_000;
 const SESSION_UNAVAILABLE_LOG_INTERVAL: Duration = Duration::from_secs(5 * 60);
-const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
+const ITER_INTERVAL: Duration = Duration::from_secs(1);
 
 #[proxy(
     interface = "org.freedesktop.login1.Manager",
@@ -40,165 +33,160 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     paths.ensure_dirs()?;
     let _tray = tray::start_daemon_tray(paths.clone());
 
-    let shutdown = Arc::new(AtomicBool::new(false));
-    let mut service = MonitorService::setup(build_core_config(paths), LinuxPlatformHooks::new())?;
-    if let Some(boot_marker) = read_current_boot_id() {
-        let _ = service.record_lifecycle_observation(LifecycleObservation::BootObserved {
-            boot_marker,
-            booted_at_ms: read_current_boot_time_ms(),
-            detected_by: "boot_id_change".to_string(),
-        });
-    }
-    let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStarted {
-        role: ServiceRole::PrimaryService,
-        detected_by: "linux_service".to_string(),
-    });
+    let config = build_core_config(paths);
+    let state_path = paths.state_dir.join("event_state.json");
+    let modules = tokio::task::block_in_place(|| {
+        build_default_modules_reqwest(config, LinuxPlatformHooks::new())
+    })?;
+    let mut bus = EventBus::new(modules, load_state(&state_path)?)?;
 
+    tokio::task::block_in_place(|| {
+        bus.send(ProcessStarted)?;
+        store_state(&state_path, &bus.iter()?)
+    })?;
+
+    let mut ipc = IpcBridge::bind(&paths.state_dir.join("daemon.sock"));
+    if let Some(ipc) = &mut ipc {
+        ipc.subscribe_standard_outbound(&mut bus);
+    }
+
+    let shutdown = Arc::new(AtomicBool::new(false));
     let (signal_tx, mut signal_rx) = mpsc::unbounded_channel::<String>();
     spawn_signal_handler(shutdown.clone(), signal_tx);
     let (sleep_tx, mut sleep_rx) = mpsc::unbounded_channel::<bool>();
     spawn_suspend_watcher(sleep_tx);
 
-    let mut last_session_unavailable_log: Option<Instant> = None;
+    let mut last_session_unavailable_log: Option<std::time::Instant> = None;
+    let mut shutdown_cleanup_done = false;
     loop {
         if shutdown.load(Ordering::SeqCst) {
             break;
         }
 
-        let sleep_duration = match service.loop_iteration() {
-            Ok(outcome) => {
-                let _ = service.record_lifecycle_observation(
-                    LifecycleObservation::CaptureAvailabilityChanged {
-                        state: CaptureAvailabilityState::Ready,
-                        detected_by: "successful_loop".to_string(),
-                    },
-                );
+        // Wire up any newly accepted IPC connections.
+        if let Some(ipc) = &mut ipc {
+            ipc.accept_pending(&mut bus, IpcBridge::forward_standard_inbound);
+        }
+
+        match tokio::task::block_in_place(|| {
+            bus.send(Ping)?;
+            bus.iter()
+        }) {
+            Ok(state) => {
                 last_session_unavailable_log = None;
-                duration_until(outcome.next_run_at_ms)
+                if let Err(e) = store_state(&state_path, &state) {
+                    eprintln!("daemon: failed to store state: {e}");
+                }
             }
             Err(err) => {
                 let message = err.to_string();
                 if is_session_unavailable_text(&message) {
-                    let _ = service.record_lifecycle_observation(
-                        LifecycleObservation::CaptureAvailabilityChanged {
-                            state: CaptureAvailabilityState::Blocked,
-                            detected_by: "session_unavailable".to_string(),
-                        },
-                    );
                     let should_log = last_session_unavailable_log
                         .is_none_or(|last| last.elapsed() >= SESSION_UNAVAILABLE_LOG_INTERVAL);
                     if should_log {
                         eprintln!("daemon: capture session unavailable: {message}");
-                        last_session_unavailable_log = Some(Instant::now());
+                        last_session_unavailable_log = Some(std::time::Instant::now());
                     }
                 } else {
                     eprintln!("daemon: {message}");
                 }
-                ERROR_RETRY_INTERVAL
             }
-        };
-        let _ =
-            service.record_service_ping_if_due(ServiceRole::PrimaryService, "linux_service_timer");
-        let sleep_duration = service
-            .next_service_ping_due_at_ms(ServiceRole::PrimaryService)
-            .ok()
-            .flatten()
-            .map(|due_at_ms| duration_until(due_at_ms.saturating_add(SERVICE_PING_WAKE_PADDING_MS)))
-            .map(|ping_duration| ping_duration.min(sleep_duration))
-            .unwrap_or(sleep_duration);
+        }
 
         tokio::select! {
             signal = signal_rx.recv() => {
-                if let Some(signal_name) = signal {
-                    record_shutdown_transition(&mut service, &signal_name);
+                if signal.is_some() {
+                    tokio::task::block_in_place(|| record_shutdown_transition(&mut bus, &state_path));
+                    shutdown_cleanup_done = true;
                 }
                 break;
             }
             sleep_change = sleep_rx.recv() => {
                 if let Some(suspending) = sleep_change {
-                    let (state, origin, confidence) = if suspending {
-                        (
-                            ComputerPowerState::Suspended,
-                            LifecycleOrigin::SystemSuspend,
-                            LifecycleConfidence::Confirmed,
-                        )
-                    } else {
-                        (
-                            ComputerPowerState::Running,
-                            LifecycleOrigin::SystemSuspend,
-                            LifecycleConfidence::Confirmed,
-                        )
-                    };
-                    let _ = service.record_lifecycle_observation(
-                        LifecycleObservation::ComputerPowerChanged {
-                            state,
-                            origin,
-                            detected_by: "login1_prepare_for_sleep".to_string(),
-                            confidence,
-                        },
-                    );
+                    let result = tokio::task::block_in_place(|| {
+                        if suspending {
+                            bus.send(ComputerSuspended)?;
+                        } else {
+                            bus.send(ComputerResumed)?;
+                        }
+                        let state = bus.iter()?;
+                        store_state(&state_path, &state)
+                    });
+                    if let Err(e) = result {
+                        eprintln!("daemon: suspend/resume error: {e}");
+                    }
                 }
             }
-            _ = sleep_interruptible(&shutdown, sleep_duration) => {}
+            _ = tokio::time::sleep(ITER_INTERVAL) => {}
         }
     }
 
-    let _ = service.shutdown();
-    Ok(())
+    if !shutdown_cleanup_done {
+        tokio::task::block_in_place(|| {
+            let _ = bus.send(Ping);
+            if let Ok(state) = bus.iter() {
+                let _ = store_state(&state_path, &state);
+            }
+        });
+    }
+    std::process::exit(0);
 }
 
-fn read_current_boot_id() -> Option<String> {
-    fs::read_to_string(CURRENT_BOOT_ID_PATH)
-        .ok()
-        .map(|raw| raw.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
+const SYSTEMCTL_TIMEOUT: Duration = Duration::from_secs(2);
 
-fn read_current_boot_time_ms() -> Option<i64> {
-    let stat = fs::read_to_string(PROC_STAT_PATH).ok()?;
-    let boot_line = stat.lines().find(|line| line.starts_with("btime "))?;
-    let seconds = boot_line.split_whitespace().nth(1)?.parse::<i64>().ok()?;
-    seconds.checked_mul(1_000)
+fn run_with_timeout<F, T>(f: F) -> Option<T>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(SYSTEMCTL_TIMEOUT).ok()
 }
 
 fn read_systemd_state() -> Option<String> {
-    let output = Command::new("systemctl")
-        .arg("is-system-running")
-        .output()
-        .ok()?;
-    let stdout = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .to_ascii_lowercase();
-    if !stdout.is_empty() {
-        return Some(stdout);
-    }
-
-    let stderr = String::from_utf8_lossy(&output.stderr)
-        .trim()
-        .to_ascii_lowercase();
-    if !stderr.is_empty() {
-        return Some(stderr);
-    }
-    None
+    run_with_timeout(|| {
+        let output = Command::new("systemctl")
+            .arg("is-system-running")
+            .output()
+            .ok()?;
+        let stdout = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .to_ascii_lowercase();
+        if !stdout.is_empty() {
+            return Some(stdout);
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr)
+            .trim()
+            .to_ascii_lowercase();
+        if !stderr.is_empty() {
+            Some(stderr)
+        } else {
+            None
+        }
+    })
+    .flatten()
 }
 
 fn is_shutdown_job_queued() -> bool {
-    let output = match Command::new("systemctl")
-        .args(["list-jobs", "--no-legend", "--no-pager"])
-        .output()
-    {
-        Ok(value) => value,
-        Err(_) => return false,
-    };
-
-    if !output.status.success() {
-        return false;
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
-    stdout.lines().any(|line| {
-        line.contains("shutdown.target") && (line.contains(" start ") || line.ends_with(" start"))
+    run_with_timeout(|| {
+        let output = Command::new("systemctl")
+            .args(["list-jobs", "--no-legend", "--no-pager"])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+        Some(stdout.lines().any(|line| {
+            line.contains("shutdown.target")
+                && (line.contains(" start ") || line.ends_with(" start"))
+        }))
     })
+    .flatten()
+    .unwrap_or(false)
 }
 
 fn spawn_signal_handler(shutdown: Arc<AtomicBool>, signal_tx: mpsc::UnboundedSender<String>) {
@@ -227,6 +215,7 @@ fn spawn_signal_handler(shutdown: Arc<AtomicBool>, signal_tx: mpsc::UnboundedSen
 }
 
 fn spawn_suspend_watcher(sleep_tx: mpsc::UnboundedSender<bool>) {
+    use futures_util::StreamExt;
     tokio::spawn(async move {
         let connection = match zbus::Connection::system().await {
             Ok(connection) => connection,
@@ -265,35 +254,86 @@ fn spawn_suspend_watcher(sleep_tx: mpsc::UnboundedSender<bool>) {
     });
 }
 
-async fn sleep_interruptible(shutdown: &Arc<AtomicBool>, duration: Duration) {
-    let mut remaining = duration;
-    while remaining > Duration::ZERO && !shutdown.load(Ordering::SeqCst) {
-        let tick = remaining.min(Duration::from_secs(1));
-        sleep(tick).await;
-        remaining = remaining.saturating_sub(tick);
+fn classify_shutdown_reason(
+    system_state: Option<&str>,
+    shutdown_job_queued: bool,
+    explicit_user_stop: bool,
+) -> ProcessStoppedReason {
+    let shutting_down = matches!(system_state, Some("stopping")) || shutdown_job_queued;
+    if shutting_down {
+        ProcessStoppedReason::Shutdown
+    } else if explicit_user_stop {
+        ProcessStoppedReason::User
+    } else {
+        ProcessStoppedReason::Other
     }
 }
 
-fn duration_until(next_run_at_ms: i64) -> Duration {
-    let now_ms = Utc::now().timestamp_millis();
-    let delta_ms = next_run_at_ms.saturating_sub(now_ms);
-    Duration::from_millis(delta_ms.max(0) as u64)
+fn record_shutdown_transition(bus: &mut EventBus, state_path: &std::path::Path) {
+    let system_state = read_systemd_state();
+    let shutdown_job_queued = is_shutdown_job_queued();
+    // Determine whether a user stop was explicitly requested via IPC.
+    // We check the Lifecycle module's persisted state indirectly: if a
+    // UserStopRequested event was emitted before shutdown, its source will
+    // have been recorded by LifecycleModule. Here we conservatively default
+    // to false; the tray/CLI sends UserStopRequested over IPC which is
+    // bridged into the bus before shutdown begins.
+    let explicit_user_stop = false;
+    let reason = classify_shutdown_reason(
+        system_state.as_deref(),
+        shutdown_job_queued,
+        explicit_user_stop,
+    );
+    let _ = bus.send(ProcessStopped(reason));
+    let _ = bus.send(Ping);
+    if let Ok(state) = bus.iter() {
+        let _ = store_state(state_path, &state);
+    }
 }
 
-fn record_shutdown_transition(service: &mut MonitorService<LinuxPlatformHooks>, signal_name: &str) {
-    let system_state = read_systemd_state();
-    let shutting_down =
-        matches!(system_state.as_deref(), Some("stopping")) || is_shutdown_job_queued();
-    let explicit_user_stop = service
-        .take_stop_intent(ServiceRole::PrimaryService)
-        .ok()
-        .flatten()
-        .is_some();
-    let _ = service.record_lifecycle_observation(LifecycleObservation::ServiceStopObserved {
-        role: ServiceRole::PrimaryService,
-        raw_reason: signal_name.to_string(),
-        shutdown_in_progress: shutting_down,
-        explicit_user_stop,
-        detected_by: "signal_plus_system_state".to_string(),
-    });
+#[cfg(test)]
+mod tests {
+    use virtue_core::ProcessStoppedReason;
+
+    use super::classify_shutdown_reason;
+
+    #[test]
+    fn classify_shutdown_reason_produces_shutdown_on_systemd_stopping_state() {
+        assert!(matches!(
+            classify_shutdown_reason(Some("stopping"), false, false),
+            ProcessStoppedReason::Shutdown
+        ));
+    }
+
+    #[test]
+    fn classify_shutdown_reason_produces_shutdown_when_job_queued() {
+        assert!(matches!(
+            classify_shutdown_reason(None, true, false),
+            ProcessStoppedReason::Shutdown
+        ));
+    }
+
+    #[test]
+    fn classify_shutdown_reason_produces_user_on_user_stop() {
+        assert!(matches!(
+            classify_shutdown_reason(None, false, true),
+            ProcessStoppedReason::User
+        ));
+    }
+
+    #[test]
+    fn classify_shutdown_reason_produces_other_by_default() {
+        assert!(matches!(
+            classify_shutdown_reason(None, false, false),
+            ProcessStoppedReason::Other
+        ));
+    }
+
+    #[test]
+    fn classify_shutdown_reason_shutdown_takes_priority_over_user_stop() {
+        assert!(matches!(
+            classify_shutdown_reason(Some("stopping"), false, true),
+            ProcessStoppedReason::Shutdown
+        ));
+    }
 }

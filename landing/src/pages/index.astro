@@ -4,6 +4,7 @@ import { Button } from '@virtueinitiative/shared-web';
 import CheckIcon from '../components/icons/CheckIcon.astro';
 import MinusIcon from '../components/icons/MinusIcon.astro';
 import LogoMark from '../components/LogoMark.astro';
+import RightArrowIcon from '../components/icons/RightArrowIcon.astro';
 import SiteLayout from '../layouts/SiteLayout.astro';
 import { APP_URL } from '../lib/app-url';
 
@@ -12,19 +13,24 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
   .slice(0, 3);
 ---
 
-<SiteLayout tagline="Providing free tools and resources for accountability">
+<SiteLayout tagline="Est. 2026">
   <div class="home-page">
     <section class="home-hero">
       <div class="home-hero-copy">
-        <h1>We want to see a world set free from pornography</h1>
+        <div class="eyebrow">A non-profit accountability project</div>
+        <h1>We want to see a world set free from pornography.</h1>
         <p class="home-hero-lead">
           Virtue is a simple app that shares blurred screenshots of your activity with an
           accountability partner you trust. It's entirely free to use and end-to-end encrypted.
         </p>
         <div class="section-actions">
-          <Button href={`${APP_URL}/signup`} variant="primary">Get started</Button>
-          <Button href="/about" variant="outline">Our mission</Button>
-          <Button href="/help" variant="outline">Help</Button>
+          <Button href={`${APP_URL}/signup`} variant="primary" size="lg">
+            <div class="home-text-icon-button-container">
+              <div>Get started</div><RightArrowIcon />
+            </div>
+          </Button>
+          <Button href="/about" size="lg">Read our mission</Button>
+          <Button href="/help" size="lg">Help and guides</Button>
         </div>
       </div>
       <div class="home-hero-logo" aria-hidden="true">
@@ -33,6 +39,7 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
     </section>
 
     <section class="home-section">
+      <div class="eyebrow">The app</div>
       <div class="home-section-heading">
         <h2>How it works</h2>
       </div>
@@ -59,18 +66,25 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
     <section class="home-section home-section-split">
       <div class="home-section-body">
         <div class="partner-copy">
+          <div class="eyebrow">Your support</div>
           <div class="home-section-heading">
             <h2>You need one accountability partner</h2>
           </div>
 
           <p>This only works if someone else can see your activity.</p>
           <p>That could be:</p>
-          <ul class="plain-list">
-            <li>a friend</li>
-            <li>a brother</li>
-            <li>a mentor</li>
-            <li>your father</li>
-          </ul>
+          <div class="home-row-with-spacing">
+            <RightArrowIcon /><div>a friend</div>
+          </div>
+          <div class="home-row-with-spacing">
+            <RightArrowIcon /><div>a brother</div>
+          </div>
+          <div class="home-row-with-spacing">
+            <RightArrowIcon /><div>a mentor</div>
+          </div>
+          <div class="home-row-with-spacing">
+            <RightArrowIcon /><div>your father</div>
+          </div>
           <p>
             Once you make an account, invite someone by email to be your accountability partner.
           </p>
@@ -83,17 +97,25 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
         <div class="home-section-heading">
           <h2>Privacy &amp; security</h2>
         </div>
-
-        <ul class="plain-list privacy-list">
-          <li>Screenshots are shrunk and blurred before being shared</li>
-          <li>Data is end-to-end encrypted</li>
-          <li>Only your chosen accountability partner can view your activity</li>
-          <li>No ads or data selling</li>
-        </ul>
+        <div class="home-row-with-spacing">
+          <RightArrowIcon /><div>Screenshots are shrunk and blurred before being shared</div>
+        </div>
+        <div class="home-row-with-spacing">
+          <RightArrowIcon /><div>Data is end-to-end encrypted</div>
+        </div>
+        <div class="home-row-with-spacing">
+          <RightArrowIcon /><div>
+            Only your chosen accountability partner can view your activity
+          </div>
+        </div>
+        <div class="home-row-with-spacing">
+          <RightArrowIcon /><div>No ads or data selling</div>
+        </div>
       </div>
     </section>
 
     <section class="home-section">
+      <div class="eyebrow">Answers</div>
       <div class="home-section-heading">
         <h2>FAQ</h2>
       </div>
@@ -133,7 +155,7 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
         </details>
 
         <details class="faq-item">
-          <summary>Where do I install it?</summary>
+          <summary>How do I install it?</summary>
           <p>
             You can install Virtue on supported devices from the
             <a href="/download">downloads page</a>, and the
@@ -144,6 +166,7 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
     </section>
 
     <section class="home-section" id="platforms">
+      <div class="eyebrow">Features</div>
       <div class="home-section-heading">
         <h2>Currently supported platforms &amp; features</h2>
       </div>
@@ -246,6 +269,7 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
     {
       latestPosts.length > 0 && (
         <section class="home-section">
+          <div class="eyebrow">Articles</div>
           <div class="home-section-heading">
             <h2>From the blog</h2>
           </div>
@@ -267,7 +291,7 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
             ))}
           </ul>
           <div class="section-actions">
-            <Button href="/blog" variant="outline">
+            <Button href="/blog" variant="outline" size="lg">
               View all posts
             </Button>
           </div>
@@ -281,7 +305,7 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
       </div>
       <p>Create your account and set up your accountability partner.</p>
       <div class="section-actions">
-        <Button href={`${APP_URL}/signup`} variant="primary">Get started</Button>
+        <Button href={`${APP_URL}/signup`} variant="primary" size="lg">Get started</Button>
       </div>
     </section>
   </div>

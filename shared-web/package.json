@@ -19,12 +19,15 @@
   },
   "exports": {
     ".": "./index.ts",
-    "./state": "./state.ts",
-    "./state.ts": "./state.ts",
     "./risk": "./risk.ts",
     "./risk.ts": "./risk.ts",
+    "./types": "./types.ts",
+    "./types.ts": "./types.ts",
     "./tokens.css": "./tokens.css",
     "./base.css": "./base.css",
     "./index.css": "./index.css"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
   }
 }

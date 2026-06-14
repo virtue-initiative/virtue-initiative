@@ -67,9 +67,7 @@
     visibility: hidden;
     pointer-events: none;
     transition: transform 0.18s ease;
-  }
 
-  @media (max-width: 900px) {
     &.is-open {
       transform: translateX(0);
       visibility: visible;
@@ -180,10 +178,6 @@ button.logs-sidebar-close {
   background: var(--text-muted);
 }
 
-.logs-status-dot--placeholder {
-  visibility: hidden;
-}
-
 .logs-device-button-group {
   color: var(--text-muted);
   font-weight: 700;
@@ -204,26 +198,21 @@ button.logs-sidebar-close {
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   padding-right: 0.25rem;
-
-  @media (max-width: 720px) {
-    overflow: visible;
-    padding-right: 0;
-    min-height: auto;
-  }
 }
 
 .logs-header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
   margin-bottom: 1.25rem;
-  gap: 1rem;
-  flex-wrap: wrap;
+  gap: 0.75rem;
 
   & h1 {
     margin: 0;
     font-size: 1.3rem;
     font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 
@@ -253,6 +242,7 @@ button.logs-sidebar-toggle {
   display: flex;
   align-items: center;
   gap: 0.6rem;
+  margin-left: auto;
 }
 
 button.logs-fullscreen-btn {
@@ -278,20 +268,15 @@ button.logs-sidebar-backdrop.is-open {
 
 @media (max-width: 600px) {
   .logs-header {
-    align-items: flex-start;
     margin-bottom: 1rem;
-  }
-
-  .logs-header h1 {
-    width: 100%;
   }
 
   .logs-header-actions {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     grid-template-areas:
-      "toggle  view-controls"
-      "filters filters";
+      'toggle  view-controls'
+      'filters filters';
     align-items: center;
     width: 100%;
     row-gap: 0.5rem;
@@ -306,10 +291,11 @@ button.logs-sidebar-backdrop.is-open {
   .logs-header-view-controls {
     grid-area: view-controls;
     justify-self: end;
+    margin-left: 0;
     min-width: 0;
   }
 
-  .logs-filter-switcher {
+  .logs-filter-section {
     grid-area: filters;
     min-width: 0;
   }
@@ -323,74 +309,6 @@ button.logs-sidebar-backdrop.is-open {
   button.logs-sidebar-toggle {
     padding: 0 0.55rem;
   }
-}
-
-.logs-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-}
-
-.logs-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 1rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.85rem 1rem;
-}
-
-.logs-list .logs-thumb-wrap {
-  flex: 0 0 auto;
-  width: 3.4rem;
-  height: 3.4rem;
-}
-
-.logs-list .logs-thumb-button,
-.logs-list .logs-thumb-status {
-  width: 100%;
-  height: 100%;
-}
-
-.logs-row-main {
-  flex: 1;
-  min-width: 0;
-}
-
-.logs-row-top {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  flex-wrap: wrap;
-  margin-bottom: 0.35rem;
-}
-
-.logs-type {
-  font-size: 0.875rem;
-  font-weight: 600;
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 0.1rem 0.45rem;
-  font-family: ui-monospace, monospace;
-}
-
-.logs-device {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  font-weight: 500;
-}
-
-.logs-device--indented {
-  margin-left: var(--space-2);
-}
-
-.logs-time {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  margin-left: auto;
-  white-space: nowrap;
 }
 
 .logs-meta {
@@ -424,7 +342,8 @@ button.logs-sidebar-backdrop.is-open {
   padding: 0 1rem;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-top: none;
+  border-radius: 0;
   cursor: pointer;
   text-align: left;
   color: inherit;
@@ -434,6 +353,19 @@ button.logs-sidebar-backdrop.is-open {
   &:hover {
     background: var(--bg-subtle);
   }
+}
+
+.logs-vrow--first {
+  border-top: 1px solid var(--border);
+  border-radius: 8px 8px 0 0;
+}
+
+.logs-vrow--last {
+  border-radius: 0 0 8px 8px;
+}
+
+.logs-vrow--first.logs-vrow--last {
+  border-radius: 8px;
 }
 
 .logs-vrow-thumb {
@@ -461,6 +393,21 @@ button.logs-sidebar-backdrop.is-open {
   background: var(--bg-subtle);
 }
 
+.logs-thumb-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+}
+
+.logs-detail-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3rem;
+  padding: 1rem 0;
+}
+
 .logs-vrow-body {
   flex: 1;
   min-width: 0;
@@ -482,11 +429,6 @@ button.logs-sidebar-backdrop.is-open {
   gap: 0.5rem;
 }
 
-.logs-risk-label {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-
 .logs-loading {
   color: var(--text-muted);
   font-size: 0.9rem;
@@ -499,137 +441,71 @@ button.logs-sidebar-backdrop.is-open {
   margin: 0 0 1rem;
 }
 
-.logs-load-sentinel {
-  width: 100%;
-  height: 1px;
-  margin-top: 0.5rem;
-}
-
-.logs-week-nav {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
-}
-
-.logs-week-label {
-  font-size: 0.9rem;
+.logs-sticky-date {
+  position: sticky;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 10;
+  width: fit-content;
+  margin-left: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.3rem 0.9rem;
+  font-size: 0.8rem;
   font-weight: 600;
   color: var(--text);
-  width: 14rem;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  margin-bottom: 0.75rem;
+  box-shadow: 0 2px 6px -1px rgba(0, 0, 0, 0.08);
 }
 
-@media (max-width: 600px) {
-  .logs-row {
-    gap: 0.75rem;
-    padding: 0.75rem 0.85rem;
-  }
+.logs-load-more {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: center;
+  padding: 1.25rem 0 0.5rem;
+}
 
-  .logs-list .logs-thumb-wrap {
-    width: 2.85rem;
-    height: 2.85rem;
-  }
+.logs-type {
+  font-size: 0.875rem;
+  font-weight: 600;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.1rem 0.45rem;
+  font-family: ui-monospace, monospace;
+}
+
+.logs-device {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.logs-device--indented {
+  margin-left: var(--space-2);
+}
+
+.logs-time {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.logs-vrow-message {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
 
 /* Detail dialog */
-.logs-detail-overlay {
-  position: fixed;
-  inset: 0;
-  background: var(--overlay);
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-}
-
 .logs-detail-dialog {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.25rem;
-  width: min(56rem, calc(100vw - 1.5rem));
   max-height: calc(100dvh - 2rem);
   overflow-y: auto;
-  box-shadow: var(--shadow-md);
-}
-
-.logs-detail-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: 0.5rem;
-}
-
-.logs-detail-close {
-  flex-shrink: 0;
-  width: 2rem;
-  height: 2rem;
-  border: none;
-  border-radius: 999px;
-  background: transparent;
-  font-size: 1.25rem;
-  line-height: 1;
-  cursor: pointer;
-  color: var(--text-muted);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-
-  &:hover {
-    background: var(--bg-subtle);
-    color: var(--text);
-  }
-}
-
-.logs-detail-time {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  margin: 0 0 0.5rem;
-}
-
-.logs-detail-badges {
-  display: flex;
-  gap: 0.4rem;
-  flex-wrap: wrap;
-  margin-bottom: 0.75rem;
-}
-
-.logs-detail-image-button {
-  display: block;
-  width: 100%;
-  border: 0;
-  border-radius: 8px;
-  padding: 0;
-  margin-bottom: 0.75rem;
-  cursor: zoom-in;
-  overflow: hidden;
-  background: var(--bg-subtle);
-  text-align: center;
-}
-
-.logs-detail-image {
-  display: block;
-  width: auto;
-  height: auto;
-  max-width: 100%;
-  max-height: 65dvh;
-  object-fit: contain;
-  margin: 0 auto;
-}
-
-.logs-detail-risk-neutral {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-muted);
-}
-
-.logs-detail-meta {
-  margin-top: 0.25rem;
+  padding: 1.25rem;
 }

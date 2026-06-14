@@ -1,11 +1,11 @@
 import { Hono } from 'hono';
-import { z } from 'zod';
 import { authenticate } from '../middleware/auth';
 import { validateZ } from '../middleware/validation';
 import {
   deleteDeviceById,
   findOwnedDevice,
   findUserById,
+  getHashState,
   listBatchUrlsForDevice,
   listAcceptedNotificationTargetsForUser,
   listDevicesForOwners,
@@ -15,17 +15,13 @@ import {
 import { sendEmail } from '../lib/email';
 import { renderDeviceDeletedTemplate } from '../lib/email/templates';
 import { deleteObject } from '../lib/r2';
+import { generateToken } from '../lib/jwt';
 import { Env, Variables } from '../types/bindings';
+import { updateDeviceSchema, type PatchDeviceResponse } from '../../../shared-web/types';
 
 const devices = new Hono<{ Bindings: Env; Variables: Variables }>();
 const ONLINE_WINDOW_MS = 2 * 60 * 60 * 1000;
 const LOCAL_WEB_URL = 'http://localhost:5173';
-
-const updateDeviceSchema = z
-  .object({
-    name: z.string().min(1).optional(),
-  })
-  .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
 
 function getAppUrl(requestUrl: string, env: Env) {
   const url = new URL(requestUrl);
@@ -40,18 +36,56 @@ devices.get('/', authenticate('access'), async (c) => {
   const ownerIds = await listVisibleOwnerIds(c.env.DB, c.get('sub'));
   const rows = await listDevicesForOwners(c.env.DB, ownerIds);
 
+  const hashServerUrl = c.env.HASH_SERVER_URL?.trim() || null;
+  const hashInfo = new Map<string, { count: number; hashed_at: number | null }>();
+
+  if (hashServerUrl?.endsWith('/api')) {
+    // Hack: when the hash server is this API itself, skip the HTTP round-trip
+    // and read the hash state directly from D1.
+    await Promise.all(
+      rows.map(async (device) => {
+        const state = await getHashState(c.env.DB, device.id);
+        if (state) {
+          hashInfo.set(device.id, { count: state.count, hashed_at: state.hashed_at });
+        }
+      }),
+    );
+  } else if (hashServerUrl) {
+    await Promise.all(
+      rows.map(async (device) => {
+        try {
+          const token = await generateToken('server', device.id, c.env.JWT_PRIVATE_KEY, 60);
+          const resp = await fetch(`${hashServerUrl}/hash/info`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (resp.ok) {
+            const info = (await resp.json()) as { count: number; hashed_at: number | null };
+            hashInfo.set(device.id, info);
+          }
+        } catch {
+          // fall back to D1 values for this device
+        }
+      }),
+    );
+  }
+
   return c.json(
-    rows.map((device) => ({
-      id: device.id,
-      owner: device.owner,
-      name: device.name,
-      platform: device.platform,
-      last_upload_at: device.last_upload_at,
-      status:
-        device.last_upload_at && Date.now() - device.last_upload_at < ONLINE_WINDOW_MS
-          ? 'online'
-          : 'offline',
-    })),
+    rows.map((device) => {
+      const hi = hashInfo.get(device.id);
+      return {
+        id: device.id,
+        owner: device.owner,
+        name: device.name,
+        platform: device.platform,
+        last_upload_at: device.last_upload_at,
+        last_hash_at: hi ? hi.hashed_at : device.last_hash_at,
+        pending_count: hi ? hi.count : device.pending_count,
+        status:
+          device.last_upload_at && Date.now() - device.last_upload_at < ONLINE_WINDOW_MS
+            ? 'online'
+            : 'offline',
+      };
+    }),
   );
 });
 
@@ -66,7 +100,7 @@ devices.patch('/:id', authenticate('access'), validateZ('json', updateDeviceSche
   const { name } = c.req.valid('json');
   await updateDevice(c.env.DB, deviceId, { name });
 
-  return c.json({ id: deviceId, updated: true });
+  return c.json<PatchDeviceResponse>({ id: deviceId, updated: true });
 });
 
 devices.delete('/:id', authenticate('access'), async (c) => {
@@ -113,7 +147,7 @@ devices.delete('/:id', authenticate('access'), async (c) => {
 
   const targets = await listAcceptedNotificationTargetsForUser(c.env.DB, c.get('sub'));
   for (const target of targets) {
-    if ((target.email_frequency ?? 'daily') === 'none') {
+    if (target.settings.email_frequency === 'none') {
       continue;
     }
 

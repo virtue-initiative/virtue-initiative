@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use crate::{
     AppState,
-    auth::{DeviceAccessAuth, ServerAuth},
+    auth::{DeviceAccessAuth, DeviceAccessOrServerAuth, ServerAuth},
     db,
 };
 
@@ -73,6 +73,18 @@ pub async fn delete_hash(
 ) -> Result<impl IntoResponse, DbError> {
     db::reset_hash_state(&state.pool, &device_id).await?;
     Ok(Json(json!({"ok": true})))
+}
+
+pub async fn get_hash_info(
+    DeviceAccessOrServerAuth(device_id): DeviceAccessOrServerAuth,
+    State(state): State<Arc<AppState>>,
+) -> Result<impl IntoResponse, DbError> {
+    let info = db::get_hash_info(&state.pool, &device_id).await?;
+    Ok(Json(json!({
+        "count": info.as_ref().map_or(0, |i| i.count),
+        "hashed_at": info.as_ref().and_then(|i| i.hashed_at),
+        "updated_at": info.map(|i| i.updated_at),
+    })))
 }
 
 #[cfg(test)]

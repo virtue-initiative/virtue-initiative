@@ -104,3 +104,23 @@ impl FromRequestParts<Arc<AppState>> for ServerAuth {
         Ok(ServerAuth(device_id))
     }
 }
+
+pub struct DeviceAccessOrServerAuth(pub String);
+
+impl FromRequestParts<Arc<AppState>> for DeviceAccessOrServerAuth {
+    type Rejection = AuthError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &Arc<AppState>,
+    ) -> Result<Self, Self::Rejection> {
+        let token = extract_token(parts)?;
+        let data = jsonwebtoken::decode::<Claims>(&token, &state.decoding_key, &make_validation())
+            .map_err(|_| AuthError::Invalid)?;
+        if data.claims.typ == "device-access" || data.claims.typ == "server" {
+            Ok(DeviceAccessOrServerAuth(data.claims.sub))
+        } else {
+            Err(AuthError::WrongType)
+        }
+    }
+}

@@ -40,9 +40,12 @@
   min-width: 240px;
   max-width: 380px;
   padding: 0.65rem 0.85rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
   font-weight: 500;
+  color: var(--text);
   box-shadow: var(--shadow-md);
   animation: vi-toast-in 0.2s ease both;
 }
@@ -52,33 +55,18 @@
 }
 
 .vi-toast--error {
-  background: #fee2e2;
-  color: #b91c1c;
-
-  [data-theme='dark'] & {
-    background: #3b0a0a;
-    color: #fca5a5;
-  }
+  border-left: 3px solid var(--danger);
+  color: var(--danger-strong);
 }
 
 .vi-toast--success {
-  background: #dcfce7;
-  color: #15803d;
-
-  [data-theme='dark'] & {
-    background: #052e16;
-    color: #8be28b;
-  }
+  border-left: 3px solid var(--good);
+  color: var(--good);
 }
 
 .vi-toast--info {
-  background: #dbeafe;
-  color: #1d4ed8;
-
-  [data-theme='dark'] & {
-    background: #0c1a3a;
-    color: #93c5fd;
-  }
+  border-left: 3px solid var(--forest);
+  color: var(--text);
 }
 
 .vi-toast__message {
