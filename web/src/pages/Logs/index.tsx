@@ -160,13 +160,15 @@ export function Logs() {
   const [logResult, setLogResult] = useState<LogQueryResult>({
     logs: [],
     complete: false,
+    processed: 0,
+    total: 0,
   });
   const activeTargetUserId = selectedUser ?? userId;
   const scopeKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!api || !activeTargetUserId) {
-      setLogResult({ logs: [], complete: false });
+      setLogResult({ logs: [], complete: false, processed: 0, total: 0 });
       scopeKeyRef.current = null;
       return;
     }
@@ -532,7 +534,11 @@ export function Logs() {
           </div>
 
           <p class="logs-summary">
-            {logsLoading ? 'Syncing logs…' : 'Logs synced'}
+            {logsLoading
+              ? logResult.total > 0
+                ? `Syncing logs… ${logResult.processed}/${logResult.total} blocks`
+                : 'Syncing logs…'
+              : 'Logs synced'}
             {!logsLoading && selectedDeviceInfo && selectedDeviceInfo.pending_count > 0 && (
               <>
                 {` · ${selectedDeviceInfo.pending_count} item${selectedDeviceInfo.pending_count !== 1 ? 's' : ''} pending upload`}

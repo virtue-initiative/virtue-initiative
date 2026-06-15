@@ -2,6 +2,7 @@
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { decryptAndFlattenBatch } from '../api/batch-materializer';
 import { unwrapBatchKey } from '../api/crypto';
+import { createNativeBatchKeyUnwrapper } from '../api/hpke-native';
 import type { Batch, DataPage } from '../api/api';
 import type { FeedLog } from '../../pages/Logs/types';
 
@@ -40,7 +41,21 @@ type CacheRequest =
     };
 
 type CacheResponse = { id: string; result: unknown } | { id: string; error: string };
-type CacheChunk = { type: 'queryChunk'; id: string; logs: FeedLog[]; done: boolean };
+type CacheChunk = {
+  type: 'queryChunk';
+  id: string;
+  logs: FeedLog[];
+  done: boolean;
+  processed: number;
+  total: number;
+  // 'replace' → authoritative snapshot (cached fast-path, final result); the consumer swaps
+  // its log set. 'append' → incremental delta; the consumer merges it into the existing set.
+  mode: 'replace' | 'append';
+};
+// Lightweight sync-progress signal: carries only the block counts, no log payload, so it
+// stays a fixed ~tiny size no matter how much data has accumulated. The full log set is
+// only ever shipped on the fast-path chunk and the final done chunk.
+type CacheProgress = { type: 'queryProgress'; id: string; processed: number; total: number };
 
 // ---------------------------------------------------------------------------
 // SQLite / OPFS
@@ -53,9 +68,13 @@ const initPromise = (async () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sqlite3 = (await sqlite3InitModule()) as any;
   console.log('[cache-worker] init: installing OPFS SAH pool VFS');
-  await sqlite3.installOpfsSAHPoolVfs({});
+  // Must open the DB via the pool returned here. Opening with sqlite3.oo1.OpfsDb instead
+  // silently falls back to the default OPFS VFS, which proxies every I/O to a separate
+  // worker and blocks on Atomics + an fsync per commit — ~100s of ms per write, which
+  // throttles the whole decrypt pipeline to a crawl regardless of fetch concurrency.
+  const poolUtil = await sqlite3.installOpfsSAHPoolVfs({});
   console.log('[cache-worker] init: opening /cache.db');
-  db = new sqlite3.oo1.OpfsDb('/cache.db');
+  db = new poolUtil.OpfsSAHPoolDb('/cache.db');
   db.exec(
     `CREATE TABLE IF NOT EXISTS feeds (
        viewer_id TEXT NOT NULL,
@@ -413,7 +432,16 @@ function sqlGetDeviceBatchEndTimes(
 // Decryption pipeline state
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-const DECRYPT_CONCURRENCY = 5;
+// Decryption is dominated by per-batch network fetches (one R2 GET each) plus async
+// WebCrypto, so it's I/O-bound — a high concurrency cuts wall-clock time. R2 is HTTP/2,
+// so this is well above the legacy 6-connection-per-host cap.
+const DECRYPT_CONCURRENCY = 24;
+// Frequent counts-only progress ticks for a smooth status-line counter.
+const PROGRESS_THROTTLE_MS = 250;
+// Coarser interval for shipping the actual newly-decrypted logs as a delta, so logs fill in
+// progressively during a long sync without re-sending (and re-querying) the whole growing
+// result set each time. Only events materialized since the previous flush cross postMessage.
+const DELTA_INTERVAL_MS = 5000;
 const BASE =
   (import.meta as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL ?? 'http://localhost:8787';
 
@@ -431,13 +459,45 @@ const knownTargetUserIds = new Set<string>();
 // ---------------------------------------------------------------------------
 // Helpers
 
-function postChunk(id: string, logs: FeedLog[], done: boolean): void {
+function postChunk(
+  id: string,
+  logs: FeedLog[],
+  done: boolean,
+  processed = 0,
+  total = 0,
+  mode: 'replace' | 'append' = 'replace',
+): void {
   (self as unknown as DedicatedWorkerGlobalScope).postMessage({
     type: 'queryChunk',
     id,
     logs,
     done,
+    processed,
+    total,
+    mode,
   } satisfies CacheChunk);
+}
+
+function postProgress(id: string, processed: number, total: number): void {
+  (self as unknown as DedicatedWorkerGlobalScope).postMessage({
+    type: 'queryProgress',
+    id,
+    processed,
+    total,
+  } satisfies CacheProgress);
+}
+
+// JS mirror of the WHERE clauses in sqlQueryEvents, used to filter in-memory delta events
+// for a query without re-hitting SQLite.
+function matchesQuery(log: FeedLog, query: WorkerCacheQuery): boolean {
+  if (query.deviceId && log.device_id !== query.deviceId) return false;
+  if (query.startTime !== undefined && query.endTime !== undefined) {
+    if (log.ts < query.startTime || log.ts > query.endTime) return false;
+  }
+  if (query.eventTypes && query.eventTypes.length > 0 && !query.eventTypes.includes(log.type)) {
+    return false;
+  }
+  return true;
 }
 
 async function fetchData(
@@ -474,13 +534,13 @@ async function fetchAndDecrypt(targetUserId: string): Promise<void> {
       .filter(([, aq]) => aq.targetUserId === targetUserId)
       .map(([id]) => id);
 
-  const serveAll = () => {
+  const serveAll = (processed = 0, total = 0) => {
     const qids = activeQids();
     console.log('[cache-worker] serveAll done=true for', qids.length, 'queries');
     for (const qid of qids) {
       const aq = activeQueries.get(qid);
       if (!aq) continue;
-      postChunk(qid, sqlQueryEvents(viewerId, targetUserId, aq.query), true);
+      postChunk(qid, sqlQueryEvents(viewerId, targetUserId, aq.query), true, processed, total);
       activeQueries.delete(qid);
     }
   };
@@ -522,17 +582,51 @@ async function fetchAndDecrypt(targetUserId: string): Promise<void> {
   const queue = [...unmaterialized].sort((a, b) => b.created_at - a.created_at);
   let processed = 0;
   const total = queue.length;
+  // Shared across the concurrent workers below; the runtime is single-threaded so the
+  // read-modify of this timestamp between awaits is race-free.
+  let lastProgressPostAt = 0;
+
+  // Per-batch key unwrap. Prefer the native-WebCrypto path (off-thread X25519), falling back
+  // to the pure-JS @hpke path on browsers whose crypto.subtle lacks X25519. The native
+  // unwrapper does a small one-time setup, so build it once for the whole run.
+  const nativeUnwrap = await createNativeBatchKeyUnwrapper(privateKey);
+  console.log(
+    '[cache-worker] batch-key unwrap path:',
+    nativeUnwrap ? 'native WebCrypto' : 'JS @hpke',
+  );
+  const openBatchKey = (encKey: string): Promise<CryptoKey> => {
+    const bytes = Uint8Array.fromBase64(encKey);
+    return nativeUnwrap ? nativeUnwrap(bytes) : unwrapBatchKey(privateKey, bytes);
+  };
+
+  // Events materialized since the last delta flush (image bytes stripped to match
+  // sqlQueryEvents output, which loads images lazily). Shared across the workers below;
+  // single-threaded, so the push/splice between awaits is race-free.
+  const deltaBuffer: FeedLog[] = [];
+  let lastDeltaPostAt = Date.now();
+
+  const flushDelta = () => {
+    if (deltaBuffer.length === 0) return;
+    const fresh = deltaBuffer.splice(0);
+    for (const qid of activeQids()) {
+      const aq = activeQueries.get(qid);
+      if (!aq) continue;
+      const matching = fresh.filter((log) => matchesQuery(log, aq.query));
+      if (matching.length > 0) postChunk(qid, matching, false, processed, total, 'append');
+    }
+  };
 
   const worker = async () => {
     while (queue.length > 0) {
       const batch = queue.shift()!;
       try {
-        const events = await decryptAndFlattenBatch(
-          batch,
-          (encKey) => unwrapBatchKey(privateKey, Uint8Array.fromBase64(encKey)),
-          '0'.repeat(64),
-        );
+        const events = await decryptAndFlattenBatch(batch, openBatchKey, '0'.repeat(64));
         sqlWriteMaterializedEvents(viewerId, targetUserId, batch.id, events);
+        for (const ev of events) {
+          const data = { ...ev.data };
+          delete data.image;
+          deltaBuffer.push({ ...ev, data });
+        }
       } catch (err) {
         console.warn('[cache-worker] failed to materialize batch', batch.id, err);
       }
@@ -540,14 +634,25 @@ async function fetchAndDecrypt(targetUserId: string): Promise<void> {
       const isLast = processed === total;
 
       if (isLast) {
-        // Final pass: serve every query waiting for this target (including late arrivals)
-        serveAll();
+        // Final pass: serve every query waiting for this target (including late arrivals).
+        // This authoritative full result supersedes any unflushed deltaBuffer entries.
+        serveAll(processed, total);
       } else {
-        // Intermediate progress: push current state to all active queries
-        for (const qid of activeQids()) {
-          const aq = activeQueries.get(qid);
-          if (!aq) continue;
-          postChunk(qid, sqlQueryEvents(viewerId, targetUserId, aq.query), false);
+        const now = Date.now();
+        // Frequent counts-only ticks keep the status-line counter smooth without re-querying
+        // or re-serializing the growing result set.
+        if (now - lastProgressPostAt >= PROGRESS_THROTTLE_MS) {
+          lastProgressPostAt = now;
+          for (const qid of activeQids()) {
+            if (!activeQueries.has(qid)) continue;
+            postProgress(qid, processed, total);
+          }
+        }
+        // Coarser delta: ship the logs decrypted since the last flush so they appear
+        // progressively. Bounded by the decrypt rate, not the accumulated total.
+        if (now - lastDeltaPostAt >= DELTA_INTERVAL_MS) {
+          lastDeltaPostAt = now;
+          flushDelta();
         }
       }
     }

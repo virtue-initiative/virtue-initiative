@@ -31,11 +31,36 @@ export type CacheRequest =
 
 export type CacheResponse = { id: string; result: unknown } | { id: string; error: string };
 
-export type CacheChunk = { type: 'queryChunk'; id: string; logs: FeedLog[]; done: boolean };
+export type CacheChunk = {
+  type: 'queryChunk';
+  id: string;
+  logs: FeedLog[];
+  done: boolean;
+  processed: number;
+  total: number;
+  mode: 'replace' | 'append';
+};
+
+// Counts-only progress signal emitted during a sync; carries no log payload.
+export type CacheProgress = { type: 'queryProgress'; id: string; processed: number; total: number };
+
+// A single update delivered to a cacheQuery subscriber. `logs` is present on data updates and
+// omitted on the lightweight intermediate progress ticks, where only the block counts change.
+// When logs are present, `replace` distinguishes an authoritative snapshot (cached fast-path,
+// final result) from an incremental delta the consumer should merge into its existing set.
+export type CacheQueryUpdate = {
+  logs?: FeedLog[];
+  replace?: boolean;
+  done: boolean;
+  processed: number;
+  total: number;
+};
+
+export type CacheQueryCallback = (update: CacheQueryUpdate) => void;
 
 export interface CacheClient {
   setSession(token: string, userId: string, privateKey: CryptoKey | null): void;
-  cacheQuery(query: CacheQuery, callback: (logs: FeedLog[], done?: boolean) => void): void;
+  cacheQuery(query: CacheQuery, callback: CacheQueryCallback): void;
   refetch(): void;
   clearCache(): Promise<void>;
   deleteDeviceData(viewerId: string, deviceId: string): Promise<void>;
@@ -70,7 +95,7 @@ function handleResponse(msg: CacheResponse, pending: Map<string, PendingEntry>) 
 
 export function createCacheClient(): CacheClient {
   const pending = new Map<string, PendingEntry>();
-  const streamCallbacks = new Map<string, (logs: FeedLog[], done?: boolean) => void>();
+  const streamCallbacks = new Map<string, CacheQueryCallback>();
   const channel = new BroadcastChannel(CHANNEL_NAME);
   let leaderWorker: Worker | null = null;
   let localUserId: string | null = null;
@@ -116,8 +141,20 @@ export function createCacheClient(): CacheClient {
   function handleChunk(data: CacheChunk) {
     const cb = streamCallbacks.get(data.id);
     if (!cb) return;
-    cb(data.logs, data.done);
+    cb({
+      logs: data.logs,
+      replace: data.mode === 'replace',
+      done: data.done,
+      processed: data.processed,
+      total: data.total,
+    });
     if (data.done) streamCallbacks.delete(data.id);
+  }
+
+  function handleProgress(data: CacheProgress) {
+    const cb = streamCallbacks.get(data.id);
+    if (!cb) return;
+    cb({ done: false, processed: data.processed, total: data.total });
   }
 
   function becomeLeader() {
@@ -138,9 +175,12 @@ export function createCacheClient(): CacheClient {
     }
 
     leaderWorker.onmessage = (e: MessageEvent) => {
-      const data = e.data as CacheResponse | CacheChunk;
+      const data = e.data as CacheResponse | CacheChunk | CacheProgress;
       if ('type' in data && data.type === 'queryChunk') {
         handleChunk(data as CacheChunk);
+        channel.postMessage(data);
+      } else if ('type' in data && data.type === 'queryProgress') {
+        handleProgress(data as CacheProgress);
         channel.postMessage(data);
       } else {
         handleResponse(data as CacheResponse, pending);
@@ -198,6 +238,10 @@ export function createCacheClient(): CacheClient {
       handleChunk(data as unknown as CacheChunk);
       return;
     }
+    if (data?.type === 'queryProgress') {
+      handleProgress(data as unknown as CacheProgress);
+      return;
+    }
     handleResponse(data as unknown as CacheResponse, pending);
   };
 
@@ -248,13 +292,17 @@ export function createCacheClient(): CacheClient {
   };
 }
 
-export const cacheClient: CacheClient | null =
-  typeof window !== 'undefined' ? createCacheClient() : null;
+// Requires a DOM window plus Web Worker + BroadcastChannel support. Environments
+// without them (SSR, the jsdom/happy-dom test runner) fall back to a null client;
+// callers treat cacheQuery as a no-op there.
+const cacheClientSupported =
+  typeof window !== 'undefined' &&
+  typeof Worker !== 'undefined' &&
+  typeof BroadcastChannel !== 'undefined';
 
-export function logCacheQuery(
-  query: CacheQuery,
-  callback: (logs: FeedLog[], done?: boolean) => void,
-): void {
+export const cacheClient: CacheClient | null = cacheClientSupported ? createCacheClient() : null;
+
+export function logCacheQuery(query: CacheQuery, callback: CacheQueryCallback): void {
   cacheClient?.cacheQuery(query, callback);
 }
 

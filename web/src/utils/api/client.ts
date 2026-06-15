@@ -34,6 +34,18 @@ export interface LogQuery {
 export interface LogQueryResult {
   logs: FeedLog[];
   complete: boolean;
+  /** Number of batch blocks decrypted so far in the in-flight sync. */
+  processed: number;
+  /** Total batch blocks to decrypt in the in-flight sync (0 if unknown). */
+  total: number;
+}
+
+// Merge an incremental delta into an existing log set: dedupe by id (incoming wins) and keep
+// the newest-first (ts desc) ordering that sqlQueryEvents produces.
+function mergeLogs(existing: FeedLog[], incoming: FeedLog[]): FeedLog[] {
+  const byId = new Map(existing.map((log) => [log.id, log]));
+  for (const log of incoming) byId.set(log.id, log);
+  return [...byId.values()].sort((a, b) => b.ts - a.ts);
 }
 
 type Subscriber<T> = (value: T) => void;
@@ -311,6 +323,11 @@ export class APIClient {
   // ── Logs ────────────────────────────────────────────────────────────────
   queryLogs(query: LogQuery, cb?: (result: LogQueryResult) => void): LogQueryResult {
     if (cb) {
+      // Updates come in three flavours: a `replace` snapshot (cached fast-path, then the
+      // final complete result), an `append` delta (logs decrypted in the last interval), and
+      // counts-only progress ticks (no logs). Retain the running set so every update — even
+      // counts-only — can re-emit a complete LogQueryResult.
+      let lastLogs: FeedLog[] = [];
       cacheClient?.cacheQuery(
         {
           userId: query.userId,
@@ -318,10 +335,20 @@ export class APIClient {
           startTime: query.startTime,
           endTime: query.endTime,
         },
-        (logs, done) => cb({ logs, complete: done ?? false }),
+        (update) => {
+          if (update.logs) {
+            lastLogs = update.replace ? update.logs : mergeLogs(lastLogs, update.logs);
+          }
+          cb({
+            logs: lastLogs,
+            complete: update.done,
+            processed: update.processed,
+            total: update.total,
+          });
+        },
       );
     }
-    return { logs: [], complete: false };
+    return { logs: [], complete: false, processed: 0, total: 0 };
   }
 
   // ── Lifecycle ───────────────────────────────────────────────────────────
