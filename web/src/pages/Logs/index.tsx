@@ -21,6 +21,7 @@ import {
   DialogHeader,
   Field,
   IconButton,
+  Menu,
   Select,
 } from '@virtueinitiative/shared-web';
 import { cacheClient } from '../../utils/cache/client';
@@ -119,6 +120,30 @@ function shiftDate(dateStr: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+type RangeKey = 'day' | 'week' | 'month';
+
+const RANGE_SEGMENTS = [
+  { label: 'Past day', value: 'day' },
+  { label: 'Past week', value: 'week' },
+  { label: 'Past month', value: 'month' },
+];
+
+function DateRangePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const current = RANGE_SEGMENTS.find((s) => s.value === value) ?? RANGE_SEGMENTS[0];
+  return (
+    <Menu
+      class="logs-range-menu"
+      trigger={
+        <Button variant="outline" size="md" class="logs-range-trigger">
+          <span>{current.label}</span>
+          <span aria-hidden="true">▾</span>
+        </Button>
+      }
+      items={RANGE_SEGMENTS.map((s) => ({ label: s.label, onClick: () => onChange(s.value) }))}
+    />
+  );
+}
+
 export function Logs() {
   const api = useAPIContext();
   const userId = api?.userId ?? null;
@@ -127,7 +152,6 @@ export function Logs() {
   const { watchings: watching, loaded: partnersLoaded } = usePartners();
 
   const today = new Date().toISOString().slice(0, 10);
-  const yesterday = shiftDate(today, -1);
   const oneMonthAgo = (() => {
     const d = new Date();
     d.setMonth(d.getMonth() - 1);
@@ -142,8 +166,7 @@ export function Logs() {
   const [selectedUser, setSelectedUser] = useUrlState<string | null>('user_id', 'string', null);
   const [galleryFullscreen, setGalleryFullscreen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [startDate, setStartDate] = useUrlState('start', 'string', yesterday);
-  const [endDate, setEndDate] = useUrlState('end', 'string', today);
+  const [range, setRange] = useUrlState<RangeKey>('range', 'string', 'day');
   const [visibleDate, setVisibleDate] = useState<string | null>(null);
   const filterDialogRef = useRef<HTMLDialogElement>(null);
   type RiskFilter = 'all' | RiskRating;
@@ -153,6 +176,14 @@ export function Logs() {
     'string',
     null,
   );
+
+  const endDate = today;
+  const startDate =
+    range === 'month'
+      ? oneMonthAgo
+      : range === 'week'
+        ? shiftDate(today, -7)
+        : shiftDate(today, -1); // 'day'
 
   const weekStart = dateToBoundsStart(startDate);
   const weekEnd = dateToBoundsEnd(endDate);
@@ -440,25 +471,8 @@ export function Logs() {
               </Button>
               <div class="logs-filter-section">
                 <div class="logs-inline-filters">
-                  <Field label="Start" class="logs-filter-field">
-                    <input
-                      type="date"
-                      class="logs-filter-date"
-                      value={startDate}
-                      min={oneMonthAgo}
-                      max={endDate}
-                      onChange={(e) => setStartDate((e.target as HTMLInputElement).value)}
-                    />
-                  </Field>
-                  <Field label="End" class="logs-filter-field">
-                    <input
-                      type="date"
-                      class="logs-filter-date"
-                      value={endDate}
-                      min={oneMonthAgo}
-                      max={today}
-                      onChange={(e) => setEndDate((e.target as HTMLInputElement).value)}
-                    />
+                  <Field label="Date range" class="logs-filter-field">
+                    <DateRangePicker value={range} onChange={(v) => setRange(v as RangeKey)} />
                   </Field>
                   <Field label="Risk" class="logs-filter-field">
                     <Select
@@ -550,7 +564,7 @@ export function Logs() {
           </p>
 
           <div class="logs-sticky-date" aria-live="polite">
-            {visibleDate ?? formatDayLabel(weekStart)}
+            {visibleDate ?? formatDayLabel(weekEnd)}
           </div>
 
           {isGallery ? (
@@ -576,55 +590,11 @@ export function Logs() {
             />
           )}
 
-          <div class="logs-load-more">
-            <Button
-              variant="ghost"
-              size="md"
-              type="button"
-              onClick={() =>
-                setStartDate(
-                  shiftDate(startDate, -1) >= oneMonthAgo ? shiftDate(startDate, -1) : oneMonthAgo,
-                )
-              }
-            >
-              Load another day
-            </Button>
-            <Button
-              variant="ghost"
-              size="md"
-              type="button"
-              onClick={() =>
-                setStartDate(
-                  shiftDate(startDate, -7) >= oneMonthAgo ? shiftDate(startDate, -7) : oneMonthAgo,
-                )
-              }
-            >
-              Load another week
-            </Button>
-          </div>
-
           <Dialog dialogRef={filterDialogRef} size="lg" class="logs-filter-dialog">
             <DialogHeader>Search filters</DialogHeader>
             <div class="logs-filter-dialog-fields">
-              <Field label="Start" class="logs-filter-field">
-                <input
-                  type="date"
-                  class="logs-filter-date"
-                  value={startDate}
-                  min={oneMonthAgo}
-                  max={endDate}
-                  onChange={(e) => setStartDate((e.target as HTMLInputElement).value)}
-                />
-              </Field>
-              <Field label="End" class="logs-filter-field">
-                <input
-                  type="date"
-                  class="logs-filter-date"
-                  value={endDate}
-                  min={oneMonthAgo}
-                  max={today}
-                  onChange={(e) => setEndDate((e.target as HTMLInputElement).value)}
-                />
+              <Field label="Date range" class="logs-filter-field">
+                <DateRangePicker value={range} onChange={(v) => setRange(v as RangeKey)} />
               </Field>
               <Field label="Risk" class="logs-filter-field">
                 <Select
