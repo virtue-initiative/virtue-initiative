@@ -482,13 +482,6 @@ button.logs-sidebar-backdrop.is-open {
   box-shadow: 0 2px 6px -1px rgba(0, 0, 0, 0.08);
 }
 
-.logs-load-more {
-  display: flex;
-  gap: 0.6rem;
-  justify-content: center;
-  padding: 1.25rem 0 0.5rem;
-}
-
 .logs-type {
   font-size: 0.875rem;
   font-weight: 600;

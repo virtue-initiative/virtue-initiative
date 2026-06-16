@@ -42,15 +42,14 @@ button.logs-filter-toggle {
   max-width: min(11.5rem, 32vw);
 }
 
-.logs-filter-date {
-  box-sizing: border-box;
-  height: var(--button-height);
-  padding: 0 0.4rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 0.875rem;
-  background: var(--surface);
-  color: var(--text);
+button.logs-range-trigger {
+  min-width: 9.5rem;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.logs-filter-dialog-fields button.logs-range-trigger {
+  width: 100%;
 }
 
 .logs-filter-dialog-fields {
