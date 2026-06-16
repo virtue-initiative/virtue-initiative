@@ -5,10 +5,9 @@ import { renderWithClient } from '../../test-utils';
 import { TEST_DEVICES } from '../../mocks/fixtures';
 import { Logs } from './index';
 
-// NOTE: data-cache (Dexie/IndexedDB) is not available in the happy-dom test environment.
-// The component handles missing IndexedDB gracefully (errors are caught internally), so
-// the UI renders correctly with empty log lists. We do NOT mock the module here because
-// doing so invalidates the module graph and causes a Preact duplicate-instance error.
+// NOTE: The SQLite/OPFS cache worker is not available in the happy-dom test environment.
+// The component handles a null cacheClient gracefully (cacheQuery is a no-op), so
+// the UI renders correctly with empty log lists.
 
 describe('Logs — sidebar', () => {
   it('shows "Devices" heading in sidebar', async () => {

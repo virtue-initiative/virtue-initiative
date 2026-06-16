@@ -1,4 +1,5 @@
 import { sendToast } from '../toast';
+import '../cache/client';
 import type {
   EmailFrequency,
   User,

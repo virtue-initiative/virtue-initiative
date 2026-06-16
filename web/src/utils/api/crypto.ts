@@ -1,6 +1,6 @@
 import { Aes256Gcm, CipherSuite, HkdfSha256 } from '@hpke/core';
 import { DhkemX25519HkdfSha256 } from '@hpke/dhkem-x25519';
-import { argon2id } from 'hash-wasm';
+import { argon2id, createSHA256, type IHasher } from 'hash-wasm';
 import type { HashParams } from './api';
 
 const textEncoder = new TextEncoder();
@@ -126,6 +126,12 @@ export async function importUserPrivateKey(privateKeyBytes: BufferSource): Promi
   return HPKE_SUITE.kem.deserializePrivateKey(privateKeyBytes);
 }
 
+// Raw 32-byte X25519 private scalar for the user's HPKE key. Used by the native-WebCrypto
+// unwrap path (hpke-native.ts) to import the key into crypto.subtle.
+export async function exportUserPrivateKey(privateKey: CryptoKey): Promise<Uint8Array> {
+  return new Uint8Array(await HPKE_SUITE.kem.serializePrivateKey(privateKey));
+}
+
 export async function unwrapBatchKey(privateKey: CryptoKey, encryptedKey: BufferSource) {
   const envelope = toUint8Array(encryptedKey);
   const enc = envelope.slice(0, HPKE_SUITE.kem.encSize);
@@ -173,29 +179,18 @@ export async function decompressGzip(data: Uint8Array): Promise<Uint8Array> {
   return result;
 }
 
-// SHA-256(currentState[32] || contentHash[32])
-// currentState: rolling state from the server (or 32 zero bytes initially)
-// contentHash:  SHA-256 of the plaintext log item being recorded
-async function computeNewState(
-  currentState: Uint8Array,
-  contentHash: Uint8Array,
-): Promise<Uint8Array> {
-  const buf = new Uint8Array(64);
-  buf.set(currentState, 0);
-  buf.set(contentHash, 32);
-  const hash = await crypto.subtle.digest('SHA-256', buf);
-  return new Uint8Array(hash);
-}
-
-const ZEROS_HEX = '0'.repeat(64);
-
 export type BatchVerification = 'verified' | 'failed' | 'unknown';
 
-async function sha256Bytes(value: ArrayBufferLike | ArrayBufferView): Promise<Uint8Array> {
-  const normalized = toUint8Array(value);
-  const input = new Uint8Array(normalized.byteLength);
-  input.set(normalized);
-  return new Uint8Array(await crypto.subtle.digest('SHA-256', input));
+// Lazily-created synchronous SHA-256 hasher (hash-wasm). We use this instead of the async
+// crypto.subtle.digest for the hash chain because verifyBatch issues two digests per event,
+// chained sequentially — thousands of awaited subtle calls dominated the decrypt pipeline.
+// A synchronous WASM hasher computes the whole chain inline with zero promise/dispatch
+// overhead. Output bytes are identical (plain SHA-256), so the cross-component hash-chain
+// contract is unchanged.
+let sha256HasherPromise: Promise<IHasher> | null = null;
+function getSha256Hasher(): Promise<IHasher> {
+  if (!sha256HasherPromise) sha256HasherPromise = createSHA256();
+  return sha256HasherPromise;
 }
 
 /**
@@ -212,16 +207,28 @@ export async function verifyBatch(
   startChainHash: string,
   endChainHash: string,
 ): Promise<BatchVerification> {
+  const hasher = await getSha256Hasher();
+
   // Convert startChainHash hex to bytes
-  const startBytes = new Uint8Array(32);
+  let state = new Uint8Array(32);
   for (let i = 0; i < 32; i++) {
-    startBytes[i] = parseInt(startChainHash.slice(i * 2, i * 2 + 2), 16);
+    state[i] = parseInt(startChainHash.slice(i * 2, i * 2 + 2), 16);
   }
 
-  let state: Uint8Array = startBytes;
+  const buf = new Uint8Array(64);
   for (const event of events) {
-    const contentHash = await sha256Bytes(event);
-    state = await computeNewState(state, contentHash);
+    // contentHash = sha256(event)
+    hasher.init();
+    hasher.update(toUint8Array(event));
+    const contentHash = hasher.digest('binary');
+
+    // state = sha256(state || contentHash). Copy both into buf before re-using the hasher
+    // so we never read a digest buffer the next hasher call might overwrite.
+    buf.set(state, 0);
+    buf.set(contentHash, 32);
+    hasher.init();
+    hasher.update(buf);
+    state = hasher.digest('binary').slice();
   }
 
   const computedHex = Array.from(state)

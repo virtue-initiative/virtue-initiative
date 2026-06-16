@@ -16,6 +16,7 @@
     "@hpke/core": "^1.9.0",
     "@hpke/dhkem-x25519": "^1.8.0",
     "@msgpack/msgpack": "^3.1.3",
+    "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
     "@tanstack/react-virtual": "^3.13.24",
     "@virtueinitiative/shared-web": "file:../shared-web",
     "dayjs": "^1.11.19",

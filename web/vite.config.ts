@@ -34,9 +34,14 @@ export default defineConfig(({ mode }) => {
       fs: {
         allow: [searchForWorkspaceRoot(rootDir), '..'],
       },
+      // OPFS synchronous VFS requires cross-origin isolation
+      headers: {
+        'Cross-Origin-Opener-Policy': 'same-origin',
+        'Cross-Origin-Embedder-Policy': 'require-corp',
+      },
     },
     optimizeDeps: {
-      exclude: ['@virtueinitiative/shared-web'],
+      exclude: ['@virtueinitiative/shared-web', '@sqlite.org/sqlite-wasm'],
     },
     resolve: {
       preserveSymlinks: false,

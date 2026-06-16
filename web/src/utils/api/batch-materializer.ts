@@ -1,7 +1,7 @@
 import { decode } from '@msgpack/msgpack';
-import { Batch } from './api';
+import type { Batch } from './api';
 import { decryptBatch, decompressGzip, verifyBatch } from './crypto';
-import { FeedLog, toUint8Array } from '../../pages/Logs/shared';
+import { FeedLog, toUint8Array } from '../../pages/Logs/types';
 import { decodeWebpDimensions } from '../webp-dimensions';
 
 // Batch payload format must match client/core/src/batch.rs:
@@ -15,7 +15,6 @@ export async function decryptAndFlattenBatch(
   if (!response.ok) {
     throw new Error(`Fetch failed (${response.status}) for ${batch.url}`);
   }
-
   const raw = new Uint8Array(await response.arrayBuffer());
   if (raw.length < 13) {
     throw new Error(`Batch blob too short for AES-GCM payload: ${batch.url}`);
@@ -26,7 +25,6 @@ export async function decryptAndFlattenBatch(
   const decompressed = await decompressGzip(decrypted);
   const decoded = decode(decompressed) as unknown;
   const eventBytes = Array.isArray(decoded) ? decoded : [];
-
   const rawEventBytes = eventBytes.map((e) => toUint8Array(e) ?? new Uint8Array());
   const batch_status = await verifyBatch(rawEventBytes, startChainHash, batch.end_hash);
 
