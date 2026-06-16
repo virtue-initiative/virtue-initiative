@@ -269,7 +269,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
             risk: Some(risk),
             event: kind,
         };
-        if risk >= crate::module::lifecycle::HIGH_RISK_LIFECYCLE_ALERT {
+        if risk >= crate::module::lifecycle::EXTRA_HIGH_RISK {
             self.state.pending_immediate_events.push(entry);
             self.retry_pending_immediates()?;
         } else {
