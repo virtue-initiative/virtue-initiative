@@ -36,7 +36,7 @@ pub struct UserStopRequested {
 }
 use crate::platform::ScreenshotHooks;
 
-pub(crate) const HIGH_RISK_LIFECYCLE_ALERT: f32 = 0.9;
+pub(crate) const EXTRA_HIGH_RISK: f32 = 0.9;
 pub(crate) const MEDIUM_RISK_LIFECYCLE_ALERT: f32 = 0.6;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -171,7 +171,7 @@ impl LifecycleModule {
             && last_shutdown - old.last_ping > 30_000
         {
             let _ = emitter.send(Upload {
-                risk: HIGH_RISK_LIFECYCLE_ALERT,
+                risk: EXTRA_HIGH_RISK,
                 kind: UploadKind::LifecycleAlert {
                     reason: AlertReason::ForceKilledBeforeShutdown,
                 },
@@ -189,7 +189,7 @@ impl LifecycleModule {
             };
             if ping_gap > 10000 && (now_ms - boot_ms) > 120000 {
                 let _ = emitter.send(Upload {
-                    risk: HIGH_RISK_LIFECYCLE_ALERT,
+                    risk: EXTRA_HIGH_RISK,
                     kind: UploadKind::LifecycleAlert {
                         reason: AlertReason::UnexpectedProcessStart,
                     },
@@ -236,7 +236,7 @@ impl LifecycleModule {
                 self.state.last_process_stopped_user = now_ms;
                 if matches!(self.state.status, LifecycleStatus::Running) {
                     let _ = emitter.send(Upload {
-                        risk: HIGH_RISK_LIFECYCLE_ALERT,
+                        risk: EXTRA_HIGH_RISK,
                         kind: UploadKind::LifecycleAlert {
                             reason: AlertReason::UserStoppedProcess,
                         },
@@ -272,7 +272,7 @@ impl LifecycleModule {
             let start_gap = now_ms - old.last_running_started;
             if old.last_ping > 0 && ping_gap > 10000 && start_gap > 10000 {
                 let _ = emitter.send(Upload {
-                    risk: HIGH_RISK_LIFECYCLE_ALERT,
+                    risk: EXTRA_HIGH_RISK,
                     kind: UploadKind::LifecycleAlert {
                         reason: AlertReason::PingGapWhileRunning,
                     },
@@ -372,7 +372,7 @@ impl Observer for LifecycleModule {
             },
             _: UserSessionLogout => {
                 let _ = emitter.send(Upload {
-                    risk: HIGH_RISK_LIFECYCLE_ALERT,
+                    risk: EXTRA_HIGH_RISK,
                     kind: UploadKind::Lifecycle { kind: LifecycleKind::Logout },
                 });
                 let _ = emitter.send(ScreenshotPaused {});
