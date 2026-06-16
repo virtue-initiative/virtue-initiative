@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { DataLog } from '../../utils/api/api';
 import { formatDate, formatTime } from '../../utils/time';
-import { Dialog, DialogHeader } from '@virtueinitiative/shared-web';
+import { Button, Dialog, DialogHeader } from '@virtueinitiative/shared-web';
 import { describeRiskLevel, getRiskLevel } from '@virtueinitiative/shared-web/risk';
+import { InformationCircleIcon, LogIcon } from './log-icons';
+
 import { loadEventImage } from '../../utils/api/event-image';
 import { type FeedLog, getLogImage, toUint8Array } from './types';
 export type { FeedLog };
@@ -24,30 +26,30 @@ export function getLogCategory(log: DataLog): string {
     case 'screenshot':
       return 'Screenshot';
     case 'lifecycle':
-      if (kind === 'computer_booted') return 'Boot';
+      if (kind === 'computer_booted') return 'Computer Started';
       if (kind === 'computer_suspended') return 'Sleep';
       if (kind === 'computer_resumed') return 'Wake';
-      if (kind === 'login') return 'Login';
-      if (kind === 'logout') return 'Logout';
-      if (kind === 'process_started') return 'Monitoring On';
-      if (
-        kind === 'process_stopped_user' ||
-        kind === 'process_stopped_shutdown' ||
-        kind === 'process_stopped_other'
-      )
-        return 'Monitoring Off';
-      if (kind === 'screenshot_paused') return 'Paused';
-      if (kind === 'screenshot_resumed') return 'Resumed';
-      return 'Lifecycle';
+      if (kind === 'login') return 'Signed In';
+      if (kind === 'logout') return 'Signed Out';
+      if (kind === 'process_started') return 'Monitoring Started';
+      if (kind === 'process_stopped_shutdown') return 'Computer Shut Down';
+      if (kind === 'process_stopped_user' || kind === 'process_stopped_other')
+        return 'Monitoring Stopped';
+      if (kind === 'screenshot_paused') return 'Screenshots Paused';
+      if (kind === 'screenshot_resumed') return 'Screenshots Resumed';
+      return 'Activity';
     case 'lifecycle_alert':
-      if (reason === 'ping_gap_while_running') return 'Alert: Gap';
-      if (reason === 'process_killed_before_shutdown' || reason === 'force_killed_before_shutdown')
-        return 'Alert: Killed';
+      if (reason === 'ping_gap_while_running') return 'Unexpected Gap';
+      if (reason === 'process_killed_before_shutdown') return 'Process Stopped Unexpectedly';
+      if (reason === 'force_killed_before_shutdown') return 'Process Force-Stopped';
+      if (reason === 'user_stopped_process') return 'Monitoring Stopped by User';
+      if (reason === 'unexpected_process_start') return 'Unexpected Restart';
+      if (reason === 'missing_resume') return 'Missing Wake Event';
       return 'Alert';
     case 'alert':
       return 'Alert';
     case 'capture_failed':
-      return 'System';
+      return 'Capture Failed';
     case 'dev':
       return 'Developer';
     default:
@@ -55,36 +57,21 @@ export function getLogCategory(log: DataLog): string {
   }
 }
 
-export function getLogIcon(log: DataLog): string {
-  const kind = log.data?.kind as string | undefined;
-  switch (log.type) {
-    case 'lifecycle':
-      if (kind === 'computer_booted') return '🖥️';
-      if (kind === 'computer_suspended') return '🌙';
-      if (kind === 'computer_resumed') return '☀️';
-      if (kind === 'login') return '🔓';
-      if (kind === 'logout') return '🔒';
-      if (kind === 'process_started') return '▶️';
-      if (
-        kind === 'process_stopped_user' ||
-        kind === 'process_stopped_shutdown' ||
-        kind === 'process_stopped_other'
-      )
-        return '⏹️';
-      if (kind === 'screenshot_paused') return '⏸️';
-      if (kind === 'screenshot_resumed') return '▶️';
-      return '📋';
-    case 'lifecycle_alert':
-      return '⚠️';
-    case 'alert':
-      return '⚠️';
-    case 'capture_failed':
-      return '❌';
-    case 'dev':
-      return '🛠️';
-    default:
-      return '📋';
-  }
+/** Base URL of the help page documenting every log type. */
+export const LOG_TYPES_HELP_URL = 'https://virtueinitiative.org/help/web/log-types';
+
+/** Slugified anchor for a log's section on the log-types help page. Mirrors the
+ * id markdown generates from the matching heading (the category title). */
+export function getLogHelpAnchor(log: DataLog): string {
+  return getLogCategory(log)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+/** Deep link to the specific log type's section on the help page. */
+export function getLogHelpUrl(log: DataLog): string {
+  return `${LOG_TYPES_HELP_URL}#${getLogHelpAnchor(log)}`;
 }
 
 export function getLogMessage(log: DataLog, deviceName: string): string {
@@ -285,6 +272,16 @@ export function LogDetailDialog({
             {item.batch_status === 'failed' && (
               <span class="logs-verify-badge logs-verify-badge--failed">⚠ Unverified</span>
             )}
+            <a
+              class="vi-icon-btn logs-detail-help-link"
+              href={getLogHelpUrl(item)}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Learn more about this event"
+              title="Learn more about this event"
+            >
+              <InformationCircleIcon />
+            </a>
           </>
         }
       >
@@ -295,7 +292,9 @@ export function LogDetailDialog({
       </p>
       <p class="logs-detail-message">{getLogMessage(item, deviceName(item.device_id))}</p>
       {!imgSrc && item.type !== 'screenshot' && (
-        <div class="logs-detail-icon">{getLogIcon(item)}</div>
+        <div class="logs-detail-icon">
+          <LogIcon log={item} />
+        </div>
       )}
       {imgSrc && (
         <button
@@ -320,6 +319,11 @@ export function LogDetailDialog({
           </dl>
         </details>
       )}
+      <div class="logs-detail-learn-more">
+        <Button variant="ghost" href={getLogHelpUrl(item)} target="_blank" rel="noreferrer">
+          Learn more about this event
+        </Button>
+      </div>
       {lightboxOpen && (
         <div class="logs-lightbox-overlay" onClick={() => setLightboxOpen(false)}>
           <div class="logs-lightbox-frame">

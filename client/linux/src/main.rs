@@ -12,6 +12,8 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
+#[cfg(debug_assertions)]
+use virtue_core::{AlertReason, LifecycleKind};
 use virtue_core::{
     ClientController, EventBus, EventChannel, FlushBatchNow, Ping, ScreenshotHooks, ServiceStatus,
     StatusRequest, StatusResponse, Upload, UploadKind, build_default_modules_reqwest, load_state,
@@ -82,6 +84,36 @@ enum DevCommands {
     AddScreenshot(DeveloperEventArgs),
     #[command(about = "Upload any queued batch items right now")]
     UploadBatch,
+    #[cfg(debug_assertions)]
+    #[command(about = "Queue a log of any type into the next batch (debug builds only)")]
+    Send(SendLogArgs),
+}
+
+/// Args for `dev send` — lets developers emit any log type to exercise the
+/// web app's icons/titles. Debug builds only.
+#[cfg(debug_assertions)]
+#[derive(Debug, Args)]
+struct SendLogArgs {
+    /// Log type to emit. Use `all` to queue one of every type.
+    #[arg(long = "type", value_name = "TYPE")]
+    log_type: String,
+    /// Lifecycle kind (snake_case) when --type lifecycle, e.g. computer_booted, login.
+    #[arg(long)]
+    kind: Option<String>,
+    /// Alert reason (snake_case) when --type lifecycle_alert, e.g. ping_gap_while_running.
+    #[arg(long)]
+    reason: Option<String>,
+    /// Message body when --type alert.
+    #[arg(long)]
+    message: Option<String>,
+    /// Title when --type dev.
+    #[arg(long)]
+    title: Option<String>,
+    /// Details when --type dev.
+    #[arg(long)]
+    details: Option<String>,
+    #[arg(long, default_value_t = 0.5_f32, value_parser = parse_risk)]
+    risk: f32,
 }
 
 #[derive(Debug, Args)]
@@ -304,7 +336,138 @@ fn dev(paths: ClientPaths, command: DevCommands) -> Result<()> {
         DevCommands::AddLog(args) => dev_add_log(paths, args),
         DevCommands::AddScreenshot(args) => dev_add_screenshot(paths, args),
         DevCommands::UploadBatch => dev_upload_batch(paths),
+        #[cfg(debug_assertions)]
+        DevCommands::Send(args) => dev_send(paths, args),
     }
+}
+
+/// Builds the `UploadKind` for a single `dev send` log type. Returns `None` for
+/// `screenshot` (handled separately) and errors on unknown types/kinds.
+#[cfg(debug_assertions)]
+fn build_send_kind(args: &SendLogArgs) -> Result<UploadKind> {
+    let parse_enum = |value: &str| -> Result<serde_json::Value> {
+        Ok(serde_json::Value::String(value.to_string()))
+    };
+    match args.log_type.as_str() {
+        "lifecycle" => {
+            let kind = args
+                .kind
+                .as_deref()
+                .context("--kind is required for --type lifecycle")?;
+            let kind: LifecycleKind = serde_json::from_value(parse_enum(kind)?)
+                .with_context(|| format!("unknown lifecycle kind: {kind}"))?;
+            Ok(UploadKind::Lifecycle { kind })
+        }
+        "lifecycle_alert" => {
+            let reason = args
+                .reason
+                .as_deref()
+                .context("--reason is required for --type lifecycle_alert")?;
+            let reason: AlertReason = serde_json::from_value(parse_enum(reason)?)
+                .with_context(|| format!("unknown alert reason: {reason}"))?;
+            Ok(UploadKind::LifecycleAlert { reason })
+        }
+        "alert" => Ok(UploadKind::Alert {
+            message: args
+                .message
+                .clone()
+                .unwrap_or_else(|| "Developer test alert".to_string()),
+        }),
+        "capture_failed" => Ok(UploadKind::CaptureFailed),
+        "dev" => Ok(UploadKind::Dev {
+            title: args
+                .title
+                .clone()
+                .unwrap_or_else(|| "Developer CLI log".to_string()),
+            details: args.details.clone(),
+        }),
+        other => anyhow::bail!(
+            "unsupported --type {other:?} (expected: lifecycle, lifecycle_alert, alert, capture_failed, dev, screenshot, or all)"
+        ),
+    }
+}
+
+/// Every concrete log variant `dev send --all` queues — one per web log icon.
+#[cfg(debug_assertions)]
+fn all_send_kinds() -> Vec<UploadKind> {
+    use AlertReason::*;
+    use LifecycleKind::*;
+    let lifecycle = [
+        ComputerBooted,
+        ComputerSuspended,
+        ComputerResumed,
+        Login,
+        Logout,
+        ProcessStarted,
+        ProcessStoppedUser,
+        ProcessStoppedShutdown,
+        ProcessStoppedOther,
+        ScreenshotPaused,
+        ScreenshotResumed,
+    ]
+    .into_iter()
+    .map(|kind| UploadKind::Lifecycle { kind });
+    let alerts = [
+        PingGapWhileRunning,
+        ProcessKilledBeforeShutdown,
+        ForceKilledBeforeShutdown,
+        UserStoppedProcess,
+        UnexpectedProcessStart,
+        MissingResume,
+    ]
+    .into_iter()
+    .map(|reason| UploadKind::LifecycleAlert { reason });
+    lifecycle
+        .chain(alerts)
+        .chain([
+            UploadKind::Alert {
+                message: "Developer test alert".to_string(),
+            },
+            UploadKind::CaptureFailed,
+            UploadKind::Dev {
+                title: "Developer CLI log".to_string(),
+                details: None,
+            },
+        ])
+        .collect()
+}
+
+#[cfg(debug_assertions)]
+fn dev_send(paths: ClientPaths, args: SendLogArgs) -> Result<()> {
+    let (mut bus, state_path) = make_dev_bus(&paths)?;
+
+    let kinds = if args.log_type == "all" {
+        // Screenshots are excluded here: the running daemon already produces real
+        // screenshots, and capture/spooling depends on the platform environment.
+        // Use `dev send --type screenshot` explicitly to queue one.
+        all_send_kinds()
+    } else if args.log_type == "screenshot" {
+        let shot = LinuxPlatformHooks::new()
+            .take_screenshot()
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        vec![UploadKind::Screenshot {
+            image: shot.bytes,
+            content_type: shot.content_type,
+        }]
+    } else {
+        vec![build_send_kind(&args)?]
+    };
+
+    let count = kinds.len();
+    for kind in kinds {
+        bus.send(Upload {
+            risk: args.risk,
+            kind,
+        })?;
+    }
+    bus.send(Ping)?;
+    store_state(&state_path, &bus.iter()?)?;
+
+    println!(
+        "Queued {count} log(s) in the next batch with risk {}. Run `virtue dev upload-batch` to send them now.",
+        format_risk(args.risk)
+    );
+    Ok(())
 }
 
 fn make_dev_bus(paths: &ClientPaths) -> Result<(EventBus, std::path::PathBuf)> {
