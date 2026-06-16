@@ -24,6 +24,11 @@ pub struct Logout;
 pub struct LoginRequested {
     pub email: String,
     pub password: Redacted<String>,
+    /// Optional device-name override chosen by the user at login. When `Some`
+    /// and non-empty, it takes precedence over the construction-time
+    /// `AuthModule::device_name` (hostname / OS device name).
+    #[serde(default)]
+    pub device_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,8 +96,14 @@ impl<A: ApiTransport + Send + Sync + 'static> AuthModule<A> {
         }
     }
 
-    fn handle_login_requested(&mut self, email: &str, password: &str, emitter: &Emitter) {
-        match self.do_login(email, password) {
+    fn handle_login_requested(
+        &mut self,
+        email: &str,
+        password: &str,
+        device_name: Option<&str>,
+        emitter: &Emitter,
+    ) {
+        match self.do_login(email, password, device_name) {
             Ok((credentials, settings)) => {
                 let device_id = credentials.device_id.clone();
                 let _ = emitter.send(Login {
@@ -119,11 +130,18 @@ impl<A: ApiTransport + Send + Sync + 'static> AuthModule<A> {
         &mut self,
         email: &str,
         password: &str,
+        device_name: Option<&str>,
     ) -> CoreResult<(DeviceCredentials, crate::model::DeviceSettings)> {
         let access_token = self.api.login(email, password)?;
+        // Use the user-supplied override when present and non-empty (trimmed),
+        // otherwise fall back to the construction-time device name (hostname).
+        let resolved_name = device_name
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .unwrap_or(self.device_name.as_str());
         let mut device =
             self.api
-                .register_device(&access_token, &self.device_name, &self.platform_name)?;
+                .register_device(&access_token, resolved_name, &self.platform_name)?;
         let settings = with_device_token_retry(&self.api, &mut device, |api, token| {
             api.get_device_settings(token)
         })?;
@@ -218,7 +236,12 @@ impl<A: ApiTransport + Send + Sync + 'static> Observer for AuthModule<A> {
     fn on_event(&mut self, event: &dyn Any, emitter: &Emitter) -> CoreResult<()> {
         crate::dispatch_event!(event, {
             ev: LoginRequested => {
-                self.handle_login_requested(&ev.email, &ev.password, emitter);
+                self.handle_login_requested(
+                    &ev.email,
+                    &ev.password,
+                    ev.device_name.as_deref(),
+                    emitter,
+                );
                 Ok(())
             },
             _: LogoutRequested => {
@@ -271,6 +294,7 @@ mod tests {
             LoginRequested {
                 email: "alice@example.org".into(),
                 password: Redacted("secret".into()),
+                device_name: None,
             },
         );
         assert_eq!(t.captured::<Login>().len(), 1, "expected Login event");
@@ -280,6 +304,58 @@ mod tests {
         assert!(
             results[0].device_id.is_some(),
             "login result should carry device_id"
+        );
+    }
+
+    #[test]
+    fn login_uses_device_name_override_when_present() {
+        let mut b = EventTester::builder();
+        b.capture::<LoginResult>();
+        b.add(AuthModule::new(
+            b.api(),
+            "test-device".into(),
+            "test-platform".into(),
+        ));
+        let mut t = b.build();
+        t.emit(
+            1,
+            LoginRequested {
+                email: "alice@example.org".into(),
+                password: Redacted("secret".into()),
+                device_name: Some("  My Laptop  ".into()),
+            },
+        );
+        let calls = t.api.state().register_device_calls.clone();
+        assert_eq!(calls.len(), 1, "expected one register_device call");
+        assert_eq!(
+            calls[0].name, "My Laptop",
+            "override name should be used (trimmed)"
+        );
+    }
+
+    #[test]
+    fn login_falls_back_to_construction_name_when_override_blank() {
+        let mut b = EventTester::builder();
+        b.capture::<LoginResult>();
+        b.add(AuthModule::new(
+            b.api(),
+            "test-device".into(),
+            "test-platform".into(),
+        ));
+        let mut t = b.build();
+        t.emit(
+            1,
+            LoginRequested {
+                email: "alice@example.org".into(),
+                password: Redacted("secret".into()),
+                device_name: Some("   ".into()),
+            },
+        );
+        let calls = t.api.state().register_device_calls.clone();
+        assert_eq!(calls.len(), 1, "expected one register_device call");
+        assert_eq!(
+            calls[0].name, "test-device",
+            "blank override should fall back to construction-time name"
         );
     }
 
@@ -300,6 +376,7 @@ mod tests {
             LoginRequested {
                 email: "alice@example.org".into(),
                 password: Redacted("wrong".into()),
+                device_name: None,
             },
         );
         let results = t.captured::<LoginResult>();

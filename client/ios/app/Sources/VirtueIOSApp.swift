@@ -150,6 +150,10 @@ struct ContentView: View {
                         SecureField("Password", text: $coordinator.password)
                             .textFieldStyle(.roundedBorder)
 
+                        TextField("Device name", text: $coordinator.deviceName)
+                            .autocorrectionDisabled()
+                            .textFieldStyle(.roundedBorder)
+
                         HStack(spacing: 10) {
                             Button("Sign In") {
                                 coordinator.login()

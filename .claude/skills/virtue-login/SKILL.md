@@ -8,6 +8,8 @@ description: Build, install, and log in to the Virtue Initiative Linux client ag
 Builds the Linux client `.deb`, installs it with `dpkg`, points it at the local
 dev API, and logs in with the dev account. The password prompt is read from a raw
 terminal, so a pty helper (`login.py`) types it in — a plain stdin pipe will not work.
+After the password, `virtue login` also prompts for a device name; `login.py`
+answers it automatically (see step 5/6).
 
 Credentials live in `credentials.json` (gitignored), NOT in the script. The dev
 account is:
@@ -63,8 +65,9 @@ systemctl --user restart virtue.service
 
 ### 5. Ensure the credentials file exists
 
-`login.py` reads `email`/`password` from `.claude/skills/virtue-login/credentials.json`
-(gitignored). On first use, if it is missing, create it from the dev account:
+`login.py` reads `email`/`password` (and an optional `device_name`) from
+`.claude/skills/virtue-login/credentials.json` (gitignored). On first use, if it
+is missing, create it from the dev account:
 
 ```bash
 cat > .claude/skills/virtue-login/credentials.json <<'EOF'
@@ -77,6 +80,13 @@ EOF
 
 See `credentials.example.json` for the format. To point at a different file, set
 `VIRTUE_LOGIN_CONFIG=/path/to/creds.json`.
+
+`device_name` is optional:
+
+- omitted/empty — `login.py` presses Enter at the device-name prompt, registering
+  the device under the machine hostname (the default).
+- set — `login.py` passes it as `virtue login --device-name <name>`, so the device
+  registers under that exact name.
 
 ### 6. Log in
 

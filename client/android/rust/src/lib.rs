@@ -237,10 +237,11 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeLogin
         let password: String = env.get_string(&password)?.into();
         let device_name: String = env.get_string(&device_name)?.into();
         let core = core()?;
-        let (mut bus, state_path) = build_bus(core, &device_name)?;
+        let (mut bus, state_path) = build_bus(core)?;
         let result = bus.request::<LoginRequested, LoginResult>(LoginRequested {
             email,
             password: Redacted(password),
+            device_name: Some(device_name),
         })?;
         if !result.success {
             return Err(anyhow!(result.error.unwrap_or_else(|| {
@@ -262,7 +263,7 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeLogou
 ) -> jstring {
     let result = (|| -> Result<()> {
         let core = core()?;
-        let (mut bus, state_path) = build_bus(core, "android-device")?;
+        let (mut bus, state_path) = build_bus(core)?;
         bus.send(LogoutRequested)?;
         let state = bus.iter()?;
         store_state(&state_path, &state)?;
@@ -360,7 +361,7 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeNoteU
     let result = (|| -> Result<()> {
         let core = core()?;
         let source: String = env.get_string(&source)?.into();
-        let (mut bus, state_path) = build_bus(core, "android-device")?;
+        let (mut bus, state_path) = build_bus(core)?;
         bus.send(UserStopRequested { source })?;
         let state = bus.iter()?;
         store_state(&state_path, &state)?;
@@ -378,7 +379,7 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeGetSt
 ) -> jstring {
     let json = (|| -> Result<String> {
         let core = core()?;
-        let (mut bus, _) = build_bus(core, "android-device")?;
+        let (mut bus, _) = build_bus(core)?;
         let response = bus.request::<StatusRequest, StatusResponse>(StatusRequest)?;
         Ok(serde_json::to_string(&response.status)?)
     })()
@@ -423,8 +424,8 @@ pub fn is_interactive(env: &mut JNIEnv) -> jni::errors::Result<bool> {
     Ok(interactive)
 }
 
-fn build_bus(core: &AndroidCore, device: &str) -> Result<(EventBus, PathBuf)> {
-    let cfg = build_core_config(core, device);
+fn build_bus(core: &AndroidCore) -> Result<(EventBus, PathBuf)> {
+    let cfg = build_core_config(core);
     let modules = build_default_modules_reqwest(
         cfg,
         AndroidPlatformHooks {
@@ -437,7 +438,7 @@ fn build_bus(core: &AndroidCore, device: &str) -> Result<(EventBus, PathBuf)> {
 }
 
 fn run_daemon_loop(core: &AndroidCore) -> Result<()> {
-    let (mut bus, state_path) = build_bus(core, "android-device")?;
+    let (mut bus, state_path) = build_bus(core)?;
     bus.send(ProcessStarted)?;
     let state = bus.iter()?;
     store_state(&state_path, &state)?;
@@ -494,10 +495,13 @@ fn sleep_interruptible(stop: &AtomicBool, duration: Duration) {
     }
 }
 
-fn build_core_config(core: &AndroidCore, device_name: &str) -> Config {
+fn build_core_config(core: &AndroidCore) -> Config {
+    // The device name passed at construction is only a placeholder: device
+    // registration happens on login, which carries the user-chosen name on the
+    // `LoginRequested` event.
     Config::new(
         DEFAULT_BASE_API_URL,
-        device_name,
+        "android",
         "android",
         core.state_dir.clone(),
         Some(core.runtime_config_file.clone()),

@@ -37,13 +37,6 @@ const CAPTURE_STATUS_PERMISSION_MISSING: c_int = 1;
 const CAPTURE_STATUS_SESSION_UNAVAILABLE: c_int = 2;
 const CAPTURE_STATUS_UNKNOWN: c_int = 3;
 
-#[derive(Clone, Debug)]
-struct StopRequest {
-    raw_reason: String,
-    detected_by: String,
-    explicit_user_stop: bool,
-}
-
 unsafe extern "C" {
     fn virtue_ios_capture_status() -> c_int;
     fn virtue_ios_capture_png_write(out_ptr: *mut *const u8, out_len: *mut usize) -> c_int;
@@ -55,7 +48,10 @@ struct IosCore {
     runtime_config_file: PathBuf,
     stop: AtomicBool,
     daemon_running: Mutex<bool>,
-    stop_request: Mutex<Option<StopRequest>>,
+    /// `Some(explicit_user_stop)` once a stop has been requested: `true` when the
+    /// user paused monitoring, `false` for a system-driven stop. `None` until a
+    /// stop is requested.
+    stop_request: Mutex<Option<bool>>,
 }
 
 #[derive(Clone)]
@@ -205,10 +201,11 @@ pub extern "C" fn virtue_ios_native_login(
         let password = c_string_or_empty(password);
         let device_name = c_string_or_empty(device_name);
         let core = core()?;
-        let (mut bus, state_path) = build_bus(core, &device_name)?;
+        let (mut bus, state_path) = build_bus(core)?;
         let result = bus.request::<LoginRequested, LoginResult>(LoginRequested {
             email,
             password: Redacted(password),
+            device_name: Some(device_name),
         })?;
         if !result.success {
             return Err(anyhow!(result.error.unwrap_or_else(|| {
@@ -227,7 +224,7 @@ pub extern "C" fn virtue_ios_native_login(
 pub extern "C" fn virtue_ios_native_logout() -> *mut c_char {
     let result = (|| -> Result<()> {
         let core = core()?;
-        let (mut bus, state_path) = build_bus(core, "ios-device")?;
+        let (mut bus, state_path) = build_bus(core)?;
         bus.send(LogoutRequested)?;
         let state = bus.iter()?;
         store_state(&state_path, &state)?;
@@ -275,7 +272,7 @@ pub extern "C" fn virtue_ios_native_get_device_id() -> *mut c_char {
 pub extern "C" fn virtue_ios_native_get_status_json() -> *mut c_char {
     let json = (|| -> Result<String> {
         let core = core()?;
-        let (mut bus, _) = build_bus(core, "ios-device")?;
+        let (mut bus, _) = build_bus(core)?;
         let response = bus.request::<StatusRequest, StatusResponse>(StatusRequest)?;
         Ok(serde_json::to_string(&response.status)?)
     })();
@@ -319,14 +316,8 @@ pub extern "C" fn virtue_ios_native_run_daemon_loop() -> *mut c_char {
 pub extern "C" fn virtue_ios_native_stop_daemon() -> *mut c_char {
     let result = (|| -> Result<()> {
         let core = core()?;
-        set_stop_request(
-            core,
-            StopRequest {
-                raw_reason: "ios_stop_request".to_string(),
-                detected_by: "ios_extension_daemon".to_string(),
-                explicit_user_stop: false,
-            },
-        )?;
+        // System-driven stop (not an explicit user pause).
+        set_stop_request(core, false)?;
         core.stop.store(true, Ordering::SeqCst);
         Ok(())
     })();
@@ -342,14 +333,8 @@ pub extern "C" fn virtue_ios_native_pause_monitoring(source: *const c_char) -> *
             "" => "ios_pause_button".to_string(),
             value => value.to_string(),
         };
-        set_stop_request(
-            core,
-            StopRequest {
-                raw_reason: "user_pause".to_string(),
-                detected_by: "ios_extension_daemon".to_string(),
-                explicit_user_stop: true,
-            },
-        )?;
+        // Explicit user pause.
+        set_stop_request(core, true)?;
         core.stop.store(true, Ordering::SeqCst);
         Ok(())
     })();
@@ -365,7 +350,7 @@ pub extern "C" fn virtue_ios_native_request_pause_monitoring(source: *const c_ch
             "" => "ios_pause_button".to_string(),
             value => value.to_string(),
         };
-        let (mut bus, state_path) = build_bus(core, "ios-device")?;
+        let (mut bus, state_path) = build_bus(core)?;
         bus.send(UserStopRequested { source })?;
         let state = bus.iter()?;
         store_state(&state_path, &state)?;
@@ -388,7 +373,7 @@ pub unsafe extern "C" fn virtue_ios_free_string(value: *mut c_char) {
 }
 
 fn run_daemon_loop(core: &IosCore) -> Result<()> {
-    let (mut bus, state_path) = build_bus(core, "ios-device")?;
+    let (mut bus, state_path) = build_bus(core)?;
     bus.send(ProcessStarted)?;
     // Enable screenshot capture. The screenshot module only captures while it is
     // "enabled", which the lifecycle module otherwise flips on via
@@ -418,12 +403,8 @@ fn run_daemon_loop(core: &IosCore) -> Result<()> {
         sleep_interruptible(&core.stop, sleep_duration);
     }
 
-    let stop_request = take_stop_request(core)?.unwrap_or_else(|| StopRequest {
-        raw_reason: "ios_stop_request".to_string(),
-        detected_by: "ios_extension_daemon".to_string(),
-        explicit_user_stop: false,
-    });
-    let reason = if stop_request.explicit_user_stop {
+    let explicit_user_stop = take_stop_request(core)?.unwrap_or(false);
+    let reason = if explicit_user_stop {
         ProcessStoppedReason::User
     } else {
         ProcessStoppedReason::Other
@@ -443,18 +424,21 @@ fn sleep_interruptible(stop: &AtomicBool, duration: Duration) {
     }
 }
 
-fn build_bus(core: &IosCore, device: &str) -> Result<(EventBus, PathBuf)> {
-    let cfg = build_core_config(core, device);
+fn build_bus(core: &IosCore) -> Result<(EventBus, PathBuf)> {
+    let cfg = build_core_config(core);
     let modules = build_default_modules_reqwest(cfg, IosPlatformHooks)?;
     let state_path = core.state_dir.join("event_state.json");
     let bus = EventBus::new(modules, load_state(&state_path)?)?;
     Ok((bus, state_path))
 }
 
-fn build_core_config(core: &IosCore, device_name: &str) -> Config {
+fn build_core_config(core: &IosCore) -> Config {
+    // The device name passed at construction is only a placeholder: device
+    // registration happens on login, which carries the user-chosen name on the
+    // `LoginRequested` event.
     Config::new(
         DEFAULT_BASE_API_URL,
-        device_name,
+        "ios",
         "ios",
         core.state_dir.clone(),
         Some(core.runtime_config_file.clone()),
@@ -463,16 +447,16 @@ fn build_core_config(core: &IosCore, device_name: &str) -> Config {
     )
 }
 
-fn set_stop_request(core: &IosCore, request: StopRequest) -> Result<()> {
+fn set_stop_request(core: &IosCore, explicit_user_stop: bool) -> Result<()> {
     let mut guard = core
         .stop_request
         .lock()
         .map_err(|_| anyhow!("stop request lock poisoned"))?;
-    *guard = Some(request);
+    *guard = Some(explicit_user_stop);
     Ok(())
 }
 
-fn take_stop_request(core: &IosCore) -> Result<Option<StopRequest>> {
+fn take_stop_request(core: &IosCore) -> Result<Option<bool>> {
     let mut guard = core
         .stop_request
         .lock()

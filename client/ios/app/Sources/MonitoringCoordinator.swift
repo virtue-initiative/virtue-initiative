@@ -43,6 +43,7 @@ private struct CoreLifecycleSnapshot: Decodable {
 final class MonitoringCoordinator: ObservableObject {
     @Published var email: String = ""
     @Published var password: String = ""
+    @Published var deviceName: String = UIDevice.current.name
     @Published var baseApiUrlOverride: String = ""
     @Published var captureIntervalOverride: String = ""
     @Published var batchWindowOverride: String = ""
@@ -140,8 +141,9 @@ final class MonitoringCoordinator: ObservableObject {
             return
         }
 
-        let deviceName = UIDevice.current.name
-        if let error = NativeBridge.login(email: email, password: password, deviceName: deviceName) {
+        let trimmedDeviceName = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedDeviceName = trimmedDeviceName.isEmpty ? UIDevice.current.name : trimmedDeviceName
+        if let error = NativeBridge.login(email: email, password: password, deviceName: resolvedDeviceName) {
             statusMessage = "Login failed: \(error)"
             return
         }

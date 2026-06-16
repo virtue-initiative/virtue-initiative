@@ -3,11 +3,15 @@
 
 The Linux client reads the password from the controlling terminal in raw mode
 (crossterm), so it cannot be fed over a normal stdin pipe. This allocates a pty,
-runs `virtue login --email <email>`, waits for the "Password:" prompt, and types
-the password followed by Enter.
+runs `virtue login --email <email>`, waits for the "Password:" prompt, types the
+password, then answers the "Device name [...]:" prompt that follows.
 
 Credentials are read from a JSON config file (NOT committed):
-  { "email": "...", "password": "..." }
+  { "email": "...", "password": "...", "device_name": "..." }
+
+`device_name` is optional:
+  - omitted/empty -> press Enter at the prompt to accept the default (hostname)
+  - set          -> pass it via --device-name (no interactive prompt appears)
 
 Config path resolution:
   1. $VIRTUE_LOGIN_CONFIG if set
@@ -40,26 +44,35 @@ def load_credentials():
         cfg = json.load(f)
     email = cfg.get("email")
     password = cfg.get("password")
+    device_name = (cfg.get("device_name") or "").strip()
     if not email or not password:
         sys.stderr.write(
             f"Config {CONFIG_PATH} must set both 'email' and 'password'.\n"
         )
         sys.exit(2)
-    return email, password
+    return email, password, device_name
 
 
 def main() -> int:
-    email, password = load_credentials()
+    email, password, device_name = load_credentials()
+
+    argv = ["virtue", "login", "--email", email]
+    # When a name is provided we pass it as a flag, so no device-name prompt
+    # appears. When it is absent we answer the interactive prompt with Enter
+    # (accepting the hostname default).
+    if device_name:
+        argv += ["--device-name", device_name]
 
     pid, fd = pty.fork()
     if pid == 0:
         # Child: become the virtue client with the pty as its controlling tty.
-        os.execvp("virtue", ["virtue", "login", "--email", email])
+        os.execvp("virtue", argv)
         os._exit(127)  # unreachable on success
 
-    # Parent: relay output, send the password when prompted.
+    # Parent: relay output, answer the password and device-name prompts.
     buf = b""
-    sent = False
+    sent_password = False
+    answered_device = device_name != ""  # nothing to answer when flag was passed
     while True:
         try:
             ready, _, _ = select.select([fd], [], [], 60)
@@ -75,10 +88,14 @@ def main() -> int:
             break
         os.write(sys.stdout.fileno(), data)  # mirror prompt/output to our stdout
         buf += data
-        if not sent and b"Password:" in buf:
+        if not sent_password and b"Password:" in buf:
             time.sleep(0.2)  # let raw mode engage before sending
             os.write(fd, (password + "\r").encode())
-            sent = True
+            sent_password = True
+        if sent_password and not answered_device and b"Device name [" in buf:
+            time.sleep(0.2)
+            os.write(fd, b"\r")  # accept the default (hostname)
+            answered_device = True
 
     _, status = os.waitpid(pid, 0)
     return os.waitstatus_to_exitcode(status)

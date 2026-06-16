@@ -59,6 +59,7 @@ enum MonitorCommand {
     AppLogin {
         email: String,
         password: String,
+        device_name: String,
         response: mpsc::SyncSender<virtue_core::CoreResult<String>>,
     },
     AppLogout {
@@ -215,7 +216,7 @@ pub fn note_login_state(logged_in: bool) {
     });
 }
 
-pub fn app_login(email: &str, password: &str) -> Result<String> {
+pub fn app_login(email: &str, password: &str, device_name: &str) -> Result<String> {
     let (tx, rx) = mpsc::sync_channel(1);
     {
         let state = controller().state.lock().expect("monitor controller lock");
@@ -224,6 +225,7 @@ pub fn app_login(email: &str, password: &str) -> Result<String> {
                 let _ = worker.command_tx.send(MonitorCommand::AppLogin {
                     email: email.to_string(),
                     password: password.to_string(),
+                    device_name: device_name.to_string(),
                     response: tx,
                 });
             }
@@ -393,11 +395,13 @@ fn handle_command(bus: &mut EventBus, state_path: &Path, command: MonitorCommand
         MonitorCommand::AppLogin {
             email,
             password,
+            device_name,
             response,
         } => {
             let request_result = bus.request::<LoginRequested, LoginResult>(LoginRequested {
                 email,
                 password: Redacted(password),
+                device_name: Some(device_name),
             });
             let _ = store_state(state_path, &bus.iter()?);
             let result = request_result.and_then(|r| {

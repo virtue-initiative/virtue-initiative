@@ -66,6 +66,7 @@ pub enum MainWindowEvent {
     LoginSubmitted {
         email: String,
         password: String,
+        device_name: String,
     },
     /// Sent from background thread when relaunch completes. `None` = success.
     RelaunchDone(Option<String>),
@@ -94,6 +95,7 @@ pub struct MainWindowDetails<'a> {
 pub enum MainWindowMode<'a> {
     Login {
         default_email: &'a str,
+        default_device_name: &'a str,
     },
     LoggedIn {
         email: &'a str,
@@ -152,6 +154,7 @@ struct MainWindowIvars {
     login_container: OnceCell<Retained<NSView>>,
     login_email_field: OnceCell<Retained<NSTextField>>,
     login_password_field: OnceCell<Retained<NSSecureTextField>>,
+    login_device_name_field: OnceCell<Retained<NSTextField>>,
     login_error_label: OnceCell<Retained<NSTextField>>,
     // Logged-in mode
     logged_in_container: OnceCell<Retained<NSView>>,
@@ -184,13 +187,25 @@ define_class!(
                 .expect("login_password_field must be set")
                 .stringValue()
                 .to_string();
+            let device_name = self
+                .ivars()
+                .login_device_name_field
+                .get()
+                .expect("login_device_name_field must be set")
+                .stringValue()
+                .to_string();
             let email = email.trim().to_string();
+            let device_name = device_name.trim().to_string();
             if email.is_empty() || password.is_empty() {
                 self.set_login_error("Email and password are required.");
                 return;
             }
             self.set_login_error("");
-            let _ = self.emit(MainWindowEvent::LoginSubmitted { email, password });
+            let _ = self.emit(MainWindowEvent::LoginSubmitted {
+                email,
+                password,
+                device_name,
+            });
         }
 
         #[unsafe(method(stopMonitoring:))]
@@ -253,6 +268,7 @@ impl MainWindowController {
         login_container: Retained<NSView>,
         login_email_field: Retained<NSTextField>,
         login_password_field: Retained<NSSecureTextField>,
+        login_device_name_field: Retained<NSTextField>,
         login_error_label: Retained<NSTextField>,
         logged_in_container: Retained<NSView>,
         message_label: Retained<NSTextField>,
@@ -277,6 +293,10 @@ impl MainWindowController {
             .login_password_field
             .set(login_password_field)
             .expect("login_password_field already set");
+        self.ivars()
+            .login_device_name_field
+            .set(login_device_name_field)
+            .expect("login_device_name_field already set");
         self.ivars()
             .login_error_label
             .set(login_error_label)
@@ -311,7 +331,7 @@ impl MainWindowController {
             .setStringValue(&NSString::from_str(msg));
     }
 
-    fn switch_to_login_mode(&self, default_email: &str) {
+    fn switch_to_login_mode(&self, default_email: &str, default_device_name: &str) {
         let ivars = self.ivars();
         ivars
             .login_error_label
@@ -328,6 +348,11 @@ impl MainWindowController {
             .get()
             .expect("login_password_field must be set")
             .setStringValue(&NSString::from_str(""));
+        ivars
+            .login_device_name_field
+            .get()
+            .expect("login_device_name_field must be set")
+            .setStringValue(&NSString::from_str(default_device_name));
         ivars
             .logged_in_container
             .get()
@@ -465,8 +490,9 @@ impl MainWindowHandle {
         self.controller.set_relaunch_button_state(title, enabled);
     }
 
-    pub fn switch_to_login(&self, default_email: &str) {
-        self.controller.switch_to_login_mode(default_email);
+    pub fn switch_to_login(&self, default_email: &str, default_device_name: &str) {
+        self.controller
+            .switch_to_login_mode(default_email, default_device_name);
     }
 }
 
@@ -474,7 +500,7 @@ pub fn show_main_window(details: &MainWindowDetails<'_>) -> Result<MainWindowHan
     let mtm = appkit_thread_marker()?;
     let controller = MainWindowController::new(mtm);
     let window_width = 700.0_f64;
-    let window_height = 290.0_f64;
+    let window_height = 360.0_f64;
     let rail_width = 160.0_f64;
     let content_x = rail_width + 24.0;
     let content_width = window_width - content_x - 20.0; // 496
@@ -510,7 +536,7 @@ pub fn show_main_window(details: &MainWindowDetails<'_>) -> Result<MainWindowHan
     );
     let logo_view = build_logo_view(
         mtm,
-        NSRect::new(NSPoint::new(28.0, 96.0), NSSize::new(104.0, 104.0)),
+        NSRect::new(NSPoint::new(28.0, 166.0), NSSize::new(104.0, 104.0)),
     )?;
 
     // -- Login container -------------------------------------------------------
@@ -525,26 +551,42 @@ pub fn show_main_window(details: &MainWindowDetails<'_>) -> Result<MainWindowHan
         mtm,
         "Sign in to your Virtue account to start monitoring.",
         0.0,
-        206.0,
+        276.0,
         content_width,
         54.0,
     );
-    let login_error_label = wrapping_label(mtm, "", 0.0, 174.0, content_width, 24.0);
-    let email_label = label(mtm, "Email", 0.0, 148.0, 120.0, 20.0);
+    let login_error_label = wrapping_label(mtm, "", 0.0, 244.0, content_width, 24.0);
+    let email_label = label(mtm, "Email", 0.0, 218.0, 120.0, 20.0);
     let login_email_field = text_input(
         mtm,
         match &details.mode {
-            MainWindowMode::Login { default_email } => default_email,
+            MainWindowMode::Login { default_email, .. } => default_email,
             _ => "",
         },
         Some("name@example.com"),
         0.0,
-        122.0,
+        192.0,
         content_width,
         24.0,
     );
-    let password_label = label(mtm, "Password", 0.0, 88.0, 120.0, 20.0);
-    let login_password_field = secure_input(mtm, Some("Password"), 0.0, 62.0, content_width, 24.0);
+    let password_label = label(mtm, "Password", 0.0, 158.0, 120.0, 20.0);
+    let login_password_field = secure_input(mtm, Some("Password"), 0.0, 132.0, content_width, 24.0);
+    let device_name_label = label(mtm, "Device name", 0.0, 98.0, 120.0, 20.0);
+    let login_device_name_field = text_input(
+        mtm,
+        match &details.mode {
+            MainWindowMode::Login {
+                default_device_name,
+                ..
+            } => default_device_name,
+            _ => "",
+        },
+        Some("This device"),
+        0.0,
+        72.0,
+        content_width,
+        24.0,
+    );
     let sign_in_button = button(
         mtm,
         "Sign In",
@@ -564,7 +606,8 @@ pub fn show_main_window(details: &MainWindowDetails<'_>) -> Result<MainWindowHan
 
     unsafe {
         login_email_field.setNextKeyView(Some(&login_password_field));
-        login_password_field.setNextKeyView(Some(&sign_in_button));
+        login_password_field.setNextKeyView(Some(&login_device_name_field));
+        login_device_name_field.setNextKeyView(Some(&sign_in_button));
         sign_in_button.setNextKeyView(Some(&login_website_button));
         login_website_button.setNextKeyView(Some(&login_email_field));
     }
@@ -575,6 +618,8 @@ pub fn show_main_window(details: &MainWindowDetails<'_>) -> Result<MainWindowHan
     login_container.addSubview(&login_email_field);
     login_container.addSubview(&password_label);
     login_container.addSubview(&login_password_field);
+    login_container.addSubview(&device_name_label);
+    login_container.addSubview(&login_device_name_field);
     login_container.addSubview(&sign_in_button);
     login_container.addSubview(&login_website_button);
 
@@ -586,8 +631,8 @@ pub fn show_main_window(details: &MainWindowDetails<'_>) -> Result<MainWindowHan
             NSSize::new(window_width - content_x, window_height),
         ),
     );
-    let message_label = wrapping_label(mtm, "", 0.0, 156.0, content_width, 74.0);
-    let permission_label = wrapping_label(mtm, "", 0.0, 108.0, content_width, 36.0);
+    let message_label = wrapping_label(mtm, "", 0.0, 226.0, content_width, 74.0);
+    let permission_label = wrapping_label(mtm, "", 0.0, 178.0, content_width, 36.0);
     let status_button = button(
         mtm,
         "Status",
@@ -624,7 +669,7 @@ pub fn show_main_window(details: &MainWindowDetails<'_>) -> Result<MainWindowHan
     let request_permissions_button = button(
         mtm,
         "Request Permissions",
-        NSRect::new(NSPoint::new(0.0, 64.0), NSSize::new(170.0, 28.0)),
+        NSRect::new(NSPoint::new(0.0, 134.0), NSSize::new(170.0, 28.0)),
         &controller,
         sel!(requestPermissions:),
         None,
@@ -632,7 +677,7 @@ pub fn show_main_window(details: &MainWindowDetails<'_>) -> Result<MainWindowHan
     let relaunch_button = button(
         mtm,
         "Relaunch to Accept Permissions",
-        NSRect::new(NSPoint::new(0.0, 64.0), NSSize::new(240.0, 28.0)),
+        NSRect::new(NSPoint::new(0.0, 134.0), NSSize::new(240.0, 28.0)),
         &controller,
         sel!(relaunchToAcceptPermissions:),
         None,
@@ -664,6 +709,7 @@ pub fn show_main_window(details: &MainWindowDetails<'_>) -> Result<MainWindowHan
         login_container.clone(),
         login_email_field.clone(),
         login_password_field.clone(),
+        login_device_name_field.clone(),
         login_error_label.clone(),
         logged_in_container.clone(),
         message_label.clone(),
