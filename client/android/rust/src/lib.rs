@@ -16,8 +16,7 @@ use virtue_core::{
     build_default_modules_reqwest, load_state, store_state, AuthState, Config, CoreError,
     CoreResult, DeviceSettings, EventBus, EventChannel, LoginRequested, LoginResult,
     LogoutRequested, Ping, PlatformHooks, ProcessStarted, ProcessStopped, ProcessStoppedReason,
-    Redacted, Screenshot, ScreenshotHooks, ScreenshotPaused, ScreenshotResumed, StatusRequest,
-    StatusResponse, UserStopRequested,
+    Redacted, Screenshot, ScreenshotHooks, StatusRequest, StatusResponse, UserStopRequested,
 };
 
 static CORE: OnceCell<AndroidCore> = OnceCell::new();
@@ -117,6 +116,19 @@ impl ScreenshotHooks for AndroidPlatformHooks {
 
     fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>> {
         Ok(None)
+    }
+
+    fn is_locked_or_screensaver(&self) -> CoreResult<bool> {
+        let mut env = self.java_vm.attach_current_thread().map_err(|err| {
+            CoreError::CommandFailed(format!("attach_current_thread failed: {err}"))
+        })?;
+        // Screen off (non-interactive) is the mobile equivalent of a locked/asleep
+        // desktop. Fail-safe to `false` (treat as viewable → fall back to the diff gate)
+        // when the state can't be read, never silently suppress.
+        match is_interactive(&mut env) {
+            Ok(interactive) => Ok(!interactive),
+            Err(_) => Ok(false),
+        }
     }
 
     fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
@@ -442,23 +454,10 @@ fn run_daemon_loop(core: &AndroidCore) -> Result<()> {
     let state = bus.iter()?;
     store_state(&state_path, &state)?;
 
-    // Starts as false since we assume we're booting or something similar
-    // Otherwise it stays paused until the state is updated
-    let mut was_interactive = false;
-
     while !core.stop.load(Ordering::SeqCst) {
-        let mut env = core.java_vm.attach_current_thread()?;
-        let current_interactive = is_interactive(&mut env)?;
-
-        if current_interactive != was_interactive {
-            was_interactive = current_interactive;
-            if !current_interactive {
-                bus.send(ScreenshotPaused)?;
-            } else {
-                bus.send(ScreenshotResumed)?;
-            }
-        }
-
+        // Screen-off is now handled inside the bus via the `is_locked_or_screensaver`
+        // hook: the screenshot module records a `ScreenshotSkipped` and the upload
+        // module defers network I/O while the screen is off.
         let sleep_duration = match (|| -> Result<()> {
             bus.send(Ping)?;
             let state = bus.iter()?;

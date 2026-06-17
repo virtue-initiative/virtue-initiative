@@ -96,6 +96,35 @@ to pattern-match typed events without boilerplate.
 | `StatusModule`              | `StatusRequest`, `PartialStatus` (from 3 sources)                                       | `StatusResponse`                                                                                   |
 | `ConfigModule`              | `Ping`                                                                                  | `ConfigChanged`                                                                                    |
 
+### Screenshot dedup (two gates)
+
+`ScreenshotModule` still captures on the normal cadence, but a frame is only _uploaded_
+when it carries new information. Two gates run on each due `Ping`:
+
+1. **Lock / screensaver gate** — checked _before_ capturing via the
+   `is_locked_or_screensaver()` platform hook. While the session is locked or a screensaver
+   is active the user cannot be viewing real content, so the capture is skipped entirely (no
+   `take_screenshot`, no classification, no `Upload`). The cadence clock still advances so we
+   re-check next interval. The hook fails safe to `false` (fall back to the diff gate) when
+   the state is unknown. Per platform: Linux uses `org.freedesktop.ScreenSaver` /
+   `org.gnome.ScreenSaver` `GetActive()` over D-Bus; macOS reads `CGSSessionScreenIsLocked`
+   and detects the screensaver process; Windows uses `SPI_GETSCREENSAVERRUNNING` plus an
+   `OpenInputDesktop` lock check.
+
+2. **Screen-change diff gate** — after capturing, the frame is reduced to a grayscale grid
+   fingerprint (`module/screenshot/fingerprint.rs`). If it has not materially changed from the
+   **last uploaded** fingerprint, the upload is suppressed. A frame counts as changed if either
+   the **mean** per-cell delta is high (a broad change, including low-contrast ones such as a
+   terminal filling with text) OR a **number of cells** changed strongly (a concentrated change
+   such as a video window — the count, not a single max, ignores a 1–2 cell clock/cursor while
+   still catching a small corner video, which is what makes the gate abuse-resistant). The grid
+   resolution is **derived from the image size** (each cell ≈ a fixed source-pixel block, aspect
+   preserved); a fixed grid would make each cell average thousands of pixels on a large/wide
+   display and dilute real changes below threshold. Anchoring to the last _uploaded_ frame — not
+   the previous capture — means slow sub-threshold drift eventually accumulates past the
+   threshold and forces a fresh upload. `last_uploaded_fingerprint` is persisted in
+   `event_state.json`.
+
 ### Request/response status flow
 
 `StatusRequest` triggers the three modules that contribute to service status
@@ -229,15 +258,19 @@ Keep the trait minimal. Platforms implement only:
 
 ```rust
 fn take_screenshot(&self) -> CoreResult<Screenshot>;
-fn get_time_utc_ms(&self) -> CoreResult<i64>;          // default: SystemTime::now()
+fn get_time_utc_ms(&self) -> CoreResult<i64>;            // default: SystemTime::now()
 fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>>;
 fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>>;
+fn is_locked_or_screensaver(&self) -> CoreResult<bool>;  // default: Ok(false)
 ```
 
 `get_time_utc_ms` has a default implementation using `SystemTime::now()` that is correct for
 all production platforms. Only `TestPlatformHooks` overrides it (delegates to `MockClock` for
-time-controlled tests). Platform crates implement only `take_screenshot`,
-`get_last_shutdown_time_utc_ms`, and `get_last_startup_time_utc_ms`.
+time-controlled tests). `is_locked_or_screensaver` defaults to `Ok(false)` (the fail-safe);
+desktop platforms override it for the screenshot dedup lock/screensaver gate, while mobile
+platforms keep the default. Platform crates implement `take_screenshot`,
+`get_last_shutdown_time_utc_ms`, `get_last_startup_time_utc_ms`, and (on desktop)
+`is_locked_or_screensaver`.
 
 Everything else belongs in `core`.
 

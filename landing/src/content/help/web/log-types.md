@@ -16,6 +16,12 @@ this page.
 A screenshot was captured on the device. This is the most common entry — the
 monitoring app captures the screen on a regular interval while it is running.
 
+## Screenshot Skipped
+
+Monitoring was active but no screenshot was uploaded — either the screen had
+not changed since the last capture, or the device was locked or asleep. This
+keeps the timeline continuous without storing redundant images.
+
 ## Computer Started
 
 The device was powered on or restarted.

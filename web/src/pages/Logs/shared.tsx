@@ -25,6 +25,8 @@ export function getLogCategory(log: DataLog): string {
   switch (log.type) {
     case 'screenshot':
       return 'Screenshot';
+    case 'screenshot_skipped':
+      return 'Screenshot Skipped';
     case 'lifecycle':
       if (kind === 'computer_booted') return 'Computer Started';
       if (kind === 'computer_suspended') return 'Sleep';
@@ -107,6 +109,13 @@ export function getLogMessage(log: DataLog, deviceName: string): string {
     }
     case 'screenshot':
       return `Screenshot captured on ${deviceName}`;
+    case 'screenshot_skipped': {
+      const reason = d.reason as string | undefined;
+      if (reason === 'static_screen') return `Duplicate screenshot skipped on ${deviceName}`;
+      if (reason === 'locked_or_screensaver')
+        return `Screen locked, screenshot skipped on ${deviceName}`;
+      return `Screenshot skipped on ${deviceName}`;
+    }
     case 'alert': {
       const message = d.message as string | undefined;
       return message ?? `Alert on ${deviceName}`;
@@ -125,6 +134,7 @@ export function getLogMessage(log: DataLog, deviceName: string): string {
 
 export const LOG_TYPES = [
   'screenshot',
+  'screenshot_skipped',
   'lifecycle',
   'lifecycle_alert',
   'alert',

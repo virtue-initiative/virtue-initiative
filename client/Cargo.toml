@@ -6,3 +6,56 @@ members = [
   "windows",
 ]
 resolver = "2"
+
+# Optimize heavy dependencies even in debug builds. The workspace crates stay at
+# the dev profile's opt-level 0 (fast incremental rebuilds + good debugging); only
+# these compute-bound deps are compiled with optimizations. Their source rarely
+# changes, so the cost is paid once and reused across rebuilds. Hot code lives in
+# the decoder / numeric-kernel sub-crates rather than the umbrella crates, so we
+# name those directly.
+
+# ONNX risk classifier (tract) + its linear-algebra / ndarray backend.
+[profile.dev.package.tract-core]
+opt-level = 3
+[profile.dev.package.tract-linalg]
+opt-level = 3
+[profile.dev.package.tract-data]
+opt-level = 3
+[profile.dev.package.ndarray]
+opt-level = 3
+
+# Screenshot image decode/blur/resize + WebP encode.
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package.png]
+opt-level = 3
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+[profile.dev.package.image-webp]
+opt-level = 3
+[profile.dev.package.libwebp-sys]
+opt-level = 3
+
+# Compression: gzip batch payloads + PNG deflate.
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+[profile.dev.package.fdeflate]
+opt-level = 3
+
+# Crypto: argon2 login KDF (deliberately CPU-heavy), AES-GCM, hashing, X25519.
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.aes]
+opt-level = 3
+[profile.dev.package.aes-gcm]
+opt-level = 3
+[profile.dev.package.ghash]
+opt-level = 3
+[profile.dev.package.polyval]
+opt-level = 3
+[profile.dev.package.curve25519-dalek]
+opt-level = 3

@@ -267,6 +267,130 @@ impl ScreenshotHooks for LinuxPlatformHooks {
             .map_err(|e| CoreError::CommandFailed(e.to_string()))?;
         Ok(parse_btime_ms(&stat))
     }
+
+    fn is_locked_or_screensaver(&self) -> CoreResult<bool> {
+        // Prefer logind's per-session `LockedHint`: the locker reports it across desktops
+        // (xss-lock, GNOME, KDE, …), so it covers minimal X11 setups like i3 + i3lock that
+        // expose no ScreenSaver D-Bus interface at all. Fall back to the freedesktop/GNOME
+        // ScreenSaver `GetActive` for environments that surface a screensaver but no
+        // LockedHint. Any error / missing service ⇒ false (fall back to the diff gate),
+        // never silently suppress.
+        if query_session_locked() == Some(true) {
+            return Ok(true);
+        }
+        Ok(query_screensaver_active().unwrap_or(false))
+    }
+}
+
+// Blocking logind proxies (system bus). `LockedHint` lives on the per-session object, so we
+// resolve the caller's primary graphical session via the user object's `Display` property
+// (the same path `loginctl` uses) and read the hint there.
+#[zbus::proxy(
+    interface = "org.freedesktop.login1.Manager",
+    default_service = "org.freedesktop.login1",
+    default_path = "/org/freedesktop/login1",
+    gen_async = false,
+    gen_blocking = true
+)]
+trait Login1Manager {
+    fn get_user(&self, uid: u32) -> zbus::Result<zbus::zvariant::OwnedObjectPath>;
+}
+
+#[zbus::proxy(
+    interface = "org.freedesktop.login1.User",
+    default_service = "org.freedesktop.login1",
+    gen_async = false,
+    gen_blocking = true
+)]
+trait Login1User {
+    /// `(session_id, object_path)` of the user's primary graphical session.
+    #[zbus(property)]
+    fn display(&self) -> zbus::Result<(String, zbus::zvariant::OwnedObjectPath)>;
+}
+
+#[zbus::proxy(
+    interface = "org.freedesktop.login1.Session",
+    default_service = "org.freedesktop.login1",
+    gen_async = false,
+    gen_blocking = true
+)]
+trait Login1Session {
+    #[zbus(property)]
+    fn locked_hint(&self) -> zbus::Result<bool>;
+}
+
+/// Real UID of this process, read from `/proc/self/status` (no libc dependency).
+fn current_uid() -> Option<u32> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    status.lines().find_map(|line| {
+        line.strip_prefix("Uid:")
+            .and_then(|rest| rest.split_whitespace().next())
+            .and_then(|uid| uid.parse().ok())
+    })
+}
+
+/// `Some(true)`/`Some(false)` if logind reports the primary graphical session's lock state,
+/// `None` if logind is unavailable or the session can't be resolved (⇒ fall back to the
+/// screensaver query).
+fn query_session_locked() -> Option<bool> {
+    let connection = zbus::blocking::Connection::system().ok()?;
+    let manager = Login1ManagerProxy::new(&connection).ok()?;
+    let user_path = manager.get_user(current_uid()?).ok()?;
+    let user = Login1UserProxy::builder(&connection)
+        .path(user_path)
+        .ok()?
+        .build()
+        .ok()?;
+    let (_session_id, session_path) = user.display().ok()?;
+    let session = Login1SessionProxy::builder(&connection)
+        .path(session_path)
+        .ok()?
+        .build()
+        .ok()?;
+    session.locked_hint().ok()
+}
+
+// Blocking D-Bus proxies for the two common `GetActive()` providers. We use the
+// blocking flavour (gen_async = false) because `is_locked_or_screensaver` is a
+// synchronous hook called from the event bus.
+#[zbus::proxy(
+    interface = "org.freedesktop.ScreenSaver",
+    default_service = "org.freedesktop.ScreenSaver",
+    default_path = "/org/freedesktop/ScreenSaver",
+    gen_async = false,
+    gen_blocking = true
+)]
+trait FreedesktopScreenSaver {
+    fn get_active(&self) -> zbus::Result<bool>;
+}
+
+#[zbus::proxy(
+    interface = "org.gnome.ScreenSaver",
+    default_service = "org.gnome.ScreenSaver",
+    default_path = "/org/gnome/ScreenSaver",
+    gen_async = false,
+    gen_blocking = true
+)]
+trait GnomeScreenSaver {
+    fn get_active(&self) -> zbus::Result<bool>;
+}
+
+fn query_screensaver_active() -> Option<bool> {
+    let connection = zbus::blocking::Connection::session().ok()?;
+
+    if let Ok(proxy) = FreedesktopScreenSaverProxy::new(&connection)
+        && let Ok(active) = proxy.get_active()
+    {
+        return Some(active);
+    }
+
+    if let Ok(proxy) = GnomeScreenSaverProxy::new(&connection)
+        && let Ok(active) = proxy.get_active()
+    {
+        return Some(active);
+    }
+
+    None
 }
 
 impl PlatformHooks for LinuxPlatformHooks {}

@@ -14,7 +14,7 @@ use virtue_core::{
     build_default_modules_reqwest, load_state, store_state, AuthState, Config, CoreError,
     CoreResult, DeviceSettings, EventBus, EventChannel, LoginRequested, LoginResult,
     LogoutRequested, Ping, PlatformHooks, ProcessStarted, ProcessStopped, ProcessStoppedReason,
-    Redacted, Screenshot, ScreenshotHooks, ScreenshotResumed, StatusRequest, StatusResponse,
+    Redacted, Screenshot, ScreenshotHooks, StatusRequest, StatusResponse,
     UserStopRequested,
 };
 
@@ -390,15 +390,11 @@ pub unsafe extern "C" fn virtue_ios_free_string(value: *mut c_char) {
 fn run_daemon_loop(core: &IosCore) -> Result<()> {
     let (mut bus, state_path) = build_bus(core, "ios-device")?;
     bus.send(ProcessStarted)?;
-    // Enable screenshot capture. The screenshot module only captures while it is
-    // "enabled", which the lifecycle module otherwise flips on via
-    // `UserSessionLogin` — a desktop-only OS event that never fires on iOS.
-    // The Safari extension only starts this daemon while monitoring is enabled
-    // (it sends `UserStopRequested`/stops the loop when the user pauses), so the
-    // loop running at all means capture should be on. Mirrors how the Android
-    // client drives `ScreenshotResumed` from its daemon loop rather than relying
-    // on a session-login event.
-    bus.send(ScreenshotResumed)?;
+    // The screenshot module's `enabled` flag is set on `Login` and persisted in
+    // `event_state.json`, so it survives across the separate login/daemon FFI calls
+    // and is already `true` here once the user has logged in. iOS has no lock/screen
+    // concept exposed to the daemon, so `is_locked_or_screensaver()` stays at the
+    // default `Ok(false)` and capture proceeds whenever the loop runs.
     let state = bus.iter()?;
     store_state(&state_path, &state)?;
 

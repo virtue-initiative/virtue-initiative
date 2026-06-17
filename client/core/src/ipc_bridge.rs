@@ -8,7 +8,6 @@ use crate::module::lifecycle::{
     ComputerResumed, ComputerSuspended, ProcessStopped, UserSessionLogin, UserSessionLogout,
     UserStopRequested,
 };
-use crate::module::screenshot::{ScreenshotPaused, ScreenshotResumed};
 use crate::module::status::{StatusRequest, StatusResponse};
 
 pub struct IpcBridge {
@@ -96,8 +95,6 @@ impl IpcBridge {
             ComputerSuspended,
             ComputerResumed,
             ProcessStopped,
-            ScreenshotPaused,
-            ScreenshotResumed,
         );
     }
 
