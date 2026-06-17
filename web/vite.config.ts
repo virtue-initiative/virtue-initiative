@@ -40,6 +40,11 @@ export default defineConfig(({ mode }) => {
         'Cross-Origin-Embedder-Policy': 'require-corp',
       },
     },
+    // The cache worker imports shared chunks, so it needs code-splitting, which
+    // is only supported with the ES module worker format (default is 'iife').
+    worker: {
+      format: 'es',
+    },
     optimizeDeps: {
       exclude: ['@virtueinitiative/shared-web', '@sqlite.org/sqlite-wasm'],
     },

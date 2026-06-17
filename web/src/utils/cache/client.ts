@@ -72,7 +72,6 @@ export interface CacheClient {
   ): Promise<number[]>;
 }
 
-const WORKER_URL = new URL('./worker.ts', import.meta.url);
 const CHANNEL_NAME = 'cache-worker';
 
 type PendingEntry = { resolve: (v: unknown) => void; reject: (e: Error) => void };
@@ -160,7 +159,14 @@ export function createCacheClient(): CacheClient {
   function becomeLeader() {
     console.log('[cache-client] acquired leader lock, starting worker');
     role = 'leader';
-    leaderWorker = new Worker(WORKER_URL, { type: 'module' });
+    // The `new URL(..., import.meta.url)` must be inline here — Vite only
+    // statically detects and bundles the worker when it's the direct argument
+    // to `new Worker(...)`. Hoisting it to a variable makes Vite skip bundling
+    // and emit the raw .ts file, which prod serves as video/mp2t and the
+    // browser refuses to execute.
+    leaderWorker = new Worker(new URL('./worker.ts', import.meta.url), {
+      type: 'module',
+    });
 
     leaderWorker.onerror = (e) => {
       console.error('[cache-client] worker error', e.message, e);
