@@ -1,5 +1,3 @@
-# Pull Request Template
-
 [Provide a succinct and descriptive summary for the pull request, e.g., "Improve caching mechanism for API calls"]
 
 ## Type of change
