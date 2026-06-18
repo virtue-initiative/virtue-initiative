@@ -3,11 +3,11 @@
 [Provide a succinct and descriptive summary for the pull request, e.g., "Improve caching mechanism for API calls"]
 
 ## Type of change
-- [ ] New feature
-- [ ] Bug fix
-- [ ] Documentation update
-- [ ] Refactoring
-- [ ] UI/UX improvement
+- New feature
+- Bug fix
+- Documentation update
+- Refactoring
+- UI/UX improvement
 
 ## Components changed
 - Web
