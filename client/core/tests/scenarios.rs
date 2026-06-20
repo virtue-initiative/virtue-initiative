@@ -118,13 +118,24 @@ fn user_stopped_process_emits_high_risk_upload() {
 }
 
 #[test]
-fn ping_gap_while_running_emits_alert() {
+fn ping_gap_while_running_batches_alert_without_email() {
     let mut scenario = Scenario::authenticated();
+    // First ping past the login grace window establishes a baseline last_ping.
     scenario.at_t(121_000).loop_iteration();
-    scenario.at_t(132_000).loop_iteration();
+    // Suppress a second screenshot so the only new upload traffic is the alert itself.
+    scenario.set_last_screenshot_at_ms(Some(150_000));
+    let hashes_before = scenario.api.state().hash_uploads.len();
+    // A single 61s gap exceeds the sliding-window budget (60s) in one shot, so the
+    // PingGapWhileRunning alert fires — but it's high-risk, not immediate.
+    scenario.at_t(182_000).loop_iteration();
+    let state = scenario.api.state();
     assert!(
-        !scenario.api.state().log_uploads.is_empty(),
-        "expected a PingGapWhileRunning log upload"
+        state.log_uploads.is_empty(),
+        "ping gap must not trigger an immediate (emailed) log upload"
+    );
+    assert!(
+        state.hash_uploads.len() > hashes_before,
+        "ping gap alert should still be recorded via the batched hash path"
     );
 }
 
@@ -283,9 +294,15 @@ fn unexpected_process_start_after_long_ping_gap_emits_alert() {
     });
     scenario.queue(ProcessStarted);
     scenario.at_t(130_000).loop_iteration();
+    // UnexpectedProcessStart is high-risk but batched (no immediate email).
+    let state = scenario.api.state();
     assert!(
-        !scenario.api.state().log_uploads.is_empty(),
-        "expected an UnexpectedProcessStart log upload"
+        state.log_uploads.is_empty(),
+        "unexpected process start must not trigger an immediate (emailed) log upload"
+    );
+    assert!(
+        !state.hash_uploads.is_empty() || !state.batch_uploads.is_empty(),
+        "unexpected process start alert should still be recorded via the batched path"
     );
 }
 

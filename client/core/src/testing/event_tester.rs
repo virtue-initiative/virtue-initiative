@@ -92,8 +92,11 @@ impl EventTesterBuilder {
     }
 
     pub fn build(self) -> EventTester {
+        // Inline spawner: background jobs run synchronously, so events they emit
+        // cascade within the same `iter()` and the tester stays deterministic.
         let mut bus =
-            EventBus::new(self.observers, self.state).expect("EventBus construction failed");
+            EventBus::with_spawner(self.observers, self.state, Arc::new(super::InlineSpawner))
+                .expect("EventBus construction failed");
         let mut captures = CaptureStore::new();
         let mut clearers = CaptureClearers::new();
 

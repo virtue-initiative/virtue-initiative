@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -20,6 +21,7 @@ use crate::state::load_state;
 use crate::testing::api::MockApiClient;
 use crate::testing::clock::MockClock;
 use crate::testing::platform::TestPlatformHooks;
+use crate::testing::spawner::InlineSpawner;
 
 static SCENARIO_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -102,7 +104,7 @@ impl Scenario {
         let observers: Vec<Box<dyn Observer>> = vec![
             Box::new(LifecycleModule::new(Box::new(platform.clone()))),
             Box::new(ScreenshotModule::new(
-                Box::new(platform.clone()),
+                Arc::new(platform.clone()),
                 screenshot_interval_ms,
             )),
             Box::new(UploadModule::new(
@@ -118,7 +120,10 @@ impl Scenario {
 
         let state_path = state_dir.join("event_state.json");
         let saved_state = load_state(&state_path).unwrap_or(StateType::Null);
-        let mut bus = EventBus::new(observers, saved_state).expect("scenario bus must construct");
+        // Inline spawner so offloaded screenshot captures run synchronously and
+        // scenarios stay deterministic.
+        let mut bus = EventBus::with_spawner(observers, saved_state, Arc::new(InlineSpawner))
+            .expect("scenario bus must construct");
 
         // Pre-set device settings in upload module if provided
         if let Some(s) = settings {
@@ -358,7 +363,7 @@ impl Scenario {
         let observers: Vec<Box<dyn Observer>> = vec![
             Box::new(LifecycleModule::new(Box::new(platform.clone()))),
             Box::new(ScreenshotModule::new(
-                Box::new(platform.clone()),
+                Arc::new(platform.clone()),
                 screenshot_interval_ms,
             )),
             Box::new(UploadModule::new(
@@ -374,7 +379,8 @@ impl Scenario {
 
         let state_path = state_dir.join("event_state.json");
         let saved_state = load_state(&state_path).unwrap_or(StateType::Null);
-        let mut bus = EventBus::new(observers, saved_state).expect("scenario bus must construct");
+        let mut bus = EventBus::with_spawner(observers, saved_state, Arc::new(InlineSpawner))
+            .expect("scenario bus must construct");
         bus.iter().expect("initial bus iter must succeed");
 
         Self {

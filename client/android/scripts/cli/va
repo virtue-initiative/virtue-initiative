@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+#
+# va — friendly CLI for building, installing, and driving the Virtue Android app
+#      against a local emulator.
+#
+# Run `va --help` for usage.
+
+set -euo pipefail
+
+# --- locate ourselves & load env -------------------------------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ANDROID_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"  # client/android
+GRADLEW="$ANDROID_DIR/gradlew"
+
+export VIRTUE_ANDROID_CLI_DIR="$SCRIPT_DIR"
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/env.sh"
+
+# --- pretty output ---------------------------------------------------------
+if [ -t 1 ]; then
+  C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'; C_BLUE=$'\033[34m'
+  C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'; C_RED=$'\033[31m'; C_DIM=$'\033[2m'
+else
+  C_RESET=; C_BOLD=; C_BLUE=; C_GREEN=; C_YELLOW=; C_RED=; C_DIM=
+fi
+step() { printf '%s==>%s %s%s%s\n' "$C_BLUE$C_BOLD" "$C_RESET" "$C_BOLD" "$*" "$C_RESET"; }
+info() { printf '%s  - %s%s\n' "$C_DIM" "$*" "$C_RESET"; }
+ok()   { printf '%s✓%s %s\n' "$C_GREEN" "$C_RESET" "$*"; }
+warn() { printf '%s!%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
+die()  { printf '%s✗%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
+
+need() { command -v "$1" >/dev/null 2>&1 || die "missing tool: $1 (check $SCRIPT_DIR/env.sh / ANDROID_SDK_ROOT)"; }
+
+gradle() { ( cd "$ANDROID_DIR" && "$GRADLEW" "$@" ); }
+
+# Variant helpers: map our --release flag onto Gradle task names.
+variant_suffix() { [ "${RELEASE:-0}" = 1 ] && echo "Release" || echo "Debug"; }
+
+# --- emulator helpers ------------------------------------------------------
+emulator_running() { adb devices | grep -q '^emulator-.*device$'; }
+
+wait_for_boot() {
+  step "Waiting for device to boot"
+  adb wait-for-device
+  until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do
+    sleep 1
+  done
+  adb shell input keyevent 82 >/dev/null 2>&1 || true  # dismiss keyguard
+  ok "device booted"
+}
+
+# --- commands --------------------------------------------------------------
+cmd_build() {
+  need "$GRADLEW" 2>/dev/null || true
+  [ -x "$GRADLEW" ] || die "gradlew not found at $GRADLEW"
+  local v; v="$(variant_suffix)"
+  step "Building app ($v) + Rust JNI core"
+  gradle ":app:assemble${v}"
+  ok "build complete"
+  info "APK: $ANDROID_DIR/app/build/outputs/apk/$(echo "$v" | tr '[:upper:]' '[:lower:]')/app-$(echo "$v" | tr '[:upper:]' '[:lower:]').apk"
+}
+
+cmd_install() {
+  [ -x "$GRADLEW" ] || die "gradlew not found at $GRADLEW"
+  need adb
+  emulator_running || warn "no emulator detected — 'va start' first if install fails"
+  local v; v="$(variant_suffix)"
+  step "Building + installing app ($v)"
+  gradle ":app:install${v}"
+  ok "installed $VIRTUE_PACKAGE"
+  step "Launching app"
+  adb shell am start -n "$VIRTUE_ACTIVITY" >/dev/null
+  ok "launched $VIRTUE_ACTIVITY"
+  info "logs: adb logcat --pid \"\$(adb shell pidof -s $VIRTUE_PACKAGE)\""
+}
+
+cmd_start() {
+  need emulator; need adb
+  if emulator_running; then
+    ok "emulator already running"
+    wait_for_boot
+    return
+  fi
+  emulator -list-avds | grep -qx "$VIRTUE_AVD" \
+    || die "AVD '$VIRTUE_AVD' not found. Create it (see README) or set VIRTUE_AVD."
+  local extra=()
+  [ "${HEADLESS:-0}" = 1 ] && extra+=(-no-window -no-audio) && info "headless mode"
+  step "Starting emulator '$VIRTUE_AVD'"
+  # Detached so it survives this script; logs to a temp file.
+  local log="${TMPDIR:-/tmp}/virtue-emulator.log"
+  nohup emulator -avd "$VIRTUE_AVD" -no-snapshot "${extra[@]}" >"$log" 2>&1 &
+  info "emulator pid $! (log: $log)"
+  wait_for_boot
+}
+
+cmd_stop() {
+  need adb
+  if ! emulator_running; then
+    ok "no emulator running"
+    return
+  fi
+  step "Stopping emulator"
+  adb emu kill >/dev/null 2>&1 || die "failed to stop emulator"
+  ok "emulator stopped"
+}
+
+cmd_lock() {
+  need adb
+  emulator_running || die "no emulator running"
+  step "Locking screen"
+  adb shell input keyevent KEYCODE_SLEEP >/dev/null  # screen off -> keyguard
+  ok "screen locked (use KEYCODE_WAKEUP / 'va start' state to wake)"
+}
+
+cmd_force_idle() {
+  need adb
+  emulator_running || die "no emulator running"
+  step "Forcing Doze (deep idle)"
+  adb shell dumpsys battery unplug >/dev/null
+  adb shell dumpsys deviceidle enable >/dev/null
+  adb shell dumpsys deviceidle force-idle >/dev/null
+  ok "device forced into Doze"
+  info "restore with: adb shell dumpsys deviceidle unforce && adb shell dumpsys battery reset"
+}
+
+usage() {
+  cat <<EOF
+${C_BOLD}va${C_RESET} — Virtue Android dev CLI
+
+${C_BOLD}Usage:${C_RESET} va <command> [options]
+
+${C_BOLD}Commands:${C_RESET}
+  ${C_GREEN}install${C_RESET} [--release]   Build, install, and launch the app on the emulator
+  ${C_GREEN}build${C_RESET}   [--release]   Build the APK (+ Rust JNI core) only
+  ${C_GREEN}start${C_RESET}   [--headless]  Start the emulator and wait for boot
+  ${C_GREEN}stop${C_RESET}                  Kill the running emulator
+  ${C_GREEN}lock${C_RESET}                  Lock the device screen
+  ${C_GREEN}force-idle${C_RESET}            Force the device into Doze (test background survival)
+
+${C_BOLD}Options:${C_RESET}
+  --release             Use the release build variant (build/install)
+  --headless            Run the emulator without a window (start)
+  -h, --help            Show this help
+
+${C_BOLD}Environment${C_RESET} (see scripts/cli/env.sh):
+  VIRTUE_AVD=$VIRTUE_AVD
+  VIRTUE_PACKAGE=$VIRTUE_PACKAGE
+  ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT
+
+${C_BOLD}Examples:${C_RESET}
+  va start --headless     # boot a windowless emulator
+  va install              # build debug, install, launch
+  va build --release      # produce a release APK
+  va force-idle           # push the app into Doze
+EOF
+}
+
+# --- arg parsing -----------------------------------------------------------
+RELEASE=0
+HEADLESS=0
+CMD=""
+for arg in "$@"; do
+  case "$arg" in
+    --release)  RELEASE=1 ;;
+    --headless) HEADLESS=1 ;;
+    -h|--help)  usage; exit 0 ;;
+    -*)         die "unknown option: $arg (try 'va --help')" ;;
+    *)          [ -z "$CMD" ] && CMD="$arg" || die "unexpected argument: $arg" ;;
+  esac
+done
+
+case "$CMD" in
+  install)    cmd_install ;;
+  build)      cmd_build ;;
+  start)      cmd_start ;;
+  stop)       cmd_stop ;;
+  lock)       cmd_lock ;;
+  force-idle) cmd_force_idle ;;
+  "")         usage; exit 1 ;;
+  *)          die "unknown command: $CMD (try 'va --help')" ;;
+esac

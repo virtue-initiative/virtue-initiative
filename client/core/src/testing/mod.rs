@@ -4,6 +4,7 @@ pub mod event_tester;
 pub mod fixtures;
 pub mod platform;
 pub mod scenario;
+pub mod spawner;
 
 pub use api::{BatchCall, HashCall, LogCall, MockApiClient, MockApiState, RegisterDeviceCall};
 pub use clock::MockClock;
@@ -11,6 +12,7 @@ pub use event_tester::{EventTester, EventTesterBuilder};
 pub use fixtures::{tiny_png_bytes, tiny_png_screenshot};
 pub use platform::TestPlatformHooks;
 pub use scenario::Scenario;
+pub use spawner::InlineSpawner;
 
 #[cfg(test)]
 mod tests {
