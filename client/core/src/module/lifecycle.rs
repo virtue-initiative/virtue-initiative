@@ -36,6 +36,12 @@ pub struct UserStopRequested {
 use crate::platform::ScreenshotHooks;
 
 pub(crate) const EXTRA_HIGH_RISK: f32 = 0.9;
+/// High-risk lifecycle alerts that are still noteworthy but don't warrant an
+/// immediate notification. The upload module routes `risk >= EXTRA_HIGH_RISK`
+/// through the immediate (emailed) path; keeping these just below that threshold
+/// flags them as high for review/sorting while letting them ride the normal
+/// batch — so common, non-urgent alerts (e.g. a ping gap) don't send an email.
+pub(crate) const HIGH_RISK_LIFECYCLE_ALERT: f32 = 0.8;
 pub(crate) const MEDIUM_RISK_LIFECYCLE_ALERT: f32 = 0.6;
 
 // Sliding-window ping-gap detection. A single slow loop iteration (e.g. a heavy
@@ -206,7 +212,7 @@ impl LifecycleModule {
             };
             if ping_gap > 10000 && (now_ms - boot_ms) > 120000 {
                 let _ = emitter.send(Upload {
-                    risk: EXTRA_HIGH_RISK,
+                    risk: HIGH_RISK_LIFECYCLE_ALERT,
                     kind: UploadKind::LifecycleAlert {
                         reason: AlertReason::UnexpectedProcessStart,
                     },
@@ -311,8 +317,10 @@ impl LifecycleModule {
                 self.state.last_ping_gap_alert = now_ms;
                 // Note: `ping_gaps` is intentionally NOT cleared — chronic stalls keep
                 // re-alerting each cooldown, while one-off bursts age out of the window.
+                // High risk but below the immediate-upload threshold: a ping gap is
+                // batched (no email), not sent immediately.
                 let _ = emitter.send(Upload {
-                    risk: EXTRA_HIGH_RISK,
+                    risk: HIGH_RISK_LIFECYCLE_ALERT,
                     kind: UploadKind::LifecycleAlert {
                         reason: AlertReason::PingGapWhileRunning,
                     },
@@ -439,7 +447,7 @@ mod tests {
         ComputerResumed, ComputerSuspended, ProcessStarted, ProcessStopped, UserSessionLogin,
         UserSessionLogout,
     };
-    use super::{LifecycleModule, LifecycleStatus};
+    use super::{EXTRA_HIGH_RISK, HIGH_RISK_LIFECYCLE_ALERT, LifecycleModule, LifecycleStatus};
     use crate::events::Ping;
     use crate::model::PartialStatus;
     use crate::model::{AlertReason, LifecycleKind, ProcessStoppedReason, UploadKind};
@@ -704,7 +712,13 @@ mod tests {
                 )
             })
             .unwrap();
-        assert!(alert.risk >= 0.9, "ping gap alert should be high risk");
+        // High risk for review, but below the immediate-upload threshold so it batches
+        // (no email) rather than firing an immediate alert.
+        assert!(
+            alert.risk >= HIGH_RISK_LIFECYCLE_ALERT && alert.risk < EXTRA_HIGH_RISK,
+            "ping gap alert should be high but not immediate, got {}",
+            alert.risk
+        );
     }
 
     #[test]
