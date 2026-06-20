@@ -67,7 +67,7 @@ password you sent them to login to get your private ("dissolving") key.
 
 The server could **if** we actually sent your password to the server, but we
 **don't** and here's how. Imagine you have a secret recipe for an amazing
-chocolate cake. Let's say you got it from your great-great-grandma. Now, let's
+chocolate cake. Let's say you got it from your great-grandma. Now, let's
 say you find a long-lost distant relative who also claims to have the secret
 recipe from your great-grandma. You're skeptical, but neither of you is willing
 to compare recipes since that would be giving away the secret. What's the
