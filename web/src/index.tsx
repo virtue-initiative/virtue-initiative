@@ -10,8 +10,9 @@ import {
 import { useEffect, useState } from 'preact/hooks';
 
 import { APIProvider, useAPIContext } from './utils/api';
-import { Header } from './components/Header';
-import { Home } from './pages/Home/index';
+import { Sidebar } from './components/Sidebar';
+import { Devices } from './pages/Devices/index';
+import { Partners } from './pages/Partners/index';
 import { Logs } from './pages/Logs/index';
 import { Auth } from './pages/Auth/index';
 import { InviteAccept } from './pages/InviteAccept/index';
@@ -118,16 +119,19 @@ function AppShell() {
 
       {authenticated && (
         <div class="app-shell">
-          <Header />
+          <Sidebar />
           <main class="app-main">
             <GlobalEmailActionHandler />
             <Router>
               <Route path="/login" component={RedirectToDashboard} />
               <Route path="/signup" component={RedirectToDashboard} />
               <Route path="/forgot-password" component={RedirectToDashboard} />
-              <Route path="/" component={Home} />
+              <Route path="/" component={Devices} />
+              <Route path="/partners" component={Partners} />
               <Route path="/logs" component={Logs} />
               <Route path="/logs/gallery" component={Logs} />
+              <Route path="/logs/:userId" component={Logs} />
+              <Route path="/logs/:userId/gallery" component={Logs} />
               <Route path="/settings" component={Settings} />
               <Route path="/verify-email" component={VerifyEmail} />
               <Route path="/invite-accept" component={InviteAccept} />

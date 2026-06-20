@@ -9,7 +9,6 @@ import {
   usePartners,
 } from '../../utils/api';
 import {
-  Alert,
   Badge,
   Button,
   Card,
@@ -19,16 +18,11 @@ import {
   Dialog,
   DialogActions,
   DialogHeader,
-  DialogSecondaryActions,
   Field,
   Input,
   useToast,
 } from '@virtueinitiative/shared-web';
-import { formatRelativeTimestamp } from '../../utils/time';
 import './style.css';
-
-const DOWNLOAD_URL = 'https://virtueinitiative.org/download';
-const INSTALLATION_URL = 'https://virtueinitiative.org/help/installation/';
 
 function UserPlusIcon() {
   return (
@@ -51,78 +45,45 @@ function UserPlusIcon() {
   );
 }
 
-export function Home() {
+export function Partners() {
   const api = useAPIContext();
-  const userId = api?.userId ?? null;
   const { devices } = useDevices();
   const { watchings: watching, watchers } = usePartners();
-  const updateDevice = (id: string, patch: { name?: string }) =>
-    api ? api.updateDevice(id, patch) : Promise.reject(new Error('Not signed in'));
-  const removeDevice = (id: string) =>
-    api ? api.removeDevice(id) : Promise.reject(new Error('Not signed in'));
   const invitePartner = (email: string) =>
     api ? api.invitePartner(email) : Promise.reject(new Error('Not signed in'));
   const removeWatching = (id: string) =>
     api ? api.stopWatching(id) : Promise.reject(new Error('Not signed in'));
   const removeWatcher = (id: string) =>
     api ? api.removeWatcher(id) : Promise.reject(new Error('Not signed in'));
-  const deviceList = devices;
-  const watchingList = watching;
-  const watchersList = watchers;
 
-  const ownDevices = useMemo(
-    () => deviceList.filter((device) => device.owner === userId),
-    [deviceList, userId],
-  );
   const devicesByOwner = useMemo(() => {
     const map = new Map<string, Device[]>();
-    for (const device of deviceList) {
+    for (const device of devices) {
       const ownerDevices = map.get(device.owner) ?? [];
       ownerDevices.push(device);
       map.set(device.owner, ownerDevices);
     }
     return map;
-  }, [deviceList]);
+  }, [devices]);
   const acceptedWatching = useMemo(
-    () => watchingList.filter((partner) => partner.status === 'accepted'),
-    [watchingList],
+    () => watching.filter((partner) => partner.status === 'accepted'),
+    [watching],
   );
   const pendingWatching = useMemo(
-    () => watchingList.filter((partner) => partner.status === 'pending'),
-    [watchingList],
+    () => watching.filter((partner) => partner.status === 'pending'),
+    [watching],
   );
   const acceptedWatchers = useMemo(
-    () => watchersList.filter((partner) => partner.status === 'accepted'),
-    [watchersList],
+    () => watchers.filter((partner) => partner.status === 'accepted'),
+    [watchers],
   );
   const pendingWatchers = useMemo(
-    () => watchersList.filter((partner) => partner.status === 'pending'),
-    [watchersList],
+    () => watchers.filter((partner) => partner.status === 'pending'),
+    [watchers],
   );
 
   return (
     <div class="dashboard">
-      <section class="dashboard-section">
-        <div class="dashboard-section-header">
-          <h2>My devices</h2>
-          <AddDeviceButton />
-        </div>
-        {ownDevices.length === 0 ? (
-          <p class="empty">No devices</p>
-        ) : (
-          <CardGrid>
-            {ownDevices.map((device) => (
-              <DeviceCard
-                key={device.id}
-                device={device}
-                onUpdateDevice={updateDevice}
-                onRemoveDevice={removeDevice}
-              />
-            ))}
-          </CardGrid>
-        )}
-      </section>
-
       <section class="dashboard-section">
         <div class="dashboard-section-header">
           <h2>You monitor</h2>
@@ -152,61 +113,6 @@ export function Home() {
         />
       </section>
     </div>
-  );
-}
-
-function AddDeviceButton() {
-  const dialogRef = useRef<HTMLDialogElement>(null);
-
-  function open() {
-    dialogRef.current?.showModal();
-  }
-
-  function close() {
-    dialogRef.current?.close();
-  }
-
-  return (
-    <>
-      <Button variant="primary" type="button" onClick={open}>
-        Add device
-      </Button>
-      <Dialog dialogRef={dialogRef} class="device-setup-dialog">
-        <DialogHeader>Add device</DialogHeader>
-        <p class="invite-desc">
-          Set up Virtue on a phone or computer, then sign in with this account so it starts
-          appearing in your dashboard.
-        </p>
-        <ol class="device-setup-steps">
-          <li>
-            <span class="device-setup-step-label">Download the app.</span>
-            Choose the installer for the device you want to monitor.
-          </li>
-          <li>
-            <span class="device-setup-step-label">Follow the installation instructions.</span>
-            Use the platform-specific setup guide if you need it.
-          </li>
-          <li>
-            <span class="device-setup-step-label">Log in on that device.</span>
-            Once the app signs in and uploads, it will show up here.
-          </li>
-        </ol>
-        <DialogActions
-          left={
-            <Button variant="ghost" href={INSTALLATION_URL} target="_blank" rel="noreferrer">
-              View guide
-            </Button>
-          }
-        >
-          <Button variant="ghost" type="button" onClick={close}>
-            Close
-          </Button>
-          <Button variant="primary" href={DOWNLOAD_URL} target="_blank" rel="noreferrer">
-            Download
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </>
   );
 }
 
@@ -446,7 +352,7 @@ function PartnerCard({
               key={device.id}
               class="partner-device-chip"
               type="button"
-              onClick={() => route(`/logs?user_id=${partner.user.id}&device_id=${device.id}`)}
+              onClick={() => route(`/logs/${partner.user.id}?device_id=${device.id}`)}
               title={device.name}
             >
               <span
@@ -462,11 +368,7 @@ function PartnerCard({
       )}
       <CardActions>
         {isWatching && partner.user.id && (
-          <Button
-            variant="ghost"
-            type="button"
-            onClick={() => route(`/logs?user_id=${partner.user.id}`)}
-          >
+          <Button variant="ghost" type="button" onClick={() => route(`/logs/${partner.user.id}`)}>
             View logs
           </Button>
         )}
@@ -503,152 +405,6 @@ function PartnerCard({
             disabled={action !== null}
           >
             {action === 'remove' ? 'Removing…' : 'Remove partner'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </Card>
-  );
-}
-
-function DeviceCard({
-  device,
-  onUpdateDevice,
-  onRemoveDevice,
-}: {
-  device: Device;
-  onUpdateDevice: (id: string, patch: { name?: string }) => Promise<void>;
-  onRemoveDevice: (id: string) => Promise<void>;
-}) {
-  const { route } = useLocation();
-  const [name, setName] = useState(device.name);
-  const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const { push: pushToast } = useToast();
-  const dialogRef = useRef<HTMLDialogElement>(null);
-  const deleteDialogRef = useRef<HTMLDialogElement>(null);
-
-  function openEdit() {
-    setName(device.name);
-    dialogRef.current?.showModal();
-  }
-
-  function closeEdit() {
-    dialogRef.current?.close();
-  }
-
-  function openDeleteDialog() {
-    dialogRef.current?.close();
-    deleteDialogRef.current?.showModal();
-  }
-
-  function closeDeleteDialog() {
-    deleteDialogRef.current?.close();
-  }
-
-  async function handleSave(e: Event) {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      await onUpdateDevice(device.id, { name });
-      dialogRef.current?.close();
-    } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Failed to save', 'error');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleDeleteConfirmed() {
-    setDeleting(true);
-    try {
-      await onRemoveDevice(device.id);
-      closeDeleteDialog();
-    } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Failed to delete device', 'error');
-    } finally {
-      setDeleting(false);
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <span class="vi-card__name">{device.name}</span>
-        <Badge variant={device.status === 'online' ? 'green' : 'gray'}>
-          {device.status === 'online' ? 'Online' : 'Offline'}
-        </Badge>
-      </CardHeader>
-      <dl class="vi-card__meta">
-        <dt>Platform</dt>
-        <dd>{device.platform}</dd>
-        <dt>Last upload</dt>
-        <dd>{formatRelativeTimestamp(device.last_upload_at)}</dd>
-        <dt>Last activity</dt>
-        <dd>{formatRelativeTimestamp(device.last_hash_at)}</dd>
-      </dl>
-      <CardActions>
-        <Button variant="ghost" type="button" onClick={() => route(`/logs?device_id=${device.id}`)}>
-          View logs
-        </Button>
-        <Button variant="ghost" type="button" onClick={openEdit}>
-          Edit
-        </Button>
-      </CardActions>
-
-      <Dialog dialogRef={dialogRef}>
-        <DialogHeader>Edit device</DialogHeader>
-        <form onSubmit={handleSave}>
-          <Field label="Name">
-            <Input
-              type="text"
-              value={name}
-              onInput={(e) => setName((e.target as HTMLInputElement).value)}
-              required
-            />
-          </Field>
-          <DialogSecondaryActions>
-            <Button
-              variant="danger"
-              type="button"
-              onClick={openDeleteDialog}
-              disabled={saving || deleting}
-            >
-              Delete device
-            </Button>
-          </DialogSecondaryActions>
-          <DialogActions>
-            <Button variant="ghost" type="button" onClick={closeEdit} disabled={saving || deleting}>
-              Cancel
-            </Button>
-            <Button variant="primary" type="submit" disabled={saving || deleting}>
-              {saving ? 'Saving…' : 'Save'}
-            </Button>
-          </DialogActions>
-        </form>
-      </Dialog>
-
-      <Dialog dialogRef={deleteDialogRef}>
-        <DialogHeader>Delete device</DialogHeader>
-        <p class="invite-desc">
-          Delete "{device.name}"? This permanently removes its logs and uploads, and your partners
-          will be notified.
-        </p>
-        <DialogActions>
-          <Button
-            variant="ghost"
-            type="button"
-            onClick={closeDeleteDialog}
-            disabled={saving || deleting}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="danger"
-            type="button"
-            onClick={() => handleDeleteConfirmed().catch(() => {})}
-            disabled={saving || deleting}
-          >
-            {deleting ? 'Deleting…' : 'Delete device'}
           </Button>
         </DialogActions>
       </Dialog>
