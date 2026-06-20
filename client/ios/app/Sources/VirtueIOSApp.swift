@@ -9,6 +9,7 @@ struct VirtueIOSApp: App {
         WindowGroup {
             ContentView(coordinator: coordinator)
                 .tint(VirtueBrand.accent)
+                .preferredColorScheme(.light)
         }
     }
 }
@@ -66,12 +67,13 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Virtue Initiative")
                         .font(.system(size: 30, weight: .semibold))
+                        .foregroundStyle(VirtueBrand.text)
                     Link("virtueinitiative.org", destination: URL(string: "https://virtueinitiative.org")!)
                         .font(.subheadline)
                         .foregroundStyle(VirtueBrand.accent)
                     Text("Build \(VirtueShared.buildLabel)")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(VirtueBrand.textMuted)
                 }
 
                 Spacer(minLength: 0)
@@ -85,10 +87,10 @@ struct ContentView: View {
                 SectionLabel("Status")
                 Text(primaryStatusTitle)
                     .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(Color(.label))
+                    .foregroundStyle(VirtueBrand.text)
                 Text(statusSubtitle)
                     .font(.body)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(VirtueBrand.textMuted)
 
                 HStack(spacing: 10) {
                     Button("Status Details") {
@@ -119,8 +121,9 @@ struct ContentView: View {
                 if coordinator.loggedIn {
                     Text("Signed in")
                         .font(.title3.weight(.semibold))
+                        .foregroundStyle(VirtueBrand.text)
                     Text("Device: \(coordinator.deviceName)")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(VirtueBrand.textMuted)
 
                     HStack(spacing: 10) {
                         Button("Sign Out") {
@@ -136,7 +139,7 @@ struct ContentView: View {
                     .padding(.top, 6)
                 } else {
                     Text("Sign in to start monitoring on this device.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(VirtueBrand.textMuted)
 
                     VStack(alignment: .leading, spacing: 12) {
                         TextField("Email", text: $coordinator.email)
@@ -175,15 +178,16 @@ struct ContentView: View {
                 SectionLabel("Safari")
                 Text("Safari extension capture")
                     .font(.title3.weight(.semibold))
+                    .foregroundStyle(VirtueBrand.text)
                 Text("Capture on iPhone only comes from the Safari extension.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(VirtueBrand.textMuted)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Permission state: \(coordinator.safariPermissionSummary)")
                     Text("Daemon state: \(coordinator.safariDaemonStatus)")
                 }
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(VirtueBrand.textMuted)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("1. Open Settings > Safari > Extensions.")
@@ -192,6 +196,7 @@ struct ContentView: View {
                     Text("4. Virtue will produce screenshots while browsing.")
                 }
                 .font(.subheadline)
+                .foregroundStyle(VirtueBrand.text)
             }
         }
     }
@@ -387,9 +392,10 @@ private struct DetailRow: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(VirtueBrand.textMuted)
             Text(value)
                 .font(.body)
+                .foregroundStyle(VirtueBrand.text)
         }
         .padding(.vertical, 2)
         .listRowBackground(VirtueBrand.surface)
@@ -457,4 +463,8 @@ private enum VirtueBrand {
     static let bgSubtle = Color(red: 235.0 / 255.0, green: 228.0 / 255.0, blue: 206.0 / 255.0)
     // Border — matches --border (#d9d1bc) in shared-web/tokens.css
     static let border = Color(red: 217.0 / 255.0, green: 209.0 / 255.0, blue: 188.0 / 255.0)
+    // Primary text — matches --text (#1b1a16) in shared-web/tokens.css
+    static let text = Color(red: 27.0 / 255.0, green: 26.0 / 255.0, blue: 22.0 / 255.0)
+    // Muted text — matches --text-muted (#6a6655) in shared-web/tokens.css
+    static let textMuted = Color(red: 106.0 / 255.0, green: 102.0 / 255.0, blue: 85.0 / 255.0)
 }
