@@ -33,13 +33,9 @@ impl SessionManager {
         })
     }
 
-    pub fn login_blocking(
-        &self,
-        email: &str,
-        password: &str,
-        _device_name: &str,
-    ) -> Result<String> {
-        let device_id = resident_monitor::app_login(email, password).context("login failed")?;
+    pub fn login_blocking(&self, email: &str, password: &str, device_name: &str) -> Result<String> {
+        let device_id =
+            resident_monitor::app_login(email, password, device_name).context("login failed")?;
 
         save_state(
             &self.paths.ui_state_file,

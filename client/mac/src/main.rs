@@ -18,7 +18,9 @@ use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEv
 use virtue_core::{AuthState, ClientController, CoreError, ServiceStatus};
 
 use crate::capture::{has_screen_capture_access, request_screen_capture_access};
-use crate::config::{ClientPaths, ClientState, build_core_config, load_state, save_state};
+use crate::config::{
+    ClientPaths, ClientState, build_core_config, default_device_name, load_state, save_state,
+};
 use crate::runtime_env::apply_runtime_env;
 
 const BUILD_LABEL: &str = virtue_core::BUILD_LABEL;
@@ -279,7 +281,7 @@ fn run_tray(paths: ClientPaths) -> Result<()> {
                         match result {
                             Ok(()) => {
                                 if let Some(window) = main_window.as_ref() {
-                                    window.switch_to_login(&saved_email);
+                                    window.switch_to_login(&saved_email, &default_device_name());
                                 }
                             }
                             Err(err) => {
@@ -364,6 +366,7 @@ fn open_app_dialog(
 
     let app_status = collect_status(paths)?;
     let default_email = app_status.email.clone().unwrap_or_default();
+    let default_device = default_device_name();
     let email_str = app_status
         .email
         .as_deref()
@@ -375,6 +378,7 @@ fn open_app_dialog(
             build_label: BUILD_LABEL,
             mode: ui::MainWindowMode::Login {
                 default_email: &default_email,
+                default_device_name: &default_device,
             },
         }
     } else {
@@ -407,11 +411,15 @@ fn handle_main_window_event(
             *main_window = None;
             Ok(false)
         }
-        ui::MainWindowEvent::LoginSubmitted { email, password } => {
+        ui::MainWindowEvent::LoginSubmitted {
+            email,
+            password,
+            device_name,
+        } => {
             // Runs synchronously on the event-loop thread; the app intentionally
             // blocks (and no status poll spawns or is processed) until login
             // resolves, since the daemon is busy with the login network call.
-            match login(paths, &email, &password) {
+            match login(paths, &email, &password, &device_name) {
                 Ok(_) => {
                     // Do not auto-request screen-capture access here: macOS shows
                     // its prompt only once per launch, so triggering it now would
@@ -512,7 +520,7 @@ fn handle_main_window_event(
             // can spawn or be processed during the logout IPC call.
             logout(paths)?;
             if let Some(window) = main_window.as_ref() {
-                window.switch_to_login(&saved_email);
+                window.switch_to_login(&saved_email, &default_device_name());
             }
             Ok(false)
         }
@@ -531,11 +539,13 @@ fn permission_phase(has_capture_permission: bool) -> Option<ui::PermissionPhase>
     }
 }
 
-fn login(paths: &ClientPaths, email: &str, password: &str) -> Result<String> {
+fn login(paths: &ClientPaths, email: &str, password: &str, device_name: &str) -> Result<String> {
     let sock = paths.state_dir.join("daemon.sock");
     let mut client =
         ClientController::connect(&sock).context("failed to connect to daemon (is it running?)")?;
-    let device_id = client.login(email, password).context("login failed")?;
+    let device_id = client
+        .login(email, password, Some(device_name))
+        .context("login failed")?;
     save_state(
         &paths.ui_state_file,
         &ClientState {

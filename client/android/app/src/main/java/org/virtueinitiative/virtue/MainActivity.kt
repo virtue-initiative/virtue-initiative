@@ -41,6 +41,10 @@ class MainActivity : AppCompatActivity() {
 
         populateOverrideInputs()
 
+        if (binding.deviceNameInput.text.isNullOrBlank()) {
+            binding.deviceNameInput.setText(deviceName())
+        }
+
         val initError = NativeBridge.ensureInitialized(this)
         if (initError != null) {
             setStatus("Core init failed: $initError")
@@ -77,6 +81,8 @@ class MainActivity : AppCompatActivity() {
 
         val email = binding.emailInput.text?.toString()?.trim().orEmpty()
         val password = binding.passwordInput.text?.toString().orEmpty()
+        val deviceName = binding.deviceNameInput.text?.toString()?.trim()
+            ?.ifBlank { null } ?: deviceName()
 
         if (email.isBlank() || password.isBlank()) {
             setStatus("Email and password are required")
@@ -86,12 +92,12 @@ class MainActivity : AppCompatActivity() {
         binding.loginButton.isEnabled = false
         lifecycleScope.launch {
             val error = withContext(Dispatchers.IO) {
-                var result = NativeBridge.nativeLogin(email, password, deviceName())
+                var result = NativeBridge.nativeLogin(email, password, deviceName)
                 if (result != null && result.contains("serialization error")) {
                     // Corrupted state files — wipe core-data and retry
                     android.util.Log.w("MainActivity", "Login serialization error, wiping core-data and retrying")
                     filesDir.resolve("core-data").deleteRecursively()
-                    result = NativeBridge.nativeLogin(email, password, deviceName())
+                    result = NativeBridge.nativeLogin(email, password, deviceName)
                 }
                 result
             }

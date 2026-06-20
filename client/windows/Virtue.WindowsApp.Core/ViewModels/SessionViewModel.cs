@@ -14,6 +14,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private string _accountEmail = string.Empty;
     private string _emailInput = string.Empty;
     private string _passwordInput = string.Empty;
+    private string _deviceNameInput = Environment.MachineName;
     private string _statusText = "Starting Virtue...";
     private string _monitorState = "stopped";
     private string? _monitorError;
@@ -108,6 +109,12 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     {
         get => _passwordInput;
         set => SetProperty(ref _passwordInput, value);
+    }
+
+    public string DeviceNameInput
+    {
+        get => _deviceNameInput;
+        set => SetProperty(ref _deviceNameInput, value);
     }
 
     public string StatusText
@@ -244,10 +251,14 @@ public sealed class SessionViewModel : INotifyPropertyChanged
             return;
         }
 
+        var deviceName = string.IsNullOrWhiteSpace(DeviceNameInput)
+            ? Environment.MachineName
+            : DeviceNameInput.Trim();
+
         await RunBusyAsync(async () =>
         {
             StatusText = "Signing in...";
-            _interopClient.Login(EmailInput.Trim(), PasswordInput, Environment.MachineName);
+            _interopClient.Login(EmailInput.Trim(), PasswordInput, deviceName);
             PasswordInput = string.Empty;
             await RefreshInternalAsync();
         });

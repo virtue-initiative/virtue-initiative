@@ -65,16 +65,20 @@ impl ClientPaths {
     }
 }
 
-pub fn build_core_config(paths: &ClientPaths) -> Config {
-    let device_name = hostname::get()
+/// Default device name used at registration: the system hostname, or
+/// `"windows-device"` if it can't be resolved.
+pub fn default_device_name() -> String {
+    hostname::get()
         .ok()
         .and_then(|value| value.into_string().ok())
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "windows-device".to_string());
+        .unwrap_or_else(|| "windows-device".to_string())
+}
 
+pub fn build_core_config(paths: &ClientPaths) -> Config {
     Config::new(
         DEFAULT_BASE_API_URL,
-        device_name,
+        default_device_name(),
         "windows",
         paths.state_dir.clone(),
         Some(paths.runtime_config_file.clone()),

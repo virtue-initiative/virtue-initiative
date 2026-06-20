@@ -28,10 +28,16 @@ impl<C: EventChannel> ClientController<C> {
 
     /// Send `LoginRequested` and block until `LoginResult` is received.
     /// Returns the device ID on success.
-    pub fn login(&mut self, email: &str, password: &str) -> CoreResult<String> {
+    pub fn login(
+        &mut self,
+        email: &str,
+        password: &str,
+        device_name: Option<&str>,
+    ) -> CoreResult<String> {
         let r: LoginResult = self.channel.request(LoginRequested {
             email: email.into(),
             password: Redacted(password.into()),
+            device_name: device_name.map(|name| name.into()),
         })?;
         if r.success {
             Ok(r.device_id.unwrap_or_default())

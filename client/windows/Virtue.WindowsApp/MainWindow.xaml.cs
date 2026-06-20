@@ -29,6 +29,7 @@ public sealed partial class MainWindow : Window
     private readonly StackPanel _signedInActionsPanel;
     private readonly TextBox _emailTextBox;
     private readonly PasswordBox _passwordBox;
+    private readonly TextBox _deviceNameTextBox;
     private bool _allowClose;
 
     public MainWindow(SessionViewModel viewModel)
@@ -42,6 +43,7 @@ public sealed partial class MainWindow : Window
         _accountSummaryTextBlock = new TextBlock();
         _emailTextBox = new TextBox();
         _passwordBox = new PasswordBox();
+        _deviceNameTextBox = new TextBox();
         _loginPanel = new StackPanel();
         _accountActionsPanel = new StackPanel();
         _signedInActionsPanel = new StackPanel();
@@ -89,6 +91,10 @@ public sealed partial class MainWindow : Window
         _passwordBox.PlaceholderText = "Password";
         _passwordBox.PasswordRevealMode = PasswordRevealMode.Hidden;
         _passwordBox.PasswordChanged += PasswordBox_OnPasswordChanged;
+
+        _deviceNameTextBox.PlaceholderText = "Device name";
+        _deviceNameTextBox.Text = ViewModel.DeviceNameInput;
+        _deviceNameTextBox.TextChanged += (_, _) => ViewModel.DeviceNameInput = _deviceNameTextBox.Text;
 
         var root = new Grid
         {
@@ -207,6 +213,7 @@ public sealed partial class MainWindow : Window
         _loginPanel.Margin = new Thickness(0, 12, 0, 0);
         _loginPanel.Children.Add(_emailTextBox);
         _loginPanel.Children.Add(_passwordBox);
+        _loginPanel.Children.Add(_deviceNameTextBox);
 
         var signInButton = CreatePrimaryButton("Sign In");
         signInButton.Click += SignInButton_OnClick;
@@ -444,6 +451,11 @@ public sealed partial class MainWindow : Window
         if (_passwordBox.Password != ViewModel.PasswordInput)
         {
             _passwordBox.Password = ViewModel.PasswordInput;
+        }
+
+        if (_deviceNameTextBox.Text != ViewModel.DeviceNameInput)
+        {
+            _deviceNameTextBox.Text = ViewModel.DeviceNameInput;
         }
     }
 

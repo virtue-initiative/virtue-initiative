@@ -21,7 +21,7 @@ use virtue_core::{
 };
 
 use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_backend};
-use crate::config::{ClientPaths, build_core_config};
+use crate::config::{ClientPaths, build_core_config, default_device_name};
 
 const BUILD_LABEL: &str = virtue_core::BUILD_LABEL;
 
@@ -40,6 +40,8 @@ enum Commands {
     Login {
         #[arg(long)]
         email: Option<String>,
+        #[arg(long)]
+        device_name: Option<String>,
     },
     #[command(about = "Log out and disable monitoring on this device")]
     Logout {
@@ -143,7 +145,9 @@ async fn run() -> Result<()> {
     paths.ensure_dirs()?;
 
     match cli.command {
-        Commands::Login { email } => tokio::task::block_in_place(|| login(paths, email)),
+        Commands::Login { email, device_name } => {
+            tokio::task::block_in_place(|| login(paths, email, device_name))
+        }
         Commands::Logout { yes } => tokio::task::block_in_place(|| logout(paths, yes)),
         Commands::Daemon { command } => daemon_command(paths, command).await,
         Commands::Status { json } => status(paths, json),
@@ -161,7 +165,7 @@ async fn daemon_command(paths: ClientPaths, command: Option<DaemonCommands>) -> 
     }
 }
 
-fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
+fn login(paths: ClientPaths, email: Option<String>, device_name: Option<String>) -> Result<()> {
     let email = match email {
         Some(email) => email,
         None => {
@@ -171,10 +175,29 @@ fn login(paths: ClientPaths, email: Option<String>) -> Result<()> {
     };
     let password = prompt_password("Password: ")?;
 
+    // Resolve the device name: use the flag if given, otherwise prompt
+    // interactively with the hostname as the blank-accepts default.
+    let default_name = default_device_name();
+    let device_name = match device_name {
+        Some(name) => name,
+        None => {
+            let mut rl = rustyline::DefaultEditor::new()?;
+            let entered = rl.readline(&format!("Device name [{default_name}]: "))?;
+            let entered = entered.trim();
+            if entered.is_empty() {
+                default_name
+            } else {
+                entered.to_string()
+            }
+        }
+    };
+
     let sock = paths.state_dir.join("daemon.sock");
     let mut client =
         ClientController::connect(&sock).context("failed to connect to daemon (is it running?)")?;
-    let device_id = client.login(&email, &password).context("login failed")?;
+    let device_id = client
+        .login(&email, &password, Some(&device_name))
+        .context("login failed")?;
 
     let probe = probe_backend();
     println!("{}", probe.guidance);
@@ -710,7 +733,26 @@ mod tests {
     #[test]
     fn cli_accepts_login_command() {
         let cli = Cli::try_parse_from(["virtue", "login"]).expect("login command should parse");
-        assert!(matches!(cli.command, Commands::Login { email: None }));
+        assert!(matches!(
+            cli.command,
+            Commands::Login {
+                email: None,
+                device_name: None
+            }
+        ));
+    }
+
+    #[test]
+    fn cli_accepts_login_device_name_flag() {
+        let cli = Cli::try_parse_from(["virtue", "login", "--device-name", "My Box"])
+            .expect("login --device-name should parse");
+        assert!(matches!(
+            cli.command,
+            Commands::Login {
+                email: None,
+                device_name: Some(name)
+            } if name == "My Box"
+        ));
     }
 
     #[test]

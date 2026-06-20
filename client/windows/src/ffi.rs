@@ -5,8 +5,8 @@ use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{
-    ClientPaths, ResolvedRuntimeConfig, RuntimeConfigOverrides, load_runtime_overrides,
-    resolved_runtime_config, save_runtime_overrides,
+    ClientPaths, ResolvedRuntimeConfig, RuntimeConfigOverrides, default_device_name,
+    load_runtime_overrides, resolved_runtime_config, save_runtime_overrides,
 };
 use crate::resident_monitor::{self, MonitorStatusSnapshot};
 use crate::session::{SessionManager, SessionStatus};
@@ -198,7 +198,7 @@ pub extern "C" fn virtue_windows_login(request_json: *const c_char) -> *mut c_ch
         let device_name = request
             .device_name
             .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| "windows-device".to_string());
+            .unwrap_or_else(default_device_name);
 
         let manager = with_session_manager()?;
         manager.login_blocking(&request.email, &request.password, &device_name)?;
