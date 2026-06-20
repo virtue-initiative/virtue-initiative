@@ -180,6 +180,52 @@ impl ScreenshotHooks for MacPlatformHooks {
         let text = String::from_utf8_lossy(&output.stdout);
         Ok(parse_boottime_ms(&text))
     }
+
+    fn is_locked_or_screensaver(&self) -> CoreResult<bool> {
+        // Either the session being locked or an active screensaver means the user
+        // can't be viewing real content. Both checks fail safe to false.
+        Ok(screen_is_locked() || screensaver_process_running())
+    }
+}
+
+// Reads `CGSessionCopyCurrentDictionary()["CGSSessionScreenIsLocked"]`. Returns false
+// when the dictionary or key is absent (unknown session) — the fail-safe default.
+fn screen_is_locked() -> bool {
+    use std::ffi::c_void;
+
+    use objc2_core_foundation::{CFBoolean, CFString};
+    use objc2_core_graphics::CGSessionCopyCurrentDictionary;
+
+    let Some(dict) = CGSessionCopyCurrentDictionary() else {
+        return false;
+    };
+    let key = CFString::from_str("CGSSessionScreenIsLocked");
+    // SAFETY: `dict` is a valid CFDictionary; `key` outlives the lookup. The returned
+    // pointer (if non-null) is the dictionary's CFBoolean for that key.
+    let value = unsafe { dict.value(&*key as *const CFString as *const c_void) };
+    if value.is_null() {
+        return false;
+    }
+    // The screensaver/lock value is the shared kCFBooleanTrue singleton; pointer
+    // identity against it is the simplest correct read.
+    let true_ptr = CFBoolean::new(true) as *const CFBoolean as *const c_void;
+    std::ptr::eq(value, true_ptr)
+}
+
+// Detects the macOS screensaver host process. The engine name differs across releases.
+fn screensaver_process_running() -> bool {
+    ["ScreenSaverEngine", "legacyScreenSaver"]
+        .iter()
+        .any(|name| {
+            Command::new("pgrep")
+                .args(["-x", name])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map(|status| status.success())
+                .unwrap_or(false)
+        })
 }
 
 impl PlatformHooks for MacPlatformHooks {}

@@ -19,6 +19,7 @@ struct TestPlatformInner {
     default_screenshot: Screenshot,
     last_shutdown_time_ms: Option<i64>,
     last_startup_time_ms: Option<i64>,
+    locked_or_screensaver: bool,
 }
 
 impl TestPlatformHooks {
@@ -35,6 +36,7 @@ impl TestPlatformHooks {
                 default_screenshot: tiny_png_screenshot(),
                 last_shutdown_time_ms: None,
                 last_startup_time_ms: None,
+                locked_or_screensaver: false,
             })),
         }
     }
@@ -57,6 +59,10 @@ impl TestPlatformHooks {
 
     pub fn set_last_startup_time(&self, ms: Option<i64>) {
         self.lock().last_startup_time_ms = ms;
+    }
+
+    pub fn set_locked_or_screensaver(&self, locked: bool) {
+        self.lock().locked_or_screensaver = locked;
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, TestPlatformInner> {
@@ -91,6 +97,10 @@ impl ScreenshotHooks for TestPlatformHooks {
 
     fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
         Ok(self.lock().last_startup_time_ms)
+    }
+
+    fn is_locked_or_screensaver(&self) -> CoreResult<bool> {
+        Ok(self.lock().locked_or_screensaver)
     }
 }
 

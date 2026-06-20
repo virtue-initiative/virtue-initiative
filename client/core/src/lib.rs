@@ -31,7 +31,7 @@ pub use events::{IpcError, IpcListener, RemoteEventBus, RemoteSender};
 pub use ipc_bridge::IpcBridge;
 pub use model::{
     AlertReason, DeviceCredentials, DeviceSettings, LifecycleKind, PartialStatus,
-    ProcessStoppedReason, Redacted, UploadKind,
+    ProcessStoppedReason, Redacted, ScreenshotSkipReason, UploadKind,
 };
 pub use model::{
     AuthState, BatchUpload, EventData, LogEntry, LoginStatus, LoopOutcome, Screenshot,
@@ -46,7 +46,7 @@ pub use module::lifecycle::{
     ComputerResumed, ComputerSuspended, ProcessStarted, ProcessStopped, UserSessionLogin,
     UserSessionLogout, UserStopRequested,
 };
-pub use module::screenshot::{CaptureFailed, ScreenshotPaused, ScreenshotResumed};
+pub use module::screenshot::CaptureFailed;
 pub use module::status::{StatusRequest, StatusResponse};
 pub use module::upload::FlushBatchNow;
 pub use module::upload::Upload;

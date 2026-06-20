@@ -52,11 +52,16 @@ pub enum LifecycleKind {
     ProcessStoppedOther,
     ComputerSuspended,
     ComputerResumed,
-    ScreenshotPaused,
-    ScreenshotResumed,
     Login,
     Logout,
     ComputerBooted,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum ScreenshotSkipReason {
+    StaticScreen,        // duplicate frame (fingerprint unchanged)
+    LockedOrScreensaver, // session locked / screensaver / screen off
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -82,6 +87,9 @@ pub enum UploadKind {
     },
     LifecycleAlert {
         reason: AlertReason,
+    },
+    ScreenshotSkipped {
+        reason: ScreenshotSkipReason,
     },
     Alert {
         message: String,

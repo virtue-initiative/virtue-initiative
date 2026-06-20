@@ -20,6 +20,8 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAlert", "NSApplication", "NSButton", "NSButtonCell", "NSColor", "NSControl", "NSEvent", "NSGraphics", "NSImage", "NSImageView", "NSMenu", "NSMenuItem", "NSResponder", "NSScrollView", "NSSecureTextField", "NSText", "NSTextField", "NSTextFieldCell", "NSTextView", "NSView", "NSVisualEffectView", "NSWindow", "NSWorkspace"] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSDate", "NSNotification", "NSOperation", "NSRunLoop", "NSString", "block2"] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFBase", "CFString", "CFDictionary", "CFNumber"] }
+objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGSession"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time"] }

@@ -21,6 +21,7 @@ describe('getLogCategory — titles', () => {
       'Unexpected Gap',
     );
     expect(getLogCategory(log('capture_failed'))).toBe('Capture Failed');
+    expect(getLogCategory(log('screenshot_skipped'))).toBe('Screenshot Skipped');
   });
 });
 
@@ -33,6 +34,7 @@ describe('getLogHelpAnchor / getLogHelpUrl', () => {
       getLogHelpAnchor(log('lifecycle_alert', { reason: 'force_killed_before_shutdown' })),
     ).toBe('process-force-stopped');
     expect(getLogHelpAnchor(log('screenshot'))).toBe('screenshot');
+    expect(getLogHelpAnchor(log('screenshot_skipped'))).toBe('screenshot-skipped');
   });
 
   it('builds a full help URL with the anchor', () => {

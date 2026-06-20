@@ -231,6 +231,49 @@ pub fn read_last_shutdown_time_utc_ms() -> CoreResult<Option<i64>> {
     Ok(None)
 }
 
+// True if a screensaver is running or the session is locked. Both checks fail safe
+// to false (fall back to the diff gate) when the state can't be determined.
+#[cfg(target_os = "windows")]
+pub fn read_locked_or_screensaver() -> bool {
+    use windows::Win32::System::StationsAndDesktops::{
+        CloseDesktop, DESKTOP_CONTROL_FLAGS, DESKTOP_SWITCHDESKTOP, OpenInputDesktop,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SPI_GETSCREENSAVERRUNNING, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+    };
+    use windows::core::BOOL;
+
+    unsafe {
+        let mut running = BOOL(0);
+        let screensaver = SystemParametersInfoW(
+            SPI_GETSCREENSAVERRUNNING,
+            0,
+            Some(&mut running as *mut _ as *mut core::ffi::c_void),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+        .is_ok()
+            && running.as_bool();
+        if screensaver {
+            return true;
+        }
+
+        // When the workstation is locked the input desktop becomes the secure
+        // (Winlogon) desktop, so a normal-privilege OpenInputDesktop fails.
+        match OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_SWITCHDESKTOP) {
+            Ok(desktop) => {
+                let _ = CloseDesktop(desktop);
+                false
+            }
+            Err(_) => true,
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn read_locked_or_screensaver() -> bool {
+    false
+}
+
 #[derive(Clone)]
 pub struct WindowsPlatformHooks;
 
@@ -263,6 +306,10 @@ impl ScreenshotHooks for WindowsPlatformHooks {
 
     fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
         read_last_startup_time_utc_ms()
+    }
+
+    fn is_locked_or_screensaver(&self) -> CoreResult<bool> {
+        Ok(read_locked_or_screensaver())
     }
 }
 

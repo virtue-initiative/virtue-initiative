@@ -13,7 +13,7 @@ use std::process::ExitCode;
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 #[cfg(debug_assertions)]
-use virtue_core::{AlertReason, LifecycleKind};
+use virtue_core::{AlertReason, LifecycleKind, ScreenshotSkipReason};
 use virtue_core::{
     ClientController, EventBus, EventChannel, FlushBatchNow, Ping, ScreenshotHooks, ServiceStatus,
     StatusRequest, StatusResponse, Upload, UploadKind, build_default_modules_reqwest, load_state,
@@ -373,6 +373,12 @@ fn build_send_kind(args: &SendLogArgs) -> Result<UploadKind> {
                 .clone()
                 .unwrap_or_else(|| "Developer test alert".to_string()),
         }),
+        "screenshot_skipped" => {
+            let reason = args.reason.as_deref().unwrap_or("static_screen");
+            let reason: ScreenshotSkipReason = serde_json::from_value(parse_enum(reason)?)
+                .with_context(|| format!("unknown screenshot skip reason: {reason}"))?;
+            Ok(UploadKind::ScreenshotSkipped { reason })
+        }
         "capture_failed" => Ok(UploadKind::CaptureFailed),
         "dev" => Ok(UploadKind::Dev {
             title: args
@@ -382,7 +388,7 @@ fn build_send_kind(args: &SendLogArgs) -> Result<UploadKind> {
             details: args.details.clone(),
         }),
         other => anyhow::bail!(
-            "unsupported --type {other:?} (expected: lifecycle, lifecycle_alert, alert, capture_failed, dev, screenshot, or all)"
+            "unsupported --type {other:?} (expected: lifecycle, lifecycle_alert, screenshot_skipped, alert, capture_failed, dev, screenshot, or all)"
         ),
     }
 }
@@ -402,8 +408,6 @@ fn all_send_kinds() -> Vec<UploadKind> {
         ProcessStoppedUser,
         ProcessStoppedShutdown,
         ProcessStoppedOther,
-        ScreenshotPaused,
-        ScreenshotResumed,
     ]
     .into_iter()
     .map(|kind| UploadKind::Lifecycle { kind });
@@ -417,8 +421,15 @@ fn all_send_kinds() -> Vec<UploadKind> {
     ]
     .into_iter()
     .map(|reason| UploadKind::LifecycleAlert { reason });
+    let skips = [
+        ScreenshotSkipReason::StaticScreen,
+        ScreenshotSkipReason::LockedOrScreensaver,
+    ]
+    .into_iter()
+    .map(|reason| UploadKind::ScreenshotSkipped { reason });
     lifecycle
         .chain(alerts)
+        .chain(skips)
         .chain([
             UploadKind::Alert {
                 message: "Developer test alert".to_string(),

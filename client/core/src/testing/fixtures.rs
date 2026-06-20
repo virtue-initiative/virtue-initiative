@@ -22,3 +22,26 @@ pub fn tiny_png_screenshot() -> Screenshot {
         content_type: "image/png".to_string(),
     }
 }
+
+/// Encode a 64×64 solid-gray PNG. Distinct `luma` values produce fingerprints that the
+/// screenshot dedup gate treats as materially different, so tests can simulate an
+/// unchanged vs. changed screen.
+pub fn solid_png_bytes(luma: u8) -> Vec<u8> {
+    let img = image::RgbImage::from_pixel(64, 64, image::Rgb([luma, luma, luma]));
+    let mut bytes = Vec::new();
+    image::DynamicImage::ImageRgb8(img)
+        .write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )
+        .expect("encode solid test PNG");
+    bytes
+}
+
+pub fn solid_png_screenshot(luma: u8) -> Screenshot {
+    Screenshot {
+        captured_at_ms: 0,
+        bytes: solid_png_bytes(luma),
+        content_type: "image/png".to_string(),
+    }
+}

@@ -240,6 +240,11 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
         if !self.authenticated {
             return Ok(());
         }
+        // Battery: don't wake the network/radio while the screen is off/locked. Queued
+        // events persist and flush on the next ping once the screen is active.
+        if self.platform.is_locked_or_screensaver()? {
+            return Ok(());
+        }
         let now_ms = self.platform.get_time_utc_ms()?;
 
         if let Some(last) = self.state.last_batch_at_ms
@@ -269,13 +274,20 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
             risk: Some(risk),
             event: kind,
         };
+        // Always enqueue, but only attempt network I/O while the screen is active
+        // (battery): a locked/off screen leaves events queued for the next ping flush.
+        let screen_active = !self.platform.is_locked_or_screensaver()?;
         if risk >= crate::module::lifecycle::EXTRA_HIGH_RISK {
             self.state.pending_immediate_events.push(entry);
-            self.retry_pending_immediates()?;
+            if screen_active {
+                self.retry_pending_immediates()?;
+            }
         } else {
             self.state.pending_hash_events.push(entry);
-            self.retry_pending_hashes()?;
-            self.maybe_upload_batch(now_ms, emitter)?;
+            if screen_active {
+                self.retry_pending_hashes()?;
+                self.maybe_upload_batch(now_ms, emitter)?;
+            }
         }
         Ok(())
     }
@@ -378,13 +390,25 @@ fn batch_recipients(settings: &DeviceSettings) -> CoreResult<Vec<BatchRecipient>
 
 #[cfg(test)]
 mod tests {
-    use super::{Upload, UploadModule};
+    use super::{FlushBatchNow, Upload, UploadModule};
+    use crate::events::Ping;
     use crate::model::{
-        BatchRecipient, DeviceCredentials, DeviceSettings, LogEntry, PartialStatus, UploadKind,
+        BatchRecipient, DeviceCredentials, DeviceSettings, LogEntry, PartialStatus,
+        ProcessStoppedReason, ScreenshotSkipReason, UploadKind,
     };
     use crate::module::auth::{Login, Logout};
+    use crate::module::lifecycle::ProcessStopped;
     use crate::module::status::StatusRequest;
     use crate::testing::{EventTester, MockApiClient};
+
+    fn skipped_upload() -> Upload {
+        Upload {
+            risk: 0.0,
+            kind: UploadKind::ScreenshotSkipped {
+                reason: ScreenshotSkipReason::StaticScreen,
+            },
+        }
+    }
 
     fn valid_credentials() -> DeviceCredentials {
         DeviceCredentials {
@@ -506,5 +530,80 @@ mod tests {
         t.assert_like::<PartialStatus>(crate::like!(PartialStatus::Upload {
             pending_request_count: 2,
         }));
+    }
+
+    #[test]
+    fn locked_screen_defers_uploads_until_active() {
+        let mut b = EventTester::builder();
+        b.platform().set_locked_or_screensaver(true);
+        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
+        let mut t = b.build();
+        t.emit(1, login_event());
+
+        // While locked, the event is queued but no network call fires on Upload or Ping.
+        t.emit(1, skipped_upload());
+        t.emit(2, Ping);
+        {
+            let s = t.api.state();
+            assert!(s.hash_uploads.is_empty(), "no hash upload while locked");
+            assert!(s.batch_uploads.is_empty(), "no batch upload while locked");
+            assert!(
+                s.log_uploads.is_empty(),
+                "no direct log upload while locked"
+            );
+        }
+        assert_eq!(
+            t.observer::<UploadModule<MockApiClient>>()
+                .state
+                .pending_hash_events
+                .len(),
+            1,
+            "event should remain queued while locked"
+        );
+
+        // Screen active again → next ping flushes the queue.
+        t.platform.set_locked_or_screensaver(false);
+        t.emit(3, Ping);
+        let s = t.api.state();
+        assert!(!s.hash_uploads.is_empty(), "hash flushes once active");
+        assert!(!s.batch_uploads.is_empty(), "batch flushes once active");
+    }
+
+    #[test]
+    fn flush_batch_now_uploads_while_locked() {
+        let mut b = EventTester::builder();
+        b.platform().set_locked_or_screensaver(true);
+        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
+        let mut t = b.build();
+        t.emit(1, login_event());
+        t.observer::<UploadModule<MockApiClient>>()
+            .state
+            .pending_batch_events
+            .push((500, vec![1, 2, 3]));
+
+        // A plain ping does not flush while locked.
+        t.emit(2, Ping);
+        assert!(t.api.state().batch_uploads.is_empty());
+
+        // FlushBatchNow is an explicit flush path → uploads regardless of lock.
+        t.emit(3, FlushBatchNow);
+        assert_eq!(t.api.state().batch_uploads.len(), 1);
+    }
+
+    #[test]
+    fn shutdown_flush_uploads_while_locked() {
+        let mut b = EventTester::builder();
+        b.platform().set_locked_or_screensaver(true);
+        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
+        let mut t = b.build();
+        t.emit(1, login_event());
+        t.observer::<UploadModule<MockApiClient>>()
+            .state
+            .pending_batch_events
+            .push((500, vec![1, 2, 3]));
+
+        // ProcessStopped(Shutdown) is a terminal flush path → uploads regardless of lock.
+        t.emit(2, ProcessStopped(ProcessStoppedReason::Shutdown));
+        assert_eq!(t.api.state().batch_uploads.len(), 1);
     }
 }
