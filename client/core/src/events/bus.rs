@@ -1,7 +1,10 @@
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
-    sync::mpsc::{self, Receiver, Sender},
+    sync::{
+        Arc,
+        mpsc::{self, Receiver, Sender},
+    },
 };
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -108,6 +111,26 @@ pub trait Observer: 'static {
 /// registered under, so the inner downcast always succeeds.
 type Handler = Box<dyn Fn(&dyn Any) + Send + Sync>;
 
+/// Runs a detached background job on behalf of [`Emitter::spawn`].
+///
+/// Production uses [`ThreadSpawner`] (a real OS thread). Tests can substitute an
+/// inline spawner that runs the job immediately, so events the job emits cascade
+/// within the **same** `iter()` and stay deterministic.
+pub trait Spawner: Send + Sync + 'static {
+    fn spawn(&self, job: Box<dyn FnOnce() + Send + 'static>);
+}
+
+/// Production [`Spawner`]: runs each job on a detached `std::thread`. Core's
+/// `tokio` only enables the `time` feature (no runtime), so we use a real OS
+/// thread rather than `tokio::spawn`.
+pub struct ThreadSpawner;
+
+impl Spawner for ThreadSpawner {
+    fn spawn(&self, job: Box<dyn FnOnce() + Send + 'static>) {
+        std::thread::spawn(job);
+    }
+}
+
 /// A cheap, cloneable handle for publishing events.
 ///
 /// Handlers must be `'static`, so they cannot borrow the [`EventBus`]. Instead
@@ -116,6 +139,7 @@ type Handler = Box<dyn Fn(&dyn Any) + Send + Sync>;
 #[derive(Clone)]
 pub struct Emitter {
     tx: Sender<AnyEvent>,
+    spawner: Arc<dyn Spawner>,
 }
 
 impl Emitter {
@@ -125,6 +149,27 @@ impl Emitter {
             .send(Box::new(event))
             .map_err(|_| CoreError::InvalidState("event bus channel closed"))
     }
+
+    /// Hand heavy work to a background job that emits a follow-up event when it
+    /// finishes — letting a sync handler offload a slow capture/upload without
+    /// stalling the single-threaded event loop. The task receives its own
+    /// `Emitter` clone; events it sends land on the queue and drain on the next
+    /// `iter()` (≤1s, next `Ping`). If the task returns `Err`, an [`Error`] event
+    /// is emitted in its place so the failure still propagates.
+    pub fn spawn<F>(&self, task: F)
+    where
+        F: FnOnce(&Emitter) -> CoreResult<()> + Send + 'static,
+    {
+        let em = self.clone();
+        self.spawner.spawn(Box::new(move || {
+            if let Err(err) = task(&em) {
+                let _ = em.send(Error {
+                    source: "spawn".into(),
+                    message: err.to_string(),
+                });
+            }
+        }));
+    }
 }
 
 pub struct EventBus {
@@ -132,6 +177,7 @@ pub struct EventBus {
     handlers: HashMap<TypeId, Vec<Handler>>,
     tx: Sender<AnyEvent>,
     rx: Receiver<AnyEvent>,
+    spawner: Arc<dyn Spawner>,
 }
 
 impl EventBus {
@@ -144,12 +190,23 @@ impl EventBus {
     ///
     /// [`save`]: EventBus::save
     pub fn new(observers: Vec<Box<dyn Observer>>, state: StateType) -> CoreResult<Self> {
+        Self::with_spawner(observers, state, Arc::new(ThreadSpawner))
+    }
+
+    /// Like [`EventBus::new`] but with an explicit [`Spawner`]. Tests pass an
+    /// inline spawner so background jobs run synchronously and deterministically.
+    pub fn with_spawner(
+        observers: Vec<Box<dyn Observer>>,
+        state: StateType,
+        spawner: Arc<dyn Spawner>,
+    ) -> CoreResult<Self> {
         let (tx, rx) = mpsc::channel();
         let mut bus = Self {
             observers: Vec::with_capacity(observers.len()),
             handlers: HashMap::new(),
             tx,
             rx,
+            spawner,
         };
 
         for mut observer in observers {
@@ -201,6 +258,7 @@ impl EventBus {
     pub fn emitter(&self) -> Emitter {
         Emitter {
             tx: self.tx.clone(),
+            spawner: Arc::clone(&self.spawner),
         }
     }
 
@@ -572,5 +630,193 @@ mod tests {
             seen, 1,
             "cascade must complete despite the failing observer"
         );
+    }
+
+    /// Observer that, for every `Tick`, spawns a background job that emits a `Tock`.
+    struct SpawnObserver;
+    impl Observer for SpawnObserver {
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+        fn init(&mut self, _bus: &mut EventBus, _state: StateType) -> CoreResult<()> {
+            Ok(())
+        }
+        fn on_event(&mut self, event: &dyn Any, emitter: &Emitter) -> CoreResult<()> {
+            crate::dispatch_event!(event, {
+                tick: Tick => {
+                    let n = tick.n;
+                    emitter.spawn(move |em| em.send(Tock { n }));
+                    Ok(())
+                },
+            })
+        }
+        fn save(&self) -> CoreResult<StateType> {
+            Ok(StateType::Null)
+        }
+        fn name(&self) -> &'static str {
+            "spawn_observer"
+        }
+    }
+
+    /// Counts only `Tock` events (and, unlike `Counter`, emits nothing on `Tick`) so
+    /// the spawn tests observe exactly the `Tock`s produced by spawned jobs.
+    struct TockCounter {
+        seen: u32,
+    }
+    impl Observer for TockCounter {
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+        fn init(&mut self, _bus: &mut EventBus, _state: StateType) -> CoreResult<()> {
+            Ok(())
+        }
+        fn on_event(&mut self, event: &dyn Any, _emitter: &Emitter) -> CoreResult<()> {
+            if event.is::<Tock>() {
+                self.seen += 1;
+            }
+            Ok(())
+        }
+        fn save(&self) -> CoreResult<StateType> {
+            Ok(StateType::Null)
+        }
+        fn name(&self) -> &'static str {
+            "tock_counter"
+        }
+    }
+
+    fn tocks_seen(bus: &mut EventBus) -> u32 {
+        bus.observer_mut("tock_counter")
+            .unwrap()
+            .as_any_mut()
+            .downcast_mut::<TockCounter>()
+            .unwrap()
+            .seen
+    }
+
+    #[test]
+    fn inline_spawner_cascades_within_single_iter() {
+        // With the inline spawner the job runs synchronously, so the `Tock` it emits
+        // cascades within the same `iter()` and the counter sees it.
+        let mut bus = EventBus::with_spawner(
+            vec![Box::new(SpawnObserver), Box::new(TockCounter { seen: 0 })],
+            StateType::Null,
+            Arc::new(crate::testing::InlineSpawner),
+        )
+        .unwrap();
+
+        bus.send(Tick { n: 1 }).unwrap();
+        bus.iter().unwrap();
+
+        assert_eq!(tocks_seen(&mut bus), 1);
+    }
+
+    #[test]
+    fn thread_spawner_delivers_on_a_later_iter() {
+        use std::time::Duration;
+
+        // The default `new()` uses `ThreadSpawner`: the job runs on a background thread,
+        // so its `Tock` is not visible in the same `iter()` — it arrives on a later one.
+        let mut bus = EventBus::new(
+            vec![Box::new(SpawnObserver), Box::new(TockCounter { seen: 0 })],
+            StateType::Null,
+        )
+        .unwrap();
+
+        bus.send(Tick { n: 1 }).unwrap();
+        bus.iter().unwrap();
+
+        // Poll subsequent iters until the background job's event lands.
+        let mut seen = tocks_seen(&mut bus);
+        for _ in 0..200 {
+            if seen == 1 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+            bus.iter().unwrap();
+            seen = tocks_seen(&mut bus);
+        }
+        assert_eq!(
+            seen, 1,
+            "background job's event must arrive on a later iter"
+        );
+    }
+
+    #[test]
+    fn spawn_job_error_emits_error_event() {
+        // A spawned task that returns `Err` must surface as an `Error` event (sourced
+        // from "spawn"). Inline spawner keeps it deterministic within one `iter()`.
+        struct SpawnFail;
+        impl Observer for SpawnFail {
+            fn as_any_mut(&mut self) -> &mut dyn Any {
+                self
+            }
+            fn init(&mut self, _bus: &mut EventBus, _state: StateType) -> CoreResult<()> {
+                Ok(())
+            }
+            fn on_event(&mut self, event: &dyn Any, emitter: &Emitter) -> CoreResult<()> {
+                crate::dispatch_event!(event, {
+                    _: Tick => {
+                        emitter.spawn(|_em| Err(CoreError::InvalidState("boom")));
+                        Ok(())
+                    },
+                })
+            }
+            fn save(&self) -> CoreResult<StateType> {
+                Ok(StateType::Null)
+            }
+            fn name(&self) -> &'static str {
+                "spawn_fail"
+            }
+        }
+
+        struct Capture {
+            errors: Vec<Error>,
+        }
+        impl Observer for Capture {
+            fn as_any_mut(&mut self) -> &mut dyn Any {
+                self
+            }
+            fn init(&mut self, _bus: &mut EventBus, _state: StateType) -> CoreResult<()> {
+                Ok(())
+            }
+            fn on_event(&mut self, event: &dyn Any, _emitter: &Emitter) -> CoreResult<()> {
+                crate::dispatch_event!(event, {
+                    err: Error => {
+                        self.errors.push(err.clone());
+                        Ok(())
+                    },
+                })
+            }
+            fn save(&self) -> CoreResult<StateType> {
+                Ok(StateType::Null)
+            }
+            fn name(&self) -> &'static str {
+                "capture"
+            }
+        }
+
+        let mut bus = EventBus::with_spawner(
+            vec![
+                Box::new(SpawnFail),
+                Box::new(Capture { errors: Vec::new() }),
+            ],
+            StateType::Null,
+            Arc::new(crate::testing::InlineSpawner),
+        )
+        .unwrap();
+
+        bus.send(Tick { n: 1 }).unwrap();
+        bus.iter().unwrap();
+
+        let errors = &bus
+            .observer_mut("capture")
+            .unwrap()
+            .as_any_mut()
+            .downcast_mut::<Capture>()
+            .unwrap()
+            .errors;
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].source.contains("spawn"));
+        assert!(errors[0].message.contains("boom"));
     }
 }

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::api::{ApiTransport, ReqwestApiClient};
 use crate::config::Config;
 use crate::error::CoreResult;
@@ -40,7 +42,7 @@ where
     let observers: Vec<Box<dyn Observer>> = vec![
         Box::new(LifecycleModule::new(Box::new(platform.clone()))),
         Box::new(ScreenshotModule::new(
-            Box::new(platform.clone()),
+            Arc::new(platform.clone()),
             screenshot_interval_ms,
         )),
         Box::new(UploadModule::new(

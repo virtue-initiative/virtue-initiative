@@ -38,6 +38,16 @@ use crate::platform::ScreenshotHooks;
 pub(crate) const EXTRA_HIGH_RISK: f32 = 0.9;
 pub(crate) const MEDIUM_RISK_LIFECYCLE_ALERT: f32 = 0.6;
 
+// Sliding-window ping-gap detection. A single slow loop iteration (e.g. a heavy
+// capture/classify) can briefly stall pings; alerting on one blip is twitchy, so
+// we sum the time lost to over-threshold gaps inside a sliding window and only
+// alert when that sustained gap budget is exceeded. (These may move to config later.)
+const PING_GAP_PER_GAP_THRESHOLD_MS: i64 = 10_000; // a gap must exceed 10s to count
+const PING_GAP_WINDOW_MS: i64 = 10 * 60 * 1_000; // 10-min sliding window
+const PING_GAP_BUDGET_MS: i64 = 60_000; // alert when counted gap time ≥ 60s in window
+const PING_GAP_ALERT_COOLDOWN_MS: i64 = 5 * 60 * 1_000; // ≤ one alert per 5 min
+const LIFECYCLE_LOGIN_GRACE_MS: i64 = 120_000; // grace after login before gap alerts
+
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub enum LifecycleStatus {
     #[default]
@@ -68,6 +78,14 @@ pub struct LifecycleObserverState {
 
     // User stop tracking
     pub user_stop_requested: bool,
+
+    // Sliding-window ping-gap detection. `ping_gaps` holds `(ts_ms, gap_ms)` for
+    // each gap that exceeded the per-gap threshold; entries age out of the window.
+    // `last_ping_gap_alert` is the cooldown anchor (0 = never alerted).
+    #[serde(default)]
+    pub ping_gaps: Vec<(i64, i64)>,
+    #[serde(default)]
+    pub last_ping_gap_alert: i64,
 }
 
 pub struct LifecycleModule {
@@ -266,10 +284,33 @@ impl LifecycleModule {
         self.maybe_backfill_missed_events(last_shutdown, startup_time_ms, emitter)?;
         self.state.last_ping = now_ms;
 
-        if now_ms - old.last_login > 120000 {
+        if now_ms - old.last_login > LIFECYCLE_LOGIN_GRACE_MS {
             let ping_gap = now_ms - old.last_ping;
             let start_gap = now_ms - old.last_running_started;
-            if old.last_ping > 0 && ping_gap > 10000 && start_gap > 10000 {
+
+            // Record this gap if it's a real over-threshold stall (and not the first
+            // ping after start, where `last_ping` is 0 or the process just began).
+            if old.last_ping > 0
+                && ping_gap > PING_GAP_PER_GAP_THRESHOLD_MS
+                && start_gap > PING_GAP_PER_GAP_THRESHOLD_MS
+            {
+                self.state.ping_gaps.push((now_ms, ping_gap));
+            }
+
+            // Prune to the sliding window, then sum the gap time that remains.
+            let window_start = now_ms - PING_GAP_WINDOW_MS;
+            self.state.ping_gaps.retain(|(ts, _)| *ts >= window_start);
+            let total_gap: i64 = self.state.ping_gaps.iter().map(|(_, gap)| *gap).sum();
+
+            // The `== 0` short-circuit keeps the very first alert from being suppressed
+            // by the cooldown (which is anchored at 0 = "never alerted").
+            let cooldown_ok = self.state.last_ping_gap_alert == 0
+                || now_ms - self.state.last_ping_gap_alert >= PING_GAP_ALERT_COOLDOWN_MS;
+
+            if total_gap >= PING_GAP_BUDGET_MS && cooldown_ok {
+                self.state.last_ping_gap_alert = now_ms;
+                // Note: `ping_gaps` is intentionally NOT cleared — chronic stalls keep
+                // re-alerting each cooldown, while one-off bursts age out of the window.
                 let _ = emitter.send(Upload {
                     risk: EXTRA_HIGH_RISK,
                     kind: UploadKind::LifecycleAlert {
@@ -686,6 +727,118 @@ mod tests {
     }
 
     #[test]
+    fn sub_budget_ping_gap_does_not_alert() {
+        let mut b = EventTester::builder();
+        b.add(LifecycleModule::new(Box::new(b.platform())));
+        let mut t = b.build();
+        // Seed a running process whose last ping is already past the login grace
+        // window (last_login stays 0).
+        {
+            let s = &mut t.observer::<LifecycleModule>().state;
+            s.last_running_started = 1_000;
+            s.last_ping = 130_000;
+        }
+        // A single 30s gap: over the 10s per-gap threshold (so it's recorded) but
+        // under the 60s sliding-window budget, so no alert fires.
+        t.emit(160, Ping);
+        t.assert_not_like(crate::like!(Upload {
+            kind: UploadKind::LifecycleAlert {
+                reason: AlertReason::PingGapWhileRunning
+            },
+            ..
+        }));
+        assert_eq!(t.observer::<LifecycleModule>().state.ping_gaps.len(), 1);
+    }
+
+    #[test]
+    fn accumulated_ping_gaps_cross_budget_and_alert() {
+        let mut b = EventTester::builder();
+        b.add(LifecycleModule::new(Box::new(b.platform())));
+        let mut t = b.build();
+        {
+            let s = &mut t.observer::<LifecycleModule>().state;
+            s.last_running_started = 1_000;
+            s.last_ping = 130_000;
+        }
+        // Three 25s gaps: 25 → 50 (both under the 60s budget), then 75 ≥ 60 alerts.
+        t.emit(155, Ping);
+        t.emit(180, Ping);
+        t.assert_not_like(crate::like!(Upload {
+            kind: UploadKind::LifecycleAlert {
+                reason: AlertReason::PingGapWhileRunning
+            },
+            ..
+        }));
+        t.clear_captured();
+        t.emit(205, Ping);
+        t.assert_like(crate::like!(Upload {
+            kind: UploadKind::LifecycleAlert {
+                reason: AlertReason::PingGapWhileRunning
+            },
+            ..
+        }));
+    }
+
+    #[test]
+    fn aged_out_ping_gaps_are_pruned_and_do_not_alert() {
+        let mut b = EventTester::builder();
+        b.add(LifecycleModule::new(Box::new(b.platform())));
+        let mut t = b.build();
+        // An old 50s gap recorded ~700s before "now"; it sits outside the 10-min
+        // window once the new ping lands and must be pruned before summing.
+        {
+            let s = &mut t.observer::<LifecycleModule>().state;
+            s.last_running_started = 1_000;
+            s.last_ping = 750_000;
+            s.ping_gaps = vec![(100_000, 50_000)];
+        }
+        // New 50s gap. Without pruning, 50 + 50 = 100 ≥ 60 would alert; with pruning
+        // the aged entry drops and only the fresh 50s remains (< 60s budget).
+        t.emit(800, Ping);
+        t.assert_not_like(crate::like!(Upload {
+            kind: UploadKind::LifecycleAlert {
+                reason: AlertReason::PingGapWhileRunning
+            },
+            ..
+        }));
+        // Old entry pruned, new entry kept.
+        assert_eq!(t.observer::<LifecycleModule>().state.ping_gaps.len(), 1);
+    }
+
+    #[test]
+    fn cooldown_suppresses_repeat_ping_gap_alert() {
+        let mut b = EventTester::builder();
+        b.add(LifecycleModule::new(Box::new(b.platform())));
+        let mut t = b.build();
+        // Seed a state that already alerted recently with enough banked gap time to
+        // cross the budget again.
+        {
+            let s = &mut t.observer::<LifecycleModule>().state;
+            s.last_running_started = 1_000;
+            s.last_ping = 200_000;
+            s.last_ping_gap_alert = 190_000;
+            s.ping_gaps = vec![(199_000, 70_000)];
+        }
+        // 40s after the last alert (< 5-min cooldown): budget exceeded but suppressed.
+        t.emit(230, Ping);
+        t.assert_not_like(crate::like!(Upload {
+            kind: UploadKind::LifecycleAlert {
+                reason: AlertReason::PingGapWhileRunning
+            },
+            ..
+        }));
+        // Well past the cooldown: the chronic stall re-alerts.
+        t.clear_captured();
+        t.emit(600, Ping);
+        t.assert_like(crate::like!(Upload {
+            kind: UploadKind::LifecycleAlert {
+                reason: AlertReason::PingGapWhileRunning
+            },
+            ..
+        }));
+    }
+
+    #[test]
     fn process_killed_before_shutdown_emits_alert() {
         let mut b = EventTester::builder();
         b.add(LifecycleModule::new(Box::new(b.platform())));
@@ -810,6 +963,13 @@ mod tests {
         t.emit(99, Ping); // pings_while_suspended = 1
         t.emit(99, Ping); // pings_while_suspended = 2
 
+        // Seed sliding-window ping-gap state so the round-trip covers it too.
+        {
+            let s = &mut t.observer::<LifecycleModule>().state;
+            s.ping_gaps = vec![(80_000, 15_000), (95_000, 20_000)];
+            s.last_ping_gap_alert = 95_000;
+        }
+
         {
             let s = &t.observer::<LifecycleModule>().state;
             assert_eq!(s.last_login, 30_000);
@@ -832,5 +992,7 @@ mod tests {
         assert_eq!(s2.last_ping, 99_000);
         assert_eq!(s2.pings_while_suspended, 2);
         assert!(matches!(s2.status, LifecycleStatus::Suspended));
+        assert_eq!(s2.ping_gaps, vec![(80_000, 15_000), (95_000, 20_000)]);
+        assert_eq!(s2.last_ping_gap_alert, 95_000);
     }
 }
