@@ -117,6 +117,14 @@ def recolor_with_theme(raw: Image.Image, rgb: tuple[int, int, int]) -> Image.Ima
     # return recolored
 
 
+def make_monochrome_black(image: Image.Image) -> Image.Image:
+    """Return a black+alpha version of the image (macOS template image format)."""
+    alpha = image.getchannel("A")
+    mono = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    mono.putalpha(alpha)
+    return mono
+
+
 @dataclass(frozen=True)
 class Background:
     """An opaque fill painted behind the logo.
@@ -398,7 +406,7 @@ def main() -> None:
             [16, 32, 64, 128, 256, 512, 1024],
             rounded_bg,
         )
-        save_png(master, mac_assets / "tray-icon.png", 32)
+        save_png(make_monochrome_black(master), mac_assets / "tray-icon.png", 32)
         outputs.extend([mac_assets / "AppIcon.icns", mac_assets / "tray-icon.png"])
 
         linux_assets = root / "client" / "linux" / "assets"

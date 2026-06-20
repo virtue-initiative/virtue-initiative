@@ -147,6 +147,7 @@ fn run_tray(paths: ClientPaths) -> Result<()> {
     let tray_icon = TrayIconBuilder::new()
         .with_tooltip(format!("Virtue {BUILD_LABEL} - virtueinitiative.org"))
         .with_icon(build_tray_icon()?)
+        .with_icon_as_template(true)
         .with_menu_on_left_click(false)
         .with_menu(Box::new(initial_menu))
         .build()
