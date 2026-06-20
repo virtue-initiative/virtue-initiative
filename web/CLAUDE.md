@@ -38,7 +38,8 @@ Changes to the encryption format, nonce layout, msgpack schema, or hash algorith
 | File                       | What's here                                                                                                                                                   |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Auth/index.tsx`           | Login / signup / forgot-password / reset / finish-signup flows; `buildResetKeyMaterial`                                                                       |
-| `Home/index.tsx`           | Dashboard: `DeviceCard`, `PartnerCard`, `PendingPartnerCard`, `InviteButton`, `AddDeviceButton`                                                               |
+| `Devices/index.tsx`        | Devices page (route `/`): `DeviceCard`, `AddDeviceButton`                                                                                                     |
+| `Partners/index.tsx`       | Partners page (route `/partners`): "You monitor" + "Monitor you"; `PartnerArea`, `PartnerCard`, `PendingPartnerCard`, `InviteButton`                          |
 | `Logs/index.tsx`           | Log viewer shell: sidebar (device/user selector), date/risk/type filters via `useUrlState`, orchestrates `LogsList` / `LogsGallery`                           |
 | `Logs/LogsList.tsx`        | Virtualised list (`@tanstack/react-virtual`), fixed row height 68 px                                                                                          |
 | `Logs/LogsGallery.tsx`     | Justified image gallery with `buildGalleryRows` layout, virtualised rows                                                                                      |
@@ -52,14 +53,14 @@ Changes to the encryption format, nonce layout, msgpack schema, or hash algorith
 
 ### Shared utilities
 
-| File                           | What's here                                                                                   |
-| ------------------------------ | --------------------------------------------------------------------------------------------- |
-| `src/utils/time.ts`            | `formatRelativeTimestamp`, `formatDate`, `formatTime`, `formatDayHeading`, `localDateKey`     |
-| `src/utils/toast.ts`           | Module-level `sendToast` helper (stores the Preact `push` ref so crypto code can fire toasts) |
-| `src/utils/webp-dimensions.ts` | `decodeWebpDimensions` — reads width/height from VP8/VP8L/VP8X binary headers                 |
-| `src/hooks/useUrlState.ts`     | `useUrlState<T>` — syncs a value to a URL search param; supports string/number/boolean/object |
-| `src/hooks/usePromise.ts`      | `usePromise` — `[pending, setPromise]` tuple for tracking async button state                  |
-| `src/components/Header.tsx`    | App nav header with desktop + mobile drawer                                                   |
+| File                           | What's here                                                                                                                                         |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/utils/time.ts`            | `formatRelativeTimestamp`, `formatDate`, `formatTime`, `formatDayHeading`, `localDateKey`                                                           |
+| `src/utils/toast.ts`           | Module-level `sendToast` helper (stores the Preact `push` ref so crypto code can fire toasts)                                                       |
+| `src/utils/webp-dimensions.ts` | `decodeWebpDimensions` — reads width/height from VP8/VP8L/VP8X binary headers                                                                       |
+| `src/hooks/useUrlState.ts`     | `useUrlState<T>` — syncs a value to a URL search param; supports string/number/boolean/object                                                       |
+| `src/hooks/usePromise.ts`      | `usePromise` — `[pending, setPromise]` tuple for tracking async button state                                                                        |
+| `src/components/Sidebar.tsx`   | Scrolling left nav: Devices / Partners / Logs (My logs + per-partner) + footer (user card, Settings, Help, Log out); desktop column + mobile drawer |
 
 ### Types
 

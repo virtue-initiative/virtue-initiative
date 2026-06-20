@@ -16,7 +16,7 @@
 
 .app-shell {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   min-height: 100vh;
   height: 100dvh;
   width: 100%;
@@ -39,5 +39,10 @@
 @media (max-width: 720px) {
   #app {
     min-height: 100svh;
+  }
+
+  /* Sidebar collapses to a drawer; the shell stacks the mobile bar above content. */
+  .app-shell {
+    flex-direction: column;
   }
 }

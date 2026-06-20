@@ -9,35 +9,38 @@ import { Logs } from './index';
 // The component handles a null cacheClient gracefully (cacheQuery is a no-op), so
 // the UI renders correctly with empty log lists.
 
-describe('Logs — sidebar', () => {
-  it('shows "Devices" heading in sidebar', async () => {
-    renderWithClient(<Logs />);
-    await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /^devices$/i })).toBeInTheDocument();
-    });
-  });
-
-  it('shows device names in sidebar after devices load', async () => {
-    renderWithClient(<Logs />);
-    await waitFor(() => {
-      expect(screen.getByText(TEST_DEVICES[0].name)).toBeInTheDocument();
-      expect(screen.getByText(TEST_DEVICES[1].name)).toBeInTheDocument();
-    });
-  });
-
-  it('shows "My devices" group label', async () => {
-    renderWithClient(<Logs />);
-    await waitFor(() => {
-      expect(screen.getByText('My devices')).toBeInTheDocument();
-    });
-  });
-});
-
 describe('Logs — header', () => {
   it('shows "My logs" heading by default', async () => {
     renderWithClient(<Logs />);
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: /^my logs$/i, level: 1 })).toBeInTheDocument();
+    });
+  });
+});
+
+describe('Logs — device dropdown', () => {
+  it('shows device names in the device dropdown after devices load', async () => {
+    renderWithClient(<Logs />);
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: TEST_DEVICES[0].name })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: TEST_DEVICES[1].name })).toBeInTheDocument();
+    });
+  });
+
+  it('selecting a device updates the heading', async () => {
+    const user = userEvent.setup();
+    renderWithClient(<Logs />);
+
+    // Wait for device options to appear, then get the parent select
+    const deviceOpts = await screen.findAllByRole('option', { name: TEST_DEVICES[0].name });
+    const deviceSelect = deviceOpts[0].closest('select')!;
+
+    await user.selectOptions(deviceSelect, [TEST_DEVICES[0].name]);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', { name: new RegExp(TEST_DEVICES[0].name, 'i'), level: 1 }),
+      ).toBeInTheDocument();
     });
   });
 });
@@ -69,23 +72,6 @@ describe('Logs — view switching', () => {
     await waitFor(() => {
       expect(screen.getByRole('link', { name: /list/i })).toBeInTheDocument();
       expect(screen.getByRole('link', { name: /gallery/i })).toBeInTheDocument();
-    });
-  });
-});
-
-describe('Logs — selecting a device', () => {
-  it('clicking a device updates the heading', async () => {
-    const user = userEvent.setup();
-    renderWithClient(<Logs />);
-
-    // Wait for device list to load
-    const deviceBtn = await screen.findByRole('button', { name: TEST_DEVICES[0].name });
-    await user.click(deviceBtn);
-
-    await waitFor(() => {
-      expect(
-        screen.getByRole('heading', { name: new RegExp(TEST_DEVICES[0].name, 'i'), level: 1 }),
-      ).toBeInTheDocument();
     });
   });
 });

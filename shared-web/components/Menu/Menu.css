@@ -41,6 +41,11 @@
   }
 }
 
+.vi-menu__dropdown--top {
+  margin-top: 0;
+  margin-bottom: var(--space-1);
+}
+
 .vi-menu__item--danger {
   color: var(--danger);
 
