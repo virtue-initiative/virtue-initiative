@@ -98,16 +98,7 @@ public sealed partial class MainWindow : Window
 
         var root = new Grid
         {
-            Background = new LinearGradientBrush
-            {
-                StartPoint = new Windows.Foundation.Point(0, 0),
-                EndPoint = new Windows.Foundation.Point(1, 1),
-                GradientStops =
-                {
-                    new GradientStop { Color = ColorFromHex("#F7FBFF"), Offset = 0.0 },
-                    new GradientStop { Color = ColorFromHex("#EEF5F2"), Offset = 1.0 },
-                },
-            },
+            Background = new SolidColorBrush(ColorFromHex("#F4EFE3")),
         };
 
         var contentStack = new StackPanel
@@ -170,10 +161,10 @@ public sealed partial class MainWindow : Window
     {
         _statusTextBlock.FontSize = 24;
         _statusTextBlock.FontWeight = FontWeights.SemiBold;
-        _statusTextBlock.Foreground = new SolidColorBrush(ColorFromHex("#133043"));
+        _statusTextBlock.Foreground = new SolidColorBrush(ColorFromHex("#1B1A16"));
 
-        _statusDetailTextBlock.Foreground = new SolidColorBrush(ColorFromHex("#4B5E68"));
-        _buildLabelTextBlock.Foreground = new SolidColorBrush(ColorFromHex("#60727C"));
+        _statusDetailTextBlock.Foreground = new SolidColorBrush(ColorFromHex("#3A382F"));
+        _buildLabelTextBlock.Foreground = new SolidColorBrush(ColorFromHex("#6A6655"));
 
         var detailsButton = CreateActionButton("Status Details");
         detailsButton.Click += StatusDetailsButton_OnClick;
@@ -207,7 +198,7 @@ public sealed partial class MainWindow : Window
     private UIElement BuildAccountCard()
     {
         _accountSummaryTextBlock.FontSize = 18;
-        _accountSummaryTextBlock.Foreground = new SolidColorBrush(ColorFromHex("#133043"));
+        _accountSummaryTextBlock.Foreground = new SolidColorBrush(ColorFromHex("#1B1A16"));
 
         _loginPanel.Spacing = 12;
         _loginPanel.Margin = new Thickness(0, 12, 0, 0);
@@ -239,9 +230,9 @@ public sealed partial class MainWindow : Window
     private Border CreateCard(UIElement content) =>
         new()
         {
-            Background = new SolidColorBrush(Colors.White),
-            CornerRadius = new CornerRadius(18),
-            BorderBrush = new SolidColorBrush(ColorFromHex("#D8E3E0")),
+            Background = new SolidColorBrush(ColorFromHex("#FBF7EA")),
+            CornerRadius = new CornerRadius(4),
+            BorderBrush = new SolidColorBrush(ColorFromHex("#D9D1BC")),
             BorderThickness = new Thickness(1),
             Padding = new Thickness(20),
             Shadow = new ThemeShadow(),
@@ -254,7 +245,7 @@ public sealed partial class MainWindow : Window
             Text = text,
             FontSize = 13,
             FontWeight = FontWeights.Medium,
-            Foreground = new SolidColorBrush(ColorFromHex("#60727C")),
+            Foreground = new SolidColorBrush(ColorFromHex("#6A6655")),
         };
 
     private static Button CreatePrimaryButton(string text) =>
@@ -284,7 +275,7 @@ public sealed partial class MainWindow : Window
         {
             Glyph = "\uE7BA",
             FontSize = 28,
-            Foreground = new SolidColorBrush(ColorFromHex("#A14A00")),
+            Foreground = new SolidColorBrush(ColorFromHex("#9C6B2E")),
             Margin = new Thickness(0, 2, 16, 0),
         };
 
@@ -303,13 +294,13 @@ public sealed partial class MainWindow : Window
         {
             Text = "This will stop monitoring on this device and close the main window and tray app.",
             TextWrapping = TextWrapping.Wrap,
-            Foreground = new SolidColorBrush(ColorFromHex("#4B5E68")),
+            Foreground = new SolidColorBrush(ColorFromHex("#3A382F")),
         });
         textStack.Children.Add(new TextBlock
         {
             Text = "People monitoring you may be alerted.",
             TextWrapping = TextWrapping.Wrap,
-            Foreground = new SolidColorBrush(ColorFromHex("#A14A00")),
+            Foreground = new SolidColorBrush(ColorFromHex("#9C6B2E")),
             FontWeight = FontWeights.Medium,
         });
 
