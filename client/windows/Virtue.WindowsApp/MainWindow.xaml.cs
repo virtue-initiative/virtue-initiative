@@ -30,6 +30,10 @@ public sealed partial class MainWindow : Window
     private readonly TextBox _emailTextBox;
     private readonly PasswordBox _passwordBox;
     private readonly TextBox _deviceNameTextBox;
+    private readonly ProgressRing _busyRing;
+    private readonly TextBlock _transitionTextBlock;
+    private readonly StackPanel _transitionPanel;
+    private readonly TextBlock _errorTextBlock;
     private bool _allowClose;
 
     public MainWindow(SessionViewModel viewModel)
@@ -47,6 +51,10 @@ public sealed partial class MainWindow : Window
         _loginPanel = new StackPanel();
         _accountActionsPanel = new StackPanel();
         _signedInActionsPanel = new StackPanel();
+        _busyRing = new ProgressRing();
+        _transitionTextBlock = new TextBlock();
+        _transitionPanel = new StackPanel();
+        _errorTextBlock = new TextBlock();
 
         Content = BuildContent();
         ViewModel.PropertyChanged += ViewModelOnPropertyChanged;
@@ -194,10 +202,24 @@ public sealed partial class MainWindow : Window
         actionRow.Children.Add(detailsButton);
         actionRow.Children.Add(_signedInActionsPanel);
 
+        _busyRing.Width = 18;
+        _busyRing.Height = 18;
+        _busyRing.IsActive = false;
+
+        _transitionTextBlock.Foreground = new SolidColorBrush(ColorFromHex("#4B5E68"));
+        _transitionTextBlock.VerticalAlignment = VerticalAlignment.Center;
+
+        _transitionPanel.Orientation = Orientation.Horizontal;
+        _transitionPanel.Spacing = 10;
+        _transitionPanel.Visibility = Visibility.Collapsed;
+        // BISECT: temporarily not adding _busyRing to isolate the startup render crash.
+        _transitionPanel.Children.Add(_transitionTextBlock);
+
         var content = new StackPanel { Spacing = 8 };
         content.Children.Add(CreateSectionLabel("Status"));
         content.Children.Add(_statusTextBlock);
         content.Children.Add(_statusDetailTextBlock);
+        content.Children.Add(_transitionPanel);
         content.Children.Add(_buildLabelTextBlock);
         content.Children.Add(actionRow);
 
@@ -227,11 +249,16 @@ public sealed partial class MainWindow : Window
         _accountActionsPanel.Margin = new Thickness(0, 12, 0, 0);
         _accountActionsPanel.Children.Add(signOutButton);
 
+        _errorTextBlock.Foreground = new SolidColorBrush(ColorFromHex("#B3261E"));
+        _errorTextBlock.TextWrapping = TextWrapping.Wrap;
+        _errorTextBlock.Visibility = Visibility.Collapsed;
+
         var content = new StackPanel { Spacing = 8 };
         content.Children.Add(CreateSectionLabel("Account"));
         content.Children.Add(_accountSummaryTextBlock);
         content.Children.Add(_loginPanel);
         content.Children.Add(_accountActionsPanel);
+        content.Children.Add(_errorTextBlock);
 
         return CreateCard(content);
     }
@@ -433,14 +460,27 @@ public sealed partial class MainWindow : Window
 
     private void SyncFromViewModel()
     {
+        bool transitioning = ViewModel.IsTransitioning;
+
         _statusTextBlock.Text = BuildPrimaryStatusText();
         _statusDetailTextBlock.Text = BuildSecondaryStatusText();
         _buildLabelTextBlock.Text = ViewModel.BuildLabelText;
+
+        _busyRing.IsActive = transitioning;
+        _transitionPanel.Visibility = transitioning ? Visibility.Visible : Visibility.Collapsed;
+        _transitionTextBlock.Text = ViewModel.TransitionMessage ?? "";
+
+        _errorTextBlock.Text = ViewModel.ErrorText ?? "";
+        _errorTextBlock.Visibility = string.IsNullOrWhiteSpace(ViewModel.ErrorText)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
         _accountSummaryTextBlock.Text = ViewModel.LoggedIn
             ? $"Signed in as {ViewModel.AccountSummary}"
             : "Sign in to start monitoring.";
-        _loginPanel.Visibility = ViewModel.LoggedIn ? Visibility.Collapsed : Visibility.Visible;
-        _accountActionsPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
+        _loginPanel.Visibility = !ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
+        _loginPanel.IsEnabled = !ViewModel.IsBusy;
+        _accountActionsPanel.Visibility = (ViewModel.LoggedIn && !transitioning) ? Visibility.Visible : Visibility.Collapsed;
         _signedInActionsPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
 
         if (_emailTextBox.Text != ViewModel.EmailInput)
