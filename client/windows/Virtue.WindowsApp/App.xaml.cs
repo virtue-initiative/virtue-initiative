@@ -221,7 +221,7 @@ public partial class App : Application
                         return;
                     }
 
-                    await _viewModel.RefreshAsync();
+                    await _viewModel.BackgroundRefreshAsync();
                 });
             }
         }, token);

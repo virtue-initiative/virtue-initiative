@@ -234,6 +234,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
             _interopClient.Initialize();
             _interopClient.StartMonitoring();
             await RefreshInternalAsync();
+            StatusText = BuildStatusText();
         });
     }
 
@@ -258,9 +259,12 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         await RunBusyAsync(async () =>
         {
             StatusText = "Signing in...";
-            _interopClient.Login(EmailInput.Trim(), PasswordInput, deviceName);
+            var email = EmailInput.Trim();
+            var password = PasswordInput;
+            await Task.Run(() => _interopClient.Login(email, password, deviceName));
             PasswordInput = string.Empty;
             await RefreshInternalAsync();
+            StatusText = BuildStatusText();
         });
     }
 
@@ -269,12 +273,22 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         await RunBusyAsync(async () =>
         {
             StatusText = "Signing out...";
-            _interopClient.Logout();
+            await Task.Run(() => _interopClient.Logout());
             await RefreshInternalAsync();
+            StatusText = BuildStatusText();
         });
     }
 
     public async Task RefreshAsync()
+    {
+        await RunBusyAsync(async () =>
+        {
+            await RefreshInternalAsync();
+            StatusText = BuildStatusText();
+        });
+    }
+
+    public async Task BackgroundRefreshAsync()
     {
         await RunBusyAsync(RefreshInternalAsync);
     }
@@ -331,8 +345,6 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         BatchWindowSeconds = runtimeConfig.BatchWindowSeconds.ToString();
         ConfigPath = runtimeConfig.ConfigPath;
 
-        StatusText = BuildStatusText();
-
         return Task.CompletedTask;
     }
 
@@ -366,19 +378,21 @@ public sealed class SessionViewModel : INotifyPropertyChanged
 
     public async Task StopMonitoringAsync()
     {
-        await RunBusyAsync(() =>
+        await RunBusyAsync(async () =>
         {
-            _interopClient.StopMonitoring();
-            return RefreshInternalAsync();
+            await Task.Run(() => _interopClient.StopMonitoring());
+            await RefreshInternalAsync();
+            StatusText = BuildStatusText();
         });
     }
 
     public async Task StopMonitoringFromTrayExitAsync()
     {
-        await RunBusyAsync(() =>
+        await RunBusyAsync(async () =>
         {
-            _interopClient.StopMonitoringFromTrayExit();
-            return RefreshInternalAsync();
+            await Task.Run(() => _interopClient.StopMonitoringFromTrayExit());
+            await RefreshInternalAsync();
+            StatusText = BuildStatusText();
         });
     }
 
