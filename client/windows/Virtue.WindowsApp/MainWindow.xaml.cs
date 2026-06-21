@@ -32,6 +32,7 @@ public sealed partial class MainWindow : Window
     private readonly TextBox _deviceNameTextBox;
     private readonly Border _statusDot;
     private readonly TextBlock _errorTextBlock;
+    private Button? _signInButton;
     private bool _allowClose;
 
     // Warm institutional palette (see shared-web/DESIGN-GUIDELINES.md).
@@ -269,9 +270,9 @@ public sealed partial class MainWindow : Window
         _loginPanel.Children.Add(_passwordBox);
         _loginPanel.Children.Add(_deviceNameTextBox);
 
-        var signInButton = CreatePrimaryButton("Sign In");
-        signInButton.Click += SignInButton_OnClick;
-        _loginPanel.Children.Add(signInButton);
+        _signInButton = CreatePrimaryButton("Sign In");
+        _signInButton.Click += SignInButton_OnClick;
+        _loginPanel.Children.Add(_signInButton);
 
         var signOutButton = CreateActionButton("Sign Out");
         signOutButton.Click += async (_, _) => await ViewModel.LogoutAsync();
@@ -562,7 +563,11 @@ public sealed partial class MainWindow : Window
             ? $"Signed in as {ViewModel.AccountSummary}"
             : "Sign in to start monitoring.";
         _loginPanel.Visibility = ViewModel.LoggedIn ? Visibility.Collapsed : Visibility.Visible;
-        _loginPanel.IsEnabled = !ViewModel.IsBusy;
+        var loginEnabled = !ViewModel.IsBusy;
+        _emailTextBox.IsEnabled = loginEnabled;
+        _passwordBox.IsEnabled = loginEnabled;
+        _deviceNameTextBox.IsEnabled = loginEnabled;
+        if (_signInButton is not null) _signInButton.IsEnabled = loginEnabled;
         _accountActionsPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
         _signedInActionsPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
 
