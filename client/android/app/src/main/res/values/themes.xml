@@ -21,6 +21,24 @@
         <item name="colorOnSurfaceVariant">@color/ink_3</item>
         <item name="colorOutline">@color/border</item>
 
-        <item name="android:statusBarColor">?attr/colorSurface</item>
+        <!-- Status bar matches page background -->
+        <item name="android:statusBarColor">@color/bg</item>
+
+        <!-- Flat 4dp corners on buttons to match card style -->
+        <item name="materialButtonStyle">@style/Widget.App.Button</item>
+        <item name="materialButtonOutlinedStyle">@style/Widget.App.Button.OutlinedButton</item>
+    </style>
+
+    <style name="ShapeAppearance.App.SmallCorner" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">4dp</item>
+    </style>
+
+    <style name="Widget.App.Button" parent="Widget.Material3.Button">
+        <item name="shapeAppearance">@style/ShapeAppearance.App.SmallCorner</item>
+    </style>
+
+    <style name="Widget.App.Button.OutlinedButton" parent="Widget.Material3.Button.OutlinedButton">
+        <item name="shapeAppearance">@style/ShapeAppearance.App.SmallCorner</item>
     </style>
 </resources>
