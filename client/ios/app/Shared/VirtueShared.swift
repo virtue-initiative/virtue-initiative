@@ -42,5 +42,5 @@ enum VirtueShared {
     static let captureStateSessionUnavailable = 2
     static let captureStateUnknown = 3
 
-    static let brandAccentHex = "#008900"
+    static let brandAccentHex = "#1e3a2e"
 }
