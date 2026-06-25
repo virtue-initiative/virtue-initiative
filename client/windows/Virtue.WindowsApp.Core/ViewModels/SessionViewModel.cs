@@ -308,9 +308,9 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         });
     }
 
-    public async Task BackgroundRefreshAsync()
+    public Task BackgroundRefreshAsync()
     {
-        await RunBusyAsync(BackgroundRefreshInternalAsync);
+        return BackgroundRefreshInternalAsync();
     }
 
     private Task BackgroundRefreshInternalAsync()
