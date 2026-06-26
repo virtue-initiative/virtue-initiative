@@ -48,7 +48,7 @@ jobs:
         working-directory: api
 
       - name: API tests
-        run: bun test
+        run: bun run test
         working-directory: api
 
       - name: Web type check
@@ -56,7 +56,7 @@ jobs:
         working-directory: web
 
       - name: Web tests
-        run: bun test
+        run: bun run test
         working-directory: web
 
       - name: Landing type check
