@@ -26,20 +26,19 @@ jobs:
           git fetch origin main --depth=1
           echo "sha=$(git rev-parse origin/main)" >> $GITHUB_OUTPUT
 
-      - uses: actions/setup-node@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: package-lock.json
+          bun-version: latest
 
       - name: Install dependencies
-        run: npm ci
+        run: bun install
         working-directory: ${{ github.workspace }}
 
       - name: deploy
         run: |
-          npm run deploy:prod
-          npm run deploy:staging
+          bun run deploy:prod
+          bun run deploy:staging
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_SHA: ${{ steps.main-sha.outputs.sha }}
