@@ -24,11 +24,12 @@
     margin: 0 0 0.8rem;
     padding-bottom: 0.7rem;
     border-bottom: 1px solid var(--border);
+    font-family: var(--font-serif);
     font-size: clamp(1.5rem, 2.8vw, 1.95rem);
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    line-height: 1.08;
-    color: var(--text-muted);
+    font-weight: 500;
+    letter-spacing: -0.025em;
+    line-height: 1.12;
+    color: var(--text);
     text-wrap: balance;
   }
 
@@ -153,6 +154,7 @@
     gap: 0.8rem;
 
     & h1 {
+      font-family: var(--font-serif);
       font-size: clamp(1.35rem, 6.8vw, 1.7rem);
       margin-bottom: 0.75rem;
       padding-bottom: 0.6rem;
