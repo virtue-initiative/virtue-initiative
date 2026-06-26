@@ -63,7 +63,7 @@ Claude with plan permissions mode, then send the composed prompt via `send-keys`
 SESSION=$(tmux display-message -p '#S')
 BRANCH=<branch>
 PROMPT="<composed prompt>"
-tmux new-window -t "$SESSION" -n "$BRANCH" -c "$WORKTREE" "claude --permission-mode plan \"$PROMPT\""
+tmux new-window -t "$SESSION" -n "$BRANCH" -c "$WORKTREE" "claude --permission-mode plan --dangerously-skip-permissions --remote-control \"$BRANCH\" \"$PROMPT\""
 ```
 
 After spawning the window, report to the user:
