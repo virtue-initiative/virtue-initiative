@@ -9,7 +9,16 @@ source "${CLIENT_ROOT}/scripts/version.sh"
 BASE_VERSION="$(virtue_base_version)"
 BUILD_LABEL="$(virtue_build_label)"
 ARCH="$(dpkg --print-architecture)"
-PKG_NAME="virtue"
+
+INSTANCE=""
+if [[ "${1:-}" == "--instance" ]]; then
+    INSTANCE="$2"
+    shift 2
+fi
+
+PKG_NAME="${INSTANCE:+virtue-$INSTANCE}"
+PKG_NAME="${PKG_NAME:-virtue}"
+BIN_NAME="$PKG_NAME"
 
 TYPEARG="--release"
 TYPE="release"
@@ -29,13 +38,21 @@ rm -rf "target/debian"
 mkdir -p "$PKG_DIR/DEBIAN"
 mkdir -p "$PKG_DIR/usr/bin"
 mkdir -p "$PKG_DIR/usr/lib/systemd/user"
-mkdir -p "$PKG_DIR/usr/share/doc/virtue"
+mkdir -p "$PKG_DIR/usr/share/doc/$PKG_NAME"
 
-install -m 0755 target/$TYPE/virtue "$PKG_DIR/usr/bin/virtue"
-install -m 0644 linux/packaging/systemd/virtue.service "$PKG_DIR/usr/lib/systemd/user/virtue.service"
-install -m 0644 linux/README.md "$PKG_DIR/usr/share/doc/virtue/README.md"
-install -m 0755 linux/packaging/debian/postinst "$PKG_DIR/DEBIAN/postinst"
-install -m 0755 linux/packaging/debian/prerm "$PKG_DIR/DEBIAN/prerm"
+install -m 0755 "target/$TYPE/virtue" "$PKG_DIR/usr/bin/$BIN_NAME"
+install -m 0644 linux/README.md "$PKG_DIR/usr/share/doc/$PKG_NAME/README.md"
+
+if [[ -n "$INSTANCE" ]]; then
+    sed "s|exec /usr/bin/virtue daemon|exec /usr/bin/$BIN_NAME --instance $INSTANCE daemon|g" \
+        linux/packaging/systemd/virtue.service \
+        > "$PKG_DIR/usr/lib/systemd/user/${BIN_NAME}.service"
+else
+    install -m 0644 linux/packaging/systemd/virtue.service \
+        "$PKG_DIR/usr/lib/systemd/user/virtue.service"
+    install -m 0755 linux/packaging/debian/postinst "$PKG_DIR/DEBIAN/postinst"
+    install -m 0755 linux/packaging/debian/prerm "$PKG_DIR/DEBIAN/prerm"
+fi
 
 cat > "$PKG_DIR/DEBIAN/control" <<CONTROL
 Package: $PKG_NAME

@@ -32,9 +32,9 @@ impl Drop for DaemonTray {
     }
 }
 
-pub fn start_daemon_tray(paths: ClientPaths) -> Option<DaemonTray> {
+pub fn start_daemon_tray(paths: ClientPaths, instance: Option<String>) -> Option<DaemonTray> {
     let shutdown = Arc::new(AtomicBool::new(false));
-    let worker = spawn_tray_worker(paths, shutdown.clone());
+    let worker = spawn_tray_worker(paths, shutdown.clone(), instance);
 
     Some(DaemonTray {
         shutdown,
@@ -42,7 +42,11 @@ pub fn start_daemon_tray(paths: ClientPaths) -> Option<DaemonTray> {
     })
 }
 
-fn spawn_tray_worker(paths: ClientPaths, shutdown: Arc<AtomicBool>) -> thread::JoinHandle<()> {
+fn spawn_tray_worker(
+    paths: ClientPaths,
+    shutdown: Arc<AtomicBool>,
+    instance: Option<String>,
+) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let mut last_error_message: Option<String> = None;
         let mut last_error_log_at = std::time::Instant::now()
@@ -56,7 +60,7 @@ fn spawn_tray_worker(paths: ClientPaths, shutdown: Arc<AtomicBool>) -> thread::J
                 continue;
             }
 
-            match run_one_tray_session(&paths, &shutdown) {
+            match run_one_tray_session(&paths, &shutdown, instance.as_deref()) {
                 Ok(()) => break,
                 Err(err) => {
                     let message = err.message();
@@ -101,10 +105,12 @@ fn next_missing_watcher_retry_delay(failure_count: usize) -> Option<Duration> {
 fn run_one_tray_session(
     paths: &ClientPaths,
     shutdown: &Arc<AtomicBool>,
+    instance: Option<&str>,
 ) -> Result<(), TraySessionError> {
-    let mut tooltip = build_tooltip(paths);
+    let mut tooltip = build_tooltip(paths, instance);
     let tray = VirtueTray {
         tooltip: tooltip.clone(),
+        instance: instance.map(str::to_owned),
     };
     let handle = tray.spawn().map_err(TraySessionError::from_spawn_error)?;
 
@@ -117,7 +123,7 @@ fn run_one_tray_session(
         }
         elapsed = Duration::ZERO;
 
-        let next = build_tooltip(paths);
+        let next = build_tooltip(paths, instance);
         if next == tooltip {
             continue;
         }
@@ -138,7 +144,7 @@ fn run_one_tray_session(
     Ok(())
 }
 
-fn build_tooltip(paths: &ClientPaths) -> String {
+fn build_tooltip(paths: &ClientPaths, instance: Option<&str>) -> String {
     let sock = paths.state_dir.join("daemon.sock");
     let is_authenticated = ClientController::connect(&sock)
         .ok()
@@ -146,10 +152,15 @@ fn build_tooltip(paths: &ClientPaths) -> String {
         .map(|s| s.is_authenticated)
         .unwrap_or(false);
 
+    let flag = match instance {
+        Some(n) if !n.is_empty() => format!(" --instance {n}"),
+        _ => String::new(),
+    };
+
     if is_authenticated {
-        "Signed in. Run 'virtue status' from a terminal for details.".to_string()
+        format!("Signed in. Run 'virtue{flag} status' from a terminal for details.")
     } else {
-        "Not signed in. Run 'virtue login' from a terminal.".to_string()
+        format!("Not signed in. Run 'virtue{flag} login' from a terminal.")
     }
 }
 
@@ -219,15 +230,22 @@ impl TraySessionError {
 #[derive(Clone, Debug)]
 struct VirtueTray {
     tooltip: String,
+    instance: Option<String>,
 }
 
 impl ksni::Tray for VirtueTray {
     fn id(&self) -> String {
-        "virtue".to_string()
+        match self.instance.as_deref() {
+            Some(n) if !n.is_empty() => format!("virtue-{n}"),
+            _ => "virtue".to_string(),
+        }
     }
 
     fn title(&self) -> String {
-        "Virtue".to_string()
+        match self.instance.as_deref() {
+            Some(n) if !n.is_empty() => format!("Virtue ({n})"),
+            _ => "Virtue".to_string(),
+        }
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
