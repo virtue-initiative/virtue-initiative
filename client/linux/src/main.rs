@@ -30,9 +30,6 @@ const BUILD_LABEL: &str = virtue_core::BUILD_LABEL;
 #[command(about = "Virtue Linux client")]
 #[command(version = BUILD_LABEL)]
 struct Cli {
-    #[arg(long, global = true, help = "Run as a named instance (e.g. dev)")]
-    instance: Option<String>,
-
     #[command(subcommand)]
     command: Commands,
 }
@@ -144,7 +141,7 @@ async fn main() -> ExitCode {
 
 async fn run() -> Result<()> {
     let cli = Cli::parse();
-    let paths = ClientPaths::discover(cli.instance.as_deref())?;
+    let paths = ClientPaths::discover()?;
     paths.ensure_dirs()?;
 
     match cli.command {
@@ -152,22 +149,18 @@ async fn run() -> Result<()> {
             tokio::task::block_in_place(|| login(paths, email, device_name))
         }
         Commands::Logout { yes } => tokio::task::block_in_place(|| logout(paths, yes)),
-        Commands::Daemon { command } => daemon_command(paths, cli.instance, command).await,
+        Commands::Daemon { command } => daemon_command(paths, command).await,
         Commands::Status { json } => status(paths, json),
         Commands::Dev { command } => tokio::task::block_in_place(|| dev(paths, command)),
     }
 }
 
-async fn daemon_command(
-    paths: ClientPaths,
-    instance: Option<String>,
-    command: Option<DaemonCommands>,
-) -> Result<()> {
+async fn daemon_command(paths: ClientPaths, command: Option<DaemonCommands>) -> Result<()> {
     match command {
-        None => daemon::run_daemon(&paths, instance).await,
-        Some(DaemonCommands::Start) => daemon_start(instance.as_deref()),
+        None => daemon::run_daemon(&paths).await,
+        Some(DaemonCommands::Start) => daemon_start(),
         Some(DaemonCommands::Stop { yes }) => {
-            tokio::task::block_in_place(|| daemon_stop(paths, yes, instance.as_deref()))
+            tokio::task::block_in_place(|| daemon_stop(paths, yes))
         }
     }
 }
@@ -281,23 +274,23 @@ fn status(paths: ClientPaths, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn service_name(instance: Option<&str>) -> String {
-    match instance {
-        Some(n) if !n.is_empty() => format!("virtue@{n}.service"),
+fn service_name() -> String {
+    match config::INSTANCE {
+        Some(n) if !n.is_empty() => format!("virtue-{n}.service"),
         _ => "virtue.service".to_string(),
     }
 }
 
-fn daemon_start(instance: Option<&str>) -> Result<()> {
-    let svc = service_name(instance);
+fn daemon_start() -> Result<()> {
+    let svc = service_name();
     run_systemctl_user(["start", &svc])?;
     println!("Started {svc}.");
     Ok(())
 }
 
-fn daemon_stop(paths: ClientPaths, yes: bool, instance: Option<&str>) -> Result<()> {
-    let svc = service_name(instance);
-    if !is_user_service_active(instance)? {
+fn daemon_stop(paths: ClientPaths, yes: bool) -> Result<()> {
+    let svc = service_name();
+    if !is_user_service_active()? {
         println!("{svc} is already stopped.");
         return Ok(());
     }
@@ -322,8 +315,8 @@ fn daemon_stop(paths: ClientPaths, yes: bool, instance: Option<&str>) -> Result<
     Ok(())
 }
 
-fn is_user_service_active(instance: Option<&str>) -> Result<bool> {
-    let svc = service_name(instance);
+fn is_user_service_active() -> Result<bool> {
+    let svc = service_name();
     let status = Command::new("systemctl")
         .args(["--user", "is-active", "--quiet", &svc])
         .status()

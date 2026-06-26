@@ -6,7 +6,7 @@ use std::time::Duration;
 use ksni::blocking::TrayMethods;
 use virtue_core::ClientController;
 
-use crate::config::ClientPaths;
+use crate::config::{self, ClientPaths};
 
 const TOOLTIP_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
 const RETRY_INTERVAL: Duration = Duration::from_secs(30);
@@ -32,9 +32,9 @@ impl Drop for DaemonTray {
     }
 }
 
-pub fn start_daemon_tray(paths: ClientPaths, instance: Option<String>) -> Option<DaemonTray> {
+pub fn start_daemon_tray(paths: ClientPaths) -> Option<DaemonTray> {
     let shutdown = Arc::new(AtomicBool::new(false));
-    let worker = spawn_tray_worker(paths, shutdown.clone(), instance);
+    let worker = spawn_tray_worker(paths, shutdown.clone());
 
     Some(DaemonTray {
         shutdown,
@@ -42,11 +42,7 @@ pub fn start_daemon_tray(paths: ClientPaths, instance: Option<String>) -> Option
     })
 }
 
-fn spawn_tray_worker(
-    paths: ClientPaths,
-    shutdown: Arc<AtomicBool>,
-    instance: Option<String>,
-) -> thread::JoinHandle<()> {
+fn spawn_tray_worker(paths: ClientPaths, shutdown: Arc<AtomicBool>) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let mut last_error_message: Option<String> = None;
         let mut last_error_log_at = std::time::Instant::now()
@@ -60,7 +56,7 @@ fn spawn_tray_worker(
                 continue;
             }
 
-            match run_one_tray_session(&paths, &shutdown, instance.as_deref()) {
+            match run_one_tray_session(&paths, &shutdown) {
                 Ok(()) => break,
                 Err(err) => {
                     let message = err.message();
@@ -105,12 +101,10 @@ fn next_missing_watcher_retry_delay(failure_count: usize) -> Option<Duration> {
 fn run_one_tray_session(
     paths: &ClientPaths,
     shutdown: &Arc<AtomicBool>,
-    instance: Option<&str>,
 ) -> Result<(), TraySessionError> {
-    let mut tooltip = build_tooltip(paths, instance);
+    let mut tooltip = build_tooltip(paths);
     let tray = VirtueTray {
         tooltip: tooltip.clone(),
-        instance: instance.map(str::to_owned),
     };
     let handle = tray.spawn().map_err(TraySessionError::from_spawn_error)?;
 
@@ -123,7 +117,7 @@ fn run_one_tray_session(
         }
         elapsed = Duration::ZERO;
 
-        let next = build_tooltip(paths, instance);
+        let next = build_tooltip(paths);
         if next == tooltip {
             continue;
         }
@@ -144,7 +138,7 @@ fn run_one_tray_session(
     Ok(())
 }
 
-fn build_tooltip(paths: &ClientPaths, instance: Option<&str>) -> String {
+fn build_tooltip(paths: &ClientPaths) -> String {
     let sock = paths.state_dir.join("daemon.sock");
     let is_authenticated = ClientController::connect(&sock)
         .ok()
@@ -152,15 +146,15 @@ fn build_tooltip(paths: &ClientPaths, instance: Option<&str>) -> String {
         .map(|s| s.is_authenticated)
         .unwrap_or(false);
 
-    let flag = match instance {
-        Some(n) if !n.is_empty() => format!(" --instance {n}"),
-        _ => String::new(),
+    let bin = match config::INSTANCE {
+        Some(n) if !n.is_empty() => format!("virtue-{n}"),
+        _ => "virtue".to_string(),
     };
 
     if is_authenticated {
-        format!("Signed in. Run 'virtue{flag} status' from a terminal for details.")
+        format!("Signed in. Run '{bin} status' from a terminal for details.")
     } else {
-        format!("Not signed in. Run 'virtue{flag} login' from a terminal.")
+        format!("Not signed in. Run '{bin} login' from a terminal.")
     }
 }
 
@@ -230,19 +224,18 @@ impl TraySessionError {
 #[derive(Clone, Debug)]
 struct VirtueTray {
     tooltip: String,
-    instance: Option<String>,
 }
 
 impl ksni::Tray for VirtueTray {
     fn id(&self) -> String {
-        match self.instance.as_deref() {
+        match config::INSTANCE {
             Some(n) if !n.is_empty() => format!("virtue-{n}"),
             _ => "virtue".to_string(),
         }
     }
 
     fn title(&self) -> String {
-        match self.instance.as_deref() {
+        match config::INSTANCE {
             Some(n) if !n.is_empty() => format!("Virtue ({n})"),
             _ => "Virtue".to_string(),
         }

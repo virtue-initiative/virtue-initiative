@@ -28,7 +28,7 @@ if [[ "${1:-}" == "--debug" ]]; then
     TYPEARG=""
 fi
 
-VIRTUE_BUILD_LABEL="$BUILD_LABEL" cargo build $TYPEARG -p virtue-linux
+VIRTUE_BUILD_LABEL="$BUILD_LABEL" VIRTUE_INSTANCE="$INSTANCE" cargo build $TYPEARG -p virtue-linux
 
 
 PKG_DIR="target/debian/${PKG_NAME}_${BUILD_LABEL}_${ARCH}"
@@ -44,7 +44,7 @@ install -m 0755 "target/$TYPE/virtue" "$PKG_DIR/usr/bin/$BIN_NAME"
 install -m 0644 linux/README.md "$PKG_DIR/usr/share/doc/$PKG_NAME/README.md"
 
 if [[ -n "$INSTANCE" ]]; then
-    sed "s|exec /usr/bin/virtue daemon|exec /usr/bin/$BIN_NAME --instance $INSTANCE daemon|g" \
+    sed "s|exec /usr/bin/virtue daemon|exec /usr/bin/$BIN_NAME daemon|g" \
         linux/packaging/systemd/virtue.service \
         > "$PKG_DIR/usr/lib/systemd/user/${BIN_NAME}.service"
 else

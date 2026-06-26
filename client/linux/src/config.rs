@@ -9,6 +9,10 @@ const DEFAULT_BASE_API_URL: &str = "https://api.virtueinitiative.org";
 const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
 const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
 
+/// Set at build time by passing `VIRTUE_INSTANCE=<name>` to cargo. Controls
+/// which XDG subdirectory and systemd service name this binary uses.
+pub const INSTANCE: Option<&str> = option_env!("VIRTUE_INSTANCE");
+
 #[derive(Clone, Debug)]
 pub struct ClientPaths {
     pub config_dir: PathBuf,
@@ -18,12 +22,12 @@ pub struct ClientPaths {
 }
 
 impl ClientPaths {
-    pub fn discover(instance: Option<&str>) -> Result<Self> {
+    pub fn discover() -> Result<Self> {
         let config_root = xdg_base_dir("XDG_CONFIG_HOME", ".config")
             .context("failed to resolve config directory")?;
         let state_root = xdg_base_dir("XDG_STATE_HOME", ".local/state")
             .context("failed to resolve state directory")?;
-        Ok(Self::from_roots(config_root, state_root, instance))
+        Ok(Self::from_roots(config_root, state_root, INSTANCE))
     }
 
     fn from_roots(config_root: PathBuf, state_root: PathBuf, instance: Option<&str>) -> Self {

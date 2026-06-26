@@ -29,9 +29,9 @@ trait LoginManager {
     fn prepare_for_sleep(&self, start: bool) -> zbus::Result<()>;
 }
 
-pub async fn run_daemon(paths: &ClientPaths, instance: Option<String>) -> Result<()> {
+pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     paths.ensure_dirs()?;
-    let _tray = tray::start_daemon_tray(paths.clone(), instance);
+    let _tray = tray::start_daemon_tray(paths.clone());
 
     let config = build_core_config(paths);
     let state_path = paths.state_dir.join("event_state.json");
