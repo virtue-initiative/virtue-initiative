@@ -91,7 +91,10 @@ if [ -n "$DOMAIN" ]; then
         wait 2>/dev/null || true
     }
 
-    run "api"     "31" "api"     bun run dev -- --port "$API_PORT" --var "APP_URL:https://app.${DOMAIN}.localhost"
+    run "api"     "31" "api"     bun run dev -- --port "$API_PORT" \
+        --var "APP_URL:https://app.${DOMAIN}.localhost" \
+        --var "R2_URL:https://app.${DOMAIN}.localhost/r2" \
+        --var "HASH_SERVER_URL:http://localhost:${API_PORT}/api"
     run "web"     "32" "web"     bun run dev -- --port "$WEB_PORT" --host 127.0.0.1
     run "landing" "34" "landing" bun run dev -- --port "$LANDING_PORT" --host 127.0.0.1
 else
@@ -101,7 +104,10 @@ else
     printf '  Web     : http://localhost:%s\n' "$WEB_PORT"
     printf '  API     : http://localhost:%s\n\n' "$API_PORT"
 
-    run "api"     "31" "api"     bun run dev -- --port "$API_PORT" --var "APP_URL:http://localhost:${WEB_PORT}"
+    run "api"     "31" "api"     bun run dev -- --port "$API_PORT" \
+        --var "APP_URL:http://localhost:${WEB_PORT}" \
+        --var "R2_URL:http://localhost:${API_PORT}/r2" \
+        --var "HASH_SERVER_URL:http://localhost:${API_PORT}/api"
     run "web"     "32" "web"     bun run dev -- --port "$WEB_PORT"
     run "landing" "34" "landing" bun run dev -- --port "$LANDING_PORT"
 fi
