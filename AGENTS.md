@@ -5,7 +5,7 @@ This repository is split across several independently-tested areas. When you cha
 ## General rules
 
 - Prefer matching the existing GitHub Actions workflows in `.github/workflows/`.
-- Use `npm ci` for Node projects when you need a clean install matching CI.
+- Use `bun install` for Node projects when you need a clean install matching CI.
 - Use `cargo` commands from `client/` for Rust workspace checks unless a section below says otherwise.
 - If you only change docs or non-executable assets, format checks may still be relevant if those files are covered by Prettier.
 - Release packaging steps are listed below because CI runs them, but they are usually only needed when validating packaging or release changes.
@@ -28,15 +28,15 @@ Run this when touching `api/`, `web/`, `landing/`, `shared-web/`, or `theme.json
 From `api/`:
 
 ```bash
-npm ci
-npm run typecheck
-npm test
-npm run prettier:check
+bun install
+bun run typecheck
+bun test
+bun run format:check
 ```
 
 Notes:
 
-- `npm test` runs `vitest run`.
+- `bun test` runs `vitest run`.
 - API tests are documented in `api/TESTING.md`.
 
 ### Web app
@@ -44,10 +44,10 @@ Notes:
 From `web/`:
 
 ```bash
-npm ci
-npm run typecheck
-npm run prettier:check
-npm run build
+bun install
+bun run typecheck
+bun run format:check
+bun run build
 ```
 
 ### Landing site
@@ -55,10 +55,10 @@ npm run build
 From `landing/`:
 
 ```bash
-npm ci
-GITHUB_TOKEN=stub npm run typecheck
-npm run prettier:check
-GITHUB_TOKEN=stub npm run build
+bun install
+GITHUB_TOKEN=stub bun run typecheck
+bun run format:check
+GITHUB_TOKEN=stub bun run build
 ```
 
 Notes:
@@ -73,20 +73,10 @@ Notes:
 From `shared-web/`:
 
 ```bash
-npm run prettier:check
+bun run format:check
 ```
 
 Also rerun the dependent checks in both `web/` and `landing/`, since that is where breakage will surface.
-
-### Web formatting helper
-
-If you need to apply formatting across the web projects instead of just checking:
-
-From the repo root:
-
-```bash
-./scripts/format-all-web.sh
-```
 
 ## Client version check (`.github/workflows/version-check.yml`)
 
@@ -229,9 +219,9 @@ Notes:
 
 If you need to mirror deployment locally:
 
-- `api/`: `npm run deploy:staging` or `npm run deploy:prod`
-- `web/`: `npm run deploy:staging` or `npm run deploy:prod`
-- `landing/`: `npm run deploy:staging` or `npm run deploy:prod`
+- `api/`: `bun run deploy:staging` or `bun run deploy:prod`
+- `web/`: `bun run deploy:staging` or `bun run deploy:prod`
+- `landing/`: `bun run deploy:staging` or `bun run deploy:prod`
 
 These require the appropriate Cloudflare credentials and, for landing, GitHub release access.
 
