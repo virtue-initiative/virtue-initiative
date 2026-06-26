@@ -1,5 +1,6 @@
 {
   "private": true,
+  "name": "@virtueinitiative/web",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +10,7 @@
     "typecheck": "tsc -p tsconfig.lint.json --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "deploy:prod": "npm run build && wrangler deploy --env prod",
+    "deploy:prod": "bun run build && wrangler deploy --env prod",
     "deploy:staging": "vite build --mode staging && wrangler deploy --env staging"
   },
   "dependencies": {

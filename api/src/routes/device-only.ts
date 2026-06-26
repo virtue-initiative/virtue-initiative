@@ -23,15 +23,9 @@ import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
 
 const deviceOnly = new Hono<{ Bindings: Env; Variables: Variables }>();
-const LOCAL_WEB_URL = 'http://localhost:5173';
 const ZERO_STATE = new Uint8Array(32);
 
 function getAppUrl(c: Context<{ Bindings: Env; Variables: Variables }>) {
-  const requestUrl = new URL(c.req.url);
-  if (requestUrl.hostname === 'localhost' || requestUrl.hostname === '127.0.0.1') {
-    return LOCAL_WEB_URL;
-  }
-
   return c.env.APP_URL;
 }
 const DEVICE_ACCESS_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;

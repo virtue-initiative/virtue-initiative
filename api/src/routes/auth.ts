@@ -56,8 +56,6 @@ import { deleteObject } from '../lib/r2';
 const auth = new Hono<{ Bindings: Env; Variables: Variables }>();
 const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 const REFRESH_TOKEN_TTL_SECONDS = 365 * 24 * 60 * 60;
-const LOCAL_WEB_URL = 'http://localhost:5173';
-
 function buildHashParamsResponse() {
   return {
     version: CURRENT_HASH_PARAMS.version,
@@ -135,11 +133,6 @@ async function createSession(c: Context<{ Bindings: Env; Variables: Variables }>
 }
 
 function getAppUrl(c: Context<{ Bindings: Env; Variables: Variables }>) {
-  const requestUrl = new URL(c.req.url);
-  if (requestUrl.hostname === 'localhost' || requestUrl.hostname === '127.0.0.1') {
-    return LOCAL_WEB_URL;
-  }
-
   return c.env.APP_URL;
 }
 
