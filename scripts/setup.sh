@@ -39,7 +39,7 @@ sudo caddy trust
 # caddy trust handles the system store but not Firefox's cert9.db on Linux,
 # and security.enterprise_roots.enabled doesn't bridge that gap reliably.
 if command -v certutil > /dev/null 2>&1; then
-    for profile in $(find /home -name "cert9.db" 2>/dev/null | xargs -I{} dirname {}); do
+    for profile in $(find "$HOME/.mozilla/firefox/" -name "cert9.db" 2>/dev/null | xargs -I{} dirname {}); do
         for cert in /usr/local/share/ca-certificates/Caddy_*.crt; do
             certutil -A -n "$(basename "$cert" .crt)" -t "CT,," -i "$cert" -d "sql:$profile" > /dev/null 2>&1 || true
         done
@@ -57,7 +57,8 @@ fi
 
 # Ensure the dev server is configured (caddy-base.json); systemctl uses Caddyfile which lacks it
 # Caddy API returns 200 with "null" when the path doesn't exist
-if [ "$(curl -sf http://localhost:2019/config/apps/http/servers/dev 2>/dev/null)" = "null" ]; then
+if [ "$(curl -sf http://localhost:2019/config/apps/http/servers/dev 2>/dev/null)" = "null" ] || \
+   [ "$(curl -sf http://localhost:2019/config/apps/http/servers/dev-http 2>/dev/null)" = "null" ]; then
     caddy reload --config "$ROOT/scripts/caddy-base.json" > /dev/null 2>&1
 fi
 
