@@ -492,6 +492,8 @@ fn dev_send(paths: ClientPaths, args: SendLogArgs) -> Result<()> {
         vec![UploadKind::Screenshot {
             image: shot.bytes,
             content_type: shot.content_type,
+            skin_detection: None,
+            nsfw_detection: None,
         }]
     } else {
         vec![build_send_kind(&args)?]
@@ -578,6 +580,8 @@ fn dev_add_screenshot(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()
         kind: UploadKind::Screenshot {
             image: screenshot.bytes,
             content_type: screenshot.content_type,
+            skin_detection: None,
+            nsfw_detection: None,
         },
     })?;
     bus.send(Ping)?;

@@ -83,7 +83,19 @@ pub struct ScreenshotModule {
 impl ScreenshotModule {
     pub fn new(platform: Arc<dyn ScreenshotHooks>, screenshot_interval_ms: i64) -> Self {
         #[cfg(not(test))]
-        let classifier = RiskClassifier::new(MODEL_BYTES).ok().map(Arc::new);
+        let classifier = match RiskClassifier::new(MODEL_BYTES) {
+            Ok(classifier) => Some(Arc::new(classifier)),
+            Err(err) => {
+                // The model is embedded via `include_bytes!` at build time; the usual cause of
+                // a load failure is an unresolved Git LFS pointer baked in instead of the real
+                // ONNX (see build.rs guard). Without a classifier every screenshot risk is 0,
+                // so make that loud rather than silent.
+                eprintln!(
+                    "[screenshot] NSFW classifier disabled, all screenshot risk will be 0: {err}"
+                );
+                None
+            }
+        };
         #[cfg(test)]
         let classifier: Option<Arc<RiskClassifier>> = None;
         Self {
@@ -218,9 +230,20 @@ fn run_capture(
         return Ok(());
     }
 
-    let risk = classifier
-        .and_then(|c| c.classify(&screenshot.bytes).ok())
-        .unwrap_or(0.0);
+    // Classify before the (consuming) image pipeline. A `None` classifier (model failed to
+    // load) or a classify error fails safe to risk 0 with no raw scores, but — unlike the old
+    // silent `.ok()` — we log the error so an always-0 misconfiguration is diagnosable.
+    let scores = classifier.and_then(|c| match c.classify(&screenshot.bytes) {
+        Ok(scores) => Some(scores),
+        Err(err) => {
+            eprintln!("[screenshot] classify failed, recording risk 0: {err}");
+            None
+        }
+    });
+    let (risk, skin_detection, nsfw_detection) = match scores {
+        Some(scores) => (scores.risk, Some(scores.skin), scores.nsfw),
+        None => (0.0, None, None),
+    };
     let processed = match image_pipeline::ImagePipeline.process(screenshot) {
         Ok(p) => p,
         Err(err) => {
@@ -237,6 +260,8 @@ fn run_capture(
         kind: UploadKind::Screenshot {
             image: processed.bytes,
             content_type: processed.content_type,
+            skin_detection,
+            nsfw_detection,
         },
     });
     let _ = emitter.send(ScreenshotCaptured {
