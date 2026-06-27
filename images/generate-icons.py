@@ -350,8 +350,9 @@ def main() -> None:
 
     # Full-bleed square for icons the OS masks itself (iOS, Android, PWA), a
     # squircle for standalone icons shown as-is (favicons, desktop apps), and a
-    # circle for Android's round launcher icon. Tray icons and Windows tiles are
-    # left transparent on purpose (they sit on a system-provided surface).
+    # circle for Android's round launcher icon and the Linux tray icon (which
+    # sits on a themed surface but needs its own background to stay visible in
+    # dark mode). Windows tiles are left transparent (the OS provides a plate).
     rounded_bg = Background(background_rgb, "rounded", CONTENT_SCALE_ROUNDED)
     square_bg = Background(background_rgb, "square", CONTENT_SCALE_SQUARE)
     circle_bg = Background(background_rgb, "circle", CONTENT_SCALE_CIRCLE)
@@ -410,7 +411,7 @@ def main() -> None:
         outputs.extend([mac_assets / "AppIcon.icns", mac_assets / "tray-icon.png"])
 
         linux_assets = root / "client" / "linux" / "assets"
-        save_png(master, linux_assets / "tray-icon.png", 32)
+        save_png(master, linux_assets / "tray-icon.png", 32, circle_bg)
         outputs.append(linux_assets / "tray-icon.png")
 
         windows_assets = root / "client" / "windows" / "assets"
