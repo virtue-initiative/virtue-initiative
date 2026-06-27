@@ -21,7 +21,6 @@ import {
   DialogHeader,
   Field,
   IconButton,
-  Menu,
   Select,
 } from '@virtueinitiative/shared-web';
 import { cacheClient } from '../../utils/cache/client';
@@ -84,22 +83,6 @@ const RANGE_SEGMENTS = [
   { label: 'Past week', value: 'week' },
   { label: 'Past month', value: 'month' },
 ];
-
-function DateRangePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const current = RANGE_SEGMENTS.find((s) => s.value === value) ?? RANGE_SEGMENTS[0];
-  return (
-    <Menu
-      class="logs-range-menu"
-      trigger={
-        <Button variant="outline" size="md" class="logs-range-trigger">
-          <span>{current.label}</span>
-          <span aria-hidden="true">▾</span>
-        </Button>
-      }
-      items={RANGE_SEGMENTS.map((s) => ({ label: s.label, onClick: () => onChange(s.value) }))}
-    />
-  );
-}
 
 export function Logs({ userId: routeUserId }: { userId?: string }) {
   const api = useAPIContext();
@@ -297,7 +280,18 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
               <div class="logs-filter-section">
                 <div class="logs-inline-filters">
                   <Field label="Date range" class="logs-filter-field">
-                    <DateRangePicker value={range} onChange={(v) => setRange(v as RangeKey)} />
+                    <Select
+                      size="md"
+                      class="logs-filter-select"
+                      value={range}
+                      onChange={(e) => setRange((e.target as HTMLSelectElement).value as RangeKey)}
+                    >
+                      {RANGE_SEGMENTS.map((s) => (
+                        <option key={s.value} value={s.value}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </Select>
                   </Field>
                   <Field label="Device" class="logs-filter-field">
                     <Select
@@ -437,7 +431,18 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
             <DialogHeader>Search filters</DialogHeader>
             <div class="logs-filter-dialog-fields">
               <Field label="Date range" class="logs-filter-field">
-                <DateRangePicker value={range} onChange={(v) => setRange(v as RangeKey)} />
+                <Select
+                  size="md"
+                  class="logs-filter-select"
+                  value={range}
+                  onChange={(e) => setRange((e.target as HTMLSelectElement).value as RangeKey)}
+                >
+                  {RANGE_SEGMENTS.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </Select>
               </Field>
               <Field label="Device" class="logs-filter-field">
                 <Select
