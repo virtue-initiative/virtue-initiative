@@ -31,10 +31,6 @@ body {
   z-index: 10;
 }
 
-.help-page .site-header-shell {
-  padding-bottom: 1.5rem;
-}
-
 .site-header {
   display: flex;
   align-items: center;

@@ -252,7 +252,7 @@ button.logs-fullscreen-btn {
   margin-left: auto;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 0.3rem 0.9rem;
   font-size: 0.8rem;
   font-weight: 600;
@@ -266,7 +266,7 @@ button.logs-fullscreen-btn {
   font-weight: 600;
   background: var(--bg-subtle);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   padding: 0.1rem 0.45rem;
   font-family: ui-monospace, monospace;
 }

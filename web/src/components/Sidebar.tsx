@@ -313,12 +313,12 @@ export function Sidebar() {
           </NavLink>
 
           <div class="sidebar-nav-group">
-            <div class="sidebar-nav-group-heading">
+            <a href="/logs" class="sidebar-nav-group-heading" onClick={closeMobile}>
               <span class="sidebar-nav-icon">
                 <LogsIcon />
               </span>
               <span class="sidebar-nav-label">Logs</span>
-            </div>
+            </a>
             <div class="sidebar-nav-sublist">
               <NavLink href="/logs" active={onLogs && !activeUserId} onNavigate={closeMobile}>
                 My logs

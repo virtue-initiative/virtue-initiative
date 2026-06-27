@@ -59,6 +59,7 @@
   padding: 0.625rem 0.875rem;
   border: 0;
   border-left: 3px solid transparent;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--ink-2);
   font-family: var(--font-serif);
@@ -134,9 +135,24 @@
   gap: 0.875rem;
   padding: 0.625rem 0.875rem;
   border-left: 3px solid transparent;
+  border-radius: var(--radius-sm);
   color: var(--ink-2);
   font-family: var(--font-serif);
   font-size: 0.9375rem;
+  text-decoration: none;
+}
+
+a.sidebar-nav-group-heading {
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+
+  &:hover {
+    color: var(--forest);
+    background: var(--paper-2);
+    text-decoration: none;
+  }
 }
 
 .sidebar-nav-sublist {
