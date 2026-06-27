@@ -1,0 +1,33 @@
+.page-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-bottom: var(--space-6);
+}
+
+.page-heading-icon {
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.page-heading-icon svg {
+  width: 1.75rem;
+  height: 1.75rem;
+}
+
+.page-heading-title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 2rem;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  color: var(--text);
+}
+
+.page-heading-actions {
+  margin-left: auto;
+  flex-shrink: 0;
+}

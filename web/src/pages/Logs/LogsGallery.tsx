@@ -9,8 +9,7 @@ import { EventImage, FeedLog, formatDayAndTime, LogDetailDialog } from './shared
 import { buildGalleryRows } from './gallery-layout';
 
 const TARGET_ROW_HEIGHT = 140;
-const GAP_NORMAL = 8;
-const GAP_FULLSCREEN = 10;
+const GAP = 8;
 const DEFAULT_RATIO = 16 / 9;
 const MIN_ROW_SCALE = 0.6;
 const MAX_LAST_ROW_SCALE = 1.0;
@@ -18,7 +17,6 @@ const MAX_LAST_ROW_SCALE = 1.0;
 export function LogsGallery({
   items,
   loading,
-  fullscreen,
   deviceName,
   onVisibleDateChange,
   viewerId,
@@ -28,7 +26,6 @@ export function LogsGallery({
   hasMore: boolean;
   onLoadMore: () => void;
   deviceName: (id: string) => string;
-  fullscreen: boolean;
   onVisibleDateChange?: (date: string | null) => void;
   viewerId: string;
 }) {
@@ -58,7 +55,7 @@ export function LogsGallery({
     };
   }, [wrapperEl]);
 
-  const gap = fullscreen ? GAP_FULLSCREEN : GAP_NORMAL;
+  const gap = GAP;
 
   const rows = useMemo(
     () =>

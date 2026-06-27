@@ -75,6 +75,7 @@ if [ -n "$DOMAIN" ]; then
 
     export VITE_API_URL="https://app.${DOMAIN}.localhost/api"
     export VITE_API_PROXY_TARGET="http://localhost:${API_PORT}"
+    export VITE_LANDING_URL="https://${DOMAIN}.localhost"
     export __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS="app.${DOMAIN}.localhost,${DOMAIN}.localhost"
     export PUBLIC_APP_URL="https://app.${DOMAIN}.localhost"
     printf '\n  Landing : http://%s.localhost  /  https://%s.localhost\n' "$DOMAIN" "$DOMAIN"
@@ -100,6 +101,7 @@ if [ -n "$DOMAIN" ]; then
 else
     export VITE_API_URL="http://localhost:${API_PORT}"
     export VITE_API_PROXY_TARGET="http://localhost:${API_PORT}"
+    export VITE_LANDING_URL="http://localhost:${LANDING_PORT}"
     printf '\n  Landing : http://localhost:%s\n' "$LANDING_PORT"
     printf '  Web     : http://localhost:%s\n' "$WEB_PORT"
     printf '  API     : http://localhost:%s\n\n' "$API_PORT"

@@ -16,10 +16,10 @@ describe('Devices — device list', () => {
     });
   });
 
-  it('shows "My devices" section heading', async () => {
+  it('shows "Devices" page heading', async () => {
     renderWithClient(<Devices />);
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /my devices/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /^devices$/i })).toBeInTheDocument();
     });
   });
 });

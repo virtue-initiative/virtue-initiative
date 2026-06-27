@@ -1,39 +1,7 @@
 .dashboard {
   width: 100%;
-  max-width: 900px;
-  padding: var(--space-6) var(--space-4);
+  padding: var(--space-4) var(--space-4);
   text-align: left;
-}
-
-.dashboard-section {
-  margin-bottom: 2.5rem;
-
-  & > h2 {
-    margin: 0 0 var(--space-4);
-  }
-
-  & h2 {
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: var(--text-muted);
-  }
-}
-
-.dashboard-section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-  margin-bottom: var(--space-4);
-
-  & h2 {
-    margin: 0;
-  }
-}
-
-.dashboard-section-header > * {
-  min-width: 0;
 }
 
 /* Device dialogs */

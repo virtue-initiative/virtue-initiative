@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { User, useUser, useAPIContext } from '../../utils/api';
+import { PageHeading } from '../../components/PageHeading';
+import { SettingsIcon } from '../../components/icons';
 import {
   Alert,
   Button,
@@ -129,7 +131,7 @@ export function Settings() {
 
   return (
     <div class="settings-page">
-      <h1 class="settings-title">Settings</h1>
+      <PageHeading icon={<SettingsIcon />}>Settings</PageHeading>
 
       <Card class="settings-section">
         <form class="settings-form" onSubmit={saveSettings}>
