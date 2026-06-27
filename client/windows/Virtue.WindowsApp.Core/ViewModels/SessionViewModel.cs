@@ -28,6 +28,8 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private bool _isBusy;
     private bool _isHydratingEmailInput;
     private bool _hasUserEditedEmailInput;
+    private string? _transitionMessage;
+    private string? _errorText;
 
     public SessionViewModel(IRustInteropClient interopClient, string? windowsPackageVersion = null)
     {
@@ -227,6 +229,26 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         }
     }
 
+    public string? TransitionMessage
+    {
+        get => _transitionMessage;
+        private set
+        {
+            if (SetProperty(ref _transitionMessage, value))
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsTransitioning)));
+            }
+        }
+    }
+
+    public bool IsTransitioning => !string.IsNullOrEmpty(TransitionMessage);
+
+    public string? ErrorText
+    {
+        get => _errorText;
+        private set => SetProperty(ref _errorText, value);
+    }
+
     public async Task InitializeAsync()
     {
         await RunBusyAsync(async () =>
@@ -234,6 +256,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
             _interopClient.Initialize();
             _interopClient.StartMonitoring();
             await RefreshInternalAsync();
+            StatusText = BuildStatusText();
         });
     }
 
@@ -241,13 +264,13 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     {
         if (string.IsNullOrWhiteSpace(EmailInput))
         {
-            StatusText = "Email is required.";
+            ErrorText = "Email is required.";
             return;
         }
 
         if (string.IsNullOrEmpty(PasswordInput))
         {
-            StatusText = "Password is required.";
+            ErrorText = "Password is required.";
             return;
         }
 
@@ -257,26 +280,50 @@ public sealed class SessionViewModel : INotifyPropertyChanged
 
         await RunBusyAsync(async () =>
         {
-            StatusText = "Signing in...";
-            _interopClient.Login(EmailInput.Trim(), PasswordInput, deviceName);
+            var email = EmailInput.Trim();
+            var password = PasswordInput;
+            await Task.Run(() => _interopClient.Login(email, password, deviceName));
             PasswordInput = string.Empty;
             await RefreshInternalAsync();
-        });
+            StatusText = BuildStatusText();
+        }, "Signing in...");
     }
 
     public async Task LogoutAsync()
     {
         await RunBusyAsync(async () =>
         {
-            StatusText = "Signing out...";
-            _interopClient.Logout();
+            await Task.Run(() => _interopClient.Logout());
             await RefreshInternalAsync();
-        });
+            StatusText = BuildStatusText();
+        }, "Signing out...");
     }
 
     public async Task RefreshAsync()
     {
-        await RunBusyAsync(RefreshInternalAsync);
+        await RunBusyAsync(async () =>
+        {
+            await RefreshInternalAsync();
+            StatusText = BuildStatusText();
+        });
+    }
+
+    public Task BackgroundRefreshAsync()
+    {
+        return BackgroundRefreshInternalAsync();
+    }
+
+    private Task BackgroundRefreshInternalAsync()
+    {
+        var monitorStatus = _interopClient.GetMonitorStatus();
+        var resolvedMonitorState = ResolveMonitorState(_loggedIn, monitorStatus.State);
+
+        MonitorState = resolvedMonitorState;
+        MonitorError = _loggedIn ? monitorStatus.LastError : null;
+        PendingRequestCount = _loggedIn ? monitorStatus.PendingRequestCount : 0;
+        LastScreenshotAtMs = _loggedIn ? monitorStatus.LastScreenshotAtMs : null;
+
+        return Task.CompletedTask;
     }
 
     public async Task SaveSettingsAsync()
@@ -299,7 +346,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
             _interopClient.SetRuntimeConfig(new RuntimeConfigUpdate(ApiBaseUrl, captureIntervalSeconds, batchWindowSeconds));
             await RefreshInternalAsync();
             StatusText = "Runtime settings saved.";
-        });
+        }, "Saving runtime settings...");
     }
 
     private Task RefreshInternalAsync()
@@ -330,8 +377,6 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         CaptureIntervalSeconds = runtimeConfig.CaptureIntervalSeconds.ToString();
         BatchWindowSeconds = runtimeConfig.BatchWindowSeconds.ToString();
         ConfigPath = runtimeConfig.ConfigPath;
-
-        StatusText = BuildStatusText();
 
         return Task.CompletedTask;
     }
@@ -366,23 +411,25 @@ public sealed class SessionViewModel : INotifyPropertyChanged
 
     public async Task StopMonitoringAsync()
     {
-        await RunBusyAsync(() =>
+        await RunBusyAsync(async () =>
         {
-            _interopClient.StopMonitoring();
-            return RefreshInternalAsync();
+            await Task.Run(() => _interopClient.StopMonitoring());
+            await RefreshInternalAsync();
+            StatusText = BuildStatusText();
         });
     }
 
     public async Task StopMonitoringFromTrayExitAsync()
     {
-        await RunBusyAsync(() =>
+        await RunBusyAsync(async () =>
         {
-            _interopClient.StopMonitoringFromTrayExit();
-            return RefreshInternalAsync();
+            await Task.Run(() => _interopClient.StopMonitoringFromTrayExit());
+            await RefreshInternalAsync();
+            StatusText = BuildStatusText();
         });
     }
 
-    private async Task RunBusyAsync(Func<Task> action)
+    private async Task RunBusyAsync(Func<Task> action, string? transitionMessage = null)
     {
         if (IsBusy)
         {
@@ -392,14 +439,21 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         try
         {
             IsBusy = true;
+            ErrorText = null;
+            if (transitionMessage != null)
+            {
+                TransitionMessage = transitionMessage;
+            }
             await action();
         }
         catch (Exception ex)
         {
+            ErrorText = ex.Message;
             StatusText = ex.Message;
         }
         finally
         {
+            TransitionMessage = null;
             IsBusy = false;
         }
     }

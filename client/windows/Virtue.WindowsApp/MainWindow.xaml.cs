@@ -31,6 +31,8 @@ public sealed partial class MainWindow : Window
     private readonly PasswordBox _passwordBox;
     private readonly TextBox _deviceNameTextBox;
     private readonly Border _statusDot;
+    private readonly TextBlock _errorTextBlock;
+    private Button? _signInButton;
     private bool _allowClose;
 
     // Warm institutional palette (see shared-web/DESIGN-GUIDELINES.md).
@@ -47,6 +49,7 @@ public sealed partial class MainWindow : Window
     private static readonly SolidColorBrush Forest3Brush = HexBrush("#2C4D3E");
     private static readonly SolidColorBrush SuccessBrush = HexBrush("#4F7A5A");
     private static readonly SolidColorBrush WarningBrush = HexBrush("#9C6B2E");
+    private static readonly SolidColorBrush DangerBrush = HexBrush("#8B3A2A");
 
     // The design fonts ship via Google Fonts on the web; on Windows we fall back
     // to the nearest installed family in each comma-separated list.
@@ -74,6 +77,12 @@ public sealed partial class MainWindow : Window
             Height = 10,
             CornerRadius = new CornerRadius(2),
             VerticalAlignment = VerticalAlignment.Center,
+        };
+        _errorTextBlock = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = DangerBrush,
+            FontFamily = BodyFont,
         };
 
         Content = BuildContent();
@@ -261,9 +270,9 @@ public sealed partial class MainWindow : Window
         _loginPanel.Children.Add(_passwordBox);
         _loginPanel.Children.Add(_deviceNameTextBox);
 
-        var signInButton = CreatePrimaryButton("Sign In");
-        signInButton.Click += SignInButton_OnClick;
-        _loginPanel.Children.Add(signInButton);
+        _signInButton = CreatePrimaryButton("Sign In");
+        _signInButton.Click += SignInButton_OnClick;
+        _loginPanel.Children.Add(_signInButton);
 
         var signOutButton = CreateActionButton("Sign Out");
         signOutButton.Click += async (_, _) => await ViewModel.LogoutAsync();
@@ -278,6 +287,7 @@ public sealed partial class MainWindow : Window
         content.Children.Add(_accountSummaryTextBlock);
         content.Children.Add(_loginPanel);
         content.Children.Add(_accountActionsPanel);
+        content.Children.Add(_errorTextBlock);
 
         return CreateCard(content);
     }
@@ -548,12 +558,23 @@ public sealed partial class MainWindow : Window
         _statusDot.Background = statusBrush;
         _statusDetailTextBlock.Text = BuildSecondaryStatusText();
         _buildLabelTextBlock.Text = ViewModel.BuildLabelText;
+
         _accountSummaryTextBlock.Text = ViewModel.LoggedIn
             ? $"Signed in as {ViewModel.AccountSummary}"
             : "Sign in to start monitoring.";
         _loginPanel.Visibility = ViewModel.LoggedIn ? Visibility.Collapsed : Visibility.Visible;
+        var loginEnabled = !ViewModel.IsBusy;
+        _emailTextBox.IsEnabled = loginEnabled;
+        _passwordBox.IsEnabled = loginEnabled;
+        _deviceNameTextBox.IsEnabled = loginEnabled;
+        if (_signInButton is not null) _signInButton.IsEnabled = loginEnabled;
         _accountActionsPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
         _signedInActionsPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
+
+        _errorTextBlock.Text = ViewModel.ErrorText ?? "";
+        _errorTextBlock.Visibility = string.IsNullOrWhiteSpace(ViewModel.ErrorText)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
 
         if (_emailTextBox.Text != ViewModel.EmailInput)
         {

@@ -49,6 +49,9 @@ final class MonitoringCoordinator: ObservableObject {
     @Published var batchWindowOverride: String = ""
 
     @Published private(set) var statusMessage: String = "Not initialized"
+    @Published private(set) var isSigningIn: Bool = false
+    @Published private(set) var isSigningOut: Bool = false
+    @Published private(set) var loginError: String? = nil
     @Published private(set) var loggedIn: Bool = false
     @Published private(set) var deviceId: String = "<none>"
     @Published private(set) var monitoringEnabled: Bool = VirtueShared.defaultMonitoringEnabled
@@ -141,31 +144,48 @@ final class MonitoringCoordinator: ObservableObject {
             return
         }
 
+        statusMessage = "Signing in..."
+        loginError = nil
+        isSigningIn = true
+        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pw = password
         let trimmedDeviceName = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedDeviceName = trimmedDeviceName.isEmpty ? UIDevice.current.name : trimmedDeviceName
-        if let error = NativeBridge.login(email: email, password: password, deviceName: resolvedDeviceName) {
-            statusMessage = "Login failed: \(error)"
-            return
-        }
 
-        setMonitoringEnabled(true)
-        refreshSessionState()
-        refreshCoreStatus()
-        refreshSafariStatus()
-        statusMessage = "Signed in. Enable Virtue Safari extension in Safari settings."
+        Task { @MainActor in
+            let error = await Task.detached(priority: .userInitiated) {
+                NativeBridge.login(email: trimmedEmail, password: pw, deviceName: resolvedDeviceName)
+            }.value
+            isSigningIn = false
+            if let error {
+                statusMessage = "Login failed: \(error)"
+                loginError = "Invalid username or password"
+                return
+            }
+            password = ""
+            setMonitoringEnabled(true)
+            refreshSessionState()
+            refreshCoreStatus()
+            refreshSafariStatus()
+            statusMessage = "Signed in. Enable Virtue Safari extension in Safari settings."
+        }
     }
 
     func logout() {
         setMonitoringEnabled(false)
-        let error = NativeBridge.logout()
-        if let error {
-            statusMessage = "Logout warning: \(error)"
-        } else {
-            statusMessage = "Signed out"
+        statusMessage = "Signing out..."
+
+        isSigningOut = true
+        Task { @MainActor in
+            let error = await Task.detached(priority: .userInitiated) {
+                NativeBridge.logout()
+            }.value
+            isSigningOut = false
+            statusMessage = error.map { "Logout warning: \($0)" } ?? "Signed out"
+            refreshSessionState()
+            refreshCoreStatus()
+            refreshSafariStatus()
         }
-        refreshSessionState()
-        refreshCoreStatus()
-        refreshSafariStatus()
     }
 
     func toggleMonitoring() {

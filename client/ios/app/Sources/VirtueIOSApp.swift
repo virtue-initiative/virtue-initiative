@@ -126,10 +126,11 @@ struct ContentView: View {
                         .foregroundStyle(VirtueBrand.textMuted)
 
                     HStack(spacing: 10) {
-                        Button("Sign Out") {
+                        Button(coordinator.isSigningOut ? "Signing Out…" : "Sign Out") {
                             showLogoutConfirmation = true
                         }
                         .buttonStyle(VirtueButtonStyle())
+                        .disabled(coordinator.isSigningOut)
 
                         Button("Runtime Overrides") {
                             showOverridesSheet = true
@@ -155,15 +156,22 @@ struct ContentView: View {
                             .textFieldStyle(.roundedBorder)
 
                         HStack(spacing: 10) {
-                            Button("Sign In") {
+                            Button(coordinator.isSigningIn ? "Signing In…" : "Sign In") {
                                 coordinator.login()
                             }
                             .buttonStyle(VirtueButtonStyle(prominent: true))
+                            .disabled(coordinator.isSigningIn)
 
                             Button("Runtime Overrides") {
                                 showOverridesSheet = true
                             }
                             .buttonStyle(VirtueButtonStyle())
+                        }
+
+                        if let error = coordinator.loginError {
+                            Text(error)
+                                .font(.subheadline)
+                                .foregroundStyle(Color.red)
                         }
                     }
                     .padding(.top, 6)
@@ -179,9 +187,6 @@ struct ContentView: View {
                 Text("Safari extension capture")
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(VirtueBrand.text)
-                Text("Capture on iPhone only comes from the Safari extension.")
-                    .foregroundStyle(VirtueBrand.textMuted)
-
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Permission state: \(coordinator.safariPermissionSummary)")
                     Text("Daemon state: \(coordinator.safariDaemonStatus)")

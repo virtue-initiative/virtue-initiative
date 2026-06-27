@@ -29,6 +29,7 @@ public partial class App : Application
     public App()
     {
         AppDomain.CurrentDomain.UnhandledException += CurrentDomainOnUnhandledException;
+        UnhandledException += OnXamlUnhandledException;
         InitializeComponent();
         LogStartup("App constructed.");
     }
@@ -98,6 +99,11 @@ public partial class App : Application
     private static void CurrentDomainOnUnhandledException(object sender, System.UnhandledExceptionEventArgs args)
     {
         LogStartup($"Unhandled exception: {args.ExceptionObject}");
+    }
+
+    private static void OnXamlUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs args)
+    {
+        LogStartup($"XAML unhandled exception: {args.Message}{Environment.NewLine}{args.Exception}");
     }
 
     private static string ResolveWindowsPackageVersion()
@@ -221,7 +227,7 @@ public partial class App : Application
                         return;
                     }
 
-                    await _viewModel.RefreshAsync();
+                    await _viewModel.BackgroundRefreshAsync();
                 });
             }
         }, token);
