@@ -17,7 +17,6 @@ setdir "." && bun install
 setdir "api"
 cp .dev.vars.example .dev.vars
 yes | bun run db:migrate:local
-setdir "." && bun ./scripts/seed-dev-user.mjs
 
 # Caddy — install if missing
 if ! command -v caddy > /dev/null 2>&1; then
