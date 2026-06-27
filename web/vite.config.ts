@@ -30,6 +30,16 @@ export default defineConfig(({ mode }) => {
       }),
     ],
     server: {
+      proxy: {
+        '/api': {
+          target: process.env.VITE_API_PROXY_TARGET ?? 'http://localhost:8787',
+          changeOrigin: true,
+        },
+        '/r2': {
+          target: process.env.VITE_API_PROXY_TARGET ?? 'http://localhost:8787',
+          changeOrigin: true,
+        },
+      },
       allowedHosts: allowedHosts?.length ? allowedHosts : undefined,
       fs: {
         allow: [searchForWorkspaceRoot(rootDir), '..'],

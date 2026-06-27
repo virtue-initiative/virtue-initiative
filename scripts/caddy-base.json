@@ -1,0 +1,22 @@
+{
+  "admin": { "listen": "localhost:2019" },
+  "apps": {
+    "http": {
+      "servers": {
+        "dev": {
+          "listen": [":443"],
+          "routes": []
+        },
+        "dev-http": {
+          "listen": [":80"],
+          "routes": []
+        }
+      }
+    },
+    "tls": {
+      "automation": {
+        "policies": [{ "issuers": [{ "module": "internal" }] }]
+      }
+    }
+  }
+}

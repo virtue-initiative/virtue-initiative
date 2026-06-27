@@ -19,60 +19,58 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          node-version: '24'
-          cache: 'npm'
-          cache-dependency-path: package-lock.json
+          bun-version: latest
 
       - name: Install dependencies
-        run: npm ci
+        run: bun install
 
       - name: API Prettier check
-        run: npm run format:check
+        run: bun run format:check
         working-directory: api
 
       - name: Web Prettier check
-        run: npm run format:check
+        run: bun run format:check
         working-directory: web
 
       - name: Landing Prettier check
-        run: npm run format:check
+        run: bun run format:check
         working-directory: landing
 
       - name: Shared Web Prettier check
-        run: npm run format:check
+        run: bun run format:check
         working-directory: shared-web
 
       - name: API type check
-        run: npm run typecheck
+        run: bun run typecheck
         working-directory: api
 
       - name: API tests
-        run: npm test
+        run: bun run test
         working-directory: api
 
       - name: Web type check
-        run: npm run typecheck
+        run: bun run typecheck
         working-directory: web
 
       - name: Web tests
-        run: npm test
+        run: bun run test
         working-directory: web
 
       - name: Landing type check
-        run: npm run typecheck
+        run: bun run typecheck
         working-directory: landing
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
       - name: Web build
-        run: npm run build
+        run: bun run build
         working-directory: web
 
       - name: Landing build
-        run: npm run build
+        run: bun run build
         working-directory: landing
         env:
           GITHUB_TOKEN: ${{ github.token }}

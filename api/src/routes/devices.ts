@@ -21,14 +21,7 @@ import { updateDeviceSchema, type PatchDeviceResponse } from '../../../shared-we
 
 const devices = new Hono<{ Bindings: Env; Variables: Variables }>();
 const ONLINE_WINDOW_MS = 2 * 60 * 60 * 1000;
-const LOCAL_WEB_URL = 'http://localhost:5173';
-
-function getAppUrl(requestUrl: string, env: Env) {
-  const url = new URL(requestUrl);
-  if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
-    return LOCAL_WEB_URL;
-  }
-
+function getAppUrl(env: Env) {
   return env.APP_URL;
 }
 
@@ -126,7 +119,7 @@ devices.delete('/:id', authenticate('access'), async (c) => {
   if (owner) {
     const email = renderDeviceDeletedTemplate({
       appName: c.env.APP_NAME,
-      appUrl: getAppUrl(c.req.url, c.env),
+      appUrl: getAppUrl(c.env),
       recipientName: owner.name,
       deviceName: device.name,
       devicePlatform: device.platform,
@@ -153,7 +146,7 @@ devices.delete('/:id', authenticate('access'), async (c) => {
 
     const email = renderDeviceDeletedTemplate({
       appName: c.env.APP_NAME,
-      appUrl: getAppUrl(c.req.url, c.env),
+      appUrl: getAppUrl(c.env),
       recipientName: target.watcher_name,
       deviceName: device.name,
       devicePlatform: device.platform,
