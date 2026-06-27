@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
-import { decryptAndFlattenBatch } from '../api/batch-materializer';
+import { decryptAndFlattenBatch, DecryptionError } from '../api/batch-materializer';
 import { unwrapBatchKey } from '../api/crypto';
 import { createNativeBatchKeyUnwrapper } from '../api/hpke-native';
 import type { Batch, DataPage } from '../api/api';
@@ -127,6 +127,12 @@ const initPromise = (async () => {
      )`,
   );
   db.exec(
+    `CREATE TABLE IF NOT EXISTS failed_batch_ids (
+       batch_id TEXT PRIMARY KEY,
+       error TEXT
+     )`,
+  );
+  db.exec(
     `CREATE TABLE IF NOT EXISTS direct_logs (
        id TEXT PRIMARY KEY,
        viewer_id TEXT NOT NULL,
@@ -231,7 +237,8 @@ function sqlGetUnmaterializedBatches(
   db.exec(
     `SELECT b.* FROM batches b
      WHERE b.viewer_id=? AND b.target_user_id=? AND b.created_at>=?
-     AND b.id NOT IN (SELECT batch_id FROM materialized_batch_ids)`,
+     AND b.id NOT IN (SELECT batch_id FROM materialized_batch_ids)
+     AND b.id NOT IN (SELECT batch_id FROM failed_batch_ids)`,
     {
       bind: [viewerId, targetUserId, cutoffTs],
       rowMode: 'object',
@@ -392,6 +399,7 @@ function sqlClearAll(): void {
   db.exec(`DELETE FROM feeds`);
   db.exec(`DELETE FROM materialized_batch_ids`);
   db.exec(`DELETE FROM event_images`);
+  db.exec(`DELETE FROM failed_batch_ids`);
 }
 
 function sqlDeleteDeviceData(viewerId: string, deviceId: string): void {
@@ -426,6 +434,12 @@ function sqlGetDeviceBatchEndTimes(
     },
   );
   return times;
+}
+
+function sqlMarkBatchFailed(batchId: string, error: string): void {
+  db.exec(`INSERT OR IGNORE INTO failed_batch_ids(batch_id, error) VALUES(?, ?)`, {
+    bind: [batchId, error],
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -628,7 +642,12 @@ async function fetchAndDecrypt(targetUserId: string): Promise<void> {
           deltaBuffer.push({ ...ev, data });
         }
       } catch (err) {
-        console.warn('[cache-worker] failed to materialize batch', batch.id, err);
+        if (err instanceof DecryptionError) {
+          console.warn('[cache-worker] permanently failed to decrypt batch', batch.id, err);
+          sqlMarkBatchFailed(batch.id, (err as Error).message);
+        } else {
+          console.warn('[cache-worker] transient failure materializing batch', batch.id, err);
+        }
       }
       processed++;
       const isLast = processed === total;
