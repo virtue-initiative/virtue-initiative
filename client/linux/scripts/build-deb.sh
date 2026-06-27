@@ -11,22 +11,30 @@ BUILD_LABEL="$(virtue_build_label)"
 ARCH="$(dpkg --print-architecture)"
 
 INSTANCE=""
-if [[ "${1:-}" == "--instance" ]]; then
-    INSTANCE="$2"
-    shift 2
-fi
+TYPE="release"
+TYPEARG="--release"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --instance)
+            INSTANCE="$2"
+            shift 2
+            ;;
+        --debug)
+            TYPE="debug"
+            TYPEARG=""
+            shift
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            exit 1
+            ;;
+    esac
+done
 
 PKG_NAME="${INSTANCE:+virtue-$INSTANCE}"
 PKG_NAME="${PKG_NAME:-virtue}"
 BIN_NAME="$PKG_NAME"
-
-TYPEARG="--release"
-TYPE="release"
-
-if [[ "${1:-}" == "--debug" ]]; then
-    TYPE="debug"
-    TYPEARG=""
-fi
 
 VIRTUE_BUILD_LABEL="$BUILD_LABEL" VIRTUE_INSTANCE="$INSTANCE" cargo build $TYPEARG -p virtue-linux
 
