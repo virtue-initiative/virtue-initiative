@@ -99,6 +99,7 @@ pub enum UploadKind {
         title: String,
         details: Option<String>,
     },
+    Heartbeat,
 }
 
 /// A single piece of `ServiceStatus` reported by one module in response to a

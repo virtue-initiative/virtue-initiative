@@ -269,6 +269,9 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
             return Ok(());
         }
         let now_ms = self.platform.get_time_utc_ms()?;
+        // Heartbeats bypass the screen-lock gate: the whole point is to prove the
+        // device is alive when idle, so we upload even if the screen is locked.
+        let is_heartbeat = matches!(kind, UploadKind::Heartbeat);
         let entry = LogEntry {
             ts: now_ms,
             risk: Some(risk),
@@ -284,9 +287,14 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
             }
         } else {
             self.state.pending_hash_events.push(entry);
-            if screen_active {
+            if screen_active || is_heartbeat {
                 self.retry_pending_hashes()?;
-                self.maybe_upload_batch(now_ms, emitter)?;
+                if is_heartbeat {
+                    // Force an immediate batch flush — don't wait for the interval timer.
+                    self.try_upload_batch(now_ms, emitter)?;
+                } else {
+                    self.maybe_upload_batch(now_ms, emitter)?;
+                }
             }
         }
         Ok(())
@@ -588,6 +596,36 @@ mod tests {
         // FlushBatchNow is an explicit flush path → uploads regardless of lock.
         t.emit(3, FlushBatchNow);
         assert_eq!(t.api.state().batch_uploads.len(), 1);
+    }
+
+    #[test]
+    fn heartbeat_upload_bypasses_lock_and_forces_batch_flush() {
+        let mut b = EventTester::builder();
+        b.platform().set_locked_or_screensaver(true);
+        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
+        let mut t = b.build();
+        t.emit(1, login_event());
+
+        // With a locked screen a normal Upload is queued but not flushed.
+        t.emit(2, skipped_upload());
+        t.emit(3, Ping);
+        assert!(
+            t.api.state().batch_uploads.is_empty(),
+            "no batch while locked"
+        );
+
+        // A Heartbeat Upload bypasses the lock gate and forces the batch out.
+        t.emit(
+            4,
+            Upload {
+                risk: 0.0,
+                kind: UploadKind::Heartbeat,
+            },
+        );
+        assert!(
+            !t.api.state().batch_uploads.is_empty(),
+            "heartbeat should flush batch even while locked"
+        );
     }
 
     #[test]
