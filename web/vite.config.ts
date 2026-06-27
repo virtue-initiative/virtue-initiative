@@ -35,6 +35,10 @@ export default defineConfig(({ mode }) => {
           target: process.env.VITE_API_PROXY_TARGET ?? 'http://localhost:8787',
           changeOrigin: true,
         },
+        '/r2': {
+          target: process.env.VITE_API_PROXY_TARGET ?? 'http://localhost:8787',
+          changeOrigin: true,
+        },
       },
       allowedHosts: allowedHosts?.length ? allowedHosts : undefined,
       fs: {

@@ -6,6 +6,10 @@
         "dev": {
           "listen": [":443"],
           "routes": []
+        },
+        "dev-http": {
+          "listen": [":80"],
+          "routes": []
         }
       }
     },

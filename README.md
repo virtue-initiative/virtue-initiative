@@ -16,34 +16,51 @@ more information about the current state.
 
 ## Local Development
 
-Generally for local development you will need a client, the web and the API
-running. You can start them with the following commands. The web interface will
-be at http://localhost:5173.
+This project uses [Bun](https://bun.sh) as its package manager and runtime.
 
-- **Web**: `cd web && npm install && cp .env.example .env.local && npm run dev`
-- **API**: `cd api && npm install && cp .dev.vars.example .dev.vars && npm run
-  dev`
-- **Client**: Check the build instructions and make sure to set the API URL to
-  `http://localhost:8787` (often using an environment variable
-  `VIRTUE_BASE_API_URL=http://localhost:8787`)
+### First-time setup
 
-If you intend to work on the landing page or help pages, you just need that one
-site.
+Run the setup script from the repo root. It installs all dependencies, copies
+example config files, runs local database migrations, and installs/configures
+[Caddy](https://caddyserver.com) for HTTPS reverse-proxying:
 
 ```
-cd landing
-npm install
-npm run dev
+./scripts/setup.sh
 ```
 
-More information about each component can be found in their respective
-subfolders.
-
-Before commiting make sure you setup the hooks
+Also configure the git hooks:
 
 ```
 git config --local core.hookspath scripts/hooks
 ```
+
+### Starting the dev servers
+
+Use `launch.sh` to start the API, web app, and landing site together with
+interleaved, colour-coded logs. Ports are chosen automatically.
+
+**Plain HTTP (simplest):**
+
+```
+./scripts/launch.sh
+```
+
+**HTTPS via Caddy with a custom local domain** (mimics production URL
+structure — useful for testing auth flows, cookies, etc.):
+
+```
+./scripts/launch.sh <domain>
+```
+
+This registers `<domain>.localhost` (landing) and `app.<domain>.localhost`
+(web + API) in the running Caddy instance. Caddy must be running first
+(`setup.sh` starts it).
+
+**Client:** Check the build instructions in `client/` and point it at the API
+URL printed by `launch.sh` (e.g. `VIRTUE_BASE_API_URL=http://localhost:<port>`).
+
+More information about each component can be found in their respective
+subfolders.
 
 ## Contributing
 
