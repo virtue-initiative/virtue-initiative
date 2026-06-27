@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use virtue_core::Config;
 
-const DEFAULT_BASE_API_URL: &str = "https://api.virtueinitiative.org";
+const DEFAULT_BASE_API_URL: &str = virtue_core::DEFAULT_API_BASE_URL;
 const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
 const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
 

@@ -20,7 +20,7 @@ use virtue_core::{
 
 static CORE: OnceCell<IosCore> = OnceCell::new();
 
-const DEFAULT_BASE_API_URL: &str = "https://api.virtueinitiative.org";
+const DEFAULT_BASE_API_URL: &str = virtue_core::DEFAULT_API_BASE_URL;
 const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
 const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
 const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
