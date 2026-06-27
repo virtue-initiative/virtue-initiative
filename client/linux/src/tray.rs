@@ -6,7 +6,7 @@ use std::time::Duration;
 use ksni::blocking::TrayMethods;
 use virtue_core::ClientController;
 
-use crate::config::ClientPaths;
+use crate::config::{self, ClientPaths};
 
 const TOOLTIP_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
 const RETRY_INTERVAL: Duration = Duration::from_secs(30);
@@ -146,10 +146,15 @@ fn build_tooltip(paths: &ClientPaths) -> String {
         .map(|s| s.is_authenticated)
         .unwrap_or(false);
 
+    let bin = match config::INSTANCE {
+        Some(n) if !n.is_empty() => format!("virtue-{n}"),
+        _ => "virtue".to_string(),
+    };
+
     if is_authenticated {
-        "Signed in. Run 'virtue status' from a terminal for details.".to_string()
+        format!("Signed in. Run '{bin} status' from a terminal for details.")
     } else {
-        "Not signed in. Run 'virtue login' from a terminal.".to_string()
+        format!("Not signed in. Run '{bin} login' from a terminal.")
     }
 }
 
@@ -223,11 +228,17 @@ struct VirtueTray {
 
 impl ksni::Tray for VirtueTray {
     fn id(&self) -> String {
-        "virtue".to_string()
+        match config::INSTANCE {
+            Some(n) if !n.is_empty() => format!("virtue-{n}"),
+            _ => "virtue".to_string(),
+        }
     }
 
     fn title(&self) -> String {
-        "Virtue".to_string()
+        match config::INSTANCE {
+            Some(n) if !n.is_empty() => format!("Virtue ({n})"),
+            _ => "Virtue".to_string(),
+        }
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {

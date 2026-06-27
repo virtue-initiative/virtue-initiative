@@ -274,15 +274,24 @@ fn status(paths: ClientPaths, json: bool) -> Result<()> {
     Ok(())
 }
 
+fn service_name() -> String {
+    match config::INSTANCE {
+        Some(n) if !n.is_empty() => format!("virtue-{n}.service"),
+        _ => "virtue.service".to_string(),
+    }
+}
+
 fn daemon_start() -> Result<()> {
-    run_systemctl_user(["start", "virtue.service"])?;
-    println!("Started virtue.service.");
+    let svc = service_name();
+    run_systemctl_user(["start", &svc])?;
+    println!("Started {svc}.");
     Ok(())
 }
 
 fn daemon_stop(paths: ClientPaths, yes: bool) -> Result<()> {
+    let svc = service_name();
     if !is_user_service_active()? {
-        println!("virtue.service is already stopped.");
+        println!("{svc} is already stopped.");
         return Ok(());
     }
 
@@ -300,23 +309,24 @@ fn daemon_stop(paths: ClientPaths, yes: bool) -> Result<()> {
         .request_user_stop("cli_daemon_stop")
         .context("failed to record stop intent")?;
 
-    run_systemctl_user(["stop", "virtue.service"])?;
+    run_systemctl_user(["stop", &svc])?;
 
-    println!("Stopped virtue.service.");
+    println!("Stopped {svc}.");
     Ok(())
 }
 
 fn is_user_service_active() -> Result<bool> {
+    let svc = service_name();
     let status = Command::new("systemctl")
-        .args(["--user", "is-active", "--quiet", "virtue.service"])
+        .args(["--user", "is-active", "--quiet", &svc])
         .status()
-        .context("failed to query virtue.service status with systemctl --user")?;
+        .with_context(|| format!("failed to query {svc} status with systemctl --user"))?;
 
     match status.code() {
         Some(0) => Ok(true),
         Some(3) => Ok(false),
         _ => Err(anyhow::anyhow!(
-            "systemctl --user is-active --quiet virtue.service exited with status {}",
+            "systemctl --user is-active --quiet {svc} exited with status {}",
             status
                 .code()
                 .map(|value| value.to_string())

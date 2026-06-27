@@ -9,6 +9,10 @@ const DEFAULT_BASE_API_URL: &str = "https://api.virtueinitiative.org";
 const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
 const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
 
+/// Set at build time by passing `VIRTUE_INSTANCE=<name>` to cargo. Controls
+/// which XDG subdirectory and systemd service name this binary uses.
+pub const INSTANCE: Option<&str> = option_env!("VIRTUE_INSTANCE");
+
 #[derive(Clone, Debug)]
 pub struct ClientPaths {
     pub config_dir: PathBuf,
@@ -23,12 +27,16 @@ impl ClientPaths {
             .context("failed to resolve config directory")?;
         let state_root = xdg_base_dir("XDG_STATE_HOME", ".local/state")
             .context("failed to resolve state directory")?;
-        Ok(Self::from_roots(config_root, state_root))
+        Ok(Self::from_roots(config_root, state_root, INSTANCE))
     }
 
-    fn from_roots(config_root: PathBuf, state_root: PathBuf) -> Self {
-        let config_dir = config_root.join("virtue");
-        let data_dir = state_root.join("virtue");
+    fn from_roots(config_root: PathBuf, state_root: PathBuf, instance: Option<&str>) -> Self {
+        let dir_name = match instance {
+            Some(n) if !n.is_empty() => format!("virtue-{n}"),
+            _ => "virtue".to_string(),
+        };
+        let config_dir = config_root.join(&dir_name);
+        let data_dir = state_root.join(&dir_name);
         Self {
             state_dir: data_dir.clone(),
             runtime_config_file: config_dir.join("config.json"),
@@ -87,7 +95,8 @@ mod tests {
 
     #[test]
     fn state_dir_is_under_state_root() {
-        let paths = ClientPaths::from_roots(PathBuf::from("/tmp/cfg"), PathBuf::from("/tmp/state"));
+        let paths =
+            ClientPaths::from_roots(PathBuf::from("/tmp/cfg"), PathBuf::from("/tmp/state"), None);
         assert_eq!(paths.state_dir, PathBuf::from("/tmp/state/virtue"));
         assert_eq!(paths.data_dir, PathBuf::from("/tmp/state/virtue"));
     }
@@ -97,6 +106,7 @@ mod tests {
         let paths = ClientPaths::from_roots(
             PathBuf::from("/home/user/.config"),
             PathBuf::from("/home/user/.local/state"),
+            None,
         );
         assert_eq!(paths.config_dir, PathBuf::from("/home/user/.config/virtue"));
         assert_eq!(
@@ -108,7 +118,7 @@ mod tests {
     #[test]
     fn fallback_paths_follow_xdg_spec_conventions() {
         let home = PathBuf::from("/home/testuser");
-        let paths = ClientPaths::from_roots(home.join(".config"), home.join(".local/state"));
+        let paths = ClientPaths::from_roots(home.join(".config"), home.join(".local/state"), None);
         assert_eq!(
             paths.state_dir,
             PathBuf::from("/home/testuser/.local/state/virtue")
@@ -117,5 +127,36 @@ mod tests {
             paths.config_dir,
             PathBuf::from("/home/testuser/.config/virtue")
         );
+    }
+
+    #[test]
+    fn instance_name_is_appended_to_dir_name() {
+        let paths = ClientPaths::from_roots(
+            PathBuf::from("/home/user/.config"),
+            PathBuf::from("/home/user/.local/state"),
+            Some("dev"),
+        );
+        assert_eq!(
+            paths.config_dir,
+            PathBuf::from("/home/user/.config/virtue-dev")
+        );
+        assert_eq!(
+            paths.state_dir,
+            PathBuf::from("/home/user/.local/state/virtue-dev")
+        );
+        assert_eq!(
+            paths.runtime_config_file,
+            PathBuf::from("/home/user/.config/virtue-dev/config.json")
+        );
+    }
+
+    #[test]
+    fn empty_instance_falls_back_to_default_dir_name() {
+        let paths = ClientPaths::from_roots(
+            PathBuf::from("/home/user/.config"),
+            PathBuf::from("/home/user/.local/state"),
+            Some(""),
+        );
+        assert_eq!(paths.config_dir, PathBuf::from("/home/user/.config/virtue"));
     }
 }
