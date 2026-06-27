@@ -7,6 +7,7 @@ use crate::events::bus::Observer;
 use crate::module::auth::AuthModule;
 use crate::module::capture_availability::CaptureAvailabilityModule;
 use crate::module::config::ConfigModule;
+use crate::module::heartbeat::HeartbeatModule;
 use crate::module::lifecycle::LifecycleModule;
 use crate::module::screenshot::ScreenshotModule;
 use crate::module::status::StatusModule;
@@ -50,7 +51,8 @@ where
             api.clone(),
             batch_interval_ms,
         )),
-        Box::new(CaptureAvailabilityModule::new(Box::new(platform))),
+        Box::new(CaptureAvailabilityModule::new(Box::new(platform.clone()))),
+        Box::new(HeartbeatModule::new(Box::new(platform))),
         Box::new(AuthModule::new(api, device_name, platform_name)),
         Box::new(StatusModule::new(STATUS_PARTIAL_COUNT)),
         Box::new(ConfigModule::new(config)),
