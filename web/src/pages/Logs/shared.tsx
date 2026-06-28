@@ -283,7 +283,7 @@ export function LogDetailDialog({
               <span class="logs-verify-badge logs-verify-badge--failed">⚠ Unverified</span>
             )}
             <a
-              class="vi-icon-btn logs-detail-help-link"
+              class="logs-detail-help-link"
               href={getLogHelpUrl(item)}
               target="_blank"
               rel="noreferrer"
