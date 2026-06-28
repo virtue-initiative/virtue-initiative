@@ -20,6 +20,16 @@ This project uses [Bun](https://bun.sh) as its package manager and runtime.
 
 ### First-time setup
 
+The NSFW screenshot model (`client/core/models/*.onnx`) is stored with
+[Git LFS](https://git-lfs.com). Install and pull it before building any client,
+or the risk classifier silently reports `0` for every screenshot (the client
+build now fails loudly if the model is still an unresolved LFS pointer):
+
+```
+git lfs install
+git lfs pull
+```
+
 Run the setup script from the repo root. It installs all dependencies, copies
 example config files, runs local database migrations, and installs/configures
 [Caddy](https://caddyserver.com) for HTTPS reverse-proxying:

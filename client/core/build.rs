@@ -17,11 +17,50 @@ fn main() {
     println!("cargo:rerun-if-changed=../version.properties");
     println!("cargo:rerun-if-changed=../../.git/HEAD");
 
+    assert_model_resolved();
+
     let build_label = build_label();
     println!("cargo:rustc-env=VIRTUE_BUILD_LABEL={build_label}");
 
     let default_api_url = default_api_base_url();
     println!("cargo:rustc-env=VIRTUE_DEFAULT_API_URL={default_api_url}");
+}
+
+/// The NSFW model is tracked by Git LFS and embedded into the binary via `include_bytes!`
+/// (`src/module/screenshot.rs`). If LFS objects aren't materialized at build time, the file on
+/// disk is a ~130-byte text *pointer*, which gets baked into the binary instead of the model.
+/// The classifier then fails to load and every screenshot risk is silently 0. Catch that here at
+/// build time — loudly — instead of shipping a broken detector.
+fn assert_model_resolved() {
+    const LFS_POINTER_MAGIC: &[u8] = b"version https://git-lfs.github.com/spec/v1";
+    // The real ONNX model is ~17 MB; any LFS pointer is well under 1 KiB. Anything below this is
+    // certainly not a usable model.
+    const MIN_MODEL_BYTES: u64 = 4096;
+
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let model_path = manifest_dir.join("models/nsfw_small_v1.onnx");
+    println!("cargo:rerun-if-changed=models/nsfw_small_v1.onnx");
+
+    let metadata = fs::metadata(&model_path).unwrap_or_else(|err| {
+        panic!(
+            "NSFW model {} is missing ({err}). Run `git lfs install && git lfs pull` before building.",
+            model_path.display()
+        )
+    });
+
+    let is_pointer = fs::read(&model_path)
+        .map(|bytes| bytes.starts_with(LFS_POINTER_MAGIC))
+        .unwrap_or(false);
+
+    if is_pointer || metadata.len() < MIN_MODEL_BYTES {
+        panic!(
+            "NSFW model {} is an unresolved Git LFS pointer ({} bytes), not the real ONNX. \
+             Run `git lfs install && git lfs pull` (and ensure CI checks out with `lfs: true`) \
+             before building, or the screenshot risk classifier will silently report 0.",
+            model_path.display(),
+            metadata.len()
+        );
+    }
 }
 
 fn build_label() -> String {

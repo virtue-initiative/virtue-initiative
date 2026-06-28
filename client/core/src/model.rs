@@ -81,6 +81,15 @@ pub enum UploadKind {
     Screenshot {
         image: Vec<u8>,
         content_type: String,
+        /// Raw skin-tone heuristic score ∈ [0.0, 1.0] from the risk classifier (dev metadata).
+        /// `None` on older logs or when no classifier was available.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        skin_detection: Option<f32>,
+        /// Raw NSFW model probability ∈ [0.0, 1.0] from the risk classifier (dev metadata).
+        /// `None` when the skin gate skipped the model, on older logs, or when no classifier
+        /// was available.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        nsfw_detection: Option<f32>,
     },
     Lifecycle {
         kind: LifecycleKind,

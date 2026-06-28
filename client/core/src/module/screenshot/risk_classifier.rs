@@ -14,6 +14,22 @@ const SKIN_GATE: f32 = 0.05; // below this contribution (~1.5% skin) skip the mo
 
 type NsfwModel = SimplePlan<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<dyn TypedOp>>>;
 
+/// Raw, unweighted outputs of the two-stage NSFW cascade plus the blended risk.
+///
+/// `risk` is what drives severity/alerting; `skin` and `nsfw` are the raw stage scores
+/// recorded on the log as low-level dev metadata so a reviewer can see *why* a frame scored
+/// the way it did.
+pub struct RiskScores {
+    /// Blended risk ∈ [0.0, 1.0] = `skin * SKIN_WEIGHT + nsfw * MODEL_WEIGHT` (or just the
+    /// skin contribution when the gate skips the model).
+    pub risk: f32,
+    /// Raw skin-tone heuristic score ∈ [0.0, 1.0], before weighting.
+    pub skin: f32,
+    /// Raw NSFW model probability ∈ [0.0, 1.0]. `None` when the skin gate skipped the model
+    /// (i.e. negligible skin), so it's distinguishable from "model ran and returned 0".
+    pub nsfw: Option<f32>,
+}
+
 pub struct RiskClassifier {
     model: NsfwModel,
 }
@@ -34,25 +50,34 @@ impl RiskClassifier {
         Ok(Self { model })
     }
 
-    /// Returns a risk score ∈ [0.0, 1.0] using a two-stage cascade:
+    /// Returns the [`RiskScores`] for an image using a two-stage cascade:
     ///
     /// 1. A cheap YCbCr skin-tone heuristic (~1ms, no model) contributes up to 30%.
     /// 2. Only when meaningful skin is present do we pay for the MobileNet NSFW model,
     ///    which contributes up to 70%.
     ///
     /// Most screenshots (terminals, code, docs) have negligible skin and return early
-    /// without any ONNX inference, keeping the daemon loop fast enough to avoid
-    /// `PingGapWhileRunning` false alerts.
-    pub fn classify(&self, image_bytes: &[u8]) -> CoreResult<f32> {
+    /// without any ONNX inference (`nsfw = None`), keeping the daemon loop fast enough to
+    /// avoid `PingGapWhileRunning` false alerts.
+    pub fn classify(&self, image_bytes: &[u8]) -> CoreResult<RiskScores> {
         let img = image::load_from_memory(image_bytes)?;
 
-        let contribution = skin_score(&img) * SKIN_WEIGHT;
+        let skin = skin_score(&img);
+        let contribution = skin * SKIN_WEIGHT;
         if contribution <= SKIN_GATE {
-            return Ok(contribution);
+            return Ok(RiskScores {
+                risk: contribution,
+                skin,
+                nsfw: None,
+            });
         }
 
         let model_score = self.run_inference(&img)?;
-        Ok(contribution + model_score * MODEL_WEIGHT)
+        Ok(RiskScores {
+            risk: contribution + model_score * MODEL_WEIGHT,
+            skin,
+            nsfw: Some(model_score),
+        })
     }
 
     /// Returns P(nsfw) ∈ [0.0, 1.0] from the MobileNetV2 model for the full image.

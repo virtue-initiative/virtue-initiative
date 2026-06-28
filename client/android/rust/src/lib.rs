@@ -7,7 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use jni::objects::{JByteArray, JClass, JString, JValue};
+use jni::objects::{GlobalRef, JByteArray, JClass, JString, JValue};
 use jni::sys::{jboolean, jstring};
 use jni::{JNIEnv, JavaVM};
 use once_cell::sync::OnceCell;
@@ -36,6 +36,8 @@ struct AndroidCore {
     state_dir: PathBuf,
     runtime_config_file: PathBuf,
     java_vm: Arc<JavaVM>,
+    // Cached at init time (main thread) so background threads can use the app class loader.
+    screenshot_service_class: Arc<GlobalRef>,
     stop: Arc<AtomicBool>,
     user_stop: Arc<AtomicBool>,
     daemon_running: Mutex<bool>,
@@ -44,6 +46,7 @@ struct AndroidCore {
 #[derive(Clone)]
 struct AndroidPlatformHooks {
     java_vm: Arc<JavaVM>,
+    screenshot_service_class: Arc<GlobalRef>,
 }
 
 impl AndroidPlatformHooks {
@@ -53,7 +56,7 @@ impl AndroidPlatformHooks {
         })?;
 
         env.call_static_method(
-            SCREENSHOT_SERVICE_CLASS,
+            &*self.screenshot_service_class,
             "captureStatusForDaemon",
             "()I",
             &[],
@@ -71,7 +74,12 @@ impl AndroidPlatformHooks {
         })?;
 
         let value = env
-            .call_static_method(SCREENSHOT_SERVICE_CLASS, "capturePngForDaemon", "()[B", &[])
+            .call_static_method(
+                &*self.screenshot_service_class,
+                "capturePngForDaemon",
+                "()[B",
+                &[],
+            )
             .map_err(|err| {
                 CoreError::CommandFailed(format!("capturePngForDaemon failed: {err}"))
             })?;
@@ -194,10 +202,20 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeInit(
 
         if CORE.get().is_none() {
             let java_vm = Arc::new(env.get_java_vm().context("failed to get JavaVM")?);
+            // Cache the ScreenshotService class here (main thread → app class loader).
+            // Background threads use the system class loader and cannot resolve app classes.
+            let class = env
+                .find_class(SCREENSHOT_SERVICE_CLASS)
+                .context("failed to find ScreenshotService class")?;
+            let screenshot_service_class = Arc::new(
+                env.new_global_ref(class)
+                    .context("failed to create GlobalRef for ScreenshotService")?,
+            );
             CORE.set(AndroidCore {
                 state_dir: PathBuf::from(data_dir),
                 runtime_config_file,
                 java_vm,
+                screenshot_service_class,
                 stop: Arc::new(AtomicBool::new(false)),
                 user_stop: Arc::new(AtomicBool::new(false)),
                 daemon_running: Mutex::new(false),
@@ -442,6 +460,7 @@ fn build_bus(core: &AndroidCore) -> Result<(EventBus, PathBuf)> {
         cfg,
         AndroidPlatformHooks {
             java_vm: core.java_vm.clone(),
+            screenshot_service_class: core.screenshot_service_class.clone(),
         },
     )?;
     let state_path = core.state_dir.join("event_state.json");
