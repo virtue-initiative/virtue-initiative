@@ -8,6 +8,8 @@ import {
   useDevices,
   usePartners,
 } from '../../utils/api';
+import { PageHeading } from '../../components/PageHeading';
+import { PartnersIcon } from '../../components/icons';
 import {
   Badge,
   Button,
@@ -84,6 +86,7 @@ export function Partners() {
 
   return (
     <div class="dashboard">
+      <PageHeading icon={<PartnersIcon />}>Partners</PageHeading>
       <section class="dashboard-section">
         <div class="dashboard-section-header">
           <h2>You monitor</h2>

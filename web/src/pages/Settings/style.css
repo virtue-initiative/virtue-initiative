@@ -1,14 +1,8 @@
 .settings-page {
   width: 100%;
   max-width: 640px;
-  padding: 2rem 1.25rem;
+  padding: 1rem 1.25rem;
   --settings-control-width: 20rem;
-}
-
-.settings-title {
-  margin: 0 0 1.5rem;
-  font-size: 1.5rem;
-  font-weight: 700;
 }
 
 .settings-section {
@@ -103,15 +97,11 @@
 
 @media (max-width: 600px) {
   .settings-page {
-    padding: 1.1rem 0.75rem;
+    padding: 1rem 0.75rem;
   }
 
   .settings-page .settings-section.vi-card {
     padding: 0.95rem;
-  }
-
-  .settings-title {
-    margin-bottom: 1.1rem;
   }
 
   .settings-section {

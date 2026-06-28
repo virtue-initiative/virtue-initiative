@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { LogQueryResult, useAPIContext, useDevices, usePartners } from '../../utils/api';
+import { PageHeading } from '../../components/PageHeading';
+import { LogsIcon } from '../../components/icons';
 import { LogsGallery } from './LogsGallery';
 import { LogsList } from './LogsList';
 import { getRiskRating, type RiskRating } from '@virtueinitiative/shared-web/risk';
@@ -15,52 +17,9 @@ const LOG_CATEGORIES = [
 ];
 import './style.css';
 import { useUrlState } from '../../hooks/useUrlState';
-import {
-  Button,
-  Dialog,
-  DialogHeader,
-  Field,
-  IconButton,
-  Select,
-} from '@virtueinitiative/shared-web';
+import { Button, Dialog, DialogHeader, Field, Select } from '@virtueinitiative/shared-web';
 import { cacheClient } from '../../utils/cache/client';
 import { formatRelativeTimestamp } from '../../utils/time';
-
-function ExpandIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      fill="none"
-      viewBox="0 0 24 24"
-      strokeWidth={1.5}
-      stroke="currentColor"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15"
-      />
-    </svg>
-  );
-}
-
-function ExitFullscreenIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      fill="none"
-      viewBox="0 0 24 24"
-      strokeWidth={1.5}
-      stroke="currentColor"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M9 9V4.5M9 9H4.5M9 9 3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5 5.25 5.25"
-      />
-    </svg>
-  );
-}
 
 function dateToBoundsStart(d: string): number {
   return new Date(d + 'T00:00:00').getTime();
@@ -103,7 +62,6 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
     'string',
     null,
   );
-  const [galleryFullscreen, setGalleryFullscreen] = useState(false);
   const [range, setRange] = useUrlState<RangeKey>('range', 'string', 'day');
   const [visibleDate, setVisibleDate] = useState<string | null>(null);
   const filterDialogRef = useRef<HTMLDialogElement>(null);
@@ -262,20 +220,12 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
     [logs, riskFilter, weekStart, weekEnd],
   );
 
-  useEffect(() => {
-    if (!isGallery) {
-      setGalleryFullscreen(false);
-    }
-  }, [isGallery]);
-
   return (
-    <div
-      class={`logs-page${isGallery && galleryFullscreen ? ' logs-page--gallery-fullscreen' : ''}`}
-    >
+    <div class="logs-page">
       <div class="logs-layout">
         <section class="logs-main">
           <div class="logs-header">
-            <h1>{title}</h1>
+            <PageHeading icon={<LogsIcon />}>{title}</PageHeading>
             <div class="logs-header-actions">
               <div class="logs-filter-section">
                 <div class="logs-inline-filters">
@@ -356,16 +306,6 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
                 </Button>
               </div>
               <div class="logs-header-view-controls">
-                {isGallery && (
-                  <IconButton
-                    class="logs-fullscreen-btn"
-                    onClick={() => setGalleryFullscreen((prev) => !prev)}
-                    aria-label={galleryFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-                    title={galleryFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-                  >
-                    {galleryFullscreen ? <ExitFullscreenIcon /> : <ExpandIcon />}
-                  </IconButton>
-                )}
                 <div class="vi-segmented-control logs-view-switcher">
                   <a
                     class={`vi-segmented-control__item${!isGallery ? ' is-active' : ''}`}
@@ -411,7 +351,6 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
               hasMore={false}
               onLoadMore={() => {}}
               deviceName={deviceName}
-              fullscreen={galleryFullscreen}
               onVisibleDateChange={setVisibleDate}
               viewerId={userId ?? ''}
             />

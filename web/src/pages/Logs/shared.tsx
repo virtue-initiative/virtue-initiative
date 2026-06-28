@@ -3,6 +3,7 @@ import { DataLog } from '../../utils/api/api';
 import { formatDate, formatTime } from '../../utils/time';
 import { Button, Dialog, DialogHeader } from '@virtueinitiative/shared-web';
 import { describeRiskLevel, getRiskLevel } from '@virtueinitiative/shared-web/risk';
+import { LANDING_URL } from '../../utils/landing-url';
 import { InformationCircleIcon, LogIcon } from './log-icons';
 
 import { loadEventImage } from '../../utils/api/event-image';
@@ -60,7 +61,7 @@ export function getLogCategory(log: DataLog): string {
 }
 
 /** Base URL of the help page documenting every log type. */
-export const LOG_TYPES_HELP_URL = 'https://virtueinitiative.org/help/web/log-types';
+export const LOG_TYPES_HELP_URL = `${LANDING_URL}/help/web/log-types`;
 
 /** Slugified anchor for a log's section on the log-types help page. Mirrors the
  * id markdown generates from the matching heading (the category title). */

@@ -1,6 +1,8 @@
 import { useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { Device, useAPIContext, useDevices } from '../../utils/api';
+import { PageHeading } from '../../components/PageHeading';
+import { DevicesIcon } from '../../components/icons';
 import {
   Badge,
   Button,
@@ -17,10 +19,11 @@ import {
   useToast,
 } from '@virtueinitiative/shared-web';
 import { formatRelativeTimestamp } from '../../utils/time';
+import { LANDING_URL } from '../../utils/landing-url';
 import './style.css';
 
-const DOWNLOAD_URL = 'https://virtueinitiative.org/download';
-const INSTALLATION_URL = 'https://virtueinitiative.org/help/installation/';
+const DOWNLOAD_URL = `${LANDING_URL}/download`;
+const INSTALLATION_URL = `${LANDING_URL}/help/installation`;
 
 export function Devices() {
   const api = useAPIContext();
@@ -38,26 +41,23 @@ export function Devices() {
 
   return (
     <div class="dashboard">
-      <section class="dashboard-section">
-        <div class="dashboard-section-header">
-          <h2>My devices</h2>
-          <AddDeviceButton />
-        </div>
-        {ownDevices.length === 0 ? (
-          <p class="empty">No devices</p>
-        ) : (
-          <CardGrid>
-            {ownDevices.map((device) => (
-              <DeviceCard
-                key={device.id}
-                device={device}
-                onUpdateDevice={updateDevice}
-                onRemoveDevice={removeDevice}
-              />
-            ))}
-          </CardGrid>
-        )}
-      </section>
+      <PageHeading icon={<DevicesIcon />} actions={<AddDeviceButton />}>
+        Devices
+      </PageHeading>
+      {ownDevices.length === 0 ? (
+        <p class="empty">No devices</p>
+      ) : (
+        <CardGrid>
+          {ownDevices.map((device) => (
+            <DeviceCard
+              key={device.id}
+              device={device}
+              onUpdateDevice={updateDevice}
+              onRemoveDevice={removeDevice}
+            />
+          ))}
+        </CardGrid>
+      )}
     </div>
   );
 }
