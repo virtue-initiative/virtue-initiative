@@ -13,7 +13,7 @@ import {
   passwordSaltFor,
   privateKeyFor,
   publicKeyFor,
-  signupAndGetToken,
+  signupAndGetCookie,
   uuidToBytes,
 } from './helpers';
 import { CURRENT_HASH_PARAMS, verifyPasswordAuth } from '../src/lib/password';
@@ -22,7 +22,7 @@ beforeEach(clearDB);
 
 describe('Auth routes', () => {
   it('returns the current hash params and login material in an enumeration-safe shape', async () => {
-    await signupAndGetToken('alice@example.com', 'correct horse');
+    await signupAndGetCookie('alice@example.com', 'correct horse');
 
     const paramsRes = await SELF.fetch(`${BASE}/current-hash-params`);
     expect(paramsRes.status).toBe(200);
@@ -107,10 +107,8 @@ describe('Auth routes', () => {
     expect(signupRes.headers.get('set-cookie')).toContain('refresh_token=');
 
     const signupBody = (await signupRes.json()) as {
-      access_token: string;
       user: { id: string; email: string; email_verified: boolean; name?: string };
     };
-    expect(signupBody.access_token).toEqual(expect.any(String));
     expect(signupBody.user).toMatchObject({
       email: 'alice@example.com',
       email_verified: true,
@@ -159,7 +157,7 @@ describe('Auth routes', () => {
   });
 
   it('rejects signup-request for an existing account', async () => {
-    await signupAndGetToken('taken@example.com', 'pw');
+    await signupAndGetCookie('taken@example.com', 'pw');
 
     const res = await SELF.fetch(`${BASE}/signup-request`, {
       method: 'POST',
@@ -169,8 +167,8 @@ describe('Auth routes', () => {
     expect(res.status).toBe(409);
   });
 
-  it('logs in with password_auth and refreshes an access token from the refresh cookie', async () => {
-    await signupAndGetToken('bob@example.com', 'pw');
+  it('logs in with password_auth and sets a refresh cookie', async () => {
+    await signupAndGetCookie('bob@example.com', 'pw');
 
     const loginRes = await SELF.fetch(`${BASE}/login`, {
       method: 'POST',
@@ -181,7 +179,11 @@ describe('Auth routes', () => {
       }),
     });
     expect(loginRes.status).toBe(200);
-    expect((await loginRes.json()) as { access_token: string }).toHaveProperty('access_token');
+    expect(loginRes.headers.get('set-cookie')).toContain('refresh_token=');
+    const loginBody = (await loginRes.json()) as { ok: boolean; refresh_token: string };
+    expect(loginBody).toMatchObject({ ok: true });
+    expect(typeof loginBody.refresh_token).toBe('string');
+    expect(loginBody.refresh_token.length).toBeGreaterThan(0);
 
     const badLoginRes = await SELF.fetch(`${BASE}/login`, {
       method: 'POST',
@@ -192,25 +194,17 @@ describe('Auth routes', () => {
       }),
     });
     expect(badLoginRes.status).toBe(401);
-
-    const cookie = loginRes.headers.get('set-cookie') ?? '';
-    const refreshRes = await SELF.fetch(`${BASE}/token`, {
-      method: 'POST',
-      headers: { Cookie: cookie },
-    });
-    expect(refreshRes.status).toBe(201);
-    expect((await refreshRes.json()) as { access_token: string }).toHaveProperty('access_token');
   });
 
   it('returns the current user and allows updating profile fields', async () => {
-    const { token, userId } = await signupAndGetToken('carol@example.com', 'pw', 'Carol');
+    const { cookie, userId } = await signupAndGetCookie('carol@example.com', 'pw', 'Carol');
 
     const nextPubKey = await publicKeyFor('carol-updated');
     const nextPrivKey = privateKeyFor('carol-updated');
 
     const patchRes = await SELF.fetch(`${BASE}/user`, {
       method: 'PATCH',
-      headers: authHeaders(token),
+      headers: authHeaders(cookie),
       body: JSON.stringify({
         name: 'Updated Carol',
         pub_key: nextPubKey,
@@ -220,7 +214,7 @@ describe('Auth routes', () => {
     expect(patchRes.status).toBe(200);
 
     const getRes = await SELF.fetch(`${BASE}/user`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: authHeaders(cookie),
     });
     expect(getRes.status).toBe(200);
 
@@ -239,7 +233,7 @@ describe('Auth routes', () => {
     await markUserEmailVerified(userId);
     const updateEmailRes = await SELF.fetch(`${BASE}/user`, {
       method: 'PATCH',
-      headers: authHeaders(token),
+      headers: authHeaders(cookie),
       body: JSON.stringify({ email: 'carol-new@example.com' }),
     });
     expect(updateEmailRes.status).toBe(200);
@@ -250,7 +244,7 @@ describe('Auth routes', () => {
     });
 
     const updatedUserRes = await SELF.fetch(`${BASE}/user`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: authHeaders(cookie),
     });
     const updatedBody = (await updatedUserRes.json()) as {
       email: string;
@@ -263,7 +257,7 @@ describe('Auth routes', () => {
 
     const updateSettingsRes = await SELF.fetch(`${BASE}/user`, {
       method: 'PATCH',
-      headers: authHeaders(token),
+      headers: authHeaders(cookie),
       body: JSON.stringify({
         settings: { email_frequency: 'weekly' },
       }),
@@ -271,7 +265,7 @@ describe('Auth routes', () => {
     expect(updateSettingsRes.status).toBe(200);
 
     const settingsUserRes = await SELF.fetch(`${BASE}/user`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: authHeaders(cookie),
     });
     expect(
       (await settingsUserRes.json()) as {
@@ -298,12 +292,12 @@ describe('Auth routes', () => {
     expect(latestVerificationToken?.email).toBe('carol-new@example.com');
   });
 
-  it('verifies email-change tokens', async () => {
-    const { token, userId } = await signupAndGetToken('verifyme@example.com', 'pw', 'Verify Me');
+  it('verifies email-change tokens and sets a new session cookie', async () => {
+    const { cookie, userId } = await signupAndGetCookie('verifyme@example.com', 'pw', 'Verify Me');
 
     const updateEmailRes = await SELF.fetch(`${BASE}/user`, {
       method: 'PATCH',
-      headers: authHeaders(token),
+      headers: authHeaders(cookie),
       body: JSON.stringify({ email: 'verifyme-new@example.com' }),
     });
     expect(updateEmailRes.status).toBe(200);
@@ -314,7 +308,7 @@ describe('Auth routes', () => {
     });
 
     const preChangeVerifyUserRes = await SELF.fetch(`${BASE}/user`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: authHeaders(cookie),
     });
     expect(await preChangeVerifyUserRes.json()).toMatchObject({
       email: 'verifyme@example.com',
@@ -333,21 +327,26 @@ describe('Auth routes', () => {
       body: JSON.stringify({ token: emailChangeToken }),
     });
     expect(verifyChangeRes.status).toBe(200);
+    expect(verifyChangeRes.headers.get('set-cookie')).toContain('refresh_token=');
+
     const verifyChangeBody = (await verifyChangeRes.json()) as {
       ok: boolean;
       email: string;
-      access_token: string;
       purpose: string;
     };
     expect(verifyChangeBody).toMatchObject({
       ok: true,
       email: 'verifyme-new@example.com',
-      access_token: expect.any(String),
       purpose: 'email_change',
     });
 
+    const newCookie = (verifyChangeRes.headers.get('set-cookie') ?? '').match(
+      /refresh_token=([^;]+)/,
+    )?.[1];
+    expect(newCookie).toBeTruthy();
+
     const userRes = await SELF.fetch(`${BASE}/user`, {
-      headers: { Authorization: `Bearer ${verifyChangeBody.access_token}` },
+      headers: authHeaders(newCookie!),
     });
     const userBody = (await userRes.json()) as {
       id: string;
@@ -358,22 +357,33 @@ describe('Auth routes', () => {
       email: 'verifyme-new@example.com',
       email_verified: true,
     });
+    void userId;
   });
 
   it('requires matching email confirmation and permanently deletes the account with cascaded data cleanup', async () => {
-    const { token, userId } = await signupAndGetToken('delete-me@example.com', 'pw', 'Delete Me');
-    const device = await createDeviceForUser(token, 'Phone', 'ios');
+    const { cookie, userId } = await signupAndGetCookie('delete-me@example.com', 'pw', 'Delete Me');
+    const device = await createDeviceForUser(cookie, 'Phone', 'ios');
+
+    const hashTokenRes = await SELF.fetch(`${BASE}/d/token`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${device.refresh_token}` },
+    });
+    expect(hashTokenRes.status).toBe(200);
+    const { hash_token } = (await hashTokenRes.json()) as { hash_token: string };
 
     const hashUploadRes = await SELF.fetch(`${BASE}/hash`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${device.access_token}` },
+      headers: { Authorization: `Bearer ${hash_token}` },
       body: new Uint8Array(32).fill(9),
     });
     expect(hashUploadRes.status).toBe(200);
 
     const logRes = await SELF.fetch(`${BASE}/d/log`, {
       method: 'POST',
-      headers: authHeaders(device.access_token),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${device.refresh_token}`,
+      },
       body: JSON.stringify({
         ts: 1710000000000,
         type: 'system_event',
@@ -394,7 +404,7 @@ describe('Auth routes', () => {
     form.set('file', new File([new Uint8Array([4, 5, 6])], 'batch.enc'));
     const batchRes = await SELF.fetch(`${BASE}/d/batch`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${device.access_token}` },
+      headers: { Authorization: `Bearer ${device.refresh_token}` },
       body: form,
     });
     expect(batchRes.status).toBe(201);
@@ -404,14 +414,14 @@ describe('Auth routes', () => {
 
     const badDeleteRes = await SELF.fetch(`${BASE}/user`, {
       method: 'DELETE',
-      headers: authHeaders(token),
+      headers: authHeaders(cookie),
       body: JSON.stringify({ confirm_email: 'wrong@example.com' }),
     });
     expect(badDeleteRes.status).toBe(400);
 
     const deleteRes = await SELF.fetch(`${BASE}/user`, {
       method: 'DELETE',
-      headers: authHeaders(token),
+      headers: authHeaders(cookie),
       body: JSON.stringify({ confirm_email: 'delete-me@example.com' }),
     });
     expect(deleteRes.status).toBe(204);
@@ -455,7 +465,7 @@ describe('Auth routes', () => {
   });
 
   it('requests and applies password resets with new auth material and keypair bytes', async () => {
-    const { userId } = await signupAndGetToken('reset@example.com', 'old-password', 'Reset User');
+    const { userId } = await signupAndGetCookie('reset@example.com', 'old-password', 'Reset User');
     await markUserEmailVerified(userId);
 
     const requestRes = await SELF.fetch(`${BASE}/password-reset`, {

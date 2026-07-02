@@ -11,8 +11,8 @@ Base URL examples:
 - `DateTime`: millisecond Unix timestamp
 - `Base64`: base64-encoded binary
 - `SHA256`: lowercase hex-encoded SHA-256 digest
-- `AccessToken`: EdDSA JWT (`Ed25519`) with `type: "access"` and `sub = user id`
-- `DeviceAccessToken`: EdDSA JWT (`Ed25519`) with `type: "device-access"` and `sub = device id`
+- `RefreshToken`: opaque web-session string. Set as the HTTPOnly `refresh_token` cookie by `POST /login`, `POST /signup`, and `POST /email-verification/validate`, and also returned in the `POST /login` body.
+- `HashServerToken`: EdDSA JWT (`Ed25519`) with `type: "hash-server"` and `sub = device id`
 - `DeviceRefreshToken`: opaque string returned by `POST /d/device`
 - `ServerToken`: EdDSA JWT (`Ed25519`) with `type: "server"` and `sub = device id`
 
@@ -40,6 +40,10 @@ Base URL examples:
   "email": "user@example.com",
   "email_verified": true,
   "email_bounced_at": DateTime | null,
+  "settings": {
+    "email_frequency": "none" | "alerts-only" | "daily" | "weekly",
+    "timezone": "America/New_York"
+  },
   "name": "Name" | undefined,
   "pub_key": Base64 | undefined,
   "priv_key": Base64 | undefined
@@ -55,6 +59,8 @@ Base URL examples:
   "name": "My Laptop",
   "platform": "linux",
   "last_upload_at": DateTime | null,
+  "last_hash_at": DateTime | null,
+  "pending_count": Number,
   "status": "online" | "offline"
 }
 ```
@@ -90,6 +96,20 @@ Base URL examples:
 ```
 
 ## Auth
+
+### `GET /`
+
+Health/info endpoint. No auth.
+
+Response `200`:
+
+```js
+{
+  "name": "Virtue Initiative API",
+  "version": "1.0.0",
+  "status": "ok"
+}
+```
 
 ### `GET /current-hash-params`
 
@@ -181,7 +201,6 @@ Response `201`:
 
 ```js
 {
-  "access_token": AccessToken,
   "user": {
     "id": UUID,
     "email": "user@example.com",
@@ -195,7 +214,7 @@ Notes:
 
 - Looks up the pending signup record by `verification_token`; returns `400` if expired/not found.
 - Creates the account using `email` from the pending record + crypto material from the body.
-- Account is created with `email_verified = true`. Sets the `refresh_token` cookie and returns an access token.
+- Account is created with `email_verified = true`. Sets the `refresh_token` cookie (auto-login on signup).
 - The signup token is consumed on success.
 - `partner_invite_token` is accepted for forwarding to the client and should be applied by the client through `POST /partner/accept` after signup.
 
@@ -206,7 +225,8 @@ Request:
 ```js
 {
   "email": "user@example.com",
-  "password_auth": Base64
+  "password_auth": Base64,
+  "timezone": "America/New_York" | undefined
 }
 ```
 
@@ -214,11 +234,13 @@ Response `200`:
 
 ```js
 {
-  "access_token": AccessToken
+  "ok": true,
+  "refresh_token": RefreshToken
 }
 ```
 
-If the credentials are valid but the account email is unverified, returns `403` with:
+Also sets the `refresh_token` cookie. If the credentials are valid but the account email is
+unverified, returns `403` with:
 
 ```js
 {
@@ -242,29 +264,14 @@ Response `200`:
 {
   "ok": true,
   "email": "user@example.com",
-  "access_token": AccessToken,
-  "purpose": "email_verification" | "email_change"
+  "purpose": "email_change"
 }
 ```
 
 Notes:
 
-- Marks the user email as verified, or applies a pending email change token.
+- Applies a pending `email_change` token; returns `400` for any other or expired token.
 - Also creates a web session and sets the `refresh_token` cookie (auto-login on verification).
-
-### `POST /email-verification`
-
-Requires a user `AccessToken`.
-
-Resends a verification email for the current account when `email_verified = false`.
-
-Response `200`:
-
-```js
-{
-  "ok": true
-}
-```
 
 ### `POST /logout`
 
@@ -272,21 +279,9 @@ Clears the `refresh_token` cookie.
 
 Response: `204 No Content`
 
-### `POST /token`
-
-Refreshes a user access token from the `refresh_token` cookie.
-
-Response `201`:
-
-```js
-{
-  "access_token": AccessToken
-}
-```
-
 ### `GET /user`
 
-Requires a user `AccessToken`.
+Requires an authenticated web session (the `refresh_token` cookie, or `Bearer <RefreshToken>`).
 
 Response `200`:
 
@@ -296,7 +291,7 @@ User;
 
 ### `PATCH /user`
 
-Requires a user `AccessToken`.
+Requires an authenticated web session (the `refresh_token` cookie, or `Bearer <RefreshToken>`).
 
 Request:
 
@@ -325,6 +320,23 @@ Notes:
 - When `email` is changed, the user email is **not** updated immediately.
 - A pending `email_change` token is sent to the new address.
 - Submitting that token to `POST /email-verification/validate` applies the email update.
+
+### `DELETE /user`
+
+Requires an authenticated web session (the `refresh_token` cookie, or `Bearer <RefreshToken>`).
+
+Permanently deletes the account and all of its stored batches. `confirm_email` must match the
+account email or the request returns `400`.
+
+Request:
+
+```js
+{
+  "confirm_email": "user@example.com"
+}
+```
+
+Response: `204 No Content` (also clears the `refresh_token` cookie).
 
 ### `POST /password-reset`
 
@@ -383,7 +395,7 @@ Response `200`:
 
 ### `POST /partner`
 
-Requires a user `AccessToken`.
+Requires an authenticated web session (the `refresh_token` cookie, or `Bearer <RefreshToken>`).
 
 Request:
 
@@ -430,7 +442,7 @@ Response `200`:
 
 ### `POST /partner/accept`
 
-Requires a user `AccessToken`.
+Requires an authenticated web session (the `refresh_token` cookie, or `Bearer <RefreshToken>`).
 
 Request:
 
@@ -450,7 +462,7 @@ Response `200`:
 
 ### `GET /partner`
 
-Requires a user `AccessToken`.
+Requires an authenticated web session (the `refresh_token` cookie, or `Bearer <RefreshToken>`).
 
 Response `200`:
 
@@ -486,7 +498,7 @@ Response `200`:
 
 ### `PATCH /partner/watching/:id`
 
-Requires a user `AccessToken`.
+Requires an authenticated web session (the `refresh_token` cookie, or `Bearer <RefreshToken>`).
 
 Request:
 
@@ -500,13 +512,65 @@ Response: `204 No Content`
 
 ### `DELETE /partner/watcher/:id`
 
-Requires a user `AccessToken`.
+Requires an authenticated web session (the `refresh_token` cookie, or `Bearer <RefreshToken>`).
 
 Response: `204 No Content`
 
 ### `DELETE /partner/watching/:id`
 
-Requires a user `AccessToken`.
+Requires an authenticated web session (the `refresh_token` cookie, or `Bearer <RefreshToken>`).
+
+Response: `204 No Content`
+
+## Devices
+
+User-facing device management. These are distinct from the device-authenticated `/d/*` routes
+below.
+
+### `GET /device`
+
+Requires an authenticated web session (the `refresh_token` cookie, or `Bearer <RefreshToken>`).
+
+Lists the requester's own devices plus those of users they watch. `last_hash_at` and
+`pending_count` reflect live hash-server state when a hash server is configured, otherwise the
+last values stored in D1.
+
+Response `200`:
+
+```js
+[Device];
+```
+
+### `PATCH /device/:id`
+
+Requires an authenticated web session (the `refresh_token` cookie, or `Bearer <RefreshToken>`).
+
+Renames a device the requester owns. Returns `404` if the device does not exist or is not owned by
+the requester.
+
+Request:
+
+```js
+{
+  "name": "New Device Name"
+}
+```
+
+Response `200`:
+
+```js
+{
+  "id": UUID,
+  "updated": true
+}
+```
+
+### `DELETE /device/:id`
+
+Requires an authenticated web session (the `refresh_token` cookie, or `Bearer <RefreshToken>`).
+
+Deletes a device the requester owns, along with its stored batches, and emails the owner and
+accepted watchers. Returns `404` if the device does not exist or is not owned by the requester.
 
 Response: `204 No Content`
 
@@ -514,7 +578,7 @@ Response: `204 No Content`
 
 ### `GET /data`
 
-Requires a user `AccessToken`.
+Requires an authenticated web session (the `refresh_token` cookie, or `Bearer <RefreshToken>`).
 
 Query parameters:
 
@@ -549,10 +613,9 @@ should pass the largest `created_at` they've seen as `since` on subsequent syncs
 
 The following routes use device auth:
 
-- `POST /d/device` uses a user `AccessToken`
-- `POST /d/token` uses a `DeviceRefreshToken`
-- `GET /d/device`, `POST /d/batch`, `POST /d/log`, `POST /hash`, `GET /hash`, and `DELETE /hash`
-  use a `DeviceAccessToken` or `ServerToken` as applicable
+- `POST /d/device` uses the authenticated web session cookie
+- `POST /d/token`, `GET /d/device`, `POST /d/batch`, and `POST /d/log` use a `DeviceRefreshToken`
+- `POST /hash`, `GET /hash`, and `DELETE /hash` use a `HashServerToken` or `ServerToken` as applicable
 
 ### `POST /d/device`
 
@@ -572,7 +635,6 @@ Response `201`:
 ```js
 {
   "id": UUID,
-  "access_token": DeviceAccessToken,
   "refresh_token": DeviceRefreshToken
 }
 ```
@@ -602,19 +664,13 @@ Response `200`:
 
 ### `POST /d/token`
 
-Request:
-
-```js
-{
-  "refresh_token": DeviceRefreshToken
-}
-```
+Exchanges the `DeviceRefreshToken` (sent as `Bearer`) for a short-lived hash-server JWT.
 
 Response `200`:
 
 ```js
 {
-  "access_token": DeviceAccessToken
+  "hash_token": HashServerToken
 }
 ```
 
@@ -682,6 +738,8 @@ Response `201`:
 
 ### `POST /hash`
 
+Requires a `HashServerToken`.
+
 Uploads a single 32-byte plaintext content hash for the device hash chain.
 
 Response `200`:
@@ -694,10 +752,55 @@ Response `200`:
 
 ### `GET /hash`
 
+Requires a `HashServerToken`.
+
 Returns the current 32-byte hash-chain state as binary.
+
+### `GET /hash/info`
+
+Requires a `HashServerToken` or `ServerToken`.
+
+Returns hash-chain metadata for the device.
+
+Response `200`:
+
+```js
+{
+  "count": Number,
+  "hashed_at": DateTime | null,
+  "updated_at": DateTime | null
+}
+```
 
 ### `DELETE /hash`
 
 Requires a `ServerToken`.
 
 Resets the current device hash-chain state.
+
+## Object storage
+
+### `GET /r2/*`
+
+Serves an object from the R2 bucket by key (the path after `/r2/`). This is where the
+`url` on a `BatchData` points, so clients fetch encrypted batch blobs here. No auth: blobs are
+end-to-end encrypted and only decryptable by recipients holding the wrapped batch key.
+
+Response `200`: the raw object body with its stored content headers and `etag`. Returns `404` if
+the key is missing or not found.
+
+## Webhooks
+
+### `POST /email/sns`
+
+Inbound AWS SNS webhook for SES delivery events; not called by clients. Confirms the SNS
+subscription (`SubscriptionConfirmation`) and processes `Bounce`/`Complaint` notifications by
+marking the affected users' emails as bounced and unverified.
+
+Response `200`:
+
+```js
+{ "ok": true, "subscribed": true }   // SubscriptionConfirmation
+{ "ok": true, "updated": Number }    // Bounce/Complaint notification
+{ "ok": true }                        // ignored event
+```

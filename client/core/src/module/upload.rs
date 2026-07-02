@@ -421,7 +421,6 @@ mod tests {
     fn valid_credentials() -> DeviceCredentials {
         DeviceCredentials {
             device_id: "test-device".into(),
-            access_token: "test-access".into(),
             refresh_token: "test-refresh".into(),
         }
     }

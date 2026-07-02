@@ -54,24 +54,8 @@ pub struct DeviceSettingsRefreshed {
 
 const SETTINGS_REFRESH_INTERVAL_PINGS: u32 = 3600;
 
-fn with_device_token_retry<A: ApiTransport, T>(
-    api: &A,
-    credentials: &mut DeviceCredentials,
-    mut op: impl FnMut(&A, &str) -> CoreResult<T>,
-) -> CoreResult<T> {
-    match op(api, &credentials.access_token) {
-        Err(e) if e.is_unauthorized() => {
-            let refreshed = api.refresh_device_token(&credentials.refresh_token)?;
-            credentials.access_token = refreshed.clone();
-            op(api, &refreshed)
-        }
-        other => other,
-    }
-}
-
 #[derive(Serialize, Deserialize, Default)]
 pub struct AuthObserverState {
-    pub user_access_token: Option<String>,
     pub device_credentials: Option<DeviceCredentials>,
 }
 
@@ -132,20 +116,17 @@ impl<A: ApiTransport + Send + Sync + 'static> AuthModule<A> {
         password: &str,
         device_name: Option<&str>,
     ) -> CoreResult<(DeviceCredentials, crate::model::DeviceSettings)> {
-        let access_token = self.api.login(email, password)?;
+        let user_token = self.api.login(email, password)?;
         // Use the user-supplied override when present and non-empty (trimmed),
         // otherwise fall back to the construction-time device name (hostname).
         let resolved_name = device_name
             .map(str::trim)
             .filter(|name| !name.is_empty())
             .unwrap_or(self.device_name.as_str());
-        let mut device =
-            self.api
-                .register_device(&access_token, resolved_name, &self.platform_name)?;
-        let settings = with_device_token_retry(&self.api, &mut device, |api, token| {
-            api.get_device_settings(token)
-        })?;
-        self.state.user_access_token = Some(access_token);
+        let device = self
+            .api
+            .register_device(&user_token, resolved_name, &self.platform_name)?;
+        let settings = self.api.get_device_settings(&device.refresh_token)?;
         self.state.device_credentials = Some(device.clone());
         self.needs_settings_refresh = false;
         self.pings_without_refresh = 0;
@@ -153,10 +134,7 @@ impl<A: ApiTransport + Send + Sync + 'static> AuthModule<A> {
     }
 
     fn handle_logout_requested(&mut self, emitter: &Emitter) {
-        if let Some(token) = self.state.user_access_token.clone() {
-            let _ = self.api.logout(&token);
-        }
-        self.state.user_access_token = None;
+        let _ = self.api.logout();
         self.state.device_credentials = None;
         self.needs_settings_refresh = false;
         self.pings_without_refresh = 0;
@@ -191,22 +169,22 @@ impl<A: ApiTransport + Send + Sync + 'static> AuthModule<A> {
     }
 
     fn refresh_settings(&mut self, emitter: &Emitter) -> CoreResult<crate::model::DeviceSettings> {
-        let mut credentials = self
+        let credentials = self
             .state
             .device_credentials
             .clone()
             .ok_or(CoreError::NotAuthenticated)?;
-        let result = with_device_token_retry(&self.api, &mut credentials, |api, token| {
-            api.get_device_settings(token)
-        });
+        let result = self.api.get_device_settings(&credentials.refresh_token);
         match result {
-            Ok(settings) => {
-                self.state.device_credentials = Some(credentials);
-                Ok(settings)
-            }
+            Ok(settings) => Ok(settings),
             Err(err) if err.is_not_found() => {
                 log_error("device not found; clearing local auth", Some(&err));
-                self.state.user_access_token = None;
+                self.state.device_credentials = None;
+                let _ = emitter.send(Logout);
+                Err(CoreError::NotAuthenticated)
+            }
+            Err(err) if err.is_unauthorized() => {
+                log_error("device unauthorized; clearing local auth", Some(&err));
                 self.state.device_credentials = None;
                 let _ = emitter.send(Logout);
                 Err(CoreError::NotAuthenticated)

@@ -88,8 +88,7 @@ mod tests {
         let api = MockApiClient::new();
         let inspector = api.clone();
 
-        let token = api.login("alice@example.org", "secret").unwrap();
-        assert_eq!(token, "mock-access-token");
+        api.login("alice@example.org", "secret").unwrap();
         assert_eq!(inspector.state().login_calls.len(), 1);
 
         api.program_batch(Ok(crate::api::UploadedBatchResponse {

@@ -191,7 +191,6 @@ pub struct BatchAccessKey {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceCredentials {
     pub device_id: String,
-    pub access_token: String,
     pub refresh_token: String,
 }
 
@@ -225,15 +224,8 @@ pub struct HashParams {
     pub hkdf_hash: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LoginStatus {
-    pub access_token: String,
-    pub device: Option<DeviceCredentials>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AuthState {
-    pub user_access_token: Option<String>,
     pub device_credentials: Option<DeviceCredentials>,
 }
 

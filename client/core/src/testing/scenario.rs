@@ -45,10 +45,8 @@ impl Scenario {
     /// disk, so the service comes up authenticated and ready to upload.
     pub fn authenticated() -> Self {
         let auth = AuthState {
-            user_access_token: Some("scenario-user-token".into()),
             device_credentials: Some(DeviceCredentials {
                 device_id: "scenario-device".into(),
-                access_token: "scenario-device-access".into(),
                 refresh_token: "scenario-device-refresh".into(),
             }),
         };

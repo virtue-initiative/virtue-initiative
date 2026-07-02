@@ -7,7 +7,7 @@ import {
   createDeviceForUser,
   listEmailDeliveries,
   markUserEmailVerified,
-  signupAndGetToken,
+  signupAndGetCookie,
   uuidToBytes,
 } from './helpers';
 
@@ -15,8 +15,8 @@ beforeEach(clearDB);
 
 describe('Notification routes and tamper alerts', () => {
   it('stores notification frequency on the user and reflects it across monitored partners', async () => {
-    const { token: ownerToken } = await signupAndGetToken('notify-owner@example.com', 'pw');
-    const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
+    const { cookie: ownerCookie } = await signupAndGetCookie('notify-owner@example.com', 'pw');
+    const { cookie: partnerCookie, userId: partnerUserId } = await signupAndGetCookie(
       'notify-partner@example.com',
       'pw',
     );
@@ -24,7 +24,7 @@ describe('Notification routes and tamper alerts', () => {
 
     const createRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
-      headers: authHeaders(ownerToken),
+      headers: authHeaders(ownerCookie),
       body: JSON.stringify({
         email: 'notify-partner@example.com',
       }),
@@ -39,12 +39,12 @@ describe('Notification routes and tamper alerts', () => {
 
     await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
-      headers: authHeaders(partnerToken),
+      headers: authHeaders(partnerCookie),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
 
     const listRes = await SELF.fetch(`${BASE}/partner`, {
-      headers: { Authorization: `Bearer ${partnerToken}` },
+      headers: authHeaders(partnerCookie),
     });
     expect(listRes.status).toBe(200);
     const list = (await listRes.json()) as {
@@ -62,7 +62,7 @@ describe('Notification routes and tamper alerts', () => {
 
     const patchRes = await SELF.fetch(`${BASE}/user`, {
       method: 'PATCH',
-      headers: authHeaders(partnerToken),
+      headers: authHeaders(partnerCookie),
       body: JSON.stringify({
         settings: { email_frequency: 'alerts-only' },
       }),
@@ -70,7 +70,7 @@ describe('Notification routes and tamper alerts', () => {
     expect(patchRes.status).toBe(200);
 
     const userRes = await SELF.fetch(`${BASE}/user`, {
-      headers: { Authorization: `Bearer ${partnerToken}` },
+      headers: authHeaders(partnerCookie),
     });
     expect(userRes.status).toBe(200);
     expect((await userRes.json()) as { settings: { email_frequency: string } }).toMatchObject({
@@ -78,7 +78,7 @@ describe('Notification routes and tamper alerts', () => {
     });
 
     const updatedRes = await SELF.fetch(`${BASE}/partner`, {
-      headers: { Authorization: `Bearer ${partnerToken}` },
+      headers: authHeaders(partnerCookie),
     });
     const updated = (await updatedRes.json()) as {
       watching: Array<{
@@ -93,8 +93,8 @@ describe('Notification routes and tamper alerts', () => {
   });
 
   it('sends immediate tamper alerts for high-risk device log events', async () => {
-    const { token: ownerToken } = await signupAndGetToken('alerts-owner@example.com', 'pw');
-    const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
+    const { cookie: ownerCookie } = await signupAndGetCookie('alerts-owner@example.com', 'pw');
+    const { cookie: partnerCookie, userId: partnerUserId } = await signupAndGetCookie(
       'alerts-partner@example.com',
       'pw',
     );
@@ -102,7 +102,7 @@ describe('Notification routes and tamper alerts', () => {
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
-      headers: authHeaders(ownerToken),
+      headers: authHeaders(ownerCookie),
       body: JSON.stringify({
         email: 'alerts-partner@example.com',
       }),
@@ -117,14 +117,17 @@ describe('Notification routes and tamper alerts', () => {
 
     await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
-      headers: authHeaders(partnerToken),
+      headers: authHeaders(partnerCookie),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
 
-    const device = await createDeviceForUser(ownerToken, 'Workstation', 'linux');
+    const device = await createDeviceForUser(ownerCookie, 'Workstation', 'linux');
     const logRes = await SELF.fetch(`${BASE}/d/log`, {
       method: 'POST',
-      headers: authHeaders(device.access_token),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${device.refresh_token}`,
+      },
       body: JSON.stringify({ ts: Date.now(), type: 'service_stop', risk: 0.7, data: {} }),
     });
 
@@ -147,8 +150,8 @@ describe('Notification routes and tamper alerts', () => {
   });
 
   it('does not send immediate tamper alerts for moderate-risk device log events', async () => {
-    const { token: ownerToken } = await signupAndGetToken('moderate-owner@example.com', 'pw');
-    const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
+    const { cookie: ownerCookie } = await signupAndGetCookie('moderate-owner@example.com', 'pw');
+    const { cookie: partnerCookie, userId: partnerUserId } = await signupAndGetCookie(
       'moderate-partner@example.com',
       'pw',
     );
@@ -156,7 +159,7 @@ describe('Notification routes and tamper alerts', () => {
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
-      headers: authHeaders(ownerToken),
+      headers: authHeaders(ownerCookie),
       body: JSON.stringify({
         email: 'moderate-partner@example.com',
       }),
@@ -171,15 +174,18 @@ describe('Notification routes and tamper alerts', () => {
 
     await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
-      headers: authHeaders(partnerToken),
+      headers: authHeaders(partnerCookie),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
 
-    const device = await createDeviceForUser(ownerToken, 'Laptop', 'linux');
+    const device = await createDeviceForUser(ownerCookie, 'Laptop', 'linux');
     const baselineCount = (await listEmailDeliveries()).length;
     const logRes = await SELF.fetch(`${BASE}/d/log`, {
       method: 'POST',
-      headers: authHeaders(device.access_token),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${device.refresh_token}`,
+      },
       body: JSON.stringify({ ts: Date.now(), type: 'service_stop', risk: 0.69, data: {} }),
     });
 
@@ -188,8 +194,8 @@ describe('Notification routes and tamper alerts', () => {
   });
 
   it('treats zero or absent risk as non-tamper', async () => {
-    const { token: ownerToken } = await signupAndGetToken('non-tamper-owner@example.com', 'pw');
-    const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
+    const { cookie: ownerCookie } = await signupAndGetCookie('non-tamper-owner@example.com', 'pw');
+    const { cookie: partnerCookie, userId: partnerUserId } = await signupAndGetCookie(
       'non-tamper-partner@example.com',
       'pw',
     );
@@ -197,7 +203,7 @@ describe('Notification routes and tamper alerts', () => {
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
-      headers: authHeaders(ownerToken),
+      headers: authHeaders(ownerCookie),
       body: JSON.stringify({
         email: 'non-tamper-partner@example.com',
       }),
@@ -212,23 +218,29 @@ describe('Notification routes and tamper alerts', () => {
 
     await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
-      headers: authHeaders(partnerToken),
+      headers: authHeaders(partnerCookie),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
 
-    const device = await createDeviceForUser(ownerToken, 'Desktop', 'linux');
+    const device = await createDeviceForUser(ownerCookie, 'Desktop', 'linux');
     const baselineCount = (await listEmailDeliveries()).length;
 
     const zeroRiskRes = await SELF.fetch(`${BASE}/d/log`, {
       method: 'POST',
-      headers: authHeaders(device.access_token),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${device.refresh_token}`,
+      },
       body: JSON.stringify({ ts: Date.now(), type: 'heartbeat', risk: 0, data: {} }),
     });
     expect(zeroRiskRes.status).toBe(201);
 
     const missingRiskRes = await SELF.fetch(`${BASE}/d/log`, {
       method: 'POST',
-      headers: authHeaders(device.access_token),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${device.refresh_token}`,
+      },
       body: JSON.stringify({ ts: Date.now(), type: 'heartbeat', data: {} }),
     });
     expect(missingRiskRes.status).toBe(201);
@@ -237,8 +249,8 @@ describe('Notification routes and tamper alerts', () => {
   });
 
   it('stops all partner emails when receive emails is disabled', async () => {
-    const { token: ownerToken } = await signupAndGetToken('mute-owner@example.com', 'pw');
-    const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
+    const { cookie: ownerCookie } = await signupAndGetCookie('mute-owner@example.com', 'pw');
+    const { cookie: partnerCookie, userId: partnerUserId } = await signupAndGetCookie(
       'mute-partner@example.com',
       'pw',
     );
@@ -246,7 +258,7 @@ describe('Notification routes and tamper alerts', () => {
 
     const createRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
-      headers: authHeaders(ownerToken),
+      headers: authHeaders(ownerCookie),
       body: JSON.stringify({
         email: 'mute-partner@example.com',
       }),
@@ -261,20 +273,23 @@ describe('Notification routes and tamper alerts', () => {
 
     await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
-      headers: authHeaders(partnerToken),
+      headers: authHeaders(partnerCookie),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
     await SELF.fetch(`${BASE}/user`, {
       method: 'PATCH',
-      headers: authHeaders(partnerToken),
+      headers: authHeaders(partnerCookie),
       body: JSON.stringify({ settings: { email_frequency: 'none' } }),
     });
 
-    const device = await createDeviceForUser(ownerToken, 'Muted Device', 'linux');
+    const device = await createDeviceForUser(ownerCookie, 'Muted Device', 'linux');
     const baselineCount = (await listEmailDeliveries()).length;
     const logRes = await SELF.fetch(`${BASE}/d/log`, {
       method: 'POST',
-      headers: authHeaders(device.access_token),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${device.refresh_token}`,
+      },
       body: JSON.stringify({ ts: Date.now(), type: 'service_stop', risk: 1, data: {} }),
     });
 
@@ -285,15 +300,15 @@ describe('Notification routes and tamper alerts', () => {
   });
 
   it('suppresses tamper alerts to unverified recipient accounts', async () => {
-    const { token: ownerToken } = await signupAndGetToken('unverified-owner@example.com', 'pw');
-    const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
+    const { cookie: ownerCookie } = await signupAndGetCookie('unverified-owner@example.com', 'pw');
+    const { cookie: partnerCookie, userId: partnerUserId } = await signupAndGetCookie(
       'unverified-partner@example.com',
       'pw',
     );
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
-      headers: authHeaders(ownerToken),
+      headers: authHeaders(ownerCookie),
       body: JSON.stringify({
         email: 'unverified-partner@example.com',
       }),
@@ -308,18 +323,21 @@ describe('Notification routes and tamper alerts', () => {
 
     await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
-      headers: authHeaders(partnerToken),
+      headers: authHeaders(partnerCookie),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
     await env.DB.prepare('UPDATE users SET email_verified = 0 WHERE id = ?')
       .bind(uuidToBytes(partnerUserId))
       .run();
 
-    const device = await createDeviceForUser(ownerToken, 'Quiet Device', 'linux');
+    const device = await createDeviceForUser(ownerCookie, 'Quiet Device', 'linux');
     const baselineCount = (await listEmailDeliveries()).length;
     const logRes = await SELF.fetch(`${BASE}/d/log`, {
       method: 'POST',
-      headers: authHeaders(device.access_token),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${device.refresh_token}`,
+      },
       body: JSON.stringify({ ts: Date.now(), type: 'service_stop', risk: 1, data: {} }),
     });
 

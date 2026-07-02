@@ -4,9 +4,6 @@ import { TEST_DEVICES, TEST_USER, TEST_WATCHER, TEST_WATCHING } from './fixtures
 const BASE = 'http://localhost:8787';
 
 export const handlers = [
-  // ── Token refresh ──────────────────────────────────────────────────────
-  http.post(`${BASE}/token`, () => HttpResponse.json({ access_token: 'test-access-token' })),
-
   // ── Hash params ────────────────────────────────────────────────────────
   http.get(`${BASE}/current-hash-params`, () =>
     HttpResponse.json({
@@ -28,11 +25,15 @@ export const handlers = [
   ),
 
   // ── Login ──────────────────────────────────────────────────────────────
-  http.post(`${BASE}/login`, () => HttpResponse.json({ access_token: 'test-access-token' })),
+  http.post(`${BASE}/login`, () => HttpResponse.json({ ok: true, refresh_token: 'mock-token' })),
 
   // ── Signup ─────────────────────────────────────────────────────────────
   http.post(`${BASE}/signup-request`, () => HttpResponse.json({ ok: true })),
-  http.post(`${BASE}/signup`, () => HttpResponse.json({ access_token: 'test-access-token' })),
+  http.post(`${BASE}/signup`, () =>
+    HttpResponse.json({
+      user: { id: 'test-user-id', email: 'test@example.com', email_verified: true },
+    }),
+  ),
 
   // ── Logout ─────────────────────────────────────────────────────────────
   http.post(`${BASE}/logout`, () => new HttpResponse(null, { status: 204 })),

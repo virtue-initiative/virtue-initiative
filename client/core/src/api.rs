@@ -22,29 +22,29 @@ pub struct UploadedLogResponse {
 
 pub trait ApiTransport: Send + Sync {
     fn login(&self, username: &str, password: &str) -> CoreResult<String>;
-    fn logout(&self, access_token: &str) -> CoreResult<()>;
+    fn logout(&self) -> CoreResult<()>;
     fn register_device(
         &self,
-        access_token: &str,
+        user_refresh_token: &str,
         name: &str,
         platform: &str,
     ) -> CoreResult<DeviceCredentials>;
-    fn get_device_settings(&self, device_access_token: &str) -> CoreResult<DeviceSettings>;
-    fn refresh_device_token(&self, refresh_token: &str) -> CoreResult<String>;
+    fn get_device_settings(&self, device_refresh_token: &str) -> CoreResult<DeviceSettings>;
+    fn get_hash_token(&self, device_refresh_token: &str) -> CoreResult<String>;
     fn upload_batch(
         &self,
-        device_access_token: &str,
+        device_refresh_token: &str,
         batch: &BatchUpload,
     ) -> CoreResult<UploadedBatchResponse>;
     fn upload_log(
         &self,
-        device_access_token: &str,
+        device_refresh_token: &str,
         log: &LogEntry,
     ) -> CoreResult<UploadedLogResponse>;
     fn upload_hash(
         &self,
         hash_base_url: Option<&str>,
-        device_access_token: &str,
+        hash_jwt: &str,
         content_hash: &[u8; 32],
     ) -> CoreResult<()>;
 
@@ -85,14 +85,14 @@ impl ApiTransport for ReqwestApiClient {
         }
 
         #[derive(Deserialize)]
-        struct LoginResponse {
-            access_token: String,
-        }
-
-        #[derive(Deserialize)]
         struct LoginMaterialResponse {
             password_salt: String,
             params: HashParams,
+        }
+
+        #[derive(Deserialize)]
+        struct LoginResponse {
+            refresh_token: String,
         }
 
         let material: LoginMaterialResponse = self.expect_json(
@@ -114,16 +114,16 @@ impl ApiTransport for ReqwestApiClient {
                 password_auth: base64::engine::general_purpose::STANDARD.encode(password_auth),
             }),
         )?;
-        Ok(response.access_token)
+        Ok(response.refresh_token)
     }
 
-    fn logout(&self, access_token: &str) -> CoreResult<()> {
-        self.send_empty(Method::POST, None, "/logout", Some(access_token))
+    fn logout(&self) -> CoreResult<()> {
+        self.send_empty(Method::POST, None, "/logout", None, None::<&()>)
     }
 
     fn register_device(
         &self,
-        access_token: &str,
+        user_refresh_token: &str,
         name: &str,
         platform: &str,
     ) -> CoreResult<DeviceCredentials> {
@@ -136,7 +136,6 @@ impl ApiTransport for ReqwestApiClient {
         #[derive(Deserialize)]
         struct RegisterDeviceResponse {
             id: String,
-            access_token: String,
             refresh_token: String,
         }
 
@@ -144,18 +143,17 @@ impl ApiTransport for ReqwestApiClient {
             Method::POST,
             None,
             "/d/device",
-            Some(access_token),
+            Some(user_refresh_token),
             Some(&RegisterDeviceRequest { name, platform }),
         )?;
 
         Ok(DeviceCredentials {
             device_id: response.id,
-            access_token: response.access_token,
             refresh_token: response.refresh_token,
         })
     }
 
-    fn get_device_settings(&self, device_access_token: &str) -> CoreResult<DeviceSettings> {
+    fn get_device_settings(&self, device_refresh_token: &str) -> CoreResult<DeviceSettings> {
         #[derive(Deserialize)]
         struct DeviceSettingsResponse {
             id: String,
@@ -176,7 +174,7 @@ impl ApiTransport for ReqwestApiClient {
             Method::GET,
             None,
             "/d/device",
-            Some(device_access_token),
+            Some(device_refresh_token),
             None::<&()>,
         )?;
         Ok(DeviceSettings {
@@ -199,30 +197,25 @@ impl ApiTransport for ReqwestApiClient {
         })
     }
 
-    fn refresh_device_token(&self, refresh_token: &str) -> CoreResult<String> {
-        #[derive(Serialize)]
-        struct RefreshRequest<'a> {
-            refresh_token: &'a str,
-        }
-
+    fn get_hash_token(&self, device_refresh_token: &str) -> CoreResult<String> {
         #[derive(Deserialize)]
-        struct RefreshResponse {
-            access_token: String,
+        struct HashTokenResponse {
+            hash_token: String,
         }
 
-        let response: RefreshResponse = self.send_json(
+        let response: HashTokenResponse = self.send_json(
             Method::POST,
             None,
             "/d/token",
-            None,
-            Some(&RefreshRequest { refresh_token }),
+            Some(device_refresh_token),
+            None::<&()>,
         )?;
-        Ok(response.access_token)
+        Ok(response.hash_token)
     }
 
     fn upload_batch(
         &self,
-        device_access_token: &str,
+        device_refresh_token: &str,
         batch: &BatchUpload,
     ) -> CoreResult<UploadedBatchResponse> {
         #[derive(Serialize)]
@@ -255,19 +248,19 @@ impl ApiTransport for ReqwestApiClient {
             .text("end_time", batch.end_time_ms.to_string())
             .text("access_keys", access_keys);
 
-        self.send_form(Method::POST, None, "/d/batch", device_access_token, form)
+        self.send_form(Method::POST, None, "/d/batch", device_refresh_token, form)
     }
 
     fn upload_log(
         &self,
-        device_access_token: &str,
+        device_refresh_token: &str,
         log: &LogEntry,
     ) -> CoreResult<UploadedLogResponse> {
         self.send_json(
             Method::POST,
             None,
             "/d/log",
-            Some(device_access_token),
+            Some(device_refresh_token),
             Some(log),
         )
     }
@@ -275,16 +268,11 @@ impl ApiTransport for ReqwestApiClient {
     fn upload_hash(
         &self,
         hash_base_url: Option<&str>,
-        device_access_token: &str,
+        hash_jwt: &str,
         content_hash: &[u8; 32],
     ) -> CoreResult<()> {
         let response = self
-            .request(
-                Method::POST,
-                hash_base_url,
-                "/hash",
-                Some(device_access_token),
-            )
+            .request(Method::POST, hash_base_url, "/hash", Some(hash_jwt))
             .header("Content-Type", "application/octet-stream")
             .body(content_hash.to_vec())
             .send()?;
@@ -314,16 +302,22 @@ impl ReqwestApiClient {
         self.expect_json(response)
     }
 
-    fn send_empty(
+    fn send_empty<TBody>(
         &self,
         method: Method,
         base_override: Option<&str>,
         path: &str,
         bearer_token: Option<&str>,
-    ) -> CoreResult<()> {
-        let response = self
-            .request(method, base_override, path, bearer_token)
-            .send()?;
+        body: Option<&TBody>,
+    ) -> CoreResult<()>
+    where
+        TBody: Serialize + ?Sized,
+    {
+        let mut request = self.request(method, base_override, path, bearer_token);
+        if let Some(body) = body {
+            request = request.json(body);
+        }
+        let response = request.send()?;
         self.expect_success(response)
     }
 

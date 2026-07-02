@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { authenticate } from '../middleware/auth';
+import { authenticateWebSession } from '../middleware/auth';
 import { canViewUserData, listBatches, listDeviceLogs } from '../lib/db';
 import { validateZ } from '../middleware/validation';
 import { Env, Variables } from '../types/bindings';
@@ -27,7 +27,7 @@ const listDataSchema = z.object({
   since: z.coerce.number().int().nonnegative().optional().default(0),
 });
 
-data.get('/', authenticate('access'), validateZ('query', listDataSchema), async (c) => {
+data.get('/', authenticateWebSession(), validateZ('query', listDataSchema), async (c) => {
   const requesterId = c.get('sub');
   const { device_id, user, since } = c.req.valid('query');
   const targetUserId = user ?? requesterId;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateAccessToken, verifyJWT } from '../src/lib/jwt';
+import { generateToken, verifyJWT } from '../src/lib/jwt';
 import { generatePasswordSalt, hashPasswordAuth, verifyPasswordAuth } from '../src/lib/password';
 import {
   TEST_JWT_PRIVATE_KEY,
@@ -30,15 +30,22 @@ describe('Password auth hashing', () => {
 });
 
 describe('JWT tokens', () => {
-  it('generates and verifies an access token', async () => {
-    const token = await generateAccessToken('user-123', TEST_JWT_PRIVATE_KEY, 900);
+  it('generates and verifies a server token', async () => {
+    const token = await generateToken('server', 'device-123', TEST_JWT_PRIVATE_KEY, 60);
     const payload = await verifyJWT(token, TEST_JWT_PUBLIC_KEY);
-    expect(payload.sub).toBe('user-123');
-    expect(payload.type).toBe('access');
+    expect(payload.sub).toBe('device-123');
+    expect(payload.type).toBe('server');
+  });
+
+  it('generates and verifies a hash-server token', async () => {
+    const token = await generateToken('hash-server', 'device-123', TEST_JWT_PRIVATE_KEY, 3600);
+    const payload = await verifyJWT(token, TEST_JWT_PUBLIC_KEY);
+    expect(payload.sub).toBe('device-123');
+    expect(payload.type).toBe('hash-server');
   });
 
   it('rejects a token signed with a different public key', async () => {
-    const token = await generateAccessToken('user-123', TEST_JWT_PRIVATE_KEY, 900);
+    const token = await generateToken('server', 'device-123', TEST_JWT_PRIVATE_KEY, 60);
     await expect(verifyJWT(token, TEST_OTHER_JWT_PUBLIC_KEY)).rejects.toThrow();
   });
 });

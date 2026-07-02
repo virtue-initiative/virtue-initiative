@@ -65,11 +65,11 @@ function bytesToUuid(value: ArrayBuffer) {
   return normalizeUuidString(hex);
 }
 
-export async function signupAndGetToken(
+export async function signupAndGetCookie(
   email: string,
   password = 'password123',
   name?: string,
-): Promise<{ token: string; userId: string }> {
+): Promise<{ cookie: string; userId: string }> {
   const password_auth = await passwordAuthFor(password);
   const password_salt = await passwordSaltFor(email);
   const pub_key = await publicKeyFor(email);
@@ -118,21 +118,26 @@ export async function signupAndGetToken(
     throw new Error(`signup failed: ${signupRes.status} ${await signupRes.text()}`);
   }
 
-  const signupBody = (await signupRes.json()) as { access_token: string; user: { id: string } };
-  return { token: signupBody.access_token, userId: signupBody.user.id };
+  const signupBody = (await signupRes.json()) as { user: { id: string } };
+  const setCookie = signupRes.headers.get('Set-Cookie') ?? '';
+  const match = setCookie.match(/refresh_token=([^;]+)/);
+  if (!match) {
+    throw new Error('No refresh_token cookie in signup response');
+  }
+  return { cookie: match[1], userId: signupBody.user.id };
 }
 
-export function authHeaders(token: string): Record<string, string> {
+export function authHeaders(cookie: string): Record<string, string> {
   return {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
+    Cookie: `refresh_token=${cookie}`,
   };
 }
 
-export async function createDeviceForUser(token: string, name = 'Laptop', platform = 'linux') {
+export async function createDeviceForUser(cookie: string, name = 'Laptop', platform = 'linux') {
   const res = await SELF.fetch(`${BASE}/d/device`, {
     method: 'POST',
-    headers: authHeaders(token),
+    headers: authHeaders(cookie),
     body: JSON.stringify({ name, platform }),
   });
 
@@ -142,7 +147,6 @@ export async function createDeviceForUser(token: string, name = 'Laptop', platfo
 
   return (await res.json()) as {
     id: string;
-    access_token: string;
     refresh_token: string;
   };
 }
