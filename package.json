@@ -3,6 +3,7 @@
   "private": true,
   "workspaces": [
     "api",
+    "api-donate",
     "shared-web",
     "web",
     "landing"

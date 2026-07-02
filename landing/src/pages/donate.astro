@@ -1,0 +1,26 @@
+---
+import { DonateForm } from '../components/DonateForm';
+import SiteLayout from '../layouts/SiteLayout.astro';
+---
+
+<SiteLayout pageTitle="Donate" tagline="Support free accountability tools for everyone">
+  <div class="donate-tax-notice">
+    <strong>Please note:</strong> The Virtue Initiative is working toward 501(c)(3) status, but we are
+    not there yet. Donations are <strong>not currently tax deductible</strong>.
+  </div>
+
+  <section class="donate-hero">
+    <h2>Support the mission</h2>
+    <p>
+      The Virtue Initiative builds free tools and resources to help people break free from
+      pornography. We fundraise all of our support so the app can stay free forever. Your gift keeps
+      it that way.
+    </p>
+  </section>
+
+  <section class="donate-section">
+    <div class="donate-card">
+      <DonateForm client:load />
+    </div>
+  </section>
+</SiteLayout>

@@ -13,6 +13,7 @@ This repository is split across several independently-tested areas. When you cha
 ## Repo-wide quick map
 
 - `api/`: Cloudflare Workers API
+- `api-donate/`: standalone donations Worker (Stripe Checkout)
 - `web/`: main web app
 - `landing/`: marketing site and help pages
 - `shared-web/`: shared web assets used by `web` and `landing`
@@ -21,7 +22,7 @@ This repository is split across several independently-tested areas. When you cha
 
 ## Web/API CI (`.github/workflows/web.yml`)
 
-Run this when touching `api/`, `web/`, `landing/`, `shared-web/`, or `theme.json`.
+Run this when touching `api/`, `api-donate/`, `web/`, `landing/`, `shared-web/`, or `theme.json`.
 
 ### API
 
@@ -38,6 +39,23 @@ Notes:
 
 - `bun test` runs `vitest run`.
 - API tests are documented in `api/TESTING.md`.
+
+### Donate API
+
+From `api-donate/`:
+
+```bash
+bun install
+bun run typecheck
+bun test
+bun run format:check
+```
+
+Notes:
+
+- `bun test` runs `vitest run` (Stripe calls are mocked via `cloudflare:test` `fetchMock`; webhook signatures are generated locally).
+- Standalone Worker, single environment (no separate staging). Deploys via `bun run deploy`.
+- Requires secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`, and a D1 database id in `wrangler.json` before deploying.
 
 ### Web app
 

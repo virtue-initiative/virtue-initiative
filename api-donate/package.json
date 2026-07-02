@@ -1,0 +1,42 @@
+{
+  "name": "api-donate",
+  "version": "1.0.0",
+  "description": "Donations API on Cloudflare Workers (Stripe Checkout)",
+  "main": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "deploy": "wrangler deploy",
+    "build": "echo 'No build step needed for Cloudflare Workers -- included in deploy'",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.lint.json --noEmit",
+    "format:check": "prettier --check .",
+    "format": "prettier --write .",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote"
+  },
+  "keywords": [
+    "cloudflare",
+    "workers",
+    "stripe",
+    "donations"
+  ],
+  "author": "",
+  "license": "AGPL-3.0-or-later",
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.12.14",
+    "@cloudflare/workers-types": "^4.20260228.0",
+    "@types/node": "^25.3.0",
+    "prettier": "^3.8.1",
+    "typescript": "^5.9.3",
+    "vitest": "3.2.4",
+    "wrangler": "^4.67.0"
+  },
+  "dependencies": {
+    "@hono/zod-validator": "^0.7.6",
+    "hono": "^4.12.1",
+    "stripe": "^18.5.0",
+    "zod": "^4.4.3"
+  }
+}
