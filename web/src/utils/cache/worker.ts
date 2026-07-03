@@ -23,7 +23,6 @@ type CacheRequest =
   | {
       id: string;
       method: 'setSession';
-      token: string;
       userId: string;
       privateKey: CryptoKey | null;
     }
@@ -459,7 +458,7 @@ const DELTA_INTERVAL_MS = 5000;
 const BASE =
   (import.meta as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL ?? 'http://localhost:8787';
 
-let session: { token: string; userId: string; privateKey: CryptoKey | null } | null = null;
+let session: { userId: string; privateKey: CryptoKey | null } | null = null;
 
 // queryId → query metadata; kept until done:true is posted
 const activeQueries = new Map<string, { query: WorkerCacheQuery; targetUserId: string }>();
@@ -514,17 +513,13 @@ function matchesQuery(log: FeedLog, query: WorkerCacheQuery): boolean {
   return true;
 }
 
-async function fetchData(
-  token: string,
-  params?: { user?: string; since?: number },
-): Promise<DataPage> {
+async function fetchData(params?: { user?: string; since?: number }): Promise<DataPage> {
   const qs = new URLSearchParams();
   if (params?.user) qs.set('user', params.user);
   if (params?.since !== undefined) qs.set('since', String(params.since));
   const q = qs.toString();
   const res = await fetch(`${BASE}/data${q ? `?${q}` : ''}`, {
     credentials: 'include',
-    headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error(`getData failed: ${res.status}`);
   return res.json() as Promise<DataPage>;
@@ -535,7 +530,7 @@ async function fetchData(
 
 async function fetchAndDecrypt(targetUserId: string): Promise<void> {
   if (!session) return;
-  const { token, userId: viewerId, privateKey } = session;
+  const { userId: viewerId, privateKey } = session;
   const cutoffTs = Date.now() - THIRTY_DAYS_MS;
   console.log('[cache-worker] fetchAndDecrypt start for', targetUserId);
 
@@ -562,7 +557,7 @@ async function fetchAndDecrypt(targetUserId: string): Promise<void> {
   try {
     const since = sqlGetSince(viewerId, targetUserId);
     console.log('[cache-worker] fetching /data since=', since, 'for', targetUserId);
-    const page = await fetchData(token, {
+    const page = await fetchData({
       user: targetUserId === viewerId ? undefined : targetUserId,
       since,
     });
@@ -705,7 +700,7 @@ async function handleStreaming(
       'hasPrivateKey=',
       req.privateKey != null,
     );
-    session = { token: req.token, userId: req.userId, privateKey: req.privateKey };
+    session = { userId: req.userId, privateKey: req.privateKey };
     const targets = new Set([req.userId, ...knownTargetUserIds]);
     console.log('[cache-worker] setSession kicking off fetch for targets:', [...targets]);
     for (const targetId of targets) {

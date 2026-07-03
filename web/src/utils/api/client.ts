@@ -84,7 +84,7 @@ export class APIClient {
   constructor(session: Session) {
     this.session = session;
     this.userId = session.userId;
-    cacheClient?.setSession(session.token, session.userId, session.privateKey ?? null);
+    cacheClient?.setSession(session.userId, session.privateKey ?? null);
     session.onTokenRefreshFailed(() => {
       this.fireLogoutOnce();
     });
@@ -110,7 +110,7 @@ export class APIClient {
   }
 
   async updateSettings(settings: UserSettings): Promise<UpdateSettingsResult> {
-    const result = await api.updateUser(this.session.token, settings);
+    const result = await api.updateUser(settings);
     await this.fetchUser(true);
     return {
       email_verification_required: result.email_verification_required,
@@ -119,7 +119,7 @@ export class APIClient {
   }
 
   async deleteUser(confirmEmail: string): Promise<void> {
-    await api.deleteUser(this.session.token, confirmEmail);
+    await api.deleteUser(confirmEmail);
     this.userCache = null;
     notify(this.userSubscribers, null);
   }
@@ -128,7 +128,7 @@ export class APIClient {
     if (this.userFetchInFlight && !force) return this.userFetchInFlight;
     const p = (async () => {
       try {
-        const user = await api.getUser(this.session.token);
+        const user = await api.getUser();
         this.userCache = user;
         notify(this.userSubscribers, user);
         return user;
@@ -146,7 +146,7 @@ export class APIClient {
   // ── Auth ─────────────────────────────────────────────────────────────────
   async verifyEmailChange(token: string): Promise<void> {
     await api.verifyEmail(token);
-    const user = await api.getUser(this.session.token);
+    const user = await api.getUser();
     this.userCache = user;
     notify(this.userSubscribers, user);
   }
@@ -221,24 +221,24 @@ export class APIClient {
   }
 
   async invitePartner(email: string): Promise<void> {
-    await api.invitePartner(this.session.token, email);
+    await api.invitePartner(email);
     await this.fetchPartners(true);
   }
 
   async acceptInvite(inviteToken: string): Promise<void> {
-    await api.acceptPartnerInvite(this.session.token, inviteToken);
+    await api.acceptPartnerInvite(inviteToken);
     await this.fetchPartners(true);
     await this.fetchDevices(true);
   }
 
   async removeWatcher(id: string): Promise<void> {
-    await api.deleteWatcher(this.session.token, id);
+    await api.deleteWatcher(id);
     await this.fetchPartners(true);
     await this.fetchDevices(true);
   }
 
   async stopWatching(id: string): Promise<void> {
-    await api.deleteWatching(this.session.token, id);
+    await api.deleteWatching(id);
     await this.fetchPartners(true);
     await this.fetchDevices(true);
   }
@@ -247,7 +247,7 @@ export class APIClient {
     if (this.partnersFetchInFlight && !force) return this.partnersFetchInFlight;
     const p = (async () => {
       try {
-        const result = await api.getPartners(this.session.token);
+        const result = await api.getPartners();
         this.watchersCache = result.watchers;
         this.watchingsCache = result.watching;
         notify(this.watchersSubscribers, result.watchers);
@@ -289,12 +289,12 @@ export class APIClient {
   }
 
   async updateDevice(id: string, patch: { name?: string }): Promise<void> {
-    await api.patchDevice(this.session.token, id, patch);
+    await api.patchDevice(id, patch);
     await this.fetchDevices(true);
   }
 
   async removeDevice(id: string): Promise<void> {
-    await api.deleteDevice(this.session.token, id);
+    await api.deleteDevice(id);
     cacheClient
       ?.deleteDeviceData(this.userId, id)
       .catch((err) => console.warn('[api-client] failed to wipe device data from cache', err));
@@ -305,7 +305,7 @@ export class APIClient {
     if (this.devicesFetchInFlight && !force) return this.devicesFetchInFlight;
     const p = (async () => {
       try {
-        const devices = await api.getDevices(this.session.token);
+        const devices = await api.getDevices();
         this.devicesCache = devices;
         notify(this.devicesSubscribers, devices);
         return devices;

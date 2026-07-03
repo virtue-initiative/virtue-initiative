@@ -202,11 +202,10 @@ export type UpdateDevicePayload = z.infer<typeof updateDeviceSchema>;
 
 // ── Additional response schemas ──────────────────────────────────────────────
 
-export const accessTokenResponseSchema = z.object({ access_token: z.string() });
-export type AccessTokenResponse = z.infer<typeof accessTokenResponseSchema>;
+export const loginResponseSchema = z.object({ ok: z.boolean(), refresh_token: z.string() });
+export type LoginResponse = z.infer<typeof loginResponseSchema>;
 
 export const signupResponseSchema = z.object({
-  access_token: z.string(),
   user: z.object({
     id: z.string(),
     email: z.string(),
@@ -219,7 +218,6 @@ export type SignupResponse = z.infer<typeof signupResponseSchema>;
 export const emailVerifyResponseSchema = z.object({
   ok: z.boolean(),
   email: z.string(),
-  access_token: z.string(),
   purpose: z.literal('email_change'),
 });
 export type EmailVerifyResponse = z.infer<typeof emailVerifyResponseSchema>;

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { SELF } from 'cloudflare:test';
-import { authHeaders, BASE, clearDB, signupAndGetToken } from './helpers';
+import { authHeaders, BASE, clearDB, signupAndGetCookie } from './helpers';
 
 beforeEach(clearDB);
 
@@ -46,19 +46,19 @@ describe('API base path routing', () => {
   });
 
   it('preserves the /api base path in device hash_base_url responses', async () => {
-    const { token } = await signupAndGetToken('prefixed-device@example.com', 'pw');
+    const { cookie } = await signupAndGetCookie('prefixed-device@example.com', 'pw');
 
     const createDeviceRes = await SELF.fetch(`${BASE}/api/d/device`, {
       method: 'POST',
-      headers: authHeaders(token),
+      headers: authHeaders(cookie),
       body: JSON.stringify({ name: 'Laptop', platform: 'linux' }),
     });
 
     expect(createDeviceRes.status).toBe(201);
 
-    const createdDevice = (await createDeviceRes.json()) as { access_token: string };
+    const createdDevice = (await createDeviceRes.json()) as { refresh_token: string };
     const settingsRes = await SELF.fetch(`${BASE}/api/d/device`, {
-      headers: { Authorization: `Bearer ${createdDevice.access_token}` },
+      headers: { Authorization: `Bearer ${createdDevice.refresh_token}` },
     });
 
     expect(settingsRes.status).toBe(200);

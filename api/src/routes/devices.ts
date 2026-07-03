@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { authenticate } from '../middleware/auth';
+import { authenticateWebSession } from '../middleware/auth';
 import { validateZ } from '../middleware/validation';
 import {
   deleteDeviceById,
@@ -25,7 +25,7 @@ function getAppUrl(env: Env) {
   return env.APP_URL;
 }
 
-devices.get('/', authenticate('access'), async (c) => {
+devices.get('/', authenticateWebSession(), async (c) => {
   const ownerIds = await listVisibleOwnerIds(c.env.DB, c.get('sub'));
   const rows = await listDevicesForOwners(c.env.DB, ownerIds);
 
@@ -82,21 +82,26 @@ devices.get('/', authenticate('access'), async (c) => {
   );
 });
 
-devices.patch('/:id', authenticate('access'), validateZ('json', updateDeviceSchema), async (c) => {
-  const deviceId = c.req.param('id');
-  const device = await findOwnedDevice(c.env.DB, deviceId, c.get('sub'));
+devices.patch(
+  '/:id',
+  authenticateWebSession(),
+  validateZ('json', updateDeviceSchema),
+  async (c) => {
+    const deviceId = c.req.param('id');
+    const device = await findOwnedDevice(c.env.DB, deviceId, c.get('sub'));
 
-  if (!device) {
-    return c.json({ error: 'Not found' }, 404);
-  }
+    if (!device) {
+      return c.json({ error: 'Not found' }, 404);
+    }
 
-  const { name } = c.req.valid('json');
-  await updateDevice(c.env.DB, deviceId, { name });
+    const { name } = c.req.valid('json');
+    await updateDevice(c.env.DB, deviceId, { name });
 
-  return c.json<PatchDeviceResponse>({ id: deviceId, updated: true });
-});
+    return c.json<PatchDeviceResponse>({ id: deviceId, updated: true });
+  },
+);
 
-devices.delete('/:id', authenticate('access'), async (c) => {
+devices.delete('/:id', authenticateWebSession(), async (c) => {
   const deviceId = c.req.param('id');
   const device = await findOwnedDevice(c.env.DB, deviceId, c.get('sub'));
 

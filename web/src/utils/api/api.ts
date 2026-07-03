@@ -16,7 +16,7 @@ import type {
   PasswordResetValidation,
   SignupPayload,
   SignupResponse,
-  AccessTokenResponse,
+  LoginResponse,
   EmailVerifyResponse,
   UpdateUserPayload,
   UpdateUserResponse,
@@ -39,7 +39,7 @@ export type {
   PasswordResetValidation,
   SignupPayload,
   SignupResponse,
-  AccessTokenResponse,
+  LoginResponse,
   EmailVerifyResponse,
   UpdateUserPayload,
   UpdateUserResponse,
@@ -52,15 +52,11 @@ const NETWORK_ERROR_MESSAGE = "Error: Couldn't connect to the network. Try reloa
 const NETWORK_TOAST_THROTTLE_MS = 3_000;
 let lastNetworkToastAt = 0;
 
-type ReauthHandler = () => Promise<string | null>;
+let unauthorizedHandler: (() => void) | null = null;
 
-interface RequestOptions {
-  allowReauth?: boolean;
-  retrying?: boolean;
+export function setUnauthorizedHandler(handler: (() => void) | null) {
+  unauthorizedHandler = handler;
 }
-
-let reauthHandler: ReauthHandler | null = null;
-let reauthInFlight: Promise<string | null> | null = null;
 
 function firstValidationMessage(details: unknown): string | null {
   if (!details) {
@@ -103,39 +99,11 @@ function firstValidationMessage(details: unknown): string | null {
   return null;
 }
 
-export function setReauthHandler(handler: ReauthHandler | null) {
-  reauthHandler = handler;
-}
-
-async function tryReauth() {
-  if (!reauthHandler) {
-    return null;
-  }
-
-  if (!reauthInFlight) {
-    reauthInFlight = reauthHandler().finally(() => {
-      reauthInFlight = null;
-    });
-  }
-
-  return reauthInFlight;
-}
-
-async function req<T>(
-  path: string,
-  init: RequestInit = {},
-  token?: string,
-  options: RequestOptions = {},
-): Promise<T> {
-  const { allowReauth = Boolean(token), retrying = false } = options;
+async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
 
   if (!headers.has('Content-Type') && !(init.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json');
-  }
-
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
   }
 
   let res: Response;
@@ -163,15 +131,8 @@ async function req<T>(
   }
 
   if (!res.ok) {
-    if (res.status === 401 && token && allowReauth && !retrying) {
-      const refreshedToken = await tryReauth();
-
-      if (refreshedToken) {
-        return req<T>(path, init, refreshedToken, {
-          allowReauth,
-          retrying: true,
-        });
-      }
+    if (res.status === 401) {
+      unauthorizedHandler?.();
     }
 
     const body = (await res.json().catch(() => ({}))) as {
@@ -205,11 +166,6 @@ async function req<T>(
 }
 
 export const api = {
-  refreshToken: () =>
-    req<AccessTokenResponse>('/token', { method: 'POST' }, undefined, {
-      allowReauth: false,
-    }),
-
   getCurrentHashParams: () => req<HashParams>('/current-hash-params'),
 
   getLoginMaterial: (email: string) => {
@@ -218,7 +174,7 @@ export const api = {
   },
 
   login: (email: string, password_auth: string, timezone?: string) =>
-    req<AccessTokenResponse>('/login', {
+    req<LoginResponse>('/login', {
       method: 'POST',
       body: JSON.stringify({ email, password_auth, ...(timezone ? { timezone } : {}) }),
     }),
@@ -240,27 +196,19 @@ export const api = {
 
   logout: () => req<void>('/logout', { method: 'POST' }),
 
-  getUser: (token: string) => req<User>('/user', {}, token),
+  getUser: () => req<User>('/user'),
 
-  updateUser: (token: string, fields: UpdateUserPayload) =>
-    req<UpdateUserResponse>(
-      '/user',
-      {
-        method: 'PATCH',
-        body: JSON.stringify(fields),
-      },
-      token,
-    ),
+  updateUser: (fields: UpdateUserPayload) =>
+    req<UpdateUserResponse>('/user', {
+      method: 'PATCH',
+      body: JSON.stringify(fields),
+    }),
 
-  deleteUser: (token: string, confirm_email: string) =>
-    req<void>(
-      '/user',
-      {
-        method: 'DELETE',
-        body: JSON.stringify({ confirm_email }),
-      },
-      token,
-    ),
+  deleteUser: (confirm_email: string) =>
+    req<void>('/user', {
+      method: 'DELETE',
+      body: JSON.stringify({ confirm_email }),
+    }),
 
   verifyEmail: (token: string) =>
     req<EmailVerifyResponse>('/email-verification/validate', {
@@ -294,32 +242,23 @@ export const api = {
       body: JSON.stringify({ token, ...payload }),
     }),
 
-  getDevices: (token: string) => req<Device[]>('/device', {}, token),
+  getDevices: () => req<Device[]>('/device'),
 
-  patchDevice: (token: string, id: string, patch: { name?: string }) =>
-    req<PatchDeviceResponse>(
-      `/device/${id}`,
-      {
-        method: 'PATCH',
-        body: JSON.stringify(patch),
-      },
-      token,
-    ),
+  patchDevice: (id: string, patch: { name?: string }) =>
+    req<PatchDeviceResponse>(`/device/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
 
-  deleteDevice: (token: string, id: string) =>
-    req<void>(`/device/${id}`, { method: 'DELETE' }, token),
+  deleteDevice: (id: string) => req<void>(`/device/${id}`, { method: 'DELETE' }),
 
-  getPartners: (token: string) => req<PartnerRelationships>('/partner', {}, token),
+  getPartners: () => req<PartnerRelationships>('/partner'),
 
-  invitePartner: (token: string, email: string) =>
-    req<CreatePartnerResponse>(
-      '/partner',
-      {
-        method: 'POST',
-        body: JSON.stringify({ email }),
-      },
-      token,
-    ),
+  invitePartner: (email: string) =>
+    req<CreatePartnerResponse>('/partner', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
 
   validatePartnerInvite: (inviteToken: string) =>
     req<PartnerInviteValidation>('/partner/validate', {
@@ -327,32 +266,21 @@ export const api = {
       body: JSON.stringify({ token: inviteToken }),
     }),
 
-  acceptPartnerInvite: (token: string, inviteToken: string) =>
-    req<{ id: string }>(
-      '/partner/accept',
-      {
-        method: 'POST',
-        body: JSON.stringify({ token: inviteToken }),
-      },
-      token,
-    ),
+  acceptPartnerInvite: (inviteToken: string) =>
+    req<{ id: string }>('/partner/accept', {
+      method: 'POST',
+      body: JSON.stringify({ token: inviteToken }),
+    }),
 
-  deleteWatcher: (token: string, id: string) =>
-    req<void>(`/partner/watcher/${id}`, { method: 'DELETE' }, token),
+  deleteWatcher: (id: string) => req<void>(`/partner/watcher/${id}`, { method: 'DELETE' }),
 
-  deleteWatching: (token: string, id: string) =>
-    req<void>(`/partner/watching/${id}`, { method: 'DELETE' }, token),
-  getData: (
-    token: string,
-    params?: {
-      user?: string;
-      since?: number;
-    },
-  ) => {
+  deleteWatching: (id: string) => req<void>(`/partner/watching/${id}`, { method: 'DELETE' }),
+
+  getData: (params?: { user?: string; since?: number }) => {
     const qs = new URLSearchParams();
     if (params?.user) qs.set('user', params.user);
     if (params?.since !== undefined) qs.set('since', String(params.since));
     const query = qs.toString();
-    return req<DataPage>(`/data${query ? `?${query}` : ''}`, {}, token);
+    return req<DataPage>(`/data${query ? `?${query}` : ''}`);
   },
 };

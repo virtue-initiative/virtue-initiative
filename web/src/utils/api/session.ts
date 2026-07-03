@@ -1,4 +1,4 @@
-import { api, setReauthHandler, User } from './api';
+import { api, setUnauthorizedHandler, User } from './api';
 import { cacheClient } from '../cache/client';
 import {
   decryptBatch,
@@ -34,31 +34,14 @@ function clearWrappingKey(): void {
   localStorage.removeItem(WRAPPING_KEY_STORAGE);
 }
 
-function jwtSub(t: string): string | null {
-  try {
-    const b64 = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
-    return JSON.parse(atob(padded)).sub ?? null;
-  } catch {
-    return null;
-  }
-}
-
 export class Session {
-  token: string;
   userId: string;
   wrappingKey: CryptoKey;
   privateKey: CryptoKey | null;
   private invalidated = false;
   private onInvalidate: (() => void) | null = null;
 
-  private constructor(
-    token: string,
-    userId: string,
-    wrappingKey: CryptoKey,
-    privateKey: CryptoKey | null,
-  ) {
-    this.token = token;
+  private constructor(userId: string, wrappingKey: CryptoKey, privateKey: CryptoKey | null) {
     this.userId = userId;
     this.wrappingKey = wrappingKey;
     this.privateKey = privateKey;
@@ -71,18 +54,16 @@ export class Session {
       Uint8Array.fromBase64(material.password_salt),
       material.params,
     );
-    const res = await api.login(
+    await api.login(
       email,
       passwordAuth.toBase64(),
       Intl.DateTimeFormat().resolvedOptions().timeZone,
     );
-    const userId = jwtSub(res.access_token);
-    if (!userId) throw new Error('Login token is missing a subject');
     await saveWrappingKey(wrappingKey);
-    const user = await api.getUser(res.access_token);
+    const user = await api.getUser();
     const privateKey = await decryptStoredPrivateKey(user, wrappingKey);
-    const session = new Session(res.access_token, userId, wrappingKey, privateKey);
-    session.installReauthHandler();
+    const session = new Session(user.id, wrappingKey, privateKey);
+    session.installUnauthorizedHandler();
     return session;
   }
 
@@ -108,36 +89,25 @@ export class Session {
       priv_key: encryptedPrivateKey.toBase64(),
       ...(name ? { name } : {}),
     });
-    const userId = jwtSub(res.access_token);
-    if (!userId) throw new Error('Signup access token is missing a subject');
     await saveWrappingKey(wrappingKey);
     const privateKey = await importUserPrivateKey(keyPair.privateKey);
-    const session = new Session(res.access_token, userId, wrappingKey, privateKey);
-    session.installReauthHandler();
+    const session = new Session(res.user.id, wrappingKey, privateKey);
+    session.installUnauthorizedHandler();
     return session;
   }
 
   static async restore(): Promise<Session | null> {
-    let access_token: string;
-    try {
-      const res = await api.refreshToken();
-      access_token = res.access_token;
-    } catch {
-      return null;
-    }
-    const userId = jwtSub(access_token);
-    if (!userId) return null;
     const wrappingKey = await loadWrappingKey().catch(() => null);
     if (!wrappingKey) return null;
     let user: User;
     try {
-      user = await api.getUser(access_token);
+      user = await api.getUser();
     } catch {
       return null;
     }
     const privateKey = await decryptStoredPrivateKey(user, wrappingKey);
-    const session = new Session(access_token, userId, wrappingKey, privateKey);
-    session.installReauthHandler();
+    const session = new Session(user.id, wrappingKey, privateKey);
+    session.installUnauthorizedHandler();
     return session;
   }
 
@@ -164,25 +134,15 @@ export class Session {
 
   private async invalidate(): Promise<void> {
     this.invalidated = true;
-    setReauthHandler(null);
+    setUnauthorizedHandler(null);
     await cacheClient?.clearCache().catch(() => {});
     clearWrappingKey();
     this.onInvalidate?.();
   }
 
-  private installReauthHandler() {
-    setReauthHandler(async () => {
-      try {
-        const res = await api.refreshToken();
-        const uid = jwtSub(res.access_token);
-        if (!uid) throw new Error('Refreshed token missing subject');
-        this.token = res.access_token;
-        this.userId = uid;
-        return res.access_token;
-      } catch {
-        await this.invalidate();
-        return null;
-      }
+  private installUnauthorizedHandler() {
+    setUnauthorizedHandler(() => {
+      void this.invalidate();
     });
   }
 }

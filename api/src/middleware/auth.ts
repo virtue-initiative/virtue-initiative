@@ -1,6 +1,9 @@
 import { Context, Next } from 'hono';
+import { getCookie } from 'hono/cookie';
 import { Env, Variables } from '../types/bindings';
 import { JWTType, verifyJWT } from '../lib/jwt';
+import { findSessionByRefreshTokenHash } from '../lib/db';
+import { hashOpaqueToken } from '../lib/tokens';
 
 export function authenticate(type: JWTType | JWTType[]) {
   const allowed = Array.isArray(type) ? type : [type];
@@ -29,5 +32,55 @@ export function authenticate(type: JWTType | JWTType[]) {
         401,
       );
     }
+  };
+}
+
+export function authenticateWebSession() {
+  return async function webSessionMiddleware(
+    c: Context<{ Bindings: Env; Variables: Variables }>,
+    next: Next,
+  ) {
+    const cookieToken = getCookie(c, 'refresh_token');
+    const authHeader = c.req.header('Authorization');
+    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+    const refreshToken = cookieToken ?? bearerToken;
+    if (!refreshToken) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const session = await findSessionByRefreshTokenHash(
+      c.env.DB,
+      hashOpaqueToken(refreshToken),
+      'web',
+    );
+
+    if (!session || !session.user_id || session.expires_at < Date.now()) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    c.set('sub', session.user_id);
+    await next();
+  };
+}
+
+export function authenticateDeviceSession() {
+  return async function deviceSessionMiddleware(
+    c: Context<{ Bindings: Env; Variables: Variables }>,
+    next: Next,
+  ) {
+    const authHeader = c.req.header('Authorization');
+    if (!authHeader?.startsWith('Bearer ')) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const token = authHeader.slice(7);
+    const session = await findSessionByRefreshTokenHash(c.env.DB, hashOpaqueToken(token), 'device');
+
+    if (!session || !session.device_id || session.expires_at < Date.now()) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    c.set('sub', session.device_id);
+    await next();
   };
 }

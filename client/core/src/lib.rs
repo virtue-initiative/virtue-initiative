@@ -34,8 +34,7 @@ pub use model::{
     ProcessStoppedReason, Redacted, ScreenshotSkipReason, UploadKind,
 };
 pub use model::{
-    AuthState, BatchUpload, EventData, LogEntry, LoginStatus, LoopOutcome, Screenshot,
-    ServiceStatus,
+    AuthState, BatchUpload, EventData, LogEntry, LoopOutcome, Screenshot, ServiceStatus,
 };
 pub use module::auth::{
     DeviceSettingsRefreshed, Login, LoginRequested, LoginResult, Logout, LogoutRequested,

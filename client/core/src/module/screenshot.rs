@@ -336,7 +336,6 @@ mod tests {
         Login {
             credentials: DeviceCredentials {
                 device_id: "test-device".into(),
-                access_token: "test-access".into(),
                 refresh_token: "test-refresh".into(),
             },
             settings: DeviceSettings {

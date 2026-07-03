@@ -1,17 +1,16 @@
-pub mod api;
 mod batch;
 
 use std::any::Any;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-pub use api::UploadApi;
 use batch::BatchBuilder;
 pub(crate) use batch::MAX_BATCH_ITEMS_PER_UPLOAD;
 
 use crate::api::ApiTransport;
 use crate::crypto::{CryptoEngine, compute_event_hash, encode_batch_event};
-use crate::error::CoreResult;
+use crate::error::{CoreError, CoreResult};
 use crate::events::Ping;
 use crate::events::bus::{Emitter, EventBus, Observer, StateType, log_error};
 use crate::model::PartialStatus;
@@ -29,7 +28,8 @@ pub struct Upload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FlushBatchNow;
 use crate::model::{
-    BatchRecipient, DeviceCredentials, DeviceSettings, LogEntry, ProcessStoppedReason, UploadKind,
+    BatchRecipient, BatchUpload, DeviceCredentials, DeviceSettings, LogEntry, ProcessStoppedReason,
+    UploadKind,
 };
 use crate::platform::ScreenshotHooks;
 
@@ -37,6 +37,7 @@ pub(crate) const POST_LOGIN_PROOF_BATCH_COUNT: u32 = 3;
 
 const MAX_HASH_RETRIES_PER_LOOP: usize = 8;
 const MAX_DIRECT_LOG_RETRIES_PER_LOOP: usize = 8;
+const HASH_TOKEN_MAX_AGE: Duration = Duration::from_secs(55 * 60);
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct UploadObserverState {
@@ -102,7 +103,8 @@ fn drain_retry_queue<T>(
 
 pub struct UploadModule<A: ApiTransport + Clone + Send + Sync + 'static> {
     pub state: UploadObserverState,
-    pub upload_api: UploadApi<A>,
+    api: A,
+    hash_token_cache: Option<(String, Instant)>,
     pub batch_interval_ms: i64,
     platform: Box<dyn ScreenshotHooks>,
     pub authenticated: bool,
@@ -112,10 +114,65 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
     pub fn new(platform: Box<dyn ScreenshotHooks>, api: A, batch_interval_ms: i64) -> Self {
         Self {
             state: UploadObserverState::default(),
-            upload_api: UploadApi::new(api),
+            api,
+            hash_token_cache: None,
             batch_interval_ms,
             platform,
             authenticated: false,
+        }
+    }
+
+    fn upload_batch(&self, batch: &BatchUpload) -> CoreResult<()> {
+        let creds = self
+            .state
+            .device_credentials
+            .as_ref()
+            .ok_or(CoreError::NotAuthenticated)?;
+        self.api
+            .upload_batch(&creds.refresh_token, batch)
+            .map(|_| ())
+    }
+
+    fn upload_log(&self, entry: &LogEntry) -> CoreResult<()> {
+        let creds = self
+            .state
+            .device_credentials
+            .as_ref()
+            .ok_or(CoreError::NotAuthenticated)?;
+        self.api.upload_log(&creds.refresh_token, entry).map(|_| ())
+    }
+
+    fn upload_hash(
+        &mut self,
+        hash_base_url: Option<&str>,
+        content_hash: &[u8; 32],
+    ) -> CoreResult<()> {
+        let hash_jwt = self.ensure_hash_token()?;
+        self.api.upload_hash(hash_base_url, &hash_jwt, content_hash)
+    }
+
+    /// Fetches a hash-server JWT, caching it for [`HASH_TOKEN_MAX_AGE`] so we don't hit
+    /// `POST /d/token` on every hash upload. Cleared on login/logout.
+    fn ensure_hash_token(&mut self) -> CoreResult<String> {
+        let refresh_token = self
+            .state
+            .device_credentials
+            .as_ref()
+            .ok_or(CoreError::NotAuthenticated)?
+            .refresh_token
+            .clone();
+
+        let needs_refresh = match &self.hash_token_cache {
+            None => true,
+            Some((_, fetched_at)) => fetched_at.elapsed() >= HASH_TOKEN_MAX_AGE,
+        };
+
+        if needs_refresh {
+            let token = self.api.get_hash_token(&refresh_token)?;
+            self.hash_token_cache = Some((token.clone(), Instant::now()));
+            Ok(token)
+        } else {
+            Ok(self.hash_token_cache.as_ref().unwrap().0.clone())
         }
     }
 
@@ -139,7 +196,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
                     }
                 };
                 let hash = compute_event_hash(&encoded);
-                match self.upload_api.upload_hash(hash_base_url.as_deref(), &hash) {
+                match self.upload_hash(hash_base_url.as_deref(), &hash) {
                     Ok(()) => {
                         self.state.pending_batch_events.push((event.ts, encoded));
                         None
@@ -154,7 +211,6 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
         let events = std::mem::take(&mut self.state.pending_immediate_events);
         self.state.pending_immediate_events =
             drain_retry_queue(events, MAX_DIRECT_LOG_RETRIES_PER_LOOP, |entry| match self
-                .upload_api
                 .upload_log(&entry)
             {
                 Ok(()) => None,
@@ -210,7 +266,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
             start_time_ms,
             now_ms,
         )?;
-        match self.upload_api.upload_batch(&batch) {
+        match self.upload_batch(&batch) {
             Ok(_) => {
                 #[cfg(debug_assertions)]
                 eprintln!("[upload] batch ok: {count} events, start_ms={start_time_ms}");
@@ -313,8 +369,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> Observer for UploadModule<
     fn init(&mut self, _bus: &mut EventBus, state: StateType) -> CoreResult<()> {
         if !state.is_null() {
             self.state = serde_json::from_value(state)?;
-            if let Some(creds) = self.state.device_credentials.clone() {
-                self.upload_api.set_credentials(Some(creds));
+            if self.state.device_credentials.is_some() {
                 self.authenticated = true;
             }
         }
@@ -325,7 +380,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> Observer for UploadModule<
         crate::dispatch_event!(event, {
             ev: Login => {
                 self.authenticated = true;
-                self.upload_api.set_credentials(Some(ev.credentials.clone()));
+                self.hash_token_cache = None;
                 self.state.settings = Some(ev.settings.clone());
                 self.state.device_credentials = Some(ev.credentials.clone());
                 self.state.reset_for_login();
@@ -333,7 +388,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> Observer for UploadModule<
             },
             _: Logout => {
                 self.authenticated = false;
-                self.upload_api.set_credentials(None);
+                self.hash_token_cache = None;
                 self.state.reset_for_logout();
                 Ok(())
             },
@@ -374,9 +429,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> Observer for UploadModule<
     }
 
     fn save(&self) -> CoreResult<StateType> {
-        let mut state = self.state.clone();
-        state.device_credentials = self.upload_api.credentials().cloned();
-        Ok(serde_json::to_value(&state)?)
+        Ok(serde_json::to_value(&self.state)?)
     }
 }
 
@@ -421,7 +474,6 @@ mod tests {
     fn valid_credentials() -> DeviceCredentials {
         DeviceCredentials {
             device_id: "test-device".into(),
-            access_token: "test-access".into(),
             refresh_token: "test-refresh".into(),
         }
     }
@@ -510,6 +562,26 @@ mod tests {
         assert!(
             m.state.pending_batch_events.is_empty(),
             "logout should clear batch queue"
+        );
+    }
+
+    #[test]
+    fn hash_token_is_fetched_once_and_cached_across_uploads() {
+        let mut b = EventTester::builder();
+        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
+        let mut t = b.build();
+        t.emit(1, login_event());
+
+        // Two low-risk uploads both flush through the hash server on an active screen.
+        t.emit(2, skipped_upload());
+        t.emit(3, skipped_upload());
+
+        let s = t.api.state();
+        assert_eq!(s.hash_uploads.len(), 2, "both hashes should upload");
+        assert_eq!(
+            s.get_hash_token_calls.len(),
+            1,
+            "hash-server token should be fetched once and cached"
         );
     }
 

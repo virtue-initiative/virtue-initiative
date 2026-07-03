@@ -86,7 +86,7 @@ Read these before touching crypto, batch, or auth code:
 - The AES-GCM nonce position or length (must be first 12 bytes)
 - The msgpack schema (`{events: [...]}` at the outer level, each event double-encoded)
 - The argon2id parameters or the HKDF label strings (`"auth"`, `"key"`)
-- The JWT token `type` claim values (`"access"`, `"device-access"`, `"server"`)
+- The JWT token `type` claim values (`"hash-server"`, `"server"`)
 - The hash chain input encoding rules (LE integers, sorted keys)
 
 ## Pull requests

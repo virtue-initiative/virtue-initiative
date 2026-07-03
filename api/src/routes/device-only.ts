@@ -1,7 +1,7 @@
 import { Context, Hono } from 'hono';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
-import { authenticate } from '../middleware/auth';
+import { authenticateWebSession, authenticateDeviceSession } from '../middleware/auth';
 import { validateZ } from '../middleware/validation';
 import {
   createBatch,
@@ -10,8 +10,6 @@ import {
   createSessionRecord,
   getHashState,
   findDeviceById,
-  findSessionByRefreshTokenHash,
-  deleteSessionByRefreshTokenHash,
   listBatchAccessRecipientsForOwner,
   resetHashState as resetStoredHashState,
 } from '../lib/db';
@@ -28,16 +26,12 @@ const ZERO_STATE = new Uint8Array(32);
 function getAppUrl(c: Context<{ Bindings: Env; Variables: Variables }>) {
   return c.env.APP_URL;
 }
-const DEVICE_ACCESS_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
+const HASH_TOKEN_TTL_SECONDS = 60 * 60;
 const DEVICE_REFRESH_TOKEN_TTL_SECONDS = 1000 * 365 * 24 * 60 * 60;
 
 const createDeviceSchema = z.object({
   name: z.string().min(1),
   platform: z.string().min(1),
-});
-
-const deviceTokenSchema = z.object({
-  refresh_token: z.string().min(1),
 });
 
 const uploadBatchSchema = z.object({
@@ -115,11 +109,11 @@ async function createDeviceSession(
 }
 
 /**
- * POST /d/device - Register a device using a user access token.
+ * POST /d/device - Register a device using the authenticated web session cookie.
  */
 deviceOnly.post(
   '/device',
-  authenticate('access'),
+  authenticateWebSession(),
   validateZ('json', createDeviceSchema),
   async (c) => {
     const { name, platform } = c.req.valid('json');
@@ -128,19 +122,16 @@ deviceOnly.post(
 
     await createDevice(c.env.DB, { id, owner, name, platform });
 
-    const [accessToken, refreshToken] = await Promise.all([
-      generateToken('device-access', id, c.env.JWT_PRIVATE_KEY, DEVICE_ACCESS_TOKEN_TTL_SECONDS),
-      createDeviceSession(c, id),
-    ]);
+    const refreshToken = await createDeviceSession(c, id);
 
-    return c.json({ id, access_token: accessToken, refresh_token: refreshToken }, 201);
+    return c.json({ id, refresh_token: refreshToken }, 201);
   },
 );
 
 /**
  * GET /d/device - Get device settings for the authenticated device.
  */
-deviceOnly.get('/device', authenticate('device-access'), async (c) => {
+deviceOnly.get('/device', authenticateDeviceSession(), async (c) => {
   const device = await findDeviceById(c.env.DB, c.get('sub'));
 
   if (!device) {
@@ -178,39 +169,23 @@ deviceOnly.get('/device', authenticate('device-access'), async (c) => {
 });
 
 /**
- * POST /d/token - Exchange a device refresh token for a new device access token.
+ * POST /d/token - Exchange the opaque device refresh token for a short-lived hash-server JWT.
  */
-deviceOnly.post('/token', validateZ('json', deviceTokenSchema), async (c) => {
-  const { refresh_token } = c.req.valid('json');
-
-  const session = await findSessionByRefreshTokenHash(
-    c.env.DB,
-    hashOpaqueToken(refresh_token),
-    'device',
-  );
-
-  if (!session || !session.device_id) {
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
-
-  if (session.expires_at < Date.now()) {
-    await deleteSessionByRefreshTokenHash(c.env.DB, session.refresh_token_hash, 'device');
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
-
-  const device = await findDeviceById(c.env.DB, session.device_id);
+deviceOnly.post('/token', authenticateDeviceSession(), async (c) => {
+  const deviceId = c.get('sub');
+  const device = await findDeviceById(c.env.DB, deviceId);
   if (!device) {
     return c.json({ error: 'Not found' }, 404);
   }
 
-  const accessToken = await generateToken(
-    'device-access',
-    session.device_id,
+  const hashToken = await generateToken(
+    'hash-server',
+    deviceId,
     c.env.JWT_PRIVATE_KEY,
-    DEVICE_ACCESS_TOKEN_TTL_SECONDS,
+    HASH_TOKEN_TTL_SECONDS,
   );
 
-  return c.json({ access_token: accessToken });
+  return c.json({ hash_token: hashToken });
 });
 
 /**
@@ -218,7 +193,7 @@ deviceOnly.post('/token', validateZ('json', deviceTokenSchema), async (c) => {
  */
 deviceOnly.post(
   '/batch',
-  authenticate('device-access'),
+  authenticateDeviceSession(),
   validateZ('form', uploadBatchSchema),
   async (c) => {
     const device = await findDeviceById(c.env.DB, c.get('sub'));
@@ -272,7 +247,7 @@ deviceOnly.post(
  */
 deviceOnly.post(
   '/log',
-  authenticate('device-access'),
+  authenticateDeviceSession(),
   validateZ('json', deviceLogSchema),
   async (c) => {
     const device = await findDeviceById(c.env.DB, c.get('sub'));
