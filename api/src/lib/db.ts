@@ -459,16 +459,24 @@ export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
   }>(
     db
       .prepare(
-        `SELECT d.id, d.owner, d.name, d.platform, d.created_at, MAX(b.end_time) AS last_upload_at,
+        // Pre-aggregate each owner's batches per device (using idx_batches_user_id,
+        // since batches.user_id is always the device owner) before joining to devices.
+        // This avoids the LEFT JOIN batches row-explosion that GROUP BY had to collapse.
+        `SELECT d.id, d.owner, d.name, d.platform, d.created_at,
+                lu.last_upload_at,
                 hs.hashed_at AS last_hash_at, COALESCE(hs.count, 0) AS pending_count
          FROM devices d
-         LEFT JOIN batches b ON b.device_id = d.id
+         LEFT JOIN (
+           SELECT device_id, MAX(end_time) AS last_upload_at
+           FROM batches
+           WHERE user_id IN (${placeholders(ownerIds.length)})
+           GROUP BY device_id
+         ) lu ON lu.device_id = d.id
          LEFT JOIN hash_states hs ON hs.device_id = d.id
          WHERE d.owner IN (${placeholders(ownerIds.length)})
-         GROUP BY d.id
          ORDER BY d.created_at DESC`,
       )
-      .bind(...ownerIds.map(uuidToBytes)),
+      .bind(...[...ownerIds, ...ownerIds].map(uuidToBytes)),
     ['id', 'owner'],
   );
 }
@@ -485,12 +493,18 @@ export async function listDevicesWithLastUpload(db: D1Database) {
     owner_name: string | null;
   }>(
     db.prepare(
-      `SELECT d.id, d.owner, d.name, d.platform, d.created_at, MAX(b.end_time) AS last_upload_at,
+      // Aggregate batches per device in a single grouped pass, then join, so the
+      // batches table is scanned once instead of being exploded across the join.
+      `SELECT d.id, d.owner, d.name, d.platform, d.created_at,
+              lu.last_upload_at,
               u.email AS owner_email, u.name AS owner_name
        FROM devices d
        JOIN users u ON u.id = d.owner
-       LEFT JOIN batches b ON b.device_id = d.id
-       GROUP BY d.id
+       LEFT JOIN (
+         SELECT device_id, MAX(end_time) AS last_upload_at
+         FROM batches
+         GROUP BY device_id
+       ) lu ON lu.device_id = d.id
        ORDER BY d.created_at DESC`,
     ),
     ['id', 'owner'],
