@@ -73,7 +73,6 @@ export type DataLog = z.infer<typeof dataLogSchema>;
 
 export const dataPageSchema = z.object({
   batches: z.array(batchSchema),
-  logs: z.array(dataLogSchema),
 });
 export type DataPage = z.infer<typeof dataPageSchema>;
 

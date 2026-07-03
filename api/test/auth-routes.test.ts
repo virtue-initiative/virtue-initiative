@@ -378,20 +378,6 @@ describe('Auth routes', () => {
     });
     expect(hashUploadRes.status).toBe(200);
 
-    const logRes = await SELF.fetch(`${BASE}/d/log`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${device.refresh_token}`,
-      },
-      body: JSON.stringify({
-        ts: 1710000000000,
-        type: 'system_event',
-        data: { event: 'account-delete-test' },
-      }),
-    });
-    expect(logRes.status).toBe(201);
-
     const form = new FormData();
     form.set('start_time', '1710000000000');
     form.set('end_time', '1710003600000');
@@ -441,11 +427,6 @@ describe('Auth routes', () => {
         .first(),
     ).toBeNull();
 
-    expect(
-      await env.DB.prepare('SELECT COUNT(*) AS count FROM device_logs WHERE user_id = ?')
-        .bind(uuidToBytes(userId))
-        .first<{ count: number }>(),
-    ).toMatchObject({ count: 0 });
     expect(
       await env.DB.prepare('SELECT COUNT(*) AS count FROM user_sessions WHERE user_id = ?')
         .bind(uuidToBytes(userId))

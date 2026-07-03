@@ -34,7 +34,7 @@ client/
         lifecycle.rs    — LifecycleModule: process/suspend/ping-gap alerts
         screenshot.rs   — ScreenshotModule: interval scheduling + capture
         status.rs       — StatusModule: partial-status aggregation
-        upload.rs       — UploadModule: hash/batch/immediate queues
+        upload.rs       — UploadModule: hash-pending, batch-pending, and notify-pending queues
       platform.rs       — ScreenshotHooks / PlatformHooks traits
       state.rs          — load_state / store_state (event_state.json)
       storage.rs        — auth.json, device_settings.json, stop_intent.json
@@ -317,6 +317,22 @@ immediately before every batch upload — this is the sole refresh path, so a pa
 added or removed is picked up on the very next batch. A transient refetch failure
 falls back to the last known settings; a 404/401 means the device is gone and
 triggers logout.
+
+Each `BatchUpload` also carries `high_risk_count`/`medium_risk_count`: tallies of how many
+events in the batch fall in the high (`risk >= 0.7`) and medium (`0.4 <= risk < 0.7`) bands,
+thresholds mirroring `shared-web/risk.ts`. These are computed client-side from per-event
+`risk` values before encryption, so the server can summarize tamper activity in partner
+digest emails without ever decrypting the batch.
+
+## Notify flow
+
+High-risk events (`risk >= lifecycle::EXTRA_HIGH_RISK`) are additionally pushed into
+`UploadModule`'s `pending_notify_events: Vec<NotifyPayload>` queue, where
+`NotifyPayload { ts, type, risk, title?, details? }`. `retry_pending_notifies` drains this
+queue by POSTing each payload to `/d/notify` once the device is authenticated. This happens
+independently of, but alongside, the always-present hash/batch path — the event body itself
+still goes through the normal encrypted batch pipeline; `/d/notify` only triggers the alert
+email.
 
 ## Hash chain
 

@@ -131,19 +131,9 @@ const initPromise = (async () => {
        error TEXT
      )`,
   );
-  db.exec(
-    `CREATE TABLE IF NOT EXISTS direct_logs (
-       id TEXT PRIMARY KEY,
-       viewer_id TEXT NOT NULL,
-       target_user_id TEXT NOT NULL,
-       device_id TEXT NOT NULL,
-       ts INTEGER NOT NULL,
-       type TEXT NOT NULL,
-       data TEXT NOT NULL,
-       created_at INTEGER NOT NULL,
-       risk REAL
-     )`,
-  );
+  // direct_logs was removed in #467 (high-risk events now live in encrypted batches);
+  // drop it so already-provisioned local caches reclaim the space.
+  db.exec('DROP TABLE IF EXISTS direct_logs');
   console.log('[cache-worker] init: done');
 })().catch((err) => {
   console.error('[cache-worker] init FAILED', err);
@@ -184,30 +174,7 @@ function sqlMergeDataPage(viewerId: string, targetUserId: string, page: DataPage
         },
       );
     }
-    for (const log of page.logs) {
-      db.exec(
-        `INSERT OR IGNORE INTO direct_logs(id,viewer_id,target_user_id,device_id,ts,type,data,created_at,risk)
-         VALUES(?,?,?,?,?,?,?,?,?)`,
-        {
-          bind: [
-            log.id,
-            viewerId,
-            targetUserId,
-            log.device_id,
-            log.ts,
-            log.type,
-            JSON.stringify(log.data),
-            log.created_at,
-            log.risk ?? null,
-          ],
-        },
-      );
-    }
-
-    const allCreatedAts = [
-      ...page.batches.map((b) => b.created_at),
-      ...page.logs.map((l) => l.created_at),
-    ];
+    const allCreatedAts = [...page.batches.map((b) => b.created_at)];
     if (allCreatedAts.length > 0) {
       const maxCreatedAt = Math.max(...allCreatedAts);
       db.exec(
@@ -348,36 +315,6 @@ function sqlQueryEvents(
       }),
   });
 
-  let logSql = `SELECT * FROM direct_logs WHERE viewer_id=? AND target_user_id=?`;
-  const logBind: unknown[] = [viewerId, targetUserId];
-
-  if (query.deviceId) {
-    logSql += ` AND device_id=?`;
-    logBind.push(query.deviceId);
-  }
-  if (query.startTime !== undefined && query.endTime !== undefined) {
-    logSql += ` AND ts BETWEEN ? AND ?`;
-    logBind.push(query.startTime, query.endTime);
-  }
-
-  db.exec(logSql, {
-    bind: logBind,
-    rowMode: 'object',
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    callback: (row: any) =>
-      results.push({
-        id: row.id as string,
-        device_id: row.device_id as string,
-        ts: row.ts as number,
-        type: row.type as string,
-        data: JSON.parse(row.data as string) as Record<string, unknown>,
-        created_at: row.created_at as number,
-        risk: row.risk != null ? (row.risk as number) : undefined,
-        batch_status: 'unknown' as const,
-        source: 'log' as const,
-      }),
-  });
-
   let combined = results.sort((a, b) => b.ts - a.ts);
   if (query.eventTypes && query.eventTypes.length > 0) {
     const allowed = new Set(query.eventTypes);
@@ -388,12 +325,10 @@ function sqlQueryEvents(
 
 function sqlPruneOldData(viewerId: string, cutoffTs: number): void {
   db.exec(`DELETE FROM events WHERE viewer_id=? AND ts<?`, { bind: [viewerId, cutoffTs] });
-  db.exec(`DELETE FROM direct_logs WHERE viewer_id=? AND ts<?`, { bind: [viewerId, cutoffTs] });
 }
 
 function sqlClearAll(): void {
   db.exec(`DELETE FROM events`);
-  db.exec(`DELETE FROM direct_logs`);
   db.exec(`DELETE FROM batches`);
   db.exec(`DELETE FROM feeds`);
   db.exec(`DELETE FROM materialized_batch_ids`);
@@ -406,9 +341,6 @@ function sqlDeleteDeviceData(viewerId: string, deviceId: string): void {
     bind: [viewerId, deviceId],
   });
   db.exec(`DELETE FROM batches WHERE viewer_id=? AND device_id=?`, {
-    bind: [viewerId, deviceId],
-  });
-  db.exec(`DELETE FROM direct_logs WHERE viewer_id=? AND device_id=?`, {
     bind: [viewerId, deviceId],
   });
 }
@@ -561,13 +493,7 @@ async function fetchAndDecrypt(targetUserId: string): Promise<void> {
       user: targetUserId === viewerId ? undefined : targetUserId,
       since,
     });
-    console.log(
-      '[cache-worker] /data returned',
-      page.batches.length,
-      'batches,',
-      page.logs.length,
-      'logs',
-    );
+    console.log('[cache-worker] /data returned', page.batches.length, 'batches');
     sqlMergeDataPage(viewerId, targetUserId, page);
   } catch (err) {
     console.warn('[cache-worker] fetch failed for', targetUserId, err);

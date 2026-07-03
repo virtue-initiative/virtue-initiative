@@ -77,5 +77,5 @@ export const handlers = [
   http.delete(`${BASE}/partner/watching/:id`, () => new HttpResponse(null, { status: 204 })),
 
   // ── Data ───────────────────────────────────────────────────────────────
-  http.get(`${BASE}/data`, () => HttpResponse.json({ batches: [], logs: [] })),
+  http.get(`${BASE}/data`, () => HttpResponse.json({ batches: [] })),
 ];

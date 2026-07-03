@@ -532,7 +532,7 @@ fn dev_upload_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
         .title
         .unwrap_or_else(|| "Developer CLI log".to_string());
     let (mut bus, state_path) = make_dev_bus(&paths)?;
-    // risk >= 1.0 routes through the immediate POST /log path.
+    // risk >= 1.0 routes through the encrypted batch plus an immediate POST /d/notify.
     bus.send(Upload {
         risk: 1.0_f32,
         kind: UploadKind::Dev {

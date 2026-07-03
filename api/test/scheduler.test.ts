@@ -15,7 +15,6 @@ import {
 beforeEach(clearDB);
 
 const DAILY_BATCH_ID = '00000000-0000-4000-8000-000000000001';
-const DAILY_RISK_LOG_ID = '00000000-0000-4000-8000-000000000002';
 const WEEKLY_BATCH_ID = '00000000-0000-4000-8000-000000000003';
 const OLD_DAILY_BATCH_ID = '00000000-0000-4000-8000-000000000004';
 const EMPTY_ACCESS_KEYS = JSON.stringify({ keys: [] });
@@ -28,7 +27,6 @@ describe('Notification scheduler', () => {
     const withinWindowBatchEnd = Date.UTC(2026, 0, 5, 12, 0, 0);
     const oldBatchStart = Date.UTC(2026, 0, 5, 0, 0, 0);
     const oldBatchEnd = Date.UTC(2026, 0, 5, 2, 0, 0);
-    const riskLogTime = Date.UTC(2026, 0, 5, 15, 0, 0);
 
     const { cookie: ownerCookie, userId: ownerId } = await signupAndGetCookie(
       'digest-owner@example.com',
@@ -75,8 +73,8 @@ describe('Notification scheduler', () => {
       .run();
 
     await env.DB.prepare(
-      `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, high_risk_count, medium_risk_count, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
         uuidToBytes(DAILY_BATCH_ID),
@@ -87,6 +85,8 @@ describe('Notification scheduler', () => {
         withinWindowBatchEnd,
         'hash-1',
         EMPTY_ACCESS_KEYS,
+        1,
+        0,
         withinWindowBatchEnd,
       )
       .run();
@@ -105,22 +105,6 @@ describe('Notification scheduler', () => {
         'hash-old',
         EMPTY_ACCESS_KEYS,
         oldBatchEnd,
-      )
-      .run();
-
-    await env.DB.prepare(
-      `INSERT INTO device_logs (id, user_id, device_id, ts, type, data, risk, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-      .bind(
-        uuidToBytes(DAILY_RISK_LOG_ID),
-        uuidToBytes(ownerId),
-        uuidToBytes(device.id),
-        riskLogTime,
-        'system_shutdown',
-        JSON.stringify({ title: 'Monitoring interruption detected' }),
-        0.7,
-        riskLogTime,
       )
       .run();
 

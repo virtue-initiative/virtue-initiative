@@ -14,7 +14,7 @@ import {
 beforeEach(clearDB);
 
 describe('Data and device API routes', () => {
-  it('handles device registration, settings, log upload, batch upload, and filtered data listing', async () => {
+  it('handles device registration, settings, batch upload, and filtered data listing', async () => {
     const { cookie: userCookie, userId } = await signupAndGetCookie('alice@example.com');
     const device = await createDeviceForUser(userCookie, 'Phone', 'ios');
 
@@ -44,24 +44,6 @@ describe('Data and device API routes', () => {
       body: new Uint8Array(32).fill(7),
     });
     expect(hashUploadRes.status).toBe(200);
-
-    const logRes = await SELF.fetch(`${BASE}/d/log`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${device.refresh_token}`,
-      },
-      body: JSON.stringify({ ts: 1710000000000, type: 'system_event', data: { event: 'startup' } }),
-    });
-    expect(logRes.status).toBe(201);
-    const uploadedLog = (await logRes.json()) as {
-      id: string;
-      type: string;
-      data: { event: string };
-    };
-    expect(uploadedLog.id).toBeTruthy();
-    expect(uploadedLog.type).toBe('system_event');
-    expect(uploadedLog.data.event).toBe('startup');
 
     const form = new FormData();
     form.set('start_time', '1710000000000');
@@ -118,26 +100,15 @@ describe('Data and device API routes', () => {
         encrypted_key: string;
         created_at: number;
       }>;
-      logs: Array<{
-        id: string;
-        device_id: string;
-        type: string;
-        data: { event: string };
-        created_at: number;
-      }>;
+      logs: unknown[];
     };
     expect(data.batches[0]).toMatchObject({
       device_id: device.id,
       encrypted_key: Buffer.from('owner-envelope').toString('base64'),
     });
     expect(data.batches[0]?.created_at).toEqual(expect.any(Number));
-    expect(data.logs[0]).toMatchObject({
-      device_id: device.id,
-      type: 'system_event',
-      data: { event: 'startup' },
-    });
-    expect(data.logs[0]?.id).toBeTruthy();
-    expect(data.logs[0]?.created_at).toEqual(expect.any(Number));
+    // Direct device logs were removed in #467; high-risk events now ride in batches.
+    expect(data.logs).toEqual([]);
 
     const serverToken = await createServerToken(device.id);
     const resetRes = await SELF.fetch(`${BASE}/hash`, {
@@ -147,7 +118,7 @@ describe('Data and device API routes', () => {
     expect(resetRes.status).toBe(200);
   });
 
-  it("returns the accepted partner's batch envelope and owner logs", async () => {
+  it("returns the accepted partner's batch envelope", async () => {
     const { cookie: ownerCookie, userId: ownerUserId } =
       await signupAndGetCookie('owner@example.com');
     const { cookie: partnerCookie, userId: partnerUserId } =
@@ -169,15 +140,6 @@ describe('Data and device API routes', () => {
       method: 'POST',
       headers: authHeaders(partnerCookie),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
-    });
-
-    await SELF.fetch(`${BASE}/d/log`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${device.refresh_token}`,
-      },
-      body: JSON.stringify({ ts: 1710000000000, type: 'system_event', data: { event: 'startup' } }),
     });
 
     const form = new FormData();
@@ -226,11 +188,9 @@ describe('Data and device API routes', () => {
     expect(partnerDataRes.status).toBe(200);
     const partnerData = (await partnerDataRes.json()) as {
       batches: Array<{ encrypted_key: string }>;
-      logs: Array<{ device_id: string }>;
     };
     expect(partnerData.batches[0]?.encrypted_key).toBe(
       Buffer.from('partner-envelope').toString('base64'),
     );
-    expect(partnerData.logs[0]?.device_id).toBe(device.id);
   });
 });

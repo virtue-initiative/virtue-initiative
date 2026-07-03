@@ -25,8 +25,8 @@ Observer state is persisted to `event_state.json` after each iteration.
 
 ### Upload / batching / hash chain
 
-- `core/src/module/upload.rs` — `UploadModule`: manages 3 queues (hash immediate, batch,
-  direct immediate), retry logic
+- `core/src/module/upload.rs` — `UploadModule`: manages 3 queues (hash-pending, batch-pending,
+  notify-pending), retry logic
 - `core/src/module/upload/batch.rs` — `BatchBuilder`: msgpack + gzip batch construction
 - `core/src/crypto.rs` — AES-256-GCM encryption, HPKE key wrap, `compute_event_hash`,
   `encode_batch_event`

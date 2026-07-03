@@ -6,7 +6,6 @@ import { validateZ } from '../middleware/validation';
 import {
   createBatch,
   createDevice,
-  createDeviceLog,
   createSessionRecord,
   getHashState,
   findDeviceById,
@@ -38,6 +37,8 @@ const uploadBatchSchema = z.object({
   start_time: z.coerce.number().int().nonnegative(),
   end_time: z.coerce.number().int().nonnegative(),
   access_keys: z.string().min(1),
+  high_risk_count: z.coerce.number().int().nonnegative().optional().default(0),
+  medium_risk_count: z.coerce.number().int().nonnegative().optional().default(0),
   file: z
     .instanceof(File)
     .refine((file) => file.size > 0, { message: 'File is empty' })
@@ -53,11 +54,12 @@ const accessKeysSchema = z.object({
   keys: z.array(accessKeyEntrySchema).min(1),
 });
 
-const deviceLogSchema = z.object({
+const notifySchema = z.object({
   ts: z.number().int().nonnegative(),
   type: z.string().min(1),
-  risk: z.number().min(0).max(1).optional(),
-  data: z.record(z.string(), z.unknown()).optional().default({}),
+  risk: z.number().min(0).max(1),
+  title: z.string().optional(),
+  details: z.string().optional(),
 });
 
 function parseAccessKeysPayload(raw: string) {
@@ -191,7 +193,8 @@ deviceOnly.post(
       return c.json({ error: 'Not found' }, 404);
     }
 
-    const { start_time, end_time, access_keys, file } = c.req.valid('form');
+    const { start_time, end_time, access_keys, high_risk_count, medium_risk_count, file } =
+      c.req.valid('form');
 
     const hashState = await readHashState(c, device.id);
     const endHash = encodeHex(hashState);
@@ -223,6 +226,8 @@ deviceOnly.post(
       end_time,
       end_hash: endHash,
       access_keys: JSON.stringify(parsedAccessKeys),
+      high_risk_count,
+      medium_risk_count,
       created_at: createdAt,
     });
     await resetHashState(c, device);
@@ -232,12 +237,16 @@ deviceOnly.post(
 );
 
 /**
- * POST /d/log - Submit a single non-batched log item.
+ * POST /d/notify - Send an alert email for a high-risk event.
+ *
+ * The event itself is uploaded (end-to-end encrypted) via POST /d/batch; this
+ * endpoint only carries the minimal metadata needed to render the notification
+ * email and is not persisted. Replaces the removed POST /d/log endpoint.
  */
 deviceOnly.post(
-  '/log',
+  '/notify',
   authenticateDeviceSession(),
-  validateZ('json', deviceLogSchema),
+  validateZ('json', notifySchema),
   async (c) => {
     const device = await findDeviceById(c.env.DB, c.get('sub'));
 
@@ -245,49 +254,29 @@ deviceOnly.post(
       return c.json({ error: 'Not found' }, 404);
     }
 
-    const log = c.req.valid('json');
-    const providedTitle = typeof log.data.title === 'string' ? log.data.title : undefined;
-    const providedDetails = typeof log.data.details === 'string' ? log.data.details : undefined;
-    const computedRisk = log.risk ?? null;
-    const computedSeverity = riskToSeverity(computedRisk);
-    const logId = uuidv4();
+    const notification = c.req.valid('json');
+    const severity = riskToSeverity(notification.risk);
 
-    await createDeviceLog(c.env.DB, {
-      id: logId,
-      user_id: device.owner,
-      device_id: device.id,
-      ts: log.ts,
-      type: log.type,
-      data: JSON.stringify(log.data),
-      risk: computedRisk,
-      created_at: Date.now(),
-    });
-
-    if (computedSeverity && computedRisk != null) {
+    if (severity) {
+      const providedTitle = notification.title?.trim();
+      const providedDetails = notification.details?.trim();
       await notifyPartnersAboutRiskLog(c.env.DB, c.env, {
-        logId,
+        logId: uuidv4(),
         appUrl: getAppUrl(c),
         userId: device.owner,
         deviceName: device.name,
-        severity: computedSeverity,
-        risk: computedRisk,
+        severity,
+        risk: notification.risk,
         title:
-          providedTitle && providedTitle.trim().length > 0
+          providedTitle && providedTitle.length > 0
             ? providedTitle
-            : `Device reported ${log.type.replaceAll('_', ' ')}.`,
-        details: providedDetails && providedDetails.trim().length > 0 ? providedDetails : null,
-        happenedAt: log.ts,
+            : `Device reported ${notification.type.replaceAll('_', ' ')}.`,
+        details: providedDetails && providedDetails.length > 0 ? providedDetails : null,
+        happenedAt: notification.ts,
       });
     }
 
-    return c.json(
-      {
-        id: logId,
-        ...log,
-        ...(computedRisk != null ? { risk: computedRisk } : {}),
-      },
-      201,
-    );
+    return c.json({ ok: true }, 202);
   },
 );
 
