@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS batches (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS idx_batches_user_id ON batches(user_id);
+CREATE INDEX IF NOT EXISTS idx_batches_user_id_created_at ON batches(user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_batches_created_at ON batches(created_at);
 
 CREATE TABLE IF NOT EXISTS partners (
