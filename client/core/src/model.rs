@@ -199,10 +199,10 @@ pub struct DeviceSettings {
     pub device_id: String,
     pub name: String,
     pub platform: String,
+    /// Every recipient the device must wrap batch keys for: the owner (when they
+    /// have a public key) followed by all accepted partners.
     #[serde(default)]
-    pub owner: Option<BatchRecipient>,
-    #[serde(default)]
-    pub partners: Vec<BatchRecipient>,
+    pub wrapping_keys: Vec<BatchRecipient>,
     #[serde(default)]
     pub hash_base_url: Option<String>,
 }

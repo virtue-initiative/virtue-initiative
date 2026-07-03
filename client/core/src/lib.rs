@@ -36,10 +36,7 @@ pub use model::{
 pub use model::{
     AuthState, BatchUpload, EventData, LogEntry, LoopOutcome, Screenshot, ServiceStatus,
 };
-pub use module::auth::{
-    DeviceSettingsRefreshed, Login, LoginRequested, LoginResult, Logout, LogoutRequested,
-    LogoutResult,
-};
+pub use module::auth::{Login, LoginRequested, LoginResult, Logout, LogoutRequested, LogoutResult};
 pub use module::config::ConfigChanged;
 pub use module::lifecycle::{
     ComputerResumed, ComputerSuspended, ProcessStarted, ProcessStopped, UserSessionLogin,

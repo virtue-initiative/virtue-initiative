@@ -23,12 +23,11 @@ describe('Data and device API routes', () => {
     });
     expect(deviceInfoRes.status).toBe(200);
     const deviceInfo = (await deviceInfoRes.json()) as {
-      owner?: { user_id: string; pub_key: string };
-      partners: Array<{ user_id: string; pub_key: string }>;
+      wrapping_keys: Array<{ user_id: string; pub_key: string }>;
       hash_base_url: string;
     };
-    expect(deviceInfo.owner?.user_id).toBe(userId);
-    expect(deviceInfo.partners).toEqual([]);
+    expect(deviceInfo.wrapping_keys).toHaveLength(1);
+    expect(deviceInfo.wrapping_keys[0]?.user_id).toBe(userId);
     expect(deviceInfo.hash_base_url).toBeTruthy();
 
     // Get a hash JWT from POST /d/token

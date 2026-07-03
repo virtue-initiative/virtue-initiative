@@ -144,26 +144,15 @@ deviceOnly.get('/device', authenticateDeviceSession(), async (c) => {
   }
 
   const recipients = await listBatchAccessRecipientsForOwner(c.env.DB, device.owner);
-  const owner = recipients.find((recipient) => recipient.id === device.owner);
 
   return c.json({
     id: device.id,
     name: device.name,
     platform: device.platform,
-    ...(owner?.pub_key
-      ? {
-          owner: {
-            user_id: owner.id,
-            pub_key: encodeBase64(owner.pub_key),
-          },
-        }
-      : {}),
-    partners: recipients
-      .filter((recipient) => recipient.id !== device.owner)
-      .map((recipient) => ({
-        user_id: recipient.id,
-        pub_key: encodeBase64(recipient.pub_key!),
-      })),
+    wrapping_keys: recipients.map((recipient) => ({
+      user_id: recipient.id,
+      pub_key: encodeBase64(recipient.pub_key!),
+    })),
     hash_base_url: hashBaseUrl,
   });
 });

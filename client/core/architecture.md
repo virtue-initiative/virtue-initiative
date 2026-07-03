@@ -86,15 +86,15 @@ to pattern-match typed events without boilerplate.
 
 ### The 7 default modules
 
-| Module                      | Key inputs                                                                              | Key outputs                                                                                        |
-| --------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `LifecycleModule`           | `Ping`, `ProcessStarted/Stopped`, `ComputerSuspended/Resumed`, `UserSession*`           | `Upload` (lifecycle + alert events)                                                                |
-| `ScreenshotModule`          | `Login`, `Logout`, `Ping`, `ConfigChanged`                                              | `Upload` (screenshot), `CaptureFailed`                                                             |
-| `UploadModule`              | `Login`, `Logout`, `Upload`, `Ping`, `ProcessStopped`, `FlushBatchNow`, `ConfigChanged` | network I/O via `ApiTransport`; `LogoutRequested` on 404                                           |
-| `CaptureAvailabilityModule` | `CaptureFailed`                                                                         | `Upload` (capture-failed alert)                                                                    |
-| `AuthModule`                | `LoginRequested`, `LogoutRequested`, `Ping`, `StatusRequest`, `ConfigChanged`           | `Login`, `Logout`, `LoginResult`, `LogoutResult`, `DeviceSettingsRefreshed`, `PartialStatus::Auth` |
-| `StatusModule`              | `StatusRequest`, `PartialStatus` (from 3 sources)                                       | `StatusResponse`                                                                                   |
-| `ConfigModule`              | `Ping`                                                                                  | `ConfigChanged`                                                                                    |
+| Module                      | Key inputs                                                                              | Key outputs                                                             |
+| --------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `LifecycleModule`           | `Ping`, `ProcessStarted/Stopped`, `ComputerSuspended/Resumed`, `UserSession*`           | `Upload` (lifecycle + alert events)                                     |
+| `ScreenshotModule`          | `Login`, `Logout`, `Ping`, `ConfigChanged`                                              | `Upload` (screenshot), `CaptureFailed`                                  |
+| `UploadModule`              | `Login`, `Logout`, `Upload`, `Ping`, `ProcessStopped`, `FlushBatchNow`, `ConfigChanged` | network I/O via `ApiTransport`; `LogoutRequested` on 404                |
+| `CaptureAvailabilityModule` | `CaptureFailed`                                                                         | `Upload` (capture-failed alert)                                         |
+| `AuthModule`                | `LoginRequested`, `LogoutRequested`, `StatusRequest`, `ConfigChanged`                   | `Login`, `Logout`, `LoginResult`, `LogoutResult`, `PartialStatus::Auth` |
+| `StatusModule`              | `StatusRequest`, `PartialStatus` (from 3 sources)                                       | `StatusResponse`                                                        |
+| `ConfigModule`              | `Ping`                                                                                  | `ConfigChanged`                                                         |
 
 ### Screenshot dedup (two gates)
 
@@ -285,7 +285,12 @@ wire:  nonce[12 bytes] || ciphertext+tag
 ```
 
 Each upload also wraps the batch key per recipient using HPKE
-(`DhkemX25519HkdfSha256 / HkdfSha256 / Aes256Gcm`).
+(`DhkemX25519HkdfSha256 / HkdfSha256 / Aes256Gcm`). The recipient set comes from
+the device's `wrapping_keys`, which `UploadModule` refetches from `GET /d/device`
+immediately before every batch upload — this is the sole refresh path, so a partner
+added or removed is picked up on the very next batch. A transient refetch failure
+falls back to the last known settings; a 404/401 means the device is gone and
+triggers logout.
 
 ## Hash chain
 
