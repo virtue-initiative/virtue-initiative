@@ -9,16 +9,20 @@ import SiteLayout from '../layouts/SiteLayout.astro';
     not there yet. Donations are <strong>not currently tax deductible</strong>.
   </div>
 
-  <section class="donate-hero">
-    <h2>Support the mission</h2>
-    <p>
-      The Virtue Initiative builds free tools and resources to help people break free from
-      pornography. We fundraise all of our support so the app can stay free forever. Your gift keeps
-      it that way.
-    </p>
-  </section>
+  <section class="donate-layout">
+    <div class="donate-intro">
+      <h2>Support the mission</h2>
+      <p>
+        The Virtue Initiative builds free tools and resources to help people break free from
+        pornography. We fundraise all of our support so the app can stay free forever. Your gift
+        keeps it that way.
+      </p>
+      <p class="donate-intro-note">
+        Please note: donations are not currently tax deductible, as we are still working toward
+        501(c)(3) status.
+      </p>
+    </div>
 
-  <section class="donate-section">
     <div class="donate-card">
       <DonateForm client:load />
     </div>
