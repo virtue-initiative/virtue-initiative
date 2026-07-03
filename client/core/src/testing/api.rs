@@ -110,7 +110,11 @@ impl Default for MockApiState {
                 device_id: "mock-device".to_string(),
                 name: "mock device".to_string(),
                 platform: "mock".to_string(),
-                wrapping_keys: Vec::new(),
+                wrapping_keys: vec![crate::model::BatchRecipient {
+                    user_id: "mock-user".to_string(),
+                    // X25519 base point (u=9); any valid curve point works here.
+                    pub_key_base64: "CQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".to_string(),
+                }],
                 hash_base_url: None,
             },
             batch_id_counter: 0,

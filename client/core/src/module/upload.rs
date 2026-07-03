@@ -14,7 +14,7 @@ use crate::error::{CoreError, CoreResult};
 use crate::events::Ping;
 use crate::events::bus::{Emitter, EventBus, Observer, StateType, log_error};
 use crate::model::PartialStatus;
-use crate::module::auth::{DeviceSettingsRefreshed, Login, Logout, LogoutRequested};
+use crate::module::auth::{Login, Logout, LogoutRequested};
 use crate::module::config::ConfigChanged;
 use crate::module::lifecycle::ProcessStopped;
 use crate::module::status::StatusRequest;
@@ -224,8 +224,9 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
     }
 
     fn maybe_upload_batch(&mut self, now_ms: i64, emitter: &Emitter) -> CoreResult<()> {
-        let can = self.state.settings.as_ref().is_some_and(can_capture);
-        if self.state.pending_batch_events.is_empty() || !can {
+        // Whether we have recipients to wrap for is decided in `try_upload_batch`
+        // after refetching settings, not from the (possibly stale) cached copy.
+        if self.state.pending_batch_events.is_empty() {
             return Ok(());
         }
         let should = self.state.post_login_proof_batches_remaining > 0
@@ -241,13 +242,51 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
         Ok(())
     }
 
+    /// Refetches device settings from the API immediately before a batch upload
+    /// so the batch key is wrapped for the current recipient set (e.g. a partner
+    /// added or removed since the last periodic refresh). Returns `false` when the
+    /// device is gone and the batch should be abandoned; a transient failure
+    /// returns `true` so the batch still uploads against the last known settings.
+    fn refresh_settings_before_batch(&mut self, emitter: &Emitter) -> bool {
+        let Some(creds) = self.state.device_credentials.as_ref() else {
+            return true;
+        };
+        let refresh_token = creds.refresh_token.clone();
+        match self.api.get_device_settings(&refresh_token) {
+            Ok(settings) => {
+                self.state.settings = Some(settings);
+                true
+            }
+            Err(err) if err.is_not_found() || err.is_unauthorized() => {
+                log_error(
+                    "settings refresh before batch: device deregistered or unauth, logging out",
+                    Some(&err),
+                );
+                let _ = emitter.send(LogoutRequested);
+                false
+            }
+            Err(err) => {
+                log_error(
+                    "settings refresh before batch failed; using last known settings",
+                    Some(&err),
+                );
+                true
+            }
+        }
+    }
+
     pub(crate) fn try_upload_batch(&mut self, now_ms: i64, emitter: &Emitter) -> CoreResult<()> {
         if self.state.pending_batch_events.is_empty() {
             return Ok(());
         }
+        if !self.refresh_settings_before_batch(emitter) {
+            return Ok(());
+        }
+        // With freshly fetched settings in hand, only proceed when there is at
+        // least one recipient to wrap for; otherwise keep the events queued.
         let settings = match self.state.settings.as_ref() {
-            Some(s) => s,
-            None => return Ok(()),
+            Some(s) if can_capture(s) => s,
+            _ => return Ok(()),
         };
         let count = self
             .state
@@ -390,10 +429,6 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> Observer for UploadModule<
                 self.authenticated = false;
                 self.hash_token_cache = None;
                 self.state.reset_for_logout();
-                Ok(())
-            },
-            ev: DeviceSettingsRefreshed => {
-                self.state.settings = Some(ev.settings.clone());
                 Ok(())
             },
             _: StatusRequest => {
@@ -577,6 +612,55 @@ mod tests {
             s.get_hash_token_calls.len(),
             1,
             "hash-server token should be fetched once and cached"
+        );
+    }
+
+    #[test]
+    fn settings_are_refetched_before_batch_and_new_recipients_are_used() {
+        let mut b = EventTester::builder();
+        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
+        let mut t = b.build();
+        // Login seeds settings with a single recipient (the owner).
+        t.emit(1, login_event());
+
+        // A partner is added server-side: the next settings fetch returns two recipients.
+        t.api.program_get_device_settings(Ok(DeviceSettings {
+            device_id: "test-device".into(),
+            name: "test device".into(),
+            platform: "test".into(),
+            wrapping_keys: vec![
+                BatchRecipient {
+                    user_id: "test-user".into(),
+                    pub_key_base64: "CQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
+                },
+                BatchRecipient {
+                    user_id: "partner-user".into(),
+                    pub_key_base64: "CQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
+                },
+            ],
+            hash_base_url: None,
+        }));
+
+        // A low-risk upload flushes a batch (post-login proof batches force it out).
+        t.emit(2, skipped_upload());
+
+        let s = t.api.state();
+        assert_eq!(
+            s.get_device_settings_calls.len(),
+            1,
+            "settings should be refetched once, right before the batch upload"
+        );
+        assert_eq!(s.batch_uploads.len(), 1, "batch should upload");
+        let recipients: Vec<String> = s.batch_uploads[0]
+            .batch
+            .access_keys
+            .iter()
+            .map(|k| k.user_id.clone())
+            .collect();
+        assert_eq!(
+            recipients,
+            vec!["test-user".to_string(), "partner-user".to_string()],
+            "batch should be wrapped for the freshly fetched recipient set"
         );
     }
 
