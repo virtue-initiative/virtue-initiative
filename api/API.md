@@ -648,11 +648,7 @@ Response `200`:
   "id": UUID,
   "name": "My Laptop",
   "platform": "linux",
-  "owner": {
-    "user_id": UUID,
-    "pub_key": Base64
-  } | undefined,
-  "partners": [
+  "wrapping_keys": [
     {
       "user_id": UUID,
       "pub_key": Base64
@@ -661,6 +657,10 @@ Response `200`:
   "hash_base_url": "https://..." | null
 }
 ```
+
+`wrapping_keys` lists every public key the device must wrap batch keys for: the
+device owner (when they have a public key) followed by all accepted partners.
+The owner, when present, is always the first entry.
 
 ### `POST /d/token`
 

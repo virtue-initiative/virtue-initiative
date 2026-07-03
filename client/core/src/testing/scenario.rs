@@ -54,12 +54,11 @@ impl Scenario {
             device_id: "scenario-device".into(),
             name: "scenario device".into(),
             platform: "test-platform".into(),
-            owner: Some(BatchRecipient {
+            wrapping_keys: vec![BatchRecipient {
                 user_id: "scenario-user".into(),
                 // X25519 base point (u=9); any valid curve point works here.
                 pub_key_base64: "CQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
-            }),
-            partners: Vec::new(),
+            }],
             hash_base_url: None,
         };
         Self::build(Some(auth), Some(settings))

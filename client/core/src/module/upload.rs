@@ -434,19 +434,15 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> Observer for UploadModule<
 }
 
 fn can_capture(settings: &DeviceSettings) -> bool {
-    settings.owner.is_some()
+    !settings.wrapping_keys.is_empty()
 }
 
 fn batch_recipients(settings: &DeviceSettings) -> CoreResult<Vec<BatchRecipient>> {
     use crate::error::CoreError;
-    let owner = settings
-        .owner
-        .clone()
-        .ok_or(CoreError::InvalidState("owner public key not available"))?;
-    let mut recipients = Vec::with_capacity(1 + settings.partners.len());
-    recipients.push(owner);
-    recipients.extend(settings.partners.clone());
-    Ok(recipients)
+    if settings.wrapping_keys.is_empty() {
+        return Err(CoreError::InvalidState("no batch recipients available"));
+    }
+    Ok(settings.wrapping_keys.clone())
 }
 
 #[cfg(test)]
@@ -483,11 +479,10 @@ mod tests {
             device_id: "test-device".into(),
             name: "test device".into(),
             platform: "test".into(),
-            owner: Some(BatchRecipient {
+            wrapping_keys: vec![BatchRecipient {
                 user_id: "test-user".into(),
                 pub_key_base64: "CQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
-            }),
-            partners: Vec::new(),
+            }],
             hash_base_url: None,
         }
     }

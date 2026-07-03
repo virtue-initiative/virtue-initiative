@@ -159,8 +159,7 @@ impl ApiTransport for ReqwestApiClient {
             id: String,
             name: String,
             platform: String,
-            owner: Option<DeviceRecipientResponse>,
-            partners: Vec<DeviceRecipientResponse>,
+            wrapping_keys: Vec<DeviceRecipientResponse>,
             hash_base_url: Option<String>,
         }
 
@@ -181,16 +180,12 @@ impl ApiTransport for ReqwestApiClient {
             device_id: response.id,
             name: response.name,
             platform: response.platform,
-            owner: response.owner.map(|owner| crate::model::BatchRecipient {
-                user_id: owner.user_id,
-                pub_key_base64: owner.pub_key,
-            }),
-            partners: response
-                .partners
+            wrapping_keys: response
+                .wrapping_keys
                 .into_iter()
-                .map(|partner| crate::model::BatchRecipient {
-                    user_id: partner.user_id,
-                    pub_key_base64: partner.pub_key,
+                .map(|key| crate::model::BatchRecipient {
+                    user_id: key.user_id,
+                    pub_key_base64: key.pub_key,
                 })
                 .collect(),
             hash_base_url: response.hash_base_url,
