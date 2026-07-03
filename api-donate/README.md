@@ -57,26 +57,47 @@ prints, and injects it as `STRIPE_WEBHOOK_SECRET` — so you don't need to set t
 falls back to the value in `~/.config/virtue-dev.env` if the Stripe CLI isn't available). These
 launch-time values override whatever is in `.dev.vars`.
 
-## Deploy / first-time setup
+## Deploy
 
-1. Create the D1 database and paste its id into `wrangler.json` (`d1_databases[0].database_id`):
+Like `api/`, this worker has separate `staging` and `prod` environments defined in
+`wrangler.json`, each with its own D1 database and route:
+
+- `staging` → `virtueinitiative-donate-staging-api`, served at
+  `staging.donate-api.virtueinitiative.org`
+- `prod` → `virtueinitiative-donate-api`, served at `donate-api.virtueinitiative.org`
+
+`.github/workflows/deploy.yml` deploys automatically on every push: `staging` on push to
+`staging`, `prod` on push to `main`. No CI step runs D1 migrations — apply those manually
+(see below) before code that depends on a schema change goes out.
+
+### First-time setup per environment
+
+1. Create the D1 database:
    ```bash
-   wrangler d1 create virtueinitiative-donate-db
+   wrangler d1 create virtueinitiative-donate-db           # prod
+   wrangler d1 create virtueinitiative-donate-staging-db    # staging
    ```
-2. Set secrets:
+   and paste the resulting id into the matching `env.prod`/`env.staging` block in
+   `wrangler.json`.
+2. Point a proxied (orange-clouded) DNS record in the `virtueinitiative.org` zone at each
+   hostname above — Worker routes only intercept traffic for hostnames that already have a
+   DNS record in the zone; they don't create one.
+3. Set secrets per environment:
    ```bash
-   wrangler secret put STRIPE_SECRET_KEY
-   wrangler secret put STRIPE_WEBHOOK_SECRET
+   wrangler secret put STRIPE_SECRET_KEY --env staging
+   wrangler secret put STRIPE_WEBHOOK_SECRET --env staging
+   wrangler secret put STRIPE_SECRET_KEY --env prod
+   wrangler secret put STRIPE_WEBHOOK_SECRET --env prod
    ```
-3. Apply migrations remotely and deploy:
+4. Apply migrations remotely:
    ```bash
-   bun run db:migrate:remote
-   bun run deploy
+   bun run db:migrate:staging
+   bun run db:migrate:prod
    ```
-4. In the Stripe dashboard, add a webhook endpoint pointing at
-   `https://donate-api.virtueinitiative.org/webhook` (events: `checkout.session.completed`,
+5. In the Stripe dashboard, add a webhook endpoint per environment pointing at
+   `https://<host>/webhook` (events: `checkout.session.completed`,
    `customer.subscription.deleted`) and enable the hosted Customer Portal login page; put that
-   login URL into the landing site's `PUBLIC_STRIPE_PORTAL_URL`.
+   login URL into the landing site's `PUBLIC_STRIPE_PORTAL_URL` for that environment.
 
 ## Checks
 

@@ -5,16 +5,18 @@
   "main": "src/index.ts",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --local",
-    "deploy": "wrangler deploy",
+    "dev": "wrangler dev --env staging --local",
+    "deploy:prod": "wrangler deploy --env prod",
+    "deploy:staging": "wrangler deploy --env staging",
     "build": "echo 'No build step needed for Cloudflare Workers -- included in deploy'",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.lint.json --noEmit",
     "format:check": "prettier --check .",
     "format": "prettier --write .",
-    "db:migrate:local": "wrangler d1 migrations apply DB --local",
-    "db:migrate:remote": "wrangler d1 migrations apply DB --remote"
+    "db:migrate:local": "wrangler d1 migrations apply DB --env staging --local",
+    "db:migrate:staging": "wrangler d1 migrations apply DB --env staging --remote",
+    "db:migrate:prod": "wrangler d1 migrations apply DB --env prod --remote"
   },
   "keywords": [
     "cloudflare",

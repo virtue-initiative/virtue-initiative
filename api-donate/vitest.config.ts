@@ -5,7 +5,7 @@ export default defineWorkersConfig({
     setupFiles: ['./test/setup.ts'],
     poolOptions: {
       workers: {
-        wrangler: { configPath: './wrangler.json' },
+        wrangler: { configPath: './wrangler.json', environment: 'staging' },
         miniflare: {
           bindings: {
             STRIPE_SECRET_KEY: 'sk_test_dummy',

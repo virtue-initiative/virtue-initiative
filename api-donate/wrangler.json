@@ -14,21 +14,46 @@
       "invocation_logs": true
     }
   },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "virtueinitiative-donate-db",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
-      "migrations_dir": "src/schema/migrations"
+  "env": {
+    "prod": {
+      "name": "virtueinitiative-donate-api",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "virtueinitiative-donate-db",
+          "database_id": "9c635213-47e5-4a98-840b-e175403dc4b7",
+          "migrations_dir": "src/schema/migrations"
+        }
+      ],
+      "vars": {
+        "LANDING_URL": "https://virtueinitiative.org"
+      },
+      "routes": [
+        {
+          "pattern": "donate-api.virtueinitiative.org/*",
+          "zone_name": "virtueinitiative.org"
+        }
+      ]
+    },
+    "staging": {
+      "name": "virtueinitiative-donate-staging-api",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "virtueinitiative-donate-staging-db",
+          "database_id": "e7ab8f0c-34aa-4979-ae75-75605fa70014",
+          "migrations_dir": "src/schema/migrations"
+        }
+      ],
+      "vars": {
+        "LANDING_URL": "https://staging.virtueinitiative.org"
+      },
+      "routes": [
+        {
+          "pattern": "staging.donate-api.virtueinitiative.org/*",
+          "zone_name": "virtueinitiative.org"
+        }
+      ]
     }
-  ],
-  "vars": {
-    "LANDING_URL": "https://virtueinitiative.org"
-  },
-  "routes": [
-    {
-      "pattern": "donate-api.virtueinitiative.org/*",
-      "zone_name": "virtueinitiative.org"
-    }
-  ]
+  }
 }

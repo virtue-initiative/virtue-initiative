@@ -54,8 +54,8 @@ bun run format:check
 Notes:
 
 - `bun test` runs `vitest run` (Stripe calls are mocked via `cloudflare:test` `fetchMock`; webhook signatures are generated locally).
-- Standalone Worker, single environment (no separate staging). Deploys via `bun run deploy`.
-- Requires secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`, and a D1 database id in `wrangler.json` before deploying.
+- Standalone Worker with separate `staging`/`prod` environments (own D1 database and route each), same pattern as `api/`. Deploys via `bun run deploy:staging` or `bun run deploy:prod`.
+- Requires secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` per environment (`wrangler secret put ... --env staging|prod`).
 
 ### Web app
 
@@ -233,13 +233,14 @@ Notes:
 
 ## Deployment workflows
 
-`deploy.yml` is not a PR validation workflow. It runs on pushes to `main` and `staging` and deploys `web`, `api`, and `landing`.
+`deploy.yml` is not a PR validation workflow. It runs on pushes to `main` and `staging` and deploys `web`, `api`, `landing`, and `api-donate`.
 
 If you need to mirror deployment locally:
 
 - `api/`: `bun run deploy:staging` or `bun run deploy:prod`
 - `web/`: `bun run deploy:staging` or `bun run deploy:prod`
 - `landing/`: `bun run deploy:staging` or `bun run deploy:prod`
+- `api-donate/`: `bun run deploy:staging` or `bun run deploy:prod`
 
 These require the appropriate Cloudflare credentials and, for landing, GitHub release access.
 
