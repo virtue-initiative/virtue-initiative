@@ -1,0 +1,11 @@
+# .dev.vars template
+# Copy this file to .dev.vars and fill in the values.
+
+# Stripe test-mode secret key (starts with sk_test_...). Required to create
+# Checkout sessions. Leave as-is to boot the worker without a working checkout.
+STRIPE_SECRET_KEY=sk_test_REPLACE_ME
+
+# Signing secret for the webhook endpoint. When forwarding events with the
+# Stripe CLI (`stripe listen --forward-to http://localhost:8788/webhook`),
+# use the whsec_... value it prints.
+STRIPE_WEBHOOK_SECRET=whsec_REPLACE_ME

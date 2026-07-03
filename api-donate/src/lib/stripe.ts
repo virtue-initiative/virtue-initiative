@@ -11,6 +11,11 @@ import Stripe from 'stripe';
 export function createStripeClient(secretKey: string): Stripe {
   return new Stripe(secretKey, {
     httpClient: Stripe.createFetchHttpClient(),
+    // Pin to the SDK's version so requests match the generated types and so
+    // features gated on a recent API version (e.g. `name_collection` on Checkout
+    // Sessions) work regardless of the account's default API version. Keep this
+    // in sync with the installed stripe package when upgrading.
+    apiVersion: '2026-06-24.dahlia',
   });
 }
 

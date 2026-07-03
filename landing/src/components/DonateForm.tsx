@@ -1,4 +1,4 @@
-import { Button } from '@virtueinitiative/shared-web';
+import { Button, SegmentedControl } from '@virtueinitiative/shared-web';
 import { useState } from 'preact/hooks';
 import { DONATE_API_URL, STRIPE_PORTAL_URL } from '../lib/donate-url';
 
@@ -7,7 +7,7 @@ const PRESET_AMOUNTS = [5, 10, 25, 50, 100];
 export function DonateForm() {
   const [amount, setAmount] = useState<number>(25);
   const [customAmount, setCustomAmount] = useState<string>('');
-  const [recurring, setRecurring] = useState<boolean>(false);
+  const [recurring, setRecurring] = useState<boolean>(true);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,40 +54,35 @@ export function DonateForm() {
     <form class="donate-form" onSubmit={handleSubmit}>
       <fieldset class="donate-frequency" disabled={submitting}>
         <legend>Donation type</legend>
-        <div class="donate-toggle">
-          <button
-            type="button"
-            class={`donate-toggle-option${recurring ? '' : ' is-active'}`}
-            aria-pressed={!recurring}
-            onClick={() => setRecurring(false)}
-          >
-            One-time
-          </button>
-          <button
-            type="button"
-            class={`donate-toggle-option${recurring ? ' is-active' : ''}`}
-            aria-pressed={recurring}
-            onClick={() => setRecurring(true)}
-          >
-            Monthly
-          </button>
-        </div>
+        <SegmentedControl
+          size="tall"
+          segments={[
+            { label: 'Monthly', value: 'monthly' },
+            { label: 'One-time', value: 'onetime' },
+          ]}
+          value={recurring ? 'monthly' : 'onetime'}
+          onChange={(value) => setRecurring(value === 'monthly')}
+        />
       </fieldset>
 
       <fieldset class="donate-amounts" disabled={submitting}>
         <legend>Amount</legend>
         <div class="donate-preset-grid">
-          {PRESET_AMOUNTS.map((value) => (
-            <button
-              type="button"
-              key={value}
-              class={`donate-preset${customAmount.trim() === '' && amount === value ? ' is-active' : ''}`}
-              aria-pressed={customAmount.trim() === '' && amount === value}
-              onClick={() => selectPreset(value)}
-            >
-              ${value}
-            </button>
-          ))}
+          {PRESET_AMOUNTS.map((value) => {
+            const isActive = customAmount.trim() === '' && amount === value;
+            return (
+              <Button
+                key={value}
+                type="button"
+                variant={isActive ? 'primary' : 'outline'}
+                class="donate-preset"
+                aria-pressed={isActive}
+                onClick={() => selectPreset(value)}
+              >
+                ${value}
+              </Button>
+            );
+          })}
         </div>
         <label class="donate-custom">
           <span>Custom amount</span>

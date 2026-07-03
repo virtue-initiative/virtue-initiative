@@ -34,6 +34,29 @@ stripe listen --forward-to http://localhost:8788/webhook
 Put the signing secret it prints into `.dev.vars` as `STRIPE_WEBHOOK_SECRET`, along with a test
 `STRIPE_SECRET_KEY`.
 
+### Running via `./scripts/launch.sh --donate`
+
+The repo's launch script can run this worker alongside the web/api/landing dev servers. Pass
+`--donate` to enable it:
+
+```bash
+./scripts/launch.sh --donate            # localhost
+./scripts/launch.sh --donate mydomain   # https://donate.mydomain.localhost via Caddy
+```
+
+Rather than editing `.dev.vars` each time, put shared secrets in `~/.config/virtue-dev.env`
+(sourced by the launch script). It's read as shell, so use `KEY=value`:
+
+```sh
+STRIPE_SECRET_KEY=sk_test_...
+PUBLIC_STRIPE_PORTAL_URL=https://billing.stripe.com/p/login/...   # landing "Manage donations" link
+```
+
+With `--donate`, the script also runs `stripe listen`, captures the webhook signing secret it
+prints, and injects it as `STRIPE_WEBHOOK_SECRET` — so you don't need to set that yourself (it
+falls back to the value in `~/.config/virtue-dev.env` if the Stripe CLI isn't available). These
+launch-time values override whatever is in `.dev.vars`.
+
 ## Deploy / first-time setup
 
 1. Create the D1 database and paste its id into `wrangler.json` (`d1_databases[0].database_id`):

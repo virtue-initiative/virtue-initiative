@@ -26,13 +26,21 @@ checkout.post('/checkout', zValidator('json', checkoutSchema), async (c) => {
         price_data: {
           currency: 'usd',
           unit_amount: unitAmount,
-          product_data: { name: 'Donation to the Virtue Initiative' },
+          product_data: {
+            name: recurring
+              ? 'a monthly donation to The Virtue Initiative'
+              : 'Donation to The Virtue Initiative',
+          },
           ...(recurring ? { recurring: { interval: 'month' } } : {}),
         },
       },
     ],
+    // Frame the flow as a donation rather than a purchase/subscription. Supported
+    // for subscription mode since API version 2024-11-20.acacia (see lib/stripe.ts).
+    submit_type: 'donate',
     // Collect everything we want from the donor inside Stripe Checkout so the
     // landing form can stay minimal.
+    name_collection: { individual: { enabled: true, optional: false } },
     billing_address_collection: 'auto',
     phone_number_collection: { enabled: true },
     success_url: `${c.env.LANDING_URL}/donate/success?session_id={CHECKOUT_SESSION_ID}`,
