@@ -19,6 +19,17 @@ export default defineConfig(({ mode }) => {
           }
         : undefined,
     plugins: [
+      // Keep non-production deployments (staging, feature branches) out of search
+      // engines by injecting a robots meta tag into the prerendered <head>.
+      mode !== 'production' && {
+        name: 'inject-noindex-meta',
+        transformIndexHtml(html: string) {
+          return html.replace(
+            '</head>',
+            '    <meta name="robots" content="noindex, nofollow" />\n  </head>',
+          );
+        },
+      },
       preact({
         prerender: {
           enabled: true,
