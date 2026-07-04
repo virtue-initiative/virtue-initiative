@@ -196,7 +196,6 @@ a.sidebar-nav-group-heading {
   display: flex;
   flex-direction: column;
   gap: 0.125rem;
-  padding: 0.5rem 0 0;
 }
 
 .sidebar-user {
@@ -204,7 +203,7 @@ a.sidebar-nav-group-heading {
   align-items: center;
   gap: 0.75rem;
   width: 100%;
-  padding: 0 0.875rem 0.75rem;
+  padding: 0.75rem 0.875rem;
   border: 0;
   border-top: 1px solid transparent;
   background: transparent;
