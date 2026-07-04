@@ -197,7 +197,7 @@ describe('Notification routes and tamper alerts', () => {
     expect(tamperDelivery?.text).toContain('Custom alert details');
   });
 
-  it('does not send immediate tamper alerts for moderate-risk device log events', async () => {
+  it('sends immediate tamper alerts for moderate-risk device log events', async () => {
     const { cookie: ownerCookie } = await signupAndGetCookie('moderate-owner@example.com', 'pw');
     const { cookie: partnerCookie, userId: partnerUserId } = await signupAndGetCookie(
       'moderate-partner@example.com',
@@ -227,7 +227,6 @@ describe('Notification routes and tamper alerts', () => {
     });
 
     const device = await createDeviceForUser(ownerCookie, 'Laptop', 'linux');
-    const baselineCount = (await listEmailDeliveries()).length;
     const logRes = await SELF.fetch(`${BASE}/d/notify`, {
       method: 'POST',
       headers: {
@@ -238,10 +237,12 @@ describe('Notification routes and tamper alerts', () => {
     });
 
     expect(logRes.status).toBe(202);
-    expect(await listEmailDeliveries()).toHaveLength(baselineCount);
+    expect((await listEmailDeliveries()).some((delivery) => delivery.kind === 'tamper_alert')).toBe(
+      true,
+    );
   });
 
-  it('treats zero or absent risk as non-tamper', async () => {
+  it('sends an immediate tamper alert even for zero risk; requires the risk field', async () => {
     const { cookie: ownerCookie } = await signupAndGetCookie('non-tamper-owner@example.com', 'pw');
     const { cookie: partnerCookie, userId: partnerUserId } = await signupAndGetCookie(
       'non-tamper-partner@example.com',
@@ -271,9 +272,9 @@ describe('Notification routes and tamper alerts', () => {
     });
 
     const device = await createDeviceForUser(ownerCookie, 'Desktop', 'linux');
-    const baselineCount = (await listEmailDeliveries()).length;
 
-    // Zero risk is accepted but produces no alert email.
+    // The notify endpoint doesn't re-filter by risk — the client's uploader only
+    // calls it for high-risk events, so any call here should send an alert.
     const zeroRiskRes = await SELF.fetch(`${BASE}/d/notify`, {
       method: 'POST',
       headers: {
@@ -283,8 +284,11 @@ describe('Notification routes and tamper alerts', () => {
       body: JSON.stringify({ ts: Date.now(), type: 'heartbeat', risk: 0 }),
     });
     expect(zeroRiskRes.status).toBe(202);
+    expect((await listEmailDeliveries()).some((delivery) => delivery.kind === 'tamper_alert')).toBe(
+      true,
+    );
 
-    // Risk is required on the notify endpoint (only high-risk events call it).
+    // Risk is still a required field on the notify endpoint.
     const missingRiskRes = await SELF.fetch(`${BASE}/d/notify`, {
       method: 'POST',
       headers: {
@@ -294,8 +298,6 @@ describe('Notification routes and tamper alerts', () => {
       body: JSON.stringify({ ts: Date.now(), type: 'heartbeat' }),
     });
     expect(missingRiskRes.status).toBe(400);
-
-    expect(await listEmailDeliveries()).toHaveLength(baselineCount);
   });
 
   it('stops all partner emails when receive emails is disabled', async () => {

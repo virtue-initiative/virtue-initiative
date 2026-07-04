@@ -37,77 +37,11 @@ pub(crate) const POST_LOGIN_PROOF_BATCH_COUNT: u32 = 3;
 
 /// A hash-uploaded event awaiting batch upload, paired with its risk so the batch
 /// upload can report how many high/medium-risk events it carries.
-///
-/// Serialized as `[ts, risk, encoded]`. For backward compatibility with state
-/// written before #467 it also deserializes the legacy `[ts, encoded]` shape,
-/// defaulting `risk` to `0.0`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PendingBatchEvent {
     pub ts: i64,
     pub risk: f32,
     pub encoded: Vec<u8>,
-}
-
-impl Serialize for PendingBatchEvent {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeSeq;
-        let mut seq = serializer.serialize_seq(Some(3))?;
-        seq.serialize_element(&self.ts)?;
-        seq.serialize_element(&self.risk)?;
-        seq.serialize_element(&self.encoded)?;
-        seq.end()
-    }
-}
-
-impl<'de> Deserialize<'de> for PendingBatchEvent {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct PendingBatchEventVisitor;
-
-        impl<'de> serde::de::Visitor<'de> for PendingBatchEventVisitor {
-            type Value = PendingBatchEvent;
-
-            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                f.write_str("a [ts, risk, encoded] or legacy [ts, encoded] sequence")
-            }
-
-            fn visit_seq<A: serde::de::SeqAccess<'de>>(
-                self,
-                mut seq: A,
-            ) -> Result<PendingBatchEvent, A::Error> {
-                use serde::de::Error;
-                let ts: i64 = seq
-                    .next_element()?
-                    .ok_or_else(|| A::Error::invalid_length(0, &self))?;
-                // The second element distinguishes the two shapes: a number is the
-                // risk (new form), an array is the encoded event (legacy form).
-                let second: serde_json::Value = seq
-                    .next_element()?
-                    .ok_or_else(|| A::Error::invalid_length(1, &self))?;
-                match second {
-                    serde_json::Value::Array(_) => {
-                        let encoded = serde_json::from_value(second).map_err(A::Error::custom)?;
-                        Ok(PendingBatchEvent {
-                            ts,
-                            risk: 0.0,
-                            encoded,
-                        })
-                    }
-                    serde_json::Value::Number(number) => {
-                        let risk = number.as_f64().unwrap_or(0.0) as f32;
-                        let encoded: Vec<u8> = seq
-                            .next_element()?
-                            .ok_or_else(|| A::Error::invalid_length(2, &self))?;
-                        Ok(PendingBatchEvent { ts, risk, encoded })
-                    }
-                    _ => Err(A::Error::custom(
-                        "unexpected second element in pending batch event",
-                    )),
-                }
-            }
-        }
-
-        deserializer.deserialize_seq(PendingBatchEventVisitor)
-    }
 }
 
 /// Builds the notification payload for a high-risk event. Title/details are pulled

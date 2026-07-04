@@ -100,15 +100,12 @@ describe('Data and device API routes', () => {
         encrypted_key: string;
         created_at: number;
       }>;
-      logs: unknown[];
     };
     expect(data.batches[0]).toMatchObject({
       device_id: device.id,
       encrypted_key: Buffer.from('owner-envelope').toString('base64'),
     });
     expect(data.batches[0]?.created_at).toEqual(expect.any(Number));
-    // Direct device logs were removed in #467; high-risk events now ride in batches.
-    expect(data.logs).toEqual([]);
 
     const serverToken = await createServerToken(device.id);
     const resetRes = await SELF.fetch(`${BASE}/hash`, {

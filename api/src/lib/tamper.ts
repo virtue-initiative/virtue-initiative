@@ -1,4 +1,4 @@
-import { DEFAULT_IMMEDIATE_TAMPER_SEVERITY, TamperSeverity, severityAtLeast } from './email-domain';
+import { TamperSeverity } from './email-domain';
 import { findUserById, listAcceptedNotificationTargetsForUser } from './db';
 import { sendEmail } from './email';
 import { renderTamperAlertTemplate } from './email/templates';
@@ -39,10 +39,6 @@ export async function notifyPartnersAboutRiskLog(
   const targets = await listAcceptedNotificationTargetsForUser(db, input.userId);
   for (const target of targets) {
     if (target.settings.email_frequency === 'none') {
-      continue;
-    }
-
-    if (!severityAtLeast(input.severity, DEFAULT_IMMEDIATE_TAMPER_SEVERITY)) {
       continue;
     }
 

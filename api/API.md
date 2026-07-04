@@ -590,18 +590,13 @@ Response `200`:
 
 ```js
 {
-  "batches": [BatchData],
-  "logs": []
+  "batches": [BatchData]
 }
 ```
 
 `batches` only include rows where the requester has a matching `encrypted_key` envelope.
 Returns every batch with `created_at > since`, ordered oldest-to-newest. Callers
 should pass the largest `created_at` they've seen as `since` on subsequent syncs.
-
-`logs` is always an empty array. Direct device logs were removed in #467 — high-risk
-events now live inside the encrypted batches above. The field is retained only for
-API stability; existing clients that read it will keep working.
 
 ## Device API
 

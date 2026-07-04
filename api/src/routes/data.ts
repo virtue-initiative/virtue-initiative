@@ -58,9 +58,6 @@ data.get('/', authenticateWebSession(), validateZ('query', listDataSchema), asyn
         };
       })
       .filter((item) => item !== null),
-    // Direct device logs were removed in #467: high-risk events now live inside the
-    // encrypted batches above. The field is retained (always empty) for API stability.
-    logs: [],
   });
 });
 

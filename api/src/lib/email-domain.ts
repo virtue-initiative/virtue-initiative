@@ -32,14 +32,3 @@ export const PASSWORD_RESET_TTL_MS = 1000 * 60 * 60;
 export const PARTNER_INVITE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 
 export const DEFAULT_EMAIL_FREQUENCY: EmailFrequency = 'daily';
-export const DEFAULT_IMMEDIATE_TAMPER_SEVERITY: TamperSeverity = 'critical';
-
-const severityRankings: Record<TamperSeverity, number> = {
-  info: 0,
-  warning: 1,
-  critical: 2,
-};
-
-export function severityAtLeast(value: TamperSeverity, minimum: TamperSeverity) {
-  return severityRankings[value] >= severityRankings[minimum];
-}

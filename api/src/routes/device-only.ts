@@ -255,26 +255,22 @@ deviceOnly.post(
     }
 
     const notification = c.req.valid('json');
-    const severity = riskToSeverity(notification.risk);
-
-    if (severity) {
-      const providedTitle = notification.title?.trim();
-      const providedDetails = notification.details?.trim();
-      await notifyPartnersAboutRiskLog(c.env.DB, c.env, {
-        logId: uuidv4(),
-        appUrl: getAppUrl(c),
-        userId: device.owner,
-        deviceName: device.name,
-        severity,
-        risk: notification.risk,
-        title:
-          providedTitle && providedTitle.length > 0
-            ? providedTitle
-            : `Device reported ${notification.type.replaceAll('_', ' ')}.`,
-        details: providedDetails && providedDetails.length > 0 ? providedDetails : null,
-        happenedAt: notification.ts,
-      });
-    }
+    const providedTitle = notification.title?.trim();
+    const providedDetails = notification.details?.trim();
+    await notifyPartnersAboutRiskLog(c.env.DB, c.env, {
+      logId: uuidv4(),
+      appUrl: getAppUrl(c),
+      userId: device.owner,
+      deviceName: device.name,
+      severity: riskToSeverity(notification.risk) ?? 'info',
+      risk: notification.risk,
+      title:
+        providedTitle && providedTitle.length > 0
+          ? providedTitle
+          : `Device reported ${notification.type.replaceAll('_', ' ')}.`,
+      details: providedDetails && providedDetails.length > 0 ? providedDetails : null,
+      happenedAt: notification.ts,
+    });
 
     return c.json({ ok: true }, 202);
   },
