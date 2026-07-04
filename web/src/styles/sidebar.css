@@ -204,7 +204,7 @@ a.sidebar-nav-group-heading {
   align-items: center;
   gap: 0.75rem;
   width: 100%;
-  padding: 0.75rem 0.875rem;
+  padding: 0 0.875rem 0.75rem;
   border: 0;
   border-top: 1px solid transparent;
   background: transparent;
@@ -251,17 +251,6 @@ a.sidebar-nav-group-heading {
   font-size: 0.8125rem;
   font-weight: 500;
   color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sidebar-user-sub {
-  font-family: var(--font-mono);
-  font-size: 0.625rem;
-  letter-spacing: 0.06em;
-  color: var(--ink-3);
-  margin-top: 0.25rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

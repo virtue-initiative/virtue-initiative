@@ -174,8 +174,7 @@ export function Sidebar() {
     setDrawerOpen(false);
   };
 
-  const userLabel = user?.name ?? user?.email ?? 'Account';
-  const userSub = user?.name ? user?.email : undefined;
+  const userLabel = user?.name || user?.email || 'Account';
 
   return (
     <>
@@ -310,7 +309,6 @@ export function Sidebar() {
             <Avatar name={user?.name ?? user?.email} size="md" />
             <span class="sidebar-user-text">
               <span class="sidebar-user-name">{userLabel}</span>
-              {userSub && <span class="sidebar-user-sub">{userSub}</span>}
             </span>
             <span class={`sidebar-user-chevron${drawerOpen ? ' is-open' : ''}`}>
               <ChevronUpIcon />

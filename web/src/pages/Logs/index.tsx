@@ -163,6 +163,10 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
     [deviceList, activeTargetUserId],
   );
 
+  const pendingCount = selectedDeviceInfo
+    ? selectedDeviceInfo.pending_count
+    : activeDevices.reduce((sum, d) => sum + d.pending_count, 0);
+
   useEffect(() => {
     if (sidebarLoading) return;
     if (selectedDevice && !activeDevices.some((d) => d.id === selectedDevice)) {
@@ -330,10 +334,10 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
                 ? `Syncing logs… ${logResult.processed}/${logResult.total} blocks`
                 : 'Syncing logs…'
               : 'Logs synced'}
-            {!logsLoading && selectedDeviceInfo && selectedDeviceInfo.pending_count > 0 && (
+            {!logsLoading && pendingCount > 0 && (
               <>
-                {` · ${selectedDeviceInfo.pending_count} item${selectedDeviceInfo.pending_count !== 1 ? 's' : ''} pending upload`}
-                {estimatedNextUpload && estimatedNextUpload > Date.now()
+                {` · ${pendingCount} item${pendingCount !== 1 ? 's' : ''} pending upload`}
+                {selectedDeviceInfo && estimatedNextUpload && estimatedNextUpload > Date.now()
                   ? ` · expected ${formatRelativeTimestamp(estimatedNextUpload)}`
                   : null}
               </>
