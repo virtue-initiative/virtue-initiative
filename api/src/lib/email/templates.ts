@@ -1,13 +1,15 @@
 import { DigestFrequency, TamperSeverity } from '../email-domain';
 
+// Mirrors the app's warm institutional palette (shared-web/tokens.css) so
+// transactional emails match the product's actual branding.
 const EMAIL_COLORS = {
-  text: '#1a1a1a',
-  textMuted: '#6b6860',
-  textOnAccent: '#ffffff',
-  accent: '#008900',
-  pageBg: '#f9f9f7',
-  surface: '#ffffff',
-  border: '#e0ddd8',
+  text: '#1b1a16', // --text
+  textMuted: '#6a6655', // --text-muted
+  textOnAccent: '#fbf7ea', // --paper-3 (matches .vi-btn--primary's text color)
+  accent: '#1e3a2e', // --accent / --forest
+  pageBg: '#f4efe3', // --bg / --paper
+  surface: '#fbf7ea', // --surface / --paper-3
+  border: '#d9d1bc', // --border
 } as const;
 
 function inlineStyle(rules: Record<string, string>) {
