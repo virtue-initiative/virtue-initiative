@@ -76,6 +76,6 @@ mod windows;
 pub use windows::ScreenshotOCR;
 
 #[cfg(target_os = "android")]
-mod android;
+pub mod android;
 #[cfg(target_os = "android")]
-pub use android::ScreenshotOCR;
+pub use android::{ScreenshotOCR, register_recognize_fn};

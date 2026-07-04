@@ -4775,6 +4775,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tract-onnx",
+ "virtue-text-detection",
  "webp",
 ]
 
@@ -4829,9 +4830,7 @@ name = "virtue-text-detection"
 version = "0.0.1"
 dependencies = [
  "image",
- "jni",
  "leptess",
- "ndk-context",
  "objc2",
  "objc2-foundation",
  "objc2-vision",

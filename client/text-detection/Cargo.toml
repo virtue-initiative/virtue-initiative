@@ -30,6 +30,3 @@ windows = { version = "0.62", features = [
 ] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
-[target.'cfg(target_os = "android")'.dependencies]
-jni = "0.21"
-ndk-context = "0.1"

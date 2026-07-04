@@ -49,6 +49,8 @@ impl ScreenshotOCR {
         .map_err(|e| OcrError::Init(e.to_string()))?;
 
         // 3. Create the OCR engine (language-locked at construction time).
+        // A null WinRT result (unsupported language) is already surfaced as an
+        // `Err` by windows-rs, so no separate None check is needed here.
         let engine = if let Some(lang) = &self.language {
             let lang_hstring: windows::core::HSTRING = lang.as_str().into();
             let language = Language::CreateLanguage(&lang_hstring)
@@ -59,14 +61,12 @@ impl ScreenshotOCR {
             OcrEngine::TryCreateFromUserProfileLanguages()
                 .map_err(|e| OcrError::Init(e.to_string()))?
         };
-        let engine =
-            engine.ok_or_else(|| OcrError::Init("no OCR engine available for language".into()))?;
 
         // 4. Recognize — blocks the calling thread (don't call from a UI thread).
         let result = engine
             .RecognizeAsync(&bitmap)
             .map_err(|e| OcrError::Recognition(e.to_string()))?
-            .get()
+            .join()
             .map_err(|e| OcrError::Recognition(e.to_string()))?;
 
         // 5. Collect word-level regions; BoundingRect is already pixel coords, top-left origin.
