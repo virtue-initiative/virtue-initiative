@@ -471,8 +471,15 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
         }
 
         self.retry_pending_hashes()?;
+        // Force the batch out before sending any queued notify emails so the
+        // event(s) they reference already exist server-side by the time the
+        // email goes out, rather than waiting on the interval timer.
+        if self.state.pending_notify_events.is_empty() {
+            self.maybe_upload_batch(now_ms, emitter)?;
+        } else {
+            self.try_upload_batch(now_ms, emitter)?;
+        }
         self.retry_pending_notifies()?;
-        self.maybe_upload_batch(now_ms, emitter)?;
         Ok(())
     }
 
@@ -509,8 +516,11 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
         let screen_active = !self.platform.is_locked_or_screensaver()?;
         if screen_active || is_heartbeat {
             self.retry_pending_hashes()?;
-            if is_heartbeat {
+            if is_heartbeat || is_high_risk {
                 // Force an immediate batch flush — don't wait for the interval timer.
+                // For a high-risk event this also guarantees the encrypted event is
+                // uploaded before the notify email below goes out, so the event
+                // already exists server-side when the recipient follows the link.
                 self.try_upload_batch(now_ms, emitter)?;
             } else {
                 self.maybe_upload_batch(now_ms, emitter)?;
@@ -913,6 +923,90 @@ mod tests {
         assert!(
             !t.api.state().batch_uploads.is_empty(),
             "heartbeat should flush batch even while locked"
+        );
+    }
+
+    #[test]
+    fn extra_high_risk_upload_forces_batch_flush_regardless_of_interval() {
+        let mut b = EventTester::builder();
+        // Huge interval so `maybe_upload_batch` would never fire on its own.
+        b.add(UploadModule::new(
+            Box::new(b.platform()),
+            b.api(),
+            24 * 60 * 60 * 1_000,
+        ));
+        let mut t = b.build();
+        t.emit(1, login_event());
+
+        t.emit(
+            2,
+            Upload {
+                risk: crate::module::lifecycle::EXTRA_HIGH_RISK,
+                kind: UploadKind::Alert {
+                    message: "tamper detected".into(),
+                },
+            },
+        );
+
+        assert_eq!(
+            t.api.state().batch_uploads.len(),
+            1,
+            "extra-high-risk upload should force an immediate batch flush"
+        );
+        assert_eq!(
+            t.api.state().notify_calls.len(),
+            1,
+            "extra-high-risk upload should still send the notify email"
+        );
+        assert!(
+            t.observer::<UploadModule<MockApiClient>>()
+                .state
+                .pending_batch_events
+                .is_empty(),
+            "the event should have been uploaded, not left queued"
+        );
+    }
+
+    #[test]
+    fn ping_forces_batch_flush_before_sending_queued_notify() {
+        let mut b = EventTester::builder();
+        b.platform().set_locked_or_screensaver(true);
+        b.add(UploadModule::new(
+            Box::new(b.platform()),
+            b.api(),
+            24 * 60 * 60 * 1_000,
+        ));
+        let mut t = b.build();
+        t.emit(1, login_event());
+
+        // Extra-high-risk event arrives while locked: queued for later, no
+        // network I/O yet (matches the existing locked-screen deferral).
+        t.emit(
+            2,
+            Upload {
+                risk: crate::module::lifecycle::EXTRA_HIGH_RISK,
+                kind: UploadKind::Alert {
+                    message: "tamper detected".into(),
+                },
+            },
+        );
+        assert!(t.api.state().batch_uploads.is_empty());
+        assert!(t.api.state().notify_calls.is_empty());
+
+        // Screen unlocks; the next ping should flush the batch before sending
+        // the queued notify, even though the batch interval hasn't elapsed.
+        t.platform.set_locked_or_screensaver(false);
+        t.emit(3, Ping);
+
+        assert_eq!(
+            t.api.state().batch_uploads.len(),
+            1,
+            "ping should force the batch out ahead of the queued notify"
+        );
+        assert_eq!(
+            t.api.state().notify_calls.len(),
+            1,
+            "queued notify should still go out"
         );
     }
 
