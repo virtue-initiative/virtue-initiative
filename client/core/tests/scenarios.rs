@@ -292,6 +292,10 @@ fn unexpected_process_start_after_long_ping_gap_emits_alert() {
         last_process_started: 1,
         ..Default::default()
     });
+    // A real boot time is required for this alert: it only makes sense relative to
+    // a known boot ("this restart isn't explained by the device having just
+    // booted"). Platforms that can't report one (e.g. iOS) don't get this alert.
+    scenario.platform.set_last_startup_time(Some(1));
     scenario.queue(ProcessStarted);
     scenario.at_t(130_000).loop_iteration();
     // UnexpectedProcessStart is high-risk but batched (no immediate email).

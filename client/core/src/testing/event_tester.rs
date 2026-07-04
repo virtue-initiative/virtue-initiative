@@ -340,6 +340,7 @@ mod tests {
     use crate::module::lifecycle::{
         ComputerSuspended, LifecycleModule, LifecycleStatus, ProcessStarted,
     };
+    use crate::platform::PlatformConfig;
 
     /// Minimal observer that counts how many Ping events it receives.
     struct PingCounter {
@@ -405,7 +406,10 @@ mod tests {
     #[test]
     fn observer_lookup_returns_correct_module() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
         t.emit(1, ProcessStarted);
         assert_eq!(
@@ -418,7 +422,10 @@ mod tests {
     #[should_panic(expected = "assert_like failed")]
     fn assert_like_panics_when_no_match() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
         // ComputerSuspended at 1s emits a Lifecycle upload but NOT a LifecycleAlert.
         t.emit(1, ComputerSuspended);
@@ -433,7 +440,10 @@ mod tests {
     #[test]
     fn assert_not_like_passes_when_absent() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
         t.emit(1, ComputerSuspended);
         t.assert_not_like(crate::like!(Upload {
@@ -447,7 +457,10 @@ mod tests {
     #[test]
     fn clear_captured_resets_buffers() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
         t.emit(1, ProcessStarted);
         assert!(!t.captured::<Upload>().is_empty());
@@ -458,7 +471,10 @@ mod tests {
     #[test]
     fn assert_like_matches_lifecycle_kind() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
         t.emit(1, ComputerSuspended);
         t.assert_like(crate::like!(Upload {
@@ -472,7 +488,10 @@ mod tests {
     #[test]
     fn missing_resume_fires_on_fourth_ping_with_enable_disable_pings() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
 
         t.emit(1, ComputerSuspended);

@@ -40,7 +40,7 @@ Everything else belongs in `core`.
 The daemon loop is:
 
 ```rust
-let observers = build_default_modules(config, platform, api)?;
+let observers = build_default_modules(config, platform, api, PlatformConfig::default())?;
 let mut bus = EventBus::new(observers, saved_state)?;
 loop {
     bus.send(Ping)?;

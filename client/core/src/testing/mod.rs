@@ -28,7 +28,7 @@ mod tests {
     use crate::events::Ping;
     use crate::events::bus::{EventBus, EventChannel, StateType};
     use crate::module::status::{StatusRequest, StatusResponse};
-    use crate::platform::ScreenshotHooks;
+    use crate::platform::{PlatformConfig, ScreenshotHooks};
 
     static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -116,8 +116,8 @@ mod tests {
         let api = MockApiClient::new();
         let inspector = api.clone();
 
-        let observers =
-            build_default_modules(config, platform, api).expect("build modules must succeed");
+        let observers = build_default_modules(config, platform, api, PlatformConfig::default())
+            .expect("build modules must succeed");
         let mut bus = EventBus::new(observers, StateType::Null).expect("bus must construct");
 
         // No auth state → ping must not upload anything.
