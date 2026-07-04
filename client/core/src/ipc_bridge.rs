@@ -9,6 +9,7 @@ use crate::module::lifecycle::{
     UserStopRequested,
 };
 use crate::module::status::{StatusRequest, StatusResponse};
+use crate::module::upload::{FlushBatchNow, Upload};
 
 pub struct IpcBridge {
     accept_rx: std::sync::mpsc::Receiver<RemoteEventBus>,
@@ -78,7 +79,7 @@ impl IpcBridge {
     /// into the bus via `emitter`:
     /// `LoginRequested`, `LogoutRequested`, `StatusRequest`, `UserStopRequested`,
     /// `UserSessionLogin`, `UserSessionLogout`, `ComputerSuspended`, `ComputerResumed`,
-    /// `ProcessStopped`.
+    /// `ProcessStopped`, `Upload`, `FlushBatchNow`.
     pub fn forward_standard_inbound(remote: &mut RemoteEventBus, emitter: &Emitter) {
         macro_rules! forward {
             ($($T:ty),* $(,)?) => {
@@ -95,6 +96,8 @@ impl IpcBridge {
             ComputerSuspended,
             ComputerResumed,
             ProcessStopped,
+            Upload,
+            FlushBatchNow,
         );
     }
 
