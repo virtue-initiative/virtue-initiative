@@ -91,7 +91,16 @@ fn temporary_capture_path() -> PathBuf {
 // Parses `sysctl -n kern.boottime` output (e.g. "{ sec = 1718000000, usec = 123456 } ...")
 // and returns the boot time in milliseconds since epoch.
 fn parse_boottime_ms(s: &str) -> Option<i64> {
-    let sec_start = s.find("sec = ")?;
+    let mut search_start = 0;
+    let sec_start = loop {
+        let candidate = s[search_start..].find("sec = ")? + search_start;
+        // Skip matches inside "usec = ", which contains "sec = " starting at its 2nd byte.
+        if candidate > 0 && s.as_bytes()[candidate - 1] == b'u' {
+            search_start = candidate + 1;
+            continue;
+        }
+        break candidate;
+    };
     let rest = &s[sec_start + 6..];
     let end = rest
         .find(|c: char| !c.is_ascii_digit())
@@ -264,8 +273,9 @@ mod tests {
 
     #[test]
     fn parse_last_shutdown_mac_handles_single_digit_day() {
-        // Space-padded day in original output becomes bare digit after split_whitespace
-        let input = "shutdown  ~          Mon Jun  5 09:00:00 2024\n";
+        // Space-padded day in original output becomes bare digit after split_whitespace.
+        // Jun 5 2024 was a Wednesday; the weekday must match the date or chrono rejects it.
+        let input = "shutdown  ~          Wed Jun  5 09:00:00 2024\n";
         let result = parse_last_shutdown_mac(input);
         assert!(
             result.is_some(),

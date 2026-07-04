@@ -7,6 +7,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 CLIENT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+MAC_ROOT="${CLIENT_ROOT}/mac"
 cd "$CLIENT_ROOT"
 
 source "${CLIENT_ROOT}/scripts/version.sh"
@@ -15,64 +16,71 @@ BASE_VERSION="$(virtue_base_version)"
 BUILD_LABEL="$(virtue_build_label)"
 APPLE_BUILD_NUMBER="$(virtue_apple_build_number)"
 APP_NAME="Virtue.app"
-ARCH_SUFFIX="${VIRTUE_ARCH_SUFFIX:-}"
-APP_ROOT="target/macos${ARCH_SUFFIX}/${APP_NAME}"
-CONTENTS_DIR="${APP_ROOT}/Contents"
-MACOS_DIR="${CONTENTS_DIR}/MacOS"
-RESOURCES_DIR="${CONTENTS_DIR}/Resources"
-ICON_SOURCE="mac/assets/AppIcon.icns"
+APP_ROOT="target/macos/${APP_NAME}"
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
+DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM:-}"
+DAEMON_TARGETS=(aarch64-apple-darwin x86_64-apple-darwin)
 
-if [[ ! -f "$ICON_SOURCE" ]]; then
-  echo "Missing ${ICON_SOURCE}. Run images/generate-icons.sh first."
+PROJECT_PATH="${MAC_ROOT}/VirtueMac.xcodeproj"
+if [[ ! -d "$PROJECT_PATH" ]]; then
+  echo "Missing ${PROJECT_PATH}. Run mac/scripts/generate-project.sh (requires xcodegen) and commit the result." >&2
   exit 1
 fi
 
-if [[ "${ARCH_SUFFIX}" == "-intel" ]]; then
-  CARGO_TARGET="x86_64-apple-darwin"
-  VIRTUE_BUILD_LABEL="$BUILD_LABEL" cargo build --release --target "$CARGO_TARGET" -p virtue-mac
-  BINARY_PATH="target/${CARGO_TARGET}/release/virtue-mac"
-else
-  VIRTUE_BUILD_LABEL="$BUILD_LABEL" cargo build --release -p virtue-mac
-  BINARY_PATH="target/release/virtue-mac"
-fi
+# 1. Build the headless daemon binary for both architectures via plain cargo,
+#    then lipo them into one universal binary. The daemon is a separate
+#    cargo binary, unaffected by the SwiftUI/Xcode rewrite.
+for target in "${DAEMON_TARGETS[@]}"; do
+  rustup target add "$target" >/dev/null 2>&1 || true
+  VIRTUE_BUILD_LABEL="$BUILD_LABEL" cargo build --release --target "$target" -p virtue-mac
+done
+UNIVERSAL_DAEMON_DIR="target/macos-universal-daemon"
+mkdir -p "$UNIVERSAL_DAEMON_DIR"
+lipo -create \
+  "target/${DAEMON_TARGETS[0]}/release/virtue-mac" \
+  "target/${DAEMON_TARGETS[1]}/release/virtue-mac" \
+  -output "${UNIVERSAL_DAEMON_DIR}/virtue-daemon"
+
+# 2. Build the SwiftUI app via xcodebuild against the already-generated,
+#    committed .xcodeproj — matching the iOS client's convention. CI must
+#    NOT depend on `xcodegen` being installed/working at build time; the
+#    project is regenerated and committed by developers via
+#    generate-project.sh whenever project.yml changes. Xcode's default
+#    ARCHS already produces a universal (arm64 + x86_64) app binary, and the
+#    `build-rust-for-xcode.sh` preBuildScript mirrors that by lipo-ing a
+#    universal `libvirtue_mac_rust.a` — one build covers both architectures.
+(
+  cd "$MAC_ROOT"
+  XCODEBUILD_ARGS=(
+    -project VirtueMac.xcodeproj
+    -scheme VirtueMac
+    -configuration Release
+    -derivedDataPath "${CLIENT_ROOT}/target/macos/DerivedData"
+    MARKETING_VERSION="${BASE_VERSION}"
+    CURRENT_PROJECT_VERSION="${APPLE_BUILD_NUMBER}"
+    VIRTUE_BUILD_LABEL="${BUILD_LABEL}"
+    CODE_SIGN_IDENTITY="${CODESIGN_IDENTITY}"
+  )
+  # Automatic signing needs an explicit team when using a real (non-adhoc)
+  # identity — the Team ID from e.g. "Developer ID Application: NAME (TEAMID)".
+  if [[ -n "$DEVELOPMENT_TEAM" ]]; then
+    XCODEBUILD_ARGS+=(DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM}")
+  fi
+  xcodebuild "${XCODEBUILD_ARGS[@]}" build
+)
 
 rm -rf "$APP_ROOT"
-mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
+mkdir -p "$(dirname "$APP_ROOT")"
+cp -R "target/macos/DerivedData/Build/Products/Release/${APP_NAME}" "$APP_ROOT"
 
-install -m 0755 "$BINARY_PATH" "${MACOS_DIR}/Virtue"
-install -m 0644 "$ICON_SOURCE" "${RESOURCES_DIR}/AppIcon.icns"
+# 3. Bundle the universal daemon binary inside the app. `daemon_exe_path()`
+#    (Rust FFI) and the coordinator both resolve this same path at runtime.
+install -m 0755 "${UNIVERSAL_DAEMON_DIR}/virtue-daemon" "${APP_ROOT}/Contents/MacOS/virtue-daemon"
 
-cat > "${CONTENTS_DIR}/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleName</key>
-  <string>Virtue</string>
-  <key>CFBundleDisplayName</key>
-  <string>Virtue</string>
-  <key>CFBundleIdentifier</key>
-  <string>org.virtueinitiative.virtue.mac</string>
-  <key>CFBundleVersion</key>
-  <string>${APPLE_BUILD_NUMBER}</string>
-  <key>CFBundleShortVersionString</key>
-  <string>${BASE_VERSION}</string>
-  <key>VirtueBuildLabel</key>
-  <string>${BUILD_LABEL}</string>
-  <key>CFBundlePackageType</key>
-  <string>APPL</string>
-  <key>CFBundleExecutable</key>
-  <string>Virtue</string>
-  <key>CFBundleIconFile</key>
-  <string>AppIcon.icns</string>
-  <key>LSUIElement</key>
-  <true/>
-  <key>NSPrincipalClass</key>
-  <string>NSApplication</string>
-  <key>NSScreenCaptureUsageDescription</key>
-  <string>Virtue captures screenshots for accountability monitoring.</string>
-</dict>
-</plist>
-PLIST
+# 4. Re-sign: adding a file after `xcodebuild` invalidates the app's
+#    signature, so both the embedded daemon and the outer bundle must be
+#    signed (in that order) after copying it in.
+codesign --force --options runtime --sign "$CODESIGN_IDENTITY" "${APP_ROOT}/Contents/MacOS/virtue-daemon"
+codesign --force --deep --options runtime --sign "$CODESIGN_IDENTITY" "$APP_ROOT"
 
 echo "Built ${APP_ROOT}"
