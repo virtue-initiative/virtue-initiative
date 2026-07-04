@@ -91,4 +91,4 @@ Read these before touching crypto, batch, or auth code:
 
 ## Pull requests
 
-When creating a PR, follow the template at `.github/PULL_REQUEST_TEMPLATE.md`. Fill in every section: type of change, components changed, description, testing, and impact.
+When creating a PR, follow the template at `.github/PULL_REQUEST_TEMPLATE.md`. Fill in every section: summary, changes (type of change + components touched), and testing.

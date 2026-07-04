@@ -1,31 +1,12 @@
-[Provide a succinct and descriptive summary for the pull request, e.g., "Improve caching mechanism for API calls"]
+## Summary
 
-## Type of change
-- New feature
-- Bug fix
-- Documentation update
-- Refactoring
-- UI/UX improvement
+<!-- What does this PR do and why? Link related issues. -->
 
-## Components changed
-- Web
-- Landing
-- API
-- Core
-- Linux
-- Mac
-- Windows
-- iOS
-- Android
+## Changes
 
-## Description
-[Provide a detailed explanation of the changes you have made. Include the reasons behind these changes and any relevant context. Link any related issues.]
+<!-- Type of change: Feature / Bug fix / Refactor / Docs / Other -->
+<!-- Components: Web / Landing / API / Core / Linux / Mac / Windows / iOS / Android -->
 
 ## Testing
-[Detail the testing you have performed to ensure that these changes function as intended. Include information about any added tests.]
 
-## Impact
-[Discuss the impact of your changes on the project. This might include effects on performance, new dependencies, or changes in behaviour.]
-
-## Additional Information
-[Any additional information that reviewers should be aware of.]
+<!-- How did you verify this works? -->
