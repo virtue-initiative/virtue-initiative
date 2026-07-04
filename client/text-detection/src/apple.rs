@@ -86,7 +86,7 @@ impl ScreenshotOCR {
 
             // Vision bounding boxes: normalized ([0,1]), bottom-left origin.
             // Convert to pixel top-left coords.
-            let bbox = obs.boundingBox();
+            let bbox = unsafe { obs.boundingBox() };
             let region = TextRegion {
                 text: text.clone(),
                 bounding_box: BoundingBox {
@@ -100,7 +100,7 @@ impl ScreenshotOCR {
 
             // Vision confidence is per-observation (line-level), not per-word.
             // min_word_confidence is applied here at the line level.
-            if obs.confidence() * 100.0 >= self.min_confidence as f32 {
+            if unsafe { obs.confidence() } * 100.0 >= self.min_confidence as f32 {
                 lines.push(text);
             }
         }

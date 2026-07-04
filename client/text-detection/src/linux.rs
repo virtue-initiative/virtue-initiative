@@ -94,15 +94,15 @@ fn parse_hocr_words(hocr: &str) -> Vec<TextRegion> {
             break;
         };
         let raw_text = &hocr[content_start..content_start + rel_close];
-        let text = decode_entities(&strip_tags(raw_text).trim().to_string());
+        let text = decode_entities(strip_tags(raw_text).trim());
 
-        if let Some(bbox) = extract_bbox(tag) {
-            if !text.is_empty() {
-                regions.push(TextRegion {
-                    text,
-                    bounding_box: bbox,
-                });
-            }
+        if let Some(bbox) = extract_bbox(tag)
+            && !text.is_empty()
+        {
+            regions.push(TextRegion {
+                text,
+                bounding_box: bbox,
+            });
         }
 
         pos = content_start + rel_close + "</span>".len();
@@ -214,7 +214,7 @@ fn words_from_span(hocr: &str, min_confidence: u8) -> Vec<String> {
             break;
         };
         let raw_text = &hocr[content_start..content_start + rel_close];
-        let text = decode_entities(&strip_tags(raw_text).trim().to_string());
+        let text = decode_entities(strip_tags(raw_text).trim());
 
         if !text.is_empty() && word_confidence(tag) >= min_confidence {
             words.push(text);
@@ -284,14 +284,13 @@ fn decode_numeric_entities(s: &str) -> String {
     while let Some(amp) = rest.find("&#") {
         out.push_str(&rest[..amp]);
         rest = &rest[amp + 2..];
-        if let Some(semi) = rest.find(';') {
-            if let Ok(n) = rest[..semi].parse::<u32>()
-                && let Some(ch) = char::from_u32(n)
-            {
-                out.push(ch);
-                rest = &rest[semi + 1..];
-                continue;
-            }
+        if let Some(semi) = rest.find(';')
+            && let Ok(n) = rest[..semi].parse::<u32>()
+            && let Some(ch) = char::from_u32(n)
+        {
+            out.push(ch);
+            rest = &rest[semi + 1..];
+            continue;
         }
         out.push_str("&#");
     }
@@ -302,10 +301,10 @@ fn decode_numeric_entities(s: &str) -> String {
 fn extract_bbox(tag: &str) -> Option<BoundingBox> {
     let ti = tag.find("title=")? + "title=".len();
     let rest = &tag[ti..];
-    let (quote, rest) = if rest.starts_with('"') {
-        ('"', &rest[1..])
-    } else if rest.starts_with('\'') {
-        ('\'', &rest[1..])
+    let (quote, rest) = if let Some(rest) = rest.strip_prefix('"') {
+        ('"', rest)
+    } else if let Some(rest) = rest.strip_prefix('\'') {
+        ('\'', rest)
     } else {
         return None;
     };
