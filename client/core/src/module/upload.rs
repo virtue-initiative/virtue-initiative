@@ -272,6 +272,20 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
         Ok(())
     }
 
+    /// Only sends queued notify emails once the hash + batch pipeline is confirmed
+    /// fully drained. `try_upload_batch`/`maybe_upload_batch` can return `Ok(())` on a
+    /// deferred/transient failure (no recipients yet, device settings refresh failed,
+    /// upload rejected) without actually uploading, so a plain `Ok(())` from those calls
+    /// is not sufficient evidence that a queued notify's event reached the server. An
+    /// empty `pending_hash_events` + `pending_batch_events` is: every event has been
+    /// hashed *and* its batch has been accepted.
+    fn retry_pending_notifies_if_flushed(&mut self) -> CoreResult<()> {
+        if self.state.pending_hash_events.is_empty() && self.state.pending_batch_events.is_empty() {
+            self.retry_pending_notifies()?;
+        }
+        Ok(())
+    }
+
     fn maybe_upload_batch(&mut self, now_ms: i64, emitter: &Emitter) -> CoreResult<()> {
         // Whether we have recipients to wrap for is decided in `try_upload_batch`
         // after refetching settings, not from the (possibly stale) cached copy.
@@ -413,7 +427,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
         } else {
             self.try_upload_batch(now_ms, emitter)?;
         }
-        self.retry_pending_notifies()?;
+        self.retry_pending_notifies_if_flushed()?;
         Ok(())
     }
 
@@ -461,7 +475,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
             }
         }
         if is_high_risk && screen_active {
-            self.retry_pending_notifies()?;
+            self.retry_pending_notifies_if_flushed()?;
         }
         Ok(())
     }
@@ -941,6 +955,72 @@ mod tests {
             t.api.state().notify_calls.len(),
             1,
             "queued notify should still go out"
+        );
+    }
+
+    #[test]
+    fn transient_batch_failure_defers_notify_until_batch_actually_lands() {
+        let mut b = EventTester::builder();
+        // Huge interval so `maybe_upload_batch` would never fire on its own.
+        b.add(UploadModule::new(
+            Box::new(b.platform()),
+            b.api(),
+            24 * 60 * 60 * 1_000,
+        ));
+        let mut t = b.build();
+        t.emit(1, login_event());
+
+        // The batch upload fails transiently (e.g. a network blip): `try_upload_batch`
+        // logs and returns `Ok(())` without actually uploading or draining the queue.
+        t.api
+            .program_batch(Err(crate::error::CoreError::HttpStatus {
+                status: 503,
+                message: "boom".into(),
+            }));
+
+        t.emit(
+            2,
+            Upload {
+                risk: crate::module::lifecycle::EXTRA_HIGH_RISK,
+                kind: UploadKind::Alert {
+                    message: "tamper detected".into(),
+                },
+            },
+        );
+
+        // The event hasn't actually reached the server, so the notify email must not
+        // go out yet even though this is the extra-high-risk "flush immediately" path.
+        assert!(
+            t.api.state().notify_calls.is_empty(),
+            "notify must not fire while the batch upload has not actually landed"
+        );
+        assert!(
+            !t.observer::<UploadModule<MockApiClient>>()
+                .state
+                .pending_batch_events
+                .is_empty(),
+            "event should remain queued after a deferred batch failure"
+        );
+        assert!(
+            !t.observer::<UploadModule<MockApiClient>>()
+                .state
+                .pending_notify_events
+                .is_empty(),
+            "notify should remain queued after a deferred batch failure"
+        );
+
+        // A later ping, once the batch upload starts succeeding again, should flush the
+        // batch and only then release the queued notify.
+        t.emit(3, Ping);
+        assert_eq!(
+            t.api.state().batch_uploads.len(),
+            2,
+            "one failed attempt from the Upload event, one successful retry from the Ping"
+        );
+        assert_eq!(
+            t.api.state().notify_calls.len(),
+            1,
+            "notify should fire only after the batch actually landed"
         );
     }
 
