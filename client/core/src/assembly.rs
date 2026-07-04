@@ -12,7 +12,7 @@ use crate::module::lifecycle::LifecycleModule;
 use crate::module::screenshot::ScreenshotModule;
 use crate::module::status::StatusModule;
 use crate::module::upload::UploadModule;
-use crate::platform::ScreenshotHooks;
+use crate::platform::{PlatformConfig, ScreenshotHooks};
 
 /// Number of observers that emit a `PartialStatus` in reply to a `StatusRequest`:
 /// `AuthModule`, `LifecycleModule`, and `UploadModule`.
@@ -22,12 +22,17 @@ const STATUS_PARTIAL_COUNT: usize = 3;
 /// and API transport. The returned modules are ready to be passed to
 /// [`EventBus::new`].
 ///
+/// `platform_config` carries fixed, per-platform capabilities (see
+/// `PlatformConfig`) forwarded to the modules that need them — currently just
+/// `LifecycleModule`. Most platforms can pass `PlatformConfig::default()`.
+///
 /// Calls `config.refresh_from_runtime_file()` once up front so overrides
 /// apply before the bus starts — critical for one-shot FFI callers.
 pub fn build_default_modules<P, A>(
     mut config: Config,
     platform: P,
     api: A,
+    platform_config: PlatformConfig,
 ) -> CoreResult<Vec<Box<dyn Observer>>>
 where
     P: ScreenshotHooks + Clone,
@@ -41,7 +46,10 @@ where
     let platform_name = config.platform_name.clone();
 
     let observers: Vec<Box<dyn Observer>> = vec![
-        Box::new(LifecycleModule::new(Box::new(platform.clone()))),
+        Box::new(LifecycleModule::new(
+            Box::new(platform.clone()),
+            platform_config,
+        )),
         Box::new(ScreenshotModule::new(
             Arc::new(platform.clone()),
             screenshot_interval_ms,
@@ -61,10 +69,12 @@ where
     Ok(observers)
 }
 
-/// Convenience wrapper that defaults to [`ReqwestApiClient`].
+/// Convenience wrapper that defaults to [`ReqwestApiClient`]. See
+/// `build_default_modules` for `platform_config`.
 pub fn build_default_modules_reqwest<P>(
     mut config: Config,
     platform: P,
+    platform_config: PlatformConfig,
 ) -> CoreResult<Vec<Box<dyn Observer>>>
 where
     P: ScreenshotHooks + Clone,
@@ -73,5 +83,5 @@ where
     // the start. build_default_modules will refresh again — that's harmless.
     config.refresh_from_runtime_file()?;
     let api = ReqwestApiClient::new(&config)?;
-    build_default_modules(config, platform, api)
+    build_default_modules(config, platform, api, platform_config)
 }

@@ -17,6 +17,7 @@ use crate::module::screenshot::ScreenshotModule;
 use crate::module::status::StatusModule;
 use crate::module::status::{StatusRequest, StatusResponse};
 use crate::module::upload::{UploadModule, UploadObserverState};
+use crate::platform::PlatformConfig;
 use crate::state::load_state;
 use crate::testing::api::MockApiClient;
 use crate::testing::clock::MockClock;
@@ -33,6 +34,7 @@ pub struct Scenario {
     pub api: MockApiClient,
     pub clock: MockClock,
     pub state_dir: PathBuf,
+    pub platform: TestPlatformHooks,
 }
 
 impl Scenario {
@@ -99,7 +101,10 @@ impl Scenario {
         let api_handle = api.clone();
 
         let observers: Vec<Box<dyn Observer>> = vec![
-            Box::new(LifecycleModule::new(Box::new(platform.clone()))),
+            Box::new(LifecycleModule::new(
+                Box::new(platform.clone()),
+                PlatformConfig::default(),
+            )),
             Box::new(ScreenshotModule::new(
                 Arc::new(platform.clone()),
                 screenshot_interval_ms,
@@ -141,6 +146,7 @@ impl Scenario {
             api: api_handle,
             clock,
             state_dir,
+            platform,
         }
     }
 
@@ -358,7 +364,10 @@ impl Scenario {
         let api_handle = api.clone();
 
         let observers: Vec<Box<dyn Observer>> = vec![
-            Box::new(LifecycleModule::new(Box::new(platform.clone()))),
+            Box::new(LifecycleModule::new(
+                Box::new(platform.clone()),
+                PlatformConfig::default(),
+            )),
             Box::new(ScreenshotModule::new(
                 Arc::new(platform.clone()),
                 screenshot_interval_ms,
@@ -385,6 +394,7 @@ impl Scenario {
             api: api_handle,
             clock,
             state_dir,
+            platform,
         }
     }
 }

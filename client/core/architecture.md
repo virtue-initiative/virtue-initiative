@@ -48,7 +48,7 @@ client/
 
 ```rust
 // Build the default set of 7 observer modules.
-let observers = build_default_modules(config, platform, api)?;
+let observers = build_default_modules(config, platform, api, PlatformConfig::default())?;
 let mut bus = EventBus::new(observers, saved_state)?;
 
 // One loop iteration: send Ping, process all cascaded events.
@@ -271,6 +271,32 @@ desktop platforms override it for the screenshot dedup lock/screensaver gate, wh
 platforms keep the default. Platform crates implement `take_screenshot`,
 `get_last_shutdown_time_utc_ms`, `get_last_startup_time_utc_ms`, and (on desktop)
 `is_locked_or_screensaver`.
+
+## PlatformConfig
+
+Fixed, per-platform capabilities that shape module behavior at startup — as opposed to
+`ScreenshotHooks`/`PlatformHooks`, which are live platform I/O queried on every tick.
+Passed once when assembling the observer modules:
+
+```rust
+pub struct PlatformConfig {
+    pub supports_sleep_wake_detection: bool, // default: true
+}
+```
+
+`supports_sleep_wake_detection` defaults to `true`, matching desktop platforms: they emit real
+`ComputerSuspended`/`ComputerResumed` events off OS power notifications, so a suspend period is
+bracketed and never counted as a ping-gap stall in the first place. iOS passes `false`: the
+monitoring process is a short-lived Safari extension host that the OS can suspend the instant
+the device locks, with no notification delivered to that process (extensions have no
+`UIApplication`) and no way to reconstruct after the fact whether a stall was a lock, a
+suspicious pause, or something else — every stall looks identical. When `false`, the lifecycle
+module skips `PingGapWhileRunning` entirely rather than risk alerting on gaps it can't
+attribute.
+
+`PlatformConfig` is deliberately named generically (not e.g. `LifecycleConfig`) so future
+platform-level capability flags can be added to it without another signature change across
+every platform crate.
 
 Everything else belongs in `core`.
 

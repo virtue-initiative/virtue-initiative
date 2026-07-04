@@ -11,9 +11,10 @@ use anyhow::Result;
 use serde::Serialize;
 use virtue_core::{
     ComputerResumed, ComputerSuspended, CoreError, EventBus, EventChannel, LoginRequested,
-    LoginResult, LogoutRequested, LogoutResult, Ping, ProcessStarted, ProcessStopped,
-    ProcessStoppedReason, Redacted, StatusRequest, StatusResponse, UserSessionLogin,
-    UserSessionLogout, UserStopRequested, build_default_modules_reqwest, load_state, store_state,
+    LoginResult, LogoutRequested, LogoutResult, Ping, PlatformConfig, ProcessStarted,
+    ProcessStopped, ProcessStoppedReason, Redacted, StatusRequest, StatusResponse,
+    UserSessionLogin, UserSessionLogout, UserStopRequested, build_default_modules_reqwest,
+    load_state, store_state,
 };
 
 use crate::capture::WindowsPlatformHooks;
@@ -278,7 +279,11 @@ fn run_monitor_loop(shutdown: Arc<AtomicBool>, command_rx: Receiver<MonitorComma
     let state_path = paths.state_dir.join("event_state.json");
     let config = build_core_config(&paths);
 
-    let modules = match build_default_modules_reqwest(config, WindowsPlatformHooks::new()) {
+    let modules = match build_default_modules_reqwest(
+        config,
+        WindowsPlatformHooks::new(),
+        PlatformConfig::default(),
+    ) {
         Ok(m) => m,
         Err(err) => {
             update_snapshot(|s| {

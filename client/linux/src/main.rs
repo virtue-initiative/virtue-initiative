@@ -15,9 +15,9 @@ use clap::{Args, Parser, Subcommand};
 #[cfg(debug_assertions)]
 use virtue_core::{AlertReason, LifecycleKind, ScreenshotSkipReason};
 use virtue_core::{
-    ClientController, EventBus, EventChannel, FlushBatchNow, Ping, ScreenshotHooks, ServiceStatus,
-    StatusRequest, StatusResponse, Upload, UploadKind, build_default_modules_reqwest, load_state,
-    store_state,
+    ClientController, EventBus, EventChannel, FlushBatchNow, Ping, PlatformConfig, ScreenshotHooks,
+    ServiceStatus, StatusRequest, StatusResponse, Upload, UploadKind,
+    build_default_modules_reqwest, load_state, store_state,
 };
 
 use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_backend};
@@ -518,8 +518,11 @@ fn dev_send(paths: ClientPaths, args: SendLogArgs) -> Result<()> {
 
 fn make_dev_bus(paths: &ClientPaths) -> Result<(EventBus, std::path::PathBuf)> {
     let state_path = paths.state_dir.join("event_state.json");
-    let modules =
-        build_default_modules_reqwest(build_core_config(paths), LinuxPlatformHooks::new())?;
+    let modules = build_default_modules_reqwest(
+        build_core_config(paths),
+        LinuxPlatformHooks::new(),
+        PlatformConfig::default(),
+    )?;
     let bus = EventBus::new(modules, load_state(&state_path)?)?;
     Ok((bus, state_path))
 }

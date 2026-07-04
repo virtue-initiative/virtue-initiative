@@ -11,7 +11,7 @@ use objc2_app_kit::{NSWorkspace, NSWorkspaceWillPowerOffNotification};
 use tokio::sync::mpsc;
 use virtue_core::{
     ComputerResumed, ComputerSuspended, EventBus, EventChannel, FlushBatchNow, IpcBridge, Ping,
-    ProcessStarted, ProcessStopped, ProcessStoppedReason, UserStopRequested,
+    PlatformConfig, ProcessStarted, ProcessStopped, ProcessStoppedReason, UserStopRequested,
     build_default_modules_reqwest, load_state, store_state,
 };
 
@@ -223,7 +223,7 @@ async fn run_daemon_service_loop(
     let state_path = paths.state_dir.join("event_state.json");
 
     let modules = tokio::task::block_in_place(|| {
-        build_default_modules_reqwest(config, MacPlatformHooks::new())
+        build_default_modules_reqwest(config, MacPlatformHooks::new(), PlatformConfig::default())
     })?;
     let mut bus = EventBus::new(modules, load_state(&state_path)?)?;
 

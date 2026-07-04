@@ -14,7 +14,7 @@ use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, LogEntry};
 /// ```ignore
 /// let mock = MockApiClient::new();
 /// let inspector = mock.clone();
-/// let observers = build_default_modules(cfg, platform, mock)?;
+/// let observers = build_default_modules(cfg, platform, mock, PlatformConfig::default())?;
 /// let mut bus = EventBus::new(observers, StateType::Null)?;
 /// // ... drive the bus ...
 /// assert_eq!(inspector.state().batch_uploads.len(), 2);

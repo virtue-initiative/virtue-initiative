@@ -33,7 +33,7 @@ pub struct UserSessionLogout;
 pub struct UserStopRequested {
     pub source: String,
 }
-use crate::platform::ScreenshotHooks;
+use crate::platform::{PlatformConfig, ScreenshotHooks};
 
 pub(crate) const EXTRA_HIGH_RISK: f32 = 0.9;
 /// High-risk lifecycle alerts that are still noteworthy but don't warrant an
@@ -97,13 +97,15 @@ pub struct LifecycleObserverState {
 pub struct LifecycleModule {
     pub state: LifecycleObserverState,
     platform: Box<dyn ScreenshotHooks>,
+    config: PlatformConfig,
 }
 
 impl LifecycleModule {
-    pub fn new(platform: Box<dyn ScreenshotHooks>) -> Self {
+    pub fn new(platform: Box<dyn ScreenshotHooks>, config: PlatformConfig) -> Self {
         Self {
             state: LifecycleObserverState::default(),
             platform,
+            config,
         }
     }
 
@@ -201,10 +203,17 @@ impl LifecycleModule {
             });
         }
 
-        if now_ms - old.last_login > 120000
+        // Only alert when the platform can report a real boot time: the check below
+        // only makes sense relative to a known boot ("this restart isn't explained by
+        // the device having just booted"). Without that signal (e.g. iOS, where the
+        // monitoring process is a short-lived Safari extension host that the OS may
+        // suspend or recycle at any time as routine behavior) we have no way to tell
+        // a benign restart from a suspicious one, so we stay silent rather than
+        // alerting on every routine restart.
+        if let Some(boot_ms) = startup_time_ms
+            && now_ms - old.last_login > 120000
             && old.last_process_started > old.last_process_stopped_user
         {
-            let boot_ms = startup_time_ms.unwrap_or(0);
             let ping_gap = if old.last_ping > 0 {
                 now_ms - old.last_ping
             } else {
@@ -290,7 +299,13 @@ impl LifecycleModule {
         self.maybe_backfill_missed_events(last_shutdown, startup_time_ms, emitter)?;
         self.state.last_ping = now_ms;
 
-        if now_ms - old.last_login > LIFECYCLE_LOGIN_GRACE_MS {
+        // See the doc comment on `PlatformConfig::supports_sleep_wake_detection`:
+        // platforms that can't reliably tell us about suspend/resume have no way
+        // to distinguish a benign gap from a suspicious one, so we don't
+        // evaluate this check.
+        if self.config.supports_sleep_wake_detection
+            && now_ms - old.last_login > LIFECYCLE_LOGIN_GRACE_MS
+        {
             let ping_gap = now_ms - old.last_ping;
             let start_gap = now_ms - old.last_running_started;
 
@@ -453,12 +468,16 @@ mod tests {
     use crate::model::{AlertReason, LifecycleKind, ProcessStoppedReason, UploadKind};
     use crate::module::status::StatusRequest;
     use crate::module::upload::Upload;
+    use crate::platform::PlatformConfig;
     use crate::testing::EventTester;
 
     #[test]
     fn status_request_emits_lifecycle_partial_status() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
         t.emit(1, StatusRequest);
         t.assert_like::<PartialStatus>(crate::like!(PartialStatus::Lifecycle { .. }));
@@ -467,7 +486,10 @@ mod tests {
     #[test]
     fn process_started_emits_lifecycle_upload() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
         t.emit(1, ProcessStarted);
         t.assert_like(crate::like!(Upload {
@@ -489,7 +511,10 @@ mod tests {
     #[test]
     fn process_stopped_shutdown_emits_upload() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
         t.emit(2, ProcessStopped(ProcessStoppedReason::Shutdown));
         t.assert_like(crate::like!(Upload {
@@ -509,7 +534,10 @@ mod tests {
     #[test]
     fn process_stopped_user_emits_upload_and_high_risk_alert() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
         t.emit(4, ProcessStopped(ProcessStoppedReason::User));
         t.assert_like(crate::like!(Upload {
@@ -548,7 +576,10 @@ mod tests {
     #[test]
     fn computer_suspended_emits_upload() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
         t.emit(5, ComputerSuspended);
         t.assert_like(crate::like!(Upload {
@@ -570,7 +601,10 @@ mod tests {
     #[test]
     fn computer_resumed_after_suspend_emits_upload() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
         t.emit(6, ComputerSuspended);
         t.clear_captured();
@@ -598,7 +632,10 @@ mod tests {
     #[test]
     fn fourth_ping_while_suspended_triggers_missing_resume_alert() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
 
         t.emit(1, ComputerSuspended);
@@ -640,7 +677,10 @@ mod tests {
     #[test]
     fn session_login_emits_lifecycle_upload() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
         t.emit(1, UserSessionLogin);
         t.assert_like(crate::like!(Upload {
@@ -655,7 +695,10 @@ mod tests {
     #[test]
     fn session_logout_emits_high_risk_lifecycle_upload() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
         t.emit(1, UserSessionLogout);
         t.assert_like(crate::like!(Upload {
@@ -682,7 +725,10 @@ mod tests {
     #[test]
     fn ping_gap_while_running_emits_high_risk_alert() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
 
         // ProcessStarted + first Ping both at 1s — within 120s grace window, no alert.
@@ -722,9 +768,74 @@ mod tests {
     }
 
     #[test]
+    fn ping_gap_is_not_evaluated_when_sleep_wake_unsupported() {
+        let mut b = EventTester::builder();
+        // Platform can't tell us about suspend/resume (e.g. iOS, where the Safari
+        // extension host can be suspended by a device lock with zero signal) — a
+        // stall like this is indistinguishable from a suspicious one, so it must
+        // not be evaluated at all, regardless of size.
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig {
+                supports_sleep_wake_detection: false,
+            },
+        ));
+        let mut t = b.build();
+
+        t.emit(1, ProcessStarted);
+        t.emit(1, Ping);
+        t.clear_captured();
+
+        t.emit(200, Ping);
+        t.assert_not_like(crate::like!(Upload {
+            kind: UploadKind::LifecycleAlert {
+                reason: AlertReason::PingGapWhileRunning
+            },
+            ..
+        }));
+        assert_eq!(
+            t.observer::<LifecycleModule>().state.ping_gaps.len(),
+            0,
+            "gap should not even be recorded when the platform can't detect sleep/wake"
+        );
+    }
+
+    #[test]
+    fn unexpected_process_start_requires_known_boot_time() {
+        let mut b = EventTester::builder();
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
+        let mut t = b.build();
+
+        // Seed a state where the desktop-style heuristic would otherwise fire: long
+        // since login, process apparently left running, and a large ping gap.
+        // Platform boot time is unknown (the default), as on iOS — since we can't
+        // tell whether this restart followed a genuine device boot, we must not
+        // alert on every routine restart.
+        {
+            let s = &mut t.observer::<LifecycleModule>().state;
+            s.last_login = 1_000;
+            s.last_process_started = 2_000;
+            s.last_ping = 3_000;
+        }
+        t.emit(200, ProcessStarted);
+        t.assert_not_like(crate::like!(Upload {
+            kind: UploadKind::LifecycleAlert {
+                reason: AlertReason::UnexpectedProcessStart
+            },
+            ..
+        }));
+    }
+
+    #[test]
     fn ping_within_login_grace_period_does_not_emit_alert() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
         t.emit(1, ProcessStarted);
         t.emit(1, Ping);
@@ -743,7 +854,10 @@ mod tests {
     #[test]
     fn sub_budget_ping_gap_does_not_alert() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
         // Seed a running process whose last ping is already past the login grace
         // window (last_login stays 0).
@@ -767,7 +881,10 @@ mod tests {
     #[test]
     fn accumulated_ping_gaps_cross_budget_and_alert() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
         {
             let s = &mut t.observer::<LifecycleModule>().state;
@@ -796,7 +913,10 @@ mod tests {
     #[test]
     fn aged_out_ping_gaps_are_pruned_and_do_not_alert() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
         // An old 50s gap recorded ~700s before "now"; it sits outside the 10-min
         // window once the new ping lands and must be pruned before summing.
@@ -822,7 +942,10 @@ mod tests {
     #[test]
     fn cooldown_suppresses_repeat_ping_gap_alert() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
         // Seed a state that already alerted recently with enough banked gap time to
         // cross the budget again.
@@ -855,7 +978,10 @@ mod tests {
     #[test]
     fn process_killed_before_shutdown_emits_alert() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
         t.emit(1, ProcessStarted);
         t.emit(1, ProcessStopped(ProcessStoppedReason::Other));
@@ -886,7 +1012,10 @@ mod tests {
     #[test]
     fn force_killed_process_with_platform_shutdown_emits_high_risk_alert() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
 
         // Run 1: process starts, pings, then is killed (Other stop — no shutdown event yet)
@@ -967,7 +1096,10 @@ mod tests {
     #[test]
     fn state_round_trips_through_save_and_load() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
         let mut t = b.build();
 
         t.emit(30, UserSessionLogin); // last_login = 30_000
@@ -996,7 +1128,10 @@ mod tests {
         let saved = t.bus.save().unwrap();
 
         let mut b2 = EventTester::builder();
-        b2.add(LifecycleModule::new(Box::new(b2.platform())));
+        b2.add(LifecycleModule::new(
+            Box::new(b2.platform()),
+            PlatformConfig::default(),
+        ));
         b2.with_state(saved);
         let mut t2 = b2.build();
 

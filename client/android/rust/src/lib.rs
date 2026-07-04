@@ -15,8 +15,9 @@ use serde::de::DeserializeOwned;
 use virtue_core::{
     build_default_modules_reqwest, load_state, store_state, AuthState, Config, CoreError,
     CoreResult, DeviceSettings, EventBus, EventChannel, LoginRequested, LoginResult,
-    LogoutRequested, Ping, PlatformHooks, ProcessStarted, ProcessStopped, ProcessStoppedReason,
-    Redacted, Screenshot, ScreenshotHooks, StatusRequest, StatusResponse, UserStopRequested,
+    LogoutRequested, Ping, PlatformConfig, PlatformHooks, ProcessStarted, ProcessStopped,
+    ProcessStoppedReason, Redacted, Screenshot, ScreenshotHooks, StatusRequest, StatusResponse,
+    UserStopRequested,
 };
 
 static CORE: OnceCell<AndroidCore> = OnceCell::new();
@@ -456,12 +457,17 @@ pub fn is_interactive(env: &mut JNIEnv) -> jni::errors::Result<bool> {
 
 fn build_bus(core: &AndroidCore) -> Result<(EventBus, PathBuf)> {
     let cfg = build_core_config(core);
+    // Default `PlatformConfig` (supports_sleep_wake_detection: true) is correct
+    // here: unlike iOS, the monitoring loop runs in a persistent foreground
+    // service that keeps executing regardless of screen lock, so a ping stall
+    // is a genuine one, not an artifact of the OS suspending our process.
     let modules = build_default_modules_reqwest(
         cfg,
         AndroidPlatformHooks {
             java_vm: core.java_vm.clone(),
             screenshot_service_class: core.screenshot_service_class.clone(),
         },
+        PlatformConfig::default(),
     )?;
     let state_path = core.state_dir.join("event_state.json");
     let bus = EventBus::new(modules, load_state(&state_path)?)?;

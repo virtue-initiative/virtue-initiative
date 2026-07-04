@@ -7,8 +7,8 @@ use anyhow::Result;
 use tokio::sync::mpsc;
 use virtue_core::ProcessStoppedReason;
 use virtue_core::{
-    ComputerResumed, ComputerSuspended, EventBus, IpcBridge, Ping, ProcessStarted, ProcessStopped,
-    build_default_modules_reqwest, load_state, store_state,
+    ComputerResumed, ComputerSuspended, EventBus, IpcBridge, Ping, PlatformConfig, ProcessStarted,
+    ProcessStopped, build_default_modules_reqwest, load_state, store_state,
 };
 use zbus::proxy;
 
@@ -36,7 +36,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     let config = build_core_config(paths);
     let state_path = paths.state_dir.join("event_state.json");
     let modules = tokio::task::block_in_place(|| {
-        build_default_modules_reqwest(config, LinuxPlatformHooks::new())
+        build_default_modules_reqwest(config, LinuxPlatformHooks::new(), PlatformConfig::default())
     })?;
     let mut bus = EventBus::new(modules, load_state(&state_path)?)?;
 
