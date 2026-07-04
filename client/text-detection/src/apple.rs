@@ -1,8 +1,6 @@
+use objc2::AnyThread;
 use objc2_foundation::{NSArray, NSData, NSDictionary, NSString};
-use objc2_vision::{
-    VNImageRequestHandler, VNRecognizeTextRequest, VNRecognizedTextObservation,
-    VNRequestTextRecognitionLevel,
-};
+use objc2_vision::{VNImageRequestHandler, VNRecognizeTextRequest, VNRequestTextRecognitionLevel};
 
 use crate::{BoundingBox, OcrError, OcrOptions, OcrResult, TextRegion};
 
