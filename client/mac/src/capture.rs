@@ -135,7 +135,7 @@ fn parse_last_shutdown_mac(s: &str) -> Option<i64> {
     None
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MacPlatformHooks;
 
 impl MacPlatformHooks {
