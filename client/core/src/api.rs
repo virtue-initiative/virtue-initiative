@@ -8,15 +8,10 @@ use serde::Serialize;
 use crate::config::Config;
 use crate::crypto::derive_password_auth;
 use crate::error::{CoreError, CoreResult};
-use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, HashParams, LogEntry};
+use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, HashParams, NotifyPayload};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct UploadedBatchResponse {
-    pub id: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct UploadedLogResponse {
     pub id: String,
 }
 
@@ -36,11 +31,7 @@ pub trait ApiTransport: Send + Sync {
         device_refresh_token: &str,
         batch: &BatchUpload,
     ) -> CoreResult<UploadedBatchResponse>;
-    fn upload_log(
-        &self,
-        device_refresh_token: &str,
-        log: &LogEntry,
-    ) -> CoreResult<UploadedLogResponse>;
+    fn notify(&self, device_refresh_token: &str, payload: &NotifyPayload) -> CoreResult<()>;
     fn upload_hash(
         &self,
         hash_base_url: Option<&str>,
@@ -241,22 +232,20 @@ impl ApiTransport for ReqwestApiClient {
             .part("file", part)
             .text("start_time", batch.start_time_ms.to_string())
             .text("end_time", batch.end_time_ms.to_string())
+            .text("high_risk_count", batch.high_risk_count.to_string())
+            .text("medium_risk_count", batch.medium_risk_count.to_string())
             .text("access_keys", access_keys);
 
         self.send_form(Method::POST, None, "/d/batch", device_refresh_token, form)
     }
 
-    fn upload_log(
-        &self,
-        device_refresh_token: &str,
-        log: &LogEntry,
-    ) -> CoreResult<UploadedLogResponse> {
-        self.send_json(
+    fn notify(&self, device_refresh_token: &str, payload: &NotifyPayload) -> CoreResult<()> {
+        self.send_empty(
             Method::POST,
             None,
-            "/d/log",
+            "/d/notify",
             Some(device_refresh_token),
-            Some(log),
+            Some(payload),
         )
     }
 

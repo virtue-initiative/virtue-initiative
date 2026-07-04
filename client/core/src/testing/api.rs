@@ -1,9 +1,9 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use crate::api::{ApiTransport, UploadedBatchResponse, UploadedLogResponse};
+use crate::api::{ApiTransport, UploadedBatchResponse};
 use crate::error::CoreResult;
-use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, LogEntry};
+use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, NotifyPayload};
 
 /// Mock `ApiTransport` impl that records every call and serves either a
 /// programmed canned response or a sensible default success.
@@ -32,7 +32,7 @@ pub struct MockApiState {
     pub get_device_settings_calls: Vec<String>,
     pub get_hash_token_calls: Vec<String>,
     pub batch_uploads: Vec<BatchCall>,
-    pub log_uploads: Vec<LogCall>,
+    pub notify_calls: Vec<NotifyCall>,
     pub hash_uploads: Vec<HashCall>,
     pub reconfigure_calls: Vec<String>,
 
@@ -43,7 +43,7 @@ pub struct MockApiState {
     pub get_device_settings_responses: VecDeque<CoreResult<DeviceSettings>>,
     pub get_hash_token_responses: VecDeque<CoreResult<String>>,
     pub batch_responses: VecDeque<CoreResult<UploadedBatchResponse>>,
-    pub log_responses: VecDeque<CoreResult<UploadedLogResponse>>,
+    pub notify_responses: VecDeque<CoreResult<()>>,
     pub hash_responses: VecDeque<CoreResult<()>>,
 
     // --- default values used when the canned queue is empty ---
@@ -52,7 +52,6 @@ pub struct MockApiState {
     pub default_hash_token: String,
     pub default_device_settings: DeviceSettings,
     batch_id_counter: u64,
-    log_id_counter: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -69,9 +68,9 @@ pub struct BatchCall {
 }
 
 #[derive(Debug, Clone)]
-pub struct LogCall {
+pub struct NotifyCall {
     pub device_refresh_token: String,
-    pub log: LogEntry,
+    pub payload: NotifyPayload,
 }
 
 #[derive(Debug, Clone)]
@@ -90,7 +89,7 @@ impl Default for MockApiState {
             get_device_settings_calls: Vec::new(),
             get_hash_token_calls: Vec::new(),
             batch_uploads: Vec::new(),
-            log_uploads: Vec::new(),
+            notify_calls: Vec::new(),
             hash_uploads: Vec::new(),
             reconfigure_calls: Vec::new(),
 
@@ -100,7 +99,7 @@ impl Default for MockApiState {
             get_device_settings_responses: VecDeque::new(),
             get_hash_token_responses: VecDeque::new(),
             batch_responses: VecDeque::new(),
-            log_responses: VecDeque::new(),
+            notify_responses: VecDeque::new(),
             hash_responses: VecDeque::new(),
 
             default_device_id: "mock-device".to_string(),
@@ -118,7 +117,6 @@ impl Default for MockApiState {
                 hash_base_url: None,
             },
             batch_id_counter: 0,
-            log_id_counter: 0,
         }
     }
 }
@@ -160,8 +158,8 @@ impl MockApiClient {
         self.state().batch_responses.push_back(response);
     }
 
-    pub fn program_log(&self, response: CoreResult<UploadedLogResponse>) {
-        self.state().log_responses.push_back(response);
+    pub fn program_notify(&self, response: CoreResult<()>) {
+        self.state().notify_responses.push_back(response);
     }
 
     pub fn program_hash(&self, response: CoreResult<()>) {
@@ -271,23 +269,16 @@ impl ApiTransport for MockApiClient {
         }
     }
 
-    fn upload_log(
-        &self,
-        device_refresh_token: &str,
-        log: &LogEntry,
-    ) -> CoreResult<UploadedLogResponse> {
+    fn notify(&self, device_refresh_token: &str, payload: &NotifyPayload) -> CoreResult<()> {
         let mut state = self.state();
-        state.log_uploads.push(LogCall {
+        state.notify_calls.push(NotifyCall {
             device_refresh_token: device_refresh_token.to_string(),
-            log: log.clone(),
+            payload: payload.clone(),
         });
-        if let Some(canned) = state.log_responses.pop_front() {
+        if let Some(canned) = state.notify_responses.pop_front() {
             canned
         } else {
-            state.log_id_counter += 1;
-            Ok(UploadedLogResponse {
-                id: format!("mock-log-{}", state.log_id_counter),
-            })
+            Ok(())
         }
     }
 

@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS batches (
   end_time INTEGER NOT NULL,
   end_hash TEXT NOT NULL,
   access_keys TEXT NOT NULL,
+  high_risk_count INTEGER NOT NULL DEFAULT 0,
+  medium_risk_count INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
@@ -61,23 +63,6 @@ CREATE TABLE IF NOT EXISTS partners (
 CREATE INDEX IF NOT EXISTS idx_partners_watching_user_id ON partners(watching_user_id);
 CREATE INDEX IF NOT EXISTS idx_partners_watcher_user_id ON partners(watcher_user_id);
 CREATE INDEX IF NOT EXISTS idx_partners_status ON partners(status);
-
-CREATE TABLE IF NOT EXISTS device_logs (
-  id BLOB PRIMARY KEY,
-  user_id BLOB NOT NULL,
-  device_id BLOB NOT NULL,
-  ts INTEGER NOT NULL,
-  type TEXT NOT NULL,
-  data TEXT NOT NULL,
-  risk REAL,
-  created_at INTEGER NOT NULL,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_device_logs_user_id_created_at ON device_logs(user_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_device_logs_device_id ON device_logs(device_id);
-CREATE INDEX IF NOT EXISTS idx_device_logs_created_at ON device_logs(created_at);
-CREATE INDEX IF NOT EXISTS idx_device_logs_risk ON device_logs(risk);
 
 CREATE TABLE IF NOT EXISTS email_tokens (
   id BLOB PRIMARY KEY,

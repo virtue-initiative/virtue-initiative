@@ -6,7 +6,7 @@ pub mod platform;
 pub mod scenario;
 pub mod spawner;
 
-pub use api::{BatchCall, HashCall, LogCall, MockApiClient, MockApiState, RegisterDeviceCall};
+pub use api::{BatchCall, HashCall, MockApiClient, MockApiState, NotifyCall, RegisterDeviceCall};
 pub use clock::MockClock;
 pub use event_tester::{EventTester, EventTesterBuilder};
 pub use fixtures::{tiny_png_bytes, tiny_png_screenshot};
@@ -99,6 +99,8 @@ mod tests {
             end_time_ms: 1,
             bytes: vec![1, 2, 3],
             access_keys: Vec::new(),
+            high_risk_count: 0,
+            medium_risk_count: 0,
         };
         let response = api.upload_batch("tok", &batch).unwrap();
         assert_eq!(response.id, "canned-batch");
@@ -130,8 +132,8 @@ mod tests {
             "unauthenticated loop must not upload batches"
         );
         assert!(
-            state.log_uploads.is_empty(),
-            "unauthenticated loop must not upload logs"
+            state.notify_calls.is_empty(),
+            "unauthenticated loop must not send notifications"
         );
 
         // Status request must return a valid response.

@@ -590,23 +590,12 @@ Response `200`:
 
 ```js
 {
-  "batches": [BatchData],
-  "logs": [
-    {
-      "id": UUID,
-      "device_id": UUID,
-      "ts": DateTime,
-      "type": "system_event",
-      "data": {},
-      "created_at": DateTime,
-      "risk": 0.7 | undefined
-    }
-  ]
+  "batches": [BatchData]
 }
 ```
 
 `batches` only include rows where the requester has a matching `encrypted_key` envelope.
-Returns every batch and log with `created_at > since`, ordered oldest-to-newest. Callers
+Returns every batch with `created_at > since`, ordered oldest-to-newest. Callers
 should pass the largest `created_at` they've seen as `since` on subsequent syncs.
 
 ## Device API
@@ -614,7 +603,7 @@ should pass the largest `created_at` they've seen as `since` on subsequent syncs
 The following routes use device auth:
 
 - `POST /d/device` uses the authenticated web session cookie
-- `POST /d/token`, `GET /d/device`, `POST /d/batch`, and `POST /d/log` use a `DeviceRefreshToken`
+- `POST /d/token`, `GET /d/device`, `POST /d/batch`, and `POST /d/notify` use a `DeviceRefreshToken`
 - `POST /hash`, `GET /hash`, and `DELETE /hash` use a `HashServerToken` or `ServerToken` as applicable
 
 ### `POST /d/device`
@@ -681,7 +670,14 @@ Multipart form request:
 - `start_time`: integer
 - `end_time`: integer
 - `access_keys`: JSON string
+- `high_risk_count`: non-negative integer, optional, default `0`
+- `medium_risk_count`: non-negative integer, optional, default `0`
 - `file`: encrypted batch blob
+
+`high_risk_count`/`medium_risk_count` are risk-band tallies computed client-side from the
+per-event `risk` values in this batch (thresholds mirror `shared-web/risk.ts`). Since
+event bodies are end-to-end encrypted, these counts are the only server-visible signal
+used to summarize tamper activity in partner digest emails.
 
 `access_keys` JSON shape:
 
@@ -708,7 +704,12 @@ Response `201`:
 }
 ```
 
-### `POST /d/log`
+### `POST /d/notify`
+
+Sends the alert email for a high-risk event. The event body itself is uploaded separately
+via the encrypted `POST /d/batch` pipeline; this endpoint only carries the metadata needed
+to render the notification email and persists nothing server-side. Replaces the removed
+`POST /d/log` endpoint.
 
 Request:
 
@@ -716,21 +717,20 @@ Request:
 {
   "ts": DateTime,
   "type": "system_event",
-  "risk": 0.7 | undefined,
-  "data": {}
+  "risk": 0.7,
+  "title": "Device reported system event." | undefined,
+  "details": "..." | undefined
 }
 ```
 
-Response `201` echoes the stored log.
-Response `201`:
+`risk` is required (`0`-`1`). `title`/`details` are optional; when omitted, a default title
+is derived from `type` and no details are included.
+
+Response `202`:
 
 ```js
 {
-  "id": UUID,
-  "ts": DateTime,
-  "type": "system_event",
-  "risk": 0.7 | undefined,
-  "data": {}
+  "ok": true
 }
 ```
 

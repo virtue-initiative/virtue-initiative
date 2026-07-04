@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { authenticateWebSession } from '../middleware/auth';
-import { canViewUserData, listBatches, listDeviceLogs } from '../lib/db';
+import { canViewUserData, listBatches } from '../lib/db';
 import { validateZ } from '../middleware/validation';
 import { Env, Variables } from '../types/bindings';
 
@@ -36,10 +36,7 @@ data.get('/', authenticateWebSession(), validateZ('query', listDataSchema), asyn
     return c.json({ error: 'Forbidden' }, 403);
   }
 
-  const [batches, logs] = await Promise.all([
-    listBatches(c.env.DB, [targetUserId], { deviceId: device_id, since }),
-    listDeviceLogs(c.env.DB, [targetUserId], { deviceId: device_id, since }),
-  ]);
+  const batches = await listBatches(c.env.DB, [targetUserId], { deviceId: device_id, since });
 
   return c.json({
     batches: batches
@@ -61,15 +58,6 @@ data.get('/', authenticateWebSession(), validateZ('query', listDataSchema), asyn
         };
       })
       .filter((item) => item !== null),
-    logs: logs.map((log) => ({
-      id: log.id,
-      device_id: log.device_id,
-      ts: log.ts,
-      type: log.type,
-      data: JSON.parse(log.data) as Record<string, unknown>,
-      created_at: log.created_at,
-      ...(log.risk !== null ? { risk: log.risk } : {}),
-    })),
   });
 });
 

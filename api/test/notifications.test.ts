@@ -122,23 +122,16 @@ describe('Notification routes and tamper alerts', () => {
     });
 
     const device = await createDeviceForUser(ownerCookie, 'Workstation', 'linux');
-    const logRes = await SELF.fetch(`${BASE}/d/log`, {
+    const logRes = await SELF.fetch(`${BASE}/d/notify`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${device.refresh_token}`,
       },
-      body: JSON.stringify({ ts: Date.now(), type: 'service_stop', risk: 0.7, data: {} }),
+      body: JSON.stringify({ ts: Date.now(), type: 'service_stop', risk: 0.7 }),
     });
 
-    expect(logRes.status).toBe(201);
-
-    const storedLog = await env.DB.prepare(
-      'SELECT risk FROM device_logs WHERE device_id = ? ORDER BY created_at DESC LIMIT 1',
-    )
-      .bind(uuidToBytes(device.id))
-      .first<{ risk: number | null }>();
-    expect(storedLog?.risk).toBe(0.7);
+    expect(logRes.status).toBe(202);
 
     const deliveries = await listEmailDeliveries();
     expect(deliveries.some((delivery) => delivery.kind === 'tamper_alert')).toBe(true);
@@ -149,7 +142,62 @@ describe('Notification routes and tamper alerts', () => {
     expect(tamperDelivery?.text).toContain('Device: Workstation');
   });
 
-  it('does not send immediate tamper alerts for moderate-risk device log events', async () => {
+  it('passes custom title/details through to the rendered tamper alert email', async () => {
+    const { cookie: ownerCookie } = await signupAndGetCookie('custom-owner@example.com', 'pw');
+    const { cookie: partnerCookie, userId: partnerUserId } = await signupAndGetCookie(
+      'custom-partner@example.com',
+      'pw',
+    );
+    await markUserEmailVerified(partnerUserId);
+
+    const inviteRes = await SELF.fetch(`${BASE}/partner`, {
+      method: 'POST',
+      headers: authHeaders(ownerCookie),
+      body: JSON.stringify({
+        email: 'custom-partner@example.com',
+      }),
+    });
+    await inviteRes.json();
+    const inviteDelivery = (await listEmailDeliveries()).find(
+      (delivery) =>
+        delivery.kind === 'partner_invite' &&
+        delivery.recipient_email === 'custom-partner@example.com',
+    );
+    const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
+
+    await SELF.fetch(`${BASE}/partner/accept`, {
+      method: 'POST',
+      headers: authHeaders(partnerCookie),
+      body: JSON.stringify({ token: inviteMetadata.inviteToken }),
+    });
+
+    const device = await createDeviceForUser(ownerCookie, 'Workstation', 'linux');
+    const logRes = await SELF.fetch(`${BASE}/d/notify`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${device.refresh_token}`,
+      },
+      body: JSON.stringify({
+        ts: Date.now(),
+        type: 'service_stop',
+        risk: 0.7,
+        title: 'Custom alert title',
+        details: 'Custom alert details',
+      }),
+    });
+
+    expect(logRes.status).toBe(202);
+
+    const tamperDelivery = (await listEmailDeliveries()).find(
+      (delivery) => delivery.kind === 'tamper_alert',
+    );
+    expect(tamperDelivery?.subject).toContain('Custom alert title');
+    expect(tamperDelivery?.text).toContain('Custom alert title');
+    expect(tamperDelivery?.text).toContain('Custom alert details');
+  });
+
+  it('sends immediate tamper alerts for moderate-risk device log events', async () => {
     const { cookie: ownerCookie } = await signupAndGetCookie('moderate-owner@example.com', 'pw');
     const { cookie: partnerCookie, userId: partnerUserId } = await signupAndGetCookie(
       'moderate-partner@example.com',
@@ -179,21 +227,22 @@ describe('Notification routes and tamper alerts', () => {
     });
 
     const device = await createDeviceForUser(ownerCookie, 'Laptop', 'linux');
-    const baselineCount = (await listEmailDeliveries()).length;
-    const logRes = await SELF.fetch(`${BASE}/d/log`, {
+    const logRes = await SELF.fetch(`${BASE}/d/notify`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${device.refresh_token}`,
       },
-      body: JSON.stringify({ ts: Date.now(), type: 'service_stop', risk: 0.69, data: {} }),
+      body: JSON.stringify({ ts: Date.now(), type: 'service_stop', risk: 0.69 }),
     });
 
-    expect(logRes.status).toBe(201);
-    expect(await listEmailDeliveries()).toHaveLength(baselineCount);
+    expect(logRes.status).toBe(202);
+    expect((await listEmailDeliveries()).some((delivery) => delivery.kind === 'tamper_alert')).toBe(
+      true,
+    );
   });
 
-  it('treats zero or absent risk as non-tamper', async () => {
+  it('sends an immediate tamper alert even for zero risk; requires the risk field', async () => {
     const { cookie: ownerCookie } = await signupAndGetCookie('non-tamper-owner@example.com', 'pw');
     const { cookie: partnerCookie, userId: partnerUserId } = await signupAndGetCookie(
       'non-tamper-partner@example.com',
@@ -223,29 +272,32 @@ describe('Notification routes and tamper alerts', () => {
     });
 
     const device = await createDeviceForUser(ownerCookie, 'Desktop', 'linux');
-    const baselineCount = (await listEmailDeliveries()).length;
 
-    const zeroRiskRes = await SELF.fetch(`${BASE}/d/log`, {
+    // The notify endpoint doesn't re-filter by risk — the client's uploader only
+    // calls it for high-risk events, so any call here should send an alert.
+    const zeroRiskRes = await SELF.fetch(`${BASE}/d/notify`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${device.refresh_token}`,
       },
-      body: JSON.stringify({ ts: Date.now(), type: 'heartbeat', risk: 0, data: {} }),
+      body: JSON.stringify({ ts: Date.now(), type: 'heartbeat', risk: 0 }),
     });
-    expect(zeroRiskRes.status).toBe(201);
+    expect(zeroRiskRes.status).toBe(202);
+    expect((await listEmailDeliveries()).some((delivery) => delivery.kind === 'tamper_alert')).toBe(
+      true,
+    );
 
-    const missingRiskRes = await SELF.fetch(`${BASE}/d/log`, {
+    // Risk is still a required field on the notify endpoint.
+    const missingRiskRes = await SELF.fetch(`${BASE}/d/notify`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${device.refresh_token}`,
       },
-      body: JSON.stringify({ ts: Date.now(), type: 'heartbeat', data: {} }),
+      body: JSON.stringify({ ts: Date.now(), type: 'heartbeat' }),
     });
-    expect(missingRiskRes.status).toBe(201);
-
-    expect(await listEmailDeliveries()).toHaveLength(baselineCount);
+    expect(missingRiskRes.status).toBe(400);
   });
 
   it('stops all partner emails when receive emails is disabled', async () => {
@@ -284,16 +336,16 @@ describe('Notification routes and tamper alerts', () => {
 
     const device = await createDeviceForUser(ownerCookie, 'Muted Device', 'linux');
     const baselineCount = (await listEmailDeliveries()).length;
-    const logRes = await SELF.fetch(`${BASE}/d/log`, {
+    const logRes = await SELF.fetch(`${BASE}/d/notify`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${device.refresh_token}`,
       },
-      body: JSON.stringify({ ts: Date.now(), type: 'service_stop', risk: 1, data: {} }),
+      body: JSON.stringify({ ts: Date.now(), type: 'service_stop', risk: 1 }),
     });
 
-    expect(logRes.status).toBe(201);
+    expect(logRes.status).toBe(202);
     const deliveries = await listEmailDeliveries();
     expect(deliveries).toHaveLength(baselineCount);
     expect(deliveries.some((delivery) => delivery.kind === 'tamper_alert')).toBe(false);
@@ -332,16 +384,16 @@ describe('Notification routes and tamper alerts', () => {
 
     const device = await createDeviceForUser(ownerCookie, 'Quiet Device', 'linux');
     const baselineCount = (await listEmailDeliveries()).length;
-    const logRes = await SELF.fetch(`${BASE}/d/log`, {
+    const logRes = await SELF.fetch(`${BASE}/d/notify`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${device.refresh_token}`,
       },
-      body: JSON.stringify({ ts: Date.now(), type: 'service_stop', risk: 1, data: {} }),
+      body: JSON.stringify({ ts: Date.now(), type: 'service_stop', risk: 1 }),
     });
 
-    expect(logRes.status).toBe(201);
+    expect(logRes.status).toBe(202);
     expect(await listEmailDeliveries()).toHaveLength(baselineCount);
   });
 });

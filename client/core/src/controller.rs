@@ -8,6 +8,7 @@ use crate::module::lifecycle::{
     UserStopRequested,
 };
 use crate::module::status::{StatusRequest, StatusResponse};
+use crate::module::upload::{FlushBatchNow, Upload};
 
 /// High-level client for communicating with a daemon over any [`EventChannel`].
 ///
@@ -90,6 +91,18 @@ impl<C: EventChannel> ClientController<C> {
 
     pub fn note_process_stopped(&self, reason: ProcessStoppedReason) -> CoreResult<()> {
         self.channel.publish(ProcessStopped(reason))
+    }
+
+    /// Queue `upload` into the daemon's live batch/hash pipeline. Picked up on
+    /// the daemon's next ping cycle (≤1s), same as an in-process `Upload`.
+    pub fn queue_upload(&self, upload: Upload) -> CoreResult<()> {
+        self.channel.publish(upload)
+    }
+
+    /// Ask the daemon to flush its currently queued batch items now, instead
+    /// of waiting for the batch interval timer.
+    pub fn flush_batch_now(&self) -> CoreResult<()> {
+        self.channel.publish(FlushBatchNow)
     }
 
     /// Register a handler for events the daemon pushes unprompted.

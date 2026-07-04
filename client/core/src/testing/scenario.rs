@@ -274,11 +274,11 @@ impl Scenario {
         self
     }
 
-    pub fn assert_log_upload_count(&self, expected: usize) -> &Self {
-        let actual = self.api.state().log_uploads.len();
+    pub fn assert_notify_count(&self, expected: usize) -> &Self {
+        let actual = self.api.state().notify_calls.len();
         assert_eq!(
             actual, expected,
-            "expected {expected} log uploads, recorded {actual}"
+            "expected {expected} notify calls, recorded {actual}"
         );
         self
     }
