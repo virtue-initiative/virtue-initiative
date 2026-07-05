@@ -28,7 +28,7 @@ const INSTALLATION_URL = `${LANDING_URL}/help/installation`;
 export function Devices() {
   const api = useAPIContext();
   const userId = api?.userId ?? null;
-  const { devices } = useDevices();
+  const { devices, loaded } = useDevices();
   const updateDevice = (id: string, patch: { name?: string }) =>
     api ? api.updateDevice(id, patch) : Promise.reject(new Error('Not signed in'));
   const removeDevice = (id: string) =>
@@ -44,7 +44,9 @@ export function Devices() {
       <PageHeading icon={<DevicesIcon />} actions={<AddDeviceButton />}>
         Devices
       </PageHeading>
-      {ownDevices.length === 0 ? (
+      {!loaded ? (
+        <p class="loading">Loading…</p>
+      ) : ownDevices.length === 0 ? (
         <p class="empty">No devices</p>
       ) : (
         <CardGrid>

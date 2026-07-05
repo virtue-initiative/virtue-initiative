@@ -15,17 +15,16 @@ cd "$CLIENT_ROOT"
 source "${CLIENT_ROOT}/scripts/version.sh"
 
 BUILD_LABEL="$(virtue_build_label)"
-ARCH_SUFFIX="${VIRTUE_ARCH_SUFFIX:-}"
 APP_NAME="Virtue.app"
-DMG_NAME="virtue-macos${ARCH_SUFFIX}-${BUILD_LABEL}.dmg"
-DMG_PATH="target/macos${ARCH_SUFFIX}/${DMG_NAME}"
-TEMP_DMG_PATH="target/macos${ARCH_SUFFIX}/Virtue-${BUILD_LABEL}-temp.dmg"
-STAGING_DIR="target/macos${ARCH_SUFFIX}/dmg-staging"
+DMG_NAME="virtue-macos-${BUILD_LABEL}.dmg"
+DMG_PATH="target/macos/${DMG_NAME}"
+TEMP_DMG_PATH="target/macos/Virtue-${BUILD_LABEL}-temp.dmg"
+STAGING_DIR="target/macos/dmg-staging"
 VOLUME_NAME="Virtue"
 
 rm -rf "$STAGING_DIR" "$DMG_PATH" "$TEMP_DMG_PATH"
 mkdir -p "$STAGING_DIR"
-cp -R "target/macos${ARCH_SUFFIX}/${APP_NAME}" "$STAGING_DIR/${APP_NAME}"
+cp -R "target/macos/${APP_NAME}" "$STAGING_DIR/${APP_NAME}"
 ln -s /Applications "$STAGING_DIR/Applications"
 
 hdiutil create \
@@ -74,3 +73,14 @@ hdiutil convert "$TEMP_DMG_PATH" -format UDZO -ov -o "$DMG_PATH"
 
 rm -rf "$STAGING_DIR" "$TEMP_DMG_PATH"
 echo "Built ${DMG_PATH}"
+
+# Notarize + staple. Skipped for local/dev builds (adhoc-signed apps can't be
+# notarized): only runs when a notarytool keychain profile is configured.
+if [[ -n "${NOTARY_PROFILE:-}" ]]; then
+  echo "Submitting ${DMG_PATH} for notarization (profile: ${NOTARY_PROFILE})..."
+  xcrun notarytool submit "$DMG_PATH" --keychain-profile "$NOTARY_PROFILE" --wait
+  xcrun stapler staple "$DMG_PATH"
+  echo "Notarized and stapled ${DMG_PATH}"
+else
+  echo "NOTARY_PROFILE not set; skipping notarization."
+fi

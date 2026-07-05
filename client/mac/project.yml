@@ -1,0 +1,57 @@
+name: VirtueMac
+options:
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: '5.0'
+    MACOSX_DEPLOYMENT_TARGET: '13.0'
+    # Manual (not Automatic): signing is driven entirely by xcodebuild
+    # command-line overrides (CODE_SIGN_IDENTITY/DEVELOPMENT_TEAM) in
+    # build-app.sh, both for CI's ad-hoc default and for local dev builds
+    # using a real Developer ID identity — Automatic conflicts with an
+    # explicitly-specified non-adhoc identity.
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ''
+    VIRTUE_APP_BUNDLE_ID: org.virtueinitiative.virtue.mac
+    CURRENT_PROJECT_VERSION: '1'
+    MARKETING_VERSION: '0.0.8'
+    VIRTUE_BUILD_LABEL: '$(MARKETING_VERSION)'
+    LIBRARY_SEARCH_PATHS: '$(inherited) $(BUILT_PRODUCTS_DIR) $(TARGET_BUILD_DIR)'
+packages:
+  VirtueKit:
+    path: ../shared-swift
+targets:
+  VirtueMac:
+    type: application
+    platform: macOS
+    deploymentTarget: '13.0'
+    settings:
+      base:
+        PRODUCT_NAME: Virtue
+        PRODUCT_BUNDLE_IDENTIFIER: '$(VIRTUE_APP_BUNDLE_ID)'
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: app/Info.plist
+        CODE_SIGN_ENTITLEMENTS: app/VirtueMac.entitlements
+        OTHER_LDFLAGS: '$(inherited) -lvirtue_mac_rust'
+        ENABLE_HARDENED_RUNTIME: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    sources:
+      - path: app/Sources
+      - path: app/Assets.xcassets
+    dependencies:
+      - package: VirtueKit
+      - framework: ApplicationServices.framework
+        embed: false
+    preBuildScripts:
+      - name: Build Rust Bridge
+        path: scripts/build-rust-for-xcode.sh
+        basedOnDependencyAnalysis: false
+schemes:
+  VirtueMac:
+    build:
+      targets:
+        VirtueMac: all
+    run:
+      config: Debug
+    archive:
+      config: Release
