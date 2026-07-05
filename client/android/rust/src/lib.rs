@@ -10,6 +10,7 @@ use anyhow::{anyhow, Context, Result};
 use jni::objects::{GlobalRef, JByteArray, JClass, JString, JValue};
 use jni::sys::{jboolean, jstring};
 use jni::{JNIEnv, JavaVM};
+use virtue_text_detection::OcrError;
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
 use virtue_core::{
@@ -212,6 +213,46 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeInit(
                 env.new_global_ref(class)
                     .context("failed to create GlobalRef for ScreenshotService")?,
             );
+
+            // Register the OCR callback (once; OnceLock ignores repeat calls).
+            // The class is cached here on the main thread; background threads use the
+            // GlobalRef so the app class loader is not needed at call time.
+            let virtue_ocr_class = env
+                .find_class("org/virtueinitiative/virtue/VirtueOcr")
+                .context("failed to find VirtueOcr class")?;
+            let virtue_ocr_global = Arc::new(
+                env.new_global_ref(virtue_ocr_class)
+                    .context("failed to create GlobalRef for VirtueOcr")?,
+            );
+            let vm_for_ocr = java_vm.clone();
+            virtue_text_detection::android::register_recognize_fn(move |image, language| {
+                let mut ocr_env = vm_for_ocr
+                    .attach_current_thread()
+                    .map_err(|e| OcrError::Init(e.to_string()))?;
+                let j_bytes = ocr_env
+                    .byte_array_from_slice(image)
+                    .map_err(|e| OcrError::Recognition(e.to_string()))?;
+                let j_lang = ocr_env
+                    .new_string(language.unwrap_or(""))
+                    .map_err(|e| OcrError::Recognition(e.to_string()))?;
+                let result = ocr_env
+                    .call_static_method(
+                        &*virtue_ocr_global,
+                        "recognizeText",
+                        "([BLjava/lang/String;)Ljava/lang/String;",
+                        &[JValue::Object(&*j_bytes), JValue::Object(&*j_lang)],
+                    )
+                    .map_err(|e| OcrError::Recognition(e.to_string()))?;
+                let j_str_obj = result
+                    .l()
+                    .map_err(|e| OcrError::Recognition(e.to_string()))?;
+                let output = unsafe { ocr_env.get_string(&JString::from(j_str_obj)) }
+                    .map_err(|e| OcrError::Recognition(e.to_string()))?
+                    .to_string_lossy()
+                    .into_owned();
+                Ok(output)
+            });
+
             CORE.set(AndroidCore {
                 state_dir: PathBuf::from(data_dir),
                 runtime_config_file,

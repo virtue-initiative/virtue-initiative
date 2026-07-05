@@ -67,6 +67,11 @@ jobs:
       - name: Build macOS universal app bundle and DMG
         run: ./mac/scripts/build-dmg.sh
         working-directory: client
+        env:
+          # CI has no access to a real Developer ID identity; build-app.sh
+          # otherwise now defaults to one for local dev (see its comments).
+          CODESIGN_IDENTITY: '-'
+          DEVELOPMENT_TEAM: ''
 
       - name: Resolve version info
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')

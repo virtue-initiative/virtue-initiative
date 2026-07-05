@@ -4,6 +4,7 @@ members = [
   "linux",
   "mac",
   "windows",
+  "text-detection",
 ]
 resolver = "2"
 
