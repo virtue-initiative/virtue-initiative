@@ -184,6 +184,11 @@ impl LifecycleModule {
                     reason: AlertReason::ProcessKilledBeforeShutdown,
                 },
             });
+            // Consume the stale "other" stop now that it's been reported — otherwise
+            // it stays > 0 forever and `last_shutdown` (which only ever climbs) keeps
+            // exceeding it by more than the threshold, re-firing this alert on every
+            // future clean boot even though nothing new happened.
+            self.state.last_process_stopped_other = 0;
         }
 
         // Detect force kill: process was actively pinging but disappeared without any
@@ -1002,6 +1007,50 @@ mod tests {
         // Gap (12_000 - 1_000 = 11_000 ms) exceeds the 10 s threshold
         t.emit(20, ProcessStarted);
         t.assert_like(crate::like!(Upload {
+            kind: UploadKind::LifecycleAlert {
+                reason: AlertReason::ProcessKilledBeforeShutdown
+            },
+            ..
+        }));
+        assert_eq!(
+            t.observer::<LifecycleModule>()
+                .state
+                .last_process_stopped_other,
+            0,
+            "the stale other-stop should be consumed once reported"
+        );
+    }
+
+    #[test]
+    fn process_killed_before_shutdown_alert_does_not_repeat_on_later_clean_reboots() {
+        let mut b = EventTester::builder();
+        b.add(LifecycleModule::new(
+            Box::new(b.platform()),
+            PlatformConfig::default(),
+        ));
+        let mut t = b.build();
+        // Same setup as `process_killed_before_shutdown_emits_alert`: an unclean
+        // "other" stop, followed (11 s later) by a real shutdown.
+        t.emit(1, ProcessStarted);
+        t.emit(1, ProcessStopped(ProcessStoppedReason::Other));
+        t.emit(12, ProcessStopped(ProcessStoppedReason::Shutdown));
+        t.clear_captured();
+        t.emit(20, ProcessStarted);
+        t.assert_like(crate::like!(Upload {
+            kind: UploadKind::LifecycleAlert {
+                reason: AlertReason::ProcessKilledBeforeShutdown
+            },
+            ..
+        }));
+
+        // A later, entirely clean shutdown/reboot cycle must not re-trigger the
+        // alert just because the old "other" stop is chronologically far behind
+        // the new (ever-climbing) last-shutdown time.
+        t.clear_captured();
+        t.emit(100, ProcessStopped(ProcessStoppedReason::Shutdown));
+        t.clear_captured();
+        t.emit(300, ProcessStarted);
+        t.assert_not_like(crate::like!(Upload {
             kind: UploadKind::LifecycleAlert {
                 reason: AlertReason::ProcessKilledBeforeShutdown
             },
