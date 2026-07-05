@@ -31,7 +31,6 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
     private const int IdTrayExit = 2002;
     private const int NotifyForThisSession = 0;
     private const int WtsSessionLogon = 0x5;
-    private const int WtsSessionLogoff = 0x6;
     private const int WindowId = 1;
     private static readonly uint WmTrayIcon = WmApp + 1;
 
@@ -283,14 +282,13 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
             }
             case WmWtsSessionChange:
             {
+                // WTS_SESSION_LOGOFF also fires on a full shutdown/restart (the session
+                // logs off as part of powering down), so only WM_ENDSESSION's
+                // ENDSESSION_LOGOFF flag can reliably tell logoff and shutdown apart.
                 var sessionEvent = wParam.ToInt32();
                 if (sessionEvent == WtsSessionLogon)
                 {
                     SessionLogonObserved?.Invoke(this, EventArgs.Empty);
-                }
-                else if (sessionEvent == WtsSessionLogoff)
-                {
-                    SessionLogoffObserved?.Invoke(this, EventArgs.Empty);
                 }
 
                 return IntPtr.Zero;
