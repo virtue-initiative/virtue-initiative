@@ -4,7 +4,7 @@ use crate::model::ServiceStatus;
 use crate::model::{ProcessStoppedReason, Redacted};
 use crate::module::auth::{LoginRequested, LoginResult, LogoutRequested, LogoutResult};
 use crate::module::lifecycle::{
-    ComputerResumed, ComputerSuspended, ProcessStopped, UserSessionLogin, UserSessionLogout,
+    ComputerResumed, ComputerSuspended, ProcessStopped, SystemLogin, SystemLogout,
     UserStopRequested,
 };
 use crate::module::status::{StatusRequest, StatusResponse};
@@ -82,11 +82,11 @@ impl<C: EventChannel> ClientController<C> {
     }
 
     pub fn note_login(&self) -> CoreResult<()> {
-        self.channel.publish(UserSessionLogin)
+        self.channel.publish(SystemLogin)
     }
 
     pub fn note_logout(&self) -> CoreResult<()> {
-        self.channel.publish(UserSessionLogout)
+        self.channel.publish(SystemLogout)
     }
 
     pub fn note_process_stopped(&self, reason: ProcessStoppedReason) -> CoreResult<()> {

@@ -12,9 +12,8 @@ use serde::Serialize;
 use virtue_core::{
     ComputerResumed, ComputerSuspended, CoreError, EventBus, EventChannel, LoginRequested,
     LoginResult, LogoutRequested, LogoutResult, Ping, PlatformConfig, ProcessStarted,
-    ProcessStopped, ProcessStoppedReason, Redacted, StatusRequest, StatusResponse,
-    UserSessionLogin, UserSessionLogout, UserStopRequested, build_default_modules_reqwest,
-    load_state, store_state,
+    ProcessStopped, ProcessStoppedReason, Redacted, StatusRequest, StatusResponse, SystemLogin,
+    SystemLogout, UserStopRequested, build_default_modules_reqwest, load_state, store_state,
 };
 
 use crate::capture::WindowsPlatformHooks;
@@ -53,8 +52,8 @@ enum MonitorCommand {
         source: String,
     },
     ProcessStopped(ProcessStoppedReason),
-    Login,
-    Logout,
+    SystemLogin,
+    SystemLogout,
     ComputerSuspended,
     ComputerResumed,
     AppLogin {
@@ -156,6 +155,7 @@ pub fn stop_monitoring_from_tray_exit() -> Result<()> {
 }
 
 pub fn stop_monitoring_for_system_shutdown() -> Result<()> {
+    send_command(MonitorCommand::SystemLogout)?;
     send_command(MonitorCommand::ProcessStopped(
         ProcessStoppedReason::Shutdown,
     ))?;
@@ -164,18 +164,18 @@ pub fn stop_monitoring_for_system_shutdown() -> Result<()> {
 }
 
 pub fn stop_monitoring_for_session_logoff() -> Result<()> {
-    send_command(MonitorCommand::Logout)?;
+    send_command(MonitorCommand::SystemLogout)?;
     send_command(MonitorCommand::ProcessStopped(ProcessStoppedReason::Other))?;
     stop_monitoring()?;
     Ok(())
 }
 
 pub fn notify_session_logon() -> Result<()> {
-    send_command(MonitorCommand::Login)
+    send_command(MonitorCommand::SystemLogin)
 }
 
 pub fn notify_session_logoff() -> Result<()> {
-    send_command(MonitorCommand::Logout)
+    send_command(MonitorCommand::SystemLogout)
 }
 
 pub fn notify_suspend() -> Result<()> {
@@ -381,12 +381,12 @@ fn handle_command(bus: &mut EventBus, state_path: &Path, command: MonitorCommand
             bus.send(ProcessStopped(reason))?;
             store_state(state_path, &bus.iter()?)?;
         }
-        MonitorCommand::Login => {
-            bus.send(UserSessionLogin)?;
+        MonitorCommand::SystemLogin => {
+            bus.send(SystemLogin)?;
             store_state(state_path, &bus.iter()?)?;
         }
-        MonitorCommand::Logout => {
-            bus.send(UserSessionLogout)?;
+        MonitorCommand::SystemLogout => {
+            bus.send(SystemLogout)?;
             store_state(state_path, &bus.iter()?)?;
         }
         MonitorCommand::ComputerSuspended => {

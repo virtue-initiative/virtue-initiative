@@ -6,7 +6,7 @@ Events (all but Ping should be forwarded to the uploader)
 - ProcessKilled (by computer, kill [pid], systemd stop/restart, etc.)
 - ProcessStarted
 - ProcessStopped (by user `virtue daemon stop`)
-- ComputerBooted
+- SystemLogin
 - ComputerSuspended
 - ComputerResumed
 - Ping

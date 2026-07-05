@@ -96,7 +96,7 @@ struct SendLogArgs {
     /// Log type to emit. Use `all` to queue one of every type.
     #[arg(long = "type", value_name = "TYPE")]
     log_type: String,
-    /// Lifecycle kind (snake_case) when --type lifecycle, e.g. computer_booted, login.
+    /// Lifecycle kind (snake_case) when --type lifecycle, e.g. system_login, login.
     #[arg(long)]
     kind: Option<String>,
     /// Alert reason (snake_case) when --type lifecycle_alert, e.g. ping_gap_while_running.
@@ -429,11 +429,10 @@ fn all_send_kinds() -> Vec<UploadKind> {
     use AlertReason::*;
     use LifecycleKind::*;
     let lifecycle = [
-        ComputerBooted,
         ComputerSuspended,
         ComputerResumed,
-        Login,
-        Logout,
+        SystemLogin,
+        SystemLogout,
         ProcessStarted,
         ProcessStoppedUser,
         ProcessStoppedShutdown,

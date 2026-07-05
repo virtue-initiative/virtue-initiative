@@ -24,10 +24,10 @@ pub struct ComputerSuspended;
 pub struct ComputerResumed;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserSessionLogin;
+pub struct SystemLogin;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserSessionLogout;
+pub struct SystemLogout;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserStopRequested {
@@ -143,7 +143,7 @@ impl LifecycleModule {
             let _ = emitter.send(Upload {
                 risk: 0.0,
                 kind: UploadKind::Lifecycle {
-                    kind: LifecycleKind::ComputerBooted,
+                    kind: LifecycleKind::SystemLogin,
                 },
             });
             self.state.last_sent_boot = boot_ms;
@@ -421,21 +421,21 @@ impl Observer for LifecycleModule {
                 }
                 Ok(())
             },
-            _: UserSessionLogin => {
+            _: SystemLogin => {
                 if matches!(self.state.status, LifecycleStatus::Running) {
                     let now_ms = self.platform.get_time_utc_ms()?;
                     let _ = emitter.send(Upload {
                         risk: 0.0,
-                        kind: UploadKind::Lifecycle { kind: LifecycleKind::Login },
+                        kind: UploadKind::Lifecycle { kind: LifecycleKind::SystemLogin },
                     });
                     self.state.last_login = now_ms;
                 }
                 Ok(())
             },
-            _: UserSessionLogout => {
+            _: SystemLogout => {
                 let _ = emitter.send(Upload {
-                    risk: EXTRA_HIGH_RISK,
-                    kind: UploadKind::Lifecycle { kind: LifecycleKind::Logout },
+                    risk: 0.0,
+                    kind: UploadKind::Lifecycle { kind: LifecycleKind::SystemLogout },
                 });
                 Ok(())
             },
@@ -459,8 +459,8 @@ impl Observer for LifecycleModule {
 #[cfg(test)]
 mod tests {
     use super::{
-        ComputerResumed, ComputerSuspended, ProcessStarted, ProcessStopped, UserSessionLogin,
-        UserSessionLogout,
+        ComputerResumed, ComputerSuspended, ProcessStarted, ProcessStopped, SystemLogin,
+        SystemLogout,
     };
     use super::{EXTRA_HIGH_RISK, HIGH_RISK_LIFECYCLE_ALERT, LifecycleModule, LifecycleStatus};
     use crate::events::Ping;
@@ -682,10 +682,10 @@ mod tests {
             PlatformConfig::default(),
         ));
         let mut t = b.build();
-        t.emit(1, UserSessionLogin);
+        t.emit(1, SystemLogin);
         t.assert_like(crate::like!(Upload {
             kind: UploadKind::Lifecycle {
-                kind: LifecycleKind::Login
+                kind: LifecycleKind::SystemLogin
             },
             ..
         }));
@@ -693,17 +693,17 @@ mod tests {
     }
 
     #[test]
-    fn session_logout_emits_high_risk_lifecycle_upload() {
+    fn system_logout_emits_low_risk_lifecycle_upload() {
         let mut b = EventTester::builder();
         b.add(LifecycleModule::new(
             Box::new(b.platform()),
             PlatformConfig::default(),
         ));
         let mut t = b.build();
-        t.emit(1, UserSessionLogout);
+        t.emit(1, SystemLogout);
         t.assert_like(crate::like!(Upload {
             kind: UploadKind::Lifecycle {
-                kind: LifecycleKind::Logout
+                kind: LifecycleKind::SystemLogout
             },
             ..
         }));
@@ -714,12 +714,12 @@ mod tests {
                 matches!(
                     e.kind,
                     UploadKind::Lifecycle {
-                        kind: LifecycleKind::Logout
+                        kind: LifecycleKind::SystemLogout
                     }
                 )
             })
             .unwrap();
-        assert!(upload.risk >= 0.9, "logout upload should be high risk");
+        assert_eq!(upload.risk, 0.0, "logout is routine, not high risk");
     }
 
     #[test]
@@ -840,7 +840,7 @@ mod tests {
         t.emit(1, ProcessStarted);
         t.emit(1, Ping);
         t.clear_captured();
-        t.emit(20, UserSessionLogin);
+        t.emit(20, SystemLogin);
         assert_eq!(t.observer::<LifecycleModule>().state.last_login, 20_000);
         t.emit(30, Ping);
         t.assert_not_like(crate::like!(Upload {
@@ -1102,7 +1102,7 @@ mod tests {
         ));
         let mut t = b.build();
 
-        t.emit(30, UserSessionLogin); // last_login = 30_000
+        t.emit(30, SystemLogin); // last_login = 30_000
         t.emit(55, ProcessStarted); // last_running_started = 55_000
         t.emit(99, Ping); // last_ping = 99_000 (first ping — no gap alert)
         t.emit(99, ComputerSuspended); // status = Suspended

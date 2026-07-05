@@ -50,17 +50,6 @@ function DocumentDuplicateIcon() {
   );
 }
 
-function ComputerDesktopIcon() {
-  return (
-    <Icon>
-      <path
-        {...cap}
-        d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25"
-      />
-    </Icon>
-  );
-}
-
 function MoonIcon() {
   return (
     <Icon>
@@ -226,11 +215,10 @@ export function LogIcon({ log }: { log: DataLog }) {
     case 'screenshot_skipped':
       return <DocumentDuplicateIcon />;
     case 'lifecycle':
-      if (kind === 'computer_booted') return <ComputerDesktopIcon />;
+      if (kind === 'system_login') return <SignInIcon />;
       if (kind === 'computer_suspended') return <MoonIcon />;
       if (kind === 'computer_resumed') return <SunIcon />;
-      if (kind === 'login') return <SignInIcon />;
-      if (kind === 'logout') return <SignOutIcon />;
+      if (kind === 'system_logout') return <SignOutIcon />;
       if (kind === 'process_started') return <PlayIcon />;
       if (kind === 'process_stopped_shutdown') return <PowerIcon />;
       if (kind === 'process_stopped_user' || kind === 'process_stopped_other') return <StopIcon />;

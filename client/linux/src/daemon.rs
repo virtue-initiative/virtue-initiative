@@ -7,8 +7,9 @@ use anyhow::Result;
 use tokio::sync::mpsc;
 use virtue_core::ProcessStoppedReason;
 use virtue_core::{
-    ComputerResumed, ComputerSuspended, EventBus, IpcBridge, Ping, PlatformConfig, ProcessStarted,
-    ProcessStopped, build_default_modules_reqwest, load_state, store_state,
+    ComputerResumed, ComputerSuspended, EventBus, EventChannel, IpcBridge, Ping, PlatformConfig,
+    ProcessStarted, ProcessStopped, SystemLogout, UserStopRequested, build_default_modules_reqwest,
+    load_state, store_state,
 };
 use zbus::proxy;
 
@@ -51,6 +52,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     }
 
     let shutdown = Arc::new(AtomicBool::new(false));
+    let user_stop_requested = Arc::new(AtomicBool::new(false));
     let (signal_tx, mut signal_rx) = mpsc::unbounded_channel::<String>();
     spawn_signal_handler(shutdown.clone(), signal_tx);
     let (sleep_tx, mut sleep_rx) = mpsc::unbounded_channel::<bool>();
@@ -65,7 +67,16 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
 
         // Wire up any newly accepted IPC connections.
         if let Some(ipc) = &mut ipc {
-            ipc.accept_pending(&mut bus, IpcBridge::forward_standard_inbound);
+            let usr = user_stop_requested.clone();
+            ipc.accept_pending(&mut bus, move |remote, e| {
+                IpcBridge::forward_standard_inbound(remote, e);
+                // Track user-stop separately to classify shutdown reason accurately.
+                let usr = usr.clone();
+                remote.on::<UserStopRequested>(move |_ev| {
+                    usr.store(true, Ordering::SeqCst);
+                    Ok(())
+                });
+            });
         }
 
         match tokio::task::block_in_place(|| {
@@ -96,7 +107,10 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
         tokio::select! {
             signal = signal_rx.recv() => {
                 if signal.is_some() {
-                    tokio::task::block_in_place(|| record_shutdown_transition(&mut bus, &state_path));
+                    let explicit_user_stop = user_stop_requested.load(Ordering::SeqCst);
+                    tokio::task::block_in_place(|| {
+                        record_shutdown_transition(&mut bus, &state_path, explicit_user_stop)
+                    });
                     shutdown_cleanup_done = true;
                 }
                 break;
@@ -269,21 +283,21 @@ fn classify_shutdown_reason(
     }
 }
 
-fn record_shutdown_transition(bus: &mut EventBus, state_path: &std::path::Path) {
+fn record_shutdown_transition(
+    bus: &mut EventBus,
+    state_path: &std::path::Path,
+    explicit_user_stop: bool,
+) {
     let system_state = read_systemd_state();
     let shutdown_job_queued = is_shutdown_job_queued();
-    // Determine whether a user stop was explicitly requested via IPC.
-    // We check the Lifecycle module's persisted state indirectly: if a
-    // UserStopRequested event was emitted before shutdown, its source will
-    // have been recorded by LifecycleModule. Here we conservatively default
-    // to false; the tray/CLI sends UserStopRequested over IPC which is
-    // bridged into the bus before shutdown begins.
-    let explicit_user_stop = false;
     let reason = classify_shutdown_reason(
         system_state.as_deref(),
         shutdown_job_queued,
         explicit_user_stop,
     );
+    if !matches!(reason, ProcessStoppedReason::User) {
+        let _ = bus.send(SystemLogout);
+    }
     let _ = bus.send(ProcessStopped(reason));
     let _ = bus.send(Ping);
     if let Ok(state) = bus.iter() {

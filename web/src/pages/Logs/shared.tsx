@@ -29,11 +29,10 @@ export function getLogCategory(log: DataLog): string {
     case 'screenshot_skipped':
       return 'Screenshot Skipped';
     case 'lifecycle':
-      if (kind === 'computer_booted') return 'Computer Started';
+      if (kind === 'system_login') return 'System Login';
       if (kind === 'computer_suspended') return 'Sleep';
       if (kind === 'computer_resumed') return 'Wake';
-      if (kind === 'login') return 'Signed In';
-      if (kind === 'logout') return 'Signed Out';
+      if (kind === 'system_logout') return 'System Logout';
       if (kind === 'process_started') return 'Monitoring Started';
       if (kind === 'process_stopped_shutdown') return 'Computer Shut Down';
       if (kind === 'process_stopped_user' || kind === 'process_stopped_other')
@@ -88,9 +87,8 @@ export function getLogMessage(log: DataLog, deviceName: string): string {
       if (kind === 'process_stopped_other') return `Monitoring stopped on ${deviceName}`;
       if (kind === 'computer_suspended') return `${deviceName} went to sleep`;
       if (kind === 'computer_resumed') return `${deviceName} woke up`;
-      if (kind === 'computer_booted') return `${deviceName} booted`;
-      if (kind === 'login') return `User logged in on ${deviceName}`;
-      if (kind === 'logout') return `User logged out on ${deviceName}`;
+      if (kind === 'system_login') return `${deviceName} was logged into or started up`;
+      if (kind === 'system_logout') return `${deviceName} was logged out of or shut down`;
       if (kind === 'screenshot_paused') return `Screenshots paused on ${deviceName}`;
       if (kind === 'screenshot_resumed') return `Screenshots resumed on ${deviceName}`;
       return `Lifecycle event on ${deviceName}`;

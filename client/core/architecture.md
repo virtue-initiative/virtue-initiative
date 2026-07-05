@@ -186,10 +186,10 @@ if let Some(ipc) = &mut ipc {
 
 `forward_standard_inbound` registers handlers for the standard controller→daemon
 set (`LoginRequested`, `LogoutRequested`, `StatusRequest`, `UserStopRequested`,
-`UserSessionLogin/Logout`, `ComputerSuspended/Resumed`, `ProcessStopped`).
+`SystemLogin/Logout`, `ComputerSuspended/Resumed`, `ProcessStopped`).
 Platform daemons can pass a custom closure to `accept_pending` to add extra
-handlers per-connection (Mac uses this to track `UserStopRequested` separately
-for shutdown-reason classification).
+handlers per-connection (Mac and Linux use this to track `UserStopRequested`
+separately for shutdown-reason classification).
 
 ## Platform process model
 

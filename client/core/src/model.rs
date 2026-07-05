@@ -52,9 +52,8 @@ pub enum LifecycleKind {
     ProcessStoppedOther,
     ComputerSuspended,
     ComputerResumed,
-    Login,
-    Logout,
-    ComputerBooted,
+    SystemLogin,
+    SystemLogout,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

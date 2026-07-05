@@ -11,9 +11,8 @@ function log(type: string, data: Record<string, unknown> = {}): DataLog {
 describe('getLogCategory — titles', () => {
   it('uses the improved, human-readable titles', () => {
     expect(getLogCategory(log('screenshot'))).toBe('Screenshot');
-    expect(getLogCategory(log('lifecycle', { kind: 'computer_booted' }))).toBe('Computer Started');
-    expect(getLogCategory(log('lifecycle', { kind: 'login' }))).toBe('Signed In');
-    expect(getLogCategory(log('lifecycle', { kind: 'logout' }))).toBe('Signed Out');
+    expect(getLogCategory(log('lifecycle', { kind: 'system_login' }))).toBe('System Login');
+    expect(getLogCategory(log('lifecycle', { kind: 'system_logout' }))).toBe('System Logout');
     expect(getLogCategory(log('lifecycle', { kind: 'process_started' }))).toBe(
       'Monitoring Started',
     );

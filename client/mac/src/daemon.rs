@@ -11,8 +11,8 @@ use objc2_app_kit::{NSWorkspace, NSWorkspaceWillPowerOffNotification};
 use tokio::sync::mpsc;
 use virtue_core::{
     ComputerResumed, ComputerSuspended, EventBus, EventChannel, FlushBatchNow, IpcBridge, Ping,
-    PlatformConfig, ProcessStarted, ProcessStopped, ProcessStoppedReason, UserStopRequested,
-    build_default_modules_reqwest, load_state, store_state,
+    PlatformConfig, ProcessStarted, ProcessStopped, ProcessStoppedReason, SystemLogout,
+    UserStopRequested, build_default_modules_reqwest, load_state, store_state,
 };
 
 use crate::capture::{MacPlatformHooks, has_screen_capture_access, is_permission_missing_error};
@@ -313,6 +313,7 @@ async fn run_daemon_service_loop(
                     Some(PowerEvent::WillPowerOff) => {
                         system_shutdown_requested.store(true, Ordering::SeqCst);
                         tokio::task::block_in_place(|| {
+                            let _ = bus.send(SystemLogout);
                             let _ = bus.send(ProcessStopped(ProcessStoppedReason::Shutdown));
                             if let Ok(state) = bus.iter() {
                                 let _ = store_state(&state_path, &state);

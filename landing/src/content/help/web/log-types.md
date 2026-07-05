@@ -22,10 +22,6 @@ Monitoring was active but no screenshot was uploaded — either the screen had
 not changed since the last capture, or the device was locked or asleep. This
 keeps the timeline continuous without storing redundant images.
 
-## Computer Started
-
-The device was powered on or restarted.
-
 ## Sleep
 
 The device went to sleep. No screenshots are captured while a device is asleep.
@@ -34,13 +30,14 @@ The device went to sleep. No screenshots are captured while a device is asleep.
 
 The device woke from sleep and monitoring resumed.
 
-## Signed In
+## System Login
 
-A user signed in on the device.
+The user logged into this computer, or the computer started up (on systems
+without a separate login step)
 
-## Signed Out
+## System Logout
 
-A user signed out of the device.
+The user logged out of this computer, or the computer was shut down
 
 ## Monitoring Started
 

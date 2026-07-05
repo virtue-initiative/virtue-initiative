@@ -39,8 +39,8 @@ pub use model::{
 pub use module::auth::{Login, LoginRequested, LoginResult, Logout, LogoutRequested, LogoutResult};
 pub use module::config::ConfigChanged;
 pub use module::lifecycle::{
-    ComputerResumed, ComputerSuspended, ProcessStarted, ProcessStopped, UserSessionLogin,
-    UserSessionLogout, UserStopRequested,
+    ComputerResumed, ComputerSuspended, ProcessStarted, ProcessStopped, SystemLogin, SystemLogout,
+    UserStopRequested,
 };
 pub use module::screenshot::CaptureFailed;
 pub use module::status::{StatusRequest, StatusResponse};
