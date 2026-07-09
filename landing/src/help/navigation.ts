@@ -52,6 +52,7 @@ export const helpSidebar: HelpNavItem[] = [
     label: 'Developer',
     href: '/help/developer',
     items: [
+      { label: 'Lifecycle events', href: '/help/developer/lifecycle' },
       { label: 'Testing', href: '/help/developer/testing' },
       {
         label: 'Developer overrides',
