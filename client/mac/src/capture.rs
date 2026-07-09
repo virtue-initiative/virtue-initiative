@@ -4,7 +4,9 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, anyhow};
 use uuid::Uuid;
-use virtue_core::{CoreError, CoreResult, PlatformHooks, Screenshot, ScreenshotHooks};
+use virtue_core::{
+    CoreError, CoreResult, LifecycleHooks, PlatformHooks, Screenshot, ScreenshotHooks,
+};
 
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
@@ -88,51 +90,51 @@ fn temporary_capture_path() -> PathBuf {
     std::env::temp_dir().join(file_name)
 }
 
-// Parses `sysctl -n kern.boottime` output (e.g. "{ sec = 1718000000, usec = 123456 } ...")
-// and returns the boot time in milliseconds since epoch.
-fn parse_boottime_ms(s: &str) -> Option<i64> {
-    let mut search_start = 0;
-    let sec_start = loop {
-        let candidate = s[search_start..].find("sec = ")? + search_start;
-        // Skip matches inside "usec = ", which contains "sec = " starting at its 2nd byte.
-        if candidate > 0 && s.as_bytes()[candidate - 1] == b'u' {
-            search_start = candidate + 1;
-            continue;
-        }
-        break candidate;
-    };
-    let rest = &s[sec_start + 6..];
-    let end = rest
-        .find(|c: char| !c.is_ascii_digit())
-        .unwrap_or(rest.len());
-    rest[..end].parse::<i64>().ok().map(|secs| secs * 1000)
-}
-
-// Parses `last -1 -F shutdown` output and returns the shutdown time in milliseconds.
-// The `-F` flag on macOS BSD last includes the year and seconds, e.g.:
-//   "shutdown  ~          Mon Jun 10 22:45:00 2024"
-// Returns None if no shutdown line is found or the date is unparseable.
-fn parse_last_shutdown_mac(s: &str) -> Option<i64> {
+// Parses a single `last -F` line's trailing date (e.g.
+// "shutdown  ~          Mon Jun 10 22:45:00 2024") into milliseconds since
+// epoch. The `-F` flag on macOS BSD `last` includes the year and seconds.
+// Returns None if the date is unparseable.
+fn parse_last_line_date(line: &str) -> Option<i64> {
     use chrono::{Local, NaiveDateTime, TimeZone};
 
-    for line in s.lines() {
-        if !line.starts_with("shutdown") {
+    let tokens: Vec<&str> = line.split_whitespace().collect();
+    for w in tokens.windows(5) {
+        let Ok(day) = w[2].parse::<u32>() else {
             continue;
-        }
-        let tokens: Vec<&str> = line.split_whitespace().collect();
-        for w in tokens.windows(5) {
-            let Ok(day) = w[2].parse::<u32>() else {
-                continue;
-            };
-            let normalized = format!("{} {} {:02} {} {}", w[0], w[1], day, w[3], w[4]);
-            if let Ok(dt) = NaiveDateTime::parse_from_str(&normalized, "%a %b %d %H:%M:%S %Y")
-                && let chrono::LocalResult::Single(local) = Local.from_local_datetime(&dt)
-            {
-                return Some(local.timestamp_millis());
-            }
+        };
+        let normalized = format!("{} {} {:02} {} {}", w[0], w[1], day, w[3], w[4]);
+        if let Ok(dt) = NaiveDateTime::parse_from_str(&normalized, "%a %b %d %H:%M:%S %Y")
+            && let chrono::LocalResult::Single(local) = Local.from_local_datetime(&dt)
+        {
+            return Some(local.timestamp_millis());
         }
     }
     None
+}
+
+// Parses `last -1 -F shutdown` output and returns the shutdown time in milliseconds.
+// Returns None if no shutdown line is found or the date is unparseable. This is a
+// floor/approximation of the true logout/shutdown time, not exact — see
+// `LifecycleHooks::get_last_logout_utc_ms`.
+fn parse_last_shutdown_mac(s: &str) -> Option<i64> {
+    s.lines()
+        .find(|line| line.starts_with("shutdown"))
+        .and_then(parse_last_line_date)
+}
+
+// Parses unfiltered `last -F` output and returns the most recent real login's
+// timestamp in milliseconds, skipping the "reboot"/"shutdown" pseudo-user
+// entries `last` also logs.
+fn parse_last_login_mac(s: &str) -> Option<i64> {
+    s.lines()
+        .map(str::trim_start)
+        .find(|line| {
+            !line.is_empty()
+                && !line.starts_with("reboot")
+                && !line.starts_with("shutdown")
+                && !line.starts_with("wtmp begins")
+        })
+        .and_then(parse_last_line_date)
 }
 
 #[derive(Clone, Default)]
@@ -152,42 +154,6 @@ impl ScreenshotHooks for MacPlatformHooks {
             bytes,
             content_type: "image/png".to_string(),
         })
-    }
-
-    fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>> {
-        let output = Command::new("last")
-            .args(["-1", "-F", "shutdown"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .output()
-            .ok();
-        let Some(output) = output else {
-            return Ok(None);
-        };
-        if !output.status.success() {
-            return Ok(None);
-        }
-        let text = String::from_utf8_lossy(&output.stdout);
-        Ok(parse_last_shutdown_mac(&text))
-    }
-
-    fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
-        let output = Command::new("sysctl")
-            .args(["-n", "kern.boottime"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .output()
-            .ok();
-        let Some(output) = output else {
-            return Ok(None);
-        };
-        if !output.status.success() {
-            return Ok(None);
-        }
-        let text = String::from_utf8_lossy(&output.stdout);
-        Ok(parse_boottime_ms(&text))
     }
 
     fn is_locked_or_screensaver(&self) -> CoreResult<bool> {
@@ -237,27 +203,87 @@ fn screensaver_process_running() -> bool {
         })
 }
 
+#[repr(C)]
+struct MachTimebaseInfo {
+    numer: u32,
+    denom: u32,
+}
+
+unsafe extern "C" {
+    fn mach_continuous_time() -> u64;
+    fn mach_absolute_time() -> u64;
+    fn mach_timebase_info(info: *mut MachTimebaseInfo) -> i32;
+}
+
+fn mach_ticks_to_ms(ticks: u64) -> CoreResult<i64> {
+    let mut info = MachTimebaseInfo { numer: 0, denom: 0 };
+    // SAFETY: `info` is a valid, owned out-param; `mach_timebase_info` does not
+    // retain the pointer past the call.
+    let rc = unsafe { mach_timebase_info(&mut info) };
+    if rc != 0 {
+        return Err(CoreError::CommandFailed(format!(
+            "mach_timebase_info failed: {rc}"
+        )));
+    }
+    let ns = u128::from(ticks) * u128::from(info.numer) / u128::from(info.denom);
+    Ok((ns / 1_000_000) as i64)
+}
+
+impl LifecycleHooks for MacPlatformHooks {
+    fn get_boot_clock_ms(&self) -> CoreResult<i64> {
+        // SAFETY: `mach_continuous_time` takes no arguments and has no
+        // preconditions.
+        mach_ticks_to_ms(unsafe { mach_continuous_time() })
+    }
+
+    fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
+        // SAFETY: `mach_absolute_time` takes no arguments and has no
+        // preconditions.
+        mach_ticks_to_ms(unsafe { mach_absolute_time() })
+    }
+
+    fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {
+        let output = Command::new("last")
+            .args(["-5", "-F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+            .ok();
+        let Some(output) = output else {
+            return Ok(None);
+        };
+        if !output.status.success() {
+            return Ok(None);
+        }
+        let text = String::from_utf8_lossy(&output.stdout);
+        Ok(parse_last_login_mac(&text))
+    }
+
+    fn get_last_logout_utc_ms(&self) -> CoreResult<Option<i64>> {
+        let output = Command::new("last")
+            .args(["-1", "-F", "shutdown"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+            .ok();
+        let Some(output) = output else {
+            return Ok(None);
+        };
+        if !output.status.success() {
+            return Ok(None);
+        }
+        let text = String::from_utf8_lossy(&output.stdout);
+        Ok(parse_last_shutdown_mac(&text))
+    }
+}
+
 impl PlatformHooks for MacPlatformHooks {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_boottime_ms_extracts_sec_from_sysctl_output() {
-        let input = "{ sec = 1718000000, usec = 123456 } Tue Jun 10 12:00:00 2024\n";
-        assert_eq!(parse_boottime_ms(input), Some(1_718_000_000_000));
-    }
-
-    #[test]
-    fn parse_boottime_ms_returns_none_on_empty_input() {
-        assert_eq!(parse_boottime_ms(""), None);
-    }
-
-    #[test]
-    fn parse_boottime_ms_returns_none_when_sec_absent() {
-        assert_eq!(parse_boottime_ms("{ usec = 123456 }"), None);
-    }
 
     #[test]
     fn parse_last_shutdown_mac_extracts_timestamp_from_last_output() {
@@ -292,5 +318,28 @@ mod tests {
     #[test]
     fn parse_last_shutdown_mac_returns_none_on_empty_input() {
         assert_eq!(parse_last_shutdown_mac(""), None);
+    }
+
+    #[test]
+    fn parse_last_login_mac_extracts_most_recent_real_login() {
+        let input = "alice     console              Mon Jun 10 22:45:00 2024 - 23:00:00 (00:15)\n\nwtmp begins Mon Jun  3 08:00:00 2024\n";
+        let result = parse_last_login_mac(input);
+        assert!(result.is_some(), "expected Some timestamp, got None");
+        let ms = result.unwrap();
+        assert!(ms > 1_700_000_000_000, "timestamp not in expected range");
+        assert!(ms < 1_800_000_000_000, "timestamp not in expected range");
+    }
+
+    #[test]
+    fn parse_last_login_mac_skips_reboot_and_shutdown_pseudo_entries() {
+        let input = "reboot    ~                   Mon Jun 10 22:00:00 2024\nalice     console              Mon Jun 10 21:45:00 2024 - 22:00:00 (00:15)\n";
+        let result = parse_last_login_mac(input);
+        assert!(result.is_some(), "expected Some timestamp, got None");
+    }
+
+    #[test]
+    fn parse_last_login_mac_returns_none_when_only_pseudo_entries() {
+        let input = "reboot    ~                   Mon Jun 10 22:00:00 2024\nshutdown  ~                   Mon Jun 10 21:00:00 2024\n\nwtmp begins Mon Jun  3 08:00:00 2024\n";
+        assert_eq!(parse_last_login_mac(input), None);
     }
 }

@@ -61,17 +61,6 @@ function MoonIcon() {
   );
 }
 
-function SunIcon() {
-  return (
-    <Icon>
-      <path
-        {...cap}
-        d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z"
-      />
-    </Icon>
-  );
-}
-
 function SignInIcon() {
   return (
     <Icon>
@@ -90,44 +79,6 @@ function SignOutIcon() {
         {...cap}
         d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15M12 9l-3 3m0 0 3 3m-3-3h12.75"
       />
-    </Icon>
-  );
-}
-
-function PlayIcon() {
-  return (
-    <Icon>
-      <path
-        {...cap}
-        d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z"
-      />
-    </Icon>
-  );
-}
-
-function StopIcon() {
-  return (
-    <Icon>
-      <path
-        {...cap}
-        d="M5.25 7.5A2.25 2.25 0 0 1 7.5 5.25h9a2.25 2.25 0 0 1 2.25 2.25v9a2.25 2.25 0 0 1-2.25 2.25h-9a2.25 2.25 0 0 1-2.25-2.25v-9Z"
-      />
-    </Icon>
-  );
-}
-
-function PowerIcon() {
-  return (
-    <Icon>
-      <path {...cap} d="M5.636 5.636a9 9 0 1 0 12.728 0M12 3v9" />
-    </Icon>
-  );
-}
-
-function PauseIcon() {
-  return (
-    <Icon>
-      <path {...cap} d="M15.75 5.25v13.5m-7.5-13.5v13.5" />
     </Icon>
   );
 }
@@ -216,18 +167,11 @@ export function LogIcon({ log }: { log: DataLog }) {
       return <DocumentDuplicateIcon />;
     case 'lifecycle':
       if (kind === 'system_login') return <SignInIcon />;
-      if (kind === 'computer_suspended') return <MoonIcon />;
-      if (kind === 'computer_resumed') return <SunIcon />;
       if (kind === 'system_logout') return <SignOutIcon />;
-      if (kind === 'process_started') return <PlayIcon />;
-      if (kind === 'process_stopped_shutdown') return <PowerIcon />;
-      if (kind === 'process_stopped_user' || kind === 'process_stopped_other') return <StopIcon />;
-      if (kind === 'screenshot_paused') return <PauseIcon />;
-      if (kind === 'screenshot_resumed') return <PlayIcon />;
+      if (kind === 'suspend_detected') return <MoonIcon />;
       return <ActivityIcon />;
     case 'lifecycle_alert':
-      if ((log.data?.reason as string | undefined) === 'ping_gap_while_running')
-        return <ClockIcon />;
+      if ((log.data?.reason as string | undefined) === 'unexpected_gap') return <ClockIcon />;
       return <ExclamationTriangleIcon />;
     case 'alert':
       return <BellAlertIcon />;

@@ -13,10 +13,8 @@ describe('getLogCategory — titles', () => {
     expect(getLogCategory(log('screenshot'))).toBe('Screenshot');
     expect(getLogCategory(log('lifecycle', { kind: 'system_login' }))).toBe('System Login');
     expect(getLogCategory(log('lifecycle', { kind: 'system_logout' }))).toBe('System Logout');
-    expect(getLogCategory(log('lifecycle', { kind: 'process_started' }))).toBe(
-      'Monitoring Started',
-    );
-    expect(getLogCategory(log('lifecycle_alert', { reason: 'ping_gap_while_running' }))).toBe(
+    expect(getLogCategory(log('lifecycle', { kind: 'suspend_detected' }))).toBe('Suspend Detected');
+    expect(getLogCategory(log('lifecycle_alert', { reason: 'unexpected_gap' }))).toBe(
       'Unexpected Gap',
     );
     expect(getLogCategory(log('capture_failed'))).toBe('Capture Failed');
@@ -26,12 +24,12 @@ describe('getLogCategory — titles', () => {
 
 describe('getLogHelpAnchor / getLogHelpUrl', () => {
   it('slugifies the category title into an anchor', () => {
-    expect(getLogHelpAnchor(log('lifecycle_alert', { reason: 'ping_gap_while_running' }))).toBe(
+    expect(getLogHelpAnchor(log('lifecycle_alert', { reason: 'unexpected_gap' }))).toBe(
       'unexpected-gap',
     );
-    expect(
-      getLogHelpAnchor(log('lifecycle_alert', { reason: 'force_killed_before_shutdown' })),
-    ).toBe('process-force-stopped');
+    expect(getLogHelpAnchor(log('lifecycle_alert', { reason: 'unexpected_stop' }))).toBe(
+      'process-stopped-unexpectedly',
+    );
     expect(getLogHelpAnchor(log('screenshot'))).toBe('screenshot');
     expect(getLogHelpAnchor(log('screenshot_skipped'))).toBe('screenshot-skipped');
   });

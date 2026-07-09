@@ -7,11 +7,10 @@ use anyhow::Result;
 use tokio::sync::mpsc;
 use virtue_core::ProcessStoppedReason;
 use virtue_core::{
-    ComputerResumed, ComputerSuspended, EventBus, EventChannel, IpcBridge, Ping, PlatformConfig,
-    ProcessStarted, ProcessStopped, SystemLogout, UserStopRequested, build_default_modules_reqwest,
-    load_state, store_state,
+    EventBus, EventChannel, IpcBridge, Ping, PlatformConfig, ProcessStarted, ProcessStopped,
+    SystemLogoutObserved, UserStopRequested, build_default_modules_reqwest, load_state,
+    store_state,
 };
-use zbus::proxy;
 
 use crate::capture::{LinuxPlatformHooks, is_session_unavailable_text};
 use crate::config::{ClientPaths, build_core_config};
@@ -19,16 +18,6 @@ use crate::tray;
 
 const SESSION_UNAVAILABLE_LOG_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const ITER_INTERVAL: Duration = Duration::from_secs(1);
-
-#[proxy(
-    interface = "org.freedesktop.login1.Manager",
-    default_service = "org.freedesktop.login1",
-    default_path = "/org/freedesktop/login1"
-)]
-trait LoginManager {
-    #[zbus(signal)]
-    fn prepare_for_sleep(&self, start: bool) -> zbus::Result<()>;
-}
 
 pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     paths.ensure_dirs()?;
@@ -55,8 +44,6 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     let user_stop_requested = Arc::new(AtomicBool::new(false));
     let (signal_tx, mut signal_rx) = mpsc::unbounded_channel::<String>();
     spawn_signal_handler(shutdown.clone(), signal_tx);
-    let (sleep_tx, mut sleep_rx) = mpsc::unbounded_channel::<bool>();
-    spawn_suspend_watcher(sleep_tx);
 
     let mut last_session_unavailable_log: Option<std::time::Instant> = None;
     let mut shutdown_cleanup_done = false;
@@ -114,22 +101,6 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
                     shutdown_cleanup_done = true;
                 }
                 break;
-            }
-            sleep_change = sleep_rx.recv() => {
-                if let Some(suspending) = sleep_change {
-                    let result = tokio::task::block_in_place(|| {
-                        if suspending {
-                            bus.send(ComputerSuspended)?;
-                        } else {
-                            bus.send(ComputerResumed)?;
-                        }
-                        let state = bus.iter()?;
-                        store_state(&state_path, &state)
-                    });
-                    if let Err(e) = result {
-                        eprintln!("daemon: suspend/resume error: {e}");
-                    }
-                }
             }
             _ = tokio::time::sleep(ITER_INTERVAL) => {}
         }
@@ -228,46 +199,6 @@ fn spawn_signal_handler(shutdown: Arc<AtomicBool>, signal_tx: mpsc::UnboundedSen
     });
 }
 
-fn spawn_suspend_watcher(sleep_tx: mpsc::UnboundedSender<bool>) {
-    use futures_util::StreamExt;
-    tokio::spawn(async move {
-        let connection = match zbus::Connection::system().await {
-            Ok(connection) => connection,
-            Err(err) => {
-                eprintln!("daemon: failed connecting to system bus for suspend watcher: {err}");
-                return;
-            }
-        };
-
-        let proxy = match LoginManagerProxy::new(&connection).await {
-            Ok(proxy) => proxy,
-            Err(err) => {
-                eprintln!("daemon: failed creating login1 proxy for suspend watcher: {err}");
-                return;
-            }
-        };
-
-        let mut stream = match proxy.receive_prepare_for_sleep().await {
-            Ok(stream) => stream,
-            Err(err) => {
-                eprintln!("daemon: failed subscribing to login1 PrepareForSleep: {err}");
-                return;
-            }
-        };
-
-        while let Some(signal) = stream.next().await {
-            match signal.args() {
-                Ok(args) => {
-                    let _ = sleep_tx.send(*args.start());
-                }
-                Err(err) => {
-                    eprintln!("daemon: failed decoding login1 PrepareForSleep signal: {err}");
-                }
-            }
-        }
-    });
-}
-
 fn classify_shutdown_reason(
     system_state: Option<&str>,
     shutdown_job_queued: bool,
@@ -295,8 +226,15 @@ fn record_shutdown_transition(
         shutdown_job_queued,
         explicit_user_stop,
     );
-    if !matches!(reason, ProcessStoppedReason::User) {
-        let _ = bus.send(SystemLogout);
+    // Only a genuine system shutdown gives us an exact logout moment — an
+    // `Other` stop (crash, `kill`, `systemctl stop`) doesn't tell us the
+    // session actually ended, so it shouldn't claim one.
+    if matches!(reason, ProcessStoppedReason::Shutdown) {
+        let utc_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let _ = bus.send(SystemLogoutObserved { utc_ms });
     }
     let _ = bus.send(ProcessStopped(reason));
     let _ = bus.send(Ping);

@@ -7,11 +7,10 @@
 //! Run with:
 //!   cargo test -p virtue-core --features testing --test scenarios
 
-use virtue_core::module::lifecycle::{LifecycleObserverState, LifecycleStatus};
+use virtue_core::module::lifecycle::LifecycleObserverState;
 use virtue_core::testing::Scenario;
 use virtue_core::{
-    CaptureFailed, ComputerResumed, ComputerSuspended, LogoutRequested, ProcessStarted,
-    ProcessStopped, ProcessStoppedReason, Upload, UploadKind,
+    CaptureFailed, LogoutRequested, ProcessStopped, ProcessStoppedReason, Upload, UploadKind,
 };
 
 // ── Basic unauthenticated loop ────────────────────────────────────────────────
@@ -96,60 +95,62 @@ fn screenshot_retaken_after_interval() {
 // ── LifecycleModule ───────────────────────────────────────────────────────────
 
 #[test]
-fn process_started_emits_lifecycle_upload() {
+fn login_poll_emits_lifecycle_upload() {
     let mut scenario = Scenario::authenticated();
-    scenario.queue(ProcessStarted);
-    scenario.at_t(0).loop_iteration();
+    scenario.platform.set_last_login(Some(500));
+    scenario.at_t(1_000).loop_iteration();
     assert!(
         !scenario.api.state().hash_uploads.is_empty(),
-        "expected at least one hash upload from the ProcessStarted lifecycle event"
+        "expected at least one hash upload from the SystemLogin lifecycle event"
     );
 }
 
 #[test]
-fn user_stopped_process_emits_high_risk_upload() {
+fn user_stop_emits_high_risk_upload() {
     let mut scenario = Scenario::authenticated();
     scenario.queue(ProcessStopped(ProcessStoppedReason::User));
     scenario.at_t(0).loop_iteration();
     assert!(
         !scenario.api.state().notify_calls.is_empty(),
-        "expected an immediate notification for UserStoppedProcess alert"
+        "expected an immediate notification for UserStop alert"
     );
 }
 
 #[test]
-fn ping_gap_while_running_batches_alert_without_email() {
+fn unexpected_gap_batches_alert_without_email() {
     let mut scenario = Scenario::authenticated();
-    // First ping past the login grace window establishes a baseline last_ping.
-    scenario.at_t(121_000).loop_iteration();
+    // First loop establishes a baseline heartbeat sample.
+    scenario.at_t(0).loop_iteration();
     // Suppress a second screenshot so the only new upload traffic is the alert itself.
-    scenario.set_last_screenshot_at_ms(Some(150_000));
+    scenario.set_last_screenshot_at_ms(Some(61_000));
     let hashes_before = scenario.api.state().hash_uploads.len();
     // A single 61s gap exceeds the sliding-window budget (60s) in one shot, so the
-    // PingGapWhileRunning alert fires — but it's high-risk, not immediate.
-    scenario.at_t(182_000).loop_iteration();
+    // UnexpectedGap alert fires — but it's high-risk, not immediate.
+    scenario.at_t(61_000).loop_iteration();
     let state = scenario.api.state();
     assert!(
         state.notify_calls.is_empty(),
-        "ping gap must not trigger an immediate (emailed) notification"
+        "unexpected gap must not trigger an immediate (emailed) notification"
     );
     assert!(
         state.hash_uploads.len() > hashes_before,
-        "ping gap alert should still be recorded via the batched hash path"
+        "unexpected gap alert should still be recorded via the batched hash path"
     );
 }
 
 #[test]
-fn computer_resume_suppresses_ping_gap_alert() {
+fn suspend_divergence_suppresses_unexpected_gap_alert() {
     let mut scenario = Scenario::authenticated();
     scenario.at_t(1_000).loop_iteration();
-    scenario.queue(ComputerSuspended);
-    scenario.queue(ComputerResumed);
+    // Simulate an 11s suspend: monotonic only advances 1s while boot/wall-clock
+    // advance 12s — the awake gap (1s) is well under threshold, so no alert.
+    scenario.platform.set_boot_clock_ms(12_000);
+    scenario.platform.set_monotonic_clock_ms(2_000);
     scenario.at_t(12_000).loop_iteration();
     assert_eq!(
         scenario.api.state().notify_calls.len(),
         0,
-        "expected no log upload when a computer-resume suppresses the ping-gap alert"
+        "expected no immediate notification when a suspend explains the gap"
     );
 }
 
@@ -270,60 +271,48 @@ fn logout_clears_pending_state() {
 // ── LifecycleModule alert paths ───────────────────────────────────────────────
 
 #[test]
-fn ping_after_suspend_without_resume_emits_alert() {
+fn unexpected_start_after_long_gap_since_login_emits_alert() {
     let mut scenario = Scenario::authenticated();
-    scenario.set_lifecycle_observer_state(LifecycleObserverState {
-        status: LifecycleStatus::Suspended,
-        pings_while_suspended: 3,
-        ..Default::default()
-    });
-    scenario.at_t(10_000).loop_iteration();
-    assert!(
-        !scenario.api.state().hash_uploads.is_empty(),
-        "expected a MissingResume hash upload after 4 pings while suspended"
-    );
-}
-
-#[test]
-fn unexpected_process_start_after_long_ping_gap_emits_alert() {
-    let mut scenario = Scenario::authenticated();
-    scenario.set_lifecycle_observer_state(LifecycleObserverState {
-        last_ping: 1_000,
-        last_process_started: 1,
-        ..Default::default()
-    });
-    // A real boot time is required for this alert: it only makes sense relative to
-    // a known boot ("this restart isn't explained by the device having just
-    // booted"). Platforms that can't report one (e.g. iOS) don't get this alert.
-    scenario.platform.set_last_startup_time(Some(1));
-    scenario.queue(ProcessStarted);
+    scenario.platform.set_last_login(Some(0));
+    scenario.platform.set_boot_clock_ms(130_000);
+    scenario.platform.set_monotonic_clock_ms(130_000);
     scenario.at_t(130_000).loop_iteration();
-    // UnexpectedProcessStart is high-risk but batched (no immediate email).
+    // UnexpectedStart is high-risk but batched (no immediate email).
     let state = scenario.api.state();
     assert!(
         state.notify_calls.is_empty(),
-        "unexpected process start must not trigger an immediate (emailed) notification"
+        "unexpected start must not trigger an immediate (emailed) notification"
     );
     assert!(
         !state.hash_uploads.is_empty() || !state.batch_uploads.is_empty(),
-        "unexpected process start alert should still be recorded via the batched path"
+        "unexpected start alert should still be recorded via the batched path"
     );
 }
 
 #[test]
-fn process_killed_before_shutdown_emits_alert() {
+fn unexpected_stop_emits_alert_when_logout_arrives_after_last_sample() {
     let mut scenario = Scenario::authenticated();
-    scenario.set_lifecycle_observer_state(LifecycleObserverState {
-        last_process_stopped_other: 1_000,
-        last_process_stopped_shutdown: 12_000,
-        ..Default::default()
-    });
-    scenario.at_t(20_000);
-    scenario.queue(ProcessStarted);
-    scenario.loop_iteration();
+    scenario.at_t(1_000).loop_iteration();
+    scenario.platform.set_last_logout(Some(62_000));
+    scenario.at_t(62_000).loop_iteration();
     assert!(
         !scenario.api.state().hash_uploads.is_empty(),
-        "expected a ProcessKilledBeforeShutdown hash upload"
+        "expected an UnexpectedStop hash upload"
+    );
+}
+
+#[test]
+fn lifecycle_observer_state_can_be_seeded_directly() {
+    let mut scenario = Scenario::authenticated();
+    scenario.set_lifecycle_observer_state(LifecycleObserverState {
+        login_id: 5,
+        last_login_utc_ms: 1_000,
+        ..Default::default()
+    });
+    scenario.at_t(1_000).loop_iteration();
+    assert!(
+        scenario.api.state().notify_calls.is_empty(),
+        "seeding lifecycle state alone must not trigger any alert"
     );
 }
 

@@ -8,23 +8,24 @@ use crate::module::auth::AuthModule;
 use crate::module::capture_availability::CaptureAvailabilityModule;
 use crate::module::config::ConfigModule;
 use crate::module::heartbeat::HeartbeatModule;
-use crate::module::lifecycle::LifecycleModule;
+use crate::module::lifecycle::{LifecycleModule, NoopLifecycleModule};
 use crate::module::screenshot::ScreenshotModule;
 use crate::module::status::StatusModule;
 use crate::module::upload::UploadModule;
-use crate::platform::{PlatformConfig, ScreenshotHooks};
+use crate::platform::{LifecycleHooks, PlatformConfig, ScreenshotHooks};
 
 /// Number of observers that emit a `PartialStatus` in reply to a `StatusRequest`:
-/// `AuthModule`, `LifecycleModule`, and `UploadModule`.
+/// `AuthModule`, `LifecycleModule` (or `NoopLifecycleModule`), and `UploadModule`.
 const STATUS_PARTIAL_COUNT: usize = 3;
 
-/// Build the default set of 7 observer modules from the given config, platform,
+/// Build the default set of 8 observer modules from the given config, platform,
 /// and API transport. The returned modules are ready to be passed to
 /// [`EventBus::new`].
 ///
-/// `platform_config` carries fixed, per-platform capabilities (see
-/// `PlatformConfig`) forwarded to the modules that need them — currently just
-/// `LifecycleModule`. Most platforms can pass `PlatformConfig::default()`.
+/// `platform_config.lifecycle_enabled` decides whether a real `LifecycleModule`
+/// or an inert `NoopLifecycleModule` is constructed — `false` only on iOS,
+/// which has no boot/shutdown/session signal available to it. Most platforms
+/// can pass `PlatformConfig::default()`.
 ///
 /// Calls `config.refresh_from_runtime_file()` once up front so overrides
 /// apply before the bus starts — critical for one-shot FFI callers.
@@ -35,7 +36,7 @@ pub fn build_default_modules<P, A>(
     platform_config: PlatformConfig,
 ) -> CoreResult<Vec<Box<dyn Observer>>>
 where
-    P: ScreenshotHooks + Clone,
+    P: ScreenshotHooks + LifecycleHooks + Clone,
     A: ApiTransport + Clone + Send + Sync + 'static,
 {
     config.refresh_from_runtime_file()?;
@@ -45,11 +46,14 @@ where
     let device_name = config.device_name.clone();
     let platform_name = config.platform_name.clone();
 
+    let lifecycle: Box<dyn Observer> = if platform_config.lifecycle_enabled {
+        Box::new(LifecycleModule::new(Box::new(platform.clone())))
+    } else {
+        Box::new(NoopLifecycleModule::new())
+    };
+
     let observers: Vec<Box<dyn Observer>> = vec![
-        Box::new(LifecycleModule::new(
-            Box::new(platform.clone()),
-            platform_config,
-        )),
+        lifecycle,
         Box::new(ScreenshotModule::new(
             Arc::new(platform.clone()),
             screenshot_interval_ms,
@@ -77,7 +81,7 @@ pub fn build_default_modules_reqwest<P>(
     platform_config: PlatformConfig,
 ) -> CoreResult<Vec<Box<dyn Observer>>>
 where
-    P: ScreenshotHooks + Clone,
+    P: ScreenshotHooks + LifecycleHooks + Clone,
 {
     // Refresh before building the API client so the override URL is used from
     // the start. build_default_modules will refresh again — that's harmless.

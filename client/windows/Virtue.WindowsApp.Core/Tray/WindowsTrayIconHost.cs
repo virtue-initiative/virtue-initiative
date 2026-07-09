@@ -15,12 +15,7 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
     private const int WmDestroy = 0x0002;
     private const int WmEndSession = 0x0016;
     private const int WmLButtonUp = 0x0202;
-    private const int WmPowerBroadcast = 0x0218;
     private const int WmRButtonUp = 0x0205;
-    private const int WmWtsSessionChange = 0x02B1;
-    private const int PbtApmResumeAutomatic = 0x0012;
-    private const int PbtApmResumeSuspend = 0x0007;
-    private const int PbtApmSuspend = 0x0004;
     private const int TpmLeftAlign = 0x0000;
     private const int TpmRightButton = 0x0002;
     private const int MfString = 0x0000;
@@ -29,8 +24,6 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
     private const int LrLoadFromFile = 0x00000010;
     private const int IdTrayOpen = 2001;
     private const int IdTrayExit = 2002;
-    private const int NotifyForThisSession = 0;
-    private const int WtsSessionLogon = 0x5;
     private const int WindowId = 1;
     private static readonly uint WmTrayIcon = WmApp + 1;
 
@@ -51,11 +44,8 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
 
     public event EventHandler? OpenRequested;
     public event EventHandler? ExitRequested;
-    public event EventHandler? SessionLogonObserved;
     public event EventHandler? SessionLogoffObserved;
     public event EventHandler? SystemShutdownObserved;
-    public event EventHandler? SuspendObserved;
-    public event EventHandler? ResumeObserved;
 
     public void Initialize()
     {
@@ -85,8 +75,6 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
             throw new InvalidOperationException("Failed to create tray host window.");
         }
 
-        _ = WTSRegisterSessionNotification(_windowHandle, NotifyForThisSession);
-
         _menuHandle = CreatePopupMenu();
         _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayOpen, "Open");
         _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayExit, "Exit");
@@ -115,7 +103,6 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
 
         if (_windowHandle != IntPtr.Zero)
         {
-            _ = WTSUnRegisterSessionNotification(_windowHandle);
             DestroyWindow(_windowHandle);
             _windowHandle = IntPtr.Zero;
         }
@@ -266,33 +253,6 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
                 }
 
                 return IntPtr.Zero;
-            case WmPowerBroadcast:
-            {
-                var powerEvent = wParam.ToInt32();
-                if (powerEvent == PbtApmSuspend)
-                {
-                    SuspendObserved?.Invoke(this, EventArgs.Empty);
-                }
-                else if (powerEvent == PbtApmResumeAutomatic || powerEvent == PbtApmResumeSuspend)
-                {
-                    ResumeObserved?.Invoke(this, EventArgs.Empty);
-                }
-
-                return IntPtr.Zero;
-            }
-            case WmWtsSessionChange:
-            {
-                // WTS_SESSION_LOGOFF also fires on a full shutdown/restart (the session
-                // logs off as part of powering down), so only WM_ENDSESSION's
-                // ENDSESSION_LOGOFF flag can reliably tell logoff and shutdown apart.
-                var sessionEvent = wParam.ToInt32();
-                if (sessionEvent == WtsSessionLogon)
-                {
-                    SessionLogonObserved?.Invoke(this, EventArgs.Empty);
-                }
-
-                return IntPtr.Zero;
-            }
         }
 
         if (msg == WmTrayIcon)
@@ -435,12 +395,6 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr GetModuleHandle(string? lpModuleName);
-
-    [DllImport("wtsapi32.dll", SetLastError = true)]
-    private static extern bool WTSRegisterSessionNotification(IntPtr hWnd, int dwFlags);
-
-    [DllImport("wtsapi32.dll", SetLastError = true)]
-    private static extern bool WTSUnRegisterSessionNotification(IntPtr hWnd);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr LoadImage(

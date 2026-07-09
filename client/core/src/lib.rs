@@ -39,12 +39,11 @@ pub use model::{
 pub use module::auth::{Login, LoginRequested, LoginResult, Logout, LogoutRequested, LogoutResult};
 pub use module::config::ConfigChanged;
 pub use module::lifecycle::{
-    ComputerResumed, ComputerSuspended, ProcessStarted, ProcessStopped, SystemLogin, SystemLogout,
-    UserStopRequested,
+    ProcessStarted, ProcessStopped, SystemLoginObserved, SystemLogoutObserved, UserStopRequested,
 };
 pub use module::screenshot::CaptureFailed;
 pub use module::status::{StatusRequest, StatusResponse};
 pub use module::upload::FlushBatchNow;
 pub use module::upload::Upload;
-pub use platform::{PlatformConfig, PlatformHooks, ScreenshotHooks};
+pub use platform::{LifecycleHooks, PlatformConfig, PlatformHooks, ScreenshotHooks};
 pub use state::{load_state, store_state};

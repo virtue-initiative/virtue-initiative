@@ -1,33 +1,30 @@
 # Lifecycle events
 
-Last Updated: 2026-07-08
+Last Updated: 2026-07-09
 
-`LifecycleModule` (`client/core/src/module/lifecycle.rs`) is one of the seven
-observers on the client's event bus. It watches process and OS lifecycle
-events — start/stop, suspend/resume, session login/logout, and the periodic
-`Ping` — and turns them into `Upload` events: routine lifecycle records for
-the timeline, and risk-scored alerts when something looks wrong (a force
-kill, a missed resume, a stalled monitoring loop). This page diagrams the
-module's inputs/outputs and its three most intricate pieces of logic.
+`LifecycleModule` (`client/core/src/module/lifecycle.rs`) is one of the eight
+observers on the client's event bus. Its job: the monitoring process is
+_expected_ to run for a known window — login → logout — and the module
+detects any stretch of that window where it wasn't running, excluding
+suspend. Suspend is identified by comparing a boot clock (includes suspend)
+against a monotonic clock (excludes suspend) each `Ping`, not by subscribing
+to OS sleep/wake events.
 
 ## Overview
 
-The module keeps a small state machine (`Running` / `Suspended`) plus a set
-of timestamps and a sliding window of ping gaps. Every inbound event either
-updates that state, emits a routine `Lifecycle` upload, emits a
-`LifecycleAlert` upload, or (for `StatusRequest`) reports the current status
-back through `PartialStatus::Lifecycle`.
+The module holds no "currently suspended" state — suspend is only knowable
+retrospectively, once the gap closes. Instead it tracks the previous
+heartbeat's clock readings and, each `Ping`, computes the delta against the
+current reading. Everything reduces to _"expected-running time not covered
+by a heartbeat, minus suspend."_
 
 ```mermaid
 flowchart LR
     Ping --> Module
-    Login --> Module
     ProcessStarted --> Module
     ProcessStopped --> Module
-    ComputerSuspended --> Module
-    ComputerResumed --> Module
-    SystemLogin --> Module
-    SystemLogout --> Module
+    SystemLoginObserved --> Module
+    SystemLogoutObserved --> Module
     StatusRequest --> Module
     UserStopRequested --> Module
 
@@ -36,225 +33,246 @@ flowchart LR
     Module --> UploadLifecycle[Upload: Lifecycle variant]
     Module --> UploadAlert[Upload: LifecycleAlert variant]
     Module --> PartialStatus[PartialStatus::Lifecycle]
-    Module -. auto-emits .-> ComputerResumed
 ```
 
-The self-loop on `ComputerResumed` is deliberate: if the module concludes a
-resume was missed (see below), it emits `ComputerResumed` back onto the bus
-itself, so the rest of the system recovers without needing a real OS signal.
+`SystemLoginObserved`/`SystemLogoutObserved` are optional, platform-pushed
+events carrying an exact timestamp (used where a real-time OS signal exists,
+e.g. Windows' `WM_ENDSESSION`). They're a latency optimization only — the
+module also polls `LifecycleHooks::get_last_login_utc_ms`/
+`get_last_logout_utc_ms` on a coarse cadence, so a platform with no push
+signal still gets full coverage.
 
-## Suspend/resume state
+## The five system hooks
 
-`LifecycleStatus` only has two states. Most transitions are a direct
-`ComputerSuspended` → `ComputerResumed` pair, but if the resume signal never
-arrives, a self-recovery path kicks in: the module counts pings received
-while suspended, and once a 4th ping lands with the module still marked
-`Suspended`, it treats that as proof the OS must have resumed, fires a
-`MissingResume` alert, and emits `ComputerResumed` itself
-(`handle_ping_suspended`, lifecycle.rs:354-367).
+Everything the module needs comes from `LifecycleHooks`
+(`client/core/src/platform.rs`), implemented once per platform:
 
-```mermaid
-stateDiagram-v2
-    [*] --> Running
-    Running --> Suspended: ComputerSuspended
-    Suspended --> Running: ComputerResumed
-    Suspended --> Suspended: Ping (1st-3rd while suspended)
-    Suspended --> Running: 4th Ping while suspended (MissingResume + self-resume)
-```
+| Hook                     | Meaning                                      |
+| ------------------------ | -------------------------------------------- |
+| `get_utc_clock_ms`       | Wall clock                                   |
+| `get_boot_clock_ms`      | Time since boot, **includes** suspend        |
+| `get_monotonic_clock_ms` | Time since boot, **excludes** suspend        |
+| `get_last_login_utc_ms`  | Start of the current expected-running window |
+| `get_last_logout_utc_ms` | End of the most recently closed window       |
 
-## Process-started decision flow
+`get_boot_clock_ms`/`get_monotonic_clock_ms` are cheap syscalls read on
+every `Ping` (~1/s) — that's what drives gap detection. The login/logout
+hooks can be expensive (D-Bus round-trips, subprocess shell-outs) and are
+throttled to a coarse poll (5 min), forced early by `ProcessStarted` or a
+detected reboot.
 
-`handle_process_started` (lifecycle.rs:155-238) runs whenever the client
-process starts while the module still thinks it's `Running` (a `Suspended`
-process start is ignored — see the `on_event` dispatch). It first backfills
-any lifecycle events the client couldn't have sent because it wasn't running
-to send them, emits the routine "process started" upload, and then runs
-three independent, non-exclusive alert checks.
+## Gap detection: three buckets
+
+A gap can appear in three places — the two edges of the login→logout window,
+and the middle:
 
 ```mermaid
 flowchart TD
-    Start([ProcessStarted, status = Running]) --> Compute[Compute last_shutdown]
-    Compute --> Backfill[maybe_backfill_missed_events]
-    Backfill -->|real shutdown\nwithout a ProcessStoppedShutdown event| BackfillStop[Upload: Lifecycle ProcessStoppedShutdown]
-    Backfill -->|real boot\nwithout a SystemLogin event| BackfillLogin[Upload: Lifecycle SystemLogin]
-    Backfill --> Routine[Upload: Lifecycle ProcessStarted]
+    P([Ping]) --> Reboot{boot_clock_ms < last_boot_clock_ms?}
+    Reboot -->|yes, reboot| Poll[Poll login/logout, anchor on UTC]
+    Reboot -->|no| Mid[Mid-session: delta_mono vs prev sample]
 
-    Routine --> CheckA{Stale 'other' stop\nfar behind last_shutdown\nover 10s gap?}
-    CheckA -->|yes| AlertA[Upload: ProcessKilledBeforeShutdown\nrisk 0.5\nconsume the stale stop]
-    CheckA -->|no| CheckB
+    Mid --> MidGap{delta_mono over PER_GAP_THRESHOLD_MS?}
+    MidGap -->|yes| RecordGap[Record into unexpected_gap window]
+    MidGap --> Suspend{delta_boot minus delta_mono\nover SUSPEND_MIN_MS?}
+    Suspend -->|yes| SuspendLog[Upload: Lifecycle SuspendDetected]
 
-    Routine --> CheckB{Was pinging, disappeared\nwith no ProcessStopped,\nthen shutdown ≥30s later?}
-    CheckB -->|yes| AlertB[Upload: ForceKilledBeforeShutdown\nrisk EXTRA_HIGH_RISK]
-    CheckB -->|no| CheckC
+    Poll --> LoginCheck{New login\nnewer than last_login_utc_ms?}
+    LoginCheck -->|yes| LoginUpload[Upload: Lifecycle SystemLogin]
+    LoginUpload --> StartGap[Evaluate gap: login to first sample,\nminus suspend since boot]
+    StartGap --> RecordStart[Record into unexpected_start window]
 
-    Routine --> CheckC{Platform reports a real\nboot time?}
-    CheckC -->|no e.g. iOS| Silent[No alert — can't tell\nbenign vs suspicious restart]
-    CheckC -->|yes| CheckC2{over 120s since login\nAND over 10s ping gap\nAND boot itself over 120s old?}
-    CheckC2 -->|yes| AlertC[Upload: UnexpectedProcessStart\nrisk HIGH_RISK_LIFECYCLE_ALERT]
-    CheckC2 -->|no| NoAlertC[No alert]
+    Poll --> LogoutCheck{New logout\nnewer than last_logout_utc_ms?}
+    LogoutCheck -->|yes| LogoutUpload[Upload: Lifecycle SystemLogout]
+    LogoutUpload --> StopGap[Evaluate gap: last sample to logout]
+    StopGap --> RecordStop[Record into unexpected_stop window]
 ```
 
-## Ping-gap sliding window
+Each of the three buckets (`unexpected_gap`, `unexpected_start`,
+`unexpected_stop`) shares the same sliding-window gap-budget mechanism
+described below — a single stall shouldn't alert on its own.
 
-`handle_ping_running` (lifecycle.rs:295-352) only runs on platforms that
-support sleep/wake detection, and only once the post-login grace period has
-elapsed. A single slow loop iteration briefly stalling `Ping` shouldn't
-alert on its own, so gaps are recorded into a sliding window and summed —
-the alert fires on sustained gap _budget_, not any one gap.
+- **Unexpected gap (mid-session):** `Δmonotonic` between two consecutive
+  samples in the same boot. Monotonic already excludes suspend, so the delta
+  directly measures awake-but-unsampled time — crash, force-kill-and-restart,
+  or a frozen process. `Δboot − Δmonotonic` is the suspend portion, logged
+  separately as `SuspendDetected` (informational, not an alert).
+- **Unexpected start:** awake time between a newly observed login and the
+  first heartbeat sample since — the session was live and awake but the
+  monitor wasn't running yet (disabled autostart, late launch). Suspend
+  accumulated since boot is backed out conservatively, since there's no
+  clock sample at the exact moment of login.
+- **Unexpected stop:** gap between the last known-alive sample and the
+  session's logout — the monitor stopped before the session ended
+  (deliberate quit or kill before logout). When the logout timestamp is
+  itself a reconstructed floor (unclean shutdown), it sits at or before the
+  true end, so the gap can only shrink, never be invented — a simultaneous
+  force-kill + power-pull correctly produces ~0 gap and stays silent.
+
+A reboot (`boot_clock_ms` regressing below the last recorded value) resets
+the boot-relative clocks, so mid-session math is skipped for that tick and
+the edge checks anchor on UTC + the login/logout hooks instead.
+
+## Sliding-window gap budget
+
+A single slow loop iteration briefly stalling `Ping` shouldn't alert on its
+own, so each bucket's gaps are recorded into a window and summed — the alert
+fires on sustained gap _budget_, not any one gap.
 
 ```mermaid
 flowchart TD
-    P([Ping while Running]) --> Grace{Past LIFECYCLE_LOGIN_GRACE_MS\nsince last_login?}
-    Grace -->|no| Done1([done])
-    Grace -->|yes| Threshold{Gap over PING_GAP_PER_GAP_THRESHOLD_MS\nAND not first ping after start/login?}
-    Threshold -->|no| Prune
-    Threshold -->|yes| Record[Record gap: push ts, gap_ms]
-    Record --> Prune[Prune gaps outside\nPING_GAP_WINDOW_MS]
+    G([Gap recorded]) --> Prune[Prune entries outside GAP_WINDOW_MS]
     Prune --> Sum[Sum remaining gap time]
-    Sum --> Budget{total_gap ≥\nPING_GAP_BUDGET_MS?}
-    Budget -->|no| Done2([done, gaps kept for next time])
+    Sum --> Budget{total ≥ GAP_BUDGET_MS?}
+    Budget -->|no| Done1([done, gaps kept for next time])
     Budget -->|yes| Cooldown{Cooldown elapsed\nor never alerted?}
-    Cooldown -->|no| Done3([suppressed, gaps kept])
-    Cooldown -->|yes| Alert[Upload: PingGapWhileRunning\nrisk HIGH_RISK_LIFECYCLE_ALERT\nbatched, not emailed]
+    Cooldown -->|no| Done2([suppressed, gaps kept])
+    Cooldown -->|yes| Alert[Upload: LifecycleAlert]
     Alert --> Reset[Reset cooldown anchor\ngaps NOT cleared]
 ```
 
-Because `ping_gaps` is never cleared on alert, a chronic stall keeps
+Because a bucket's gaps are never cleared on alert, a chronic stall keeps
 re-alerting every cooldown window, while a one-off burst simply ages out of
 the 10-minute window on its own.
 
-## Tunable constants
+## User-initiated stop
 
-These are the non-obvious knobs behind the checks above, all defined at the
-top of `lifecycle.rs`:
+An explicit user-initiated stop (`ProcessStopped(User)`, from the tray/CLI
+"quit" action) fires its own immediate `UserStop` alert (`EXTRA_HIGH_RISK`)
+independently of the gap model — nothing about a user-initiated stop
+suppresses or excuses the later unexpected-stop evaluation. When the
+session's logout eventually arrives, the resulting gap is still
+independently evaluated: both signals can exist for the same incident.
 
-| Constant                        | Value  | Meaning                                                  |
-| ------------------------------- | ------ | -------------------------------------------------------- |
-| `LIFECYCLE_LOGIN_GRACE_MS`      | 120s   | No ping-gap alerts until this long after login           |
-| `PING_GAP_PER_GAP_THRESHOLD_MS` | 10s    | Minimum size for a single gap to be recorded             |
-| `PING_GAP_WINDOW_MS`            | 10 min | Sliding window gaps are summed over                      |
-| `PING_GAP_BUDGET_MS`            | 60s    | Total gap time in the window that triggers an alert      |
-| `PING_GAP_ALERT_COOLDOWN_MS`    | 5 min  | Minimum time between repeat ping-gap alerts              |
-| `EXTRA_HIGH_RISK`               | 0.9    | Immediate/emailed alert threshold (e.g. force kill)      |
-| `HIGH_RISK_LIFECYCLE_ALERT`     | 0.8    | Batched but noteworthy (e.g. ping gap, unexpected start) |
-| `MEDIUM_RISK_LIFECYCLE_ALERT`   | 0.6    | Lower-priority alert (e.g. missing resume)               |
+## The closed event/alert set
+
+Exactly seven lifecycle log entries exist — no more, no less. Routine
+process-start/stop bookkeeping (`ProcessStarted`/`ProcessStopped`) still
+drives the state machine internally (deciding when to poll login/logout,
+detecting an explicit user stop) but produces no visible log row of its own.
+
+| Kind/reason       | Risk                                       | Payload       |
+| ----------------- | ------------------------------------------ | ------------- |
+| `SuspendDetected` | 0.0 (informational)                        | `duration_ms` |
+| `SystemLogin`     | 0.0 (informational)                        | `utc_ms`      |
+| `SystemLogout`    | 0.0 (informational)                        | `utc_ms`      |
+| `UnexpectedStart` | `HIGH_RISK_LIFECYCLE_ALERT` (0.8, batched) | —             |
+| `UnexpectedStop`  | `HIGH_RISK_LIFECYCLE_ALERT` (0.8, batched) | —             |
+| `UnexpectedGap`   | `HIGH_RISK_LIFECYCLE_ALERT` (0.8, batched) | —             |
+| `UserStop`        | `EXTRA_HIGH_RISK` (0.9, immediate/emailed) | —             |
+
+There is no clean-vs-reconstructed distinction on `UnexpectedStop` — a
+killed-before-shutdown gap is always the same risk tier, regardless of
+whether the logout timestamp came from an exact push or a reconstructed
+floor.
 
 `HIGH_RISK_LIFECYCLE_ALERT` is intentionally kept just below
 `EXTRA_HIGH_RISK`: the upload module routes `risk >= EXTRA_HIGH_RISK`
 through the immediate, emailed path, so common non-urgent alerts ride the
 normal batch instead of paging anyone.
 
+## Tunable constants
+
+Defined at the top of `lifecycle.rs`:
+
+| Constant                    | Value  | Meaning                                                        |
+| --------------------------- | ------ | -------------------------------------------------------------- |
+| `PER_GAP_THRESHOLD_MS`      | 10s    | Minimum size for a single gap to be recorded                   |
+| `GAP_WINDOW_MS`             | 10 min | Sliding window gaps are summed over                            |
+| `GAP_BUDGET_MS`             | 60s    | Total gap time in the window that triggers an alert            |
+| `GAP_ALERT_COOLDOWN_MS`     | 5 min  | Minimum time between repeat alerts, per bucket                 |
+| `SUSPEND_MIN_MS`            | 5s     | Minimum boot-vs-monotonic divergence worth logging             |
+| `LOGIN_POLL_INTERVAL_MS`    | 5 min  | Coarse cadence for the (possibly expensive) login/logout hooks |
+| `EXTRA_HIGH_RISK`           | 0.9    | Immediate/emailed alert threshold                              |
+| `HIGH_RISK_LIFECYCLE_ALERT` | 0.8    | Batched but noteworthy                                         |
+
 ## What actually generates each event, per platform
 
-`LifecycleModule` only reacts to events; it never decides _when_ a login,
-logout, suspend, or resume happened. That decision is made in
-platform-specific code that has no shared abstraction beyond
-`bus.send(...)` and the two boot/shutdown-time `PlatformHooks` (see
-`architecture.md`). This section is the map from OS signal to bus event.
+`LifecycleModule` only reacts to hook readings and pushed events; it never
+decides _when_ a login, logout, or suspend happened beyond what the hooks
+report. This section is the map from OS signal to `LifecycleHooks`.
 
 ### Linux (`client/linux/src/daemon.rs`, `capture.rs`)
 
-- **`SystemLogin`**: never sent explicitly. `LifecycleModule::maybe_backfill_missed_events`
-  notices `get_last_startup_time_utc_ms()` (reads the `btime` line of
-  `/proc/stat`) advanced past the stored `last_sent_boot` and synthesizes the
-  upload on the next `ProcessStarted`/`Ping`.
-- **`SystemLogout`**: sent from `record_shutdown_transition()` when the
-  daemon catches `SIGTERM`/`SIGINT` — but only if the stop reason isn't
-  `User` (an explicit tray/CLI stop shouldn't read as a "logout").
-- **`ProcessStopped`**: reason is a heuristic, not a callback. On signal
-  receipt, `classify_shutdown_reason()` shells out to
-  `systemctl is-system-running` and `systemctl list-jobs` (2s timeout each)
-  to check for state `stopping` or a queued `shutdown.target` job →
-  `Shutdown`; otherwise `User` if `UserStopRequested` was seen over IPC, else
-  `Other`. A hard `SIGKILL` or power loss isn't caught at all — the daemon
-  just never gets to run this code, and the gap is picked up later via
-  `get_last_shutdown_time_utc_ms()` backfill.
-- **`ComputerSuspended` / `ComputerResumed`**: the systemd-logind D-Bus
-  signal `org.freedesktop.login1.Manager.PrepareForSleep(start: bool)`,
-  subscribed via `zbus` in `spawn_suspend_watcher()`. `start=true` →
-  suspended, `start=false` → resumed. Requires systemd-logind on the system
-  bus; there's no fallback on non-systemd distros.
-- **`get_last_shutdown_time_utc_ms`**: runs `journalctl --list-boots -o json`
-  and reads the `last_entry` timestamp of the boot with `index == -1` (the
-  previous boot). Needs persistent journald logging (`Storage=persistent`);
-  returns `None` otherwise.
+- **`get_boot_clock_ms`/`get_monotonic_clock_ms`**: `libc::clock_gettime`
+  with `CLOCK_BOOTTIME`/`CLOCK_MONOTONIC`.
+- **`get_last_login_utc_ms`**: reads the primary graphical session's
+  `Timestamp` property over the same logind D-Bus session proxy already used
+  for lock-state detection.
+- **`get_last_logout_utc_ms`**: `journalctl --list-boots -o json`, the
+  `last_entry` timestamp of the previous boot — a floor, not exact. Needs
+  persistent journald logging (`Storage=persistent`); returns `None`
+  otherwise.
+- **`SystemLogoutObserved`**: sent from `record_shutdown_transition()` when
+  the daemon catches `SIGTERM`/`SIGINT` and `classify_shutdown_reason()`
+  (shells out to `systemctl is-system-running`/`systemctl list-jobs`)
+  resolves to `Shutdown` — an `Other` or `User` stop doesn't claim to know an
+  exact logout time.
+- No real-time suspend/resume subscription exists anymore — the systemd-logind
+  `PrepareForSleep` D-Bus watcher was removed; suspend is derived purely from
+  clock divergence.
 
 ### macOS (`client/mac/src/daemon.rs`, `capture.rs`)
 
-- **`SystemLogin`**: same as Linux — never sent explicitly, inferred from
-  `get_last_startup_time_utc_ms()` (parses `sysctl -n kern.boottime`)
-  advancing past `last_sent_boot`.
-- **`SystemLogout`** and **`ProcessStopped(Shutdown)`**: both sent together
-  from the `PowerEvent::WillPowerOff` handler, driven by
-  `NSWorkspaceWillPowerOffNotification` observed on a dedicated
-  `ShutdownWatcher` thread via `NSWorkspace.notificationCenter()`. This is
-  "will power off," not a completion guarantee — an abrupt power loss or
-  forced kill bypasses it, in which case `ProcessStopped` instead comes from
-  the `SIGTERM`/`SIGINT` handler with reason `Other`.
-- **`ComputerSuspended` / `ComputerResumed`**: IOKit system power
-  notifications via `IORegisterForSystemPower`, running its own `CFRunLoop`
-  on a dedicated thread. `kIOMessageSystemWillSleep` → suspended;
-  `kIOMessageSystemHasPoweredOn` → resumed (and also fires `FlushBatchNow`,
-  plus a 30s suppression window on screenshot-capture-state logging to avoid
-  noise right after wake).
-- **`get_last_shutdown_time_utc_ms`**: shells out to `last -1 -F shutdown`
-  and parses the BSD `last` output for the most recent `shutdown` line;
-  depends on `wtmp` history being intact.
+- **`get_boot_clock_ms`/`get_monotonic_clock_ms`**: hand-rolled FFI to
+  `mach_continuous_time()`/`mach_absolute_time()` + `mach_timebase_info`.
+- **`get_last_login_utc_ms`**: parses unfiltered `last -F` output for the
+  most recent non-`reboot`/non-`shutdown` entry.
+- **`get_last_logout_utc_ms`**: `last -1 -F shutdown`, parsed the same way
+  as before — a floor.
+- **`SystemLogoutObserved`**: still sent from
+  `NSWorkspaceWillPowerOffNotification`, observed on a dedicated
+  `ShutdownWatcher` thread — this is a shutdown notification, not the
+  suspend/resume subscription that was removed.
+- The `IORegisterForSystemPower` IOKit watcher (suspend/resume) was removed
+  entirely. The daemon now derives "just resumed" locally each tick from its
+  own boot-vs-monotonic divergence check, purely to drive the post-wake
+  capture-suppression window and a prompt `FlushBatchNow` — independent of
+  `LifecycleModule`'s own suspend detection.
 
 ### Windows (`Virtue.WindowsApp.Core/Tray/WindowsTrayIconHost.cs` + `client/windows/src/{ffi.rs,resident_monitor.rs,capture.rs}`)
 
-Windows is the odd one out: the OS-signal detection lives in the C# WinUI
-tray app (which owns a hidden window and its `WindowProc`), and crosses over
-FFI into the Rust monitor thread, which then calls `bus.send(...)`.
+- **`get_boot_clock_ms`/`get_monotonic_clock_ms`**: `QueryInterruptTime`
+  (includes suspend) / `QueryUnbiasedInterruptTime` (excludes suspend).
+- **`get_last_login_utc_ms`**: unchanged from before — reads the current
+  session's LSA logon time via `LsaGetLogonSessionData`. (Despite living in a
+  function historically named around "startup," this was always logon time,
+  not machine boot time.)
+- **`get_last_logout_utc_ms`**: unchanged — reads the `ShutdownTime`
+  `REG_BINARY` value under `HKLM\SYSTEM\CurrentControlSet\Control\Windows`,
+  written only on a clean shutdown.
+- **`SystemLogoutObserved`**: still driven by `WM_ENDSESSION`'s
+  `ENDSESSION_LOGOFF` bit — set → session logoff, unset → shutdown. Both
+  paths now push an exact-timestamp `SystemLogoutObserved` instead of the old
+  bare `SystemLogout`.
+- `WM_POWERBROADCAST` (suspend/resume) and `WM_WTSSESSION_CHANGE`
+  (`WTS_SESSION_LOGON` push) were both removed — suspend is derived from
+  clocks, and login is covered by the pull-based hook (a few seconds'
+  latency, no real-time push needed).
 
-- **`SystemLogin`**: `WM_WTSSESSION_CHANGE` with `wParam == WTS_SESSION_LOGON`
-  (requires `WTSRegisterSessionNotification` at startup) → C# raises
-  `SessionLogonObserved` → `RustInteropClient.NotifySessionLogon()` →
-  `virtue_windows_notify_session_logon` FFI → `bus.send(SystemLogin)`.
-- **`SystemLogout`**: deliberately _not_ driven by
-  `WM_WTSSESSION_CHANGE`'s logoff variant, because `WTS_SESSION_LOGOFF` also
-  fires on a full shutdown/restart (a session logs off as part of powering
-  down) — that would conflate the two. Instead `WM_ENDSESSION` is used:
-  when its `lParam`'s `ENDSESSION_LOGOFF` bit is set → session logoff path
-  (`SystemLogout` + `ProcessStopped(Other)`); when unset → shutdown path
-  (`SystemLogout` + `ProcessStopped(Shutdown)`). A separate tray-exit path
-  (`ExitRequested` → user clicks "Exit") sends `UserStopRequested` then
-  `ProcessStopped(User)` with no `SystemLogout`.
-- **`ComputerSuspended` / `ComputerResumed`**: `WM_POWERBROADCAST` with
-  `wParam == PBT_APMSUSPEND` → suspended; `PBT_APMRESUMEAUTOMATIC` or
-  `PBT_APMRESUMESUSPEND` → resumed.
-- **`get_last_startup_time_utc_ms`**: despite the name, this returns the
-  _current user's logon time_, not system boot time — since Virtue starts at
-  user login rather than system boot on Windows, that's the meaningful
-  "startup" here. Read via `LsaGetLogonSessionData` off the process token's
-  `AuthenticationId`.
-- **`get_last_shutdown_time_utc_ms`**: reads the `ShutdownTime` `REG_BINARY`
-  value under `HKLM\SYSTEM\CurrentControlSet\Control\Windows`, which Windows
-  only writes on a clean shutdown — abrupt power loss won't update it.
+### Android (`client/android/rust/src/lib.rs`)
 
-### Android and iOS (`client/android/rust/src/lib.rs`, `client/ios/rust/src/lib.rs`)
+Android has no OS "login" concept, so the expected-running window is modeled
+as "whenever the device is powered on":
 
-Neither mobile platform sends `ComputerSuspended`, `ComputerResumed`,
-`SystemLogin`, or `SystemLogout` — this is a deliberate scope decision, not
-a gap:
+- **`get_boot_clock_ms`**: `SystemClock.elapsedRealtime()` (includes deep
+  sleep).
+- **`get_monotonic_clock_ms`**: `SystemClock.uptimeMillis()` (excludes
+  deep-sleep CPU-off time) — new; correctly excuses Doze-induced stalls that
+  the old always-genuine-stall assumption would have flagged.
+- **`get_last_login_utc_ms`**: device boot time, derived from
+  `elapsedRealtime()` the same way as before.
+- **`get_last_logout_utc_ms`**: hardcoded `None` — Android gives a
+  foreground service no reliable last-alive record, so the unexpected-stop
+  bucket never fires there. An accepted, documented gap.
 
-- **Android** runs the monitor as a persistent foreground service that keeps
-  executing through screen lock, so a ping stall is never a benign
-  OS-suspend artifact in the first place; `PlatformConfig::default()`
-  (`supports_sleep_wake_detection: true`) is kept as-is.
-  `get_last_startup_time_utc_ms` derives boot time via JNI from
-  `SystemClock.elapsedRealtime()` (uptime since boot, survives deep sleep);
-  `get_last_shutdown_time_utc_ms` is hardcoded to `None`.
-- **iOS** hosts monitoring inside a short-lived Safari App Extension with no
-  `UIApplication`, which the OS can suspend the instant the device locks
-  with zero notification delivered — there's no way to tell a benign lock
-  from a suspicious stall, so `PlatformConfig::supports_sleep_wake_detection`
-  is set to `false`, which turns off `handle_ping_running`'s gap check
-  entirely (see `ping_gap_is_not_evaluated_when_sleep_wake_unsupported`).
-  Both boot/shutdown hooks are hardcoded to `None`, which is also why the
-  `UnexpectedProcessStart` check in `handle_process_started` is gated on a
-  known boot time — see `unexpected_process_start_requires_known_boot_time`.
+### iOS (`client/ios/rust/src/lib.rs`)
 
-Both platforms still send `ProcessStarted`/`ProcessStopped` around their own
-daemon-loop lifetime, with `ProcessStoppedReason::User` when the user
-explicitly stopped monitoring and `Other` otherwise.
+Lifecycle detection is disabled entirely, not just narrowed:
+`PlatformConfig { lifecycle_enabled: false }` means `assembly.rs` constructs
+a `NoopLifecycleModule` instead of a real `LifecycleModule` — it answers
+`StatusRequest` but does nothing else. `IosPlatformHooks`'s `LifecycleHooks`
+impl is inert (`Ok(0)`/`Ok(None)` everywhere), needed only to satisfy the
+`PlatformHooks: ScreenshotHooks + LifecycleHooks` trait bound; none of its
+methods are ever called. This reflects that the Safari extension host has no
+boot/shutdown/session API surface at all, not just a suspend-detection gap.

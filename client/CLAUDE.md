@@ -16,9 +16,11 @@ is a thin wrapper that supplies raw screen data and OS hooks.
 
 - `core/src/events/bus.rs` — `EventBus`, `Observer` trait, `Emitter`, `dispatch_event!` macro,
   `EventChannel` trait
-- `core/src/events/types.rs` — all typed event structs (`Ping`, `Login`, `Upload`, `StatusRequest`, …)
+- `core/src/events.rs` — the `Ping` event struct; other typed events live inline in the
+  module file that owns them (`Login`/`Logout` in `module/auth.rs`, `ProcessStarted`/
+  `SystemLoginObserved`/etc. in `module/lifecycle.rs`, `StatusRequest` in `module/status.rs`)
 - `core/src/events/remote.rs` — `RemoteEventBus` (cross-process JSON-line channel)
-- `core/src/assembly.rs` — `build_default_modules()` factory for the 7 default observers
+- `core/src/assembly.rs` — `build_default_modules()` factory for the 8 default observers
 
 The daemon loop sends `Ping` events and calls `bus.iter()` on each cycle.
 Observer state is persisted to `event_state.json` after each iteration.
@@ -40,8 +42,10 @@ Observer state is persisted to `event_state.json` after each iteration.
 
 ### Lifecycle events / alerts
 
-- `core/src/module/lifecycle.rs` — `LifecycleModule`: tracks process start/stop,
-  suspend/resume, ping-gap detection, fires `Upload` on anomalies
+- `core/src/module/lifecycle.rs` — `LifecycleModule`: detects gaps in the expected
+  login→logout running window (mid-session, at-start, at-stop), deriving suspend
+  from boot-vs-monotonic clock divergence rather than OS sleep/wake events; fires
+  `Upload` on anomalies. See `core/tampering.md` for the full model.
 
 ### IPC (daemon ↔ controller)
 
@@ -58,9 +62,14 @@ Observer state is persisted to `event_state.json` after each iteration.
 
 ### Platform daemons / main loops
 
-- `linux/src/daemon.rs` — daemon loop, systemd suspend signals, IPC receiver threads
-- `mac/src/daemon.rs` — daemon loop, IOKit power notifications, 30s post-wake suppression
-- `windows/src/resident_monitor.rs` — in-process monitor, session/suspend events
+- `linux/src/daemon.rs` — daemon loop, IPC receiver threads
+- `mac/src/daemon.rs` — daemon loop, NSWorkspace shutdown notification, local
+  boot-vs-monotonic divergence check driving 30s post-wake suppression
+- `windows/src/resident_monitor.rs` — in-process monitor, session-end (`WM_ENDSESSION`) events
+
+Suspend/resume is no longer driven by real-time OS notifications on any
+platform — `LifecycleModule` derives it from `boot_clock − monotonic_clock`
+divergence sampled each `Ping` instead.
 
 ### Configuration
 
@@ -73,10 +82,6 @@ Observer state is persisted to `event_state.json` after each iteration.
 - `core/src/testing/` — `MockApiClient`, `TestPlatformHooks`, `MockClock`, `Scenario` DSL
 - `core/src/module/*.rs` — per-module behavioral tests in `#[cfg(test)] mod tests`
 - `core/tests/scenarios.rs` — integration-style scenario tests
-
-## Open bugs
-
-See `BUGS.md` in this directory.
 
 ## Key invariants (don't change without cross-component review)
 

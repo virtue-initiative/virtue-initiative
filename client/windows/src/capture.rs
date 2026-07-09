@@ -1,7 +1,9 @@
 use std::io::Cursor;
 
 use anyhow::{Context, Result, anyhow};
-use virtue_core::{CoreError, CoreResult, PlatformHooks, Screenshot, ScreenshotHooks};
+use virtue_core::{
+    CoreError, CoreResult, LifecycleHooks, PlatformHooks, Screenshot, ScreenshotHooks,
+};
 
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Gdi::{
@@ -120,7 +122,7 @@ pub fn capture_screen_png() -> Result<Vec<u8>> {
 // Reads the logon time of the current user session via the process token and LSA.
 // Uses logon time rather than system uptime because Virtue starts at user login, not system boot.
 #[cfg(target_os = "windows")]
-pub fn read_last_startup_time_utc_ms() -> CoreResult<Option<i64>> {
+pub fn read_last_login_utc_ms() -> CoreResult<Option<i64>> {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::Security::Authentication::Identity::{
         LsaFreeReturnBuffer, LsaGetLogonSessionData, SECURITY_LOGON_SESSION_DATA,
@@ -170,13 +172,15 @@ pub fn read_last_startup_time_utc_ms() -> CoreResult<Option<i64>> {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn read_last_startup_time_utc_ms() -> CoreResult<Option<i64>> {
+pub fn read_last_login_utc_ms() -> CoreResult<Option<i64>> {
     Ok(None)
 }
 
 // Reads HKLM\SYSTEM\CurrentControlSet\Control\Windows\ShutdownTime (REG_BINARY FILETIME).
+// This is a floor/approximation of the true logout time, not exact — see
+// `LifecycleHooks::get_last_logout_utc_ms`.
 #[cfg(target_os = "windows")]
-pub fn read_last_shutdown_time_utc_ms() -> CoreResult<Option<i64>> {
+pub fn read_last_logout_utc_ms() -> CoreResult<Option<i64>> {
     use windows::core::PCWSTR;
 
     const FILETIME_TO_UNIX_OFFSET: u64 = 116_444_736_000_000_000;
@@ -227,8 +231,38 @@ pub fn read_last_shutdown_time_utc_ms() -> CoreResult<Option<i64>> {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn read_last_shutdown_time_utc_ms() -> CoreResult<Option<i64>> {
+pub fn read_last_logout_utc_ms() -> CoreResult<Option<i64>> {
     Ok(None)
+}
+
+// `QueryInterruptTime` returns 100ns units since boot, INCLUDING time spent
+// suspended.
+#[cfg(target_os = "windows")]
+pub fn read_boot_clock_ms() -> CoreResult<i64> {
+    use windows::Win32::System::SystemInformation::QueryInterruptTime;
+    let mut time_100ns = 0u64;
+    unsafe { QueryInterruptTime(&mut time_100ns) };
+    Ok((time_100ns / 10_000) as i64)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn read_boot_clock_ms() -> CoreResult<i64> {
+    Ok(0)
+}
+
+// `QueryUnbiasedInterruptTime` returns 100ns units since boot, EXCLUDING time
+// spent suspended.
+#[cfg(target_os = "windows")]
+pub fn read_monotonic_clock_ms() -> CoreResult<i64> {
+    use windows::Win32::System::SystemInformation::QueryUnbiasedInterruptTime;
+    let mut time_100ns = 0u64;
+    unsafe { QueryUnbiasedInterruptTime(&mut time_100ns) };
+    Ok((time_100ns / 10_000) as i64)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn read_monotonic_clock_ms() -> CoreResult<i64> {
+    Ok(0)
 }
 
 // True if a screensaver is running or the session is locked. Both checks fail safe
@@ -300,16 +334,26 @@ impl ScreenshotHooks for WindowsPlatformHooks {
         })
     }
 
-    fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>> {
-        read_last_shutdown_time_utc_ms()
-    }
-
-    fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
-        read_last_startup_time_utc_ms()
-    }
-
     fn is_locked_or_screensaver(&self) -> CoreResult<bool> {
         Ok(read_locked_or_screensaver())
+    }
+}
+
+impl LifecycleHooks for WindowsPlatformHooks {
+    fn get_boot_clock_ms(&self) -> CoreResult<i64> {
+        read_boot_clock_ms()
+    }
+
+    fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
+        read_monotonic_clock_ms()
+    }
+
+    fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {
+        read_last_login_utc_ms()
+    }
+
+    fn get_last_logout_utc_ms(&self) -> CoreResult<Option<i64>> {
+        read_last_logout_utc_ms()
     }
 }
 

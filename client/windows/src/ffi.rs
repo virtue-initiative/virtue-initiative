@@ -254,26 +254,6 @@ pub extern "C" fn virtue_windows_stop_monitoring_for_session_logoff() -> *mut c_
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn virtue_windows_notify_session_logon() -> *mut c_char {
-    into_error_ptr(resident_monitor::notify_session_logon())
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn virtue_windows_notify_session_logoff() -> *mut c_char {
-    into_error_ptr(resident_monitor::notify_session_logoff())
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn virtue_windows_notify_suspend() -> *mut c_char {
-    into_error_ptr(resident_monitor::notify_suspend())
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn virtue_windows_notify_resume() -> *mut c_char {
-    into_error_ptr(resident_monitor::notify_resume())
-}
-
-#[unsafe(no_mangle)]
 pub extern "C" fn virtue_windows_get_monitor_status_json() -> *mut c_char {
     into_json_ptr(Ok(MonitorStatusPayload::from(
         resident_monitor::status_snapshot(),

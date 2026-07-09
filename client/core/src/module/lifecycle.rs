@@ -5,11 +5,10 @@ use serde::{Deserialize, Serialize};
 use crate::error::CoreResult;
 use crate::events::Ping;
 use crate::events::bus::{Emitter, EventBus, Observer, StateType};
-use crate::model::{AlertReason, PartialStatus};
-use crate::model::{LifecycleKind, ProcessStoppedReason, UploadKind};
-use crate::module::auth::Login;
+use crate::model::{AlertReason, LifecycleKind, PartialStatus, ProcessStoppedReason, UploadKind};
 use crate::module::status::StatusRequest;
 use crate::module::upload::Upload;
+use crate::platform::LifecycleHooks;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessStarted;
@@ -17,332 +16,301 @@ pub struct ProcessStarted;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessStopped(pub ProcessStoppedReason);
 
+/// Pushed by a platform when it can observe an exact login moment (e.g.
+/// Windows `WM_WTSSESSION_CHANGE`) rather than waiting for the next coarse
+/// `LifecycleHooks::get_last_login_utc_ms` poll. Optional — the poll alone is
+/// sufficient, this just reduces latency where a real-time signal exists.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ComputerSuspended;
+pub struct SystemLoginObserved {
+    pub utc_ms: i64,
+}
 
+/// Pushed by a platform when it can observe an exact clean-logout moment
+/// (e.g. `WM_ENDSESSION`, `NSWorkspaceWillPowerOffNotification`, a systemd
+/// shutdown-job classification). Optional — the poll alone is sufficient,
+/// this just reduces latency and improves precision over a reconstructed
+/// floor for the common clean-shutdown case.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ComputerResumed;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SystemLogin;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SystemLogout;
+pub struct SystemLogoutObserved {
+    pub utc_ms: i64,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserStopRequested {
     pub source: String,
 }
-use crate::platform::{PlatformConfig, ScreenshotHooks};
 
 pub(crate) const EXTRA_HIGH_RISK: f32 = 0.9;
 /// High-risk lifecycle alerts that are still noteworthy but don't warrant an
 /// immediate notification. The upload module routes `risk >= EXTRA_HIGH_RISK`
 /// through the immediate (emailed) path; keeping these just below that threshold
 /// flags them as high for review/sorting while letting them ride the normal
-/// batch — so common, non-urgent alerts (e.g. a ping gap) don't send an email.
+/// batch.
 pub(crate) const HIGH_RISK_LIFECYCLE_ALERT: f32 = 0.8;
-pub(crate) const MEDIUM_RISK_LIFECYCLE_ALERT: f32 = 0.6;
 
-// Sliding-window ping-gap detection. A single slow loop iteration (e.g. a heavy
-// capture/classify) can briefly stall pings; alerting on one blip is twitchy, so
-// we sum the time lost to over-threshold gaps inside a sliding window and only
-// alert when that sustained gap budget is exceeded. (These may move to config later.)
-const PING_GAP_PER_GAP_THRESHOLD_MS: i64 = 10_000; // a gap must exceed 10s to count
-const PING_GAP_WINDOW_MS: i64 = 10 * 60 * 1_000; // 10-min sliding window
-const PING_GAP_BUDGET_MS: i64 = 60_000; // alert when counted gap time ≥ 60s in window
-const PING_GAP_ALERT_COOLDOWN_MS: i64 = 5 * 60 * 1_000; // ≤ one alert per 5 min
-const LIFECYCLE_LOGIN_GRACE_MS: i64 = 120_000; // grace after login before gap alerts
+// Sliding-window gap-budget detection, shared by all three gap buckets below.
+// A single stall can be a blip (heavy capture/classify cycle, a slow poll) —
+// alerting on one is twitchy, so we sum the time lost to over-threshold gaps
+// inside a sliding window and only alert when that sustained gap budget is
+// exceeded.
+const PER_GAP_THRESHOLD_MS: i64 = 10_000; // a gap must exceed 10s to count
+const GAP_WINDOW_MS: i64 = 10 * 60 * 1_000; // 10-min sliding window
+const GAP_BUDGET_MS: i64 = 60_000; // alert when counted gap time >= 60s in window
+const GAP_ALERT_COOLDOWN_MS: i64 = 5 * 60 * 1_000; // <= one alert per 5 min
 
+const SUSPEND_MIN_MS: i64 = 5_000; // boot-vs-monotonic divergence worth logging
+const LOGIN_POLL_INTERVAL_MS: i64 = 5 * 60 * 1_000; // coarse poll cadence while running
+
+/// A single heartbeat's clock readings, used to compute the delta to the next
+/// heartbeat.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default)]
+pub struct HeartbeatSample {
+    pub utc_ms: i64,
+    pub boot_clock_ms: i64,
+    pub monotonic_clock_ms: i64,
+    pub login_id: u64,
+}
+
+/// Sliding-window gap-budget tracker shared by the three gap buckets
+/// (unexpected gap / start / stop). Holds `(ts_ms, gap_ms)` for each gap that
+/// exceeded the per-gap threshold; entries age out of the window.
+/// `last_alert_ms` is the cooldown anchor (0 = never alerted).
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub enum LifecycleStatus {
-    #[default]
-    Running,
-    Suspended,
+#[serde(default)]
+pub struct GapTracker {
+    pub gaps: Vec<(i64, i64)>,
+    pub last_alert_ms: i64,
+}
+
+impl GapTracker {
+    fn record(&mut self, now_ms: i64, gap_ms: i64) {
+        self.gaps.push((now_ms, gap_ms));
+    }
+
+    /// Prune to the sliding window, sum the remaining gap time, and report
+    /// whether the budget is newly crossed (respecting the cooldown). Gaps
+    /// are intentionally NOT cleared on alert — chronic stalls keep
+    /// re-alerting each cooldown, while one-off bursts age out of the window.
+    fn crossed_budget(&mut self, now_ms: i64) -> bool {
+        let window_start = now_ms - GAP_WINDOW_MS;
+        self.gaps.retain(|(ts, _)| *ts >= window_start);
+        let total: i64 = self.gaps.iter().map(|(_, gap)| *gap).sum();
+
+        // The `== 0` short-circuit keeps the very first alert from being
+        // suppressed by the cooldown (which is anchored at 0 = "never alerted").
+        let cooldown_ok =
+            self.last_alert_ms == 0 || now_ms - self.last_alert_ms >= GAP_ALERT_COOLDOWN_MS;
+
+        if total >= GAP_BUDGET_MS && cooldown_ok {
+            self.last_alert_ms = now_ms;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 #[serde(default)]
 pub struct LifecycleObserverState {
-    pub status: LifecycleStatus,
+    /// Bumped each time `get_last_login_utc_ms` reports a login newer than
+    /// `last_login_utc_ms`. Tags each `HeartbeatSample` with the session it
+    /// belongs to.
+    pub login_id: u64,
+    pub last_login_utc_ms: i64,
+    pub last_logout_utc_ms: i64,
 
-    pub last_login: i64,
+    /// Just the previous tick's clock readings — O(1), not a growing history.
+    pub last_sample: Option<HeartbeatSample>,
+    /// Last observed boot-clock value, used to detect a reboot (the
+    /// boot-relative clocks resetting to a smaller value than previously seen).
+    pub last_boot_clock_ms: i64,
+    /// Throttles `get_last_login_utc_ms`/`get_last_logout_utc_ms`, which can
+    /// be expensive (D-Bus round-trips, subprocess shell-outs) — polled at
+    /// most every `LOGIN_POLL_INTERVAL_MS`, plus whenever `ProcessStarted`
+    /// fires or a reboot is detected.
+    pub last_login_poll_at_ms: i64,
 
-    // Running
-    pub last_process_stopped_other: i64,
-    pub last_process_stopped_shutdown: i64,
-    pub last_process_stopped_user: i64,
-    pub last_computer_suspend: i64,
-    pub last_computer_resume: i64,
-    pub last_ping: i64,
-    pub last_process_started: i64,
-    pub last_running_started: i64,
-    pub last_sent_boot: i64,
-
-    // Suspended
-    pub pings_while_suspended: i64,
-
-    // User stop tracking
-    pub user_stop_requested: bool,
-
-    // Sliding-window ping-gap detection. `ping_gaps` holds `(ts_ms, gap_ms)` for
-    // each gap that exceeded the per-gap threshold; entries age out of the window.
-    // `last_ping_gap_alert` is the cooldown anchor (0 = never alerted).
-    #[serde(default)]
-    pub ping_gaps: Vec<(i64, i64)>,
-    #[serde(default)]
-    pub last_ping_gap_alert: i64,
+    pub unexpected_gap: GapTracker,
+    pub unexpected_start: GapTracker,
+    pub unexpected_stop: GapTracker,
 }
 
 pub struct LifecycleModule {
     pub state: LifecycleObserverState,
-    platform: Box<dyn ScreenshotHooks>,
-    config: PlatformConfig,
+    hooks: Box<dyn LifecycleHooks>,
 }
 
 impl LifecycleModule {
-    pub fn new(platform: Box<dyn ScreenshotHooks>, config: PlatformConfig) -> Self {
+    pub fn new(hooks: Box<dyn LifecycleHooks>) -> Self {
         Self {
             state: LifecycleObserverState::default(),
-            platform,
-            config,
+            hooks,
         }
-    }
-
-    fn compute_last_shutdown(&self) -> CoreResult<i64> {
-        let stored = self.state.last_process_stopped_shutdown;
-        if stored > 0 {
-            return Ok(stored);
-        }
-        Ok(self.platform.get_last_shutdown_time_utc_ms()?.unwrap_or(0))
-    }
-
-    fn maybe_backfill_missed_events(
-        &mut self,
-        last_shutdown: i64,
-        startup_time_ms: Option<i64>,
-        emitter: &Emitter,
-    ) -> CoreResult<()> {
-        if last_shutdown > 0
-            && self.state.last_process_stopped_other > 0
-            && last_shutdown > self.state.last_process_stopped_other
-            && self.state.last_process_stopped_shutdown < last_shutdown
-        {
-            let _ = emitter.send(Upload {
-                risk: 0.0,
-                kind: UploadKind::Lifecycle {
-                    kind: LifecycleKind::ProcessStoppedShutdown,
-                },
-            });
-            self.state.last_process_stopped_shutdown = last_shutdown;
-        }
-
-        if let Some(boot_ms) = startup_time_ms
-            && boot_ms > self.state.last_sent_boot
-        {
-            let _ = emitter.send(Upload {
-                risk: 0.0,
-                kind: UploadKind::Lifecycle {
-                    kind: LifecycleKind::SystemLogin,
-                },
-            });
-            self.state.last_sent_boot = boot_ms;
-        }
-
-        Ok(())
-    }
-
-    fn handle_process_started(&mut self, emitter: &Emitter) -> CoreResult<()> {
-        let now_ms = self.platform.get_time_utc_ms()?;
-        let startup_time_ms = self.platform.get_last_startup_time_utc_ms()?;
-        let last_shutdown = if self.state.last_process_stopped_other > 0 || self.state.last_ping > 0
-        {
-            self.compute_last_shutdown()?
-        } else {
-            0
-        };
-        let old = self.state.clone();
-
-        self.maybe_backfill_missed_events(last_shutdown, startup_time_ms, emitter)?;
-
-        let _ = emitter.send(Upload {
-            risk: 0.0,
-            kind: UploadKind::Lifecycle {
-                kind: LifecycleKind::ProcessStarted,
-            },
-        });
-
-        self.state.last_process_started = now_ms;
-        self.state.last_running_started = now_ms;
-
-        if old.last_process_stopped_other > 0
-            && last_shutdown - old.last_process_stopped_other > 10000
-        {
-            let _ = emitter.send(Upload {
-                risk: 0.5,
-                kind: UploadKind::LifecycleAlert {
-                    reason: AlertReason::ProcessKilledBeforeShutdown,
-                },
-            });
-            // Consume the stale "other" stop now that it's been reported — otherwise
-            // it stays > 0 forever and `last_shutdown` (which only ever climbs) keeps
-            // exceeding it by more than the threshold, re-firing this alert on every
-            // future clean boot even though nothing new happened.
-            self.state.last_process_stopped_other = 0;
-        }
-
-        // Detect force kill: process was actively pinging but disappeared without any
-        // ProcessStopped event, and the computer then shut down 30+ s after the last ping.
-        if last_shutdown > 0
-            && old.last_ping > 0
-            && old.last_ping >= old.last_process_started
-            && old.last_ping > old.last_process_stopped_other
-            && old.last_ping > old.last_process_stopped_user
-            && last_shutdown - old.last_ping > 30_000
-        {
-            let _ = emitter.send(Upload {
-                risk: EXTRA_HIGH_RISK,
-                kind: UploadKind::LifecycleAlert {
-                    reason: AlertReason::ForceKilledBeforeShutdown,
-                },
-            });
-        }
-
-        // Only alert when the platform can report a real boot time: the check below
-        // only makes sense relative to a known boot ("this restart isn't explained by
-        // the device having just booted"). Without that signal (e.g. iOS, where the
-        // monitoring process is a short-lived Safari extension host that the OS may
-        // suspend or recycle at any time as routine behavior) we have no way to tell
-        // a benign restart from a suspicious one, so we stay silent rather than
-        // alerting on every routine restart.
-        if let Some(boot_ms) = startup_time_ms
-            && now_ms - old.last_login > 120000
-            && old.last_process_started > old.last_process_stopped_user
-        {
-            let ping_gap = if old.last_ping > 0 {
-                now_ms - old.last_ping
-            } else {
-                i64::MAX
-            };
-            if ping_gap > 10000 && (now_ms - boot_ms) > 120000 {
-                let _ = emitter.send(Upload {
-                    risk: HIGH_RISK_LIFECYCLE_ALERT,
-                    kind: UploadKind::LifecycleAlert {
-                        reason: AlertReason::UnexpectedProcessStart,
-                    },
-                });
-            }
-        }
-
-        Ok(())
-    }
-
-    fn handle_process_stopped(
-        &mut self,
-        reason: &ProcessStoppedReason,
-        emitter: &Emitter,
-    ) -> CoreResult<()> {
-        let now_ms = self.platform.get_time_utc_ms()?;
-        match self.state.status.clone() {
-            LifecycleStatus::Running => {
-                let startup_time_ms = self.platform.get_last_startup_time_utc_ms()?;
-                let last_shutdown = if self.state.last_process_stopped_other > 0 {
-                    self.compute_last_shutdown()?
-                } else {
-                    0
-                };
-                self.maybe_backfill_missed_events(last_shutdown, startup_time_ms, emitter)?;
-            }
-            LifecycleStatus::Suspended => {}
-        }
-
-        let kind = match reason {
-            ProcessStoppedReason::Other => LifecycleKind::ProcessStoppedOther,
-            ProcessStoppedReason::Shutdown => LifecycleKind::ProcessStoppedShutdown,
-            ProcessStoppedReason::User => LifecycleKind::ProcessStoppedUser,
-        };
-        let _ = emitter.send(Upload {
-            risk: 0.0,
-            kind: UploadKind::Lifecycle { kind },
-        });
-
-        match reason {
-            ProcessStoppedReason::Other => self.state.last_process_stopped_other = now_ms,
-            ProcessStoppedReason::Shutdown => self.state.last_process_stopped_shutdown = now_ms,
-            ProcessStoppedReason::User => {
-                self.state.last_process_stopped_user = now_ms;
-                if matches!(self.state.status, LifecycleStatus::Running) {
-                    let _ = emitter.send(Upload {
-                        risk: EXTRA_HIGH_RISK,
-                        kind: UploadKind::LifecycleAlert {
-                            reason: AlertReason::UserStoppedProcess,
-                        },
-                    });
-                }
-            }
-        }
-
-        Ok(())
     }
 
     fn handle_ping(&mut self, emitter: &Emitter) -> CoreResult<()> {
-        match self.state.status.clone() {
-            LifecycleStatus::Running => self.handle_ping_running(emitter),
-            LifecycleStatus::Suspended => self.handle_ping_suspended(emitter),
+        let utc_ms = self.hooks.get_utc_clock_ms()?;
+        let boot_ms = self.hooks.get_boot_clock_ms()?;
+        let mono_ms = self.hooks.get_monotonic_clock_ms()?;
+
+        // A boot-clock value smaller than the last recorded one is the reboot
+        // signal — the boot-relative clocks just reset, so a delta across
+        // this boundary is meaningless; skip the mid-session math for this
+        // tick and fall straight to the login/logout edge checks below,
+        // anchored on UTC rather than the (now-reset) boot-relative clocks.
+        let rebooted = self.state.last_boot_clock_ms > 0 && boot_ms < self.state.last_boot_clock_ms;
+
+        if !rebooted && let Some(prev) = self.state.last_sample {
+            self.evaluate_unexpected_gap(utc_ms, boot_ms, mono_ms, prev, emitter)?;
         }
+
+        let should_poll = rebooted
+            || self.state.last_login_poll_at_ms == 0
+            || utc_ms - self.state.last_login_poll_at_ms >= LOGIN_POLL_INTERVAL_MS;
+        if should_poll {
+            self.poll_login_logout(utc_ms, boot_ms, mono_ms, emitter)?;
+        }
+
+        self.state.last_sample = Some(HeartbeatSample {
+            utc_ms,
+            boot_clock_ms: boot_ms,
+            monotonic_clock_ms: mono_ms,
+            login_id: self.state.login_id,
+        });
+        self.state.last_boot_clock_ms = boot_ms;
+
+        Ok(())
     }
 
-    fn handle_ping_running(&mut self, emitter: &Emitter) -> CoreResult<()> {
-        let now_ms = self.platform.get_time_utc_ms()?;
-        let startup_time_ms = self.platform.get_last_startup_time_utc_ms()?;
-        let last_shutdown = if self.state.last_process_stopped_other > 0 {
-            self.compute_last_shutdown()?
-        } else {
-            0
-        };
-        let old = self.state.clone();
-        self.maybe_backfill_missed_events(last_shutdown, startup_time_ms, emitter)?;
-        self.state.last_ping = now_ms;
+    /// Mid-session gap: awake time between two consecutive samples in the
+    /// same boot that exceeds the per-gap threshold. The monotonic clock
+    /// already excludes suspend, so the delta directly measures awake-but-
+    /// unsampled time — crash, force-kill-and-restart, or a frozen process.
+    fn evaluate_unexpected_gap(
+        &mut self,
+        utc_ms: i64,
+        boot_ms: i64,
+        mono_ms: i64,
+        prev: HeartbeatSample,
+        emitter: &Emitter,
+    ) -> CoreResult<()> {
+        let delta_mono = mono_ms - prev.monotonic_clock_ms;
+        let delta_boot = boot_ms - prev.boot_clock_ms;
+        let suspend_ms = (delta_boot - delta_mono).max(0);
 
-        // See the doc comment on `PlatformConfig::supports_sleep_wake_detection`:
-        // platforms that can't reliably tell us about suspend/resume have no way
-        // to distinguish a benign gap from a suspicious one, so we don't
-        // evaluate this check.
-        if self.config.supports_sleep_wake_detection
-            && now_ms - old.last_login > LIFECYCLE_LOGIN_GRACE_MS
-        {
-            let ping_gap = now_ms - old.last_ping;
-            let start_gap = now_ms - old.last_running_started;
-
-            // Record this gap if it's a real over-threshold stall (and not the first
-            // ping after start, where `last_ping` is 0 or the process just began).
-            if old.last_ping > 0
-                && ping_gap > PING_GAP_PER_GAP_THRESHOLD_MS
-                && start_gap > PING_GAP_PER_GAP_THRESHOLD_MS
-            {
-                self.state.ping_gaps.push((now_ms, ping_gap));
-            }
-
-            // Prune to the sliding window, then sum the gap time that remains.
-            let window_start = now_ms - PING_GAP_WINDOW_MS;
-            self.state.ping_gaps.retain(|(ts, _)| *ts >= window_start);
-            let total_gap: i64 = self.state.ping_gaps.iter().map(|(_, gap)| *gap).sum();
-
-            // The `== 0` short-circuit keeps the very first alert from being suppressed
-            // by the cooldown (which is anchored at 0 = "never alerted").
-            let cooldown_ok = self.state.last_ping_gap_alert == 0
-                || now_ms - self.state.last_ping_gap_alert >= PING_GAP_ALERT_COOLDOWN_MS;
-
-            if total_gap >= PING_GAP_BUDGET_MS && cooldown_ok {
-                self.state.last_ping_gap_alert = now_ms;
-                // Note: `ping_gaps` is intentionally NOT cleared — chronic stalls keep
-                // re-alerting each cooldown, while one-off bursts age out of the window.
-                // High risk but below the immediate-upload threshold: a ping gap is
-                // batched (no email), not sent immediately.
+        if delta_mono > PER_GAP_THRESHOLD_MS {
+            self.state.unexpected_gap.record(utc_ms, delta_mono);
+            if self.state.unexpected_gap.crossed_budget(utc_ms) {
                 let _ = emitter.send(Upload {
                     risk: HIGH_RISK_LIFECYCLE_ALERT,
                     kind: UploadKind::LifecycleAlert {
-                        reason: AlertReason::PingGapWhileRunning,
+                        reason: AlertReason::UnexpectedGap,
+                    },
+                });
+            }
+        }
+
+        if suspend_ms >= SUSPEND_MIN_MS {
+            let _ = emitter.send(Upload {
+                risk: 0.0,
+                kind: UploadKind::Lifecycle {
+                    kind: LifecycleKind::SuspendDetected {
+                        duration_ms: suspend_ms,
+                    },
+                },
+            });
+        }
+
+        Ok(())
+    }
+
+    fn poll_login_logout(
+        &mut self,
+        utc_ms: i64,
+        boot_ms: i64,
+        mono_ms: i64,
+        emitter: &Emitter,
+    ) -> CoreResult<()> {
+        self.state.last_login_poll_at_ms = utc_ms;
+
+        if let Some(login_ms) = self.hooks.get_last_login_utc_ms()? {
+            self.observe_login(login_ms, utc_ms, boot_ms, mono_ms, emitter)?;
+        }
+        if let Some(logout_ms) = self.hooks.get_last_logout_utc_ms()? {
+            self.observe_logout(logout_ms, emitter)?;
+        }
+
+        Ok(())
+    }
+
+    fn observe_login(
+        &mut self,
+        login_ms: i64,
+        utc_ms: i64,
+        boot_ms: i64,
+        mono_ms: i64,
+        emitter: &Emitter,
+    ) -> CoreResult<()> {
+        if login_ms <= self.state.last_login_utc_ms {
+            return Ok(());
+        }
+        self.state.login_id += 1;
+        self.state.last_login_utc_ms = login_ms;
+        let _ = emitter.send(Upload {
+            risk: 0.0,
+            kind: UploadKind::Lifecycle {
+                kind: LifecycleKind::SystemLogin { utc_ms: login_ms },
+            },
+        });
+        self.evaluate_unexpected_start(login_ms, utc_ms, boot_ms, mono_ms, emitter)
+    }
+
+    fn observe_logout(&mut self, logout_ms: i64, emitter: &Emitter) -> CoreResult<()> {
+        if logout_ms <= self.state.last_logout_utc_ms {
+            return Ok(());
+        }
+        self.state.last_logout_utc_ms = logout_ms;
+        let _ = emitter.send(Upload {
+            risk: 0.0,
+            kind: UploadKind::Lifecycle {
+                kind: LifecycleKind::SystemLogout { utc_ms: logout_ms },
+            },
+        });
+        self.evaluate_unexpected_stop(logout_ms, emitter)
+    }
+
+    /// Unexpected start: awake time between a known login and the first
+    /// heartbeat sample observed since, exceeding the per-gap threshold —
+    /// the session was live and awake but we weren't running yet (disabled
+    /// autostart, late launch). Suspend accumulated since boot is backed out
+    /// conservatively (see architecture notes): we have no clock sample at
+    /// the exact moment of login, only at first-observed-heartbeat, so this
+    /// slightly over-excuses suspend that happened before login — which only
+    /// ever shrinks the alert window, never invents one.
+    fn evaluate_unexpected_start(
+        &mut self,
+        login_ms: i64,
+        utc_ms: i64,
+        boot_ms: i64,
+        mono_ms: i64,
+        emitter: &Emitter,
+    ) -> CoreResult<()> {
+        let raw_gap = utc_ms - login_ms;
+        if raw_gap <= 0 {
+            return Ok(());
+        }
+        let suspend_since_boot = (boot_ms - mono_ms).max(0);
+        let excusable = suspend_since_boot.min(raw_gap);
+        let gap = raw_gap - excusable;
+
+        if gap > PER_GAP_THRESHOLD_MS {
+            self.state.unexpected_start.record(utc_ms, gap);
+            if self.state.unexpected_start.crossed_budget(utc_ms) {
+                let _ = emitter.send(Upload {
+                    risk: HIGH_RISK_LIFECYCLE_ALERT,
+                    kind: UploadKind::LifecycleAlert {
+                        reason: AlertReason::UnexpectedStart,
                     },
                 });
             }
@@ -351,18 +319,31 @@ impl LifecycleModule {
         Ok(())
     }
 
-    fn handle_ping_suspended(&mut self, emitter: &Emitter) -> CoreResult<()> {
-        self.state.pings_while_suspended += 1;
-        if self.state.pings_while_suspended > 3 {
-            self.state.pings_while_suspended = 0;
-            let _ = emitter.send(Upload {
-                risk: MEDIUM_RISK_LIFECYCLE_ALERT,
-                kind: UploadKind::LifecycleAlert {
-                    reason: AlertReason::MissingResume,
-                },
-            });
-            let _ = emitter.send(ComputerResumed);
+    /// Unexpected stop: gap between the last known-alive sample and the
+    /// session's logout, exceeding the per-gap threshold — we stopped
+    /// running before the session ended (deliberate quit or kill before
+    /// logout). When the logout timestamp is itself a reconstructed floor
+    /// (unclean shutdown), it sits at or before the true end, so the gap can
+    /// only shrink, never be invented — a simultaneous force-kill + power
+    /// pull correctly produces ~0 gap and stays silent.
+    fn evaluate_unexpected_stop(&mut self, logout_ms: i64, emitter: &Emitter) -> CoreResult<()> {
+        let Some(last_sample) = self.state.last_sample else {
+            return Ok(());
+        };
+        let gap = (logout_ms - last_sample.utc_ms).max(0);
+
+        if gap > PER_GAP_THRESHOLD_MS {
+            self.state.unexpected_stop.record(logout_ms, gap);
+            if self.state.unexpected_stop.crossed_budget(logout_ms) {
+                let _ = emitter.send(Upload {
+                    risk: HIGH_RISK_LIFECYCLE_ALERT,
+                    kind: UploadKind::LifecycleAlert {
+                        reason: AlertReason::UnexpectedStop,
+                    },
+                });
+            }
         }
+
         Ok(())
     }
 }
@@ -386,73 +367,36 @@ impl Observer for LifecycleModule {
     fn on_event(&mut self, event: &dyn Any, emitter: &Emitter) -> CoreResult<()> {
         crate::dispatch_event!(event, {
             _: Ping => self.handle_ping(emitter),
-            _: Login => {
-                if matches!(self.state.status, LifecycleStatus::Running) {
-                    self.state.last_login = self.platform.get_time_utc_ms()?;
-                }
-                Ok(())
-            },
             _: ProcessStarted => {
-                if matches!(self.state.status, LifecycleStatus::Running) {
-                    self.handle_process_started(emitter)
-                } else {
-                    Ok(())
-                }
-            },
-            ev: ProcessStopped => self.handle_process_stopped(&ev.0, emitter),
-            _: ComputerSuspended => {
-                if matches!(self.state.status, LifecycleStatus::Running) {
-                    let now_ms = self.platform.get_time_utc_ms()?;
-                    let _ = emitter.send(Upload {
-                        risk: 0.0,
-                        kind: UploadKind::Lifecycle { kind: LifecycleKind::ComputerSuspended },
-                    });
-                    self.state.last_computer_suspend = now_ms;
-                    self.state.status = LifecycleStatus::Suspended;
-                }
+                // Force a fresh login/logout poll on the very next Ping,
+                // rather than waiting out the coarse throttle — a process
+                // restart is exactly when a login/logout is likely to have
+                // changed underneath us.
+                self.state.last_login_poll_at_ms = 0;
                 Ok(())
             },
-            _: ComputerResumed => {
-                if matches!(self.state.status, LifecycleStatus::Suspended) {
-                    let now_ms = self.platform.get_time_utc_ms()?;
-                    self.state.pings_while_suspended = 0;
-                    self.state.status = LifecycleStatus::Running;
-                    self.state.last_running_started = now_ms;
-                    self.state.last_computer_resume = now_ms;
+            ev: ProcessStopped => {
+                if matches!(ev.0, ProcessStoppedReason::User) {
                     let _ = emitter.send(Upload {
-                        risk: 0.0,
-                        kind: UploadKind::Lifecycle { kind: LifecycleKind::ComputerResumed },
+                        risk: EXTRA_HIGH_RISK,
+                        kind: UploadKind::LifecycleAlert { reason: AlertReason::UserStop },
                     });
                 }
                 Ok(())
             },
-            _: SystemLogin => {
-                if matches!(self.state.status, LifecycleStatus::Running) {
-                    let now_ms = self.platform.get_time_utc_ms()?;
-                    let _ = emitter.send(Upload {
-                        risk: 0.0,
-                        kind: UploadKind::Lifecycle { kind: LifecycleKind::SystemLogin },
-                    });
-                    self.state.last_login = now_ms;
-                }
-                Ok(())
+            ev: SystemLoginObserved => {
+                let utc_ms = self.hooks.get_utc_clock_ms()?;
+                let boot_ms = self.hooks.get_boot_clock_ms()?;
+                let mono_ms = self.hooks.get_monotonic_clock_ms()?;
+                self.observe_login(ev.utc_ms, utc_ms, boot_ms, mono_ms, emitter)
             },
-            _: SystemLogout => {
-                let _ = emitter.send(Upload {
-                    risk: 0.0,
-                    kind: UploadKind::Lifecycle { kind: LifecycleKind::SystemLogout },
-                });
-                Ok(())
-            },
+            ev: SystemLogoutObserved => self.observe_logout(ev.utc_ms, emitter),
             _: StatusRequest => {
-                let last_loop_at_ms = (self.state.last_ping > 0).then_some(self.state.last_ping);
+                let last_loop_at_ms = self.state.last_sample.map(|s| s.utc_ms);
                 let _ = emitter.send(PartialStatus::Lifecycle { is_running: true, last_loop_at_ms });
                 Ok(())
             },
-            _: UserStopRequested => {
-                self.state.user_stop_requested = true;
-                Ok(())
-            },
+            _: UserStopRequested => Ok(()),
         })
     }
 
@@ -461,296 +405,179 @@ impl Observer for LifecycleModule {
     }
 }
 
+/// Stand-in for platforms where `PlatformConfig::lifecycle_enabled` is
+/// `false` (currently only iOS, which has no boot/shutdown/session signal
+/// available to its Safari-extension-host process). Keeps `name() ==
+/// "lifecycle"` so the state-file key stays stable and answers
+/// `StatusRequest` so `StatusModule`'s partial-status count is still
+/// satisfied, but otherwise does nothing.
+#[derive(Default)]
+pub struct NoopLifecycleModule;
+
+impl NoopLifecycleModule {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Observer for NoopLifecycleModule {
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn name(&self) -> &'static str {
+        "lifecycle"
+    }
+
+    fn init(&mut self, _bus: &mut EventBus, _state: StateType) -> CoreResult<()> {
+        Ok(())
+    }
+
+    fn on_event(&mut self, event: &dyn Any, emitter: &Emitter) -> CoreResult<()> {
+        crate::dispatch_event!(event, {
+            _: StatusRequest => {
+                let _ = emitter.send(PartialStatus::Lifecycle { is_running: true, last_loop_at_ms: None });
+                Ok(())
+            },
+        })
+    }
+
+    fn save(&self) -> CoreResult<StateType> {
+        Ok(StateType::Null)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        ComputerResumed, ComputerSuspended, ProcessStarted, ProcessStopped, SystemLogin,
-        SystemLogout,
+        EXTRA_HIGH_RISK, HIGH_RISK_LIFECYCLE_ALERT, LifecycleModule, ProcessStarted,
+        ProcessStopped, SystemLogoutObserved,
     };
-    use super::{EXTRA_HIGH_RISK, HIGH_RISK_LIFECYCLE_ALERT, LifecycleModule, LifecycleStatus};
     use crate::events::Ping;
     use crate::model::PartialStatus;
     use crate::model::{AlertReason, LifecycleKind, ProcessStoppedReason, UploadKind};
     use crate::module::status::StatusRequest;
     use crate::module::upload::Upload;
-    use crate::platform::PlatformConfig;
     use crate::testing::EventTester;
 
     #[test]
     fn status_request_emits_lifecycle_partial_status() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(
-            Box::new(b.platform()),
-            PlatformConfig::default(),
-        ));
+        b.add(LifecycleModule::new(Box::new(b.platform())));
         let mut t = b.build();
         t.emit(1, StatusRequest);
         t.assert_like::<PartialStatus>(crate::like!(PartialStatus::Lifecycle { .. }));
     }
 
     #[test]
-    fn process_started_emits_lifecycle_upload() {
+    fn routine_process_start_stop_produces_no_log_row() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(
-            Box::new(b.platform()),
-            PlatformConfig::default(),
-        ));
+        b.add(LifecycleModule::new(Box::new(b.platform())));
         let mut t = b.build();
         t.emit(1, ProcessStarted);
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::Lifecycle {
-                kind: LifecycleKind::ProcessStarted
-            },
+        t.emit(2, ProcessStopped(ProcessStoppedReason::Other));
+        t.emit(3, ProcessStopped(ProcessStoppedReason::Shutdown));
+        t.assert_not_like(crate::like!(Upload {
+            kind: UploadKind::Lifecycle { .. },
             ..
         }));
-        assert_eq!(
-            t.observer::<LifecycleModule>().state.last_process_started,
-            1_000
-        );
-        assert_eq!(
-            t.observer::<LifecycleModule>().state.last_running_started,
-            1_000
-        );
     }
 
     #[test]
-    fn process_stopped_shutdown_emits_upload() {
+    fn login_poll_emits_system_login_and_tracks_state() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(
-            Box::new(b.platform()),
-            PlatformConfig::default(),
-        ));
+        b.add(LifecycleModule::new(Box::new(b.platform())));
         let mut t = b.build();
-        t.emit(2, ProcessStopped(ProcessStoppedReason::Shutdown));
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::Lifecycle {
-                kind: LifecycleKind::ProcessStoppedShutdown
-            },
-            ..
-        }));
-        assert_eq!(
-            t.observer::<LifecycleModule>()
-                .state
-                .last_process_stopped_shutdown,
-            2_000
-        );
-    }
-
-    #[test]
-    fn process_stopped_user_emits_upload_and_high_risk_alert() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(
-            Box::new(b.platform()),
-            PlatformConfig::default(),
-        ));
-        let mut t = b.build();
-        t.emit(4, ProcessStopped(ProcessStoppedReason::User));
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::Lifecycle {
-                kind: LifecycleKind::ProcessStoppedUser
-            },
-            ..
-        }));
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::UserStoppedProcess
-            },
-            ..
-        }));
-        let alert = t
-            .captured::<Upload>()
-            .into_iter()
-            .find(|e| {
-                matches!(
-                    e.kind,
-                    UploadKind::LifecycleAlert {
-                        reason: AlertReason::UserStoppedProcess
-                    }
-                )
-            })
-            .unwrap();
-        assert!(alert.risk >= 0.9, "alert should be high risk");
-        assert_eq!(
-            t.observer::<LifecycleModule>()
-                .state
-                .last_process_stopped_user,
-            4_000
-        );
-    }
-
-    #[test]
-    fn computer_suspended_emits_upload() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(
-            Box::new(b.platform()),
-            PlatformConfig::default(),
-        ));
-        let mut t = b.build();
-        t.emit(5, ComputerSuspended);
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::Lifecycle {
-                kind: LifecycleKind::ComputerSuspended
-            },
-            ..
-        }));
-        assert!(matches!(
-            t.observer::<LifecycleModule>().state.status,
-            LifecycleStatus::Suspended
-        ));
-        assert_eq!(
-            t.observer::<LifecycleModule>().state.last_computer_suspend,
-            5_000
-        );
-    }
-
-    #[test]
-    fn computer_resumed_after_suspend_emits_upload() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(
-            Box::new(b.platform()),
-            PlatformConfig::default(),
-        ));
-        let mut t = b.build();
-        t.emit(6, ComputerSuspended);
-        t.clear_captured();
-        t.emit(7, ComputerResumed);
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::Lifecycle {
-                kind: LifecycleKind::ComputerResumed
-            },
-            ..
-        }));
-        assert!(matches!(
-            t.observer::<LifecycleModule>().state.status,
-            LifecycleStatus::Running
-        ));
-        assert_eq!(
-            t.observer::<LifecycleModule>().state.last_computer_resume,
-            7_000
-        );
-        assert_eq!(
-            t.observer::<LifecycleModule>().state.last_running_started,
-            7_000
-        );
-    }
-
-    #[test]
-    fn fourth_ping_while_suspended_triggers_missing_resume_alert() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(
-            Box::new(b.platform()),
-            PlatformConfig::default(),
-        ));
-        let mut t = b.build();
-
-        t.emit(1, ComputerSuspended);
-        t.clear_captured();
-
-        // Pings at 2s, 3s, 4s (3 pings) — NOT at 5s (exclusive boundary).
-        t.enable_pings(2);
-        t.disable_pings(5);
-        t.advance_to(5);
-        assert_eq!(
-            t.observer::<LifecycleModule>().state.pings_while_suspended,
-            3,
-            "counter should be 3 before the 4th ping"
-        );
-        t.clear_captured();
-
-        // 4th ping crosses >3 threshold → MissingResume + auto ComputerResumed
-        t.emit(6, Ping);
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::MissingResume
-            },
-            ..
-        }));
-        assert_eq!(
-            t.observer::<LifecycleModule>().state.pings_while_suspended,
-            0,
-            "counter should reset after alert"
-        );
-        assert!(
-            matches!(
-                t.observer::<LifecycleModule>().state.status,
-                LifecycleStatus::Running
-            ),
-            "auto-sent ComputerResumed should restore Running status"
-        );
-    }
-
-    #[test]
-    fn session_login_emits_lifecycle_upload() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(
-            Box::new(b.platform()),
-            PlatformConfig::default(),
-        ));
-        let mut t = b.build();
-        t.emit(1, SystemLogin);
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::Lifecycle {
-                kind: LifecycleKind::SystemLogin
-            },
-            ..
-        }));
-        assert_eq!(t.observer::<LifecycleModule>().state.last_login, 1_000);
-    }
-
-    #[test]
-    fn system_logout_emits_low_risk_lifecycle_upload() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(
-            Box::new(b.platform()),
-            PlatformConfig::default(),
-        ));
-        let mut t = b.build();
-        t.emit(1, SystemLogout);
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::Lifecycle {
-                kind: LifecycleKind::SystemLogout
-            },
-            ..
-        }));
-        let upload = t
-            .captured::<Upload>()
-            .into_iter()
-            .find(|e| {
-                matches!(
-                    e.kind,
-                    UploadKind::Lifecycle {
-                        kind: LifecycleKind::SystemLogout
-                    }
-                )
-            })
-            .unwrap();
-        assert_eq!(upload.risk, 0.0, "logout is routine, not high risk");
-    }
-
-    #[test]
-    fn ping_gap_while_running_emits_high_risk_alert() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(
-            Box::new(b.platform()),
-            PlatformConfig::default(),
-        ));
-        let mut t = b.build();
-
-        // ProcessStarted + first Ping both at 1s — within 120s grace window, no alert.
-        t.emit(1, ProcessStarted);
+        t.platform.set_last_login(Some(500));
         t.emit(1, Ping);
-        assert_eq!(t.observer::<LifecycleModule>().state.last_ping, 1_000);
-        t.clear_captured();
-
-        // Jump to 200s: past 120s grace window and 10s ping-gap threshold.
-        t.emit(200, Ping);
         t.assert_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::PingGapWhileRunning
+            kind: UploadKind::Lifecycle {
+                kind: LifecycleKind::SystemLogin { utc_ms: 500 }
             },
             ..
         }));
-        assert_eq!(t.observer::<LifecycleModule>().state.last_ping, 200_000);
+        assert_eq!(t.observer::<LifecycleModule>().state.last_login_utc_ms, 500);
+        assert_eq!(t.observer::<LifecycleModule>().state.login_id, 1);
+    }
+
+    #[test]
+    fn logout_poll_emits_system_logout() {
+        let mut b = EventTester::builder();
+        b.add(LifecycleModule::new(Box::new(b.platform())));
+        let mut t = b.build();
+        t.platform.set_last_logout(Some(500));
+        t.emit(1, Ping);
+        t.assert_like(crate::like!(Upload {
+            kind: UploadKind::Lifecycle {
+                kind: LifecycleKind::SystemLogout { utc_ms: 500 }
+            },
+            ..
+        }));
+        assert_eq!(
+            t.observer::<LifecycleModule>().state.last_logout_utc_ms,
+            500
+        );
+    }
+
+    #[test]
+    fn sub_budget_unexpected_gap_does_not_alert() {
+        let mut b = EventTester::builder();
+        b.add(LifecycleModule::new(Box::new(b.platform())));
+        let mut t = b.build();
+        // Seed a prior sample; boot/monotonic default to tracking the mock
+        // wall clock (no suspend) unless overridden.
+        t.platform.set_boot_clock_ms(1_000);
+        t.platform.set_monotonic_clock_ms(1_000);
+        t.emit(1, Ping);
+        t.clear_captured();
+
+        // A single 30s gap: over the 10s per-gap threshold (recorded) but
+        // under the 60s sliding-window budget, so no alert fires.
+        t.platform.set_boot_clock_ms(31_000);
+        t.platform.set_monotonic_clock_ms(31_000);
+        t.emit(31, Ping);
+        t.assert_not_like(crate::like!(Upload {
+            kind: UploadKind::LifecycleAlert {
+                reason: AlertReason::UnexpectedGap
+            },
+            ..
+        }));
+    }
+
+    #[test]
+    fn accumulated_unexpected_gaps_cross_budget_and_alert() {
+        let mut b = EventTester::builder();
+        b.add(LifecycleModule::new(Box::new(b.platform())));
+        let mut t = b.build();
+        t.platform.set_boot_clock_ms(1_000);
+        t.platform.set_monotonic_clock_ms(1_000);
+        t.emit(1, Ping);
+        t.clear_captured();
+
+        // Three 25s gaps: 25 -> 50 (both under the 60s budget), then 75 >= 60 alerts.
+        t.platform.set_boot_clock_ms(26_000);
+        t.platform.set_monotonic_clock_ms(26_000);
+        t.emit(26, Ping);
+        t.platform.set_boot_clock_ms(51_000);
+        t.platform.set_monotonic_clock_ms(51_000);
+        t.emit(51, Ping);
+        t.assert_not_like(crate::like!(Upload {
+            kind: UploadKind::LifecycleAlert {
+                reason: AlertReason::UnexpectedGap
+            },
+            ..
+        }));
+        t.clear_captured();
+
+        t.platform.set_boot_clock_ms(76_000);
+        t.platform.set_monotonic_clock_ms(76_000);
+        t.emit(76, Ping);
+        t.assert_like(crate::like!(Upload {
+            kind: UploadKind::LifecycleAlert {
+                reason: AlertReason::UnexpectedGap
+            },
+            ..
+        }));
         let alert = t
             .captured::<Upload>()
             .into_iter()
@@ -758,353 +585,162 @@ mod tests {
                 matches!(
                     e.kind,
                     UploadKind::LifecycleAlert {
-                        reason: AlertReason::PingGapWhileRunning
+                        reason: AlertReason::UnexpectedGap
                     }
                 )
             })
             .unwrap();
-        // High risk for review, but below the immediate-upload threshold so it batches
-        // (no email) rather than firing an immediate alert.
         assert!(
             alert.risk >= HIGH_RISK_LIFECYCLE_ALERT && alert.risk < EXTRA_HIGH_RISK,
-            "ping gap alert should be high but not immediate, got {}",
+            "unexpected-gap alert should be high but not immediate, got {}",
             alert.risk
         );
     }
 
     #[test]
-    fn ping_gap_is_not_evaluated_when_sleep_wake_unsupported() {
+    fn cooldown_suppresses_repeat_unexpected_gap_alert() {
         let mut b = EventTester::builder();
-        // Platform can't tell us about suspend/resume (e.g. iOS, where the Safari
-        // extension host can be suspended by a device lock with zero signal) — a
-        // stall like this is indistinguishable from a suspicious one, so it must
-        // not be evaluated at all, regardless of size.
-        b.add(LifecycleModule::new(
-            Box::new(b.platform()),
-            PlatformConfig {
-                supports_sleep_wake_detection: false,
-            },
-        ));
+        b.add(LifecycleModule::new(Box::new(b.platform())));
         let mut t = b.build();
-
-        t.emit(1, ProcessStarted);
+        t.platform.set_boot_clock_ms(1_000);
+        t.platform.set_monotonic_clock_ms(1_000);
         t.emit(1, Ping);
-        t.clear_captured();
 
-        t.emit(200, Ping);
-        t.assert_not_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::PingGapWhileRunning
-            },
-            ..
-        }));
-        assert_eq!(
-            t.observer::<LifecycleModule>().state.ping_gaps.len(),
-            0,
-            "gap should not even be recorded when the platform can't detect sleep/wake"
-        );
-    }
-
-    #[test]
-    fn unexpected_process_start_requires_known_boot_time() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(
-            Box::new(b.platform()),
-            PlatformConfig::default(),
-        ));
-        let mut t = b.build();
-
-        // Seed a state where the desktop-style heuristic would otherwise fire: long
-        // since login, process apparently left running, and a large ping gap.
-        // Platform boot time is unknown (the default), as on iOS — since we can't
-        // tell whether this restart followed a genuine device boot, we must not
-        // alert on every routine restart.
-        {
-            let s = &mut t.observer::<LifecycleModule>().state;
-            s.last_login = 1_000;
-            s.last_process_started = 2_000;
-            s.last_ping = 3_000;
-        }
-        t.emit(200, ProcessStarted);
-        t.assert_not_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::UnexpectedProcessStart
-            },
-            ..
-        }));
-    }
-
-    #[test]
-    fn ping_within_login_grace_period_does_not_emit_alert() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(
-            Box::new(b.platform()),
-            PlatformConfig::default(),
-        ));
-        let mut t = b.build();
-        t.emit(1, ProcessStarted);
-        t.emit(1, Ping);
-        t.clear_captured();
-        t.emit(20, SystemLogin);
-        assert_eq!(t.observer::<LifecycleModule>().state.last_login, 20_000);
-        t.emit(30, Ping);
-        t.assert_not_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::PingGapWhileRunning
-            },
-            ..
-        }));
-    }
-
-    #[test]
-    fn sub_budget_ping_gap_does_not_alert() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(
-            Box::new(b.platform()),
-            PlatformConfig::default(),
-        ));
-        let mut t = b.build();
-        // Seed a running process whose last ping is already past the login grace
-        // window (last_login stays 0).
-        {
-            let s = &mut t.observer::<LifecycleModule>().state;
-            s.last_running_started = 1_000;
-            s.last_ping = 130_000;
-        }
-        // A single 30s gap: over the 10s per-gap threshold (so it's recorded) but
-        // under the 60s sliding-window budget, so no alert fires.
-        t.emit(160, Ping);
-        t.assert_not_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::PingGapWhileRunning
-            },
-            ..
-        }));
-        assert_eq!(t.observer::<LifecycleModule>().state.ping_gaps.len(), 1);
-    }
-
-    #[test]
-    fn accumulated_ping_gaps_cross_budget_and_alert() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(
-            Box::new(b.platform()),
-            PlatformConfig::default(),
-        ));
-        let mut t = b.build();
-        {
-            let s = &mut t.observer::<LifecycleModule>().state;
-            s.last_running_started = 1_000;
-            s.last_ping = 130_000;
-        }
-        // Three 25s gaps: 25 → 50 (both under the 60s budget), then 75 ≥ 60 alerts.
-        t.emit(155, Ping);
-        t.emit(180, Ping);
-        t.assert_not_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::PingGapWhileRunning
-            },
-            ..
-        }));
-        t.clear_captured();
-        t.emit(205, Ping);
+        // First gap of 70s crosses budget and alerts.
+        t.platform.set_boot_clock_ms(71_000);
+        t.platform.set_monotonic_clock_ms(71_000);
+        t.emit(71, Ping);
         t.assert_like(crate::like!(Upload {
             kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::PingGapWhileRunning
+                reason: AlertReason::UnexpectedGap
             },
             ..
         }));
-    }
-
-    #[test]
-    fn aged_out_ping_gaps_are_pruned_and_do_not_alert() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(
-            Box::new(b.platform()),
-            PlatformConfig::default(),
-        ));
-        let mut t = b.build();
-        // An old 50s gap recorded ~700s before "now"; it sits outside the 10-min
-        // window once the new ping lands and must be pruned before summing.
-        {
-            let s = &mut t.observer::<LifecycleModule>().state;
-            s.last_running_started = 1_000;
-            s.last_ping = 750_000;
-            s.ping_gaps = vec![(100_000, 50_000)];
-        }
-        // New 50s gap. Without pruning, 50 + 50 = 100 ≥ 60 would alert; with pruning
-        // the aged entry drops and only the fresh 50s remains (< 60s budget).
-        t.emit(800, Ping);
-        t.assert_not_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::PingGapWhileRunning
-            },
-            ..
-        }));
-        // Old entry pruned, new entry kept.
-        assert_eq!(t.observer::<LifecycleModule>().state.ping_gaps.len(), 1);
-    }
-
-    #[test]
-    fn cooldown_suppresses_repeat_ping_gap_alert() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(
-            Box::new(b.platform()),
-            PlatformConfig::default(),
-        ));
-        let mut t = b.build();
-        // Seed a state that already alerted recently with enough banked gap time to
-        // cross the budget again.
-        {
-            let s = &mut t.observer::<LifecycleModule>().state;
-            s.last_running_started = 1_000;
-            s.last_ping = 200_000;
-            s.last_ping_gap_alert = 190_000;
-            s.ping_gaps = vec![(199_000, 70_000)];
-        }
-        // 40s after the last alert (< 5-min cooldown): budget exceeded but suppressed.
-        t.emit(230, Ping);
-        t.assert_not_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::PingGapWhileRunning
-            },
-            ..
-        }));
-        // Well past the cooldown: the chronic stall re-alerts.
         t.clear_captured();
+
+        // 40s later (< 5-min cooldown): another 70s gap crosses budget again but is suppressed.
+        t.platform.set_boot_clock_ms(181_000);
+        t.platform.set_monotonic_clock_ms(181_000);
+        t.emit(181, Ping);
+        t.assert_not_like(crate::like!(Upload {
+            kind: UploadKind::LifecycleAlert {
+                reason: AlertReason::UnexpectedGap
+            },
+            ..
+        }));
+        t.clear_captured();
+
+        // Well past the cooldown: the chronic stall re-alerts.
+        t.platform.set_boot_clock_ms(600_000);
+        t.platform.set_monotonic_clock_ms(600_000);
         t.emit(600, Ping);
         t.assert_like(crate::like!(Upload {
             kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::PingGapWhileRunning
+                reason: AlertReason::UnexpectedGap
             },
             ..
         }));
     }
 
     #[test]
-    fn process_killed_before_shutdown_emits_alert() {
+    fn suspend_excuses_unexpected_gap() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(
-            Box::new(b.platform()),
-            PlatformConfig::default(),
-        ));
+        b.add(LifecycleModule::new(Box::new(b.platform())));
         let mut t = b.build();
-        t.emit(1, ProcessStarted);
-        t.emit(1, ProcessStopped(ProcessStoppedReason::Other));
-        assert_eq!(
-            t.observer::<LifecycleModule>()
-                .state
-                .last_process_stopped_other,
-            1_000
-        );
-        t.emit(12, ProcessStopped(ProcessStoppedReason::Shutdown));
-        assert_eq!(
-            t.observer::<LifecycleModule>()
-                .state
-                .last_process_stopped_shutdown,
-            12_000
-        );
+        t.platform.set_boot_clock_ms(1_000);
+        t.platform.set_monotonic_clock_ms(1_000);
+        t.emit(1, Ping);
         t.clear_captured();
-        // Gap (12_000 - 1_000 = 11_000 ms) exceeds the 10 s threshold
-        t.emit(20, ProcessStarted);
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::ProcessKilledBeforeShutdown
-            },
-            ..
-        }));
-        assert_eq!(
-            t.observer::<LifecycleModule>()
-                .state
-                .last_process_stopped_other,
-            0,
-            "the stale other-stop should be consumed once reported"
-        );
-    }
 
-    #[test]
-    fn process_killed_before_shutdown_alert_does_not_repeat_on_later_clean_reboots() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(
-            Box::new(b.platform()),
-            PlatformConfig::default(),
-        ));
-        let mut t = b.build();
-        // Same setup as `process_killed_before_shutdown_emits_alert`: an unclean
-        // "other" stop, followed (11 s later) by a real shutdown.
-        t.emit(1, ProcessStarted);
-        t.emit(1, ProcessStopped(ProcessStoppedReason::Other));
-        t.emit(12, ProcessStopped(ProcessStoppedReason::Shutdown));
-        t.clear_captured();
-        t.emit(20, ProcessStarted);
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::ProcessKilledBeforeShutdown
-            },
-            ..
-        }));
-
-        // A later, entirely clean shutdown/reboot cycle must not re-trigger the
-        // alert just because the old "other" stop is chronologically far behind
-        // the new (ever-climbing) last-shutdown time.
-        t.clear_captured();
-        t.emit(100, ProcessStopped(ProcessStoppedReason::Shutdown));
-        t.clear_captured();
-        t.emit(300, ProcessStarted);
+        // 10 minutes of wall-clock/boot time pass, but monotonic only
+        // advances 30s (the machine was suspended for the rest) — no
+        // UnexpectedGap alert, but a SuspendDetected log is emitted.
+        t.platform.set_boot_clock_ms(601_000);
+        t.platform.set_monotonic_clock_ms(31_000);
+        t.emit(601, Ping);
         t.assert_not_like(crate::like!(Upload {
             kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::ProcessKilledBeforeShutdown
+                reason: AlertReason::UnexpectedGap
+            },
+            ..
+        }));
+        t.assert_like(crate::like!(Upload {
+            kind: UploadKind::Lifecycle {
+                kind: LifecycleKind::SuspendDetected { .. }
             },
             ..
         }));
     }
 
     #[test]
-    fn force_killed_process_with_platform_shutdown_emits_high_risk_alert() {
+    fn unexpected_start_alerts_when_login_precedes_first_sample_by_more_than_threshold() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(
-            Box::new(b.platform()),
-            PlatformConfig::default(),
-        ));
+        b.add(LifecycleModule::new(Box::new(b.platform())));
         let mut t = b.build();
-
-        // Run 1: process starts, pings, then is killed (Other stop — no shutdown event yet)
-        t.emit(1, ProcessStarted);
-        t.emit(2, Ping);
-        t.emit(3, Ping);
-        t.emit(10, ProcessStopped(ProcessStoppedReason::Other));
-        assert_eq!(
-            t.observer::<LifecycleModule>()
-                .state
-                .last_process_stopped_other,
-            10_000
-        );
-
-        // Run 2: process starts, pings, then is force-killed (no ProcessStopped event)
-        t.emit(12, ProcessStarted);
-        t.emit(13, Ping);
-        t.emit(14, Ping);
-        t.emit(15, Ping);
-        assert_eq!(t.observer::<LifecycleModule>().state.last_ping, 15_000);
-        assert_eq!(
-            t.observer::<LifecycleModule>()
-                .state
-                .last_process_stopped_shutdown,
-            0,
-            "no shutdown recorded yet"
-        );
-
-        // Computer shuts down at 70s (55 s after last ping), boots at 100s.
-        // Only the platform hook carries this — no events were sent.
-        // Platform hooks are now implemented on Linux/Mac; this mock mirrors a real capability.
-        t.platform.set_last_shutdown_time(Some(70_000));
-        t.platform.set_last_startup_time(Some(100_000));
-        t.clear_captured();
-
-        // Run 3: lifecycle detects the force-kill gap (boot was only 10 s ago → no UnexpectedStart)
-        t.emit(110, ProcessStarted);
+        t.platform.set_last_login(Some(100));
+        t.platform.set_boot_clock_ms(61_000);
+        t.platform.set_monotonic_clock_ms(61_000);
+        t.emit(61, Ping);
         t.assert_like(crate::like!(Upload {
             kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::ForceKilledBeforeShutdown
+                reason: AlertReason::UnexpectedStart
+            },
+            ..
+        }));
+    }
+
+    #[test]
+    fn unexpected_start_excused_by_suspend_since_boot() {
+        let mut b = EventTester::builder();
+        b.add(LifecycleModule::new(Box::new(b.platform())));
+        let mut t = b.build();
+        t.platform.set_last_login(Some(100));
+        // 60s of wall-clock/boot time since login, but monotonic shows only
+        // 5s of that was actually awake (55s of suspend) — the awake gap
+        // (5s) is under the per-gap threshold, so no alert.
+        t.platform.set_boot_clock_ms(60_000);
+        t.platform.set_monotonic_clock_ms(5_000);
+        t.emit(60, Ping);
+        t.assert_not_like(crate::like!(Upload {
+            kind: UploadKind::LifecycleAlert {
+                reason: AlertReason::UnexpectedStart
+            },
+            ..
+        }));
+    }
+
+    #[test]
+    fn unexpected_start_silent_with_no_known_login() {
+        let mut b = EventTester::builder();
+        b.add(LifecycleModule::new(Box::new(b.platform())));
+        let mut t = b.build();
+        // No `set_last_login` call — hook returns None, so there's nothing to
+        // anchor an unexpected-start check against.
+        t.emit(60, Ping);
+        t.assert_not_like(crate::like!(Upload {
+            kind: UploadKind::LifecycleAlert {
+                reason: AlertReason::UnexpectedStart
+            },
+            ..
+        }));
+    }
+
+    #[test]
+    fn unexpected_stop_alerts_when_logout_arrives_well_after_last_sample() {
+        let mut b = EventTester::builder();
+        b.add(LifecycleModule::new(Box::new(b.platform())));
+        let mut t = b.build();
+        t.platform.set_boot_clock_ms(1_000);
+        t.platform.set_monotonic_clock_ms(1_000);
+        t.emit(1, Ping);
+        t.clear_captured();
+
+        // Logout is reported 60s after our last heartbeat via a direct platform
+        // push (not the coarse poll, which is throttled to a 5-min cadence).
+        t.emit(61, SystemLogoutObserved { utc_ms: 61_000 });
+        t.assert_like(crate::like!(Upload {
+            kind: UploadKind::LifecycleAlert {
+                reason: AlertReason::UnexpectedStop
             },
             ..
         }));
@@ -1115,82 +751,141 @@ mod tests {
                 matches!(
                     e.kind,
                     UploadKind::LifecycleAlert {
-                        reason: AlertReason::ForceKilledBeforeShutdown
+                        reason: AlertReason::UnexpectedStop
                     }
                 )
             })
             .unwrap();
-        assert!(alert.risk >= 0.9, "alert should be high risk");
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::Lifecycle {
-                kind: LifecycleKind::ProcessStoppedShutdown
+        assert!(
+            alert.risk >= HIGH_RISK_LIFECYCLE_ALERT && alert.risk < EXTRA_HIGH_RISK,
+            "unexpected-stop alert should be high but not immediate, got {}",
+            alert.risk
+        );
+    }
+
+    #[test]
+    fn floor_reconstruction_landing_on_last_sample_does_not_alert() {
+        let mut b = EventTester::builder();
+        b.add(LifecycleModule::new(Box::new(b.platform())));
+        let mut t = b.build();
+        t.platform.set_boot_clock_ms(60_000);
+        t.platform.set_monotonic_clock_ms(60_000);
+        t.emit(60, Ping);
+        t.clear_captured();
+
+        // A reconstructed logout floor that lands at/before our last known
+        // sample (the "simultaneous force-kill + power pull" case) produces
+        // zero/near-zero gap and must not alert.
+        t.emit(120, SystemLogoutObserved { utc_ms: 60_000 });
+        t.assert_not_like(crate::like!(Upload {
+            kind: UploadKind::LifecycleAlert {
+                reason: AlertReason::UnexpectedStop
             },
             ..
         }));
+    }
+
+    #[test]
+    fn reboot_regression_does_not_corrupt_mid_session_math() {
+        let mut b = EventTester::builder();
+        b.add(LifecycleModule::new(Box::new(b.platform())));
+        let mut t = b.build();
+        t.platform.set_boot_clock_ms(500_000);
+        t.platform.set_monotonic_clock_ms(500_000);
+        t.emit(500, Ping);
+        t.clear_captured();
+
+        // Reboot: boot/monotonic clocks reset to small values while wall
+        // clock keeps climbing. Must not be misread as a huge mid-session gap.
+        t.platform.set_boot_clock_ms(2_000);
+        t.platform.set_monotonic_clock_ms(2_000);
+        t.emit(600, Ping);
         t.assert_not_like(crate::like!(Upload {
             kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::UnexpectedProcessStart
+                reason: AlertReason::UnexpectedGap
             },
             ..
         }));
         assert_eq!(
-            t.observer::<LifecycleModule>()
-                .state
-                .last_process_stopped_shutdown,
-            70_000,
-            "shutdown time should be backfilled into state"
+            t.observer::<LifecycleModule>().state.last_boot_clock_ms,
+            2_000
         );
+    }
+
+    #[test]
+    fn user_stop_fires_immediate_alert_and_later_gap_still_evaluated() {
+        let mut b = EventTester::builder();
+        b.add(LifecycleModule::new(Box::new(b.platform())));
+        let mut t = b.build();
+        t.platform.set_boot_clock_ms(1_000);
+        t.platform.set_monotonic_clock_ms(1_000);
+        t.emit(1, Ping);
+
+        // Explicit user-initiated stop: immediate high-risk alert.
+        t.emit(2, ProcessStopped(ProcessStoppedReason::User));
+        t.assert_like(crate::like!(Upload {
+            kind: UploadKind::LifecycleAlert {
+                reason: AlertReason::UserStop
+            },
+            ..
+        }));
+        let user_stop = t
+            .captured::<Upload>()
+            .into_iter()
+            .find(|e| {
+                matches!(
+                    e.kind,
+                    UploadKind::LifecycleAlert {
+                        reason: AlertReason::UserStop
+                    }
+                )
+            })
+            .unwrap();
+        assert!(
+            user_stop.risk >= EXTRA_HIGH_RISK,
+            "user stop should be immediate/extra-high risk"
+        );
+        t.clear_captured();
+
+        // The session's logout eventually arrives (a direct platform push, not
+        // the coarse poll), long after the stop — the resulting gap is still
+        // independently evaluated and alerts, even though the stop was
+        // user-initiated.
+        t.emit(63, SystemLogoutObserved { utc_ms: 63_000 });
+        t.assert_like(crate::like!(Upload {
+            kind: UploadKind::LifecycleAlert {
+                reason: AlertReason::UnexpectedStop
+            },
+            ..
+        }));
     }
 
     #[test]
     fn state_round_trips_through_save_and_load() {
         let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(
-            Box::new(b.platform()),
-            PlatformConfig::default(),
-        ));
+        b.add(LifecycleModule::new(Box::new(b.platform())));
         let mut t = b.build();
 
-        t.emit(30, SystemLogin); // last_login = 30_000
-        t.emit(55, ProcessStarted); // last_running_started = 55_000
-        t.emit(99, Ping); // last_ping = 99_000 (first ping — no gap alert)
-        t.emit(99, ComputerSuspended); // status = Suspended
-        t.emit(99, Ping); // pings_while_suspended = 1
-        t.emit(99, Ping); // pings_while_suspended = 2
-
-        // Seed sliding-window ping-gap state so the round-trip covers it too.
-        {
-            let s = &mut t.observer::<LifecycleModule>().state;
-            s.ping_gaps = vec![(80_000, 15_000), (95_000, 20_000)];
-            s.last_ping_gap_alert = 95_000;
-        }
+        t.platform.set_last_login(Some(30_000));
+        t.emit(30, Ping);
+        t.platform.set_last_login(None);
 
         {
             let s = &t.observer::<LifecycleModule>().state;
-            assert_eq!(s.last_login, 30_000);
-            assert_eq!(s.last_running_started, 55_000);
-            assert_eq!(s.last_ping, 99_000);
-            assert_eq!(s.pings_while_suspended, 2);
-            assert!(matches!(s.status, LifecycleStatus::Suspended));
+            assert_eq!(s.last_login_utc_ms, 30_000);
+            assert_eq!(s.login_id, 1);
         }
 
         let saved = t.bus.save().unwrap();
 
         let mut b2 = EventTester::builder();
-        b2.add(LifecycleModule::new(
-            Box::new(b2.platform()),
-            PlatformConfig::default(),
-        ));
+        b2.add(LifecycleModule::new(Box::new(b2.platform())));
         b2.with_state(saved);
         let mut t2 = b2.build();
 
         let s2 = &t2.observer::<LifecycleModule>().state;
-        assert_eq!(s2.last_login, 30_000);
-        assert_eq!(s2.last_running_started, 55_000);
-        assert_eq!(s2.last_ping, 99_000);
-        assert_eq!(s2.pings_while_suspended, 2);
-        assert!(matches!(s2.status, LifecycleStatus::Suspended));
-        assert_eq!(s2.ping_gaps, vec![(80_000, 15_000), (95_000, 20_000)]);
-        assert_eq!(s2.last_ping_gap_alert, 95_000);
+        assert_eq!(s2.last_login_utc_ms, 30_000);
+        assert_eq!(s2.login_id, 1);
+        assert!(s2.last_sample.is_some());
     }
 }

@@ -5,8 +5,7 @@ use crate::events::bus::{Emitter, Error as EventError, Event, EventBus, EventCha
 use crate::events::remote::{IpcListener, RemoteEventBus, RemoteSender};
 use crate::module::auth::{LoginRequested, LoginResult, Logout, LogoutRequested, LogoutResult};
 use crate::module::lifecycle::{
-    ComputerResumed, ComputerSuspended, ProcessStopped, SystemLogin, SystemLogout,
-    UserStopRequested,
+    ProcessStopped, SystemLoginObserved, SystemLogoutObserved, UserStopRequested,
 };
 use crate::module::status::{StatusRequest, StatusResponse};
 use crate::module::upload::{FlushBatchNow, Upload};
@@ -78,8 +77,8 @@ impl IpcBridge {
     /// Register handlers on `remote` to forward the standard controller→daemon set
     /// into the bus via `emitter`:
     /// `LoginRequested`, `LogoutRequested`, `StatusRequest`, `UserStopRequested`,
-    /// `SystemLogin`, `SystemLogout`, `ComputerSuspended`, `ComputerResumed`,
-    /// `ProcessStopped`, `Upload`, `FlushBatchNow`.
+    /// `SystemLoginObserved`, `SystemLogoutObserved`, `ProcessStopped`, `Upload`,
+    /// `FlushBatchNow`.
     pub fn forward_standard_inbound(remote: &mut RemoteEventBus, emitter: &Emitter) {
         macro_rules! forward {
             ($($T:ty),* $(,)?) => {
@@ -91,10 +90,8 @@ impl IpcBridge {
             LogoutRequested,
             StatusRequest,
             UserStopRequested,
-            SystemLogin,
-            SystemLogout,
-            ComputerSuspended,
-            ComputerResumed,
+            SystemLoginObserved,
+            SystemLogoutObserved,
             ProcessStopped,
             Upload,
             FlushBatchNow,

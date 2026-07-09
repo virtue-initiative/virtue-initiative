@@ -46,14 +46,13 @@ pub enum ProcessStoppedReason {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum LifecycleKind {
-    ProcessStarted,
-    ProcessStoppedUser,
-    ProcessStoppedShutdown,
-    ProcessStoppedOther,
-    ComputerSuspended,
-    ComputerResumed,
-    SystemLogin,
-    SystemLogout,
+    /// A suspend interval detected retrospectively via boot-vs-monotonic
+    /// clock divergence.
+    SuspendDetected { duration_ms: i64 },
+    /// Start of a new expected-running window (OS session/user login).
+    SystemLogin { utc_ms: i64 },
+    /// End of an expected-running window (OS session/user logout).
+    SystemLogout { utc_ms: i64 },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -66,12 +65,19 @@ pub enum ScreenshotSkipReason {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum AlertReason {
-    ProcessKilledBeforeShutdown,
-    ForceKilledBeforeShutdown,
-    UserStoppedProcess,
-    UnexpectedProcessStart,
-    PingGapWhileRunning,
-    MissingResume,
+    /// The process wasn't running during a stretch of awake time between a
+    /// known login and the first observed heartbeat.
+    UnexpectedStart,
+    /// The process stopped running before the session's logout, leaving a
+    /// gap between the last heartbeat and the (possibly reconstructed)
+    /// logout timestamp.
+    UnexpectedStop,
+    /// A stretch of awake time (same boot) between two heartbeats with no
+    /// sample — crash, force-kill-and-restart, or frozen process.
+    UnexpectedGap,
+    /// The user explicitly quit the monitor while it was expected to be
+    /// running.
+    UserStop,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

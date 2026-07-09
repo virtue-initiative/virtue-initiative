@@ -427,29 +427,18 @@ fn build_send_kind(args: &SendLogArgs) -> Result<UploadKind> {
 #[cfg(debug_assertions)]
 fn all_send_kinds() -> Vec<UploadKind> {
     use AlertReason::*;
-    use LifecycleKind::*;
     let lifecycle = [
-        ComputerSuspended,
-        ComputerResumed,
-        SystemLogin,
-        SystemLogout,
-        ProcessStarted,
-        ProcessStoppedUser,
-        ProcessStoppedShutdown,
-        ProcessStoppedOther,
+        LifecycleKind::SuspendDetected {
+            duration_ms: 60_000,
+        },
+        LifecycleKind::SystemLogin { utc_ms: 0 },
+        LifecycleKind::SystemLogout { utc_ms: 0 },
     ]
     .into_iter()
     .map(|kind| UploadKind::Lifecycle { kind });
-    let alerts = [
-        PingGapWhileRunning,
-        ProcessKilledBeforeShutdown,
-        ForceKilledBeforeShutdown,
-        UserStoppedProcess,
-        UnexpectedProcessStart,
-        MissingResume,
-    ]
-    .into_iter()
-    .map(|reason| UploadKind::LifecycleAlert { reason });
+    let alerts = [UnexpectedStart, UnexpectedStop, UnexpectedGap, UserStop]
+        .into_iter()
+        .map(|reason| UploadKind::LifecycleAlert { reason });
     let skips = [
         ScreenshotSkipReason::StaticScreen,
         ScreenshotSkipReason::LockedOrScreensaver,

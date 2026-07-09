@@ -54,30 +54,6 @@ public sealed class RustInteropClient : IRustInteropClient
         ThrowIfError(error);
     }
 
-    public void NotifySessionLogon()
-    {
-        var error = NativeMethods.virtue_windows_notify_session_logon();
-        ThrowIfError(error);
-    }
-
-    public void NotifySessionLogoff()
-    {
-        var error = NativeMethods.virtue_windows_notify_session_logoff();
-        ThrowIfError(error);
-    }
-
-    public void NotifySuspend()
-    {
-        var error = NativeMethods.virtue_windows_notify_suspend();
-        ThrowIfError(error);
-    }
-
-    public void NotifyResume()
-    {
-        var error = NativeMethods.virtue_windows_notify_resume();
-        ThrowIfError(error);
-    }
-
     public SessionStatusPayload GetSessionStatus() =>
         ReadJsonPayload<SessionStatusPayload>(NativeMethods.virtue_windows_get_session_status_json());
 
@@ -210,18 +186,6 @@ public sealed class RustInteropClient : IRustInteropClient
 
         [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
         internal static extern IntPtr virtue_windows_stop_monitoring_for_session_logoff();
-
-        [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern IntPtr virtue_windows_notify_session_logon();
-
-        [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern IntPtr virtue_windows_notify_session_logoff();
-
-        [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern IntPtr virtue_windows_notify_suspend();
-
-        [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern IntPtr virtue_windows_notify_resume();
 
         [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
         internal static extern IntPtr virtue_windows_get_monitor_status_json();
