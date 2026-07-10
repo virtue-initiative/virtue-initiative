@@ -60,6 +60,12 @@ their own.
 - `UserStop` and a later `UnexpectedStop` for the same incident are
   independent — a user-initiated stop doesn't suppress or excuse the
   eventual gap evaluation once the real logout timestamp arrives.
+- A sample recorded under an older login/logout window is never used for
+  mid-session `UnexpectedGap` evaluation against a newly observed login —
+  that elapsed time was already assessed via `UnexpectedStart`/
+  `UnexpectedStop` against that window's own boundary, so reusing it here
+  too would double-count a clean sign-out/sign-in cycle (no reboot) as a
+  false gap.
 
 ## Known limits (accepted under the current threat model)
 

@@ -142,15 +142,24 @@ impl LifecycleModule {
         // anchored on UTC rather than the (now-reset) boot-relative clocks.
         let rebooted = self.state.last_boot_clock_ms > 0 && boot_ms < self.state.last_boot_clock_ms;
 
-        if !rebooted && let Some(prev) = self.state.last_sample {
-            self.evaluate_unexpected_gap(utc_ms, boot_ms, mono_ms, prev, emitter)?;
-        }
-
         let should_poll = rebooted
             || self.state.last_login_poll_at_ms == 0
             || utc_ms - self.state.last_login_poll_at_ms >= LOGIN_POLL_INTERVAL_MS;
         if should_poll {
             self.poll_login_logout(utc_ms, boot_ms, mono_ms, emitter)?;
+        }
+
+        // A `prev` sample recorded under an older login_id predates a login/logout
+        // boundary that was just (re)observed above — the elapsed time already went
+        // through `evaluate_unexpected_start`/`evaluate_unexpected_stop` against that
+        // boundary, so treating it as mid-session awake-but-unsampled time here as
+        // well would double-count a clean sign-out/sign-in (or quit/relaunch across
+        // one) as a false `UnexpectedGap`.
+        if !rebooted
+            && let Some(prev) = self.state.last_sample
+            && prev.login_id == self.state.login_id
+        {
+            self.evaluate_unexpected_gap(utc_ms, boot_ms, mono_ms, prev, emitter)?;
         }
 
         self.state.last_sample = Some(HeartbeatSample {
@@ -640,6 +649,47 @@ mod tests {
             },
             ..
         }));
+    }
+
+    #[test]
+    fn login_boundary_since_prev_sample_excuses_unexpected_gap() {
+        let mut b = EventTester::builder();
+        b.add(LifecycleModule::new(Box::new(b.platform())));
+        let mut t = b.build();
+        t.platform.set_boot_clock_ms(1_000);
+        t.platform.set_monotonic_clock_ms(1_000);
+        t.emit(1, Ping);
+        t.clear_captured();
+
+        // A real login/logout cycle (sign-out then sign-in, no reboot) happens
+        // between this sample and the next: a new login is observed 350s later,
+        // well past the per-gap threshold. Without accounting for the login
+        // boundary, this would be misread as mid-session awake-but-unsampled
+        // time and double-alert as UnexpectedGap on top of UnexpectedStart.
+        t.platform.set_last_login(Some(50_000));
+        t.platform.set_boot_clock_ms(400_000);
+        t.platform.set_monotonic_clock_ms(400_000);
+        t.emit(400, Ping);
+
+        t.assert_like(crate::like!(Upload {
+            kind: UploadKind::Lifecycle {
+                kind: LifecycleKind::SystemLogin { utc_ms: 50_000 }
+            },
+            ..
+        }));
+        t.assert_not_like(crate::like!(Upload {
+            kind: UploadKind::LifecycleAlert {
+                reason: AlertReason::UnexpectedGap
+            },
+            ..
+        }));
+        assert!(
+            t.observer::<LifecycleModule>()
+                .state
+                .unexpected_gap
+                .gaps
+                .is_empty()
+        );
     }
 
     #[test]
