@@ -29,7 +29,7 @@ This Code of Conduct applies within all project spaces, including the repository
 
 ## Enforcement
 
-Instances of unacceptable behavior may be reported to the project maintainers at **help@virtueinitiative.org**. All reports will be reviewed and investigated promptly and fairly, and maintainers are obligated to respect the privacy and security of the person reporting.
+Instances of unacceptable behavior may be reported to the project maintainers at [help@virtueinitiative.org](mailto:help@virtueinitiative.org). All reports will be reviewed and investigated promptly and fairly, and maintainers are obligated to respect the privacy and security of the person reporting.
 
 Maintainers who do not follow or enforce this Code of Conduct in good faith may face temporary or permanent repercussions as determined by other project leadership.
 
