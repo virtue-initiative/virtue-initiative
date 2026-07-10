@@ -1,4 +1,6 @@
 use std::io::Cursor;
+#[cfg(target_os = "windows")]
+use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, anyhow};
 use virtue_core::{
@@ -177,10 +179,11 @@ pub fn read_last_login_utc_ms() -> CoreResult<Option<i64>> {
 }
 
 // Reads HKLM\SYSTEM\CurrentControlSet\Control\Windows\ShutdownTime (REG_BINARY FILETIME).
-// This is a floor/approximation of the true logout time, not exact — see
-// `LifecycleHooks::get_last_logout_utc_ms`.
+// The OS writes this key only during a clean shutdown, so it never advances
+// across a crash/power-loss — see `read_eventlog_last_before_boot_ms` for the
+// fallback that covers that case.
 #[cfg(target_os = "windows")]
-pub fn read_last_logout_utc_ms() -> CoreResult<Option<i64>> {
+fn read_registry_shutdown_time_ms() -> Option<i64> {
     use windows::core::PCWSTR;
 
     const FILETIME_TO_UNIX_OFFSET: u64 = 116_444_736_000_000_000;
@@ -200,7 +203,7 @@ pub fn read_last_logout_utc_ms() -> CoreResult<Option<i64>> {
             &mut hkey,
         );
         if open_result.is_err() {
-            return Ok(None);
+            return None;
         }
 
         let mut data = [0u8; 8];
@@ -216,18 +219,81 @@ pub fn read_last_logout_utc_ms() -> CoreResult<Option<i64>> {
         let _ = RegCloseKey(hkey);
 
         if query_result.is_err() || data_size != 8 {
-            return Ok(None);
+            return None;
         }
 
         let filetime = u64::from_le_bytes(data);
         if filetime < FILETIME_TO_UNIX_OFFSET {
-            return Ok(None);
+            return None;
         }
         let unix_ms = (filetime - FILETIME_TO_UNIX_OFFSET) / 10_000;
-        Ok(Some(i64::try_from(unix_ms).map_err(|_| {
-            CoreError::InvalidState("shutdown time overflow")
-        })?))
+        i64::try_from(unix_ms).ok()
     }
+}
+
+// Extracts the `SystemTime='...'` attribute of the first (i.e. newest, given
+// `/rd:true`) `<TimeCreated>` element in `wevtutil qe ... /f:xml` output.
+// `wevtutil` single-quotes XML attributes, not double-quotes.
+fn parse_eventlog_timecreated_ms(xml: &str) -> Option<i64> {
+    let key = "SystemTime='";
+    let start = xml.find(key)? + key.len();
+    let end = start + xml[start..].find('\'')?;
+    let ts = &xml[start..end];
+    chrono::DateTime::parse_from_rfc3339(ts)
+        .ok()
+        .map(|dt| dt.timestamp_millis())
+}
+
+// Falls back to the last System-log event timestamp recorded before the
+// current boot, analogous to `journalctl --list-boots` on Linux: unlike the
+// `ShutdownTime` registry key, Windows keeps writing to the event log right up
+// until a crash/power-loss, so its last pre-boot entry is a floor for the
+// true (unclean) shutdown moment. Best-effort: `None` on any failure.
+#[cfg(target_os = "windows")]
+fn read_eventlog_last_before_boot_ms(boot_start_utc_ms: i64) -> Option<i64> {
+    let boot_time_iso = chrono::DateTime::from_timestamp_millis(boot_start_utc_ms)?
+        .format("%Y-%m-%dT%H:%M:%S%.3fZ");
+    let query = format!("*[System[TimeCreated[@SystemTime<='{boot_time_iso}']]]");
+    let output = Command::new("wevtutil")
+        .args(["qe", "System", "/c:1", "/rd:true", "/f:xml"])
+        .arg(format!("/q:{query}"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_eventlog_timecreated_ms(&String::from_utf8_lossy(&output.stdout))
+}
+
+// This is a floor/approximation of the true logout time, not exact — see
+// `LifecycleHooks::get_last_logout_utc_ms`. Combines the clean-shutdown
+// registry timestamp with the event-log floor (which alone covers unclean
+// shutdowns the registry key misses) and returns whichever is newer.
+#[cfg(target_os = "windows")]
+pub fn read_last_logout_utc_ms() -> CoreResult<Option<i64>> {
+    let registry_ms = read_registry_shutdown_time_ms();
+
+    let boot_start_utc_ms = read_boot_clock_ms()
+        .ok()
+        .and_then(|boot_ms| Some(read_utc_now_ms()? - boot_ms));
+    let eventlog_ms = boot_start_utc_ms.and_then(read_eventlog_last_before_boot_ms);
+
+    Ok(registry_ms.into_iter().chain(eventlog_ms).max())
+}
+
+#[cfg(target_os = "windows")]
+fn read_utc_now_ms() -> Option<i64> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    i64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .ok()?
+            .as_millis(),
+    )
+    .ok()
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -239,9 +305,8 @@ pub fn read_last_logout_utc_ms() -> CoreResult<Option<i64>> {
 // suspended.
 #[cfg(target_os = "windows")]
 pub fn read_boot_clock_ms() -> CoreResult<i64> {
-    use windows::Win32::System::SystemInformation::QueryInterruptTime;
-    let mut time_100ns = 0u64;
-    unsafe { QueryInterruptTime(&mut time_100ns) };
+    use windows::Win32::System::WindowsProgramming::QueryInterruptTime;
+    let time_100ns = unsafe { QueryInterruptTime() };
     Ok((time_100ns / 10_000) as i64)
 }
 
@@ -254,9 +319,9 @@ pub fn read_boot_clock_ms() -> CoreResult<i64> {
 // spent suspended.
 #[cfg(target_os = "windows")]
 pub fn read_monotonic_clock_ms() -> CoreResult<i64> {
-    use windows::Win32::System::SystemInformation::QueryUnbiasedInterruptTime;
+    use windows::Win32::System::WindowsProgramming::QueryUnbiasedInterruptTime;
     let mut time_100ns = 0u64;
-    unsafe { QueryUnbiasedInterruptTime(&mut time_100ns) };
+    let _ = unsafe { QueryUnbiasedInterruptTime(&mut time_100ns) };
     Ok((time_100ns / 10_000) as i64)
 }
 
@@ -358,3 +423,33 @@ impl LifecycleHooks for WindowsPlatformHooks {
 }
 
 impl PlatformHooks for WindowsPlatformHooks {}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_eventlog_timecreated_ms;
+
+    #[test]
+    fn parse_eventlog_timecreated_ms_extracts_newest_entry() {
+        // `wevtutil qe ... /f:xml` single-quotes attributes, unlike typical XML.
+        let xml = r#"<Events><Event><System><TimeCreated SystemTime='2026-07-10T01:06:12.345Z'/></System></Event></Events>"#;
+        assert_eq!(parse_eventlog_timecreated_ms(xml), Some(1783645572345));
+    }
+
+    #[test]
+    fn parse_eventlog_timecreated_ms_returns_none_on_empty_result() {
+        assert_eq!(parse_eventlog_timecreated_ms("<Events></Events>"), None);
+        assert_eq!(parse_eventlog_timecreated_ms(""), None);
+    }
+
+    #[test]
+    fn parse_eventlog_timecreated_ms_returns_none_on_malformed_timestamp() {
+        let xml = r#"<TimeCreated SystemTime='not-a-timestamp'/>"#;
+        assert_eq!(parse_eventlog_timecreated_ms(xml), None);
+    }
+
+    #[test]
+    fn parse_eventlog_timecreated_ms_handles_real_wevtutil_output() {
+        let xml = r#"<Event xmlns='http://schemas.microsoft.com/win/2004/08/events/event'><System><Provider Name='Microsoft-Windows-Kernel-General' Guid='{a68ca8b7-004f-d7b6-a698-07e2de0f1f5d}'/><EventID>16</EventID><TimeCreated SystemTime='2026-07-10T06:17:42.6765986Z'/><EventRecordID>4988</EventRecordID></System></Event>"#;
+        assert_eq!(parse_eventlog_timecreated_ms(xml), Some(1783664262676));
+    }
+}
