@@ -300,11 +300,20 @@ fn daemon_stop(paths: ClientPaths, yes: bool) -> Result<()> {
     }
 
     let sock = paths.state_dir.join("daemon.sock");
-    let client =
+    let mut client =
         ClientController::connect(&sock).context("failed to connect to daemon (is it running?)")?;
     client
         .request_user_stop("cli_daemon_stop")
         .context("failed to record stop intent")?;
+
+    // `request_user_stop` only publishes onto the IPC socket — it doesn't wait
+    // for the daemon to actually read and dispatch it. Without this round trip,
+    // `systemctl stop`'s SIGTERM can arrive before the daemon's next loop
+    // iteration drains the socket, silently dropping the immediate/emailed
+    // UserStop alert. `get_status` is a synchronous request/response over the
+    // same ordered connection, so its reply guarantees the daemon has already
+    // processed (and persisted) the earlier UserStopRequested.
+    let _ = client.get_status();
 
     run_systemctl_user(["stop", &svc])?;
 
