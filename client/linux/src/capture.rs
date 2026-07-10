@@ -396,7 +396,7 @@ fn read_clock_ms(clock_id: libc::clockid_t) -> CoreResult<i64> {
             std::io::Error::last_os_error().to_string(),
         ));
     }
-    Ok(ts.tv_sec * 1000 + i64::from(ts.tv_nsec) / 1_000_000)
+    Ok(ts.tv_sec * 1000 + ts.tv_nsec / 1_000_000)
 }
 
 impl LifecycleHooks for LinuxPlatformHooks {
