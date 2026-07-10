@@ -303,10 +303,9 @@ fn extract_bbox(tag: &str) -> Option<BoundingBox> {
     let rest = &tag[ti..];
     let (quote, rest) = if let Some(rest) = rest.strip_prefix('"') {
         ('"', rest)
-    } else if let Some(rest) = rest.strip_prefix('\'') {
-        ('\'', rest)
     } else {
-        return None;
+        let rest = rest.strip_prefix('\'')?;
+        ('\'', rest)
     };
     let title = &rest[..rest.find(quote)?];
     let bi = title.find("bbox ")? + "bbox ".len();
