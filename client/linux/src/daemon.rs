@@ -1,14 +1,12 @@
-use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::Result;
 use tokio::sync::mpsc;
-use virtue_core::ProcessStoppedReason;
 use virtue_core::{
-    EventBus, EventChannel, IpcBridge, Ping, PlatformConfig, ProcessStarted, ProcessStopped,
-    UserStopRequested, build_default_modules_reqwest, load_state, store_state,
+    EventBus, IpcBridge, Ping, PlatformConfig, ProcessStarted, ProcessStopped,
+    build_default_modules_reqwest, load_state, store_state,
 };
 
 use crate::capture::{LinuxPlatformHooks, is_session_unavailable_text};
@@ -40,7 +38,6 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     }
 
     let shutdown = Arc::new(AtomicBool::new(false));
-    let user_stop_requested = Arc::new(AtomicBool::new(false));
     let (signal_tx, mut signal_rx) = mpsc::unbounded_channel::<String>();
     spawn_signal_handler(shutdown.clone(), signal_tx);
 
@@ -53,16 +50,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
 
         // Wire up any newly accepted IPC connections.
         if let Some(ipc) = &mut ipc {
-            let usr = user_stop_requested.clone();
-            ipc.accept_pending(&mut bus, move |remote, e| {
-                IpcBridge::forward_standard_inbound(remote, e);
-                // Track user-stop separately to classify shutdown reason accurately.
-                let usr = usr.clone();
-                remote.on::<UserStopRequested>(move |_ev| {
-                    usr.store(true, Ordering::SeqCst);
-                    Ok(())
-                });
-            });
+            ipc.accept_pending(&mut bus, IpcBridge::forward_standard_inbound);
         }
 
         match tokio::task::block_in_place(|| {
@@ -93,9 +81,12 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
         tokio::select! {
             signal = signal_rx.recv() => {
                 if signal.is_some() {
-                    let explicit_user_stop = user_stop_requested.load(Ordering::SeqCst);
                     tokio::task::block_in_place(|| {
-                        record_shutdown_transition(&mut bus, &state_path, explicit_user_stop)
+                        let _ = bus.send(ProcessStopped);
+                        let _ = bus.send(Ping);
+                        if let Ok(state) = bus.iter() {
+                            let _ = store_state(&state_path, &state);
+                        }
                     });
                     shutdown_cleanup_done = true;
                 }
@@ -114,63 +105,6 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
         });
     }
     std::process::exit(0);
-}
-
-const SYSTEMCTL_TIMEOUT: Duration = Duration::from_secs(2);
-
-fn run_with_timeout<F, T>(f: F) -> Option<T>
-where
-    F: FnOnce() -> T + Send + 'static,
-    T: Send + 'static,
-{
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = tx.send(f());
-    });
-    rx.recv_timeout(SYSTEMCTL_TIMEOUT).ok()
-}
-
-fn read_systemd_state() -> Option<String> {
-    run_with_timeout(|| {
-        let output = Command::new("systemctl")
-            .arg("is-system-running")
-            .output()
-            .ok()?;
-        let stdout = String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .to_ascii_lowercase();
-        if !stdout.is_empty() {
-            return Some(stdout);
-        }
-        let stderr = String::from_utf8_lossy(&output.stderr)
-            .trim()
-            .to_ascii_lowercase();
-        if !stderr.is_empty() {
-            Some(stderr)
-        } else {
-            None
-        }
-    })
-    .flatten()
-}
-
-fn is_shutdown_job_queued() -> bool {
-    run_with_timeout(|| {
-        let output = Command::new("systemctl")
-            .args(["list-jobs", "--no-legend", "--no-pager"])
-            .output()
-            .ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        let stdout = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
-        Some(stdout.lines().any(|line| {
-            line.contains("shutdown.target")
-                && (line.contains(" start ") || line.ends_with(" start"))
-        }))
-    })
-    .flatten()
-    .unwrap_or(false)
 }
 
 fn spawn_signal_handler(shutdown: Arc<AtomicBool>, signal_tx: mpsc::UnboundedSender<String>) {
@@ -196,85 +130,4 @@ fn spawn_signal_handler(shutdown: Arc<AtomicBool>, signal_tx: mpsc::UnboundedSen
         shutdown.store(true, Ordering::SeqCst);
         let _ = signal_tx.send(signal_name.to_string());
     });
-}
-
-fn classify_shutdown_reason(
-    system_state: Option<&str>,
-    shutdown_job_queued: bool,
-    explicit_user_stop: bool,
-) -> ProcessStoppedReason {
-    let shutting_down = matches!(system_state, Some("stopping")) || shutdown_job_queued;
-    if shutting_down {
-        ProcessStoppedReason::Shutdown
-    } else if explicit_user_stop {
-        ProcessStoppedReason::User
-    } else {
-        ProcessStoppedReason::Other
-    }
-}
-
-fn record_shutdown_transition(
-    bus: &mut EventBus,
-    state_path: &std::path::Path,
-    explicit_user_stop: bool,
-) {
-    let system_state = read_systemd_state();
-    let shutdown_job_queued = is_shutdown_job_queued();
-    let reason = classify_shutdown_reason(
-        system_state.as_deref(),
-        shutdown_job_queued,
-        explicit_user_stop,
-    );
-    let _ = bus.send(ProcessStopped(reason));
-    let _ = bus.send(Ping);
-    if let Ok(state) = bus.iter() {
-        let _ = store_state(state_path, &state);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use virtue_core::ProcessStoppedReason;
-
-    use super::classify_shutdown_reason;
-
-    #[test]
-    fn classify_shutdown_reason_produces_shutdown_on_systemd_stopping_state() {
-        assert!(matches!(
-            classify_shutdown_reason(Some("stopping"), false, false),
-            ProcessStoppedReason::Shutdown
-        ));
-    }
-
-    #[test]
-    fn classify_shutdown_reason_produces_shutdown_when_job_queued() {
-        assert!(matches!(
-            classify_shutdown_reason(None, true, false),
-            ProcessStoppedReason::Shutdown
-        ));
-    }
-
-    #[test]
-    fn classify_shutdown_reason_produces_user_on_user_stop() {
-        assert!(matches!(
-            classify_shutdown_reason(None, false, true),
-            ProcessStoppedReason::User
-        ));
-    }
-
-    #[test]
-    fn classify_shutdown_reason_produces_other_by_default() {
-        assert!(matches!(
-            classify_shutdown_reason(None, false, false),
-            ProcessStoppedReason::Other
-        ));
-    }
-
-    #[test]
-    fn classify_shutdown_reason_shutdown_takes_priority_over_user_stop() {
-        assert!(matches!(
-            classify_shutdown_reason(Some("stopping"), false, true),
-            ProcessStoppedReason::Shutdown
-        ));
-    }
 }

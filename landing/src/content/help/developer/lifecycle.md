@@ -36,11 +36,9 @@ flowchart LR
 Login and logout detection are both purely poll-based: the module polls
 `LifecycleHooks::get_last_login_utc_ms`/`get_last_logout_utc_ms` on a coarse
 cadence, forced immediately after `ProcessStarted` or a detected reboot.
-There is no real-time push path for either — platforms that can observe an
-exact OS signal (a systemd shutdown classification, `WM_ENDSESSION`,
-`NSWorkspaceWillPowerOffNotification`) still use it to classify the process
-stop reason, but it no longer feeds a lifecycle timestamp directly; the poll
-picks up the same timestamp on the next tick.
+There is no real-time push path for either — a platform-observed OS signal
+around process stop (e.g. Windows' `WM_ENDSESSION`) doesn't feed a lifecycle
+timestamp directly; the poll picks up the same timestamp on the next tick.
 
 ## The five system hooks
 
@@ -137,19 +135,20 @@ the 10-minute window on its own.
 
 ## User-initiated stop
 
-An explicit user-initiated stop (`ProcessStopped(User)`, from the tray/CLI
-"quit" action) fires its own immediate `UserStop` alert (`EXTRA_HIGH_RISK`)
-independently of the gap model — nothing about a user-initiated stop
-suppresses or excuses the later unexpected-stop evaluation. When the
-session's logout eventually arrives, the resulting gap is still
-independently evaluated: both signals can exist for the same incident.
+An explicit user-initiated stop (`UserStopRequested`, from the tray/CLI
+"quit" action, fired before the process actually exits) drives its own
+immediate `UserStop` alert (`EXTRA_HIGH_RISK`) independently of the gap
+model — nothing about a user-initiated stop suppresses or excuses the later
+unexpected-stop evaluation. When the session's logout eventually arrives,
+the resulting gap is still independently evaluated: both signals can exist
+for the same incident.
 
 ## The closed event/alert set
 
 Exactly seven lifecycle log entries exist — no more, no less. Routine
 process-start/stop bookkeeping (`ProcessStarted`/`ProcessStopped`) still
-drives the state machine internally (deciding when to poll login/logout,
-detecting an explicit user stop) but produces no visible log row of its own.
+drives the state machine internally (deciding when to poll login/logout)
+but produces no visible log row of its own.
 
 | Kind/reason       | Risk                                       | Payload       |
 | ----------------- | ------------------------------------------ | ------------- |
@@ -203,12 +202,6 @@ report. This section is the map from OS signal to `LifecycleHooks`.
   `last_entry` timestamp of the previous boot — a floor, not exact. Needs
   persistent journald logging (`Storage=persistent`); returns `None`
   otherwise.
-- `record_shutdown_transition()`, run when the daemon catches
-  `SIGTERM`/`SIGINT`, still calls `classify_shutdown_reason()` (shells out to
-  `systemctl is-system-running`/`systemctl list-jobs`) to decide the
-  `ProcessStoppedReason` (`Shutdown` vs `Other`/`User`) — but this only feeds
-  the stop-reason now, not a lifecycle timestamp push; the logout time itself
-  comes from the next `get_last_logout_utc_ms` poll.
 - No real-time suspend/resume subscription exists anymore — the systemd-logind
   `PrepareForSleep` D-Bus watcher was removed; suspend is derived purely from
   clock divergence.
@@ -221,11 +214,6 @@ report. This section is the map from OS signal to `LifecycleHooks`.
   most recent non-`reboot`/non-`shutdown` entry.
 - **`get_last_logout_utc_ms`**: `last -1 -F shutdown`, parsed the same way
   as before — a floor.
-- `NSWorkspaceWillPowerOffNotification`, observed on a dedicated
-  `ShutdownWatcher` thread, still classifies the `ProcessStoppedReason` as
-  `Shutdown` — this is a shutdown notification, not the suspend/resume
-  subscription that was removed. It no longer pushes a lifecycle timestamp;
-  the logout time comes from the next `get_last_logout_utc_ms` poll.
 - The `IORegisterForSystemPower` IOKit watcher (suspend/resume) was removed
   entirely. The daemon now derives "just resumed" locally each tick from its
   own boot-vs-monotonic divergence check, purely to drive the post-wake
@@ -244,10 +232,11 @@ report. This section is the map from OS signal to `LifecycleHooks`.
   `REG_BINARY` value under `HKLM\SYSTEM\CurrentControlSet\Control\Windows`,
   written only on a clean shutdown.
 - `WM_ENDSESSION`'s `ENDSESSION_LOGOFF` bit still distinguishes session
-  logoff from shutdown — set → session logoff, unset → shutdown — but only
-  to pick the right `ProcessStoppedReason`. Neither path pushes a lifecycle
-  timestamp anymore; the logout time comes from the next
-  `get_last_logout_utc_ms` poll.
+  logoff from shutdown at the C# layer (for logging purposes only — see
+  `App.xaml.cs`'s `HandleSessionLogoff`/`HandleSystemShutdown`), but both
+  paths now call the same Rust-side `stop_monitoring_for_os_session_end()`;
+  neither pushes a lifecycle timestamp, and the logout time comes from the
+  next `get_last_logout_utc_ms` poll.
 - `WM_POWERBROADCAST` (suspend/resume) and `WM_WTSSESSION_CHANGE`
   (`WTS_SESSION_LOGON` push) were both removed — suspend is derived from
   clocks, and login is covered by the pull-based hook (a few seconds'

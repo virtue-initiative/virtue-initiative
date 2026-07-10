@@ -1,9 +1,9 @@
 use crate::error::{CoreError, CoreResult};
 use crate::events::{Event, EventChannel};
+use crate::model::Redacted;
 use crate::model::ServiceStatus;
-use crate::model::{ProcessStoppedReason, Redacted};
 use crate::module::auth::{LoginRequested, LoginResult, LogoutRequested, LogoutResult};
-use crate::module::lifecycle::{ProcessStopped, UserStopRequested};
+use crate::module::lifecycle::UserStopRequested;
 use crate::module::status::{StatusRequest, StatusResponse};
 use crate::module::upload::{FlushBatchNow, Upload};
 
@@ -68,10 +68,6 @@ impl<C: EventChannel> ClientController<C> {
         self.channel.publish(UserStopRequested {
             source: source.into(),
         })
-    }
-
-    pub fn note_process_stopped(&self, reason: ProcessStoppedReason) -> CoreResult<()> {
-        self.channel.publish(ProcessStopped(reason))
     }
 
     /// Queue `upload` into the daemon's live batch/hash pipeline. Picked up on

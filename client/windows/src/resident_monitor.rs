@@ -11,9 +11,8 @@ use anyhow::Result;
 use serde::Serialize;
 use virtue_core::{
     CoreError, EventBus, EventChannel, LoginRequested, LoginResult, LogoutRequested, LogoutResult,
-    Ping, PlatformConfig, ProcessStarted, ProcessStopped, ProcessStoppedReason, Redacted,
-    StatusRequest, StatusResponse, UserStopRequested, build_default_modules_reqwest, load_state,
-    store_state,
+    Ping, PlatformConfig, ProcessStarted, ProcessStopped, Redacted, StatusRequest, StatusResponse,
+    UserStopRequested, build_default_modules_reqwest, load_state, store_state,
 };
 
 use crate::capture::WindowsPlatformHooks;
@@ -51,7 +50,7 @@ enum MonitorCommand {
     NoteStopRequested {
         source: String,
     },
-    ProcessStopped(ProcessStoppedReason),
+    ProcessStopped,
     AppLogin {
         email: String,
         password: String,
@@ -145,21 +144,13 @@ pub fn stop_monitoring_from_tray_exit() -> Result<()> {
     send_command(MonitorCommand::NoteStopRequested {
         source: "tray_stop_monitoring".to_string(),
     })?;
-    send_command(MonitorCommand::ProcessStopped(ProcessStoppedReason::User))?;
+    send_command(MonitorCommand::ProcessStopped)?;
     stop_monitoring()?;
     Ok(())
 }
 
-pub fn stop_monitoring_for_system_shutdown() -> Result<()> {
-    send_command(MonitorCommand::ProcessStopped(
-        ProcessStoppedReason::Shutdown,
-    ))?;
-    stop_monitoring()?;
-    Ok(())
-}
-
-pub fn stop_monitoring_for_session_logoff() -> Result<()> {
-    send_command(MonitorCommand::ProcessStopped(ProcessStoppedReason::Other))?;
+pub fn stop_monitoring_for_os_session_end() -> Result<()> {
+    send_command(MonitorCommand::ProcessStopped)?;
     stop_monitoring()?;
     Ok(())
 }
@@ -355,8 +346,8 @@ fn handle_command(bus: &mut EventBus, state_path: &Path, command: MonitorCommand
             bus.send(UserStopRequested { source })?;
             store_state(state_path, &bus.iter()?)?;
         }
-        MonitorCommand::ProcessStopped(reason) => {
-            bus.send(ProcessStopped(reason))?;
+        MonitorCommand::ProcessStopped => {
+            bus.send(ProcessStopped)?;
             store_state(state_path, &bus.iter()?)?;
         }
         MonitorCommand::AppLogin {

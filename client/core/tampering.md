@@ -29,12 +29,14 @@ Alerts:
   the last known-alive sample and the session's logout
 - `UnexpectedGap` (risk `HIGH_RISK_LIFECYCLE_ALERT`, batched) — awake time
   between two consecutive samples in the same boot with no sample
-- `UserStop` (risk `EXTRA_HIGH_RISK`, immediate/emailed) — the user
-  explicitly quit the monitor while it was expected to be running
+- `UserStop` (risk `EXTRA_HIGH_RISK`, immediate/emailed) — driven directly by
+  `UserStopRequested`, fired by every platform's explicit-stop entry point
+  before the process actually exits
 
-`ProcessStarted`/`ProcessStopped` still exist as internal events (driving
-when to poll the login/logout hooks, detecting an explicit user stop) but
-produce no log row of their own.
+`ProcessStarted`/`ProcessStopped` still exist as internal events — the
+former drives when to poll the login/logout hooks, the latter is the
+upload module's flush-opportunity trigger — but produce no log row of
+their own.
 
 ## Rules
 

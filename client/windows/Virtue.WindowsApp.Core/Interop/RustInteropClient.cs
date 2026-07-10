@@ -42,15 +42,9 @@ public sealed class RustInteropClient : IRustInteropClient
         ThrowIfError(error);
     }
 
-    public void StopMonitoringForSystemShutdown()
+    public void StopMonitoringForOsSessionEnd()
     {
-        var error = NativeMethods.virtue_windows_stop_monitoring_for_system_shutdown();
-        ThrowIfError(error);
-    }
-
-    public void StopMonitoringForSessionLogoff()
-    {
-        var error = NativeMethods.virtue_windows_stop_monitoring_for_session_logoff();
+        var error = NativeMethods.virtue_windows_stop_monitoring_for_os_session_end();
         ThrowIfError(error);
     }
 
@@ -182,10 +176,7 @@ public sealed class RustInteropClient : IRustInteropClient
         internal static extern IntPtr virtue_windows_stop_monitoring_from_tray_exit();
 
         [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern IntPtr virtue_windows_stop_monitoring_for_system_shutdown();
-
-        [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern IntPtr virtue_windows_stop_monitoring_for_session_logoff();
+        internal static extern IntPtr virtue_windows_stop_monitoring_for_os_session_end();
 
         [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
         internal static extern IntPtr virtue_windows_get_monitor_status_json();

@@ -37,14 +37,6 @@ impl From<&str> for Redacted<String> {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
-pub enum ProcessStoppedReason {
-    Other,
-    Shutdown,
-    User,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "snake_case")]
 pub enum LifecycleKind {
     /// A suspend interval detected retrospectively via boot-vs-monotonic
     /// clock divergence.

@@ -16,8 +16,8 @@ use virtue_core::{
     build_default_modules_reqwest, load_state, store_state, AuthState, Config, CoreError,
     CoreResult, DeviceSettings, EventBus, EventChannel, LifecycleHooks, LoginRequested,
     LoginResult, LogoutRequested, Ping, PlatformConfig, PlatformHooks, ProcessStarted,
-    ProcessStopped, ProcessStoppedReason, Redacted, Screenshot, ScreenshotHooks, StatusRequest,
-    StatusResponse, UserStopRequested,
+    ProcessStopped, Redacted, Screenshot, ScreenshotHooks, StatusRequest, StatusResponse,
+    UserStopRequested,
 };
 
 static CORE: OnceCell<AndroidCore> = OnceCell::new();
@@ -40,7 +40,6 @@ struct AndroidCore {
     // Cached at init time (main thread) so background threads can use the app class loader.
     screenshot_service_class: Arc<GlobalRef>,
     stop: Arc<AtomicBool>,
-    user_stop: Arc<AtomicBool>,
     daemon_running: Mutex<bool>,
 }
 
@@ -241,7 +240,6 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeInit(
                 java_vm,
                 screenshot_service_class,
                 stop: Arc::new(AtomicBool::new(false)),
-                user_stop: Arc::new(AtomicBool::new(false)),
                 daemon_running: Mutex::new(false),
             })
             .map_err(|_| anyhow!("core already initialized"))?;
@@ -379,7 +377,6 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeRunDa
             *guard = true;
         }
         core.stop.store(false, Ordering::SeqCst);
-        core.user_stop.store(false, Ordering::SeqCst);
 
         let daemon_result = run_daemon_loop(core);
 
@@ -419,7 +416,6 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeNoteU
         bus.send(UserStopRequested { source })?;
         let state = bus.iter()?;
         store_state(&state_path, &state)?;
-        core.user_stop.store(true, Ordering::SeqCst);
         Ok(())
     })();
 
@@ -522,12 +518,7 @@ fn run_daemon_loop(core: &AndroidCore) -> Result<()> {
         sleep_interruptible(&core.stop, sleep_duration);
     }
 
-    let reason = if core.user_stop.load(Ordering::SeqCst) {
-        ProcessStoppedReason::User
-    } else {
-        ProcessStoppedReason::Other
-    };
-    bus.send(ProcessStopped(reason))?;
+    bus.send(ProcessStopped)?;
     let state = bus.iter()?;
     let _ = store_state(&state_path, &state);
     Ok(())

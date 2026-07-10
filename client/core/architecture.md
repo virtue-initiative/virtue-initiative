@@ -88,7 +88,7 @@ to pattern-match typed events without boilerplate.
 
 | Module                      | Key inputs                                                                              | Key outputs                                                             |
 | --------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `LifecycleModule`           | `Ping`, `ProcessStarted/Stopped`, `UserStopRequested`                                   | `Upload` (lifecycle + alert events), `PartialStatus::Lifecycle`         |
+| `LifecycleModule`           | `Ping`, `ProcessStarted`, `UserStopRequested`                                           | `Upload` (lifecycle + alert events), `PartialStatus::Lifecycle`         |
 | `ScreenshotModule`          | `Login`, `Logout`, `Ping`, `ConfigChanged`                                              | `Upload` (screenshot), `CaptureFailed`                                  |
 | `UploadModule`              | `Login`, `Logout`, `Upload`, `Ping`, `ProcessStopped`, `FlushBatchNow`, `ConfigChanged` | network I/O via `ApiTransport`; `LogoutRequested` on 404                |
 | `CaptureAvailabilityModule` | `CaptureFailed`                                                                         | `Upload` (capture-failed alert)                                         |
@@ -193,8 +193,8 @@ if let Some(ipc) = &mut ipc {
 set (`LoginRequested`, `LogoutRequested`, `StatusRequest`, `UserStopRequested`,
 `ProcessStopped`).
 Platform daemons can pass a custom closure to `accept_pending` to add extra
-handlers per-connection (Mac and Linux use this to track `UserStopRequested`
-separately for shutdown-reason classification).
+handlers per-connection when needed; Mac and Linux currently just pass
+`forward_standard_inbound` directly.
 
 ## Platform process model
 

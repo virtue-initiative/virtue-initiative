@@ -69,7 +69,7 @@ loop {
 | Module                 | Handles                                                                | Emits                                                                   |
 | ---------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | `auth`                 | `LoginRequested`, `LogoutRequested`, `StatusRequest`                   | `Login`, `Logout`, `LoginResult`, `LogoutResult`, `PartialStatus::Auth` |
-| `lifecycle`            | `Ping`, `ProcessStarted/Stopped`, `UserStopRequested`                  | `Upload` (lifecycle + alerts), `PartialStatus::Lifecycle`               |
+| `lifecycle`            | `Ping`, `ProcessStarted`, `UserStopRequested`                          | `Upload` (lifecycle + alerts), `PartialStatus::Lifecycle`               |
 | `screenshot`           | `Login`, `Logout`, `Ping`, `ConfigChanged`                             | `Upload` (screenshot), `CaptureFailed`                                  |
 | `upload`               | `Login`, `Logout`, `Upload`, `Ping`, `ProcessStopped`, `FlushBatchNow` | network I/O                                                             |
 | `capture_availability` | `CaptureFailed`                                                        | `Upload` (capture-failed alert)                                         |

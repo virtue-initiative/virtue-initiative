@@ -14,8 +14,8 @@ use virtue_core::{
     build_default_modules_reqwest, load_state, store_state, AuthState, Config, CoreError,
     CoreResult, DeviceSettings, EventBus, EventChannel, LifecycleHooks, LoginRequested,
     LoginResult, LogoutRequested, Ping, PlatformConfig, PlatformHooks, ProcessStarted,
-    ProcessStopped, ProcessStoppedReason, Redacted, Screenshot, ScreenshotHooks, StatusRequest,
-    StatusResponse, UserStopRequested,
+    ProcessStopped, Redacted, Screenshot, ScreenshotHooks, StatusRequest, StatusResponse,
+    UserStopRequested,
 };
 
 static CORE: OnceCell<IosCore> = OnceCell::new();
@@ -46,10 +46,6 @@ struct IosCore {
     runtime_config_file: PathBuf,
     stop: AtomicBool,
     daemon_running: Mutex<bool>,
-    /// `Some(explicit_user_stop)` once a stop has been requested: `true` when the
-    /// user paused monitoring, `false` for a system-driven stop. `None` until a
-    /// stop is requested.
-    stop_request: Mutex<Option<bool>>,
 }
 
 #[derive(Clone)]
@@ -171,7 +167,6 @@ pub extern "C" fn virtue_ios_native_init(
                 runtime_config_file,
                 stop: AtomicBool::new(false),
                 daemon_running: Mutex::new(false),
-                stop_request: Mutex::new(None),
             })
             .map_err(|_| anyhow!("core already initialized"))?;
         }
@@ -331,8 +326,6 @@ pub extern "C" fn virtue_ios_native_run_daemon_loop() -> *mut c_char {
 pub extern "C" fn virtue_ios_native_stop_daemon() -> *mut c_char {
     let result = (|| -> Result<()> {
         let core = core()?;
-        // System-driven stop (not an explicit user pause).
-        set_stop_request(core, false)?;
         core.stop.store(true, Ordering::SeqCst);
         Ok(())
     })();
@@ -348,8 +341,6 @@ pub extern "C" fn virtue_ios_native_pause_monitoring(source: *const c_char) -> *
             "" => "ios_pause_button".to_string(),
             value => value.to_string(),
         };
-        // Explicit user pause.
-        set_stop_request(core, true)?;
         core.stop.store(true, Ordering::SeqCst);
         Ok(())
     })();
@@ -414,13 +405,7 @@ fn run_daemon_loop(core: &IosCore) -> Result<()> {
         sleep_interruptible(&core.stop, sleep_duration);
     }
 
-    let explicit_user_stop = take_stop_request(core)?.unwrap_or(false);
-    let reason = if explicit_user_stop {
-        ProcessStoppedReason::User
-    } else {
-        ProcessStoppedReason::Other
-    };
-    bus.send(ProcessStopped(reason))?;
+    bus.send(ProcessStopped)?;
     let state = bus.iter()?;
     let _ = store_state(&state_path, &state);
     Ok(())
@@ -465,23 +450,6 @@ fn build_core_config(core: &IosCore) -> Config {
         Duration::from_secs(DEFAULT_CAPTURE_INTERVAL_SECONDS),
         Duration::from_secs(DEFAULT_BATCH_WINDOW_SECONDS),
     )
-}
-
-fn set_stop_request(core: &IosCore, explicit_user_stop: bool) -> Result<()> {
-    let mut guard = core
-        .stop_request
-        .lock()
-        .map_err(|_| anyhow!("stop request lock poisoned"))?;
-    *guard = Some(explicit_user_stop);
-    Ok(())
-}
-
-fn take_stop_request(core: &IosCore) -> Result<Option<bool>> {
-    let mut guard = core
-        .stop_request
-        .lock()
-        .map_err(|_| anyhow!("stop request lock poisoned"))?;
-    Ok(guard.take())
 }
 
 fn write_runtime_overrides(

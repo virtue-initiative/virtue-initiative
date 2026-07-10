@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::CoreResult;
 use crate::events::Ping;
 use crate::events::bus::{Emitter, EventBus, Observer, StateType};
-use crate::model::{AlertReason, LifecycleKind, PartialStatus, ProcessStoppedReason, UploadKind};
+use crate::model::{AlertReason, LifecycleKind, PartialStatus, UploadKind};
 use crate::module::status::StatusRequest;
 use crate::module::upload::Upload;
 use crate::platform::LifecycleHooks;
@@ -14,7 +14,7 @@ use crate::platform::LifecycleHooks;
 pub struct ProcessStarted;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProcessStopped(pub ProcessStoppedReason);
+pub struct ProcessStopped;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserStopRequested {
@@ -356,21 +356,18 @@ impl Observer for LifecycleModule {
                 self.state.last_login_poll_at_ms = 0;
                 Ok(())
             },
-            ev: ProcessStopped => {
-                if matches!(ev.0, ProcessStoppedReason::User) {
-                    let _ = emitter.send(Upload {
-                        risk: EXTRA_HIGH_RISK,
-                        kind: UploadKind::LifecycleAlert { reason: AlertReason::UserStop },
-                    });
-                }
-                Ok(())
-            },
             _: StatusRequest => {
                 let last_loop_at_ms = self.state.last_sample.map(|s| s.utc_ms);
                 let _ = emitter.send(PartialStatus::Lifecycle { is_running: true, last_loop_at_ms });
                 Ok(())
             },
-            _: UserStopRequested => Ok(()),
+            _: UserStopRequested => {
+                let _ = emitter.send(Upload {
+                    risk: EXTRA_HIGH_RISK,
+                    kind: UploadKind::LifecycleAlert { reason: AlertReason::UserStop },
+                });
+                Ok(())
+            },
         })
     }
 
@@ -423,12 +420,13 @@ impl Observer for NoopLifecycleModule {
 
 #[cfg(test)]
 mod tests {
+    use super::UserStopRequested;
     use super::{
         EXTRA_HIGH_RISK, HIGH_RISK_LIFECYCLE_ALERT, LifecycleModule, ProcessStarted, ProcessStopped,
     };
     use crate::events::Ping;
     use crate::model::PartialStatus;
-    use crate::model::{AlertReason, LifecycleKind, ProcessStoppedReason, UploadKind};
+    use crate::model::{AlertReason, LifecycleKind, UploadKind};
     use crate::module::status::StatusRequest;
     use crate::module::upload::Upload;
     use crate::testing::EventTester;
@@ -448,8 +446,7 @@ mod tests {
         b.add(LifecycleModule::new(Box::new(b.platform())));
         let mut t = b.build();
         t.emit(1, ProcessStarted);
-        t.emit(2, ProcessStopped(ProcessStoppedReason::Other));
-        t.emit(3, ProcessStopped(ProcessStoppedReason::Shutdown));
+        t.emit(2, ProcessStopped);
         t.assert_not_like(crate::like!(Upload {
             kind: UploadKind::Lifecycle { .. },
             ..
@@ -799,7 +796,12 @@ mod tests {
         t.emit(1, Ping);
 
         // Explicit user-initiated stop: immediate high-risk alert.
-        t.emit(2, ProcessStopped(ProcessStoppedReason::User));
+        t.emit(
+            2,
+            UserStopRequested {
+                source: "test".into(),
+            },
+        );
         t.assert_like(crate::like!(Upload {
             kind: UploadKind::LifecycleAlert {
                 reason: AlertReason::UserStop

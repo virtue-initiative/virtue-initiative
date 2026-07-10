@@ -1,17 +1,12 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use block2::RcBlock;
-use objc2::rc::autoreleasepool;
-use objc2_app_kit::{NSWorkspace, NSWorkspaceWillPowerOffNotification};
 use tokio::sync::mpsc;
 use virtue_core::{
-    EventBus, EventChannel, FlushBatchNow, IpcBridge, LifecycleHooks, Ping, PlatformConfig,
-    ProcessStarted, ProcessStopped, ProcessStoppedReason, UserStopRequested,
-    build_default_modules_reqwest, load_state, store_state,
+    EventBus, FlushBatchNow, IpcBridge, LifecycleHooks, Ping, PlatformConfig, ProcessStarted,
+    ProcessStopped, build_default_modules_reqwest, load_state, store_state,
 };
 
 use crate::capture::{MacPlatformHooks, has_screen_capture_access, is_permission_missing_error};
@@ -28,65 +23,12 @@ const ITER_INTERVAL: Duration = Duration::from_secs(1);
 /// part of the core alerting model.
 const LOCAL_SUSPEND_MIN_MS: i64 = 5_000;
 
-/// Watches for `NSWorkspaceWillPowerOffNotification` — a genuine OS shutdown
-/// notification, distinct from (and not replaced by) the suspend/resume
-/// detection removed above. This is the one source of an *exact* clean-logout
-/// timestamp available on macOS.
-struct ShutdownWatcher {
-    should_stop: Arc<AtomicBool>,
-    worker: Option<thread::JoinHandle<()>>,
-}
-
-impl ShutdownWatcher {
-    fn spawn(event_tx: mpsc::UnboundedSender<()>) -> Self {
-        let should_stop = Arc::new(AtomicBool::new(false));
-        let worker_stop = should_stop.clone();
-        let worker = thread::spawn(move || {
-            autoreleasepool(|_| unsafe {
-                let workspace = NSWorkspace::sharedWorkspace();
-                let center = workspace.notificationCenter();
-                let callback = RcBlock::new(move |_| {
-                    let _ = event_tx.send(());
-                });
-                let observer = center.addObserverForName_object_queue_usingBlock(
-                    Some(NSWorkspaceWillPowerOffNotification),
-                    None,
-                    None,
-                    &callback,
-                );
-                while !worker_stop.load(Ordering::SeqCst) {
-                    thread::sleep(Duration::from_millis(500));
-                }
-
-                center.removeObserver((*observer).as_ref());
-            });
-        });
-
-        Self {
-            should_stop,
-            worker: Some(worker),
-        }
-    }
-}
-
-impl Drop for ShutdownWatcher {
-    fn drop(&mut self) {
-        self.should_stop.store(true, Ordering::SeqCst);
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
-    }
-}
-
 pub fn run_daemon(paths: &ClientPaths) -> Result<()> {
     let paths = paths.clone();
-    let (shutdown_notice_tx, shutdown_notice_rx) = mpsc::unbounded_channel::<()>();
-
-    let _shutdown_watcher = ShutdownWatcher::spawn(shutdown_notice_tx);
 
     let result = tokio::runtime::Runtime::new()
         .map_err(anyhow::Error::from)
-        .and_then(|runtime| runtime.block_on(run_daemon_service_loop(&paths, shutdown_notice_rx)));
+        .and_then(|runtime| runtime.block_on(run_daemon_service_loop(&paths)));
     if let Err(err) = result {
         eprintln!("daemon: {err:#}");
         std::process::exit(1);
@@ -94,10 +36,7 @@ pub fn run_daemon(paths: &ClientPaths) -> Result<()> {
     std::process::exit(0);
 }
 
-async fn run_daemon_service_loop(
-    paths: &ClientPaths,
-    mut shutdown_notice_rx: mpsc::UnboundedReceiver<()>,
-) -> Result<()> {
+async fn run_daemon_service_loop(paths: &ClientPaths) -> Result<()> {
     paths.ensure_dirs()?;
 
     let config = build_core_config(paths);
@@ -118,8 +57,6 @@ async fn run_daemon_service_loop(
     }
 
     let shutdown = Arc::new(AtomicBool::new(false));
-    let system_shutdown_requested = Arc::new(AtomicBool::new(false));
-    let user_stop_requested = Arc::new(AtomicBool::new(false));
     let (signal_tx, mut signal_rx) = mpsc::unbounded_channel::<String>();
     spawn_signal_handler(shutdown.clone(), signal_tx);
 
@@ -132,16 +69,7 @@ async fn run_daemon_service_loop(
 
         // Wire up any newly accepted IPC connections.
         if let Some(ipc) = &mut ipc {
-            let usr = user_stop_requested.clone();
-            ipc.accept_pending(&mut bus, move |remote, e| {
-                IpcBridge::forward_standard_inbound(remote, e);
-                // Track user-stop separately to classify shutdown reason accurately.
-                let usr = usr.clone();
-                remote.on::<UserStopRequested>(move |_ev| {
-                    usr.store(true, Ordering::SeqCst);
-                    Ok(())
-                });
-            });
+            ipc.accept_pending(&mut bus, IpcBridge::forward_standard_inbound);
         }
 
         // Detect "just resumed from sleep" locally so post-wake capture
@@ -190,33 +118,14 @@ async fn run_daemon_service_loop(
         tokio::select! {
             signal = signal_rx.recv() => {
                 if signal.is_some() {
-                    let reason = if system_shutdown_requested.load(Ordering::SeqCst) {
-                        ProcessStoppedReason::Shutdown
-                    } else if user_stop_requested.load(Ordering::SeqCst) {
-                        ProcessStoppedReason::User
-                    } else {
-                        ProcessStoppedReason::Other
-                    };
                     tokio::task::block_in_place(|| {
-                        let _ = bus.send(ProcessStopped(reason));
+                        let _ = bus.send(ProcessStopped);
                         if let Ok(state) = bus.iter() {
                             let _ = store_state(&state_path, &state);
                         }
                     });
                 }
                 break;
-            }
-            notice = shutdown_notice_rx.recv() => {
-                if notice.is_some() {
-                    system_shutdown_requested.store(true, Ordering::SeqCst);
-                    tokio::task::block_in_place(|| {
-                        let _ = bus.send(ProcessStopped(ProcessStoppedReason::Shutdown));
-                        if let Ok(state) = bus.iter() {
-                            let _ = store_state(&state_path, &state);
-                        }
-                    });
-                    shutdown.store(true, Ordering::SeqCst);
-                }
             }
             _ = tokio::time::sleep(ITER_INTERVAL) => {}
         }

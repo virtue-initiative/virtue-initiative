@@ -244,13 +244,8 @@ pub extern "C" fn virtue_windows_stop_monitoring_from_tray_exit() -> *mut c_char
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn virtue_windows_stop_monitoring_for_system_shutdown() -> *mut c_char {
-    into_error_ptr(resident_monitor::stop_monitoring_for_system_shutdown())
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn virtue_windows_stop_monitoring_for_session_logoff() -> *mut c_char {
-    into_error_ptr(resident_monitor::stop_monitoring_for_session_logoff())
+pub extern "C" fn virtue_windows_stop_monitoring_for_os_session_end() -> *mut c_char {
+    into_error_ptr(resident_monitor::stop_monitoring_for_os_session_end())
 }
 
 #[unsafe(no_mangle)]

@@ -30,8 +30,8 @@ pub use events::{IpcError, IpcListener, RemoteEventBus, RemoteSender};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use ipc_bridge::IpcBridge;
 pub use model::{
-    AlertReason, DeviceCredentials, DeviceSettings, LifecycleKind, PartialStatus,
-    ProcessStoppedReason, Redacted, ScreenshotSkipReason, UploadKind,
+    AlertReason, DeviceCredentials, DeviceSettings, LifecycleKind, PartialStatus, Redacted,
+    ScreenshotSkipReason, UploadKind,
 };
 pub use model::{
     AuthState, BatchUpload, EventData, LogEntry, LoopOutcome, Screenshot, ServiceStatus,

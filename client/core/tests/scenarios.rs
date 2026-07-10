@@ -9,9 +9,7 @@
 
 use virtue_core::module::lifecycle::LifecycleObserverState;
 use virtue_core::testing::Scenario;
-use virtue_core::{
-    CaptureFailed, LogoutRequested, ProcessStopped, ProcessStoppedReason, Upload, UploadKind,
-};
+use virtue_core::{CaptureFailed, LogoutRequested, Upload, UploadKind, UserStopRequested};
 
 // ── Basic unauthenticated loop ────────────────────────────────────────────────
 
@@ -108,7 +106,9 @@ fn login_poll_emits_lifecycle_upload() {
 #[test]
 fn user_stop_emits_high_risk_upload() {
     let mut scenario = Scenario::authenticated();
-    scenario.queue(ProcessStopped(ProcessStoppedReason::User));
+    scenario.queue(UserStopRequested {
+        source: "test".into(),
+    });
     scenario.at_t(0).loop_iteration();
     assert!(
         !scenario.api.state().notify_calls.is_empty(),

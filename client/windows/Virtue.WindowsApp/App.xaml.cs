@@ -313,7 +313,7 @@ public partial class App : Application
         try
         {
             _refreshLoopCancellation?.Cancel();
-            new RustInteropClient().StopMonitoringForSessionLogoff();
+            new RustInteropClient().StopMonitoringForOsSessionEnd();
         }
         catch (Exception ex)
         {
@@ -326,7 +326,7 @@ public partial class App : Application
         try
         {
             _refreshLoopCancellation?.Cancel();
-            new RustInteropClient().StopMonitoringForSystemShutdown();
+            new RustInteropClient().StopMonitoringForOsSessionEnd();
         }
         catch (Exception ex)
         {
