@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use crate::ScreenshotHooks;
 use crate::error::CoreResult;
 use crate::events::Ping;
 use crate::events::bus::{Emitter, EventBus, Observer, StateType};
@@ -14,8 +15,8 @@ use crate::model::{ScreenshotSkipReason, UploadKind};
 use crate::module::auth::{Login, Logout};
 use crate::module::config::ConfigChanged;
 use crate::module::upload::Upload;
-use crate::platform::ScreenshotHooks;
 use risk_classifier::RiskClassifier;
+use virtue_text_detection::ScreenshotOCR;
 
 #[cfg(not(test))]
 const MODEL_BYTES: &[u8] = include_bytes!("../../models/nsfw_small_v1.onnx");
@@ -73,6 +74,9 @@ pub struct ScreenshotModule {
     /// Shared with the background capture job. `RiskClassifier` is `Send + Sync`
     /// (tract op types are), so an `Arc` crosses threads without a `Mutex`.
     classifier: Option<Arc<RiskClassifier>>,
+    /// Shared OCR engine for text redaction before upload. `None` when OCR
+    /// is unavailable (platform not supported, tesseract not installed, etc.).
+    ocr: Option<Arc<ScreenshotOCR>>,
     /// True while a background capture is running. A **module field**, never
     /// persisted to `event_state.json`, so a crash/restart can't leave it stuck
     /// true. Guards against launching overlapping captures when one runs longer
@@ -98,11 +102,24 @@ impl ScreenshotModule {
         };
         #[cfg(test)]
         let classifier: Option<Arc<RiskClassifier>> = None;
+
+        #[cfg(not(test))]
+        let ocr = match ScreenshotOCR::new(Default::default()) {
+            Ok(ocr) => Some(Arc::new(ocr)),
+            Err(err) => {
+                eprintln!("[screenshot] OCR disabled, text will not be redacted: {err}");
+                None
+            }
+        };
+        #[cfg(test)]
+        let ocr: Option<Arc<ScreenshotOCR>> = None;
+
         Self {
             state: ScreenshotObserverState::default(),
             platform,
             screenshot_interval_ms,
             classifier,
+            ocr,
             capture_in_flight: false,
         }
     }
@@ -166,11 +183,13 @@ impl ScreenshotModule {
 
         let platform = Arc::clone(&self.platform);
         let classifier = self.classifier.clone();
+        let ocr = self.ocr.clone();
         let anchor = self.state.last_uploaded_fingerprint.clone();
         emitter.spawn(move |em| {
             run_capture(
                 platform.as_ref(),
                 classifier.as_deref(),
+                ocr.as_deref(),
                 anchor.as_ref(),
                 em,
             )
@@ -192,6 +211,7 @@ impl ScreenshotModule {
 fn run_capture(
     platform: &dyn ScreenshotHooks,
     classifier: Option<&RiskClassifier>,
+    ocr: Option<&ScreenshotOCR>,
     anchor: Option<&fingerprint::Fingerprint>,
     emitter: &Emitter,
 ) -> CoreResult<()> {
@@ -244,6 +264,7 @@ fn run_capture(
         Some(scores) => (scores.risk, Some(scores.skin), scores.nsfw),
         None => (0.0, None, None),
     };
+    let screenshot = redact_if_ocr(ocr, screenshot);
     let processed = match image_pipeline::ImagePipeline.process(screenshot) {
         Ok(p) => p,
         Err(err) => {
@@ -267,6 +288,46 @@ fn run_capture(
     let _ = emitter.send(ScreenshotCaptured {
         update_fingerprint: fingerprint,
     });
+    Ok(())
+}
+
+fn redact_if_ocr(ocr: Option<&ScreenshotOCR>, mut shot: crate::Screenshot) -> crate::Screenshot {
+    let Some(engine) = ocr else {
+        return shot;
+    };
+    match engine.detect(&shot.bytes) {
+        Ok(result) if !result.regions.is_empty() => {
+            if let Err(err) = redact_text_regions(&mut shot, &result.regions) {
+                eprintln!("[screenshot] text redaction failed, uploading unredacted: {err}");
+            }
+            shot
+        }
+        Ok(_) => shot,
+        Err(err) => {
+            eprintln!("[screenshot] OCR failed, uploading unredacted: {err}");
+            shot
+        }
+    }
+}
+
+fn redact_text_regions(
+    shot: &mut crate::Screenshot,
+    regions: &[virtue_text_detection::TextRegion],
+) -> CoreResult<()> {
+    let mut img =
+        image::load_from_memory_with_format(&shot.bytes, image::ImageFormat::Png)?.to_rgba8();
+    for r in regions {
+        let bb = &r.bounding_box;
+        for py in (bb.y as u32)..((bb.y + bb.height) as u32).min(img.height()) {
+            for px in (bb.x as u32)..((bb.x + bb.width) as u32).min(img.width()) {
+                img.put_pixel(px, py, image::Rgba([0, 0, 0, 255]));
+            }
+        }
+    }
+    let dyn_img = image::DynamicImage::ImageRgba8(img);
+    let mut out = Vec::new();
+    dyn_img.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)?;
+    shot.bytes = out;
     Ok(())
 }
 
