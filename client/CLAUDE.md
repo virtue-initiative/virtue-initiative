@@ -18,7 +18,7 @@ is a thin wrapper that supplies raw screen data and OS hooks.
   `EventChannel` trait
 - `core/src/events.rs` — the `Ping` event struct; other typed events live inline in the
   module file that owns them (`Login`/`Logout` in `module/auth.rs`, `ProcessStarted`/
-  `SystemLoginObserved`/etc. in `module/lifecycle.rs`, `StatusRequest` in `module/status.rs`)
+  `ProcessStarted`/etc. in `module/lifecycle.rs`, `StatusRequest` in `module/status.rs`)
 - `core/src/events/remote.rs` — `RemoteEventBus` (cross-process JSON-line channel)
 - `core/src/assembly.rs` — `build_default_modules()` factory for the 8 default observers
 

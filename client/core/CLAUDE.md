@@ -66,16 +66,16 @@ loop {
 
 ## The 8 observer modules (`src/module/`)
 
-| Module                 | Handles                                                                                     | Emits                                                                   |
-| ---------------------- | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `auth`                 | `LoginRequested`, `LogoutRequested`, `StatusRequest`                                        | `Login`, `Logout`, `LoginResult`, `LogoutResult`, `PartialStatus::Auth` |
-| `lifecycle`            | `Ping`, `ProcessStarted/Stopped`, `SystemLoginObserved/LogoutObserved`, `UserStopRequested` | `Upload` (lifecycle + alerts), `PartialStatus::Lifecycle`               |
-| `screenshot`           | `Login`, `Logout`, `Ping`, `ConfigChanged`                                                  | `Upload` (screenshot), `CaptureFailed`                                  |
-| `upload`               | `Login`, `Logout`, `Upload`, `Ping`, `ProcessStopped`, `FlushBatchNow`                      | network I/O                                                             |
-| `capture_availability` | `CaptureFailed`                                                                             | `Upload` (capture-failed alert)                                         |
-| `heartbeat`            | `Ping`                                                                                      | `Upload` (heartbeat, once per 24h while authenticated)                  |
-| `status`               | `StatusRequest`, `PartialStatus`                                                            | `StatusResponse`                                                        |
-| `config`               | `Ping`                                                                                      | `ConfigChanged`                                                         |
+| Module                 | Handles                                                                | Emits                                                                   |
+| ---------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `auth`                 | `LoginRequested`, `LogoutRequested`, `StatusRequest`                   | `Login`, `Logout`, `LoginResult`, `LogoutResult`, `PartialStatus::Auth` |
+| `lifecycle`            | `Ping`, `ProcessStarted/Stopped`, `UserStopRequested`                  | `Upload` (lifecycle + alerts), `PartialStatus::Lifecycle`               |
+| `screenshot`           | `Login`, `Logout`, `Ping`, `ConfigChanged`                             | `Upload` (screenshot), `CaptureFailed`                                  |
+| `upload`               | `Login`, `Logout`, `Upload`, `Ping`, `ProcessStopped`, `FlushBatchNow` | network I/O                                                             |
+| `capture_availability` | `CaptureFailed`                                                        | `Upload` (capture-failed alert)                                         |
+| `heartbeat`            | `Ping`                                                                 | `Upload` (heartbeat, once per 24h while authenticated)                  |
+| `status`               | `StatusRequest`, `PartialStatus`                                       | `StatusResponse`                                                        |
+| `config`               | `Ping`                                                                 | `ConfigChanged`                                                         |
 
 `lifecycle` derives suspend from `boot_clock − monotonic_clock` divergence
 rather than dedicated suspend/resume events — see `../tampering.md`.

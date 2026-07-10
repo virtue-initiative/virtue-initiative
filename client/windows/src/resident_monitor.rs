@@ -10,10 +10,10 @@ use std::time::Duration;
 use anyhow::Result;
 use serde::Serialize;
 use virtue_core::{
-    CoreError, EventBus, EventChannel, LifecycleHooks, LoginRequested, LoginResult,
-    LogoutRequested, LogoutResult, Ping, PlatformConfig, ProcessStarted, ProcessStopped,
-    ProcessStoppedReason, Redacted, StatusRequest, StatusResponse, SystemLogoutObserved,
-    UserStopRequested, build_default_modules_reqwest, load_state, store_state,
+    CoreError, EventBus, EventChannel, LoginRequested, LoginResult, LogoutRequested, LogoutResult,
+    Ping, PlatformConfig, ProcessStarted, ProcessStopped, ProcessStoppedReason, Redacted,
+    StatusRequest, StatusResponse, UserStopRequested, build_default_modules_reqwest, load_state,
+    store_state,
 };
 
 use crate::capture::WindowsPlatformHooks;
@@ -52,9 +52,6 @@ enum MonitorCommand {
         source: String,
     },
     ProcessStopped(ProcessStoppedReason),
-    SystemLogoutObserved {
-        utc_ms: i64,
-    },
     AppLogin {
         email: String,
         password: String,
@@ -154,9 +151,6 @@ pub fn stop_monitoring_from_tray_exit() -> Result<()> {
 }
 
 pub fn stop_monitoring_for_system_shutdown() -> Result<()> {
-    send_command(MonitorCommand::SystemLogoutObserved {
-        utc_ms: current_utc_ms(),
-    })?;
     send_command(MonitorCommand::ProcessStopped(
         ProcessStoppedReason::Shutdown,
     ))?;
@@ -165,16 +159,9 @@ pub fn stop_monitoring_for_system_shutdown() -> Result<()> {
 }
 
 pub fn stop_monitoring_for_session_logoff() -> Result<()> {
-    send_command(MonitorCommand::SystemLogoutObserved {
-        utc_ms: current_utc_ms(),
-    })?;
     send_command(MonitorCommand::ProcessStopped(ProcessStoppedReason::Other))?;
     stop_monitoring()?;
     Ok(())
-}
-
-fn current_utc_ms() -> i64 {
-    WindowsPlatformHooks::new().get_utc_clock_ms().unwrap_or(0)
 }
 
 fn send_command(command: MonitorCommand) -> Result<()> {
@@ -370,10 +357,6 @@ fn handle_command(bus: &mut EventBus, state_path: &Path, command: MonitorCommand
         }
         MonitorCommand::ProcessStopped(reason) => {
             bus.send(ProcessStopped(reason))?;
-            store_state(state_path, &bus.iter()?)?;
-        }
-        MonitorCommand::SystemLogoutObserved { utc_ms } => {
-            bus.send(SystemLogoutObserved { utc_ms })?;
             store_state(state_path, &bus.iter()?)?;
         }
         MonitorCommand::AppLogin {

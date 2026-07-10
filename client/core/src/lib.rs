@@ -38,9 +38,7 @@ pub use model::{
 };
 pub use module::auth::{Login, LoginRequested, LoginResult, Logout, LogoutRequested, LogoutResult};
 pub use module::config::ConfigChanged;
-pub use module::lifecycle::{
-    ProcessStarted, ProcessStopped, SystemLoginObserved, SystemLogoutObserved, UserStopRequested,
-};
+pub use module::lifecycle::{ProcessStarted, ProcessStopped, UserStopRequested};
 pub use module::screenshot::CaptureFailed;
 pub use module::status::{StatusRequest, StatusResponse};
 pub use module::upload::FlushBatchNow;

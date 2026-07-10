@@ -86,16 +86,16 @@ to pattern-match typed events without boilerplate.
 
 ### The 8 default modules
 
-| Module                      | Key inputs                                                                                  | Key outputs                                                             |
-| --------------------------- | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `LifecycleModule`           | `Ping`, `ProcessStarted/Stopped`, `SystemLoginObserved/LogoutObserved`, `UserStopRequested` | `Upload` (lifecycle + alert events), `PartialStatus::Lifecycle`         |
-| `ScreenshotModule`          | `Login`, `Logout`, `Ping`, `ConfigChanged`                                                  | `Upload` (screenshot), `CaptureFailed`                                  |
-| `UploadModule`              | `Login`, `Logout`, `Upload`, `Ping`, `ProcessStopped`, `FlushBatchNow`, `ConfigChanged`     | network I/O via `ApiTransport`; `LogoutRequested` on 404                |
-| `CaptureAvailabilityModule` | `CaptureFailed`                                                                             | `Upload` (capture-failed alert)                                         |
-| `HeartbeatModule`           | `Ping`                                                                                      | `Upload` (heartbeat, once per 24h while authenticated)                  |
-| `AuthModule`                | `LoginRequested`, `LogoutRequested`, `StatusRequest`, `ConfigChanged`                       | `Login`, `Logout`, `LoginResult`, `LogoutResult`, `PartialStatus::Auth` |
-| `StatusModule`              | `StatusRequest`, `PartialStatus` (from 3 sources)                                           | `StatusResponse`                                                        |
-| `ConfigModule`              | `Ping`                                                                                      | `ConfigChanged`                                                         |
+| Module                      | Key inputs                                                                              | Key outputs                                                             |
+| --------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `LifecycleModule`           | `Ping`, `ProcessStarted/Stopped`, `UserStopRequested`                                   | `Upload` (lifecycle + alert events), `PartialStatus::Lifecycle`         |
+| `ScreenshotModule`          | `Login`, `Logout`, `Ping`, `ConfigChanged`                                              | `Upload` (screenshot), `CaptureFailed`                                  |
+| `UploadModule`              | `Login`, `Logout`, `Upload`, `Ping`, `ProcessStopped`, `FlushBatchNow`, `ConfigChanged` | network I/O via `ApiTransport`; `LogoutRequested` on 404                |
+| `CaptureAvailabilityModule` | `CaptureFailed`                                                                         | `Upload` (capture-failed alert)                                         |
+| `HeartbeatModule`           | `Ping`                                                                                  | `Upload` (heartbeat, once per 24h while authenticated)                  |
+| `AuthModule`                | `LoginRequested`, `LogoutRequested`, `StatusRequest`, `ConfigChanged`                   | `Login`, `Logout`, `LoginResult`, `LogoutResult`, `PartialStatus::Auth` |
+| `StatusModule`              | `StatusRequest`, `PartialStatus` (from 3 sources)                                       | `StatusResponse`                                                        |
+| `ConfigModule`              | `Ping`                                                                                  | `ConfigChanged`                                                         |
 
 On iOS (`PlatformConfig::lifecycle_enabled == false`), `LifecycleModule` is
 replaced by a `NoopLifecycleModule` that only answers `StatusRequest` — see
@@ -191,7 +191,7 @@ if let Some(ipc) = &mut ipc {
 
 `forward_standard_inbound` registers handlers for the standard controller→daemon
 set (`LoginRequested`, `LogoutRequested`, `StatusRequest`, `UserStopRequested`,
-`SystemLoginObserved/LogoutObserved`, `ProcessStopped`).
+`ProcessStopped`).
 Platform daemons can pass a custom closure to `accept_pending` to add extra
 handlers per-connection (Mac and Linux use this to track `UserStopRequested`
 separately for shutdown-reason classification).

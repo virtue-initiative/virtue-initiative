@@ -23,8 +23,6 @@ flowchart LR
     Ping --> Module
     ProcessStarted --> Module
     ProcessStopped --> Module
-    SystemLoginObserved --> Module
-    SystemLogoutObserved --> Module
     StatusRequest --> Module
     UserStopRequested --> Module
 
@@ -35,12 +33,14 @@ flowchart LR
     Module --> PartialStatus[PartialStatus::Lifecycle]
 ```
 
-`SystemLoginObserved`/`SystemLogoutObserved` are optional, platform-pushed
-events carrying an exact timestamp (used where a real-time OS signal exists,
-e.g. Windows' `WM_ENDSESSION`). They're a latency optimization only — the
-module also polls `LifecycleHooks::get_last_login_utc_ms`/
-`get_last_logout_utc_ms` on a coarse cadence, so a platform with no push
-signal still gets full coverage.
+Login and logout detection are both purely poll-based: the module polls
+`LifecycleHooks::get_last_login_utc_ms`/`get_last_logout_utc_ms` on a coarse
+cadence, forced immediately after `ProcessStarted` or a detected reboot.
+There is no real-time push path for either — platforms that can observe an
+exact OS signal (a systemd shutdown classification, `WM_ENDSESSION`,
+`NSWorkspaceWillPowerOffNotification`) still use it to classify the process
+stop reason, but it no longer feeds a lifecycle timestamp directly; the poll
+picks up the same timestamp on the next tick.
 
 ## The five system hooks
 
@@ -203,11 +203,12 @@ report. This section is the map from OS signal to `LifecycleHooks`.
   `last_entry` timestamp of the previous boot — a floor, not exact. Needs
   persistent journald logging (`Storage=persistent`); returns `None`
   otherwise.
-- **`SystemLogoutObserved`**: sent from `record_shutdown_transition()` when
-  the daemon catches `SIGTERM`/`SIGINT` and `classify_shutdown_reason()`
-  (shells out to `systemctl is-system-running`/`systemctl list-jobs`)
-  resolves to `Shutdown` — an `Other` or `User` stop doesn't claim to know an
-  exact logout time.
+- `record_shutdown_transition()`, run when the daemon catches
+  `SIGTERM`/`SIGINT`, still calls `classify_shutdown_reason()` (shells out to
+  `systemctl is-system-running`/`systemctl list-jobs`) to decide the
+  `ProcessStoppedReason` (`Shutdown` vs `Other`/`User`) — but this only feeds
+  the stop-reason now, not a lifecycle timestamp push; the logout time itself
+  comes from the next `get_last_logout_utc_ms` poll.
 - No real-time suspend/resume subscription exists anymore — the systemd-logind
   `PrepareForSleep` D-Bus watcher was removed; suspend is derived purely from
   clock divergence.
@@ -220,10 +221,11 @@ report. This section is the map from OS signal to `LifecycleHooks`.
   most recent non-`reboot`/non-`shutdown` entry.
 - **`get_last_logout_utc_ms`**: `last -1 -F shutdown`, parsed the same way
   as before — a floor.
-- **`SystemLogoutObserved`**: still sent from
-  `NSWorkspaceWillPowerOffNotification`, observed on a dedicated
-  `ShutdownWatcher` thread — this is a shutdown notification, not the
-  suspend/resume subscription that was removed.
+- `NSWorkspaceWillPowerOffNotification`, observed on a dedicated
+  `ShutdownWatcher` thread, still classifies the `ProcessStoppedReason` as
+  `Shutdown` — this is a shutdown notification, not the suspend/resume
+  subscription that was removed. It no longer pushes a lifecycle timestamp;
+  the logout time comes from the next `get_last_logout_utc_ms` poll.
 - The `IORegisterForSystemPower` IOKit watcher (suspend/resume) was removed
   entirely. The daemon now derives "just resumed" locally each tick from its
   own boot-vs-monotonic divergence check, purely to drive the post-wake
@@ -241,10 +243,11 @@ report. This section is the map from OS signal to `LifecycleHooks`.
 - **`get_last_logout_utc_ms`**: unchanged — reads the `ShutdownTime`
   `REG_BINARY` value under `HKLM\SYSTEM\CurrentControlSet\Control\Windows`,
   written only on a clean shutdown.
-- **`SystemLogoutObserved`**: still driven by `WM_ENDSESSION`'s
-  `ENDSESSION_LOGOFF` bit — set → session logoff, unset → shutdown. Both
-  paths now push an exact-timestamp `SystemLogoutObserved` instead of the old
-  bare `SystemLogout`.
+- `WM_ENDSESSION`'s `ENDSESSION_LOGOFF` bit still distinguishes session
+  logoff from shutdown — set → session logoff, unset → shutdown — but only
+  to pick the right `ProcessStoppedReason`. Neither path pushes a lifecycle
+  timestamp anymore; the logout time comes from the next
+  `get_last_logout_utc_ms` poll.
 - `WM_POWERBROADCAST` (suspend/resume) and `WM_WTSSESSION_CHANGE`
   (`WTS_SESSION_LOGON` push) were both removed — suspend is derived from
   clocks, and login is covered by the pull-based hook (a few seconds'

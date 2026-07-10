@@ -10,7 +10,7 @@ use objc2_app_kit::{NSWorkspace, NSWorkspaceWillPowerOffNotification};
 use tokio::sync::mpsc;
 use virtue_core::{
     EventBus, EventChannel, FlushBatchNow, IpcBridge, LifecycleHooks, Ping, PlatformConfig,
-    ProcessStarted, ProcessStopped, ProcessStoppedReason, SystemLogoutObserved, UserStopRequested,
+    ProcessStarted, ProcessStopped, ProcessStoppedReason, UserStopRequested,
     build_default_modules_reqwest, load_state, store_state,
 };
 
@@ -209,9 +209,7 @@ async fn run_daemon_service_loop(
             notice = shutdown_notice_rx.recv() => {
                 if notice.is_some() {
                     system_shutdown_requested.store(true, Ordering::SeqCst);
-                    let utc_ms = platform.get_utc_clock_ms().unwrap_or(0);
                     tokio::task::block_in_place(|| {
-                        let _ = bus.send(SystemLogoutObserved { utc_ms });
                         let _ = bus.send(ProcessStopped(ProcessStoppedReason::Shutdown));
                         if let Ok(state) = bus.iter() {
                             let _ = store_state(&state_path, &state);

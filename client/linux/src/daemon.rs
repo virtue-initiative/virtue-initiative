@@ -8,8 +8,7 @@ use tokio::sync::mpsc;
 use virtue_core::ProcessStoppedReason;
 use virtue_core::{
     EventBus, EventChannel, IpcBridge, Ping, PlatformConfig, ProcessStarted, ProcessStopped,
-    SystemLogoutObserved, UserStopRequested, build_default_modules_reqwest, load_state,
-    store_state,
+    UserStopRequested, build_default_modules_reqwest, load_state, store_state,
 };
 
 use crate::capture::{LinuxPlatformHooks, is_session_unavailable_text};
@@ -226,16 +225,6 @@ fn record_shutdown_transition(
         shutdown_job_queued,
         explicit_user_stop,
     );
-    // Only a genuine system shutdown gives us an exact logout moment — an
-    // `Other` stop (crash, `kill`, `systemctl stop`) doesn't tell us the
-    // session actually ended, so it shouldn't claim one.
-    if matches!(reason, ProcessStoppedReason::Shutdown) {
-        let utc_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
-        let _ = bus.send(SystemLogoutObserved { utc_ms });
-    }
     let _ = bus.send(ProcessStopped(reason));
     let _ = bus.send(Ping);
     if let Ok(state) = bus.iter() {

@@ -16,25 +16,6 @@ pub struct ProcessStarted;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessStopped(pub ProcessStoppedReason);
 
-/// Pushed by a platform when it can observe an exact login moment (e.g.
-/// Windows `WM_WTSSESSION_CHANGE`) rather than waiting for the next coarse
-/// `LifecycleHooks::get_last_login_utc_ms` poll. Optional — the poll alone is
-/// sufficient, this just reduces latency where a real-time signal exists.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SystemLoginObserved {
-    pub utc_ms: i64,
-}
-
-/// Pushed by a platform when it can observe an exact clean-logout moment
-/// (e.g. `WM_ENDSESSION`, `NSWorkspaceWillPowerOffNotification`, a systemd
-/// shutdown-job classification). Optional — the poll alone is sufficient,
-/// this just reduces latency and improves precision over a reconstructed
-/// floor for the common clean-shutdown case.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SystemLogoutObserved {
-    pub utc_ms: i64,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserStopRequested {
     pub source: String,
@@ -384,13 +365,6 @@ impl Observer for LifecycleModule {
                 }
                 Ok(())
             },
-            ev: SystemLoginObserved => {
-                let utc_ms = self.hooks.get_utc_clock_ms()?;
-                let boot_ms = self.hooks.get_boot_clock_ms()?;
-                let mono_ms = self.hooks.get_monotonic_clock_ms()?;
-                self.observe_login(ev.utc_ms, utc_ms, boot_ms, mono_ms, emitter)
-            },
-            ev: SystemLogoutObserved => self.observe_logout(ev.utc_ms, emitter),
             _: StatusRequest => {
                 let last_loop_at_ms = self.state.last_sample.map(|s| s.utc_ms);
                 let _ = emitter.send(PartialStatus::Lifecycle { is_running: true, last_loop_at_ms });
@@ -450,8 +424,7 @@ impl Observer for NoopLifecycleModule {
 #[cfg(test)]
 mod tests {
     use super::{
-        EXTRA_HIGH_RISK, HIGH_RISK_LIFECYCLE_ALERT, LifecycleModule, ProcessStarted,
-        ProcessStopped, SystemLogoutObserved,
+        EXTRA_HIGH_RISK, HIGH_RISK_LIFECYCLE_ALERT, LifecycleModule, ProcessStarted, ProcessStopped,
     };
     use crate::events::Ping;
     use crate::model::PartialStatus;
@@ -735,9 +708,11 @@ mod tests {
         t.emit(1, Ping);
         t.clear_captured();
 
-        // Logout is reported 60s after our last heartbeat via a direct platform
-        // push (not the coarse poll, which is throttled to a 5-min cadence).
-        t.emit(61, SystemLogoutObserved { utc_ms: 61_000 });
+        // Logout is reported 60s after our last heartbeat. Force an immediate
+        // poll (rather than waiting out the 5-min throttle) via ProcessStarted.
+        t.platform.set_last_logout(Some(61_000));
+        t.emit(61, ProcessStarted);
+        t.emit(61, Ping);
         t.assert_like(crate::like!(Upload {
             kind: UploadKind::LifecycleAlert {
                 reason: AlertReason::UnexpectedStop
@@ -776,7 +751,9 @@ mod tests {
         // A reconstructed logout floor that lands at/before our last known
         // sample (the "simultaneous force-kill + power pull" case) produces
         // zero/near-zero gap and must not alert.
-        t.emit(120, SystemLogoutObserved { utc_ms: 60_000 });
+        t.platform.set_last_logout(Some(60_000));
+        t.emit(120, ProcessStarted);
+        t.emit(120, Ping);
         t.assert_not_like(crate::like!(Upload {
             kind: UploadKind::LifecycleAlert {
                 reason: AlertReason::UnexpectedStop
@@ -847,11 +824,13 @@ mod tests {
         );
         t.clear_captured();
 
-        // The session's logout eventually arrives (a direct platform push, not
-        // the coarse poll), long after the stop — the resulting gap is still
-        // independently evaluated and alerts, even though the stop was
-        // user-initiated.
-        t.emit(63, SystemLogoutObserved { utc_ms: 63_000 });
+        // The session's logout eventually arrives (via the poll, forced
+        // immediately rather than waiting out the throttle), long after the
+        // stop — the resulting gap is still independently evaluated and
+        // alerts, even though the stop was user-initiated.
+        t.platform.set_last_logout(Some(63_000));
+        t.emit(63, ProcessStarted);
+        t.emit(63, Ping);
         t.assert_like(crate::like!(Upload {
             kind: UploadKind::LifecycleAlert {
                 reason: AlertReason::UnexpectedStop
