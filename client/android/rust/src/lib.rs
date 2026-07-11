@@ -10,13 +10,15 @@ use anyhow::{anyhow, Context, Result};
 use jni::objects::{GlobalRef, JByteArray, JClass, JString, JValue};
 use jni::sys::{jboolean, jstring};
 use jni::{JNIEnv, JavaVM};
+use virtue_text_detection::OcrError;
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
 use virtue_core::{
     build_default_modules_reqwest, load_state, store_state, AuthState, Config, CoreError,
     CoreResult, DeviceSettings, EventBus, EventChannel, LoginRequested, LoginResult,
-    LogoutRequested, Ping, PlatformHooks, ProcessStarted, ProcessStopped, ProcessStoppedReason,
-    Redacted, Screenshot, ScreenshotHooks, StatusRequest, StatusResponse, UserStopRequested,
+    LogoutRequested, Ping, PlatformConfig, PlatformHooks, ProcessStarted, ProcessStopped,
+    ProcessStoppedReason, Redacted, Screenshot, ScreenshotHooks, StatusRequest, StatusResponse,
+    UserStopRequested,
 };
 
 static CORE: OnceCell<AndroidCore> = OnceCell::new();
@@ -211,6 +213,46 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeInit(
                 env.new_global_ref(class)
                     .context("failed to create GlobalRef for ScreenshotService")?,
             );
+
+            // Register the OCR callback (once; OnceLock ignores repeat calls).
+            // The class is cached here on the main thread; background threads use the
+            // GlobalRef so the app class loader is not needed at call time.
+            let virtue_ocr_class = env
+                .find_class("org/virtueinitiative/virtue/VirtueOcr")
+                .context("failed to find VirtueOcr class")?;
+            let virtue_ocr_global = Arc::new(
+                env.new_global_ref(virtue_ocr_class)
+                    .context("failed to create GlobalRef for VirtueOcr")?,
+            );
+            let vm_for_ocr = java_vm.clone();
+            virtue_text_detection::android::register_recognize_fn(move |image, language| {
+                let mut ocr_env = vm_for_ocr
+                    .attach_current_thread()
+                    .map_err(|e| OcrError::Init(e.to_string()))?;
+                let j_bytes = ocr_env
+                    .byte_array_from_slice(image)
+                    .map_err(|e| OcrError::Recognition(e.to_string()))?;
+                let j_lang = ocr_env
+                    .new_string(language.unwrap_or(""))
+                    .map_err(|e| OcrError::Recognition(e.to_string()))?;
+                let result = ocr_env
+                    .call_static_method(
+                        &*virtue_ocr_global,
+                        "recognizeText",
+                        "([BLjava/lang/String;)Ljava/lang/String;",
+                        &[JValue::Object(&*j_bytes), JValue::Object(&*j_lang)],
+                    )
+                    .map_err(|e| OcrError::Recognition(e.to_string()))?;
+                let j_str_obj = result
+                    .l()
+                    .map_err(|e| OcrError::Recognition(e.to_string()))?;
+                let output = unsafe { ocr_env.get_string(&JString::from(j_str_obj)) }
+                    .map_err(|e| OcrError::Recognition(e.to_string()))?
+                    .to_string_lossy()
+                    .into_owned();
+                Ok(output)
+            });
+
             CORE.set(AndroidCore {
                 state_dir: PathBuf::from(data_dir),
                 runtime_config_file,
@@ -456,12 +498,17 @@ pub fn is_interactive(env: &mut JNIEnv) -> jni::errors::Result<bool> {
 
 fn build_bus(core: &AndroidCore) -> Result<(EventBus, PathBuf)> {
     let cfg = build_core_config(core);
+    // Default `PlatformConfig` (supports_sleep_wake_detection: true) is correct
+    // here: unlike iOS, the monitoring loop runs in a persistent foreground
+    // service that keeps executing regardless of screen lock, so a ping stall
+    // is a genuine one, not an artifact of the OS suspending our process.
     let modules = build_default_modules_reqwest(
         cfg,
         AndroidPlatformHooks {
             java_vm: core.java_vm.clone(),
             screenshot_service_class: core.screenshot_service_class.clone(),
         },
+        PlatformConfig::default(),
     )?;
     let state_path = core.state_dir.join("event_state.json");
     let bus = EventBus::new(modules, load_state(&state_path)?)?;

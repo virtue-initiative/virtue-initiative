@@ -22,6 +22,41 @@ describe('Devices — device list', () => {
       expect(screen.getByRole('heading', { name: /^devices$/i })).toBeInTheDocument();
     });
   });
+
+  it('shows a loading indicator instead of "No devices" while the fetch is in flight', async () => {
+    let resolveDevices: (() => void) | undefined;
+    server.use(
+      http.get(
+        'http://localhost:8787/device',
+        () =>
+          new Promise((resolve) => {
+            resolveDevices = () => resolve(HttpResponse.json(TEST_DEVICES));
+          }),
+      ),
+    );
+
+    renderWithClient(<Devices />);
+
+    expect(screen.getByText(/loading/i)).toBeInTheDocument();
+    expect(screen.queryByText('No devices')).not.toBeInTheDocument();
+
+    await waitFor(() => expect(resolveDevices).toBeDefined());
+    resolveDevices?.();
+
+    await waitFor(() => {
+      expect(screen.getByText('My Laptop')).toBeInTheDocument();
+    });
+  });
+
+  it('shows "No devices" once loaded with an empty list', async () => {
+    server.use(http.get('http://localhost:8787/device', () => HttpResponse.json([])));
+
+    renderWithClient(<Devices />);
+
+    await waitFor(() => {
+      expect(screen.getByText('No devices')).toBeInTheDocument();
+    });
+  });
 });
 
 describe('Devices — Add device dialog', () => {

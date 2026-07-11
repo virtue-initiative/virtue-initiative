@@ -4,6 +4,7 @@ mod daemon;
 mod tray;
 
 use std::io::{self, Write};
+use std::time::{Duration, Instant};
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
@@ -14,11 +15,7 @@ use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 #[cfg(debug_assertions)]
 use virtue_core::{AlertReason, LifecycleKind, ScreenshotSkipReason};
-use virtue_core::{
-    ClientController, EventBus, EventChannel, FlushBatchNow, Ping, ScreenshotHooks, ServiceStatus,
-    StatusRequest, StatusResponse, Upload, UploadKind, build_default_modules_reqwest, load_state,
-    store_state,
-};
+use virtue_core::{ClientController, ScreenshotHooks, ServiceStatus, Upload, UploadKind};
 
 use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_backend};
 use crate::config::{ClientPaths, build_core_config, default_device_name};
@@ -478,7 +475,7 @@ fn all_send_kinds() -> Vec<UploadKind> {
 
 #[cfg(debug_assertions)]
 fn dev_send(paths: ClientPaths, args: SendLogArgs) -> Result<()> {
-    let (mut bus, state_path) = make_dev_bus(&paths)?;
+    let client = connect_to_daemon(&paths)?;
 
     let kinds = if args.log_type == "all" {
         // Screenshots are excluded here: the running daemon already produces real
@@ -501,13 +498,13 @@ fn dev_send(paths: ClientPaths, args: SendLogArgs) -> Result<()> {
 
     let count = kinds.len();
     for kind in kinds {
-        bus.send(Upload {
-            risk: args.risk,
-            kind,
-        })?;
+        client
+            .queue_upload(Upload {
+                risk: args.risk,
+                kind,
+            })
+            .context("failed to queue developer log")?;
     }
-    bus.send(Ping)?;
-    store_state(&state_path, &bus.iter()?)?;
 
     println!(
         "Queued {count} log(s) in the next batch with risk {}. Run `virtue dev upload-batch` to send them now.",
@@ -516,29 +513,32 @@ fn dev_send(paths: ClientPaths, args: SendLogArgs) -> Result<()> {
     Ok(())
 }
 
-fn make_dev_bus(paths: &ClientPaths) -> Result<(EventBus, std::path::PathBuf)> {
-    let state_path = paths.state_dir.join("event_state.json");
-    let modules =
-        build_default_modules_reqwest(build_core_config(paths), LinuxPlatformHooks::new())?;
-    let bus = EventBus::new(modules, load_state(&state_path)?)?;
-    Ok((bus, state_path))
+/// Connect to the running daemon over IPC. Dev commands queue events into the
+/// daemon's own live batch/hash pipeline rather than editing `event_state.json`
+/// directly — the daemon holds that state in memory and rewrites the file on
+/// every ping (~1s), so a direct edit would race with (or be silently
+/// clobbered by) the daemon's next write.
+fn connect_to_daemon(paths: &ClientPaths) -> Result<ClientController<virtue_core::RemoteEventBus>> {
+    let sock = paths.state_dir.join("daemon.sock");
+    ClientController::connect(&sock)
+        .context("failed to connect to daemon (is it running? try `virtue daemon start`)")
 }
 
 fn dev_upload_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
     let title = args
         .title
         .unwrap_or_else(|| "Developer CLI log".to_string());
-    let (mut bus, state_path) = make_dev_bus(&paths)?;
-    // risk >= 1.0 routes through the immediate POST /log path.
-    bus.send(Upload {
-        risk: 1.0_f32,
-        kind: UploadKind::Dev {
-            title,
-            details: args.details,
-        },
-    })?;
-    bus.send(Ping)?;
-    store_state(&state_path, &bus.iter()?)?;
+    let client = connect_to_daemon(&paths)?;
+    // risk >= 1.0 routes through the encrypted batch plus an immediate POST /d/notify.
+    client
+        .queue_upload(Upload {
+            risk: 1.0_f32,
+            kind: UploadKind::Dev {
+                title,
+                details: args.details,
+            },
+        })
+        .context("failed to queue developer log")?;
 
     println!(
         "Recorded immediate developer log with risk {}.",
@@ -551,16 +551,16 @@ fn dev_add_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
     let title = args
         .title
         .unwrap_or_else(|| "Developer CLI batched log".to_string());
-    let (mut bus, state_path) = make_dev_bus(&paths)?;
-    bus.send(Upload {
-        risk: args.risk,
-        kind: UploadKind::Dev {
-            title,
-            details: args.details,
-        },
-    })?;
-    bus.send(Ping)?;
-    store_state(&state_path, &bus.iter()?)?;
+    let client = connect_to_daemon(&paths)?;
+    client
+        .queue_upload(Upload {
+            risk: args.risk,
+            kind: UploadKind::Dev {
+                title,
+                details: args.details,
+            },
+        })
+        .context("failed to queue developer log")?;
 
     println!(
         "Queued developer log in the next batch with risk {}.",
@@ -570,22 +570,21 @@ fn dev_add_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
 }
 
 fn dev_add_screenshot(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
-    let platform = LinuxPlatformHooks::new();
-    let screenshot = platform
+    let screenshot = LinuxPlatformHooks::new()
         .take_screenshot()
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let (mut bus, state_path) = make_dev_bus(&paths)?;
-    bus.send(Upload {
-        risk: args.risk,
-        kind: UploadKind::Screenshot {
-            image: screenshot.bytes,
-            content_type: screenshot.content_type,
-            skin_detection: None,
-            nsfw_detection: None,
-        },
-    })?;
-    bus.send(Ping)?;
-    store_state(&state_path, &bus.iter()?)?;
+    let client = connect_to_daemon(&paths)?;
+    client
+        .queue_upload(Upload {
+            risk: args.risk,
+            kind: UploadKind::Screenshot {
+                image: screenshot.bytes,
+                content_type: screenshot.content_type,
+                skin_detection: None,
+                nsfw_detection: None,
+            },
+        })
+        .context("failed to queue developer screenshot")?;
 
     println!(
         "Captured and queued a developer screenshot with risk {}.",
@@ -595,26 +594,44 @@ fn dev_add_screenshot(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()
 }
 
 fn dev_upload_batch(paths: ClientPaths) -> Result<()> {
-    let (mut bus, state_path) = make_dev_bus(&paths)?;
+    let mut client = connect_to_daemon(&paths)?;
 
-    let before: StatusResponse = bus.request(StatusRequest)?;
-    let initial_pending = before.status.pending_request_count;
-
+    let initial_pending = client
+        .get_status()
+        .context("failed to query daemon status")?
+        .pending_request_count;
     if initial_pending == 0 {
         println!("No pending batch items to upload.");
         return Ok(());
     }
 
-    bus.send(FlushBatchNow)?;
-    bus.send(Ping)?;
-    bus.iter()?;
+    client
+        .flush_batch_now()
+        .context("failed to request batch flush")?;
 
-    let after: StatusResponse = bus.request(StatusRequest)?;
-    let remaining = after.status.pending_request_count;
+    // The flush is processed asynchronously on the daemon's next ping cycle
+    // (≤1s) plus however long the network upload takes. Give it a full cycle
+    // before the first check, then keep polling as long as it's still making
+    // progress, up to a generous cap.
+    std::thread::sleep(Duration::from_millis(1200));
+    let mut remaining = client
+        .get_status()
+        .context("failed to query daemon status")?
+        .pending_request_count;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while remaining > 0 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(500));
+        let seen = client
+            .get_status()
+            .context("failed to query daemon status")?
+            .pending_request_count;
+        if seen == remaining {
+            break;
+        }
+        remaining = seen;
+    }
+
     let attempted = initial_pending.saturating_sub(remaining);
-
-    store_state(&state_path, &bus.iter()?)?;
-
     if remaining == 0 {
         println!("Processed {attempted} batch item(s); no batch items remain queued.");
     } else {

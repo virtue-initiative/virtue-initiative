@@ -3,9 +3,8 @@ use std::any::Any;
 use serde::{Deserialize, Serialize};
 
 use crate::api::ApiTransport;
-use crate::error::{CoreError, CoreResult};
-use crate::events::Ping;
-use crate::events::bus::{Emitter, EventBus, Observer, StateType, log_error};
+use crate::error::CoreResult;
+use crate::events::bus::{Emitter, EventBus, Observer, StateType};
 use crate::model::PartialStatus;
 use crate::model::{DeviceCredentials, DeviceSettings, Redacted};
 use crate::module::config::ConfigChanged;
@@ -47,31 +46,8 @@ pub struct LogoutResult {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DeviceSettingsRefreshed {
-    pub settings: DeviceSettings,
-}
-
-const SETTINGS_REFRESH_INTERVAL_PINGS: u32 = 3600;
-
-fn with_device_token_retry<A: ApiTransport, T>(
-    api: &A,
-    credentials: &mut DeviceCredentials,
-    mut op: impl FnMut(&A, &str) -> CoreResult<T>,
-) -> CoreResult<T> {
-    match op(api, &credentials.access_token) {
-        Err(e) if e.is_unauthorized() => {
-            let refreshed = api.refresh_device_token(&credentials.refresh_token)?;
-            credentials.access_token = refreshed.clone();
-            op(api, &refreshed)
-        }
-        other => other,
-    }
-}
-
 #[derive(Serialize, Deserialize, Default)]
 pub struct AuthObserverState {
-    pub user_access_token: Option<String>,
     pub device_credentials: Option<DeviceCredentials>,
 }
 
@@ -80,8 +56,6 @@ pub struct AuthModule<A: ApiTransport + Send + Sync + 'static> {
     api: A,
     device_name: String,
     platform_name: String,
-    needs_settings_refresh: bool,
-    pings_without_refresh: u32,
 }
 
 impl<A: ApiTransport + Send + Sync + 'static> AuthModule<A> {
@@ -91,8 +65,6 @@ impl<A: ApiTransport + Send + Sync + 'static> AuthModule<A> {
             api,
             device_name,
             platform_name,
-            needs_settings_refresh: false,
-            pings_without_refresh: 0,
         }
     }
 
@@ -132,87 +104,29 @@ impl<A: ApiTransport + Send + Sync + 'static> AuthModule<A> {
         password: &str,
         device_name: Option<&str>,
     ) -> CoreResult<(DeviceCredentials, crate::model::DeviceSettings)> {
-        let access_token = self.api.login(email, password)?;
+        let user_token = self.api.login(email, password)?;
         // Use the user-supplied override when present and non-empty (trimmed),
         // otherwise fall back to the construction-time device name (hostname).
         let resolved_name = device_name
             .map(str::trim)
             .filter(|name| !name.is_empty())
             .unwrap_or(self.device_name.as_str());
-        let mut device =
-            self.api
-                .register_device(&access_token, resolved_name, &self.platform_name)?;
-        let settings = with_device_token_retry(&self.api, &mut device, |api, token| {
-            api.get_device_settings(token)
-        })?;
-        self.state.user_access_token = Some(access_token);
+        let device = self
+            .api
+            .register_device(&user_token, resolved_name, &self.platform_name)?;
+        let settings = self.api.get_device_settings(&device.refresh_token)?;
         self.state.device_credentials = Some(device.clone());
-        self.needs_settings_refresh = false;
-        self.pings_without_refresh = 0;
         Ok((device, settings))
     }
 
     fn handle_logout_requested(&mut self, emitter: &Emitter) {
-        if let Some(token) = self.state.user_access_token.clone() {
-            let _ = self.api.logout(&token);
-        }
-        self.state.user_access_token = None;
+        let _ = self.api.logout();
         self.state.device_credentials = None;
-        self.needs_settings_refresh = false;
-        self.pings_without_refresh = 0;
         let _ = emitter.send(Logout);
         let _ = emitter.send(LogoutResult {
             success: true,
             error: None,
         });
-    }
-
-    fn handle_ping(&mut self, emitter: &Emitter) {
-        if self.state.device_credentials.is_none() {
-            return;
-        }
-        self.pings_without_refresh += 1;
-        if self.pings_without_refresh >= SETTINGS_REFRESH_INTERVAL_PINGS {
-            self.needs_settings_refresh = true;
-            self.pings_without_refresh = 0;
-        }
-        if !self.needs_settings_refresh {
-            return;
-        }
-        match self.refresh_settings(emitter) {
-            Ok(settings) => {
-                self.needs_settings_refresh = false;
-                let _ = emitter.send(DeviceSettingsRefreshed { settings });
-            }
-            Err(e) => {
-                log_error("settings refresh failed on ping", Some(&e));
-            }
-        }
-    }
-
-    fn refresh_settings(&mut self, emitter: &Emitter) -> CoreResult<crate::model::DeviceSettings> {
-        let mut credentials = self
-            .state
-            .device_credentials
-            .clone()
-            .ok_or(CoreError::NotAuthenticated)?;
-        let result = with_device_token_retry(&self.api, &mut credentials, |api, token| {
-            api.get_device_settings(token)
-        });
-        match result {
-            Ok(settings) => {
-                self.state.device_credentials = Some(credentials);
-                Ok(settings)
-            }
-            Err(err) if err.is_not_found() => {
-                log_error("device not found; clearing local auth", Some(&err));
-                self.state.user_access_token = None;
-                self.state.device_credentials = None;
-                let _ = emitter.send(Logout);
-                Err(CoreError::NotAuthenticated)
-            }
-            Err(err) => Err(err),
-        }
     }
 }
 
@@ -229,7 +143,6 @@ impl<A: ApiTransport + Send + Sync + 'static> Observer for AuthModule<A> {
         if !state.is_null() {
             self.state = serde_json::from_value(state)?;
         }
-        self.needs_settings_refresh = self.state.device_credentials.is_some();
         Ok(())
     }
 
@@ -246,10 +159,6 @@ impl<A: ApiTransport + Send + Sync + 'static> Observer for AuthModule<A> {
             },
             _: LogoutRequested => {
                 self.handle_logout_requested(emitter);
-                Ok(())
-            },
-            _: Ping => {
-                self.handle_ping(emitter);
                 Ok(())
             },
             _: StatusRequest => {

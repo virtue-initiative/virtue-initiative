@@ -6,19 +6,19 @@ import {
   clearDB,
   listEmailDeliveries,
   markUserEmailVerified,
-  signupAndGetToken,
+  signupAndGetCookie,
 } from './helpers';
 
 beforeEach(clearDB);
 
 describe('Partner routes', () => {
   it('creates, accepts, lists, and deletes a partnership without shared-key fields', async () => {
-    const { token: ownerToken, userId: ownerUserId } = await signupAndGetToken(
+    const { cookie: ownerCookie, userId: ownerUserId } = await signupAndGetCookie(
       'owner@example.com',
       'pw',
       'Owner',
     );
-    const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
+    const { cookie: partnerCookie, userId: partnerUserId } = await signupAndGetCookie(
       'partner@example.com',
       'pw',
       'Partner',
@@ -27,7 +27,7 @@ describe('Partner routes', () => {
 
     const createRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
-      headers: authHeaders(ownerToken),
+      headers: authHeaders(ownerCookie),
       body: JSON.stringify({ email: 'partner@example.com' }),
     });
     expect(createRes.status).toBe(201);
@@ -40,13 +40,13 @@ describe('Partner routes', () => {
 
     const acceptRes = await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
-      headers: authHeaders(partnerToken),
+      headers: authHeaders(partnerCookie),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
     expect(acceptRes.status).toBe(200);
 
     const ownerListRes = await SELF.fetch(`${BASE}/partner`, {
-      headers: { Authorization: `Bearer ${ownerToken}` },
+      headers: authHeaders(ownerCookie),
     });
     const ownerList = (await ownerListRes.json()) as {
       watchers: Array<{
@@ -66,7 +66,7 @@ describe('Partner routes', () => {
     });
 
     const partnerListRes = await SELF.fetch(`${BASE}/partner`, {
-      headers: { Authorization: `Bearer ${partnerToken}` },
+      headers: authHeaders(partnerCookie),
     });
     const partnerList = (await partnerListRes.json()) as {
       watching: Array<{
@@ -81,19 +81,19 @@ describe('Partner routes', () => {
 
     const deleteRes = await SELF.fetch(`${BASE}/partner/watching/${created.id}`, {
       method: 'DELETE',
-      headers: { Authorization: `Bearer ${partnerToken}` },
+      headers: authHeaders(partnerCookie),
     });
     expect(deleteRes.status).toBe(204);
   });
 
   it('supports inviting an email before the partner account exists', async () => {
-    const { token: ownerToken, userId: ownerUserId } =
-      await signupAndGetToken('owner2@example.com');
+    const { cookie: ownerCookie, userId: ownerUserId } =
+      await signupAndGetCookie('owner2@example.com');
     await markUserEmailVerified(ownerUserId);
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
-      headers: authHeaders(ownerToken),
+      headers: authHeaders(ownerCookie),
       body: JSON.stringify({ email: 'future@example.com' }),
     });
     expect(inviteRes.status).toBe(201);
@@ -104,7 +104,7 @@ describe('Partner routes', () => {
     );
     const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
 
-    const { token: futureToken } = await signupAndGetToken('accepted@example.com');
+    const { cookie: futureCookie } = await signupAndGetCookie('accepted@example.com');
 
     const validateRes = await SELF.fetch(`${BASE}/partner/validate`, {
       method: 'POST',
@@ -120,13 +120,13 @@ describe('Partner routes', () => {
 
     const acceptRes = await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
-      headers: authHeaders(futureToken),
+      headers: authHeaders(futureCookie),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
     expect(acceptRes.status).toBe(200);
 
     const ownerPartnersRes = await SELF.fetch(`${BASE}/partner`, {
-      headers: { Authorization: `Bearer ${ownerToken}` },
+      headers: authHeaders(ownerCookie),
     });
     const ownerPartners = (await ownerPartnersRes.json()) as {
       watchers: Array<{
@@ -141,13 +141,13 @@ describe('Partner routes', () => {
   });
 
   it('prevents accepting your own invite link', async () => {
-    const { token: ownerToken, userId: ownerUserId } =
-      await signupAndGetToken('owner4@example.com');
+    const { cookie: ownerCookie, userId: ownerUserId } =
+      await signupAndGetCookie('owner4@example.com');
     await markUserEmailVerified(ownerUserId);
 
     const createRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
-      headers: authHeaders(ownerToken),
+      headers: authHeaders(ownerCookie),
       body: JSON.stringify({
         email: 'someone-else@example.com',
       }),
@@ -162,7 +162,7 @@ describe('Partner routes', () => {
 
     const acceptRes = await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
-      headers: authHeaders(ownerToken),
+      headers: authHeaders(ownerCookie),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
     expect(acceptRes.status).toBe(409);

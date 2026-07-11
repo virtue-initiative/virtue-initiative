@@ -95,18 +95,16 @@ mod tests {
         Login {
             credentials: DeviceCredentials {
                 device_id: "test-device".into(),
-                access_token: "test-access".into(),
                 refresh_token: "test-refresh".into(),
             },
             settings: DeviceSettings {
                 device_id: "test-device".into(),
                 name: "test device".into(),
                 platform: "test".into(),
-                owner: Some(BatchRecipient {
+                wrapping_keys: vec![BatchRecipient {
                     user_id: "test-user".into(),
                     pub_key_base64: "CQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
-                }),
-                partners: Vec::new(),
+                }],
                 hash_base_url: None,
             },
         }

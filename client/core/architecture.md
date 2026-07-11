@@ -34,7 +34,7 @@ client/
         lifecycle.rs    — LifecycleModule: process/suspend/ping-gap alerts
         screenshot.rs   — ScreenshotModule: interval scheduling + capture
         status.rs       — StatusModule: partial-status aggregation
-        upload.rs       — UploadModule: hash/batch/immediate queues
+        upload.rs       — UploadModule: hash-pending, batch-pending, and notify-pending queues
       platform.rs       — ScreenshotHooks / PlatformHooks traits
       state.rs          — load_state / store_state (event_state.json)
       storage.rs        — auth.json, device_settings.json, stop_intent.json
@@ -48,7 +48,7 @@ client/
 
 ```rust
 // Build the default set of 7 observer modules.
-let observers = build_default_modules(config, platform, api)?;
+let observers = build_default_modules(config, platform, api, PlatformConfig::default())?;
 let mut bus = EventBus::new(observers, saved_state)?;
 
 // One loop iteration: send Ping, process all cascaded events.
@@ -86,15 +86,15 @@ to pattern-match typed events without boilerplate.
 
 ### The 7 default modules
 
-| Module                      | Key inputs                                                                              | Key outputs                                                                                        |
-| --------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `LifecycleModule`           | `Ping`, `ProcessStarted/Stopped`, `ComputerSuspended/Resumed`, `UserSession*`           | `Upload` (lifecycle + alert events)                                                                |
-| `ScreenshotModule`          | `Login`, `Logout`, `Ping`, `ConfigChanged`                                              | `Upload` (screenshot), `CaptureFailed`                                                             |
-| `UploadModule`              | `Login`, `Logout`, `Upload`, `Ping`, `ProcessStopped`, `FlushBatchNow`, `ConfigChanged` | network I/O via `ApiTransport`; `LogoutRequested` on 404                                           |
-| `CaptureAvailabilityModule` | `CaptureFailed`                                                                         | `Upload` (capture-failed alert)                                                                    |
-| `AuthModule`                | `LoginRequested`, `LogoutRequested`, `Ping`, `StatusRequest`, `ConfigChanged`           | `Login`, `Logout`, `LoginResult`, `LogoutResult`, `DeviceSettingsRefreshed`, `PartialStatus::Auth` |
-| `StatusModule`              | `StatusRequest`, `PartialStatus` (from 3 sources)                                       | `StatusResponse`                                                                                   |
-| `ConfigModule`              | `Ping`                                                                                  | `ConfigChanged`                                                                                    |
+| Module                      | Key inputs                                                                              | Key outputs                                                             |
+| --------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `LifecycleModule`           | `Ping`, `ProcessStarted/Stopped`, `ComputerSuspended/Resumed`, `UserSession*`           | `Upload` (lifecycle + alert events)                                     |
+| `ScreenshotModule`          | `Login`, `Logout`, `Ping`, `ConfigChanged`                                              | `Upload` (screenshot), `CaptureFailed`                                  |
+| `UploadModule`              | `Login`, `Logout`, `Upload`, `Ping`, `ProcessStopped`, `FlushBatchNow`, `ConfigChanged` | network I/O via `ApiTransport`; `LogoutRequested` on 404                |
+| `CaptureAvailabilityModule` | `CaptureFailed`                                                                         | `Upload` (capture-failed alert)                                         |
+| `AuthModule`                | `LoginRequested`, `LogoutRequested`, `StatusRequest`, `ConfigChanged`                   | `Login`, `Logout`, `LoginResult`, `LogoutResult`, `PartialStatus::Auth` |
+| `StatusModule`              | `StatusRequest`, `PartialStatus` (from 3 sources)                                       | `StatusResponse`                                                        |
+| `ConfigModule`              | `Ping`                                                                                  | `ConfigChanged`                                                         |
 
 ### Screenshot dedup (two gates)
 
@@ -272,6 +272,32 @@ platforms keep the default. Platform crates implement `take_screenshot`,
 `get_last_shutdown_time_utc_ms`, `get_last_startup_time_utc_ms`, and (on desktop)
 `is_locked_or_screensaver`.
 
+## PlatformConfig
+
+Fixed, per-platform capabilities that shape module behavior at startup — as opposed to
+`ScreenshotHooks`/`PlatformHooks`, which are live platform I/O queried on every tick.
+Passed once when assembling the observer modules:
+
+```rust
+pub struct PlatformConfig {
+    pub supports_sleep_wake_detection: bool, // default: true
+}
+```
+
+`supports_sleep_wake_detection` defaults to `true`, matching desktop platforms: they emit real
+`ComputerSuspended`/`ComputerResumed` events off OS power notifications, so a suspend period is
+bracketed and never counted as a ping-gap stall in the first place. iOS passes `false`: the
+monitoring process is a short-lived Safari extension host that the OS can suspend the instant
+the device locks, with no notification delivered to that process (extensions have no
+`UIApplication`) and no way to reconstruct after the fact whether a stall was a lock, a
+suspicious pause, or something else — every stall looks identical. When `false`, the lifecycle
+module skips `PingGapWhileRunning` entirely rather than risk alerting on gaps it can't
+attribute.
+
+`PlatformConfig` is deliberately named generically (not e.g. `LifecycleConfig`) so future
+platform-level capability flags can be added to it without another signature change across
+every platform crate.
+
 Everything else belongs in `core`.
 
 ## Batch blob format
@@ -285,7 +311,28 @@ wire:  nonce[12 bytes] || ciphertext+tag
 ```
 
 Each upload also wraps the batch key per recipient using HPKE
-(`DhkemX25519HkdfSha256 / HkdfSha256 / Aes256Gcm`).
+(`DhkemX25519HkdfSha256 / HkdfSha256 / Aes256Gcm`). The recipient set comes from
+the device's `wrapping_keys`, which `UploadModule` refetches from `GET /d/device`
+immediately before every batch upload — this is the sole refresh path, so a partner
+added or removed is picked up on the very next batch. A transient refetch failure
+falls back to the last known settings; a 404/401 means the device is gone and
+triggers logout.
+
+Each `BatchUpload` also carries `high_risk_count`/`medium_risk_count`: tallies of how many
+events in the batch fall in the high (`risk >= 0.7`) and medium (`0.4 <= risk < 0.7`) bands,
+thresholds mirroring `shared-web/risk.ts`. These are computed client-side from per-event
+`risk` values before encryption, so the server can summarize tamper activity in partner
+digest emails without ever decrypting the batch.
+
+## Notify flow
+
+High-risk events (`risk >= lifecycle::EXTRA_HIGH_RISK`) are additionally pushed into
+`UploadModule`'s `pending_notify_events: Vec<NotifyPayload>` queue, where
+`NotifyPayload { ts, type, risk, title?, details? }`. `retry_pending_notifies` drains this
+queue by POSTing each payload to `/d/notify` once the device is authenticated. This happens
+independently of, but alongside, the always-present hash/batch path — the event body itself
+still goes through the normal encrypted batch pipeline; `/d/notify` only triggers the alert
+email.
 
 ## Hash chain
 

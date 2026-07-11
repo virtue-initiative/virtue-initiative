@@ -10,7 +10,6 @@ import type { ComponentChildren } from 'preact';
 export function makeFakeSession(overrides: Partial<Session> = {}): Session {
   return {
     userId: 'user-1',
-    token: 'test-token',
     privateKey: null,
     wrappingKey: {} as CryptoKey,
     logout: vi.fn().mockResolvedValue(undefined),

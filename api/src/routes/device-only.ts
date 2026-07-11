@@ -1,17 +1,14 @@
 import { Context, Hono } from 'hono';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
-import { authenticate } from '../middleware/auth';
+import { authenticateWebSession, authenticateDeviceSession } from '../middleware/auth';
 import { validateZ } from '../middleware/validation';
 import {
   createBatch,
   createDevice,
-  createDeviceLog,
   createSessionRecord,
   getHashState,
   findDeviceById,
-  findSessionByRefreshTokenHash,
-  deleteSessionByRefreshTokenHash,
   listBatchAccessRecipientsForOwner,
   resetHashState as resetStoredHashState,
 } from '../lib/db';
@@ -28,7 +25,7 @@ const ZERO_STATE = new Uint8Array(32);
 function getAppUrl(c: Context<{ Bindings: Env; Variables: Variables }>) {
   return c.env.APP_URL;
 }
-const DEVICE_ACCESS_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
+const HASH_TOKEN_TTL_SECONDS = 60 * 60;
 const DEVICE_REFRESH_TOKEN_TTL_SECONDS = 1000 * 365 * 24 * 60 * 60;
 
 const createDeviceSchema = z.object({
@@ -36,14 +33,12 @@ const createDeviceSchema = z.object({
   platform: z.string().min(1),
 });
 
-const deviceTokenSchema = z.object({
-  refresh_token: z.string().min(1),
-});
-
 const uploadBatchSchema = z.object({
   start_time: z.coerce.number().int().nonnegative(),
   end_time: z.coerce.number().int().nonnegative(),
   access_keys: z.string().min(1),
+  high_risk_count: z.coerce.number().int().nonnegative().optional().default(0),
+  medium_risk_count: z.coerce.number().int().nonnegative().optional().default(0),
   file: z
     .instanceof(File)
     .refine((file) => file.size > 0, { message: 'File is empty' })
@@ -59,11 +54,12 @@ const accessKeysSchema = z.object({
   keys: z.array(accessKeyEntrySchema).min(1),
 });
 
-const deviceLogSchema = z.object({
+const notifySchema = z.object({
   ts: z.number().int().nonnegative(),
   type: z.string().min(1),
-  risk: z.number().min(0).max(1).optional(),
-  data: z.record(z.string(), z.unknown()).optional().default({}),
+  risk: z.number().min(0).max(1),
+  title: z.string().optional(),
+  details: z.string().optional(),
 });
 
 function parseAccessKeysPayload(raw: string) {
@@ -115,11 +111,11 @@ async function createDeviceSession(
 }
 
 /**
- * POST /d/device - Register a device using a user access token.
+ * POST /d/device - Register a device using the authenticated web session cookie.
  */
 deviceOnly.post(
   '/device',
-  authenticate('access'),
+  authenticateWebSession(),
   validateZ('json', createDeviceSchema),
   async (c) => {
     const { name, platform } = c.req.valid('json');
@@ -128,19 +124,16 @@ deviceOnly.post(
 
     await createDevice(c.env.DB, { id, owner, name, platform });
 
-    const [accessToken, refreshToken] = await Promise.all([
-      generateToken('device-access', id, c.env.JWT_PRIVATE_KEY, DEVICE_ACCESS_TOKEN_TTL_SECONDS),
-      createDeviceSession(c, id),
-    ]);
+    const refreshToken = await createDeviceSession(c, id);
 
-    return c.json({ id, access_token: accessToken, refresh_token: refreshToken }, 201);
+    return c.json({ id, refresh_token: refreshToken }, 201);
   },
 );
 
 /**
  * GET /d/device - Get device settings for the authenticated device.
  */
-deviceOnly.get('/device', authenticate('device-access'), async (c) => {
+deviceOnly.get('/device', authenticateDeviceSession(), async (c) => {
   const device = await findDeviceById(c.env.DB, c.get('sub'));
 
   if (!device) {
@@ -153,64 +146,37 @@ deviceOnly.get('/device', authenticate('device-access'), async (c) => {
   }
 
   const recipients = await listBatchAccessRecipientsForOwner(c.env.DB, device.owner);
-  const owner = recipients.find((recipient) => recipient.id === device.owner);
 
   return c.json({
     id: device.id,
     name: device.name,
     platform: device.platform,
-    ...(owner?.pub_key
-      ? {
-          owner: {
-            user_id: owner.id,
-            pub_key: encodeBase64(owner.pub_key),
-          },
-        }
-      : {}),
-    partners: recipients
-      .filter((recipient) => recipient.id !== device.owner)
-      .map((recipient) => ({
-        user_id: recipient.id,
-        pub_key: encodeBase64(recipient.pub_key!),
-      })),
+    wrapping_keys: recipients.map((recipient) => ({
+      user_id: recipient.id,
+      pub_key: encodeBase64(recipient.pub_key!),
+    })),
     hash_base_url: hashBaseUrl,
   });
 });
 
 /**
- * POST /d/token - Exchange a device refresh token for a new device access token.
+ * POST /d/token - Exchange the opaque device refresh token for a short-lived hash-server JWT.
  */
-deviceOnly.post('/token', validateZ('json', deviceTokenSchema), async (c) => {
-  const { refresh_token } = c.req.valid('json');
-
-  const session = await findSessionByRefreshTokenHash(
-    c.env.DB,
-    hashOpaqueToken(refresh_token),
-    'device',
-  );
-
-  if (!session || !session.device_id) {
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
-
-  if (session.expires_at < Date.now()) {
-    await deleteSessionByRefreshTokenHash(c.env.DB, session.refresh_token_hash, 'device');
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
-
-  const device = await findDeviceById(c.env.DB, session.device_id);
+deviceOnly.post('/token', authenticateDeviceSession(), async (c) => {
+  const deviceId = c.get('sub');
+  const device = await findDeviceById(c.env.DB, deviceId);
   if (!device) {
     return c.json({ error: 'Not found' }, 404);
   }
 
-  const accessToken = await generateToken(
-    'device-access',
-    session.device_id,
+  const hashToken = await generateToken(
+    'hash-server',
+    deviceId,
     c.env.JWT_PRIVATE_KEY,
-    DEVICE_ACCESS_TOKEN_TTL_SECONDS,
+    HASH_TOKEN_TTL_SECONDS,
   );
 
-  return c.json({ access_token: accessToken });
+  return c.json({ hash_token: hashToken });
 });
 
 /**
@@ -218,7 +184,7 @@ deviceOnly.post('/token', validateZ('json', deviceTokenSchema), async (c) => {
  */
 deviceOnly.post(
   '/batch',
-  authenticate('device-access'),
+  authenticateDeviceSession(),
   validateZ('form', uploadBatchSchema),
   async (c) => {
     const device = await findDeviceById(c.env.DB, c.get('sub'));
@@ -227,7 +193,8 @@ deviceOnly.post(
       return c.json({ error: 'Not found' }, 404);
     }
 
-    const { start_time, end_time, access_keys, file } = c.req.valid('form');
+    const { start_time, end_time, access_keys, high_risk_count, medium_risk_count, file } =
+      c.req.valid('form');
 
     const hashState = await readHashState(c, device.id);
     const endHash = encodeHex(hashState);
@@ -259,6 +226,8 @@ deviceOnly.post(
       end_time,
       end_hash: endHash,
       access_keys: JSON.stringify(parsedAccessKeys),
+      high_risk_count,
+      medium_risk_count,
       created_at: createdAt,
     });
     await resetHashState(c, device);
@@ -268,12 +237,16 @@ deviceOnly.post(
 );
 
 /**
- * POST /d/log - Submit a single non-batched log item.
+ * POST /d/notify - Send an alert email for a high-risk event.
+ *
+ * The event itself is uploaded (end-to-end encrypted) via POST /d/batch; this
+ * endpoint only carries the minimal metadata needed to render the notification
+ * email and is not persisted. Replaces the removed POST /d/log endpoint.
  */
 deviceOnly.post(
-  '/log',
-  authenticate('device-access'),
-  validateZ('json', deviceLogSchema),
+  '/notify',
+  authenticateDeviceSession(),
+  validateZ('json', notifySchema),
   async (c) => {
     const device = await findDeviceById(c.env.DB, c.get('sub'));
 
@@ -281,49 +254,25 @@ deviceOnly.post(
       return c.json({ error: 'Not found' }, 404);
     }
 
-    const log = c.req.valid('json');
-    const providedTitle = typeof log.data.title === 'string' ? log.data.title : undefined;
-    const providedDetails = typeof log.data.details === 'string' ? log.data.details : undefined;
-    const computedRisk = log.risk ?? null;
-    const computedSeverity = riskToSeverity(computedRisk);
-    const logId = uuidv4();
-
-    await createDeviceLog(c.env.DB, {
-      id: logId,
-      user_id: device.owner,
-      device_id: device.id,
-      ts: log.ts,
-      type: log.type,
-      data: JSON.stringify(log.data),
-      risk: computedRisk,
-      created_at: Date.now(),
+    const notification = c.req.valid('json');
+    const providedTitle = notification.title?.trim();
+    const providedDetails = notification.details?.trim();
+    await notifyPartnersAboutRiskLog(c.env.DB, c.env, {
+      logId: uuidv4(),
+      appUrl: getAppUrl(c),
+      userId: device.owner,
+      deviceName: device.name,
+      severity: riskToSeverity(notification.risk) ?? 'info',
+      risk: notification.risk,
+      title:
+        providedTitle && providedTitle.length > 0
+          ? providedTitle
+          : `Device reported ${notification.type.replaceAll('_', ' ')}.`,
+      details: providedDetails && providedDetails.length > 0 ? providedDetails : null,
+      happenedAt: notification.ts,
     });
 
-    if (computedSeverity && computedRisk != null) {
-      await notifyPartnersAboutRiskLog(c.env.DB, c.env, {
-        logId,
-        appUrl: getAppUrl(c),
-        userId: device.owner,
-        deviceName: device.name,
-        severity: computedSeverity,
-        risk: computedRisk,
-        title:
-          providedTitle && providedTitle.trim().length > 0
-            ? providedTitle
-            : `Device reported ${log.type.replaceAll('_', ' ')}.`,
-        details: providedDetails && providedDetails.trim().length > 0 ? providedDetails : null,
-        happenedAt: log.ts,
-      });
-    }
-
-    return c.json(
-      {
-        id: logId,
-        ...log,
-        ...(computedRisk != null ? { risk: computedRisk } : {}),
-      },
-      201,
-    );
+    return c.json({ ok: true }, 202);
   },
 );
 

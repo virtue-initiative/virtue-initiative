@@ -17,6 +17,7 @@ use crate::module::screenshot::ScreenshotModule;
 use crate::module::status::StatusModule;
 use crate::module::status::{StatusRequest, StatusResponse};
 use crate::module::upload::{UploadModule, UploadObserverState};
+use crate::platform::PlatformConfig;
 use crate::state::load_state;
 use crate::testing::api::MockApiClient;
 use crate::testing::clock::MockClock;
@@ -33,6 +34,7 @@ pub struct Scenario {
     pub api: MockApiClient,
     pub clock: MockClock,
     pub state_dir: PathBuf,
+    pub platform: TestPlatformHooks,
 }
 
 impl Scenario {
@@ -45,10 +47,8 @@ impl Scenario {
     /// disk, so the service comes up authenticated and ready to upload.
     pub fn authenticated() -> Self {
         let auth = AuthState {
-            user_access_token: Some("scenario-user-token".into()),
             device_credentials: Some(DeviceCredentials {
                 device_id: "scenario-device".into(),
-                access_token: "scenario-device-access".into(),
                 refresh_token: "scenario-device-refresh".into(),
             }),
         };
@@ -56,12 +56,11 @@ impl Scenario {
             device_id: "scenario-device".into(),
             name: "scenario device".into(),
             platform: "test-platform".into(),
-            owner: Some(BatchRecipient {
+            wrapping_keys: vec![BatchRecipient {
                 user_id: "scenario-user".into(),
                 // X25519 base point (u=9); any valid curve point works here.
                 pub_key_base64: "CQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
-            }),
-            partners: Vec::new(),
+            }],
             hash_base_url: None,
         };
         Self::build(Some(auth), Some(settings))
@@ -102,7 +101,10 @@ impl Scenario {
         let api_handle = api.clone();
 
         let observers: Vec<Box<dyn Observer>> = vec![
-            Box::new(LifecycleModule::new(Box::new(platform.clone()))),
+            Box::new(LifecycleModule::new(
+                Box::new(platform.clone()),
+                PlatformConfig::default(),
+            )),
             Box::new(ScreenshotModule::new(
                 Arc::new(platform.clone()),
                 screenshot_interval_ms,
@@ -144,6 +146,7 @@ impl Scenario {
             api: api_handle,
             clock,
             state_dir,
+            platform,
         }
     }
 
@@ -271,11 +274,11 @@ impl Scenario {
         self
     }
 
-    pub fn assert_log_upload_count(&self, expected: usize) -> &Self {
-        let actual = self.api.state().log_uploads.len();
+    pub fn assert_notify_count(&self, expected: usize) -> &Self {
+        let actual = self.api.state().notify_calls.len();
         assert_eq!(
             actual, expected,
-            "expected {expected} log uploads, recorded {actual}"
+            "expected {expected} notify calls, recorded {actual}"
         );
         self
     }
@@ -361,7 +364,10 @@ impl Scenario {
         let api_handle = api.clone();
 
         let observers: Vec<Box<dyn Observer>> = vec![
-            Box::new(LifecycleModule::new(Box::new(platform.clone()))),
+            Box::new(LifecycleModule::new(
+                Box::new(platform.clone()),
+                PlatformConfig::default(),
+            )),
             Box::new(ScreenshotModule::new(
                 Arc::new(platform.clone()),
                 screenshot_interval_ms,
@@ -388,6 +394,7 @@ impl Scenario {
             api: api_handle,
             clock,
             state_dir,
+            platform,
         }
     }
 }

@@ -8,7 +8,7 @@ import {
   type JWK,
 } from 'jose';
 
-export type JWTType = 'access' | 'refresh' | 'server' | 'device-access' | 'device-refresh';
+export type JWTType = 'server' | 'hash-server';
 
 export interface JWTPayload {
   sub: string;
@@ -135,12 +135,4 @@ export function generateToken(
   expiresInSeconds: number,
 ): Promise<string> {
   return signJWT({ sub, type }, privateKeyPem, expiresInSeconds);
-}
-
-export function generateAccessToken(sub: string, privateKeyPem: string, expiresInSeconds: number) {
-  return generateToken('access', sub, privateKeyPem, expiresInSeconds);
-}
-
-export function generateRefreshToken(sub: string, privateKeyPem: string, expiresInSeconds: number) {
-  return generateToken('refresh', sub, privateKeyPem, expiresInSeconds);
 }

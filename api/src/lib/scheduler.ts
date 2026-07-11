@@ -1,15 +1,8 @@
 import { DigestFrequency, TamperSeverity } from './email-domain';
 import { formatUtcDate, getDigestWindowForRun } from './digest-schedule';
-import {
-  listBatchWindowsForUser,
-  listDevicesForUser,
-  listDeviceLogsForUser,
-  listDigestEligiblePartnerships,
-  listRiskDeviceLogsForUser,
-} from './db';
+import { listBatchWindowsForUser, listDevicesForUser, listDigestEligiblePartnerships } from './db';
 import { sendEmail } from './email';
 import { renderPartnerDigestTemplate } from './email/templates';
-import { riskToSeverity } from './tamper';
 import { Env } from '../types/bindings';
 
 const DEFAULT_CAPTURE_INTERVAL_MS = 300 * 1000;
@@ -32,13 +25,17 @@ function countApproximateScreenshots(
   }, 0);
 }
 
-function summarizeTamperCounts(events: Array<{ risk: number | null }>) {
+// High-risk events now live inside end-to-end encrypted batches, so the server can
+// no longer read individual event risks. Each batch instead reports how many of its
+// events fell in the high (>= 0.7) and medium (0.4–0.7) risk bands; those map to the
+// `critical` and `warning` tamper severities respectively.
+function summarizeTamperCounts(
+  batches: Array<{ high_risk_count: number; medium_risk_count: number }>,
+) {
   const counts: Record<TamperSeverity, number> = { info: 0, warning: 0, critical: 0 };
-  for (const event of events) {
-    const severity = riskToSeverity(event.risk);
-    if (severity) {
-      counts[severity] += 1;
-    }
+  for (const batch of batches) {
+    counts.critical += batch.high_risk_count;
+    counts.warning += batch.medium_risk_count;
   }
   return counts;
 }
@@ -51,24 +48,14 @@ function batchOverlapsWindow(
   return batch.end_time > windowStart && batch.start_time < windowEnd;
 }
 
-function logFallsWithinWindow(log: { ts: number }, windowStart: number, windowEnd: number) {
-  return log.ts >= windowStart && log.ts < windowEnd;
-}
-
 function hasActivityInWindow(
   deviceId: string,
   batches: Array<{ device_id: string; start_time: number; end_time: number }>,
-  logs: Array<{ device_id: string; ts: number }>,
   windowStart: number,
   windowEnd: number,
 ) {
-  return (
-    batches.some(
-      (batch) => batch.device_id === deviceId && batchOverlapsWindow(batch, windowStart, windowEnd),
-    ) ||
-    logs.some(
-      (log) => log.device_id === deviceId && logFallsWithinWindow(log, windowStart, windowEnd),
-    )
+  return batches.some(
+    (batch) => batch.device_id === deviceId && batchOverlapsWindow(batch, windowStart, windowEnd),
   );
 }
 
@@ -76,7 +63,6 @@ function collectMissingLogPeriods(
   cadence: DigestFrequency,
   devices: Array<{ id: string; name: string; created_at: number }>,
   batches: Array<{ device_id: string; start_time: number; end_time: number }>,
-  logs: Array<{ device_id: string; ts: number }>,
   windowStart: number,
   windowEnd: number,
 ) {
@@ -89,7 +75,7 @@ function collectMissingLogPeriods(
     }
 
     if (cadence === 'daily') {
-      if (!hasActivityInWindow(device.id, batches, logs, firstRelevantTime, windowEnd)) {
+      if (!hasActivityInWindow(device.id, batches, firstRelevantTime, windowEnd)) {
         missing.push(`${device.name}: no logs in the last 24 hours`);
       }
       continue;
@@ -97,7 +83,7 @@ function collectMissingLogPeriods(
 
     for (let bucketStart = firstRelevantTime; bucketStart < windowEnd; bucketStart += DAY_MS) {
       const bucketEnd = Math.min(bucketStart + DAY_MS, windowEnd);
-      if (!hasActivityInWindow(device.id, batches, logs, bucketStart, bucketEnd)) {
+      if (!hasActivityInWindow(device.id, batches, bucketStart, bucketEnd)) {
         missing.push(`${device.name}: no logs on ${formatUtcDate(bucketStart)}`);
       }
     }
@@ -145,15 +131,8 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
           ),
         )
         .map(async (partnership) => {
-          const [batches, riskLogs, deviceLogs, devices] = await Promise.all([
+          const [batches, devices] = await Promise.all([
             listBatchWindowsForUser(env.DB, partnership.watching_user_id, window.start, window.end),
-            listRiskDeviceLogsForUser(
-              env.DB,
-              partnership.watching_user_id,
-              window.start,
-              window.end,
-            ),
-            listDeviceLogsForUser(env.DB, partnership.watching_user_id, window.start, window.end),
             listDevicesForUser(env.DB, partnership.watching_user_id),
           ]);
 
@@ -166,12 +145,11 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
               DEFAULT_CAPTURE_INTERVAL_MS,
               window,
             ),
-            tamperCounts: summarizeTamperCounts(riskLogs),
+            tamperCounts: summarizeTamperCounts(batches),
             missingLogDays: collectMissingLogPeriods(
               emailFrequency,
               devices,
               batches,
-              deviceLogs,
               window.start,
               window.end,
             ),

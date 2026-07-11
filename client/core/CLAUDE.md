@@ -40,7 +40,7 @@ Everything else belongs in `core`.
 The daemon loop is:
 
 ```rust
-let observers = build_default_modules(config, platform, api)?;
+let observers = build_default_modules(config, platform, api, PlatformConfig::default())?;
 let mut bus = EventBus::new(observers, saved_state)?;
 loop {
     bus.send(Ping)?;
@@ -54,7 +54,7 @@ loop {
 
 | Module                 | Handles                                                                       | Emits                                                                   |
 | ---------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `auth`                 | `LoginRequested`, `LogoutRequested`, `Ping`, `StatusRequest`                  | `Login`, `Logout`, `LoginResult`, `LogoutResult`, `PartialStatus::Auth` |
+| `auth`                 | `LoginRequested`, `LogoutRequested`, `StatusRequest`                          | `Login`, `Logout`, `LoginResult`, `LogoutResult`, `PartialStatus::Auth` |
 | `lifecycle`            | `Ping`, `ProcessStarted/Stopped`, `ComputerSuspended/Resumed`, `UserSession*` | `Upload` (lifecycle + alerts)                                           |
 | `screenshot`           | `Login`, `Logout`, `Ping`, `ConfigChanged`                                    | `Upload` (screenshot), `CaptureFailed`                                  |
 | `upload`               | `Login`, `Logout`, `Upload`, `Ping`, `ProcessStopped`, `FlushBatchNow`        | network I/O                                                             |

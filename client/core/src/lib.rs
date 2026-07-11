@@ -34,13 +34,9 @@ pub use model::{
     ProcessStoppedReason, Redacted, ScreenshotSkipReason, UploadKind,
 };
 pub use model::{
-    AuthState, BatchUpload, EventData, LogEntry, LoginStatus, LoopOutcome, Screenshot,
-    ServiceStatus,
+    AuthState, BatchUpload, EventData, LogEntry, LoopOutcome, Screenshot, ServiceStatus,
 };
-pub use module::auth::{
-    DeviceSettingsRefreshed, Login, LoginRequested, LoginResult, Logout, LogoutRequested,
-    LogoutResult,
-};
+pub use module::auth::{Login, LoginRequested, LoginResult, Logout, LogoutRequested, LogoutResult};
 pub use module::config::ConfigChanged;
 pub use module::lifecycle::{
     ComputerResumed, ComputerSuspended, ProcessStarted, ProcessStopped, UserSessionLogin,
@@ -50,5 +46,5 @@ pub use module::screenshot::CaptureFailed;
 pub use module::status::{StatusRequest, StatusResponse};
 pub use module::upload::FlushBatchNow;
 pub use module::upload::Upload;
-pub use platform::{PlatformHooks, ScreenshotHooks};
+pub use platform::{PlatformConfig, PlatformHooks, ScreenshotHooks};
 pub use state::{load_state, store_state};

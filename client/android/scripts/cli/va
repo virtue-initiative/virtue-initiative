@@ -71,7 +71,7 @@ cmd_install() {
   step "Launching app"
   adb shell am start -n "$VIRTUE_ACTIVITY" >/dev/null
   ok "launched $VIRTUE_ACTIVITY"
-  info "logs: adb logcat --pid \"\$(adb shell pidof -s $VIRTUE_PACKAGE)\""
+  info "logs: va logs --follow"
 }
 
 cmd_start() {
@@ -112,6 +112,30 @@ cmd_lock() {
   ok "screen locked (use KEYCODE_WAKEUP / 'va start' state to wake)"
 }
 
+cmd_logs() {
+  need adb
+  emulator_running || die "no emulator running"
+  local pid
+  pid="$(adb shell pidof -s "$VIRTUE_PACKAGE" 2>/dev/null | tr -d '\r' || true)"
+  if [ "${FOLLOW:-0}" = 1 ]; then
+    if [ -n "$pid" ]; then
+      step "Following logs for $VIRTUE_PACKAGE (pid $pid)"
+      adb logcat --pid "$pid"
+    else
+      warn "app not running — following unfiltered logcat instead"
+      adb logcat
+    fi
+  else
+    step "Dumping buffered logs for $VIRTUE_PACKAGE"
+    if [ -n "$pid" ]; then
+      adb logcat -d --pid "$pid"
+    else
+      warn "app not running — showing package-matched lines from the full buffer"
+      adb logcat -d | grep -i "$VIRTUE_PACKAGE" || true
+    fi
+  fi
+}
+
 cmd_force_idle() {
   need adb
   emulator_running || die "no emulator running"
@@ -135,11 +159,13 @@ ${C_BOLD}Commands:${C_RESET}
   ${C_GREEN}start${C_RESET}   [--headless]  Start the emulator and wait for boot
   ${C_GREEN}stop${C_RESET}                  Kill the running emulator
   ${C_GREEN}lock${C_RESET}                  Lock the device screen
+  ${C_GREEN}logs${C_RESET}    [--follow]    Show app logs (buffered by default)
   ${C_GREEN}force-idle${C_RESET}            Force the device into Doze (test background survival)
 
 ${C_BOLD}Options:${C_RESET}
   --release             Use the release build variant (build/install)
   --headless            Run the emulator without a window (start)
+  --follow              Stream logs live instead of dumping the buffer (logs)
   -h, --help            Show this help
 
 ${C_BOLD}Environment${C_RESET} (see scripts/cli/env.sh):
@@ -151,6 +177,8 @@ ${C_BOLD}Examples:${C_RESET}
   va start --headless     # boot a windowless emulator
   va install              # build debug, install, launch
   va build --release      # produce a release APK
+  va logs                 # dump buffered app logs
+  va logs --follow        # stream app logs live
   va force-idle           # push the app into Doze
 EOF
 }
@@ -158,11 +186,13 @@ EOF
 # --- arg parsing -----------------------------------------------------------
 RELEASE=0
 HEADLESS=0
+FOLLOW=0
 CMD=""
 for arg in "$@"; do
   case "$arg" in
     --release)  RELEASE=1 ;;
     --headless) HEADLESS=1 ;;
+    --follow)   FOLLOW=1 ;;
     -h|--help)  usage; exit 0 ;;
     -*)         die "unknown option: $arg (try 'va --help')" ;;
     *)          [ -z "$CMD" ] && CMD="$arg" || die "unexpected argument: $arg" ;;
@@ -175,6 +205,7 @@ case "$CMD" in
   start)      cmd_start ;;
   stop)       cmd_stop ;;
   lock)       cmd_lock ;;
+  logs)       cmd_logs ;;
   force-idle) cmd_force_idle ;;
   "")         usage; exit 1 ;;
   *)          die "unknown command: $CMD (try 'va --help')" ;;

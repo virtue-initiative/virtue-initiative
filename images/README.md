@@ -10,6 +10,7 @@ Regeneration:
 
 - `./images/generate-icons.sh`
 - `./images/generate-icons.sh --target ios` to regenerate only the iOS app icon set
+- `./images/generate-icons.sh --target mac` to regenerate only the mac app icon/tray icon set
 - `./images/generate-icons.sh --background "#rrggbb"` to override the icon background color (default `#f4efe3`)
 
 Requirements:
@@ -39,6 +40,9 @@ Generated targets:
 - `landing/public/logo.svg`
 - `client/mac/assets/AppIcon.icns`
 - `client/mac/assets/tray-icon.png`
+- `client/mac/app/Assets.xcassets/Contents.json`
+- `client/mac/app/Assets.xcassets/AppIcon.appiconset/*`
+- `client/mac/app/Assets.xcassets/TrayIcon.imageset/*`
 - `client/linux/assets/tray-icon.png`
 - `client/windows/assets/app-icon.ico`
 - `client/windows/assets/app-icon.png`

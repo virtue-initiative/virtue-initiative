@@ -180,6 +180,25 @@ pub struct BatchUpload {
     #[serde(with = "serde_bytes")]
     pub bytes: Vec<u8>,
     pub access_keys: Vec<BatchAccessKey>,
+    /// Number of events in this batch whose risk fell in the high band (>= 0.7).
+    pub high_risk_count: u32,
+    /// Number of events in this batch whose risk fell in the medium band (0.4–0.7).
+    pub medium_risk_count: u32,
+}
+
+/// Minimal metadata sent to `POST /d/notify` to trigger an alert email for a
+/// high-risk event. The event body itself is uploaded end-to-end encrypted via a
+/// batch; this payload carries only what the notification email needs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotifyPayload {
+    pub ts: i64,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub risk: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,7 +210,6 @@ pub struct BatchAccessKey {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceCredentials {
     pub device_id: String,
-    pub access_token: String,
     pub refresh_token: String,
 }
 
@@ -200,10 +218,10 @@ pub struct DeviceSettings {
     pub device_id: String,
     pub name: String,
     pub platform: String,
+    /// Every recipient the device must wrap batch keys for: the owner (when they
+    /// have a public key) followed by all accepted partners.
     #[serde(default)]
-    pub owner: Option<BatchRecipient>,
-    #[serde(default)]
-    pub partners: Vec<BatchRecipient>,
+    pub wrapping_keys: Vec<BatchRecipient>,
     #[serde(default)]
     pub hash_base_url: Option<String>,
 }
@@ -225,15 +243,8 @@ pub struct HashParams {
     pub hkdf_hash: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LoginStatus {
-    pub access_token: String,
-    pub device: Option<DeviceCredentials>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AuthState {
-    pub user_access_token: Option<String>,
     pub device_credentials: Option<DeviceCredentials>,
 }
 

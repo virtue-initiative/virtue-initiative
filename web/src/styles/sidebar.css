@@ -196,7 +196,6 @@ a.sidebar-nav-group-heading {
   display: flex;
   flex-direction: column;
   gap: 0.125rem;
-  padding: 0.5rem 0 0;
 }
 
 .sidebar-user {
@@ -251,17 +250,6 @@ a.sidebar-nav-group-heading {
   font-size: 0.8125rem;
   font-weight: 500;
   color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sidebar-user-sub {
-  font-family: var(--font-mono);
-  font-size: 0.625rem;
-  letter-spacing: 0.06em;
-  color: var(--ink-3);
-  margin-top: 0.25rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

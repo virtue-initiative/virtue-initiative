@@ -13,8 +13,8 @@ use serde::de::DeserializeOwned;
 use virtue_core::{
     build_default_modules_reqwest, load_state, store_state, AuthState, Config, CoreError,
     CoreResult, DeviceSettings, EventBus, EventChannel, LoginRequested, LoginResult,
-    LogoutRequested, Ping, PlatformHooks, ProcessStarted, ProcessStopped, ProcessStoppedReason,
-    Redacted, Screenshot, ScreenshotHooks, StatusRequest, StatusResponse,
+    LogoutRequested, Ping, PlatformConfig, PlatformHooks, ProcessStarted, ProcessStopped,
+    ProcessStoppedReason, Redacted, Screenshot, ScreenshotHooks, StatusRequest, StatusResponse,
     UserStopRequested,
 };
 
@@ -422,7 +422,15 @@ fn sleep_interruptible(stop: &AtomicBool, duration: Duration) {
 
 fn build_bus(core: &IosCore) -> Result<(EventBus, PathBuf)> {
     let cfg = build_core_config(core);
-    let modules = build_default_modules_reqwest(cfg, IosPlatformHooks)?;
+    // The Safari extension host has no `UIApplication` and can be suspended by
+    // the OS the instant the device locks, with no notification delivered to
+    // this process. There's no reliable way to tell a benign lock/unlock from a
+    // suspicious pause, so the lifecycle module must not evaluate
+    // `PingGapWhileRunning` on iOS at all.
+    let platform_config = PlatformConfig {
+        supports_sleep_wake_detection: false,
+    };
+    let modules = build_default_modules_reqwest(cfg, IosPlatformHooks, platform_config)?;
     let state_path = core.state_dir.join("event_state.json");
     let bus = EventBus::new(modules, load_state(&state_path)?)?;
     Ok((bus, state_path))

@@ -406,7 +406,6 @@ export async function listBatchUrlsForUser(db: D1Database, userId: string) {
 
 export async function deleteDeviceById(db: D1Database, deviceId: string) {
   const deviceIdBytes = uuidToBytes(deviceId);
-  await db.prepare('DELETE FROM device_logs WHERE device_id = ?').bind(deviceIdBytes).run();
   await db.prepare('DELETE FROM batches WHERE device_id = ?').bind(deviceIdBytes).run();
   await db.prepare('DELETE FROM hash_states WHERE device_id = ?').bind(deviceIdBytes).run();
   return db.prepare('DELETE FROM devices WHERE id = ?').bind(deviceIdBytes).run();
@@ -459,16 +458,24 @@ export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
   }>(
     db
       .prepare(
-        `SELECT d.id, d.owner, d.name, d.platform, d.created_at, MAX(b.end_time) AS last_upload_at,
+        // Pre-aggregate each owner's batches per device (using idx_batches_user_id,
+        // since batches.user_id is always the device owner) before joining to devices.
+        // This avoids the LEFT JOIN batches row-explosion that GROUP BY had to collapse.
+        `SELECT d.id, d.owner, d.name, d.platform, d.created_at,
+                lu.last_upload_at,
                 hs.hashed_at AS last_hash_at, COALESCE(hs.count, 0) AS pending_count
          FROM devices d
-         LEFT JOIN batches b ON b.device_id = d.id
+         LEFT JOIN (
+           SELECT device_id, MAX(end_time) AS last_upload_at
+           FROM batches
+           WHERE user_id IN (${placeholders(ownerIds.length)})
+           GROUP BY device_id
+         ) lu ON lu.device_id = d.id
          LEFT JOIN hash_states hs ON hs.device_id = d.id
          WHERE d.owner IN (${placeholders(ownerIds.length)})
-         GROUP BY d.id
          ORDER BY d.created_at DESC`,
       )
-      .bind(...ownerIds.map(uuidToBytes)),
+      .bind(...[...ownerIds, ...ownerIds].map(uuidToBytes)),
     ['id', 'owner'],
   );
 }
@@ -485,12 +492,18 @@ export async function listDevicesWithLastUpload(db: D1Database) {
     owner_name: string | null;
   }>(
     db.prepare(
-      `SELECT d.id, d.owner, d.name, d.platform, d.created_at, MAX(b.end_time) AS last_upload_at,
+      // Aggregate batches per device in a single grouped pass, then join, so the
+      // batches table is scanned once instead of being exploded across the join.
+      `SELECT d.id, d.owner, d.name, d.platform, d.created_at,
+              lu.last_upload_at,
               u.email AS owner_email, u.name AS owner_name
        FROM devices d
        JOIN users u ON u.id = d.owner
-       LEFT JOIN batches b ON b.device_id = d.id
-       GROUP BY d.id
+       LEFT JOIN (
+         SELECT device_id, MAX(end_time) AS last_upload_at
+         FROM batches
+         GROUP BY device_id
+       ) lu ON lu.device_id = d.id
        ORDER BY d.created_at DESC`,
     ),
     ['id', 'owner'],
@@ -528,14 +541,17 @@ export async function createBatch(
     end_time: number;
     end_hash: string;
     access_keys: string;
+    high_risk_count?: number;
+    medium_risk_count?: number;
     created_at: number;
   },
 ) {
   return db
     .prepare(
       `INSERT INTO batches (
-         id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         id, user_id, device_id, url, start_time, end_time, end_hash, access_keys,
+         high_risk_count, medium_risk_count, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       uuidToBytes(input.id),
@@ -546,37 +562,8 @@ export async function createBatch(
       input.end_time,
       input.end_hash,
       input.access_keys,
-      input.created_at,
-    )
-    .run();
-}
-
-export async function createDeviceLog(
-  db: D1Database,
-  input: {
-    id: string;
-    user_id: string;
-    device_id: string;
-    ts: number;
-    type: string;
-    data: string;
-    risk?: number | null;
-    created_at: number;
-  },
-) {
-  return db
-    .prepare(
-      `INSERT INTO device_logs (id, user_id, device_id, ts, type, data, risk, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      uuidToBytes(input.id),
-      uuidToBytes(input.user_id),
-      uuidToBytes(input.device_id),
-      input.ts,
-      input.type,
-      input.data,
-      input.risk ?? null,
+      input.high_risk_count ?? 0,
+      input.medium_risk_count ?? 0,
       input.created_at,
     )
     .run();
@@ -627,143 +614,23 @@ export async function listBatchWindowsForUser(
   windowStart: number,
   windowEnd: number,
 ) {
-  return allWithUuidFields<{ id: string; device_id: string; start_time: number; end_time: number }>(
+  return allWithUuidFields<{
+    id: string;
+    device_id: string;
+    start_time: number;
+    end_time: number;
+    high_risk_count: number;
+    medium_risk_count: number;
+  }>(
     db
       .prepare(
-        `SELECT id, device_id, start_time, end_time
+        `SELECT id, device_id, start_time, end_time, high_risk_count, medium_risk_count
          FROM batches
          WHERE user_id = ? AND end_time > ? AND start_time < ?
          ORDER BY start_time ASC`,
       )
       .bind(uuidToBytes(userId), windowStart, windowEnd),
     ['id', 'device_id'],
-  );
-}
-
-export async function listDeviceLogs(
-  db: D1Database,
-  ownerIds: string[],
-  filters: { deviceId?: string; since?: number },
-) {
-  if (ownerIds.length === 0) {
-    return [];
-  }
-
-  const params: SqlValue[] = ownerIds.map(uuidToBytes);
-  let query = `SELECT id, user_id, device_id, ts, type, data, risk, created_at
-               FROM device_logs
-               WHERE user_id IN (${placeholders(ownerIds.length)})`;
-
-  if (filters.deviceId) {
-    query += ' AND device_id = ?';
-    params.push(uuidToBytes(filters.deviceId));
-  }
-
-  if (filters.since !== undefined) {
-    query += ' AND created_at > ?';
-    params.push(filters.since);
-  }
-
-  query += ' ORDER BY created_at ASC';
-
-  return allWithUuidFields<{
-    id: string;
-    user_id: string;
-    device_id: string;
-    ts: number;
-    type: string;
-    data: string;
-    risk: number | null;
-    created_at: number;
-  }>(db.prepare(query).bind(...params), ['id', 'user_id', 'device_id']);
-}
-
-export async function findDeviceLogByKindWithinWindow(
-  db: D1Database,
-  input: { userId: string; deviceId: string; type: string; windowStart: number; windowEnd: number },
-) {
-  return firstWithUuidFields<{
-    id: string;
-    user_id: string;
-    device_id: string;
-    ts: number;
-    type: string;
-    data: string;
-    risk: number | null;
-    created_at: number;
-  }>(
-    db
-      .prepare(
-        `SELECT id, user_id, device_id, ts, type, data, risk, created_at
-         FROM device_logs
-         WHERE user_id = ? AND device_id = ? AND type = ? AND ts >= ? AND ts < ?
-         ORDER BY ts DESC
-         LIMIT 1`,
-      )
-      .bind(
-        uuidToBytes(input.userId),
-        uuidToBytes(input.deviceId),
-        input.type,
-        input.windowStart,
-        input.windowEnd,
-      ),
-    ['id', 'user_id', 'device_id'],
-  );
-}
-
-export async function listRiskDeviceLogsForUser(
-  db: D1Database,
-  userId: string,
-  windowStart: number,
-  windowEnd: number,
-) {
-  return allWithUuidFields<{
-    id: string;
-    user_id: string;
-    device_id: string;
-    ts: number;
-    type: string;
-    data: string;
-    risk: number | null;
-    created_at: number;
-  }>(
-    db
-      .prepare(
-        `SELECT id, user_id, device_id, ts, type, data, risk, created_at
-         FROM device_logs
-         WHERE user_id = ? AND risk IS NOT NULL AND ts >= ? AND ts < ?
-         ORDER BY ts DESC`,
-      )
-      .bind(uuidToBytes(userId), windowStart, windowEnd),
-    ['id', 'user_id', 'device_id'],
-  );
-}
-
-export async function listDeviceLogsForUser(
-  db: D1Database,
-  userId: string,
-  windowStart: number,
-  windowEnd: number,
-) {
-  return allWithUuidFields<{
-    id: string;
-    user_id: string;
-    device_id: string;
-    ts: number;
-    type: string;
-    data: string;
-    risk: number | null;
-    created_at: number;
-  }>(
-    db
-      .prepare(
-        `SELECT id, user_id, device_id, ts, type, data, risk, created_at
-         FROM device_logs
-         WHERE user_id = ? AND ts >= ? AND ts < ?
-         ORDER BY ts DESC`,
-      )
-      .bind(uuidToBytes(userId), windowStart, windowEnd),
-    ['id', 'user_id', 'device_id'],
   );
 }
 

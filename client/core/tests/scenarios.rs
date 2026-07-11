@@ -36,7 +36,7 @@ fn fresh_unauthenticated_service_loops_cleanly_with_no_uploads() {
         .assert_is_running(true)
         .assert_is_authenticated(false)
         .assert_batch_upload_count(0)
-        .assert_log_upload_count(0)
+        .assert_notify_count(0)
         .assert_errors_log_empty();
 }
 
@@ -112,8 +112,8 @@ fn user_stopped_process_emits_high_risk_upload() {
     scenario.queue(ProcessStopped(ProcessStoppedReason::User));
     scenario.at_t(0).loop_iteration();
     assert!(
-        !scenario.api.state().log_uploads.is_empty(),
-        "expected an immediate log upload for UserStoppedProcess alert"
+        !scenario.api.state().notify_calls.is_empty(),
+        "expected an immediate notification for UserStoppedProcess alert"
     );
 }
 
@@ -130,8 +130,8 @@ fn ping_gap_while_running_batches_alert_without_email() {
     scenario.at_t(182_000).loop_iteration();
     let state = scenario.api.state();
     assert!(
-        state.log_uploads.is_empty(),
-        "ping gap must not trigger an immediate (emailed) log upload"
+        state.notify_calls.is_empty(),
+        "ping gap must not trigger an immediate (emailed) notification"
     );
     assert!(
         state.hash_uploads.len() > hashes_before,
@@ -147,7 +147,7 @@ fn computer_resume_suppresses_ping_gap_alert() {
     scenario.queue(ComputerResumed);
     scenario.at_t(12_000).loop_iteration();
     assert_eq!(
-        scenario.api.state().log_uploads.len(),
+        scenario.api.state().notify_calls.len(),
         0,
         "expected no log upload when a computer-resume suppresses the ping-gap alert"
     );
@@ -175,9 +175,9 @@ fn four_capture_failures_below_threshold_no_upload() {
         "4 failures < threshold, no batch upload"
     );
     assert_eq!(
-        state.log_uploads.len(),
+        state.notify_calls.len(),
         0,
-        "4 failures < threshold, no log upload"
+        "4 failures < threshold, no notification"
     );
 }
 
@@ -292,13 +292,17 @@ fn unexpected_process_start_after_long_ping_gap_emits_alert() {
         last_process_started: 1,
         ..Default::default()
     });
+    // A real boot time is required for this alert: it only makes sense relative to
+    // a known boot ("this restart isn't explained by the device having just
+    // booted"). Platforms that can't report one (e.g. iOS) don't get this alert.
+    scenario.platform.set_last_startup_time(Some(1));
     scenario.queue(ProcessStarted);
     scenario.at_t(130_000).loop_iteration();
     // UnexpectedProcessStart is high-risk but batched (no immediate email).
     let state = scenario.api.state();
     assert!(
-        state.log_uploads.is_empty(),
-        "unexpected process start must not trigger an immediate (emailed) log upload"
+        state.notify_calls.is_empty(),
+        "unexpected process start must not trigger an immediate (emailed) notification"
     );
     assert!(
         !state.hash_uploads.is_empty() || !state.batch_uploads.is_empty(),

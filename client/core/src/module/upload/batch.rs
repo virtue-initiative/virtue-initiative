@@ -13,12 +13,15 @@ pub(crate) const MAX_BATCH_ITEMS_PER_UPLOAD: usize = 200;
 pub struct BatchBuilder;
 
 impl BatchBuilder {
+    #[allow(clippy::too_many_arguments)]
     pub fn build_upload(
         encoded_events: &[Vec<u8>],
         crypto: &CryptoEngine,
         recipients: &[BatchRecipient],
         start_time_ms: i64,
         end_time_ms: i64,
+        high_risk_count: u32,
+        medium_risk_count: u32,
     ) -> CoreResult<BatchUpload> {
         if encoded_events.is_empty() {
             return Err(CoreError::InvalidState(
@@ -53,6 +56,8 @@ impl BatchBuilder {
             end_time_ms,
             bytes: encrypted,
             access_keys,
+            high_risk_count,
+            medium_risk_count,
         })
     }
 }

@@ -3,7 +3,7 @@ import type { BatchVerification } from '../../utils/api/crypto';
 
 export type FeedLog = DataLog & {
   batch_status: BatchVerification;
-  source: 'batch' | 'log';
+  source: 'batch';
   image_w?: number;
   image_h?: number;
 };

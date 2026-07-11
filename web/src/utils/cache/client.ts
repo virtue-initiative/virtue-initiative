@@ -12,7 +12,6 @@ export type CacheRequest =
   | {
       id: string;
       method: 'setSession';
-      token: string;
       userId: string;
       privateKey: CryptoKey | null;
     }
@@ -59,7 +58,7 @@ export type CacheQueryUpdate = {
 export type CacheQueryCallback = (update: CacheQueryUpdate) => void;
 
 export interface CacheClient {
-  setSession(token: string, userId: string, privateKey: CryptoKey | null): void;
+  setSession(userId: string, privateKey: CryptoKey | null): void;
   cacheQuery(query: CacheQuery, callback: CacheQueryCallback): void;
   refetch(): void;
   clearCache(): Promise<void>;
@@ -270,9 +269,9 @@ export function createCacheClient(): CacheClient {
   }
 
   return {
-    setSession: (token, userId, privateKey) => {
+    setSession: (userId, privateKey) => {
       localUserId = userId;
-      send({ id: makeId(), method: 'setSession', token, userId, privateKey });
+      send({ id: makeId(), method: 'setSession', userId, privateKey });
     },
 
     cacheQuery: (query, callback) => {

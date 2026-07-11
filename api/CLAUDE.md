@@ -4,14 +4,18 @@ Cloudflare Workers API using Hono. Entry point: `src/index.ts`.
 
 ## Token types and TTLs
 
-| Type            | TTL        | Auth header     | Notes                                  |
-| --------------- | ---------- | --------------- | -------------------------------------- |
-| `access`        | 1 hour     | `Bearer <jwt>`  | User routes                            |
-| `device-access` | 7 days     | `Bearer <jwt>`  | Device routes (`/d/*`, `/hash`)        |
-| `server`        | 60 seconds | `Bearer <jwt>`  | Server-to-server (e.g. `DELETE /hash`) |
-| refresh         | 1 year     | HTTPOnly cookie | Exchanged at `POST /token`             |
+Two kinds of credential exist: **opaque session refresh tokens** (looked up in the `sessions` table) and **short-lived EdDSA JWTs**.
 
-JWT subject (`sub`) is a user ID for `access` tokens and a device ID for `device-access`/`server` tokens. The `type` claim in the payload distinguishes them.
+| Token                | Kind   | TTL        | Auth header             | Notes                                                    |
+| -------------------- | ------ | ---------- | ----------------------- | -------------------------------------------------------- |
+| web refresh token    | opaque | 1 year     | `refresh_token` cookie¹ | Authenticates user/web routes directly                   |
+| device refresh token | opaque | ~1000 yr   | `Bearer <token>`        | Authenticates `/d/*` routes directly                     |
+| `hash-server`        | JWT    | 1 hour     | `Bearer <jwt>`          | Hash-server routes (`/hash`); minted by `POST /d/token`  |
+| `server`             | JWT    | 60 seconds | `Bearer <jwt>`          | Server-to-server (e.g. `DELETE /hash`, `GET /hash/info`) |
+
+¹ The web refresh token is also accepted as `Bearer <token>` (used by the cache worker).
+
+There is no access-token exchange: opaque refresh tokens authenticate their routes directly. The JWT `sub` is a device ID for `hash-server`/`server` tokens; the `type` claim distinguishes them.
 
 ## Validation pattern
 

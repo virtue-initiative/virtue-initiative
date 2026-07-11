@@ -1,21 +1,20 @@
-pub mod api;
 mod batch;
 
 use std::any::Any;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-pub use api::UploadApi;
 use batch::BatchBuilder;
 pub(crate) use batch::MAX_BATCH_ITEMS_PER_UPLOAD;
 
 use crate::api::ApiTransport;
 use crate::crypto::{CryptoEngine, compute_event_hash, encode_batch_event};
-use crate::error::CoreResult;
+use crate::error::{CoreError, CoreResult};
 use crate::events::Ping;
 use crate::events::bus::{Emitter, EventBus, Observer, StateType, log_error};
 use crate::model::PartialStatus;
-use crate::module::auth::{DeviceSettingsRefreshed, Login, Logout, LogoutRequested};
+use crate::module::auth::{Login, Logout, LogoutRequested};
 use crate::module::config::ConfigChanged;
 use crate::module::lifecycle::ProcessStopped;
 use crate::module::status::StatusRequest;
@@ -29,20 +28,67 @@ pub struct Upload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FlushBatchNow;
 use crate::model::{
-    BatchRecipient, DeviceCredentials, DeviceSettings, LogEntry, ProcessStoppedReason, UploadKind,
+    BatchRecipient, BatchUpload, DeviceCredentials, DeviceSettings, LogEntry, NotifyPayload,
+    ProcessStoppedReason, UploadKind,
 };
 use crate::platform::ScreenshotHooks;
 
 pub(crate) const POST_LOGIN_PROOF_BATCH_COUNT: u32 = 3;
 
+/// A hash-uploaded event awaiting batch upload, paired with its risk so the batch
+/// upload can report how many high/medium-risk events it carries.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PendingBatchEvent {
+    pub ts: i64,
+    pub risk: f32,
+    pub encoded: Vec<u8>,
+}
+
+/// Builds the notification payload for a high-risk event. Title/details are pulled
+/// from the event body when present (e.g. `Dev` events); otherwise the server
+/// derives a fallback title from the event type.
+fn build_notify_payload(entry: &LogEntry) -> NotifyPayload {
+    let value = serde_json::to_value(&entry.event).unwrap_or(serde_json::Value::Null);
+    let event_type = value
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("event")
+        .to_string();
+    let data = value.get("data");
+    let title = data
+        .and_then(|d| d.get("title"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let details = data
+        .and_then(|d| d.get("details"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    NotifyPayload {
+        ts: entry.ts,
+        event_type,
+        risk: entry.risk.unwrap_or(0.0),
+        title,
+        details,
+    }
+}
+
 const MAX_HASH_RETRIES_PER_LOOP: usize = 8;
-const MAX_DIRECT_LOG_RETRIES_PER_LOOP: usize = 8;
+const MAX_NOTIFY_RETRIES_PER_LOOP: usize = 8;
+const HASH_TOKEN_MAX_AGE: Duration = Duration::from_secs(55 * 60);
+
+/// Risk-rating band thresholds mirroring `shared-web/risk.ts` (`getRiskRating`).
+/// A batch reports how many of its events land in the high (>= 0.7) and medium
+/// (0.4–0.7) bands so the server can summarize tamper activity in digest emails
+/// without reading the encrypted payload.
+const HIGH_RISK_RATING: f32 = 0.7;
+const MEDIUM_RISK_RATING: f32 = 0.4;
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct UploadObserverState {
-    pub pending_batch_events: Vec<(i64, Vec<u8>)>,
+    pub pending_batch_events: Vec<PendingBatchEvent>,
     pub pending_hash_events: Vec<LogEntry>,
-    pub pending_immediate_events: Vec<LogEntry>,
+    #[serde(default)]
+    pub pending_notify_events: Vec<NotifyPayload>,
     pub last_batch_at_ms: Option<i64>,
     pub post_login_proof_batches_remaining: u32,
     #[serde(default)]
@@ -55,7 +101,7 @@ impl UploadObserverState {
     pub fn reset_for_login(&mut self) {
         self.pending_batch_events.clear();
         self.pending_hash_events.clear();
-        self.pending_immediate_events.clear();
+        self.pending_notify_events.clear();
         self.last_batch_at_ms = None;
         self.post_login_proof_batches_remaining = POST_LOGIN_PROOF_BATCH_COUNT;
     }
@@ -63,7 +109,7 @@ impl UploadObserverState {
     pub fn reset_for_logout(&mut self) {
         self.pending_batch_events.clear();
         self.pending_hash_events.clear();
-        self.pending_immediate_events.clear();
+        self.pending_notify_events.clear();
         self.last_batch_at_ms = None;
         self.post_login_proof_batches_remaining = 0;
         self.settings = None;
@@ -72,7 +118,7 @@ impl UploadObserverState {
 
     pub fn pending_request_count(&self) -> usize {
         self.pending_hash_events.len()
-            + self.pending_immediate_events.len()
+            + self.pending_notify_events.len()
             + usize::from(!self.pending_batch_events.is_empty())
     }
 }
@@ -102,7 +148,8 @@ fn drain_retry_queue<T>(
 
 pub struct UploadModule<A: ApiTransport + Clone + Send + Sync + 'static> {
     pub state: UploadObserverState,
-    pub upload_api: UploadApi<A>,
+    api: A,
+    hash_token_cache: Option<(String, Instant)>,
     pub batch_interval_ms: i64,
     platform: Box<dyn ScreenshotHooks>,
     pub authenticated: bool,
@@ -112,10 +159,65 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
     pub fn new(platform: Box<dyn ScreenshotHooks>, api: A, batch_interval_ms: i64) -> Self {
         Self {
             state: UploadObserverState::default(),
-            upload_api: UploadApi::new(api),
+            api,
+            hash_token_cache: None,
             batch_interval_ms,
             platform,
             authenticated: false,
+        }
+    }
+
+    fn upload_batch(&self, batch: &BatchUpload) -> CoreResult<()> {
+        let creds = self
+            .state
+            .device_credentials
+            .as_ref()
+            .ok_or(CoreError::NotAuthenticated)?;
+        self.api
+            .upload_batch(&creds.refresh_token, batch)
+            .map(|_| ())
+    }
+
+    fn notify(&self, payload: &NotifyPayload) -> CoreResult<()> {
+        let creds = self
+            .state
+            .device_credentials
+            .as_ref()
+            .ok_or(CoreError::NotAuthenticated)?;
+        self.api.notify(&creds.refresh_token, payload).map(|_| ())
+    }
+
+    fn upload_hash(
+        &mut self,
+        hash_base_url: Option<&str>,
+        content_hash: &[u8; 32],
+    ) -> CoreResult<()> {
+        let hash_jwt = self.ensure_hash_token()?;
+        self.api.upload_hash(hash_base_url, &hash_jwt, content_hash)
+    }
+
+    /// Fetches a hash-server JWT, caching it for [`HASH_TOKEN_MAX_AGE`] so we don't hit
+    /// `POST /d/token` on every hash upload. Cleared on login/logout.
+    fn ensure_hash_token(&mut self) -> CoreResult<String> {
+        let refresh_token = self
+            .state
+            .device_credentials
+            .as_ref()
+            .ok_or(CoreError::NotAuthenticated)?
+            .refresh_token
+            .clone();
+
+        let needs_refresh = match &self.hash_token_cache {
+            None => true,
+            Some((_, fetched_at)) => fetched_at.elapsed() >= HASH_TOKEN_MAX_AGE,
+        };
+
+        if needs_refresh {
+            let token = self.api.get_hash_token(&refresh_token)?;
+            self.hash_token_cache = Some((token.clone(), Instant::now()));
+            Ok(token)
+        } else {
+            Ok(self.hash_token_cache.as_ref().unwrap().0.clone())
         }
     }
 
@@ -139,9 +241,13 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
                     }
                 };
                 let hash = compute_event_hash(&encoded);
-                match self.upload_api.upload_hash(hash_base_url.as_deref(), &hash) {
+                match self.upload_hash(hash_base_url.as_deref(), &hash) {
                     Ok(()) => {
-                        self.state.pending_batch_events.push((event.ts, encoded));
+                        self.state.pending_batch_events.push(PendingBatchEvent {
+                            ts: event.ts,
+                            risk: event.risk.unwrap_or(0.0),
+                            encoded,
+                        });
                         None
                     }
                     Err(_) => Some(event),
@@ -150,26 +256,40 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
         Ok(())
     }
 
-    fn retry_pending_immediates(&mut self) -> CoreResult<()> {
-        let events = std::mem::take(&mut self.state.pending_immediate_events);
-        self.state.pending_immediate_events =
-            drain_retry_queue(events, MAX_DIRECT_LOG_RETRIES_PER_LOOP, |entry| match self
-                .upload_api
-                .upload_log(&entry)
-            {
-                Ok(()) => None,
-                Err(err) if err.is_bad_request() => {
-                    log_error("direct log upload failed permanently", Some(&err));
-                    None
+    fn retry_pending_notifies(&mut self) -> CoreResult<()> {
+        let events = std::mem::take(&mut self.state.pending_notify_events);
+        self.state.pending_notify_events =
+            drain_retry_queue(events, MAX_NOTIFY_RETRIES_PER_LOOP, |payload| {
+                match self.notify(&payload) {
+                    Ok(()) => None,
+                    Err(err) if err.is_bad_request() => {
+                        log_error("notify failed permanently", Some(&err));
+                        None
+                    }
+                    Err(_) => Some(payload),
                 }
-                Err(_) => Some(entry),
             });
         Ok(())
     }
 
+    /// Only sends queued notify emails once the hash + batch pipeline is confirmed
+    /// fully drained. `try_upload_batch`/`maybe_upload_batch` can return `Ok(())` on a
+    /// deferred/transient failure (no recipients yet, device settings refresh failed,
+    /// upload rejected) without actually uploading, so a plain `Ok(())` from those calls
+    /// is not sufficient evidence that a queued notify's event reached the server. An
+    /// empty `pending_hash_events` + `pending_batch_events` is: every event has been
+    /// hashed *and* its batch has been accepted.
+    fn retry_pending_notifies_if_flushed(&mut self) -> CoreResult<()> {
+        if self.state.pending_hash_events.is_empty() && self.state.pending_batch_events.is_empty() {
+            self.retry_pending_notifies()?;
+        }
+        Ok(())
+    }
+
     fn maybe_upload_batch(&mut self, now_ms: i64, emitter: &Emitter) -> CoreResult<()> {
-        let can = self.state.settings.as_ref().is_some_and(can_capture);
-        if self.state.pending_batch_events.is_empty() || !can {
+        // Whether we have recipients to wrap for is decided in `try_upload_batch`
+        // after refetching settings, not from the (possibly stale) cached copy.
+        if self.state.pending_batch_events.is_empty() {
             return Ok(());
         }
         let should = self.state.post_login_proof_batches_remaining > 0
@@ -185,13 +305,51 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
         Ok(())
     }
 
+    /// Refetches device settings from the API immediately before a batch upload
+    /// so the batch key is wrapped for the current recipient set (e.g. a partner
+    /// added or removed since the last periodic refresh). Returns `false` when the
+    /// device is gone and the batch should be abandoned; a transient failure
+    /// returns `true` so the batch still uploads against the last known settings.
+    fn refresh_settings_before_batch(&mut self, emitter: &Emitter) -> bool {
+        let Some(creds) = self.state.device_credentials.as_ref() else {
+            return true;
+        };
+        let refresh_token = creds.refresh_token.clone();
+        match self.api.get_device_settings(&refresh_token) {
+            Ok(settings) => {
+                self.state.settings = Some(settings);
+                true
+            }
+            Err(err) if err.is_not_found() || err.is_unauthorized() => {
+                log_error(
+                    "settings refresh before batch: device deregistered or unauth, logging out",
+                    Some(&err),
+                );
+                let _ = emitter.send(LogoutRequested);
+                false
+            }
+            Err(err) => {
+                log_error(
+                    "settings refresh before batch failed; using last known settings",
+                    Some(&err),
+                );
+                true
+            }
+        }
+    }
+
     pub(crate) fn try_upload_batch(&mut self, now_ms: i64, emitter: &Emitter) -> CoreResult<()> {
         if self.state.pending_batch_events.is_empty() {
             return Ok(());
         }
+        if !self.refresh_settings_before_batch(emitter) {
+            return Ok(());
+        }
+        // With freshly fetched settings in hand, only proceed when there is at
+        // least one recipient to wrap for; otherwise keep the events queued.
         let settings = match self.state.settings.as_ref() {
-            Some(s) => s,
-            None => return Ok(()),
+            Some(s) if can_capture(s) => s,
+            _ => return Ok(()),
         };
         let count = self
             .state
@@ -199,9 +357,14 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
             .len()
             .min(MAX_BATCH_ITEMS_PER_UPLOAD);
         let mut items = self.state.pending_batch_events[..count].to_vec();
-        items.sort_by_key(|(ts, _)| *ts);
-        let start_time_ms = items[0].0;
-        let encoded: Vec<Vec<u8>> = items.into_iter().map(|(_, bytes)| bytes).collect();
+        items.sort_by_key(|event| event.ts);
+        let start_time_ms = items[0].ts;
+        let high_risk_count = items.iter().filter(|e| e.risk >= HIGH_RISK_RATING).count() as u32;
+        let medium_risk_count = items
+            .iter()
+            .filter(|e| e.risk >= MEDIUM_RISK_RATING && e.risk < HIGH_RISK_RATING)
+            .count() as u32;
+        let encoded: Vec<Vec<u8>> = items.into_iter().map(|event| event.encoded).collect();
         let recipients = batch_recipients(settings)?;
         let batch = BatchBuilder::build_upload(
             &encoded,
@@ -209,8 +372,10 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
             &recipients,
             start_time_ms,
             now_ms,
+            high_risk_count,
+            medium_risk_count,
         )?;
-        match self.upload_api.upload_batch(&batch) {
+        match self.upload_batch(&batch) {
             Ok(_) => {
                 #[cfg(debug_assertions)]
                 eprintln!("[upload] batch ok: {count} events, start_ms={start_time_ms}");
@@ -254,8 +419,15 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
         }
 
         self.retry_pending_hashes()?;
-        self.retry_pending_immediates()?;
-        self.maybe_upload_batch(now_ms, emitter)?;
+        // Force the batch out before sending any queued notify emails so the
+        // event(s) they reference already exist server-side by the time the
+        // email goes out, rather than waiting on the interval timer.
+        if self.state.pending_notify_events.is_empty() {
+            self.maybe_upload_batch(now_ms, emitter)?;
+        } else {
+            self.try_upload_batch(now_ms, emitter)?;
+        }
+        self.retry_pending_notifies_if_flushed()?;
         Ok(())
     }
 
@@ -272,30 +444,38 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
         // Heartbeats bypass the screen-lock gate: the whole point is to prove the
         // device is alive when idle, so we upload even if the screen is locked.
         let is_heartbeat = matches!(kind, UploadKind::Heartbeat);
+        let is_high_risk = risk >= crate::module::lifecycle::EXTRA_HIGH_RISK;
         let entry = LogEntry {
             ts: now_ms,
             risk: Some(risk),
             event: kind,
         };
+        // High-risk events trigger an immediate email notification, but the event
+        // body still rides through the hash chain + encrypted batch below — the
+        // server never receives it unencrypted.
+        if is_high_risk {
+            self.state
+                .pending_notify_events
+                .push(build_notify_payload(&entry));
+        }
         // Always enqueue, but only attempt network I/O while the screen is active
         // (battery): a locked/off screen leaves events queued for the next ping flush.
+        self.state.pending_hash_events.push(entry);
         let screen_active = !self.platform.is_locked_or_screensaver()?;
-        if risk >= crate::module::lifecycle::EXTRA_HIGH_RISK {
-            self.state.pending_immediate_events.push(entry);
-            if screen_active {
-                self.retry_pending_immediates()?;
+        if screen_active || is_heartbeat {
+            self.retry_pending_hashes()?;
+            if is_heartbeat || is_high_risk {
+                // Force an immediate batch flush — don't wait for the interval timer.
+                // For a high-risk event this also guarantees the encrypted event is
+                // uploaded before the notify email below goes out, so the event
+                // already exists server-side when the recipient follows the link.
+                self.try_upload_batch(now_ms, emitter)?;
+            } else {
+                self.maybe_upload_batch(now_ms, emitter)?;
             }
-        } else {
-            self.state.pending_hash_events.push(entry);
-            if screen_active || is_heartbeat {
-                self.retry_pending_hashes()?;
-                if is_heartbeat {
-                    // Force an immediate batch flush — don't wait for the interval timer.
-                    self.try_upload_batch(now_ms, emitter)?;
-                } else {
-                    self.maybe_upload_batch(now_ms, emitter)?;
-                }
-            }
+        }
+        if is_high_risk && screen_active {
+            self.retry_pending_notifies_if_flushed()?;
         }
         Ok(())
     }
@@ -313,8 +493,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> Observer for UploadModule<
     fn init(&mut self, _bus: &mut EventBus, state: StateType) -> CoreResult<()> {
         if !state.is_null() {
             self.state = serde_json::from_value(state)?;
-            if let Some(creds) = self.state.device_credentials.clone() {
-                self.upload_api.set_credentials(Some(creds));
+            if self.state.device_credentials.is_some() {
                 self.authenticated = true;
             }
         }
@@ -325,7 +504,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> Observer for UploadModule<
         crate::dispatch_event!(event, {
             ev: Login => {
                 self.authenticated = true;
-                self.upload_api.set_credentials(Some(ev.credentials.clone()));
+                self.hash_token_cache = None;
                 self.state.settings = Some(ev.settings.clone());
                 self.state.device_credentials = Some(ev.credentials.clone());
                 self.state.reset_for_login();
@@ -333,12 +512,8 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> Observer for UploadModule<
             },
             _: Logout => {
                 self.authenticated = false;
-                self.upload_api.set_credentials(None);
+                self.hash_token_cache = None;
                 self.state.reset_for_logout();
-                Ok(())
-            },
-            ev: DeviceSettingsRefreshed => {
-                self.state.settings = Some(ev.settings.clone());
                 Ok(())
             },
             _: StatusRequest => {
@@ -374,26 +549,20 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> Observer for UploadModule<
     }
 
     fn save(&self) -> CoreResult<StateType> {
-        let mut state = self.state.clone();
-        state.device_credentials = self.upload_api.credentials().cloned();
-        Ok(serde_json::to_value(&state)?)
+        Ok(serde_json::to_value(&self.state)?)
     }
 }
 
 fn can_capture(settings: &DeviceSettings) -> bool {
-    settings.owner.is_some()
+    !settings.wrapping_keys.is_empty()
 }
 
 fn batch_recipients(settings: &DeviceSettings) -> CoreResult<Vec<BatchRecipient>> {
     use crate::error::CoreError;
-    let owner = settings
-        .owner
-        .clone()
-        .ok_or(CoreError::InvalidState("owner public key not available"))?;
-    let mut recipients = Vec::with_capacity(1 + settings.partners.len());
-    recipients.push(owner);
-    recipients.extend(settings.partners.clone());
-    Ok(recipients)
+    if settings.wrapping_keys.is_empty() {
+        return Err(CoreError::InvalidState("no batch recipients available"));
+    }
+    Ok(settings.wrapping_keys.clone())
 }
 
 #[cfg(test)]
@@ -421,7 +590,6 @@ mod tests {
     fn valid_credentials() -> DeviceCredentials {
         DeviceCredentials {
             device_id: "test-device".into(),
-            access_token: "test-access".into(),
             refresh_token: "test-refresh".into(),
         }
     }
@@ -431,11 +599,10 @@ mod tests {
             device_id: "test-device".into(),
             name: "test device".into(),
             platform: "test".into(),
-            owner: Some(BatchRecipient {
+            wrapping_keys: vec![BatchRecipient {
                 user_id: "test-user".into(),
                 pub_key_base64: "CQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
-            }),
-            partners: Vec::new(),
+            }],
             hash_base_url: None,
         }
     }
@@ -514,6 +681,75 @@ mod tests {
     }
 
     #[test]
+    fn hash_token_is_fetched_once_and_cached_across_uploads() {
+        let mut b = EventTester::builder();
+        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
+        let mut t = b.build();
+        t.emit(1, login_event());
+
+        // Two low-risk uploads both flush through the hash server on an active screen.
+        t.emit(2, skipped_upload());
+        t.emit(3, skipped_upload());
+
+        let s = t.api.state();
+        assert_eq!(s.hash_uploads.len(), 2, "both hashes should upload");
+        assert_eq!(
+            s.get_hash_token_calls.len(),
+            1,
+            "hash-server token should be fetched once and cached"
+        );
+    }
+
+    #[test]
+    fn settings_are_refetched_before_batch_and_new_recipients_are_used() {
+        let mut b = EventTester::builder();
+        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
+        let mut t = b.build();
+        // Login seeds settings with a single recipient (the owner).
+        t.emit(1, login_event());
+
+        // A partner is added server-side: the next settings fetch returns two recipients.
+        t.api.program_get_device_settings(Ok(DeviceSettings {
+            device_id: "test-device".into(),
+            name: "test device".into(),
+            platform: "test".into(),
+            wrapping_keys: vec![
+                BatchRecipient {
+                    user_id: "test-user".into(),
+                    pub_key_base64: "CQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
+                },
+                BatchRecipient {
+                    user_id: "partner-user".into(),
+                    pub_key_base64: "CQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
+                },
+            ],
+            hash_base_url: None,
+        }));
+
+        // A low-risk upload flushes a batch (post-login proof batches force it out).
+        t.emit(2, skipped_upload());
+
+        let s = t.api.state();
+        assert_eq!(
+            s.get_device_settings_calls.len(),
+            1,
+            "settings should be refetched once, right before the batch upload"
+        );
+        assert_eq!(s.batch_uploads.len(), 1, "batch should upload");
+        let recipients: Vec<String> = s.batch_uploads[0]
+            .batch
+            .access_keys
+            .iter()
+            .map(|k| k.user_id.clone())
+            .collect();
+        assert_eq!(
+            recipients,
+            vec!["test-user".to_string(), "partner-user".to_string()],
+            "batch should be wrapped for the freshly fetched recipient set"
+        );
+    }
+
+    #[test]
     fn status_request_emits_pending_request_count() {
         let mut b = EventTester::builder();
         b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
@@ -532,7 +768,13 @@ mod tests {
                     details: None,
                 },
             });
-            m.state.pending_batch_events.push((500, vec![1, 2, 3]));
+            m.state
+                .pending_batch_events
+                .push(crate::module::upload::PendingBatchEvent {
+                    ts: 500,
+                    risk: 0.0,
+                    encoded: vec![1, 2, 3],
+                });
         }
         t.emit(1, StatusRequest);
         t.assert_like::<PartialStatus>(crate::like!(PartialStatus::Upload {
@@ -556,7 +798,7 @@ mod tests {
             assert!(s.hash_uploads.is_empty(), "no hash upload while locked");
             assert!(s.batch_uploads.is_empty(), "no batch upload while locked");
             assert!(
-                s.log_uploads.is_empty(),
+                s.notify_calls.is_empty(),
                 "no direct log upload while locked"
             );
         }
@@ -587,7 +829,11 @@ mod tests {
         t.observer::<UploadModule<MockApiClient>>()
             .state
             .pending_batch_events
-            .push((500, vec![1, 2, 3]));
+            .push(crate::module::upload::PendingBatchEvent {
+                ts: 500,
+                risk: 0.0,
+                encoded: vec![1, 2, 3],
+            });
 
         // A plain ping does not flush while locked.
         t.emit(2, Ping);
@@ -629,6 +875,156 @@ mod tests {
     }
 
     #[test]
+    fn extra_high_risk_upload_forces_batch_flush_regardless_of_interval() {
+        let mut b = EventTester::builder();
+        // Huge interval so `maybe_upload_batch` would never fire on its own.
+        b.add(UploadModule::new(
+            Box::new(b.platform()),
+            b.api(),
+            24 * 60 * 60 * 1_000,
+        ));
+        let mut t = b.build();
+        t.emit(1, login_event());
+
+        t.emit(
+            2,
+            Upload {
+                risk: crate::module::lifecycle::EXTRA_HIGH_RISK,
+                kind: UploadKind::Alert {
+                    message: "tamper detected".into(),
+                },
+            },
+        );
+
+        assert_eq!(
+            t.api.state().batch_uploads.len(),
+            1,
+            "extra-high-risk upload should force an immediate batch flush"
+        );
+        assert_eq!(
+            t.api.state().notify_calls.len(),
+            1,
+            "extra-high-risk upload should still send the notify email"
+        );
+        assert!(
+            t.observer::<UploadModule<MockApiClient>>()
+                .state
+                .pending_batch_events
+                .is_empty(),
+            "the event should have been uploaded, not left queued"
+        );
+    }
+
+    #[test]
+    fn ping_forces_batch_flush_before_sending_queued_notify() {
+        let mut b = EventTester::builder();
+        b.platform().set_locked_or_screensaver(true);
+        b.add(UploadModule::new(
+            Box::new(b.platform()),
+            b.api(),
+            24 * 60 * 60 * 1_000,
+        ));
+        let mut t = b.build();
+        t.emit(1, login_event());
+
+        // Extra-high-risk event arrives while locked: queued for later, no
+        // network I/O yet (matches the existing locked-screen deferral).
+        t.emit(
+            2,
+            Upload {
+                risk: crate::module::lifecycle::EXTRA_HIGH_RISK,
+                kind: UploadKind::Alert {
+                    message: "tamper detected".into(),
+                },
+            },
+        );
+        assert!(t.api.state().batch_uploads.is_empty());
+        assert!(t.api.state().notify_calls.is_empty());
+
+        // Screen unlocks; the next ping should flush the batch before sending
+        // the queued notify, even though the batch interval hasn't elapsed.
+        t.platform.set_locked_or_screensaver(false);
+        t.emit(3, Ping);
+
+        assert_eq!(
+            t.api.state().batch_uploads.len(),
+            1,
+            "ping should force the batch out ahead of the queued notify"
+        );
+        assert_eq!(
+            t.api.state().notify_calls.len(),
+            1,
+            "queued notify should still go out"
+        );
+    }
+
+    #[test]
+    fn transient_batch_failure_defers_notify_until_batch_actually_lands() {
+        let mut b = EventTester::builder();
+        // Huge interval so `maybe_upload_batch` would never fire on its own.
+        b.add(UploadModule::new(
+            Box::new(b.platform()),
+            b.api(),
+            24 * 60 * 60 * 1_000,
+        ));
+        let mut t = b.build();
+        t.emit(1, login_event());
+
+        // The batch upload fails transiently (e.g. a network blip): `try_upload_batch`
+        // logs and returns `Ok(())` without actually uploading or draining the queue.
+        t.api
+            .program_batch(Err(crate::error::CoreError::HttpStatus {
+                status: 503,
+                message: "boom".into(),
+            }));
+
+        t.emit(
+            2,
+            Upload {
+                risk: crate::module::lifecycle::EXTRA_HIGH_RISK,
+                kind: UploadKind::Alert {
+                    message: "tamper detected".into(),
+                },
+            },
+        );
+
+        // The event hasn't actually reached the server, so the notify email must not
+        // go out yet even though this is the extra-high-risk "flush immediately" path.
+        assert!(
+            t.api.state().notify_calls.is_empty(),
+            "notify must not fire while the batch upload has not actually landed"
+        );
+        assert!(
+            !t.observer::<UploadModule<MockApiClient>>()
+                .state
+                .pending_batch_events
+                .is_empty(),
+            "event should remain queued after a deferred batch failure"
+        );
+        assert!(
+            !t.observer::<UploadModule<MockApiClient>>()
+                .state
+                .pending_notify_events
+                .is_empty(),
+            "notify should remain queued after a deferred batch failure"
+        );
+
+        // A later ping, once the batch upload starts succeeding again, should flush the
+        // batch and only then release the queued notify.
+        t.emit(3, Ping);
+        assert_eq!(
+            t.api.state().batch_uploads.len(),
+            2,
+            "one failed attempt from the Upload event, one successful retry from the Ping"
+        );
+        assert_eq!(
+            t.api.state().notify_calls.len(),
+            1,
+            "notify should fire only after the batch actually landed"
+        );
+    }
+
+    #[test]
     fn shutdown_flush_uploads_while_locked() {
         let mut b = EventTester::builder();
         b.platform().set_locked_or_screensaver(true);
@@ -638,7 +1034,11 @@ mod tests {
         t.observer::<UploadModule<MockApiClient>>()
             .state
             .pending_batch_events
-            .push((500, vec![1, 2, 3]));
+            .push(crate::module::upload::PendingBatchEvent {
+                ts: 500,
+                risk: 0.0,
+                encoded: vec![1, 2, 3],
+            });
 
         // ProcessStopped(Shutdown) is a terminal flush path → uploads regardless of lock.
         t.emit(2, ProcessStopped(ProcessStoppedReason::Shutdown));

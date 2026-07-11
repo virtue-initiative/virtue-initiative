@@ -1,0 +1,8 @@
+---
+// Keep non-production deployments (staging, feature branches) out of search
+// engines. The staging build runs `astro build --mode staging`, so any mode
+// other than `production` should not be indexed.
+const noindex = import.meta.env.MODE !== 'production';
+---
+
+{noindex && <meta name="robots" content="noindex, nofollow" />}
