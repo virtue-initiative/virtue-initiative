@@ -30,8 +30,8 @@
       },
       "routes": [
         {
-          "pattern": "donate-api.virtueinitiative.org/*",
-          "zone_name": "virtueinitiative.org"
+          "pattern": "donate-api.virtueinitiative.org",
+          "custom_domain": true
         }
       ]
     },
@@ -50,8 +50,8 @@
       },
       "routes": [
         {
-          "pattern": "staging.donate-api.virtueinitiative.org/*",
-          "zone_name": "virtueinitiative.org"
+          "pattern": "staging.donate-api.virtueinitiative.org",
+          "custom_domain": true
         }
       ]
     }
