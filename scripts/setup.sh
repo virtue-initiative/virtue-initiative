@@ -18,6 +18,11 @@ setdir "api"
 cp .dev.vars.example .dev.vars
 yes | bun run db:migrate:local
 
+# Donations API setup
+setdir "api-donate"
+cp .dev.vars.example .dev.vars
+yes | bun run db:migrate:local
+
 # Caddy — install if missing
 if ! command -v caddy > /dev/null 2>&1; then
   echo "Installing Caddy..."

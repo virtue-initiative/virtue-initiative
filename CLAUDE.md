@@ -3,6 +3,7 @@
 ## Repo map
 
 - `api/` — Cloudflare Workers REST API (TypeScript, Hono, D1 SQLite, R2 object storage)
+- `api-donate/` — Standalone Cloudflare Worker for donations (TypeScript, Hono, D1, Stripe Checkout)
 - `web/` — Main web app (TypeScript, Preact, Vite)
 - `landing/` — Marketing/help site (TypeScript, Astro, Preact)
 - `shared-web/` — Shared UI components used by `web/` and `landing/`

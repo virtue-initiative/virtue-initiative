@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "virtueinitiative-web",
+  "name": "app",
   "compatibility_date": "2026-02-23",
   "workers_dev": false,
   "assets": {
@@ -9,7 +9,7 @@
   },
   "env": {
     "prod": {
-      "name": "virtueinitiative-web",
+      "name": "app",
       "routes": [
         {
           "pattern": "app.virtueinitiative.org",
@@ -18,7 +18,7 @@
       ]
     },
     "staging": {
-      "name": "virtueinitiative-staging-web",
+      "name": "staging-app",
       "routes": [
         {
           "pattern": "staging.app.virtueinitiative.org",

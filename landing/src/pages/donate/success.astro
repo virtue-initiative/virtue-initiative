@@ -1,0 +1,21 @@
+---
+import { Button } from '@virtueinitiative/shared-web';
+import SiteLayout from '../../layouts/SiteLayout.astro';
+---
+
+<SiteLayout pageTitle="Thank you" tagline="Your donation makes a difference">
+  <section class="donate-success">
+    <h2>Thank you for your gift</h2>
+    <p>
+      Your donation directly supports free accountability tools for people who want to break free
+      from pornography. A receipt has been sent to your email by Stripe.
+    </p>
+    <p class="donate-success-note">
+      If you set up a monthly donation, you can update or cancel it any time from the donate page.
+    </p>
+    <div class="donate-success-actions">
+      <Button href="/" variant="primary">Back to home</Button>
+      <Button href="/about" variant="outline">Learn more about us</Button>
+    </div>
+  </section>
+</SiteLayout>

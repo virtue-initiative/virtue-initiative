@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "virtueinitiative-api",
+  "name": "api",
   "main": "src/index.ts",
   "compatibility_date": "2024-12-01",
   "compatibility_flags": ["nodejs_compat"],
@@ -19,19 +19,19 @@
   },
   "env": {
     "prod": {
-      "name": "virtueinitiative-api",
+      "name": "api",
       "d1_databases": [
         {
           "binding": "DB",
-          "database_name": "virtueinitiative-db",
-          "database_id": "ff636ee0-a8f9-44a1-8a16-f0a162cf1c73",
+          "database_name": "app-db",
+          "database_id": "141a161a-a16b-41cb-a8b3-e5e40803391a",
           "migrations_dir": "src/schema/migrations"
         }
       ],
       "r2_buckets": [
         {
           "binding": "BUCKET",
-          "bucket_name": "virtueinitiative-images"
+          "bucket_name": "app-bucket"
         }
       ],
       "vars": {
@@ -58,19 +58,19 @@
       ]
     },
     "staging": {
-      "name": "virtueinitiative-staging-api",
+      "name": "staging-api",
       "d1_databases": [
         {
           "binding": "DB",
-          "database_name": "virtueinitiative-staging-db",
-          "database_id": "9ec06359-1165-48bc-a73a-a870d9082980",
+          "database_name": "staging-app-db",
+          "database_id": "f00a68e9-9ca0-4fa9-98e9-c135a489df3f",
           "migrations_dir": "src/schema/migrations"
         }
       ],
       "r2_buckets": [
         {
           "binding": "BUCKET",
-          "bucket_name": "virtueinitiative-staging-images"
+          "bucket_name": "staging-app-bucket"
         }
       ],
       "vars": {

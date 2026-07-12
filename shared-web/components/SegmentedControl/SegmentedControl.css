@@ -38,3 +38,8 @@
     }
   }
 }
+
+.vi-segmented-control--tall .vi-segmented-control__item {
+  min-height: var(--button-height);
+  padding: 0.4rem 1rem;
+}

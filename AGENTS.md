@@ -13,6 +13,7 @@ This repository is split across several independently-tested areas. When you cha
 ## Repo-wide quick map
 
 - `api/`: Cloudflare Workers API
+- `api-donate/`: standalone donations Worker (Stripe Checkout)
 - `web/`: main web app
 - `landing/`: marketing site and help pages
 - `shared-web/`: shared web assets used by `web` and `landing`
@@ -21,7 +22,7 @@ This repository is split across several independently-tested areas. When you cha
 
 ## Web/API CI (`.github/workflows/web.yml`)
 
-Run this when touching `api/`, `web/`, `landing/`, `shared-web/`, or `theme.json`.
+Run this when touching `api/`, `api-donate/`, `web/`, `landing/`, `shared-web/`, or `theme.json`.
 
 ### API
 
@@ -38,6 +39,23 @@ Notes:
 
 - `bun test` runs `vitest run`.
 - API tests are documented in `api/TESTING.md`.
+
+### Donate API
+
+From `api-donate/`:
+
+```bash
+bun install
+bun run typecheck
+bun test
+bun run format:check
+```
+
+Notes:
+
+- `bun test` runs `vitest run` (Stripe calls are mocked via `cloudflare:test` `fetchMock`; webhook signatures are generated locally).
+- Standalone Worker with separate `staging`/`prod` environments (own D1 database and route each), same pattern as `api/`. Deploys via `bun run deploy:staging` or `bun run deploy:prod`.
+- Requires secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` per environment (`wrangler secret put ... --env staging|prod`).
 
 ### Web app
 
@@ -215,13 +233,14 @@ Notes:
 
 ## Deployment workflows
 
-`deploy.yml` is not a PR validation workflow. It runs on pushes to `main` and `staging` and deploys `web`, `api`, and `landing`.
+`deploy.yml` is not a PR validation workflow. It runs on pushes to `main` and `staging` and deploys `web`, `api`, `landing`, and `api-donate`.
 
 If you need to mirror deployment locally:
 
 - `api/`: `bun run deploy:staging` or `bun run deploy:prod`
 - `web/`: `bun run deploy:staging` or `bun run deploy:prod`
 - `landing/`: `bun run deploy:staging` or `bun run deploy:prod`
+- `api-donate/`: `bun run deploy:staging` or `bun run deploy:prod`
 
 These require the appropriate Cloudflare credentials and, for landing, GitHub release access.
 

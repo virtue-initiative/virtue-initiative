@@ -1,0 +1,59 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "donate",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-12-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "dev": {
+    "port": 8788
+  },
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
+  },
+  "env": {
+    "prod": {
+      "name": "donate",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "donate-db",
+          "database_id": "e5917246-2afa-445e-8aa4-9cd7d240bc11",
+          "migrations_dir": "src/schema/migrations"
+        }
+      ],
+      "vars": {
+        "LANDING_URL": "https://virtueinitiative.org"
+      },
+      "routes": [
+        {
+          "pattern": "donate-api.virtueinitiative.org",
+          "custom_domain": true
+        }
+      ]
+    },
+    "staging": {
+      "name": "staging-donate",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "staging-donate-db",
+          "database_id": "0eb0216c-c399-425b-9e60-c569f75fee02",
+          "migrations_dir": "src/schema/migrations"
+        }
+      ],
+      "vars": {
+        "LANDING_URL": "https://staging.virtueinitiative.org"
+      },
+      "routes": [
+        {
+          "pattern": "staging.donate-api.virtueinitiative.org",
+          "custom_domain": true
+        }
+      ]
+    }
+  }
+}
