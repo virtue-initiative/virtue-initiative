@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "virtueinitiative-donate-api",
+  "name": "donate",
   "main": "src/index.ts",
   "compatibility_date": "2024-12-01",
   "compatibility_flags": ["nodejs_compat"],
@@ -16,12 +16,12 @@
   },
   "env": {
     "prod": {
-      "name": "virtueinitiative-donate-api",
+      "name": "donate",
       "d1_databases": [
         {
           "binding": "DB",
-          "database_name": "virtueinitiative-donate-db",
-          "database_id": "9c635213-47e5-4a98-840b-e175403dc4b7",
+          "database_name": "donate-db",
+          "database_id": "e5917246-2afa-445e-8aa4-9cd7d240bc11",
           "migrations_dir": "src/schema/migrations"
         }
       ],
@@ -36,12 +36,12 @@
       ]
     },
     "staging": {
-      "name": "virtueinitiative-donate-staging-api",
+      "name": "staging-donate",
       "d1_databases": [
         {
           "binding": "DB",
-          "database_name": "virtueinitiative-donate-staging-db",
-          "database_id": "e7ab8f0c-34aa-4979-ae75-75605fa70014",
+          "database_name": "staging-donate-db",
+          "database_id": "0eb0216c-c399-425b-9e60-c569f75fee02",
           "migrations_dir": "src/schema/migrations"
         }
       ],

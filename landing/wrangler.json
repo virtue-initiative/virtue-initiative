@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "virtueinitiative-landing",
+  "name": "landing",
   "compatibility_date": "2026-02-23",
   "workers_dev": false,
   "assets": {
@@ -8,7 +8,7 @@
   },
   "env": {
     "prod": {
-      "name": "virtueinitiative-landing",
+      "name": "landing",
       "routes": [
         {
           "pattern": "virtueinitiative.org",
@@ -17,7 +17,7 @@
       ]
     },
     "staging": {
-      "name": "virtueinitiative-staging-landing",
+      "name": "staging-landing",
       "routes": [
         {
           "pattern": "staging.virtueinitiative.org",

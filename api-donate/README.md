@@ -62,9 +62,9 @@ launch-time values override whatever is in `.dev.vars`.
 Like `api/`, this worker has separate `staging` and `prod` environments defined in
 `wrangler.json`, each with its own D1 database and route:
 
-- `staging` → `virtueinitiative-donate-staging-api`, served at
+- `staging` → `staging-donate`, served at
   `staging.donate-api.virtueinitiative.org`
-- `prod` → `virtueinitiative-donate-api`, served at `donate-api.virtueinitiative.org`
+- `prod` → `donate`, served at `donate-api.virtueinitiative.org`
 
 `.github/workflows/deploy.yml` deploys automatically on every push: `staging` on push to
 `staging`, `prod` on push to `main`. No CI step runs D1 migrations — apply those manually
@@ -74,8 +74,8 @@ Like `api/`, this worker has separate `staging` and `prod` environments defined 
 
 1. Create the D1 database:
    ```bash
-   wrangler d1 create virtueinitiative-donate-db           # prod
-   wrangler d1 create virtueinitiative-donate-staging-db    # staging
+   wrangler d1 create donate-db           # prod
+   wrangler d1 create staging-donate-db    # staging
    ```
    and paste the resulting id into the matching `env.prod`/`env.staging` block in
    `wrangler.json`.
