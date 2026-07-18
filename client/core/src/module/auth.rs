@@ -75,6 +75,14 @@ impl<A: ApiTransport + Send + Sync + 'static> AuthModule<A> {
         device_name: Option<&str>,
         emitter: &Emitter,
     ) {
+        // A login while another device session is still active (e.g. the
+        // user re-runs `login` without logging out first) would otherwise
+        // leave the old device row active on the server forever. Log it out
+        // first so it gets soft-deleted and its hash state reset, same as an
+        // explicit logout.
+        if self.revoke_current_device() {
+            let _ = emitter.send(Logout);
+        }
         match self.do_login(email, password, device_name) {
             Ok((credentials, settings)) => {
                 let device_id = credentials.device_id.clone();
@@ -120,15 +128,24 @@ impl<A: ApiTransport + Send + Sync + 'static> AuthModule<A> {
     }
 
     fn handle_logout_requested(&mut self, emitter: &Emitter) {
-        if let Some(creds) = self.state.device_credentials.as_ref() {
-            let _ = self.api.logout(&creds.refresh_token);
-        }
-        self.state.device_credentials = None;
+        self.revoke_current_device();
         let _ = emitter.send(Logout);
         let _ = emitter.send(LogoutResult {
             success: true,
             error: None,
         });
+    }
+
+    /// Revokes the current device's session with the server (best effort)
+    /// and clears local credentials. Returns `true` if there was a device
+    /// session to revoke.
+    fn revoke_current_device(&mut self) -> bool {
+        if let Some(creds) = self.state.device_credentials.take() {
+            let _ = self.api.logout(&creds.refresh_token);
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -296,6 +313,77 @@ mod tests {
         assert!(
             results[0].error.is_some(),
             "failed login should carry error message"
+        );
+    }
+
+    #[test]
+    fn login_without_prior_session_does_not_call_logout() {
+        let mut b = EventTester::builder();
+        b.add(AuthModule::new(
+            b.api(),
+            "test-device".into(),
+            "test-platform".into(),
+        ));
+        let mut t = b.build();
+        t.emit(
+            1,
+            LoginRequested {
+                email: "alice@example.org".into(),
+                password: Redacted("secret".into()),
+                device_name: None,
+            },
+        );
+        assert!(
+            t.api.state().logout_calls.is_empty(),
+            "first login should not call logout when there is no existing session"
+        );
+    }
+
+    #[test]
+    fn login_while_already_authenticated_logs_out_previous_device_first() {
+        let mut b = EventTester::builder();
+        b.capture::<Logout>().capture::<Login>();
+        b.add(AuthModule::new(
+            b.api(),
+            "test-device".into(),
+            "test-platform".into(),
+        ));
+        let mut t = b.build();
+        t.emit(
+            1,
+            LoginRequested {
+                email: "alice@example.org".into(),
+                password: Redacted("secret".into()),
+                device_name: None,
+            },
+        );
+        t.emit(
+            2,
+            LoginRequested {
+                email: "bob@example.org".into(),
+                password: Redacted("secret2".into()),
+                device_name: None,
+            },
+        );
+        let calls = t.api.state().logout_calls.clone();
+        assert_eq!(
+            calls.len(),
+            1,
+            "second login should log out the previous device's session"
+        );
+        assert_eq!(
+            calls[0], "mock-refresh-token",
+            "logout should use the previous device's refresh token"
+        );
+        assert_eq!(
+            t.captured::<Logout>().len(),
+            1,
+            "expected exactly one implicit Logout, for the second login"
+        );
+        assert_eq!(
+            t.captured::<Login>().len(),
+            2,
+            "expected both logins to emit Login"
         );
     }
 
