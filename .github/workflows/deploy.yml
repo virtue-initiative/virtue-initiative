@@ -7,6 +7,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     concurrency:
       group: ${{ github.workflow }}-${{ matrix.project }}-${{ github.ref }}
