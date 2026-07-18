@@ -9,7 +9,7 @@ const outputPath = path.join(projectRoot, 'src', 'data', 'releases.json');
 
 const GITHUB_RELEASES_URL =
   'https://api.github.com/repos/virtue-initiative/virtue-initiative/releases?per_page=20';
-const TIMEOUT_MS = 20 * 60 * 1000;
+const TIMEOUT_MS = 45 * 60 * 1000;
 const AUTHENTICATED_INTERVAL_MS = 30 * 1000;
 const UNAUTHENTICATED_INTERVAL_MS = 60 * 1000;
 const EXPECTED_SHA = process.env.GITHUB_SHA?.toLowerCase() ?? null;
