@@ -76,6 +76,45 @@ const MAX_HASH_RETRIES_PER_LOOP: usize = 8;
 const MAX_NOTIFY_RETRIES_PER_LOOP: usize = 8;
 const HASH_TOKEN_MAX_AGE: Duration = Duration::from_secs(55 * 60);
 
+const INITIAL_BACKOFF_MS: i64 = 1_000; // 1s — matches today's single-failure retry-next-tick behavior
+const MAX_BACKOFF_MS: i64 = 20 * 60 * 1_000; // cap at 20 minutes — batch uploads normally happen
+// about once an hour (see DEFAULT_BATCH_WINDOW_SECONDS = 3600 in the Android/iOS crates), so a
+// 20-minute ceiling still guarantees at least ~3 retry attempts within a nominal batch period
+// during a sustained outage, rather than retrying at a rate disconnected from that cadence.
+
+/// Tracks per-queue exponential backoff. Not persisted — resets on process restart,
+/// which is fine: worst case is one immediate retry after a restart, then backoff
+/// re-accumulates.
+#[derive(Default)]
+struct RetryBackoff {
+    next_attempt_at_ms: i64,
+    current_backoff_ms: i64, // 0 until first failure; treated as INITIAL_BACKOFF_MS on first use
+}
+
+impl RetryBackoff {
+    fn ready(&self, now_ms: i64) -> bool {
+        now_ms >= self.next_attempt_at_ms
+    }
+
+    fn record_failure(&mut self, now_ms: i64) {
+        let backoff = if self.current_backoff_ms == 0 {
+            INITIAL_BACKOFF_MS
+        } else {
+            self.current_backoff_ms
+        };
+        // Cheap jitter (not security-sensitive) so many devices hitting the same
+        // outage don't all retry in lockstep once it clears.
+        let jitter_ms = now_ms % 250;
+        self.next_attempt_at_ms = now_ms + backoff + jitter_ms;
+        self.current_backoff_ms = (backoff * 2).min(MAX_BACKOFF_MS);
+    }
+
+    fn record_success(&mut self) {
+        self.next_attempt_at_ms = 0;
+        self.current_backoff_ms = 0;
+    }
+}
+
 /// Risk-rating band thresholds mirroring `shared-web/risk.ts` (`getRiskRating`).
 /// A batch reports how many of its events land in the high (>= 0.7) and medium
 /// (0.4–0.7) bands so the server can summarize tamper activity in digest emails
@@ -153,6 +192,10 @@ pub struct UploadModule<A: ApiTransport + Clone + Send + Sync + 'static> {
     pub batch_interval_ms: i64,
     platform: Box<dyn ScreenshotHooks>,
     pub authenticated: bool,
+    hash_backoff: RetryBackoff,
+    notify_backoff: RetryBackoff,
+    batch_backoff: RetryBackoff,
+    error_log: Option<crate::storage::FileStateStore>,
 }
 
 impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
@@ -164,7 +207,19 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
             batch_interval_ms,
             platform,
             authenticated: false,
+            hash_backoff: RetryBackoff::default(),
+            notify_backoff: RetryBackoff::default(),
+            batch_backoff: RetryBackoff::default(),
+            error_log: None,
         }
+    }
+
+    /// Records permanently-rejected (400) events for operator visibility. Purely
+    /// additive — tests that don't call this leave `error_log` as `None`, and
+    /// permanent-failure logging silently no-ops.
+    pub fn with_error_log(mut self, store: crate::storage::FileStateStore) -> Self {
+        self.error_log = Some(store);
+        self
     }
 
     fn upload_batch(&self, batch: &BatchUpload) -> CoreResult<()> {
@@ -221,13 +276,30 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
         }
     }
 
-    fn retry_pending_hashes(&mut self) -> CoreResult<()> {
+    fn log_permanent_hash_failure(&self, now_ms: i64, event: &LogEntry, err: &CoreError) {
+        log_error(
+            "hash upload failed permanently (400), dropping event",
+            Some(err),
+        );
+        if let Some(store) = &self.error_log {
+            let _ = store.append_error_log(&format!(
+                "{now_ms} hash upload permanently rejected (400) for event ts={}: {err}",
+                event.ts
+            ));
+        }
+    }
+
+    fn retry_pending_hashes(&mut self, now_ms: i64) -> CoreResult<()> {
+        if self.state.pending_hash_events.is_empty() || !self.hash_backoff.ready(now_ms) {
+            return Ok(());
+        }
         let hash_base_url = self
             .state
             .settings
             .as_ref()
             .and_then(|s| s.hash_base_url.clone());
         let events = std::mem::take(&mut self.state.pending_hash_events);
+        let mut had_failure = false;
         self.state.pending_hash_events =
             drain_retry_queue(events, MAX_HASH_RETRIES_PER_LOOP, |event| {
                 let encoded = match encode_batch_event(&event) {
@@ -250,14 +322,31 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
                         });
                         None
                     }
-                    Err(_) => Some(event),
+                    Err(err) if err.is_bad_request() => {
+                        self.log_permanent_hash_failure(now_ms, &event, &err);
+                        None
+                    }
+                    Err(err) => {
+                        had_failure = true;
+                        log_error("hash upload failed, will retry", Some(&err));
+                        Some(event)
+                    }
                 }
             });
+        if had_failure {
+            self.hash_backoff.record_failure(now_ms);
+        } else {
+            self.hash_backoff.record_success();
+        }
         Ok(())
     }
 
-    fn retry_pending_notifies(&mut self) -> CoreResult<()> {
+    fn retry_pending_notifies(&mut self, now_ms: i64) -> CoreResult<()> {
+        if self.state.pending_notify_events.is_empty() || !self.notify_backoff.ready(now_ms) {
+            return Ok(());
+        }
         let events = std::mem::take(&mut self.state.pending_notify_events);
+        let mut had_failure = false;
         self.state.pending_notify_events =
             drain_retry_queue(events, MAX_NOTIFY_RETRIES_PER_LOOP, |payload| {
                 match self.notify(&payload) {
@@ -266,9 +355,17 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
                         log_error("notify failed permanently", Some(&err));
                         None
                     }
-                    Err(_) => Some(payload),
+                    Err(_) => {
+                        had_failure = true;
+                        Some(payload)
+                    }
                 }
             });
+        if had_failure {
+            self.notify_backoff.record_failure(now_ms);
+        } else {
+            self.notify_backoff.record_success();
+        }
         Ok(())
     }
 
@@ -279,9 +376,9 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
     /// is not sufficient evidence that a queued notify's event reached the server. An
     /// empty `pending_hash_events` + `pending_batch_events` is: every event has been
     /// hashed *and* its batch has been accepted.
-    fn retry_pending_notifies_if_flushed(&mut self) -> CoreResult<()> {
+    fn retry_pending_notifies_if_flushed(&mut self, now_ms: i64) -> CoreResult<()> {
         if self.state.pending_hash_events.is_empty() && self.state.pending_batch_events.is_empty() {
-            self.retry_pending_notifies()?;
+            self.retry_pending_notifies(now_ms)?;
         }
         Ok(())
     }
@@ -300,7 +397,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
                 .unwrap_or(true)
             || self.state.pending_batch_events.len() >= MAX_BATCH_ITEMS_PER_UPLOAD;
         if should {
-            self.try_upload_batch(now_ms, emitter)?;
+            self.try_upload_batch(now_ms, emitter, true)?;
         }
         Ok(())
     }
@@ -338,8 +435,16 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
         }
     }
 
-    pub(crate) fn try_upload_batch(&mut self, now_ms: i64, emitter: &Emitter) -> CoreResult<()> {
+    pub(crate) fn try_upload_batch(
+        &mut self,
+        now_ms: i64,
+        emitter: &Emitter,
+        respect_backoff: bool,
+    ) -> CoreResult<()> {
         if self.state.pending_batch_events.is_empty() {
+            return Ok(());
+        }
+        if respect_backoff && !self.batch_backoff.ready(now_ms) {
             return Ok(());
         }
         if !self.refresh_settings_before_batch(emitter) {
@@ -384,6 +489,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
                     self.state.post_login_proof_batches_remaining -= 1;
                 }
                 self.state.last_batch_at_ms = Some(now_ms);
+                self.batch_backoff.record_success();
                 Ok(())
             }
             Err(err) if err.is_not_found() || err.is_unauthorized() => {
@@ -396,6 +502,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
             }
             Err(err) => {
                 log_error("batch upload deferred", Some(&err));
+                self.batch_backoff.record_failure(now_ms);
                 Ok(())
             }
         }
@@ -418,16 +525,16 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
             self.state.last_batch_at_ms = None;
         }
 
-        self.retry_pending_hashes()?;
+        self.retry_pending_hashes(now_ms)?;
         // Force the batch out before sending any queued notify emails so the
         // event(s) they reference already exist server-side by the time the
         // email goes out, rather than waiting on the interval timer.
         if self.state.pending_notify_events.is_empty() {
             self.maybe_upload_batch(now_ms, emitter)?;
         } else {
-            self.try_upload_batch(now_ms, emitter)?;
+            self.try_upload_batch(now_ms, emitter, true)?;
         }
-        self.retry_pending_notifies_if_flushed()?;
+        self.retry_pending_notifies_if_flushed(now_ms)?;
         Ok(())
     }
 
@@ -463,19 +570,19 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
         self.state.pending_hash_events.push(entry);
         let screen_active = !self.platform.is_locked_or_screensaver()?;
         if screen_active || is_heartbeat {
-            self.retry_pending_hashes()?;
+            self.retry_pending_hashes(now_ms)?;
             if is_heartbeat || is_high_risk {
                 // Force an immediate batch flush — don't wait for the interval timer.
                 // For a high-risk event this also guarantees the encrypted event is
                 // uploaded before the notify email below goes out, so the event
                 // already exists server-side when the recipient follows the link.
-                self.try_upload_batch(now_ms, emitter)?;
+                self.try_upload_batch(now_ms, emitter, true)?;
             } else {
                 self.maybe_upload_batch(now_ms, emitter)?;
             }
         }
         if is_high_risk && screen_active {
-            self.retry_pending_notifies_if_flushed()?;
+            self.retry_pending_notifies_if_flushed(now_ms)?;
         }
         Ok(())
     }
@@ -526,7 +633,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> Observer for UploadModule<
             _: ProcessStopped => {
                 if self.authenticated && !self.state.pending_batch_events.is_empty() {
                     let now_ms = self.platform.get_time_utc_ms()?;
-                    let _ = self.try_upload_batch(now_ms, emitter);
+                    let _ = self.try_upload_batch(now_ms, emitter, false);
                 }
                 Ok(())
             },
@@ -534,7 +641,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> Observer for UploadModule<
             _: FlushBatchNow => {
                 if self.authenticated {
                     let now_ms = self.platform.get_time_utc_ms()?;
-                    self.try_upload_batch(now_ms, emitter)?;
+                    self.try_upload_batch(now_ms, emitter, false)?;
                 }
                 Ok(())
             },
@@ -1040,5 +1147,217 @@ mod tests {
         // ProcessStopped is a terminal flush path → uploads regardless of lock.
         t.emit(2, ProcessStopped);
         assert_eq!(t.api.state().batch_uploads.len(), 1);
+    }
+
+    #[test]
+    fn sustained_hash_upload_failure_backs_off_instead_of_retrying_every_tick() {
+        let mut b = EventTester::builder();
+        // Huge interval so batch logic never interferes with this hash-only test.
+        b.add(UploadModule::new(
+            Box::new(b.platform()),
+            b.api(),
+            24 * 60 * 60 * 1_000,
+        ));
+        let mut t = b.build();
+        t.emit(1, login_event());
+
+        for _ in 0..10 {
+            t.api.program_hash(Err(crate::error::CoreError::HttpStatus {
+                status: 503,
+                message: "boom".into(),
+            }));
+        }
+
+        // The first attempt happens immediately when the event is queued.
+        t.emit(2, skipped_upload());
+        assert_eq!(
+            t.api.state().hash_uploads.len(),
+            1,
+            "first attempt happens immediately"
+        );
+
+        // Backoff after one failure is 1s: a ping exactly 1s later should retry.
+        t.emit(3, Ping);
+        assert_eq!(
+            t.api.state().hash_uploads.len(),
+            2,
+            "backoff should allow a retry after 1s"
+        );
+
+        // Backoff doubles to 2s: a ping only 1s after that must NOT retry yet.
+        t.emit(4, Ping);
+        assert_eq!(
+            t.api.state().hash_uploads.len(),
+            2,
+            "must not retry every tick during a sustained outage"
+        );
+
+        // ...but 2s after the last attempt (t=5) it should.
+        t.emit(5, Ping);
+        assert_eq!(
+            t.api.state().hash_uploads.len(),
+            3,
+            "backoff window elapsed, retry should fire"
+        );
+
+        // Backoff doubles again to 4s: pings at t=6,7,8 must not retry.
+        t.emit(6, Ping);
+        t.emit(7, Ping);
+        t.emit(8, Ping);
+        assert_eq!(
+            t.api.state().hash_uploads.len(),
+            3,
+            "gap should keep growing, not reset back to 1s"
+        );
+
+        // 4s after the t=5 attempt (t=9) the retry should fire again.
+        t.emit(9, Ping);
+        assert_eq!(
+            t.api.state().hash_uploads.len(),
+            4,
+            "retry fires again once the longer window elapses"
+        );
+
+        assert_eq!(
+            t.observer::<UploadModule<MockApiClient>>()
+                .state
+                .pending_hash_events
+                .len(),
+            1,
+            "event should remain queued through the whole sustained outage"
+        );
+    }
+
+    #[test]
+    fn permanent_hash_failure_400_drops_event_without_retry() {
+        let mut b = EventTester::builder();
+        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
+        let mut t = b.build();
+        t.emit(1, login_event());
+
+        t.api.program_hash(Err(crate::error::CoreError::HttpStatus {
+            status: 400,
+            message: "bad event".into(),
+        }));
+
+        t.emit(2, skipped_upload());
+        assert_eq!(
+            t.api.state().hash_uploads.len(),
+            1,
+            "one attempt should be made"
+        );
+        assert!(
+            t.observer::<UploadModule<MockApiClient>>()
+                .state
+                .pending_hash_events
+                .is_empty(),
+            "permanently rejected event should be dropped, not kept for retry"
+        );
+
+        // No pending events remain, so a later ping makes no further hash calls.
+        t.emit(3, Ping);
+        assert_eq!(
+            t.api.state().hash_uploads.len(),
+            1,
+            "no further attempts for a permanently rejected event"
+        );
+    }
+
+    #[test]
+    fn flush_batch_now_bypasses_batch_backoff_cooldown() {
+        let mut b = EventTester::builder();
+        b.add(UploadModule::new(
+            Box::new(b.platform()),
+            b.api(),
+            24 * 60 * 60 * 1_000,
+        ));
+        let mut t = b.build();
+        t.emit(1, login_event());
+        t.observer::<UploadModule<MockApiClient>>()
+            .state
+            .pending_batch_events
+            .push(crate::module::upload::PendingBatchEvent {
+                ts: 500,
+                risk: 0.0,
+                encoded: vec![1, 2, 3],
+            });
+
+        // First flush fails, putting `batch_backoff` into a ~1s cooldown.
+        t.api
+            .program_batch(Err(crate::error::CoreError::HttpStatus {
+                status: 503,
+                message: "boom".into(),
+            }));
+        t.emit(2, FlushBatchNow);
+        assert_eq!(
+            t.api.state().batch_uploads.len(),
+            1,
+            "first flush attempts and fails"
+        );
+
+        // A plain ping still inside the cooldown window must not retry — this
+        // is the backoff-respecting path that keeps a stuck endpoint from
+        // being hammered once per tick.
+        t.emit(2.5, Ping);
+        assert_eq!(
+            t.api.state().batch_uploads.len(),
+            1,
+            "ping should respect the batch backoff cooldown"
+        );
+
+        // An explicit FlushBatchNow, still inside that same cooldown window,
+        // must bypass it and attempt immediately.
+        t.emit(2.6, FlushBatchNow);
+        assert_eq!(
+            t.api.state().batch_uploads.len(),
+            2,
+            "FlushBatchNow should bypass the cooldown and retry immediately"
+        );
+        assert!(
+            t.observer::<UploadModule<MockApiClient>>()
+                .state
+                .pending_batch_events
+                .is_empty(),
+            "the bypassed retry should have succeeded and drained the queue"
+        );
+    }
+
+    #[test]
+    fn process_stopped_bypasses_batch_backoff_cooldown() {
+        let mut b = EventTester::builder();
+        b.add(UploadModule::new(
+            Box::new(b.platform()),
+            b.api(),
+            24 * 60 * 60 * 1_000,
+        ));
+        let mut t = b.build();
+        t.emit(1, login_event());
+        t.observer::<UploadModule<MockApiClient>>()
+            .state
+            .pending_batch_events
+            .push(crate::module::upload::PendingBatchEvent {
+                ts: 500,
+                risk: 0.0,
+                encoded: vec![1, 2, 3],
+            });
+
+        // First flush fails, putting `batch_backoff` into a ~1s cooldown.
+        t.api
+            .program_batch(Err(crate::error::CoreError::HttpStatus {
+                status: 503,
+                message: "boom".into(),
+            }));
+        t.emit(2, FlushBatchNow);
+        assert_eq!(t.api.state().batch_uploads.len(), 1);
+
+        // ProcessStopped fires well inside the cooldown window but, like
+        // FlushBatchNow, is a terminal one-shot flush and must not be
+        // silently swallowed by an unrelated earlier failure's backoff.
+        t.emit(2.2, ProcessStopped);
+        assert_eq!(
+            t.api.state().batch_uploads.len(),
+            2,
+            "ProcessStopped should bypass the cooldown and flush immediately"
+        );
     }
 }

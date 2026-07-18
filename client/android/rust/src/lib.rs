@@ -26,7 +26,6 @@ static CORE: OnceCell<AndroidCore> = OnceCell::new();
 const DEFAULT_BASE_API_URL: &str = virtue_core::DEFAULT_API_BASE_URL;
 const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
 const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
-const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
 const LOOP_INTERVAL: Duration = Duration::from_secs(1);
 
 const SCREENSHOT_SERVICE_CLASS: &str = "org/virtueinitiative/virtue/ScreenshotService";
@@ -544,19 +543,15 @@ fn run_daemon_loop(core: &AndroidCore) -> Result<()> {
         // Screen-off is now handled inside the bus via the `is_locked_or_screensaver`
         // hook: the screenshot module records a `ScreenshotSkipped` and the upload
         // module defers network I/O while the screen is off.
-        let sleep_duration = match (|| -> Result<()> {
+        if let Err(err) = (|| -> Result<()> {
             bus.send(Ping)?;
             let state = bus.iter()?;
             store_state(&state_path, &state)?;
             Ok(())
         })() {
-            Ok(()) => LOOP_INTERVAL,
-            Err(err) => {
-                eprintln!("android-daemon: {err}");
-                ERROR_RETRY_INTERVAL
-            }
-        };
-        sleep_interruptible(&core.stop, sleep_duration);
+            eprintln!("android-daemon: {err}");
+        }
+        sleep_interruptible(&core.stop, LOOP_INTERVAL);
     }
 
     bus.send(ProcessStopped)?;
