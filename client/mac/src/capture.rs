@@ -90,56 +90,79 @@ fn temporary_capture_path() -> PathBuf {
     std::env::temp_dir().join(file_name)
 }
 
-// Parses a single `last` line's trailing date (e.g.
-// "shutdown time                              Sat Jul  4 18:23") into
+// Parses a single `last -y -s` line's leading date (e.g.
+// "shutdown time                              Sat Jul  4 2026 18:23") into
 // milliseconds since epoch. Unlike Linux's util-linux `last`, macOS's BSD
 // `last` has no `-F`/full-format flag at all (confirmed against `man last`
-// on macOS 15) — its default output carries only weekday/month/day/HH:MM,
-// with no year and no seconds. We recover the year by assuming the entry is
-// from the current year, falling back to the previous year if that would
-// place it in the future (`last` never lists future entries) — this only
-// picks the wrong year in the pathological case of a >1-year-old, otherwise
-// ambiguous entry, which is far outside the gap-detection windows this data
-// feeds. Seconds are unavailable and default to :00; this bounds precision
-// to well under a minute, an acceptable floor given `PER_GAP_THRESHOLD_MS`
-// is measured in tens of seconds. Returns None if the date is unparseable.
+// on macOS 15); `-y` is required to get the year at all (default output omits
+// it, making it ambiguous), and `-s` (used by `parse_last_session_duration_secs`)
+// switches session durations to plain integer seconds instead of a
+// `[D+]HH:MM[:SS]` string. There's still no flag that adds seconds to the
+// start time itself, so precision here bottoms out around a minute — well
+// under `PER_GAP_THRESHOLD_MS` (measured in tens of seconds), an acceptable
+// floor. Returns None if the date is unparseable.
 fn parse_last_line_date(line: &str) -> Option<i64> {
-    use chrono::{Datelike, Local, NaiveDateTime, TimeZone};
+    use chrono::{Local, NaiveDateTime, TimeZone};
 
-    let now = Local::now();
     let tokens: Vec<&str> = line.split_whitespace().collect();
-    for w in tokens.windows(4) {
-        let Ok(day) = w[2].parse::<u32>() else {
+    for w in tokens.windows(5) {
+        let (Ok(day), Ok(_year)) = (w[2].parse::<u32>(), w[3].parse::<i32>()) else {
             continue;
         };
-        for year in [now.year(), now.year() - 1] {
-            let normalized = format!("{} {} {:02} {} {}", w[0], w[1], day, w[3], year);
-            if let Ok(dt) = NaiveDateTime::parse_from_str(&normalized, "%a %b %d %H:%M %Y")
-                && let chrono::LocalResult::Single(local) = Local.from_local_datetime(&dt)
-                && local <= now
-            {
-                return Some(local.timestamp_millis());
-            }
+        let normalized = format!("{} {} {:02} {} {}", w[0], w[1], day, w[4], w[3]);
+        if let Ok(dt) = NaiveDateTime::parse_from_str(&normalized, "%a %b %d %H:%M %Y")
+            && let chrono::LocalResult::Single(local) = Local.from_local_datetime(&dt)
+        {
+            return Some(local.timestamp_millis());
         }
     }
     None
 }
 
-// Parses `last reboot` output (which, on macOS, interleaves "reboot time" and
-// "shutdown time" pseudo-user entries — filtering by the literal username
-// `shutdown` matches nothing on macOS's `last`) and returns the most recent
-// shutdown time in milliseconds. Returns None if no shutdown line is found or
-// the date is unparseable. This is a floor/approximation of the true
-// logout/shutdown time, not exact — see `LifecycleHooks::get_last_logout_utc_ms`.
-fn parse_last_shutdown_mac(s: &str) -> Option<i64> {
-    s.lines()
-        .find(|line| line.trim_start().starts_with("shutdown"))
-        .and_then(parse_last_line_date)
+// Parses the integer-second duration from a `last -s` session line's
+// trailing "( N )" group, e.g. "... Sat Jul  4 2026 18:24 - 22:32  ( 1138099)"
+// (this also covers sessions `last` marks "- crash" or "- shutdown" instead
+// of a clean end time — the numeric duration is still present either way).
+// Returns None for still-active sessions, which have no trailing group.
+fn parse_last_session_duration_secs(line: &str) -> Option<i64> {
+    let open = line.rfind('(')?;
+    let close = open + line[open..].find(')')?;
+    line[open + 1..close].trim().parse::<i64>().ok()
 }
 
-// Parses unfiltered `last` output and returns the most recent real login's
-// timestamp in milliseconds, skipping the "reboot"/"shutdown" pseudo-user
-// entries `last` also logs.
+// Parses `last -y -s` output and returns the most recent known session end
+// (logout) in milliseconds. On macOS this can come from two different kinds
+// of line: a "shutdown time" pseudo-entry, logged only when the *machine*
+// actually powers off/reboots; or an ordinary completed session line's own
+// start time plus duration, which is the *only* record of a plain "Log Out"
+// that returns to the login window without powering the machine off — macOS
+// never logs a separate event for that case. Returns the max of every
+// candidate found in the window, i.e. the most recent of either kind. This is
+// a floor/approximation of the true logout time, not exact — see
+// `LifecycleHooks::get_last_logout_utc_ms`.
+fn parse_last_logout_mac(s: &str) -> Option<i64> {
+    s.lines()
+        .filter_map(|line| {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("shutdown") {
+                return parse_last_line_date(line);
+            }
+            if trimmed.is_empty()
+                || trimmed.starts_with("reboot")
+                || trimmed.starts_with("wtmp begins")
+            {
+                return None;
+            }
+            let start_ms = parse_last_line_date(line)?;
+            let duration_secs = parse_last_session_duration_secs(line)?;
+            Some(start_ms + duration_secs * 1000)
+        })
+        .max()
+}
+
+// Parses unfiltered `last -y -s` output and returns the most recent real
+// login's timestamp in milliseconds, skipping the "reboot"/"shutdown"
+// pseudo-user entries `last` also logs.
 fn parse_last_login_mac(s: &str) -> Option<i64> {
     s.lines()
         .map(str::trim_start)
@@ -259,7 +282,7 @@ impl LifecycleHooks for MacPlatformHooks {
 
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {
         let output = Command::new("last")
-            .args(["-n", "5"])
+            .args(["-y", "-s", "-n", "5"])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -276,11 +299,11 @@ impl LifecycleHooks for MacPlatformHooks {
     }
 
     fn get_last_logout_utc_ms(&self) -> CoreResult<Option<i64>> {
-        // `reboot` (not `shutdown`) is the filter that actually works here —
-        // see `parse_last_shutdown_mac`. `-n 10` gives enough history to find
-        // a shutdown line even right after a fresh boot with few prior pairs.
+        // `-n 15`: enough history to reliably see a shutdown/crash line even
+        // when several plain logouts (which don't get their own separate
+        // entry — see `parse_last_logout_mac`) preceded it.
         let output = Command::new("last")
-            .args(["-n", "10", "reboot"])
+            .args(["-y", "-s", "-n", "15"])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -293,7 +316,7 @@ impl LifecycleHooks for MacPlatformHooks {
             return Ok(None);
         }
         let text = String::from_utf8_lossy(&output.stdout);
-        Ok(parse_last_shutdown_mac(&text))
+        Ok(parse_last_logout_mac(&text))
     }
 }
 
@@ -301,84 +324,102 @@ impl PlatformHooks for MacPlatformHooks {}
 
 #[cfg(test)]
 mod tests {
-    use chrono::{Datelike, Duration, Local, TimeZone, Timelike};
+    use chrono::{Local, TimeZone};
 
     use super::*;
 
-    /// A timestamp `hours_ago` in the past, truncated to whole minutes —
-    /// real macOS `last` output carries no seconds, so round-tripping through
-    /// the parser should reproduce this exactly. Deriving it from `Local::now()`
-    /// (rather than a fixed date) keeps the weekday chrono computes for the
-    /// formatted line consistent with whatever year the parser's own
-    /// `Local::now()` call lands on when the test runs.
-    fn recent_minute(hours_ago: i64) -> chrono::DateTime<Local> {
-        let now = Local::now()
-            .with_second(0)
-            .unwrap()
-            .with_nanosecond(0)
-            .unwrap();
-        now - Duration::hours(hours_ago)
-    }
-
-    fn fmt_last_line(dt: chrono::DateTime<Local>) -> String {
-        // macOS `last`'s real default format: weekday, month, space-padded day, HH:MM — no year, no seconds.
-        dt.format("%a %b %e %H:%M").to_string()
-    }
-
-    #[test]
-    fn parse_last_shutdown_mac_extracts_timestamp_from_last_output() {
-        let when = recent_minute(2);
-        let input = format!(
-            "shutdown time                              {}\n\nwtmp begins Mon Jul  1 09:00\n",
-            fmt_last_line(when)
-        );
-        let result = parse_last_shutdown_mac(&input);
-        assert_eq!(result, Some(when.timestamp_millis()));
-    }
-
-    #[test]
-    fn parse_last_shutdown_mac_handles_single_digit_day() {
-        // Pick an instant that's guaranteed to land on a single-digit day of
-        // the month, so `%e`'s space padding ("Jul  4" not "Jul 14") is
-        // exercised the same way real `last` output is.
-        let now = Local::now();
-        let first_of_month = Local
-            .with_ymd_and_hms(now.year(), now.month(), 1, 9, 0, 0)
+    // `-y` gives an explicit year, so test fixtures can use fixed dates —
+    // chrono derives the correct weekday for us, and validates it against
+    // the date when parsing (same guard real macOS `last` output gets).
+    fn fixed_dt(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> chrono::DateTime<Local> {
+        Local
+            .with_ymd_and_hms(y, mo, d, h, mi, 0)
             .single()
-            .expect("valid first-of-month timestamp");
-        let when = if first_of_month <= now {
-            first_of_month
-        } else {
-            first_of_month - Duration::days(28)
-        };
-        let input = format!(
-            "shutdown time                              {}\n",
-            fmt_last_line(when)
-        );
-        let result = parse_last_shutdown_mac(&input);
-        assert_eq!(result, Some(when.timestamp_millis()));
+            .expect("valid fixed timestamp")
+    }
+
+    // macOS `last -y`'s date format: weekday, month, space-padded day, year, HH:MM — still no seconds.
+    fn fmt_last_line(dt: chrono::DateTime<Local>) -> String {
+        dt.format("%a %b %e %Y %H:%M").to_string()
     }
 
     #[test]
-    fn parse_last_shutdown_mac_returns_none_when_no_shutdown_line() {
-        let when = recent_minute(2);
-        let input = format!(
-            "reboot time                                {}\n\nwtmp begins Mon Jul  1 09:00\n",
-            fmt_last_line(when)
+    fn parse_last_session_duration_secs_extracts_trailing_group() {
+        assert_eq!(
+            parse_last_session_duration_secs("jeff console ... - 22:32  ( 1138099)"),
+            Some(1_138_099)
         );
-        assert_eq!(parse_last_shutdown_mac(&input), None);
+        assert_eq!(
+            parse_last_session_duration_secs("jeff console ... - 21:34  (       0)"),
+            Some(0)
+        );
     }
 
     #[test]
-    fn parse_last_shutdown_mac_returns_none_on_empty_input() {
-        assert_eq!(parse_last_shutdown_mac(""), None);
+    fn parse_last_session_duration_secs_returns_none_for_still_active_session() {
+        assert_eq!(
+            parse_last_session_duration_secs("jeff console ... 22:33   still logged in"),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_last_logout_mac_extracts_timestamp_from_shutdown_line() {
+        let when = fixed_dt(2024, 6, 10, 22, 45);
+        let input = format!(
+            "shutdown time                              {}\n\nwtmp begins Mon Jun  3 08:00\n",
+            fmt_last_line(when)
+        );
+        assert_eq!(parse_last_logout_mac(&input), Some(when.timestamp_millis()));
+    }
+
+    #[test]
+    fn parse_last_logout_mac_extracts_timestamp_from_plain_logout_with_no_shutdown_line() {
+        // A plain "Log Out" (return to login window, machine stays powered
+        // on) never logs a "shutdown time" entry on macOS — it's only
+        // recoverable as the completed session's own start + duration. This
+        // is the scenario a real logout/login cycle exercises.
+        let start = fixed_dt(2026, 7, 4, 18, 24);
+        let duration_secs = 1_138_099; // 13d 4h 8m 19s
+        let input = format!(
+            "jeff       console                         {} - 22:32  ({duration_secs})\nreboot time                                {}\n",
+            fmt_last_line(start),
+            fmt_last_line(start),
+        );
+        let expected = start.timestamp_millis() + duration_secs * 1000;
+        assert_eq!(parse_last_logout_mac(&input), Some(expected));
+    }
+
+    #[test]
+    fn parse_last_logout_mac_picks_most_recent_of_shutdown_and_plain_logout_candidates() {
+        let older_shutdown = fixed_dt(2024, 6, 1, 9, 0);
+        let newer_session_start = fixed_dt(2024, 6, 10, 22, 45);
+        let newer_duration_secs = 900; // ends 2024-06-10 23:00
+        let input = format!(
+            "shutdown time                              {}\nalice     console                         {} - 23:00  ({newer_duration_secs})\n",
+            fmt_last_line(older_shutdown),
+            fmt_last_line(newer_session_start),
+        );
+        let expected = newer_session_start.timestamp_millis() + newer_duration_secs * 1000;
+        assert_eq!(parse_last_logout_mac(&input), Some(expected));
+    }
+
+    #[test]
+    fn parse_last_logout_mac_ignores_still_active_and_reboot_lines() {
+        let input = "jeff       console                         Fri Jul 17 2026 22:33   still logged in\nreboot time                                Fri Jul 17 2026 22:33\n\nwtmp begins Mon Jun  3 08:00\n";
+        assert_eq!(parse_last_logout_mac(input), None);
+    }
+
+    #[test]
+    fn parse_last_logout_mac_returns_none_on_empty_input() {
+        assert_eq!(parse_last_logout_mac(""), None);
     }
 
     #[test]
     fn parse_last_login_mac_extracts_most_recent_real_login() {
-        let when = recent_minute(3);
+        let when = fixed_dt(2024, 6, 10, 22, 45);
         let input = format!(
-            "alice     console                         {} - 23:00   (00:15)\n\nwtmp begins Mon Jul  1 09:00\n",
+            "alice     console                         {} - 23:00   (00:15)\n\nwtmp begins Mon Jun  3 08:00\n",
             fmt_last_line(when)
         );
         let result = parse_last_login_mac(&input);
@@ -387,8 +428,8 @@ mod tests {
 
     #[test]
     fn parse_last_login_mac_skips_reboot_and_shutdown_pseudo_entries() {
-        let reboot_when = recent_minute(5);
-        let login_when = recent_minute(4);
+        let reboot_when = fixed_dt(2024, 6, 10, 22, 0);
+        let login_when = fixed_dt(2024, 6, 10, 21, 45);
         let input = format!(
             "reboot time                                {}\nalice     console                         {} - 22:00   (00:15)\n",
             fmt_last_line(reboot_when),
@@ -400,10 +441,10 @@ mod tests {
 
     #[test]
     fn parse_last_login_mac_returns_none_when_only_pseudo_entries() {
-        let reboot_when = recent_minute(5);
-        let shutdown_when = recent_minute(6);
+        let reboot_when = fixed_dt(2024, 6, 10, 22, 0);
+        let shutdown_when = fixed_dt(2024, 6, 10, 21, 0);
         let input = format!(
-            "reboot time                                {}\nshutdown time                              {}\n\nwtmp begins Mon Jul  1 09:00\n",
+            "reboot time                                {}\nshutdown time                              {}\n\nwtmp begins Mon Jun  3 08:00\n",
             fmt_last_line(reboot_when),
             fmt_last_line(shutdown_when)
         );
