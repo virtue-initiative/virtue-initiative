@@ -30,21 +30,18 @@ pub use events::{IpcError, IpcListener, RemoteEventBus, RemoteSender};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use ipc_bridge::IpcBridge;
 pub use model::{
-    AlertReason, DeviceCredentials, DeviceSettings, LifecycleKind, PartialStatus,
-    ProcessStoppedReason, Redacted, ScreenshotSkipReason, UploadKind,
+    AlertReason, DeviceCredentials, DeviceSettings, LifecycleKind, PartialStatus, Redacted,
+    ScreenshotSkipReason, UploadKind,
 };
 pub use model::{
     AuthState, BatchUpload, EventData, LogEntry, LoopOutcome, Screenshot, ServiceStatus,
 };
 pub use module::auth::{Login, LoginRequested, LoginResult, Logout, LogoutRequested, LogoutResult};
 pub use module::config::ConfigChanged;
-pub use module::lifecycle::{
-    ComputerResumed, ComputerSuspended, ProcessStarted, ProcessStopped, UserSessionLogin,
-    UserSessionLogout, UserStopRequested,
-};
+pub use module::lifecycle::{ProcessStarted, ProcessStopped, UserStopRequested};
 pub use module::screenshot::CaptureFailed;
 pub use module::status::{StatusRequest, StatusResponse};
 pub use module::upload::FlushBatchNow;
 pub use module::upload::Upload;
-pub use platform::{PlatformConfig, PlatformHooks, ScreenshotHooks};
+pub use platform::{LifecycleHooks, PlatformConfig, PlatformHooks, ScreenshotHooks};
 pub use state::{load_state, store_state};

@@ -415,29 +415,17 @@ public sealed class SessionViewModelTests
     {
         var host = new NullTrayIconHost();
         var controller = new TrayMenuController(host);
-        var logonRaised = false;
         var logoffRaised = false;
         var shutdownRaised = false;
-        var suspendRaised = false;
-        var resumeRaised = false;
 
-        controller.SessionLogonObserved += (_, _) => logonRaised = true;
         controller.SessionLogoffObserved += (_, _) => logoffRaised = true;
         controller.SystemShutdownObserved += (_, _) => shutdownRaised = true;
-        controller.SuspendObserved += (_, _) => suspendRaised = true;
-        controller.ResumeObserved += (_, _) => resumeRaised = true;
 
-        host.RequestSessionLogon();
         host.RequestSessionLogoff();
         host.RequestSystemShutdown();
-        host.RequestSuspend();
-        host.RequestResume();
 
-        Assert.True(logonRaised);
         Assert.True(logoffRaised);
         Assert.True(shutdownRaised);
-        Assert.True(suspendRaised);
-        Assert.True(resumeRaised);
     }
 
     [Fact]

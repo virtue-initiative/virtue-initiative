@@ -96,7 +96,7 @@ struct SendLogArgs {
     /// Log type to emit. Use `all` to queue one of every type.
     #[arg(long = "type", value_name = "TYPE")]
     log_type: String,
-    /// Lifecycle kind (snake_case) when --type lifecycle, e.g. computer_booted, login.
+    /// Lifecycle kind (snake_case) when --type lifecycle, e.g. system_login, login.
     #[arg(long)]
     kind: Option<String>,
     /// Alert reason (snake_case) when --type lifecycle_alert, e.g. ping_gap_while_running.
@@ -300,11 +300,20 @@ fn daemon_stop(paths: ClientPaths, yes: bool) -> Result<()> {
     }
 
     let sock = paths.state_dir.join("daemon.sock");
-    let client =
+    let mut client =
         ClientController::connect(&sock).context("failed to connect to daemon (is it running?)")?;
     client
         .request_user_stop("cli_daemon_stop")
         .context("failed to record stop intent")?;
+
+    // `request_user_stop` only publishes onto the IPC socket — it doesn't wait
+    // for the daemon to actually read and dispatch it. Without this round trip,
+    // `systemctl stop`'s SIGTERM can arrive before the daemon's next loop
+    // iteration drains the socket, silently dropping the immediate/emailed
+    // UserStop alert. `get_status` is a synchronous request/response over the
+    // same ordered connection, so its reply guarantees the daemon has already
+    // processed (and persisted) the earlier UserStopRequested.
+    let _ = client.get_status();
 
     run_systemctl_user(["stop", &svc])?;
 
@@ -427,30 +436,18 @@ fn build_send_kind(args: &SendLogArgs) -> Result<UploadKind> {
 #[cfg(debug_assertions)]
 fn all_send_kinds() -> Vec<UploadKind> {
     use AlertReason::*;
-    use LifecycleKind::*;
     let lifecycle = [
-        ComputerBooted,
-        ComputerSuspended,
-        ComputerResumed,
-        Login,
-        Logout,
-        ProcessStarted,
-        ProcessStoppedUser,
-        ProcessStoppedShutdown,
-        ProcessStoppedOther,
+        LifecycleKind::SuspendDetected {
+            duration_ms: 60_000,
+        },
+        LifecycleKind::SystemLogin { utc_ms: 0 },
+        LifecycleKind::SystemLogout { utc_ms: 0 },
     ]
     .into_iter()
     .map(|kind| UploadKind::Lifecycle { kind });
-    let alerts = [
-        PingGapWhileRunning,
-        ProcessKilledBeforeShutdown,
-        ForceKilledBeforeShutdown,
-        UserStoppedProcess,
-        UnexpectedProcessStart,
-        MissingResume,
-    ]
-    .into_iter()
-    .map(|reason| UploadKind::LifecycleAlert { reason });
+    let alerts = [UnexpectedStart, UnexpectedStop, UnexpectedGap, UserStop]
+        .into_iter()
+        .map(|reason| UploadKind::LifecycleAlert { reason });
     let skips = [
         ScreenshotSkipReason::StaticScreen,
         ScreenshotSkipReason::LockedOrScreensaver,

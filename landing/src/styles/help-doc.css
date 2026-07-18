@@ -110,6 +110,10 @@
     border-radius: 6px;
   }
 
+  & .mermaid {
+    overflow-x: auto;
+  }
+
   & pre {
     overflow-x: auto;
     background: var(--bg-subtle);

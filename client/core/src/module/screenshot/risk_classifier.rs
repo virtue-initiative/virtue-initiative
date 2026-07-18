@@ -58,7 +58,7 @@ impl RiskClassifier {
     ///
     /// Most screenshots (terminals, code, docs) have negligible skin and return early
     /// without any ONNX inference (`nsfw = None`), keeping the daemon loop fast enough to
-    /// avoid `PingGapWhileRunning` false alerts.
+    /// avoid `UnexpectedGap` false alerts.
     pub fn classify(&self, image_bytes: &[u8]) -> CoreResult<RiskScores> {
         let img = image::load_from_memory(image_bytes)?;
 

@@ -17,14 +17,27 @@ See `../CLAUDE.md` (repo root) for the exact wire formats and constraints.
 
 ## PlatformHooks
 
-Keep the trait minimal. Platforms implement only:
+Keep the traits minimal. Platforms implement `ScreenshotHooks` (screen capture,
+lock detection) and `LifecycleHooks` (the five hooks the lifecycle model needs):
 
 ```rust
+// ScreenshotHooks
 take_screenshot() -> Result<Screenshot>
 get_time_utc_ms() -> Result<i64>
-get_last_shutdown_time_utc_ms() -> Result<Option<i64>>
-get_last_startup_time_utc_ms() -> Result<Option<i64>>
+is_locked_or_screensaver() -> Result<bool>
+
+// LifecycleHooks
+get_utc_clock_ms() -> Result<i64>
+get_boot_clock_ms() -> Result<i64>        // includes suspend
+get_monotonic_clock_ms() -> Result<i64>   // excludes suspend
+get_last_login_utc_ms() -> Result<Option<i64>>
+get_last_logout_utc_ms() -> Result<Option<i64>>
 ```
+
+`PlatformHooks: ScreenshotHooks + LifecycleHooks` is the combined bound most
+call sites use. `PlatformConfig::lifecycle_enabled` (`false` only on iOS)
+decides whether `assembly::build_default_modules` constructs a real
+`LifecycleModule` or an inert `NoopLifecycleModule`.
 
 Everything else belongs in `core`.
 
@@ -33,9 +46,10 @@ Everything else belongs in `core`.
 `core` uses a typed in-process event bus:
 
 - `src/events/bus.rs` — `EventBus`, `Observer` trait, `Emitter`, `dispatch_event!` macro, `EventChannel` trait
-- `src/events/types.rs` — all typed event structs (`Ping`, `Login`, `Upload`, `StatusRequest`, …)
+- `src/events.rs` — the `Ping` event struct; other typed events live inline in the
+  module file that owns them (e.g. `Login`/`Logout` in `module/auth.rs`)
 - `src/events/remote.rs` — `RemoteEventBus` (cross-process JSON-line channel)
-- `src/assembly.rs` — `build_default_modules()` factory for the 7 default observers
+- `src/assembly.rs` — `build_default_modules()` factory for the 8 default observers
 
 The daemon loop is:
 
@@ -50,17 +64,21 @@ loop {
 }
 ```
 
-## The 7 observer modules (`src/module/`)
+## The 8 observer modules (`src/module/`)
 
-| Module                 | Handles                                                                       | Emits                                                                   |
-| ---------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `auth`                 | `LoginRequested`, `LogoutRequested`, `StatusRequest`                          | `Login`, `Logout`, `LoginResult`, `LogoutResult`, `PartialStatus::Auth` |
-| `lifecycle`            | `Ping`, `ProcessStarted/Stopped`, `ComputerSuspended/Resumed`, `UserSession*` | `Upload` (lifecycle + alerts)                                           |
-| `screenshot`           | `Login`, `Logout`, `Ping`, `ConfigChanged`                                    | `Upload` (screenshot), `CaptureFailed`                                  |
-| `upload`               | `Login`, `Logout`, `Upload`, `Ping`, `ProcessStopped`, `FlushBatchNow`        | network I/O                                                             |
-| `capture_availability` | `CaptureFailed`                                                               | `Upload` (capture-failed alert)                                         |
-| `status`               | `StatusRequest`, `PartialStatus`                                              | `StatusResponse`                                                        |
-| `config`               | `Ping`                                                                        | `ConfigChanged`                                                         |
+| Module                 | Handles                                                                | Emits                                                                   |
+| ---------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `auth`                 | `LoginRequested`, `LogoutRequested`, `StatusRequest`                   | `Login`, `Logout`, `LoginResult`, `LogoutResult`, `PartialStatus::Auth` |
+| `lifecycle`            | `Ping`, `ProcessStarted`, `UserStopRequested`                          | `Upload` (lifecycle + alerts), `PartialStatus::Lifecycle`               |
+| `screenshot`           | `Login`, `Logout`, `Ping`, `ConfigChanged`                             | `Upload` (screenshot), `CaptureFailed`                                  |
+| `upload`               | `Login`, `Logout`, `Upload`, `Ping`, `ProcessStopped`, `FlushBatchNow` | network I/O                                                             |
+| `capture_availability` | `CaptureFailed`                                                        | `Upload` (capture-failed alert)                                         |
+| `heartbeat`            | `Ping`                                                                 | `Upload` (heartbeat, once per 24h while authenticated)                  |
+| `status`               | `StatusRequest`, `PartialStatus`                                       | `StatusResponse`                                                        |
+| `config`               | `Ping`                                                                 | `ConfigChanged`                                                         |
+
+`lifecycle` derives suspend from `boot_clock − monotonic_clock` divergence
+rather than dedicated suspend/resume events — see `../tampering.md`.
 
 ## State persistence
 

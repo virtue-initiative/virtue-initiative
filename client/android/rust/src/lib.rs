@@ -15,9 +15,9 @@ use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
 use virtue_core::{
     build_default_modules_reqwest, load_state, store_state, AuthState, Config, CoreError,
-    CoreResult, DeviceSettings, EventBus, EventChannel, LoginRequested, LoginResult,
-    LogoutRequested, Ping, PlatformConfig, PlatformHooks, ProcessStarted, ProcessStopped,
-    ProcessStoppedReason, Redacted, Screenshot, ScreenshotHooks, StatusRequest, StatusResponse,
+    CoreResult, DeviceSettings, EventBus, EventChannel, LifecycleHooks, LoginRequested,
+    LoginResult, LogoutRequested, Ping, PlatformConfig, PlatformHooks, ProcessStarted,
+    ProcessStopped, Redacted, Screenshot, ScreenshotHooks, StatusRequest, StatusResponse,
     UserStopRequested,
 };
 
@@ -41,7 +41,6 @@ struct AndroidCore {
     // Cached at init time (main thread) so background threads can use the app class loader.
     screenshot_service_class: Arc<GlobalRef>,
     stop: Arc<AtomicBool>,
-    user_stop: Arc<AtomicBool>,
     daemon_running: Mutex<bool>,
 }
 
@@ -124,10 +123,6 @@ impl ScreenshotHooks for AndroidPlatformHooks {
         }
     }
 
-    fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>> {
-        Ok(None)
-    }
-
     fn is_locked_or_screensaver(&self) -> CoreResult<bool> {
         let mut env = self.java_vm.attach_current_thread().map_err(|err| {
             CoreError::CommandFailed(format!("attach_current_thread failed: {err}"))
@@ -140,32 +135,59 @@ impl ScreenshotHooks for AndroidPlatformHooks {
             Err(_) => Ok(false),
         }
     }
+}
 
-    fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
+impl AndroidPlatformHooks {
+    /// `SystemClock.elapsedRealtime()`: milliseconds since boot, INCLUDING time
+    /// spent asleep/Doze.
+    fn elapsed_realtime_ms(&self) -> CoreResult<i64> {
         let mut env = self.java_vm.attach_current_thread().map_err(|err| {
             CoreError::CommandFailed(format!("attach_current_thread failed: {err}"))
         })?;
-
-        let uptime_ms: i64 = env
-            .call_static_method("android/os/SystemClock", "elapsedRealtime", "()J", &[])
-            .map_err(|err| {
-                CoreError::CommandFailed(format!(
-                    "failed to get boot time from system clock: {err}"
-                ))
-            })?
+        env.call_static_method("android/os/SystemClock", "elapsedRealtime", "()J", &[])
+            .map_err(|err| CoreError::CommandFailed(format!("elapsedRealtime failed: {err}")))?
             .j()
-            .map_err(|err| {
-                CoreError::CommandFailed(format!(
-                    "failed to get boot time from system clock: {err}"
-                ))
-            })?;
+            .map_err(|err| CoreError::CommandFailed(format!("elapsedRealtime type error: {err}")))
+    }
 
+    /// `SystemClock.uptimeMillis()`: milliseconds since boot, EXCLUDING deep-sleep
+    /// time when the CPU was fully suspended.
+    fn uptime_millis(&self) -> CoreResult<i64> {
+        let mut env = self.java_vm.attach_current_thread().map_err(|err| {
+            CoreError::CommandFailed(format!("attach_current_thread failed: {err}"))
+        })?;
+        env.call_static_method("android/os/SystemClock", "uptimeMillis", "()J", &[])
+            .map_err(|err| CoreError::CommandFailed(format!("uptimeMillis failed: {err}")))?
+            .j()
+            .map_err(|err| CoreError::CommandFailed(format!("uptimeMillis type error: {err}")))
+    }
+}
+
+impl LifecycleHooks for AndroidPlatformHooks {
+    fn get_boot_clock_ms(&self) -> CoreResult<i64> {
+        self.elapsed_realtime_ms()
+    }
+
+    fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
+        self.uptime_millis()
+    }
+
+    // Android has no OS "login" concept; the expected-running window is modeled
+    // as "whenever the device is powered on", so login = device boot time.
+    fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {
+        let uptime_ms = self.elapsed_realtime_ms()?;
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|err| CoreError::CommandFailed(format!("system time error: {err}")))?
             .as_millis() as i64;
-
         Ok(Some(now_ms - uptime_ms))
+    }
+
+    // Android gives a foreground service no reliable last-alive record — the
+    // unexpected-stop bucket simply never fires here, an accepted gap rather
+    // than a false negative being papered over.
+    fn get_last_logout_utc_ms(&self) -> CoreResult<Option<i64>> {
+        Ok(None)
     }
 }
 
@@ -259,7 +281,6 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeInit(
                 java_vm,
                 screenshot_service_class,
                 stop: Arc::new(AtomicBool::new(false)),
-                user_stop: Arc::new(AtomicBool::new(false)),
                 daemon_running: Mutex::new(false),
             })
             .map_err(|_| anyhow!("core already initialized"))?;
@@ -397,7 +418,6 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeRunDa
             *guard = true;
         }
         core.stop.store(false, Ordering::SeqCst);
-        core.user_stop.store(false, Ordering::SeqCst);
 
         let daemon_result = run_daemon_loop(core);
 
@@ -437,7 +457,6 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeNoteU
         bus.send(UserStopRequested { source })?;
         let state = bus.iter()?;
         store_state(&state_path, &state)?;
-        core.user_stop.store(true, Ordering::SeqCst);
         Ok(())
     })();
 
@@ -498,10 +517,10 @@ pub fn is_interactive(env: &mut JNIEnv) -> jni::errors::Result<bool> {
 
 fn build_bus(core: &AndroidCore) -> Result<(EventBus, PathBuf)> {
     let cfg = build_core_config(core);
-    // Default `PlatformConfig` (supports_sleep_wake_detection: true) is correct
-    // here: unlike iOS, the monitoring loop runs in a persistent foreground
-    // service that keeps executing regardless of screen lock, so a ping stall
-    // is a genuine one, not an artifact of the OS suspending our process.
+    // Default `PlatformConfig` (lifecycle_enabled: true) is correct here:
+    // unlike iOS, Android has a working boot/monotonic clock pair and a
+    // reasonable login-window proxy (device boot time), so the full lifecycle
+    // model applies.
     let modules = build_default_modules_reqwest(
         cfg,
         AndroidPlatformHooks {
@@ -540,12 +559,7 @@ fn run_daemon_loop(core: &AndroidCore) -> Result<()> {
         sleep_interruptible(&core.stop, sleep_duration);
     }
 
-    let reason = if core.user_stop.load(Ordering::SeqCst) {
-        ProcessStoppedReason::User
-    } else {
-        ProcessStoppedReason::Other
-    };
-    bus.send(ProcessStopped(reason))?;
+    bus.send(ProcessStopped)?;
     let state = bus.iter()?;
     let _ = store_state(&state_path, &state);
     Ok(())

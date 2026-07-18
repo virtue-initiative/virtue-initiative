@@ -47,7 +47,7 @@ client/
 `core` is structured around a typed, in-process event bus.
 
 ```rust
-// Build the default set of 7 observer modules.
+// Build the default set of 8 observer modules.
 let observers = build_default_modules(config, platform, api, PlatformConfig::default())?;
 let mut bus = EventBus::new(observers, saved_state)?;
 
@@ -84,17 +84,22 @@ pub trait Observer: 'static {
 Use `crate::dispatch_event!(event, { pat: Type => expr, … })` inside `on_event`
 to pattern-match typed events without boilerplate.
 
-### The 7 default modules
+### The 8 default modules
 
 | Module                      | Key inputs                                                                              | Key outputs                                                             |
 | --------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `LifecycleModule`           | `Ping`, `ProcessStarted/Stopped`, `ComputerSuspended/Resumed`, `UserSession*`           | `Upload` (lifecycle + alert events)                                     |
+| `LifecycleModule`           | `Ping`, `ProcessStarted`, `UserStopRequested`                                           | `Upload` (lifecycle + alert events), `PartialStatus::Lifecycle`         |
 | `ScreenshotModule`          | `Login`, `Logout`, `Ping`, `ConfigChanged`                                              | `Upload` (screenshot), `CaptureFailed`                                  |
 | `UploadModule`              | `Login`, `Logout`, `Upload`, `Ping`, `ProcessStopped`, `FlushBatchNow`, `ConfigChanged` | network I/O via `ApiTransport`; `LogoutRequested` on 404                |
 | `CaptureAvailabilityModule` | `CaptureFailed`                                                                         | `Upload` (capture-failed alert)                                         |
+| `HeartbeatModule`           | `Ping`                                                                                  | `Upload` (heartbeat, once per 24h while authenticated)                  |
 | `AuthModule`                | `LoginRequested`, `LogoutRequested`, `StatusRequest`, `ConfigChanged`                   | `Login`, `Logout`, `LoginResult`, `LogoutResult`, `PartialStatus::Auth` |
 | `StatusModule`              | `StatusRequest`, `PartialStatus` (from 3 sources)                                       | `StatusResponse`                                                        |
 | `ConfigModule`              | `Ping`                                                                                  | `ConfigChanged`                                                         |
+
+On iOS (`PlatformConfig::lifecycle_enabled == false`), `LifecycleModule` is
+replaced by a `NoopLifecycleModule` that only answers `StatusRequest` — see
+`PlatformConfig` below.
 
 ### Screenshot dedup (two gates)
 
@@ -186,10 +191,10 @@ if let Some(ipc) = &mut ipc {
 
 `forward_standard_inbound` registers handlers for the standard controller→daemon
 set (`LoginRequested`, `LogoutRequested`, `StatusRequest`, `UserStopRequested`,
-`UserSessionLogin/Logout`, `ComputerSuspended/Resumed`, `ProcessStopped`).
+`ProcessStopped`).
 Platform daemons can pass a custom closure to `accept_pending` to add extra
-handlers per-connection (Mac uses this to track `UserStopRequested` separately
-for shutdown-reason classification).
+handlers per-connection when needed; Mac and Linux currently just pass
+`forward_standard_inbound` directly.
 
 ## Platform process model
 
@@ -254,45 +259,52 @@ are now owned entirely by their observer modules).
 
 ## PlatformHooks
 
-Keep the trait minimal. Platforms implement only:
+Keep the traits minimal. Platforms implement `ScreenshotHooks` and `LifecycleHooks`:
 
 ```rust
+// ScreenshotHooks
 fn take_screenshot(&self) -> CoreResult<Screenshot>;
-fn get_time_utc_ms(&self) -> CoreResult<i64>;            // default: SystemTime::now()
-fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>>;
-fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>>;
-fn is_locked_or_screensaver(&self) -> CoreResult<bool>;  // default: Ok(false)
+fn get_time_utc_ms(&self) -> CoreResult<i64>;             // default: SystemTime::now()
+fn is_locked_or_screensaver(&self) -> CoreResult<bool>;   // default: Ok(false)
+
+// LifecycleHooks
+fn get_utc_clock_ms(&self) -> CoreResult<i64>;             // default: SystemTime::now()
+fn get_boot_clock_ms(&self) -> CoreResult<i64>;             // includes suspend
+fn get_monotonic_clock_ms(&self) -> CoreResult<i64>;        // excludes suspend
+fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>>;
+fn get_last_logout_utc_ms(&self) -> CoreResult<Option<i64>>;
 ```
 
-`get_time_utc_ms` has a default implementation using `SystemTime::now()` that is correct for
-all production platforms. Only `TestPlatformHooks` overrides it (delegates to `MockClock` for
+The `get_time_utc_ms`/`get_utc_clock_ms` defaults using `SystemTime::now()` are correct for all
+production platforms. Only `TestPlatformHooks` overrides them (delegates to `MockClock` for
 time-controlled tests). `is_locked_or_screensaver` defaults to `Ok(false)` (the fail-safe);
 desktop platforms override it for the screenshot dedup lock/screensaver gate, while mobile
-platforms keep the default. Platform crates implement `take_screenshot`,
-`get_last_shutdown_time_utc_ms`, `get_last_startup_time_utc_ms`, and (on desktop)
-`is_locked_or_screensaver`.
+platforms keep the default. `PlatformHooks: ScreenshotHooks + LifecycleHooks` is the combined
+bound most call sites (like `assembly::build_default_modules`) use.
+
+`get_boot_clock_ms`/`get_monotonic_clock_ms` are cheap syscalls read on every `Ping`.
+`get_last_login_utc_ms`/`get_last_logout_utc_ms` can be expensive (D-Bus round-trips,
+subprocess shell-outs) — `LifecycleModule` throttles them to a coarse poll rather than calling
+them every tick. See `../tampering.md` for the full lifecycle model built on these hooks.
 
 ## PlatformConfig
 
 Fixed, per-platform capabilities that shape module behavior at startup — as opposed to
-`ScreenshotHooks`/`PlatformHooks`, which are live platform I/O queried on every tick.
+`ScreenshotHooks`/`LifecycleHooks`, which are live platform I/O queried on every tick.
 Passed once when assembling the observer modules:
 
 ```rust
 pub struct PlatformConfig {
-    pub supports_sleep_wake_detection: bool, // default: true
+    pub lifecycle_enabled: bool, // default: true
 }
 ```
 
-`supports_sleep_wake_detection` defaults to `true`, matching desktop platforms: they emit real
-`ComputerSuspended`/`ComputerResumed` events off OS power notifications, so a suspend period is
-bracketed and never counted as a ping-gap stall in the first place. iOS passes `false`: the
-monitoring process is a short-lived Safari extension host that the OS can suspend the instant
-the device locks, with no notification delivered to that process (extensions have no
-`UIApplication`) and no way to reconstruct after the fact whether a stall was a lock, a
-suspicious pause, or something else — every stall looks identical. When `false`, the lifecycle
-module skips `PingGapWhileRunning` entirely rather than risk alerting on gaps it can't
-attribute.
+`lifecycle_enabled` defaults to `true`. iOS passes `false`: the monitoring process is a
+short-lived Safari extension host that the OS can suspend the instant the device locks, with no
+notification delivered to that process (extensions have no `UIApplication`) and no
+boot/shutdown/session API surface available to it at all — there's no way to build a
+meaningful expected-running-window model. When `false`, `assembly::build_default_modules`
+constructs a `NoopLifecycleModule` instead of a real `LifecycleModule`.
 
 `PlatformConfig` is deliberately named generically (not e.g. `LifecycleConfig`) so future
 platform-level capability flags can be added to it without another signature change across

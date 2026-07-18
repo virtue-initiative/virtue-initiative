@@ -4,10 +4,7 @@ use std::sync::{Arc, Mutex};
 use crate::events::bus::{Emitter, Error as EventError, Event, EventBus, EventChannel};
 use crate::events::remote::{IpcListener, RemoteEventBus, RemoteSender};
 use crate::module::auth::{LoginRequested, LoginResult, Logout, LogoutRequested, LogoutResult};
-use crate::module::lifecycle::{
-    ComputerResumed, ComputerSuspended, ProcessStopped, UserSessionLogin, UserSessionLogout,
-    UserStopRequested,
-};
+use crate::module::lifecycle::{ProcessStopped, UserStopRequested};
 use crate::module::status::{StatusRequest, StatusResponse};
 use crate::module::upload::{FlushBatchNow, Upload};
 
@@ -78,7 +75,6 @@ impl IpcBridge {
     /// Register handlers on `remote` to forward the standard controller→daemon set
     /// into the bus via `emitter`:
     /// `LoginRequested`, `LogoutRequested`, `StatusRequest`, `UserStopRequested`,
-    /// `UserSessionLogin`, `UserSessionLogout`, `ComputerSuspended`, `ComputerResumed`,
     /// `ProcessStopped`, `Upload`, `FlushBatchNow`.
     pub fn forward_standard_inbound(remote: &mut RemoteEventBus, emitter: &Emitter) {
         macro_rules! forward {
@@ -91,10 +87,6 @@ impl IpcBridge {
             LogoutRequested,
             StatusRequest,
             UserStopRequested,
-            UserSessionLogin,
-            UserSessionLogout,
-            ComputerSuspended,
-            ComputerResumed,
             ProcessStopped,
             Upload,
             FlushBatchNow,

@@ -175,7 +175,7 @@ impl ScreenshotModule {
 
         // Hand the heavy work (capture → fingerprint → classify → image-process) to a
         // background thread so a slow capture can't stall the daemon's event loop and
-        // trip a false `PingGapWhileRunning`. Advance the cadence clock and set the
+        // trip a false `UnexpectedGap`. Advance the cadence clock and set the
         // in-flight guard *before* spawning so pacing continues while it runs; the guard
         // is cleared when the terminal `ScreenshotCaptured` event arrives.
         self.capture_in_flight = true;

@@ -10,11 +10,9 @@ use std::time::Duration;
 use anyhow::Result;
 use serde::Serialize;
 use virtue_core::{
-    ComputerResumed, ComputerSuspended, CoreError, EventBus, EventChannel, LoginRequested,
-    LoginResult, LogoutRequested, LogoutResult, Ping, PlatformConfig, ProcessStarted,
-    ProcessStopped, ProcessStoppedReason, Redacted, StatusRequest, StatusResponse,
-    UserSessionLogin, UserSessionLogout, UserStopRequested, build_default_modules_reqwest,
-    load_state, store_state,
+    CoreError, EventBus, EventChannel, LoginRequested, LoginResult, LogoutRequested, LogoutResult,
+    Ping, PlatformConfig, ProcessStarted, ProcessStopped, Redacted, StatusRequest, StatusResponse,
+    UserStopRequested, build_default_modules_reqwest, load_state, store_state,
 };
 
 use crate::capture::WindowsPlatformHooks;
@@ -52,11 +50,7 @@ enum MonitorCommand {
     NoteStopRequested {
         source: String,
     },
-    ProcessStopped(ProcessStoppedReason),
-    Login,
-    Logout,
-    ComputerSuspended,
-    ComputerResumed,
+    ProcessStopped,
     AppLogin {
         email: String,
         password: String,
@@ -150,40 +144,15 @@ pub fn stop_monitoring_from_tray_exit() -> Result<()> {
     send_command(MonitorCommand::NoteStopRequested {
         source: "tray_stop_monitoring".to_string(),
     })?;
-    send_command(MonitorCommand::ProcessStopped(ProcessStoppedReason::User))?;
+    send_command(MonitorCommand::ProcessStopped)?;
     stop_monitoring()?;
     Ok(())
 }
 
-pub fn stop_monitoring_for_system_shutdown() -> Result<()> {
-    send_command(MonitorCommand::ProcessStopped(
-        ProcessStoppedReason::Shutdown,
-    ))?;
+pub fn stop_monitoring_for_os_session_end() -> Result<()> {
+    send_command(MonitorCommand::ProcessStopped)?;
     stop_monitoring()?;
     Ok(())
-}
-
-pub fn stop_monitoring_for_session_logoff() -> Result<()> {
-    send_command(MonitorCommand::Logout)?;
-    send_command(MonitorCommand::ProcessStopped(ProcessStoppedReason::Other))?;
-    stop_monitoring()?;
-    Ok(())
-}
-
-pub fn notify_session_logon() -> Result<()> {
-    send_command(MonitorCommand::Login)
-}
-
-pub fn notify_session_logoff() -> Result<()> {
-    send_command(MonitorCommand::Logout)
-}
-
-pub fn notify_suspend() -> Result<()> {
-    send_command(MonitorCommand::ComputerSuspended)
-}
-
-pub fn notify_resume() -> Result<()> {
-    send_command(MonitorCommand::ComputerResumed)
 }
 
 fn send_command(command: MonitorCommand) -> Result<()> {
@@ -377,24 +346,8 @@ fn handle_command(bus: &mut EventBus, state_path: &Path, command: MonitorCommand
             bus.send(UserStopRequested { source })?;
             store_state(state_path, &bus.iter()?)?;
         }
-        MonitorCommand::ProcessStopped(reason) => {
-            bus.send(ProcessStopped(reason))?;
-            store_state(state_path, &bus.iter()?)?;
-        }
-        MonitorCommand::Login => {
-            bus.send(UserSessionLogin)?;
-            store_state(state_path, &bus.iter()?)?;
-        }
-        MonitorCommand::Logout => {
-            bus.send(UserSessionLogout)?;
-            store_state(state_path, &bus.iter()?)?;
-        }
-        MonitorCommand::ComputerSuspended => {
-            bus.send(ComputerSuspended)?;
-            store_state(state_path, &bus.iter()?)?;
-        }
-        MonitorCommand::ComputerResumed => {
-            bus.send(ComputerResumed)?;
+        MonitorCommand::ProcessStopped => {
+            bus.send(ProcessStopped)?;
             store_state(state_path, &bus.iter()?)?;
         }
         MonitorCommand::AppLogin {

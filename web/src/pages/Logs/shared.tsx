@@ -29,25 +29,15 @@ export function getLogCategory(log: DataLog): string {
     case 'screenshot_skipped':
       return 'Screenshot Skipped';
     case 'lifecycle':
-      if (kind === 'computer_booted') return 'Computer Started';
-      if (kind === 'computer_suspended') return 'Sleep';
-      if (kind === 'computer_resumed') return 'Wake';
-      if (kind === 'login') return 'Signed In';
-      if (kind === 'logout') return 'Signed Out';
-      if (kind === 'process_started') return 'Monitoring Started';
-      if (kind === 'process_stopped_shutdown') return 'Computer Shut Down';
-      if (kind === 'process_stopped_user' || kind === 'process_stopped_other')
-        return 'Monitoring Stopped';
-      if (kind === 'screenshot_paused') return 'Screenshots Paused';
-      if (kind === 'screenshot_resumed') return 'Screenshots Resumed';
+      if (kind === 'system_login') return 'System Login';
+      if (kind === 'system_logout') return 'System Logout';
+      if (kind === 'suspend_detected') return 'Suspend Detected';
       return 'Activity';
     case 'lifecycle_alert':
-      if (reason === 'ping_gap_while_running') return 'Unexpected Gap';
-      if (reason === 'process_killed_before_shutdown') return 'Process Stopped Unexpectedly';
-      if (reason === 'force_killed_before_shutdown') return 'Process Force-Stopped';
-      if (reason === 'user_stopped_process') return 'Monitoring Stopped by User';
-      if (reason === 'unexpected_process_start') return 'Unexpected Restart';
-      if (reason === 'missing_resume') return 'Missing Wake Event';
+      if (reason === 'unexpected_gap') return 'Unexpected Gap';
+      if (reason === 'unexpected_stop') return 'Process Stopped Unexpectedly';
+      if (reason === 'unexpected_start') return 'Unexpected Restart';
+      if (reason === 'user_stop') return 'Monitoring Stopped by User';
       return 'Alert';
     case 'alert':
       return 'Alert';
@@ -82,30 +72,23 @@ export function getLogMessage(log: DataLog, deviceName: string): string {
   switch (log.type) {
     case 'lifecycle': {
       const kind = d.kind as string | undefined;
-      if (kind === 'process_started') return `Monitoring started on ${deviceName}`;
-      if (kind === 'process_stopped_user') return `Monitoring stopped by user on ${deviceName}`;
-      if (kind === 'process_stopped_shutdown') return `${deviceName} shut down`;
-      if (kind === 'process_stopped_other') return `Monitoring stopped on ${deviceName}`;
-      if (kind === 'computer_suspended') return `${deviceName} went to sleep`;
-      if (kind === 'computer_resumed') return `${deviceName} woke up`;
-      if (kind === 'computer_booted') return `${deviceName} booted`;
-      if (kind === 'login') return `User logged in on ${deviceName}`;
-      if (kind === 'logout') return `User logged out on ${deviceName}`;
-      if (kind === 'screenshot_paused') return `Screenshots paused on ${deviceName}`;
-      if (kind === 'screenshot_resumed') return `Screenshots resumed on ${deviceName}`;
+      if (kind === 'system_login') return `${deviceName} was logged into or started up`;
+      if (kind === 'system_logout') return `${deviceName} was logged out of or shut down`;
+      if (kind === 'suspend_detected') {
+        const durationMs = typeof d.duration_ms === 'number' ? d.duration_ms : undefined;
+        if (durationMs === undefined) return `${deviceName} was asleep for a while`;
+        const minutes = Math.round(durationMs / 60_000);
+        const durationLabel = minutes >= 1 ? `${minutes} min` : `${Math.round(durationMs / 1000)}s`;
+        return `${deviceName} was asleep for ${durationLabel}`;
+      }
       return `Lifecycle event on ${deviceName}`;
     }
     case 'lifecycle_alert': {
       const reason = d.reason as string | undefined;
-      if (reason === 'user_stopped_process') return `Monitoring stopped by user on ${deviceName}`;
-      if (reason === 'unexpected_process_start')
-        return `Unexpected restart detected on ${deviceName}`;
-      if (reason === 'ping_gap_while_running') return `Monitoring gap detected on ${deviceName}`;
-      if (reason === 'process_killed_before_shutdown')
-        return `Process killed before shutdown on ${deviceName}`;
-      if (reason === 'missing_resume') return `Missing resume event on ${deviceName}`;
-      if (reason === 'force_killed_before_shutdown')
-        return `Process force-killed before shutdown on ${deviceName}`;
+      if (reason === 'user_stop') return `Monitoring stopped by user on ${deviceName}`;
+      if (reason === 'unexpected_start') return `Unexpected restart detected on ${deviceName}`;
+      if (reason === 'unexpected_gap') return `Monitoring gap detected on ${deviceName}`;
+      if (reason === 'unexpected_stop') return `Process stopped unexpectedly on ${deviceName}`;
       return `Alert on ${deviceName}`;
     }
     case 'screenshot':

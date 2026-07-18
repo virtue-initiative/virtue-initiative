@@ -12,9 +12,9 @@ use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
 use virtue_core::{
     build_default_modules_reqwest, load_state, store_state, AuthState, Config, CoreError,
-    CoreResult, DeviceSettings, EventBus, EventChannel, LoginRequested, LoginResult,
-    LogoutRequested, Ping, PlatformConfig, PlatformHooks, ProcessStarted, ProcessStopped,
-    ProcessStoppedReason, Redacted, Screenshot, ScreenshotHooks, StatusRequest, StatusResponse,
+    CoreResult, DeviceSettings, EventBus, EventChannel, LifecycleHooks, LoginRequested,
+    LoginResult, LogoutRequested, Ping, PlatformConfig, PlatformHooks, ProcessStarted,
+    ProcessStopped, Redacted, Screenshot, ScreenshotHooks, StatusRequest, StatusResponse,
     UserStopRequested,
 };
 
@@ -24,12 +24,10 @@ const DEFAULT_BASE_API_URL: &str = virtue_core::DEFAULT_API_BASE_URL;
 const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
 const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
 const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
-// Ping every second (like the Android client). The lifecycle module flags a
-// `PingGapWhileRunning` alert once the gap between pings exceeds 10s, so a long
-// loop interval trips it on every iteration. Safari can suspend/kill the
-// extension at any time; a fresh `ProcessStarted` resets the start-gap guard so
-// the post-resume gap is not misreported. Capture cadence is governed
-// separately by `capture_interval_seconds`, not this loop interval.
+// Ping every second (like the Android client), independent of capture cadence
+// (governed separately by `capture_interval_seconds`). Lifecycle detection is
+// disabled entirely on iOS (see `build_bus`), so this cadence is purely about
+// keeping other modules (screenshot scheduling, upload batching) responsive.
 const LOOP_INTERVAL: Duration = Duration::from_secs(1);
 
 const CAPTURE_STATUS_READY: c_int = 0;
@@ -48,10 +46,6 @@ struct IosCore {
     runtime_config_file: PathBuf,
     stop: AtomicBool,
     daemon_running: Mutex<bool>,
-    /// `Some(explicit_user_stop)` once a stop has been requested: `true` when the
-    /// user paused monitoring, `false` for a system-driven stop. `None` until a
-    /// stop is requested.
-    stop_request: Mutex<Option<bool>>,
 }
 
 #[derive(Clone)]
@@ -110,11 +104,28 @@ impl ScreenshotHooks for IosPlatformHooks {
         }
     }
 
-    fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>> {
+}
+
+// Inert: iOS has no boot/shutdown/session API surface available to a Safari
+// extension host, and `PlatformConfig { lifecycle_enabled: false }` (set in
+// `build_bus`) means `LifecycleModule` is never constructed here — a
+// `NoopLifecycleModule` stands in instead. These methods only exist to
+// satisfy `PlatformHooks: ScreenshotHooks + LifecycleHooks`'s trait bound on
+// `build_default_modules_reqwest` and are never called.
+impl LifecycleHooks for IosPlatformHooks {
+    fn get_boot_clock_ms(&self) -> CoreResult<i64> {
+        Ok(0)
+    }
+
+    fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
+        Ok(0)
+    }
+
+    fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {
         Ok(None)
     }
 
-    fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
+    fn get_last_logout_utc_ms(&self) -> CoreResult<Option<i64>> {
         Ok(None)
     }
 }
@@ -156,7 +167,6 @@ pub extern "C" fn virtue_ios_native_init(
                 runtime_config_file,
                 stop: AtomicBool::new(false),
                 daemon_running: Mutex::new(false),
-                stop_request: Mutex::new(None),
             })
             .map_err(|_| anyhow!("core already initialized"))?;
         }
@@ -316,8 +326,6 @@ pub extern "C" fn virtue_ios_native_run_daemon_loop() -> *mut c_char {
 pub extern "C" fn virtue_ios_native_stop_daemon() -> *mut c_char {
     let result = (|| -> Result<()> {
         let core = core()?;
-        // System-driven stop (not an explicit user pause).
-        set_stop_request(core, false)?;
         core.stop.store(true, Ordering::SeqCst);
         Ok(())
     })();
@@ -333,8 +341,6 @@ pub extern "C" fn virtue_ios_native_pause_monitoring(source: *const c_char) -> *
             "" => "ios_pause_button".to_string(),
             value => value.to_string(),
         };
-        // Explicit user pause.
-        set_stop_request(core, true)?;
         core.stop.store(true, Ordering::SeqCst);
         Ok(())
     })();
@@ -399,13 +405,7 @@ fn run_daemon_loop(core: &IosCore) -> Result<()> {
         sleep_interruptible(&core.stop, sleep_duration);
     }
 
-    let explicit_user_stop = take_stop_request(core)?.unwrap_or(false);
-    let reason = if explicit_user_stop {
-        ProcessStoppedReason::User
-    } else {
-        ProcessStoppedReason::Other
-    };
-    bus.send(ProcessStopped(reason))?;
+    bus.send(ProcessStopped)?;
     let state = bus.iter()?;
     let _ = store_state(&state_path, &state);
     Ok(())
@@ -424,11 +424,12 @@ fn build_bus(core: &IosCore) -> Result<(EventBus, PathBuf)> {
     let cfg = build_core_config(core);
     // The Safari extension host has no `UIApplication` and can be suspended by
     // the OS the instant the device locks, with no notification delivered to
-    // this process. There's no reliable way to tell a benign lock/unlock from a
-    // suspicious pause, so the lifecycle module must not evaluate
-    // `PingGapWhileRunning` on iOS at all.
+    // this process, and no boot/shutdown/session API surface at all. There's no
+    // way to build a meaningful expected-running-window model here, so
+    // lifecycle detection is disabled entirely — `assembly::build_default_modules`
+    // constructs a `NoopLifecycleModule` instead of a real `LifecycleModule`.
     let platform_config = PlatformConfig {
-        supports_sleep_wake_detection: false,
+        lifecycle_enabled: false,
     };
     let modules = build_default_modules_reqwest(cfg, IosPlatformHooks, platform_config)?;
     let state_path = core.state_dir.join("event_state.json");
@@ -449,23 +450,6 @@ fn build_core_config(core: &IosCore) -> Config {
         Duration::from_secs(DEFAULT_CAPTURE_INTERVAL_SECONDS),
         Duration::from_secs(DEFAULT_BATCH_WINDOW_SECONDS),
     )
-}
-
-fn set_stop_request(core: &IosCore, explicit_user_stop: bool) -> Result<()> {
-    let mut guard = core
-        .stop_request
-        .lock()
-        .map_err(|_| anyhow!("stop request lock poisoned"))?;
-    *guard = Some(explicit_user_stop);
-    Ok(())
-}
-
-fn take_stop_request(core: &IosCore) -> Result<Option<bool>> {
-    let mut guard = core
-        .stop_request
-        .lock()
-        .map_err(|_| anyhow!("stop request lock poisoned"))?;
-    Ok(guard.take())
 }
 
 fn write_runtime_overrides(

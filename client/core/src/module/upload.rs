@@ -29,7 +29,7 @@ pub struct Upload {
 pub struct FlushBatchNow;
 use crate::model::{
     BatchRecipient, BatchUpload, DeviceCredentials, DeviceSettings, LogEntry, NotifyPayload,
-    ProcessStoppedReason, UploadKind,
+    UploadKind,
 };
 use crate::platform::ScreenshotHooks;
 
@@ -523,11 +523,8 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> Observer for UploadModule<
                 Ok(())
             },
             _: Ping => self.handle_ping(emitter),
-            ev: ProcessStopped => {
-                if matches!(ev.0, ProcessStoppedReason::Shutdown)
-                    && self.authenticated
-                    && !self.state.pending_batch_events.is_empty()
-                {
+            _: ProcessStopped => {
+                if self.authenticated && !self.state.pending_batch_events.is_empty() {
                     let now_ms = self.platform.get_time_utc_ms()?;
                     let _ = self.try_upload_batch(now_ms, emitter);
                 }
@@ -571,7 +568,7 @@ mod tests {
     use crate::events::Ping;
     use crate::model::{
         BatchRecipient, DeviceCredentials, DeviceSettings, LogEntry, PartialStatus,
-        ProcessStoppedReason, ScreenshotSkipReason, UploadKind,
+        ScreenshotSkipReason, UploadKind,
     };
     use crate::module::auth::{Login, Logout};
     use crate::module::lifecycle::ProcessStopped;
@@ -1025,7 +1022,7 @@ mod tests {
     }
 
     #[test]
-    fn shutdown_flush_uploads_while_locked() {
+    fn process_stopped_flushes_pending_uploads_while_locked() {
         let mut b = EventTester::builder();
         b.platform().set_locked_or_screensaver(true);
         b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
@@ -1040,8 +1037,8 @@ mod tests {
                 encoded: vec![1, 2, 3],
             });
 
-        // ProcessStopped(Shutdown) is a terminal flush path → uploads regardless of lock.
-        t.emit(2, ProcessStopped(ProcessStoppedReason::Shutdown));
+        // ProcessStopped is a terminal flush path → uploads regardless of lock.
+        t.emit(2, ProcessStopped);
         assert_eq!(t.api.state().batch_uploads.len(), 1);
     }
 }

@@ -57,11 +57,8 @@ public partial class App : Application
             _trayController = new TrayMenuController();
             _trayController.OpenRequested += (_, _) => ShowMainWindow();
             _trayController.ExitRequested += async (_, _) => await RequestResidentShutdownAsync();
-            _trayController.SessionLogonObserved += (_, _) => RecordSessionLogon();
             _trayController.SessionLogoffObserved += (_, _) => HandleSessionLogoff();
             _trayController.SystemShutdownObserved += (_, _) => HandleSystemShutdown();
-            _trayController.SuspendObserved += (_, _) => RecordSuspend();
-            _trayController.ResumeObserved += (_, _) => RecordResume();
             _trayController.Initialize();
             _trayController.UpdateToolTip("Virtue: starting");
             LogStartup("Tray controller initialized.");
@@ -311,23 +308,12 @@ public partial class App : Application
         return confirmed;
     }
 
-    private static void RecordSessionLogon()
-    {
-        try
-        {
-            new RustInteropClient().NotifySessionLogon();
-        }
-        catch
-        {
-        }
-    }
-
     private void HandleSessionLogoff()
     {
         try
         {
             _refreshLoopCancellation?.Cancel();
-            new RustInteropClient().StopMonitoringForSessionLogoff();
+            new RustInteropClient().StopMonitoringForOsSessionEnd();
         }
         catch (Exception ex)
         {
@@ -340,7 +326,7 @@ public partial class App : Application
         try
         {
             _refreshLoopCancellation?.Cancel();
-            new RustInteropClient().StopMonitoringForSystemShutdown();
+            new RustInteropClient().StopMonitoringForOsSessionEnd();
         }
         catch (Exception ex)
         {
@@ -348,25 +334,4 @@ public partial class App : Application
         }
     }
 
-    private static void RecordSuspend()
-    {
-        try
-        {
-            new RustInteropClient().NotifySuspend();
-        }
-        catch
-        {
-        }
-    }
-
-    private static void RecordResume()
-    {
-        try
-        {
-            new RustInteropClient().NotifyResume();
-        }
-        catch
-        {
-        }
-    }
 }

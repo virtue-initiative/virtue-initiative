@@ -5,7 +5,7 @@ sidebar_position: 2
 # Log types
 
 Every entry in your log feed has a **type** and a matching icon. Most entries are
-routine activity (screenshots, sign-ins, sleep/wake). A few are **alerts** that
+routine activity (screenshots, sign-ins, suspend/resume). A few are **alerts** that
 flag a gap or interruption in monitoring worth a second look.
 
 Open any entry to see its details, the device it came from, and a link back to
@@ -22,45 +22,19 @@ Monitoring was active but no screenshot was uploaded — either the screen had
 not changed since the last capture, or the device was locked or asleep. This
 keeps the timeline continuous without storing redundant images.
 
-## Computer Started
+## System Login
 
-The device was powered on or restarted.
+The user logged into this computer, or the computer started up (on systems
+without a separate login step)
 
-## Sleep
+## System Logout
 
-The device went to sleep. No screenshots are captured while a device is asleep.
+The user logged out of this computer, or the computer was shut down
 
-## Wake
+## Suspend Detected
 
-The device woke from sleep and monitoring resumed.
-
-## Signed In
-
-A user signed in on the device.
-
-## Signed Out
-
-A user signed out of the device.
-
-## Monitoring Started
-
-The monitoring app started running on the device.
-
-## Monitoring Stopped
-
-Monitoring stopped on the device — for example, a user stopped the app.
-
-## Computer Shut Down
-
-The device shut down, which stopped monitoring.
-
-## Screenshots Paused
-
-Screenshot capture was paused on the device.
-
-## Screenshots Resumed
-
-Screenshot capture resumed on the device.
+The device was asleep for a while. No screenshots are captured while a device
+is asleep; this entry is logged retrospectively once monitoring resumes.
 
 ## Activity
 
@@ -76,12 +50,9 @@ frequent gaps are worth investigating.
 
 ## Process Stopped Unexpectedly
 
-Monitoring was stopped before the device shut down normally. This can indicate
-the app was closed or killed rather than the device shutting down cleanly.
-
-## Process Force-Stopped
-
-Monitoring was forcibly terminated before the device shut down.
+Monitoring was stopped before the device's session ended normally. This can
+indicate the app was closed or killed rather than the user logging out or the
+device shutting down cleanly.
 
 ## Monitoring Stopped by User
 
@@ -90,10 +61,6 @@ A user stopped the monitoring process.
 ## Unexpected Restart
 
 The monitoring process restarted unexpectedly.
-
-## Missing Wake Event
-
-A wake event was expected after the device slept but never arrived.
 
 ## Alert
 

@@ -42,39 +42,9 @@ public sealed class RustInteropClient : IRustInteropClient
         ThrowIfError(error);
     }
 
-    public void StopMonitoringForSystemShutdown()
+    public void StopMonitoringForOsSessionEnd()
     {
-        var error = NativeMethods.virtue_windows_stop_monitoring_for_system_shutdown();
-        ThrowIfError(error);
-    }
-
-    public void StopMonitoringForSessionLogoff()
-    {
-        var error = NativeMethods.virtue_windows_stop_monitoring_for_session_logoff();
-        ThrowIfError(error);
-    }
-
-    public void NotifySessionLogon()
-    {
-        var error = NativeMethods.virtue_windows_notify_session_logon();
-        ThrowIfError(error);
-    }
-
-    public void NotifySessionLogoff()
-    {
-        var error = NativeMethods.virtue_windows_notify_session_logoff();
-        ThrowIfError(error);
-    }
-
-    public void NotifySuspend()
-    {
-        var error = NativeMethods.virtue_windows_notify_suspend();
-        ThrowIfError(error);
-    }
-
-    public void NotifyResume()
-    {
-        var error = NativeMethods.virtue_windows_notify_resume();
+        var error = NativeMethods.virtue_windows_stop_monitoring_for_os_session_end();
         ThrowIfError(error);
     }
 
@@ -206,22 +176,7 @@ public sealed class RustInteropClient : IRustInteropClient
         internal static extern IntPtr virtue_windows_stop_monitoring_from_tray_exit();
 
         [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern IntPtr virtue_windows_stop_monitoring_for_system_shutdown();
-
-        [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern IntPtr virtue_windows_stop_monitoring_for_session_logoff();
-
-        [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern IntPtr virtue_windows_notify_session_logon();
-
-        [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern IntPtr virtue_windows_notify_session_logoff();
-
-        [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern IntPtr virtue_windows_notify_suspend();
-
-        [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern IntPtr virtue_windows_notify_resume();
+        internal static extern IntPtr virtue_windows_stop_monitoring_for_os_session_end();
 
         [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
         internal static extern IntPtr virtue_windows_get_monitor_status_json();
