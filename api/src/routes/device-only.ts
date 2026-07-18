@@ -2,6 +2,7 @@ import { Context, Hono } from 'hono';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { authenticateWebSession, authenticateDeviceSession } from '../middleware/auth';
+import { rateLimitByDevice } from '../middleware/rate-limit';
 import { validateZ } from '../middleware/validation';
 import {
   createBatch,
@@ -133,7 +134,7 @@ deviceOnly.post(
 /**
  * GET /d/device - Get device settings for the authenticated device.
  */
-deviceOnly.get('/device', authenticateDeviceSession(), async (c) => {
+deviceOnly.get('/device', authenticateDeviceSession(), rateLimitByDevice(), async (c) => {
   const device = await findDeviceById(c.env.DB, c.get('sub'));
 
   if (!device) {
@@ -185,6 +186,7 @@ deviceOnly.post('/token', authenticateDeviceSession(), async (c) => {
 deviceOnly.post(
   '/batch',
   authenticateDeviceSession(),
+  rateLimitByDevice(),
   validateZ('form', uploadBatchSchema),
   async (c) => {
     const device = await findDeviceById(c.env.DB, c.get('sub'));
@@ -246,6 +248,7 @@ deviceOnly.post(
 deviceOnly.post(
   '/notify',
   authenticateDeviceSession(),
+  rateLimitByDevice(),
   validateZ('json', notifySchema),
   async (c) => {
     const device = await findDeviceById(c.env.DB, c.get('sub'));

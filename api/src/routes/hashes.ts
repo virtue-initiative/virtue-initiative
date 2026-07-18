@@ -1,12 +1,13 @@
 import { Hono } from 'hono';
 import { authenticate } from '../middleware/auth';
+import { rateLimitByDevice } from '../middleware/rate-limit';
 import { findDeviceById, getHashState, resetHashState, upsertHashState } from '../lib/db';
 import { Env, Variables } from '../types/bindings';
 
 const hashes = new Hono<{ Bindings: Env; Variables: Variables }>();
 const ZERO_STATE = new Uint8Array(32);
 
-hashes.post('/', authenticate('hash-server'), async (c) => {
+hashes.post('/', authenticate('hash-server'), rateLimitByDevice(), async (c) => {
   const body = await c.req.arrayBuffer();
 
   if (body.byteLength !== 32) {
@@ -31,7 +32,7 @@ hashes.post('/', authenticate('hash-server'), async (c) => {
   return c.json({ ok: true });
 });
 
-hashes.get('/', authenticate('hash-server'), async (c) => {
+hashes.get('/', authenticate('hash-server'), rateLimitByDevice(), async (c) => {
   const state = await getHashState(c.env.DB, c.get('sub'));
   const body = state ? new Uint8Array(state.state) : ZERO_STATE;
 

@@ -45,6 +45,7 @@ where
     let batch_interval_ms = config.batch_interval.as_millis() as i64;
     let device_name = config.device_name.clone();
     let platform_name = config.platform_name.clone();
+    let state_dir = config.state_dir.clone();
 
     let lifecycle: Box<dyn Observer> = if platform_config.lifecycle_enabled {
         Box::new(LifecycleModule::new(Box::new(platform.clone())))
@@ -58,11 +59,10 @@ where
             Arc::new(platform.clone()),
             screenshot_interval_ms,
         )),
-        Box::new(UploadModule::new(
-            Box::new(platform.clone()),
-            api.clone(),
-            batch_interval_ms,
-        )),
+        Box::new(
+            UploadModule::new(Box::new(platform.clone()), api.clone(), batch_interval_ms)
+                .with_error_log(crate::storage::FileStateStore::new(&state_dir)?),
+        ),
         Box::new(CaptureAvailabilityModule::new(Box::new(platform.clone()))),
         Box::new(HeartbeatModule::new(Box::new(platform))),
         Box::new(AuthModule::new(api, device_name, platform_name)),
