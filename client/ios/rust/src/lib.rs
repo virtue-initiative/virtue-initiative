@@ -21,8 +21,8 @@ use virtue_core::{
 static CORE: OnceCell<IosCore> = OnceCell::new();
 
 const DEFAULT_BASE_API_URL: &str = virtue_core::DEFAULT_API_BASE_URL;
-const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
-const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
+const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = virtue_core::DEFAULT_CAPTURE_INTERVAL_SECONDS;
+const DEFAULT_BATCH_WINDOW_SECONDS: u64 = virtue_core::DEFAULT_BATCH_WINDOW_SECONDS;
 const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
 // Ping every second (like the Android client), independent of capture cadence
 // (governed separately by `capture_interval_seconds`). Lifecycle detection is
@@ -131,6 +131,16 @@ impl LifecycleHooks for IosPlatformHooks {
 }
 
 impl PlatformHooks for IosPlatformHooks {}
+
+#[no_mangle]
+pub extern "C" fn virtue_ios_default_capture_interval_seconds() -> u64 {
+    DEFAULT_CAPTURE_INTERVAL_SECONDS
+}
+
+#[no_mangle]
+pub extern "C" fn virtue_ios_default_batch_window_seconds() -> u64 {
+    DEFAULT_BATCH_WINDOW_SECONDS
+}
 
 #[no_mangle]
 pub extern "C" fn virtue_ios_native_init(

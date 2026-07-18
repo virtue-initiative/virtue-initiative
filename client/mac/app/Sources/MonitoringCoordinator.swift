@@ -9,18 +9,18 @@ enum PermissionPhase {
     case needsRelaunch
 }
 
-/// UserDefaults keys + built-in defaults for runtime overrides, matching the
-/// daemon's actual defaults in `config.rs` (mac's own capture/batch cadence,
-/// not iOS's dev-oriented 15s/30s). Blank fields mean "use the built-in
-/// default" — the FFI layer omits blank keys from the override JSON entirely.
+/// UserDefaults keys + built-in defaults for runtime overrides. Capture/batch
+/// defaults are read from the Rust core via NativeBridge rather than
+/// duplicated here. Blank fields mean "use the built-in default" — the FFI
+/// layer omits blank keys from the override JSON entirely.
 private enum OverrideDefaults {
     static let baseApiUrlKey = "VIRTUE_BASE_API_URL"
     static let captureIntervalKey = "VIRTUE_CAPTURE_INTERVAL_SECONDS"
     static let batchWindowKey = "VIRTUE_BATCH_WINDOW_SECONDS"
 
     static let baseApiUrl = "https://api.virtueinitiative.org"
-    static let captureIntervalSeconds = "300"
-    static let batchWindowSeconds = "3600"
+    static let captureIntervalSeconds = String(NativeBridge.defaultCaptureIntervalSeconds())
+    static let batchWindowSeconds = String(NativeBridge.defaultBatchWindowSeconds())
 }
 
 /// Faithfully ports `main.rs`'s tray event loop state machine: the daemon

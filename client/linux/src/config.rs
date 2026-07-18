@@ -6,8 +6,8 @@ use anyhow::{Context, Result};
 use virtue_core::Config;
 
 const DEFAULT_BASE_API_URL: &str = virtue_core::DEFAULT_API_BASE_URL;
-const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
-const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
+const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = virtue_core::DEFAULT_CAPTURE_INTERVAL_SECONDS;
+const DEFAULT_BATCH_WINDOW_SECONDS: u64 = virtue_core::DEFAULT_BATCH_WINDOW_SECONDS;
 
 /// Set at build time by passing `VIRTUE_INSTANCE=<name>` to cargo. Controls
 /// which XDG subdirectory and systemd service name this binary uses.
