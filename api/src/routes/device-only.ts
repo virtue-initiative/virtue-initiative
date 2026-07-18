@@ -8,9 +8,11 @@ import {
   createBatch,
   createDevice,
   createSessionRecord,
+  deleteDeviceSessionsByDeviceId,
   getHashState,
   findDeviceById,
   listBatchAccessRecipientsForOwner,
+  markDeviceDeleted,
   resetHashState as resetStoredHashState,
 } from '../lib/db';
 import { encodeBase64, encodeHex } from '../lib/encoding';
@@ -158,6 +160,37 @@ deviceOnly.get('/device', authenticateDeviceSession(), rateLimitByDevice(), asyn
     })),
     hash_base_url: hashBaseUrl,
   });
+});
+
+/**
+ * POST /d/logout - Revoke the authenticated device's session and soft-delete it.
+ *
+ * Clears the device's hash-chain state as a best-effort cleanup; batches/screenshots
+ * and the device row itself are untouched (that's the manual hard-delete flow).
+ */
+deviceOnly.post('/logout', authenticateDeviceSession(), async (c) => {
+  const deviceId = c.get('sub');
+  const now = Date.now();
+
+  await deleteDeviceSessionsByDeviceId(c.env.DB, deviceId);
+  await markDeviceDeleted(c.env.DB, deviceId, now);
+
+  const hashServerUrl = c.env.HASH_SERVER_URL?.trim();
+  try {
+    if (hashServerUrl?.endsWith('/api')) {
+      await resetStoredHashState(c.env.DB, deviceId, now);
+    } else if (hashServerUrl) {
+      const token = await generateToken('server', deviceId, c.env.JWT_PRIVATE_KEY, 60);
+      await fetch(`${hashServerUrl}/hash`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    }
+  } catch {
+    // Non-fatal — logout/soft-delete already committed; hash state is best-effort.
+  }
+
+  return c.body(null, 204);
 });
 
 /**

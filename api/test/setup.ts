@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS devices (
   platform TEXT NOT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL,
+  deleted_at INTEGER,
   FOREIGN KEY (owner) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_devices_owner ON devices(owner);
