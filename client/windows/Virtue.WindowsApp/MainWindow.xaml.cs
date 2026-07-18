@@ -559,17 +559,28 @@ public sealed partial class MainWindow : Window
         _statusDetailTextBlock.Text = BuildSecondaryStatusText();
         _buildLabelTextBlock.Text = ViewModel.BuildLabelText;
 
-        _accountSummaryTextBlock.Text = ViewModel.LoggedIn
-            ? $"Signed in as {ViewModel.AccountSummary}"
-            : "Sign in to start monitoring.";
-        _loginPanel.Visibility = ViewModel.LoggedIn ? Visibility.Collapsed : Visibility.Visible;
+        if (!ViewModel.HasLoadedStatus)
+        {
+            _accountSummaryTextBlock.Text = "Checking sign-in status...";
+            _loginPanel.Visibility = Visibility.Collapsed;
+            _accountActionsPanel.Visibility = Visibility.Collapsed;
+            _signedInActionsPanel.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            _accountSummaryTextBlock.Text = ViewModel.LoggedIn
+                ? $"Signed in as {ViewModel.AccountSummary}"
+                : "Sign in to start monitoring.";
+            _loginPanel.Visibility = ViewModel.LoggedIn ? Visibility.Collapsed : Visibility.Visible;
+            _accountActionsPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
+            _signedInActionsPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
+        }
+
         var loginEnabled = !ViewModel.IsBusy;
         _emailTextBox.IsEnabled = loginEnabled;
         _passwordBox.IsEnabled = loginEnabled;
         _deviceNameTextBox.IsEnabled = loginEnabled;
         if (_signInButton is not null) _signInButton.IsEnabled = loginEnabled;
-        _accountActionsPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
-        _signedInActionsPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
 
         _errorTextBlock.Text = ViewModel.ErrorText ?? "";
         _errorTextBlock.Visibility = string.IsNullOrWhiteSpace(ViewModel.ErrorText)
@@ -595,6 +606,7 @@ public sealed partial class MainWindow : Window
     private string BuildPrimaryStatusText() =>
         ViewModel.MonitorState switch
         {
+            "loading" => "Loading status...",
             "running" => "Monitoring active",
             "starting" => "Starting monitoring",
             "signed_out" => "Logged out",
@@ -662,6 +674,7 @@ public sealed partial class MainWindow : Window
 
         return ViewModel.MonitorState switch
         {
+            "loading" => "Checking your sign-in status...",
             "running" => "Virtue is actively monitoring this device.",
             "starting" => "Virtue is bringing the background monitor online.",
             "signed_out" => "Monitoring resumes after you sign in again.",

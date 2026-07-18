@@ -16,7 +16,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private string _passwordInput = string.Empty;
     private string _deviceNameInput = Environment.MachineName;
     private string _statusText = "Starting Virtue...";
-    private string _monitorState = "stopped";
+    private string _monitorState = "loading";
     private string? _monitorError;
     private string? _deviceId;
     private int _pendingRequestCount;
@@ -26,6 +26,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private string _batchWindowSeconds = string.Empty;
     private string _configPath = "Loading config path...";
     private bool _isBusy;
+    private bool _hasLoadedStatus;
     private bool _isHydratingEmailInput;
     private bool _hasUserEditedEmailInput;
     private string? _transitionMessage;
@@ -72,6 +73,20 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         }
     }
 
+    public bool HasLoadedStatus
+    {
+        get => _hasLoadedStatus;
+        private set
+        {
+            if (SetProperty(ref _hasLoadedStatus, value))
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LoggedInText)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AccountSummary)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TrayTooltip)));
+            }
+        }
+    }
+
     public string AccountEmail
     {
         get => _accountEmail;
@@ -91,9 +106,11 @@ public sealed class SessionViewModel : INotifyPropertyChanged
 
     public string WindowsPackageVersion => _windowsPackageVersion;
 
-    public string LoggedInText => LoggedIn ? "Yes" : "No";
+    public string LoggedInText => !HasLoadedStatus ? "Loading..." : (LoggedIn ? "Yes" : "No");
 
-    public string AccountSummary => string.IsNullOrWhiteSpace(AccountEmail) ? "Not signed in" : AccountEmail;
+    public string AccountSummary => !HasLoadedStatus
+        ? "Loading..."
+        : (string.IsNullOrWhiteSpace(AccountEmail) ? "Not signed in" : AccountEmail);
 
     public string EmailInput
     {
@@ -173,6 +190,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     public string TrayTooltip =>
         MonitorState switch
         {
+            "loading" => "Virtue: loading status",
             "running" => "Virtue: monitoring active",
             "starting" => "Virtue: starting monitoring",
             "error" => string.IsNullOrWhiteSpace(MonitorError)
@@ -316,7 +334,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private Task BackgroundRefreshInternalAsync()
     {
         var monitorStatus = _interopClient.GetMonitorStatus();
-        var resolvedMonitorState = ResolveMonitorState(_loggedIn, monitorStatus.State);
+        var resolvedMonitorState = ResolveMonitorState(_hasLoadedStatus, _loggedIn, monitorStatus.State);
 
         MonitorState = resolvedMonitorState;
         MonitorError = _loggedIn ? monitorStatus.LastError : null;
@@ -352,9 +370,10 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private Task RefreshInternalAsync()
     {
         var status = _interopClient.GetSessionStatus();
+        HasLoadedStatus = true;
         var monitorStatus = _interopClient.GetMonitorStatus();
         var runtimeConfig = _interopClient.GetRuntimeConfig();
-        var resolvedMonitorState = ResolveMonitorState(status.LoggedIn, monitorStatus.State);
+        var resolvedMonitorState = ResolveMonitorState(_hasLoadedStatus, status.LoggedIn, monitorStatus.State);
         var isSignedIn = status.LoggedIn;
 
         BuildLabel = status.BuildLabel;
@@ -381,8 +400,13 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         return Task.CompletedTask;
     }
 
-    private static string ResolveMonitorState(bool loggedIn, string monitorState)
+    private static string ResolveMonitorState(bool hasStatus, bool loggedIn, string monitorState)
     {
+        if (!hasStatus)
+        {
+            return "loading";
+        }
+
         if (!loggedIn)
         {
             return "signed_out";

@@ -276,6 +276,13 @@ fn run_monitor_loop(shutdown: Arc<AtomicBool>, command_rx: Receiver<MonitorComma
         }
     };
 
+    if let Ok(resp) = bus.request::<StatusRequest, StatusResponse>(StatusRequest) {
+        update_snapshot(|s| {
+            s.logged_in = resp.status.is_authenticated;
+            s.pending_request_count = resp.status.pending_request_count;
+        });
+    }
+
     if let Err(err) = (|| -> anyhow::Result<()> {
         bus.send(ProcessStarted)?;
         store_state(&state_path, &bus.iter()?)?;
@@ -364,6 +371,7 @@ fn handle_command(bus: &mut EventBus, state_path: &Path, command: MonitorCommand
             let _ = store_state(state_path, &bus.iter()?);
             let result = request_result.and_then(|r| {
                 if r.success {
+                    note_login_state(true);
                     Ok(r.device_id.unwrap_or_default())
                 } else {
                     Err(CoreError::CommandFailed(
@@ -378,6 +386,7 @@ fn handle_command(bus: &mut EventBus, state_path: &Path, command: MonitorCommand
             let _ = store_state(state_path, &bus.iter()?);
             let result = request_result.and_then(|r| {
                 if r.success {
+                    note_login_state(false);
                     Ok(())
                 } else {
                     Err(CoreError::CommandFailed(

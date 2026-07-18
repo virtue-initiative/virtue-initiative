@@ -8,6 +8,19 @@ namespace Virtue.WindowsApp.Tests;
 public sealed class SessionViewModelTests
 {
     [Fact]
+    public void BeforeAnyRefresh_ReportsLoadingState()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        Assert.False(viewModel.HasLoadedStatus);
+        Assert.Equal("loading", viewModel.MonitorState);
+        Assert.Equal("Loading...", viewModel.LoggedInText);
+        Assert.Equal("Loading...", viewModel.AccountSummary);
+        Assert.Equal("Virtue: loading status", viewModel.TrayTooltip);
+    }
+
+    [Fact]
     public async Task InitializeAsync_LoadsSessionAndRuntimeConfig()
     {
         var fakeClient = new FakeRustInteropClient
