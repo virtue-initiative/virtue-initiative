@@ -73,8 +73,9 @@ devices.get('/', authenticateWebSession(), async (c) => {
         last_upload_at: device.last_upload_at,
         last_hash_at: hi ? hi.hashed_at : device.last_hash_at,
         pending_count: hi ? hi.count : device.pending_count,
-        status:
-          device.last_upload_at && Date.now() - device.last_upload_at < ONLINE_WINDOW_MS
+        status: device.deleted_at
+          ? 'logged_out'
+          : device.last_upload_at && Date.now() - device.last_upload_at < ONLINE_WINDOW_MS
             ? 'online'
             : 'offline',
       };

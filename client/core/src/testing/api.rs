@@ -27,7 +27,7 @@ pub struct MockApiClient {
 pub struct MockApiState {
     // --- recordings ---
     pub login_calls: Vec<(String, String)>,
-    pub logout_calls: Vec<()>,
+    pub logout_calls: Vec<String>,
     pub register_device_calls: Vec<RegisterDeviceCall>,
     pub get_device_settings_calls: Vec<String>,
     pub get_hash_token_calls: Vec<String>,
@@ -193,9 +193,9 @@ impl ApiTransport for MockApiClient {
         }
     }
 
-    fn logout(&self) -> CoreResult<()> {
+    fn logout(&self, device_refresh_token: &str) -> CoreResult<()> {
         let mut state = self.state();
-        state.logout_calls.push(());
+        state.logout_calls.push(device_refresh_token.to_string());
         if let Some(canned) = state.logout_responses.pop_front() {
             canned
         } else {

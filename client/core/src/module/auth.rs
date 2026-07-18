@@ -120,7 +120,9 @@ impl<A: ApiTransport + Send + Sync + 'static> AuthModule<A> {
     }
 
     fn handle_logout_requested(&mut self, emitter: &Emitter) {
-        let _ = self.api.logout();
+        if let Some(creds) = self.state.device_credentials.as_ref() {
+            let _ = self.api.logout(&creds.refresh_token);
+        }
         self.state.device_credentials = None;
         let _ = emitter.send(Logout);
         let _ = emitter.send(LogoutResult {
@@ -309,6 +311,48 @@ mod tests {
         let mut t = b.build();
         t.emit(1, LogoutRequested);
         assert_eq!(t.captured::<Logout>().len(), 1, "expected Logout event");
+    }
+
+    #[test]
+    fn logout_without_credentials_does_not_call_api() {
+        let mut b = EventTester::builder();
+        b.add(AuthModule::new(
+            b.api(),
+            "test-device".into(),
+            "test-platform".into(),
+        ));
+        let mut t = b.build();
+        t.emit(1, LogoutRequested);
+        assert!(
+            t.api.state().logout_calls.is_empty(),
+            "logout should not call the API when there are no device credentials"
+        );
+    }
+
+    #[test]
+    fn logout_with_credentials_calls_api_with_device_refresh_token() {
+        let mut b = EventTester::builder();
+        b.add(AuthModule::new(
+            b.api(),
+            "test-device".into(),
+            "test-platform".into(),
+        ));
+        let mut t = b.build();
+        t.emit(
+            1,
+            LoginRequested {
+                email: "alice@example.org".into(),
+                password: Redacted("secret".into()),
+                device_name: None,
+            },
+        );
+        t.emit(2, LogoutRequested);
+        let calls = t.api.state().logout_calls.clone();
+        assert_eq!(calls.len(), 1, "expected one logout call");
+        assert_eq!(
+            calls[0], "mock-refresh-token",
+            "logout should be called with the device's refresh token"
+        );
     }
 
     #[test]

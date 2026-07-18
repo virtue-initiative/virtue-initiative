@@ -386,6 +386,20 @@ export async function updateDevice(db: D1Database, deviceId: string, fields: { n
     .run();
 }
 
+export async function markDeviceDeleted(db: D1Database, deviceId: string, deletedAt: number) {
+  return db
+    .prepare('UPDATE devices SET deleted_at = ? WHERE id = ?')
+    .bind(deletedAt, uuidToBytes(deviceId))
+    .run();
+}
+
+export async function deleteDeviceSessionsByDeviceId(db: D1Database, deviceId: string) {
+  return db
+    .prepare('DELETE FROM device_sessions WHERE device_id = ?')
+    .bind(uuidToBytes(deviceId))
+    .run();
+}
+
 export async function listBatchUrlsForDevice(db: D1Database, deviceId: string) {
   const result = await db
     .prepare('SELECT url FROM batches WHERE device_id = ?')
@@ -455,13 +469,14 @@ export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
     last_upload_at: number | null;
     last_hash_at: number | null;
     pending_count: number;
+    deleted_at: number | null;
   }>(
     db
       .prepare(
         // Pre-aggregate each owner's batches per device (using idx_batches_user_id,
         // since batches.user_id is always the device owner) before joining to devices.
         // This avoids the LEFT JOIN batches row-explosion that GROUP BY had to collapse.
-        `SELECT d.id, d.owner, d.name, d.platform, d.created_at,
+        `SELECT d.id, d.owner, d.name, d.platform, d.created_at, d.deleted_at,
                 lu.last_upload_at,
                 hs.hashed_at AS last_hash_at, COALESCE(hs.count, 0) AS pending_count
          FROM devices d

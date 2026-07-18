@@ -17,7 +17,7 @@ pub struct UploadedBatchResponse {
 
 pub trait ApiTransport: Send + Sync {
     fn login(&self, username: &str, password: &str) -> CoreResult<String>;
-    fn logout(&self) -> CoreResult<()>;
+    fn logout(&self, device_refresh_token: &str) -> CoreResult<()>;
     fn register_device(
         &self,
         user_refresh_token: &str,
@@ -108,8 +108,14 @@ impl ApiTransport for ReqwestApiClient {
         Ok(response.refresh_token)
     }
 
-    fn logout(&self) -> CoreResult<()> {
-        self.send_empty(Method::POST, None, "/logout", None, None::<&()>)
+    fn logout(&self, device_refresh_token: &str) -> CoreResult<()> {
+        self.send_empty(
+            Method::POST,
+            None,
+            "/d/logout",
+            Some(device_refresh_token),
+            None::<&()>,
+        )
     }
 
     fn register_device(
