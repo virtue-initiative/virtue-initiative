@@ -23,7 +23,6 @@ static CORE: OnceCell<IosCore> = OnceCell::new();
 const DEFAULT_BASE_API_URL: &str = virtue_core::DEFAULT_API_BASE_URL;
 const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
 const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
-const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
 // Ping every second (like the Android client), independent of capture cadence
 // (governed separately by `capture_interval_seconds`). Lifecycle detection is
 // disabled entirely on iOS (see `build_bus`), so this cadence is purely about
@@ -390,19 +389,15 @@ fn run_daemon_loop(core: &IosCore) -> Result<()> {
     store_state(&state_path, &state)?;
 
     while !core.stop.load(Ordering::SeqCst) {
-        let sleep_duration = match (|| -> Result<()> {
+        if let Err(err) = (|| -> Result<()> {
             bus.send(Ping)?;
             let state = bus.iter()?;
             store_state(&state_path, &state)?;
             Ok(())
         })() {
-            Ok(()) => LOOP_INTERVAL,
-            Err(err) => {
-                eprintln!("ios-daemon: {err}");
-                ERROR_RETRY_INTERVAL
-            }
-        };
-        sleep_interruptible(&core.stop, sleep_duration);
+            eprintln!("ios-daemon: {err}");
+        }
+        sleep_interruptible(&core.stop, LOOP_INTERVAL);
     }
 
     bus.send(ProcessStopped)?;

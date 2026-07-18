@@ -1,6 +1,7 @@
 export interface Env {
   DB: D1Database;
   BUCKET: R2Bucket;
+  RATE_LIMITER: RateLimit;
   JWT_PRIVATE_KEY: string;
   JWT_PUBLIC_KEY: string;
   API_BASE_PATH?: string;
