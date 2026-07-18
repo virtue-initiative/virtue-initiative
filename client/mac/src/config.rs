@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use virtue_core::{AuthState, Config};
 
 const DEFAULT_BASE_API_URL: &str = virtue_core::DEFAULT_API_BASE_URL;
-const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
-const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
+const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = virtue_core::DEFAULT_CAPTURE_INTERVAL_SECONDS;
+const DEFAULT_BATCH_WINDOW_SECONDS: u64 = virtue_core::DEFAULT_BATCH_WINDOW_SECONDS;
 
 #[derive(Clone, Debug)]
 pub struct ClientPaths {

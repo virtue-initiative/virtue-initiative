@@ -65,6 +65,12 @@ private func virtue_mac_native_get_build_label() -> UnsafeMutablePointer<CChar>?
 @_silgen_name("virtue_mac_native_default_device_name")
 private func virtue_mac_native_default_device_name() -> UnsafeMutablePointer<CChar>?
 
+@_silgen_name("virtue_mac_native_default_capture_interval_seconds")
+private func virtue_mac_native_default_capture_interval_seconds() -> UInt64
+
+@_silgen_name("virtue_mac_native_default_batch_window_seconds")
+private func virtue_mac_native_default_batch_window_seconds() -> UInt64
+
 @_silgen_name("virtue_mac_native_daemon_exe_path")
 private func virtue_mac_native_daemon_exe_path(
     _ appBundlePath: UnsafePointer<CChar>?
@@ -195,6 +201,14 @@ enum NativeBridge {
 
     static func defaultDeviceName() -> String {
         consumeOptionalString(virtue_mac_native_default_device_name()) ?? "mac-device"
+    }
+
+    static func defaultCaptureIntervalSeconds() -> UInt64 {
+        virtue_mac_native_default_capture_interval_seconds()
+    }
+
+    static func defaultBatchWindowSeconds() -> UInt64 {
+        virtue_mac_native_default_batch_window_seconds()
     }
 
     static func daemonExePath(appBundlePath: String) -> String {

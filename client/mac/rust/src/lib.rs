@@ -249,6 +249,16 @@ pub extern "C" fn virtue_mac_native_default_device_name() -> *mut c_char {
     string_to_c(virtue_mac_platform::config::default_device_name())
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn virtue_mac_native_default_capture_interval_seconds() -> u64 {
+    virtue_core::DEFAULT_CAPTURE_INTERVAL_SECONDS
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn virtue_mac_native_default_batch_window_seconds() -> u64 {
+    virtue_core::DEFAULT_BATCH_WINDOW_SECONDS
+}
+
 /// Resolve the daemon executable bundled inside the app at
 /// `Contents/MacOS/virtue-daemon`, given the app bundle path
 /// (`Bundle.main.bundlePath` on the Swift side).

@@ -1,5 +1,11 @@
 import Foundation
 
+@_silgen_name("virtue_ios_default_capture_interval_seconds")
+private func virtue_ios_default_capture_interval_seconds() -> UInt64
+
+@_silgen_name("virtue_ios_default_batch_window_seconds")
+private func virtue_ios_default_batch_window_seconds() -> UInt64
+
 enum VirtueShared {
     static let appGroupID = "group.org.virtueinitiative.virtueios"
     static let buildLabel: String = {
@@ -22,8 +28,8 @@ enum VirtueShared {
     static let safariPauseStopIssuedKey = "VIRTUE_SAFARI_PAUSE_STOP_ISSUED"
 
     static let defaultBaseApiUrl = "https://api.virtueinitiative.org"
-    static let defaultCaptureIntervalSeconds = "15"
-    static let defaultBatchWindowSeconds = "30"
+    static let defaultCaptureIntervalSeconds = String(virtue_ios_default_capture_interval_seconds())
+    static let defaultBatchWindowSeconds = String(virtue_ios_default_batch_window_seconds())
     static let defaultMonitoringEnabled = true
 
     static let safariLastMessageAtKey = "VIRTUE_SAFARI_LAST_MESSAGE_AT"

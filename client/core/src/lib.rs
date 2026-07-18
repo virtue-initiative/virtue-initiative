@@ -19,7 +19,9 @@ pub mod testing;
 
 pub use assembly::{build_default_modules, build_default_modules_reqwest};
 pub use build_info::{BUILD_LABEL, build_label};
-pub use config::{Config, DEFAULT_API_BASE_URL};
+pub use config::{
+    Config, DEFAULT_API_BASE_URL, DEFAULT_BATCH_WINDOW_SECONDS, DEFAULT_CAPTURE_INTERVAL_SECONDS,
+};
 pub use controller::ClientController;
 pub use error::{CoreError, CoreResult};
 pub use events::{
