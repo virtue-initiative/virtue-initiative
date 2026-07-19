@@ -62,6 +62,25 @@ else
     install -m 0755 linux/packaging/debian/prerm "$PKG_DIR/DEBIAN/prerm"
 fi
 
+# Auto-detect shared library dependencies (e.g. libtesseract5) via dpkg-shlibdeps,
+# since the binary links libraries pulled in transitively by Cargo dependencies
+# (leptess/tesseract-sys) that aren't tracked anywhere else.
+rm -rf debian
+mkdir -p debian
+cat > debian/control <<CONTROL
+Source: $PKG_NAME
+Section: utils
+Priority: optional
+Maintainer: Virtue Initiative <support@virtue.app>
+
+Package: $PKG_NAME
+Architecture: $ARCH
+Depends: \${shlibs:Depends}
+Description: Virtue Linux monitoring client
+CONTROL
+SHLIBS_DEPENDS="$(dpkg-shlibdeps -O "$PKG_DIR/usr/bin/$BIN_NAME" 2>/dev/null | sed -n 's/^shlibs:Depends=//p')"
+rm -rf debian
+
 cat > "$PKG_DIR/DEBIAN/control" <<CONTROL
 Package: $PKG_NAME
 Version: $BASE_VERSION
@@ -69,7 +88,7 @@ Section: utils
 Priority: optional
 Architecture: $ARCH
 Maintainer: Virtue Initiative <support@virtue.app>
-Depends: systemd
+Depends: systemd, $SHLIBS_DEPENDS
 Description: Virtue Linux monitoring client
  Virtue command line and background service for screenshot monitoring.
 CONTROL
