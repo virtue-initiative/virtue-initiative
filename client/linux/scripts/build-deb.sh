@@ -62,9 +62,43 @@ else
     install -m 0755 linux/packaging/debian/prerm "$PKG_DIR/DEBIAN/prerm"
 fi
 
-# Auto-detect shared library dependencies (e.g. libtesseract5) via dpkg-shlibdeps,
-# since the binary links libraries pulled in transitively by Cargo dependencies
-# (leptess/tesseract-sys) that aren't tracked anywhere else.
+# Bundle libtesseract/liblept/libjpeg into the package instead of depending on
+# the OS-provided packages. Leptonica's shared-library package was renamed
+# from liblept5 to libleptonica6 (SONAME bump) starting with Debian trixie /
+# newer Ubuntu releases, so a .deb built against one naming fails to install
+# on the other. libjpeg is worse: Debian dropped the libjpeg v8 ABI
+# (SONAME libjpeg.so.8, package libjpeg8/libjpeg-turbo8) entirely in favor of
+# the v6b-compatible libjpeg62-turbo (SONAME libjpeg.so.62) -- on a build
+# machine that links leptonica against the v8 ABI (e.g. Ubuntu), there is no
+# installable libjpeg8 package on Debian at all, not just a rename. Vendoring
+# all three avoids depending on any of these OS package names.
+# libjpeg is a NEEDED entry of liblept.so.5, not of the binary itself, so this
+# has to walk the full transitive closure (ldd) rather than just the direct
+# NEEDED list (readelf -d) of the top-level binary.
+BUNDLE_SONAMES="$(ldd "$PKG_DIR/usr/bin/$BIN_NAME" | grep -oE 'lib(tesseract|lept|leptonica|jpeg)[^ ]*\.so\.[0-9]+' | sort -u)"
+
+mkdir -p "$PKG_DIR/usr/lib/$PKG_NAME"
+for soname in $BUNDLE_SONAMES; do
+    resolved="$(ldd "$PKG_DIR/usr/bin/$BIN_NAME" | awk -v s="$soname" '$1==s {print $3}')"
+    install -m 0644 "$resolved" "$PKG_DIR/usr/lib/$PKG_NAME/$soname"
+done
+
+# RPATH lets the dynamic linker find the bundled libs without needing them in
+# the system ld cache. Each bundled .so also needs its own $ORIGIN RPATH
+# because DT_RUNPATH does not propagate transitively to a library's own
+# NEEDED entries (libtesseract.so.5 itself needs liblept.so.5).
+patchelf --set-rpath "\$ORIGIN/../lib/$PKG_NAME" "$PKG_DIR/usr/bin/$BIN_NAME"
+for soname in $BUNDLE_SONAMES; do
+    patchelf --set-rpath '$ORIGIN' "$PKG_DIR/usr/lib/$PKG_NAME/$soname"
+done
+
+# Auto-detect remaining shared library dependencies via dpkg-shlibdeps, since
+# the binary links libraries pulled in transitively by Cargo dependencies
+# (leptess/tesseract-sys) that aren't tracked anywhere else. Run it across the
+# main binary and the bundled libs together so leptonica/tesseract's own
+# remaining sub-dependencies (libpng, libcurl, libtiff, ...) are still picked
+# up, then strip out the bundled libs' own package entries since those are
+# vendored, not system deps.
 rm -rf debian
 mkdir -p debian
 cat > debian/control <<CONTROL
@@ -78,7 +112,10 @@ Architecture: $ARCH
 Depends: \${shlibs:Depends}
 Description: Virtue Linux monitoring client
 CONTROL
-SHLIBS_DEPENDS="$(dpkg-shlibdeps -O "$PKG_DIR/usr/bin/$BIN_NAME" 2>/dev/null | sed -n 's/^shlibs:Depends=//p')"
+SHLIBS_DEPENDS="$(dpkg-shlibdeps -O "$PKG_DIR/usr/bin/$BIN_NAME" "$PKG_DIR"/usr/lib/"$PKG_NAME"/*.so.* 2>/dev/null \
+    | sed -n 's/^shlibs:Depends=//p' \
+    | sed -E 's/(^|, ?)(lib(tesseract5|lept5|leptonica6|jpeg8|jpeg-turbo8))( \([^)]*\))?//g' \
+    | sed -E 's/^, //; s/, ,/,/g; s/, $//')"
 rm -rf debian
 
 cat > "$PKG_DIR/DEBIAN/control" <<CONTROL
