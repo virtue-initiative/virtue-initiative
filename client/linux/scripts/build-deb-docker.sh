@@ -4,6 +4,16 @@ set -euo pipefail
 CLIENT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$CLIENT_ROOT"
 
+source "${CLIENT_ROOT}/scripts/version.sh"
+
+# Resolve the git hash/build date on the host, where .git is present, and
+# pass them through explicitly. The container only has client/ bind-mounted
+# (see below), not the repo root's .git dir, so version.sh's git lookup
+# would otherwise silently resolve to an empty hash inside the container.
+VIRTUE_GIT_SHORT_HASH="$(virtue_git_short_hash)"
+VIRTUE_BUILD_DATE="$(virtue_build_date)"
+export VIRTUE_GIT_SHORT_HASH VIRTUE_BUILD_DATE
+
 IMAGE_TAG="virtue-linux-deb-builder"
 CARGO_CACHE_DIR="$CLIENT_ROOT/.docker-cargo-home"
 DOCKER_TARGET_DIR="$CLIENT_ROOT/target-docker"
@@ -22,6 +32,8 @@ docker run --rm \
     --user "$(id -u):$(id -g)" \
     -e CARGO_HOME=/workspace/.docker-cargo-home \
     -e HOME=/workspace/.docker-cargo-home \
+    -e VIRTUE_GIT_SHORT_HASH \
+    -e VIRTUE_BUILD_DATE \
     -v "$CLIENT_ROOT:/workspace" \
     -v "$DOCKER_TARGET_DIR:/workspace/target" \
     -w /workspace \
