@@ -16,7 +16,24 @@ use crate::tray;
 const SESSION_UNAVAILABLE_LOG_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const ITER_INTERVAL: Duration = Duration::from_secs(1);
 
+/// Installs the process-wide `tracing` subscriber. Captured on stdout, which
+/// systemd's `Type=simple` unit forwards to journald — no new log file on
+/// Linux. Honors `RUST_LOG` (useful for local `cargo run` too), falling back
+/// to the build-type default directive shared with every other platform.
+fn init_logging() {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        tracing_subscriber::EnvFilter::new(virtue_core::logging::default_filter_directive(cfg!(
+            debug_assertions
+        )))
+    });
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stdout)
+        .init();
+}
+
 pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
+    init_logging();
     paths.ensure_dirs()?;
     let _tray = tray::start_daemon_tray(paths.clone());
 
@@ -60,7 +77,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
             Ok(state) => {
                 last_session_unavailable_log = None;
                 if let Err(e) = store_state(&state_path, &state) {
-                    eprintln!("daemon: failed to store state: {e}");
+                    tracing::error!(error = %e, "daemon: failed to store state");
                 }
             }
             Err(err) => {
@@ -69,11 +86,11 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
                     let should_log = last_session_unavailable_log
                         .is_none_or(|last| last.elapsed() >= SESSION_UNAVAILABLE_LOG_INTERVAL);
                     if should_log {
-                        eprintln!("daemon: capture session unavailable: {message}");
+                        tracing::warn!("daemon: capture session unavailable: {message}");
                         last_session_unavailable_log = Some(std::time::Instant::now());
                     }
                 } else {
-                    eprintln!("daemon: {message}");
+                    tracing::error!("daemon: {message}");
                 }
             }
         }
