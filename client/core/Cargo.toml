@@ -40,5 +40,6 @@ sha2 = "0.10"
 thiserror = "2.0"
 tokio = { version = "1", features = ["time"] }
 tract-onnx = "0.21"
+tracing = "0.1"
 virtue-text-detection = { path = "../text-detection" }
 webp = "0.3"

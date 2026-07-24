@@ -72,7 +72,7 @@ pub enum AlertReason {
     UserStop,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum UploadKind {
     Screenshot {
@@ -106,6 +106,38 @@ pub enum UploadKind {
         details: Option<String>,
     },
     Heartbeat,
+}
+
+/// Hand-written so the captured screenshot bytes never reach a log line
+/// verbatim — every other field prints exactly as `#[derive(Debug)]` would.
+impl std::fmt::Debug for UploadKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UploadKind::Screenshot {
+                image,
+                content_type,
+                skin_detection,
+                nsfw_detection,
+            } => write!(
+                f,
+                "Screenshot {{ image: <{} bytes>, content_type: {content_type:?}, skin_detection: {skin_detection:?}, nsfw_detection: {nsfw_detection:?} }}",
+                image.len()
+            ),
+            UploadKind::Lifecycle { kind } => write!(f, "Lifecycle {{ kind: {kind:?} }}"),
+            UploadKind::LifecycleAlert { reason } => {
+                write!(f, "LifecycleAlert {{ reason: {reason:?} }}")
+            }
+            UploadKind::ScreenshotSkipped { reason } => {
+                write!(f, "ScreenshotSkipped {{ reason: {reason:?} }}")
+            }
+            UploadKind::Alert { message } => write!(f, "Alert {{ message: {message:?} }}"),
+            UploadKind::CaptureFailed => write!(f, "CaptureFailed"),
+            UploadKind::Dev { title, details } => {
+                write!(f, "Dev {{ title: {title:?}, details: {details:?} }}")
+            }
+            UploadKind::Heartbeat => write!(f, "Heartbeat"),
+        }
+    }
 }
 
 /// A single piece of `ServiceStatus` reported by one module in response to a

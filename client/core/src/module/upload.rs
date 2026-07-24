@@ -12,7 +12,7 @@ use crate::api::ApiTransport;
 use crate::crypto::{CryptoEngine, compute_event_hash, encode_batch_event};
 use crate::error::{CoreError, CoreResult};
 use crate::events::Ping;
-use crate::events::bus::{Emitter, EventBus, Observer, StateType, log_error};
+use crate::events::bus::{Emitter, EventBus, Observer, StateType, log_error, log_warning};
 use crate::model::PartialStatus;
 use crate::module::auth::{Login, Logout, LogoutRequested};
 use crate::module::config::ConfigChanged;
@@ -305,7 +305,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
                 let encoded = match encode_batch_event(&event) {
                     Ok(bytes) => bytes,
                     Err(err) => {
-                        log_error(
+                        log_warning(
                             "encode_batch_event failed, keeping event for retry",
                             Some(&err),
                         );
@@ -328,7 +328,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
                     }
                     Err(err) => {
                         had_failure = true;
-                        log_error("hash upload failed, will retry", Some(&err));
+                        log_warning("hash upload failed, will retry", Some(&err));
                         Some(event)
                     }
                 }
@@ -418,7 +418,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
                 true
             }
             Err(err) if err.is_not_found() || err.is_unauthorized() => {
-                log_error(
+                log_warning(
                     "settings refresh before batch: device deregistered or unauth, logging out",
                     Some(&err),
                 );
@@ -426,7 +426,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
                 false
             }
             Err(err) => {
-                log_error(
+                log_warning(
                     "settings refresh before batch failed; using last known settings",
                     Some(&err),
                 );
@@ -482,8 +482,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
         )?;
         match self.upload_batch(&batch) {
             Ok(_) => {
-                #[cfg(debug_assertions)]
-                eprintln!("[upload] batch ok: {count} events, start_ms={start_time_ms}");
+                tracing::info!(count, start_time_ms, "batch upload ok");
                 self.state.pending_batch_events.drain(..count);
                 if self.state.post_login_proof_batches_remaining > 0 {
                     self.state.post_login_proof_batches_remaining -= 1;
@@ -493,7 +492,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
                 Ok(())
             }
             Err(err) if err.is_not_found() || err.is_unauthorized() => {
-                log_error(
+                log_warning(
                     "batch upload: device deregistered or unauth, logging out",
                     Some(&err),
                 );
@@ -501,7 +500,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
                 Ok(())
             }
             Err(err) => {
-                log_error("batch upload deferred", Some(&err));
+                log_warning("batch upload deferred", Some(&err));
                 self.batch_backoff.record_failure(now_ms);
                 Ok(())
             }

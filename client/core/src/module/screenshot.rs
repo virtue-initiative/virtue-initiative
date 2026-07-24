@@ -94,8 +94,9 @@ impl ScreenshotModule {
                 // a load failure is an unresolved Git LFS pointer baked in instead of the real
                 // ONNX (see build.rs guard). Without a classifier every screenshot risk is 0,
                 // so make that loud rather than silent.
-                eprintln!(
-                    "[screenshot] NSFW classifier disabled, all screenshot risk will be 0: {err}"
+                tracing::error!(
+                    error = %err,
+                    "NSFW classifier disabled, all screenshot risk will be 0"
                 );
                 None
             }
@@ -107,7 +108,7 @@ impl ScreenshotModule {
         let ocr = match ScreenshotOCR::new(Default::default()) {
             Ok(ocr) => Some(Arc::new(ocr)),
             Err(err) => {
-                eprintln!("[screenshot] OCR disabled, text will not be redacted: {err}");
+                tracing::warn!(error = %err, "OCR disabled, text will not be redacted");
                 None
             }
         };
@@ -256,7 +257,7 @@ fn run_capture(
     let scores = classifier.and_then(|c| match c.classify(&screenshot.bytes) {
         Ok(scores) => Some(scores),
         Err(err) => {
-            eprintln!("[screenshot] classify failed, recording risk 0: {err}");
+            tracing::warn!(error = %err, "classify failed, recording risk 0");
             None
         }
     });
@@ -298,13 +299,13 @@ fn redact_if_ocr(ocr: Option<&ScreenshotOCR>, mut shot: crate::Screenshot) -> cr
     match engine.detect(&shot.bytes) {
         Ok(result) if !result.regions.is_empty() => {
             if let Err(err) = redact_text_regions(&mut shot, &result.regions) {
-                eprintln!("[screenshot] text redaction failed, uploading unredacted: {err}");
+                tracing::warn!(error = %err, "text redaction failed, uploading unredacted");
             }
             shot
         }
         Ok(_) => shot,
         Err(err) => {
-            eprintln!("[screenshot] OCR failed, uploading unredacted: {err}");
+            tracing::warn!(error = %err, "OCR failed, uploading unredacted");
             shot
         }
     }
