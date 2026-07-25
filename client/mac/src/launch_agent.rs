@@ -237,17 +237,21 @@ fn wait_for_loaded_state(
 
 fn render_plist(exe_path: &Path, paths: &ClientPaths) -> String {
     let exe = xml_escape(&exe_path.display().to_string());
+    // `tracing-appender` owns `virtue.<date>` in this same directory; these
+    // launchd-redirected files are only a fallback safety net for output
+    // emitted before `tracing` initializes, or panics that bypass it, so they
+    // use distinct names to avoid colliding with the rotated log files.
     let stdout_path = xml_escape(
         &paths
             .logs_dir
-            .join("virtue-daemon.log")
+            .join("virtue-daemon-launchd.log")
             .display()
             .to_string(),
     );
     let stderr_path = xml_escape(
         &paths
             .logs_dir
-            .join("virtue-daemon.error.log")
+            .join("virtue-daemon-launchd.error.log")
             .display()
             .to_string(),
     );
