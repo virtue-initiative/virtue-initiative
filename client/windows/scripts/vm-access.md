@@ -122,14 +122,15 @@ The app runs in the tray and shows a sign-in form on first launch. The package f
 
 ## Read the client log
 
-The Virtue Windows client writes to `C:\ProgramData\Virtue\data\service.log`.
+The Virtue Windows client writes daily-rotated logs to
+`C:\ProgramData\Virtue\data\logs\virtue.<date>.log`.
 
 ```bash
-# Last 50 lines
-ssh virtue-win11 "powershell Get-Content 'C:\ProgramData\Virtue\data\service.log' -Tail 50"
+# Last 50 lines (adjust the date suffix to today's log file)
+ssh virtue-win11 "powershell Get-ChildItem 'C:\ProgramData\Virtue\data\logs' | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | Get-Content -Tail 50"
 
-# Live tail
-ssh virtue-win11 "powershell Get-Content -Wait -Tail 20 'C:\ProgramData\Virtue\data\service.log'"
+# Live tail of the newest log file
+ssh virtue-win11 "powershell Get-Content -Wait -Tail 20 (Get-ChildItem 'C:\ProgramData\Virtue\data\logs' | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName"
 ```
 
 ## Check if the client is running
