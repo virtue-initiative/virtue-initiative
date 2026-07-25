@@ -4,14 +4,13 @@
 //! knows its own process model — but the naming/retention knobs are pure
 //! logic worth centralizing rather than reimplementing per platform.
 
-/// Default `EnvFilter` directive per build type — the fallback when no
-/// runtime override (`RUST_LOG`, where supported) is present.
-pub fn default_filter_directive(debug_build: bool) -> &'static str {
-    if debug_build {
-        "info,virtue_core=debug"
-    } else {
-        "info"
-    }
+/// Default `EnvFilter` directive — the fallback when no runtime override
+/// (`RUST_LOG`, where supported) is present. Always debug-level for
+/// `virtue_core` so release builds retain the same diagnostic detail as
+/// debug builds; `debug_build` is accepted for call-site symmetry with
+/// platforms that also gate their own crate's directive on it.
+pub fn default_filter_directive(_debug_build: bool) -> &'static str {
+    "info,virtue_core=debug"
 }
 
 /// Rolling-file naming/retention knobs shared by every platform with a file
@@ -62,9 +61,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_filter_directive_differs_by_build_type() {
+    fn default_filter_directive_is_debug_regardless_of_build_type() {
         assert_eq!(default_filter_directive(true), "info,virtue_core=debug");
-        assert_eq!(default_filter_directive(false), "info");
+        assert_eq!(default_filter_directive(false), "info,virtue_core=debug");
     }
 
     #[test]
