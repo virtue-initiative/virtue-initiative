@@ -19,6 +19,11 @@ use virtue_core::{
 };
 
 static CORE: OnceCell<IosCore> = OnceCell::new();
+// Kept alive for the process lifetime; dropping it would silently stop the
+// background thread that flushes buffered log lines. A dedicated `OnceCell`
+// (rather than piggybacking on `CORE`, which has no room to hold a guard)
+// still only ever runs its init closure once per process.
+static LOG_GUARD: OnceCell<tracing_appender::non_blocking::WorkerGuard> = OnceCell::new();
 
 const DEFAULT_BASE_API_URL: &str = virtue_core::DEFAULT_API_BASE_URL;
 const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = virtue_core::DEFAULT_CAPTURE_INTERVAL_SECONDS;
@@ -132,6 +137,41 @@ impl LifecycleHooks for IosPlatformHooks {
 
 impl PlatformHooks for IosPlatformHooks {}
 
+/// Installs the process-wide `tracing` subscriber on first call, writing
+/// daily-rotated plain-text logs to `<data_dir>/logs/virtue.log`. Subsequent
+/// calls are no-ops. No runtime override (no shell env vars on mobile) — the
+/// compiled-in default filter for the build type is used directly.
+fn init_logging(data_dir: &Path) {
+    LOG_GUARD.get_or_init(|| {
+        let log_dir = data_dir.join("logs");
+        if let Err(err) = fs::create_dir_all(&log_dir) {
+            eprintln!("failed to create logs dir {}: {err}", log_dir.display());
+        }
+        if let Err(err) = virtue_core::logging::prune_old_logs(
+            &log_dir,
+            &virtue_core::logging::DEFAULT_FILE_LOG_POLICY,
+        ) {
+            eprintln!("failed to prune old logs: {err}");
+        }
+
+        let file_appender = tracing_appender::rolling::daily(
+            &log_dir,
+            virtue_core::logging::DEFAULT_FILE_LOG_POLICY.file_name_prefix,
+        );
+        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+
+        tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::new(
+                virtue_core::logging::default_filter_directive(cfg!(debug_assertions)),
+            ))
+            .with_writer(non_blocking)
+            .with_ansi(false)
+            .init();
+
+        guard
+    });
+}
+
 #[no_mangle]
 pub extern "C" fn virtue_ios_default_capture_interval_seconds() -> u64 {
     DEFAULT_CAPTURE_INTERVAL_SECONDS
@@ -172,6 +212,8 @@ pub extern "C" fn virtue_ios_native_init(
         )?;
 
         if CORE.get().is_none() {
+            init_logging(Path::new(&data_dir));
+
             CORE.set(IosCore {
                 state_dir: PathBuf::from(data_dir),
                 runtime_config_file,
@@ -406,7 +448,7 @@ fn run_daemon_loop(core: &IosCore) -> Result<()> {
             store_state(&state_path, &state)?;
             Ok(())
         })() {
-            eprintln!("ios-daemon: {err}");
+            tracing::error!(error = %err, "ios-daemon");
         }
         sleep_interruptible(&core.stop, LOOP_INTERVAL);
     }
@@ -556,5 +598,29 @@ fn into_c_result(result: Result<()>) -> *mut c_char {
         Err(err) => CString::new(err.to_string())
             .map(CString::into_raw)
             .unwrap_or(std::ptr::null_mut()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn init_logging_is_idempotent_across_repeated_calls() {
+        // `virtue_ios_native_init` can legitimately be called more than once per
+        // process, and its one-time-setup block guards on `CORE.get().is_none()`
+        // before calling `init_logging`. `init_logging` itself must also tolerate
+        // more than one call without panicking, since nothing prevents it being
+        // reached twice before `CORE` is set on a slow init path.
+        let dir =
+            std::env::temp_dir().join(format!("virtue-ios-logging-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        init_logging(&dir);
+        init_logging(&dir);
+
+        assert!(LOG_GUARD.get().is_some(), "logging should be initialized");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
