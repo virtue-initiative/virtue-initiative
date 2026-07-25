@@ -98,7 +98,9 @@ mod tests {
             std::fs::write(&path, b"x").unwrap();
             let mtime = std::time::SystemTime::UNIX_EPOCH
                 + std::time::Duration::from_secs(1_700_000_000 + i as u64 * 3600);
-            let file = std::fs::File::open(&path).unwrap();
+            // `File::open` is read-only, which lacks the write-attributes
+            // permission `set_modified` needs on Windows.
+            let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
             file.set_modified(mtime).unwrap();
         }
         std::fs::write(dir.join("other.log"), b"x").unwrap();
