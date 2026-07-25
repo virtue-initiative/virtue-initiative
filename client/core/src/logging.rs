@@ -50,7 +50,7 @@ pub fn prune_old_logs(dir: &std::path::Path, policy: &FileLogPolicy) -> std::io:
     }
 
     // Newest first, so the retained prefix is the newest `max_retained_files`.
-    files.sort_by(|a, b| b.0.cmp(&a.0));
+    files.sort_by_key(|f| std::cmp::Reverse(f.0));
     for (_, path) in files.into_iter().skip(policy.max_retained_files) {
         let _ = std::fs::remove_file(path);
     }
