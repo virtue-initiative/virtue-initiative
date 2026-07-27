@@ -29,6 +29,7 @@ fn init_logging() {
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_writer(std::io::stdout)
+        .without_time()
         .init();
 }
 
