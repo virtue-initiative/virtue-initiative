@@ -51,8 +51,15 @@ macro_rules! dispatch_event {
 
 pub fn log_error(msg: &str, err: Option<&dyn std::fmt::Display>) {
     match err {
-        Some(e) => eprintln!("[core error] {msg}: {e}"),
-        None => eprintln!("[core error] {msg}"),
+        Some(e) => tracing::error!(error = %e, "{msg}"),
+        None => tracing::error!("{msg}"),
+    }
+}
+
+pub fn log_warning(msg: &str, err: Option<&dyn std::fmt::Display>) {
+    match err {
+        Some(e) => tracing::warn!(error = %e, "{msg}"),
+        None => tracing::warn!("{msg}"),
     }
 }
 
@@ -280,13 +287,21 @@ impl EventBus {
     /// every observer is collected and returned.
     pub fn iter(&mut self) -> CoreResult<StateType> {
         while let Ok(event) = self.rx.try_recv() {
-            if cfg!(debug_assertions) {
-                println!("Event: {:?}", &*event);
-            }
             // Upcast the boxed event to `&dyn Any` ONCE, dereferencing to the
             // inner `dyn AnyDebugEvent` first. Upcasting the box directly would
             // yield a `&dyn Any` of the box, so no `type_id`/downcast would match.
             let event_any: &dyn Any = &*event;
+
+            // `Ping` fires on every tick regardless of activity and carries no
+            // state of its own, so even DEBUG-level dispatch logging is too
+            // noisy to be useful by default — it alone goes to TRACE. Every
+            // other event type logs at DEBUG; the runtime filter (not a
+            // compile-time flag) decides whether it's actually emitted.
+            if event_any.is::<super::Ping>() {
+                tracing::trace!(event = ?event, "event");
+            } else {
+                tracing::debug!(event = ?event, "event");
+            }
 
             // Subscription-based handlers (closure subscriptions).
             if let Some(handlers) = self.handlers.get(&event_any.type_id()) {

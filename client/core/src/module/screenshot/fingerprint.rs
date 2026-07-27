@@ -47,11 +47,25 @@ const MIN_STRONG_CELLS: usize = 6;
 /// A grid fingerprint of a captured frame: the grid dimensions plus the row-major grayscale
 /// cells. Dimensions are stored so two fingerprints can only be compared when they describe the
 /// same-shaped grid (i.e. the same screen resolution).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Fingerprint {
     pub width: u16,
     pub height: u16,
     pub cells: Vec<u8>,
+}
+
+/// Hand-written so the raw grayscale grid — a coarse but real reconstruction
+/// of on-screen content — never reaches a log line verbatim.
+impl std::fmt::Debug for Fingerprint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Fingerprint {{ width: {}, height: {}, cells: <{} bytes> }}",
+            self.width,
+            self.height,
+            self.cells.len()
+        )
+    }
 }
 
 /// Grid cell counts (width, height) for an image of the given pixel dimensions.

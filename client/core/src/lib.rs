@@ -8,6 +8,7 @@ pub mod error;
 pub mod events;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub mod ipc_bridge;
+pub mod logging;
 pub mod model;
 pub mod module;
 pub mod platform;

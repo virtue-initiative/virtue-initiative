@@ -29,7 +29,7 @@ impl IpcBridge {
                                 }
                             }
                             Err(e) => {
-                                eprintln!("daemon: ipc accept error: {e}");
+                                tracing::error!(error = %e, "daemon: ipc accept error");
                                 break;
                             }
                         }
@@ -41,9 +41,10 @@ impl IpcBridge {
                 })
             }
             Err(e) => {
-                eprintln!(
-                    "daemon: failed to bind IPC listener at {}: {e}",
-                    path.display()
+                tracing::error!(
+                    error = %e,
+                    path = %path.display(),
+                    "daemon: failed to bind IPC listener"
                 );
                 None
             }
