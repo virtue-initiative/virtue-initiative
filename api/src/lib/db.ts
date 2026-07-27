@@ -623,6 +623,18 @@ export async function listBatches(
   }>(db.prepare(query).bind(...params), ['id', 'user_id', 'device_id']);
 }
 
+export async function deleteExpiredBatchesChunk(db: D1Database, cutoff: number, limit: number) {
+  const result = await db
+    .prepare(
+      `DELETE FROM batches WHERE id IN (
+         SELECT id FROM batches WHERE created_at < ? ORDER BY created_at ASC LIMIT ?
+       )`,
+    )
+    .bind(cutoff, limit)
+    .run();
+  return result.meta.changes;
+}
+
 export async function listBatchWindowsForUser(
   db: D1Database,
   userId: string,
