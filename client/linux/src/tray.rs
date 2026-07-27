@@ -63,7 +63,7 @@ fn spawn_tray_worker(paths: ClientPaths, shutdown: Arc<AtomicBool>) -> thread::J
                     let should_log = last_error_message.as_deref() != Some(message.as_str())
                         || last_error_log_at.elapsed() >= LOG_THROTTLE_INTERVAL;
                     if should_log {
-                        eprintln!("tray unavailable (non-fatal): {message}");
+                        tracing::warn!("tray unavailable (non-fatal): {message}");
                         last_error_message = Some(message);
                         last_error_log_at = std::time::Instant::now();
                     }
@@ -81,7 +81,7 @@ fn spawn_tray_worker(paths: ClientPaths, shutdown: Arc<AtomicBool>) -> thread::J
                     };
 
                     let Some(retry_delay) = retry_delay else {
-                        eprintln!(
+                        tracing::warn!(
                             "tray unavailable (non-fatal): no tray host appeared after startup retries; giving up until the daemon restarts"
                         );
                         break;
@@ -272,7 +272,7 @@ fn build_icon() -> ksni::Icon {
     let decoded = match image::load_from_memory(include_bytes!("../assets/tray-icon.png")) {
         Ok(image) => image.into_rgba8(),
         Err(err) => {
-            eprintln!("failed to decode tray icon image: {err}");
+            tracing::error!(error = %err, "failed to decode tray icon image");
             return fallback_icon();
         }
     };
