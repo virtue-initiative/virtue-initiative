@@ -115,13 +115,15 @@ the edge checks anchor on UTC + the login/logout hooks instead.
 
 A single slow loop iteration briefly stalling `Ping` shouldn't alert on its
 own, so each bucket's gaps are recorded into a window and summed — the alert
-fires on sustained gap _budget_, not any one gap.
+fires on sustained gap _budget_, not any one gap. The budget is
+bucket-specific: 2 min for the mid-session `UnexpectedGap` bucket, 4 min for
+`UnexpectedStart` (to tolerate longer boots), and 1 min for `UnexpectedStop`.
 
 ```mermaid
 flowchart TD
     G([Gap recorded]) --> Prune[Prune entries outside GAP_WINDOW_MS]
     Prune --> Sum[Sum remaining gap time]
-    Sum --> Budget{total ≥ GAP_BUDGET_MS?}
+    Sum --> Budget{total ≥ bucket's budget?}
     Budget -->|no| Done1([done, gaps kept for next time])
     Budget -->|yes| Cooldown{Cooldown elapsed\nor never alerted?}
     Cooldown -->|no| Done2([suppressed, gaps kept])
@@ -178,7 +180,9 @@ Defined at the top of `lifecycle.rs`:
 | --------------------------- | ------ | -------------------------------------------------------------- |
 | `PER_GAP_THRESHOLD_MS`      | 10s    | Minimum size for a single gap to be recorded                   |
 | `GAP_WINDOW_MS`             | 10 min | Sliding window gaps are summed over                            |
-| `GAP_BUDGET_MS`             | 60s    | Total gap time in the window that triggers an alert            |
+| `GAP_BUDGET_MS`             | 2 min  | Mid-session gap budget (`UnexpectedGap`)                       |
+| `STARTUP_GAP_BUDGET_MS`     | 4 min  | Startup gap budget (`UnexpectedStart`)                         |
+| `STOP_GAP_BUDGET_MS`        | 1 min  | Shutdown gap budget (`UnexpectedStop`), unchanged              |
 | `GAP_ALERT_COOLDOWN_MS`     | 5 min  | Minimum time between repeat alerts, per bucket                 |
 | `SUSPEND_MIN_MS`            | 5s     | Minimum boot-vs-monotonic divergence worth logging             |
 | `LOGIN_POLL_INTERVAL_MS`    | 5 min  | Coarse cadence for the (possibly expensive) login/logout hooks |

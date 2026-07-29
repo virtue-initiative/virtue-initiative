@@ -47,10 +47,13 @@ their own.
   last recorded one is the reboot signal. Any math spanning a reboot anchors
   on UTC + the login/logout hooks instead.
 - Each of the three gap buckets (`UnexpectedGap`/`UnexpectedStart`/
-  `UnexpectedStop`) uses a shared sliding-window budget: gaps are summed over
-  a 10-minute window, and an alert only fires once the summed gap time
-  crosses a budget (60s), with a 5-minute cooldown between repeat alerts per
-  bucket. A single stall shouldn't alert on its own.
+  `UnexpectedStop`) uses the same sliding-window mechanism — gaps are summed
+  over a 10-minute window, and an alert only fires once the summed gap time
+  crosses that bucket's budget, with a 5-minute cooldown between repeat
+  alerts per bucket — but each bucket has its own budget: `UnexpectedGap`
+  (mid-session) is 2 min, `UnexpectedStart` is 4 min (to tolerate longer
+  boots), and `UnexpectedStop` is unchanged at 1 min. A single stall
+  shouldn't alert on its own.
 - A reconstructed (unclean-shutdown) logout timestamp is a _floor_, not
   exact — it sits at or before the true end, so the computed
   `UnexpectedStop` gap can only shrink, never be invented. A simultaneous
