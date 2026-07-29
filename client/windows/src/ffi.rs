@@ -23,7 +23,7 @@ fn current_paths() -> Result<ClientPaths> {
 static LOG_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
 
 /// Installs the process-wide `tracing` subscriber on first call, writing
-/// daily-rotated plain-text logs to `<data>\logs\virtue.log`. Subsequent
+/// daily-rotated plain-text logs to `<data>\logs\virtue.<date>.log`. Subsequent
 /// calls are no-ops — safe to call from every `virtue_windows_init` invocation.
 fn init_logging(paths: &ClientPaths) {
     LOG_GUARD.get_or_init(|| {
@@ -40,24 +40,42 @@ fn init_logging(paths: &ClientPaths) {
             eprintln!("failed to prune old logs: {err}");
         }
 
-        let file_appender = tracing_appender::rolling::daily(
-            &paths.log_dir,
-            virtue_core::logging::DEFAULT_FILE_LOG_POLICY.file_name_prefix,
-        );
-        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+        let file_appender = tracing_appender::rolling::Builder::new()
+            .rotation(tracing_appender::rolling::Rotation::DAILY)
+            .filename_prefix(virtue_core::logging::DEFAULT_FILE_LOG_POLICY.file_name_prefix)
+            .filename_suffix("log")
+            .build(&paths.log_dir);
 
         let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
             tracing_subscriber::EnvFilter::new(virtue_core::logging::default_filter_directive(
                 cfg!(debug_assertions),
             ))
         });
-        tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_writer(non_blocking)
-            .with_ansi(false)
-            .init();
 
-        guard
+        match file_appender {
+            Ok(file_appender) => {
+                let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+                tracing_subscriber::fmt()
+                    .with_env_filter(filter)
+                    .with_writer(non_blocking)
+                    .with_ansi(false)
+                    .init();
+                guard
+            }
+            Err(err) => {
+                eprintln!(
+                    "failed to open log file in {}: {err}",
+                    paths.log_dir.display()
+                );
+                let (non_blocking, guard) = tracing_appender::non_blocking(std::io::stderr());
+                tracing_subscriber::fmt()
+                    .with_env_filter(filter)
+                    .with_writer(non_blocking)
+                    .with_ansi(false)
+                    .init();
+                guard
+            }
+        }
     });
 }
 
