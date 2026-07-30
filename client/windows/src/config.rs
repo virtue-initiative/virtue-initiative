@@ -18,7 +18,7 @@ pub struct ClientPaths {
     pub state_dir: PathBuf,
     pub runtime_config_file: PathBuf,
     pub ui_state_file: PathBuf,
-    pub log_file: PathBuf,
+    pub log_dir: PathBuf,
 }
 
 impl ClientPaths {
@@ -47,7 +47,7 @@ impl ClientPaths {
             state_dir: data_dir.clone(),
             runtime_config_file: config_dir.join("config.json"),
             ui_state_file: config_dir.join("ui_state.json"),
-            log_file: data_dir.join("service.log"),
+            log_dir: data_dir.join("logs"),
             base_dir,
             config_dir,
             data_dir,
@@ -61,6 +61,8 @@ impl ClientPaths {
             .with_context(|| format!("failed to create {}", self.data_dir.display()))?;
         fs::create_dir_all(&self.state_dir)
             .with_context(|| format!("failed to create {}", self.state_dir.display()))?;
+        fs::create_dir_all(&self.log_dir)
+            .with_context(|| format!("failed to create {}", self.log_dir.display()))?;
         Ok(())
     }
 }

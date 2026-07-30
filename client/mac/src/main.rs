@@ -42,6 +42,7 @@ fn run() -> Result<()> {
     let paths = ClientPaths::discover()?;
     paths.ensure_dirs()?;
     apply_runtime_env(&paths);
+    let _log_guard = daemon::init_logging(&paths);
 
     match cli.command {
         Commands::Daemon => daemon::run_daemon(&paths),

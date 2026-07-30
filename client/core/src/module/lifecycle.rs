@@ -33,10 +33,13 @@ pub(crate) const HIGH_RISK_LIFECYCLE_ALERT: f32 = 0.8;
 // A single stall can be a blip (heavy capture/classify cycle, a slow poll) —
 // alerting on one is twitchy, so we sum the time lost to over-threshold gaps
 // inside a sliding window and only alert when that sustained gap budget is
-// exceeded.
+// exceeded. Each bucket has its own budget: startup gets the most headroom
+// since a legitimate boot can take longer than a plain mid-session stall.
 const PER_GAP_THRESHOLD_MS: i64 = 10_000; // a gap must exceed 10s to count
 const GAP_WINDOW_MS: i64 = 10 * 60 * 1_000; // 10-min sliding window
-const GAP_BUDGET_MS: i64 = 60_000; // alert when counted gap time >= 60s in window
+const GAP_BUDGET_MS: i64 = 2 * 60 * 1_000; // UnexpectedGap (mid-session): alert at >= 2 min in window
+const STARTUP_GAP_BUDGET_MS: i64 = 4 * 60 * 1_000; // UnexpectedStart: alert at >= 4 min, to tolerate longer boots
+const STOP_GAP_BUDGET_MS: i64 = 60_000; // UnexpectedStop: alert at >= 1 min, unchanged
 const GAP_ALERT_COOLDOWN_MS: i64 = 5 * 60 * 1_000; // <= one alert per 5 min
 
 const SUSPEND_MIN_MS: i64 = 5_000; // boot-vs-monotonic divergence worth logging
@@ -72,7 +75,7 @@ impl GapTracker {
     /// whether the budget is newly crossed (respecting the cooldown). Gaps
     /// are intentionally NOT cleared on alert — chronic stalls keep
     /// re-alerting each cooldown, while one-off bursts age out of the window.
-    fn crossed_budget(&mut self, now_ms: i64) -> bool {
+    fn crossed_budget(&mut self, now_ms: i64, budget_ms: i64) -> bool {
         let window_start = now_ms - GAP_WINDOW_MS;
         self.gaps.retain(|(ts, _)| *ts >= window_start);
         let total: i64 = self.gaps.iter().map(|(_, gap)| *gap).sum();
@@ -82,7 +85,7 @@ impl GapTracker {
         let cooldown_ok =
             self.last_alert_ms == 0 || now_ms - self.last_alert_ms >= GAP_ALERT_COOLDOWN_MS;
 
-        if total >= GAP_BUDGET_MS && cooldown_ok {
+        if total >= budget_ms && cooldown_ok {
             self.last_alert_ms = now_ms;
             true
         } else {
@@ -191,7 +194,11 @@ impl LifecycleModule {
 
         if delta_mono > PER_GAP_THRESHOLD_MS {
             self.state.unexpected_gap.record(utc_ms, delta_mono);
-            if self.state.unexpected_gap.crossed_budget(utc_ms) {
+            if self
+                .state
+                .unexpected_gap
+                .crossed_budget(utc_ms, GAP_BUDGET_MS)
+            {
                 let _ = emitter.send(Upload {
                     risk: HIGH_RISK_LIFECYCLE_ALERT,
                     kind: UploadKind::LifecycleAlert {
@@ -296,7 +303,11 @@ impl LifecycleModule {
 
         if gap > PER_GAP_THRESHOLD_MS {
             self.state.unexpected_start.record(utc_ms, gap);
-            if self.state.unexpected_start.crossed_budget(utc_ms) {
+            if self
+                .state
+                .unexpected_start
+                .crossed_budget(utc_ms, STARTUP_GAP_BUDGET_MS)
+            {
                 let _ = emitter.send(Upload {
                     risk: HIGH_RISK_LIFECYCLE_ALERT,
                     kind: UploadKind::LifecycleAlert {
@@ -324,7 +335,11 @@ impl LifecycleModule {
 
         if gap > PER_GAP_THRESHOLD_MS {
             self.state.unexpected_stop.record(logout_ms, gap);
-            if self.state.unexpected_stop.crossed_budget(logout_ms) {
+            if self
+                .state
+                .unexpected_stop
+                .crossed_budget(logout_ms, STOP_GAP_BUDGET_MS)
+            {
                 let _ = emitter.send(Upload {
                     risk: HIGH_RISK_LIFECYCLE_ALERT,
                     kind: UploadKind::LifecycleAlert {
@@ -511,7 +526,7 @@ mod tests {
         t.clear_captured();
 
         // A single 30s gap: over the 10s per-gap threshold (recorded) but
-        // under the 60s sliding-window budget, so no alert fires.
+        // under the 120s sliding-window budget, so no alert fires.
         t.platform.set_boot_clock_ms(31_000);
         t.platform.set_monotonic_clock_ms(31_000);
         t.emit(31, Ping);
@@ -533,13 +548,13 @@ mod tests {
         t.emit(1, Ping);
         t.clear_captured();
 
-        // Three 25s gaps: 25 -> 50 (both under the 60s budget), then 75 >= 60 alerts.
-        t.platform.set_boot_clock_ms(26_000);
-        t.platform.set_monotonic_clock_ms(26_000);
-        t.emit(26, Ping);
-        t.platform.set_boot_clock_ms(51_000);
-        t.platform.set_monotonic_clock_ms(51_000);
-        t.emit(51, Ping);
+        // Three 45s gaps: 45 -> 90 (both under the 120s budget), then 135 >= 120 alerts.
+        t.platform.set_boot_clock_ms(46_000);
+        t.platform.set_monotonic_clock_ms(46_000);
+        t.emit(46, Ping);
+        t.platform.set_boot_clock_ms(91_000);
+        t.platform.set_monotonic_clock_ms(91_000);
+        t.emit(91, Ping);
         t.assert_not_like(crate::like!(Upload {
             kind: UploadKind::LifecycleAlert {
                 reason: AlertReason::UnexpectedGap
@@ -548,9 +563,9 @@ mod tests {
         }));
         t.clear_captured();
 
-        t.platform.set_boot_clock_ms(76_000);
-        t.platform.set_monotonic_clock_ms(76_000);
-        t.emit(76, Ping);
+        t.platform.set_boot_clock_ms(136_000);
+        t.platform.set_monotonic_clock_ms(136_000);
+        t.emit(136, Ping);
         t.assert_like(crate::like!(Upload {
             kind: UploadKind::LifecycleAlert {
                 reason: AlertReason::UnexpectedGap
@@ -585,10 +600,10 @@ mod tests {
         t.platform.set_monotonic_clock_ms(1_000);
         t.emit(1, Ping);
 
-        // First gap of 70s crosses budget and alerts.
-        t.platform.set_boot_clock_ms(71_000);
-        t.platform.set_monotonic_clock_ms(71_000);
-        t.emit(71, Ping);
+        // First gap of 130s crosses the 120s budget directly and alerts.
+        t.platform.set_boot_clock_ms(131_000);
+        t.platform.set_monotonic_clock_ms(131_000);
+        t.emit(131, Ping);
         t.assert_like(crate::like!(Upload {
             kind: UploadKind::LifecycleAlert {
                 reason: AlertReason::UnexpectedGap
@@ -597,10 +612,10 @@ mod tests {
         }));
         t.clear_captured();
 
-        // 40s later (< 5-min cooldown): another 70s gap crosses budget again but is suppressed.
-        t.platform.set_boot_clock_ms(181_000);
-        t.platform.set_monotonic_clock_ms(181_000);
-        t.emit(181, Ping);
+        // 40s later (< 5-min cooldown): another gap crosses budget again but is suppressed.
+        t.platform.set_boot_clock_ms(171_000);
+        t.platform.set_monotonic_clock_ms(171_000);
+        t.emit(171, Ping);
         t.assert_not_like(crate::like!(Upload {
             kind: UploadKind::LifecycleAlert {
                 reason: AlertReason::UnexpectedGap
@@ -698,10 +713,30 @@ mod tests {
         b.add(LifecycleModule::new(Box::new(b.platform())));
         let mut t = b.build();
         t.platform.set_last_login(Some(100));
-        t.platform.set_boot_clock_ms(61_000);
-        t.platform.set_monotonic_clock_ms(61_000);
-        t.emit(61, Ping);
+        t.platform.set_boot_clock_ms(241_000);
+        t.platform.set_monotonic_clock_ms(241_000);
+        t.emit(241, Ping);
         t.assert_like(crate::like!(Upload {
+            kind: UploadKind::LifecycleAlert {
+                reason: AlertReason::UnexpectedStart
+            },
+            ..
+        }));
+    }
+
+    #[test]
+    fn seventy_five_second_boot_does_not_trigger_unexpected_start() {
+        let mut b = EventTester::builder();
+        b.add(LifecycleModule::new(Box::new(b.platform())));
+        let mut t = b.build();
+        // Regression test for the reported Mac boot that took 75s and
+        // incorrectly alerted under the old 60s startup budget. Under the
+        // new 240s budget, it must stay silent.
+        t.platform.set_last_login(Some(100));
+        t.platform.set_boot_clock_ms(75_100);
+        t.platform.set_monotonic_clock_ms(75_100);
+        t.emit(75, Ping);
+        t.assert_not_like(crate::like!(Upload {
             kind: UploadKind::LifecycleAlert {
                 reason: AlertReason::UnexpectedStart
             },

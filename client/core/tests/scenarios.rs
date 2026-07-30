@@ -122,11 +122,11 @@ fn unexpected_gap_batches_alert_without_email() {
     // First loop establishes a baseline heartbeat sample.
     scenario.at_t(0).loop_iteration();
     // Suppress a second screenshot so the only new upload traffic is the alert itself.
-    scenario.set_last_screenshot_at_ms(Some(61_000));
+    scenario.set_last_screenshot_at_ms(Some(121_000));
     let hashes_before = scenario.api.state().hash_uploads.len();
-    // A single 61s gap exceeds the sliding-window budget (60s) in one shot, so the
+    // A single 121s gap exceeds the sliding-window budget (120s) in one shot, so the
     // UnexpectedGap alert fires — but it's high-risk, not immediate.
-    scenario.at_t(61_000).loop_iteration();
+    scenario.at_t(121_000).loop_iteration();
     let state = scenario.api.state();
     assert!(
         state.notify_calls.is_empty(),
@@ -274,9 +274,9 @@ fn logout_clears_pending_state() {
 fn unexpected_start_after_long_gap_since_login_emits_alert() {
     let mut scenario = Scenario::authenticated();
     scenario.platform.set_last_login(Some(0));
-    scenario.platform.set_boot_clock_ms(130_000);
-    scenario.platform.set_monotonic_clock_ms(130_000);
-    scenario.at_t(130_000).loop_iteration();
+    scenario.platform.set_boot_clock_ms(241_000);
+    scenario.platform.set_monotonic_clock_ms(241_000);
+    scenario.at_t(241_000).loop_iteration();
     // UnexpectedStart is high-risk but batched (no immediate email).
     let state = scenario.api.state();
     assert!(

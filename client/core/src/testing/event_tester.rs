@@ -489,10 +489,10 @@ mod tests {
         t.clear_captured();
 
         // A big awake gap (monotonic keeps pace with boot — no suspend) crosses
-        // the sliding-window budget on the next ping.
-        t.platform.set_boot_clock_ms(101_000);
-        t.platform.set_monotonic_clock_ms(101_000);
-        t.emit(101, Ping);
+        // the sliding-window budget (120s) on the next ping.
+        t.platform.set_boot_clock_ms(121_000);
+        t.platform.set_monotonic_clock_ms(121_000);
+        t.emit(121, Ping);
         t.assert_like(crate::like!(Upload {
             kind: UploadKind::LifecycleAlert {
                 reason: AlertReason::UnexpectedGap

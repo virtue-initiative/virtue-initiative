@@ -403,7 +403,7 @@ fn handle_command(bus: &mut EventBus, state_path: &Path, command: MonitorCommand
 fn drain_commands(bus: &mut EventBus, state_path: &Path, command_rx: &Receiver<MonitorCommand>) {
     while let Ok(command) = command_rx.try_recv() {
         if let Err(e) = handle_command(bus, state_path, command) {
-            eprintln!("resident_monitor: command error: {e}");
+            tracing::error!(error = %e, "resident_monitor: command error");
         }
     }
 }
@@ -426,7 +426,7 @@ fn wait_for_commands(
         match command_rx.recv_timeout(tick) {
             Ok(command) => {
                 if let Err(e) = handle_command(bus, state_path, command) {
-                    eprintln!("resident_monitor: command error: {e}");
+                    tracing::error!(error = %e, "resident_monitor: command error");
                 }
             }
             Err(RecvTimeoutError::Timeout) => {
