@@ -23,6 +23,48 @@ const ITER_INTERVAL: Duration = Duration::from_secs(1);
 /// part of the core alerting model.
 const LOCAL_SUSPEND_MIN_MS: i64 = 5_000;
 
+/// Installs the process-wide `tracing` subscriber, writing daily-rotated
+/// plain-text logs to `paths.logs_dir` (`~/Library/Logs/virtue.log`). The
+/// returned guard must be kept alive for the life of the process — dropping
+/// it stops the background writer thread that flushes buffered log lines.
+///
+/// A launchd stdout/stderr redirect (see `launch_agent.rs`) remains as a
+/// fallback safety net for output emitted before this installs, or panics
+/// that bypass `tracing` entirely.
+pub fn init_logging(paths: &ClientPaths) -> tracing_appender::non_blocking::WorkerGuard {
+    if let Err(err) = std::fs::create_dir_all(&paths.logs_dir) {
+        eprintln!(
+            "failed to create logs dir {}: {err}",
+            paths.logs_dir.display()
+        );
+    }
+    if let Err(err) = virtue_core::logging::prune_old_logs(
+        &paths.logs_dir,
+        &virtue_core::logging::DEFAULT_FILE_LOG_POLICY,
+    ) {
+        eprintln!("failed to prune old logs: {err}");
+    }
+
+    let file_appender = tracing_appender::rolling::daily(
+        &paths.logs_dir,
+        virtue_core::logging::DEFAULT_FILE_LOG_POLICY.file_name_prefix,
+    );
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        tracing_subscriber::EnvFilter::new(virtue_core::logging::default_filter_directive(cfg!(
+            debug_assertions
+        )))
+    });
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(non_blocking)
+        .with_ansi(false)
+        .init();
+
+    guard
+}
+
 pub fn run_daemon(paths: &ClientPaths) -> Result<()> {
     let paths = paths.clone();
 
@@ -30,7 +72,7 @@ pub fn run_daemon(paths: &ClientPaths) -> Result<()> {
         .map_err(anyhow::Error::from)
         .and_then(|runtime| runtime.block_on(run_daemon_service_loop(&paths)));
     if let Err(err) = result {
-        eprintln!("daemon: {err:#}");
+        tracing::error!(error = %format!("{err:#}"), "daemon: fatal error, exiting");
         std::process::exit(1);
     }
     std::process::exit(0);
@@ -99,19 +141,19 @@ async fn run_daemon_service_loop(paths: &ClientPaths) -> Result<()> {
                     suppress_capture_state_until = None;
                 }
                 if let Err(e) = store_state(&state_path, &state) {
-                    eprintln!("daemon: failed to store state: {e}");
+                    tracing::error!(error = %e, "daemon: failed to store state");
                 }
             }
             Err(err) => {
                 let error_text = err.to_string();
                 if suppress_capture_state_until.is_none_or(|until| Instant::now() >= until) {
                     if is_permission_missing_error(&error_text) {
-                        eprintln!("daemon: capture permission missing: {error_text}");
+                        tracing::warn!("daemon: capture permission missing: {error_text}");
                     } else {
-                        eprintln!("daemon: capture blocked: {error_text}");
+                        tracing::warn!("daemon: capture blocked: {error_text}");
                     }
                 }
-                eprintln!("daemon: {error_text}");
+                tracing::warn!("daemon: {error_text}");
             }
         }
 
