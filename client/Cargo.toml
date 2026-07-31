@@ -3,6 +3,7 @@ members = [
   "core",
   "linux",
   "mac",
+  "mac/rust",
   "windows",
   "text-detection",
 ]

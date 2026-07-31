@@ -14,10 +14,10 @@ if [ "${CONFIGURATION:-Debug}" = "Release" ]; then
   CARGO_EXTRA="--release"
 fi
 
-if [ "${GITHUB_ACTIONS:-}" = "true" ] && [ -z "${CARGO_TARGET_DIR:-}" ]; then
-  export CARGO_TARGET_DIR="$(cd "$RUST_DIR/../.." && pwd)/target"
-fi
-TARGET_DIR="${CARGO_TARGET_DIR:-$RUST_DIR/target}"
+# client/mac/rust is a member of the client/ Cargo workspace, so cargo
+# always builds into the shared client/target dir (the same one
+# `cargo build -p virtue-mac` and CI's rust-cache step use).
+TARGET_DIR="${CARGO_TARGET_DIR:-$(cd "$RUST_DIR/../.." && pwd)/target}"
 
 LIB_DEST="$BUILT_PRODUCTS_DIR/$LIB_NAME"
 rm -f "$LIB_DEST"
