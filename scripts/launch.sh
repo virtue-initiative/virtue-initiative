@@ -189,6 +189,7 @@ else
     export VITE_API_URL="http://localhost:${API_PORT}"
     export VITE_API_PROXY_TARGET="http://localhost:${API_PORT}"
     export VITE_LANDING_URL="http://localhost:${LANDING_PORT}"
+    export PUBLIC_APP_URL="http://localhost:${WEB_PORT}"
     [ "$DONATE" = 1 ] && export PUBLIC_DONATE_API_URL="http://localhost:${DONATE_PORT}"
     printf '\n  Landing : http://localhost:%s\n' "$LANDING_PORT"
     printf '  Web     : http://localhost:%s\n' "$WEB_PORT"
