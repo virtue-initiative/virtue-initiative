@@ -4,6 +4,10 @@ import { DONATE_API_URL, STRIPE_PORTAL_URL } from '../lib/donate-url';
 
 const PRESET_AMOUNTS = [5, 10, 25, 50, 100];
 
+function formatAmount(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
 export function DonateForm() {
   const [amount, setAmount] = useState<number>(25);
   const [customAmount, setCustomAmount] = useState<string>('');
@@ -12,7 +16,10 @@ export function DonateForm() {
   const [error, setError] = useState<string | null>(null);
 
   // The custom input, when filled, overrides the selected preset.
-  const effectiveAmount = customAmount.trim() !== '' ? Number(customAmount) : amount;
+  const rawAmount = customAmount.trim() !== '' ? Number(customAmount) : amount;
+  const effectiveAmount = Number.isFinite(rawAmount)
+    ? Math.round(rawAmount * 100) / 100
+    : rawAmount;
   const amountIsValid = Number.isFinite(effectiveAmount) && effectiveAmount >= 1;
 
   function selectPreset(value: number) {
@@ -91,7 +98,7 @@ export function DonateForm() {
             <input
               type="number"
               min="1"
-              step="1"
+              step="0.01"
               inputMode="decimal"
               placeholder="Other"
               value={customAmount}
@@ -107,8 +114,8 @@ export function DonateForm() {
         {submitting
           ? 'Redirecting to checkout…'
           : recurring
-            ? `Donate $${amountIsValid ? effectiveAmount : ''} monthly`
-            : `Donate $${amountIsValid ? effectiveAmount : ''}`}
+            ? `Donate $${amountIsValid ? formatAmount(effectiveAmount) : ''} monthly`
+            : `Donate $${amountIsValid ? formatAmount(effectiveAmount) : ''}`}
       </Button>
 
       <p class="donate-secure-note">
