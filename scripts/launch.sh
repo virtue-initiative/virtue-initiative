@@ -71,6 +71,18 @@ run() {
           done &
 }
 
+# Local D1 state persists across dev sessions, but this script picks a fresh
+# random API port every run, which gets baked into R2_URL (local batch urls
+# route through the api worker's own /r2 proxy, not a real R2 domain). Without
+# this, batches uploaded in a previous session point at a dead port. Rewrite
+# their stored urls to the current R2_URL so old local batches keep resolving.
+rewrite_local_batch_urls() {
+    local new_r2_url="$1"
+    (cd "$ROOT/api" && bun run wrangler d1 execute staging-app-db --local --env staging \
+        --command "UPDATE batches SET url = '${new_r2_url}/' || substr(url, instr(url, '/r2/') + 4) WHERE url LIKE '%/r2/%';" \
+        > /dev/null 2>&1) || true
+}
+
 # Start the donations worker (and Stripe webhook forwarder). $1 is the landing
 # URL the worker should use for CORS and Stripe redirect URLs.
 start_donate() {
@@ -178,6 +190,7 @@ if [ -n "$DOMAIN" ]; then
         wait 2>/dev/null || true
     }
 
+    rewrite_local_batch_urls "https://app.${DOMAIN}.localhost/r2"
     run "api"     "31" "api"     bun run dev -- --port "$API_PORT" \
         --var "APP_URL:https://app.${DOMAIN}.localhost" \
         --var "R2_URL:https://app.${DOMAIN}.localhost/r2" \
@@ -196,6 +209,7 @@ else
     [ "$DONATE" = 1 ] && printf '  Donate  : http://localhost:%s\n' "$DONATE_PORT"
     printf '\n'
 
+    rewrite_local_batch_urls "http://localhost:${API_PORT}/r2"
     run "api"     "31" "api"     bun run dev -- --port "$API_PORT" \
         --var "APP_URL:http://localhost:${WEB_PORT}" \
         --var "R2_URL:http://localhost:${API_PORT}/r2" \

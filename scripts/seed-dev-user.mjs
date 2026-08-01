@@ -16,8 +16,10 @@ const ROOT = join(__dirname, '..');
 const EMAIL = 'dev@dev.com';
 const PASSWORD = 'devpassword';
 
-// Fixed UUID and salt so the seed is deterministic across runs.
-const USER_ID_HEX = '0123456789abcdef0123456789abcdef';
+// Fixed UUID and salt so the seed is deterministic across runs. Must have a
+// valid v4 version nibble (4) and variant nibble (8/9/a/b) — z.uuid() rejects
+// ids that don't, which breaks the access_keys validation on batch upload.
+const USER_ID_HEX = '0123456789ab4def8123456789abcdef';
 const PASSWORD_SALT = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
 
 // Fixed IKM for deterministic HPKE key pair derivation across runs.
