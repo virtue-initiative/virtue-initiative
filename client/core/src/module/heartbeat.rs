@@ -15,6 +15,8 @@ pub(crate) const HEARTBEAT_INTERVAL_MS: i64 = 24 * 60 * 60 * 1_000;
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct HeartbeatObserverState {
     pub last_heartbeat_ms: i64,
+    #[serde(default)]
+    pub authenticated: bool,
 }
 
 pub struct HeartbeatModule {
@@ -45,6 +47,7 @@ impl Observer for HeartbeatModule {
     fn init(&mut self, _bus: &mut EventBus, state: StateType) -> CoreResult<()> {
         if !state.is_null() {
             self.state = serde_json::from_value(state)?;
+            self.authenticated = self.state.authenticated;
         }
         Ok(())
     }
@@ -53,10 +56,12 @@ impl Observer for HeartbeatModule {
         crate::dispatch_event!(event, {
             _: Login => {
                 self.authenticated = true;
+                self.state.authenticated = true;
                 Ok(())
             },
             _: Logout => {
                 self.authenticated = false;
+                self.state.authenticated = false;
                 Ok(())
             },
             _: Ping => {
@@ -219,6 +224,30 @@ mod tests {
         // After another 24h: should fire
         t2.clear_captured();
         t2.emit(DAY_SECS + DAY_SECS + 20.0, Ping);
+        t2.assert_like(crate::like!(Upload {
+            kind: UploadKind::Heartbeat,
+            ..
+        }));
+    }
+
+    #[test]
+    fn authenticated_flag_persists_across_restart_without_relogin() {
+        let mut b = EventTester::builder();
+        b.add(HeartbeatModule::new(Box::new(b.platform())));
+        let mut t = b.build();
+        t.emit(DAY_SECS - 2.0, login_event());
+        t.emit(DAY_SECS, Ping); // heartbeat fires
+
+        let saved = t.bus.save().unwrap();
+
+        // Simulate daemon restart while still logged in: no Login event this time.
+        let mut b2 = EventTester::builder();
+        b2.add(HeartbeatModule::new(Box::new(b2.platform())));
+        b2.with_state(saved);
+        let mut t2 = b2.build();
+        t2.clear_captured();
+
+        t2.emit(DAY_SECS + DAY_SECS, Ping);
         t2.assert_like(crate::like!(Upload {
             kind: UploadKind::Heartbeat,
             ..
