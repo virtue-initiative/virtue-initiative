@@ -1,5 +1,4 @@
 import { ComponentChildren } from 'preact';
-import { DataLog } from '../../utils/api/api';
 
 // Hand-inlined Heroicons (outline) — same convention as the rest of the web app
 // (see MenuIcon/ExpandIcon in ./index.tsx). Size is controlled by the parent via
@@ -24,7 +23,7 @@ function Icon({ children }: { children: ComponentChildren }) {
 
 const cap = { strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
 
-function CameraIcon() {
+export function CameraIcon() {
   return (
     <Icon>
       <path
@@ -39,7 +38,7 @@ function CameraIcon() {
   );
 }
 
-function DocumentDuplicateIcon() {
+export function DocumentDuplicateIcon() {
   return (
     <Icon>
       <path
@@ -50,7 +49,7 @@ function DocumentDuplicateIcon() {
   );
 }
 
-function MoonIcon() {
+export function MoonIcon() {
   return (
     <Icon>
       <path
@@ -61,7 +60,7 @@ function MoonIcon() {
   );
 }
 
-function SignInIcon() {
+export function SignInIcon() {
   return (
     <Icon>
       <path
@@ -72,7 +71,7 @@ function SignInIcon() {
   );
 }
 
-function SignOutIcon() {
+export function SignOutIcon() {
   return (
     <Icon>
       <path
@@ -83,7 +82,7 @@ function SignOutIcon() {
   );
 }
 
-function ActivityIcon() {
+export function ActivityIcon() {
   return (
     <Icon>
       <path
@@ -94,7 +93,7 @@ function ActivityIcon() {
   );
 }
 
-function ClockIcon() {
+export function ClockIcon() {
   return (
     <Icon>
       <path {...cap} d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
@@ -102,7 +101,7 @@ function ClockIcon() {
   );
 }
 
-function ExclamationTriangleIcon() {
+export function ExclamationTriangleIcon() {
   return (
     <Icon>
       <path
@@ -113,7 +112,7 @@ function ExclamationTriangleIcon() {
   );
 }
 
-function ExclamationCircleIcon() {
+export function ExclamationCircleIcon() {
   return (
     <Icon>
       <path
@@ -124,7 +123,7 @@ function ExclamationCircleIcon() {
   );
 }
 
-function BellAlertIcon() {
+export function BellAlertIcon() {
   return (
     <Icon>
       <path
@@ -135,7 +134,7 @@ function BellAlertIcon() {
   );
 }
 
-function WrenchScrewdriverIcon() {
+export function WrenchScrewdriverIcon() {
   return (
     <Icon>
       <path
@@ -155,31 +154,4 @@ export function InformationCircleIcon() {
       />
     </Icon>
   );
-}
-
-/** Picks the right Heroicon for a log entry based on its type and kind/reason. */
-export function LogIcon({ log }: { log: DataLog }) {
-  const kind = log.data?.kind as string | undefined;
-  switch (log.type) {
-    case 'screenshot':
-      return <CameraIcon />;
-    case 'screenshot_skipped':
-      return <DocumentDuplicateIcon />;
-    case 'lifecycle':
-      if (kind === 'system_login') return <SignInIcon />;
-      if (kind === 'system_logout') return <SignOutIcon />;
-      if (kind === 'suspend_detected') return <MoonIcon />;
-      return <ActivityIcon />;
-    case 'lifecycle_alert':
-      if ((log.data?.reason as string | undefined) === 'unexpected_gap') return <ClockIcon />;
-      return <ExclamationTriangleIcon />;
-    case 'alert':
-      return <BellAlertIcon />;
-    case 'capture_failed':
-      return <ExclamationCircleIcon />;
-    case 'dev':
-      return <WrenchScrewdriverIcon />;
-    default:
-      return <ActivityIcon />;
-  }
 }

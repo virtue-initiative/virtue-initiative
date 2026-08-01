@@ -6,15 +6,7 @@ import { LogsIcon } from '../../components/icons';
 import { LogsGallery } from './LogsGallery';
 import { LogsList } from './LogsList';
 import { getRiskRating, type RiskRating } from '@virtueinitiative/shared-web/risk';
-import { FeedLog, formatDayLabel, getLogCategory, LOG_TYPES } from './shared';
-
-const LOG_CATEGORIES = [
-  ...new Set(
-    LOG_TYPES.map((type) =>
-      getLogCategory({ type, data: {}, id: '', device_id: '', ts: 0, created_at: 0 }),
-    ),
-  ),
-];
+import { FeedLog, formatDayLabel, getLogCategory, LOG_CATEGORIES } from './shared';
 import './style.css';
 import { useUrlState } from '../../hooks/useUrlState';
 import { Button, Dialog, DialogHeader, Field, Select } from '@virtueinitiative/shared-web';
@@ -198,8 +190,7 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
     () =>
       (logs ?? []).filter((item) => {
         if (item.ts < weekStart || item.ts > weekEnd) return false;
-        if (typeFilter !== null && getLogCategory({ ...item, data: {} }) !== typeFilter)
-          return false;
+        if (typeFilter !== null && getLogCategory(item) !== typeFilter) return false;
         if (riskFilter !== 'all') {
           const rating = getRiskRating(item.risk);
           if (riskFilter === 'high' && rating !== 'high') return false;
