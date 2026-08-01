@@ -32,7 +32,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -42,6 +42,7 @@ jobs:
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
         with:
+          cache-on-failure: true
           workspaces: |
             client/android/rust -> target
 

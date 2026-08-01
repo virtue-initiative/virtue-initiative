@@ -4042,6 +4042,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "virtue-mac-ffi"
+version = "0.0.8"
+dependencies = [
+ "anyhow",
+ "once_cell",
+ "serde_json",
+ "virtue-core",
+ "virtue-mac",
+]
+
+[[package]]
 name = "virtue-text-detection"
 version = "0.0.1"
 dependencies = [

@@ -38,6 +38,7 @@ jobs:
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
         with:
+          cache-on-failure: true
           workspaces: |
             client -> target
 
@@ -64,6 +65,24 @@ jobs:
       - name: Rust tests (Linux client)
         run: cargo test -p virtue-linux
         working-directory: client
+
+      # build-deb-docker.sh deliberately builds with its own CARGO_HOME and
+      # target dir (client/.docker-cargo-home, client/target-docker) instead
+      # of the host paths the "Cache Rust artifacts" step above manages —
+      # artifacts built by the container's older glibc aren't compatible
+      # with binaries linked against the host runner's glibc. That means
+      # they need their own cache entry, or this step re-downloads and
+      # recompiles the entire dependency tree (~370 crates) from scratch on
+      # every run.
+      - name: Cache Docker Rust artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            client/.docker-cargo-home
+            client/target-docker
+          key: linux-deb-docker-v1-${{ hashFiles('client/Cargo.lock') }}
+          restore-keys: |
+            linux-deb-docker-v1-
 
       - name: Build Linux .deb package
         run: ./linux/scripts/build-deb-docker.sh
