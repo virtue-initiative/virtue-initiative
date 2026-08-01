@@ -36,7 +36,7 @@ impl From<&str> for Redacted<String> {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum LifecycleKind {
     /// A suspend interval detected retrospectively via boot-vs-monotonic
     /// clock divergence.
@@ -89,6 +89,7 @@ pub enum UploadKind {
         nsfw_detection: Option<f32>,
     },
     Lifecycle {
+        #[serde(flatten)]
         kind: LifecycleKind,
     },
     LifecycleAlert {
@@ -290,4 +291,47 @@ pub struct ServiceStatus {
 pub struct LoopOutcome {
     pub ran_at_ms: i64,
     pub status: ServiceStatus,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // `LifecycleKind` must serialize as a bare `"kind"`-tagged object flattened
+    // into `UploadKind::Lifecycle`'s `data` — this is exactly the wire shape
+    // the web viewer's `getLogCategory`/`getLogMessage` assume, and previously
+    // silently drifted from it when the variants gained fields (see #526).
+    #[test]
+    fn lifecycle_kind_serializes_to_flattened_tagged_shape() {
+        assert_eq!(
+            serde_json::to_value(LifecycleKind::SuspendDetected {
+                duration_ms: 60_033
+            })
+            .unwrap(),
+            json!({ "kind": "suspend_detected", "duration_ms": 60_033 })
+        );
+        assert_eq!(
+            serde_json::to_value(LifecycleKind::SystemLogin { utc_ms: 123 }).unwrap(),
+            json!({ "kind": "system_login", "utc_ms": 123 })
+        );
+        assert_eq!(
+            serde_json::to_value(LifecycleKind::SystemLogout { utc_ms: 456 }).unwrap(),
+            json!({ "kind": "system_logout", "utc_ms": 456 })
+        );
+    }
+
+    #[test]
+    fn upload_kind_lifecycle_flattens_kind_into_data() {
+        let upload = UploadKind::Lifecycle {
+            kind: LifecycleKind::SystemLogin { utc_ms: 789 },
+        };
+        assert_eq!(
+            serde_json::to_value(upload).unwrap(),
+            json!({
+                "type": "lifecycle",
+                "data": { "kind": "system_login", "utc_ms": 789 }
+            })
+        );
+    }
 }

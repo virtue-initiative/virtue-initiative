@@ -1,10 +1,24 @@
+import type { JSX } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { DataLog } from '../../utils/api/api';
 import { formatDate, formatTime } from '../../utils/time';
 import { Button, Dialog, DialogHeader } from '@virtueinitiative/shared-web';
 import { describeRiskLevel, getRiskLevel } from '@virtueinitiative/shared-web/risk';
 import { LANDING_URL } from '../../utils/landing-url';
-import { InformationCircleIcon, LogIcon } from './log-icons';
+import {
+  ActivityIcon,
+  BellAlertIcon,
+  CameraIcon,
+  ClockIcon,
+  DocumentDuplicateIcon,
+  ExclamationCircleIcon,
+  ExclamationTriangleIcon,
+  InformationCircleIcon,
+  MoonIcon,
+  SignInIcon,
+  SignOutIcon,
+  WrenchScrewdriverIcon,
+} from './log-icons';
 
 import { loadEventImage } from '../../utils/api/event-image';
 import { type FeedLog, getLogImage, toUint8Array } from './types';
@@ -20,34 +34,169 @@ function getLogMetadata(log: DataLog) {
     );
 }
 
-export function getLogCategory(log: DataLog): string {
+type LogCaseKey =
+  | 'screenshot'
+  | 'screenshot_skipped'
+  | 'system_login'
+  | 'system_logout'
+  | 'suspend_detected'
+  | 'lifecycle_other'
+  | 'unexpected_gap'
+  | 'unexpected_stop'
+  | 'unexpected_start'
+  | 'user_stop'
+  | 'lifecycle_alert_other'
+  | 'alert'
+  | 'capture_failed'
+  | 'dev'
+  | 'heartbeat'
+  | 'unknown';
+
+/** The only place in the module that branches on a log's `type`/`kind`/`reason`. */
+function getLogCaseKey(log: DataLog): LogCaseKey {
   const kind = log.data?.kind as string | undefined;
   const reason = log.data?.reason as string | undefined;
   switch (log.type) {
     case 'screenshot':
-      return 'Screenshot';
+      return 'screenshot';
     case 'screenshot_skipped':
-      return 'Screenshot Skipped';
+      return 'screenshot_skipped';
     case 'lifecycle':
-      if (kind === 'system_login') return 'System Login';
-      if (kind === 'system_logout') return 'System Logout';
-      if (kind === 'suspend_detected') return 'Suspend Detected';
-      return 'Activity';
+      if (kind === 'system_login') return 'system_login';
+      if (kind === 'system_logout') return 'system_logout';
+      if (kind === 'suspend_detected') return 'suspend_detected';
+      return 'lifecycle_other';
     case 'lifecycle_alert':
-      if (reason === 'unexpected_gap') return 'Unexpected Gap';
-      if (reason === 'unexpected_stop') return 'Process Stopped Unexpectedly';
-      if (reason === 'unexpected_start') return 'Unexpected Restart';
-      if (reason === 'user_stop') return 'Monitoring Stopped by User';
-      return 'Alert';
+      if (reason === 'unexpected_gap') return 'unexpected_gap';
+      if (reason === 'unexpected_stop') return 'unexpected_stop';
+      if (reason === 'unexpected_start') return 'unexpected_start';
+      if (reason === 'user_stop') return 'user_stop';
+      return 'lifecycle_alert_other';
     case 'alert':
-      return 'Alert';
+      return 'alert';
     case 'capture_failed':
-      return 'Capture Failed';
+      return 'capture_failed';
     case 'dev':
-      return 'Developer';
+      return 'dev';
+    case 'heartbeat':
+      return 'heartbeat';
     default:
-      return (log.type ?? '').replace(/_/g, ' ');
+      return 'unknown';
   }
+}
+
+const LOG_KIND_TABLE: Record<
+  Exclude<LogCaseKey, 'unknown'>,
+  {
+    category: string;
+    icon: () => JSX.Element;
+    message: (deviceName: string, data: Record<string, unknown>) => string;
+  }
+> = {
+  screenshot: {
+    category: 'Screenshot',
+    icon: CameraIcon,
+    message: (d) => `Screenshot captured on ${d}`,
+  },
+  screenshot_skipped: {
+    category: 'Screenshot Skipped',
+    icon: DocumentDuplicateIcon,
+    message: (d, data) => {
+      const reason = data.reason as string | undefined;
+      if (reason === 'static_screen') return `Duplicate screenshot skipped on ${d}`;
+      if (reason === 'locked_or_screensaver') return `Screen locked, screenshot skipped on ${d}`;
+      return `Screenshot skipped on ${d}`;
+    },
+  },
+  system_login: {
+    category: 'System Login',
+    icon: SignInIcon,
+    message: (d) => `${d} was logged into or started up`,
+  },
+  system_logout: {
+    category: 'System Logout',
+    icon: SignOutIcon,
+    message: (d) => `${d} was logged out of or shut down`,
+  },
+  suspend_detected: {
+    category: 'Suspend Detected',
+    icon: MoonIcon,
+    message: (d, data) => {
+      const durationMs = typeof data.duration_ms === 'number' ? data.duration_ms : undefined;
+      if (durationMs === undefined) return `${d} was asleep for a while`;
+      const minutes = Math.round(durationMs / 60_000);
+      const durationLabel = minutes >= 1 ? `${minutes} min` : `${Math.round(durationMs / 1000)}s`;
+      return `${d} was asleep for ${durationLabel}`;
+    },
+  },
+  lifecycle_other: {
+    category: 'Activity',
+    icon: ActivityIcon,
+    message: (d) => `Lifecycle event on ${d}`,
+  },
+  unexpected_gap: {
+    category: 'Unexpected Gap',
+    icon: ClockIcon,
+    message: (d) => `Monitoring gap detected on ${d}`,
+  },
+  unexpected_stop: {
+    category: 'Process Stopped Unexpectedly',
+    icon: ExclamationTriangleIcon,
+    message: (d) => `Process stopped unexpectedly on ${d}`,
+  },
+  unexpected_start: {
+    category: 'Unexpected Restart',
+    icon: ExclamationTriangleIcon,
+    message: (d) => `Unexpected restart detected on ${d}`,
+  },
+  user_stop: {
+    category: 'Monitoring Stopped by User',
+    icon: ExclamationTriangleIcon,
+    message: (d) => `Monitoring stopped by user on ${d}`,
+  },
+  lifecycle_alert_other: {
+    category: 'Alert',
+    icon: ExclamationTriangleIcon,
+    message: (d) => `Alert on ${d}`,
+  },
+  alert: {
+    category: 'Alert',
+    icon: BellAlertIcon,
+    message: (d, data) => (data.message as string | undefined) ?? `Alert on ${d}`,
+  },
+  capture_failed: {
+    category: 'Capture Failed',
+    icon: ExclamationCircleIcon,
+    message: (d) => `Capture failed repeatedly on ${d}`,
+  },
+  dev: {
+    category: 'Developer',
+    icon: WrenchScrewdriverIcon,
+    message: (d, data) => {
+      const title = data.title as string | undefined;
+      const details = data.details as string | undefined;
+      return title ? (details ? `${title}: ${details}` : title) : `Developer log on ${d}`;
+    },
+  },
+  heartbeat: {
+    category: 'Heartbeat',
+    icon: ActivityIcon,
+    message: (d) => `Heartbeat received from ${d}`,
+  },
+};
+
+export const LOG_CATEGORIES = [...new Set(Object.values(LOG_KIND_TABLE).map((v) => v.category))];
+
+export function getLogCategory(log: DataLog): string {
+  const key = getLogCaseKey(log);
+  if (key === 'unknown') return (log.type ?? '').replace(/_/g, ' ');
+  return LOG_KIND_TABLE[key].category;
+}
+
+export function LogIcon({ log }: { log: DataLog }) {
+  const key = getLogCaseKey(log);
+  const IconComp = key === 'unknown' ? ActivityIcon : LOG_KIND_TABLE[key].icon;
+  return <IconComp />;
 }
 
 /** Base URL of the help page documenting every log type. */
@@ -68,52 +217,9 @@ export function getLogHelpUrl(log: DataLog): string {
 }
 
 export function getLogMessage(log: DataLog, deviceName: string): string {
-  const d = log.data;
-  switch (log.type) {
-    case 'lifecycle': {
-      const kind = d.kind as string | undefined;
-      if (kind === 'system_login') return `${deviceName} was logged into or started up`;
-      if (kind === 'system_logout') return `${deviceName} was logged out of or shut down`;
-      if (kind === 'suspend_detected') {
-        const durationMs = typeof d.duration_ms === 'number' ? d.duration_ms : undefined;
-        if (durationMs === undefined) return `${deviceName} was asleep for a while`;
-        const minutes = Math.round(durationMs / 60_000);
-        const durationLabel = minutes >= 1 ? `${minutes} min` : `${Math.round(durationMs / 1000)}s`;
-        return `${deviceName} was asleep for ${durationLabel}`;
-      }
-      return `Lifecycle event on ${deviceName}`;
-    }
-    case 'lifecycle_alert': {
-      const reason = d.reason as string | undefined;
-      if (reason === 'user_stop') return `Monitoring stopped by user on ${deviceName}`;
-      if (reason === 'unexpected_start') return `Unexpected restart detected on ${deviceName}`;
-      if (reason === 'unexpected_gap') return `Monitoring gap detected on ${deviceName}`;
-      if (reason === 'unexpected_stop') return `Process stopped unexpectedly on ${deviceName}`;
-      return `Alert on ${deviceName}`;
-    }
-    case 'screenshot':
-      return `Screenshot captured on ${deviceName}`;
-    case 'screenshot_skipped': {
-      const reason = d.reason as string | undefined;
-      if (reason === 'static_screen') return `Duplicate screenshot skipped on ${deviceName}`;
-      if (reason === 'locked_or_screensaver')
-        return `Screen locked, screenshot skipped on ${deviceName}`;
-      return `Screenshot skipped on ${deviceName}`;
-    }
-    case 'alert': {
-      const message = d.message as string | undefined;
-      return message ?? `Alert on ${deviceName}`;
-    }
-    case 'capture_failed':
-      return `Capture failed repeatedly on ${deviceName}`;
-    case 'dev': {
-      const title = d.title as string | undefined;
-      const details = d.details as string | undefined;
-      return title ? (details ? `${title}: ${details}` : title) : `Developer log on ${deviceName}`;
-    }
-    default:
-      return `Event on ${deviceName}`;
-  }
+  const key = getLogCaseKey(log);
+  if (key === 'unknown') return `Event on ${deviceName}`;
+  return LOG_KIND_TABLE[key].message(deviceName, log.data);
 }
 
 export const LOG_TYPES = [
@@ -124,6 +230,7 @@ export const LOG_TYPES = [
   'alert',
   'capture_failed',
   'dev',
+  'heartbeat',
 ] as const;
 
 const _dayLabelFmt = new Intl.DateTimeFormat(undefined, {

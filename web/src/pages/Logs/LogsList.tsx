@@ -8,8 +8,8 @@ import {
   getLogCategory,
   getLogMessage,
   LogDetailDialog,
+  LogIcon,
 } from './shared';
-import { LogIcon } from './log-icons';
 import { getRiskLevel } from '@virtueinitiative/shared-web/risk';
 
 const ITEM_HEIGHT = 68;
