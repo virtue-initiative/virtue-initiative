@@ -85,9 +85,19 @@ fi
 #    plain cargo. In universal mode, lipo the two slices together; in
 #    single-arch mode just use the one slice directly. The daemon is a
 #    separate cargo binary, unaffected by the SwiftUI/Xcode rewrite.
+#
+#    Also build virtue-mac-ffi (the staticlib the SwiftUI app links against)
+#    in this same invocation, per target. xcodebuild's own "Build Rust
+#    Bridge" prebuild-script phase (build-rust-for-xcode.sh) builds that
+#    same crate again for the same target/profile, but as a separate `cargo`
+#    invocation it was found to always miss cargo's fingerprint cache and
+#    recompile the entire dependency tree from scratch (~3 min/arch) even
+#    though the artifacts here are already fresh. Building it here instead,
+#    and telling that script to skip its own build via
+#    VIRTUE_MAC_RUST_PREBUILT below, avoids paying for that twice.
 for target in "${DAEMON_TARGETS[@]}"; do
   rustup target add "$target" >/dev/null 2>&1 || true
-  VIRTUE_BUILD_LABEL="$BUILD_LABEL" cargo build --release --target "$target" -p virtue-mac
+  VIRTUE_BUILD_LABEL="$BUILD_LABEL" cargo build --release --target "$target" -p virtue-mac -p virtue-mac-ffi
 done
 UNIVERSAL_DAEMON_DIR="target/macos-universal-daemon"
 mkdir -p "$UNIVERSAL_DAEMON_DIR"
@@ -108,6 +118,9 @@ fi
 #    ARCHS already produces a universal (arm64 + x86_64) app binary, and the
 #    `build-rust-for-xcode.sh` preBuildScript mirrors that by lipo-ing a
 #    universal `libvirtue_mac_rust.a` — one build covers both architectures.
+#    VIRTUE_MAC_RUST_PREBUILT tells that script the .a it needs was already
+#    built above, so it just picks it up instead of invoking cargo again.
+export VIRTUE_MAC_RUST_PREBUILT=1
 (
   cd "$MAC_ROOT"
   XCODEBUILD_ARGS=(
