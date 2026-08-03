@@ -8,6 +8,9 @@ import mermaid from 'astro-mermaid';
 
 export default defineConfig({
   trailingSlash: 'never',
+  build: {
+    format: 'file',
+  },
   integrations: [
     mermaid({
       theme: 'base',
