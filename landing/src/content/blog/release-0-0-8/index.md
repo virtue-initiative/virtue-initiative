@@ -11,21 +11,21 @@ This release brings a redesigned Mac client, screenshot text detection and redac
 
 The Mac client has been rewritten from scratch, moving from Rust/AppKit to SwiftUI. iOS, Android, and Windows have all been updated to match the new theme, and the website has been redone with a sidebar-based layout, consistent page headings, and a typography pass.
 
-![New Mac SwiftUI client](./new-design-mac.png)
+<!-- TODO: add screenshot ./new-design-mac.png - the new Mac SwiftUI client -->
 
-![Redesigned sidebar-based website](./new-design-website.png)
+<!-- TODO: add screenshot ./new-design-website.png - the redesigned sidebar-based website -->
 
 ## Screenshot text detection & redaction
 
 We added a new OCR library for detecting text in screenshots, along with image risk classification and skin/NSFW raw scores. This lays the groundwork for redacting sensitive text directly in screenshots.
 
-![Screenshot with text redacted](./text-redaction.png)
+<!-- TODO: add screenshot ./text-redaction.png - a single screenshot showing redacted text -->
 
 ## Donations page
 
 We added a donations page powered by Stripe Checkout, making it easy to support the project directly. (We also fixed a bug where custom donation amounts with cents would silently fail to submit.)
 
-![New donations page](./donations-page.png)
+<!-- TODO: add screenshot ./donations-page.png - the new Stripe Checkout donations page -->
 
 ## Simplified auth & device model
 
