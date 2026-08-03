@@ -1,5 +1,5 @@
 ---
-title: Release 0.0.8
+title: Release 0.0.9
 description: This release brings redesigned clients, screenshot text detection and redaction, a new donations page, and a simplified auth and device model.
 pubDate: 2026-07-29
 author: The Virtue Initiative team
