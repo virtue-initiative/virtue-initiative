@@ -18,6 +18,7 @@ const { tagline } = Astro.props;
         {tagline && <p class="site-tagline eyebrow">{tagline}</p>}
       </div>
       <div class="site-header-actions">
+        <Button href="/donate" variant="outline">Donate</Button>
         <Button href={APP_URL}
           ><div class="site-header-text-icon-button-container">
             <div>Sign in</div><RightArrowIcon />

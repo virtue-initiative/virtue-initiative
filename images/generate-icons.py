@@ -117,6 +117,14 @@ def recolor_with_theme(raw: Image.Image, rgb: tuple[int, int, int]) -> Image.Ima
     # return recolored
 
 
+def make_monochrome_black(image: Image.Image) -> Image.Image:
+    """Return a black+alpha version of the image (macOS template image format)."""
+    alpha = image.getchannel("A")
+    mono = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    mono.putalpha(alpha)
+    return mono
+
+
 @dataclass(frozen=True)
 class Background:
     """An opaque fill painted behind the logo.
@@ -275,6 +283,94 @@ def save_ios_app_icons(
     return outputs
 
 
+MAC_APP_ICON_SPECS = (
+    {"size": "16x16", "scale": "1x", "pixels": 16},
+    {"size": "16x16", "scale": "2x", "pixels": 32},
+    {"size": "32x32", "scale": "1x", "pixels": 32},
+    {"size": "32x32", "scale": "2x", "pixels": 64},
+    {"size": "128x128", "scale": "1x", "pixels": 128},
+    {"size": "128x128", "scale": "2x", "pixels": 256},
+    {"size": "256x256", "scale": "1x", "pixels": 256},
+    {"size": "256x256", "scale": "2x", "pixels": 512},
+    {"size": "512x512", "scale": "1x", "pixels": 512},
+    {"size": "512x512", "scale": "2x", "pixels": 1024},
+)
+
+
+def save_asset_catalog_contents(assets_dir: Path) -> Path:
+    path = assets_dir / "Contents.json"
+    save_json(path, {"info": {"author": "xcode", "version": 1}})
+    return path
+
+
+def save_mac_app_icons(
+    master: Image.Image, assets_dir: Path, background: Background
+) -> list[Path]:
+    app_icon_dir = assets_dir / "AppIcon.appiconset"
+    outputs = [save_asset_catalog_contents(assets_dir), app_icon_dir / "Contents.json"]
+
+    if app_icon_dir.exists():
+        shutil.rmtree(app_icon_dir)
+
+    contents_images = []
+    for spec in MAC_APP_ICON_SPECS:
+        filename = f"icon_{spec['size']}.png" if spec["scale"] == "1x" else f"icon_{spec['size']}@{spec['scale']}.png"
+        target_path = app_icon_dir / filename
+        # macOS does not mask app icons, so bake the squircle in, matching
+        # the standalone AppIcon.icns treatment below.
+        save_png(master, target_path, int(spec["pixels"]), background)
+        outputs.append(target_path)
+        contents_images.append(
+            {
+                "filename": filename,
+                "idiom": "mac",
+                "scale": str(spec["scale"]),
+                "size": str(spec["size"]),
+            }
+        )
+
+    save_json(
+        app_icon_dir / "Contents.json",
+        {
+            "images": contents_images,
+            "info": {"author": "xcode", "version": 1},
+        },
+    )
+    return outputs
+
+
+def save_mac_tray_icon(master: Image.Image, assets_dir: Path) -> list[Path]:
+    tray_icon_dir = assets_dir / "TrayIcon.imageset"
+    outputs = [save_asset_catalog_contents(assets_dir), tray_icon_dir / "Contents.json"]
+
+    if tray_icon_dir.exists():
+        shutil.rmtree(tray_icon_dir)
+
+    mono = make_monochrome_black(master)
+    sizes = ({"scale": "1x", "pixels": 16}, {"scale": "2x", "pixels": 32})
+    contents_images = []
+    for spec in sizes:
+        filename = f"tray-icon-{spec['pixels']}.png"
+        target_path = tray_icon_dir / filename
+        save_png(mono, target_path, int(spec["pixels"]))
+        outputs.append(target_path)
+        contents_images.append(
+            {"filename": filename, "idiom": "mac", "scale": str(spec["scale"])}
+        )
+
+    save_json(
+        tray_icon_dir / "Contents.json",
+        {
+            "images": contents_images,
+            "info": {"author": "xcode", "version": 1},
+            # Lets the menu bar tint it automatically for light/dark mode,
+            # matching the standalone tray-icon.png used by the old AppKit UI.
+            "properties": {"template-rendering-intent": "template"},
+        },
+    )
+    return outputs
+
+
 def preprocess_logo(
     raw_path: Path, out_path: Path | None, theme_rgb: tuple[int, int, int]
 ) -> Image.Image:
@@ -311,7 +407,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--target",
-        choices=("all", "ios"),
+        choices=("all", "ios", "mac"),
         default="all",
         help="Limit generated outputs to a specific target set.",
     )
@@ -342,8 +438,9 @@ def main() -> None:
 
     # Full-bleed square for icons the OS masks itself (iOS, Android, PWA), a
     # squircle for standalone icons shown as-is (favicons, desktop apps), and a
-    # circle for Android's round launcher icon. Tray icons and Windows tiles are
-    # left transparent on purpose (they sit on a system-provided surface).
+    # circle for Android's round launcher icon and the Linux tray icon (which
+    # sits on a themed surface but needs its own background to stay visible in
+    # dark mode). Windows tiles are left transparent (the OS provides a plate).
     rounded_bg = Background(background_rgb, "rounded", CONTENT_SCALE_ROUNDED)
     square_bg = Background(background_rgb, "square", CONTENT_SCALE_SQUARE)
     circle_bg = Background(background_rgb, "circle", CONTENT_SCALE_CIRCLE)
@@ -389,20 +486,8 @@ def main() -> None:
 
         outputs.append(landing_public / "logo.svg")
 
-        mac_assets = root / "client" / "mac" / "assets"
-        # macOS does not mask app icons, so bake the squircle in. The tray icon
-        # stays transparent so it tints with the menu bar.
-        save_icns(
-            master,
-            mac_assets / "AppIcon.icns",
-            [16, 32, 64, 128, 256, 512, 1024],
-            rounded_bg,
-        )
-        save_png(master, mac_assets / "tray-icon.png", 32)
-        outputs.extend([mac_assets / "AppIcon.icns", mac_assets / "tray-icon.png"])
-
         linux_assets = root / "client" / "linux" / "assets"
-        save_png(master, linux_assets / "tray-icon.png", 32)
+        save_png(master, linux_assets / "tray-icon.png", 32, circle_bg)
         outputs.append(linux_assets / "tray-icon.png")
 
         windows_assets = root / "client" / "windows" / "assets"
@@ -463,8 +548,26 @@ def main() -> None:
             outputs.append(android_base / bucket / "ic_launcher.png")
             outputs.append(android_base / bucket / "ic_launcher_round.png")
 
-    ios_assets = root / "client" / "ios" / "app" / "Assets.xcassets"
-    outputs.extend(save_ios_app_icons(master, ios_assets, square_bg))
+    if args.target in ("all", "mac"):
+        mac_assets = root / "client" / "mac" / "assets"
+        # macOS does not mask app icons, so bake the squircle in. The tray icon
+        # stays transparent so it tints with the menu bar.
+        save_icns(
+            master,
+            mac_assets / "AppIcon.icns",
+            [16, 32, 64, 128, 256, 512, 1024],
+            rounded_bg,
+        )
+        save_png(make_monochrome_black(master), mac_assets / "tray-icon.png", 32)
+        outputs.extend([mac_assets / "AppIcon.icns", mac_assets / "tray-icon.png"])
+
+        mac_swiftui_assets = root / "client" / "mac" / "app" / "Assets.xcassets"
+        outputs.extend(save_mac_app_icons(master, mac_swiftui_assets, rounded_bg))
+        outputs.extend(save_mac_tray_icon(master, mac_swiftui_assets))
+
+    if args.target in ("all", "ios"):
+        ios_assets = root / "client" / "ios" / "app" / "Assets.xcassets"
+        outputs.extend(save_ios_app_icons(master, ios_assets, square_bg))
 
     print("Generated icon assets:")
     for path in outputs:

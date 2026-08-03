@@ -1,6 +1,6 @@
 import { Context, Hono } from 'hono';
 import { v4 as uuidv4 } from 'uuid';
-import { authenticate } from '../middleware/auth';
+import { authenticateWebSession } from '../middleware/auth';
 import { validateZ } from '../middleware/validation';
 import {
   acceptPartner,
@@ -34,14 +34,7 @@ import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
 
 const partners = new Hono<{ Bindings: Env; Variables: Variables }>();
-const LOCAL_WEB_URL = 'http://localhost:5173';
-
 function getAppUrl(c: Context<{ Bindings: Env; Variables: Variables }>) {
-  const requestUrl = new URL(c.req.url);
-  if (requestUrl.hostname === 'localhost' || requestUrl.hostname === '127.0.0.1') {
-    return LOCAL_WEB_URL;
-  }
-
   return c.env.APP_URL;
 }
 
@@ -55,7 +48,7 @@ function toPublicNotificationCadence(emailFrequency: string | null | undefined) 
 
 partners.post(
   '/partner',
-  authenticate('access'),
+  authenticateWebSession(),
   validateZ('json', createPartnerSchema),
   async (c) => {
     const userId = c.get('sub');
@@ -156,7 +149,7 @@ partners.post('/partner/validate', validateZ('json', inviteTokenSchema), async (
 
 partners.post(
   '/partner/accept',
-  authenticate('access'),
+  authenticateWebSession(),
   validateZ('json', inviteTokenSchema),
   async (c) => {
     const userId = c.get('sub');
@@ -234,7 +227,7 @@ partners.post(
   },
 );
 
-partners.get('/partner', authenticate('access'), async (c) => {
+partners.get('/partner', authenticateWebSession(), async (c) => {
   const userId = c.get('sub');
   const currentUser = await findUserById(c.env.DB, userId);
 
@@ -276,7 +269,7 @@ partners.get('/partner', authenticate('access'), async (c) => {
 
 partners.patch(
   '/partner/watching/:id',
-  authenticate('access'),
+  authenticateWebSession(),
   validateZ('json', updateWatchingSchema),
   async (c) => {
     const { digest_cadence } = c.req.valid('json');
@@ -295,7 +288,7 @@ partners.patch(
   },
 );
 
-partners.delete('/partner/watcher/:id', authenticate('access'), async (c) => {
+partners.delete('/partner/watcher/:id', authenticateWebSession(), async (c) => {
   const partnerId = c.req.param('id');
   const partnership = await findPartnerById(c.env.DB, partnerId);
 
@@ -307,7 +300,7 @@ partners.delete('/partner/watcher/:id', authenticate('access'), async (c) => {
   return c.body(null, 204);
 });
 
-partners.delete('/partner/watching/:id', authenticate('access'), async (c) => {
+partners.delete('/partner/watching/:id', authenticateWebSession(), async (c) => {
   const partnerId = c.req.param('id');
   const partnership = await findPartnerById(c.env.DB, partnerId);
   const currentUser = await findUserById(c.env.DB, c.get('sub'));

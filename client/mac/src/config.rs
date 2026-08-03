@@ -4,11 +4,11 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use virtue_core::Config;
+use virtue_core::{AuthState, Config};
 
-const DEFAULT_BASE_API_URL: &str = "https://api.virtueinitiative.org";
-const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
-const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
+const DEFAULT_BASE_API_URL: &str = virtue_core::DEFAULT_API_BASE_URL;
+const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = virtue_core::DEFAULT_CAPTURE_INTERVAL_SECONDS;
+const DEFAULT_BATCH_WINDOW_SECONDS: u64 = virtue_core::DEFAULT_BATCH_WINDOW_SECONDS;
 
 #[derive(Clone, Debug)]
 pub struct ClientPaths {
@@ -61,16 +61,20 @@ impl ClientPaths {
     }
 }
 
-pub fn build_core_config(paths: &ClientPaths) -> Config {
-    let device_name = hostname::get()
+/// Default device name used at registration: the system hostname, or
+/// `"mac-device"` if it can't be resolved.
+pub fn default_device_name() -> String {
+    hostname::get()
         .ok()
         .and_then(|value| value.into_string().ok())
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "mac-device".to_string());
+        .unwrap_or_else(|| "mac-device".to_string())
+}
 
+pub fn build_core_config(paths: &ClientPaths) -> Config {
     Config::new(
         DEFAULT_BASE_API_URL,
-        device_name,
+        default_device_name(),
         "macos",
         paths.state_dir.clone(),
         Some(paths.runtime_config_file.clone()),
@@ -96,6 +100,23 @@ pub fn load_state(path: &Path) -> Result<ClientState> {
     }
 
     serde_json::from_slice(&raw).with_context(|| format!("failed parsing {}", path.display()))
+}
+
+/// Read the daemon's persisted auth state (`event_state.json`'s `auth` key).
+/// Returns the default (logged-out) state if the file is missing or malformed.
+pub fn read_auth_state(state_dir: &Path) -> Result<AuthState> {
+    let path = state_dir.join("event_state.json");
+    if !path.exists() {
+        return Ok(AuthState::default());
+    }
+    let bytes = fs::read(&path)?;
+    let state: serde_json::Value = serde_json::from_slice(&bytes)?;
+    if let Some(auth) = state.get("auth")
+        && !auth.is_null()
+    {
+        return Ok(serde_json::from_value(auth.clone())?);
+    }
+    Ok(AuthState::default())
 }
 
 pub fn save_state(path: &Path, state: &ClientState) -> Result<()> {

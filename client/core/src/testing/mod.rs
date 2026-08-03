@@ -4,13 +4,15 @@ pub mod event_tester;
 pub mod fixtures;
 pub mod platform;
 pub mod scenario;
+pub mod spawner;
 
-pub use api::{BatchCall, HashCall, LogCall, MockApiClient, MockApiState, RegisterDeviceCall};
+pub use api::{BatchCall, HashCall, MockApiClient, MockApiState, NotifyCall, RegisterDeviceCall};
 pub use clock::MockClock;
 pub use event_tester::{EventTester, EventTesterBuilder};
 pub use fixtures::{tiny_png_bytes, tiny_png_screenshot};
 pub use platform::TestPlatformHooks;
 pub use scenario::Scenario;
+pub use spawner::InlineSpawner;
 
 #[cfg(test)]
 mod tests {
@@ -26,7 +28,7 @@ mod tests {
     use crate::events::Ping;
     use crate::events::bus::{EventBus, EventChannel, StateType};
     use crate::module::status::{StatusRequest, StatusResponse};
-    use crate::platform::ScreenshotHooks;
+    use crate::platform::{PlatformConfig, ScreenshotHooks};
 
     static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -86,8 +88,7 @@ mod tests {
         let api = MockApiClient::new();
         let inspector = api.clone();
 
-        let token = api.login("alice@example.org", "secret").unwrap();
-        assert_eq!(token, "mock-access-token");
+        api.login("alice@example.org", "secret").unwrap();
         assert_eq!(inspector.state().login_calls.len(), 1);
 
         api.program_batch(Ok(crate::api::UploadedBatchResponse {
@@ -98,6 +99,8 @@ mod tests {
             end_time_ms: 1,
             bytes: vec![1, 2, 3],
             access_keys: Vec::new(),
+            high_risk_count: 0,
+            medium_risk_count: 0,
         };
         let response = api.upload_batch("tok", &batch).unwrap();
         assert_eq!(response.id, "canned-batch");
@@ -115,8 +118,8 @@ mod tests {
         let api = MockApiClient::new();
         let inspector = api.clone();
 
-        let observers =
-            build_default_modules(config, platform, api).expect("build modules must succeed");
+        let observers = build_default_modules(config, platform, api, PlatformConfig::default())
+            .expect("build modules must succeed");
         let mut bus = EventBus::new(observers, StateType::Null).expect("bus must construct");
 
         // No auth state → ping must not upload anything.
@@ -129,8 +132,8 @@ mod tests {
             "unauthenticated loop must not upload batches"
         );
         assert!(
-            state.log_uploads.is_empty(),
-            "unauthenticated loop must not upload logs"
+            state.notify_calls.is_empty(),
+            "unauthenticated loop must not send notifications"
         );
 
         // Status request must return a valid response.

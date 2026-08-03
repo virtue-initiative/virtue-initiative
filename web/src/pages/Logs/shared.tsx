@@ -1,35 +1,29 @@
+import type { JSX } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { DataLog } from '../../utils/api/api';
-import { BatchVerification } from '../../utils/api/crypto';
 import { formatDate, formatTime } from '../../utils/time';
-import { Dialog, DialogHeader } from '@virtueinitiative/shared-web';
+import { Button, Dialog, DialogHeader } from '@virtueinitiative/shared-web';
 import { describeRiskLevel, getRiskLevel } from '@virtueinitiative/shared-web/risk';
-import { loadEventImage } from '../../utils/api/data-cache';
+import { LANDING_URL } from '../../utils/landing-url';
+import {
+  ActivityIcon,
+  BellAlertIcon,
+  CameraIcon,
+  ClockIcon,
+  DocumentDuplicateIcon,
+  ExclamationCircleIcon,
+  ExclamationTriangleIcon,
+  InformationCircleIcon,
+  MoonIcon,
+  SignInIcon,
+  SignOutIcon,
+  WrenchScrewdriverIcon,
+} from './log-icons';
 
-export type FeedLog = DataLog & {
-  batch_status: BatchVerification;
-  source: 'batch' | 'log';
-  image_w?: number;
-  image_h?: number;
-};
-
-export function toUint8Array(value: unknown): Uint8Array | undefined {
-  if (!value) return undefined;
-  if (value instanceof Uint8Array) return value;
-  if (Array.isArray(value)) return new Uint8Array(value as number[]);
-  if (typeof value === 'string') {
-    try {
-      return Uint8Array.fromBase64(value);
-    } catch {
-      return undefined;
-    }
-  }
-  return undefined;
-}
-
-export function getLogImage(log: DataLog): Uint8Array | undefined {
-  return toUint8Array(log.data.image);
-}
+import { loadEventImage } from '../../utils/api/event-image';
+import { type FeedLog, getLogImage, toUint8Array } from './types';
+export type { FeedLog };
+export { toUint8Array, getLogImage };
 
 function getLogMetadata(log: DataLog) {
   return Object.entries(log.data)
@@ -40,132 +34,203 @@ function getLogMetadata(log: DataLog) {
     );
 }
 
-export function getLogCategory(log: DataLog): string {
+type LogCaseKey =
+  | 'screenshot'
+  | 'screenshot_skipped'
+  | 'system_login'
+  | 'system_logout'
+  | 'suspend_detected'
+  | 'lifecycle_other'
+  | 'unexpected_gap'
+  | 'unexpected_stop'
+  | 'unexpected_start'
+  | 'user_stop'
+  | 'lifecycle_alert_other'
+  | 'alert'
+  | 'capture_failed'
+  | 'dev'
+  | 'heartbeat'
+  | 'unknown';
+
+/** The only place in the module that branches on a log's `type`/`kind`/`reason`. */
+function getLogCaseKey(log: DataLog): LogCaseKey {
   const kind = log.data?.kind as string | undefined;
   const reason = log.data?.reason as string | undefined;
   switch (log.type) {
     case 'screenshot':
-      return 'Screenshot';
+      return 'screenshot';
+    case 'screenshot_skipped':
+      return 'screenshot_skipped';
     case 'lifecycle':
-      if (kind === 'computer_booted') return 'Boot';
-      if (kind === 'computer_suspended') return 'Sleep';
-      if (kind === 'computer_resumed') return 'Wake';
-      if (kind === 'login') return 'Login';
-      if (kind === 'logout') return 'Logout';
-      if (kind === 'process_started') return 'Monitoring On';
-      if (
-        kind === 'process_stopped_user' ||
-        kind === 'process_stopped_shutdown' ||
-        kind === 'process_stopped_other'
-      )
-        return 'Monitoring Off';
-      if (kind === 'screenshot_paused') return 'Paused';
-      if (kind === 'screenshot_resumed') return 'Resumed';
-      return 'Lifecycle';
+      if (kind === 'system_login') return 'system_login';
+      if (kind === 'system_logout') return 'system_logout';
+      if (kind === 'suspend_detected') return 'suspend_detected';
+      return 'lifecycle_other';
     case 'lifecycle_alert':
-      if (reason === 'ping_gap_while_running') return 'Alert: Gap';
-      if (reason === 'process_killed_before_shutdown' || reason === 'force_killed_before_shutdown')
-        return 'Alert: Killed';
-      return 'Alert';
+      if (reason === 'unexpected_gap') return 'unexpected_gap';
+      if (reason === 'unexpected_stop') return 'unexpected_stop';
+      if (reason === 'unexpected_start') return 'unexpected_start';
+      if (reason === 'user_stop') return 'user_stop';
+      return 'lifecycle_alert_other';
     case 'alert':
-      return 'Alert';
+      return 'alert';
     case 'capture_failed':
-      return 'System';
+      return 'capture_failed';
     case 'dev':
-      return 'Developer';
+      return 'dev';
+    case 'heartbeat':
+      return 'heartbeat';
     default:
-      return (log.type ?? '').replace(/_/g, ' ');
+      return 'unknown';
   }
 }
 
-export function getLogIcon(log: DataLog): string {
-  const kind = log.data?.kind as string | undefined;
-  switch (log.type) {
-    case 'lifecycle':
-      if (kind === 'computer_booted') return '🖥️';
-      if (kind === 'computer_suspended') return '🌙';
-      if (kind === 'computer_resumed') return '☀️';
-      if (kind === 'login') return '🔓';
-      if (kind === 'logout') return '🔒';
-      if (kind === 'process_started') return '▶️';
-      if (
-        kind === 'process_stopped_user' ||
-        kind === 'process_stopped_shutdown' ||
-        kind === 'process_stopped_other'
-      )
-        return '⏹️';
-      if (kind === 'screenshot_paused') return '⏸️';
-      if (kind === 'screenshot_resumed') return '▶️';
-      return '📋';
-    case 'lifecycle_alert':
-      return '⚠️';
-    case 'alert':
-      return '⚠️';
-    case 'capture_failed':
-      return '❌';
-    case 'dev':
-      return '🛠️';
-    default:
-      return '📋';
+const LOG_KIND_TABLE: Record<
+  Exclude<LogCaseKey, 'unknown'>,
+  {
+    category: string;
+    icon: () => JSX.Element;
+    message: (deviceName: string, data: Record<string, unknown>) => string;
   }
+> = {
+  screenshot: {
+    category: 'Screenshot',
+    icon: CameraIcon,
+    message: (d) => `Screenshot captured on ${d}`,
+  },
+  screenshot_skipped: {
+    category: 'Screenshot Skipped',
+    icon: DocumentDuplicateIcon,
+    message: (d, data) => {
+      const reason = data.reason as string | undefined;
+      if (reason === 'static_screen') return `Duplicate screenshot skipped on ${d}`;
+      if (reason === 'locked_or_screensaver') return `Screen locked, screenshot skipped on ${d}`;
+      return `Screenshot skipped on ${d}`;
+    },
+  },
+  system_login: {
+    category: 'System Login',
+    icon: SignInIcon,
+    message: (d) => `${d} was logged into or started up`,
+  },
+  system_logout: {
+    category: 'System Logout',
+    icon: SignOutIcon,
+    message: (d) => `${d} was logged out of or shut down`,
+  },
+  suspend_detected: {
+    category: 'Suspend Detected',
+    icon: MoonIcon,
+    message: (d, data) => {
+      const durationMs = typeof data.duration_ms === 'number' ? data.duration_ms : undefined;
+      if (durationMs === undefined) return `${d} was asleep for a while`;
+      const minutes = Math.round(durationMs / 60_000);
+      const durationLabel = minutes >= 1 ? `${minutes} min` : `${Math.round(durationMs / 1000)}s`;
+      return `${d} was asleep for ${durationLabel}`;
+    },
+  },
+  lifecycle_other: {
+    category: 'Activity',
+    icon: ActivityIcon,
+    message: (d) => `Lifecycle event on ${d}`,
+  },
+  unexpected_gap: {
+    category: 'Unexpected Gap',
+    icon: ClockIcon,
+    message: (d) => `Monitoring gap detected on ${d}`,
+  },
+  unexpected_stop: {
+    category: 'Process Stopped Unexpectedly',
+    icon: ExclamationTriangleIcon,
+    message: (d) => `Process stopped unexpectedly on ${d}`,
+  },
+  unexpected_start: {
+    category: 'Unexpected Restart',
+    icon: ExclamationTriangleIcon,
+    message: (d) => `Unexpected restart detected on ${d}`,
+  },
+  user_stop: {
+    category: 'Monitoring Stopped by User',
+    icon: ExclamationTriangleIcon,
+    message: (d) => `Monitoring stopped by user on ${d}`,
+  },
+  lifecycle_alert_other: {
+    category: 'Alert',
+    icon: ExclamationTriangleIcon,
+    message: (d) => `Alert on ${d}`,
+  },
+  alert: {
+    category: 'Alert',
+    icon: BellAlertIcon,
+    message: (d, data) => (data.message as string | undefined) ?? `Alert on ${d}`,
+  },
+  capture_failed: {
+    category: 'Capture Failed',
+    icon: ExclamationCircleIcon,
+    message: (d) => `Capture failed repeatedly on ${d}`,
+  },
+  dev: {
+    category: 'Developer',
+    icon: WrenchScrewdriverIcon,
+    message: (d, data) => {
+      const title = data.title as string | undefined;
+      const details = data.details as string | undefined;
+      return title ? (details ? `${title}: ${details}` : title) : `Developer log on ${d}`;
+    },
+  },
+  heartbeat: {
+    category: 'Heartbeat',
+    icon: ActivityIcon,
+    message: (d) => `Heartbeat received from ${d}`,
+  },
+};
+
+export const LOG_CATEGORIES = [...new Set(Object.values(LOG_KIND_TABLE).map((v) => v.category))];
+
+export function getLogCategory(log: DataLog): string {
+  const key = getLogCaseKey(log);
+  if (key === 'unknown') return (log.type ?? '').replace(/_/g, ' ');
+  return LOG_KIND_TABLE[key].category;
+}
+
+export function LogIcon({ log }: { log: DataLog }) {
+  const key = getLogCaseKey(log);
+  const IconComp = key === 'unknown' ? ActivityIcon : LOG_KIND_TABLE[key].icon;
+  return <IconComp />;
+}
+
+/** Base URL of the help page documenting every log type. */
+export const LOG_TYPES_HELP_URL = `${LANDING_URL}/help/web/log-types`;
+
+/** Slugified anchor for a log's section on the log-types help page. Mirrors the
+ * id markdown generates from the matching heading (the category title). */
+export function getLogHelpAnchor(log: DataLog): string {
+  return getLogCategory(log)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+/** Deep link to the specific log type's section on the help page. */
+export function getLogHelpUrl(log: DataLog): string {
+  return `${LOG_TYPES_HELP_URL}#${getLogHelpAnchor(log)}`;
 }
 
 export function getLogMessage(log: DataLog, deviceName: string): string {
-  const d = log.data;
-  switch (log.type) {
-    case 'lifecycle': {
-      const kind = d.kind as string | undefined;
-      if (kind === 'process_started') return `Monitoring started on ${deviceName}`;
-      if (kind === 'process_stopped_user') return `Monitoring stopped by user on ${deviceName}`;
-      if (kind === 'process_stopped_shutdown') return `${deviceName} shut down`;
-      if (kind === 'process_stopped_other') return `Monitoring stopped on ${deviceName}`;
-      if (kind === 'computer_suspended') return `${deviceName} went to sleep`;
-      if (kind === 'computer_resumed') return `${deviceName} woke up`;
-      if (kind === 'computer_booted') return `${deviceName} booted`;
-      if (kind === 'login') return `User logged in on ${deviceName}`;
-      if (kind === 'logout') return `User logged out on ${deviceName}`;
-      if (kind === 'screenshot_paused') return `Screenshots paused on ${deviceName}`;
-      if (kind === 'screenshot_resumed') return `Screenshots resumed on ${deviceName}`;
-      return `Lifecycle event on ${deviceName}`;
-    }
-    case 'lifecycle_alert': {
-      const reason = d.reason as string | undefined;
-      if (reason === 'user_stopped_process') return `Monitoring stopped by user on ${deviceName}`;
-      if (reason === 'unexpected_process_start')
-        return `Unexpected restart detected on ${deviceName}`;
-      if (reason === 'ping_gap_while_running') return `Monitoring gap detected on ${deviceName}`;
-      if (reason === 'process_killed_before_shutdown')
-        return `Process killed before shutdown on ${deviceName}`;
-      if (reason === 'missing_resume') return `Missing resume event on ${deviceName}`;
-      if (reason === 'force_killed_before_shutdown')
-        return `Process force-killed before shutdown on ${deviceName}`;
-      return `Alert on ${deviceName}`;
-    }
-    case 'screenshot':
-      return `Screenshot captured on ${deviceName}`;
-    case 'alert': {
-      const message = d.message as string | undefined;
-      return message ?? `Alert on ${deviceName}`;
-    }
-    case 'capture_failed':
-      return `Capture failed repeatedly on ${deviceName}`;
-    case 'dev': {
-      const title = d.title as string | undefined;
-      const details = d.details as string | undefined;
-      return title ? (details ? `${title}: ${details}` : title) : `Developer log on ${deviceName}`;
-    }
-    default:
-      return `Event on ${deviceName}`;
-  }
+  const key = getLogCaseKey(log);
+  if (key === 'unknown') return `Event on ${deviceName}`;
+  return LOG_KIND_TABLE[key].message(deviceName, log.data);
 }
 
 export const LOG_TYPES = [
   'screenshot',
+  'screenshot_skipped',
   'lifecycle',
   'lifecycle_alert',
   'alert',
   'capture_failed',
   'dev',
+  'heartbeat',
 ] as const;
 
 const _dayLabelFmt = new Intl.DateTimeFormat(undefined, {
@@ -308,6 +373,16 @@ export function LogDetailDialog({
             {item.batch_status === 'failed' && (
               <span class="logs-verify-badge logs-verify-badge--failed">⚠ Unverified</span>
             )}
+            <a
+              class="logs-detail-help-link"
+              href={getLogHelpUrl(item)}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Learn more about this event"
+              title="Learn more about this event"
+            >
+              <InformationCircleIcon />
+            </a>
           </>
         }
       >
@@ -318,7 +393,9 @@ export function LogDetailDialog({
       </p>
       <p class="logs-detail-message">{getLogMessage(item, deviceName(item.device_id))}</p>
       {!imgSrc && item.type !== 'screenshot' && (
-        <div class="logs-detail-icon">{getLogIcon(item)}</div>
+        <div class="logs-detail-icon">
+          <LogIcon log={item} />
+        </div>
       )}
       {imgSrc && (
         <button
@@ -343,6 +420,11 @@ export function LogDetailDialog({
           </dl>
         </details>
       )}
+      <div class="logs-detail-learn-more">
+        <Button variant="ghost" href={getLogHelpUrl(item)} target="_blank" rel="noreferrer">
+          Learn more about this event
+        </Button>
+      </div>
       {lightboxOpen && (
         <div class="logs-lightbox-overlay" onClick={() => setLightboxOpen(false)}>
           <div class="logs-lightbox-frame">

@@ -7,24 +7,30 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use jni::objects::{JByteArray, JClass, JString, JValue};
+use jni::objects::{GlobalRef, JByteArray, JClass, JString, JValue};
 use jni::sys::{jboolean, jstring};
 use jni::{JNIEnv, JavaVM};
+use virtue_text_detection::OcrError;
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
 use virtue_core::{
     build_default_modules_reqwest, load_state, store_state, AuthState, Config, CoreError,
-    CoreResult, DeviceSettings, EventBus, EventChannel, LoginRequested, LoginResult,
-    LogoutRequested, Ping, PlatformHooks, ProcessStarted, ProcessStopped, ProcessStoppedReason,
-    Redacted, Screenshot, ScreenshotHooks, ScreenshotPaused, ScreenshotResumed, StatusRequest,
-    StatusResponse, UserStopRequested,
+    CoreResult, DeviceSettings, EventBus, EventChannel, LifecycleHooks, LoginRequested,
+    LoginResult, LogoutRequested, Ping, PlatformConfig, PlatformHooks, ProcessStarted,
+    ProcessStopped, Redacted, Screenshot, ScreenshotHooks, StatusRequest, StatusResponse,
+    UserStopRequested,
 };
 
 static CORE: OnceCell<AndroidCore> = OnceCell::new();
+// Kept alive for the process lifetime; dropping it would silently stop the
+// background thread that flushes buffered log lines. A dedicated `OnceCell`
+// (rather than piggybacking on `CORE`, which has no room to hold a guard)
+// still only ever runs its init closure once per process.
+static LOG_GUARD: OnceCell<tracing_appender::non_blocking::WorkerGuard> = OnceCell::new();
 
-const DEFAULT_BASE_API_URL: &str = "https://api.virtueinitiative.org";
-const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
-const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
+const DEFAULT_BASE_API_URL: &str = virtue_core::DEFAULT_API_BASE_URL;
+const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = virtue_core::DEFAULT_CAPTURE_INTERVAL_SECONDS;
+const DEFAULT_BATCH_WINDOW_SECONDS: u64 = virtue_core::DEFAULT_BATCH_WINDOW_SECONDS;
 const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
 const LOOP_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -37,14 +43,16 @@ struct AndroidCore {
     state_dir: PathBuf,
     runtime_config_file: PathBuf,
     java_vm: Arc<JavaVM>,
+    // Cached at init time (main thread) so background threads can use the app class loader.
+    screenshot_service_class: Arc<GlobalRef>,
     stop: Arc<AtomicBool>,
-    user_stop: Arc<AtomicBool>,
     daemon_running: Mutex<bool>,
 }
 
 #[derive(Clone)]
 struct AndroidPlatformHooks {
     java_vm: Arc<JavaVM>,
+    screenshot_service_class: Arc<GlobalRef>,
 }
 
 impl AndroidPlatformHooks {
@@ -54,7 +62,7 @@ impl AndroidPlatformHooks {
         })?;
 
         env.call_static_method(
-            SCREENSHOT_SERVICE_CLASS,
+            &*self.screenshot_service_class,
             "captureStatusForDaemon",
             "()I",
             &[],
@@ -72,7 +80,12 @@ impl AndroidPlatformHooks {
         })?;
 
         let value = env
-            .call_static_method(SCREENSHOT_SERVICE_CLASS, "capturePngForDaemon", "()[B", &[])
+            .call_static_method(
+                &*self.screenshot_service_class,
+                "capturePngForDaemon",
+                "()[B",
+                &[],
+            )
             .map_err(|err| {
                 CoreError::CommandFailed(format!("capturePngForDaemon failed: {err}"))
             })?;
@@ -115,39 +128,110 @@ impl ScreenshotHooks for AndroidPlatformHooks {
         }
     }
 
-    fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>> {
-        Ok(None)
-    }
-
-    fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
+    fn is_locked_or_screensaver(&self) -> CoreResult<bool> {
         let mut env = self.java_vm.attach_current_thread().map_err(|err| {
             CoreError::CommandFailed(format!("attach_current_thread failed: {err}"))
         })?;
+        // Screen off (non-interactive) is the mobile equivalent of a locked/asleep
+        // desktop. Fail-safe to `false` (treat as viewable → fall back to the diff gate)
+        // when the state can't be read, never silently suppress.
+        match is_interactive(&mut env) {
+            Ok(interactive) => Ok(!interactive),
+            Err(_) => Ok(false),
+        }
+    }
+}
 
-        let uptime_ms: i64 = env
-            .call_static_method("android/os/SystemClock", "elapsedRealtime", "()J", &[])
-            .map_err(|err| {
-                CoreError::CommandFailed(format!(
-                    "failed to get boot time from system clock: {err}"
-                ))
-            })?
+impl AndroidPlatformHooks {
+    /// `SystemClock.elapsedRealtime()`: milliseconds since boot, INCLUDING time
+    /// spent asleep/Doze.
+    fn elapsed_realtime_ms(&self) -> CoreResult<i64> {
+        let mut env = self.java_vm.attach_current_thread().map_err(|err| {
+            CoreError::CommandFailed(format!("attach_current_thread failed: {err}"))
+        })?;
+        env.call_static_method("android/os/SystemClock", "elapsedRealtime", "()J", &[])
+            .map_err(|err| CoreError::CommandFailed(format!("elapsedRealtime failed: {err}")))?
             .j()
-            .map_err(|err| {
-                CoreError::CommandFailed(format!(
-                    "failed to get boot time from system clock: {err}"
-                ))
-            })?;
+            .map_err(|err| CoreError::CommandFailed(format!("elapsedRealtime type error: {err}")))
+    }
 
+    /// `SystemClock.uptimeMillis()`: milliseconds since boot, EXCLUDING deep-sleep
+    /// time when the CPU was fully suspended.
+    fn uptime_millis(&self) -> CoreResult<i64> {
+        let mut env = self.java_vm.attach_current_thread().map_err(|err| {
+            CoreError::CommandFailed(format!("attach_current_thread failed: {err}"))
+        })?;
+        env.call_static_method("android/os/SystemClock", "uptimeMillis", "()J", &[])
+            .map_err(|err| CoreError::CommandFailed(format!("uptimeMillis failed: {err}")))?
+            .j()
+            .map_err(|err| CoreError::CommandFailed(format!("uptimeMillis type error: {err}")))
+    }
+}
+
+impl LifecycleHooks for AndroidPlatformHooks {
+    fn get_boot_clock_ms(&self) -> CoreResult<i64> {
+        self.elapsed_realtime_ms()
+    }
+
+    fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
+        self.uptime_millis()
+    }
+
+    // Android has no OS "login" concept; the expected-running window is modeled
+    // as "whenever the device is powered on", so login = device boot time.
+    fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {
+        let uptime_ms = self.elapsed_realtime_ms()?;
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|err| CoreError::CommandFailed(format!("system time error: {err}")))?
             .as_millis() as i64;
-
         Ok(Some(now_ms - uptime_ms))
+    }
+
+    // Android gives a foreground service no reliable last-alive record — the
+    // unexpected-stop bucket simply never fires here, an accepted gap rather
+    // than a false negative being papered over.
+    fn get_last_logout_utc_ms(&self) -> CoreResult<Option<i64>> {
+        Ok(None)
     }
 }
 
 impl PlatformHooks for AndroidPlatformHooks {}
+
+/// Installs the process-wide `tracing` subscriber on first call, writing
+/// daily-rotated plain-text logs to `<data_dir>/logs/virtue.log`. Subsequent
+/// calls are no-ops. No runtime override (no `RUST_LOG` on mobile) — the
+/// compiled-in default filter for the build type is used directly.
+fn init_logging(data_dir: &Path) {
+    LOG_GUARD.get_or_init(|| {
+        let log_dir = data_dir.join("logs");
+        if let Err(err) = fs::create_dir_all(&log_dir) {
+            eprintln!("failed to create logs dir {}: {err}", log_dir.display());
+        }
+        if let Err(err) = virtue_core::logging::prune_old_logs(
+            &log_dir,
+            &virtue_core::logging::DEFAULT_FILE_LOG_POLICY,
+        ) {
+            eprintln!("failed to prune old logs: {err}");
+        }
+
+        let file_appender = tracing_appender::rolling::daily(
+            &log_dir,
+            virtue_core::logging::DEFAULT_FILE_LOG_POLICY.file_name_prefix,
+        );
+        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+
+        tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::new(
+                virtue_core::logging::default_filter_directive(cfg!(debug_assertions)),
+            ))
+            .with_writer(non_blocking)
+            .with_ansi(false)
+            .init();
+
+        guard
+    });
+}
 
 #[no_mangle]
 pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeInit(
@@ -181,13 +265,64 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeInit(
         )?;
 
         if CORE.get().is_none() {
+            init_logging(Path::new(&data_dir));
+
             let java_vm = Arc::new(env.get_java_vm().context("failed to get JavaVM")?);
+            // Cache the ScreenshotService class here (main thread → app class loader).
+            // Background threads use the system class loader and cannot resolve app classes.
+            let class = env
+                .find_class(SCREENSHOT_SERVICE_CLASS)
+                .context("failed to find ScreenshotService class")?;
+            let screenshot_service_class = Arc::new(
+                env.new_global_ref(class)
+                    .context("failed to create GlobalRef for ScreenshotService")?,
+            );
+
+            // Register the OCR callback (once; OnceLock ignores repeat calls).
+            // The class is cached here on the main thread; background threads use the
+            // GlobalRef so the app class loader is not needed at call time.
+            let virtue_ocr_class = env
+                .find_class("org/virtueinitiative/virtue/VirtueOcr")
+                .context("failed to find VirtueOcr class")?;
+            let virtue_ocr_global = Arc::new(
+                env.new_global_ref(virtue_ocr_class)
+                    .context("failed to create GlobalRef for VirtueOcr")?,
+            );
+            let vm_for_ocr = java_vm.clone();
+            virtue_text_detection::android::register_recognize_fn(move |image, language| {
+                let mut ocr_env = vm_for_ocr
+                    .attach_current_thread()
+                    .map_err(|e| OcrError::Init(e.to_string()))?;
+                let j_bytes = ocr_env
+                    .byte_array_from_slice(image)
+                    .map_err(|e| OcrError::Recognition(e.to_string()))?;
+                let j_lang = ocr_env
+                    .new_string(language.unwrap_or(""))
+                    .map_err(|e| OcrError::Recognition(e.to_string()))?;
+                let result = ocr_env
+                    .call_static_method(
+                        &*virtue_ocr_global,
+                        "recognizeText",
+                        "([BLjava/lang/String;)Ljava/lang/String;",
+                        &[JValue::Object(&*j_bytes), JValue::Object(&*j_lang)],
+                    )
+                    .map_err(|e| OcrError::Recognition(e.to_string()))?;
+                let j_str_obj = result
+                    .l()
+                    .map_err(|e| OcrError::Recognition(e.to_string()))?;
+                let output = unsafe { ocr_env.get_string(&JString::from(j_str_obj)) }
+                    .map_err(|e| OcrError::Recognition(e.to_string()))?
+                    .to_string_lossy()
+                    .into_owned();
+                Ok(output)
+            });
+
             CORE.set(AndroidCore {
                 state_dir: PathBuf::from(data_dir),
                 runtime_config_file,
                 java_vm,
+                screenshot_service_class,
                 stop: Arc::new(AtomicBool::new(false)),
-                user_stop: Arc::new(AtomicBool::new(false)),
                 daemon_running: Mutex::new(false),
             })
             .map_err(|_| anyhow!("core already initialized"))?;
@@ -237,10 +372,11 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeLogin
         let password: String = env.get_string(&password)?.into();
         let device_name: String = env.get_string(&device_name)?.into();
         let core = core()?;
-        let (mut bus, state_path) = build_bus(core, &device_name)?;
+        let (mut bus, state_path) = build_bus(core)?;
         let result = bus.request::<LoginRequested, LoginResult>(LoginRequested {
             email,
             password: Redacted(password),
+            device_name: Some(device_name),
         })?;
         if !result.success {
             return Err(anyhow!(result.error.unwrap_or_else(|| {
@@ -262,7 +398,7 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeLogou
 ) -> jstring {
     let result = (|| -> Result<()> {
         let core = core()?;
-        let (mut bus, state_path) = build_bus(core, "android-device")?;
+        let (mut bus, state_path) = build_bus(core)?;
         bus.send(LogoutRequested)?;
         let state = bus.iter()?;
         store_state(&state_path, &state)?;
@@ -324,7 +460,6 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeRunDa
             *guard = true;
         }
         core.stop.store(false, Ordering::SeqCst);
-        core.user_stop.store(false, Ordering::SeqCst);
 
         let daemon_result = run_daemon_loop(core);
 
@@ -360,11 +495,10 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeNoteU
     let result = (|| -> Result<()> {
         let core = core()?;
         let source: String = env.get_string(&source)?.into();
-        let (mut bus, state_path) = build_bus(core, "android-device")?;
+        let (mut bus, state_path) = build_bus(core)?;
         bus.send(UserStopRequested { source })?;
         let state = bus.iter()?;
         store_state(&state_path, &state)?;
-        core.user_stop.store(true, Ordering::SeqCst);
         Ok(())
     })();
 
@@ -378,7 +512,7 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeGetSt
 ) -> jstring {
     let json = (|| -> Result<String> {
         let core = core()?;
-        let (mut bus, _) = build_bus(core, "android-device")?;
+        let (mut bus, _) = build_bus(core)?;
         let response = bus.request::<StatusRequest, StatusResponse>(StatusRequest)?;
         Ok(serde_json::to_string(&response.status)?)
     })()
@@ -423,13 +557,19 @@ pub fn is_interactive(env: &mut JNIEnv) -> jni::errors::Result<bool> {
     Ok(interactive)
 }
 
-fn build_bus(core: &AndroidCore, device: &str) -> Result<(EventBus, PathBuf)> {
-    let cfg = build_core_config(core, device);
+fn build_bus(core: &AndroidCore) -> Result<(EventBus, PathBuf)> {
+    let cfg = build_core_config(core);
+    // Default `PlatformConfig` (lifecycle_enabled: true) is correct here:
+    // unlike iOS, Android has a working boot/monotonic clock pair and a
+    // reasonable login-window proxy (device boot time), so the full lifecycle
+    // model applies.
     let modules = build_default_modules_reqwest(
         cfg,
         AndroidPlatformHooks {
             java_vm: core.java_vm.clone(),
+            screenshot_service_class: core.screenshot_service_class.clone(),
         },
+        PlatformConfig::default(),
     )?;
     let state_path = core.state_dir.join("event_state.json");
     let bus = EventBus::new(modules, load_state(&state_path)?)?;
@@ -437,49 +577,27 @@ fn build_bus(core: &AndroidCore, device: &str) -> Result<(EventBus, PathBuf)> {
 }
 
 fn run_daemon_loop(core: &AndroidCore) -> Result<()> {
-    let (mut bus, state_path) = build_bus(core, "android-device")?;
+    let (mut bus, state_path) = build_bus(core)?;
     bus.send(ProcessStarted)?;
     let state = bus.iter()?;
     store_state(&state_path, &state)?;
 
-    // Starts as false since we assume we're booting or something similar
-    // Otherwise it stays paused until the state is updated
-    let mut was_interactive = false;
-
     while !core.stop.load(Ordering::SeqCst) {
-        let mut env = core.java_vm.attach_current_thread()?;
-        let current_interactive = is_interactive(&mut env)?;
-
-        if current_interactive != was_interactive {
-            was_interactive = current_interactive;
-            if !current_interactive {
-                bus.send(ScreenshotPaused)?;
-            } else {
-                bus.send(ScreenshotResumed)?;
-            }
-        }
-
-        let sleep_duration = match (|| -> Result<()> {
+        // Screen-off is now handled inside the bus via the `is_locked_or_screensaver`
+        // hook: the screenshot module records a `ScreenshotSkipped` and the upload
+        // module defers network I/O while the screen is off.
+        if let Err(err) = (|| -> Result<()> {
             bus.send(Ping)?;
             let state = bus.iter()?;
             store_state(&state_path, &state)?;
             Ok(())
         })() {
-            Ok(()) => LOOP_INTERVAL,
-            Err(err) => {
-                eprintln!("android-daemon: {err}");
-                ERROR_RETRY_INTERVAL
-            }
-        };
-        sleep_interruptible(&core.stop, sleep_duration);
+            tracing::error!(error = %err, "android-daemon");
+        }
+        sleep_interruptible(&core.stop, LOOP_INTERVAL);
     }
 
-    let reason = if core.user_stop.load(Ordering::SeqCst) {
-        ProcessStoppedReason::User
-    } else {
-        ProcessStoppedReason::Other
-    };
-    bus.send(ProcessStopped(reason))?;
+    bus.send(ProcessStopped)?;
     let state = bus.iter()?;
     let _ = store_state(&state_path, &state);
     Ok(())
@@ -494,10 +612,13 @@ fn sleep_interruptible(stop: &AtomicBool, duration: Duration) {
     }
 }
 
-fn build_core_config(core: &AndroidCore, device_name: &str) -> Config {
+fn build_core_config(core: &AndroidCore) -> Config {
+    // The device name passed at construction is only a placeholder: device
+    // registration happens on login, which carries the user-chosen name on the
+    // `LoginRequested` event.
     Config::new(
         DEFAULT_BASE_API_URL,
-        device_name,
+        "android",
         "android",
         core.state_dir.clone(),
         Some(core.runtime_config_file.clone()),
@@ -589,5 +710,32 @@ fn to_jstring_result(env: &mut JNIEnv, result: Result<()>) -> jstring {
             .new_string(err.to_string())
             .map(|value| value.into_raw())
             .unwrap_or(std::ptr::null_mut()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn init_logging_is_idempotent_across_repeated_calls() {
+        // `nativeInit` can legitimately be called more than once per process
+        // (e.g. the app re-initializing after a config change), and its
+        // one-time-setup block guards on `CORE.get().is_none()` before calling
+        // `init_logging`. `init_logging` itself must also tolerate more than
+        // one call without panicking, since nothing prevents it being reached
+        // twice before `CORE` is set on a slow init path.
+        let dir = std::env::temp_dir().join(format!(
+            "virtue-android-logging-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        init_logging(&dir);
+        init_logging(&dir);
+
+        assert!(LOG_GUARD.get().is_some(), "logging should be initialized");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

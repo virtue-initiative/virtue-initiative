@@ -6,9 +6,9 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use virtue_core::Config;
 
-const DEFAULT_BASE_API_URL: &str = "https://api.virtueinitiative.org";
-const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
-const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
+const DEFAULT_BASE_API_URL: &str = virtue_core::DEFAULT_API_BASE_URL;
+const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = virtue_core::DEFAULT_CAPTURE_INTERVAL_SECONDS;
+const DEFAULT_BATCH_WINDOW_SECONDS: u64 = virtue_core::DEFAULT_BATCH_WINDOW_SECONDS;
 
 #[derive(Clone, Debug)]
 pub struct ClientPaths {
@@ -18,7 +18,7 @@ pub struct ClientPaths {
     pub state_dir: PathBuf,
     pub runtime_config_file: PathBuf,
     pub ui_state_file: PathBuf,
-    pub log_file: PathBuf,
+    pub log_dir: PathBuf,
 }
 
 impl ClientPaths {
@@ -47,7 +47,7 @@ impl ClientPaths {
             state_dir: data_dir.clone(),
             runtime_config_file: config_dir.join("config.json"),
             ui_state_file: config_dir.join("ui_state.json"),
-            log_file: data_dir.join("service.log"),
+            log_dir: data_dir.join("logs"),
             base_dir,
             config_dir,
             data_dir,
@@ -61,20 +61,26 @@ impl ClientPaths {
             .with_context(|| format!("failed to create {}", self.data_dir.display()))?;
         fs::create_dir_all(&self.state_dir)
             .with_context(|| format!("failed to create {}", self.state_dir.display()))?;
+        fs::create_dir_all(&self.log_dir)
+            .with_context(|| format!("failed to create {}", self.log_dir.display()))?;
         Ok(())
     }
 }
 
-pub fn build_core_config(paths: &ClientPaths) -> Config {
-    let device_name = hostname::get()
+/// Default device name used at registration: the system hostname, or
+/// `"windows-device"` if it can't be resolved.
+pub fn default_device_name() -> String {
+    hostname::get()
         .ok()
         .and_then(|value| value.into_string().ok())
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "windows-device".to_string());
+        .unwrap_or_else(|| "windows-device".to_string())
+}
 
+pub fn build_core_config(paths: &ClientPaths) -> Config {
     Config::new(
         DEFAULT_BASE_API_URL,
-        device_name,
+        default_device_name(),
         "windows",
         paths.state_dir.clone(),
         Some(paths.runtime_config_file.clone()),

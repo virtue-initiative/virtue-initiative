@@ -1,8 +1,13 @@
 import { decode } from '@msgpack/msgpack';
-import { Batch } from './api';
+import type { Batch } from './api';
 import { decryptBatch, decompressGzip, verifyBatch } from './crypto';
-import { FeedLog, toUint8Array } from '../../pages/Logs/shared';
+import { FeedLog, toUint8Array } from '../../pages/Logs/types';
 import { decodeWebpDimensions } from '../webp-dimensions';
+
+// Thrown when crypto/decompression/decoding fails — a permanent failure indicating the batch
+// can never be decrypted with the current key (e.g. key rotation). Distinct from network
+// errors (plain Error), which are transient and should be retried.
+export class DecryptionError extends Error {}
 
 // Batch payload format must match client/core/src/batch.rs:
 //   msgpack({events: [msgpack(event), ...]}) → gzip → AES-256-GCM (nonce[12] || ciphertext+tag)
@@ -15,20 +20,25 @@ export async function decryptAndFlattenBatch(
   if (!response.ok) {
     throw new Error(`Fetch failed (${response.status}) for ${batch.url}`);
   }
-
   const raw = new Uint8Array(await response.arrayBuffer());
   if (raw.length < 13) {
-    throw new Error(`Batch blob too short for AES-GCM payload: ${batch.url}`);
+    throw new DecryptionError(`Batch blob too short for AES-GCM payload: ${batch.url}`);
   }
 
-  const batchKey = await openBatchKey(batch.encrypted_key);
-  const decrypted = await decryptBatch(batchKey, raw);
-  const decompressed = await decompressGzip(decrypted);
-  const decoded = decode(decompressed) as unknown;
-  const eventBytes = Array.isArray(decoded) ? decoded : [];
-
-  const rawEventBytes = eventBytes.map((e) => toUint8Array(e) ?? new Uint8Array());
-  const batch_status = await verifyBatch(rawEventBytes, startChainHash, batch.end_hash);
+  let eventBytes: unknown[];
+  let batch_status: FeedLog['batch_status'];
+  try {
+    const batchKey = await openBatchKey(batch.encrypted_key);
+    const decrypted = await decryptBatch(batchKey, raw);
+    const decompressed = await decompressGzip(decrypted);
+    const decoded = decode(decompressed) as unknown;
+    eventBytes = Array.isArray(decoded) ? decoded : [];
+    const rawEventBytes = eventBytes.map((e) => toUint8Array(e) ?? new Uint8Array());
+    batch_status = await verifyBatch(rawEventBytes, startChainHash, batch.end_hash);
+  } catch (err) {
+    if (err instanceof DecryptionError) throw err;
+    throw new DecryptionError(`${(err as Error).message}`);
+  }
 
   return eventBytes.map((encodedEvent, index) => {
     const rawEvent = toUint8Array(encodedEvent);

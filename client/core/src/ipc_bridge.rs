@@ -4,12 +4,9 @@ use std::sync::{Arc, Mutex};
 use crate::events::bus::{Emitter, Error as EventError, Event, EventBus, EventChannel};
 use crate::events::remote::{IpcListener, RemoteEventBus, RemoteSender};
 use crate::module::auth::{LoginRequested, LoginResult, Logout, LogoutRequested, LogoutResult};
-use crate::module::lifecycle::{
-    ComputerResumed, ComputerSuspended, ProcessStopped, UserSessionLogin, UserSessionLogout,
-    UserStopRequested,
-};
-use crate::module::screenshot::{ScreenshotPaused, ScreenshotResumed};
+use crate::module::lifecycle::{ProcessStopped, UserStopRequested};
 use crate::module::status::{StatusRequest, StatusResponse};
+use crate::module::upload::{FlushBatchNow, Upload};
 
 pub struct IpcBridge {
     accept_rx: std::sync::mpsc::Receiver<RemoteEventBus>,
@@ -32,7 +29,7 @@ impl IpcBridge {
                                 }
                             }
                             Err(e) => {
-                                eprintln!("daemon: ipc accept error: {e}");
+                                tracing::error!(error = %e, "daemon: ipc accept error");
                                 break;
                             }
                         }
@@ -44,9 +41,10 @@ impl IpcBridge {
                 })
             }
             Err(e) => {
-                eprintln!(
-                    "daemon: failed to bind IPC listener at {}: {e}",
-                    path.display()
+                tracing::error!(
+                    error = %e,
+                    path = %path.display(),
+                    "daemon: failed to bind IPC listener"
                 );
                 None
             }
@@ -78,8 +76,7 @@ impl IpcBridge {
     /// Register handlers on `remote` to forward the standard controller→daemon set
     /// into the bus via `emitter`:
     /// `LoginRequested`, `LogoutRequested`, `StatusRequest`, `UserStopRequested`,
-    /// `UserSessionLogin`, `UserSessionLogout`, `ComputerSuspended`, `ComputerResumed`,
-    /// `ProcessStopped`.
+    /// `ProcessStopped`, `Upload`, `FlushBatchNow`.
     pub fn forward_standard_inbound(remote: &mut RemoteEventBus, emitter: &Emitter) {
         macro_rules! forward {
             ($($T:ty),* $(,)?) => {
@@ -91,13 +88,9 @@ impl IpcBridge {
             LogoutRequested,
             StatusRequest,
             UserStopRequested,
-            UserSessionLogin,
-            UserSessionLogout,
-            ComputerSuspended,
-            ComputerResumed,
             ProcessStopped,
-            ScreenshotPaused,
-            ScreenshotResumed,
+            Upload,
+            FlushBatchNow,
         );
     }
 

@@ -6,7 +6,7 @@ use std::time::Duration;
 use ksni::blocking::TrayMethods;
 use virtue_core::ClientController;
 
-use crate::config::ClientPaths;
+use crate::config::{self, ClientPaths};
 
 const TOOLTIP_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
 const RETRY_INTERVAL: Duration = Duration::from_secs(30);
@@ -63,7 +63,7 @@ fn spawn_tray_worker(paths: ClientPaths, shutdown: Arc<AtomicBool>) -> thread::J
                     let should_log = last_error_message.as_deref() != Some(message.as_str())
                         || last_error_log_at.elapsed() >= LOG_THROTTLE_INTERVAL;
                     if should_log {
-                        eprintln!("tray unavailable (non-fatal): {message}");
+                        tracing::warn!("tray unavailable (non-fatal): {message}");
                         last_error_message = Some(message);
                         last_error_log_at = std::time::Instant::now();
                     }
@@ -81,7 +81,7 @@ fn spawn_tray_worker(paths: ClientPaths, shutdown: Arc<AtomicBool>) -> thread::J
                     };
 
                     let Some(retry_delay) = retry_delay else {
-                        eprintln!(
+                        tracing::warn!(
                             "tray unavailable (non-fatal): no tray host appeared after startup retries; giving up until the daemon restarts"
                         );
                         break;
@@ -146,10 +146,15 @@ fn build_tooltip(paths: &ClientPaths) -> String {
         .map(|s| s.is_authenticated)
         .unwrap_or(false);
 
+    let bin = match config::INSTANCE {
+        Some(n) if !n.is_empty() => format!("virtue-{n}"),
+        _ => "virtue".to_string(),
+    };
+
     if is_authenticated {
-        "Signed in. Run 'virtue status' from a terminal for details.".to_string()
+        format!("Signed in. Run '{bin} status' from a terminal for details.")
     } else {
-        "Not signed in. Run 'virtue login' from a terminal.".to_string()
+        format!("Not signed in. Run '{bin} login' from a terminal.")
     }
 }
 
@@ -223,11 +228,17 @@ struct VirtueTray {
 
 impl ksni::Tray for VirtueTray {
     fn id(&self) -> String {
-        "virtue".to_string()
+        match config::INSTANCE {
+            Some(n) if !n.is_empty() => format!("virtue-{n}"),
+            _ => "virtue".to_string(),
+        }
     }
 
     fn title(&self) -> String {
-        "Virtue".to_string()
+        match config::INSTANCE {
+            Some(n) if !n.is_empty() => format!("Virtue ({n})"),
+            _ => "Virtue".to_string(),
+        }
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
@@ -261,7 +272,7 @@ fn build_icon() -> ksni::Icon {
     let decoded = match image::load_from_memory(include_bytes!("../assets/tray-icon.png")) {
         Ok(image) => image.into_rgba8(),
         Err(err) => {
-            eprintln!("failed to decode tray icon image: {err}");
+            tracing::error!(error = %err, "failed to decode tray icon image");
             return fallback_icon();
         }
     };

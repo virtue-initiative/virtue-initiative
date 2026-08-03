@@ -5,6 +5,8 @@ type SegmentedControlProps = {
   segments: Segment[];
   value: string;
   onChange: (value: string) => void;
+  /** `tall` matches the height of preset/amount buttons. */
+  size?: 'md' | 'tall';
   class?: string;
 };
 
@@ -12,10 +14,15 @@ export function SegmentedControl({
   segments,
   value,
   onChange,
+  size = 'md',
   class: className,
 }: SegmentedControlProps) {
   return (
-    <div class={['vi-segmented-control', className].filter(Boolean).join(' ')}>
+    <div
+      class={['vi-segmented-control', size === 'tall' && 'vi-segmented-control--tall', className]
+        .filter(Boolean)
+        .join(' ')}
+    >
       {segments.map((seg) => (
         <button
           key={seg.value}

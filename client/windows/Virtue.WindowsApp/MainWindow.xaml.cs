@@ -29,7 +29,32 @@ public sealed partial class MainWindow : Window
     private readonly StackPanel _signedInActionsPanel;
     private readonly TextBox _emailTextBox;
     private readonly PasswordBox _passwordBox;
+    private readonly TextBox _deviceNameTextBox;
+    private readonly Border _statusDot;
+    private readonly TextBlock _errorTextBlock;
+    private Button? _signInButton;
     private bool _allowClose;
+
+    // Warm institutional palette (see shared-web/DESIGN-GUIDELINES.md).
+    private static readonly SolidColorBrush PaperBrush = HexBrush("#F4EFE3");
+    private static readonly SolidColorBrush SurfaceBrush = HexBrush("#FBF7EA");
+    private static readonly SolidColorBrush PaperInsetBrush = HexBrush("#EBE4CE");
+    private static readonly SolidColorBrush BorderBrushToken = HexBrush("#D9D1BC");
+    private static readonly SolidColorBrush BorderHoverBrush = HexBrush("#C9C0A8");
+    private static readonly SolidColorBrush InkBrush = HexBrush("#1B1A16");
+    private static readonly SolidColorBrush Ink2Brush = HexBrush("#3A382F");
+    private static readonly SolidColorBrush Ink3Brush = HexBrush("#6A6655");
+    private static readonly SolidColorBrush ForestBrush = HexBrush("#1E3A2E");
+    private static readonly SolidColorBrush Forest2Brush = HexBrush("#163026");
+    private static readonly SolidColorBrush Forest3Brush = HexBrush("#2C4D3E");
+    private static readonly SolidColorBrush SuccessBrush = HexBrush("#4F7A5A");
+    private static readonly SolidColorBrush WarningBrush = HexBrush("#9C6B2E");
+    private static readonly SolidColorBrush DangerBrush = HexBrush("#8B3A2A");
+
+    // The design fonts ship via Google Fonts on the web; on Windows we fall back
+    // to the nearest installed family in each comma-separated list.
+    private static readonly FontFamily BodyFont = new("IBM Plex Sans, Segoe UI, sans-serif");
+    private static readonly FontFamily MonoFont = new("IBM Plex Mono, Consolas, monospace");
 
     public MainWindow(SessionViewModel viewModel)
     {
@@ -42,9 +67,23 @@ public sealed partial class MainWindow : Window
         _accountSummaryTextBlock = new TextBlock();
         _emailTextBox = new TextBox();
         _passwordBox = new PasswordBox();
+        _deviceNameTextBox = new TextBox();
         _loginPanel = new StackPanel();
         _accountActionsPanel = new StackPanel();
         _signedInActionsPanel = new StackPanel();
+        _statusDot = new Border
+        {
+            Width = 10,
+            Height = 10,
+            CornerRadius = new CornerRadius(2),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        _errorTextBlock = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = DangerBrush,
+            FontFamily = BodyFont,
+        };
 
         Content = BuildContent();
         ViewModel.PropertyChanged += ViewModelOnPropertyChanged;
@@ -85,23 +124,21 @@ public sealed partial class MainWindow : Window
     {
         _emailTextBox.PlaceholderText = "Email";
         _emailTextBox.TextChanged += (_, _) => ViewModel.EmailInput = _emailTextBox.Text;
+        StyleInput(_emailTextBox);
 
         _passwordBox.PlaceholderText = "Password";
         _passwordBox.PasswordRevealMode = PasswordRevealMode.Hidden;
         _passwordBox.PasswordChanged += PasswordBox_OnPasswordChanged;
+        StyleInput(_passwordBox);
+
+        _deviceNameTextBox.PlaceholderText = "Device name";
+        _deviceNameTextBox.Text = ViewModel.DeviceNameInput;
+        _deviceNameTextBox.TextChanged += (_, _) => ViewModel.DeviceNameInput = _deviceNameTextBox.Text;
+        StyleInput(_deviceNameTextBox);
 
         var root = new Grid
         {
-            Background = new LinearGradientBrush
-            {
-                StartPoint = new Windows.Foundation.Point(0, 0),
-                EndPoint = new Windows.Foundation.Point(1, 1),
-                GradientStops =
-                {
-                    new GradientStop { Color = ColorFromHex("#F7FBFF"), Offset = 0.0 },
-                    new GradientStop { Color = ColorFromHex("#EEF5F2"), Offset = 1.0 },
-                },
-            },
+            Background = PaperBrush,
         };
 
         var contentStack = new StackPanel
@@ -146,28 +183,51 @@ public sealed partial class MainWindow : Window
         textStack.Children.Add(new TextBlock
         {
             Text = "Virtue",
-            FontSize = 30,
+            FontFamily = BodyFont,
+            FontSize = 32,
             FontWeight = FontWeights.SemiBold,
+            Foreground = InkBrush,
         });
-        textStack.Children.Add(new HyperlinkButton
+
+        var websiteLink = new HyperlinkButton
         {
             Content = WebsiteDisplayUrl,
             NavigateUri = new Uri(WebsiteNavigateUrl),
             HorizontalAlignment = HorizontalAlignment.Left,
             Padding = new Thickness(0),
-        });
+            FontFamily = MonoFont,
+            Foreground = ForestBrush,
+        };
+        websiteLink.Resources["HyperlinkButtonForeground"] = ForestBrush;
+        websiteLink.Resources["HyperlinkButtonForegroundPointerOver"] = Forest3Brush;
+        websiteLink.Resources["HyperlinkButtonForegroundPressed"] = Forest2Brush;
+        websiteLink.Resources["HyperlinkButtonForegroundDisabled"] = Ink3Brush;
+        textStack.Children.Add(websiteLink);
 
         return header;
     }
 
     private UIElement BuildStatusCard()
     {
+        _statusTextBlock.FontFamily = BodyFont;
         _statusTextBlock.FontSize = 24;
         _statusTextBlock.FontWeight = FontWeights.SemiBold;
-        _statusTextBlock.Foreground = new SolidColorBrush(ColorFromHex("#133043"));
+        _statusTextBlock.Foreground = InkBrush;
+        _statusTextBlock.VerticalAlignment = VerticalAlignment.Center;
 
-        _statusDetailTextBlock.Foreground = new SolidColorBrush(ColorFromHex("#4B5E68"));
-        _buildLabelTextBlock.Foreground = new SolidColorBrush(ColorFromHex("#60727C"));
+        _statusDetailTextBlock.FontFamily = BodyFont;
+        _statusDetailTextBlock.Foreground = Ink2Brush;
+        _buildLabelTextBlock.FontFamily = MonoFont;
+        _buildLabelTextBlock.FontSize = 12;
+        _buildLabelTextBlock.Foreground = Ink3Brush;
+
+        var headingRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 10,
+        };
+        headingRow.Children.Add(_statusDot);
+        headingRow.Children.Add(_statusTextBlock);
 
         var detailsButton = CreateActionButton("Status Details");
         detailsButton.Click += StatusDetailsButton_OnClick;
@@ -190,7 +250,7 @@ public sealed partial class MainWindow : Window
 
         var content = new StackPanel { Spacing = 8 };
         content.Children.Add(CreateSectionLabel("Status"));
-        content.Children.Add(_statusTextBlock);
+        content.Children.Add(headingRow);
         content.Children.Add(_statusDetailTextBlock);
         content.Children.Add(_buildLabelTextBlock);
         content.Children.Add(actionRow);
@@ -200,17 +260,19 @@ public sealed partial class MainWindow : Window
 
     private UIElement BuildAccountCard()
     {
+        _accountSummaryTextBlock.FontFamily = BodyFont;
         _accountSummaryTextBlock.FontSize = 18;
-        _accountSummaryTextBlock.Foreground = new SolidColorBrush(ColorFromHex("#133043"));
+        _accountSummaryTextBlock.Foreground = InkBrush;
 
         _loginPanel.Spacing = 12;
         _loginPanel.Margin = new Thickness(0, 12, 0, 0);
         _loginPanel.Children.Add(_emailTextBox);
         _loginPanel.Children.Add(_passwordBox);
+        _loginPanel.Children.Add(_deviceNameTextBox);
 
-        var signInButton = CreatePrimaryButton("Sign In");
-        signInButton.Click += SignInButton_OnClick;
-        _loginPanel.Children.Add(signInButton);
+        _signInButton = CreatePrimaryButton("Sign In");
+        _signInButton.Click += SignInButton_OnClick;
+        _loginPanel.Children.Add(_signInButton);
 
         var signOutButton = CreateActionButton("Sign Out");
         signOutButton.Click += async (_, _) => await ViewModel.LogoutAsync();
@@ -225,45 +287,101 @@ public sealed partial class MainWindow : Window
         content.Children.Add(_accountSummaryTextBlock);
         content.Children.Add(_loginPanel);
         content.Children.Add(_accountActionsPanel);
+        content.Children.Add(_errorTextBlock);
 
         return CreateCard(content);
     }
 
-    private Border CreateCard(UIElement content) =>
+    private static Border CreateCard(UIElement content) =>
         new()
         {
-            Background = new SolidColorBrush(Colors.White),
-            CornerRadius = new CornerRadius(18),
-            BorderBrush = new SolidColorBrush(ColorFromHex("#D8E3E0")),
+            Background = SurfaceBrush,
+            CornerRadius = new CornerRadius(4),
+            BorderBrush = BorderBrushToken,
             BorderThickness = new Thickness(1),
             Padding = new Thickness(20),
-            Shadow = new ThemeShadow(),
             Child = content,
         };
 
+    // Mono "eyebrow" label: uppercase, letter-spaced, muted — the design's
+    // "stamped" small-caps feel for section headers and metadata.
     private static TextBlock CreateSectionLabel(string text) =>
         new()
         {
-            Text = text,
-            FontSize = 13,
+            Text = text.ToUpperInvariant(),
+            FontFamily = MonoFont,
+            FontSize = 12,
             FontWeight = FontWeights.Medium,
-            Foreground = new SolidColorBrush(ColorFromHex("#60727C")),
+            CharacterSpacing = 80,
+            Foreground = Ink3Brush,
         };
 
-    private static Button CreatePrimaryButton(string text) =>
-        new()
+    // Filled-forest primary action with paper text (Button --primary).
+    private static Button CreatePrimaryButton(string text)
+    {
+        var button = new Button
         {
             Content = text,
             HorizontalAlignment = HorizontalAlignment.Left,
             MinWidth = 120,
+            FontFamily = BodyFont,
+            CornerRadius = new CornerRadius(2),
+            BorderThickness = new Thickness(1),
         };
+        button.Resources["ButtonBackground"] = ForestBrush;
+        button.Resources["ButtonBackgroundPointerOver"] = Forest3Brush;
+        button.Resources["ButtonBackgroundPressed"] = Forest2Brush;
+        button.Resources["ButtonForeground"] = PaperBrush;
+        button.Resources["ButtonForegroundPointerOver"] = PaperBrush;
+        button.Resources["ButtonForegroundPressed"] = PaperBrush;
+        button.Resources["ButtonBorderBrush"] = ForestBrush;
+        button.Resources["ButtonBorderBrushPointerOver"] = Forest3Brush;
+        button.Resources["ButtonBorderBrushPressed"] = Forest2Brush;
+        return button;
+    }
 
-    private static Button CreateActionButton(string text) =>
-        new()
+    // Low-emphasis neutral action: subtle paper fill on a hairline border
+    // (Button --quiet).
+    private static Button CreateActionButton(string text)
+    {
+        var button = new Button
         {
             Content = text,
             HorizontalAlignment = HorizontalAlignment.Left,
+            FontFamily = BodyFont,
+            CornerRadius = new CornerRadius(2),
+            BorderThickness = new Thickness(1),
         };
+        button.Resources["ButtonBackground"] = SurfaceBrush;
+        button.Resources["ButtonBackgroundPointerOver"] = PaperInsetBrush;
+        button.Resources["ButtonBackgroundPressed"] = PaperInsetBrush;
+        button.Resources["ButtonForeground"] = Ink2Brush;
+        button.Resources["ButtonForegroundPointerOver"] = InkBrush;
+        button.Resources["ButtonForegroundPressed"] = InkBrush;
+        button.Resources["ButtonBorderBrush"] = BorderBrushToken;
+        button.Resources["ButtonBorderBrushPointerOver"] = BorderHoverBrush;
+        button.Resources["ButtonBorderBrushPressed"] = BorderHoverBrush;
+        return button;
+    }
+
+    // Cream-filled input on a hairline border; focus border goes forest.
+    private static void StyleInput(Control input)
+    {
+        input.FontFamily = BodyFont;
+        input.CornerRadius = new CornerRadius(2);
+        input.Resources["TextControlBackground"] = PaperBrush;
+        input.Resources["TextControlBackgroundPointerOver"] = PaperBrush;
+        input.Resources["TextControlBackgroundFocused"] = SurfaceBrush;
+        input.Resources["TextControlBorderBrush"] = BorderBrushToken;
+        input.Resources["TextControlBorderBrushPointerOver"] = BorderHoverBrush;
+        input.Resources["TextControlBorderBrushFocused"] = ForestBrush;
+        input.Resources["TextControlForeground"] = InkBrush;
+        input.Resources["TextControlForegroundPointerOver"] = InkBrush;
+        input.Resources["TextControlForegroundFocused"] = InkBrush;
+        input.Resources["TextControlPlaceholderForeground"] = Ink3Brush;
+        input.Resources["TextControlPlaceholderForegroundPointerOver"] = Ink3Brush;
+        input.Resources["TextControlPlaceholderForegroundFocused"] = Ink3Brush;
+    }
 
     private async void StatusDetailsButton_OnClick(object sender, RoutedEventArgs e)
     {
@@ -277,7 +395,7 @@ public sealed partial class MainWindow : Window
         {
             Glyph = "\uE7BA",
             FontSize = 28,
-            Foreground = new SolidColorBrush(ColorFromHex("#A14A00")),
+            Foreground = WarningBrush,
             Margin = new Thickness(0, 2, 16, 0),
         };
 
@@ -288,21 +406,25 @@ public sealed partial class MainWindow : Window
         textStack.Children.Add(new TextBlock
         {
             Text = "Stop monitoring and close Virtue?",
+            FontFamily = BodyFont,
             FontSize = 20,
             FontWeight = FontWeights.SemiBold,
+            Foreground = InkBrush,
             TextWrapping = TextWrapping.Wrap,
         });
         textStack.Children.Add(new TextBlock
         {
             Text = "This will stop monitoring on this device and close the main window and tray app.",
+            FontFamily = BodyFont,
             TextWrapping = TextWrapping.Wrap,
-            Foreground = new SolidColorBrush(ColorFromHex("#4B5E68")),
+            Foreground = Ink2Brush,
         });
         textStack.Children.Add(new TextBlock
         {
             Text = "People monitoring you may be alerted.",
+            FontFamily = BodyFont,
             TextWrapping = TextWrapping.Wrap,
-            Foreground = new SolidColorBrush(ColorFromHex("#A14A00")),
+            Foreground = WarningBrush,
             FontWeight = FontWeights.Medium,
         });
 
@@ -320,12 +442,13 @@ public sealed partial class MainWindow : Window
 
         var dialog = new ContentDialog
         {
-            Title = "Stop Monitoring",
+            Title = CreateDialogTitle("Stop Monitoring"),
             PrimaryButtonText = "Stop Monitoring",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
             Content = content,
         };
+        ApplyDialogTheme(dialog);
 
         if (Content is FrameworkElement root)
         {
@@ -342,13 +465,15 @@ public sealed partial class MainWindow : Window
         {
             Text = BuildStatusDetailsText(),
             TextWrapping = TextWrapping.Wrap,
-            FontFamily = new FontFamily("Consolas"),
+            FontFamily = MonoFont,
+            FontSize = 13,
+            Foreground = Ink2Brush,
             Width = 520,
         };
 
         var dialog = new ContentDialog
         {
-            Title = "Virtue Status",
+            Title = CreateDialogTitle("Virtue Status"),
             CloseButtonText = "Close",
             DefaultButton = ContentDialogButton.Close,
             Content = new ScrollViewer
@@ -359,6 +484,7 @@ public sealed partial class MainWindow : Window
                 MinHeight = 320,
             },
         };
+        ApplyDialogTheme(dialog);
 
         if (Content is FrameworkElement root)
         {
@@ -427,14 +553,39 @@ public sealed partial class MainWindow : Window
     private void SyncFromViewModel()
     {
         _statusTextBlock.Text = BuildPrimaryStatusText();
+        var statusBrush = StatusBrush();
+        _statusTextBlock.Foreground = statusBrush;
+        _statusDot.Background = statusBrush;
         _statusDetailTextBlock.Text = BuildSecondaryStatusText();
         _buildLabelTextBlock.Text = ViewModel.BuildLabelText;
-        _accountSummaryTextBlock.Text = ViewModel.LoggedIn
-            ? $"Signed in as {ViewModel.AccountSummary}"
-            : "Sign in to start monitoring.";
-        _loginPanel.Visibility = ViewModel.LoggedIn ? Visibility.Collapsed : Visibility.Visible;
-        _accountActionsPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
-        _signedInActionsPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
+
+        if (!ViewModel.HasLoadedStatus)
+        {
+            _accountSummaryTextBlock.Text = "Checking sign-in status...";
+            _loginPanel.Visibility = Visibility.Collapsed;
+            _accountActionsPanel.Visibility = Visibility.Collapsed;
+            _signedInActionsPanel.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            _accountSummaryTextBlock.Text = ViewModel.LoggedIn
+                ? $"Signed in as {ViewModel.AccountSummary}"
+                : "Sign in to start monitoring.";
+            _loginPanel.Visibility = ViewModel.LoggedIn ? Visibility.Collapsed : Visibility.Visible;
+            _accountActionsPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
+            _signedInActionsPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        var loginEnabled = !ViewModel.IsBusy;
+        _emailTextBox.IsEnabled = loginEnabled;
+        _passwordBox.IsEnabled = loginEnabled;
+        _deviceNameTextBox.IsEnabled = loginEnabled;
+        if (_signInButton is not null) _signInButton.IsEnabled = loginEnabled;
+
+        _errorTextBlock.Text = ViewModel.ErrorText ?? "";
+        _errorTextBlock.Visibility = string.IsNullOrWhiteSpace(ViewModel.ErrorText)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
 
         if (_emailTextBox.Text != ViewModel.EmailInput)
         {
@@ -445,17 +596,74 @@ public sealed partial class MainWindow : Window
         {
             _passwordBox.Password = ViewModel.PasswordInput;
         }
+
+        if (_deviceNameTextBox.Text != ViewModel.DeviceNameInput)
+        {
+            _deviceNameTextBox.Text = ViewModel.DeviceNameInput;
+        }
     }
 
     private string BuildPrimaryStatusText() =>
         ViewModel.MonitorState switch
         {
+            "loading" => "Loading status...",
             "running" => "Monitoring active",
             "starting" => "Starting monitoring",
             "signed_out" => "Logged out",
             "error" => "Attention needed",
             _ => "Monitoring stopped",
         };
+
+    private SolidColorBrush StatusBrush() =>
+        ViewModel.MonitorState switch
+        {
+            "running" => SuccessBrush,
+            "starting" => ForestBrush,
+            "error" => WarningBrush,
+            _ => Ink3Brush,
+        };
+
+    private static TextBlock CreateDialogTitle(string text) =>
+        new()
+        {
+            Text = text,
+            FontFamily = BodyFont,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = InkBrush,
+        };
+
+    // Lightweight styling so dialogs read as cream paper with forest/quiet
+    // buttons and near-square corners, matching the rest of the page.
+    private static void ApplyDialogTheme(ContentDialog dialog)
+    {
+        var r = dialog.Resources;
+        r["ContentDialogBackground"] = SurfaceBrush;
+        r["ContentDialogForeground"] = InkBrush;
+        r["ContentDialogBorderBrush"] = BorderBrushToken;
+        r["ContentDialogSeparatorBorderBrush"] = BorderBrushToken;
+        r["OverlayCornerRadius"] = new CornerRadius(4);
+        r["ControlCornerRadius"] = new CornerRadius(2);
+
+        // Default button (accent) -> filled forest.
+        r["AccentButtonBackground"] = ForestBrush;
+        r["AccentButtonBackgroundPointerOver"] = Forest3Brush;
+        r["AccentButtonBackgroundPressed"] = Forest2Brush;
+        r["AccentButtonForeground"] = PaperBrush;
+        r["AccentButtonForegroundPointerOver"] = PaperBrush;
+        r["AccentButtonForegroundPressed"] = PaperBrush;
+        r["AccentButtonBorderBrush"] = ForestBrush;
+
+        // Non-default buttons -> quiet paper fill on a hairline border.
+        r["ButtonBackground"] = SurfaceBrush;
+        r["ButtonBackgroundPointerOver"] = PaperInsetBrush;
+        r["ButtonBackgroundPressed"] = PaperInsetBrush;
+        r["ButtonForeground"] = Ink2Brush;
+        r["ButtonForegroundPointerOver"] = InkBrush;
+        r["ButtonForegroundPressed"] = InkBrush;
+        r["ButtonBorderBrush"] = BorderBrushToken;
+        r["ButtonBorderBrushPointerOver"] = BorderHoverBrush;
+        r["ButtonBorderBrushPressed"] = BorderHoverBrush;
+    }
 
     private string BuildSecondaryStatusText()
     {
@@ -466,6 +674,7 @@ public sealed partial class MainWindow : Window
 
         return ViewModel.MonitorState switch
         {
+            "loading" => "Checking your sign-in status...",
             "running" => "Virtue is actively monitoring this device.",
             "starting" => "Virtue is bringing the background monitor online.",
             "signed_out" => "Monitoring resumes after you sign in again.",
@@ -524,6 +733,8 @@ public sealed partial class MainWindow : Window
             .ToLocalTime()
             .ToString("yyyy-MM-dd HH:mm:ss zzz");
     }
+
+    private static SolidColorBrush HexBrush(string value) => new(ColorFromHex(value));
 
     private static Windows.UI.Color ColorFromHex(string value)
     {

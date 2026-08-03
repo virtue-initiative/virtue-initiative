@@ -1,13 +1,23 @@
 import { DigestFrequency, TamperSeverity } from '../email-domain';
 
+// Mirrors the app's warm institutional palette (shared-web/tokens.css) so
+// transactional emails match the product's actual branding.
 const EMAIL_COLORS = {
-  text: '#1a1a1a',
-  textMuted: '#6b6860',
-  textOnAccent: '#ffffff',
-  accent: '#008900',
-  pageBg: '#f9f9f7',
-  surface: '#ffffff',
-  border: '#e0ddd8',
+  text: '#1b1a16', // --text
+  textMuted: '#6a6655', // --text-muted
+  textOnAccent: '#fbf7ea', // --paper-3 (matches .vi-btn--primary's text color)
+  accent: '#1e3a2e', // --accent / --forest
+  pageBg: '#f4efe3', // --bg / --paper
+  surface: '#fbf7ea', // --surface / --paper-3
+  border: '#d9d1bc', // --border
+} as const;
+
+// Mirrors --font / --font-serif in shared-web/tokens.css. Custom web fonts
+// aren't loaded in most email clients, so these fall back to the same
+// generic stacks the app itself falls back to.
+const EMAIL_FONTS = {
+  sans: "'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+  serif: "'Source Serif 4', Georgia, serif",
 } as const;
 
 function inlineStyle(rules: Record<string, string>) {
@@ -37,22 +47,24 @@ function paragraph(text: string) {
     margin: '0 0 16px 0',
     color: EMAIL_COLORS.text,
     'font-size': '16px',
-    'line-height': '1.6',
+    'line-height': '1.5',
   })}">${escapeHtml(text)}</p>`;
 }
 
+// Mirrors .vi-btn--primary in shared-web/components/Button/Button.css.
 function actionButton(url: string, label: string) {
-  return `<p style="${inlineStyle({ margin: '0 0 18px 0' })}"><a href="${escapeHtml(url)}" style="${inlineStyle(
+  return `<p style="${inlineStyle({ margin: '0 0 16px 0' })}"><a href="${escapeHtml(url)}" style="${inlineStyle(
     {
       display: 'inline-block',
       background: EMAIL_COLORS.accent,
       color: EMAIL_COLORS.textOnAccent,
       'text-decoration': 'none',
-      'font-weight': '600',
-      'font-size': '15px',
+      'font-weight': '500',
+      'font-size': '14px',
+      'letter-spacing': '0.005em',
       'line-height': '1',
-      padding: '12px 18px',
-      'border-radius': '8px',
+      padding: '11px 13px',
+      'border-radius': '2px',
     },
   )}">${escapeHtml(label)}</a></p>`;
 }
@@ -61,7 +73,7 @@ function listItem(text: string) {
   return `<li style="${inlineStyle({
     margin: '0 0 8px 0',
     color: EMAIL_COLORS.text,
-    'font-size': '15px',
+    'font-size': '14px',
     'line-height': '1.5',
   })}">${escapeHtml(text)}</li>`;
 }
@@ -88,7 +100,7 @@ function renderEmailDocument(input: {
     margin: '0',
     padding: '24px',
     background: EMAIL_COLORS.pageBg,
-    'font-family': "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif",
+    'font-family': EMAIL_FONTS.sans,
     color: EMAIL_COLORS.text,
   })}">
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="${inlineStyle({ 'border-collapse': 'collapse' })}">
@@ -101,11 +113,11 @@ function renderEmailDocument(input: {
             },
           )}">
             <tr>
-              <td style="${inlineStyle({ padding: '0 0 14px 0' })}">
+              <td style="${inlineStyle({ padding: '0 0 16px 0' })}">
                 <p style="${inlineStyle({
                   margin: '0',
                   color: EMAIL_COLORS.textMuted,
-                  'font-size': '13px',
+                  'font-size': '12px',
                   'font-weight': '600',
                 })}">${escapeHtml(input.appName)}</p>
               </td>
@@ -114,13 +126,16 @@ function renderEmailDocument(input: {
               <td style="${inlineStyle({
                 background: EMAIL_COLORS.surface,
                 border: `1px solid ${EMAIL_COLORS.border}`,
-                'border-radius': '14px',
-                padding: '26px 24px',
+                'border-radius': '4px',
+                padding: '20px',
               })}">
                 <h1 style="${inlineStyle({
                   margin: '0 0 16px 0',
-                  'font-size': '22px',
-                  'line-height': '1.25',
+                  'font-family': EMAIL_FONTS.serif,
+                  'font-size': '28px',
+                  'font-weight': '400',
+                  'line-height': '1.15',
+                  'letter-spacing': '-0.01em',
                   color: EMAIL_COLORS.text,
                 })}">${escapeHtml(input.headline)}</h1>
                 ${input.contentHtml}
@@ -166,7 +181,7 @@ function withFooter(input: {
     `<p style="${inlineStyle({
       margin: '0',
       color: EMAIL_COLORS.textMuted,
-      'font-size': '13px',
+      'font-size': '12px',
       'line-height': '1.5',
     })}">${themedLink(settingsUrl, 'Manage email preferences')}</p>`,
   ].join('');
@@ -493,10 +508,10 @@ export function renderPartnerDigestTemplate(input: {
           : '';
 
       return `<div style="${inlineStyle({
-        margin: '0 0 18px 0',
+        margin: '0 0 16px 0',
         padding: '16px',
         border: `1px solid ${EMAIL_COLORS.border}`,
-        'border-radius': '10px',
+        'border-radius': '4px',
       })}">
         <p style="${inlineStyle({
           margin: '0 0 12px 0',

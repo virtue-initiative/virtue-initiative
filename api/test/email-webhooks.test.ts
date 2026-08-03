@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { env, SELF } from 'cloudflare:test';
-import { BASE, clearDB, markUserEmailVerified, signupAndGetToken, uuidToBytes } from './helpers';
+import { BASE, clearDB, markUserEmailVerified, signupAndGetCookie, uuidToBytes } from './helpers';
 
 beforeEach(clearDB);
 
 describe('Email webhooks', () => {
   it('marks users unverified on SNS bounce notifications', async () => {
-    const { userId } = await signupAndGetToken('bounce@example.com', 'pw');
+    const { userId } = await signupAndGetCookie('bounce@example.com', 'pw');
     await markUserEmailVerified(userId);
 
     const res = await SELF.fetch(`${BASE}/email/sns`, {
@@ -36,7 +36,7 @@ describe('Email webhooks', () => {
   });
 
   it('marks users unverified on SNS complaint notifications', async () => {
-    const { userId } = await signupAndGetToken('complaint@example.com', 'pw');
+    const { userId } = await signupAndGetCookie('complaint@example.com', 'pw');
     await markUserEmailVerified(userId);
 
     const res = await SELF.fetch(`${BASE}/email/sns`, {

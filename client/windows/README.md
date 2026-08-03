@@ -40,7 +40,7 @@ From WSL:
 
 ```bash
 cd /home/jeff/code/virtue-initiative/client/windows
-./scripts/build-msix.sh -Version 0.0.7-dev -Profile Debug
+./scripts/build-msix.sh -Version 0.0.8-dev -Profile Debug
 ```
 
 Expected output:
@@ -138,7 +138,7 @@ Build the Windows MSIX package from Linux:
 ./client/windows/scripts/remote-windows-build.sh \
   --build-host win11 \
   --mode msix \
-  --version 0.0.7-dev \
+  --version 0.0.8-dev \
   --profile Debug
 ```
 
@@ -162,9 +162,8 @@ The WinUI app and Rust resident monitoring host share state under `%PROGRAMDATA%
 - `%PROGRAMDATA%\Virtue\config\config.json`
 - `%PROGRAMDATA%\Virtue\config\ui_state.json`
 - `%PROGRAMDATA%\Virtue\config\token_store.json`
-- `%PROGRAMDATA%\Virtue\data\audit.jsonl`
 - `%PROGRAMDATA%\Virtue\data\lifecycle_state.json`
-- `%PROGRAMDATA%\Virtue\data\service.log`
+- `%PROGRAMDATA%\Virtue\data\logs\virtue.<date>.log` (daily-rotated diagnostic log)
 
 Runtime config overrides continue to support:
 
@@ -188,5 +187,5 @@ The Rust FFI surface exposed to the WinUI app is:
 ## Troubleshooting
 
 - No tray icon: confirm the app has been launched once after install and that the Windows startup task for Virtue is enabled.
-- Signed in but monitoring inactive: check `%PROGRAMDATA%\Virtue\data\service.log` and the monitor state shown in the settings window.
+- Signed in but monitoring inactive: check `%PROGRAMDATA%\Virtue\data\logs\virtue.<date>.log` and the monitor state shown in the settings window.
 - Startup did not run: launch Virtue from Start once, then verify the `VirtueTrayStartup` startup entry remains enabled in Windows.

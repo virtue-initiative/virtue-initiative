@@ -9,6 +9,7 @@ struct VirtueIOSApp: App {
         WindowGroup {
             ContentView(coordinator: coordinator)
                 .tint(VirtueBrand.accent)
+                .preferredColorScheme(.light)
         }
     }
 }
@@ -31,7 +32,7 @@ struct ContentView: View {
                 }
                 .padding(20)
             }
-            .background(Color(.systemGroupedBackground))
+            .background(VirtueBrand.bg)
             .navigationBarHidden(true)
         }
         .sheet(isPresented: $showStatusSheet) {
@@ -66,12 +67,13 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Virtue Initiative")
                         .font(.system(size: 30, weight: .semibold))
+                        .foregroundStyle(VirtueBrand.text)
                     Link("virtueinitiative.org", destination: URL(string: "https://virtueinitiative.org")!)
                         .font(.subheadline)
                         .foregroundStyle(VirtueBrand.accent)
                     Text("Build \(VirtueShared.buildLabel)")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(VirtueBrand.textMuted)
                 }
 
                 Spacer(minLength: 0)
@@ -85,19 +87,16 @@ struct ContentView: View {
                 SectionLabel("Status")
                 Text(primaryStatusTitle)
                     .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(Color(.label))
+                    .foregroundStyle(VirtueBrand.text)
                 Text(statusSubtitle)
                     .font(.body)
-                    .foregroundStyle(.secondary)
-                Text(coordinator.statusMessage)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(VirtueBrand.textMuted)
 
                 HStack(spacing: 10) {
                     Button("Status Details") {
                         showStatusSheet = true
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(VirtueButtonStyle())
 
                     Button(coordinator.monitoringEnabled ? "Pause Monitoring" : "Resume Monitoring") {
                         if coordinator.monitoringEnabled {
@@ -106,7 +105,7 @@ struct ContentView: View {
                             coordinator.toggleMonitoring()
                         }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(VirtueButtonStyle(prominent: true))
                     .disabled(!coordinator.loggedIn)
                 }
                 .padding(.top, 6)
@@ -122,24 +121,26 @@ struct ContentView: View {
                 if coordinator.loggedIn {
                     Text("Signed in")
                         .font(.title3.weight(.semibold))
-                    Text("Device ID: \(coordinator.deviceId)")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(VirtueBrand.text)
+                    Text("Device: \(coordinator.deviceName)")
+                        .foregroundStyle(VirtueBrand.textMuted)
 
                     HStack(spacing: 10) {
-                        Button("Sign Out") {
+                        Button(coordinator.isSigningOut ? "Signing Out…" : "Sign Out") {
                             showLogoutConfirmation = true
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(VirtueButtonStyle())
+                        .disabled(coordinator.isSigningOut)
 
                         Button("Runtime Overrides") {
                             showOverridesSheet = true
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(VirtueButtonStyle())
                     }
                     .padding(.top, 6)
                 } else {
                     Text("Sign in to start monitoring on this device.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(VirtueBrand.textMuted)
 
                     VStack(alignment: .leading, spacing: 12) {
                         TextField("Email", text: $coordinator.email)
@@ -150,16 +151,27 @@ struct ContentView: View {
                         SecureField("Password", text: $coordinator.password)
                             .textFieldStyle(.roundedBorder)
 
+                        TextField("Device name", text: $coordinator.deviceName)
+                            .autocorrectionDisabled()
+                            .textFieldStyle(.roundedBorder)
+
                         HStack(spacing: 10) {
-                            Button("Sign In") {
+                            Button(coordinator.isSigningIn ? "Signing In…" : "Sign In") {
                                 coordinator.login()
                             }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(VirtueButtonStyle(prominent: true))
+                            .disabled(coordinator.isSigningIn)
 
                             Button("Runtime Overrides") {
                                 showOverridesSheet = true
                             }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(VirtueButtonStyle())
+                        }
+
+                        if let error = coordinator.loginError {
+                            Text(error)
+                                .font(.subheadline)
+                                .foregroundStyle(Color.red)
                         }
                     }
                     .padding(.top, 6)
@@ -174,23 +186,22 @@ struct ContentView: View {
                 SectionLabel("Safari")
                 Text("Safari extension capture")
                     .font(.title3.weight(.semibold))
-                Text("Capture on iPhone only comes from the Safari extension.")
-                    .foregroundStyle(.secondary)
-
+                    .foregroundStyle(VirtueBrand.text)
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Permission state: \(coordinator.safariPermissionSummary)")
                     Text("Daemon state: \(coordinator.safariDaemonStatus)")
                 }
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(VirtueBrand.textMuted)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("1. Open Settings > Safari > Extensions.")
                     Text("2. Enable Virtue Safari Capture.")
                     Text("3. Allow access on All Websites.")
-                    Text("4. Browse in Safari to produce screenshots.")
+                    Text("4. Virtue will produce screenshots while browsing.")
                 }
                 .font(.subheadline)
+                .foregroundStyle(VirtueBrand.text)
             }
         }
     }
@@ -265,6 +276,8 @@ private struct StatusSheet: View {
                     DetailRow(label: "Last error", value: coordinator.safariLastError)
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(VirtueBrand.bg)
             .navigationTitle("Status Details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -289,10 +302,13 @@ private struct OverridesSheet: View {
                     TextField("VIRTUE_BASE_API_URL", text: $coordinator.baseApiUrlOverride)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .listRowBackground(VirtueBrand.surface)
                     TextField("VIRTUE_CAPTURE_INTERVAL_SECONDS", text: $coordinator.captureIntervalOverride)
                         .keyboardType(.numberPad)
+                        .listRowBackground(VirtueBrand.surface)
                     TextField("VIRTUE_BATCH_WINDOW_SECONDS", text: $coordinator.batchWindowOverride)
                         .keyboardType(.numberPad)
+                        .listRowBackground(VirtueBrand.surface)
                 }
 
                 Section {
@@ -300,8 +316,12 @@ private struct OverridesSheet: View {
                         coordinator.applyOverrides()
                         dismiss()
                     }
+                    .listRowBackground(VirtueBrand.surface)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(VirtueBrand.bg)
             .navigationTitle("Runtime Overrides")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -315,6 +335,28 @@ private struct OverridesSheet: View {
     }
 }
 
+private struct VirtueButtonStyle: ButtonStyle {
+    var prominent: Bool = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(
+                prominent
+                    ? (configuration.isPressed ? VirtueBrand.accent.opacity(0.85) : VirtueBrand.accent)
+                    : (configuration.isPressed ? VirtueBrand.border : VirtueBrand.bgSubtle)
+            )
+            .foregroundStyle(prominent ? Color.white : VirtueBrand.accent)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(prominent ? Color.clear : VirtueBrand.border, lineWidth: 1)
+            )
+            .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
+    }
+}
+
 private struct Card<Content: View>: View {
     @ViewBuilder let content: Content
 
@@ -324,11 +366,11 @@ private struct Card<Content: View>: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(VirtueBrand.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color(.separator).opacity(0.25), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(VirtueBrand.border, lineWidth: 1)
         )
     }
 }
@@ -343,7 +385,7 @@ private struct SectionLabel: View {
     var body: some View {
         Text(text.uppercased())
             .font(.caption.weight(.medium))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(VirtueBrand.ochre)
     }
 }
 
@@ -355,11 +397,13 @@ private struct DetailRow: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(VirtueBrand.textMuted)
             Text(value)
                 .font(.body)
+                .foregroundStyle(VirtueBrand.text)
         }
         .padding(.vertical, 2)
+        .listRowBackground(VirtueBrand.surface)
     }
 }
 
@@ -371,7 +415,7 @@ private struct AppBrandIcon: View {
                 .frame(width: 60, height: 60)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         } else {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(VirtueBrand.accent)
                 .frame(width: 60, height: 60)
                 .overlay(
@@ -404,9 +448,28 @@ private struct AppBrandIcon: View {
 }
 
 private enum VirtueBrand {
+    // Forest green — matches --accent / --forest in shared-web/tokens.css
     static let accent = Color(
-        red: 0.0,
-        green: 137.0 / 255.0,
-        blue: 0.0
+        red: 30.0 / 255.0,
+        green: 58.0 / 255.0,
+        blue: 46.0 / 255.0
     )
+    // Warm ochre — matches --ochre in shared-web/tokens.css
+    static let ochre = Color(
+        red: 166.0 / 255.0,
+        green: 127.0 / 255.0,
+        blue: 61.0 / 255.0
+    )
+    // Page background — matches --bg (#f4efe3) in shared-web/tokens.css
+    static let bg = Color(red: 244.0 / 255.0, green: 239.0 / 255.0, blue: 227.0 / 255.0)
+    // Card surface — matches --surface (#fbf7ea) in shared-web/tokens.css
+    static let surface = Color(red: 251.0 / 255.0, green: 247.0 / 255.0, blue: 234.0 / 255.0)
+    // Subtle background — matches --bg-subtle (#ebe4ce) in shared-web/tokens.css
+    static let bgSubtle = Color(red: 235.0 / 255.0, green: 228.0 / 255.0, blue: 206.0 / 255.0)
+    // Border — matches --border (#d9d1bc) in shared-web/tokens.css
+    static let border = Color(red: 217.0 / 255.0, green: 209.0 / 255.0, blue: 188.0 / 255.0)
+    // Primary text — matches --text (#1b1a16) in shared-web/tokens.css
+    static let text = Color(red: 27.0 / 255.0, green: 26.0 / 255.0, blue: 22.0 / 255.0)
+    // Muted text — matches --text-muted (#6a6655) in shared-web/tokens.css
+    static let textMuted = Color(red: 106.0 / 255.0, green: 102.0 / 255.0, blue: 85.0 / 255.0)
 }

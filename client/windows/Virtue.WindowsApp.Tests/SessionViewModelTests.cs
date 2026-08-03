@@ -8,6 +8,19 @@ namespace Virtue.WindowsApp.Tests;
 public sealed class SessionViewModelTests
 {
     [Fact]
+    public void BeforeAnyRefresh_ReportsLoadingState()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        Assert.False(viewModel.HasLoadedStatus);
+        Assert.Equal("loading", viewModel.MonitorState);
+        Assert.Equal("Loading...", viewModel.LoggedInText);
+        Assert.Equal("Loading...", viewModel.AccountSummary);
+        Assert.Equal("Virtue: loading status", viewModel.TrayTooltip);
+    }
+
+    [Fact]
     public async Task InitializeAsync_LoadsSessionAndRuntimeConfig()
     {
         var fakeClient = new FakeRustInteropClient
@@ -200,7 +213,7 @@ public sealed class SessionViewModelTests
         await viewModel.LoginAsync();
 
         Assert.Null(fakeClient.LastLogin);
-        Assert.Equal("Email is required.", viewModel.StatusText);
+        Assert.Equal("Email is required.", viewModel.ErrorText);
     }
 
     [Fact]
@@ -216,7 +229,7 @@ public sealed class SessionViewModelTests
         await viewModel.LoginAsync();
 
         Assert.Null(fakeClient.LastLogin);
-        Assert.Equal("Password is required.", viewModel.StatusText);
+        Assert.Equal("Password is required.", viewModel.ErrorText);
     }
 
     [Fact]
@@ -415,29 +428,41 @@ public sealed class SessionViewModelTests
     {
         var host = new NullTrayIconHost();
         var controller = new TrayMenuController(host);
-        var logonRaised = false;
         var logoffRaised = false;
         var shutdownRaised = false;
-        var suspendRaised = false;
-        var resumeRaised = false;
 
-        controller.SessionLogonObserved += (_, _) => logonRaised = true;
         controller.SessionLogoffObserved += (_, _) => logoffRaised = true;
         controller.SystemShutdownObserved += (_, _) => shutdownRaised = true;
-        controller.SuspendObserved += (_, _) => suspendRaised = true;
-        controller.ResumeObserved += (_, _) => resumeRaised = true;
 
-        host.RequestSessionLogon();
         host.RequestSessionLogoff();
         host.RequestSystemShutdown();
-        host.RequestSuspend();
-        host.RequestResume();
 
-        Assert.True(logonRaised);
         Assert.True(logoffRaised);
         Assert.True(shutdownRaised);
-        Assert.True(suspendRaised);
-        Assert.True(resumeRaised);
+    }
+
+    [Fact]
+    public async Task BackgroundRefreshAsync_DoesNotClearLoggedInState()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
+            MonitorStatus = new MonitorStatusPayload("running", true, 0, null, null),
+            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234")
+        {
+            EmailInput = "user@example.com",
+            PasswordInput = "secret",
+        };
+        await viewModel.LoginAsync();
+        Assert.True(viewModel.LoggedIn);
+
+        fakeClient.SessionStatus = fakeClient.SessionStatus with { LoggedIn = false };
+
+        await viewModel.BackgroundRefreshAsync();
+
+        Assert.True(viewModel.LoggedIn);
     }
 
     private sealed class FakeRustInteropClient : IRustInteropClient

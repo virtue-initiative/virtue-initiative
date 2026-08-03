@@ -8,9 +8,8 @@
 }
 
 .vi-menu__dropdown {
-  position: absolute;
-  top: calc(100% + var(--space-1));
-  right: 0;
+  position: fixed;
+  margin-top: var(--space-1);
   z-index: var(--z-dropdown);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -40,6 +39,11 @@
   &:hover {
     background: var(--bg-subtle);
   }
+}
+
+.vi-menu__dropdown--top {
+  margin-top: 0;
+  margin-bottom: var(--space-1);
 }
 
 .vi-menu__item--danger {

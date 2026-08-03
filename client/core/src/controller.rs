@@ -1,14 +1,11 @@
 use crate::error::{CoreError, CoreResult};
 use crate::events::{Event, EventChannel};
+use crate::model::Redacted;
 use crate::model::ServiceStatus;
-use crate::model::{ProcessStoppedReason, Redacted};
 use crate::module::auth::{LoginRequested, LoginResult, LogoutRequested, LogoutResult};
-use crate::module::lifecycle::{
-    ComputerResumed, ComputerSuspended, ProcessStopped, UserSessionLogin, UserSessionLogout,
-    UserStopRequested,
-};
-use crate::module::screenshot::{ScreenshotPaused, ScreenshotResumed};
+use crate::module::lifecycle::UserStopRequested;
 use crate::module::status::{StatusRequest, StatusResponse};
+use crate::module::upload::{FlushBatchNow, Upload};
 
 /// High-level client for communicating with a daemon over any [`EventChannel`].
 ///
@@ -29,10 +26,16 @@ impl<C: EventChannel> ClientController<C> {
 
     /// Send `LoginRequested` and block until `LoginResult` is received.
     /// Returns the device ID on success.
-    pub fn login(&mut self, email: &str, password: &str) -> CoreResult<String> {
+    pub fn login(
+        &mut self,
+        email: &str,
+        password: &str,
+        device_name: Option<&str>,
+    ) -> CoreResult<String> {
         let r: LoginResult = self.channel.request(LoginRequested {
             email: email.into(),
             password: Redacted(password.into()),
+            device_name: device_name.map(|name| name.into()),
         })?;
         if r.success {
             Ok(r.device_id.unwrap_or_default())
@@ -67,32 +70,16 @@ impl<C: EventChannel> ClientController<C> {
         })
     }
 
-    pub fn note_suspended(&self) -> CoreResult<()> {
-        self.channel.publish(ComputerSuspended)
+    /// Queue `upload` into the daemon's live batch/hash pipeline. Picked up on
+    /// the daemon's next ping cycle (≤1s), same as an in-process `Upload`.
+    pub fn queue_upload(&self, upload: Upload) -> CoreResult<()> {
+        self.channel.publish(upload)
     }
 
-    pub fn note_resumed(&self) -> CoreResult<()> {
-        self.channel.publish(ComputerResumed)
-    }
-
-    pub fn note_login(&self) -> CoreResult<()> {
-        self.channel.publish(UserSessionLogin)
-    }
-
-    pub fn note_logout(&self) -> CoreResult<()> {
-        self.channel.publish(UserSessionLogout)
-    }
-
-    pub fn note_process_stopped(&self, reason: ProcessStoppedReason) -> CoreResult<()> {
-        self.channel.publish(ProcessStopped(reason))
-    }
-
-    pub fn pause_screenshots(&self) -> CoreResult<()> {
-        self.channel.publish(ScreenshotPaused)
-    }
-
-    pub fn resume_screenshots(&self) -> CoreResult<()> {
-        self.channel.publish(ScreenshotResumed)
+    /// Ask the daemon to flush its currently queued batch items now, instead
+    /// of waiting for the batch interval timer.
+    pub fn flush_batch_now(&self) -> CoreResult<()> {
+        self.channel.publish(FlushBatchNow)
     }
 
     /// Register a handler for events the daemon pushes unprompted.

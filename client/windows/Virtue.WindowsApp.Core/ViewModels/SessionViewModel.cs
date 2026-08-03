@@ -14,8 +14,9 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private string _accountEmail = string.Empty;
     private string _emailInput = string.Empty;
     private string _passwordInput = string.Empty;
+    private string _deviceNameInput = Environment.MachineName;
     private string _statusText = "Starting Virtue...";
-    private string _monitorState = "stopped";
+    private string _monitorState = "loading";
     private string? _monitorError;
     private string? _deviceId;
     private int _pendingRequestCount;
@@ -25,8 +26,11 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private string _batchWindowSeconds = string.Empty;
     private string _configPath = "Loading config path...";
     private bool _isBusy;
+    private bool _hasLoadedStatus;
     private bool _isHydratingEmailInput;
     private bool _hasUserEditedEmailInput;
+    private string? _transitionMessage;
+    private string? _errorText;
 
     public SessionViewModel(IRustInteropClient interopClient, string? windowsPackageVersion = null)
     {
@@ -69,6 +73,20 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         }
     }
 
+    public bool HasLoadedStatus
+    {
+        get => _hasLoadedStatus;
+        private set
+        {
+            if (SetProperty(ref _hasLoadedStatus, value))
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LoggedInText)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AccountSummary)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TrayTooltip)));
+            }
+        }
+    }
+
     public string AccountEmail
     {
         get => _accountEmail;
@@ -88,9 +106,11 @@ public sealed class SessionViewModel : INotifyPropertyChanged
 
     public string WindowsPackageVersion => _windowsPackageVersion;
 
-    public string LoggedInText => LoggedIn ? "Yes" : "No";
+    public string LoggedInText => !HasLoadedStatus ? "Loading..." : (LoggedIn ? "Yes" : "No");
 
-    public string AccountSummary => string.IsNullOrWhiteSpace(AccountEmail) ? "Not signed in" : AccountEmail;
+    public string AccountSummary => !HasLoadedStatus
+        ? "Loading..."
+        : (string.IsNullOrWhiteSpace(AccountEmail) ? "Not signed in" : AccountEmail);
 
     public string EmailInput
     {
@@ -108,6 +128,12 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     {
         get => _passwordInput;
         set => SetProperty(ref _passwordInput, value);
+    }
+
+    public string DeviceNameInput
+    {
+        get => _deviceNameInput;
+        set => SetProperty(ref _deviceNameInput, value);
     }
 
     public string StatusText
@@ -164,6 +190,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     public string TrayTooltip =>
         MonitorState switch
         {
+            "loading" => "Virtue: loading status",
             "running" => "Virtue: monitoring active",
             "starting" => "Virtue: starting monitoring",
             "error" => string.IsNullOrWhiteSpace(MonitorError)
@@ -220,6 +247,26 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         }
     }
 
+    public string? TransitionMessage
+    {
+        get => _transitionMessage;
+        private set
+        {
+            if (SetProperty(ref _transitionMessage, value))
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsTransitioning)));
+            }
+        }
+    }
+
+    public bool IsTransitioning => !string.IsNullOrEmpty(TransitionMessage);
+
+    public string? ErrorText
+    {
+        get => _errorText;
+        private set => SetProperty(ref _errorText, value);
+    }
+
     public async Task InitializeAsync()
     {
         await RunBusyAsync(async () =>
@@ -227,6 +274,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
             _interopClient.Initialize();
             _interopClient.StartMonitoring();
             await RefreshInternalAsync();
+            StatusText = BuildStatusText();
         });
     }
 
@@ -234,38 +282,66 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     {
         if (string.IsNullOrWhiteSpace(EmailInput))
         {
-            StatusText = "Email is required.";
+            ErrorText = "Email is required.";
             return;
         }
 
         if (string.IsNullOrEmpty(PasswordInput))
         {
-            StatusText = "Password is required.";
+            ErrorText = "Password is required.";
             return;
         }
 
+        var deviceName = string.IsNullOrWhiteSpace(DeviceNameInput)
+            ? Environment.MachineName
+            : DeviceNameInput.Trim();
+
         await RunBusyAsync(async () =>
         {
-            StatusText = "Signing in...";
-            _interopClient.Login(EmailInput.Trim(), PasswordInput, Environment.MachineName);
+            var email = EmailInput.Trim();
+            var password = PasswordInput;
+            await Task.Run(() => _interopClient.Login(email, password, deviceName));
             PasswordInput = string.Empty;
             await RefreshInternalAsync();
-        });
+            StatusText = BuildStatusText();
+        }, "Signing in...");
     }
 
     public async Task LogoutAsync()
     {
         await RunBusyAsync(async () =>
         {
-            StatusText = "Signing out...";
-            _interopClient.Logout();
+            await Task.Run(() => _interopClient.Logout());
             await RefreshInternalAsync();
-        });
+            StatusText = BuildStatusText();
+        }, "Signing out...");
     }
 
     public async Task RefreshAsync()
     {
-        await RunBusyAsync(RefreshInternalAsync);
+        await RunBusyAsync(async () =>
+        {
+            await RefreshInternalAsync();
+            StatusText = BuildStatusText();
+        });
+    }
+
+    public Task BackgroundRefreshAsync()
+    {
+        return BackgroundRefreshInternalAsync();
+    }
+
+    private Task BackgroundRefreshInternalAsync()
+    {
+        var monitorStatus = _interopClient.GetMonitorStatus();
+        var resolvedMonitorState = ResolveMonitorState(_hasLoadedStatus, _loggedIn, monitorStatus.State);
+
+        MonitorState = resolvedMonitorState;
+        MonitorError = _loggedIn ? monitorStatus.LastError : null;
+        PendingRequestCount = _loggedIn ? monitorStatus.PendingRequestCount : 0;
+        LastScreenshotAtMs = _loggedIn ? monitorStatus.LastScreenshotAtMs : null;
+
+        return Task.CompletedTask;
     }
 
     public async Task SaveSettingsAsync()
@@ -288,15 +364,16 @@ public sealed class SessionViewModel : INotifyPropertyChanged
             _interopClient.SetRuntimeConfig(new RuntimeConfigUpdate(ApiBaseUrl, captureIntervalSeconds, batchWindowSeconds));
             await RefreshInternalAsync();
             StatusText = "Runtime settings saved.";
-        });
+        }, "Saving runtime settings...");
     }
 
     private Task RefreshInternalAsync()
     {
         var status = _interopClient.GetSessionStatus();
+        HasLoadedStatus = true;
         var monitorStatus = _interopClient.GetMonitorStatus();
         var runtimeConfig = _interopClient.GetRuntimeConfig();
-        var resolvedMonitorState = ResolveMonitorState(status.LoggedIn, monitorStatus.State);
+        var resolvedMonitorState = ResolveMonitorState(_hasLoadedStatus, status.LoggedIn, monitorStatus.State);
         var isSignedIn = status.LoggedIn;
 
         BuildLabel = status.BuildLabel;
@@ -320,13 +397,16 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         BatchWindowSeconds = runtimeConfig.BatchWindowSeconds.ToString();
         ConfigPath = runtimeConfig.ConfigPath;
 
-        StatusText = BuildStatusText();
-
         return Task.CompletedTask;
     }
 
-    private static string ResolveMonitorState(bool loggedIn, string monitorState)
+    private static string ResolveMonitorState(bool hasStatus, bool loggedIn, string monitorState)
     {
+        if (!hasStatus)
+        {
+            return "loading";
+        }
+
         if (!loggedIn)
         {
             return "signed_out";
@@ -355,23 +435,25 @@ public sealed class SessionViewModel : INotifyPropertyChanged
 
     public async Task StopMonitoringAsync()
     {
-        await RunBusyAsync(() =>
+        await RunBusyAsync(async () =>
         {
-            _interopClient.StopMonitoring();
-            return RefreshInternalAsync();
+            await Task.Run(() => _interopClient.StopMonitoring());
+            await RefreshInternalAsync();
+            StatusText = BuildStatusText();
         });
     }
 
     public async Task StopMonitoringFromTrayExitAsync()
     {
-        await RunBusyAsync(() =>
+        await RunBusyAsync(async () =>
         {
-            _interopClient.StopMonitoringFromTrayExit();
-            return RefreshInternalAsync();
+            await Task.Run(() => _interopClient.StopMonitoringFromTrayExit());
+            await RefreshInternalAsync();
+            StatusText = BuildStatusText();
         });
     }
 
-    private async Task RunBusyAsync(Func<Task> action)
+    private async Task RunBusyAsync(Func<Task> action, string? transitionMessage = null)
     {
         if (IsBusy)
         {
@@ -381,14 +463,21 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         try
         {
             IsBusy = true;
+            ErrorText = null;
+            if (transitionMessage != null)
+            {
+                TransitionMessage = transitionMessage;
+            }
             await action();
         }
         catch (Exception ex)
         {
+            ErrorText = ex.Message;
             StatusText = ex.Message;
         }
         finally
         {
+            TransitionMessage = null;
             IsBusy = false;
         }
     }

@@ -92,8 +92,11 @@ impl EventTesterBuilder {
     }
 
     pub fn build(self) -> EventTester {
+        // Inline spawner: background jobs run synchronously, so events they emit
+        // cascade within the same `iter()` and the tester stays deterministic.
         let mut bus =
-            EventBus::new(self.observers, self.state).expect("EventBus construction failed");
+            EventBus::with_spawner(self.observers, self.state, Arc::new(super::InlineSpawner))
+                .expect("EventBus construction failed");
         let mut captures = CaptureStore::new();
         let mut clearers = CaptureClearers::new();
 
@@ -334,9 +337,7 @@ mod tests {
     use crate::events::Ping;
     use crate::events::bus::{Emitter, EventBus, Observer, StateType};
     use crate::model::{AlertReason, LifecycleKind, UploadKind};
-    use crate::module::lifecycle::{
-        ComputerSuspended, LifecycleModule, LifecycleStatus, ProcessStarted,
-    };
+    use crate::module::lifecycle::LifecycleModule;
 
     /// Minimal observer that counts how many Ping events it receives.
     struct PingCounter {
@@ -404,9 +405,13 @@ mod tests {
         let mut b = EventTester::builder();
         b.add(LifecycleModule::new(Box::new(b.platform())));
         let mut t = b.build();
-        t.emit(1, ProcessStarted);
+        t.emit(1, Ping);
         assert_eq!(
-            t.observer::<LifecycleModule>().state.last_process_started,
+            t.observer::<LifecycleModule>()
+                .state
+                .last_sample
+                .unwrap()
+                .utc_ms,
             1_000
         );
     }
@@ -417,11 +422,12 @@ mod tests {
         let mut b = EventTester::builder();
         b.add(LifecycleModule::new(Box::new(b.platform())));
         let mut t = b.build();
-        // ComputerSuspended at 1s emits a Lifecycle upload but NOT a LifecycleAlert.
-        t.emit(1, ComputerSuspended);
+        // A login poll at 1s emits a Lifecycle upload but NOT a LifecycleAlert.
+        t.platform.set_last_login(Some(500));
+        t.emit(1, Ping);
         t.assert_like(crate::like!(Upload {
             kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::PingGapWhileRunning
+                reason: AlertReason::UnexpectedGap
             },
             ..
         }));
@@ -432,10 +438,11 @@ mod tests {
         let mut b = EventTester::builder();
         b.add(LifecycleModule::new(Box::new(b.platform())));
         let mut t = b.build();
-        t.emit(1, ComputerSuspended);
+        t.platform.set_last_login(Some(500));
+        t.emit(1, Ping);
         t.assert_not_like(crate::like!(Upload {
             kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::PingGapWhileRunning
+                reason: AlertReason::UnexpectedGap
             },
             ..
         }));
@@ -446,7 +453,8 @@ mod tests {
         let mut b = EventTester::builder();
         b.add(LifecycleModule::new(Box::new(b.platform())));
         let mut t = b.build();
-        t.emit(1, ProcessStarted);
+        t.platform.set_last_login(Some(500));
+        t.emit(1, Ping);
         assert!(!t.captured::<Upload>().is_empty());
         t.clear_captured();
         assert!(t.captured::<Upload>().is_empty());
@@ -457,49 +465,39 @@ mod tests {
         let mut b = EventTester::builder();
         b.add(LifecycleModule::new(Box::new(b.platform())));
         let mut t = b.build();
-        t.emit(1, ComputerSuspended);
+        t.platform.set_last_login(Some(500));
+        t.emit(1, Ping);
         t.assert_like(crate::like!(Upload {
             kind: UploadKind::Lifecycle {
-                kind: LifecycleKind::ComputerSuspended
+                kind: LifecycleKind::SystemLogin { .. }
             },
             ..
         }));
     }
 
     #[test]
-    fn missing_resume_fires_on_fourth_ping_with_enable_disable_pings() {
+    fn unexpected_gap_fires_after_a_large_boot_vs_monotonic_gap_with_enable_disable_pings() {
         let mut b = EventTester::builder();
         b.add(LifecycleModule::new(Box::new(b.platform())));
         let mut t = b.build();
 
-        t.emit(1, ComputerSuspended);
+        t.platform.set_boot_clock_ms(1_000);
+        t.platform.set_monotonic_clock_ms(1_000);
+        t.enable_pings(1);
+        t.disable_pings(2);
+        t.advance_to(2);
         t.clear_captured();
 
-        // Pings at 2s, 3s, 4s (3 pings) — NOT at 5s (exclusive boundary)
-        t.enable_pings(2);
-        t.disable_pings(5);
-        t.advance_to(5);
-        assert_eq!(
-            t.observer::<LifecycleModule>().state.pings_while_suspended,
-            3
-        );
-        t.clear_captured();
-
-        // 4th ping crosses the >3 threshold
-        t.emit(6, Ping);
+        // A big awake gap (monotonic keeps pace with boot — no suspend) crosses
+        // the sliding-window budget (120s) on the next ping.
+        t.platform.set_boot_clock_ms(121_000);
+        t.platform.set_monotonic_clock_ms(121_000);
+        t.emit(121, Ping);
         t.assert_like(crate::like!(Upload {
             kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::MissingResume
+                reason: AlertReason::UnexpectedGap
             },
             ..
         }));
-        assert_eq!(
-            t.observer::<LifecycleModule>().state.pings_while_suspended,
-            0
-        );
-        assert!(matches!(
-            t.observer::<LifecycleModule>().state.status,
-            LifecycleStatus::Running
-        ));
     }
 }

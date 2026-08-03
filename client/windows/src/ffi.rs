@@ -1,18 +1,82 @@
 use std::ffi::{CStr, CString, c_char};
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{
-    ClientPaths, ResolvedRuntimeConfig, RuntimeConfigOverrides, load_runtime_overrides,
-    resolved_runtime_config, save_runtime_overrides,
+    ClientPaths, ResolvedRuntimeConfig, RuntimeConfigOverrides, default_device_name,
+    load_runtime_overrides, resolved_runtime_config, save_runtime_overrides,
 };
 use crate::resident_monitor::{self, MonitorStatusSnapshot};
 use crate::session::{SessionManager, SessionStatus};
 
 fn current_paths() -> Result<ClientPaths> {
     ClientPaths::discover()
+}
+
+// Keeps the non-blocking writer's flush thread alive for the process
+// lifetime; dropping it would silently stop log writes. `OnceLock` makes the
+// install idempotent — `virtue_windows_init` can be (and is, per its own
+// tests) called more than once per process.
+static LOG_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
+
+/// Installs the process-wide `tracing` subscriber on first call, writing
+/// daily-rotated plain-text logs to `<data>\logs\virtue.<date>.log`. Subsequent
+/// calls are no-ops — safe to call from every `virtue_windows_init` invocation.
+fn init_logging(paths: &ClientPaths) {
+    LOG_GUARD.get_or_init(|| {
+        if let Err(err) = std::fs::create_dir_all(&paths.log_dir) {
+            eprintln!(
+                "failed to create logs dir {}: {err}",
+                paths.log_dir.display()
+            );
+        }
+        if let Err(err) = virtue_core::logging::prune_old_logs(
+            &paths.log_dir,
+            &virtue_core::logging::DEFAULT_FILE_LOG_POLICY,
+        ) {
+            eprintln!("failed to prune old logs: {err}");
+        }
+
+        let file_appender = tracing_appender::rolling::Builder::new()
+            .rotation(tracing_appender::rolling::Rotation::DAILY)
+            .filename_prefix(virtue_core::logging::DEFAULT_FILE_LOG_POLICY.file_name_prefix)
+            .filename_suffix("log")
+            .build(&paths.log_dir);
+
+        let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+            tracing_subscriber::EnvFilter::new(virtue_core::logging::default_filter_directive(
+                cfg!(debug_assertions),
+            ))
+        });
+
+        match file_appender {
+            Ok(file_appender) => {
+                let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+                tracing_subscriber::fmt()
+                    .with_env_filter(filter)
+                    .with_writer(non_blocking)
+                    .with_ansi(false)
+                    .init();
+                guard
+            }
+            Err(err) => {
+                eprintln!(
+                    "failed to open log file in {}: {err}",
+                    paths.log_dir.display()
+                );
+                let (non_blocking, guard) = tracing_appender::non_blocking(std::io::stderr());
+                tracing_subscriber::fmt()
+                    .with_env_filter(filter)
+                    .with_writer(non_blocking)
+                    .with_ansi(false)
+                    .init();
+                guard
+            }
+        }
+    });
 }
 
 fn c_string_or_empty(value: *const c_char) -> String {
@@ -137,6 +201,7 @@ pub extern "C" fn virtue_windows_init(
 ) -> *mut c_char {
     into_error_ptr((|| {
         let paths = ensure_paths_initialized()?;
+        init_logging(&paths);
 
         let base_api_url = c_string_or_empty(base_api_url);
         let capture_interval_seconds = c_string_or_empty(capture_interval_seconds);
@@ -198,7 +263,7 @@ pub extern "C" fn virtue_windows_login(request_json: *const c_char) -> *mut c_ch
         let device_name = request
             .device_name
             .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| "windows-device".to_string());
+            .unwrap_or_else(default_device_name);
 
         let manager = with_session_manager()?;
         manager.login_blocking(&request.email, &request.password, &device_name)?;
@@ -244,33 +309,8 @@ pub extern "C" fn virtue_windows_stop_monitoring_from_tray_exit() -> *mut c_char
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn virtue_windows_stop_monitoring_for_system_shutdown() -> *mut c_char {
-    into_error_ptr(resident_monitor::stop_monitoring_for_system_shutdown())
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn virtue_windows_stop_monitoring_for_session_logoff() -> *mut c_char {
-    into_error_ptr(resident_monitor::stop_monitoring_for_session_logoff())
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn virtue_windows_notify_session_logon() -> *mut c_char {
-    into_error_ptr(resident_monitor::notify_session_logon())
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn virtue_windows_notify_session_logoff() -> *mut c_char {
-    into_error_ptr(resident_monitor::notify_session_logoff())
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn virtue_windows_notify_suspend() -> *mut c_char {
-    into_error_ptr(resident_monitor::notify_suspend())
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn virtue_windows_notify_resume() -> *mut c_char {
-    into_error_ptr(resident_monitor::notify_resume())
+pub extern "C" fn virtue_windows_stop_monitoring_for_os_session_end() -> *mut c_char {
+    into_error_ptr(resident_monitor::stop_monitoring_for_os_session_end())
 }
 
 #[unsafe(no_mangle)]
@@ -368,6 +408,23 @@ mod tests {
 
     fn c_value(value: &str) -> CString {
         CString::new(value).expect("test strings should not contain null bytes")
+    }
+
+    #[test]
+    fn init_logging_is_idempotent_across_repeated_calls() {
+        // `virtue_windows_init` (and therefore `init_logging`) can legitimately be
+        // called more than once per process — the WinUI app may re-init after a
+        // runtime config change. Calling it twice must not panic, and the log
+        // directory should exist afterward.
+        let _guard = test_lock().lock().expect("test lock");
+        let paths = temporary_paths("logging-idempotent");
+        let _program_data = ProgramDataGuard::set(&paths.base_dir);
+        paths.ensure_dirs().expect("ensure dirs");
+
+        init_logging(&paths);
+        init_logging(&paths);
+
+        assert!(LOG_GUARD.get().is_some(), "logging should be initialized");
     }
 
     #[test]

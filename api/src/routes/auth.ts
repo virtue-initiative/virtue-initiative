@@ -1,7 +1,7 @@
 import { Context, Hono } from 'hono';
 import { getCookie, deleteCookie, setCookie } from 'hono/cookie';
 import { v4 as uuidv4 } from 'uuid';
-import { authenticate } from '../middleware/auth';
+import { authenticateWebSession } from '../middleware/auth';
 import { validateZ } from '../middleware/validation';
 import {
   createEmailToken,
@@ -10,7 +10,6 @@ import {
   deleteUserById,
   deleteSessionByRefreshTokenHash,
   findEmailTokenByHash,
-  findSessionByRefreshTokenHash,
   findUserByEmail,
   findUserById,
   invalidateEmailTokens,
@@ -36,12 +35,10 @@ import {
   passwordResetSchema,
   updateUserSchema,
   deleteUserSchema,
-  type AccessTokenResponse,
   type SignupResponse,
   type EmailVerifyResponse,
   type UpdateUserResponse,
 } from '../../../shared-web/types';
-import { generateAccessToken } from '../lib/jwt';
 import {
   CURRENT_HASH_PARAMS,
   HASH_PARAMS_VERSION,
@@ -54,10 +51,7 @@ import { Env, Variables } from '../types/bindings';
 import { deleteObject } from '../lib/r2';
 
 const auth = new Hono<{ Bindings: Env; Variables: Variables }>();
-const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 const REFRESH_TOKEN_TTL_SECONDS = 365 * 24 * 60 * 60;
-const LOCAL_WEB_URL = 'http://localhost:5173';
-
 function buildHashParamsResponse() {
   return {
     version: CURRENT_HASH_PARAMS.version,
@@ -106,12 +100,10 @@ function badRequest(c: Context<{ Bindings: Env; Variables: Variables }>, message
   return c.json({ error: 'Bad Request', details: { errors: [message] } }, 400);
 }
 
-async function createSession(c: Context<{ Bindings: Env; Variables: Variables }>, userId: string) {
-  const accessToken = await generateAccessToken(
-    userId,
-    c.env.JWT_PRIVATE_KEY,
-    ACCESS_TOKEN_TTL_SECONDS,
-  );
+async function createSession(
+  c: Context<{ Bindings: Env; Variables: Variables }>,
+  userId: string,
+): Promise<string> {
   const refreshToken = generateOpaqueToken();
   const now = Date.now();
 
@@ -131,15 +123,10 @@ async function createSession(c: Context<{ Bindings: Env; Variables: Variables }>
     maxAge: REFRESH_TOKEN_TTL_SECONDS,
   });
 
-  return accessToken;
+  return refreshToken;
 }
 
 function getAppUrl(c: Context<{ Bindings: Env; Variables: Variables }>) {
-  const requestUrl = new URL(c.req.url);
-  if (requestUrl.hostname === 'localhost' || requestUrl.hostname === '127.0.0.1') {
-    return LOCAL_WEB_URL;
-  }
-
   return c.env.APP_URL;
 }
 
@@ -351,11 +338,10 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
   await updateUser(c.env.DB, userId, { email_verified: true });
   await consumeEmailToken(c.env.DB, record.id, Date.now());
 
-  const accessToken = await createSession(c, userId);
+  await createSession(c, userId);
 
   return c.json<SignupResponse>(
     {
-      access_token: accessToken,
       user: {
         id: userId,
         email: normalizedEmail,
@@ -391,8 +377,8 @@ auth.post('/login', validateZ('json', loginSchema), async (c) => {
     await updateUser(c.env.DB, user.id, { settings: { timezone } });
   }
 
-  const accessToken = await createSession(c, user.id);
-  return c.json<AccessTokenResponse>({ access_token: accessToken });
+  const refresh_token = await createSession(c, user.id);
+  return c.json({ ok: true, refresh_token });
 });
 
 auth.post('/logout', async (c) => {
@@ -404,38 +390,7 @@ auth.post('/logout', async (c) => {
   return c.body(null, 204);
 });
 
-auth.post('/token', async (c) => {
-  const refreshToken = getCookie(c, 'refresh_token');
-
-  if (!refreshToken) {
-    return c.json({ error: 'Session expired. Please log in again.' }, 401);
-  }
-
-  const session = await findSessionByRefreshTokenHash(
-    c.env.DB,
-    hashOpaqueToken(refreshToken),
-    'web',
-  );
-
-  if (!session || !session.user_id) {
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
-
-  if (session.expires_at < Date.now()) {
-    await deleteSessionByRefreshTokenHash(c.env.DB, session.refresh_token_hash, 'web');
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
-
-  const accessToken = await generateAccessToken(
-    session.user_id,
-    c.env.JWT_PRIVATE_KEY,
-    ACCESS_TOKEN_TTL_SECONDS,
-  );
-
-  return c.json<AccessTokenResponse>({ access_token: accessToken }, 201);
-});
-
-auth.get('/user', authenticate('access'), async (c) => {
+auth.get('/user', authenticateWebSession(), async (c) => {
   const user = await findUserById(c.env.DB, c.get('sub'));
 
   if (!user) {
@@ -454,7 +409,7 @@ auth.get('/user', authenticate('access'), async (c) => {
   });
 });
 
-auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema), async (c) => {
+auth.patch('/user', authenticateWebSession(), validateZ('json', updateUserSchema), async (c) => {
   const userId = c.get('sub');
   const { email, name, settings, pub_key, priv_key } = c.req.valid('json');
   const normalizedEmail = email?.trim().toLowerCase();
@@ -518,7 +473,7 @@ auth.patch('/user', authenticate('access'), validateZ('json', updateUserSchema),
   });
 });
 
-auth.delete('/user', authenticate('access'), validateZ('json', deleteUserSchema), async (c) => {
+auth.delete('/user', authenticateWebSession(), validateZ('json', deleteUserSchema), async (c) => {
   const userId = c.get('sub');
   const { confirm_email } = c.req.valid('json');
   const user = await findUserById(c.env.DB, userId);
@@ -569,12 +524,11 @@ auth.post('/email-verification/validate', validateZ('json', verifyEmailSchema), 
   await consumeEmailToken(c.env.DB, record.id, Date.now());
   await invalidateEmailTokens(c.env.DB, userId, 'email_change');
 
-  const accessToken = await createSession(c, userId);
+  await createSession(c, userId);
 
   return c.json<EmailVerifyResponse>({
     ok: true,
     email: record.email,
-    access_token: accessToken,
     purpose: 'email_change',
   });
 });

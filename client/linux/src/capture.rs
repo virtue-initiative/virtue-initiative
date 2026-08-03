@@ -1,7 +1,9 @@
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, anyhow};
-use virtue_core::{CoreError, CoreResult, PlatformHooks, Screenshot, ScreenshotHooks};
+use virtue_core::{
+    CoreError, CoreResult, LifecycleHooks, PlatformHooks, Screenshot, ScreenshotHooks,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub enum CaptureBackend {
@@ -195,18 +197,10 @@ fn run_capture_command(
     Ok(output.stdout)
 }
 
-fn parse_btime_ms(proc_stat: &str) -> Option<i64> {
-    for line in proc_stat.lines() {
-        if let Some(rest) = line.strip_prefix("btime ") {
-            return rest.trim().parse::<i64>().ok().map(|secs| secs * 1000);
-        }
-    }
-    None
-}
-
 // Parses `journalctl --list-boots -o json` output and returns the last-entry timestamp
 // (µs → ms) of the previous boot (index == -1). Returns None if there is no previous boot,
-// the output is unparseable, or journald has no persistent log.
+// the output is unparseable, or journald has no persistent log. This is a floor/approximation
+// of the true logout/shutdown time, not exact — see `LifecycleHooks::get_last_logout_utc_ms`.
 fn parse_last_shutdown_ms(json: &str) -> Option<i64> {
     let entries: Vec<serde_json::Value> = serde_json::from_str(json).ok()?;
     for entry in &entries {
@@ -244,7 +238,181 @@ impl ScreenshotHooks for LinuxPlatformHooks {
         })
     }
 
-    fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>> {
+    fn is_locked_or_screensaver(&self) -> CoreResult<bool> {
+        // Prefer logind's per-session `LockedHint`: the locker reports it across desktops
+        // (xss-lock, GNOME, KDE, …), so it covers minimal X11 setups like i3 + i3lock that
+        // expose no ScreenSaver D-Bus interface at all. Fall back to the freedesktop/GNOME
+        // ScreenSaver `GetActive` for environments that surface a screensaver but no
+        // LockedHint. Any error / missing service ⇒ false (fall back to the diff gate),
+        // never silently suppress.
+        if query_session_locked() == Some(true) {
+            return Ok(true);
+        }
+        Ok(query_screensaver_active().unwrap_or(false))
+    }
+}
+
+// Blocking logind proxies (system bus). `LockedHint` lives on the per-session object, so we
+// resolve the caller's primary graphical session via the user object's `Display` property
+// (the same path `loginctl` uses) and read the hint there.
+#[zbus::proxy(
+    interface = "org.freedesktop.login1.Manager",
+    default_service = "org.freedesktop.login1",
+    default_path = "/org/freedesktop/login1",
+    gen_async = false,
+    gen_blocking = true
+)]
+trait Login1Manager {
+    fn get_user(&self, uid: u32) -> zbus::Result<zbus::zvariant::OwnedObjectPath>;
+}
+
+#[zbus::proxy(
+    interface = "org.freedesktop.login1.User",
+    default_service = "org.freedesktop.login1",
+    gen_async = false,
+    gen_blocking = true
+)]
+trait Login1User {
+    /// `(session_id, object_path)` of the user's primary graphical session.
+    #[zbus(property)]
+    fn display(&self) -> zbus::Result<(String, zbus::zvariant::OwnedObjectPath)>;
+}
+
+#[zbus::proxy(
+    interface = "org.freedesktop.login1.Session",
+    default_service = "org.freedesktop.login1",
+    gen_async = false,
+    gen_blocking = true
+)]
+trait Login1Session {
+    #[zbus(property)]
+    fn locked_hint(&self) -> zbus::Result<bool>;
+    /// Session start time, µs since epoch.
+    #[zbus(property)]
+    fn timestamp(&self) -> zbus::Result<u64>;
+}
+
+/// Real UID of this process, read from `/proc/self/status` (no libc dependency).
+fn current_uid() -> Option<u32> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    status.lines().find_map(|line| {
+        line.strip_prefix("Uid:")
+            .and_then(|rest| rest.split_whitespace().next())
+            .and_then(|uid| uid.parse().ok())
+    })
+}
+
+/// Resolve the caller's primary graphical session via the user object's
+/// `Display` property (the same path `loginctl` uses).
+fn resolve_primary_session<'c>(
+    connection: &'c zbus::blocking::Connection,
+) -> Option<Login1SessionProxy<'c>> {
+    let manager = Login1ManagerProxy::new(connection).ok()?;
+    let user_path = manager.get_user(current_uid()?).ok()?;
+    let user = Login1UserProxy::builder(connection)
+        .path(user_path)
+        .ok()?
+        .build()
+        .ok()?;
+    let (_session_id, session_path) = user.display().ok()?;
+    Login1SessionProxy::builder(connection)
+        .path(session_path)
+        .ok()?
+        .build()
+        .ok()
+}
+
+/// `Some(true)`/`Some(false)` if logind reports the primary graphical session's lock state,
+/// `None` if logind is unavailable or the session can't be resolved (⇒ fall back to the
+/// screensaver query).
+fn query_session_locked() -> Option<bool> {
+    let connection = zbus::blocking::Connection::system().ok()?;
+    let session = resolve_primary_session(&connection)?;
+    session.locked_hint().ok()
+}
+
+/// The primary graphical session's start time (logind's `Timestamp` property,
+/// µs since epoch, converted to ms), or `None` if logind is unavailable or the
+/// session can't be resolved.
+fn query_session_login_time_ms() -> Option<i64> {
+    let connection = zbus::blocking::Connection::system().ok()?;
+    let session = resolve_primary_session(&connection)?;
+    session.timestamp().ok().map(|us| (us / 1000) as i64)
+}
+
+// Blocking D-Bus proxies for the two common `GetActive()` providers. We use the
+// blocking flavour (gen_async = false) because `is_locked_or_screensaver` is a
+// synchronous hook called from the event bus.
+#[zbus::proxy(
+    interface = "org.freedesktop.ScreenSaver",
+    default_service = "org.freedesktop.ScreenSaver",
+    default_path = "/org/freedesktop/ScreenSaver",
+    gen_async = false,
+    gen_blocking = true
+)]
+trait FreedesktopScreenSaver {
+    fn get_active(&self) -> zbus::Result<bool>;
+}
+
+#[zbus::proxy(
+    interface = "org.gnome.ScreenSaver",
+    default_service = "org.gnome.ScreenSaver",
+    default_path = "/org/gnome/ScreenSaver",
+    gen_async = false,
+    gen_blocking = true
+)]
+trait GnomeScreenSaver {
+    fn get_active(&self) -> zbus::Result<bool>;
+}
+
+fn query_screensaver_active() -> Option<bool> {
+    let connection = zbus::blocking::Connection::session().ok()?;
+
+    if let Ok(proxy) = FreedesktopScreenSaverProxy::new(&connection)
+        && let Ok(active) = proxy.get_active()
+    {
+        return Some(active);
+    }
+
+    if let Ok(proxy) = GnomeScreenSaverProxy::new(&connection)
+        && let Ok(active) = proxy.get_active()
+    {
+        return Some(active);
+    }
+
+    None
+}
+
+fn read_clock_ms(clock_id: libc::clockid_t) -> CoreResult<i64> {
+    let mut ts = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `ts` is a valid, owned `timespec` we pass as an out-param; `clock_gettime`
+    // does not retain the pointer past the call.
+    let rc = unsafe { libc::clock_gettime(clock_id, &mut ts) };
+    if rc != 0 {
+        return Err(CoreError::CommandFailed(
+            std::io::Error::last_os_error().to_string(),
+        ));
+    }
+    Ok(ts.tv_sec * 1000 + ts.tv_nsec / 1_000_000)
+}
+
+impl LifecycleHooks for LinuxPlatformHooks {
+    fn get_boot_clock_ms(&self) -> CoreResult<i64> {
+        read_clock_ms(libc::CLOCK_BOOTTIME)
+    }
+
+    fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
+        read_clock_ms(libc::CLOCK_MONOTONIC)
+    }
+
+    fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {
+        Ok(query_session_login_time_ms())
+    }
+
+    fn get_last_logout_utc_ms(&self) -> CoreResult<Option<i64>> {
         let output = Command::new("journalctl")
             .args(["--list-boots", "-o", "json"])
             .stdin(Stdio::null())
@@ -261,12 +429,6 @@ impl ScreenshotHooks for LinuxPlatformHooks {
         let json = String::from_utf8_lossy(&output.stdout);
         Ok(parse_last_shutdown_ms(&json))
     }
-
-    fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>> {
-        let stat = std::fs::read_to_string("/proc/stat")
-            .map_err(|e| CoreError::CommandFailed(e.to_string()))?;
-        Ok(parse_btime_ms(&stat))
-    }
 }
 
 impl PlatformHooks for LinuxPlatformHooks {}
@@ -274,7 +436,7 @@ impl PlatformHooks for LinuxPlatformHooks {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use virtue_core::ScreenshotHooks;
+    use virtue_core::{LifecycleHooks, ScreenshotHooks};
 
     #[test]
     fn is_session_unavailable_text_matches_known_error_strings() {
@@ -329,15 +491,20 @@ mod tests {
     }
 
     #[test]
-    fn parse_btime_ms_extracts_boot_time_from_proc_stat() {
-        let content = "cpu  1234 0 5678 9999\nbtime 1717200000\ncpu0 0 0 0 0\n";
-        assert_eq!(parse_btime_ms(content), Some(1_717_200_000_000));
-    }
-
-    #[test]
-    fn parse_btime_ms_returns_none_when_btime_absent() {
-        let content = "cpu  1234 0 5678 9999\nprocs_running 1\n";
-        assert_eq!(parse_btime_ms(content), None);
+    fn boot_clock_includes_at_least_as_much_as_monotonic_clock() {
+        let hooks = LinuxPlatformHooks::new();
+        let boot = hooks
+            .get_boot_clock_ms()
+            .expect("boot clock should not fail");
+        let mono = hooks
+            .get_monotonic_clock_ms()
+            .expect("monotonic clock should not fail");
+        assert!(boot >= 0);
+        assert!(mono >= 0);
+        assert!(
+            boot >= mono,
+            "CLOCK_BOOTTIME ({boot}) should be >= CLOCK_MONOTONIC ({mono}) since it includes suspend"
+        );
     }
 
     #[test]

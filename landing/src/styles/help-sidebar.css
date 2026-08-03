@@ -16,7 +16,6 @@
 .help-sidebar-section {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
 }
 
 .help-sidebar-section-summary {
@@ -24,10 +23,13 @@
   display: flex;
   align-items: center;
   gap: 0;
-  border-radius: 8px;
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-sm);
   padding-right: 0.25rem;
   cursor: pointer;
-  transition: background 0.12s;
+  transition:
+    background 0.12s,
+    color 0.12s;
 }
 
 .help-sidebar-section-summary::-webkit-details-marker {
@@ -51,18 +53,23 @@
   display: block;
   width: 100%;
   padding: 0.55rem 0.8rem;
-  border-radius: 8px;
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-sm);
   color: var(--text);
+  font-family: var(--font-serif);
   font-size: 0.96rem;
   font-weight: 500;
   letter-spacing: -0.01em;
   line-height: 1.38;
   text-decoration: none;
-  transition: background 0.12s;
+  transition:
+    background 0.12s,
+    color 0.12s;
 }
 
 .help-sidebar-section-summary .help-sidebar-item {
   flex: 1;
+  border-left: none;
 }
 
 .help-sidebar-section-summary .help-sidebar-item:hover {
@@ -70,17 +77,21 @@
 }
 
 .help-sidebar-item:hover {
-  background: var(--bg-subtle);
+  background: var(--paper-2);
+  color: var(--forest);
   text-decoration: none;
 }
 
 .help-sidebar-section-summary:hover,
 .help-sidebar-section-summary:focus-visible {
-  background: var(--bg-subtle);
+  background: var(--paper-2);
+  color: var(--forest);
 }
 
 .help-sidebar-section-summary.is-active {
-  background: var(--accent);
+  background: var(--paper-2);
+  border-left-color: var(--forest);
+  color: var(--forest);
 }
 
 .help-sidebar-section-summary.is-active .help-sidebar-item.is-active {
@@ -88,12 +99,13 @@
 }
 
 .help-sidebar-section-summary.is-active .help-sidebar-toggle {
-  color: var(--surface);
+  color: var(--forest);
 }
 
 .help-sidebar-item.is-active {
-  background: var(--accent);
-  color: var(--surface);
+  background: var(--paper-2);
+  border-left-color: var(--forest);
+  color: var(--forest);
 }
 
 .help-sidebar-toggle {
@@ -122,7 +134,7 @@
 }
 
 .help-sidebar-item-child {
-  padding-left: 1.9rem;
+  padding-left: calc(1.9rem + 3px);
   font-size: 0.93rem;
   font-weight: 450;
 }
@@ -269,7 +281,7 @@
   }
 
   .help-sidebar-drawer .help-sidebar-item-child {
-    padding-left: 1.65rem;
+    padding-left: calc(1.65rem + 3px);
   }
 
   .help-sidebar-drawer .help-sidebar-section-summary {

@@ -5,7 +5,7 @@ This repository is split across several independently-tested areas. When you cha
 ## General rules
 
 - Prefer matching the existing GitHub Actions workflows in `.github/workflows/`.
-- Use `npm ci` for Node projects when you need a clean install matching CI.
+- Use `bun install` for Node projects when you need a clean install matching CI.
 - Use `cargo` commands from `client/` for Rust workspace checks unless a section below says otherwise.
 - If you only change docs or non-executable assets, format checks may still be relevant if those files are covered by Prettier.
 - Release packaging steps are listed below because CI runs them, but they are usually only needed when validating packaging or release changes.
@@ -13,6 +13,7 @@ This repository is split across several independently-tested areas. When you cha
 ## Repo-wide quick map
 
 - `api/`: Cloudflare Workers API
+- `api-donate/`: standalone donations Worker (Stripe Checkout)
 - `web/`: main web app
 - `landing/`: marketing site and help pages
 - `shared-web/`: shared web assets used by `web` and `landing`
@@ -21,33 +22,50 @@ This repository is split across several independently-tested areas. When you cha
 
 ## Web/API CI (`.github/workflows/web.yml`)
 
-Run this when touching `api/`, `web/`, `landing/`, `shared-web/`, or `theme.json`.
+Run this when touching `api/`, `api-donate/`, `web/`, `landing/`, `shared-web/`, or `theme.json`.
 
 ### API
 
 From `api/`:
 
 ```bash
-npm ci
-npm run typecheck
-npm test
-npm run prettier:check
+bun install
+bun run typecheck
+bun test
+bun run format:check
 ```
 
 Notes:
 
-- `npm test` runs `vitest run`.
+- `bun test` runs `vitest run`.
 - API tests are documented in `api/TESTING.md`.
+
+### Donate API
+
+From `api-donate/`:
+
+```bash
+bun install
+bun run typecheck
+bun test
+bun run format:check
+```
+
+Notes:
+
+- `bun test` runs `vitest run` (Stripe calls are mocked via `cloudflare:test` `fetchMock`; webhook signatures are generated locally).
+- Standalone Worker with separate `staging`/`prod` environments (own D1 database and route each), same pattern as `api/`. Deploys via `bun run deploy:staging` or `bun run deploy:prod`.
+- Requires secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` per environment (`wrangler secret put ... --env staging|prod`).
 
 ### Web app
 
 From `web/`:
 
 ```bash
-npm ci
-npm run typecheck
-npm run prettier:check
-npm run build
+bun install
+bun run typecheck
+bun run format:check
+bun run build
 ```
 
 ### Landing site
@@ -55,10 +73,10 @@ npm run build
 From `landing/`:
 
 ```bash
-npm ci
-GITHUB_TOKEN=stub npm run typecheck
-npm run prettier:check
-GITHUB_TOKEN=stub npm run build
+bun install
+GITHUB_TOKEN=stub bun run typecheck
+bun run format:check
+GITHUB_TOKEN=stub bun run build
 ```
 
 Notes:
@@ -73,20 +91,10 @@ Notes:
 From `shared-web/`:
 
 ```bash
-npm run prettier:check
+bun run format:check
 ```
 
 Also rerun the dependent checks in both `web/` and `landing/`, since that is where breakage will surface.
-
-### Web formatting helper
-
-If you need to apply formatting across the web projects instead of just checking:
-
-From the repo root:
-
-```bash
-./scripts/format-all-web.sh
-```
 
 ## Client version check (`.github/workflows/version-check.yml`)
 
@@ -225,13 +233,14 @@ Notes:
 
 ## Deployment workflows
 
-`deploy.yml` is not a PR validation workflow. It runs on pushes to `main` and `staging` and deploys `web`, `api`, and `landing`.
+`deploy.yml` is not a PR validation workflow. It runs on pushes to `main` and `staging` and deploys `web`, `api`, `landing`, and `api-donate`.
 
 If you need to mirror deployment locally:
 
-- `api/`: `npm run deploy:staging` or `npm run deploy:prod`
-- `web/`: `npm run deploy:staging` or `npm run deploy:prod`
-- `landing/`: `npm run deploy:staging` or `npm run deploy:prod`
+- `api/`: `bun run deploy:staging` or `bun run deploy:prod`
+- `web/`: `bun run deploy:staging` or `bun run deploy:prod`
+- `landing/`: `bun run deploy:staging` or `bun run deploy:prod`
+- `api-donate/`: `bun run deploy:staging` or `bun run deploy:prod`
 
 These require the appropriate Cloudflare credentials and, for landing, GitHub release access.
 

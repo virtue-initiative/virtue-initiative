@@ -7,18 +7,18 @@ import {
   createDeviceForUser,
   listEmailDeliveries,
   markUserEmailVerified,
-  signupAndGetToken,
+  signupAndGetCookie,
 } from './helpers';
 
 beforeEach(clearDB);
 
 describe('Main device routes', () => {
   it('lists devices owned by the authenticated user', async () => {
-    const { token } = await signupAndGetToken('alice@example.com');
-    await createDeviceForUser(token, 'Work Laptop', 'linux');
+    const { cookie } = await signupAndGetCookie('alice@example.com');
+    await createDeviceForUser(cookie, 'Work Laptop', 'linux');
 
     const res = await SELF.fetch(`${BASE}/device`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: authHeaders(cookie),
     });
 
     expect(res.status).toBe(200);
@@ -28,12 +28,12 @@ describe('Main device routes', () => {
   });
 
   it('updates an owned device', async () => {
-    const { token } = await signupAndGetToken('bob@example.com');
-    const device = await createDeviceForUser(token, 'Old Name', 'macos');
+    const { cookie } = await signupAndGetCookie('bob@example.com');
+    const device = await createDeviceForUser(cookie, 'Old Name', 'macos');
 
     const res = await SELF.fetch(`${BASE}/device/${device.id}`, {
       method: 'PATCH',
-      headers: authHeaders(token),
+      headers: authHeaders(cookie),
       body: JSON.stringify({ name: 'New Name' }),
     });
 
@@ -41,7 +41,7 @@ describe('Main device routes', () => {
     expect(await res.json()).toEqual({ id: device.id, updated: true });
 
     const listRes = await SELF.fetch(`${BASE}/device`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: authHeaders(cookie),
     });
     const list = (await listRes.json()) as Array<{ id: string; name: string }>;
     expect(list.find((item) => item.id === device.id)).toMatchObject({
@@ -50,13 +50,13 @@ describe('Main device routes', () => {
   });
 
   it('forbids patching a device owned by another user', async () => {
-    const { token: ownerToken } = await signupAndGetToken('owner@example.com');
-    const { token: attackerToken } = await signupAndGetToken('attacker@example.com');
-    const device = await createDeviceForUser(ownerToken);
+    const { cookie: ownerCookie } = await signupAndGetCookie('owner@example.com');
+    const { cookie: attackerCookie } = await signupAndGetCookie('attacker@example.com');
+    const device = await createDeviceForUser(ownerCookie);
 
     const res = await SELF.fetch(`${BASE}/device/${device.id}`, {
       method: 'PATCH',
-      headers: authHeaders(attackerToken),
+      headers: authHeaders(attackerCookie),
       body: JSON.stringify({ name: 'nope' }),
     });
 
@@ -64,15 +64,15 @@ describe('Main device routes', () => {
   });
 
   it('lists owner devices to an accepted partner', async () => {
-    const { token: ownerToken } = await signupAndGetToken('owner2@example.com');
-    const { token: partnerToken, userId: partnerUserId } =
-      await signupAndGetToken('partner2@example.com');
+    const { cookie: ownerCookie } = await signupAndGetCookie('owner2@example.com');
+    const { cookie: partnerCookie, userId: partnerUserId } =
+      await signupAndGetCookie('partner2@example.com');
     await markUserEmailVerified(partnerUserId);
-    const device = await createDeviceForUser(ownerToken, 'Owner Phone', 'android');
+    const device = await createDeviceForUser(ownerCookie, 'Owner Phone', 'android');
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
-      headers: authHeaders(ownerToken),
+      headers: authHeaders(ownerCookie),
       body: JSON.stringify({ email: 'partner2@example.com' }),
     });
     expect(inviteRes.status).toBe(201);
@@ -85,13 +85,13 @@ describe('Main device routes', () => {
 
     const acceptRes = await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
-      headers: authHeaders(partnerToken),
+      headers: authHeaders(partnerCookie),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
     expect(acceptRes.status).toBe(200);
 
     const beforeConfirmRes = await SELF.fetch(`${BASE}/device`, {
-      headers: { Authorization: `Bearer ${partnerToken}` },
+      headers: authHeaders(partnerCookie),
     });
     expect(beforeConfirmRes.status).toBe(200);
     const beforeConfirm = (await beforeConfirmRes.json()) as Array<{ id: string }>;
@@ -99,17 +99,17 @@ describe('Main device routes', () => {
   });
 
   it('deletes an owned device and sends a notification email', async () => {
-    const { token, userId } = await signupAndGetToken('delete-device@example.com');
+    const { cookie, userId } = await signupAndGetCookie('delete-device@example.com');
     await markUserEmailVerified(userId);
-    const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
+    const { cookie: partnerCookie, userId: partnerUserId } = await signupAndGetCookie(
       'delete-device-partner@example.com',
     );
     await markUserEmailVerified(partnerUserId);
-    const device = await createDeviceForUser(token, 'Delete Me', 'linux');
+    const device = await createDeviceForUser(cookie, 'Delete Me', 'linux');
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
-      headers: authHeaders(token),
+      headers: authHeaders(cookie),
       body: JSON.stringify({
         email: 'delete-device-partner@example.com',
       }),
@@ -125,19 +125,19 @@ describe('Main device routes', () => {
 
     const acceptRes = await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
-      headers: authHeaders(partnerToken),
+      headers: authHeaders(partnerCookie),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
     expect(acceptRes.status).toBe(200);
 
     const deleteRes = await SELF.fetch(`${BASE}/device/${device.id}`, {
       method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: authHeaders(cookie),
     });
     expect(deleteRes.status).toBe(204);
 
     const listRes = await SELF.fetch(`${BASE}/device`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: authHeaders(cookie),
     });
     const list = (await listRes.json()) as Array<{ id: string }>;
     expect(list.find((item) => item.id === device.id)).toBeUndefined();
@@ -163,15 +163,15 @@ describe('Main device routes', () => {
   });
 
   it('sends deletion notifications to accepted partners even if emails are unverified', async () => {
-    const { token } = await signupAndGetToken('delete-device-unverified@example.com');
-    const { token: partnerToken } = await signupAndGetToken(
+    const { cookie } = await signupAndGetCookie('delete-device-unverified@example.com');
+    const { cookie: partnerCookie } = await signupAndGetCookie(
       'delete-device-unverified-partner@example.com',
     );
-    const device = await createDeviceForUser(token, 'Unverified Delete', 'linux');
+    const device = await createDeviceForUser(cookie, 'Unverified Delete', 'linux');
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
-      headers: authHeaders(token),
+      headers: authHeaders(cookie),
       body: JSON.stringify({
         email: 'delete-device-unverified-partner@example.com',
       }),
@@ -187,14 +187,14 @@ describe('Main device routes', () => {
 
     const acceptRes = await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
-      headers: authHeaders(partnerToken),
+      headers: authHeaders(partnerCookie),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
     expect(acceptRes.status).toBe(200);
 
     const deleteRes = await SELF.fetch(`${BASE}/device/${device.id}`, {
       method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: authHeaders(cookie),
     });
     expect(deleteRes.status).toBe(204);
 

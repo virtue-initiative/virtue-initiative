@@ -8,12 +8,11 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-const BUCKET_NAME =
-  process.argv[2] === 'prod' ? 'virtueinitiative-images' : 'virtueinitiative-staging-images';
+const BUCKET_NAME = process.argv[2] === 'prod' ? 'app-bucket' : 'staging-app-bucket';
 const DB_ID =
   process.argv[2] === 'prod'
-    ? 'ff636ee0-a8f9-44a1-8a16-f0a162cf1c73'
-    : '9ec06359-1165-48bc-a73a-a870d9082980';
+    ? '141a161a-a16b-41cb-a8b3-e5e40803391a'
+    : 'f00a68e9-9ca0-4fa9-98e9-c135a489df3f';
 
 function readWranglerToken() {
   const configPath = join(homedir(), '.config', '.wrangler', 'config', 'default.toml');

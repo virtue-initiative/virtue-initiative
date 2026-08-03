@@ -53,7 +53,7 @@ pub fn ensure_agent_running(paths: &ClientPaths, exe_path: &Path) -> Result<()> 
         if !service_is_loaded(&service_id)? {
             return Err(anyhow!(
                 "launchctl bootstrap failed: {}",
-                bootstrap_status.stderr.trim()
+                bootstrap_status.describe_failure()
             ));
         }
     }
@@ -63,7 +63,7 @@ pub fn ensure_agent_running(paths: &ClientPaths, exe_path: &Path) -> Result<()> 
     if !kickstart.success {
         return Err(anyhow!(
             "launchctl kickstart failed: {}",
-            kickstart.stderr.trim()
+            kickstart.describe_failure()
         ));
     }
 
@@ -83,17 +83,19 @@ pub fn stop_agent(paths: &ClientPaths) -> Result<()> {
         if !by_plist.success && wait_for_loaded_state(&service_id, false, STOP_WAIT_TIMEOUT)? {
             failures.push(format!(
                 "failed to unload launch agent: {}; {}",
-                by_service.stderr.trim(),
-                by_plist.stderr.trim()
+                by_service.describe_failure(),
+                by_plist.describe_failure()
             ));
         }
     }
 
     let disable = run_launchctl(&["disable", &service_id])?;
-    if !disable.success && !is_missing_target_error(&disable.stderr) {
+    if !disable.success
+        && !is_missing_target_error(&format!("{} {}", disable.stdout, disable.stderr))
+    {
         failures.push(format!(
             "failed to disable launch agent override: {}",
-            disable.stderr.trim()
+            disable.describe_failure()
         ));
     }
 
@@ -132,7 +134,36 @@ pub fn is_agent_loaded() -> Result<bool> {
 
 struct LaunchctlOutput {
     success: bool,
+    exit_code: Option<i32>,
+    stdout: String,
     stderr: String,
+}
+
+impl LaunchctlOutput {
+    /// `launchctl` often reports failures on stdout (e.g. plain "Bad
+    /// request." from `kickstart`) rather than stderr, and can exit nonzero
+    /// with both streams empty. Combine everything available so callers
+    /// never surface a blank error message.
+    fn describe_failure(&self) -> String {
+        let stdout = self.stdout.trim();
+        let stderr = self.stderr.trim();
+        let mut parts = Vec::new();
+        if !stdout.is_empty() {
+            parts.push(format!("stdout: {stdout}"));
+        }
+        if !stderr.is_empty() {
+            parts.push(format!("stderr: {stderr}"));
+        }
+        if parts.is_empty() {
+            parts.push(format!(
+                "exit code {}, no output",
+                self.exit_code
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "unknown".to_string())
+            ));
+        }
+        parts.join("; ")
+    }
 }
 
 fn run_launchctl(args: &[&str]) -> Result<LaunchctlOutput> {
@@ -143,6 +174,8 @@ fn run_launchctl(args: &[&str]) -> Result<LaunchctlOutput> {
 
     Ok(LaunchctlOutput {
         success: output.status.success(),
+        exit_code: output.status.code(),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
     })
 }
@@ -204,17 +237,21 @@ fn wait_for_loaded_state(
 
 fn render_plist(exe_path: &Path, paths: &ClientPaths) -> String {
     let exe = xml_escape(&exe_path.display().to_string());
+    // `tracing-appender` owns `virtue.<date>` in this same directory; these
+    // launchd-redirected files are only a fallback safety net for output
+    // emitted before `tracing` initializes, or panics that bypass it, so they
+    // use distinct names to avoid colliding with the rotated log files.
     let stdout_path = xml_escape(
         &paths
             .logs_dir
-            .join("virtue-daemon.log")
+            .join("virtue-daemon-launchd.log")
             .display()
             .to_string(),
     );
     let stderr_path = xml_escape(
         &paths
             .logs_dir
-            .join("virtue-daemon.error.log")
+            .join("virtue-daemon-launchd.error.log")
             .display()
             .to_string(),
     );

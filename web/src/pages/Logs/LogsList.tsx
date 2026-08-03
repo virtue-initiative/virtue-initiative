@@ -6,9 +6,9 @@ import {
   FeedLog,
   formatDayAndTime,
   getLogCategory,
-  getLogIcon,
   getLogMessage,
   LogDetailDialog,
+  LogIcon,
 } from './shared';
 import { getRiskLevel } from '@virtueinitiative/shared-web/risk';
 
@@ -97,7 +97,9 @@ export function LogsList({
                   {item.image_w !== undefined ? (
                     <EventImage eventId={item.id} viewerId={viewerId} />
                   ) : (
-                    <div class="logs-thumb-placeholder logs-thumb-icon">{getLogIcon(item)}</div>
+                    <div class="logs-thumb-placeholder logs-thumb-icon">
+                      <LogIcon log={item} />
+                    </div>
                   )}
                 </div>
                 <div class="logs-vrow-body">

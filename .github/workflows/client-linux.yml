@@ -22,6 +22,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Install OCR system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libleptonica-dev libtesseract-dev libclang-dev clang
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -31,6 +38,7 @@ jobs:
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
         with:
+          cache-on-failure: true
           workspaces: |
             client -> target
 
@@ -58,8 +66,26 @@ jobs:
         run: cargo test -p virtue-linux
         working-directory: client
 
+      # build-deb-docker.sh deliberately builds with its own CARGO_HOME and
+      # target dir (client/.docker-cargo-home, client/target-docker) instead
+      # of the host paths the "Cache Rust artifacts" step above manages —
+      # artifacts built by the container's older glibc aren't compatible
+      # with binaries linked against the host runner's glibc. That means
+      # they need their own cache entry, or this step re-downloads and
+      # recompiles the entire dependency tree (~370 crates) from scratch on
+      # every run.
+      - name: Cache Docker Rust artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            client/.docker-cargo-home
+            client/target-docker
+          key: linux-deb-docker-v1-${{ hashFiles('client/Cargo.lock') }}
+          restore-keys: |
+            linux-deb-docker-v1-
+
       - name: Build Linux .deb package
-        run: ./linux/scripts/build-deb.sh
+        run: ./linux/scripts/build-deb-docker.sh
         working-directory: client
 
       - name: Resolve version info
@@ -78,7 +104,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: virtue-linux-${{ steps.version.outputs.build_label }}
-          path: client/target/debian/virtue-linux_${{ steps.version.outputs.build_label }}_${{ steps.version.outputs.arch }}.deb
+          path: client/target-docker/debian/virtue-linux_${{ steps.version.outputs.build_label }}_${{ steps.version.outputs.arch }}.deb
 
       - name: Clear existing Linux release assets
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
@@ -95,5 +121,5 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./scripts/publish-release.sh "${{ steps.version.outputs.release_tag }}" "${{ steps.version.outputs.build_label }}" "target/debian/virtue-linux_${{ steps.version.outputs.build_label }}_${{ steps.version.outputs.arch }}.deb" "${{ github.ref_name == 'main' && 'stable' || 'dev' }}"
+        run: ./scripts/publish-release.sh "${{ steps.version.outputs.release_tag }}" "${{ steps.version.outputs.build_label }}" "target-docker/debian/virtue-linux_${{ steps.version.outputs.build_label }}_${{ steps.version.outputs.arch }}.deb" "${{ github.ref_name == 'main' && 'stable' || 'dev' }}"
         working-directory: client

@@ -1,109 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
-import { Device, LogQueryResult, useAPIContext, useDevices, usePartners } from '../../utils/api';
+import { LogQueryResult, useAPIContext, useDevices, usePartners } from '../../utils/api';
+import { PageHeading } from '../../components/PageHeading';
+import { LogsIcon } from '../../components/icons';
 import { LogsGallery } from './LogsGallery';
 import { LogsList } from './LogsList';
 import { getRiskRating, type RiskRating } from '@virtueinitiative/shared-web/risk';
-import { FeedLog, formatDayLabel, getLogCategory, LOG_TYPES } from './shared';
-
-const LOG_CATEGORIES = [
-  ...new Set(
-    LOG_TYPES.map((type) =>
-      getLogCategory({ type, data: {}, id: '', device_id: '', ts: 0, created_at: 0 }),
-    ),
-  ),
-];
+import { FeedLog, formatDayLabel, getLogCategory, LOG_CATEGORIES } from './shared';
 import './style.css';
 import { useUrlState } from '../../hooks/useUrlState';
-import {
-  Button,
-  Dialog,
-  DialogHeader,
-  Field,
-  IconButton,
-  Select,
-} from '@virtueinitiative/shared-web';
-import { loadCachedDataFeed } from '../../utils/api/data-cache';
+import { Button, Dialog, DialogHeader, Field, Select } from '@virtueinitiative/shared-web';
+import { cacheClient } from '../../utils/cache/client';
 import { formatRelativeTimestamp } from '../../utils/time';
-
-interface DeviceGroup {
-  label: string;
-  userId: string | null;
-  devices: Device[];
-}
-
-interface UserLabel {
-  id: string;
-  label: string;
-}
-
-function ExpandIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      fill="none"
-      viewBox="0 0 24 24"
-      strokeWidth={1.5}
-      stroke="currentColor"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15"
-      />
-    </svg>
-  );
-}
-
-function ExitFullscreenIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      fill="none"
-      viewBox="0 0 24 24"
-      strokeWidth={1.5}
-      stroke="currentColor"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M9 9V4.5M9 9H4.5M9 9 3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5 5.25 5.25"
-      />
-    </svg>
-  );
-}
-
-function MenuIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      fill="none"
-      viewBox="0 0 24 24"
-      strokeWidth={1.5}
-      stroke="currentColor"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"
-      />
-    </svg>
-  );
-}
-
-function CloseIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      fill="none"
-      viewBox="0 0 24 24"
-      strokeWidth={1.5}
-      stroke="currentColor"
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
-    </svg>
-  );
-}
 
 function dateToBoundsStart(d: string): number {
   return new Date(d + 'T00:00:00').getTime();
@@ -119,7 +27,15 @@ function shiftDate(dateStr: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-export function Logs() {
+type RangeKey = 'day' | 'week' | 'month';
+
+const RANGE_SEGMENTS = [
+  { label: 'Past day', value: 'day' },
+  { label: 'Past week', value: 'week' },
+  { label: 'Past month', value: 'month' },
+];
+
+export function Logs({ userId: routeUserId }: { userId?: string }) {
   const api = useAPIContext();
   const userId = api?.userId ?? null;
   const { path } = useLocation();
@@ -127,7 +43,6 @@ export function Logs() {
   const { watchings: watching, loaded: partnersLoaded } = usePartners();
 
   const today = new Date().toISOString().slice(0, 10);
-  const yesterday = shiftDate(today, -1);
   const oneMonthAgo = (() => {
     const d = new Date();
     d.setMonth(d.getMonth() - 1);
@@ -139,11 +54,7 @@ export function Logs() {
     'string',
     null,
   );
-  const [selectedUser, setSelectedUser] = useUrlState<string | null>('user_id', 'string', null);
-  const [galleryFullscreen, setGalleryFullscreen] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [startDate, setStartDate] = useUrlState('start', 'string', yesterday);
-  const [endDate, setEndDate] = useUrlState('end', 'string', today);
+  const [range, setRange] = useUrlState<RangeKey>('range', 'string', 'day');
   const [visibleDate, setVisibleDate] = useState<string | null>(null);
   const filterDialogRef = useRef<HTMLDialogElement>(null);
   type RiskFilter = 'all' | RiskRating;
@@ -154,19 +65,29 @@ export function Logs() {
     null,
   );
 
+  const endDate = today;
+  const startDate =
+    range === 'month'
+      ? oneMonthAgo
+      : range === 'week'
+        ? shiftDate(today, -7)
+        : shiftDate(today, -1); // 'day'
+
   const weekStart = dateToBoundsStart(startDate);
   const weekEnd = dateToBoundsEnd(endDate);
 
   const [logResult, setLogResult] = useState<LogQueryResult>({
     logs: [],
     complete: false,
+    processed: 0,
+    total: 0,
   });
-  const activeTargetUserId = selectedUser ?? userId;
+  const activeTargetUserId = routeUserId ?? userId;
   const scopeKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!api || !activeTargetUserId) {
-      setLogResult({ logs: [], complete: false });
+      setLogResult({ logs: [], complete: false, processed: 0, total: 0 });
       scopeKeyRef.current = null;
       return;
     }
@@ -212,16 +133,14 @@ export function Logs() {
       setEstimatedNextUpload(null);
       return;
     }
-    loadCachedDataFeed(userId, activeTargetUserId)
-      .then((feed) => {
-        const batches = feed.batches
-          .filter((b) => b.device_id === selectedDevice)
-          .sort((a, b) => a.end_time - b.end_time);
-        if (batches.length < 2) {
+    cacheClient
+      ?.getDeviceBatchEndTimes(userId, activeTargetUserId, selectedDevice)
+      .then((endTimes) => {
+        if (endTimes.length < 2) {
           setEstimatedNextUpload(null);
           return;
         }
-        const intervals = batches.slice(1).map((b, i) => b.end_time - batches[i].end_time);
+        const intervals = endTimes.slice(1).map((t, i) => t - endTimes[i]);
         intervals.sort((a, b) => a - b);
         const median = intervals[Math.floor(intervals.length / 2)];
         if (median > 0 && selectedDeviceInfo.last_upload_at) {
@@ -231,105 +150,47 @@ export function Logs() {
       .catch(() => {});
   }, [userId, activeTargetUserId, selectedDevice, selectedDeviceInfo?.last_upload_at]);
 
-  const { knownUsers, deviceGroups } = useMemo(() => {
-    if (!userId) {
-      return {
-        knownUsers: [] as UserLabel[],
-        deviceGroups: [] as DeviceGroup[],
-      };
-    }
-
-    const labels = new Map<string, string>();
-    labels.set(userId, 'My devices');
-    for (const partner of watchingList) {
-      labels.set(partner.user.id, partner.user.name ?? partner.user.email);
-    }
-
-    const grouped = new Map<string, Device[]>();
-    for (const device of deviceList) {
-      const current = grouped.get(device.owner) ?? [];
-      current.push(device);
-      grouped.set(device.owner, current);
-    }
-    for (const ownerId of labels.keys()) {
-      if (!grouped.has(ownerId)) {
-        grouped.set(ownerId, []);
-      }
-    }
-
-    return {
-      knownUsers: Array.from(labels.entries()).map(([id, label]) => ({
-        id,
-        label,
-      })),
-      deviceGroups: Array.from(grouped.entries())
-        .sort(([a], [b]) => (a === userId ? -1 : b === userId ? 1 : a.localeCompare(b)))
-        .map(([owner, ownerDevices]) => ({
-          label: labels.get(owner) ?? `${owner.slice(0, 8)}…`,
-          userId: owner === userId ? null : owner,
-          devices: ownerDevices,
-        })),
-    };
-  }, [deviceList, userId, watchingList]);
-
-  const activeGroup = useMemo(
-    () => deviceGroups.find((group) => group.userId === selectedUser) ?? null,
-    [deviceGroups, selectedUser],
+  const activeDevices = useMemo(
+    () => deviceList.filter((d) => d.owner === (activeTargetUserId ?? '')),
+    [deviceList, activeTargetUserId],
   );
-  const activeDevices = activeGroup?.devices ?? [];
-  const activeDeviceIds = useMemo(
-    () => new Set(activeDevices.map((device) => device.id)),
-    [activeDevices],
-  );
+
+  const pendingCount = selectedDeviceInfo
+    ? selectedDeviceInfo.pending_count
+    : activeDevices.reduce((sum, d) => sum + d.pending_count, 0);
 
   useEffect(() => {
-    if (sidebarLoading) {
-      return;
+    if (sidebarLoading) return;
+    if (selectedDevice && !activeDevices.some((d) => d.id === selectedDevice)) {
+      setSelectedDevice(null);
     }
-
-    if (selectedUser !== null && !deviceGroups.some((group) => group.userId === selectedUser)) {
-      select(null, null);
-      return;
-    }
-
-    if (selectedDevice && !activeDeviceIds.has(selectedDevice)) {
-      select(selectedUser, null);
-    }
-  }, [activeDeviceIds, deviceGroups, selectedDevice, selectedUser, sidebarLoading]);
-
-  const allDevices = useMemo(() => deviceGroups.flatMap((group) => group.devices), [deviceGroups]);
+  }, [activeDevices, selectedDevice, sidebarLoading]);
 
   const deviceName = (id: string) =>
-    allDevices.find((device) => device.id === id)?.name ?? `${id.slice(0, 8)}…`;
+    deviceList.find((device) => device.id === id)?.name ?? `${id.slice(0, 8)}…`;
+
   const groupLabel = (ownerId: string) =>
-    knownUsers.find((entry) => entry.id === ownerId)?.label ??
     watchingList.find((partner) => partner.user.id === ownerId)?.user.name ??
     watchingList.find((partner) => partner.user.id === ownerId)?.user.email ??
-    deviceGroups.find((group) => group.userId === ownerId)?.label ??
     `${ownerId.slice(0, 8)}…`;
 
-  function select(user: string | null, device: string | null) {
-    setSelectedUser(user);
-    setSelectedDevice(device);
-    setSidebarOpen(false);
-  }
-
   const baseTitle =
-    sidebarLoading && selectedUser
+    sidebarLoading && routeUserId
       ? 'Loading…'
-      : selectedUser
-        ? `${groupLabel(selectedUser)}'s logs`
+      : routeUserId
+        ? `${groupLabel(routeUserId)}'s logs`
         : 'My logs';
   const title = selectedDevice ? `${baseTitle} — ${deviceName(selectedDevice)}` : baseTitle;
-  const isGallery = path === '/logs/gallery';
+  const isGallery = path.endsWith('/gallery');
   const typeFilter = Array.isArray(rawTypeFilter) ? (rawTypeFilter[0] ?? null) : rawTypeFilter;
+
+  const logsBasePath = routeUserId ? `/logs/${routeUserId}` : '/logs';
 
   const items = useMemo(
     () =>
       (logs ?? []).filter((item) => {
         if (item.ts < weekStart || item.ts > weekEnd) return false;
-        if (typeFilter !== null && getLogCategory({ ...item, data: {} }) !== typeFilter)
-          return false;
+        if (typeFilter !== null && getLogCategory(item) !== typeFilter) return false;
         if (riskFilter !== 'all') {
           const rating = getRiskRating(item.risk);
           if (riskFilter === 'high' && rating !== 'high') return false;
@@ -354,111 +215,46 @@ export function Logs() {
     [logs, riskFilter, weekStart, weekEnd],
   );
 
-  useEffect(() => {
-    if (!isGallery) {
-      setGalleryFullscreen(false);
-    }
-  }, [isGallery]);
-
   return (
-    <div
-      class={`logs-page${isGallery && galleryFullscreen ? ' logs-page--gallery-fullscreen' : ''}`}
-    >
-      <button
-        class={`app-drawer-backdrop logs-sidebar-backdrop${sidebarOpen ? ' is-open' : ''}`}
-        type="button"
-        aria-label="Close logs sidebar"
-        onClick={() => setSidebarOpen(false)}
-      />
+    <div class="logs-page">
       <div class="logs-layout">
-        {!(isGallery && galleryFullscreen) && (
-          <aside class={`logs-sidebar${sidebarOpen ? ' is-open' : ''}`}>
-            <div class="app-drawer-header logs-sidebar-header">
-              <h2>Devices</h2>
-              <button
-                class="app-drawer-close logs-sidebar-close"
-                type="button"
-                aria-label="Close logs sidebar"
-                onClick={() => setSidebarOpen(false)}
-              >
-                <CloseIcon />
-              </button>
-            </div>
-            {sidebarLoading && <p class="logs-sidebar-loading">Loading…</p>}
-            {!sidebarLoading && deviceGroups.length === 0 && (
-              <div class="logs-sidebar-group">
-                <p class="logs-sidebar-group-label">My devices</p>
-                <p class="logs-sidebar-loading">No devices</p>
-              </div>
-            )}
-            {deviceGroups.map((group) => (
-              <div class="logs-sidebar-group" key={group.label}>
-                <button
-                  class={`logs-device-button logs-device-button-group${selectedUser === group.userId && selectedDevice === null ? ' is-active' : ''}`}
-                  title={group.label}
-                  onClick={() => select(group.userId, null)}
-                  type="button"
-                >
-                  <span class="logs-device-button-label">{group.label}</span>
-                </button>
-                <ul class="logs-device-list">
-                  {group.devices.map((device) => (
-                    <li key={device.id}>
-                      <button
-                        class={`logs-device-button${selectedDevice === device.id ? ' is-active' : ''}`}
-                        onClick={() => select(group.userId, device.id)}
-                        type="button"
-                        title={device.name}
-                      >
-                        <span
-                          class={`logs-status-dot ${device.status === 'online' ? 'logs-status-dot--online' : 'logs-status-dot--offline'}`}
-                        />
-                        <span class="logs-device-button-label">{device.name}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-                {group.devices.length === 0 && <p class="logs-sidebar-loading">No devices</p>}
-              </div>
-            ))}
-          </aside>
-        )}
-
         <section class="logs-main">
           <div class="logs-header">
-            <h1>{title}</h1>
+            <PageHeading icon={<LogsIcon />}>{title}</PageHeading>
             <div class="logs-header-actions">
-              <Button
-                variant="ghost"
-                size="md"
-                class="logs-sidebar-toggle"
-                type="button"
-                onClick={() => setSidebarOpen(true)}
-              >
-                <MenuIcon />
-                <span>Devices</span>
-              </Button>
               <div class="logs-filter-section">
                 <div class="logs-inline-filters">
-                  <Field label="Start" class="logs-filter-field">
-                    <input
-                      type="date"
-                      class="logs-filter-date"
-                      value={startDate}
-                      min={oneMonthAgo}
-                      max={endDate}
-                      onChange={(e) => setStartDate((e.target as HTMLInputElement).value)}
-                    />
+                  <Field label="Date range" class="logs-filter-field">
+                    <Select
+                      size="md"
+                      class="logs-filter-select"
+                      value={range}
+                      onChange={(e) => setRange((e.target as HTMLSelectElement).value as RangeKey)}
+                    >
+                      {RANGE_SEGMENTS.map((s) => (
+                        <option key={s.value} value={s.value}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </Select>
                   </Field>
-                  <Field label="End" class="logs-filter-field">
-                    <input
-                      type="date"
-                      class="logs-filter-date"
-                      value={endDate}
-                      min={oneMonthAgo}
-                      max={today}
-                      onChange={(e) => setEndDate((e.target as HTMLInputElement).value)}
-                    />
+                  <Field label="Device" class="logs-filter-field">
+                    <Select
+                      size="md"
+                      class="logs-filter-select"
+                      value={selectedDevice ?? ''}
+                      onChange={(e) => {
+                        const val = (e.target as HTMLSelectElement).value;
+                        setSelectedDevice(val || null);
+                      }}
+                    >
+                      <option value="">All devices</option>
+                      {activeDevices.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.name}
+                        </option>
+                      ))}
+                    </Select>
                   </Field>
                   <Field label="Risk" class="logs-filter-field">
                     <Select
@@ -505,26 +301,16 @@ export function Logs() {
                 </Button>
               </div>
               <div class="logs-header-view-controls">
-                {isGallery && (
-                  <IconButton
-                    class="logs-fullscreen-btn"
-                    onClick={() => setGalleryFullscreen((prev) => !prev)}
-                    aria-label={galleryFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-                    title={galleryFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-                  >
-                    {galleryFullscreen ? <ExitFullscreenIcon /> : <ExpandIcon />}
-                  </IconButton>
-                )}
                 <div class="vi-segmented-control logs-view-switcher">
                   <a
                     class={`vi-segmented-control__item${!isGallery ? ' is-active' : ''}`}
-                    href={`/logs${window.location.search}`}
+                    href={`${logsBasePath}${window.location.search}`}
                   >
                     List
                   </a>
                   <a
                     class={`vi-segmented-control__item${isGallery ? ' is-active' : ''}`}
-                    href={`/logs/gallery${window.location.search}`}
+                    href={`${logsBasePath}/gallery${window.location.search}`}
                   >
                     Gallery
                   </a>
@@ -534,11 +320,15 @@ export function Logs() {
           </div>
 
           <p class="logs-summary">
-            {logsLoading ? 'Syncing logs…' : 'Logs synced'}
-            {!logsLoading && selectedDeviceInfo && selectedDeviceInfo.pending_count > 0 && (
+            {logsLoading
+              ? logResult.total > 0
+                ? `Syncing logs… ${logResult.processed}/${logResult.total} blocks`
+                : 'Syncing logs…'
+              : 'Logs synced'}
+            {!logsLoading && pendingCount > 0 && (
               <>
-                {` · ${selectedDeviceInfo.pending_count} item${selectedDeviceInfo.pending_count !== 1 ? 's' : ''} pending upload`}
-                {estimatedNextUpload && estimatedNextUpload > Date.now()
+                {` · ${pendingCount} item${pendingCount !== 1 ? 's' : ''} pending upload`}
+                {selectedDeviceInfo && estimatedNextUpload && estimatedNextUpload > Date.now()
                   ? ` · expected ${formatRelativeTimestamp(estimatedNextUpload)}`
                   : null}
               </>
@@ -546,7 +336,7 @@ export function Logs() {
           </p>
 
           <div class="logs-sticky-date" aria-live="polite">
-            {visibleDate ?? formatDayLabel(weekStart)}
+            {visibleDate ?? formatDayLabel(weekEnd)}
           </div>
 
           {isGallery ? (
@@ -556,7 +346,6 @@ export function Logs() {
               hasMore={false}
               onLoadMore={() => {}}
               deviceName={deviceName}
-              fullscreen={galleryFullscreen}
               onVisibleDateChange={setVisibleDate}
               viewerId={userId ?? ''}
             />
@@ -572,55 +361,40 @@ export function Logs() {
             />
           )}
 
-          <div class="logs-load-more">
-            <Button
-              variant="ghost"
-              size="md"
-              type="button"
-              onClick={() =>
-                setStartDate(
-                  shiftDate(startDate, -1) >= oneMonthAgo ? shiftDate(startDate, -1) : oneMonthAgo,
-                )
-              }
-            >
-              Load another day
-            </Button>
-            <Button
-              variant="ghost"
-              size="md"
-              type="button"
-              onClick={() =>
-                setStartDate(
-                  shiftDate(startDate, -7) >= oneMonthAgo ? shiftDate(startDate, -7) : oneMonthAgo,
-                )
-              }
-            >
-              Load another week
-            </Button>
-          </div>
-
           <Dialog dialogRef={filterDialogRef} size="lg" class="logs-filter-dialog">
             <DialogHeader>Search filters</DialogHeader>
             <div class="logs-filter-dialog-fields">
-              <Field label="Start" class="logs-filter-field">
-                <input
-                  type="date"
-                  class="logs-filter-date"
-                  value={startDate}
-                  min={oneMonthAgo}
-                  max={endDate}
-                  onChange={(e) => setStartDate((e.target as HTMLInputElement).value)}
-                />
+              <Field label="Date range" class="logs-filter-field">
+                <Select
+                  size="md"
+                  class="logs-filter-select"
+                  value={range}
+                  onChange={(e) => setRange((e.target as HTMLSelectElement).value as RangeKey)}
+                >
+                  {RANGE_SEGMENTS.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </Select>
               </Field>
-              <Field label="End" class="logs-filter-field">
-                <input
-                  type="date"
-                  class="logs-filter-date"
-                  value={endDate}
-                  min={oneMonthAgo}
-                  max={today}
-                  onChange={(e) => setEndDate((e.target as HTMLInputElement).value)}
-                />
+              <Field label="Device" class="logs-filter-field">
+                <Select
+                  size="md"
+                  class="logs-filter-select"
+                  value={selectedDevice ?? ''}
+                  onChange={(e) => {
+                    const val = (e.target as HTMLSelectElement).value;
+                    setSelectedDevice(val || null);
+                  }}
+                >
+                  <option value="">All devices</option>
+                  {activeDevices.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </Select>
               </Field>
               <Field label="Risk" class="logs-filter-field">
                 <Select

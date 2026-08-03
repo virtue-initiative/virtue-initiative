@@ -3,9 +3,8 @@ use std::any::Any;
 use serde::{Deserialize, Serialize};
 
 use crate::api::ApiTransport;
-use crate::error::{CoreError, CoreResult};
-use crate::events::Ping;
-use crate::events::bus::{Emitter, EventBus, Observer, StateType, log_error};
+use crate::error::CoreResult;
+use crate::events::bus::{Emitter, EventBus, Observer, StateType};
 use crate::model::PartialStatus;
 use crate::model::{DeviceCredentials, DeviceSettings, Redacted};
 use crate::module::config::ConfigChanged;
@@ -24,6 +23,11 @@ pub struct Logout;
 pub struct LoginRequested {
     pub email: String,
     pub password: Redacted<String>,
+    /// Optional device-name override chosen by the user at login. When `Some`
+    /// and non-empty, it takes precedence over the construction-time
+    /// `AuthModule::device_name` (hostname / OS device name).
+    #[serde(default)]
+    pub device_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,31 +46,8 @@ pub struct LogoutResult {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DeviceSettingsRefreshed {
-    pub settings: DeviceSettings,
-}
-
-const SETTINGS_REFRESH_INTERVAL_PINGS: u32 = 3600;
-
-fn with_device_token_retry<A: ApiTransport, T>(
-    api: &A,
-    credentials: &mut DeviceCredentials,
-    mut op: impl FnMut(&A, &str) -> CoreResult<T>,
-) -> CoreResult<T> {
-    match op(api, &credentials.access_token) {
-        Err(e) if e.is_unauthorized() => {
-            let refreshed = api.refresh_device_token(&credentials.refresh_token)?;
-            credentials.access_token = refreshed.clone();
-            op(api, &refreshed)
-        }
-        other => other,
-    }
-}
-
 #[derive(Serialize, Deserialize, Default)]
 pub struct AuthObserverState {
-    pub user_access_token: Option<String>,
     pub device_credentials: Option<DeviceCredentials>,
 }
 
@@ -75,8 +56,6 @@ pub struct AuthModule<A: ApiTransport + Send + Sync + 'static> {
     api: A,
     device_name: String,
     platform_name: String,
-    needs_settings_refresh: bool,
-    pings_without_refresh: u32,
 }
 
 impl<A: ApiTransport + Send + Sync + 'static> AuthModule<A> {
@@ -86,13 +65,25 @@ impl<A: ApiTransport + Send + Sync + 'static> AuthModule<A> {
             api,
             device_name,
             platform_name,
-            needs_settings_refresh: false,
-            pings_without_refresh: 0,
         }
     }
 
-    fn handle_login_requested(&mut self, email: &str, password: &str, emitter: &Emitter) {
-        match self.do_login(email, password) {
+    fn handle_login_requested(
+        &mut self,
+        email: &str,
+        password: &str,
+        device_name: Option<&str>,
+        emitter: &Emitter,
+    ) {
+        // A login while another device session is still active (e.g. the
+        // user re-runs `login` without logging out first) would otherwise
+        // leave the old device row active on the server forever. Log it out
+        // first so it gets soft-deleted and its hash state reset, same as an
+        // explicit logout.
+        if self.revoke_current_device() {
+            let _ = emitter.send(Logout);
+        }
+        match self.do_login(email, password, device_name) {
             Ok((credentials, settings)) => {
                 let device_id = credentials.device_id.clone();
                 let _ = emitter.send(Login {
@@ -119,29 +110,25 @@ impl<A: ApiTransport + Send + Sync + 'static> AuthModule<A> {
         &mut self,
         email: &str,
         password: &str,
+        device_name: Option<&str>,
     ) -> CoreResult<(DeviceCredentials, crate::model::DeviceSettings)> {
-        let access_token = self.api.login(email, password)?;
-        let mut device =
-            self.api
-                .register_device(&access_token, &self.device_name, &self.platform_name)?;
-        let settings = with_device_token_retry(&self.api, &mut device, |api, token| {
-            api.get_device_settings(token)
-        })?;
-        self.state.user_access_token = Some(access_token);
+        let user_token = self.api.login(email, password)?;
+        // Use the user-supplied override when present and non-empty (trimmed),
+        // otherwise fall back to the construction-time device name (hostname).
+        let resolved_name = device_name
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .unwrap_or(self.device_name.as_str());
+        let device = self
+            .api
+            .register_device(&user_token, resolved_name, &self.platform_name)?;
+        let settings = self.api.get_device_settings(&device.refresh_token)?;
         self.state.device_credentials = Some(device.clone());
-        self.needs_settings_refresh = false;
-        self.pings_without_refresh = 0;
         Ok((device, settings))
     }
 
     fn handle_logout_requested(&mut self, emitter: &Emitter) {
-        if let Some(token) = self.state.user_access_token.clone() {
-            let _ = self.api.logout(&token);
-        }
-        self.state.user_access_token = None;
-        self.state.device_credentials = None;
-        self.needs_settings_refresh = false;
-        self.pings_without_refresh = 0;
+        self.revoke_current_device();
         let _ = emitter.send(Logout);
         let _ = emitter.send(LogoutResult {
             success: true,
@@ -149,51 +136,15 @@ impl<A: ApiTransport + Send + Sync + 'static> AuthModule<A> {
         });
     }
 
-    fn handle_ping(&mut self, emitter: &Emitter) {
-        if self.state.device_credentials.is_none() {
-            return;
-        }
-        self.pings_without_refresh += 1;
-        if self.pings_without_refresh >= SETTINGS_REFRESH_INTERVAL_PINGS {
-            self.needs_settings_refresh = true;
-            self.pings_without_refresh = 0;
-        }
-        if !self.needs_settings_refresh {
-            return;
-        }
-        match self.refresh_settings(emitter) {
-            Ok(settings) => {
-                self.needs_settings_refresh = false;
-                let _ = emitter.send(DeviceSettingsRefreshed { settings });
-            }
-            Err(e) => {
-                log_error("settings refresh failed on ping", Some(&e));
-            }
-        }
-    }
-
-    fn refresh_settings(&mut self, emitter: &Emitter) -> CoreResult<crate::model::DeviceSettings> {
-        let mut credentials = self
-            .state
-            .device_credentials
-            .clone()
-            .ok_or(CoreError::NotAuthenticated)?;
-        let result = with_device_token_retry(&self.api, &mut credentials, |api, token| {
-            api.get_device_settings(token)
-        });
-        match result {
-            Ok(settings) => {
-                self.state.device_credentials = Some(credentials);
-                Ok(settings)
-            }
-            Err(err) if err.is_not_found() => {
-                log_error("device not found; clearing local auth", Some(&err));
-                self.state.user_access_token = None;
-                self.state.device_credentials = None;
-                let _ = emitter.send(Logout);
-                Err(CoreError::NotAuthenticated)
-            }
-            Err(err) => Err(err),
+    /// Revokes the current device's session with the server (best effort)
+    /// and clears local credentials. Returns `true` if there was a device
+    /// session to revoke.
+    fn revoke_current_device(&mut self) -> bool {
+        if let Some(creds) = self.state.device_credentials.take() {
+            let _ = self.api.logout(&creds.refresh_token);
+            true
+        } else {
+            false
         }
     }
 }
@@ -211,22 +162,22 @@ impl<A: ApiTransport + Send + Sync + 'static> Observer for AuthModule<A> {
         if !state.is_null() {
             self.state = serde_json::from_value(state)?;
         }
-        self.needs_settings_refresh = self.state.device_credentials.is_some();
         Ok(())
     }
 
     fn on_event(&mut self, event: &dyn Any, emitter: &Emitter) -> CoreResult<()> {
         crate::dispatch_event!(event, {
             ev: LoginRequested => {
-                self.handle_login_requested(&ev.email, &ev.password, emitter);
+                self.handle_login_requested(
+                    &ev.email,
+                    &ev.password,
+                    ev.device_name.as_deref(),
+                    emitter,
+                );
                 Ok(())
             },
             _: LogoutRequested => {
                 self.handle_logout_requested(emitter);
-                Ok(())
-            },
-            _: Ping => {
-                self.handle_ping(emitter);
                 Ok(())
             },
             _: StatusRequest => {
@@ -271,6 +222,7 @@ mod tests {
             LoginRequested {
                 email: "alice@example.org".into(),
                 password: Redacted("secret".into()),
+                device_name: None,
             },
         );
         assert_eq!(t.captured::<Login>().len(), 1, "expected Login event");
@@ -280,6 +232,58 @@ mod tests {
         assert!(
             results[0].device_id.is_some(),
             "login result should carry device_id"
+        );
+    }
+
+    #[test]
+    fn login_uses_device_name_override_when_present() {
+        let mut b = EventTester::builder();
+        b.capture::<LoginResult>();
+        b.add(AuthModule::new(
+            b.api(),
+            "test-device".into(),
+            "test-platform".into(),
+        ));
+        let mut t = b.build();
+        t.emit(
+            1,
+            LoginRequested {
+                email: "alice@example.org".into(),
+                password: Redacted("secret".into()),
+                device_name: Some("  My Laptop  ".into()),
+            },
+        );
+        let calls = t.api.state().register_device_calls.clone();
+        assert_eq!(calls.len(), 1, "expected one register_device call");
+        assert_eq!(
+            calls[0].name, "My Laptop",
+            "override name should be used (trimmed)"
+        );
+    }
+
+    #[test]
+    fn login_falls_back_to_construction_name_when_override_blank() {
+        let mut b = EventTester::builder();
+        b.capture::<LoginResult>();
+        b.add(AuthModule::new(
+            b.api(),
+            "test-device".into(),
+            "test-platform".into(),
+        ));
+        let mut t = b.build();
+        t.emit(
+            1,
+            LoginRequested {
+                email: "alice@example.org".into(),
+                password: Redacted("secret".into()),
+                device_name: Some("   ".into()),
+            },
+        );
+        let calls = t.api.state().register_device_calls.clone();
+        assert_eq!(calls.len(), 1, "expected one register_device call");
+        assert_eq!(
+            calls[0].name, "test-device",
+            "blank override should fall back to construction-time name"
         );
     }
 
@@ -300,6 +304,7 @@ mod tests {
             LoginRequested {
                 email: "alice@example.org".into(),
                 password: Redacted("wrong".into()),
+                device_name: None,
             },
         );
         let results = t.captured::<LoginResult>();
@@ -308,6 +313,77 @@ mod tests {
         assert!(
             results[0].error.is_some(),
             "failed login should carry error message"
+        );
+    }
+
+    #[test]
+    fn login_without_prior_session_does_not_call_logout() {
+        let mut b = EventTester::builder();
+        b.add(AuthModule::new(
+            b.api(),
+            "test-device".into(),
+            "test-platform".into(),
+        ));
+        let mut t = b.build();
+        t.emit(
+            1,
+            LoginRequested {
+                email: "alice@example.org".into(),
+                password: Redacted("secret".into()),
+                device_name: None,
+            },
+        );
+        assert!(
+            t.api.state().logout_calls.is_empty(),
+            "first login should not call logout when there is no existing session"
+        );
+    }
+
+    #[test]
+    fn login_while_already_authenticated_logs_out_previous_device_first() {
+        let mut b = EventTester::builder();
+        b.capture::<Logout>().capture::<Login>();
+        b.add(AuthModule::new(
+            b.api(),
+            "test-device".into(),
+            "test-platform".into(),
+        ));
+        let mut t = b.build();
+        t.emit(
+            1,
+            LoginRequested {
+                email: "alice@example.org".into(),
+                password: Redacted("secret".into()),
+                device_name: None,
+            },
+        );
+        t.emit(
+            2,
+            LoginRequested {
+                email: "bob@example.org".into(),
+                password: Redacted("secret2".into()),
+                device_name: None,
+            },
+        );
+        let calls = t.api.state().logout_calls.clone();
+        assert_eq!(
+            calls.len(),
+            1,
+            "second login should log out the previous device's session"
+        );
+        assert_eq!(
+            calls[0], "mock-refresh-token",
+            "logout should use the previous device's refresh token"
+        );
+        assert_eq!(
+            t.captured::<Logout>().len(),
+            1,
+            "expected exactly one implicit Logout, for the second login"
+        );
+        assert_eq!(
+            t.captured::<Login>().len(),
+            2,
+            "expected both logins to emit Login"
         );
     }
 
@@ -323,6 +399,48 @@ mod tests {
         let mut t = b.build();
         t.emit(1, LogoutRequested);
         assert_eq!(t.captured::<Logout>().len(), 1, "expected Logout event");
+    }
+
+    #[test]
+    fn logout_without_credentials_does_not_call_api() {
+        let mut b = EventTester::builder();
+        b.add(AuthModule::new(
+            b.api(),
+            "test-device".into(),
+            "test-platform".into(),
+        ));
+        let mut t = b.build();
+        t.emit(1, LogoutRequested);
+        assert!(
+            t.api.state().logout_calls.is_empty(),
+            "logout should not call the API when there are no device credentials"
+        );
+    }
+
+    #[test]
+    fn logout_with_credentials_calls_api_with_device_refresh_token() {
+        let mut b = EventTester::builder();
+        b.add(AuthModule::new(
+            b.api(),
+            "test-device".into(),
+            "test-platform".into(),
+        ));
+        let mut t = b.build();
+        t.emit(
+            1,
+            LoginRequested {
+                email: "alice@example.org".into(),
+                password: Redacted("secret".into()),
+                device_name: None,
+            },
+        );
+        t.emit(2, LogoutRequested);
+        let calls = t.api.state().logout_calls.clone();
+        assert_eq!(calls.len(), 1, "expected one logout call");
+        assert_eq!(
+            calls[0], "mock-refresh-token",
+            "logout should be called with the device's refresh token"
+        );
     }
 
     #[test]

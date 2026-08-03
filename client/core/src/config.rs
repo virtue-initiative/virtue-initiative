@@ -6,8 +6,13 @@ use serde::Deserialize;
 
 use crate::error::{CoreError, CoreResult};
 
+pub const DEFAULT_API_BASE_URL: &str = env!("VIRTUE_DEFAULT_API_URL");
+
 const MIN_CAPTURE_INTERVAL_SECONDS: u64 = 15;
 const MIN_BATCH_INTERVAL_SECONDS: u64 = 1;
+
+pub const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = 300;
+pub const DEFAULT_BATCH_WINDOW_SECONDS: u64 = 3600;
 
 #[derive(Debug, Clone)]
 pub struct Config {

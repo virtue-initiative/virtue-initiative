@@ -7,26 +7,9 @@ import {
   WatcherPartner,
   WatchingPartner,
 } from './api';
-import { decryptAndFlattenBatch } from './batch-materializer';
-import { unwrapBatchKey } from './crypto';
-import {
-  clearDataCache,
-  deleteDecryptedEventsForDevice,
-  getUnmaterializedBatches,
-  loadCachedDataFeed,
-  mergeDataPageIntoCache,
-  pruneCachedDataFeedDevices,
-  pruneDecryptedEventsBefore,
-  queryDecryptedEvents,
-  removeDeviceFromCachedDataFeed,
-  writeMaterializedEvents,
-} from './data-cache';
-import { FeedLog, getLogImage } from '../../pages/Logs/shared';
-import { decodeWebpDimensions } from '../webp-dimensions';
+import { FeedLog } from '../../pages/Logs/types';
 import { Session } from './session';
-
-const DECRYPT_CONCURRENCY = 5;
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+import { cacheClient } from '../cache/client';
 
 export interface UserSettings {
   email?: string;
@@ -51,6 +34,18 @@ export interface LogQuery {
 export interface LogQueryResult {
   logs: FeedLog[];
   complete: boolean;
+  /** Number of batch blocks decrypted so far in the in-flight sync. */
+  processed: number;
+  /** Total batch blocks to decrypt in the in-flight sync (0 if unknown). */
+  total: number;
+}
+
+// Merge an incremental delta into an existing log set: dedupe by id (incoming wins) and keep
+// the newest-first (ts desc) ordering that sqlQueryEvents produces.
+function mergeLogs(existing: FeedLog[], incoming: FeedLog[]): FeedLog[] {
+  const byId = new Map(existing.map((log) => [log.id, log]));
+  for (const log of incoming) byId.set(log.id, log);
+  return [...byId.values()].sort((a, b) => b.ts - a.ts);
 }
 
 type Subscriber<T> = (value: T) => void;
@@ -89,6 +84,7 @@ export class APIClient {
   constructor(session: Session) {
     this.session = session;
     this.userId = session.userId;
+    cacheClient?.setSession(session.userId, session.privateKey ?? null);
     session.onTokenRefreshFailed(() => {
       this.fireLogoutOnce();
     });
@@ -114,7 +110,7 @@ export class APIClient {
   }
 
   async updateSettings(settings: UserSettings): Promise<UpdateSettingsResult> {
-    const result = await api.updateUser(this.session.token, settings);
+    const result = await api.updateUser(settings);
     await this.fetchUser(true);
     return {
       email_verification_required: result.email_verification_required,
@@ -123,7 +119,7 @@ export class APIClient {
   }
 
   async deleteUser(confirmEmail: string): Promise<void> {
-    await api.deleteUser(this.session.token, confirmEmail);
+    await api.deleteUser(confirmEmail);
     this.userCache = null;
     notify(this.userSubscribers, null);
   }
@@ -132,7 +128,7 @@ export class APIClient {
     if (this.userFetchInFlight && !force) return this.userFetchInFlight;
     const p = (async () => {
       try {
-        const user = await api.getUser(this.session.token);
+        const user = await api.getUser();
         this.userCache = user;
         notify(this.userSubscribers, user);
         return user;
@@ -150,7 +146,7 @@ export class APIClient {
   // ── Auth ─────────────────────────────────────────────────────────────────
   async verifyEmailChange(token: string): Promise<void> {
     await api.verifyEmail(token);
-    const user = await api.getUser(this.session.token);
+    const user = await api.getUser();
     this.userCache = user;
     notify(this.userSubscribers, user);
   }
@@ -173,7 +169,7 @@ export class APIClient {
 
   async logout(): Promise<void> {
     await this.session.logout();
-    await clearDataCache().catch(() => {});
+    await cacheClient?.clearCache().catch(() => {});
     this.fireLogoutOnce();
   }
 
@@ -225,24 +221,24 @@ export class APIClient {
   }
 
   async invitePartner(email: string): Promise<void> {
-    await api.invitePartner(this.session.token, email);
+    await api.invitePartner(email);
     await this.fetchPartners(true);
   }
 
   async acceptInvite(inviteToken: string): Promise<void> {
-    await api.acceptPartnerInvite(this.session.token, inviteToken);
+    await api.acceptPartnerInvite(inviteToken);
     await this.fetchPartners(true);
     await this.fetchDevices(true);
   }
 
   async removeWatcher(id: string): Promise<void> {
-    await api.deleteWatcher(this.session.token, id);
+    await api.deleteWatcher(id);
     await this.fetchPartners(true);
     await this.fetchDevices(true);
   }
 
   async stopWatching(id: string): Promise<void> {
-    await api.deleteWatching(this.session.token, id);
+    await api.deleteWatching(id);
     await this.fetchPartners(true);
     await this.fetchDevices(true);
   }
@@ -251,7 +247,7 @@ export class APIClient {
     if (this.partnersFetchInFlight && !force) return this.partnersFetchInFlight;
     const p = (async () => {
       try {
-        const result = await api.getPartners(this.session.token);
+        const result = await api.getPartners();
         this.watchersCache = result.watchers;
         this.watchingsCache = result.watching;
         notify(this.watchersSubscribers, result.watchers);
@@ -293,18 +289,15 @@ export class APIClient {
   }
 
   async updateDevice(id: string, patch: { name?: string }): Promise<void> {
-    await api.patchDevice(this.session.token, id, patch);
+    await api.patchDevice(id, patch);
     await this.fetchDevices(true);
   }
 
   async removeDevice(id: string): Promise<void> {
-    await api.deleteDevice(this.session.token, id);
-    await removeDeviceFromCachedDataFeed(this.userId, this.userId, id).catch((err) =>
-      console.warn('[api-client] failed to remove deleted device from cache', err),
-    );
-    await deleteDecryptedEventsForDevice(this.userId, id).catch((err) =>
-      console.warn('[api-client] failed to wipe decrypted events for device', err),
-    );
+    await api.deleteDevice(id);
+    cacheClient
+      ?.deleteDeviceData(this.userId, id)
+      .catch((err) => console.warn('[api-client] failed to wipe device data from cache', err));
     await this.fetchDevices(true);
   }
 
@@ -312,7 +305,7 @@ export class APIClient {
     if (this.devicesFetchInFlight && !force) return this.devicesFetchInFlight;
     const p = (async () => {
       try {
-        const devices = await api.getDevices(this.session.token);
+        const devices = await api.getDevices();
         this.devicesCache = devices;
         notify(this.devicesSubscribers, devices);
         return devices;
@@ -329,99 +322,33 @@ export class APIClient {
 
   // ── Logs ────────────────────────────────────────────────────────────────
   queryLogs(query: LogQuery, cb?: (result: LogQueryResult) => void): LogQueryResult {
-    const initial = queryLogsFromIDB(this.userId, query);
-    let result: LogQueryResult = { logs: [], complete: false };
-    initial
-      .then((logs) => {
-        result = { logs, complete: false };
-        if (cb) cb(result);
-      })
-      .catch((err) => console.warn('[api-client] initial log query failed', err));
-
     if (cb) {
-      void this.refreshLogs(query, cb);
-    }
-
-    return result;
-  }
-
-  private async refreshLogs(query: LogQuery, cb: (result: LogQueryResult) => void): Promise<void> {
-    const { userId: targetUserId, deviceId, startTime, endTime } = query;
-
-    try {
-      await pruneDecryptedEventsBefore(this.userId, Date.now() - THIRTY_DAYS_MS).catch(() => {});
-
-      const devices: Device[] = this.devicesCache ?? (await this.fetchDevices()) ?? [];
-      const ownedIds = devices
-        .filter((d) => d.owner === targetUserId)
-        .map((d) => d.id)
-        .sort();
-
-      const initialFeed = await loadCachedDataFeed(this.userId, targetUserId);
-      const page = await api.getData(this.session.token, {
-        user: targetUserId === this.userId ? undefined : targetUserId,
-        since: initialFeed.since,
-      });
-      if (page.batches.length > 0 || page.logs.length > 0) {
-        await mergeDataPageIntoCache(this.userId, targetUserId, page);
-      }
-
-      let cachedFeed = await loadCachedDataFeed(this.userId, targetUserId);
-      cachedFeed = await pruneCachedDataFeedDevices(this.userId, targetUserId, ownedIds);
-
-      const inRangeBatches = cachedFeed.batches.filter((batch) => {
-        if (deviceId && batch.device_id !== deviceId) return false;
-        if (startTime !== undefined && endTime !== undefined) {
-          return batch.start_time <= endTime && batch.end_time >= startTime;
-        }
-        return true;
-      });
-
-      const cutoff = Date.now() - THIRTY_DAYS_MS;
-      const unmaterialized = getUnmaterializedBatches(cachedFeed, inRangeBatches, cutoff);
-
-      const cachedLogs = await queryLogsFromIDB(this.userId, query);
-      cb({
-        logs: cachedLogs,
-        complete: unmaterialized.length === 0 || !this.session.privateKey,
-      });
-
-      if (!this.session.privateKey || unmaterialized.length === 0) return;
-
-      const queue = [...unmaterialized].sort((a, b) => b.created_at - a.created_at);
-      let processed = 0;
-      const total = queue.length;
-      let querying = false;
-
-      const worker = async () => {
-        while (queue.length > 0) {
-          const batch = queue.shift()!;
-          try {
-            const events = await decryptAndFlattenBatch(
-              batch,
-              (encryptedKey) =>
-                unwrapBatchKey(this.session.privateKey!, Uint8Array.fromBase64(encryptedKey)),
-              '0'.repeat(64),
-            );
-            await writeMaterializedEvents(this.userId, targetUserId, batch.id, events);
-          } catch (err) {
-            console.warn('[api-client] failed to materialize batch', batch.id, err);
+      // Updates come in three flavours: a `replace` snapshot (cached fast-path, then the
+      // final complete result), an `append` delta (logs decrypted in the last interval), and
+      // counts-only progress ticks (no logs). Retain the running set so every update — even
+      // counts-only — can re-emit a complete LogQueryResult.
+      let lastLogs: FeedLog[] = [];
+      cacheClient?.cacheQuery(
+        {
+          userId: query.userId,
+          deviceId: query.deviceId,
+          startTime: query.startTime,
+          endTime: query.endTime,
+        },
+        (update) => {
+          if (update.logs) {
+            lastLogs = update.replace ? update.logs : mergeLogs(lastLogs, update.logs);
           }
-          processed++;
-          const isLast = processed === total;
-          if (!querying || isLast) {
-            querying = true;
-            const updatedLogs = await queryLogsFromIDB(this.userId, query);
-            querying = false;
-            cb({ logs: updatedLogs, complete: isLast });
-          }
-        }
-      };
-
-      await Promise.all(Array.from({ length: Math.min(DECRYPT_CONCURRENCY, total) }, worker));
-    } catch (err) {
-      console.warn('[api-client] log refresh failed', err);
+          cb({
+            logs: lastLogs,
+            complete: update.done,
+            processed: update.processed,
+            total: update.total,
+          });
+        },
+      );
     }
+    return { logs: [], complete: false, processed: 0, total: 0 };
   }
 
   // ── Lifecycle ───────────────────────────────────────────────────────────
@@ -441,62 +368,6 @@ export class APIClient {
       }
     }
   }
-}
-
-async function queryLogsFromIDB(viewerId: string, query: LogQuery): Promise<FeedLog[]> {
-  const cachedFeed = await loadCachedDataFeed(viewerId, query.userId);
-
-  const feedDeviceIds = new Set([
-    ...cachedFeed.batches.map((b) => b.device_id),
-    ...cachedFeed.logs.map((l) => l.device_id),
-  ]);
-
-  const events = await queryDecryptedEvents(viewerId, {
-    deviceId: query.deviceId,
-    allowedDeviceIds: query.deviceId ? undefined : [...feedDeviceIds],
-    startTs: query.startTime,
-    endTs: query.endTime,
-  });
-
-  const directLogs: FeedLog[] = cachedFeed.logs
-    .filter((log) => {
-      if (query.deviceId && log.device_id !== query.deviceId) return false;
-      if (query.startTime !== undefined && query.endTime !== undefined) {
-        return log.ts >= query.startTime && log.ts <= query.endTime;
-      }
-      return true;
-    })
-    .map(toDirectLogEntry);
-
-  return [...events, ...directLogs].sort((a, b) => b.ts - a.ts);
-}
-
-function toDirectLogEntry(entry: {
-  id: string;
-  device_id: string;
-  ts: number;
-  type: string;
-  data: Record<string, unknown>;
-  created_at: number;
-  risk?: number;
-}): FeedLog {
-  const image = getLogImage(entry);
-  let image_w: number | undefined;
-  let image_h: number | undefined;
-  if (image) {
-    const dims = decodeWebpDimensions(image);
-    if (dims) {
-      image_w = dims.width;
-      image_h = dims.height;
-    }
-  }
-  return {
-    ...entry,
-    batch_status: 'unknown' as const,
-    source: 'log' as const,
-    image_w,
-    image_h,
-  };
 }
 
 export type { Batch };

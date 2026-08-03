@@ -8,14 +8,13 @@ import {
   createDeviceForUser,
   listEmailDeliveries,
   markUserEmailVerified,
-  signupAndGetToken,
+  signupAndGetCookie,
   uuidToBytes,
 } from './helpers';
 
 beforeEach(clearDB);
 
 const DAILY_BATCH_ID = '00000000-0000-4000-8000-000000000001';
-const DAILY_RISK_LOG_ID = '00000000-0000-4000-8000-000000000002';
 const WEEKLY_BATCH_ID = '00000000-0000-4000-8000-000000000003';
 const OLD_DAILY_BATCH_ID = '00000000-0000-4000-8000-000000000004';
 const EMPTY_ACCESS_KEYS = JSON.stringify({ keys: [] });
@@ -28,13 +27,12 @@ describe('Notification scheduler', () => {
     const withinWindowBatchEnd = Date.UTC(2026, 0, 5, 12, 0, 0);
     const oldBatchStart = Date.UTC(2026, 0, 5, 0, 0, 0);
     const oldBatchEnd = Date.UTC(2026, 0, 5, 2, 0, 0);
-    const riskLogTime = Date.UTC(2026, 0, 5, 15, 0, 0);
 
-    const { token: ownerToken, userId: ownerId } = await signupAndGetToken(
+    const { cookie: ownerCookie, userId: ownerId } = await signupAndGetCookie(
       'digest-owner@example.com',
       'pw',
     );
-    const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
+    const { cookie: partnerCookie, userId: partnerUserId } = await signupAndGetCookie(
       'digest-partner@example.com',
       'pw',
     );
@@ -42,7 +40,7 @@ describe('Notification scheduler', () => {
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
-      headers: authHeaders(ownerToken),
+      headers: authHeaders(ownerCookie),
       body: JSON.stringify({
         email: 'digest-partner@example.com',
       }),
@@ -57,26 +55,26 @@ describe('Notification scheduler', () => {
 
     await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
-      headers: authHeaders(partnerToken),
+      headers: authHeaders(partnerCookie),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
     await SELF.fetch(`${BASE}/user`, {
       method: 'PATCH',
-      headers: authHeaders(partnerToken),
+      headers: authHeaders(partnerCookie),
       body: JSON.stringify({
         settings: { timezone: 'America/New_York' },
       }),
     });
 
-    const device = await createDeviceForUser(ownerToken, 'Digest Device', 'linux');
-    const silentDevice = await createDeviceForUser(ownerToken, 'Silent Device', 'linux');
+    const device = await createDeviceForUser(ownerCookie, 'Digest Device', 'linux');
+    const silentDevice = await createDeviceForUser(ownerCookie, 'Silent Device', 'linux');
     await env.DB.prepare('UPDATE devices SET created_at = ? WHERE id IN (?, ?)')
       .bind(previousWindowStart, uuidToBytes(device.id), uuidToBytes(silentDevice.id))
       .run();
 
     await env.DB.prepare(
-      `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, high_risk_count, medium_risk_count, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
         uuidToBytes(DAILY_BATCH_ID),
@@ -87,6 +85,8 @@ describe('Notification scheduler', () => {
         withinWindowBatchEnd,
         'hash-1',
         EMPTY_ACCESS_KEYS,
+        1,
+        0,
         withinWindowBatchEnd,
       )
       .run();
@@ -105,22 +105,6 @@ describe('Notification scheduler', () => {
         'hash-old',
         EMPTY_ACCESS_KEYS,
         oldBatchEnd,
-      )
-      .run();
-
-    await env.DB.prepare(
-      `INSERT INTO device_logs (id, user_id, device_id, ts, type, data, risk, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-      .bind(
-        uuidToBytes(DAILY_RISK_LOG_ID),
-        uuidToBytes(ownerId),
-        uuidToBytes(device.id),
-        riskLogTime,
-        'system_shutdown',
-        JSON.stringify({ title: 'Monitoring interruption detected' }),
-        0.7,
-        riskLogTime,
       )
       .run();
 
@@ -143,11 +127,11 @@ describe('Notification scheduler', () => {
     const batchStart = Date.UTC(2026, 0, 5, 12, 0, 0);
     const batchEnd = Date.UTC(2026, 0, 5, 13, 0, 0);
 
-    const { token: ownerToken, userId: ownerId } = await signupAndGetToken(
+    const { cookie: ownerCookie, userId: ownerId } = await signupAndGetCookie(
       'batch-owner@example.com',
       'pw',
     );
-    const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
+    const { cookie: partnerCookie, userId: partnerUserId } = await signupAndGetCookie(
       'batch-partner@example.com',
       'pw',
     );
@@ -155,7 +139,7 @@ describe('Notification scheduler', () => {
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
-      headers: authHeaders(ownerToken),
+      headers: authHeaders(ownerCookie),
       body: JSON.stringify({
         email: 'batch-partner@example.com',
       }),
@@ -170,12 +154,12 @@ describe('Notification scheduler', () => {
 
     await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
-      headers: authHeaders(partnerToken),
+      headers: authHeaders(partnerCookie),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
 
-    const device = await createDeviceForUser(ownerToken, 'Batch Device', 'linux');
-    const silentDevice = await createDeviceForUser(ownerToken, 'Silent Device', 'linux');
+    const device = await createDeviceForUser(ownerCookie, 'Batch Device', 'linux');
+    const silentDevice = await createDeviceForUser(ownerCookie, 'Silent Device', 'linux');
     await env.DB.prepare('UPDATE devices SET created_at = ? WHERE id IN (?, ?)')
       .bind(previousWindowStart, uuidToBytes(device.id), uuidToBytes(silentDevice.id))
       .run();
@@ -212,27 +196,27 @@ describe('Notification scheduler', () => {
     const previousDayStart = Date.UTC(2026, 0, 5, 0, 0, 0);
     const previousDayMid = Date.UTC(2026, 0, 5, 12, 0, 0);
 
-    const { token: ownerOneToken, userId: ownerOneId } = await signupAndGetToken(
+    const { cookie: ownerOneCookie, userId: ownerOneId } = await signupAndGetCookie(
       'multi-owner-one@example.com',
       'pw',
       'Owner One',
     );
-    const { token: ownerTwoToken, userId: ownerTwoId } = await signupAndGetToken(
+    const { cookie: ownerTwoCookie, userId: ownerTwoId } = await signupAndGetCookie(
       'multi-owner-two@example.com',
       'pw',
       'Owner Two',
     );
-    const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
+    const { cookie: partnerCookie, userId: partnerUserId } = await signupAndGetCookie(
       'multi-partner@example.com',
       'pw',
       'Partner',
     );
     await markUserEmailVerified(partnerUserId);
 
-    for (const ownerToken of [ownerOneToken, ownerTwoToken]) {
+    for (const ownerCookie of [ownerOneCookie, ownerTwoCookie]) {
       const inviteRes = await SELF.fetch(`${BASE}/partner`, {
         method: 'POST',
-        headers: authHeaders(ownerToken),
+        headers: authHeaders(ownerCookie),
         body: JSON.stringify({
           email: 'multi-partner@example.com',
         }),
@@ -250,13 +234,13 @@ describe('Notification scheduler', () => {
       const inviteMetadata = JSON.parse(delivery.metadata) as { inviteToken: string };
       await SELF.fetch(`${BASE}/partner/accept`, {
         method: 'POST',
-        headers: authHeaders(partnerToken),
+        headers: authHeaders(partnerCookie),
         body: JSON.stringify({ token: inviteMetadata.inviteToken }),
       });
     }
 
-    const ownerOneDevice = await createDeviceForUser(ownerOneToken, 'Owner One Device', 'linux');
-    const ownerTwoDevice = await createDeviceForUser(ownerTwoToken, 'Owner Two Device', 'linux');
+    const ownerOneDevice = await createDeviceForUser(ownerOneCookie, 'Owner One Device', 'linux');
+    const ownerTwoDevice = await createDeviceForUser(ownerTwoCookie, 'Owner Two Device', 'linux');
 
     await env.DB.prepare(
       `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at)
@@ -308,11 +292,11 @@ describe('Notification scheduler', () => {
     const previousWeekStart = Date.UTC(2025, 11, 29, 0, 0, 0);
     const sundayMid = Date.UTC(2026, 0, 4, 12, 0, 0);
 
-    const { token: ownerToken, userId: ownerId } = await signupAndGetToken(
+    const { cookie: ownerCookie, userId: ownerId } = await signupAndGetCookie(
       'twice-owner@example.com',
       'pw',
     );
-    const { token: partnerToken, userId: partnerUserId } = await signupAndGetToken(
+    const { cookie: partnerCookie, userId: partnerUserId } = await signupAndGetCookie(
       'twice-partner@example.com',
       'pw',
     );
@@ -320,7 +304,7 @@ describe('Notification scheduler', () => {
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
-      headers: authHeaders(ownerToken),
+      headers: authHeaders(ownerCookie),
       body: JSON.stringify({
         email: 'twice-partner@example.com',
       }),
@@ -334,18 +318,18 @@ describe('Notification scheduler', () => {
 
     await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
-      headers: authHeaders(partnerToken),
+      headers: authHeaders(partnerCookie),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
 
     await inviteRes.json();
     await SELF.fetch(`${BASE}/user`, {
       method: 'PATCH',
-      headers: authHeaders(partnerToken),
+      headers: authHeaders(partnerCookie),
       body: JSON.stringify({ settings: { email_frequency: 'weekly' } }),
     });
 
-    const device = await createDeviceForUser(ownerToken, 'Twice Device', 'linux');
+    const device = await createDeviceForUser(ownerCookie, 'Twice Device', 'linux');
     await env.DB.prepare(
       `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,

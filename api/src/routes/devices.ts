@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { authenticate } from '../middleware/auth';
+import { authenticateWebSession } from '../middleware/auth';
 import { validateZ } from '../middleware/validation';
 import {
   deleteDeviceById,
@@ -21,18 +21,11 @@ import { updateDeviceSchema, type PatchDeviceResponse } from '../../../shared-we
 
 const devices = new Hono<{ Bindings: Env; Variables: Variables }>();
 const ONLINE_WINDOW_MS = 2 * 60 * 60 * 1000;
-const LOCAL_WEB_URL = 'http://localhost:5173';
-
-function getAppUrl(requestUrl: string, env: Env) {
-  const url = new URL(requestUrl);
-  if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
-    return LOCAL_WEB_URL;
-  }
-
+function getAppUrl(env: Env) {
   return env.APP_URL;
 }
 
-devices.get('/', authenticate('access'), async (c) => {
+devices.get('/', authenticateWebSession(), async (c) => {
   const ownerIds = await listVisibleOwnerIds(c.env.DB, c.get('sub'));
   const rows = await listDevicesForOwners(c.env.DB, ownerIds);
 
@@ -80,8 +73,9 @@ devices.get('/', authenticate('access'), async (c) => {
         last_upload_at: device.last_upload_at,
         last_hash_at: hi ? hi.hashed_at : device.last_hash_at,
         pending_count: hi ? hi.count : device.pending_count,
-        status:
-          device.last_upload_at && Date.now() - device.last_upload_at < ONLINE_WINDOW_MS
+        status: device.deleted_at
+          ? 'logged_out'
+          : device.last_upload_at && Date.now() - device.last_upload_at < ONLINE_WINDOW_MS
             ? 'online'
             : 'offline',
       };
@@ -89,21 +83,26 @@ devices.get('/', authenticate('access'), async (c) => {
   );
 });
 
-devices.patch('/:id', authenticate('access'), validateZ('json', updateDeviceSchema), async (c) => {
-  const deviceId = c.req.param('id');
-  const device = await findOwnedDevice(c.env.DB, deviceId, c.get('sub'));
+devices.patch(
+  '/:id',
+  authenticateWebSession(),
+  validateZ('json', updateDeviceSchema),
+  async (c) => {
+    const deviceId = c.req.param('id');
+    const device = await findOwnedDevice(c.env.DB, deviceId, c.get('sub'));
 
-  if (!device) {
-    return c.json({ error: 'Not found' }, 404);
-  }
+    if (!device) {
+      return c.json({ error: 'Not found' }, 404);
+    }
 
-  const { name } = c.req.valid('json');
-  await updateDevice(c.env.DB, deviceId, { name });
+    const { name } = c.req.valid('json');
+    await updateDevice(c.env.DB, deviceId, { name });
 
-  return c.json<PatchDeviceResponse>({ id: deviceId, updated: true });
-});
+    return c.json<PatchDeviceResponse>({ id: deviceId, updated: true });
+  },
+);
 
-devices.delete('/:id', authenticate('access'), async (c) => {
+devices.delete('/:id', authenticateWebSession(), async (c) => {
   const deviceId = c.req.param('id');
   const device = await findOwnedDevice(c.env.DB, deviceId, c.get('sub'));
 
@@ -126,7 +125,7 @@ devices.delete('/:id', authenticate('access'), async (c) => {
   if (owner) {
     const email = renderDeviceDeletedTemplate({
       appName: c.env.APP_NAME,
-      appUrl: getAppUrl(c.req.url, c.env),
+      appUrl: getAppUrl(c.env),
       recipientName: owner.name,
       deviceName: device.name,
       devicePlatform: device.platform,
@@ -153,7 +152,7 @@ devices.delete('/:id', authenticate('access'), async (c) => {
 
     const email = renderDeviceDeletedTemplate({
       appName: c.env.APP_NAME,
-      appUrl: getAppUrl(c.req.url, c.env),
+      appUrl: getAppUrl(c.env),
       recipientName: target.watcher_name,
       deviceName: device.name,
       devicePlatform: device.platform,

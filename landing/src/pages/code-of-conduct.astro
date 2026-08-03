@@ -1,0 +1,11 @@
+---
+import SiteLayout from '../layouts/SiteLayout.astro';
+// Symlinked to the repo-root CODE_OF_CONDUCT.md so the site and repo copies can't drift apart.
+import { Content } from '../legal/code-of-conduct.md';
+---
+
+<SiteLayout pageTitle="Code of Conduct">
+  <section class="legal">
+    <Content />
+  </section>
+</SiteLayout>

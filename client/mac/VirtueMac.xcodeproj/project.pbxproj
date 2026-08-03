@@ -1,0 +1,435 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0946C5109E37F3FAEE99088C /* VirtueKit in Frameworks */ = {isa = PBXBuildFile; productRef = 082894B96DBA8A27A0ECE9E8 /* VirtueKit */; };
+		11B013F0E56013B1C6C6EC60 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 055BD2FE6FCEDDEC3BE4C0AF /* ContentView.swift */; };
+		292AA2A902C74EB4A54F00F7 /* OverridesSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36325AE89554E525D5084EC4 /* OverridesSheet.swift */; };
+		3A915346468F31F82374F360 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 694D4847EBC1A16DB15D473D /* Assets.xcassets */; };
+		5188731D1EEC6BD5A5FFAF29 /* MonitoringCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEC65E353F74300A665CAF36 /* MonitoringCoordinator.swift */; };
+		59CF74E58D6F876BC06C0E9D /* VirtueMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41804153F1E76D2C46B7E251 /* VirtueMacApp.swift */; };
+		7FD43B539BE365F6C475A652 /* ApplicationServices.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 72020BD32DBCC1A5559326B6 /* ApplicationServices.framework */; };
+		F07E6593210A054AA700AB65 /* StatusSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF53D4E18246A0144F67A054 /* StatusSheet.swift */; };
+		FAA5A585CF46E803782F70E5 /* NativeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C2AC02ABF6297F0C75A1FDA /* NativeBridge.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		037446F0C83B692EC6A40FE3 /* shared-swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "shared-swift"; path = "../shared-swift"; sourceTree = SOURCE_ROOT; };
+		055BD2FE6FCEDDEC3BE4C0AF /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		36325AE89554E525D5084EC4 /* OverridesSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverridesSheet.swift; sourceTree = "<group>"; };
+		3C2AC02ABF6297F0C75A1FDA /* NativeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBridge.swift; sourceTree = "<group>"; };
+		41804153F1E76D2C46B7E251 /* VirtueMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtueMacApp.swift; sourceTree = "<group>"; };
+		4B9ABF2C4EE68B7B48ACAF7D /* VirtueMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VirtueMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		694D4847EBC1A16DB15D473D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		72020BD32DBCC1A5559326B6 /* ApplicationServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = ApplicationServices.framework; sourceTree = "<group>"; };
+		CF53D4E18246A0144F67A054 /* StatusSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusSheet.swift; sourceTree = "<group>"; };
+		FEC65E353F74300A665CAF36 /* MonitoringCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringCoordinator.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		2B69C3C39842AC04AAB3C8C1 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0946C5109E37F3FAEE99088C /* VirtueKit in Frameworks */,
+				7FD43B539BE365F6C475A652 /* ApplicationServices.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		038CFDA6A45392B5A9A825F2 /* app */ = {
+			isa = PBXGroup;
+			children = (
+				694D4847EBC1A16DB15D473D /* Assets.xcassets */,
+				3D4266277BD67B395F8D7699 /* Sources */,
+			);
+			path = app;
+			sourceTree = "<group>";
+		};
+		3B9B07D913F0BE5742624F43 = {
+			isa = PBXGroup;
+			children = (
+				038CFDA6A45392B5A9A825F2 /* app */,
+				9E2AE7237EFDE6467856189C /* Packages */,
+				ED52C5F3DAAF6874A5CB0034 /* Frameworks */,
+				9F9FB3779B0A93E95960F1C4 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		3D4266277BD67B395F8D7699 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				055BD2FE6FCEDDEC3BE4C0AF /* ContentView.swift */,
+				FEC65E353F74300A665CAF36 /* MonitoringCoordinator.swift */,
+				3C2AC02ABF6297F0C75A1FDA /* NativeBridge.swift */,
+				36325AE89554E525D5084EC4 /* OverridesSheet.swift */,
+				CF53D4E18246A0144F67A054 /* StatusSheet.swift */,
+				41804153F1E76D2C46B7E251 /* VirtueMacApp.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		9E2AE7237EFDE6467856189C /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				037446F0C83B692EC6A40FE3 /* shared-swift */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		9F9FB3779B0A93E95960F1C4 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				4B9ABF2C4EE68B7B48ACAF7D /* VirtueMac.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		ED52C5F3DAAF6874A5CB0034 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				72020BD32DBCC1A5559326B6 /* ApplicationServices.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		E3B79E26048D91D1448A7145 /* VirtueMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8580FAB8D67EA24DD98384C9 /* Build configuration list for PBXNativeTarget "VirtueMac" */;
+			buildPhases = (
+				6D77307B4718845A19E9E8CF /* Build Rust Bridge */,
+				6093142DB77E2BD61D8F9512 /* Sources */,
+				90B93C00AA0958E74FF005AB /* Resources */,
+				2B69C3C39842AC04AAB3C8C1 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = VirtueMac;
+			packageProductDependencies = (
+				082894B96DBA8A27A0ECE9E8 /* VirtueKit */,
+			);
+			productName = VirtueMac;
+			productReference = 4B9ABF2C4EE68B7B48ACAF7D /* VirtueMac.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		C8BF2DE940BD1C9FED07EBB5 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					E3B79E26048D91D1448A7145 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Manual;
+					};
+				};
+			};
+			buildConfigurationList = 9DEAA85C4464E0A1A6EB3DB1 /* Build configuration list for PBXProject "VirtueMac" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 3B9B07D913F0BE5742624F43;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				F09A76F6B0F22225FB80E2E7 /* XCLocalSwiftPackageReference "../shared-swift" */,
+			);
+			preferredProjectObjectVersion = 77;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				E3B79E26048D91D1448A7145 /* VirtueMac */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		90B93C00AA0958E74FF005AB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3A915346468F31F82374F360 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		6D77307B4718845A19E9E8CF /* Build Rust Bridge */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build Rust Bridge";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "#!/bin/sh\nset -eu\n\nSCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\nROOT_DIR=\"${SRCROOT:-$(cd \"$SCRIPT_DIR/..\" && pwd)}\"\nRUST_DIR=\"$ROOT_DIR/rust\"\nMANIFEST_PATH=\"$RUST_DIR/Cargo.toml\"\nLIB_NAME=\"libvirtue_mac_rust.a\"\n\nPROFILE_DIR=\"debug\"\nCARGO_EXTRA=\"\"\nif [ \"${CONFIGURATION:-Debug}\" = \"Release\" ]; then\n  PROFILE_DIR=\"release\"\n  CARGO_EXTRA=\"--release\"\nfi\n\n# client/mac/rust is a member of the client/ Cargo workspace, so cargo\n# always builds into the shared client/target dir (the same one\n# `cargo build -p virtue-mac` and CI's rust-cache step use).\nTARGET_DIR=\"${CARGO_TARGET_DIR:-$(cd \"$RUST_DIR/../..\" && pwd)/target}\"\n\nLIB_DEST=\"$BUILT_PRODUCTS_DIR/$LIB_NAME\"\nrm -f \"$LIB_DEST\"\n\n# build-app.sh (the CI/release path) already builds virtue-mac-ffi for every\n# requested arch, into this same TARGET_DIR, before invoking xcodebuild —\n# and sets VIRTUE_MAC_RUST_PREBUILT to say so. Re-running cargo here for\n# that case was found to always miss cargo's own fingerprint cache (full\n# dependency recompile, ~3 min per arch) even though the artifacts were\n# already fresh, so skip straight to using them instead of invoking cargo\n# again. Local Xcode builds (no VIRTUE_MAC_RUST_PREBUILT) still build here.\nbuild_target() {\n  target=\"$1\"\n  if [ -n \"${VIRTUE_MAC_RUST_PREBUILT:-}\" ]; then\n    return 0\n  fi\n  rustup target add \"$target\" >/dev/null 2>&1 || true\n  if [ -n \"$CARGO_EXTRA\" ]; then\n    cargo build --manifest-path \"$MANIFEST_PATH\" --target \"$target\" $CARGO_EXTRA\n  else\n    cargo build --manifest-path \"$MANIFEST_PATH\" --target \"$target\"\n  fi\n}\n\nLIB_INPUTS=\"\"\nLIB_COUNT=0\n\ncase \" ${ARCHS:-} \" in\n  *\" arm64 \"*)\n  target=\"aarch64-apple-darwin\"\n  if [ -n \"${VIRTUE_MAC_RUST_PREBUILT:-}\" ]; then\n    echo \"Using prebuilt Rust bridge for target: ${target} (config: ${CONFIGURATION:-Debug})\"\n  else\n    echo \"Building Rust bridge for target: ${target} (config: ${CONFIGURATION:-Debug})\"\n  fi\n  build_target \"$target\"\n  LIB_INPUTS=\"$LIB_INPUTS $TARGET_DIR/$target/$PROFILE_DIR/$LIB_NAME\"\n  LIB_COUNT=$((LIB_COUNT + 1))\n  ;;\nesac\n\ncase \" ${ARCHS:-} \" in\n  *\" x86_64 \"*)\n  target=\"x86_64-apple-darwin\"\n  if [ -n \"${VIRTUE_MAC_RUST_PREBUILT:-}\" ]; then\n    echo \"Using prebuilt Rust bridge for target: ${target} (config: ${CONFIGURATION:-Debug})\"\n  else\n    echo \"Building Rust bridge for target: ${target} (config: ${CONFIGURATION:-Debug})\"\n  fi\n  build_target \"$target\"\n  LIB_INPUTS=\"$LIB_INPUTS $TARGET_DIR/$target/$PROFILE_DIR/$LIB_NAME\"\n  LIB_COUNT=$((LIB_COUNT + 1))\n  ;;\nesac\n\nif [ \"$LIB_COUNT\" -eq 0 ]; then\n  echo \"No supported arch found in ARCHS='${ARCHS:-}'\" >&2\n  exit 1\nfi\n\nif [ \"$LIB_COUNT\" -eq 1 ]; then\n  # shellcheck disable=SC2086\n  set -- $LIB_INPUTS\n  cp \"$1\" \"$LIB_DEST\"\nelse\n  # shellcheck disable=SC2086\n  lipo -create $LIB_INPUTS -output \"$LIB_DEST\"\nfi\n\necho \"Prepared Rust bridge library -> $LIB_DEST\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		6093142DB77E2BD61D8F9512 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				11B013F0E56013B1C6C6EC60 /* ContentView.swift in Sources */,
+				5188731D1EEC6BD5A5FFAF29 /* MonitoringCoordinator.swift in Sources */,
+				FAA5A585CF46E803782F70E5 /* NativeBridge.swift in Sources */,
+				292AA2A902C74EB4A54F00F7 /* OverridesSheet.swift in Sources */,
+				F07E6593210A054AA700AB65 /* StatusSheet.swift in Sources */,
+				59CF74E58D6F876BC06C0E9D /* VirtueMacApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		16DC04728E21CB372A1A1F08 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = app/VirtueMac.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\".\"",
+				);
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = app/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = "$(inherited) -lvirtue_mac_rust";
+				PRODUCT_BUNDLE_IDENTIFIER = "$(VIRTUE_APP_BUNDLE_ID)";
+				PRODUCT_NAME = Virtue;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		566A41B04284EAB5D8FE74C5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = app/VirtueMac.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\".\"",
+				);
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = app/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = "$(inherited) -lvirtue_mac_rust";
+				PRODUCT_BUNDLE_IDENTIFIER = "$(VIRTUE_APP_BUNDLE_ID)";
+				PRODUCT_NAME = Virtue;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		6A690A75201C8EAAC5D7D308 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LIBRARY_SEARCH_PATHS = "$(inherited) $(BUILT_PRODUCTS_DIR) $(TARGET_BUILD_DIR)";
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.0.8;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				VIRTUE_APP_BUNDLE_ID = org.virtueinitiative.virtue.mac;
+				VIRTUE_BUILD_LABEL = "$(MARKETING_VERSION)";
+			};
+			name = Debug;
+		};
+		8FC740402B014E0E6ABB2057 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LIBRARY_SEARCH_PATHS = "$(inherited) $(BUILT_PRODUCTS_DIR) $(TARGET_BUILD_DIR)";
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.0.8;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				VIRTUE_APP_BUNDLE_ID = org.virtueinitiative.virtue.mac;
+				VIRTUE_BUILD_LABEL = "$(MARKETING_VERSION)";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		8580FAB8D67EA24DD98384C9 /* Build configuration list for PBXNativeTarget "VirtueMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				566A41B04284EAB5D8FE74C5 /* Debug */,
+				16DC04728E21CB372A1A1F08 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		9DEAA85C4464E0A1A6EB3DB1 /* Build configuration list for PBXProject "VirtueMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6A690A75201C8EAAC5D7D308 /* Debug */,
+				8FC740402B014E0E6ABB2057 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		F09A76F6B0F22225FB80E2E7 /* XCLocalSwiftPackageReference "../shared-swift" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../shared-swift";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		082894B96DBA8A27A0ECE9E8 /* VirtueKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VirtueKit;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = C8BF2DE940BD1C9FED07EBB5 /* Project object */;
+}

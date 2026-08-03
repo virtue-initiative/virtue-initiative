@@ -41,6 +41,10 @@ class MainActivity : AppCompatActivity() {
 
         populateOverrideInputs()
 
+        if (binding.deviceNameInput.text.isNullOrBlank()) {
+            binding.deviceNameInput.setText(deviceName())
+        }
+
         val initError = NativeBridge.ensureInitialized(this)
         if (initError != null) {
             setStatus("Core init failed: $initError")
@@ -77,6 +81,8 @@ class MainActivity : AppCompatActivity() {
 
         val email = binding.emailInput.text?.toString()?.trim().orEmpty()
         val password = binding.passwordInput.text?.toString().orEmpty()
+        val deviceName = binding.deviceNameInput.text?.toString()?.trim()
+            ?.ifBlank { null } ?: deviceName()
 
         if (email.isBlank() || password.isBlank()) {
             setStatus("Email and password are required")
@@ -86,12 +92,12 @@ class MainActivity : AppCompatActivity() {
         binding.loginButton.isEnabled = false
         lifecycleScope.launch {
             val error = withContext(Dispatchers.IO) {
-                var result = NativeBridge.nativeLogin(email, password, deviceName())
+                var result = NativeBridge.nativeLogin(email, password, deviceName)
                 if (result != null && result.contains("serialization error")) {
                     // Corrupted state files — wipe core-data and retry
                     android.util.Log.w("MainActivity", "Login serialization error, wiping core-data and retrying")
                     filesDir.resolve("core-data").deleteRecursively()
-                    result = NativeBridge.nativeLogin(email, password, deviceName())
+                    result = NativeBridge.nativeLogin(email, password, deviceName)
                 }
                 result
             }
@@ -304,16 +310,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showOverridesDialog() {
-        val bgColor = 0xFFF9F9F7.toInt()
-        val cardColor = 0xFFFFFFFF.toInt()
-        val borderColor = 0xFFE5E5EA.toInt()
-        val labelColor = 0xFF888888.toInt()
-        val valueColor = 0xFF1A1C19.toInt()
+        val bgColor = 0xFFF4EFE3.toInt()
+        val cardColor = 0xFFFBF7EA.toInt()
+        val borderColor = 0xFFD9D1BC.toInt()
+        val labelColor = 0xFF9C9682.toInt()
+        val valueColor = 0xFF1B1A16.toInt()
         val dp = resources.displayMetrics.density
 
         fun cardDrawable() = GradientDrawable().apply {
             setColor(cardColor)
-            cornerRadius = 18 * dp
+            cornerRadius = 4 * dp
             setStroke((1 * dp).toInt(), borderColor)
         }
 
@@ -367,8 +373,8 @@ class MainActivity : AppCompatActivity() {
             this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle
         ).apply {
             text = getString(R.string.dialog_cancel)
-            setTextColor(0xFF008900.toInt())
-            strokeColor = android.content.res.ColorStateList.valueOf(0xFF008900.toInt())
+            setTextColor(0xFF1E3A2E.toInt())
+            strokeColor = android.content.res.ColorStateList.valueOf(0xFF1E3A2E.toInt())
             backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.TRANSPARENT)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
@@ -376,7 +382,7 @@ class MainActivity : AppCompatActivity() {
         }
         val applyBtn = com.google.android.material.button.MaterialButton(this).apply {
             text = getString(R.string.btn_apply_overrides)
-            backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF008900.toInt())
+            backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF1E3A2E.toInt())
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
             )
@@ -448,16 +454,16 @@ class MainActivity : AppCompatActivity() {
         val overrides = OverrideSettings.load(this)
         val apiUrl = overrides.baseApiUrl ?: "https://api.virtueinitiative.org"
 
-        val bgColor = 0xFFF9F9F7.toInt()
-        val cardColor = 0xFFFFFFFF.toInt()
-        val borderColor = 0xFFE5E5EA.toInt()
-        val labelColor = 0xFF888888.toInt()
-        val valueColor = 0xFF1A1C19.toInt()
+        val bgColor = 0xFFF4EFE3.toInt()
+        val cardColor = 0xFFFBF7EA.toInt()
+        val borderColor = 0xFFD9D1BC.toInt()
+        val labelColor = 0xFF9C9682.toInt()
+        val valueColor = 0xFF1B1A16.toInt()
         val dp = resources.displayMetrics.density
 
         fun cardDrawable() = GradientDrawable().apply {
             setColor(cardColor)
-            cornerRadius = 18 * dp
+            cornerRadius = 4 * dp
             setStroke((1 * dp).toInt(), borderColor)
         }
 
@@ -523,8 +529,8 @@ class MainActivity : AppCompatActivity() {
         })
         val doneBtn = com.google.android.material.button.MaterialButton(this).apply {
             text = getString(R.string.btn_done)
-            setTextColor(0xFF008900.toInt())
-            strokeColor = android.content.res.ColorStateList.valueOf(0xFF008900.toInt())
+            setTextColor(0xFF1E3A2E.toInt())
+            strokeColor = android.content.res.ColorStateList.valueOf(0xFF1E3A2E.toInt())
             strokeWidth = (1 * dp).toInt()
             backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.TRANSPARENT)
             layoutParams = LinearLayout.LayoutParams(

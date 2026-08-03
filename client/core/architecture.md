@@ -34,7 +34,7 @@ client/
         lifecycle.rs    — LifecycleModule: process/suspend/ping-gap alerts
         screenshot.rs   — ScreenshotModule: interval scheduling + capture
         status.rs       — StatusModule: partial-status aggregation
-        upload.rs       — UploadModule: hash/batch/immediate queues
+        upload.rs       — UploadModule: hash-pending, batch-pending, and notify-pending queues
       platform.rs       — ScreenshotHooks / PlatformHooks traits
       state.rs          — load_state / store_state (event_state.json)
       storage.rs        — auth.json, device_settings.json, stop_intent.json
@@ -47,8 +47,8 @@ client/
 `core` is structured around a typed, in-process event bus.
 
 ```rust
-// Build the default set of 7 observer modules.
-let observers = build_default_modules(config, platform, api)?;
+// Build the default set of 8 observer modules.
+let observers = build_default_modules(config, platform, api, PlatformConfig::default())?;
 let mut bus = EventBus::new(observers, saved_state)?;
 
 // One loop iteration: send Ping, process all cascaded events.
@@ -84,17 +84,51 @@ pub trait Observer: 'static {
 Use `crate::dispatch_event!(event, { pat: Type => expr, … })` inside `on_event`
 to pattern-match typed events without boilerplate.
 
-### The 7 default modules
+### The 8 default modules
 
-| Module                      | Key inputs                                                                              | Key outputs                                                                                        |
-| --------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `LifecycleModule`           | `Ping`, `ProcessStarted/Stopped`, `ComputerSuspended/Resumed`, `UserSession*`           | `Upload` (lifecycle + alert events)                                                                |
-| `ScreenshotModule`          | `Login`, `Logout`, `Ping`, `ConfigChanged`                                              | `Upload` (screenshot), `CaptureFailed`                                                             |
-| `UploadModule`              | `Login`, `Logout`, `Upload`, `Ping`, `ProcessStopped`, `FlushBatchNow`, `ConfigChanged` | network I/O via `ApiTransport`; `LogoutRequested` on 404                                           |
-| `CaptureAvailabilityModule` | `CaptureFailed`                                                                         | `Upload` (capture-failed alert)                                                                    |
-| `AuthModule`                | `LoginRequested`, `LogoutRequested`, `Ping`, `StatusRequest`, `ConfigChanged`           | `Login`, `Logout`, `LoginResult`, `LogoutResult`, `DeviceSettingsRefreshed`, `PartialStatus::Auth` |
-| `StatusModule`              | `StatusRequest`, `PartialStatus` (from 3 sources)                                       | `StatusResponse`                                                                                   |
-| `ConfigModule`              | `Ping`                                                                                  | `ConfigChanged`                                                                                    |
+| Module                      | Key inputs                                                                              | Key outputs                                                             |
+| --------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `LifecycleModule`           | `Ping`, `ProcessStarted`, `UserStopRequested`                                           | `Upload` (lifecycle + alert events), `PartialStatus::Lifecycle`         |
+| `ScreenshotModule`          | `Login`, `Logout`, `Ping`, `ConfigChanged`                                              | `Upload` (screenshot), `CaptureFailed`                                  |
+| `UploadModule`              | `Login`, `Logout`, `Upload`, `Ping`, `ProcessStopped`, `FlushBatchNow`, `ConfigChanged` | network I/O via `ApiTransport`; `LogoutRequested` on 404                |
+| `CaptureAvailabilityModule` | `CaptureFailed`                                                                         | `Upload` (capture-failed alert)                                         |
+| `HeartbeatModule`           | `Ping`                                                                                  | `Upload` (heartbeat, once per 24h while authenticated)                  |
+| `AuthModule`                | `LoginRequested`, `LogoutRequested`, `StatusRequest`, `ConfigChanged`                   | `Login`, `Logout`, `LoginResult`, `LogoutResult`, `PartialStatus::Auth` |
+| `StatusModule`              | `StatusRequest`, `PartialStatus` (from 3 sources)                                       | `StatusResponse`                                                        |
+| `ConfigModule`              | `Ping`                                                                                  | `ConfigChanged`                                                         |
+
+On iOS (`PlatformConfig::lifecycle_enabled == false`), `LifecycleModule` is
+replaced by a `NoopLifecycleModule` that only answers `StatusRequest` — see
+`PlatformConfig` below.
+
+### Screenshot dedup (two gates)
+
+`ScreenshotModule` still captures on the normal cadence, but a frame is only _uploaded_
+when it carries new information. Two gates run on each due `Ping`:
+
+1. **Lock / screensaver gate** — checked _before_ capturing via the
+   `is_locked_or_screensaver()` platform hook. While the session is locked or a screensaver
+   is active the user cannot be viewing real content, so the capture is skipped entirely (no
+   `take_screenshot`, no classification, no `Upload`). The cadence clock still advances so we
+   re-check next interval. The hook fails safe to `false` (fall back to the diff gate) when
+   the state is unknown. Per platform: Linux uses `org.freedesktop.ScreenSaver` /
+   `org.gnome.ScreenSaver` `GetActive()` over D-Bus; macOS reads `CGSSessionScreenIsLocked`
+   and detects the screensaver process; Windows uses `SPI_GETSCREENSAVERRUNNING` plus an
+   `OpenInputDesktop` lock check.
+
+2. **Screen-change diff gate** — after capturing, the frame is reduced to a grayscale grid
+   fingerprint (`module/screenshot/fingerprint.rs`). If it has not materially changed from the
+   **last uploaded** fingerprint, the upload is suppressed. A frame counts as changed if either
+   the **mean** per-cell delta is high (a broad change, including low-contrast ones such as a
+   terminal filling with text) OR a **number of cells** changed strongly (a concentrated change
+   such as a video window — the count, not a single max, ignores a 1–2 cell clock/cursor while
+   still catching a small corner video, which is what makes the gate abuse-resistant). The grid
+   resolution is **derived from the image size** (each cell ≈ a fixed source-pixel block, aspect
+   preserved); a fixed grid would make each cell average thousands of pixels on a large/wide
+   display and dilute real changes below threshold. Anchoring to the last _uploaded_ frame — not
+   the previous capture — means slow sub-threshold drift eventually accumulates past the
+   threshold and forces a fresh upload. `last_uploaded_fingerprint` is persisted in
+   `event_state.json`.
 
 ### Request/response status flow
 
@@ -157,10 +191,10 @@ if let Some(ipc) = &mut ipc {
 
 `forward_standard_inbound` registers handlers for the standard controller→daemon
 set (`LoginRequested`, `LogoutRequested`, `StatusRequest`, `UserStopRequested`,
-`UserSessionLogin/Logout`, `ComputerSuspended/Resumed`, `ProcessStopped`).
+`ProcessStopped`).
 Platform daemons can pass a custom closure to `accept_pending` to add extra
-handlers per-connection (Mac uses this to track `UserStopRequested` separately
-for shutdown-reason classification).
+handlers per-connection when needed; Mac and Linux currently just pass
+`forward_standard_inbound` directly.
 
 ## Platform process model
 
@@ -225,19 +259,56 @@ are now owned entirely by their observer modules).
 
 ## PlatformHooks
 
-Keep the trait minimal. Platforms implement only:
+Keep the traits minimal. Platforms implement `ScreenshotHooks` and `LifecycleHooks`:
 
 ```rust
+// ScreenshotHooks
 fn take_screenshot(&self) -> CoreResult<Screenshot>;
-fn get_time_utc_ms(&self) -> CoreResult<i64>;          // default: SystemTime::now()
-fn get_last_shutdown_time_utc_ms(&self) -> CoreResult<Option<i64>>;
-fn get_last_startup_time_utc_ms(&self) -> CoreResult<Option<i64>>;
+fn get_time_utc_ms(&self) -> CoreResult<i64>;             // default: SystemTime::now()
+fn is_locked_or_screensaver(&self) -> CoreResult<bool>;   // default: Ok(false)
+
+// LifecycleHooks
+fn get_utc_clock_ms(&self) -> CoreResult<i64>;             // default: SystemTime::now()
+fn get_boot_clock_ms(&self) -> CoreResult<i64>;             // includes suspend
+fn get_monotonic_clock_ms(&self) -> CoreResult<i64>;        // excludes suspend
+fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>>;
+fn get_last_logout_utc_ms(&self) -> CoreResult<Option<i64>>;
 ```
 
-`get_time_utc_ms` has a default implementation using `SystemTime::now()` that is correct for
-all production platforms. Only `TestPlatformHooks` overrides it (delegates to `MockClock` for
-time-controlled tests). Platform crates implement only `take_screenshot`,
-`get_last_shutdown_time_utc_ms`, and `get_last_startup_time_utc_ms`.
+The `get_time_utc_ms`/`get_utc_clock_ms` defaults using `SystemTime::now()` are correct for all
+production platforms. Only `TestPlatformHooks` overrides them (delegates to `MockClock` for
+time-controlled tests). `is_locked_or_screensaver` defaults to `Ok(false)` (the fail-safe);
+desktop platforms override it for the screenshot dedup lock/screensaver gate, while mobile
+platforms keep the default. `PlatformHooks: ScreenshotHooks + LifecycleHooks` is the combined
+bound most call sites (like `assembly::build_default_modules`) use.
+
+`get_boot_clock_ms`/`get_monotonic_clock_ms` are cheap syscalls read on every `Ping`.
+`get_last_login_utc_ms`/`get_last_logout_utc_ms` can be expensive (D-Bus round-trips,
+subprocess shell-outs) — `LifecycleModule` throttles them to a coarse poll rather than calling
+them every tick. See `../tampering.md` for the full lifecycle model built on these hooks.
+
+## PlatformConfig
+
+Fixed, per-platform capabilities that shape module behavior at startup — as opposed to
+`ScreenshotHooks`/`LifecycleHooks`, which are live platform I/O queried on every tick.
+Passed once when assembling the observer modules:
+
+```rust
+pub struct PlatformConfig {
+    pub lifecycle_enabled: bool, // default: true
+}
+```
+
+`lifecycle_enabled` defaults to `true`. iOS passes `false`: the monitoring process is a
+short-lived Safari extension host that the OS can suspend the instant the device locks, with no
+notification delivered to that process (extensions have no `UIApplication`) and no
+boot/shutdown/session API surface available to it at all — there's no way to build a
+meaningful expected-running-window model. When `false`, `assembly::build_default_modules`
+constructs a `NoopLifecycleModule` instead of a real `LifecycleModule`.
+
+`PlatformConfig` is deliberately named generically (not e.g. `LifecycleConfig`) so future
+platform-level capability flags can be added to it without another signature change across
+every platform crate.
 
 Everything else belongs in `core`.
 
@@ -252,7 +323,28 @@ wire:  nonce[12 bytes] || ciphertext+tag
 ```
 
 Each upload also wraps the batch key per recipient using HPKE
-(`DhkemX25519HkdfSha256 / HkdfSha256 / Aes256Gcm`).
+(`DhkemX25519HkdfSha256 / HkdfSha256 / Aes256Gcm`). The recipient set comes from
+the device's `wrapping_keys`, which `UploadModule` refetches from `GET /d/device`
+immediately before every batch upload — this is the sole refresh path, so a partner
+added or removed is picked up on the very next batch. A transient refetch failure
+falls back to the last known settings; a 404/401 means the device is gone and
+triggers logout.
+
+Each `BatchUpload` also carries `high_risk_count`/`medium_risk_count`: tallies of how many
+events in the batch fall in the high (`risk >= 0.7`) and medium (`0.4 <= risk < 0.7`) bands,
+thresholds mirroring `shared-web/risk.ts`. These are computed client-side from per-event
+`risk` values before encryption, so the server can summarize tamper activity in partner
+digest emails without ever decrypting the batch.
+
+## Notify flow
+
+High-risk events (`risk >= lifecycle::EXTRA_HIGH_RISK`) are additionally pushed into
+`UploadModule`'s `pending_notify_events: Vec<NotifyPayload>` queue, where
+`NotifyPayload { ts, type, risk, title?, details? }`. `retry_pending_notifies` drains this
+queue by POSTing each payload to `/d/notify` once the device is authenticated. This happens
+independently of, but alongside, the always-present hash/batch path — the event body itself
+still goes through the normal encrypted batch pipeline; `/d/notify` only triggers the alert
+email.
 
 ## Hash chain
 

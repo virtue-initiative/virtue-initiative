@@ -36,52 +36,67 @@ impl From<&str> for Redacted<String> {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "snake_case")]
-pub enum ProcessStoppedReason {
-    Other,
-    Shutdown,
-    User,
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum LifecycleKind {
+    /// A suspend interval detected retrospectively via boot-vs-monotonic
+    /// clock divergence.
+    SuspendDetected { duration_ms: i64 },
+    /// Start of a new expected-running window (OS session/user login).
+    SystemLogin { utc_ms: i64 },
+    /// End of an expected-running window (OS session/user logout).
+    SystemLogout { utc_ms: i64 },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
-pub enum LifecycleKind {
-    ProcessStarted,
-    ProcessStoppedUser,
-    ProcessStoppedShutdown,
-    ProcessStoppedOther,
-    ComputerSuspended,
-    ComputerResumed,
-    ScreenshotPaused,
-    ScreenshotResumed,
-    Login,
-    Logout,
-    ComputerBooted,
+pub enum ScreenshotSkipReason {
+    StaticScreen,        // duplicate frame (fingerprint unchanged)
+    LockedOrScreensaver, // session locked / screensaver / screen off
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum AlertReason {
-    ProcessKilledBeforeShutdown,
-    ForceKilledBeforeShutdown,
-    UserStoppedProcess,
-    UnexpectedProcessStart,
-    PingGapWhileRunning,
-    MissingResume,
+    /// The process wasn't running during a stretch of awake time between a
+    /// known login and the first observed heartbeat.
+    UnexpectedStart,
+    /// The process stopped running before the session's logout, leaving a
+    /// gap between the last heartbeat and the (possibly reconstructed)
+    /// logout timestamp.
+    UnexpectedStop,
+    /// A stretch of awake time (same boot) between two heartbeats with no
+    /// sample — crash, force-kill-and-restart, or frozen process.
+    UnexpectedGap,
+    /// The user explicitly quit the monitor while it was expected to be
+    /// running.
+    UserStop,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum UploadKind {
     Screenshot {
         image: Vec<u8>,
         content_type: String,
+        /// Raw skin-tone heuristic score ∈ [0.0, 1.0] from the risk classifier (dev metadata).
+        /// `None` on older logs or when no classifier was available.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        skin_detection: Option<f32>,
+        /// Raw NSFW model probability ∈ [0.0, 1.0] from the risk classifier (dev metadata).
+        /// `None` when the skin gate skipped the model, on older logs, or when no classifier
+        /// was available.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        nsfw_detection: Option<f32>,
     },
     Lifecycle {
+        #[serde(flatten)]
         kind: LifecycleKind,
     },
     LifecycleAlert {
         reason: AlertReason,
+    },
+    ScreenshotSkipped {
+        reason: ScreenshotSkipReason,
     },
     Alert {
         message: String,
@@ -91,6 +106,39 @@ pub enum UploadKind {
         title: String,
         details: Option<String>,
     },
+    Heartbeat,
+}
+
+/// Hand-written so the captured screenshot bytes never reach a log line
+/// verbatim — every other field prints exactly as `#[derive(Debug)]` would.
+impl std::fmt::Debug for UploadKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UploadKind::Screenshot {
+                image,
+                content_type,
+                skin_detection,
+                nsfw_detection,
+            } => write!(
+                f,
+                "Screenshot {{ image: <{} bytes>, content_type: {content_type:?}, skin_detection: {skin_detection:?}, nsfw_detection: {nsfw_detection:?} }}",
+                image.len()
+            ),
+            UploadKind::Lifecycle { kind } => write!(f, "Lifecycle {{ kind: {kind:?} }}"),
+            UploadKind::LifecycleAlert { reason } => {
+                write!(f, "LifecycleAlert {{ reason: {reason:?} }}")
+            }
+            UploadKind::ScreenshotSkipped { reason } => {
+                write!(f, "ScreenshotSkipped {{ reason: {reason:?} }}")
+            }
+            UploadKind::Alert { message } => write!(f, "Alert {{ message: {message:?} }}"),
+            UploadKind::CaptureFailed => write!(f, "CaptureFailed"),
+            UploadKind::Dev { title, details } => {
+                write!(f, "Dev {{ title: {title:?}, details: {details:?} }}")
+            }
+            UploadKind::Heartbeat => write!(f, "Heartbeat"),
+        }
+    }
 }
 
 /// A single piece of `ServiceStatus` reported by one module in response to a
@@ -162,6 +210,25 @@ pub struct BatchUpload {
     #[serde(with = "serde_bytes")]
     pub bytes: Vec<u8>,
     pub access_keys: Vec<BatchAccessKey>,
+    /// Number of events in this batch whose risk fell in the high band (>= 0.7).
+    pub high_risk_count: u32,
+    /// Number of events in this batch whose risk fell in the medium band (0.4–0.7).
+    pub medium_risk_count: u32,
+}
+
+/// Minimal metadata sent to `POST /d/notify` to trigger an alert email for a
+/// high-risk event. The event body itself is uploaded end-to-end encrypted via a
+/// batch; this payload carries only what the notification email needs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotifyPayload {
+    pub ts: i64,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub risk: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,7 +240,6 @@ pub struct BatchAccessKey {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceCredentials {
     pub device_id: String,
-    pub access_token: String,
     pub refresh_token: String,
 }
 
@@ -182,10 +248,10 @@ pub struct DeviceSettings {
     pub device_id: String,
     pub name: String,
     pub platform: String,
+    /// Every recipient the device must wrap batch keys for: the owner (when they
+    /// have a public key) followed by all accepted partners.
     #[serde(default)]
-    pub owner: Option<BatchRecipient>,
-    #[serde(default)]
-    pub partners: Vec<BatchRecipient>,
+    pub wrapping_keys: Vec<BatchRecipient>,
     #[serde(default)]
     pub hash_base_url: Option<String>,
 }
@@ -207,15 +273,8 @@ pub struct HashParams {
     pub hkdf_hash: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LoginStatus {
-    pub access_token: String,
-    pub device: Option<DeviceCredentials>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AuthState {
-    pub user_access_token: Option<String>,
     pub device_credentials: Option<DeviceCredentials>,
 }
 
@@ -232,4 +291,47 @@ pub struct ServiceStatus {
 pub struct LoopOutcome {
     pub ran_at_ms: i64,
     pub status: ServiceStatus,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // `LifecycleKind` must serialize as a bare `"kind"`-tagged object flattened
+    // into `UploadKind::Lifecycle`'s `data` — this is exactly the wire shape
+    // the web viewer's `getLogCategory`/`getLogMessage` assume, and previously
+    // silently drifted from it when the variants gained fields (see #526).
+    #[test]
+    fn lifecycle_kind_serializes_to_flattened_tagged_shape() {
+        assert_eq!(
+            serde_json::to_value(LifecycleKind::SuspendDetected {
+                duration_ms: 60_033
+            })
+            .unwrap(),
+            json!({ "kind": "suspend_detected", "duration_ms": 60_033 })
+        );
+        assert_eq!(
+            serde_json::to_value(LifecycleKind::SystemLogin { utc_ms: 123 }).unwrap(),
+            json!({ "kind": "system_login", "utc_ms": 123 })
+        );
+        assert_eq!(
+            serde_json::to_value(LifecycleKind::SystemLogout { utc_ms: 456 }).unwrap(),
+            json!({ "kind": "system_logout", "utc_ms": 456 })
+        );
+    }
+
+    #[test]
+    fn upload_kind_lifecycle_flattens_kind_into_data() {
+        let upload = UploadKind::Lifecycle {
+            kind: LifecycleKind::SystemLogin { utc_ms: 789 },
+        };
+        assert_eq!(
+            serde_json::to_value(upload).unwrap(),
+            json!({
+                "type": "lifecycle",
+                "data": { "kind": "system_login", "utc_ms": 789 }
+            })
+        );
+    }
 }

@@ -10,10 +10,9 @@ use std::time::Duration;
 use anyhow::Result;
 use serde::Serialize;
 use virtue_core::{
-    ComputerResumed, ComputerSuspended, CoreError, EventBus, EventChannel, LoginRequested,
-    LoginResult, LogoutRequested, LogoutResult, Ping, ProcessStarted, ProcessStopped,
-    ProcessStoppedReason, Redacted, StatusRequest, StatusResponse, UserSessionLogin,
-    UserSessionLogout, UserStopRequested, build_default_modules_reqwest, load_state, store_state,
+    CoreError, EventBus, EventChannel, LoginRequested, LoginResult, LogoutRequested, LogoutResult,
+    Ping, PlatformConfig, ProcessStarted, ProcessStopped, Redacted, StatusRequest, StatusResponse,
+    UserStopRequested, build_default_modules_reqwest, load_state, store_state,
 };
 
 use crate::capture::WindowsPlatformHooks;
@@ -51,14 +50,11 @@ enum MonitorCommand {
     NoteStopRequested {
         source: String,
     },
-    ProcessStopped(ProcessStoppedReason),
-    Login,
-    Logout,
-    ComputerSuspended,
-    ComputerResumed,
+    ProcessStopped,
     AppLogin {
         email: String,
         password: String,
+        device_name: String,
         response: mpsc::SyncSender<virtue_core::CoreResult<String>>,
     },
     AppLogout {
@@ -148,40 +144,15 @@ pub fn stop_monitoring_from_tray_exit() -> Result<()> {
     send_command(MonitorCommand::NoteStopRequested {
         source: "tray_stop_monitoring".to_string(),
     })?;
-    send_command(MonitorCommand::ProcessStopped(ProcessStoppedReason::User))?;
+    send_command(MonitorCommand::ProcessStopped)?;
     stop_monitoring()?;
     Ok(())
 }
 
-pub fn stop_monitoring_for_system_shutdown() -> Result<()> {
-    send_command(MonitorCommand::ProcessStopped(
-        ProcessStoppedReason::Shutdown,
-    ))?;
+pub fn stop_monitoring_for_os_session_end() -> Result<()> {
+    send_command(MonitorCommand::ProcessStopped)?;
     stop_monitoring()?;
     Ok(())
-}
-
-pub fn stop_monitoring_for_session_logoff() -> Result<()> {
-    send_command(MonitorCommand::Logout)?;
-    send_command(MonitorCommand::ProcessStopped(ProcessStoppedReason::Other))?;
-    stop_monitoring()?;
-    Ok(())
-}
-
-pub fn notify_session_logon() -> Result<()> {
-    send_command(MonitorCommand::Login)
-}
-
-pub fn notify_session_logoff() -> Result<()> {
-    send_command(MonitorCommand::Logout)
-}
-
-pub fn notify_suspend() -> Result<()> {
-    send_command(MonitorCommand::ComputerSuspended)
-}
-
-pub fn notify_resume() -> Result<()> {
-    send_command(MonitorCommand::ComputerResumed)
 }
 
 fn send_command(command: MonitorCommand) -> Result<()> {
@@ -215,7 +186,7 @@ pub fn note_login_state(logged_in: bool) {
     });
 }
 
-pub fn app_login(email: &str, password: &str) -> Result<String> {
+pub fn app_login(email: &str, password: &str, device_name: &str) -> Result<String> {
     let (tx, rx) = mpsc::sync_channel(1);
     {
         let state = controller().state.lock().expect("monitor controller lock");
@@ -224,6 +195,7 @@ pub fn app_login(email: &str, password: &str) -> Result<String> {
                 let _ = worker.command_tx.send(MonitorCommand::AppLogin {
                     email: email.to_string(),
                     password: password.to_string(),
+                    device_name: device_name.to_string(),
                     response: tx,
                 });
             }
@@ -276,7 +248,11 @@ fn run_monitor_loop(shutdown: Arc<AtomicBool>, command_rx: Receiver<MonitorComma
     let state_path = paths.state_dir.join("event_state.json");
     let config = build_core_config(&paths);
 
-    let modules = match build_default_modules_reqwest(config, WindowsPlatformHooks::new()) {
+    let modules = match build_default_modules_reqwest(
+        config,
+        WindowsPlatformHooks::new(),
+        PlatformConfig::default(),
+    ) {
         Ok(m) => m,
         Err(err) => {
             update_snapshot(|s| {
@@ -299,6 +275,13 @@ fn run_monitor_loop(shutdown: Arc<AtomicBool>, command_rx: Receiver<MonitorComma
             return;
         }
     };
+
+    if let Ok(resp) = bus.request::<StatusRequest, StatusResponse>(StatusRequest) {
+        update_snapshot(|s| {
+            s.logged_in = resp.status.is_authenticated;
+            s.pending_request_count = resp.status.pending_request_count;
+        });
+    }
 
     if let Err(err) = (|| -> anyhow::Result<()> {
         bus.send(ProcessStarted)?;
@@ -370,38 +353,25 @@ fn handle_command(bus: &mut EventBus, state_path: &Path, command: MonitorCommand
             bus.send(UserStopRequested { source })?;
             store_state(state_path, &bus.iter()?)?;
         }
-        MonitorCommand::ProcessStopped(reason) => {
-            bus.send(ProcessStopped(reason))?;
-            store_state(state_path, &bus.iter()?)?;
-        }
-        MonitorCommand::Login => {
-            bus.send(UserSessionLogin)?;
-            store_state(state_path, &bus.iter()?)?;
-        }
-        MonitorCommand::Logout => {
-            bus.send(UserSessionLogout)?;
-            store_state(state_path, &bus.iter()?)?;
-        }
-        MonitorCommand::ComputerSuspended => {
-            bus.send(ComputerSuspended)?;
-            store_state(state_path, &bus.iter()?)?;
-        }
-        MonitorCommand::ComputerResumed => {
-            bus.send(ComputerResumed)?;
+        MonitorCommand::ProcessStopped => {
+            bus.send(ProcessStopped)?;
             store_state(state_path, &bus.iter()?)?;
         }
         MonitorCommand::AppLogin {
             email,
             password,
+            device_name,
             response,
         } => {
             let request_result = bus.request::<LoginRequested, LoginResult>(LoginRequested {
                 email,
                 password: Redacted(password),
+                device_name: Some(device_name),
             });
             let _ = store_state(state_path, &bus.iter()?);
             let result = request_result.and_then(|r| {
                 if r.success {
+                    note_login_state(true);
                     Ok(r.device_id.unwrap_or_default())
                 } else {
                     Err(CoreError::CommandFailed(
@@ -416,6 +386,7 @@ fn handle_command(bus: &mut EventBus, state_path: &Path, command: MonitorCommand
             let _ = store_state(state_path, &bus.iter()?);
             let result = request_result.and_then(|r| {
                 if r.success {
+                    note_login_state(false);
                     Ok(())
                 } else {
                     Err(CoreError::CommandFailed(
@@ -432,7 +403,7 @@ fn handle_command(bus: &mut EventBus, state_path: &Path, command: MonitorCommand
 fn drain_commands(bus: &mut EventBus, state_path: &Path, command_rx: &Receiver<MonitorCommand>) {
     while let Ok(command) = command_rx.try_recv() {
         if let Err(e) = handle_command(bus, state_path, command) {
-            eprintln!("resident_monitor: command error: {e}");
+            tracing::error!(error = %e, "resident_monitor: command error");
         }
     }
 }
@@ -455,7 +426,7 @@ fn wait_for_commands(
         match command_rx.recv_timeout(tick) {
             Ok(command) => {
                 if let Err(e) = handle_command(bus, state_path, command) {
-                    eprintln!("resident_monitor: command error: {e}");
+                    tracing::error!(error = %e, "resident_monitor: command error");
                 }
             }
             Err(RecvTimeoutError::Timeout) => {

@@ -4,7 +4,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:fillViewport="true"
-    android:background="@color/page_background">
+    android:background="@color/bg">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -53,7 +53,7 @@
                         android:id="@+id/websiteLink"
                         android:text="@string/app_website"
                         android:textSize="14sp"
-                        android:textColor="@color/virtue_green"
+                        android:textColor="@color/virtue_forest"
                         android:layout_marginTop="2dp"
                         android:clickable="true"
                         android:focusable="true" />
@@ -116,12 +116,12 @@
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/statusDetailsButton"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    style="@style/Widget.App.Button.OutlinedButton"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="@string/btn_status_details"
-                    android:textColor="@color/virtue_green"
-                    app:strokeColor="@color/virtue_green" />
+                    android:textColor="@color/virtue_forest"
+                    app:strokeColor="@color/virtue_forest" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/pauseResumeButton"
@@ -129,7 +129,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
                     android:text="@string/btn_pause_monitoring"
-                    android:backgroundTint="@color/virtue_green" />
+                    android:backgroundTint="@color/virtue_forest" />
             </LinearLayout>
         </LinearLayout>
 
@@ -197,6 +197,20 @@
                         android:autofillHints="password" />
                 </com.google.android.material.textfield.TextInputLayout>
 
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    app:boxBackgroundMode="outline">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/deviceNameInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="@string/device_name_hint"
+                        android:inputType="text" />
+                </com.google.android.material.textfield.TextInputLayout>
+
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -208,17 +222,17 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:text="@string/btn_sign_in"
-                        android:backgroundTint="@color/virtue_green" />
+                        android:backgroundTint="@color/virtue_forest" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/overridesButton"
-                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        style="@style/Widget.App.Button.OutlinedButton"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
                         android:text="@string/btn_runtime_overrides"
-                        android:textColor="@color/virtue_green"
-                        app:strokeColor="@color/virtue_green" />
+                        android:textColor="@color/virtue_forest"
+                        app:strokeColor="@color/virtue_forest" />
                 </LinearLayout>
             </LinearLayout>
 
@@ -255,22 +269,22 @@
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/signOutButton"
-                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        style="@style/Widget.App.Button.OutlinedButton"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:text="@string/btn_sign_out"
-                        android:textColor="@color/virtue_green"
-                        app:strokeColor="@color/virtue_green" />
+                        android:textColor="@color/virtue_forest"
+                        app:strokeColor="@color/virtue_forest" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/overridesButtonSession"
-                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        style="@style/Widget.App.Button.OutlinedButton"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
                         android:text="@string/btn_runtime_overrides"
-                        android:textColor="@color/virtue_green"
-                        app:strokeColor="@color/virtue_green" />
+                        android:textColor="@color/virtue_forest"
+                        app:strokeColor="@color/virtue_forest" />
                 </LinearLayout>
             </LinearLayout>
         </LinearLayout>

@@ -3,6 +3,7 @@
 ## Repo map
 
 - `api/` — Cloudflare Workers REST API (TypeScript, Hono, D1 SQLite, R2 object storage)
+- `api-donate/` — Standalone Cloudflare Worker for donations (TypeScript, Hono, D1, Stripe Checkout)
 - `web/` — Main web app (TypeScript, Preact, Vite)
 - `landing/` — Marketing/help site (TypeScript, Astro, Preact)
 - `shared-web/` — Shared UI components used by `web/` and `landing/`
@@ -25,6 +26,7 @@ wire:  nonce[12 bytes] || ciphertext+tag
 ```
 
 Key files:
+
 - Rust: `client/core/src/batch.rs`, `client/core/src/crypto.rs`
 - TypeScript: `web/src/batch-materializer.ts`, `web/src/crypto.ts`
 
@@ -39,6 +41,7 @@ contentHash = sha256(ts_le64 || type_utf8 || sorted(key_utf8 || encoded_value))
 Value encoding: strings → UTF-8, numbers → i64 LE, booleans → 0x00/0x01, bytes → raw.
 
 Key files:
+
 - Rust: `client/core/src/crypto.rs`
 - TypeScript: `web/src/crypto.ts` (`computeNewState`, `verifyBatch`)
 
@@ -58,6 +61,7 @@ then HKDF-SHA256("auth", argon_output) → hex string sent as password_auth
 ```
 
 Key files:
+
 - Rust: `client/core/src/api.rs`
 - TypeScript: `web/src/crypto.ts` (`derivePasswordMaterial`)
 
@@ -67,6 +71,7 @@ Batch keys are wrapped per-recipient using `DhkemX25519HkdfSha256 / HkdfSha256 /
 Wire format: `enc[kem.encSize bytes] || ciphertext`.
 
 Key files:
+
 - Rust: `client/core/src/crypto.rs`
 - TypeScript: `web/src/crypto.ts` (`unwrapBatchKey`, `encryptForPublicKey`)
 
@@ -82,5 +87,9 @@ Read these before touching crypto, batch, or auth code:
 - The AES-GCM nonce position or length (must be first 12 bytes)
 - The msgpack schema (`{events: [...]}` at the outer level, each event double-encoded)
 - The argon2id parameters or the HKDF label strings (`"auth"`, `"key"`)
-- The JWT token `type` claim values (`"access"`, `"device-access"`, `"server"`)
+- The JWT token `type` claim values (`"hash-server"`, `"server"`)
 - The hash chain input encoding rules (LE integers, sorted keys)
+
+## Pull requests
+
+When creating a PR, follow the template at `.github/PULL_REQUEST_TEMPLATE.md`. Fill in every section: summary, changes (type of change + components touched), and testing.
