@@ -1,43 +1,51 @@
 ---
 title: Release 0.0.8
-description: This release brings a redesigned Mac client, screenshot text detection and redaction, a new donations page, and a simplified auth and device model.
+description: This release brings redesigned clients, screenshot text detection and redaction, a new donations page, and a simplified auth and device model.
 pubDate: 2026-07-29
 author: The Virtue Initiative team
 ---
 
-This release brings a redesigned Mac client, screenshot text detection and redaction, a new donations page, and a simplified auth and device model.
+This release brings redesigned clients, nsfw image classification, screenshot text detection and redaction, a new donations page, and a simplified auth and device model.
+
+As of this release, most essential features are at least mostly working (or seem to be). Over the next month or two, we intend to focus on polishing the installation flow and preparing it for a more stable beta release that people can install and use.
 
 ## New look across every platform
 
 The Mac client has been rewritten from scratch, moving from Rust/AppKit to SwiftUI. iOS, Android, and Windows have all been updated to match the new theme, and the website has been redone with a sidebar-based layout, consistent page headings, and a typography pass.
 
-<!-- TODO: add screenshot ./new-design-mac.png - the new Mac SwiftUI client -->
+![new Mac design](./new-design-mac.png)
 
-<!-- TODO: add screenshot ./new-design-website.png - the redesigned sidebar-based website -->
+![new website design](./new-design-web.png)
 
-## Screenshot text detection & redaction
+## Screenshot classification and text detection & redaction
 
-We added a new OCR library for detecting text in screenshots, along with image risk classification and skin/NSFW raw scores. This lays the groundwork for redacting sensitive text directly in screenshots.
+We added a small on device model that assigns a score to each screenshot based on how likely it is to contain NSFW content.
 
-<!-- TODO: add screenshot ./text-redaction.png - a single screenshot showing redacted text -->
+![image classifcation](./nsfw-image-detection.png)
+
+We also added a OCR library for detecting text in screenshots. Currently, we use this for redacting text in screenshots, but eventually we would like to run the on-screen text through a classifer so that NSFW text (such as an explict story) is detected as well.
+
+![text redaction example](./text-redaction.png)
 
 ## Donations page
 
-We added a donations page powered by Stripe Checkout, making it easy to support the project directly. (We also fixed a bug where custom donation amounts with cents would silently fail to submit.)
+We added a donations page powered by Stripe Checkout, making it easy to support the project directly. Donations are not currently tax-deductable, but we are working towards 501(c)3 status.
 
-<!-- TODO: add screenshot ./donations-page.png - the new Stripe Checkout donations page -->
+![donations page](./donations-page.png)
 
-## Simplified auth & device model
+## Devices are now marked as deleted on logout
 
-Auth was simplified to use session and device tokens, device settings were consolidated, and devices are now soft-deleted when a client logs out.
+Devices are now marked as deleted in the UI (but screenshots are still visible) when you log out on the device. We also simplified some internal auth and session code for the devices.
 
 ## Better lifecycle & login handling
 
-We improved inactivity detection across platforms, added an optional device name when logging in, rewrote login/logout tracking as an expected-window model, and added support for running multiple instances of the Linux client at once.
+We worked on improving our model for detecting unexpected gaps in monitoring. Our new model works on the assumption that a session begins when a user logs into their computer and ends when a user logs out of/shuts down their computer. Any gap in between (except suspend, i.e. closing the laptop lid), is detected as an unexpected gap and creates an alert that partners can see.
 
-## Reliability & diagnostics
+We also allow you to set your device name when logging in (previously it could only be changed from the website).
 
-We rolled out tracing-based structured logging across every platform (core, Linux, Mac, Windows, iOS, and Android), started pruning batches older than 30 days, added upload retry backoff and API rate limiting, and extended the boot/gap alert thresholds.
+## Internal reliability & diagnostics
+
+We rolled out consistent logging across every platform for better debug information. We also started pruning batches older than 30 days and added upload retry backoff and API rate limiting.
 
 ## Everything else
 
