@@ -16,7 +16,7 @@ export const hashParamsSchema = z.object({
 export type HashParams = z.infer<typeof hashParamsSchema>;
 
 export const loginMaterialSchema = z.object({
-  password_salt: z.string(),
+  password_salt: z.string().optional(),
   params: hashParamsSchema,
 });
 export type LoginMaterial = z.infer<typeof loginMaterialSchema>;
@@ -32,7 +32,7 @@ export const userSchema = z.object({
   }),
   name: z.string().optional(),
   pub_key: z.string().optional(),
-  priv_key: z.string().optional(),
+  encrypted_priv_key: z.string().optional(),
 });
 export type User = z.infer<typeof userSchema>;
 
@@ -131,12 +131,12 @@ export const signupSchema = z.object({
   password_auth: z.base64(),
   password_salt: z.base64(),
   pub_key: z.base64(),
-  priv_key: z.base64(),
+  encrypted_priv_key: z.base64(),
   name: z.string().min(1).optional(),
 });
 export type SignupPayload = z.infer<typeof signupSchema>;
 
-export const loginMaterialQuerySchema = z.object({ email: z.email() });
+export const loginMaterialQuerySchema = z.object({ email: z.email().optional() });
 export type LoginMaterialQuery = z.infer<typeof loginMaterialQuerySchema>;
 
 export const loginSchema = z.object({
@@ -160,7 +160,7 @@ export const passwordResetSchema = z.object({
   password_auth: z.base64(),
   password_salt: z.base64(),
   pub_key: z.base64(),
-  priv_key: z.base64(),
+  encrypted_priv_key: z.base64(),
 });
 export type PasswordResetPayload = z.infer<typeof passwordResetSchema>;
 
@@ -175,7 +175,7 @@ export const updateUserSchema = z
       })
       .optional(),
     pub_key: z.base64().optional(),
-    priv_key: z.base64().optional(),
+    encrypted_priv_key: z.base64().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
 export type UpdateUserPayload = z.infer<typeof updateUserSchema>;
@@ -201,7 +201,7 @@ export type UpdateDevicePayload = z.infer<typeof updateDeviceSchema>;
 
 // ── Additional response schemas ──────────────────────────────────────────────
 
-export const loginResponseSchema = z.object({ ok: z.boolean(), refresh_token: z.string() });
+export const loginResponseSchema = z.object({ ok: z.boolean() });
 export type LoginResponse = z.infer<typeof loginResponseSchema>;
 
 export const signupResponseSchema = z.object({

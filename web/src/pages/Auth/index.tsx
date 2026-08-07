@@ -168,7 +168,7 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
         password_auth: passwordAuth.toBase64(),
         password_salt: passwordSalt.toBase64(),
         pub_key: keyPair.publicKey.toBase64(),
-        priv_key: (await encryptData(wrappingKey, keyPair.privateKey)).toBase64(),
+        encrypted_priv_key: (await encryptData(wrappingKey, keyPair.privateKey)).toBase64(),
       },
     };
   }

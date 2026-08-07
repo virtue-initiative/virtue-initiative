@@ -7,7 +7,7 @@ export const TEST_USER: User = {
   email_bounced_at: null,
   name: 'Test User',
   pub_key: undefined,
-  priv_key: undefined,
+  encrypted_priv_key: undefined,
   settings: {
     email_frequency: 'daily',
     timezone: 'UTC',

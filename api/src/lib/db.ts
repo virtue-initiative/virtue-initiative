@@ -119,13 +119,13 @@ export async function findUserByEmail(db: D1Database, email: string) {
     email_bounced_at: number | null;
     settings: string;
     pub_key: ArrayBuffer | null;
-    priv_key: ArrayBuffer | null;
+    encrypted_priv_key: ArrayBuffer | null;
   }>(
     db
       .prepare(
         `SELECT id, email, password_hash, password_salt, password_params_version,
                 name, email_verified, email_bounced_at, settings,
-                pub_key, priv_key
+                pub_key, encrypted_priv_key
          FROM users
          WHERE email = ?`,
       )
@@ -145,12 +145,12 @@ export async function findUserById(db: D1Database, userId: string) {
     email_bounced_at: number | null;
     settings: string;
     pub_key: ArrayBuffer | null;
-    priv_key: ArrayBuffer | null;
+    encrypted_priv_key: ArrayBuffer | null;
   }>(
     db
       .prepare(
         `SELECT id, email, name, email_verified, email_bounced_at, settings,
-                pub_key, priv_key
+                pub_key, encrypted_priv_key
          FROM users
          WHERE id = ?`,
       )
@@ -211,7 +211,7 @@ export async function createUser(
     passwordSalt: ArrayBuffer;
     passwordParamsVersion: string;
     pub_key: ArrayBuffer;
-    priv_key: ArrayBuffer;
+    encrypted_priv_key: ArrayBuffer;
     name?: string;
   },
 ) {
@@ -220,7 +220,7 @@ export async function createUser(
       `INSERT INTO users (
         id, email, password_hash, password_salt, password_params_version,
         name, email_verified, settings,
-        pub_key, priv_key, created_at
+        pub_key, encrypted_priv_key, created_at
       ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
     )
     .bind(
@@ -232,7 +232,7 @@ export async function createUser(
       input.name ?? null,
       JSON.stringify({ email_frequency: 'daily', timezone: 'UTC' }),
       input.pub_key,
-      input.priv_key,
+      input.encrypted_priv_key,
       Date.now(),
     )
     .run();
@@ -251,7 +251,7 @@ export async function updateUser(
     email_bounced_at?: number | null;
     settings?: { email_frequency?: string; timezone?: string };
     pub_key?: ArrayBuffer;
-    priv_key?: ArrayBuffer;
+    encrypted_priv_key?: ArrayBuffer;
   },
 ) {
   const updates: string[] = [];
@@ -308,9 +308,9 @@ export async function updateUser(
     params.push(fields.pub_key);
   }
 
-  if (fields.priv_key !== undefined) {
-    updates.push('priv_key = ?');
-    params.push(fields.priv_key);
+  if (fields.encrypted_priv_key !== undefined) {
+    updates.push('encrypted_priv_key = ?');
+    params.push(fields.encrypted_priv_key);
   }
 
   if (updates.length === 0) {
@@ -995,11 +995,18 @@ export async function findEmailTokenByHash(db: D1Database, tokenHash: string, pu
   }>(purpose ? prepared.bind(tokenHash, purpose) : prepared.bind(tokenHash), ['id', 'user_id']);
 }
 
-export async function consumeEmailToken(db: D1Database, tokenId: string, consumedAt: number) {
-  return db
+export async function consumeEmailToken(
+  db: D1Database,
+  token: { id: string; user_id: string | null; purpose: string },
+  consumedAt: number,
+) {
+  await db
     .prepare('UPDATE email_tokens SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL')
-    .bind(consumedAt, uuidToBytes(tokenId))
+    .bind(consumedAt, uuidToBytes(token.id))
     .run();
+  if (token.user_id) {
+    await invalidateEmailTokens(db, token.user_id, token.purpose);
+  }
 }
 
 export async function createSessionRecord(

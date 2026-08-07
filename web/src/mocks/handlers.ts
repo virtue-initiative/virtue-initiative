@@ -3,29 +3,31 @@ import { TEST_DEVICES, TEST_USER, TEST_WATCHER, TEST_WATCHING } from './fixtures
 
 const BASE = 'http://localhost:8787';
 
-export const handlers = [
-  // ── Hash params ────────────────────────────────────────────────────────
-  http.get(`${BASE}/current-hash-params`, () =>
-    HttpResponse.json({
-      salt_length: 16,
-      memory_cost_kib: 65536,
-      time_cost: 3,
-      parallelism: 1,
-    }),
-  ),
+const MOCK_HASH_PARAMS = {
+  version: 'argon2id-v1',
+  algorithm: 'argon2id',
+  salt_length: 16,
+  memory_cost_kib: 65536,
+  time_cost: 3,
+  parallelism: 1,
+  hkdf_hash: 'sha256',
+};
 
-  // ── Login material ─────────────────────────────────────────────────────
-  http.get(`${BASE}/user/login-material`, () =>
-    HttpResponse.json({
+export const handlers = [
+  // ── Login material (also serves current hash params when `email` is omitted) ──
+  http.get(`${BASE}/user/login-material`, ({ request }) => {
+    const url = new URL(request.url);
+    if (!url.searchParams.has('email')) {
+      return HttpResponse.json({ params: MOCK_HASH_PARAMS });
+    }
+    return HttpResponse.json({
       password_salt: btoa('testsalt12345678'),
-      memory_cost_kib: 65536,
-      time_cost: 3,
-      parallelism: 1,
-    }),
-  ),
+      params: MOCK_HASH_PARAMS,
+    });
+  }),
 
   // ── Login ──────────────────────────────────────────────────────────────
-  http.post(`${BASE}/login`, () => HttpResponse.json({ ok: true, refresh_token: 'mock-token' })),
+  http.post(`${BASE}/login`, () => HttpResponse.json({ ok: true })),
 
   // ── Signup ─────────────────────────────────────────────────────────────
   http.post(`${BASE}/signup-request`, () => HttpResponse.json({ ok: true })),
