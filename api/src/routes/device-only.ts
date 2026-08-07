@@ -71,7 +71,7 @@ async function createDeviceSession(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   deviceId: string,
 ) {
-  const refreshToken = generateOpaqueToken();
+  const refreshToken = generateOpaqueToken('device_session');
   const now = Date.now();
 
   await createSessionRecord(c.env.DB, {

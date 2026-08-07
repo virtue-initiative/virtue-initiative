@@ -16,7 +16,7 @@ export interface UserSettings {
   name?: string;
   settings?: { email_frequency?: User['settings']['email_frequency']; timezone?: string };
   pub_key?: string;
-  priv_key?: string;
+  encrypted_priv_key?: string;
 }
 
 export interface UpdateSettingsResult {
@@ -161,7 +161,7 @@ export class APIClient {
       password_auth: string;
       password_salt: string;
       pub_key?: string;
-      priv_key?: string;
+      encrypted_priv_key?: string;
     },
   ): Promise<void> {
     await api.resetPassword(token, payload);

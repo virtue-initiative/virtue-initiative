@@ -3,7 +3,7 @@ import { getCookie } from 'hono/cookie';
 import { Env, Variables } from '../types/bindings';
 import { JWTType, verifyJWT } from '../lib/jwt';
 import { findSessionByRefreshTokenHash } from '../lib/db';
-import { hashOpaqueToken } from '../lib/tokens';
+import { assertTokenPurpose, hashOpaqueToken } from '../lib/tokens';
 
 export function authenticate(type: JWTType | JWTType[]) {
   const allowed = Array.isArray(type) ? type : [type];
@@ -48,6 +48,12 @@ export function authenticateWebSession() {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
+    try {
+      assertTokenPurpose(refreshToken, 'web_session');
+    } catch {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
     const session = await findSessionByRefreshTokenHash(
       c.env.DB,
       hashOpaqueToken(refreshToken),
@@ -74,6 +80,12 @@ export function authenticateDeviceSession() {
     }
 
     const token = authHeader.slice(7);
+    try {
+      assertTokenPurpose(token, 'device_session');
+    } catch {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
     const session = await findSessionByRefreshTokenHash(c.env.DB, hashOpaqueToken(token), 'device');
 
     if (!session || !session.device_id || session.expires_at < Date.now()) {

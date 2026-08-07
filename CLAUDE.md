@@ -12,6 +12,18 @@
 
 See `AGENTS.md` for how to run checks and tests for each component.
 
+## Local dev
+
+`./scripts/setup.sh` — one-time: installs deps, copies `.dev.vars`, runs local D1 migrations, installs/trusts Caddy.
+
+`./scripts/launch.sh [--donate] [domain]` — starts `api`, `web`, and `landing` dev servers together (interleaved colored logs), each on a random free port:
+
+- No `domain` arg: plain `http://localhost:<port>` for each service (ports differ per run — see the script's own startup banner). This is enough for most manual testing; browsers treat `http://localhost` as a secure context, so the API's `Secure` session cookie still gets set and sent.
+- With a `domain` arg (e.g. `./scripts/launch.sh myfeature`): registers `https://app.<domain>.localhost`, `https://<domain>.localhost`, etc. via the local Caddy instance (requires `setup.sh` to have run), mimicking the production URL structure.
+- `--donate` also starts `api-donate` and forwards Stripe webhooks to it if the `stripe` CLI is available.
+
+`EMAIL_DELIVERY_MODE=log` in `api/.dev.vars` means outgoing emails aren't sent — they're printed to the `[api]`-prefixed dev-server log (subject/text/html/metadata), including the token-bearing links. That's the way to find a signup/email-change/password-reset link during local testing.
+
 ## Cross-component contracts
 
 These five things are implemented independently in both Rust (`client/core/`) and TypeScript (`web/`) and **must stay bit-for-bit compatible**. If you change one side, you must change the other to match.

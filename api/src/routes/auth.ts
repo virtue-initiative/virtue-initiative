@@ -1,6 +1,7 @@
 import { Context, Hono } from 'hono';
 import { getCookie, deleteCookie, setCookie } from 'hono/cookie';
 import { v4 as uuidv4 } from 'uuid';
+import { z } from 'zod';
 import { authenticateWebSession } from '../middleware/auth';
 import { validateZ } from '../middleware/validation';
 import {
@@ -13,11 +14,12 @@ import {
   findUserByEmail,
   findUserById,
   invalidateEmailTokens,
-  listBatchUrlsForUser,
   updateUser,
   consumeEmailToken,
 } from '../lib/db';
 import {
+  renderAccountExistsTemplate,
+  renderEmailInUseTemplate,
   renderEmailVerificationTemplate,
   renderPasswordResetTemplate,
 } from '../lib/email/templates';
@@ -45,9 +47,8 @@ import {
   generatePasswordSalt,
   hashPasswordAuth,
 } from '../lib/password';
-import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
+import { assertTokenPurpose, generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
-import { deleteObject } from '../lib/r2';
 import { verifyUserCredentials } from '../lib/credentials';
 
 const auth = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -64,47 +65,55 @@ function buildHashParamsResponse() {
   };
 }
 
-function decodeRequiredBase64(value: string, field: string) {
-  const decoded = decodeBase64(value);
-  if (new Uint8Array(decoded).byteLength === 0) {
-    throw new Error(`${field} must not be empty`);
-  }
-  return decoded;
+// Base64 decode + byte-length validation, layered on top of the wire-level
+// `z.base64()` string schemas in shared-web/types.ts (which stay strings since
+// web serializes these fields as JSON).
+function base64Bytes(length: number, label: string) {
+  return z.base64().transform((value, ctx) => {
+    const decoded = decodeBase64(value);
+    if (new Uint8Array(decoded).byteLength !== length) {
+      ctx.addIssue({ code: 'custom', message: `${label} must be ${length} bytes` });
+      return z.NEVER;
+    }
+    return decoded;
+  });
 }
 
-function decodePasswordSalt(value: string) {
-  const decoded = decodeRequiredBase64(value, 'password_salt');
-  if (new Uint8Array(decoded).byteLength !== CURRENT_HASH_PARAMS.salt_length) {
-    throw new Error(`password_salt must be ${CURRENT_HASH_PARAMS.salt_length} bytes`);
-  }
-  return decoded;
+function base64NonEmpty(label: string) {
+  return z.base64().transform((value, ctx) => {
+    const decoded = decodeBase64(value);
+    if (new Uint8Array(decoded).byteLength === 0) {
+      ctx.addIssue({ code: 'custom', message: `${label} must not be empty` });
+      return z.NEVER;
+    }
+    return decoded;
+  });
 }
 
-function decodePasswordAuth(value: string) {
-  const decoded = decodeRequiredBase64(value, 'password_auth');
-  if (new Uint8Array(decoded).byteLength !== 32) {
-    throw new Error('password_auth must be 32 bytes');
-  }
-  return decoded;
-}
+const keyMaterialSchema = z.object({
+  password_auth: base64Bytes(32, 'password_auth'),
+  password_salt: base64Bytes(CURRENT_HASH_PARAMS.salt_length, 'password_salt'),
+  pub_key: base64Bytes(32, 'pub_key'),
+  encrypted_priv_key: base64NonEmpty('encrypted_priv_key'),
+});
 
-function decodePublicKey(value: string) {
-  const decoded = decodeRequiredBase64(value, 'pub_key');
-  if (new Uint8Array(decoded).byteLength !== 32) {
-    throw new Error('pub_key must be 32 bytes');
-  }
-  return decoded;
-}
+const updateKeyMaterialSchema = z.object({
+  pub_key: base64Bytes(32, 'pub_key').optional(),
+  encrypted_priv_key: base64NonEmpty('encrypted_priv_key').optional(),
+});
 
-function badRequest(c: Context<{ Bindings: Env; Variables: Variables }>, message: string) {
-  return c.json({ error: 'Bad Request', details: { errors: [message] } }, 400);
+function invalidRequestData(
+  c: Context<{ Bindings: Env; Variables: Variables }>,
+  error: z.ZodError,
+) {
+  return c.json({ error: 'Invalid request data', details: z.treeifyError(error) }, 400);
 }
 
 async function createSession(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   userId: string,
 ): Promise<string> {
-  const refreshToken = generateOpaqueToken();
+  const refreshToken = generateOpaqueToken('web_session');
   const now = Date.now();
 
   await createSessionRecord(c.env.DB, {
@@ -133,7 +142,7 @@ async function issueEmailToken(
   ttlMs: number,
 ) {
   await invalidateEmailTokens(db, user.id, purpose);
-  const token = generateOpaqueToken();
+  const token = generateOpaqueToken(purpose);
   const now = Date.now();
 
   await createEmailToken(db, {
@@ -205,6 +214,58 @@ async function sendSignupConfirmationEmail(
   });
 }
 
+async function sendAccountExistsEmail(
+  c: Context<{ Bindings: Env; Variables: Variables }>,
+  user: { id: string; email: string; name?: string | null },
+) {
+  const loginUrl = `${c.env.APP_URL}/login`;
+  const forgotPasswordUrl = `${c.env.APP_URL}/forgot-password`;
+  const email = renderAccountExistsTemplate({
+    appName: c.env.APP_NAME,
+    appUrl: c.env.APP_URL,
+    recipientName: user.name,
+    loginUrl,
+    forgotPasswordUrl,
+  });
+
+  await sendEmail({
+    env: c.env,
+    db: c.env.DB,
+    kind: 'account_exists_notice',
+    recipient: user.email,
+    subject: email.subject,
+    text: email.text,
+    html: email.html,
+    related_user_id: user.id,
+    metadata: { purpose: 'account_exists', loginUrl, forgotPasswordUrl },
+  });
+}
+
+async function sendEmailInUseNotice(
+  c: Context<{ Bindings: Env; Variables: Variables }>,
+  user: { id: string; email: string; name?: string | null },
+) {
+  const forgotPasswordUrl = `${c.env.APP_URL}/forgot-password`;
+  const email = renderEmailInUseTemplate({
+    appName: c.env.APP_NAME,
+    appUrl: c.env.APP_URL,
+    recipientName: user.name,
+    forgotPasswordUrl,
+  });
+
+  await sendEmail({
+    env: c.env,
+    db: c.env.DB,
+    kind: 'email_in_use_notice',
+    recipient: user.email,
+    subject: email.subject,
+    text: email.text,
+    html: email.html,
+    related_user_id: user.id,
+    metadata: { purpose: 'email_in_use', forgotPasswordUrl },
+  });
+}
+
 async function sendPasswordResetEmail(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   user: { id: string; email: string; name?: string | null },
@@ -234,8 +295,14 @@ async function sendPasswordResetEmail(
 async function getValidTokenRecord(
   db: D1Database,
   rawToken: string,
-  purpose?: 'email_change' | 'password_reset' | 'signup',
+  purpose: 'email_change' | 'password_reset' | 'signup',
 ) {
+  try {
+    assertTokenPurpose(rawToken, purpose);
+  } catch {
+    return null;
+  }
+
   const token = await findEmailTokenByHash(db, hashOpaqueToken(rawToken), purpose);
   if (!token || token.consumed_at || token.expires_at < Date.now()) {
     return null;
@@ -246,10 +313,13 @@ async function getValidTokenRecord(
   return token;
 }
 
-auth.get('/current-hash-params', async (c) => c.json(buildHashParamsResponse()));
-
 auth.get('/user/login-material', validateZ('query', loginMaterialQuerySchema), async (c) => {
   const { email } = c.req.valid('query');
+
+  if (!email) {
+    return c.json({ params: buildHashParamsResponse() });
+  }
+
   const user = await findUserByEmail(c.env.DB, email.trim().toLowerCase());
 
   return c.json({
@@ -264,10 +334,11 @@ auth.post('/signup-request', validateZ('json', signupRequestSchema), async (c) =
   const existingUser = await findUserByEmail(c.env.DB, normalizedEmail);
 
   if (existingUser) {
-    return c.json({ error: 'An account already exists for that email' }, 409);
+    await sendAccountExistsEmail(c, existingUser);
+    return c.json({ ok: true });
   }
 
-  const token = generateOpaqueToken();
+  const token = generateOpaqueToken('signup');
   const now = Date.now();
 
   await createEmailToken(c.env.DB, {
@@ -288,7 +359,7 @@ auth.post('/signup-request', validateZ('json', signupRequestSchema), async (c) =
 });
 
 auth.post('/signup', validateZ('json', signupSchema), async (c) => {
-  const { verification_token, password_auth, password_salt, pub_key, priv_key, name } =
+  const { verification_token, password_auth, password_salt, pub_key, encrypted_priv_key, name } =
     c.req.valid('json');
 
   const record = await getValidTokenRecord(c.env.DB, verification_token, 'signup');
@@ -300,39 +371,39 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
   const existingUser = await findUserByEmail(c.env.DB, normalizedEmail);
 
   if (existingUser) {
-    return c.json({ error: 'An account already exists for that email' }, 409);
+    // Someone else already claimed this email between /signup-request and now.
+    // /signup-request already notified the account owner, so just burn the
+    // token and report the same generic failure — no fresh leak here.
+    await consumeEmailToken(c.env.DB, record, Date.now());
+    return c.json({ error: 'Invalid or expired verification token' }, 400);
   }
 
-  let decodedPasswordAuth: ArrayBuffer;
-  let decodedPasswordSalt: ArrayBuffer;
-  let decodedPublicKey: ArrayBuffer;
-  let decodedPrivateKey: ArrayBuffer;
-
-  try {
-    decodedPasswordAuth = decodePasswordAuth(password_auth);
-    decodedPasswordSalt = decodePasswordSalt(password_salt);
-    decodedPublicKey = decodePublicKey(pub_key);
-    decodedPrivateKey = decodeRequiredBase64(priv_key, 'priv_key');
-  } catch (error) {
-    return badRequest(c, error instanceof Error ? error.message : 'Invalid signup payload');
+  const decoded = keyMaterialSchema.safeParse({
+    password_auth,
+    password_salt,
+    pub_key,
+    encrypted_priv_key,
+  });
+  if (!decoded.success) {
+    return invalidRequestData(c, decoded.error);
   }
 
   const userId = uuidv4();
-  const passwordHash = await hashPasswordAuth(decodedPasswordAuth);
+  const passwordHash = await hashPasswordAuth(decoded.data.password_auth);
 
   await createUser(c.env.DB, {
     id: userId,
     email: normalizedEmail,
     passwordHash,
-    passwordSalt: decodedPasswordSalt,
+    passwordSalt: decoded.data.password_salt,
     passwordParamsVersion: HASH_PARAMS_VERSION,
-    pub_key: decodedPublicKey,
-    priv_key: decodedPrivateKey,
+    pub_key: decoded.data.pub_key,
+    encrypted_priv_key: decoded.data.encrypted_priv_key,
     name,
   });
 
   await updateUser(c.env.DB, userId, { email_verified: true });
-  await consumeEmailToken(c.env.DB, record.id, Date.now());
+  await consumeEmailToken(c.env.DB, record, Date.now());
 
   await createSession(c, userId);
 
@@ -367,14 +438,19 @@ auth.post('/login', validateZ('json', loginSchema), async (c) => {
     await updateUser(c.env.DB, user.id, { settings: { timezone } });
   }
 
-  const refresh_token = await createSession(c, user.id);
-  return c.json({ ok: true, refresh_token });
+  await createSession(c, user.id);
+  return c.json({ ok: true });
 });
 
 auth.post('/logout', async (c) => {
   const refreshToken = getCookie(c, 'refresh_token');
   if (refreshToken) {
-    await deleteSessionByRefreshTokenHash(c.env.DB, hashOpaqueToken(refreshToken), 'web');
+    try {
+      assertTokenPurpose(refreshToken, 'web_session');
+      await deleteSessionByRefreshTokenHash(c.env.DB, hashOpaqueToken(refreshToken), 'web');
+    } catch {
+      // Malformed or foreign-purpose token — nothing to delete.
+    }
   }
   deleteCookie(c, 'refresh_token', { path: '/' });
   return c.body(null, 204);
@@ -395,13 +471,15 @@ auth.get('/user', authenticateWebSession(), async (c) => {
     settings: user.settings,
     ...(user.name ? { name: user.name } : {}),
     ...(user.pub_key ? { pub_key: encodeBase64(user.pub_key) } : {}),
-    ...(user.priv_key ? { priv_key: encodeBase64(user.priv_key) } : {}),
+    ...(user.encrypted_priv_key
+      ? { encrypted_priv_key: encodeBase64(user.encrypted_priv_key) }
+      : {}),
   });
 });
 
 auth.patch('/user', authenticateWebSession(), validateZ('json', updateUserSchema), async (c) => {
   const userId = c.get('sub');
-  const { email, name, settings, pub_key, priv_key } = c.req.valid('json');
+  const { email, name, settings, pub_key, encrypted_priv_key } = c.req.valid('json');
   const normalizedEmail = email?.trim().toLowerCase();
   const user = await findUserById(c.env.DB, userId);
 
@@ -409,47 +487,43 @@ auth.patch('/user', authenticateWebSession(), validateZ('json', updateUserSchema
     return c.json({ error: 'User account not found' }, 404);
   }
 
-  const emailChanged = Boolean(normalizedEmail && normalizedEmail !== user.email);
-  if (emailChanged) {
-    const existingUser = await findUserByEmail(c.env.DB, normalizedEmail!);
-    if (existingUser && existingUser.id !== userId) {
-      return c.json({ error: 'Email is already in use' }, 409);
-    }
-  }
-
-  let decodedPublicKey: ArrayBuffer | undefined;
-  let decodedPrivateKey: ArrayBuffer | undefined;
-
-  try {
-    decodedPublicKey = pub_key ? decodePublicKey(pub_key) : undefined;
-    decodedPrivateKey = priv_key ? decodeRequiredBase64(priv_key, 'priv_key') : undefined;
-  } catch (error) {
-    return badRequest(c, error instanceof Error ? error.message : 'Invalid user update payload');
+  const decoded = updateKeyMaterialSchema.safeParse({ pub_key, encrypted_priv_key });
+  if (!decoded.success) {
+    return invalidRequestData(c, decoded.error);
   }
 
   await updateUser(c.env.DB, userId, {
     name,
     settings,
-    pub_key: decodedPublicKey,
-    priv_key: decodedPrivateKey,
+    pub_key: decoded.data.pub_key,
+    encrypted_priv_key: decoded.data.encrypted_priv_key,
   });
 
+  const emailChanged = Boolean(normalizedEmail && normalizedEmail !== user.email);
   if (emailChanged) {
-    const verificationToken = await issueEmailToken(
-      c.env.DB,
-      { id: userId, email: normalizedEmail! },
-      'email_change',
-      EMAIL_VERIFICATION_TTL_MS,
-    );
-    await sendVerificationEmail(
-      c,
-      {
-        id: userId,
-        email: normalizedEmail!,
-        name: name ?? user.name,
-      },
-      verificationToken,
-    );
+    const existingUser = await findUserByEmail(c.env.DB, normalizedEmail!);
+    if (existingUser && existingUser.id !== userId) {
+      // Don't issue a real verification token — just let the actual owner
+      // know, and tell the requester the same thing a successful request
+      // would say (mirrors POST /password-reset's generic 204 pattern).
+      await sendEmailInUseNotice(c, existingUser);
+    } else {
+      const verificationToken = await issueEmailToken(
+        c.env.DB,
+        { id: userId, email: normalizedEmail! },
+        'email_change',
+        EMAIL_VERIFICATION_TTL_MS,
+      );
+      await sendVerificationEmail(
+        c,
+        {
+          id: userId,
+          email: normalizedEmail!,
+          name: name ?? user.name,
+        },
+        verificationToken,
+      );
+    }
   }
 
   return c.json<UpdateUserResponse>({
@@ -476,16 +550,9 @@ auth.delete('/user', authenticateWebSession(), validateZ('json', deleteUserSchem
     return c.json({ error: 'Confirmation email does not match your account email' }, 400);
   }
 
-  const batchUrls = await listBatchUrlsForUser(c.env.DB, userId);
+  // R2 batch blobs age out via a bucket lifecycle rule independent of D1 row
+  // lifetime, so there's nothing to clean up here beyond the cascading D1 delete.
   await deleteUserById(c.env.DB, userId);
-
-  const r2Prefix = `${c.env.R2_URL}/`;
-  await Promise.all(
-    batchUrls
-      .map((batch) => batch.url)
-      .filter((url) => url.startsWith(r2Prefix))
-      .map((url) => deleteObject(c.env, url.slice(r2Prefix.length))),
-  );
 
   deleteCookie(c, 'refresh_token', { path: '/' });
   return c.body(null, 204);
@@ -493,9 +560,9 @@ auth.delete('/user', authenticateWebSession(), validateZ('json', deleteUserSchem
 
 auth.post('/email-verification/validate', validateZ('json', verifyEmailSchema), async (c) => {
   const { token } = c.req.valid('json');
-  const record = await getValidTokenRecord(c.env.DB, token);
+  const record = await getValidTokenRecord(c.env.DB, token, 'email_change');
 
-  if (!record || !record.user_id || record.purpose !== 'email_change') {
+  if (!record || !record.user_id) {
     return c.json({ error: 'Invalid or expired token' }, 400);
   }
 
@@ -503,7 +570,9 @@ auth.post('/email-verification/validate', validateZ('json', verifyEmailSchema), 
 
   const existingUser = await findUserByEmail(c.env.DB, record.email);
   if (existingUser && existingUser.id !== userId) {
-    return c.json({ error: 'Email is already in use' }, 409);
+    await consumeEmailToken(c.env.DB, record, Date.now());
+    await sendEmailInUseNotice(c, existingUser);
+    return c.json({ error: 'Invalid or expired token' }, 400);
   }
 
   await updateUser(c.env.DB, userId, {
@@ -511,8 +580,7 @@ auth.post('/email-verification/validate', validateZ('json', verifyEmailSchema), 
     email_verified: true,
     email_bounced_at: null,
   });
-  await consumeEmailToken(c.env.DB, record.id, Date.now());
-  await invalidateEmailTokens(c.env.DB, userId, 'email_change');
+  await consumeEmailToken(c.env.DB, record, Date.now());
 
   await createSession(c, userId);
 
@@ -554,7 +622,7 @@ auth.post('/password-reset/validate', validateZ('json', passwordResetValidateSch
 });
 
 auth.post('/password-reset/finalize', validateZ('json', passwordResetSchema), async (c) => {
-  const { token, password_auth, password_salt, pub_key, priv_key } = c.req.valid('json');
+  const { token, password_auth, password_salt, pub_key, encrypted_priv_key } = c.req.valid('json');
   const record = await getValidTokenRecord(c.env.DB, token, 'password_reset');
 
   if (!record || !record.user_id) {
@@ -566,29 +634,24 @@ auth.post('/password-reset/finalize', validateZ('json', passwordResetSchema), as
     return c.json({ error: 'Invalid or expired token' }, 400);
   }
 
-  let decodedPasswordAuth: ArrayBuffer;
-  let decodedPasswordSalt: ArrayBuffer;
-  let decodedPublicKey: ArrayBuffer;
-  let decodedPrivateKey: ArrayBuffer;
-
-  try {
-    decodedPasswordAuth = decodePasswordAuth(password_auth);
-    decodedPasswordSalt = decodePasswordSalt(password_salt);
-    decodedPublicKey = decodePublicKey(pub_key);
-    decodedPrivateKey = decodeRequiredBase64(priv_key, 'priv_key');
-  } catch (error) {
-    return badRequest(c, error instanceof Error ? error.message : 'Invalid password reset payload');
+  const decoded = keyMaterialSchema.safeParse({
+    password_auth,
+    password_salt,
+    pub_key,
+    encrypted_priv_key,
+  });
+  if (!decoded.success) {
+    return invalidRequestData(c, decoded.error);
   }
 
   await updateUser(c.env.DB, record.user_id, {
-    password_hash: await hashPasswordAuth(decodedPasswordAuth),
-    password_salt: decodedPasswordSalt,
+    password_hash: await hashPasswordAuth(decoded.data.password_auth),
+    password_salt: decoded.data.password_salt,
     password_params_version: HASH_PARAMS_VERSION,
-    pub_key: decodedPublicKey,
-    priv_key: decodedPrivateKey,
+    pub_key: decoded.data.pub_key,
+    encrypted_priv_key: decoded.data.encrypted_priv_key,
   });
-  await consumeEmailToken(c.env.DB, record.id, Date.now());
-  await invalidateEmailTokens(c.env.DB, record.user_id, 'password_reset');
+  await consumeEmailToken(c.env.DB, record, Date.now());
 
   return c.json({ ok: true });
 });

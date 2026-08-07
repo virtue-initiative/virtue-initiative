@@ -11,7 +11,7 @@ Base URL examples:
 - `DateTime`: millisecond Unix timestamp
 - `Base64`: base64-encoded binary
 - `SHA256`: lowercase hex-encoded SHA-256 digest
-- `RefreshToken`: opaque web-session string. Set as the HTTPOnly `refresh_token` cookie by `POST /login`, `POST /signup`, and `POST /email-verification/validate`, and also returned in the `POST /login` body.
+- `RefreshToken`: opaque web-session string, prefixed by purpose (e.g. `wst_...`). Set as the HTTPOnly `refresh_token` cookie by `POST /login`, `POST /signup`, and `POST /email-verification/validate`.
 - `HashServerToken`: EdDSA JWT (`Ed25519`) with `type: "hash-server"` and `sub = device id`; minted by `POST /d/device`, `GET /d/device`, and `POST /d/batch`
 - `DeviceRefreshToken`: opaque string returned by `POST /d/device`
 - `ServerToken`: EdDSA JWT (`Ed25519`) with `type: "server"` and `sub = device id`
@@ -46,7 +46,7 @@ Base URL examples:
   },
   "name": "Name" | undefined,
   "pub_key": Base64 | undefined,
-  "priv_key": Base64 | undefined
+  "encrypted_priv_key": Base64 | undefined
 }
 ```
 
@@ -111,16 +111,6 @@ Response `200`:
 }
 ```
 
-### `GET /current-hash-params`
-
-Returns the current client password-derivation settings.
-
-Response `200`:
-
-```js
-HashParams;
-```
-
 ### `GET /.well-known/jwks.json`
 
 Returns the public signing key in JWKS form for remote JWT verification.
@@ -144,10 +134,19 @@ Response `200`:
 
 ### `GET /user/login-material?email=user@example.com`
 
-Returns a login salt and the current hash params. The response shape is the same for existing and
-non-existing users.
+Returns the current client password-derivation settings, and — when `email` is provided — a login
+salt for that email. The response shape is the same for existing and non-existing users (a decoy
+salt is returned for unknown emails, for enumeration resistance).
 
-Response `200`:
+Response `200` (no `email`):
+
+```js
+{
+  "params": HashParams
+}
+```
+
+Response `200` (with `email`):
 
 ```js
 {
@@ -178,7 +177,10 @@ Notes:
 - Stores a short-lived pending signup token (`email_tokens` row with `purpose='signup'` and `user_id=NULL`).
 - Sends a verification email with a link to `/finish-signup?token=...`.
 - Does **not** create a user account.
-- Returns `409` if an account already exists for the email.
+- Never returns a distinct status for an already-registered email (enumeration-safe). If an
+  account already exists, no token is issued; instead a notice email is sent to the existing
+  account telling them someone tried to sign up with their address. The response is always
+  `{ "ok": true }`.
 
 ### `POST /signup`
 
@@ -190,7 +192,7 @@ Request:
   "password_auth": Base64,
   "password_salt": Base64,
   "pub_key": Base64,
-  "priv_key": Base64,
+  "encrypted_priv_key": Base64,
   "name": "Name" | undefined,
   "email_digest_minutes_utc": Number | undefined,
   "partner_invite_token": "opaque-string" | undefined
@@ -216,6 +218,9 @@ Notes:
 - Creates the account using `email` from the pending record + crypto material from the body.
 - Account is created with `email_verified = true`. Sets the `refresh_token` cookie (auto-login on signup).
 - The signup token is consumed on success.
+- If an account was created for this email in the window between `/signup-request` and `/signup`
+  (a token-redemption race), the token is consumed and the same generic `400` used for
+  expired/invalid tokens is returned — no distinct error, no new account created.
 - `partner_invite_token` is accepted for forwarding to the client and should be applied by the client through `POST /partner/accept` after signup.
 
 ### `POST /login`
@@ -234,12 +239,11 @@ Response `200`:
 
 ```js
 {
-  "ok": true,
-  "refresh_token": RefreshToken
+  "ok": true
 }
 ```
 
-Also sets the `refresh_token` cookie. If the credentials are valid but the account email is
+Also sets the `refresh_token` cookie (the only way this token is delivered). If the credentials are valid but the account email is
 unverified, returns `403` with:
 
 ```js
@@ -272,6 +276,9 @@ Notes:
 
 - Applies a pending `email_change` token; returns `400` for any other or expired token.
 - Also creates a web session and sets the `refresh_token` cookie (auto-login on verification).
+- If the target email was claimed by another account in the window between `PATCH /user` and
+  redemption (a race), the token is consumed, a notice is sent to the real owner, and the same
+  generic `400` is returned — no distinct error, no session created.
 
 ### `POST /logout`
 
@@ -301,7 +308,7 @@ Request:
   "name": "New Name" | undefined,
   "email_frequency": "none" | "alerts-only" | "daily" | "weekly" | undefined,
   "pub_key": Base64 | undefined,
-  "priv_key": Base64 | undefined
+  "encrypted_priv_key": Base64 | undefined
 }
 ```
 
@@ -320,13 +327,21 @@ Notes:
 - When `email` is changed, the user email is **not** updated immediately.
 - A pending `email_change` token is sent to the new address.
 - Submitting that token to `POST /email-verification/validate` applies the email update.
+- If the requested email is already in use by another account, no distinct error is returned —
+  the response looks identical to the success case (`email_verification_required: true`), but no
+  working verification token is issued for the requester. Instead, a notice is sent to the actual
+  owner of that email.
+- Name/settings/key-material fields are applied unconditionally, regardless of whether the email
+  change itself succeeds.
 
 ### `DELETE /user`
 
 Requires an authenticated web session (the `refresh_token` cookie, or `Bearer <RefreshToken>`).
 
-Permanently deletes the account and all of its stored batches. `confirm_email` must match the
-account email or the request returns `400`.
+Permanently deletes the account; D1 rows owned by the account (devices, batches, sessions, email
+tokens) cascade-delete along with it. `confirm_email` must match the account email or the request
+returns `400`. R2 batch blobs are **not** deleted inline — they age out independently via a bucket
+lifecycle rule, same as the general 30-day batch retention policy.
 
 Request:
 
@@ -379,7 +394,7 @@ Request:
   "password_auth": Base64,
   "password_salt": Base64,
   "pub_key": Base64,
-  "priv_key": Base64
+  "encrypted_priv_key": Base64
 }
 ```
 

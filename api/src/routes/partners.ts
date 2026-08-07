@@ -30,7 +30,7 @@ import {
   type CreatePartnerResponse,
 } from '../../../shared-web/types';
 import { sendEmail } from '../lib/email';
-import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
+import { assertTokenPurpose, generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
 
 const partners = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -69,7 +69,7 @@ partners.post(
     const id = uuidv4();
     const inviteTokenId = uuidv4();
     const now = Date.now();
-    const inviteToken = generateOpaqueToken();
+    const inviteToken = generateOpaqueToken('partner_invite');
     const inviteTokenHash = hashOpaqueToken(inviteToken);
 
     await createEmailToken(c.env.DB, {
@@ -116,6 +116,13 @@ partners.post(
 
 partners.post('/partner/validate', validateZ('json', inviteTokenSchema), async (c) => {
   const { token } = c.req.valid('json');
+
+  try {
+    assertTokenPurpose(token, 'partner_invite');
+  } catch {
+    return c.json({ error: 'Invalid or expired invite' }, 400);
+  }
+
   const invite = await findPartnerByInviteTokenHash(c.env.DB, hashOpaqueToken(token));
 
   if (
@@ -152,6 +159,13 @@ partners.post(
     const userId = c.get('sub');
     const currentUser = await findUserById(c.env.DB, userId);
     const { token } = c.req.valid('json');
+
+    try {
+      assertTokenPurpose(token, 'partner_invite');
+    } catch {
+      return c.json({ error: 'Invalid or expired invite' }, 400);
+    }
+
     const invite = await findPartnerByInviteTokenHash(c.env.DB, hashOpaqueToken(token));
 
     if (!currentUser || !invite) {
@@ -195,7 +209,11 @@ partners.post(
       updated_at: Date.now(),
     });
     if (invite.invite_token_id) {
-      await consumeEmailToken(c.env.DB, invite.invite_token_id, Date.now());
+      await consumeEmailToken(
+        c.env.DB,
+        { id: invite.invite_token_id, user_id: null, purpose: 'partner_invite' },
+        Date.now(),
+      );
     }
 
     const owner = await findUserById(c.env.DB, invite.watching_user_id);
