@@ -43,7 +43,9 @@ HTTP status codes: 400 bad request, 401 unauthorized, 403 forbidden, 404 not fou
 - `src/middleware/auth.ts` — JWT verification, sets `c.get('sub')`
 - `src/middleware/validation.ts` — Zod validation wrapper
 - `src/routes/device-only.ts` — batch upload and device log endpoints
-- `src/routes/data.ts` — data retrieval with access control
+- `src/routes/batches.ts` — batch retrieval with access control
+- `src/routes/updates.ts` — combined `GET /updates` (user + devices + partners in one round trip)
+- `src/lib/views.ts` — shared response-builders used by `/user`, `/device`, `/partner`, and `/updates`
 - `API.md` — complete endpoint specification
 
 ## Type source of truth

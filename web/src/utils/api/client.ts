@@ -3,6 +3,7 @@ import {
   Batch,
   Device,
   PartnerRelationships,
+  Updates,
   User,
   WatcherPartner,
   WatchingPartner,
@@ -81,14 +82,46 @@ export class APIClient {
   private logoutSubscribers = new Set<() => void>();
   private loggedOut = false;
 
+  private unsubscribeUpdates: (() => void) | null = null;
+
   constructor(session: Session) {
     this.session = session;
     this.userId = session.userId;
+
+    const updates = session.updates;
     this.userCache = session.user ?? null;
+    this.devicesCache = updates?.devices ?? null;
+    this.watchersCache = updates?.partners.watchers ?? null;
+    this.watchingsCache = updates?.partners.watching ?? null;
+
     cacheClient?.setSession(session.userId, session.privateKey ?? null);
+    this.unsubscribeUpdates =
+      cacheClient?.subscribeUpdates((next) => this.applyUpdates(next)) ?? null;
+
     session.onTokenRefreshFailed(() => {
       this.fireLogoutOnce();
     });
+  }
+
+  private applyUpdates(updates: Updates): void {
+    this.userCache = updates.user;
+    notify(this.userSubscribers, updates.user);
+    this.devicesCache = updates.devices;
+    notify(this.devicesSubscribers, updates.devices);
+    this.watchersCache = updates.partners.watchers;
+    notify(this.watchersSubscribers, updates.partners.watchers);
+    this.watchingsCache = updates.partners.watching;
+    notify(this.watchingsSubscribers, updates.partners.watching);
+  }
+
+  private async refreshAfterMutation(fallback: () => Promise<unknown>): Promise<void> {
+    if (cacheClient) {
+      await cacheClient.refetchUpdates().catch((err) => {
+        console.warn('[api-client] worker refetchUpdates failed', err);
+      });
+      return;
+    }
+    await fallback();
   }
 
   // ── User ────────────────────────────────────────────────────────────────
@@ -112,7 +145,7 @@ export class APIClient {
 
   async updateSettings(settings: UserSettings): Promise<UpdateSettingsResult> {
     const result = await api.updateUser(settings);
-    await this.fetchUser(true);
+    await this.refreshAfterMutation(() => this.fetchUser(true));
     return {
       email_verification_required: result.email_verification_required,
       pending_email: result.pending_email,
@@ -223,25 +256,28 @@ export class APIClient {
 
   async invitePartner(email: string): Promise<void> {
     await api.invitePartner(email);
-    await this.fetchPartners(true);
+    await this.refreshAfterMutation(() => this.fetchPartners(true));
   }
 
   async acceptInvite(inviteToken: string): Promise<void> {
     await api.acceptPartnerInvite(inviteToken);
-    await this.fetchPartners(true);
-    await this.fetchDevices(true);
+    await this.refreshAfterMutation(() =>
+      Promise.all([this.fetchPartners(true), this.fetchDevices(true)]),
+    );
   }
 
   async removeWatcher(id: string): Promise<void> {
     await api.deleteWatcher(id);
-    await this.fetchPartners(true);
-    await this.fetchDevices(true);
+    await this.refreshAfterMutation(() =>
+      Promise.all([this.fetchPartners(true), this.fetchDevices(true)]),
+    );
   }
 
   async stopWatching(id: string): Promise<void> {
     await api.deleteWatching(id);
-    await this.fetchPartners(true);
-    await this.fetchDevices(true);
+    await this.refreshAfterMutation(() =>
+      Promise.all([this.fetchPartners(true), this.fetchDevices(true)]),
+    );
   }
 
   private async fetchPartners(force = false): Promise<PartnerRelationships | null> {
@@ -291,7 +327,7 @@ export class APIClient {
 
   async updateDevice(id: string, patch: { name?: string }): Promise<void> {
     await api.patchDevice(id, patch);
-    await this.fetchDevices(true);
+    await this.refreshAfterMutation(() => this.fetchDevices(true));
   }
 
   async removeDevice(id: string): Promise<void> {
@@ -299,7 +335,7 @@ export class APIClient {
     cacheClient
       ?.deleteDeviceData(this.userId, id)
       .catch((err) => console.warn('[api-client] failed to wipe device data from cache', err));
-    await this.fetchDevices(true);
+    await this.refreshAfterMutation(() => this.fetchDevices(true));
   }
 
   private async fetchDevices(force = false): Promise<Device[] | null> {
@@ -361,6 +397,7 @@ export class APIClient {
   private fireLogoutOnce() {
     if (this.loggedOut) return;
     this.loggedOut = true;
+    this.unsubscribeUpdates?.();
     for (const cb of this.logoutSubscribers) {
       try {
         cb();

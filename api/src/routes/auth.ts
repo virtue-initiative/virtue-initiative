@@ -24,6 +24,7 @@ import {
 import { sendEmail } from '../lib/email';
 import { decodeBase64, encodeBase64 } from '../lib/encoding';
 import { EMAIL_VERIFICATION_TTL_MS, PASSWORD_RESET_TTL_MS } from '../lib/email-domain';
+import { buildUserView } from '../lib/views';
 import {
   signupRequestSchema,
   signupSchema,
@@ -391,22 +392,13 @@ auth.post('/logout', async (c) => {
 });
 
 auth.get('/user', authenticateWebSession(), async (c) => {
-  const user = await findUserById(c.env.DB, c.get('sub'));
+  const view = await buildUserView(c.env.DB, c.get('sub'));
 
-  if (!user) {
+  if (!view) {
     return c.json({ error: 'User account not found' }, 404);
   }
 
-  return c.json({
-    id: user.id,
-    email: user.email,
-    email_verified: user.email_verified === 1,
-    email_bounced_at: user.email_bounced_at,
-    settings: user.settings,
-    ...(user.name ? { name: user.name } : {}),
-    ...(user.pub_key ? { pub_key: encodeBase64(user.pub_key) } : {}),
-    ...(user.priv_key ? { priv_key: encodeBase64(user.priv_key) } : {}),
-  });
+  return c.json(view);
 });
 
 auth.patch('/user', authenticateWebSession(), validateZ('json', updateUserSchema), async (c) => {

@@ -3,7 +3,7 @@ import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { decryptAndFlattenBatch, DecryptionError } from '../api/batch-materializer';
 import { unwrapBatchKey } from '../api/crypto';
 import { createNativeBatchKeyUnwrapper } from '../api/hpke-native';
-import type { Batch, DataPage } from '../api/api';
+import type { Batch, BatchesPage, Updates } from '../api/api';
 import type { FeedLog } from '../../pages/Logs/types';
 
 export type {};
@@ -28,6 +28,7 @@ type CacheRequest =
     }
   | { id: string; method: 'cacheQuery'; query: WorkerCacheQuery; targetUserId: string }
   | { id: string; method: 'refetch' }
+  | { id: string; method: 'refetchUpdates' }
   | { id: string; method: 'clearCache' }
   | { id: string; method: 'deleteDeviceData'; viewerId: string; deviceId: string }
   | { id: string; method: 'getEventImage'; eventId: string }
@@ -55,6 +56,8 @@ type CacheChunk = {
 // stays a fixed ~tiny size no matter how much data has accumulated. The full log set is
 // only ever shipped on the fast-path chunk and the final done chunk.
 type CacheProgress = { type: 'queryProgress'; id: string; processed: number; total: number };
+type UpdatesChangedBroadcast = { type: 'updatesChanged'; updates: Updates };
+type UnauthorizedBroadcast = { type: 'unauthorized' };
 
 // ---------------------------------------------------------------------------
 // SQLite / OPFS
@@ -151,7 +154,7 @@ function sqlGetSince(viewerId: string, targetUserId: string): number {
   );
 }
 
-function sqlMergeDataPage(viewerId: string, targetUserId: string, page: DataPage): void {
+function sqlMergeBatchesPage(viewerId: string, targetUserId: string, page: BatchesPage): void {
   db.exec('BEGIN');
   try {
     for (const batch of page.batches) {
@@ -432,6 +435,19 @@ function postProgress(id: string, processed: number, total: number): void {
   } satisfies CacheProgress);
 }
 
+function postUpdatesChanged(updates: Updates): void {
+  (self as unknown as DedicatedWorkerGlobalScope).postMessage({
+    type: 'updatesChanged',
+    updates,
+  } satisfies UpdatesChangedBroadcast);
+}
+
+function postUnauthorized(): void {
+  (self as unknown as DedicatedWorkerGlobalScope).postMessage({
+    type: 'unauthorized',
+  } satisfies UnauthorizedBroadcast);
+}
+
 // JS mirror of the WHERE clauses in sqlQueryEvents, used to filter in-memory delta events
 // for a query without re-hitting SQLite.
 function matchesQuery(log: FeedLog, query: WorkerCacheQuery): boolean {
@@ -445,16 +461,30 @@ function matchesQuery(log: FeedLog, query: WorkerCacheQuery): boolean {
   return true;
 }
 
-async function fetchData(params?: { user?: string; since?: number }): Promise<DataPage> {
+function reportIfUnauthorized(res: Response): void {
+  if (res.status === 401) postUnauthorized();
+}
+
+async function fetchBatches(params?: { user?: string; since?: number }): Promise<BatchesPage> {
   const qs = new URLSearchParams();
   if (params?.user) qs.set('user', params.user);
   if (params?.since !== undefined) qs.set('since', String(params.since));
   const q = qs.toString();
-  const res = await fetch(`${BASE}/data${q ? `?${q}` : ''}`, {
+  const res = await fetch(`${BASE}/batches${q ? `?${q}` : ''}`, {
     credentials: 'include',
   });
-  if (!res.ok) throw new Error(`getData failed: ${res.status}`);
-  return res.json() as Promise<DataPage>;
+  reportIfUnauthorized(res);
+  if (!res.ok) throw new Error(`getBatches failed: ${res.status}`);
+  return res.json() as Promise<BatchesPage>;
+}
+
+async function fetchUpdates(): Promise<Updates> {
+  const res = await fetch(`${BASE}/updates`, {
+    credentials: 'include',
+  });
+  reportIfUnauthorized(res);
+  if (!res.ok) throw new Error(`getUpdates failed: ${res.status}`);
+  return res.json() as Promise<Updates>;
 }
 
 // ---------------------------------------------------------------------------
@@ -488,13 +518,13 @@ async function fetchAndDecrypt(targetUserId: string): Promise<void> {
 
   try {
     const since = sqlGetSince(viewerId, targetUserId);
-    console.log('[cache-worker] fetching /data since=', since, 'for', targetUserId);
-    const page = await fetchData({
+    console.log('[cache-worker] fetching /batches since=', since, 'for', targetUserId);
+    const page = await fetchBatches({
       user: targetUserId === viewerId ? undefined : targetUserId,
       since,
     });
-    console.log('[cache-worker] /data returned', page.batches.length, 'batches');
-    sqlMergeDataPage(viewerId, targetUserId, page);
+    console.log('[cache-worker] /batches returned', page.batches.length, 'batches');
+    sqlMergeBatchesPage(viewerId, targetUserId, page);
   } catch (err) {
     console.warn('[cache-worker] fetch failed for', targetUserId, err);
     serveAll();
@@ -673,6 +703,11 @@ async function handleStreaming(
 // One-shot handlers
 
 async function dispatchOneShot(req: CacheRequest): Promise<unknown> {
+  if (req.method === 'refetchUpdates') {
+    const updates = await fetchUpdates();
+    postUpdatesChanged(updates);
+    return updates;
+  }
   if (req.method === 'clearCache') {
     sqlClearAll();
     return 0;

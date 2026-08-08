@@ -1,12 +1,13 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import auth from './routes/auth';
-import data from './routes/data';
+import batches from './routes/batches';
 import deviceOnly from './routes/device-only';
 import devices from './routes/devices';
 import emailWebhooks from './routes/email-webhooks';
 import hashes from './routes/hashes';
 import partners from './routes/partners';
+import updates from './routes/updates';
 import { stripApiBasePath } from './lib/base-path';
 import { getJWKS } from './lib/jwt';
 import { pruneExpiredBatches } from './lib/retention';
@@ -45,9 +46,10 @@ app.get('/.well-known/jwks.json', async (c) => c.json(await getJWKS(c.env.JWT_PU
 
 app.route('/', auth);
 app.route('/', partners);
+app.route('/', updates);
 app.route('/', emailWebhooks);
 app.route('/device', devices);
-app.route('/data', data);
+app.route('/batches', batches);
 app.route('/d', deviceOnly);
 app.route('/hash', hashes);
 

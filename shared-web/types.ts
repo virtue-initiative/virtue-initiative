@@ -71,10 +71,10 @@ export const dataLogSchema = z.object({
 });
 export type DataLog = z.infer<typeof dataLogSchema>;
 
-export const dataPageSchema = z.object({
+export const batchesPageSchema = z.object({
   batches: z.array(batchSchema),
 });
-export type DataPage = z.infer<typeof dataPageSchema>;
+export type BatchesPage = z.infer<typeof batchesPageSchema>;
 
 const partnerUserSchema = z.object({
   id: z.string(),
@@ -104,6 +104,13 @@ export const partnerRelationshipsSchema = z.object({
   watchers: z.array(watcherPartnerSchema),
 });
 export type PartnerRelationships = z.infer<typeof partnerRelationshipsSchema>;
+
+export const updatesSchema = z.object({
+  user: userSchema,
+  devices: z.array(deviceSchema),
+  partners: partnerRelationshipsSchema,
+});
+export type Updates = z.infer<typeof updatesSchema>;
 
 export const partnerInviteValidationSchema = z.object({
   ok: z.boolean(),

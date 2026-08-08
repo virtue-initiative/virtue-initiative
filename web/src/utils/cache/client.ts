@@ -1,4 +1,5 @@
 import type { FeedLog } from '../../pages/Logs/types';
+import type { Updates } from '../api/api';
 
 export type CacheQuery = {
   userId?: string;
@@ -17,6 +18,7 @@ export type CacheRequest =
     }
   | { id: string; method: 'cacheQuery'; query: CacheQuery; targetUserId: string }
   | { id: string; method: 'refetch' }
+  | { id: string; method: 'refetchUpdates' }
   | { id: string; method: 'clearCache' }
   | { id: string; method: 'deleteDeviceData'; viewerId: string; deviceId: string }
   | { id: string; method: 'getEventImage'; eventId: string }
@@ -42,6 +44,9 @@ export type CacheChunk = {
 
 // Counts-only progress signal emitted during a sync; carries no log payload.
 export type CacheProgress = { type: 'queryProgress'; id: string; processed: number; total: number };
+
+export type UpdatesChangedBroadcast = { type: 'updatesChanged'; updates: Updates };
+export type UnauthorizedBroadcast = { type: 'unauthorized' };
 
 // A single update delivered to a cacheQuery subscriber. `logs` is present on data updates and
 // omitted on the lightweight intermediate progress ticks, where only the block counts change.
@@ -69,6 +74,9 @@ export interface CacheClient {
     targetUserId: string,
     deviceId: string,
   ): Promise<number[]>;
+  refetchUpdates(): Promise<Updates>;
+  subscribeUpdates(callback: (updates: Updates) => void): () => void;
+  setUnauthorizedHandler(handler: (() => void) | null): void;
 }
 
 const CHANNEL_NAME = 'cache-worker';
@@ -94,6 +102,8 @@ function handleResponse(msg: CacheResponse, pending: Map<string, PendingEntry>) 
 export function createCacheClient(): CacheClient {
   const pending = new Map<string, PendingEntry>();
   const streamCallbacks = new Map<string, CacheQueryCallback>();
+  const updatesCallbacks = new Set<(updates: Updates) => void>();
+  let unauthorizedHandler: (() => void) | null = null;
   const channel = new BroadcastChannel(CHANNEL_NAME);
   let leaderWorker: Worker | null = null;
   let localUserId: string | null = null;
@@ -155,6 +165,14 @@ export function createCacheClient(): CacheClient {
     cb({ done: false, processed: data.processed, total: data.total });
   }
 
+  function handleUpdatesChanged(data: UpdatesChangedBroadcast) {
+    for (const cb of updatesCallbacks) cb(data.updates);
+  }
+
+  function handleUnauthorized() {
+    unauthorizedHandler?.();
+  }
+
   function becomeLeader() {
     console.log('[cache-client] acquired leader lock, starting worker');
     role = 'leader';
@@ -180,12 +198,23 @@ export function createCacheClient(): CacheClient {
     }
 
     leaderWorker.onmessage = (e: MessageEvent) => {
-      const data = e.data as CacheResponse | CacheChunk | CacheProgress;
+      const data = e.data as
+        | CacheResponse
+        | CacheChunk
+        | CacheProgress
+        | UpdatesChangedBroadcast
+        | UnauthorizedBroadcast;
       if ('type' in data && data.type === 'queryChunk') {
         handleChunk(data as CacheChunk);
         channel.postMessage(data);
       } else if ('type' in data && data.type === 'queryProgress') {
         handleProgress(data as CacheProgress);
+        channel.postMessage(data);
+      } else if ('type' in data && data.type === 'updatesChanged') {
+        handleUpdatesChanged(data as UpdatesChangedBroadcast);
+        channel.postMessage(data);
+      } else if ('type' in data && data.type === 'unauthorized') {
+        handleUnauthorized();
         channel.postMessage(data);
       } else {
         handleResponse(data as CacheResponse, pending);
@@ -247,6 +276,14 @@ export function createCacheClient(): CacheClient {
       handleProgress(data as unknown as CacheProgress);
       return;
     }
+    if (data?.type === 'updatesChanged') {
+      handleUpdatesChanged(data as unknown as UpdatesChangedBroadcast);
+      return;
+    }
+    if (data?.type === 'unauthorized') {
+      handleUnauthorized();
+      return;
+    }
     handleResponse(data as unknown as CacheResponse, pending);
   };
 
@@ -294,6 +331,17 @@ export function createCacheClient(): CacheClient {
 
     getDeviceBatchEndTimes: (viewerId, targetUserId, deviceId) =>
       call<number[]>({ method: 'getDeviceBatchEndTimes', viewerId, targetUserId, deviceId }),
+
+    refetchUpdates: () => call<Updates>({ method: 'refetchUpdates' }),
+
+    subscribeUpdates: (callback) => {
+      updatesCallbacks.add(callback);
+      return () => updatesCallbacks.delete(callback);
+    },
+
+    setUnauthorizedHandler: (handler) => {
+      unauthorizedHandler = handler;
+    },
   };
 }
 

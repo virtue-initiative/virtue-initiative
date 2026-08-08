@@ -2,7 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { APIClient } from './client';
 import { server } from '../../mocks/server';
-import { TEST_DEVICES, TEST_USER, TEST_WATCHER, TEST_WATCHING } from '../../mocks/fixtures';
+import {
+  TEST_DEVICES,
+  TEST_UPDATES,
+  TEST_USER,
+  TEST_WATCHER,
+  TEST_WATCHING,
+} from '../../mocks/fixtures';
 import { makeFakeSession } from '../../test-utils';
 
 const BASE = 'http://localhost:8787';
@@ -61,6 +67,34 @@ describe('APIClient — user cache', () => {
     const client = new APIClient(makeFakeSession({ user: TEST_USER }));
     expect(client.getUser()).toEqual(TEST_USER);
     expect(callCount).toBe(0);
+  });
+
+  it('seeds user/devices/watchers/watchings from session.updates and skips all fetches', () => {
+    let userCalls = 0;
+    let deviceCalls = 0;
+    let partnerCalls = 0;
+    server.use(
+      http.get(`${BASE}/user`, () => {
+        userCalls++;
+        return HttpResponse.json(TEST_USER);
+      }),
+      http.get(`${BASE}/device`, () => {
+        deviceCalls++;
+        return HttpResponse.json(TEST_DEVICES);
+      }),
+      http.get(`${BASE}/partner`, () => {
+        partnerCalls++;
+        return HttpResponse.json({ watchers: [TEST_WATCHER], watching: [TEST_WATCHING] });
+      }),
+    );
+    const client = new APIClient(makeFakeSession({ user: TEST_USER, updates: TEST_UPDATES }));
+    expect(client.getUser()).toEqual(TEST_USER);
+    expect(client.listDevices()).toEqual(TEST_DEVICES);
+    expect(client.listWatchers()).toEqual([TEST_WATCHER]);
+    expect(client.listWatchings()).toEqual([TEST_WATCHING]);
+    expect(userCalls).toBe(0);
+    expect(deviceCalls).toBe(0);
+    expect(partnerCalls).toBe(0);
   });
 });
 

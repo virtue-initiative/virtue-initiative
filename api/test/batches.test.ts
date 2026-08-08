@@ -89,7 +89,7 @@ describe('Data and device API routes', () => {
       ],
     });
 
-    const dataRes = await SELF.fetch(`${BASE}/data?since=0`, {
+    const dataRes = await SELF.fetch(`${BASE}/batches?since=0`, {
       headers: authHeaders(userCookie),
     });
     expect(dataRes.status).toBe(200);
@@ -165,7 +165,7 @@ describe('Data and device API routes', () => {
     });
     expect(batchUploadRes.status).toBe(201);
 
-    const ownerDataRes = await SELF.fetch(`${BASE}/data?since=0`, {
+    const ownerDataRes = await SELF.fetch(`${BASE}/batches?since=0`, {
       headers: authHeaders(ownerCookie),
     });
     expect(ownerDataRes.status).toBe(200);
@@ -177,7 +177,7 @@ describe('Data and device API routes', () => {
     );
 
     const partnerDataRes = await SELF.fetch(
-      `${BASE}/data?since=0&user=${encodeURIComponent(ownerUserId)}`,
+      `${BASE}/batches?since=0&user=${encodeURIComponent(ownerUserId)}`,
       {
         headers: authHeaders(partnerCookie),
       },

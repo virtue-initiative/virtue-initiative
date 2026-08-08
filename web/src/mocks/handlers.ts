@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw';
-import { TEST_DEVICES, TEST_USER, TEST_WATCHER, TEST_WATCHING } from './fixtures';
+import { TEST_DEVICES, TEST_UPDATES, TEST_USER, TEST_WATCHER, TEST_WATCHING } from './fixtures';
 
 const BASE = 'http://localhost:8787';
 
@@ -50,6 +50,9 @@ export const handlers = [
   http.patch(`${BASE}/user`, () => HttpResponse.json({ email_verification_required: false })),
   http.delete(`${BASE}/user`, () => new HttpResponse(null, { status: 204 })),
 
+  // ── Updates ────────────────────────────────────────────────────────────
+  http.get(`${BASE}/updates`, () => HttpResponse.json(TEST_UPDATES)),
+
   // ── Email verify ───────────────────────────────────────────────────────
   http.post(`${BASE}/user/verify-email`, () => new HttpResponse(null, { status: 204 })),
 
@@ -76,6 +79,6 @@ export const handlers = [
   http.delete(`${BASE}/partner/watcher/:id`, () => new HttpResponse(null, { status: 204 })),
   http.delete(`${BASE}/partner/watching/:id`, () => new HttpResponse(null, { status: 204 })),
 
-  // ── Data ───────────────────────────────────────────────────────────────
-  http.get(`${BASE}/data`, () => HttpResponse.json({ batches: [] })),
+  // ── Batches ────────────────────────────────────────────────────────────
+  http.get(`${BASE}/batches`, () => HttpResponse.json({ batches: [] })),
 ];

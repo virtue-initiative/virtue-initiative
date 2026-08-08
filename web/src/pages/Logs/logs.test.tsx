@@ -45,6 +45,9 @@ vi.mock('../../utils/cache/client', () => ({
     deleteDeviceData: vi.fn().mockResolvedValue(undefined),
     getEventImage: vi.fn().mockResolvedValue(null),
     getDeviceBatchEndTimes: vi.fn().mockResolvedValue([]),
+    refetchUpdates: vi.fn().mockResolvedValue(undefined),
+    subscribeUpdates: vi.fn().mockReturnValue(() => {}),
+    setUnauthorizedHandler: vi.fn(),
   },
 }));
 

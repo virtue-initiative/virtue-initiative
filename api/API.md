@@ -574,9 +574,31 @@ accepted watchers. Returns `404` if the device does not exist or is not owned by
 
 Response: `204 No Content`
 
-## Data
+## Updates
 
-### `GET /data`
+### `GET /updates`
+
+Requires an authenticated web session (the `refresh_token` cookie, or `Bearer <RefreshToken>`).
+
+Combines `GET /user`, `GET /device`, and `GET /partner` into a single round trip for initial page
+load. No parameters.
+
+Response `200`:
+
+```js
+{
+  "user": User,
+  "devices": [Device],
+  "partners": PartnerRelationships
+}
+```
+
+Targeted mutations (renaming a device, updating settings, inviting a partner) should still refetch
+via `/user`, `/device`, or `/partner` directly if not going through the cache worker.
+
+## Batches
+
+### `GET /batches`
 
 Requires an authenticated web session (the `refresh_token` cookie, or `Bearer <RefreshToken>`).
 

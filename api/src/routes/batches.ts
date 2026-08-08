@@ -5,7 +5,7 @@ import { canViewUserData, listBatches } from '../lib/db';
 import { validateZ } from '../middleware/validation';
 import { Env, Variables } from '../types/bindings';
 
-const data = new Hono<{ Bindings: Env; Variables: Variables }>();
+const batches = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 function getEncryptedKeyForUser(rawAccessKeys: string, userId: string) {
   try {
@@ -21,13 +21,13 @@ function getEncryptedKeyForUser(rawAccessKeys: string, userId: string) {
   }
 }
 
-const listDataSchema = z.object({
+const listBatchesSchema = z.object({
   device_id: z.uuid().optional(),
   user: z.uuid().optional(),
   since: z.coerce.number().int().nonnegative().optional().default(0),
 });
 
-data.get('/', authenticateWebSession(), validateZ('query', listDataSchema), async (c) => {
+batches.get('/', authenticateWebSession(), validateZ('query', listBatchesSchema), async (c) => {
   const requesterId = c.get('sub');
   const { device_id, user, since } = c.req.valid('query');
   const targetUserId = user ?? requesterId;
@@ -36,10 +36,10 @@ data.get('/', authenticateWebSession(), validateZ('query', listDataSchema), asyn
     return c.json({ error: 'Forbidden' }, 403);
   }
 
-  const batches = await listBatches(c.env.DB, [targetUserId], { deviceId: device_id, since });
+  const rows = await listBatches(c.env.DB, [targetUserId], { deviceId: device_id, since });
 
   return c.json({
-    batches: batches
+    batches: rows
       .map((batch) => {
         const encryptedKey = getEncryptedKeyForUser(batch.access_keys, requesterId);
         if (!encryptedKey) {
@@ -61,4 +61,4 @@ data.get('/', authenticateWebSession(), validateZ('query', listDataSchema), asyn
   });
 });
 
-export default data;
+export default batches;

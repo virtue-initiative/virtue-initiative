@@ -1,4 +1,4 @@
-import type { Device, User, WatcherPartner, WatchingPartner } from '../utils/api/api';
+import type { Device, Updates, User, WatcherPartner, WatchingPartner } from '../utils/api/api';
 
 export const TEST_USER: User = {
   id: 'user-1',
@@ -47,4 +47,10 @@ export const TEST_WATCHING: WatchingPartner = {
   status: 'accepted',
   digest_cadence: 'daily',
   created_at: Date.now() - 86_400_000,
+};
+
+export const TEST_UPDATES: Updates = {
+  user: TEST_USER,
+  devices: TEST_DEVICES,
+  partners: { watchers: [TEST_WATCHER], watching: [TEST_WATCHING] },
 };

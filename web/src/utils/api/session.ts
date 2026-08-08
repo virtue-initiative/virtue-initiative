@@ -1,4 +1,4 @@
-import { api, setUnauthorizedHandler, User } from './api';
+import { api, setUnauthorizedHandler, Updates, User } from './api';
 import { cacheClient } from '../cache/client';
 import {
   decryptBatch,
@@ -38,7 +38,7 @@ export class Session {
   userId: string;
   wrappingKey: CryptoKey;
   privateKey: CryptoKey | null;
-  user: User | null;
+  updates: Updates | null;
   private invalidated = false;
   private onInvalidate: (() => void) | null = null;
 
@@ -46,12 +46,16 @@ export class Session {
     userId: string,
     wrappingKey: CryptoKey,
     privateKey: CryptoKey | null,
-    user: User | null = null,
+    updates: Updates | null = null,
   ) {
     this.userId = userId;
     this.wrappingKey = wrappingKey;
     this.privateKey = privateKey;
-    this.user = user;
+    this.updates = updates;
+  }
+
+  get user(): User | null {
+    return this.updates?.user ?? null;
   }
 
   static async fromLogin(email: string, password: string): Promise<Session> {
@@ -67,9 +71,9 @@ export class Session {
       Intl.DateTimeFormat().resolvedOptions().timeZone,
     );
     await saveWrappingKey(wrappingKey);
-    const user = await api.getUser();
-    const privateKey = await decryptStoredPrivateKey(user, wrappingKey);
-    const session = new Session(user.id, wrappingKey, privateKey, user);
+    const updates = await api.getUpdates();
+    const privateKey = await decryptStoredPrivateKey(updates.user, wrappingKey);
+    const session = new Session(updates.user.id, wrappingKey, privateKey, updates);
     session.installUnauthorizedHandler();
     return session;
   }
@@ -97,8 +101,9 @@ export class Session {
       ...(name ? { name } : {}),
     });
     await saveWrappingKey(wrappingKey);
+    const updates = await api.getUpdates();
     const privateKey = await importUserPrivateKey(keyPair.privateKey);
-    const session = new Session(res.user.id, wrappingKey, privateKey);
+    const session = new Session(res.user.id, wrappingKey, privateKey, updates);
     session.installUnauthorizedHandler();
     return session;
   }
@@ -106,14 +111,14 @@ export class Session {
   static async restore(): Promise<Session | null> {
     const wrappingKey = await loadWrappingKey().catch(() => null);
     if (!wrappingKey) return null;
-    let user: User;
+    let updates: Updates;
     try {
-      user = await api.getUser();
+      updates = await api.getUpdates();
     } catch {
       return null;
     }
-    const privateKey = await decryptStoredPrivateKey(user, wrappingKey);
-    const session = new Session(user.id, wrappingKey, privateKey, user);
+    const privateKey = await decryptStoredPrivateKey(updates.user, wrappingKey);
+    const session = new Session(updates.user.id, wrappingKey, privateKey, updates);
     session.installUnauthorizedHandler();
     return session;
   }
@@ -142,6 +147,7 @@ export class Session {
   private async invalidate(): Promise<void> {
     this.invalidated = true;
     setUnauthorizedHandler(null);
+    cacheClient?.setUnauthorizedHandler(null);
     await cacheClient?.clearCache().catch(() => {});
     clearWrappingKey();
     this.onInvalidate?.();
@@ -149,6 +155,9 @@ export class Session {
 
   private installUnauthorizedHandler() {
     setUnauthorizedHandler(() => {
+      void this.invalidate();
+    });
+    cacheClient?.setUnauthorizedHandler(() => {
       void this.invalidate();
     });
   }

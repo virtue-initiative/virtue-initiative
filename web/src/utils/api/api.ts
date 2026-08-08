@@ -8,7 +8,8 @@ import type {
   Device,
   Batch,
   DataLog,
-  DataPage,
+  BatchesPage,
+  Updates,
   WatchingPartner,
   WatcherPartner,
   PartnerRelationships,
@@ -31,7 +32,8 @@ export type {
   Device,
   Batch,
   DataLog,
-  DataPage,
+  BatchesPage,
+  Updates,
   WatchingPartner,
   WatcherPartner,
   PartnerRelationships,
@@ -198,6 +200,8 @@ export const api = {
 
   getUser: () => req<User>('/user'),
 
+  getUpdates: () => req<Updates>('/updates'),
+
   updateUser: (fields: UpdateUserPayload) =>
     req<UpdateUserResponse>('/user', {
       method: 'PATCH',
@@ -276,11 +280,11 @@ export const api = {
 
   deleteWatching: (id: string) => req<void>(`/partner/watching/${id}`, { method: 'DELETE' }),
 
-  getData: (params?: { user?: string; since?: number }) => {
+  getBatches: (params?: { user?: string; since?: number }) => {
     const qs = new URLSearchParams();
     if (params?.user) qs.set('user', params.user);
     if (params?.since !== undefined) qs.set('since', String(params.since));
     const query = qs.toString();
-    return req<DataPage>(`/data${query ? `?${query}` : ''}`);
+    return req<BatchesPage>(`/batches${query ? `?${query}` : ''}`);
   },
 };

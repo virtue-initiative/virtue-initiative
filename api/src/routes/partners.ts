@@ -13,16 +13,11 @@ import {
   findPartnerInviteForOwner,
   findPartnerForOwnerAndUser,
   findUserById,
-  listIncomingPartners,
-  listOwnedPartners,
   updatePartnerNotificationPreference,
 } from '../lib/db';
 import { renderPartnerAcceptedTemplate, renderPartnerInviteTemplate } from '../lib/email/templates';
-import {
-  DEFAULT_EMAIL_FREQUENCY,
-  emailFrequencies,
-  PARTNER_INVITE_TTL_MS,
-} from '../lib/email-domain';
+import { PARTNER_INVITE_TTL_MS } from '../lib/email-domain';
+import { buildPartnerRelationships } from '../lib/views';
 import {
   createPartnerSchema,
   inviteTokenSchema,
@@ -36,14 +31,6 @@ import { Env, Variables } from '../types/bindings';
 const partners = new Hono<{ Bindings: Env; Variables: Variables }>();
 function getAppUrl(c: Context<{ Bindings: Env; Variables: Variables }>) {
   return c.env.APP_URL;
-}
-
-function toPublicNotificationCadence(emailFrequency: string | null | undefined) {
-  if (!emailFrequency || !(emailFrequencies as readonly string[]).includes(emailFrequency)) {
-    return 'daily' as const;
-  }
-
-  return emailFrequency as (typeof emailFrequencies)[number];
 }
 
 partners.post(
@@ -235,36 +222,8 @@ partners.get('/partner', authenticateWebSession(), async (c) => {
     return c.json({ error: 'Not found' }, 404);
   }
 
-  const [owned, incoming] = await Promise.all([
-    listOwnedPartners(c.env.DB, userId),
-    listIncomingPartners(c.env.DB, userId),
-  ]);
-
-  return c.json({
-    watching: incoming.map((partner) => ({
-      id: partner.id,
-      user: {
-        id: partner.watching_user_id,
-        email: partner.watching_user_email,
-        ...(partner.watching_user_name ? { name: partner.watching_user_name } : {}),
-      },
-      status: partner.status,
-      digest_cadence: toPublicNotificationCadence(
-        partner.settings.email_frequency ?? DEFAULT_EMAIL_FREQUENCY,
-      ),
-      created_at: partner.created_at,
-    })),
-    watchers: owned.map((partner) => ({
-      id: partner.id,
-      user: {
-        ...(partner.watcher_id ? { id: partner.watcher_id } : {}),
-        email: partner.watcher_email,
-        ...(partner.watcher_name ? { name: partner.watcher_name } : {}),
-      },
-      status: partner.status,
-      created_at: partner.created_at,
-    })),
-  });
+  const relationships = await buildPartnerRelationships(c.env.DB, userId);
+  return c.json(relationships);
 });
 
 partners.patch(
