@@ -38,13 +38,20 @@ export class Session {
   userId: string;
   wrappingKey: CryptoKey;
   privateKey: CryptoKey | null;
+  user: User | null;
   private invalidated = false;
   private onInvalidate: (() => void) | null = null;
 
-  private constructor(userId: string, wrappingKey: CryptoKey, privateKey: CryptoKey | null) {
+  private constructor(
+    userId: string,
+    wrappingKey: CryptoKey,
+    privateKey: CryptoKey | null,
+    user: User | null = null,
+  ) {
     this.userId = userId;
     this.wrappingKey = wrappingKey;
     this.privateKey = privateKey;
+    this.user = user;
   }
 
   static async fromLogin(email: string, password: string): Promise<Session> {
@@ -62,7 +69,7 @@ export class Session {
     await saveWrappingKey(wrappingKey);
     const user = await api.getUser();
     const privateKey = await decryptStoredPrivateKey(user, wrappingKey);
-    const session = new Session(user.id, wrappingKey, privateKey);
+    const session = new Session(user.id, wrappingKey, privateKey, user);
     session.installUnauthorizedHandler();
     return session;
   }
@@ -106,7 +113,7 @@ export class Session {
       return null;
     }
     const privateKey = await decryptStoredPrivateKey(user, wrappingKey);
-    const session = new Session(user.id, wrappingKey, privateKey);
+    const session = new Session(user.id, wrappingKey, privateKey, user);
     session.installUnauthorizedHandler();
     return session;
   }

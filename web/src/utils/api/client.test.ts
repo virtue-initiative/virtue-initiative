@@ -49,6 +49,19 @@ describe('APIClient — user cache', () => {
     await vi.waitFor(() => expect(client.getUser()).toEqual(TEST_USER));
     expect(cb).not.toHaveBeenCalled();
   });
+
+  it('seeds the cache from session.user and skips the fetch', async () => {
+    let callCount = 0;
+    server.use(
+      http.get(`${BASE}/user`, () => {
+        callCount++;
+        return HttpResponse.json(TEST_USER);
+      }),
+    );
+    const client = new APIClient(makeFakeSession({ user: TEST_USER }));
+    expect(client.getUser()).toEqual(TEST_USER);
+    expect(callCount).toBe(0);
+  });
 });
 
 describe('APIClient — devices cache', () => {
