@@ -65,9 +65,9 @@ function buildHashParamsResponse() {
   };
 }
 
-// Base64 decode + byte-length validation, layered on top of the wire-level
-// `z.base64()` string schemas in shared-web/types.ts (which stay strings since
-// web serializes these fields as JSON).
+// Decodes a base64 field and rejects it unless it's exactly `length` bytes,
+// replacing the old hand-rolled decode+length checks with a Zod schema so
+// failures get the same aggregated error shape as the rest of the API.
 function base64Bytes(length: number, label: string) {
   return z.base64().transform((value, ctx) => {
     const decoded = decodeBase64(value);
