@@ -65,7 +65,7 @@ pub async fn update_hash_chain(
 ) -> sqlx::Result<()> {
     use sha2::Digest;
 
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
 
     let current = get_hash_state_tx(&mut tx, device_id)
         .await?

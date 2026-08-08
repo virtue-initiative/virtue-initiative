@@ -9,7 +9,7 @@ use axum::{
     routing::{get, post},
 };
 use jsonwebtoken::DecodingKey;
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous};
 use std::{str::FromStr, sync::Arc, time::Duration};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing_subscriber::{EnvFilter, fmt};
@@ -55,6 +55,7 @@ async fn main() -> anyhow::Result<()> {
 
     let opts = SqliteConnectOptions::from_str(&database_url)?
         .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Normal)
         .busy_timeout(Duration::from_secs(30))
         .create_if_missing(true);
 
