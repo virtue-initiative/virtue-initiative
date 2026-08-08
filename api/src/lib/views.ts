@@ -10,10 +10,11 @@ import {
 import { generateToken } from './jwt';
 import { DEFAULT_EMAIL_FREQUENCY, emailFrequencies } from './email-domain';
 import { Env } from '../types/bindings';
+import type { Device, PartnerRelationships, User } from '../../../shared-web/types';
 
 export const ONLINE_WINDOW_MS = 2 * 60 * 60 * 1000;
 
-export async function buildUserView(db: D1Database, userId: string) {
+export async function buildUserView(db: D1Database, userId: string): Promise<User | null> {
   const user = await findUserById(db, userId);
   if (!user) return null;
   return {
@@ -21,14 +22,17 @@ export async function buildUserView(db: D1Database, userId: string) {
     email: user.email,
     email_verified: user.email_verified === 1,
     email_bounced_at: user.email_bounced_at,
-    settings: user.settings,
+    settings: {
+      email_frequency: toPublicNotificationCadence(user.settings.email_frequency),
+      timezone: user.settings.timezone,
+    },
     ...(user.name ? { name: user.name } : {}),
     ...(user.pub_key ? { pub_key: encodeBase64(user.pub_key) } : {}),
     ...(user.priv_key ? { priv_key: encodeBase64(user.priv_key) } : {}),
   };
 }
 
-export async function buildDeviceViews(env: Env, requesterId: string) {
+export async function buildDeviceViews(env: Env, requesterId: string): Promise<Device[]> {
   const ownerIds = await listVisibleOwnerIds(env.DB, requesterId);
   const rows = await listDevicesForOwners(env.DB, ownerIds);
   const hashServerUrl = env.HASH_SERVER_URL?.trim() || null;
@@ -91,7 +95,14 @@ function toPublicNotificationCadence(emailFrequency: string | null | undefined) 
   return emailFrequency as (typeof emailFrequencies)[number];
 }
 
-export async function buildPartnerRelationships(db: D1Database, userId: string) {
+function toPartnerStatus(status: string): 'pending' | 'accepted' {
+  return status === 'accepted' ? 'accepted' : 'pending';
+}
+
+export async function buildPartnerRelationships(
+  db: D1Database,
+  userId: string,
+): Promise<PartnerRelationships> {
   const [owned, incoming] = await Promise.all([
     listOwnedPartners(db, userId),
     listIncomingPartners(db, userId),
@@ -105,7 +116,7 @@ export async function buildPartnerRelationships(db: D1Database, userId: string) 
         email: partner.watching_user_email,
         ...(partner.watching_user_name ? { name: partner.watching_user_name } : {}),
       },
-      status: partner.status,
+      status: toPartnerStatus(partner.status),
       digest_cadence: toPublicNotificationCadence(
         partner.settings.email_frequency ?? DEFAULT_EMAIL_FREQUENCY,
       ),
@@ -118,7 +129,7 @@ export async function buildPartnerRelationships(db: D1Database, userId: string) 
         email: partner.watcher_email,
         ...(partner.watcher_name ? { name: partner.watcher_name } : {}),
       },
-      status: partner.status,
+      status: toPartnerStatus(partner.status),
       created_at: partner.created_at,
     })),
   };
