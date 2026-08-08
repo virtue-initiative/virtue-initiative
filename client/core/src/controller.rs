@@ -40,8 +40,10 @@ impl<C: EventChannel> ClientController<C> {
         if r.success {
             Ok(r.device_id.unwrap_or_default())
         } else {
-            Err(CoreError::CommandFailed(
-                r.error.unwrap_or_else(|| "login failed".to_string()),
+            Err(CoreError::Remote(
+                r.error
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "login failed".to_string()),
             ))
         }
     }
@@ -52,8 +54,10 @@ impl<C: EventChannel> ClientController<C> {
         if r.success {
             Ok(())
         } else {
-            Err(CoreError::CommandFailed(
-                r.error.unwrap_or_else(|| "logout failed".to_string()),
+            Err(CoreError::Remote(
+                r.error
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "logout failed".to_string()),
             ))
         }
     }
@@ -97,5 +101,77 @@ impl ClientController<crate::events::RemoteEventBus> {
     pub fn connect(path: &std::path::Path) -> CoreResult<Self> {
         let bus = crate::events::RemoteEventBus::connect(path).map_err(CoreError::from)?;
         Ok(Self::new(bus))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::bus::{Emitter, EventBus, Observer, StateType};
+    use std::any::Any;
+
+    /// Replies to `LoginRequested`/`LogoutRequested` with a failure result
+    /// carrying an empty error string, mimicking a daemon-reported failure
+    /// with no message (e.g. an empty response body upstream).
+    struct EmptyErrorResponder;
+
+    impl Observer for EmptyErrorResponder {
+        fn init(&mut self, _bus: &mut EventBus, _state: StateType) -> CoreResult<()> {
+            Ok(())
+        }
+
+        fn on_event(&mut self, event: &dyn Any, emitter: &Emitter) -> CoreResult<()> {
+            crate::dispatch_event!(event, {
+                _: LoginRequested => emitter.send(LoginResult {
+                    success: false,
+                    error: Some(String::new()),
+                    device_id: None,
+                }),
+                _: LogoutRequested => emitter.send(LogoutResult {
+                    success: false,
+                    error: Some(String::new()),
+                }),
+            })
+        }
+
+        fn save(&self) -> CoreResult<StateType> {
+            Ok(StateType::Null)
+        }
+
+        fn name(&self) -> &'static str {
+            "empty_error_responder"
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+    }
+
+    #[test]
+    fn empty_login_error_becomes_default_remote_message() {
+        let bus = EventBus::new(vec![Box::new(EmptyErrorResponder)], StateType::Null).unwrap();
+        let mut controller = ClientController::new(bus);
+
+        let err = controller
+            .login("user@example.com", "password", None)
+            .expect_err("login should fail");
+
+        match err {
+            CoreError::Remote(message) => assert_eq!(message, "login failed"),
+            other => panic!("expected CoreError::Remote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn empty_logout_error_becomes_default_remote_message() {
+        let bus = EventBus::new(vec![Box::new(EmptyErrorResponder)], StateType::Null).unwrap();
+        let mut controller = ClientController::new(bus);
+
+        let err = controller.logout().expect_err("logout should fail");
+
+        match err {
+            CoreError::Remote(message) => assert_eq!(message, "logout failed"),
+            other => panic!("expected CoreError::Remote, got {other:?}"),
+        }
     }
 }

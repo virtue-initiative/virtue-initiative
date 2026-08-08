@@ -369,23 +369,33 @@ impl ReqwestApiClient {
             return Ok(response);
         }
 
-        let fallback = response
-            .text()
-            .unwrap_or_else(|_| format!("HTTP {} error", status.as_u16()));
-        let message = match serde_json::from_str::<ApiErrorResponse>(&fallback) {
-            Ok(body) => body
-                .details
-                .as_ref()
-                .and_then(format_api_details)
-                .or_else(|| body.error.filter(|s| !s.is_empty()))
-                .unwrap_or(fallback),
-            Err(_) => fallback,
-        };
+        let body = response.text().ok();
+        let message = error_message_from_body(status, body.as_deref());
 
         Err(CoreError::HttpStatus {
             status: status.as_u16(),
             message,
         })
+    }
+}
+
+/// Derives a non-empty error message from a non-2xx response body, falling
+/// back to a status-line-bearing message (e.g. "HTTP 502 Bad Gateway error")
+/// when the body is missing, empty, or unparseable.
+fn error_message_from_body(status: reqwest::StatusCode, body: Option<&str>) -> String {
+    let fallback = body
+        .filter(|s| !s.trim().is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("HTTP {status} error"));
+
+    match serde_json::from_str::<ApiErrorResponse>(&fallback) {
+        Ok(body) => body
+            .details
+            .as_ref()
+            .and_then(format_api_details)
+            .or_else(|| body.error.filter(|s| !s.is_empty()))
+            .unwrap_or(fallback),
+        Err(_) => fallback,
     }
 }
 
@@ -430,4 +440,40 @@ fn format_api_details(details: &serde_json::Value) -> Option<String> {
 struct ApiErrorResponse {
     error: Option<String>,
     details: Option<serde_json::Value>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_message_from_body_falls_back_on_empty_body() {
+        let message =
+            error_message_from_body(reqwest::StatusCode::from_u16(401).unwrap(), Some(""));
+        assert!(!message.is_empty());
+        assert!(message.contains("401"));
+    }
+
+    #[test]
+    fn error_message_from_body_falls_back_on_missing_body() {
+        let message = error_message_from_body(reqwest::StatusCode::from_u16(500).unwrap(), None);
+        assert!(!message.is_empty());
+        assert!(message.contains("500"));
+    }
+
+    #[test]
+    fn error_message_from_body_includes_reason_phrase_on_fallback() {
+        let message = error_message_from_body(reqwest::StatusCode::from_u16(502).unwrap(), None);
+        assert!(message.contains("502"));
+        assert!(message.contains("Bad Gateway"));
+    }
+
+    #[test]
+    fn error_message_from_body_uses_error_field() {
+        let message = error_message_from_body(
+            reqwest::StatusCode::from_u16(400).unwrap(),
+            Some(r#"{"error":"bad email"}"#),
+        );
+        assert_eq!(message, "bad email");
+    }
 }
