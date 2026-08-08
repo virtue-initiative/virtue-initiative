@@ -8,7 +8,12 @@ import emailWebhooks from './routes/email-webhooks';
 import partners from './routes/partners';
 import { stripApiBasePath } from './lib/base-path';
 import { getJWKS } from './lib/jwt';
-import { pruneExpiredBatches } from './lib/retention';
+import {
+  pruneExpiredBatches,
+  pruneExpiredDeviceSessions,
+  pruneExpiredEmailTokens,
+  pruneExpiredUserSessions,
+} from './lib/retention';
 import { runNotificationSchedule } from './lib/scheduler';
 import { Env, Variables } from './types/bindings';
 
@@ -78,5 +83,8 @@ export default {
   scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(runNotificationSchedule(env, controller.scheduledTime));
     ctx.waitUntil(pruneExpiredBatches(env, controller.scheduledTime));
+    ctx.waitUntil(pruneExpiredEmailTokens(env, controller.scheduledTime));
+    ctx.waitUntil(pruneExpiredUserSessions(env, controller.scheduledTime));
+    ctx.waitUntil(pruneExpiredDeviceSessions(env, controller.scheduledTime));
   },
 };

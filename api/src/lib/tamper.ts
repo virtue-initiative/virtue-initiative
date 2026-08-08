@@ -58,6 +58,7 @@ export async function notifyPartnersAboutRiskLog(
       db,
       kind: 'tamper_alert',
       recipient: target.watcher_email,
+      recipientEmailVerified: target.watcher_email_verified,
       subject: email.subject,
       text: email.text,
       html: email.html,
