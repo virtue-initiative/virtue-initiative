@@ -410,6 +410,7 @@ mod tests {
                 }],
                 hash_base_url: None,
             },
+            hash_token: "test-hash-token".into(),
         }
     }
 

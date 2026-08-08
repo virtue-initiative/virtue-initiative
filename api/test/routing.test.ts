@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { SELF } from 'cloudflare:test';
-import { authHeaders, BASE, clearDB, signupAndGetCookie } from './helpers';
+import { BASE, clearDB, passwordAuthFor, signupAndGetCookie } from './helpers';
 
 beforeEach(clearDB);
 
@@ -46,12 +46,17 @@ describe('API base path routing', () => {
   });
 
   it('preserves the /api base path in device hash_base_url responses', async () => {
-    const { cookie } = await signupAndGetCookie('prefixed-device@example.com', 'pw');
+    await signupAndGetCookie('prefixed-device@example.com', 'pw');
 
     const createDeviceRes = await SELF.fetch(`${BASE}/api/d/device`, {
       method: 'POST',
-      headers: authHeaders(cookie),
-      body: JSON.stringify({ name: 'Laptop', platform: 'linux' }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'prefixed-device@example.com',
+        password_auth: await passwordAuthFor('pw'),
+        name: 'Laptop',
+        platform: 'linux',
+      }),
     });
 
     expect(createDeviceRes.status).toBe(201);
@@ -63,7 +68,7 @@ describe('API base path routing', () => {
 
     expect(settingsRes.status).toBe(200);
     expect(await settingsRes.json()).toMatchObject({
-      hash_base_url: `${BASE}/api`,
+      settings: { hash_base_url: `${BASE}/api` },
     });
   });
 });

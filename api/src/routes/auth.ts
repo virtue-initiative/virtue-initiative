@@ -44,11 +44,12 @@ import {
   HASH_PARAMS_VERSION,
   generatePasswordSalt,
   hashPasswordAuth,
-  verifyPasswordAuth,
 } from '../lib/password';
 import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
 import { deleteObject } from '../lib/r2';
+import { getAppUrl } from '../lib/app-url';
+import { verifyUserCredentials } from '../lib/credentials';
 
 const auth = new Hono<{ Bindings: Env; Variables: Variables }>();
 const REFRESH_TOKEN_TTL_SECONDS = 365 * 24 * 60 * 60;
@@ -126,10 +127,6 @@ async function createSession(
   return refreshToken;
 }
 
-function getAppUrl(c: Context<{ Bindings: Env; Variables: Variables }>) {
-  return c.env.APP_URL;
-}
-
 async function issueEmailToken(
   db: D1Database,
   user: { id: string; email: string },
@@ -158,10 +155,10 @@ async function sendVerificationEmail(
   user: { id: string; email: string; name?: string | null },
   token: string,
 ) {
-  const verifyUrl = `${getAppUrl(c)}/verify-email?token=${encodeURIComponent(token)}`;
+  const verifyUrl = `${getAppUrl(c.env)}/verify-email?token=${encodeURIComponent(token)}`;
   const email = renderEmailVerificationTemplate({
     appName: c.env.APP_NAME,
-    appUrl: getAppUrl(c),
+    appUrl: getAppUrl(c.env),
     recipientName: user.name,
     verifyUrl,
   });
@@ -189,10 +186,10 @@ async function sendSignupConfirmationEmail(
   if (options?.to) {
     params.set('to', options.to);
   }
-  const verifyUrl = `${getAppUrl(c)}/signup?${params.toString()}`;
+  const verifyUrl = `${getAppUrl(c.env)}/signup?${params.toString()}`;
   const email = renderEmailVerificationTemplate({
     appName: c.env.APP_NAME,
-    appUrl: getAppUrl(c),
+    appUrl: getAppUrl(c.env),
     recipientName: recipient.name,
     verifyUrl,
   });
@@ -214,10 +211,10 @@ async function sendPasswordResetEmail(
   user: { id: string; email: string; name?: string | null },
 ) {
   const token = await issueEmailToken(c.env.DB, user, 'password_reset', PASSWORD_RESET_TTL_MS);
-  const resetUrl = `${getAppUrl(c)}/forgot-password?token=${encodeURIComponent(token)}`;
+  const resetUrl = `${getAppUrl(c.env)}/forgot-password?token=${encodeURIComponent(token)}`;
   const email = renderPasswordResetTemplate({
     appName: c.env.APP_NAME,
-    appUrl: getAppUrl(c),
+    appUrl: getAppUrl(c.env),
     recipientName: user.name,
     resetUrl,
   });
@@ -355,23 +352,17 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
 
 auth.post('/login', validateZ('json', loginSchema), async (c) => {
   const { email, password_auth, timezone } = c.req.valid('json');
-  const normalizedEmail = email.trim().toLowerCase();
-  const user = await findUserByEmail(c.env.DB, normalizedEmail);
+  const result = await verifyUserCredentials(c.env.DB, email, password_auth);
 
-  let decodedPasswordAuth: ArrayBuffer;
-  try {
-    decodedPasswordAuth = decodePasswordAuth(password_auth);
-  } catch {
+  if (result.status === 'invalid') {
     return c.json({ error: 'Invalid email or password' }, 401);
   }
 
-  if (!user || !(await verifyPasswordAuth(decodedPasswordAuth, user.password_hash))) {
-    return c.json({ error: 'Invalid email or password' }, 401);
-  }
-
-  if (user.email_verified !== 1) {
+  if (result.status === 'unverified') {
     return c.json({ error: 'Please verify your email before logging in.' }, 403);
   }
+
+  const { user } = result;
 
   if (timezone) {
     await updateUser(c.env.DB, user.id, { settings: { timezone } });

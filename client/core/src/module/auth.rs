@@ -14,6 +14,7 @@ use crate::module::status::StatusRequest;
 pub struct Login {
     pub credentials: DeviceCredentials,
     pub settings: DeviceSettings,
+    pub hash_token: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,11 +85,12 @@ impl<A: ApiTransport + Send + Sync + 'static> AuthModule<A> {
             let _ = emitter.send(Logout);
         }
         match self.do_login(email, password, device_name) {
-            Ok((credentials, settings)) => {
+            Ok((credentials, settings, hash_token)) => {
                 let device_id = credentials.device_id.clone();
                 let _ = emitter.send(Login {
                     credentials,
                     settings,
+                    hash_token,
                 });
                 let _ = emitter.send(LoginResult {
                     success: true,
@@ -111,20 +113,22 @@ impl<A: ApiTransport + Send + Sync + 'static> AuthModule<A> {
         email: &str,
         password: &str,
         device_name: Option<&str>,
-    ) -> CoreResult<(DeviceCredentials, crate::model::DeviceSettings)> {
-        let user_token = self.api.login(email, password)?;
+    ) -> CoreResult<(DeviceCredentials, crate::model::DeviceSettings, String)> {
         // Use the user-supplied override when present and non-empty (trimmed),
         // otherwise fall back to the construction-time device name (hostname).
         let resolved_name = device_name
             .map(str::trim)
             .filter(|name| !name.is_empty())
             .unwrap_or(self.device_name.as_str());
-        let device = self
-            .api
-            .register_device(&user_token, resolved_name, &self.platform_name)?;
-        let settings = self.api.get_device_settings(&device.refresh_token)?;
-        self.state.device_credentials = Some(device.clone());
-        Ok((device, settings))
+        let registered =
+            self.api
+                .register_device(email, password, resolved_name, &self.platform_name)?;
+        self.state.device_credentials = Some(registered.credentials.clone());
+        Ok((
+            registered.credentials,
+            registered.settings,
+            registered.hash_token,
+        ))
     }
 
     fn handle_logout_requested(&mut self, emitter: &Emitter) {
@@ -298,7 +302,7 @@ mod tests {
         ));
         let mut t = b.build();
         t.api
-            .program_login(Err(CoreError::InvalidState("bad credentials")));
+            .program_register_device(Err(CoreError::InvalidState("bad credentials")));
         t.emit(
             1,
             LoginRequested {

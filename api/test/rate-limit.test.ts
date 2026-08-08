@@ -6,8 +6,13 @@ beforeEach(clearDB);
 
 describe('Per-device rate limiting', () => {
   it('returns 429 once a device exceeds the configured request rate', async () => {
-    const { cookie } = await signupAndGetCookie('rate-limited@example.com');
-    const device = await createDeviceForUser(cookie, 'Rate Limited Device', 'linux');
+    await signupAndGetCookie('rate-limited@example.com');
+    const device = await createDeviceForUser(
+      'rate-limited@example.com',
+      'password123',
+      'Rate Limited Device',
+      'linux',
+    );
     const headers = { Authorization: `Bearer ${device.refresh_token}` };
 
     // wrangler.json's staging RATE_LIMITER is configured for 60 requests/60s.
@@ -24,9 +29,19 @@ describe('Per-device rate limiting', () => {
   });
 
   it('does not rate limit two different devices independently of each other', async () => {
-    const { cookie } = await signupAndGetCookie('two-devices@example.com');
-    const deviceA = await createDeviceForUser(cookie, 'Device A', 'linux');
-    const deviceB = await createDeviceForUser(cookie, 'Device B', 'macos');
+    await signupAndGetCookie('two-devices@example.com');
+    const deviceA = await createDeviceForUser(
+      'two-devices@example.com',
+      'password123',
+      'Device A',
+      'linux',
+    );
+    const deviceB = await createDeviceForUser(
+      'two-devices@example.com',
+      'password123',
+      'Device B',
+      'macos',
+    );
 
     const resA = await SELF.fetch(`${BASE}/d/device`, {
       headers: { Authorization: `Bearer ${deviceA.refresh_token}` },

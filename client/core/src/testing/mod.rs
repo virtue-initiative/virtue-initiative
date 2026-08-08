@@ -88,11 +88,20 @@ mod tests {
         let api = MockApiClient::new();
         let inspector = api.clone();
 
-        api.login("alice@example.org", "secret").unwrap();
-        assert_eq!(inspector.state().login_calls.len(), 1);
+        api.register_device(
+            "alice@example.org",
+            "secret",
+            "test-device",
+            "test-platform",
+        )
+        .unwrap();
+        assert_eq!(inspector.state().register_device_calls.len(), 1);
 
+        let default_settings = inspector.state().default_device_settings.clone();
         api.program_batch(Ok(crate::api::UploadedBatchResponse {
             id: "canned-batch".into(),
+            settings: default_settings,
+            hash_token: "canned-hash-token".into(),
         }));
         let batch = crate::model::BatchUpload {
             start_time_ms: 0,
@@ -101,6 +110,7 @@ mod tests {
             access_keys: Vec::new(),
             high_risk_count: 0,
             medium_risk_count: 0,
+            notifications: Vec::new(),
         };
         let response = api.upload_batch("tok", &batch).unwrap();
         assert_eq!(response.id, "canned-batch");

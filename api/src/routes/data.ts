@@ -9,13 +9,8 @@ const data = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 function getEncryptedKeyForUser(rawAccessKeys: string, userId: string) {
   try {
-    const payload = JSON.parse(rawAccessKeys) as {
-      keys?: Array<{ user_id?: string; hpke_key?: string }>;
-    };
-    return (
-      payload.keys?.find((key) => key.user_id === userId && typeof key.hpke_key === 'string')
-        ?.hpke_key ?? null
-    );
+    const payload = JSON.parse(rawAccessKeys) as { keys?: Record<string, string> };
+    return payload.keys?.[userId] ?? null;
   } catch {
     return null;
   }

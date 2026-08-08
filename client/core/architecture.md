@@ -34,7 +34,7 @@ client/
         lifecycle.rs    — LifecycleModule: process/suspend/ping-gap alerts
         screenshot.rs   — ScreenshotModule: interval scheduling + capture
         status.rs       — StatusModule: partial-status aggregation
-        upload.rs       — UploadModule: hash-pending, batch-pending, and notify-pending queues
+        upload.rs       — UploadModule: hash-pending and batch-pending queues (notify rides with its batch)
       platform.rs       — ScreenshotHooks / PlatformHooks traits
       state.rs          — load_state / store_state (event_state.json)
       storage.rs        — auth.json, device_settings.json, stop_intent.json
@@ -324,11 +324,14 @@ wire:  nonce[12 bytes] || ciphertext+tag
 
 Each upload also wraps the batch key per recipient using HPKE
 (`DhkemX25519HkdfSha256 / HkdfSha256 / Aes256Gcm`). The recipient set comes from
-the device's `wrapping_keys`, which `UploadModule` refetches from `GET /d/device`
-immediately before every batch upload — this is the sole refresh path, so a partner
-added or removed is picked up on the very next batch. A transient refetch failure
-falls back to the last known settings; a 404/401 means the device is gone and
-triggers logout.
+the device's `wrapping_keys`, sourced from `state.settings` — which is refreshed
+opportunistically from the `settings` field embedded in every `GET /d/device` and
+`POST /d/batch` response, not from a dedicated pre-batch fetch. A partner added or
+removed is therefore picked up with a one-batch lag (the batch in flight when they're
+added still uses the old recipient set; the next one uses the new one), not
+immediately. A batch upload that fails with 404/401 means the device is gone and
+triggers logout; other failures leave the events queued and retry on the next
+batch attempt using the last known settings.
 
 Each `BatchUpload` also carries `high_risk_count`/`medium_risk_count`: tallies of how many
 events in the batch fall in the high (`risk >= 0.7`) and medium (`0.4 <= risk < 0.7`) bands,
@@ -338,13 +341,18 @@ digest emails without ever decrypting the batch.
 
 ## Notify flow
 
-High-risk events (`risk >= lifecycle::EXTRA_HIGH_RISK`) are additionally pushed into
-`UploadModule`'s `pending_notify_events: Vec<NotifyPayload>` queue, where
-`NotifyPayload { ts, type, risk, title?, details? }`. `retry_pending_notifies` drains this
-queue by POSTing each payload to `/d/notify` once the device is authenticated. This happens
-independently of, but alongside, the always-present hash/batch path — the event body itself
-still goes through the normal encrypted batch pipeline; `/d/notify` only triggers the alert
-email.
+High-risk events (`risk >= lifecycle::EXTRA_HIGH_RISK`) no longer travel through a
+separate notify queue. When `retry_pending_hashes` successfully hashes an event, it
+checks whether that event was high-risk and, if so, attaches a `NotifyPayload
+{ ts, type, risk, title?, details? }` to the `PendingBatchEvent.notify` field. The
+notify payload then rides with that event into whichever batch carries it: `try_upload_batch`
+collects every `notify` present in the events it's about to send into `BatchUpload.notifications`
+and uploads them in the same `POST /d/batch` multipart request (`notifications` field —
+a JSON-encoded array), where the server processes them (best-effort) only after the
+batch itself has durably persisted. A high-risk or heartbeat event still force-flushes
+the batch immediately (`handle_upload`'s `is_heartbeat || is_high_risk` check), so
+notify latency is preserved — it's just "flush the batch sooner" rather than "flush a
+separate notify queue." `POST /d/notify` no longer exists.
 
 ## Hash chain
 
@@ -354,6 +362,12 @@ Per-event content hashes are uploaded to `POST /hash` independently of batches:
 content_hash = sha256(ts_le64 || type_utf8 || sorted(key_utf8 || encoded_value))
 new_state    = sha256(current_state[32] || content_hash[32])
 ```
+
+`POST /hash` itself requires a `HashServerToken`, minted by `POST /d/device`, `GET
+/d/device`, and `POST /d/batch` — there is no longer a dedicated `POST /d/token`
+endpoint. `UploadModule::ensure_hash_token` caches the token from whichever of those
+responses arrived most recently and only calls `GET /d/device` when that cache goes
+stale (55 minutes) without a batch having refreshed it in the meantime.
 
 ## Testing
 

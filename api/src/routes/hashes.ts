@@ -1,11 +1,10 @@
 import { Hono } from 'hono';
 import { authenticate } from '../middleware/auth';
 import { rateLimitByDevice } from '../middleware/rate-limit';
-import { findDeviceById, getHashState, resetHashState, upsertHashState } from '../lib/db';
+import { localHashGet, localHashIngest, localHashInfo, localHashReset } from '../lib/hash-server';
 import { Env, Variables } from '../types/bindings';
 
 const hashes = new Hono<{ Bindings: Env; Variables: Variables }>();
-const ZERO_STATE = new Uint8Array(32);
 
 hashes.post('/', authenticate('hash-server'), rateLimitByDevice(), async (c) => {
   const body = await c.req.arrayBuffer();
@@ -14,27 +13,13 @@ hashes.post('/', authenticate('hash-server'), rateLimitByDevice(), async (c) => 
     return c.json({ error: 'Bad Request', details: { body: ['Expected exactly 32 bytes'] } }, 400);
   }
 
-  const now = Date.now();
-  const deviceId = c.get('sub');
-  const current = await getHashState(c.env.DB, deviceId);
-  const hashInput = new Uint8Array(64);
-  hashInput.set(current ? new Uint8Array(current.state) : ZERO_STATE, 0);
-  hashInput.set(new Uint8Array(body), 32);
-
-  const nextState = await crypto.subtle.digest('SHA-256', hashInput);
-  await upsertHashState(c.env.DB, {
-    device_id: deviceId,
-    state: nextState,
-    updated_at: now,
-    hashed_at: now,
-  });
+  await localHashIngest(c.env.DB, c.get('sub'), new Uint8Array(body));
 
   return c.json({ ok: true });
 });
 
 hashes.get('/', authenticate('hash-server'), rateLimitByDevice(), async (c) => {
-  const state = await getHashState(c.env.DB, c.get('sub'));
-  const body = state ? new Uint8Array(state.state) : ZERO_STATE;
+  const body = await localHashGet(c.env.DB, c.get('sub'));
 
   return new Response(body, {
     headers: { 'Content-Type': 'application/octet-stream' },
@@ -42,21 +27,16 @@ hashes.get('/', authenticate('hash-server'), rateLimitByDevice(), async (c) => {
 });
 
 hashes.delete('/', authenticate('server'), async (c) => {
-  const device = await findDeviceById(c.env.DB, c.get('sub'));
-  if (!device) {
-    return c.json({ error: 'Not found' }, 404);
-  }
-
-  await resetHashState(c.env.DB, device.id, Date.now());
+  await localHashReset(c.env.DB, c.get('sub'));
   return c.json({ ok: true });
 });
 
 hashes.get('/info', authenticate(['hash-server', 'server']), async (c) => {
-  const state = await getHashState(c.env.DB, c.get('sub'));
+  const info = await localHashInfo(c.env.DB, c.get('sub'));
   return c.json({
-    count: state?.count ?? 0,
-    hashed_at: state?.hashed_at ?? null,
-    updated_at: state?.updated_at ?? null,
+    count: info?.count ?? 0,
+    hashed_at: info?.hashed_at ?? null,
+    updated_at: info?.updated_at ?? null,
   });
 });
 
