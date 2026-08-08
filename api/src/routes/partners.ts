@@ -32,7 +32,6 @@ import {
 import { sendEmail } from '../lib/email';
 import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
-import { getAppUrl } from '../lib/app-url';
 
 const partners = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -95,8 +94,8 @@ partners.post(
       ownerName: currentUser.name,
       ownerEmail: currentUser.email,
       appName: c.env.APP_NAME,
-      appUrl: getAppUrl(c.env),
-      inviteUrl: `${getAppUrl(c.env)}/invite-accept?partner_token=${encodeURIComponent(inviteToken)}`,
+      appUrl: c.env.APP_URL,
+      inviteUrl: `${c.env.APP_URL}/invite-accept?partner_token=${encodeURIComponent(inviteToken)}`,
     });
     await sendEmail({
       env: c.env,
@@ -205,7 +204,7 @@ partners.post(
         partnerName: currentUser.name,
         partnerEmail: currentUser.email,
         appName: c.env.APP_NAME,
-        appUrl: getAppUrl(c.env),
+        appUrl: c.env.APP_URL,
       });
       await sendEmail({
         env: c.env,

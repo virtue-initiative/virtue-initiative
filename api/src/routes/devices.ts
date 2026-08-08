@@ -18,7 +18,6 @@ import { deleteObject } from '../lib/r2';
 import { generateToken } from '../lib/jwt';
 import { Env, Variables } from '../types/bindings';
 import { updateDeviceSchema, type PatchDeviceResponse } from '../../../shared-web/types';
-import { getAppUrl } from '../lib/app-url';
 
 const devices = new Hono<{ Bindings: Env; Variables: Variables }>();
 const ONLINE_WINDOW_MS = 2 * 60 * 60 * 1000;
@@ -123,7 +122,7 @@ devices.delete('/:id', authenticateWebSession(), async (c) => {
   if (owner) {
     const email = renderDeviceDeletedTemplate({
       appName: c.env.APP_NAME,
-      appUrl: getAppUrl(c.env),
+      appUrl: c.env.APP_URL,
       recipientName: owner.name,
       deviceName: device.name,
       devicePlatform: device.platform,
@@ -150,7 +149,7 @@ devices.delete('/:id', authenticateWebSession(), async (c) => {
 
     const email = renderDeviceDeletedTemplate({
       appName: c.env.APP_NAME,
-      appUrl: getAppUrl(c.env),
+      appUrl: c.env.APP_URL,
       recipientName: target.watcher_name,
       deviceName: device.name,
       devicePlatform: device.platform,

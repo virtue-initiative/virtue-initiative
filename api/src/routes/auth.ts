@@ -48,7 +48,6 @@ import {
 import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
 import { deleteObject } from '../lib/r2';
-import { getAppUrl } from '../lib/app-url';
 import { verifyUserCredentials } from '../lib/credentials';
 
 const auth = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -155,10 +154,10 @@ async function sendVerificationEmail(
   user: { id: string; email: string; name?: string | null },
   token: string,
 ) {
-  const verifyUrl = `${getAppUrl(c.env)}/verify-email?token=${encodeURIComponent(token)}`;
+  const verifyUrl = `${c.env.APP_URL}/verify-email?token=${encodeURIComponent(token)}`;
   const email = renderEmailVerificationTemplate({
     appName: c.env.APP_NAME,
-    appUrl: getAppUrl(c.env),
+    appUrl: c.env.APP_URL,
     recipientName: user.name,
     verifyUrl,
   });
@@ -186,10 +185,10 @@ async function sendSignupConfirmationEmail(
   if (options?.to) {
     params.set('to', options.to);
   }
-  const verifyUrl = `${getAppUrl(c.env)}/signup?${params.toString()}`;
+  const verifyUrl = `${c.env.APP_URL}/signup?${params.toString()}`;
   const email = renderEmailVerificationTemplate({
     appName: c.env.APP_NAME,
-    appUrl: getAppUrl(c.env),
+    appUrl: c.env.APP_URL,
     recipientName: recipient.name,
     verifyUrl,
   });
@@ -211,10 +210,10 @@ async function sendPasswordResetEmail(
   user: { id: string; email: string; name?: string | null },
 ) {
   const token = await issueEmailToken(c.env.DB, user, 'password_reset', PASSWORD_RESET_TTL_MS);
-  const resetUrl = `${getAppUrl(c.env)}/forgot-password?token=${encodeURIComponent(token)}`;
+  const resetUrl = `${c.env.APP_URL}/forgot-password?token=${encodeURIComponent(token)}`;
   const email = renderPasswordResetTemplate({
     appName: c.env.APP_NAME,
-    appUrl: getAppUrl(c.env),
+    appUrl: c.env.APP_URL,
     recipientName: user.name,
     resetUrl,
   });

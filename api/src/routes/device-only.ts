@@ -20,7 +20,6 @@ import { putObject } from '../lib/r2';
 import { notifyPartnersAboutRiskLog, riskToSeverity } from '../lib/tamper';
 import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
-import { getAppUrl } from '../lib/app-url';
 import { verifyUserCredentials } from '../lib/credentials';
 
 const deviceOnly = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -271,7 +270,7 @@ deviceOnly.post(
         const providedDetails = notification.details?.trim();
         await notifyPartnersAboutRiskLog(c.env.DB, c.env, {
           logId: uuidv4(),
-          appUrl: getAppUrl(c.env),
+          appUrl: c.env.APP_URL,
           userId: device.owner,
           deviceName: device.name,
           severity: riskToSeverity(notification.risk) ?? 'info',
