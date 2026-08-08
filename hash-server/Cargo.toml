@@ -26,4 +26,9 @@ http = "1"
 
 [dev-dependencies]
 ed25519-dalek = { version = "2", features = ["pkcs8"] }
+pkcs8 = { version = "0.10", features = ["pem"] }
 tower = { version = "0.5", features = ["util"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+clap = { version = "4", features = ["derive"] }
+hdrhistogram = "7"
+rand = "0.8"
