@@ -614,8 +614,8 @@ describe('Auth routes', () => {
     expect(unprefixedRes.status).toBe(401);
 
     const { id: deviceRefreshToken } = await (async () => {
-      const { cookie } = await signupAndGetCookie('device-owner@example.com', 'pw');
-      const device = await createDeviceForUser(cookie, 'Laptop', 'linux');
+      await signupAndGetCookie('device-owner@example.com', 'pw');
+      const device = await createDeviceForUser('device-owner@example.com', 'pw', 'Laptop', 'linux');
       return { id: device.refresh_token };
     })();
 
