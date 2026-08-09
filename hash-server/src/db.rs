@@ -1,7 +1,7 @@
 use sqlx::{SqlitePool, sqlite::SqliteConnection};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -19,7 +19,7 @@ pub async fn get_hash_state(pool: &SqlitePool, device_id: &str) -> sqlx::Result<
     Ok(row.and_then(|v| v.try_into().ok()))
 }
 
-async fn get_hash_state_tx(
+pub(crate) async fn get_hash_state_tx(
     tx: &mut SqliteConnection,
     device_id: &str,
 ) -> sqlx::Result<Option<[u8; 32]>> {
@@ -33,7 +33,7 @@ async fn get_hash_state_tx(
     Ok(row.and_then(|v| v.try_into().ok()))
 }
 
-async fn upsert_hash_state_tx(
+pub(crate) async fn upsert_hash_state_tx(
     tx: &mut SqliteConnection,
     device_id: &str,
     state: &[u8; 32],
@@ -58,6 +58,7 @@ async fn upsert_hash_state_tx(
     Ok(())
 }
 
+#[cfg(test)]
 pub async fn update_hash_chain(
     pool: &SqlitePool,
     device_id: &str,
@@ -83,7 +84,7 @@ pub async fn update_hash_chain(
     Ok(())
 }
 
-pub async fn reset_hash_state(pool: &SqlitePool, device_id: &str) -> sqlx::Result<()> {
+pub(crate) async fn reset_hash_state_tx(conn: &mut SqliteConnection, device_id: &str) -> sqlx::Result<()> {
     sqlx::query(
         "INSERT INTO hash_states (device_id, state, updated_at, count)
          VALUES (?, ?, ?, 0)
@@ -95,9 +96,15 @@ pub async fn reset_hash_state(pool: &SqlitePool, device_id: &str) -> sqlx::Resul
     .bind(device_id)
     .bind([0u8; 32].as_slice())
     .bind(now_ms())
-    .execute(pool)
+    .execute(&mut *conn)
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+pub async fn reset_hash_state(pool: &SqlitePool, device_id: &str) -> sqlx::Result<()> {
+    let mut conn = pool.acquire().await?;
+    reset_hash_state_tx(&mut conn, device_id).await
 }
 
 pub struct HashInfo {
