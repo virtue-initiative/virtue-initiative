@@ -135,6 +135,21 @@ env HOME="$TMP_HOME" XDG_CONFIG_HOME="$CLIENT_XDG_CONFIG_HOME" XDG_STATE_HOME="$
   xvfb-run -a "$VIRTUE_BIN" daemon > "$DAEMON_LOG" 2>&1 &
 DAEMON_PID=$!
 
+echo "== Waiting for the daemon IPC socket =="
+DAEMON_SOCK="$CLIENT_XDG_STATE_HOME/virtue/daemon.sock"
+daemon_ready=0
+for _ in $(seq 1 30); do
+  if [ -S "$DAEMON_SOCK" ]; then
+    daemon_ready=1
+    break
+  fi
+  sleep 1
+done
+if [ "$daemon_ready" -ne 1 ]; then
+  echo "integration-test: daemon did not create its IPC socket in time" >&2
+  exit 1
+fi
+
 echo "== Logging in =="
 env HOME="$TMP_HOME" XDG_CONFIG_HOME="$CLIENT_XDG_CONFIG_HOME" XDG_STATE_HOME="$CLIENT_XDG_STATE_HOME" \
   bun "$SCRIPT_DIR/ci-login.ts" \
