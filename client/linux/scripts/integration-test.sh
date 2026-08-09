@@ -41,10 +41,14 @@ LOG_DIR="$(mktemp -d)"
 API_LOG="$LOG_DIR/api.log"
 DAEMON_LOG="$LOG_DIR/daemon.log"
 
+# Isolated home for the client under test only -- NOT exported globally.
+# rustup resolves its default toolchain from $HOME/.rustup at runtime (unlike
+# $CARGO_HOME, which the Setup Rust step pins explicitly), so swapping HOME
+# for the whole script breaks `cargo build`. Only the daemon and login
+# processes below get this HOME/XDG override.
 TMP_HOME="$(mktemp -d)"
-export HOME="$TMP_HOME"
-export XDG_CONFIG_HOME="$TMP_HOME/config"
-export XDG_STATE_HOME="$TMP_HOME/state"
+CLIENT_XDG_CONFIG_HOME="$TMP_HOME/config"
+CLIENT_XDG_STATE_HOME="$TMP_HOME/state"
 
 API_PID=""
 DAEMON_PID=""
@@ -117,8 +121,8 @@ echo "== Building virtue-linux client =="
 VIRTUE_BIN="$CLIENT_DIR/target/debug/virtue"
 
 echo "== Writing isolated client config =="
-mkdir -p "$XDG_CONFIG_HOME/virtue"
-cat > "$XDG_CONFIG_HOME/virtue/config.json" <<EOF
+mkdir -p "$CLIENT_XDG_CONFIG_HOME/virtue"
+cat > "$CLIENT_XDG_CONFIG_HOME/virtue/config.json" <<EOF
 {
   "api_base_url": "${API_BASE_URL}",
   "capture_interval_seconds": ${CAPTURE_INTERVAL_SECONDS},
@@ -127,11 +131,13 @@ cat > "$XDG_CONFIG_HOME/virtue/config.json" <<EOF
 EOF
 
 echo "== Starting the daemon under Xvfb =="
-xvfb-run -a "$VIRTUE_BIN" daemon > "$DAEMON_LOG" 2>&1 &
+env HOME="$TMP_HOME" XDG_CONFIG_HOME="$CLIENT_XDG_CONFIG_HOME" XDG_STATE_HOME="$CLIENT_XDG_STATE_HOME" \
+  xvfb-run -a "$VIRTUE_BIN" daemon > "$DAEMON_LOG" 2>&1 &
 DAEMON_PID=$!
 
 echo "== Logging in =="
-bun "$SCRIPT_DIR/ci-login.ts" \
+env HOME="$TMP_HOME" XDG_CONFIG_HOME="$CLIENT_XDG_CONFIG_HOME" XDG_STATE_HOME="$CLIENT_XDG_STATE_HOME" \
+  bun "$SCRIPT_DIR/ci-login.ts" \
   --bin "$VIRTUE_BIN" \
   --email "$DEV_EMAIL" \
   --password "$DEV_PASSWORD" \
