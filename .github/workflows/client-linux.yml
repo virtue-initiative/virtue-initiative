@@ -123,3 +123,38 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: ./scripts/publish-release.sh "${{ steps.version.outputs.release_tag }}" "${{ steps.version.outputs.build_label }}" "target-docker/debian/virtue-linux_${{ steps.version.outputs.build_label }}_${{ steps.version.outputs.arch }}.deb" "${{ github.ref_name == 'main' && 'stable' || 'dev' }}"
         working-directory: client
+
+  client-linux-integration:
+    name: Client Linux Integration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Install OCR and headless-capture system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libleptonica-dev libtesseract-dev libclang-dev clang xvfb imagemagick
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          workspaces: |
+            client -> target
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Run device -> api/hash integration test
+        run: ./client/linux/scripts/integration-test.sh
