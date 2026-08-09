@@ -12,7 +12,7 @@ USERS="${1:?users required}"
 DURATION="${2:?duration_secs required}"
 shift 2
 
-./target/release/examples/loadtest --url http://localhost:3001 --users "$USERS" --duration-secs "$DURATION" "$@" &
+./target/release/examples/loadtest --url http://localhost:3001 --secure-url http://localhost:3001 --users "$USERS" --duration-secs "$DURATION" "$@" &
 CLIENT_PID=$!
 sudo bash -c "echo $CLIENT_PID > /sys/fs/cgroup/bench/client/cgroup.procs"
 wait $CLIENT_PID

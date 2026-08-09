@@ -32,7 +32,7 @@ done
 sudo perf record -g --call-graph dwarf -o /tmp/hash-server-perf.data -p "$SERVER_PID" -- sleep "$DURATION" &
 PERF_PID=$!
 
-./target/release/examples/loadtest --url http://localhost:3000 --users 500 --duration-secs "$DURATION" --time-scale "$TS" &
+./target/release/examples/loadtest --url http://localhost:3000 --secure-url http://localhost:3000 --users 500 --duration-secs "$DURATION" --time-scale "$TS" &
 CLIENT_PID=$!
 sudo bash -c "echo $CLIENT_PID > /sys/fs/cgroup/bench/client/cgroup.procs"
 wait $CLIENT_PID

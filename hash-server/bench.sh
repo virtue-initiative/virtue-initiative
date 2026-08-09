@@ -32,7 +32,7 @@ for i in $(seq 1 50); do
     sleep 0.1
 done
 
-./target/release/examples/loadtest --url http://localhost:3000 --users "$USERS" --duration-secs "$DURATION" "$@" &
+./target/release/examples/loadtest --url http://localhost:3000 --secure-url http://localhost:3000 --users "$USERS" --duration-secs "$DURATION" "$@" &
 CLIENT_PID=$!
 sudo bash -c "echo $CLIENT_PID > /sys/fs/cgroup/bench/client/cgroup.procs"
 wait $CLIENT_PID
