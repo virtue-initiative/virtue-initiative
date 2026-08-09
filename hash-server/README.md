@@ -156,6 +156,20 @@ multi-hour soak run.
   fixed `--workers` pool. See the module doc comment at the top of
   `examples/loadtest.rs` for the full design (including how it avoids
   redundantly re-enqueuing a device whose request is still in flight).
+  Measured client RSS with this model, real production cadence
+  (`--time-scale 1`): ~333MB at 200k devices, ~787MB at 500k, ~1.52GB at 1M —
+  scales linearly at roughly 1.5KB/device, not the old model's per-task
+  blowup.
+- **Two HTTP clients, deliberately not sharing a pool.** The load generator
+  uses one `reqwest::Client` with `pool_max_idle_per_host(0)` for per-device
+  `POST /hash` traffic (real devices are separate machines, so every ping is
+  genuinely a fresh connection) and a second, normally-pooled client for the
+  server-only `DELETE`/`GET` (info) calls (in production these come from a
+  single Cloudflare Worker, which does reuse a connection pool). Sharing one
+  no-pool client across both previously forced a needless fresh TLS
+  handshake on every `DELETE`/`GET`, which both understated their real-world
+  latency and added spurious handshake load onto the target server during a
+  test.
 - **Replay-guard memory at scale.** `hash-server` itself keeps an in-memory
   `AppState.replay_guard: DashMap<String, i64>` mapping each device that has
   ever sent a signed `POST /hash` to its last-accepted signature timestamp.
@@ -175,3 +189,37 @@ multi-hour soak run.
   will eventually queue on the write lock — if you push `--users`/
   `--time-scale` far enough to saturate it, `busy_timeout` (30s) governs how
   long a write waits before giving up.
+
+### Measured results
+
+**Local, isolated cores** (`bench.sh <users> <duration_secs> [extra loadtest
+args...]`/`sweep.sh <duration_secs> <time_scale>...`: run the server pinned
+to one isolated CPU core and the loadtest client pinned to another, via a
+cgroup v2 "bench" partition set up separately — removes this machine's own
+noise from the numbers, over loopback): sustained `POST /hash` throughput
+plateaus around **3500-3600 req/s** with zero errors; past that point,
+excess offered load shows up as growing latency (p99 up to ~105ms) rather
+than failures, since the write queue absorbs backpressure instead of
+rejecting requests. `profile.sh [time_scale] [duration_secs]` runs the same
+setup under `perf` and writes a report to `/tmp/hash-server-perf.txt`.
+
+**Remote, real server** (`hash.virtueinitiative.org`, a 2-vCPU Oracle Cloud
+free-tier ARM box, traffic routed through the real nginx TLS/plain-HTTP
+frontend rather than the SSH-tunnel-to-raw-port setup `bench-remote.sh`
+uses): ramped `--time-scale 1` (true production cadence — POST every 5min)
+device count from 200k to 1M:
+
+| Devices | Client max RSS | `POST /hash` completed | Errors | p99 latency |
+| ------- | -------------- | ---------------------- | ------ | ----------- |
+| 200k    | 333MB          | 235,243 (691.9 req/s)  | 3      | 1.20s       |
+| 500k    | 787MB          | 281,143 (826.9 req/s)  | 104    | 2.16s       |
+| 1M      | 1.52GB         | 258,138 (759.2 req/s)  | 69     | 2.21s       |
+
+Error rate stayed under 0.04% at every point (`DELETE`/`GET` stayed at zero
+errors throughout). Completed `POST /hash` throughput plateaus around
+750-830 req/s regardless of device count past ~500k — this small free-tier
+box's real sustained ceiling, well below the local isolated-core number
+above, but the server absorbed the excess as latency rather than rejecting
+requests, matching the local-bench finding. `hash-server` itself stayed
+lightweight throughout (double-digit MB RSS, load average recovered
+promptly after each run).
