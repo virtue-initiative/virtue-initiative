@@ -14,18 +14,16 @@ beforeEach(clearDB);
 describe('POST /d/logout', () => {
   it('revokes the device session, soft-deletes the device, and resets its hash state', async () => {
     const { cookie } = await signupAndGetCookie('logout@example.com');
-    const device = await createDeviceForUser(cookie, 'Laptop', 'linux');
-
-    const hashTokenRes = await SELF.fetch(`${BASE}/d/token`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${device.refresh_token}` },
-    });
-    expect(hashTokenRes.status).toBe(200);
-    const { hash_token } = (await hashTokenRes.json()) as { hash_token: string };
+    const device = await createDeviceForUser(
+      'logout@example.com',
+      'password123',
+      'Laptop',
+      'linux',
+    );
 
     const hashUploadRes = await SELF.fetch(`${BASE}/hash`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${hash_token}` },
+      headers: { Authorization: `Bearer ${device.token}` },
       body: new Uint8Array(32).fill(9),
     });
     expect(hashUploadRes.status).toBe(200);

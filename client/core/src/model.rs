@@ -214,12 +214,16 @@ pub struct BatchUpload {
     pub high_risk_count: u32,
     /// Number of events in this batch whose risk fell in the medium band (0.4–0.7).
     pub medium_risk_count: u32,
+    /// Alert-email metadata for any high-risk events in this batch, carried
+    /// alongside the batch upload instead of a separate notify call.
+    #[serde(default)]
+    pub notifications: Vec<NotifyPayload>,
 }
 
-/// Minimal metadata sent to `POST /d/notify` to trigger an alert email for a
-/// high-risk event. The event body itself is uploaded end-to-end encrypted via a
-/// batch; this payload carries only what the notification email needs.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Minimal metadata sent alongside a batch upload to trigger an alert email for a
+/// high-risk event. The event body itself is uploaded end-to-end encrypted via the
+/// same batch; this payload carries only what the notification email needs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NotifyPayload {
     pub ts: i64,
     #[serde(rename = "type")]

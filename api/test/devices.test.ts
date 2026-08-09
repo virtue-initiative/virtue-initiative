@@ -15,7 +15,7 @@ beforeEach(clearDB);
 describe('Main device routes', () => {
   it('lists devices owned by the authenticated user', async () => {
     const { cookie } = await signupAndGetCookie('alice@example.com');
-    await createDeviceForUser(cookie, 'Work Laptop', 'linux');
+    await createDeviceForUser('alice@example.com', 'password123', 'Work Laptop', 'linux');
 
     const res = await SELF.fetch(`${BASE}/device`, {
       headers: authHeaders(cookie),
@@ -29,7 +29,7 @@ describe('Main device routes', () => {
 
   it('updates an owned device', async () => {
     const { cookie } = await signupAndGetCookie('bob@example.com');
-    const device = await createDeviceForUser(cookie, 'Old Name', 'macos');
+    const device = await createDeviceForUser('bob@example.com', 'password123', 'Old Name', 'macos');
 
     const res = await SELF.fetch(`${BASE}/device/${device.id}`, {
       method: 'PATCH',
@@ -50,9 +50,9 @@ describe('Main device routes', () => {
   });
 
   it('forbids patching a device owned by another user', async () => {
-    const { cookie: ownerCookie } = await signupAndGetCookie('owner@example.com');
+    await signupAndGetCookie('owner@example.com');
     const { cookie: attackerCookie } = await signupAndGetCookie('attacker@example.com');
-    const device = await createDeviceForUser(ownerCookie);
+    const device = await createDeviceForUser('owner@example.com');
 
     const res = await SELF.fetch(`${BASE}/device/${device.id}`, {
       method: 'PATCH',
@@ -68,7 +68,12 @@ describe('Main device routes', () => {
     const { cookie: partnerCookie, userId: partnerUserId } =
       await signupAndGetCookie('partner2@example.com');
     await markUserEmailVerified(partnerUserId);
-    const device = await createDeviceForUser(ownerCookie, 'Owner Phone', 'android');
+    const device = await createDeviceForUser(
+      'owner2@example.com',
+      'password123',
+      'Owner Phone',
+      'android',
+    );
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
@@ -105,7 +110,12 @@ describe('Main device routes', () => {
       'delete-device-partner@example.com',
     );
     await markUserEmailVerified(partnerUserId);
-    const device = await createDeviceForUser(cookie, 'Delete Me', 'linux');
+    const device = await createDeviceForUser(
+      'delete-device@example.com',
+      'password123',
+      'Delete Me',
+      'linux',
+    );
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
@@ -167,7 +177,12 @@ describe('Main device routes', () => {
     const { cookie: partnerCookie } = await signupAndGetCookie(
       'delete-device-unverified-partner@example.com',
     );
-    const device = await createDeviceForUser(cookie, 'Unverified Delete', 'linux');
+    const device = await createDeviceForUser(
+      'delete-device-unverified@example.com',
+      'password123',
+      'Unverified Delete',
+      'linux',
+    );
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',

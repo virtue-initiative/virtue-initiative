@@ -8,30 +8,88 @@ use serde::Serialize;
 use crate::config::Config;
 use crate::crypto::derive_password_auth;
 use crate::error::{CoreError, CoreResult};
-use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, HashParams, NotifyPayload};
+use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, HashParams};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct UploadedBatchResponse {
     pub id: String,
+    pub settings: DeviceSettings,
+    pub hash_token: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RegisteredDevice {
+    pub credentials: DeviceCredentials,
+    pub settings: DeviceSettings,
+    pub hash_token: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeviceState {
+    pub settings: DeviceSettings,
+    pub hash_token: String,
+}
+
+/// Raw wire shape for the `{settings, token}` pair embedded in `POST /d/device`,
+/// `GET /d/device`, and `POST /d/batch` responses. `DeviceSettingsResponse` differs
+/// from the public `DeviceSettings` only in its `id`/`device_id` field name.
+#[derive(Deserialize)]
+struct DeviceRecipientResponse {
+    user_id: String,
+    pub_key: String,
+}
+
+#[derive(Deserialize)]
+struct DeviceSettingsResponse {
+    id: String,
+    name: String,
+    platform: String,
+    #[serde(default)]
+    wrapping_keys: Vec<DeviceRecipientResponse>,
+    #[serde(default)]
+    hash_base_url: Option<String>,
+}
+
+impl From<DeviceSettingsResponse> for DeviceSettings {
+    fn from(response: DeviceSettingsResponse) -> Self {
+        DeviceSettings {
+            device_id: response.id,
+            name: response.name,
+            platform: response.platform,
+            wrapping_keys: response
+                .wrapping_keys
+                .into_iter()
+                .map(|key| crate::model::BatchRecipient {
+                    user_id: key.user_id,
+                    pub_key_base64: key.pub_key,
+                })
+                .collect(),
+            hash_base_url: response.hash_base_url,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct DeviceStateResponse {
+    settings: DeviceSettingsResponse,
+    token: String,
 }
 
 pub trait ApiTransport: Send + Sync {
-    fn login(&self, username: &str, password: &str) -> CoreResult<String>;
     fn logout(&self, device_refresh_token: &str) -> CoreResult<()>;
     fn register_device(
         &self,
-        user_refresh_token: &str,
+        email: &str,
+        password: &str,
         name: &str,
         platform: &str,
-    ) -> CoreResult<DeviceCredentials>;
-    fn get_device_settings(&self, device_refresh_token: &str) -> CoreResult<DeviceSettings>;
-    fn get_hash_token(&self, device_refresh_token: &str) -> CoreResult<String>;
+    ) -> CoreResult<RegisteredDevice>;
+    fn get_device_settings(&self, device_refresh_token: &str) -> CoreResult<DeviceState>;
     fn upload_batch(
         &self,
         device_refresh_token: &str,
         batch: &BatchUpload,
     ) -> CoreResult<UploadedBatchResponse>;
-    fn notify(&self, device_refresh_token: &str, payload: &NotifyPayload) -> CoreResult<()>;
     fn upload_hash(
         &self,
         hash_base_url: Option<&str>,
@@ -68,46 +126,6 @@ impl ApiTransport for ReqwestApiClient {
         Ok(())
     }
 
-    fn login(&self, username: &str, password: &str) -> CoreResult<String> {
-        #[derive(Serialize)]
-        struct LoginRequest<'a> {
-            email: &'a str,
-            password_auth: String,
-        }
-
-        #[derive(Deserialize)]
-        struct LoginMaterialResponse {
-            password_salt: String,
-            params: HashParams,
-        }
-
-        #[derive(Deserialize)]
-        struct LoginResponse {
-            refresh_token: String,
-        }
-
-        let material: LoginMaterialResponse = self.expect_json(
-            self.request(Method::GET, None, "/user/login-material", None)
-                .query(&[("email", username)])
-                .send()?,
-        )?;
-        let password_salt =
-            base64::engine::general_purpose::STANDARD.decode(material.password_salt)?;
-        let password_auth = derive_password_auth(password, &password_salt, &material.params)?;
-
-        let response: LoginResponse = self.send_json(
-            Method::POST,
-            None,
-            "/login",
-            None,
-            Some(&LoginRequest {
-                email: username,
-                password_auth: base64::engine::general_purpose::STANDARD.encode(password_auth),
-            }),
-        )?;
-        Ok(response.refresh_token)
-    }
-
     fn logout(&self, device_refresh_token: &str) -> CoreResult<()> {
         self.send_empty(
             Method::POST,
@@ -120,89 +138,77 @@ impl ApiTransport for ReqwestApiClient {
 
     fn register_device(
         &self,
-        user_refresh_token: &str,
+        email: &str,
+        password: &str,
         name: &str,
         platform: &str,
-    ) -> CoreResult<DeviceCredentials> {
+    ) -> CoreResult<RegisteredDevice> {
+        #[derive(Deserialize)]
+        struct LoginMaterialResponse {
+            password_salt: String,
+            params: HashParams,
+        }
+
         #[derive(Serialize)]
         struct RegisterDeviceRequest<'a> {
+            email: &'a str,
+            password_auth: String,
             name: &'a str,
             platform: &'a str,
         }
 
         #[derive(Deserialize)]
         struct RegisterDeviceResponse {
-            id: String,
             refresh_token: String,
+            #[serde(flatten)]
+            state: DeviceStateResponse,
         }
+
+        let material: LoginMaterialResponse = self.expect_json(
+            self.request(Method::GET, None, "/user/login-material", None)
+                .query(&[("email", email)])
+                .send()?,
+        )?;
+        let password_salt =
+            base64::engine::general_purpose::STANDARD.decode(material.password_salt)?;
+        let password_auth = derive_password_auth(password, &password_salt, &material.params)?;
 
         let response: RegisterDeviceResponse = self.send_json(
             Method::POST,
             None,
             "/d/device",
-            Some(user_refresh_token),
-            Some(&RegisterDeviceRequest { name, platform }),
+            None,
+            Some(&RegisterDeviceRequest {
+                email,
+                password_auth: base64::engine::general_purpose::STANDARD.encode(password_auth),
+                name,
+                platform,
+            }),
         )?;
 
-        Ok(DeviceCredentials {
-            device_id: response.id,
-            refresh_token: response.refresh_token,
+        let settings: DeviceSettings = response.state.settings.into();
+        Ok(RegisteredDevice {
+            credentials: DeviceCredentials {
+                device_id: settings.device_id.clone(),
+                refresh_token: response.refresh_token,
+            },
+            settings,
+            hash_token: response.state.token,
         })
     }
 
-    fn get_device_settings(&self, device_refresh_token: &str) -> CoreResult<DeviceSettings> {
-        #[derive(Deserialize)]
-        struct DeviceSettingsResponse {
-            id: String,
-            name: String,
-            platform: String,
-            wrapping_keys: Vec<DeviceRecipientResponse>,
-            hash_base_url: Option<String>,
-        }
-
-        #[derive(Deserialize)]
-        struct DeviceRecipientResponse {
-            user_id: String,
-            pub_key: String,
-        }
-
-        let response: DeviceSettingsResponse = self.send_json(
+    fn get_device_settings(&self, device_refresh_token: &str) -> CoreResult<DeviceState> {
+        let response: DeviceStateResponse = self.send_json(
             Method::GET,
             None,
             "/d/device",
             Some(device_refresh_token),
             None::<&()>,
         )?;
-        Ok(DeviceSettings {
-            device_id: response.id,
-            name: response.name,
-            platform: response.platform,
-            wrapping_keys: response
-                .wrapping_keys
-                .into_iter()
-                .map(|key| crate::model::BatchRecipient {
-                    user_id: key.user_id,
-                    pub_key_base64: key.pub_key,
-                })
-                .collect(),
-            hash_base_url: response.hash_base_url,
+        Ok(DeviceState {
+            settings: response.settings.into(),
+            hash_token: response.token,
         })
-    }
-
-    fn get_hash_token(&self, device_refresh_token: &str) -> CoreResult<String> {
-        #[derive(Deserialize)]
-        struct HashTokenResponse {
-            hash_token: String,
-        }
-
-        let response: HashTokenResponse = self.send_json(
-            Method::POST,
-            None,
-            "/d/token",
-            Some(device_refresh_token),
-            None::<&()>,
-        )?;
-        Ok(response.hash_token)
     }
 
     fn upload_batch(
@@ -212,13 +218,14 @@ impl ApiTransport for ReqwestApiClient {
     ) -> CoreResult<UploadedBatchResponse> {
         #[derive(Serialize)]
         struct AccessKeysPayload<'a> {
-            keys: Vec<AccessKeyEntry<'a>>,
+            keys: std::collections::BTreeMap<&'a str, &'a str>,
         }
 
-        #[derive(Serialize)]
-        struct AccessKeyEntry<'a> {
-            user_id: &'a str,
-            hpke_key: &'a str,
+        #[derive(Deserialize)]
+        struct UploadBatchResponse {
+            id: String,
+            #[serde(flatten)]
+            state: DeviceStateResponse,
         }
 
         let part = Part::bytes(batch.bytes.clone())
@@ -228,31 +235,30 @@ impl ApiTransport for ReqwestApiClient {
             keys: batch
                 .access_keys
                 .iter()
-                .map(|entry| AccessKeyEntry {
-                    user_id: &entry.user_id,
-                    hpke_key: &entry.hpke_key_base64,
-                })
+                .map(|entry| (entry.user_id.as_str(), entry.hpke_key_base64.as_str()))
                 .collect(),
         })?;
-        let form = Form::new()
+        let mut form = Form::new()
             .part("file", part)
             .text("start_time", batch.start_time_ms.to_string())
             .text("end_time", batch.end_time_ms.to_string())
             .text("high_risk_count", batch.high_risk_count.to_string())
             .text("medium_risk_count", batch.medium_risk_count.to_string())
             .text("access_keys", access_keys);
+        if !batch.notifications.is_empty() {
+            form = form.text(
+                "notifications",
+                serde_json::to_string(&batch.notifications)?,
+            );
+        }
 
-        self.send_form(Method::POST, None, "/d/batch", device_refresh_token, form)
-    }
-
-    fn notify(&self, device_refresh_token: &str, payload: &NotifyPayload) -> CoreResult<()> {
-        self.send_empty(
-            Method::POST,
-            None,
-            "/d/notify",
-            Some(device_refresh_token),
-            Some(payload),
-        )
+        let response: UploadBatchResponse =
+            self.send_form(Method::POST, None, "/d/batch", device_refresh_token, form)?;
+        Ok(UploadedBatchResponse {
+            id: response.id,
+            settings: response.state.settings.into(),
+            hash_token: response.state.token,
+        })
     }
 
     fn upload_hash(
@@ -311,14 +317,17 @@ impl ReqwestApiClient {
         self.expect_success(response)
     }
 
-    fn send_form(
+    fn send_form<TResponse>(
         &self,
         method: Method,
         base_override: Option<&str>,
         path: &str,
         bearer_token: &str,
         form: Form,
-    ) -> CoreResult<UploadedBatchResponse> {
+    ) -> CoreResult<TResponse>
+    where
+        TResponse: for<'de> Deserialize<'de>,
+    {
         let response = self
             .request(method, base_override, path, Some(bearer_token))
             .multipart(form)

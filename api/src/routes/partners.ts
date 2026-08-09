@@ -1,4 +1,4 @@
-import { Context, Hono } from 'hono';
+import { Hono } from 'hono';
 import { v4 as uuidv4 } from 'uuid';
 import { authenticateWebSession } from '../middleware/auth';
 import { validateZ } from '../middleware/validation';
@@ -34,9 +34,6 @@ import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
 
 const partners = new Hono<{ Bindings: Env; Variables: Variables }>();
-function getAppUrl(c: Context<{ Bindings: Env; Variables: Variables }>) {
-  return c.env.APP_URL;
-}
 
 function toPublicNotificationCadence(emailFrequency: string | null | undefined) {
   if (!emailFrequency || !(emailFrequencies as readonly string[]).includes(emailFrequency)) {
@@ -97,8 +94,8 @@ partners.post(
       ownerName: currentUser.name,
       ownerEmail: currentUser.email,
       appName: c.env.APP_NAME,
-      appUrl: getAppUrl(c),
-      inviteUrl: `${getAppUrl(c)}/invite-accept?partner_token=${encodeURIComponent(inviteToken)}`,
+      appUrl: c.env.APP_URL,
+      inviteUrl: `${c.env.APP_URL}/invite-accept?partner_token=${encodeURIComponent(inviteToken)}`,
     });
     await sendEmail({
       env: c.env,
@@ -207,7 +204,7 @@ partners.post(
         partnerName: currentUser.name,
         partnerEmail: currentUser.email,
         appName: c.env.APP_NAME,
-        appUrl: getAppUrl(c),
+        appUrl: c.env.APP_URL,
       });
       await sendEmail({
         env: c.env,

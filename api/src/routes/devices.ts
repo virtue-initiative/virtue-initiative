@@ -5,13 +5,13 @@ import {
   deleteDeviceById,
   findOwnedDevice,
   findUserById,
-  getHashState,
   listBatchUrlsForDevice,
   listAcceptedNotificationTargetsForUser,
   listDevicesForOwners,
   listVisibleOwnerIds,
   updateDevice,
 } from '../lib/db';
+import { localHashInfo } from '../lib/hash-server';
 import { sendEmail } from '../lib/email';
 import { renderDeviceDeletedTemplate } from '../lib/email/templates';
 import { deleteObject } from '../lib/r2';
@@ -21,9 +21,6 @@ import { updateDeviceSchema, type PatchDeviceResponse } from '../../../shared-we
 
 const devices = new Hono<{ Bindings: Env; Variables: Variables }>();
 const ONLINE_WINDOW_MS = 2 * 60 * 60 * 1000;
-function getAppUrl(env: Env) {
-  return env.APP_URL;
-}
 
 devices.get('/', authenticateWebSession(), async (c) => {
   const ownerIds = await listVisibleOwnerIds(c.env.DB, c.get('sub'));
@@ -37,9 +34,9 @@ devices.get('/', authenticateWebSession(), async (c) => {
     // and read the hash state directly from D1.
     await Promise.all(
       rows.map(async (device) => {
-        const state = await getHashState(c.env.DB, device.id);
-        if (state) {
-          hashInfo.set(device.id, { count: state.count, hashed_at: state.hashed_at });
+        const info = await localHashInfo(c.env.DB, device.id);
+        if (info) {
+          hashInfo.set(device.id, { count: info.count, hashed_at: info.hashed_at });
         }
       }),
     );
@@ -125,7 +122,7 @@ devices.delete('/:id', authenticateWebSession(), async (c) => {
   if (owner) {
     const email = renderDeviceDeletedTemplate({
       appName: c.env.APP_NAME,
-      appUrl: getAppUrl(c.env),
+      appUrl: c.env.APP_URL,
       recipientName: owner.name,
       deviceName: device.name,
       devicePlatform: device.platform,
@@ -152,7 +149,7 @@ devices.delete('/:id', authenticateWebSession(), async (c) => {
 
     const email = renderDeviceDeletedTemplate({
       appName: c.env.APP_NAME,
-      appUrl: getAppUrl(c.env),
+      appUrl: c.env.APP_URL,
       recipientName: target.watcher_name,
       deviceName: device.name,
       devicePlatform: device.platform,

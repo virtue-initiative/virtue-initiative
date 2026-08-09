@@ -395,15 +395,25 @@ mod tests {
     }
 
     fn make_bus_pair() -> (RemoteEventBus, RemoteEventBus) {
+        // A pid+timestamp nonce isn't unique enough on its own: several tests in
+        // this module call make_bus_pair() and the default test runner executes
+        // them in parallel threads within the same process, so two calls landing
+        // in the same clock tick (observed on macOS CI) previously collided on
+        // the same socket path. The atomic counter guarantees each call gets a
+        // distinct path regardless of clock resolution.
+        use std::sync::atomic::{AtomicU32, Ordering};
         use std::time::{SystemTime, UNIX_EPOCH};
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .subsec_nanos();
+        let count = COUNTER.fetch_add(1, Ordering::Relaxed);
         let sock = std::env::temp_dir().join(format!(
-            "virtue-remote-test-{}-{}.sock",
+            "virtue-remote-test-{}-{}-{}.sock",
             std::process::id(),
-            nonce
+            nonce,
+            count
         ));
         let listener = IpcListener::bind(&sock).expect("bind");
 

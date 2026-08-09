@@ -12,7 +12,7 @@ Base URL examples:
 - `Base64`: base64-encoded binary
 - `SHA256`: lowercase hex-encoded SHA-256 digest
 - `RefreshToken`: opaque web-session string. Set as the HTTPOnly `refresh_token` cookie by `POST /login`, `POST /signup`, and `POST /email-verification/validate`, and also returned in the `POST /login` body.
-- `HashServerToken`: EdDSA JWT (`Ed25519`) with `type: "hash-server"` and `sub = device id`
+- `HashServerToken`: EdDSA JWT (`Ed25519`) with `type: "hash-server"` and `sub = device id`; minted by `POST /d/device`, `GET /d/device`, and `POST /d/batch`
 - `DeviceRefreshToken`: opaque string returned by `POST /d/device`
 - `ServerToken`: EdDSA JWT (`Ed25519`) with `type: "server"` and `sub = device id`
 
@@ -602,35 +602,15 @@ should pass the largest `created_at` they've seen as `since` on subsequent syncs
 
 The following routes use device auth:
 
-- `POST /d/device` uses the authenticated web session cookie
-- `POST /d/token`, `GET /d/device`, `POST /d/batch`, and `POST /d/notify` use a `DeviceRefreshToken`
+- `POST /d/device` takes the owner's email + `password_auth` directly (same credential
+  material as `POST /login`) — no web session or prior device session required
+- `POST /d/logout`, `GET /d/device`, and `POST /d/batch` use a `DeviceRefreshToken`
 - `POST /hash`, `GET /hash`, and `DELETE /hash` use a `HashServerToken` or `ServerToken` as applicable
 
-### `POST /d/device`
+### DeviceSettings
 
-Registers a device for the authenticated user.
-
-Request:
-
-```js
-{
-  "name": "My Laptop",
-  "platform": "linux"
-}
-```
-
-Response `201`:
-
-```js
-{
-  "id": UUID,
-  "refresh_token": DeviceRefreshToken
-}
-```
-
-### `GET /d/device`
-
-Response `200`:
+Shared shape embedded (alongside a fresh `token`) in the responses of `POST /d/device`,
+`GET /d/device`, and `POST /d/batch`:
 
 ```js
 {
@@ -651,17 +631,61 @@ Response `200`:
 device owner (when they have a public key) followed by all accepted partners.
 The owner, when present, is always the first entry.
 
-### `POST /d/token`
+### `POST /d/device`
 
-Exchanges the `DeviceRefreshToken` (sent as `Bearer`) for a short-lived hash-server JWT.
+Registers a device for the user identified by `email`/`password_auth` — the same
+credential verification `POST /login` performs (401 on bad credentials, 403 if the
+account's email isn't verified). Since this is the device's very first call, no prior
+session of any kind is required.
+
+Request:
+
+```js
+{
+  "email": "user@example.com",
+  "password_auth": Base64,
+  "name": "My Laptop",
+  "platform": "linux"
+}
+```
+
+Response `201`:
+
+```js
+{
+  "refresh_token": DeviceRefreshToken,
+  "settings": DeviceSettings,
+  "token": HashServerToken
+}
+```
+
+Registration alone is enough to start operating: the device gets its credentials,
+initial settings, and an initial hash token in one round trip, with no follow-up call
+needed before its first hash upload.
+
+### `GET /d/device`
+
+Refreshes settings and mints a fresh hash-server token for the authenticated device.
+This is the manual/periodic refresh path — used by clients when their cached hash token
+goes stale without a batch upload happening in the meantime — and also the replacement
+for the removed `POST /d/token`.
 
 Response `200`:
 
 ```js
 {
-  "hash_token": HashServerToken
+  "settings": DeviceSettings,
+  "token": HashServerToken
 }
 ```
+
+### `POST /d/logout`
+
+Revokes the authenticated device's session and soft-deletes it. Clears the device's
+hash-chain state as a best-effort cleanup; batches/screenshots and the device row itself
+are untouched (that's the separate manual hard-delete flow via `DELETE /device/:id`).
+
+Response: `204` with no body.
 
 ### `POST /d/batch`
 
@@ -672,6 +696,7 @@ Multipart form request:
 - `access_keys`: JSON string
 - `high_risk_count`: non-negative integer, optional, default `0`
 - `medium_risk_count`: non-negative integer, optional, default `0`
+- `notifications`: JSON string, optional — array of alert-email entries (see below)
 - `file`: encrypted batch blob
 
 `high_risk_count`/`medium_risk_count` are risk-band tallies computed client-side from the
@@ -683,14 +708,31 @@ used to summarize tamper activity in partner digest emails.
 
 ```js
 {
-  "keys": [
-    {
-      "user_id": UUID,
-      "hpke_key": Base64
-    }
-  ]
+  "keys": {
+    "<user_id UUID>": Base64 // hpke_key
+  }
 }
 ```
+
+`notifications` JSON shape — a JSON-encoded array, each entry triggering the alert email
+for one high-risk event once the batch is durably persisted (best-effort: a failure here
+does not roll back the already-committed batch). The event body itself lives in the
+encrypted batch; each entry only carries what the notification email needs:
+
+```js
+[
+  {
+    ts: DateTime,
+    type: 'system_event',
+    risk: 0.7,
+    title: 'Device reported system event.' | undefined,
+    details: '...' | undefined,
+  },
+];
+```
+
+`risk` is required (`0`-`1`) on each entry. `title`/`details` are optional; when omitted,
+a default title is derived from `type` and no details are included.
 
 Response `201`:
 
@@ -700,39 +742,14 @@ Response `201`:
   "start_time": DateTime,
   "end_time": DateTime,
   "end_hash": SHA256,
-  "url": "https://.../user/.../batches/...enc"
+  "url": "https://.../user/.../batches/...enc",
+  "settings": DeviceSettings,
+  "token": HashServerToken
 }
 ```
 
-### `POST /d/notify`
-
-Sends the alert email for a high-risk event. The event body itself is uploaded separately
-via the encrypted `POST /d/batch` pipeline; this endpoint only carries the metadata needed
-to render the notification email and persists nothing server-side. Replaces the removed
-`POST /d/log` endpoint.
-
-Request:
-
-```js
-{
-  "ts": DateTime,
-  "type": "system_event",
-  "risk": 0.7,
-  "title": "Device reported system event." | undefined,
-  "details": "..." | undefined
-}
-```
-
-`risk` is required (`0`-`1`). `title`/`details` are optional; when omitted, a default title
-is derived from `type` and no details are included.
-
-Response `202`:
-
-```js
-{
-  "ok": true
-}
-```
+Every batch upload refreshes both settings and the hash token, piggybacking on the
+response so the device rarely needs a dedicated `GET /d/device` call.
 
 ## Hash API
 

@@ -16,31 +16,26 @@ beforeEach(clearDB);
 describe('Data and device API routes', () => {
   it('handles device registration, settings, batch upload, and filtered data listing', async () => {
     const { cookie: userCookie, userId } = await signupAndGetCookie('alice@example.com');
-    const device = await createDeviceForUser(userCookie, 'Phone', 'ios');
+    const device = await createDeviceForUser('alice@example.com', 'password123', 'Phone', 'ios');
 
     const deviceInfoRes = await SELF.fetch(`${BASE}/d/device`, {
       headers: { Authorization: `Bearer ${device.refresh_token}` },
     });
     expect(deviceInfoRes.status).toBe(200);
     const deviceInfo = (await deviceInfoRes.json()) as {
-      wrapping_keys: Array<{ user_id: string; pub_key: string }>;
-      hash_base_url: string;
+      settings: {
+        wrapping_keys: Array<{ user_id: string; pub_key: string }>;
+        hash_base_url: string;
+      };
+      token: string;
     };
-    expect(deviceInfo.wrapping_keys).toHaveLength(1);
-    expect(deviceInfo.wrapping_keys[0]?.user_id).toBe(userId);
-    expect(deviceInfo.hash_base_url).toBeTruthy();
-
-    // Get a hash JWT from POST /d/token
-    const hashTokenRes = await SELF.fetch(`${BASE}/d/token`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${device.refresh_token}` },
-    });
-    expect(hashTokenRes.status).toBe(200);
-    const { hash_token } = (await hashTokenRes.json()) as { hash_token: string };
+    expect(deviceInfo.settings.wrapping_keys).toHaveLength(1);
+    expect(deviceInfo.settings.wrapping_keys[0]?.user_id).toBe(userId);
+    expect(deviceInfo.settings.hash_base_url).toBeTruthy();
 
     const hashUploadRes = await SELF.fetch(`${BASE}/hash`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${hash_token}` },
+      headers: { Authorization: `Bearer ${deviceInfo.token}` },
       body: new Uint8Array(32).fill(7),
     });
     expect(hashUploadRes.status).toBe(200);
@@ -51,12 +46,7 @@ describe('Data and device API routes', () => {
     form.set(
       'access_keys',
       JSON.stringify({
-        keys: [
-          {
-            user_id: userId,
-            hpke_key: Buffer.from('owner-envelope').toString('base64'),
-          },
-        ],
+        keys: { [userId]: Buffer.from('owner-envelope').toString('base64') },
       }),
     );
     form.set('file', new File([new Uint8Array([1, 2, 3])], 'batch.enc'));
@@ -81,12 +71,7 @@ describe('Data and device API routes', () => {
       .bind(uuidToBytes(batch.id))
       .first<{ access_keys: string }>();
     expect(JSON.parse(storedBatch!.access_keys)).toEqual({
-      keys: [
-        {
-          user_id: userId,
-          hpke_key: Buffer.from('owner-envelope').toString('base64'),
-        },
-      ],
+      keys: { [userId]: Buffer.from('owner-envelope').toString('base64') },
     });
 
     const dataRes = await SELF.fetch(`${BASE}/data?since=0`, {
@@ -120,7 +105,7 @@ describe('Data and device API routes', () => {
       await signupAndGetCookie('owner@example.com');
     const { cookie: partnerCookie, userId: partnerUserId } =
       await signupAndGetCookie('partner@example.com');
-    const device = await createDeviceForUser(ownerCookie);
+    const device = await createDeviceForUser('owner@example.com');
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
@@ -145,16 +130,10 @@ describe('Data and device API routes', () => {
     form.set(
       'access_keys',
       JSON.stringify({
-        keys: [
-          {
-            user_id: ownerUserId,
-            hpke_key: Buffer.from('owner-envelope').toString('base64'),
-          },
-          {
-            user_id: partnerUserId,
-            hpke_key: Buffer.from('partner-envelope').toString('base64'),
-          },
-        ],
+        keys: {
+          [ownerUserId]: Buffer.from('owner-envelope').toString('base64'),
+          [partnerUserId]: Buffer.from('partner-envelope').toString('base64'),
+        },
       }),
     );
     form.set('file', new File([new Uint8Array([1, 2, 3])], 'batch.enc'));

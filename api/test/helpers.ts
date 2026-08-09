@@ -134,21 +134,30 @@ export function authHeaders(cookie: string): Record<string, string> {
   };
 }
 
-export async function createDeviceForUser(cookie: string, name = 'Laptop', platform = 'linux') {
+export async function createDeviceForUser(
+  email: string,
+  password = 'password123',
+  name = 'Laptop',
+  platform = 'linux',
+) {
+  const password_auth = await passwordAuthFor(password);
   const res = await SELF.fetch(`${BASE}/d/device`, {
     method: 'POST',
-    headers: authHeaders(cookie),
-    body: JSON.stringify({ name, platform }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password_auth, name, platform }),
   });
 
   if (!res.ok) {
     throw new Error(`device creation failed: ${res.status} ${await res.text()}`);
   }
 
-  return (await res.json()) as {
-    id: string;
+  const body = (await res.json()) as {
     refresh_token: string;
+    settings: { id: string };
+    token: string;
   };
+
+  return { id: body.settings.id, refresh_token: body.refresh_token, token: body.token };
 }
 
 export async function createServerToken(deviceId: string) {

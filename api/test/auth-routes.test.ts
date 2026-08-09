@@ -362,18 +362,11 @@ describe('Auth routes', () => {
 
   it('requires matching email confirmation and permanently deletes the account with cascaded data cleanup', async () => {
     const { cookie, userId } = await signupAndGetCookie('delete-me@example.com', 'pw', 'Delete Me');
-    const device = await createDeviceForUser(cookie, 'Phone', 'ios');
-
-    const hashTokenRes = await SELF.fetch(`${BASE}/d/token`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${device.refresh_token}` },
-    });
-    expect(hashTokenRes.status).toBe(200);
-    const { hash_token } = (await hashTokenRes.json()) as { hash_token: string };
+    const device = await createDeviceForUser('delete-me@example.com', 'pw', 'Phone', 'ios');
 
     const hashUploadRes = await SELF.fetch(`${BASE}/hash`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${hash_token}` },
+      headers: { Authorization: `Bearer ${device.token}` },
       body: new Uint8Array(32).fill(9),
     });
     expect(hashUploadRes.status).toBe(200);
@@ -384,7 +377,7 @@ describe('Auth routes', () => {
     form.set(
       'access_keys',
       JSON.stringify({
-        keys: [{ user_id: userId, hpke_key: Buffer.from('owner-envelope').toString('base64') }],
+        keys: { [userId]: Buffer.from('owner-envelope').toString('base64') },
       }),
     );
     form.set('file', new File([new Uint8Array([4, 5, 6])], 'batch.enc'));

@@ -75,6 +75,10 @@ Key files:
 - Rust: `client/core/src/crypto.rs`
 - TypeScript: `web/src/crypto.ts` (`unwrapBatchKey`, `encryptForPublicKey`)
 
+The `access_keys` JSON envelope and `DeviceSettings` shape are also shared between Rust and
+the API, but are plain JSON relay shapes — not independently-reimplemented crypto — so they
+aren't listed as one of the five contracts above. See `api/API.md` for their wire shapes.
+
 ## Key invariant files
 
 Read these before touching crypto, batch, or auth code:
