@@ -174,24 +174,29 @@ d1_query_count() {
   '
 }
 
-DEVICE_COUNT="$(d1_query_count "SELECT COUNT(*) as c FROM devices WHERE name = '${DEVICE_NAME}'")"
-HASH_COUNT="$(d1_query_count "SELECT COALESCE((SELECT hs.count FROM hash_states hs JOIN devices d ON d.id = hs.device_id WHERE d.name = '${DEVICE_NAME}'), 0) as c")"
-BATCH_COUNT="$(d1_query_count "SELECT COUNT(*) as c FROM batches b JOIN devices d ON d.id = b.device_id WHERE d.name = '${DEVICE_NAME}'")"
+# Each POST /hash or /d/batch response returns only once its D1 write has been
+# awaited, but a separate `wrangler d1 execute --local` CLI process reading the
+# same on-disk D1 state can still lag slightly behind Miniflare's in-process
+# view -- so retry for a few seconds instead of asserting on a single snapshot.
+fail=1
+for _ in $(seq 1 15); do
+  DEVICE_COUNT="$(d1_query_count "SELECT COUNT(*) as c FROM devices WHERE name = '${DEVICE_NAME}'")"
+  HASH_COUNT="$(d1_query_count "SELECT COALESCE((SELECT hs.count FROM hash_states hs JOIN devices d ON d.id = hs.device_id WHERE d.name = '${DEVICE_NAME}'), 0) as c")"
+  BATCH_COUNT="$(d1_query_count "SELECT COUNT(*) as c FROM batches b JOIN devices d ON d.id = b.device_id WHERE d.name = '${DEVICE_NAME}'")"
 
-echo "device rows: ${DEVICE_COUNT}, hash count: ${HASH_COUNT}, batch rows: ${BATCH_COUNT}"
+  echo "device rows: ${DEVICE_COUNT}, hash count: ${HASH_COUNT}, batch rows: ${BATCH_COUNT}"
 
-fail=0
-if [ "$DEVICE_COUNT" -lt 1 ]; then
-  echo "integration-test: expected a devices row for '${DEVICE_NAME}'" >&2
-  fail=1
-fi
-if [ "$HASH_COUNT" -lt 1 ]; then
-  echo "integration-test: expected hash_states.count > 0 for '${DEVICE_NAME}'" >&2
-  fail=1
-fi
-if [ "$BATCH_COUNT" -lt 1 ]; then
-  echo "integration-test: expected at least one batch row for '${DEVICE_NAME}'" >&2
-  fail=1
+  if [ "$DEVICE_COUNT" -ge 1 ] && [ "$HASH_COUNT" -ge 1 ] && [ "$BATCH_COUNT" -ge 1 ]; then
+    fail=0
+    break
+  fi
+  sleep 2
+done
+
+if [ "$fail" -ne 0 ]; then
+  [ "$DEVICE_COUNT" -ge 1 ] || echo "integration-test: expected a devices row for '${DEVICE_NAME}'" >&2
+  [ "$HASH_COUNT" -ge 1 ] || echo "integration-test: expected hash_states.count > 0 for '${DEVICE_NAME}'" >&2
+  [ "$BATCH_COUNT" -ge 1 ] || echo "integration-test: expected at least one batch row for '${DEVICE_NAME}'" >&2
 fi
 
 if [ "$fail" -ne 0 ]; then
