@@ -49,6 +49,7 @@ impl Scenario {
             device_credentials: Some(DeviceCredentials {
                 device_id: "scenario-device".into(),
                 refresh_token: "scenario-device-refresh".into(),
+                signing_key: [1u8; 32],
             }),
         };
         let settings = DeviceSettings {

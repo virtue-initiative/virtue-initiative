@@ -6,16 +6,17 @@ Cloudflare Workers API using Hono. Entry point: `src/index.ts`.
 
 Two kinds of credential exist: **opaque session refresh tokens** (looked up in the `sessions` table) and **short-lived EdDSA JWTs**.
 
-| Token                | Kind   | TTL        | Auth header             | Notes                                                                                      |
-| -------------------- | ------ | ---------- | ----------------------- | ------------------------------------------------------------------------------------------ |
-| web refresh token    | opaque | 1 year     | `refresh_token` cookie¹ | Authenticates user/web routes directly                                                     |
-| device refresh token | opaque | ~1000 yr   | `Bearer <token>`        | Authenticates `/d/*` routes directly                                                       |
-| `hash-server`        | JWT    | 1 hour     | `Bearer <jwt>`          | Hash-server routes (`/hash`); minted by `POST /d/device`, `GET /d/device`, `POST /d/batch` |
-| `server`             | JWT    | 60 seconds | `Bearer <jwt>`          | Server-to-server (e.g. `DELETE /hash`, `GET /hash/info`)                                   |
+| Token                | Kind   | TTL        | Auth header                             | Notes                                                                                                                                                                                                                                                                            |
+| -------------------- | ------ | ---------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| web refresh token    | opaque | 1 year     | `refresh_token` cookie¹                 | Authenticates user/web routes directly                                                                                                                                                                                                                                           |
+| device refresh token | opaque | ~1000 yr   | `Bearer <token>`                        | Authenticates `/d/*` routes directly                                                                                                                                                                                                                                             |
+| `hash-server`        | JWT    | 1 hour     | `Bearer <jwt>`                          | **Local-hash-server mode only** (`isLocalHashServer(env)` true — `HASH_SERVER_URL` unset or ends in `/api`); minted by `POST /d/device`, `GET /d/device`, `POST /d/batch`; unsigned, no pubkey                                                                                   |
+| `device-cert`        | JWT    | 24 hours   | `Bearer <jwt>` + `X-Signature*` headers | **Remote-hash-server mode only**; minted by `buildDeviceState` from a caller-supplied `X-Device-Pubkey` header on every call to `POST /d/device`/`GET /d/device`/`POST /d/batch` — never persisted, so omitting the header on any such call is a 400, not a "not enrolled" state |
+| `server`             | JWT    | 60 seconds | `Bearer <jwt>`                          | Server-to-server (e.g. `DELETE /hash`, the merged `GET /hash` info shape)                                                                                                                                                                                                        |
 
 ¹ The web refresh token is also accepted as `Bearer <token>` (used by the cache worker).
 
-There is no access-token exchange: opaque refresh tokens authenticate their routes directly. The JWT `sub` is a device ID for `hash-server`/`server` tokens; the `type` claim distinguishes them.
+There is no access-token exchange: opaque refresh tokens authenticate their routes directly. The JWT `sub` is a device ID for `hash-server`/`server`/`device-cert` tokens; the `type` claim distinguishes them. See the root `CLAUDE.md`'s "Device-cert request signing" contract for the `X-Signature*` header / Ed25519 signature scheme that `device-cert` tokens pair with on `POST /hash`.
 
 ## Validation pattern
 

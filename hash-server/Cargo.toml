@@ -23,6 +23,9 @@ dotenvy = "0.15"
 thiserror = "2"
 bytes = "1"
 http = "1"
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+dashmap = "6"
+base64 = "0.22"
 
 [dev-dependencies]
 ed25519-dalek = { version = "2", features = ["pkcs8"] }

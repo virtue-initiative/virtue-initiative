@@ -2,6 +2,7 @@ use aes_gcm::aead::{Aead, KeyInit, OsRng as AesOsRng, rand_core::RngCore};
 use aes_gcm::{Aes256Gcm, Nonce};
 use argon2::{Algorithm, Argon2, Params, Version};
 use base64::Engine;
+use ed25519_dalek::{Signer, SigningKey};
 use hkdf::Hkdf;
 use hpke::{
     Deserializable, OpModeS, Serializable,
@@ -108,6 +109,54 @@ pub fn encode_batch_event(event: &LogEntry) -> CoreResult<Vec<u8>> {
 
 pub fn compute_event_hash(encoded_event: &[u8]) -> [u8; 32] {
     Sha256::digest(encoded_event).into()
+}
+
+/// Generates a new Ed25519 device-signing keypair's raw private key bytes.
+///
+/// Deliberately does NOT call `SigningKey::generate()` — its `pkcs8`/
+/// `rand_core` glue pins `rand_core 0.6`, which conflicts with this crate's
+/// `rand_core = "0.9.5"` (used for HPKE). Reusing the OsRng/`fill_bytes`
+/// pattern already used for the AES batch key above needs no `rand_core`
+/// feature on `ed25519-dalek` at all.
+pub fn generate_signing_key() -> [u8; 32] {
+    let mut key = [0_u8; 32];
+    AesOsRng.fill_bytes(&mut key);
+    key
+}
+
+pub fn signing_public_key_base64(signing_key_bytes: &[u8; 32]) -> String {
+    let signing_key = SigningKey::from_bytes(signing_key_bytes);
+    base64::engine::general_purpose::STANDARD.encode(signing_key.verifying_key().to_bytes())
+}
+
+/// Signs a `POST /hash` request to the real hash-server. Message layout
+/// (must stay byte-for-byte identical to `hash-server/src/auth.rs`'s
+/// `verify_signature`):
+///
+/// `timestamp_ms (i64 LE, 8 bytes) || device_id || 0x00 || method || 0x00 || path || 0x00 || body`
+pub fn sign_request(
+    signing_key_bytes: &[u8; 32],
+    timestamp_ms: i64,
+    device_id: &str,
+    method: &str,
+    path: &str,
+    body: &[u8],
+) -> [u8; 64] {
+    let signing_key = SigningKey::from_bytes(signing_key_bytes);
+
+    let mut msg = Vec::with_capacity(
+        8 + device_id.len() + 1 + method.len() + 1 + path.len() + 1 + body.len(),
+    );
+    msg.extend_from_slice(&timestamp_ms.to_le_bytes());
+    msg.extend_from_slice(device_id.as_bytes());
+    msg.push(0);
+    msg.extend_from_slice(method.as_bytes());
+    msg.push(0);
+    msg.extend_from_slice(path.as_bytes());
+    msg.push(0);
+    msg.extend_from_slice(body);
+
+    signing_key.sign(&msg).to_bytes()
 }
 
 #[cfg(test)]

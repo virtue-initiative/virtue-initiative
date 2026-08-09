@@ -369,6 +369,35 @@ endpoint. `UploadModule::ensure_hash_token` caches the token from whichever of t
 responses arrived most recently and only calls `GET /d/device` when that cache goes
 stale (55 minutes) without a batch having refreshed it in the meantime.
 
+Every `POST /hash` request is also signed with the device's own Ed25519 keypair — this
+replaces TLS as the authenticity/integrity mechanism on that path (per-device traffic to
+the real hash-server runs over plain HTTP; TLS's handshake cost, not app-level compute,
+was the throughput bottleneck it exists to remove). Confidentiality is intentionally not
+provided, since the payload is just a hash. The signed-message layout (must stay
+byte-for-byte identical to `hash-server/src/auth.rs`'s `verify_signature`):
+
+```
+Ed25519_sign(
+  device_privkey,
+  timestamp_ms_LE(8 bytes) || device_id || 0x00 || method || 0x00 || path || 0x00 || body
+)
+```
+
+sent as `Authorization: Bearer <device-cert JWT>`, `X-Signature-Timestamp: <timestamp_ms>`,
+`X-Signature: <base64 sig>`. The keypair is generated locally in `module/auth.rs`'s
+`do_login` (before the `register_device` call, since the derived pubkey has to ride along
+on that same request) and the raw private key is persisted in `DeviceCredentials.signing_key`
+— plaintext in `event_state.json`, the same storage model `refresh_token` already uses (no
+OS keychain yet). Since the server never persists the pubkey, it has to be resent as an
+`X-Device-Pubkey` header on every call that can mint/refresh a device-cert
+(`register_device`, `get_device_settings`, `upload_batch`), not just once at registration.
+
+This only matters when the API Worker's `HASH_SERVER_URL` points at a real remote
+hash-server. In local/dev mode (`hash_base_url` pointing back at the Worker's own D1-backed
+`/hash` routes), the client still computes and attaches the same signature headers
+unconditionally — it doesn't need to know which mode it's in — but the local routes simply
+never check for them, so local dev traffic works unmodified and unverified.
+
 ## Testing
 
 The `testing` feature (auto-enabled under `cfg(test)`) exposes:

@@ -225,7 +225,8 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
             .device_credentials
             .as_ref()
             .ok_or(CoreError::NotAuthenticated)?;
-        self.api.upload_batch(&creds.refresh_token, batch)
+        let pubkey = crate::crypto::signing_public_key_base64(&creds.signing_key);
+        self.api.upload_batch(&creds.refresh_token, &pubkey, batch)
     }
 
     fn upload_hash(
@@ -234,7 +235,18 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
         content_hash: &[u8; 32],
     ) -> CoreResult<()> {
         let hash_jwt = self.ensure_hash_token()?;
-        self.api.upload_hash(hash_base_url, &hash_jwt, content_hash)
+        let creds = self
+            .state
+            .device_credentials
+            .as_ref()
+            .ok_or(CoreError::NotAuthenticated)?;
+        self.api.upload_hash(
+            hash_base_url,
+            &hash_jwt,
+            &creds.device_id,
+            &creds.signing_key,
+            content_hash,
+        )
     }
 
     /// Returns the cached hash-server JWT, refreshing it via `GET /d/device` once it's
@@ -243,13 +255,12 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
     /// so on an active device this rarely needs to hit the network at all. The refresh
     /// also opportunistically updates `state.settings`, same as a batch response does.
     fn ensure_hash_token(&mut self) -> CoreResult<String> {
-        let refresh_token = self
+        let creds = self
             .state
             .device_credentials
             .as_ref()
-            .ok_or(CoreError::NotAuthenticated)?
-            .refresh_token
-            .clone();
+            .ok_or(CoreError::NotAuthenticated)?;
+        let refresh_token = creds.refresh_token.clone();
 
         let needs_refresh = match &self.hash_token_cache {
             None => true,
@@ -257,7 +268,8 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
         };
 
         if needs_refresh {
-            let result = self.api.get_device_settings(&refresh_token)?;
+            let pubkey = crate::crypto::signing_public_key_base64(&creds.signing_key);
+            let result = self.api.get_device_settings(&refresh_token, &pubkey)?;
             self.hash_token_cache = Some((result.hash_token.clone(), Instant::now()));
             self.state.settings = Some(result.settings);
             Ok(result.hash_token)
@@ -605,6 +617,7 @@ mod tests {
         DeviceCredentials {
             device_id: "test-device".into(),
             refresh_token: "test-refresh".into(),
+            signing_key: [1u8; 32],
         }
     }
 

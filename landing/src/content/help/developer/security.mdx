@@ -21,20 +21,22 @@ devices to partners.
 
 ### Data storage
 
-| Item         | Place   | Format                                                 | Access           |
-| ------------ | ------- | ------------------------------------------------------ | ---------------- |
-| Password     | Server  | `HKDF-SHA256("auth", Argon2id(pwd, salt, params))`     | None             |
-| Email        | Server  | Plaintext                                              | Partners         |
-| Private Key  | Server  | `AES-256-GCM(HKDF-SHA256("key", Argon2id(...), salt))` | User             |
-| Private Key  | Browser | Plaintext                                              | Browser          |
-| Private Key  | Device  | Plaintext                                              | Device           |
-| Public Key   | Server  | Plaintext (X25519)                                     | Anyone           |
-| Batch List   | Server  | Plaintext                                              | Partners         |
-| Batch Key    | Server  | `HPKE(DHKEM(X25519), HKDF-SHA256, AES-256-GCM)`        | Partners         |
-| Batches      | Server  | `AES-256-GCM(batch_key)`                               | Anyone with UUID |
-| Latest Batch | Device  | Plaintext                                              | Device           |
-| Logs         | Server  | Plaintext                                              | Partners         |
-| Logs         | Device  | Plaintext                                              | Device           |
+| Item               | Place   | Format                                                 | Access           |
+| ------------------ | ------- | ------------------------------------------------------ | ---------------- |
+| Password           | Server  | `HKDF-SHA256("auth", Argon2id(pwd, salt, params))`     | None             |
+| Email              | Server  | Plaintext                                              | Partners         |
+| Private Key        | Server  | `AES-256-GCM(HKDF-SHA256("key", Argon2id(...), salt))` | User             |
+| Private Key        | Browser | Plaintext                                              | Browser          |
+| Private Key        | Device  | Plaintext                                              | Device           |
+| Public Key         | Server  | Plaintext (X25519)                                     | Anyone           |
+| Batch List         | Server  | Plaintext                                              | Partners         |
+| Batch Key          | Server  | `HPKE(DHKEM(X25519), HKDF-SHA256, AES-256-GCM)`        | Partners         |
+| Batches            | Server  | `AES-256-GCM(batch_key)`                               | Anyone with UUID |
+| Latest Batch       | Device  | Plaintext                                              | Device           |
+| Logs               | Server  | Plaintext                                              | Partners         |
+| Logs               | Device  | Plaintext                                              | Device           |
+| Device Signing Key | Device  | Plaintext (Ed25519 private key)                        | Device           |
+| Device Cert        | Server  | JWT: publicly-verifiable pubkey binding, server-issued | Anyone           |
 
 ## Details
 
@@ -157,6 +159,48 @@ the server with the hash like above. The partner can verify that the batch is
 correct by doing the same process on their end when downloading and decrypting
 the batch.
 
+### Device request signing
+
+Requests that extend a device's hash chain (`POST /hash`, sent frequently — once
+per capture interval) run over plain HTTP rather than HTTPS, since a fresh
+TLS handshake on every request turned out to be the actual throughput
+bottleneck at fleet scale, not application-level compute. In place of TLS,
+each device signs every such request with an Ed25519 keypair it generates
+locally at registration; the private key never leaves the device.
+
+The device's public key is sent to the server on every authenticated call
+that can mint or refresh its short-lived device certificate — the server
+never stores it, so it has to be resent each time rather than looked up. The
+server embeds whatever pubkey was presented into a signed, publicly-verifiable
+"device certificate" JWT (24-hour lifetime) that the device then presents
+alongside each signed request.
+
+Each request is signed like this:
+
+```
+Ed25519_sign(
+  device_private_key,
+  timestamp_ms_LE(8 bytes)
+    || device_id
+    || 0x00 || method
+    || 0x00 || path
+    || 0x00 || body
+)
+```
+
+using the same content-hash chain formula described above — `content_hash =
+sha256(ts_le64 || type_utf8 || sorted(key_utf8 || encoded_value))`, chained as
+`new_state = sha256(current_state || content_hash)` — for the body being
+signed. The server rejects a request if its timestamp is more than 60 seconds
+old, and separately tracks the most recently accepted timestamp per device so
+an intercepted request can't be replayed.
+
+This scheme provides authenticity (the request really came from a device
+holding that private key) and integrity (the request wasn't modified in
+transit), which is what TLS was providing on this path before. It
+deliberately does **not** provide confidentiality — the request body is just
+a hash, not sensitive data, so there's nothing to keep private in transit.
+
 ## Known tradeoffs
 
 - We ultimately encrypt everything with the user's password. Using the user's
@@ -176,7 +220,16 @@ the batch.
 
 - Emails might currently be able to be guessed, either in the login flow or in
   the invite flow.
-- Devices should use the keychain eventually.
+- Devices should use the keychain eventually — this applies to both the
+  private key described above and the newer device signing key, which are
+  currently stored the same way (plaintext on disk).
+- Hash-chain traffic (`POST /hash`) no longer runs over TLS. This trades away
+  transport-layer confidentiality on that specific path in exchange for
+  avoiding a fresh TLS handshake on every request; since the payload is only
+  ever a hash, nothing sensitive is exposed by that tradeoff, but it's worth
+  noting explicitly that this path no longer gets TLS's confidentiality
+  guarantee (only authenticity and integrity, via the signature scheme
+  above).
 
 ## Flow diagram
 
@@ -192,7 +245,7 @@ The links and snippets below are generated from the current tree by `node script
 
 Argon2id output is split into `passwordAuth` and the AES wrapping key with HKDF-SHA256.
 
-Source: [`web/src/crypto.ts:L83-L110`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/crypto.ts#L83-L110)
+Source: [`web/src/utils/api/crypto.ts:L73-L96`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/utils/api/crypto.ts#L73-L96)
 
 ```ts
 export async function derivePasswordMaterial(
@@ -225,7 +278,7 @@ export async function derivePasswordMaterial(
 
 The web client encrypts the private key locally with AES-GCM before upload.
 
-Source: [`web/src/crypto.ts:L112-L124`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/crypto.ts#L112-L124)
+Source: [`web/src/utils/api/crypto.ts:L98-L103`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/utils/api/crypto.ts#L98-L103)
 
 ```ts
 export async function encryptData(key: CryptoKey, data: Uint8Array): Promise<Uint8Array> {
@@ -240,7 +293,7 @@ export async function encryptData(key: CryptoKey, data: Uint8Array): Promise<Uin
 
 The web app generates the user keypair from the HPKE suite's X25519 KEM.
 
-Source: [`web/src/crypto.ts:L140-L151`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/crypto.ts#L140-L151)
+Source: [`web/src/utils/api/crypto.ts:L116-L123`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/utils/api/crypto.ts#L116-L123)
 
 ```ts
 export async function generateUserKeyPair() {
@@ -257,7 +310,7 @@ export async function generateUserKeyPair() {
 
 Batch access envelopes are opened with HPKE and imported back into WebCrypto as AES keys.
 
-Source: [`web/src/crypto.ts:L159-L171`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/crypto.ts#L159-L171)
+Source: [`web/src/utils/api/crypto.ts:L135-L142`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/utils/api/crypto.ts#L135-L142)
 
 ```ts
 export async function unwrapBatchKey(privateKey: CryptoKey, encryptedKey: BufferSource) {
@@ -287,7 +340,7 @@ export async function hashPasswordAuth(passwordAuth: ArrayBuffer | Uint8Array) {
 
 The Rust client matches the browser flow with Argon2id and HKDF-SHA256("auth").
 
-Source: [`client/core/src/crypto.rs:L82-L105`](https://github.com/virtue-initiative/virtue-initiative/blob/main/client/core/src/crypto.rs#L82-L105)
+Source: [`client/core/src/crypto.rs:L81-L104`](https://github.com/virtue-initiative/virtue-initiative/blob/main/client/core/src/crypto.rs#L81-L104)
 
 ```rs
 pub fn derive_password_auth(
@@ -320,29 +373,31 @@ pub fn derive_password_auth(
 
 Each batch gets a fresh AES key, then the client HPKE-wraps that key for every recipient.
 
-Source: [`client/core/src/batch.rs:L14-L56`](https://github.com/virtue-initiative/virtue-initiative/blob/main/client/core/src/batch.rs#L14-L56)
+Source: [`client/core/src/module/upload/batch.rs:L17-L64`](https://github.com/virtue-initiative/virtue-initiative/blob/main/client/core/src/module/upload/batch.rs#L17-L64)
 
 ```rs
     pub fn build_upload(
-        items: &[BufferedBatchEvent],
+        encoded_events: &[Vec<u8>],
         crypto: &CryptoEngine,
         recipients: &[BatchRecipient],
+        start_time_ms: i64,
         end_time_ms: i64,
+        high_risk_count: u32,
+        medium_risk_count: u32,
+        notifications: Vec<NotifyPayload>,
     ) -> CoreResult<BatchUpload> {
-        let first = items.first().ok_or(CoreError::InvalidState(
-            "cannot build a batch from an empty buffer",
-        ))?;
+        if encoded_events.is_empty() {
+            return Err(CoreError::InvalidState(
+                "cannot build a batch from an empty buffer",
+            ));
+        }
         if recipients.is_empty() {
             return Err(CoreError::InvalidState(
                 "cannot build a batch without any recipients",
             ));
         }
 
-        let encoded_events = items
-            .iter()
-            .map(|item| encode_batch_event(&item.event))
-            .collect::<CoreResult<Vec<_>>>()?;
-        let msgpack = rmp_serde::to_vec_named(&encoded_events)?;
+        let msgpack = rmp_serde::to_vec_named(encoded_events)?;
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(&msgpack)?;
@@ -360,12 +415,116 @@ Source: [`client/core/src/batch.rs:L14-L56`](https://github.com/virtue-initiativ
             .collect::<CoreResult<Vec<_>>>()?;
 
         Ok(BatchUpload {
-            start_time_ms: first.event.ts,
+            start_time_ms,
             end_time_ms,
             bytes: encrypted,
             access_keys,
+            high_risk_count,
+            medium_risk_count,
+            notifications,
         })
     }
+```
+
+### Native client request signing
+
+The Rust client signs each POST /hash request with the device's locally-generated Ed25519 key, replacing TLS as the authenticity/integrity mechanism on that path.
+
+Source: [`client/core/src/crypto.rs:L137-L160`](https://github.com/virtue-initiative/virtue-initiative/blob/main/client/core/src/crypto.rs#L137-L160)
+
+```rs
+pub fn sign_request(
+    signing_key_bytes: &[u8; 32],
+    timestamp_ms: i64,
+    device_id: &str,
+    method: &str,
+    path: &str,
+    body: &[u8],
+) -> [u8; 64] {
+    let signing_key = SigningKey::from_bytes(signing_key_bytes);
+
+    let mut msg = Vec::with_capacity(
+        8 + device_id.len() + 1 + method.len() + 1 + path.len() + 1 + body.len(),
+    );
+    msg.extend_from_slice(&timestamp_ms.to_le_bytes());
+    msg.extend_from_slice(device_id.as_bytes());
+    msg.push(0);
+    msg.extend_from_slice(method.as_bytes());
+    msg.push(0);
+    msg.extend_from_slice(path.as_bytes());
+    msg.push(0);
+    msg.extend_from_slice(body);
+
+    signing_key.sign(&msg).to_bytes()
+}
+```
+
+### Hash-server signature verification
+
+The hash-server verifies each signed POST /hash request's signature and timestamp, rejecting stale or replayed requests.
+
+Source: [`hash-server/src/auth.rs:L185-L243`](https://github.com/virtue-initiative/virtue-initiative/blob/main/hash-server/src/auth.rs#L185-L243)
+
+```rs
+pub fn verify_signature(
+    headers: &HeaderMap,
+    device_id: &str,
+    pubkey: &VerifyingKey,
+    method: &str,
+    path: &str,
+    body: &[u8],
+    replay_guard: &DashMap<String, i64>,
+) -> Result<(), AuthError> {
+    let timestamp_ms: i64 = headers
+        .get("x-signature-timestamp")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse().ok())
+        .ok_or(AuthError::InvalidSignature)?;
+
+    let sig_b64 = headers
+        .get("x-signature")
+        .and_then(|v| v.to_str().ok())
+        .ok_or(AuthError::InvalidSignature)?;
+
+    let now_ms = crate::db::now_ms();
+    if (now_ms - timestamp_ms).abs() > 60_000 {
+        return Err(AuthError::StaleTimestamp);
+    }
+
+    let sig_bytes = STANDARD
+        .decode(sig_b64)
+        .map_err(|_| AuthError::InvalidSignature)?;
+    let sig_arr: [u8; 64] = sig_bytes.try_into().map_err(|_| AuthError::InvalidSignature)?;
+    let signature = Signature::from_bytes(&sig_arr);
+
+    let mut msg = Vec::with_capacity(8 + device_id.len() + 1 + method.len() + 1 + path.len() + 1 + body.len());
+    msg.extend_from_slice(&timestamp_ms.to_le_bytes());
+    msg.extend_from_slice(device_id.as_bytes());
+    msg.push(0);
+    msg.extend_from_slice(method.as_bytes());
+    msg.push(0);
+    msg.extend_from_slice(path.as_bytes());
+    msg.push(0);
+    msg.extend_from_slice(body);
+
+    pubkey
+        .verify_strict(&msg, &signature)
+        .map_err(|_| AuthError::InvalidSignature)?;
+
+    match replay_guard.entry(device_id.to_owned()) {
+        Entry::Occupied(mut entry) => {
+            if timestamp_ms <= *entry.get() {
+                return Err(AuthError::ReplayedTimestamp);
+            }
+            entry.insert(timestamp_ms);
+        }
+        Entry::Vacant(entry) => {
+            entry.insert(timestamp_ms);
+        }
+    }
+
+    Ok(())
+}
 ```
 
 {/* CODE_REFERENCES:END */}

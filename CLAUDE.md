@@ -26,7 +26,7 @@ See `AGENTS.md` for how to run checks and tests for each component.
 
 ## Cross-component contracts
 
-These five things are implemented independently in both Rust (`client/core/`) and TypeScript (`web/`) and **must stay bit-for-bit compatible**. If you change one side, you must change the other to match.
+These six things are implemented independently in both Rust (`client/core/`) and TypeScript (`web/`) and **must stay bit-for-bit compatible**. If you change one side, you must change the other to match.
 
 ### 1. Batch wire format
 
@@ -87,9 +87,44 @@ Key files:
 - Rust: `client/core/src/crypto.rs`
 - TypeScript: `web/src/crypto.ts` (`unwrapBatchKey`, `encryptForPublicKey`)
 
+### 6. Device-cert request signing
+
+Per-device traffic to the real Rust `hash-server` (`POST /hash`) runs over plain HTTP instead
+of TLS (the TLS handshake itself, not app code, is what capped fresh-connection throughput —
+see `hash-server/README.md`). In its place, each device signs every request with an Ed25519
+keypair it generates locally; the server verifies the signature and enforces a replay-guard
+timestamp watermark instead of relying on TLS for per-request authenticity and integrity.
+Confidentiality is intentionally not provided — the payload is just a hash, not sensitive data.
+
+The device's pubkey is embedded (never persisted server-side) in a `device-cert`-typed JWT,
+minted by `buildDeviceState` in `api/src/routes/device-only.ts` whenever `HASH_SERVER_URL`
+points at a real remote hash-server (not the local D1-backed dev fallback):
+
+```
+device-cert JWT: {sub: device_id, type: "device-cert", pubkey: <base64 raw Ed25519 pubkey>, exp}
+```
+
+Every `POST /hash` is signed:
+
+```
+Ed25519_sign(
+  device_privkey,
+  timestamp_ms_LE(8 bytes) || device_id || 0x00 || method || 0x00 || path || 0x00 || body
+)
+```
+
+sent as `Authorization: Bearer <device-cert JWT>`, `X-Signature-Timestamp: <timestamp_ms>`,
+`X-Signature: <base64 sig>`. The server rejects `|now_ms - timestamp_ms| > 60_000` and any
+timestamp `<=` the last one accepted for that device (in-memory watermark, reset on restart).
+
+Key files:
+
+- Rust: `hash-server/src/auth.rs` (`verify_signature`)
+- Rust (signing side): `client/core/src/crypto.rs` (`sign_request`)
+
 The `access_keys` JSON envelope and `DeviceSettings` shape are also shared between Rust and
 the API, but are plain JSON relay shapes — not independently-reimplemented crypto — so they
-aren't listed as one of the five contracts above. See `api/API.md` for their wire shapes.
+aren't listed as one of the six contracts above. See `api/API.md` for their wire shapes.
 
 ## Key invariant files
 
@@ -103,8 +138,9 @@ Read these before touching crypto, batch, or auth code:
 - The AES-GCM nonce position or length (must be first 12 bytes)
 - The msgpack schema (`{events: [...]}` at the outer level, each event double-encoded)
 - The argon2id parameters or the HKDF label strings (`"auth"`, `"key"`)
-- The JWT token `type` claim values (`"hash-server"`, `"server"`)
+- The JWT token `type` claim values (`"hash-server"`, `"server"`, `"device-cert"`)
 - The hash chain input encoding rules (LE integers, sorted keys)
+- The device-cert signed-message byte layout or the 60-second replay window
 
 ## Pull requests
 

@@ -1,4 +1,5 @@
 import { uuidToBytes } from './db';
+import { decodeBase64 } from './encoding';
 import { generateToken } from './jwt';
 import { Env } from '../types/bindings';
 
@@ -61,11 +62,14 @@ export async function localHashInfo(db: D1Database, deviceId: string) {
   return row ? { count: row.count, hashed_at: row.hashed_at, updated_at: row.updated_at } : null;
 }
 
-function isLocalHashServer(env: Env): boolean {
+export function isLocalHashServer(env: Env): boolean {
   const url = env.HASH_SERVER_URL?.trim();
   return !url || url.endsWith('/api');
 }
 
+// GET /hash on the real hash-server is a merged endpoint (see hash-server's
+// routes.rs) returning {state, count, hashed_at, updated_at} as JSON, not raw
+// bytes. This caller only ever wanted the state, so that's all it reads.
 export async function hashGet(env: Env, deviceId: string): Promise<Uint8Array> {
   if (isLocalHashServer(env)) return localHashGet(env.DB, deviceId);
   const token = await generateToken('hash-server', deviceId, env.JWT_PRIVATE_KEY, 60);
@@ -73,7 +77,8 @@ export async function hashGet(env: Env, deviceId: string): Promise<Uint8Array> {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!resp.ok) throw new Error(`remote hash server GET /hash failed: ${resp.status}`);
-  return new Uint8Array(await resp.arrayBuffer());
+  const body = (await resp.json()) as { state: string };
+  return new Uint8Array(decodeBase64(body.state));
 }
 
 export async function hashReset(env: Env, deviceId: string): Promise<void> {

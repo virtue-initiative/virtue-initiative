@@ -28,7 +28,7 @@ pub struct MockApiState {
     // --- recordings ---
     pub logout_calls: Vec<String>,
     pub register_device_calls: Vec<RegisterDeviceCall>,
-    pub get_device_settings_calls: Vec<String>,
+    pub get_device_settings_calls: Vec<GetDeviceSettingsCall>,
     pub batch_uploads: Vec<BatchCall>,
     /// Derived from each successful `upload_batch` call's `batch.notifications` —
     /// there is no standalone notify method anymore, so this records what the
@@ -49,6 +49,7 @@ pub struct MockApiState {
     pub default_refresh_token: String,
     pub default_hash_token: String,
     pub default_device_settings: DeviceSettings,
+    pub default_signing_key: [u8; 32],
     batch_id_counter: u64,
 }
 
@@ -58,11 +59,19 @@ pub struct RegisterDeviceCall {
     pub password: String,
     pub name: String,
     pub platform: String,
+    pub pubkey: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct GetDeviceSettingsCall {
+    pub device_refresh_token: String,
+    pub pubkey: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct BatchCall {
     pub device_refresh_token: String,
+    pub pubkey: String,
     pub batch: BatchUpload,
 }
 
@@ -76,6 +85,8 @@ pub struct NotifyCall {
 pub struct HashCall {
     pub hash_base_url: Option<String>,
     pub hash_jwt: String,
+    pub device_id: String,
+    pub signing_key: [u8; 32],
     pub content_hash: [u8; 32],
 }
 
@@ -110,6 +121,7 @@ impl Default for MockApiState {
                 }],
                 hash_base_url: None,
             },
+            default_signing_key: [1u8; 32],
             batch_id_counter: 0,
         }
     }
@@ -179,6 +191,7 @@ impl ApiTransport for MockApiClient {
         password: &str,
         name: &str,
         platform: &str,
+        pubkey: &str,
     ) -> CoreResult<RegisteredDevice> {
         let mut state = self.state();
         state.register_device_calls.push(RegisterDeviceCall {
@@ -186,6 +199,7 @@ impl ApiTransport for MockApiClient {
             password: password.to_string(),
             name: name.to_string(),
             platform: platform.to_string(),
+            pubkey: pubkey.to_string(),
         });
         if let Some(canned) = state.register_device_responses.pop_front() {
             canned
@@ -194,6 +208,7 @@ impl ApiTransport for MockApiClient {
                 credentials: DeviceCredentials {
                     device_id: state.default_device_id.clone(),
                     refresh_token: state.default_refresh_token.clone(),
+                    signing_key: state.default_signing_key,
                 },
                 settings: state.default_device_settings.clone(),
                 hash_token: state.default_hash_token.clone(),
@@ -201,11 +216,16 @@ impl ApiTransport for MockApiClient {
         }
     }
 
-    fn get_device_settings(&self, device_refresh_token: &str) -> CoreResult<DeviceState> {
+    fn get_device_settings(
+        &self,
+        device_refresh_token: &str,
+        pubkey: &str,
+    ) -> CoreResult<DeviceState> {
         let mut state = self.state();
-        state
-            .get_device_settings_calls
-            .push(device_refresh_token.to_string());
+        state.get_device_settings_calls.push(GetDeviceSettingsCall {
+            device_refresh_token: device_refresh_token.to_string(),
+            pubkey: pubkey.to_string(),
+        });
         if let Some(canned) = state.get_device_settings_responses.pop_front() {
             canned
         } else {
@@ -219,11 +239,13 @@ impl ApiTransport for MockApiClient {
     fn upload_batch(
         &self,
         device_refresh_token: &str,
+        pubkey: &str,
         batch: &BatchUpload,
     ) -> CoreResult<UploadedBatchResponse> {
         let mut state = self.state();
         state.batch_uploads.push(BatchCall {
             device_refresh_token: device_refresh_token.to_string(),
+            pubkey: pubkey.to_string(),
             batch: batch.clone(),
         });
         let response = if let Some(canned) = state.batch_responses.pop_front() {
@@ -253,12 +275,16 @@ impl ApiTransport for MockApiClient {
         &self,
         hash_base_url: Option<&str>,
         hash_jwt: &str,
+        device_id: &str,
+        signing_key: &[u8; 32],
         content_hash: &[u8; 32],
     ) -> CoreResult<()> {
         let mut state = self.state();
         state.hash_uploads.push(HashCall {
             hash_base_url: hash_base_url.map(String::from),
             hash_jwt: hash_jwt.to_string(),
+            device_id: device_id.to_string(),
+            signing_key: *signing_key,
             content_hash: *content_hash,
         });
         if let Some(canned) = state.hash_responses.pop_front() {

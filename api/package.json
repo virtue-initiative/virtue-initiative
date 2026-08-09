@@ -9,7 +9,7 @@
     "deploy:prod": "wrangler deploy --env prod",
     "deploy:staging": "wrangler deploy --env staging",
     "build": "echo 'No build step needed for Cloudflare Workers -- included in deploy'",
-    "test": "vitest run",
+    "test": "vitest run && vitest run -c vitest.config.remote-hash-server.ts",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.lint.json --noEmit",
     "format:check": "prettier --check .",

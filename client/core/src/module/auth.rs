@@ -120,9 +120,23 @@ impl<A: ApiTransport + Send + Sync + 'static> AuthModule<A> {
             .map(str::trim)
             .filter(|name| !name.is_empty())
             .unwrap_or(self.device_name.as_str());
-        let registered =
-            self.api
-                .register_device(email, password, resolved_name, &self.platform_name)?;
+
+        // Generate this device's signing identity locally — the private key
+        // never leaves the device; only the derived pubkey is sent.
+        let signing_key = crate::crypto::generate_signing_key();
+        let pubkey = crate::crypto::signing_public_key_base64(&signing_key);
+
+        let mut registered = self.api.register_device(
+            email,
+            password,
+            resolved_name,
+            &self.platform_name,
+            &pubkey,
+        )?;
+        // register_device only ever received the pubkey, never the raw
+        // private key, so its returned credentials carry a placeholder —
+        // fill in the real key generated above before persisting.
+        registered.credentials.signing_key = signing_key;
         self.state.device_credentials = Some(registered.credentials.clone());
         Ok((
             registered.credentials,

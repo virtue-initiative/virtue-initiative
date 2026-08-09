@@ -399,6 +399,7 @@ mod tests {
             credentials: DeviceCredentials {
                 device_id: "test-device".into(),
                 refresh_token: "test-refresh".into(),
+                signing_key: [1u8; 32],
             },
             settings: DeviceSettings {
                 device_id: "test-device".into(),

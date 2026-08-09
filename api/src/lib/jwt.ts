@@ -8,11 +8,12 @@ import {
   type JWK,
 } from 'jose';
 
-export type JWTType = 'server' | 'hash-server';
+export type JWTType = 'server' | 'hash-server' | 'device-cert';
 
 export interface JWTPayload {
   sub: string;
   type: JWTType;
+  pubkey?: string;
   iat?: number;
   exp?: number;
 }
@@ -123,6 +124,7 @@ export async function verifyJWT(token: string, publicKeyPem: string): Promise<JW
   return {
     sub: payload.sub,
     type: payload.type as JWTType,
+    pubkey: typeof payload.pubkey === 'string' ? payload.pubkey : undefined,
     iat: payload.iat,
     exp: payload.exp,
   };
@@ -135,4 +137,17 @@ export function generateToken(
   expiresInSeconds: number,
 ): Promise<string> {
   return signJWT({ sub, type }, privateKeyPem, expiresInSeconds);
+}
+
+export function generateDeviceCertToken(
+  sub: string,
+  pubkeyBase64: string,
+  privateKeyPem: string,
+  expiresInSeconds: number,
+): Promise<string> {
+  return signJWT(
+    { sub, type: 'device-cert', pubkey: pubkeyBase64 },
+    privateKeyPem,
+    expiresInSeconds,
+  );
 }

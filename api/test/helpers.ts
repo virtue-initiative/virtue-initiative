@@ -24,6 +24,10 @@ export function privateKeyFor(seed: string) {
   return Buffer.from(`priv:${seed}`).toString('base64');
 }
 
+export function validDevicePubkeyBase64(fill = 7): string {
+  return Buffer.from(new Uint8Array(32).fill(fill)).toString('base64');
+}
+
 export function uuidToBytes(uuid: string): ArrayBuffer {
   const normalized = normalizeUuidString(uuid);
   const hex = normalized.replace(/-/g, '');
@@ -143,7 +147,13 @@ export async function createDeviceForUser(
   const password_auth = await passwordAuthFor(password);
   const res = await SELF.fetch(`${BASE}/d/device`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    // X-Device-Pubkey is required in remote-hash-server mode and ignored in
+    // local mode (the default test env) — sending it unconditionally lets
+    // this helper work under either vitest config.
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Device-Pubkey': validDevicePubkeyBase64(1),
+    },
     body: JSON.stringify({ email, password_auth, name, platform }),
   });
 

@@ -245,6 +245,13 @@ pub struct BatchAccessKey {
 pub struct DeviceCredentials {
     pub device_id: String,
     pub refresh_token: String,
+    /// Raw Ed25519 private key bytes for signing `POST /hash` requests to the
+    /// real hash-server (see `crypto::sign_request`). Generated locally at
+    /// registration (`module/auth.rs`'s `do_login`) and never transmitted —
+    /// only the derived pubkey is sent. Plaintext in `event_state.json`, same
+    /// storage model as `refresh_token` (no OS keychain yet).
+    #[serde(with = "serde_bytes")]
+    pub signing_key: [u8; 32],
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -13,9 +13,9 @@ import {
   listBatchAccessRecipientsForOwner,
   markDeviceDeleted,
 } from '../lib/db';
-import { hashGet, hashReset } from '../lib/hash-server';
-import { encodeBase64, encodeHex } from '../lib/encoding';
-import { generateToken } from '../lib/jwt';
+import { hashGet, hashReset, isLocalHashServer } from '../lib/hash-server';
+import { decodeBase64, encodeBase64, encodeHex } from '../lib/encoding';
+import { generateDeviceCertToken, generateToken } from '../lib/jwt';
 import { putObject } from '../lib/r2';
 import { notifyPartnersAboutRiskLog, riskToSeverity } from '../lib/tamper';
 import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
@@ -25,6 +25,7 @@ import { verifyUserCredentials } from '../lib/credentials';
 const deviceOnly = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 const HASH_TOKEN_TTL_SECONDS = 60 * 60;
+const DEVICE_CERT_TTL_SECONDS = 60 * 60 * 24;
 const DEVICE_REFRESH_TOKEN_TTL_SECONDS = 1000 * 365 * 24 * 60 * 60;
 
 const registerDeviceSchema = z.object({
@@ -67,6 +68,32 @@ function parseNotificationsPayload(raw: string) {
   return z.array(notifyEntrySchema).parse(JSON.parse(raw) as unknown);
 }
 
+/**
+ * Reads and validates the X-Device-Pubkey header shared by all three
+ * device-state-returning routes. Returns null when the header is absent
+ * (buildDeviceState decides whether that's an error, since it's only
+ * required in remote-hash-server mode); throws when present but malformed
+ * so callers can surface a distinct 400.
+ */
+function readDevicePubkeyHeader(
+  c: Context<{ Bindings: Env; Variables: Variables }>,
+): string | null {
+  const raw = c.req.header('X-Device-Pubkey');
+  if (!raw) return null;
+
+  let decoded: ArrayBuffer;
+  try {
+    decoded = decodeBase64(raw);
+  } catch {
+    throw new Error('X-Device-Pubkey header is not valid base64');
+  }
+  if (decoded.byteLength !== 32) {
+    throw new Error('X-Device-Pubkey header must decode to exactly 32 bytes');
+  }
+
+  return raw;
+}
+
 async function createDeviceSession(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   deviceId: string,
@@ -89,14 +116,21 @@ async function createDeviceSession(
  * Builds the {settings, token} pair embedded in POST /d/device, GET /d/device, and
  * POST /d/batch responses — the one canonical place a device's wrapping keys and a
  * fresh hash-server token are assembled.
+ *
+ * In local-hash-server mode (dev, D1-backed) this mints the existing unsigned
+ * hash-server-typed token, unchanged. In remote mode (a real hash-server instance)
+ * it instead mints a device-cert-typed token binding the caller-supplied pubkey —
+ * since nothing is persisted server-side, the pubkey must be presented fresh on
+ * every call, and its absence is a 400, not a "not enrolled" state.
  */
 async function buildDeviceState(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   device: { id: string; owner: string; name: string; platform: string },
-) {
+  pubkeyBase64: string | null,
+): Promise<{ settings: unknown; token: string } | { error: string; status: 400 | 500 }> {
   const hashBaseUrl = c.env.HASH_SERVER_URL?.trim();
   if (!hashBaseUrl) {
-    return null; // caller returns the existing 500
+    return { error: 'Hash server not configured', status: 500 };
   }
 
   const recipients = await listBatchAccessRecipientsForOwner(c.env.DB, device.owner);
@@ -110,13 +144,27 @@ async function buildDeviceState(
     })),
     hash_base_url: hashBaseUrl,
   };
-  const token = await generateToken(
-    'hash-server',
-    device.id,
-    c.env.JWT_PRIVATE_KEY,
-    HASH_TOKEN_TTL_SECONDS,
-  );
 
+  if (isLocalHashServer(c.env)) {
+    const token = await generateToken(
+      'hash-server',
+      device.id,
+      c.env.JWT_PRIVATE_KEY,
+      HASH_TOKEN_TTL_SECONDS,
+    );
+    return { settings, token };
+  }
+
+  if (!pubkeyBase64) {
+    return { error: 'missing X-Device-Pubkey header', status: 400 };
+  }
+
+  const token = await generateDeviceCertToken(
+    device.id,
+    pubkeyBase64,
+    c.env.JWT_PRIVATE_KEY,
+    DEVICE_CERT_TTL_SECONDS,
+  );
   return { settings, token };
 }
 
@@ -127,6 +175,14 @@ async function buildDeviceState(
  */
 deviceOnly.post('/device', validateZ('json', registerDeviceSchema), async (c) => {
   const { email, password_auth, name, platform } = c.req.valid('json');
+
+  let pubkeyBase64: string | null;
+  try {
+    pubkeyBase64 = readDevicePubkeyHeader(c);
+  } catch (error) {
+    return c.json({ error: 'Bad Request', details: { errors: [(error as Error).message] } }, 400);
+  }
+
   const result = await verifyUserCredentials(c.env.DB, email, password_auth);
 
   if (result.status === 'invalid') {
@@ -143,9 +199,9 @@ deviceOnly.post('/device', validateZ('json', registerDeviceSchema), async (c) =>
   await createDevice(c.env.DB, { id, owner, name, platform });
   const refreshToken = await createDeviceSession(c, id);
 
-  const state = await buildDeviceState(c, { id, owner, name, platform });
-  if (!state) {
-    return c.json({ error: 'Hash server not configured' }, 500);
+  const state = await buildDeviceState(c, { id, owner, name, platform }, pubkeyBase64);
+  if ('error' in state) {
+    return c.json({ error: state.error }, state.status);
   }
 
   return c.json({ refresh_token: refreshToken, ...state }, 201);
@@ -157,15 +213,22 @@ deviceOnly.post('/device', validateZ('json', registerDeviceSchema), async (c) =>
  * when its cached hash token goes stale without a batch upload in between.
  */
 deviceOnly.get('/device', authenticateDeviceSession(), rateLimitByDevice(), async (c) => {
+  let pubkeyBase64: string | null;
+  try {
+    pubkeyBase64 = readDevicePubkeyHeader(c);
+  } catch (error) {
+    return c.json({ error: 'Bad Request', details: { errors: [(error as Error).message] } }, 400);
+  }
+
   const device = await findDeviceById(c.env.DB, c.get('sub'));
 
   if (!device) {
     return c.json({ error: 'Not found' }, 404);
   }
 
-  const state = await buildDeviceState(c, device);
-  if (!state) {
-    return c.json({ error: 'Hash server not configured' }, 500);
+  const state = await buildDeviceState(c, device, pubkeyBase64);
+  if ('error' in state) {
+    return c.json({ error: state.error }, state.status);
   }
 
   return c.json(state);
@@ -206,6 +269,13 @@ deviceOnly.post(
   rateLimitByDevice(),
   validateZ('form', uploadBatchSchema),
   async (c) => {
+    let pubkeyBase64: string | null;
+    try {
+      pubkeyBase64 = readDevicePubkeyHeader(c);
+    } catch (error) {
+      return c.json({ error: 'Bad Request', details: { errors: [(error as Error).message] } }, 400);
+    }
+
     const device = await findDeviceById(c.env.DB, c.get('sub'));
 
     if (!device) {
@@ -287,9 +357,9 @@ deviceOnly.post(
       }
     }
 
-    const state = await buildDeviceState(c, device);
-    if (!state) {
-      return c.json({ error: 'Hash server not configured' }, 500);
+    const state = await buildDeviceState(c, device, pubkeyBase64);
+    if ('error' in state) {
+      return c.json({ error: state.error }, state.status);
     }
 
     return c.json({ id: batchId, start_time, end_time, end_hash: endHash, url, ...state }, 201);

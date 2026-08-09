@@ -93,6 +93,7 @@ mod tests {
             "secret",
             "test-device",
             "test-platform",
+            "mock-pubkey",
         )
         .unwrap();
         assert_eq!(inspector.state().register_device_calls.len(), 1);
@@ -112,11 +113,11 @@ mod tests {
             medium_risk_count: 0,
             notifications: Vec::new(),
         };
-        let response = api.upload_batch("tok", &batch).unwrap();
+        let response = api.upload_batch("tok", "mock-pubkey", &batch).unwrap();
         assert_eq!(response.id, "canned-batch");
         assert_eq!(inspector.state().batch_uploads.len(), 1);
 
-        let second = api.upload_batch("tok", &batch).unwrap();
+        let second = api.upload_batch("tok", "mock-pubkey", &batch).unwrap();
         assert_eq!(second.id, "mock-batch-1");
     }
 

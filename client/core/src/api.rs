@@ -77,23 +77,40 @@ struct DeviceStateResponse {
 
 pub trait ApiTransport: Send + Sync {
     fn logout(&self, device_refresh_token: &str) -> CoreResult<()>;
+    /// `pubkey` (base64 raw Ed25519 pubkey) is sent as `X-Device-Pubkey` on
+    /// every call that can mint/refresh a device-cert — the server never
+    /// persists it, so it must be resent on every such call, not just once
+    /// at registration.
     fn register_device(
         &self,
         email: &str,
         password: &str,
         name: &str,
         platform: &str,
+        pubkey: &str,
     ) -> CoreResult<RegisteredDevice>;
-    fn get_device_settings(&self, device_refresh_token: &str) -> CoreResult<DeviceState>;
+    fn get_device_settings(
+        &self,
+        device_refresh_token: &str,
+        pubkey: &str,
+    ) -> CoreResult<DeviceState>;
     fn upload_batch(
         &self,
         device_refresh_token: &str,
+        pubkey: &str,
         batch: &BatchUpload,
     ) -> CoreResult<UploadedBatchResponse>;
+    /// Signs the request with `signing_key` (see `crypto::sign_request`) —
+    /// always, regardless of whether `hash_jwt` is a `hash-server`- or
+    /// `device-cert`-typed token, since the local D1-backed fallback simply
+    /// doesn't check for the signature headers while the real hash-server
+    /// enforces them.
     fn upload_hash(
         &self,
         hash_base_url: Option<&str>,
         hash_jwt: &str,
+        device_id: &str,
+        signing_key: &[u8; 32],
         content_hash: &[u8; 32],
     ) -> CoreResult<()>;
 
@@ -142,6 +159,7 @@ impl ApiTransport for ReqwestApiClient {
         password: &str,
         name: &str,
         platform: &str,
+        pubkey: &str,
     ) -> CoreResult<RegisteredDevice> {
         #[derive(Deserialize)]
         struct LoginMaterialResponse {
@@ -178,6 +196,7 @@ impl ApiTransport for ReqwestApiClient {
             None,
             "/d/device",
             None,
+            Some(pubkey),
             Some(&RegisterDeviceRequest {
                 email,
                 password_auth: base64::engine::general_purpose::STANDARD.encode(password_auth),
@@ -191,18 +210,28 @@ impl ApiTransport for ReqwestApiClient {
             credentials: DeviceCredentials {
                 device_id: settings.device_id.clone(),
                 refresh_token: response.refresh_token,
+                // register_device only ever sees the device's pubkey (the
+                // `pubkey` param above), never the raw private key — the
+                // caller (module/auth.rs's do_login) overwrites this with
+                // the real signing key immediately after this call returns.
+                signing_key: [0u8; 32],
             },
             settings,
             hash_token: response.state.token,
         })
     }
 
-    fn get_device_settings(&self, device_refresh_token: &str) -> CoreResult<DeviceState> {
+    fn get_device_settings(
+        &self,
+        device_refresh_token: &str,
+        pubkey: &str,
+    ) -> CoreResult<DeviceState> {
         let response: DeviceStateResponse = self.send_json(
             Method::GET,
             None,
             "/d/device",
             Some(device_refresh_token),
+            Some(pubkey),
             None::<&()>,
         )?;
         Ok(DeviceState {
@@ -214,6 +243,7 @@ impl ApiTransport for ReqwestApiClient {
     fn upload_batch(
         &self,
         device_refresh_token: &str,
+        pubkey: &str,
         batch: &BatchUpload,
     ) -> CoreResult<UploadedBatchResponse> {
         #[derive(Serialize)]
@@ -252,8 +282,14 @@ impl ApiTransport for ReqwestApiClient {
             );
         }
 
-        let response: UploadBatchResponse =
-            self.send_form(Method::POST, None, "/d/batch", device_refresh_token, form)?;
+        let response: UploadBatchResponse = self.send_form(
+            Method::POST,
+            None,
+            "/d/batch",
+            device_refresh_token,
+            pubkey,
+            form,
+        )?;
         Ok(UploadedBatchResponse {
             id: response.id,
             settings: response.state.settings.into(),
@@ -265,12 +301,36 @@ impl ApiTransport for ReqwestApiClient {
         &self,
         hash_base_url: Option<&str>,
         hash_jwt: &str,
+        device_id: &str,
+        signing_key: &[u8; 32],
         content_hash: &[u8; 32],
     ) -> CoreResult<()> {
+        let body = content_hash.to_vec();
+        let timestamp_ms = i64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|_| CoreError::InvalidState("system clock before unix epoch"))?
+                .as_millis(),
+        )
+        .map_err(|_| CoreError::InvalidState("system clock overflow"))?;
+        let signature = crate::crypto::sign_request(
+            signing_key,
+            timestamp_ms,
+            device_id,
+            "POST",
+            "/hash",
+            &body,
+        );
+
         let response = self
             .request(Method::POST, hash_base_url, "/hash", Some(hash_jwt))
             .header("Content-Type", "application/octet-stream")
-            .body(content_hash.to_vec())
+            .header("X-Signature-Timestamp", timestamp_ms.to_string())
+            .header(
+                "X-Signature",
+                base64::engine::general_purpose::STANDARD.encode(signature),
+            )
+            .body(body)
             .send()?;
         self.expect_success(response)
     }
@@ -283,6 +343,7 @@ impl ReqwestApiClient {
         base_override: Option<&str>,
         path: &str,
         bearer_token: Option<&str>,
+        pubkey: Option<&str>,
         body: Option<&TBody>,
     ) -> CoreResult<TResponse>
     where
@@ -290,6 +351,9 @@ impl ReqwestApiClient {
         TResponse: for<'de> Deserialize<'de>,
     {
         let mut request = self.request(method, base_override, path, bearer_token);
+        if let Some(pubkey) = pubkey {
+            request = request.header("X-Device-Pubkey", pubkey);
+        }
         if let Some(body) = body {
             request = request.json(body);
         }
@@ -323,6 +387,7 @@ impl ReqwestApiClient {
         base_override: Option<&str>,
         path: &str,
         bearer_token: &str,
+        pubkey: &str,
         form: Form,
     ) -> CoreResult<TResponse>
     where
@@ -330,6 +395,7 @@ impl ReqwestApiClient {
     {
         let response = self
             .request(method, base_override, path, Some(bearer_token))
+            .header("X-Device-Pubkey", pubkey)
             .multipart(form)
             .send()?;
         self.expect_json(response)
