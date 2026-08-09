@@ -197,6 +197,13 @@ if [ "$fail" -ne 0 ]; then
   [ "$DEVICE_COUNT" -ge 1 ] || echo "integration-test: expected a devices row for '${DEVICE_NAME}'" >&2
   [ "$HASH_COUNT" -ge 1 ] || echo "integration-test: expected hash_states.count > 0 for '${DEVICE_NAME}'" >&2
   [ "$BATCH_COUNT" -ge 1 ] || echo "integration-test: expected at least one batch row for '${DEVICE_NAME}'" >&2
+
+  echo "--- devices (raw) ---"
+  (cd "$API_DIR" && bun run wrangler d1 execute staging-app-db --local --env staging --command "SELECT hex(id) as id, name FROM devices")
+  echo "--- hash_states (raw) ---"
+  (cd "$API_DIR" && bun run wrangler d1 execute staging-app-db --local --env staging --command "SELECT hex(device_id) as device_id, count FROM hash_states")
+  echo "--- batches (raw) ---"
+  (cd "$API_DIR" && bun run wrangler d1 execute staging-app-db --local --env staging --command "SELECT hex(device_id) as device_id, COUNT(*) as n FROM batches GROUP BY device_id")
 fi
 
 if [ "$fail" -ne 0 ]; then
