@@ -326,6 +326,7 @@ async fn run_scheduler(
 async fn run_worker(
     rx: Arc<tokio::sync::Mutex<mpsc::Receiver<(usize, Action)>>>,
     client: reqwest::Client,
+    server_client: reqwest::Client,
     base_url: Arc<str>,
     secure_base_url: Arc<str>,
     devices: Arc<[DeviceState]>,
@@ -373,7 +374,7 @@ async fn run_worker(
             Action::Reset => {
                 // Server-only, unsigned, TLS-fronted — see module docs.
                 let start = Instant::now();
-                let result = client
+                let result = server_client
                     .delete(format!("{secure_base_url}/hash"))
                     .bearer_auth(&device.server_token)
                     .send()
@@ -391,7 +392,7 @@ async fn run_worker(
 }
 
 async fn run_user_group_task(
-    client: reqwest::Client,
+    server_client: reqwest::Client,
     secure_base_url: Arc<str>,
     devices: Arc<[Arc<str>]>,
     info_interval: Duration,
@@ -411,7 +412,7 @@ async fn run_user_group_task(
             _ = info_iv.tick() => {
                 let mut set = JoinSet::new();
                 for token in devices.iter() {
-                    let client = client.clone();
+                    let client = server_client.clone();
                     let base_url = secure_base_url.clone();
                     let token = token.clone();
                     set.spawn(async move {
@@ -575,6 +576,11 @@ async fn main() -> anyhow::Result<()> {
     let client = reqwest::Client::builder()
         .pool_max_idle_per_host(0)
         .build()?;
+    // DELETE/GET (info) are server-to-server calls that in production come
+    // from a single Cloudflare Worker, which does reuse a connection pool --
+    // unlike per-device traffic, forcing a fresh TLS handshake per call here
+    // would overstate their cost and add spurious load to the target.
+    let server_client = reqwest::Client::builder().build()?;
     let deadline = Instant::now() + Duration::from_secs(args.duration_secs);
 
     let (post_rec, post_handle) = spawn_recorder(65_536);
@@ -601,6 +607,7 @@ async fn main() -> anyhow::Result<()> {
         worker_handles.push(tokio::spawn(run_worker(
             worker_rx.clone(),
             client.clone(),
+            server_client.clone(),
             base_url.clone(),
             secure_base_url.clone(),
             devices.clone(),
@@ -617,7 +624,7 @@ async fn main() -> anyhow::Result<()> {
         let group_tokens: Arc<[Arc<str>]> = Arc::from(chunk.to_vec().into_boxed_slice());
         let info_phase = Duration::from_secs_f64(rng.gen::<f64>() * info_interval.as_secs_f64());
         group_handles.push(tokio::spawn(run_user_group_task(
-            client.clone(),
+            server_client.clone(),
             secure_base_url.clone(),
             group_tokens,
             info_interval,
