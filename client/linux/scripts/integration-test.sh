@@ -174,17 +174,23 @@ d1_query_count() {
   '
 }
 
-# Each POST /hash or /d/batch response returns only once its D1 write has been
-# awaited, but a separate `wrangler d1 execute --local` CLI process reading the
-# same on-disk D1 state can still lag slightly behind Miniflare's in-process
-# view -- so retry for a few seconds instead of asserting on a single snapshot.
+# hash_states.count is a rolling per-batch-window counter, not a cumulative
+# total: api/src/routes/device-only.ts resets it to 0 after every successful
+# POST /d/batch (see hashReset() there), so with our short batch window it
+# can legitimately read 0 moments after a hash was ingested. hashed_at is
+# never touched by that reset (see localHashReset in api/src/lib/hash-server.ts),
+# so it's the durable signal that at least one hash was ever ingested.
+#
+# A `wrangler d1 execute --local` CLI process reading the same on-disk D1
+# state can also lag slightly behind Miniflare's in-process view right after
+# a write, so retry for a few seconds instead of asserting on one snapshot.
 fail=1
 for _ in $(seq 1 15); do
   DEVICE_COUNT="$(d1_query_count "SELECT COUNT(*) as c FROM devices WHERE name = '${DEVICE_NAME}'")"
-  HASH_COUNT="$(d1_query_count "SELECT COALESCE((SELECT hs.count FROM hash_states hs JOIN devices d ON d.id = hs.device_id WHERE d.name = '${DEVICE_NAME}'), 0) as c")"
+  HASH_COUNT="$(d1_query_count "SELECT COUNT(*) as c FROM hash_states hs JOIN devices d ON d.id = hs.device_id WHERE d.name = '${DEVICE_NAME}' AND hs.hashed_at IS NOT NULL")"
   BATCH_COUNT="$(d1_query_count "SELECT COUNT(*) as c FROM batches b JOIN devices d ON d.id = b.device_id WHERE d.name = '${DEVICE_NAME}'")"
 
-  echo "device rows: ${DEVICE_COUNT}, hash count: ${HASH_COUNT}, batch rows: ${BATCH_COUNT}"
+  echo "device rows: ${DEVICE_COUNT}, ever-hashed: ${HASH_COUNT}, batch rows: ${BATCH_COUNT}"
 
   if [ "$DEVICE_COUNT" -ge 1 ] && [ "$HASH_COUNT" -ge 1 ] && [ "$BATCH_COUNT" -ge 1 ]; then
     fail=0
@@ -195,13 +201,13 @@ done
 
 if [ "$fail" -ne 0 ]; then
   [ "$DEVICE_COUNT" -ge 1 ] || echo "integration-test: expected a devices row for '${DEVICE_NAME}'" >&2
-  [ "$HASH_COUNT" -ge 1 ] || echo "integration-test: expected hash_states.count > 0 for '${DEVICE_NAME}'" >&2
+  [ "$HASH_COUNT" -ge 1 ] || echo "integration-test: expected a hash_states row with hashed_at set for '${DEVICE_NAME}'" >&2
   [ "$BATCH_COUNT" -ge 1 ] || echo "integration-test: expected at least one batch row for '${DEVICE_NAME}'" >&2
 
   echo "--- devices (raw) ---"
   (cd "$API_DIR" && bun run wrangler d1 execute staging-app-db --local --env staging --command "SELECT hex(id) as id, name FROM devices")
   echo "--- hash_states (raw) ---"
-  (cd "$API_DIR" && bun run wrangler d1 execute staging-app-db --local --env staging --command "SELECT hex(device_id) as device_id, count FROM hash_states")
+  (cd "$API_DIR" && bun run wrangler d1 execute staging-app-db --local --env staging --command "SELECT hex(device_id) as device_id, count, hashed_at FROM hash_states")
   echo "--- batches (raw) ---"
   (cd "$API_DIR" && bun run wrangler d1 execute staging-app-db --local --env staging --command "SELECT hex(device_id) as device_id, COUNT(*) as n FROM batches GROUP BY device_id")
 fi
