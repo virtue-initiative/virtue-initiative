@@ -33,7 +33,10 @@ fn main() -> ExitCode {
     let mut client = match ClientController::connect(&args.socket) {
         Ok(client) => client,
         Err(err) => {
-            eprintln!("ci-login: failed to connect to daemon at {}: {err}", args.socket.display());
+            eprintln!(
+                "ci-login: failed to connect to daemon at {}: {err}",
+                args.socket.display()
+            );
             return ExitCode::FAILURE;
         }
     };
