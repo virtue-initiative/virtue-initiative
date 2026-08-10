@@ -16,6 +16,12 @@ path = "src/main.rs"
 name = "virtue-mac-ci-login"
 path = "src/bin/ci-login.rs"
 
+[features]
+# CI-only: replaces real screen capture with a fixed embedded PNG, compiled in
+# only when explicitly requested. Never enabled by build-app.sh/build-dmg.sh
+# (release builds), so it cannot ship. See capture.rs.
+mock-capture = []
+
 [dependencies]
 anyhow = "1"
 virtue_core = { package = "virtue-core", path = "../core" }

@@ -193,7 +193,7 @@ Requires `bun`, `cargo`, `curl` on `PATH`.
 Notes:
 
 - Runs against an isolated `$HOME` in a temp directory (macOS resolves config/data/state dirs off `$HOME`, unlike Linux's XDG vars), so it won't touch a real local `virtue` install.
-- CI runners don't have Screen Recording permission granted, and there's no headless way to grant it. `capture.rs` checks `CGPreflightScreenCaptureAccess()` before shelling out, so a missing grant fails fast as a real `CaptureFailed` event rather than hanging on a consent dialog. The test's run duration is sized to tolerate either outcome: a granted permission uploads a real screenshot almost immediately, while a missing one still produces a real `UploadKind::CaptureFailed` alert after the 5th failure (`capture_availability.rs`) — either way a genuine hash/batch lands, no mocking required.
+- CI runners don't have Screen Recording permission granted, and there's no headless way to grant it. Rather than exercising the `CaptureFailed` alert fallback instead of a real capture, the daemon is built with the `mock-capture` Cargo feature (`client/mac/src/capture.rs`), which swaps in a fixed embedded PNG in place of shelling out to `screencapture`. It's compiled in only when explicitly requested (`cargo build -p virtue-mac --features mock-capture`) — never by `build-app.sh`/`build-dmg.sh` — so it can't end up in a shipped build, and it still exercises the real capture → classify → upload → hash → batch pipeline, just not the permission-gating logic itself.
 
 ### Windows client CI (`.github/workflows/client-windows.yml`)
 

@@ -6,23 +6,22 @@
 # local dev -- see api/src/lib/hash-server.ts and scripts/launch.sh), seeds
 # the deterministic dev account, builds and runs the real virtue-mac daemon
 # binary directly (no launchd, no packaged .app), logs it in over its IPC
-# socket, lets it run for a window long enough to cover both possible
-# screenshot outcomes below, then asserts that hashes and batches actually
-# landed in the database.
+# socket, waits for a real screenshot/hash/batch cycle, then asserts that
+# hashes and batches actually landed in the database.
 #
-# Screen Recording permission: CI runners generally don't have it granted,
-# and macOS's TCC framework has no scriptable/headless way to grant it (unlike
-# Linux's Xvfb, which just gives the daemon a permission-free virtual
-# display). `capture.rs` checks `CGPreflightScreenCaptureAccess()` before ever
-# invoking `screencapture`, so a missing grant fails fast with `CaptureFailed`
-# instead of hanging on a consent dialog -- no mocking needed either way:
-#   - permission granted: the first capture succeeds and uploads for real.
-#   - permission missing: captures keep failing until the 5th failure inside
-#     capture_availability.rs's 30-minute window fires a real
-#     `UploadKind::CaptureFailed` alert (still real product code, just a
-#     different upload kind than a screenshot).
-# RUN_DURATION_SECONDS below is sized to cover the slower (missing-permission)
-# path with margin.
+# Screen Recording permission: CI runners don't have it granted, and macOS's
+# TCC framework has no scriptable/headless way to grant it (unlike Linux's
+# Xvfb, which just gives the daemon a permission-free virtual display).
+# Rather than testing the CaptureFailed alert fallback instead of a real
+# capture, the daemon here is built with the mock-capture feature
+# (client/mac/src/capture.rs), which swaps in a fixed embedded PNG in place
+# of shelling out to `screencapture`. That's compiled in only when this
+# script explicitly requests it -- never by build-app.sh/build-dmg.sh -- so
+# it can't end up in a shipped build, and it still exercises the real
+# capture -> classify -> upload -> hash -> batch pipeline end to end -- it
+# just doesn't cover the Screen Recording permission-gating logic itself
+# (CGPreflightScreenCaptureAccess / CaptureFailed), which stays untested by
+# this job.
 #
 # Usage: ./client/mac/scripts/integration-test.sh
 #
@@ -42,9 +41,9 @@ DEVICE_NAME="ci-integration-test-$$"
 # capture_interval_seconds has a 15s floor enforced by client/core/src/config.rs.
 CAPTURE_INTERVAL_SECONDS=15
 BATCH_WINDOW_SECONDS=15
-# 5 capture failures (one per CAPTURE_INTERVAL_SECONDS) plus a batch window,
-# with margin, covers the no-Screen-Recording-permission fallback path.
-RUN_DURATION_SECONDS=120
+# One capture interval for the (mocked) screenshot to fire, plus one batch
+# window for it to flush, plus margin for CI scheduling jitter.
+RUN_DURATION_SECONDS=45
 
 if [ "$(uname -s)" != "Darwin" ]; then
   echo "integration-test: this script only runs on macOS" >&2
@@ -141,8 +140,8 @@ fi
 echo "== Seeding dev user =="
 bun run "$ROOT/scripts/seed-dev-user.mjs"
 
-echo "== Building virtue-mac client =="
-(cd "$CLIENT_DIR" && cargo build -p virtue-mac)
+echo "== Building virtue-mac client (mock-capture) =="
+(cd "$CLIENT_DIR" && cargo build -p virtue-mac --features mock-capture)
 VIRTUE_BIN="$CLIENT_DIR/target/debug/virtue-mac"
 CI_LOGIN_BIN="$CLIENT_DIR/target/debug/virtue-mac-ci-login"
 
