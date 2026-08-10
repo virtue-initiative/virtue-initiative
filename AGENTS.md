@@ -156,7 +156,7 @@ Notes:
 - Written in TypeScript, run directly with `bun` -- no build step. Shares `client/scripts/integration-test-lib.ts` (port picking, api dev server bootstrap, dev-user seeding, D1 verification/retry) with the macOS integration test below.
 - Runs against an isolated `HOME`/`XDG_CONFIG_HOME`/`XDG_STATE_HOME` in a temp directory, so it won't touch a real local `virtue` install.
 - `client/linux/scripts/ci-login.ts` drives `virtue login`'s password prompt non-interactively via `script(1)` (Bun has no built-in pty allocation); it exports `ciLogin()` so the script can call it in-process instead of shelling out.
-- Currently Linux-only. The same api-dev-server + seed + verify shape generalizes to other platforms; extending it is tracked as follow-up work per platform.
+- The same api-dev-server + seed + verify shape has since been extended to macOS (below); Windows/Android/iOS remain follow-up work.
 
 ### macOS client CI (`.github/workflows/client-macos.yml`)
 
@@ -177,6 +177,23 @@ cargo test -p virtue-core --features testing --test scenarios
 Notes:
 
 - `build-dmg.sh` validates the app bundle and DMG packaging path.
+
+### macOS client integration test (`.github/workflows/client-macos.yml`, `client-macos-integration` job)
+
+Same device -> api/hash-server smoke test as Linux's, adapted to how macOS is actually driven: builds and runs the real `virtue-mac` daemon binary directly (no launchd, no packaged `.app`), then logs it in over its IPC socket with a small `virtue-mac-ci-login` helper instead of a CLI login command — macOS login normally goes through the SwiftUI app's FFI bridge (`mac/rust/src/lib.rs`), which itself just calls `ClientController::login` over the same socket, so the helper does exactly that with no interactive terminal or pty involved.
+
+Run it locally from the repo root (macOS only):
+
+```bash
+./client/mac/scripts/integration-test.sh
+```
+
+Requires `bun`, `cargo`, `curl` on `PATH`.
+
+Notes:
+
+- Runs against an isolated `$HOME` in a temp directory (macOS resolves config/data/state dirs off `$HOME`, unlike Linux's XDG vars), so it won't touch a real local `virtue` install.
+- CI runners don't have Screen Recording permission granted, and there's no headless way to grant it. `capture.rs` checks `CGPreflightScreenCaptureAccess()` before shelling out, so a missing grant fails fast as a real `CaptureFailed` event rather than hanging on a consent dialog. The test's run duration is sized to tolerate either outcome: a granted permission uploads a real screenshot almost immediately, while a missing one still produces a real `UploadKind::CaptureFailed` alert after the 5th failure (`capture_availability.rs`) — either way a genuine hash/batch lands, no mocking required.
 
 ### Windows client CI (`.github/workflows/client-windows.yml`)
 

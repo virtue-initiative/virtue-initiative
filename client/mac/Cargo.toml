@@ -12,6 +12,10 @@ path = "src/lib.rs"
 name = "virtue-mac"
 path = "src/main.rs"
 
+[[bin]]
+name = "virtue-mac-ci-login"
+path = "src/bin/ci-login.rs"
+
 [dependencies]
 anyhow = "1"
 virtue_core = { package = "virtue-core", path = "../core" }
