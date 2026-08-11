@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
   email_bounced_at INTEGER,
   settings TEXT NOT NULL DEFAULT '{}',
   pub_key BLOB,
-  priv_key BLOB,
+  encrypted_priv_key BLOB,
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);

@@ -23,6 +23,8 @@ export const emailKinds = [
   'tamper_alert',
   'daily_digest',
   'weekly_digest',
+  'account_exists_notice',
+  'email_in_use_notice',
 ] as const;
 
 export type EmailKind = (typeof emailKinds)[number];

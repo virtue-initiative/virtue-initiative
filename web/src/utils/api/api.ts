@@ -166,7 +166,8 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  getCurrentHashParams: () => req<HashParams>('/current-hash-params'),
+  getCurrentHashParams: () =>
+    req<{ params: HashParams }>('/user/login-material').then((res) => res.params),
 
   getLoginMaterial: (email: string) => {
     const qs = new URLSearchParams({ email });
@@ -234,7 +235,7 @@ export const api = {
       password_auth: string;
       password_salt: string;
       pub_key?: string;
-      priv_key?: string;
+      encrypted_priv_key?: string;
     },
   ) =>
     req<{ ok: boolean }>('/password-reset/finalize', {

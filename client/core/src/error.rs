@@ -41,6 +41,8 @@ pub enum CoreError {
     Crypto(&'static str),
     #[error("external command failed: {0}")]
     CommandFailed(String),
+    #[error("{0}")]
+    Remote(String),
     #[error("classifier error: {0}")]
     Classifier(String),
     #[error("IPC error: {0}")]

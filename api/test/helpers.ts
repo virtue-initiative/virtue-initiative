@@ -109,7 +109,7 @@ export async function signupAndGetCookie(
       password_auth,
       password_salt,
       pub_key,
-      priv_key,
+      encrypted_priv_key: priv_key,
       ...(name ? { name } : {}),
     }),
   });
