@@ -185,13 +185,14 @@ Same device -> api/hash-server smoke test as Linux's, adapted to how macOS is ac
 Run it locally from the repo root (macOS only):
 
 ```bash
-./client/mac/scripts/integration-test.sh
+bun client/mac/scripts/integration-test.ts
 ```
 
 Requires `bun`, `cargo`, `curl` on `PATH`.
 
 Notes:
 
+- Written in TypeScript, run directly with `bun` -- no build step. Shares `client/scripts/integration-test-lib.ts` with the Linux integration test above.
 - Runs against an isolated `$HOME` in a temp directory (macOS resolves config/data/state dirs off `$HOME`, unlike Linux's XDG vars), so it won't touch a real local `virtue` install.
 - CI runners don't have Screen Recording permission granted, and there's no headless way to grant it. Rather than exercising the `CaptureFailed` alert fallback instead of a real capture, the daemon is built with the `mock-capture` Cargo feature (`client/mac/src/capture.rs`), which swaps in a fixed embedded PNG in place of shelling out to `screencapture`. It's compiled in only when explicitly requested (`cargo build -p virtue-mac --features mock-capture`) — never by `build-app.sh`/`build-dmg.sh` — so it can't end up in a shipped build, and it still exercises the real capture → classify → upload → hash → batch pipeline, just not the permission-gating logic itself.
 

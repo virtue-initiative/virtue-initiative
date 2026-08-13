@@ -138,4 +138,4 @@ jobs:
         run: bun install
 
       - name: Run device -> api/hash integration test
-        run: ./client/mac/scripts/integration-test.sh
+        run: bun client/mac/scripts/integration-test.ts
