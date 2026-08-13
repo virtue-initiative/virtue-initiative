@@ -146,15 +146,16 @@ End-to-end smoke test: boots the api worker locally against a fresh D1 database 
 Run it locally from the repo root:
 
 ```bash
-./client/linux/scripts/integration-test.sh
+bun client/linux/scripts/integration-test.ts
 ```
 
-Requires `bun`, `cargo`, `curl`, `xvfb-run`, and ImageMagick's `import` on `PATH` (on Debian/Ubuntu: `apt-get install xvfb imagemagick`).
+Requires `bun`, `cargo`, `curl`, `xvfb-run` on `PATH` (on Debian/Ubuntu: `apt-get install xvfb`).
 
 Notes:
 
+- Written in TypeScript, run directly with `bun` -- no build step. Shares `client/scripts/integration-test-lib.ts` (port picking, api dev server bootstrap, dev-user seeding, D1 verification/retry) with the macOS integration test below.
 - Runs against an isolated `HOME`/`XDG_CONFIG_HOME`/`XDG_STATE_HOME` in a temp directory, so it won't touch a real local `virtue` install.
-- `client/linux/scripts/ci-login.ts` drives `virtue login`'s password prompt non-interactively via `script(1)` (Bun has no built-in pty allocation).
+- `client/linux/scripts/ci-login.ts` drives `virtue login`'s password prompt non-interactively via `script(1)` (Bun has no built-in pty allocation); it exports `ciLogin()` so the script can call it in-process instead of shelling out.
 - Currently Linux-only. The same api-dev-server + seed + verify shape generalizes to other platforms; extending it is tracked as follow-up work per platform.
 
 ### macOS client CI (`.github/workflows/client-macos.yml`)

@@ -136,7 +136,7 @@ jobs:
       - name: Install OCR and headless-capture system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libleptonica-dev libtesseract-dev libclang-dev clang xvfb imagemagick
+          sudo apt-get install -y --no-install-recommends libleptonica-dev libtesseract-dev libclang-dev clang xvfb
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -157,4 +157,4 @@ jobs:
         run: bun install
 
       - name: Run device -> api/hash integration test
-        run: ./client/linux/scripts/integration-test.sh
+        run: bun client/linux/scripts/integration-test.ts

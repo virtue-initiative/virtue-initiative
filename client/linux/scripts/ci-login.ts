@@ -8,8 +8,72 @@
 // own stdio — driving `script`'s piped stdin/stdout gives `virtue login` a
 // real controlling tty.
 //
-// Usage:
+// Exports `ciLogin()` for use from integration-test.ts; also runnable
+// standalone:
 //   bun ci-login.ts --bin <path-to-virtue> --email <email> --password <password> --device-name <name>
+
+const PROMPT_TIMEOUT_MS = 30_000;
+
+function shQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+export interface CiLoginArgs {
+  bin: string;
+  email: string;
+  password: string;
+  deviceName: string;
+  env?: Record<string, string>;
+}
+
+/** Runs `<bin> login`, feeding the password once the pty prompt appears. Throws on failure. */
+export async function ciLogin(args: CiLoginArgs): Promise<void> {
+  const childCmd = [
+    shQuote(args.bin),
+    'login',
+    '--email',
+    shQuote(args.email),
+    '--device-name',
+    shQuote(args.deviceName),
+  ].join(' ');
+
+  const proc = Bun.spawn(['script', '-qefc', childCmd, '/dev/null'], {
+    env: args.env ?? (process.env as Record<string, string>),
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'inherit',
+  });
+
+  const decoder = new TextDecoder();
+  let buf = '';
+  let sentPassword = false;
+  let timedOut = false;
+
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    proc.kill();
+  }, PROMPT_TIMEOUT_MS);
+
+  for await (const chunk of proc.stdout as ReadableStream<Uint8Array>) {
+    const text = decoder.decode(chunk, { stream: true });
+    process.stdout.write(text);
+    buf += text;
+
+    if (!sentPassword && buf.includes('Password:')) {
+      clearTimeout(timeout);
+      // Let raw mode engage before sending.
+      await Bun.sleep(200);
+      proc.stdin.write(args.password + '\r');
+      await proc.stdin.flush();
+      sentPassword = true;
+    }
+  }
+
+  clearTimeout(timeout);
+  const exitCode = await proc.exited;
+  if (timedOut) throw new Error('ci-login: timed out waiting for the password prompt');
+  if (exitCode !== 0) throw new Error(`ci-login: virtue login exited with code ${exitCode}`);
+}
 
 function parseArgs(argv: string[]): Record<string, string> {
   const args: Record<string, string> = {};
@@ -27,13 +91,7 @@ function parseArgs(argv: string[]): Record<string, string> {
   return args;
 }
 
-function shQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
-
-const PROMPT_TIMEOUT_MS = 30_000;
-
-async function main() {
+if (import.meta.main) {
   const args = parseArgs(process.argv.slice(2));
   for (const required of ['bin', 'email', 'password', 'device-name']) {
     if (!args[required]) {
@@ -42,59 +100,13 @@ async function main() {
     }
   }
 
-  const bin = args.bin;
-  const email = args.email;
-  const password = args.password;
-  const deviceName = args['device-name'];
-
-  const childCmd = [
-    shQuote(bin),
-    'login',
-    '--email',
-    shQuote(email),
-    '--device-name',
-    shQuote(deviceName),
-  ].join(' ');
-
-  const proc = Bun.spawn(['script', '-qefc', childCmd, '/dev/null'], {
-    stdin: 'pipe',
-    stdout: 'pipe',
-    stderr: 'inherit',
+  ciLogin({
+    bin: args.bin,
+    email: args.email,
+    password: args.password,
+    deviceName: args['device-name'],
+  }).catch((err) => {
+    console.error(err instanceof Error ? err.message : err);
+    process.exit(1);
   });
-
-  const decoder = new TextDecoder();
-  let buf = '';
-  let sentPassword = false;
-
-  const timeout = setTimeout(() => {
-    console.error('ci-login: timed out waiting for the password prompt');
-    proc.kill();
-  }, PROMPT_TIMEOUT_MS);
-
-  for await (const chunk of proc.stdout as ReadableStream<Uint8Array>) {
-    const text = decoder.decode(chunk, { stream: true });
-    process.stdout.write(text);
-    buf += text;
-
-    if (!sentPassword && buf.includes('Password:')) {
-      clearTimeout(timeout);
-      // Let raw mode engage before sending.
-      await Bun.sleep(200);
-      proc.stdin.write(password + '\r');
-      await proc.stdin.flush();
-      sentPassword = true;
-    }
-  }
-
-  clearTimeout(timeout);
-  const exitCode = await proc.exited;
-  if (exitCode !== 0) {
-    console.error(`ci-login: virtue login exited with code ${exitCode}`);
-  }
-  process.exit(exitCode);
 }
-
-main().catch((err) => {
-  console.error('ci-login: fatal error', err);
-  process.exit(1);
-});
