@@ -222,18 +222,19 @@ Notes:
 
 Same device -> api/hash-server smoke test as Linux's and macOS's, adapted to how Windows is actually driven: `virtue_windows` has no standalone daemon process or CLI at all -- it's a cdylib the WinUI app loads via P/Invoke, and monitoring/login both happen as in-process calls against a background thread that same process spawns (see `RustInteropClient.cs`/`SessionViewModel.cs` for the app's own call sequence: Initialize -> StartMonitoring -> Login). A small `virtue-windows-ci-runner` binary reproduces that exact sequence directly against the `virtue-windows` library, then blocks for a fixed run window so the monitor's background thread can actually capture/hash/batch/upload before the process exits (which would otherwise kill that thread immediately), and exits on its own once that window elapses -- there's no separate daemon process to start, log in to, and kill.
 
-Run it locally from the repo root (Windows only, PowerShell):
+Run it locally from the repo root (Windows only):
 
-```powershell
-.\client\windows\scripts\integration-test.ps1
+```bash
+bun client/windows/scripts/integration-test.ts
 ```
 
 Requires `bun`, `cargo` on `PATH`.
 
 Notes:
 
+- Written in TypeScript, run directly with `bun` -- no build step. Shares `client/scripts/integration-test-lib.ts` with the Linux and macOS integration tests above.
 - Runs against an isolated `PROGRAMDATA` in a temp directory (`ClientPaths::discover()` resolves everything off `PROGRAMDATA`), so it won't touch a real local `virtue` install.
-- GitHub's `windows-latest` runners have a real interactive desktop session, so GDI screen capture (`capture.rs`) produces a genuine screenshot with no permission prompt and no virtual-display trick needed (unlike Linux's Xvfb or macOS's Screen Recording consent).
+- GitHub's `windows-latest` runners have a real interactive desktop session, so GDI screen capture (`capture.rs`) produces a genuine screenshot with no permission prompt and no virtual-display trick needed (unlike Linux's Xvfb or macOS's missing Screen Recording grant).
 
 ### Android client CI (`.github/workflows/client-android.yml`)
 

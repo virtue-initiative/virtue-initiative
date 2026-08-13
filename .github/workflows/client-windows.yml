@@ -207,4 +207,4 @@ jobs:
         run: bun install
 
       - name: Run device -> api/hash integration test
-        run: ./client/windows/scripts/integration-test.ps1
+        run: bun client/windows/scripts/integration-test.ts
