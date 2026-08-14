@@ -170,7 +170,9 @@ The server SHOULD NOT log the body of every request.
 
 The server SHOULD log every unexpected error (5xx codes).
 
-## 4. Performance Testing
+## 4. Testing
+
+### 4.1 Performance
 
 We SHOULD have a script that uses h2load to test the number of valid requests per second over http.
 
@@ -182,3 +184,33 @@ give each request a strictly-increasing `seq`; every request after that is a fas
 Treat the `write` number as the ceiling for the auth + parse + write-queue path, not
 for sustained disk-durable writes. Tokens for both modes are minted with
 `cargo run --example mint_token -- <sub> <device|server> <private_key_pem_path>`.
+
+### 4.2 CI
+
+The rust unit and integration tests SHOULD be run in github CI.
+
+## 5. Deployment
+
+### 5.1 Location
+
+Both a STAGING (on push/merge to staging) and PRODUCTION (on push/merge to main) deployment SHOULD be deployed to our oracle cloud A1 VM at hash.virtueinitiative.org port 22.
+
+### 5.2 Method
+
+The built binary and systemd service SHOULD be copied over SSH to the oracle cloud VM from within CI. The staging binary SHOULD be named `staging-virtue-hash` and the production binary SHOULD be named `virtue-hash`
+
+The SSH key SHOULD be stored as a GitHub secret.
+
+The systemd service MUST be restarted after the deploy.
+
+Each server MUST be configured with its own `DATABASE_PATH`, so staging and production
+never share a database.
+
+The production server SHOULD use the default `PORT` (8788). The staging server SHOULD be
+configured with `PORT=8789`. Cloudflared (section 5.3) MUST route to the matching port.
+
+The staging server SHOULD be configured with RUST_LOG=debug.
+
+### 5.3 Cloudflared
+
+Cloudflared MUST be configured on the oracle cloud VM and MUST route staging.hash.virtueinitiative.org to the staging server and hash.virtueinitiative.org to the production server.

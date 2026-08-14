@@ -1,0 +1,85 @@
+name: Deploy Hash Server
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - 'hash-server/**'
+      - '.github/workflows/deploy-hash-server.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy
+    # SPEC.md section 3.1: the VM is an Oracle Cloud A1 (arm64) instance, so the
+    # build must match its architecture — a native arm64 runner avoids setting up
+    # aarch64-unknown-linux-gnu cross-compilation.
+    runs-on: ubuntu-24.04-arm
+    defaults:
+      run:
+        working-directory: hash-server
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: hash-server
+
+      - name: Build release binary
+        run: cargo build --release
+
+      # SPEC.md section 5.2: staging binary is staging-virtue-hash, production is
+      # virtue-hash; each has its own directory/systemd unit/database on the VM.
+      - name: Resolve deploy target
+        id: target
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "name=virtue-hash" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=staging-virtue-hash" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          echo "${{ secrets.HASH_SERVER_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.HASH_SERVER_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Copy binary and systemd unit
+        env:
+          TARGET: ${{ steps.target.outputs.name }}
+          HOST: ${{ secrets.HASH_SERVER_HOST }}
+        run: |
+          scp -i ~/.ssh/deploy_key \
+            target/release/hash-server \
+            "ubuntu@$HOST:/home/ubuntu/$TARGET/$TARGET.new"
+          scp -i ~/.ssh/deploy_key \
+            "deploy/$TARGET.service" \
+            "ubuntu@$HOST:/tmp/$TARGET.service"
+
+      # SPEC.md section 5.2: "The systemd service MUST be restarted after the deploy."
+      - name: Install and restart
+        env:
+          TARGET: ${{ steps.target.outputs.name }}
+          HOST: ${{ secrets.HASH_SERVER_HOST }}
+        run: |
+          ssh -i ~/.ssh/deploy_key "ubuntu@$HOST" "
+            set -e
+            mv /home/ubuntu/$TARGET/$TARGET.new /home/ubuntu/$TARGET/$TARGET
+            chmod +x /home/ubuntu/$TARGET/$TARGET
+            sudo mv /tmp/$TARGET.service /etc/systemd/system/$TARGET.service
+            sudo systemctl daemon-reload
+            sudo systemctl enable $TARGET
+            sudo systemctl restart $TARGET
+            sleep 1
+            sudo systemctl is-active $TARGET
+          "

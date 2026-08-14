@@ -37,6 +37,7 @@
       "vars": {
         "JWT_ACCESS_EXPIRY": "15m",
         "JWT_REFRESH_EXPIRY": "7d",
+        "JWT_PUBLIC_KEY": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAqscGXAACNQeQfhFi3eTH61Wy9NWAGBg+ne8KDqPHTAg=\n-----END PUBLIC KEY-----",
         "API_BASE_PATH": "/api",
         "R2_URL": "https://r2.virtueinitiative.org",
         "APP_URL": "https://app.virtueinitiative.org",
@@ -44,7 +45,7 @@
         "AWS_SES_REGION": "us-east-1",
         "AWS_SES_FROM_EMAIL": "notifications@virtueinitiative.org",
         "EMAIL_DELIVERY_MODE": "ses",
-        "HASH_SERVER_URL": "https://app.virtueinitiative.org/api"
+        "HASH_SERVER_URL": "https://hash.virtueinitiative.org"
       },
       "ratelimits": [
         {
@@ -83,6 +84,7 @@
       "vars": {
         "JWT_ACCESS_EXPIRY": "15m",
         "JWT_REFRESH_EXPIRY": "7d",
+        "JWT_PUBLIC_KEY": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEARCen2jsj53qDZBVcGdZ0pe7JCiREYC3B9ni3dC0uTSY=\n-----END PUBLIC KEY-----",
         "API_BASE_PATH": "/api",
         "R2_URL": "https://staging.r2.virtueinitiative.org",
         "APP_URL": "https://staging.app.virtueinitiative.org",
@@ -90,7 +92,7 @@
         "AWS_SES_REGION": "us-east-1",
         "AWS_SES_FROM_EMAIL": "notifications@virtueinitiative.org",
         "EMAIL_DELIVERY_MODE": "ses",
-        "HASH_SERVER_URL": "https://staging.app.virtueinitiative.org/api"
+        "HASH_SERVER_URL": "https://staging.hash.virtueinitiative.org"
       },
       "ratelimits": [
         {
