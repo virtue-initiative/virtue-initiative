@@ -139,6 +139,25 @@ Notes:
 - This is the most complete Rust CI workflow and is the baseline for Linux or shared-core changes.
 - `build-deb.sh` is the packaging step CI runs after tests.
 
+### Linux client integration test (`.github/workflows/client-linux.yml`, `client-linux-integration` job)
+
+End-to-end smoke test: boots the api worker locally against a fresh D1 database (the api's own D1-backed `/hash` routes stand in for the standalone Rust hash-server in local dev, same as `scripts/launch.sh`), builds the real `virtue-linux` binary, runs its daemon under Xvfb (screenshot capture works for real against a blank virtual display, so no mocking code is needed), logs in as the seeded dev account, and asserts hash/batch rows actually land in the database after a short delay.
+
+Run it locally from the repo root:
+
+```bash
+bun client/linux/scripts/integration-test.ts
+```
+
+Requires `bun`, `cargo`, `curl`, `xvfb-run` on `PATH` (on Debian/Ubuntu: `apt-get install xvfb`).
+
+Notes:
+
+- Written in TypeScript, run directly with `bun` -- no build step. Shares `client/scripts/integration-test-lib.ts` (port picking, api dev server bootstrap, dev-user seeding, D1 verification/retry) with the macOS integration test below.
+- Runs against an isolated `HOME`/`XDG_CONFIG_HOME`/`XDG_STATE_HOME` in a temp directory, so it won't touch a real local `virtue` install.
+- `client/linux/scripts/ci-login.ts` drives `virtue login`'s password prompt non-interactively via `script(1)` (Bun has no built-in pty allocation); it exports `ciLogin()` so the script can call it in-process instead of shelling out.
+- The same api-dev-server + seed + verify shape has since been extended to macOS and Windows (below); Android/iOS remain follow-up work.
+
 ### macOS client CI (`.github/workflows/client-macos.yml`)
 
 Run these on macOS.
@@ -158,6 +177,24 @@ cargo test -p virtue-core --features testing --test scenarios
 Notes:
 
 - `build-dmg.sh` validates the app bundle and DMG packaging path.
+
+### macOS client integration test (`.github/workflows/client-macos.yml`, `client-macos-integration` job)
+
+Same device -> api/hash-server smoke test as Linux's, adapted to how macOS is actually driven: builds and runs the real `virtue-mac` daemon binary directly (no launchd, no packaged `.app`), then logs it in over its IPC socket with a small `virtue-mac-ci-login` helper instead of a CLI login command — macOS login normally goes through the SwiftUI app's FFI bridge (`mac/rust/src/lib.rs`), which itself just calls `ClientController::login` over the same socket, so the helper does exactly that with no interactive terminal or pty involved.
+
+Run it locally from the repo root (macOS only):
+
+```bash
+bun client/mac/scripts/integration-test.ts
+```
+
+Requires `bun`, `cargo`, `curl` on `PATH`.
+
+Notes:
+
+- Written in TypeScript, run directly with `bun` -- no build step. Shares `client/scripts/integration-test-lib.ts` with the Linux integration test above.
+- Runs against an isolated `$HOME` in a temp directory (macOS resolves config/data/state dirs off `$HOME`, unlike Linux's XDG vars), so it won't touch a real local `virtue` install.
+- CI runners don't have Screen Recording permission granted, and there's no headless way to grant it. Rather than exercising the `CaptureFailed` alert fallback instead of a real capture, the daemon is built with the `mock-capture` Cargo feature (`client/mac/src/capture.rs`), which swaps in a fixed embedded PNG in place of shelling out to `screencapture`. It's compiled in only when explicitly requested (`cargo build -p virtue-mac --features mock-capture`) — never by `build-app.sh`/`build-dmg.sh` — so it can't end up in a shipped build, and it still exercises the real capture → classify → upload → hash → batch pipeline, just not the permission-gating logic itself.
 
 ### Windows client CI (`.github/workflows/client-windows.yml`)
 
@@ -180,6 +217,24 @@ Notes:
 
 - CI installs NSIS before building the installer.
 - Release builds use `-Profile Release -Version <build_label>`, but debug packaging is the PR-time smoke test.
+
+### Windows client integration test (`.github/workflows/client-windows.yml`, `client-windows-integration` job)
+
+Same device -> api/hash-server smoke test as Linux's and macOS's, adapted to how Windows is actually driven: `virtue_windows` has no standalone daemon process or CLI at all -- it's a cdylib the WinUI app loads via P/Invoke, and monitoring/login both happen as in-process calls against a background thread that same process spawns (see `RustInteropClient.cs`/`SessionViewModel.cs` for the app's own call sequence: Initialize -> StartMonitoring -> Login). A small `virtue-windows-ci-runner` binary reproduces that exact sequence directly against the `virtue-windows` library, then blocks for a fixed run window so the monitor's background thread can actually capture/hash/batch/upload before the process exits (which would otherwise kill that thread immediately), and exits on its own once that window elapses -- there's no separate daemon process to start, log in to, and kill.
+
+Run it locally from the repo root (Windows only):
+
+```bash
+bun client/windows/scripts/integration-test.ts
+```
+
+Requires `bun`, `cargo` on `PATH`.
+
+Notes:
+
+- Written in TypeScript, run directly with `bun` -- no build step. Shares `client/scripts/integration-test-lib.ts` with the Linux and macOS integration tests above.
+- Runs against an isolated `PROGRAMDATA` in a temp directory (`ClientPaths::discover()` resolves everything off `PROGRAMDATA`), so it won't touch a real local `virtue` install.
+- GitHub's `windows-latest` runners have a real interactive desktop session, so GDI screen capture (`capture.rs`) produces a genuine screenshot with no permission prompt and no virtual-display trick needed (unlike Linux's Xvfb or macOS's missing Screen Recording grant).
 
 ### Android client CI (`.github/workflows/client-android.yml`)
 
