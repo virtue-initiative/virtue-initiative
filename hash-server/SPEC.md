@@ -12,7 +12,7 @@ All error responses (not **2xx**) MUST have this shape.
 {
   "code": "invalid_body",
   "message": "The request contains an invalid body",
-  "details": "optional more details",
+  "details": "optional more details"
 }
 ```
 
@@ -20,36 +20,36 @@ All error responses (not **2xx**) MUST have this shape.
 
 ### 2.1 `POST /hash`
 
-The client SHOULD authenticate with this header.
+The client MUST authenticate with this header.
 
 ```
 Authorization: Bearer <JWT>`
-````
+```
 
-The JWT SHOULD be signed by the main API server and MUST have 'device' as the sub.
+The JWT SHOULD be signed by the main API server and MUST have 'hash-server' as the type claim and the device ID as the sub.
 
 The server MUST reject invalid JWTs with **HTTP 401**.
 
-Client MUST send a 40 byte body.
+Client MUST send a 40 byte body, all integer fields little-endian.
 
 ```
 [unix_time:u32][seq:u32][sha hash:32 bytes]
 ```
 
-- `unix_time`: REQUIRED, server currently ignores is, but can use it to prevent replays.
+- `unix_time`: REQUIRED, ignored for now (not used for replay prevention).
 - `seq`: REQUIRED, MUST be strictly greater than the last sequence number for the device, until it resets on DELETE.
 - `sha hash`: REQUIRED, hash to be combined with the currently stored hash (see below).
 
-The server MUST respond with **HTTP 401** if the body is invalid.
+The server MUST respond with **HTTP 400** if the body is invalid.
 
-The server SHOULD respond with **HTTP 201** if the sequence number is not strictly greater than the previous sequence number.
+The server MUST respond with **HTTP 409** if the sequence number is not strictly greater than the previous sequence number.
 
 **Hash Storage**
 
 The server MUST take the hash and combine it with the stored hash in this way
 
 ```
-stored = sha256(stored || seq || hash)
+stored = sha256(stored || hash)
 ```
 
 The server MUST return **HTTP 201** if the new state has been written to disk and MUST NOT return **HTTP 201** otherwise.
@@ -58,13 +58,13 @@ The client SHOULD retry the request if it does not receive any of the following 
 
 ### 2.2 `GET /hash?devices=[device_ids]`
 
-The client (in this case, the main API server) SHOULD authenticate with this header.
+The client (in this case, the main API server) MUST authenticate with this header.
 
 ```
 Authorization: Bearer <JWT>
-````
+```
 
-The JWT SHOULD be signed by the main API server and MUST have 'server' as the sub.
+The JWT SHOULD be signed by the main API server and MUST have 'server' as the type claim. The sub claim SHOULD be ignored for `server` type tokens.
 
 The server MUST respond with **HTTP 401**, if the JWT is invalid.
 
@@ -80,7 +80,7 @@ The server MUST return a ZERO hash, a 0 count and a 0 for last_received if it do
 {
   "device_id": {
      "hash": "hash_hex",
-     "count": 40,
+     "seq": 40,
      "last_received": 1786674101
   },
   ...
@@ -89,13 +89,13 @@ The server MUST return a ZERO hash, a 0 count and a 0 for last_received if it do
 
 ### 2.3 `DELETE /hash?device=device1`
 
-The client SHOULD authenticate with this header.
+The client MUST authenticate with this header.
 
 ```
 Authorization: Bearer <JWT>
 ```
 
-The JWT SHOULD be signed by the main API server and MUST have 'device' as the sub.
+The JWT SHOULD be signed by the main API server and MUST have 'hash-server' as the type claim and the device ID as the sub.
 
 The server MUST reject invalid JWTs with **HTTP 401**.
 
@@ -118,6 +118,7 @@ On success, the server MUST return **HTTP 200** with the following shape. With t
 ### 3.1 High level overview
 
 The server...
+
 - SHOULD be implemented in rust.
 - SHOULD serve strictly HTTP.
 - SHOULD be behind a cloudflare tunnel which handles HTTPS.
@@ -132,11 +133,10 @@ The server SHOULD use tokio as it's runtime
 
 SQLite SHOULD be configured in WAL with synchronous = full.
 
-Writes MUST all be on one thread and writes within a time window SHOULD be batched as one transaction.
+Writes MUST all be on one thread and writes within a configurable time window SHOULD be batched as one transaction, with no maximum batch size.
 
 Writes MUST be fully written to the database before a successful response is returned to the client.
 
 ## 4. Performance Testing
 
 We SHOULD have a script that uses h2load to test the number of valid requests per second over http.
-
