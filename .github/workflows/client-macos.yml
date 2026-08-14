@@ -128,6 +128,7 @@ jobs:
           cache-on-failure: true
           workspaces: |
             client -> target
+            hash-server -> target
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
