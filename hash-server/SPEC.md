@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-The hash server SHOULD have one endpoint with three methods.
+The hash server SHOULD have one endpoint with three methods and one status endpoint.
 
 ### 1.1 Error Responses
 
@@ -121,6 +121,23 @@ On success, the server MUST return **HTTP 200** with the following shape. With t
   "hash": "hash_hex",
   "seq": 40,
   "last_received": 1786674101
+}
+```
+
+### 2.4 `GET /`
+
+This endpoint MUST not require authentication, and MUST return **HTTP 200** unless the server is down.
+
+The endpoint SHOULD return the following response shape.
+
+The endpoint MAY return a status other than "ok" IF it has a way to detect degraded status. (We currently don't)
+
+```json
+{
+  "name": "Virtue Initiative Hash API",
+  "version": "1.0.0",
+  "commit": "51e8a2690a19adcfdbd62494cc8b2b83f24c560b",
+  "status": "ok"
 }
 ```
 

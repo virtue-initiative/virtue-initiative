@@ -93,6 +93,25 @@ fn post_body(unix_time: u32, seq: u32, hash: [u8; 32]) -> Vec<u8> {
 }
 
 #[tokio::test]
+async fn get_root_returns_status_without_auth() {
+    let server = spawn_server().await;
+    let client = reqwest::Client::new();
+
+    let resp = client
+        .get(format!("{}/", server.base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+
+    let body: Value = resp.json().await.unwrap();
+    assert_eq!(body["name"], "Virtue Initiative Hash API");
+    assert_eq!(body["status"], "ok");
+    assert!(body["version"].is_string());
+    assert!(body["commit"].is_string());
+}
+
+#[tokio::test]
 async fn post_hash_requires_valid_jwt() {
     let server = spawn_server().await;
     let client = reqwest::Client::new();

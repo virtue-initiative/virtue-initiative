@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::middleware;
-use axum::routing::post;
+use axum::routing::{get, post};
 
 use config::Config;
 use db::WriteHandle;
@@ -42,6 +42,7 @@ pub fn init(config: &Config) -> AppState {
 
 pub fn router(state: AppState) -> Router {
     Router::new()
+        .route("/", get(routes::status::status))
         .route(
             "/hash",
             post(routes::hash::ingest)
