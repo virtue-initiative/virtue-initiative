@@ -4132,6 +4132,7 @@ dependencies = [
  "anyhow",
  "base64",
  "chrono",
+ "clap",
  "hex",
  "hostname",
  "image",
