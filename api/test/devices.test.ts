@@ -9,7 +9,7 @@ import {
   markUserEmailVerified,
   signupAndGetCookie,
 } from './helpers';
-import { installHashServerMock } from './hash-server-mock';
+import { installHashServerMock, seedHashState } from './hash-server-mock';
 
 beforeAll(() => {
   fetchMock.activate();
@@ -32,6 +32,26 @@ describe('Main device routes', () => {
     const body = (await res.json()) as Array<{ name: string; platform: string }>;
     expect(body).toHaveLength(1);
     expect(body[0]).toMatchObject({ name: 'Work Laptop', platform: 'linux' });
+  });
+
+  it("reports last_hash_at as milliseconds, converted from the hash server's unix-second last_received", async () => {
+    const { cookie } = await signupAndGetCookie('carol@example.com');
+    const device = await createDeviceForUser(
+      'carol@example.com',
+      'password123',
+      'Phone',
+      'android',
+    );
+    seedHashState(device.id, { hash: '0a'.repeat(32), seq: 3, last_received: 1_700_000_000 });
+
+    const res = await SELF.fetch(`${BASE}/device`, {
+      headers: authHeaders(cookie),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ id: string; last_hash_at: number | null }>;
+    const found = body.find((item) => item.id === device.id);
+    expect(found?.last_hash_at).toBe(1_700_000_000_000);
   });
 
   it('updates an owned device', async () => {

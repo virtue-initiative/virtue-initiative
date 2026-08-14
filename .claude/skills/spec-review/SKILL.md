@@ -12,4 +12,3 @@ First, do a minimal review of any code needed.
 Second, IF anything needs clarified, ask the user a list of questions.
 
 Third, make minimal changes to the spec file. Keep the same language throughout. Do not write any more detail than needed.
-

@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use tokio::sync::oneshot;
 
 use crate::error::ApiError;
-use crate::state::{DeviceState, SharedDevices};
+use crate::state::{DeviceState, SharedDevices, ZERO_HASH};
 
 enum WriteCommand {
     Ingest {
@@ -213,7 +213,12 @@ fn process_batch(conn: &mut Connection, batch: Vec<WriteCommand>, devices: &Shar
                     .get(&device_id)
                     .copied()
                     .unwrap_or_else(|| snapshot.get(&device_id).copied().unwrap_or_default());
-                let new_state = DeviceState::default();
+                // SPEC.md section 2.3: the reset MUST NOT touch last_received.
+                let new_state = DeviceState {
+                    hash: ZERO_HASH,
+                    seq: 0,
+                    last_received: prior.last_received,
+                };
 
                 if let Err(e) = upsert(&tx, &device_id, &new_state) {
                     tracing::error!("failed to stage reset for {device_id}: {e}");

@@ -282,6 +282,10 @@ async fn delete_hash_resets_and_returns_prior_state() {
     let body: Value = resp.json().await.unwrap();
     assert_eq!(body["hash"], hex::encode([0u8; 32]));
     assert_eq!(body["seq"], 0);
+    // SPEC.md section 2.3: a reset "SHOULD NOT reset the last_received time" —
+    // this reflects state going into the *second* reset, i.e. right after the
+    // first one, so last_received must still be what the first POST set.
+    assert_eq!(body["last_received"], 500);
 
     // Sequence numbers reset to zero, so the next write must use seq > 0.
     let resp = client

@@ -45,7 +45,11 @@ devices.get('/', authenticateWebSession(), async (c) => {
         name: device.name,
         platform: device.platform,
         last_upload_at: device.last_upload_at,
-        last_hash_at: hi ? hi.last_received : null,
+        // hash-server's last_received is unix *seconds* (hash-server/SPEC.md's
+        // unix_time is a u32, so it can only be seconds); last_hash_at is a
+        // DateTime (millisecond Unix timestamp) per API.md, like every other
+        // timestamp this API returns.
+        last_hash_at: hi ? hi.last_received * 1000 : null,
         pending_count: hi ? hi.seq : 0,
         status: device.deleted_at
           ? 'logged_out'

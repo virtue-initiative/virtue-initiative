@@ -112,6 +112,8 @@ The server SHOULD return **HTTP 400** on a malformed `device_id`
 
 The server MUST reset a device's hash to ZERO and also set the sequence number to zero.
 
+It SHOULD NOT reset the last_received time.
+
 On success, the server MUST return **HTTP 200** with the following shape. With the data, BEFORE it was reset.
 
 ```json
@@ -159,6 +161,14 @@ response; they never touch SQLite directly.
 Writes MUST be fully written to the database before a successful response is returned to the client. Handlers only respond after the writer thread's transaction commits.
 
 `GET /hash` is served from SQLite directly, multiple readers are allowed in WAL mode, and after a commit, everything is fine.
+
+### 3.4 Logging
+
+The server SHOULD log every request at level debug.
+
+The server SHOULD NOT log the body of every request.
+
+The server SHOULD log every unexpected error (5xx codes).
 
 ## 4. Performance Testing
 

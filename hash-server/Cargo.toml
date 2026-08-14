@@ -23,3 +23,5 @@ reqwest = { version = "0.12", default-features = false, features = ["json"] }
 ed25519-dalek = { version = "2", features = ["pkcs8", "rand_core"] }
 rand = "0.8"
 pkcs8 = { version = "0.10", features = ["pem"] }
+tracing-test = "0.2"
+tower = { version = "0.5", features = ["util"] }

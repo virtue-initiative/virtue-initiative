@@ -2,12 +2,14 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod jwt;
+pub mod logging;
 pub mod routes;
 pub mod state;
 
 use std::sync::Arc;
 
 use axum::Router;
+use axum::middleware;
 use axum::routing::post;
 
 use config::Config;
@@ -46,5 +48,6 @@ pub fn router(state: AppState) -> Router {
                 .get(routes::hash::get_many)
                 .delete(routes::hash::reset),
         )
+        .layer(middleware::from_fn(logging::log_request))
         .with_state(state)
 }

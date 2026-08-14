@@ -62,12 +62,16 @@ impl IntoResponse for ApiError {
                 "The sequence number is not strictly greater than the previous one",
                 None,
             ),
-            ApiError::Internal(details) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "internal_error",
-                "An internal error occurred",
-                details,
-            ),
+            ApiError::Internal(details) => {
+                // SPEC.md section 3.4: every unexpected (5xx) error is logged.
+                tracing::error!(details = details.as_deref().unwrap_or(""), "internal error");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal_error",
+                    "An internal error occurred",
+                    details,
+                )
+            }
         };
 
         (
@@ -79,5 +83,27 @@ impl IntoResponse for ApiError {
             }),
         )
             .into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tracing_test::traced_test;
+
+    // SPEC.md section 3.4: "The server SHOULD log every unexpected error (5xx codes)."
+    #[traced_test]
+    #[test]
+    fn internal_errors_are_logged() {
+        let _ = ApiError::Internal(Some("boom".into())).into_response();
+        assert!(logs_contain("internal error"));
+    }
+
+    #[traced_test]
+    #[test]
+    fn non_5xx_errors_are_not_logged_as_internal() {
+        let _ = ApiError::Unauthorized(None).into_response();
+        let _ = ApiError::SequenceConflict.into_response();
+        assert!(!logs_contain("internal error"));
     }
 }
