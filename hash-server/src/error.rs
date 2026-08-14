@@ -1,0 +1,83 @@
+use axum::Json;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use serde::Serialize;
+
+#[derive(Debug, Serialize)]
+struct ErrorBody {
+    code: &'static str,
+    message: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    details: Option<String>,
+}
+
+/// The shapes of failure this server can produce, per SPEC.md section 1.1.
+/// Every variant maps to one (status, code, message) triple.
+#[derive(Debug, thiserror::Error)]
+pub enum ApiError {
+    #[error("invalid body")]
+    InvalidBody(Option<String>),
+    #[error("invalid query")]
+    InvalidQuery(Option<String>),
+    #[error("unauthorized")]
+    Unauthorized(Option<String>),
+    #[error("forbidden")]
+    Forbidden(Option<String>),
+    #[error("sequence conflict")]
+    SequenceConflict,
+    #[error("internal error")]
+    Internal(Option<String>),
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        let (status, code, message, details) = match self {
+            ApiError::InvalidBody(details) => (
+                StatusCode::BAD_REQUEST,
+                "invalid_body",
+                "The request contains an invalid body",
+                details,
+            ),
+            ApiError::InvalidQuery(details) => (
+                StatusCode::BAD_REQUEST,
+                "invalid_query",
+                "The request contains an invalid or malformed query parameter",
+                details,
+            ),
+            ApiError::Unauthorized(details) => (
+                StatusCode::UNAUTHORIZED,
+                "unauthorized",
+                "The request is not authorized",
+                details,
+            ),
+            ApiError::Forbidden(details) => (
+                StatusCode::FORBIDDEN,
+                "forbidden",
+                "The token does not authorize this device",
+                details,
+            ),
+            ApiError::SequenceConflict => (
+                StatusCode::CONFLICT,
+                "sequence_conflict",
+                "The sequence number is not strictly greater than the previous one",
+                None,
+            ),
+            ApiError::Internal(details) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "An internal error occurred",
+                details,
+            ),
+        };
+
+        (
+            status,
+            Json(ErrorBody {
+                code,
+                message,
+                details,
+            }),
+        )
+            .into_response()
+    }
+}

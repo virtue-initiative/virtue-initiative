@@ -16,6 +16,15 @@ All error responses (not **2xx**) MUST have this shape.
 }
 ```
 
+`code` is one of: `invalid_body`, `invalid_query`, `unauthorized`, `forbidden`, `sequence_conflict`, `internal_error`.
+
+### 1.2 Authentication
+
+JWTs MUST use `EdDSA` (Ed25519). This server only verifies tokens minted by the main
+API server — it never signs its own. The verification key is configured via the
+`JWT_PUBLIC_KEY` environment variable (Ed25519 SPKI PEM), matching the main API's
+`JWT_PUBLIC_KEY`/`JWT_PRIVATE_KEY` pair.
+
 ## 2. Methods
 
 ### 2.1 `POST /hash`
@@ -37,7 +46,7 @@ Client MUST send a 40 byte body, all integer fields little-endian.
 ```
 
 - `unix_time`: REQUIRED, ignored for now (not used for replay prevention).
-- `seq`: REQUIRED, MUST be strictly greater than the last sequence number for the device, until it resets on DELETE.
+- `seq`: REQUIRED, MUST be strictly greater than the last sequence number for the device, until it resets on DELETE. A device the server has never seen is treated identically to a freshly-reset device (last sequence number `0`), so `seq: 0` is never valid — the first accepted value for any device is `1` or higher.
 - `sha hash`: REQUIRED, hash to be combined with the currently stored hash (see below).
 
 The server MUST respond with **HTTP 400** if the body is invalid.
@@ -70,7 +79,8 @@ The server MUST respond with **HTTP 401**, if the JWT is invalid.
 
 **device_ids** MUST be a comma seperate list of valid IDs.
 
-The server SHOULD reject malformed IDs or a malformed list with **HTTP 400**.
+A valid ID is a UUID (matching the main API's device ID format). The server SHOULD
+reject malformed IDs or a malformed list with **HTTP 400**.
 
 On a valid request, the server MUST return the following JSON shape with **HTTP 200**, with one entry per device ID.
 
@@ -101,6 +111,11 @@ The server MUST reject invalid JWTs with **HTTP 401**.
 
 The server SHOULD return **HTTP 400** on a malformed `device_id`
 
+Since a `hash-server` JWT already scopes the caller to one device (its `sub`), the
+`device` query parameter MUST equal the token's `sub`. The server MUST reject a
+mismatch with **HTTP 403** (`code: "forbidden"`) rather than resetting a different
+device than the one the token authorizes.
+
 The server MUST reset a device's hash to ZERO and also set the sequence number to zero.
 
 On success, the server MUST return **HTTP 200** with the following shape. With the data, BEFORE it was reset.
@@ -127,16 +142,37 @@ The server...
 
 ### 3.2 Server
 
-The server SHOULD use tokio as it's runtime
+The server SHOULD use tokio as it's runtime, with axum for HTTP routing.
+
+Configuration is read from environment variables (a `.env` file is loaded if present):
+`HOST` (default `0.0.0.0`), `PORT` (default `8788`), `DATABASE_PATH` (default
+`hash-server.sqlite`), `JWT_PUBLIC_KEY` (required), `WRITE_BATCH_WINDOW_MS` (default `5`).
 
 ### 3.3 Database
 
-SQLite SHOULD be configured in WAL with synchronous = full.
+SQLite (via `rusqlite`, bundled) SHOULD be configured in WAL with synchronous = full.
 
-Writes MUST all be on one thread and writes within a configurable time window SHOULD be batched as one transaction, with no maximum batch size.
+Writes MUST all be on one thread and writes within a configurable time window SHOULD be batched as one transaction, with no maximum batch size. Implemented as a dedicated OS
+thread owning the write connection: it blocks for the first queued write, then drains
+anything else that arrives within `WRITE_BATCH_WINDOW_MS` into the same transaction
+before committing. `POST`/`DELETE` handlers send a request to this thread and await a
+response; they never touch SQLite directly.
 
-Writes MUST be fully written to the database before a successful response is returned to the client.
+Writes MUST be fully written to the database before a successful response is returned to the client. Handlers only respond after the writer thread's transaction commits.
+
+`GET /hash` is served from an in-memory map mirroring the database, updated by the
+writer thread immediately after each commit, so reads never wait on the write queue or
+touch disk.
 
 ## 4. Performance Testing
 
 We SHOULD have a script that uses h2load to test the number of valid requests per second over http.
+
+`scripts/bench.sh` (`--h1`, i.e. plain HTTP) has two modes: `read`, which repeatedly
+calls `GET /hash?devices=<id>` (idempotent, so it measures real sustained throughput),
+and `write`, which repeatedly `POST`s a fixed body to `/hash` — only the first request
+in the run is a durable write, since h2load cannot vary the request body per call to
+give each request a strictly-increasing `seq`; every request after that is a fast 409.
+Treat the `write` number as the ceiling for the auth + parse + write-queue path, not
+for sustained disk-durable writes. Tokens for both modes are minted with
+`cargo run --example mint_token -- <sub> <hash-server|server> <private_key_pem_path>`.
