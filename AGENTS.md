@@ -139,6 +139,25 @@ Notes:
 - This is the most complete Rust CI workflow and is the baseline for Linux or shared-core changes.
 - `build-deb.sh` is the packaging step CI runs after tests.
 
+### Linux client integration test (`.github/workflows/client-linux.yml`, `client-linux-integration` job)
+
+End-to-end smoke test: boots the api worker locally against a fresh D1 database (the api's own D1-backed `/hash` routes stand in for the standalone Rust hash-server in local dev, same as `scripts/launch.sh`), builds the real `virtue-linux` binary, runs its daemon under Xvfb (screenshot capture works for real against a blank virtual display, so no mocking code is needed), logs in as the seeded dev account, and asserts hash/batch rows actually land in the database after a short delay.
+
+Run it locally from the repo root:
+
+```bash
+bun client/linux/scripts/integration-test.ts
+```
+
+Requires `bun`, `cargo`, `curl`, `xvfb-run` on `PATH` (on Debian/Ubuntu: `apt-get install xvfb`).
+
+Notes:
+
+- Written in TypeScript, run directly with `bun` -- no build step. Shares `client/scripts/integration-test-lib.ts` (port picking, api dev server bootstrap, dev-user seeding, D1 verification/retry) with the macOS integration test below.
+- Runs against an isolated `HOME`/`XDG_CONFIG_HOME`/`XDG_STATE_HOME` in a temp directory, so it won't touch a real local `virtue` install.
+- `client/linux/scripts/ci-login.ts` drives `virtue login`'s password prompt non-interactively via `script(1)` (Bun has no built-in pty allocation); it exports `ciLogin()` so the script can call it in-process instead of shelling out.
+- Currently Linux-only. The same api-dev-server + seed + verify shape generalizes to other platforms; extending it is tracked as follow-up work per platform.
+
 ### macOS client CI (`.github/workflows/client-macos.yml`)
 
 Run these on macOS.
