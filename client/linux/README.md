@@ -57,40 +57,18 @@ And lifecycle alerts, fired when the expected login→logout running window does
   - procfs with `/proc/sys/kernel/random/boot_id` (startup detection).
 - Non-systemd distributions are not currently supported for system lifecycle logs.
 
-Capture/upload timing is file-driven through `~/.config/virtue/config.json`.
+`api_base_url`, `capture_interval_seconds` (default `300`, minimum `15`), and
+`batch_window_seconds` (default `3600`, minimum `1`) are baked into the binary
+at **compile time** — there is no runtime override file. To build against a
+local API or with different intervals, set `VIRTUE_DEFAULT_API_URL`,
+`VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS`, and/or
+`VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS` (as real env vars, or via a
+`client/.env` file copied from `client/.env.example`) before running
+`cargo build`.
 
-Supported keys:
+`virtue status` prints the current build-resolved values.
 
-- `api_base_url`
-- `capture_interval_seconds` (default `300`, minimum `15`)
-- `batch_window_seconds` (default `3600`, minimum `1`)
-
-`virtue status` prints the current CLI-resolved values.
-
-## Runtime Config
-
-Use one `.deb` for both prod and local API. Override values through `~/.config/virtue/config.json`.
-
-```bash
-mkdir -p ~/.config/virtue
-cat > ~/.config/virtue/config.json <<'EOF'
-{
-  "api_base_url": "http://localhost:8787",
-  "capture_interval_seconds": 120,
-  "batch_window_seconds": 900
-}
-EOF
-```
-
-Revert service back to default API:
-
-```bash
-rm -f ~/.config/virtue/config.json
-```
-
-The core reloads this file during daemon operation, so runtime changes do not require a service restart.
-
-The client uses `XDG_CONFIG_HOME` and `XDG_STATE_HOME` when those variables are set. Otherwise it falls back to `~/.config/virtue/config.json` for config and `~/.local/state/virtue` for mutable state.
+The client uses `XDG_CONFIG_HOME` and `XDG_STATE_HOME` when those variables are set. Otherwise it falls back to `~/.config/virtue` for config and `~/.local/state/virtue` for mutable state.
 
 ## Wayland and X11
 

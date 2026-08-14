@@ -44,9 +44,6 @@ final class MonitoringCoordinator: ObservableObject {
     @Published var email: String = ""
     @Published var password: String = ""
     @Published var deviceName: String = UIDevice.current.name
-    @Published var baseApiUrlOverride: String = ""
-    @Published var captureIntervalOverride: String = ""
-    @Published var batchWindowOverride: String = ""
 
     @Published private(set) var statusMessage: String = "Not initialized"
     @Published private(set) var isSigningIn: Bool = false
@@ -102,7 +99,7 @@ final class MonitoringCoordinator: ObservableObject {
         configDir = root.appendingPathComponent("config", isDirectory: true)
         dataDir = root.appendingPathComponent("data", isDirectory: true)
 
-        loadOverrideInputs()
+        monitoringEnabled = readMonitoringEnabledPreference(defaults: sharedDefaults ?? UserDefaults.standard)
         initializeCore()
         bindAppLifecycleState()
         refreshSessionState()
@@ -119,19 +116,6 @@ final class MonitoringCoordinator: ObservableObject {
             NotificationCenter.default.removeObserver(willEnterForegroundObserver)
         }
         stopStatusRefreshTimer()
-    }
-
-    func applyOverrides() {
-        let overrides = runtimeOverrides()
-        persistOverrides(overrides)
-
-        if let error = NativeBridge.setOverrides(overrides) {
-            statusMessage = "Override update failed: \(error)"
-            return
-        }
-
-        refreshCoreStatus()
-        statusMessage = "Runtime overrides updated"
     }
 
     func login() {
@@ -217,8 +201,7 @@ final class MonitoringCoordinator: ObservableObject {
 
         let error = NativeBridge.initialize(
             configDir: configDir.path,
-            dataDir: dataDir.path,
-            overrides: runtimeOverrides()
+            dataDir: dataDir.path
         )
 
         if let error {
@@ -366,10 +349,6 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     private func refreshCoreStatus() {
-        currentApiBaseUrl = runtimeOverrides().baseApiUrl.isEmpty
-            ? VirtueShared.defaultBaseApiUrl
-            : runtimeOverrides().baseApiUrl
-
         let serviceStatus = loadCoreStatus()
 
         pendingRequestCount = serviceStatus?.pendingRequestCount ?? 0
@@ -396,47 +375,6 @@ final class MonitoringCoordinator: ObservableObject {
         }
     }
 
-    private func runtimeOverrides() -> RuntimeOverrides {
-        RuntimeOverrides(
-            baseApiUrl: baseApiUrlOverride.trimmingCharacters(in: .whitespacesAndNewlines),
-            captureIntervalSeconds: captureIntervalOverride.trimmingCharacters(in: .whitespacesAndNewlines),
-            batchWindowSeconds: batchWindowOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-        )
-    }
-
-    private func persistOverrides(_ overrides: RuntimeOverrides) {
-        let write = { (defaults: UserDefaults) in
-            defaults.set(overrides.baseApiUrl, forKey: VirtueShared.baseApiUrlKey)
-            defaults.set(overrides.captureIntervalSeconds, forKey: VirtueShared.captureIntervalKey)
-            defaults.set(overrides.batchWindowSeconds, forKey: VirtueShared.batchWindowKey)
-        }
-        write(UserDefaults.standard)
-        if let sharedDefaults {
-            write(sharedDefaults)
-        }
-    }
-
-    private func loadOverrideInputs() {
-        let preferredDefaults = sharedDefaults ?? UserDefaults.standard
-        monitoringEnabled = readMonitoringEnabledPreference(defaults: preferredDefaults)
-        baseApiUrlOverride = storedOverride(
-            forKey: VirtueShared.baseApiUrlKey,
-            defaults: preferredDefaults,
-            fallback: VirtueShared.defaultBaseApiUrl
-        )
-        captureIntervalOverride = storedOverride(
-            forKey: VirtueShared.captureIntervalKey,
-            defaults: preferredDefaults,
-            fallback: VirtueShared.defaultCaptureIntervalSeconds
-        )
-        batchWindowOverride = storedOverride(
-            forKey: VirtueShared.batchWindowKey,
-            defaults: preferredDefaults,
-            fallback: VirtueShared.defaultBatchWindowSeconds
-        )
-        persistOverrides(runtimeOverrides())
-    }
-
     private func setMonitoringEnabled(_ enabled: Bool) {
         monitoringEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: VirtueShared.monitoringEnabledKey)
@@ -457,14 +395,6 @@ final class MonitoringCoordinator: ObservableObject {
             return VirtueShared.defaultMonitoringEnabled
         }
         return defaults.bool(forKey: VirtueShared.monitoringEnabledKey)
-    }
-
-    private func storedOverride(forKey key: String, defaults: UserDefaults, fallback: String) -> String {
-        let value = defaults.string(forKey: key)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if key == VirtueShared.baseApiUrlKey, value == "http://10.7.7.4:8787" {
-            return fallback
-        }
-        return (value?.isEmpty == false) ? value! : fallback
     }
 
     private func loadCoreStatus() -> CoreServiceStatus? {

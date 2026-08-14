@@ -21,7 +21,7 @@ is a thin wrapper that supplies raw screen data and OS hooks.
   module file that owns them (`Login`/`Logout` in `module/auth.rs`, `ProcessStarted`/
   `ProcessStarted`/etc. in `module/lifecycle.rs`, `StatusRequest` in `module/status.rs`)
 - `core/src/events/remote.rs` — `RemoteEventBus` (cross-process JSON-line channel)
-- `core/src/assembly.rs` — `build_default_modules()` factory for the 8 default observers
+- `core/src/assembly.rs` — `build_default_modules()` factory for the 7 default observers
 
 The daemon loop sends `Ping` events and calls `bus.iter()` on each cycle.
 Observer state is persisted to `event_state.json` after each iteration.
@@ -75,8 +75,10 @@ divergence sampled each `Ping` instead.
 
 ### Configuration
 
-- `core/src/config.rs` — `Config`: API base URL, screenshot/batch intervals, state dir
-- `core/src/module/config.rs` — `ConfigModule`: hot-reloads `config_override.json` on Ping
+- `core/src/config.rs` — `Config`: API base URL, screenshot/batch intervals, state dir.
+  All three values are compile-time constants baked in via `env!()` through
+  `core/build.rs`, which also loads an optional `client/.env` file (gitignored;
+  see `client/.env.example`) — there is no runtime override mechanism.
 - `linux/src/config.rs`, `mac/src/config.rs`, `windows/src/config.rs` — path discovery
 
 ### Testing

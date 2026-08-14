@@ -159,17 +159,17 @@ Remote logs are always written locally under:
 
 The WinUI app and Rust resident monitoring host share state under `%PROGRAMDATA%\Virtue`:
 
-- `%PROGRAMDATA%\Virtue\config\config.json`
 - `%PROGRAMDATA%\Virtue\config\ui_state.json`
 - `%PROGRAMDATA%\Virtue\config\token_store.json`
 - `%PROGRAMDATA%\Virtue\data\lifecycle_state.json`
 - `%PROGRAMDATA%\Virtue\data\logs\virtue.<date>.log` (daily-rotated diagnostic log)
 
-Runtime config overrides continue to support:
-
-- `apiBaseUrl`
-- `captureIntervalSeconds`
-- `batchWindowSeconds`
+`api_base_url`, `capture_interval_seconds`, and `batch_window_seconds` are no longer
+runtime-configurable. They're compile-time constants baked in by `client/core/build.rs`
+via `env!()`. To set local dev values, copy `client/.env.example` to `client/.env`
+(gitignored) and set `VIRTUE_DEFAULT_API_URL`, `VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS`,
+and `VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS` there; real process/CI env vars still take
+precedence over `.env`.
 
 The Rust FFI surface exposed to the WinUI app is:
 
@@ -180,8 +180,6 @@ The Rust FFI surface exposed to the WinUI app is:
 - `virtue_windows_get_session_status_json`
 - `virtue_windows_login`
 - `virtue_windows_logout`
-- `virtue_windows_get_runtime_config_json`
-- `virtue_windows_set_runtime_config_json`
 - `virtue_windows_free_string`
 
 ## Troubleshooting

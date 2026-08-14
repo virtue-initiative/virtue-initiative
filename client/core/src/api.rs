@@ -101,9 +101,6 @@ pub trait ApiTransport: Send + Sync {
         seq: u32,
         content_hash: &[u8; 32],
     ) -> CoreResult<()>;
-
-    /// Apply an updated API base URL to the transport in place.
-    fn reconfigure(&mut self, api_base_url: &str) -> CoreResult<()>;
 }
 
 #[derive(Debug, Clone)]
@@ -126,11 +123,6 @@ impl ReqwestApiClient {
 }
 
 impl ApiTransport for ReqwestApiClient {
-    fn reconfigure(&mut self, api_base_url: &str) -> CoreResult<()> {
-        self.base_url = api_base_url.trim_end_matches('/').to_string();
-        Ok(())
-    }
-
     fn logout(&self, device_refresh_token: &str) -> CoreResult<()> {
         self.send_empty(
             Method::POST,

@@ -13,7 +13,7 @@
 //
 // Requires: bun, cargo, curl, xvfb-run, all on PATH.
 
-import { mkdirSync, mkdtempSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Subprocess } from 'bun';
@@ -131,23 +131,16 @@ async function main(): Promise<void> {
   seedDevUser(ROOT);
 
   log('Building virtue-linux client');
-  run(['cargo', 'build', '-p', 'virtue-linux'], { cwd: CLIENT_DIR });
+  run(['cargo', 'build', '-p', 'virtue-linux'], {
+    cwd: CLIENT_DIR,
+    env: {
+      ...(process.env as Record<string, string>),
+      VIRTUE_DEFAULT_API_URL: apiBaseUrl,
+      VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS: String(CAPTURE_INTERVAL_SECONDS),
+      VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS: String(BATCH_WINDOW_SECONDS),
+    },
+  });
   virtueBin = join(CLIENT_DIR, 'target/debug/virtue');
-
-  log('Writing isolated client config');
-  mkdirSync(join(xdgConfigHome, 'virtue'), { recursive: true });
-  await Bun.write(
-    join(xdgConfigHome, 'virtue/config.json'),
-    JSON.stringify(
-      {
-        api_base_url: apiBaseUrl,
-        capture_interval_seconds: CAPTURE_INTERVAL_SECONDS,
-        batch_window_seconds: BATCH_WINDOW_SECONDS,
-      },
-      null,
-      2,
-    ),
-  );
 
   log('Starting the daemon under Xvfb');
   daemonProc = spawnLogged(['xvfb-run', '-a', virtueBin, 'daemon'], {

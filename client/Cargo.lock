@@ -4140,7 +4140,6 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "tempfile",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",

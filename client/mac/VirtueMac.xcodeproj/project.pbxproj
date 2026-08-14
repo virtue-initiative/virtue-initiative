@@ -9,7 +9,6 @@
 /* Begin PBXBuildFile section */
 		0946C5109E37F3FAEE99088C /* VirtueKit in Frameworks */ = {isa = PBXBuildFile; productRef = 082894B96DBA8A27A0ECE9E8 /* VirtueKit */; };
 		11B013F0E56013B1C6C6EC60 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 055BD2FE6FCEDDEC3BE4C0AF /* ContentView.swift */; };
-		292AA2A902C74EB4A54F00F7 /* OverridesSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36325AE89554E525D5084EC4 /* OverridesSheet.swift */; };
 		3A915346468F31F82374F360 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 694D4847EBC1A16DB15D473D /* Assets.xcassets */; };
 		5188731D1EEC6BD5A5FFAF29 /* MonitoringCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEC65E353F74300A665CAF36 /* MonitoringCoordinator.swift */; };
 		59CF74E58D6F876BC06C0E9D /* VirtueMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41804153F1E76D2C46B7E251 /* VirtueMacApp.swift */; };
@@ -21,7 +20,6 @@
 /* Begin PBXFileReference section */
 		037446F0C83B692EC6A40FE3 /* shared-swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "shared-swift"; path = "../shared-swift"; sourceTree = SOURCE_ROOT; };
 		055BD2FE6FCEDDEC3BE4C0AF /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		36325AE89554E525D5084EC4 /* OverridesSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverridesSheet.swift; sourceTree = "<group>"; };
 		3C2AC02ABF6297F0C75A1FDA /* NativeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBridge.swift; sourceTree = "<group>"; };
 		41804153F1E76D2C46B7E251 /* VirtueMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtueMacApp.swift; sourceTree = "<group>"; };
 		4B9ABF2C4EE68B7B48ACAF7D /* VirtueMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VirtueMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -69,7 +67,6 @@
 				055BD2FE6FCEDDEC3BE4C0AF /* ContentView.swift */,
 				FEC65E353F74300A665CAF36 /* MonitoringCoordinator.swift */,
 				3C2AC02ABF6297F0C75A1FDA /* NativeBridge.swift */,
-				36325AE89554E525D5084EC4 /* OverridesSheet.swift */,
 				CF53D4E18246A0144F67A054 /* StatusSheet.swift */,
 				41804153F1E76D2C46B7E251 /* VirtueMacApp.swift */,
 			);
@@ -202,7 +199,6 @@
 				11B013F0E56013B1C6C6EC60 /* ContentView.swift in Sources */,
 				5188731D1EEC6BD5A5FFAF29 /* MonitoringCoordinator.swift in Sources */,
 				FAA5A585CF46E803782F70E5 /* NativeBridge.swift in Sources */,
-				292AA2A902C74EB4A54F00F7 /* OverridesSheet.swift in Sources */,
 				F07E6593210A054AA700AB65 /* StatusSheet.swift in Sources */,
 				59CF74E58D6F876BC06C0E9D /* VirtueMacApp.swift in Sources */,
 			);

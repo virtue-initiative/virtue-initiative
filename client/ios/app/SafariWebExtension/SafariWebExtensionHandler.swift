@@ -6,10 +6,7 @@ private let extensionMessageKey = "message"
 @_silgen_name("virtue_ios_native_init")
 private func virtue_ios_native_init(
     _ configDir: UnsafePointer<CChar>?,
-    _ dataDir: UnsafePointer<CChar>?,
-    _ baseApiUrl: UnsafePointer<CChar>?,
-    _ captureIntervalSeconds: UnsafePointer<CChar>?,
-    _ batchWindowSeconds: UnsafePointer<CChar>?
+    _ dataDir: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
 @_silgen_name("virtue_ios_native_run_daemon_loop")
@@ -247,13 +244,6 @@ private final class SafariNativeRuntime {
         }
         lock.unlock()
 
-        let defaults = UserDefaults(suiteName: VirtueShared.appGroupID)
-        let overrides = (
-            defaults?.string(forKey: VirtueShared.baseApiUrlKey) ?? VirtueShared.defaultBaseApiUrl,
-            defaults?.string(forKey: VirtueShared.captureIntervalKey) ?? VirtueShared.defaultCaptureIntervalSeconds,
-            defaults?.string(forKey: VirtueShared.batchWindowKey) ?? VirtueShared.defaultBatchWindowSeconds
-        )
-
         guard let root = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: VirtueShared.appGroupID
         ) else {
@@ -272,19 +262,7 @@ private final class SafariNativeRuntime {
 
         let initError = configDir.path.withCString { configCString in
             dataDir.path.withCString { dataCString in
-                overrides.0.withCString { baseURLCString in
-                    overrides.1.withCString { captureIntervalCString in
-                        overrides.2.withCString { batchWindowCString in
-                            virtue_ios_native_init(
-                                configCString,
-                                dataCString,
-                                baseURLCString,
-                                captureIntervalCString,
-                                batchWindowCString
-                            )
-                        }
-                    }
-                }
+                virtue_ios_native_init(configCString, dataCString)
             }
         }
 

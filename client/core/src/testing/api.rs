@@ -35,7 +35,6 @@ pub struct MockApiState {
     /// batch carried rather than a separate API call.
     pub notify_calls: Vec<NotifyCall>,
     pub hash_uploads: Vec<HashCall>,
-    pub reconfigure_calls: Vec<String>,
 
     // --- canned responses (FIFO per method) ---
     pub logout_responses: VecDeque<CoreResult<()>>,
@@ -90,7 +89,6 @@ impl Default for MockApiState {
             batch_uploads: Vec::new(),
             notify_calls: Vec::new(),
             hash_uploads: Vec::new(),
-            reconfigure_calls: Vec::new(),
 
             logout_responses: VecDeque::new(),
             register_device_responses: VecDeque::new(),
@@ -158,13 +156,6 @@ impl Default for MockApiClient {
 }
 
 impl ApiTransport for MockApiClient {
-    fn reconfigure(&mut self, api_base_url: &str) -> CoreResult<()> {
-        self.state()
-            .reconfigure_calls
-            .push(api_base_url.to_string());
-        Ok(())
-    }
-
     fn logout(&self, device_refresh_token: &str) -> CoreResult<()> {
         let mut state = self.state();
         state.logout_calls.push(device_refresh_token.to_string());

@@ -228,8 +228,7 @@ fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
 }
 
 fn status(paths: ClientPaths, json: bool) -> Result<()> {
-    let mut config = build_core_config(&paths);
-    config.refresh_from_runtime_file()?;
+    let config = build_core_config(&paths);
     let status = load_service_status(&paths)?;
 
     let logged_in = status.is_authenticated;

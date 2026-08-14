@@ -36,27 +36,13 @@ The tray app waits for the daemon to come up, but it now stays open and keeps po
 
 `system_shutdown` is best-effort and may still be missed on abrupt power loss or forced termination.
 
-## Local API Override
+## Local configuration
 
-macOS reads runtime overrides from:
-
-`~/Library/Application Support/virtue/config.json`
-
-Example:
-
-```json
-{
-  "api_base_url": "http://localhost:8787",
-  "capture_interval_seconds": 120,
-  "batch_window_seconds": 900
-}
-```
-
-Apply after changing the file:
-
-```bash
-launchctl kickstart -k gui/$(id -u)/org.virtueinitiative.virtue.daemon
-```
+There are no runtime config overrides — `api_base_url`, `capture_interval_seconds`, and
+`batch_window_seconds` are compile-time constants baked into the binary via `env!()`
+(see `client/core/build.rs`). To set local values for development, copy
+`client/.env.example` to `client/.env` (gitignored) and edit it; real process/CI env
+vars always take precedence over that file. Rebuild for changes to take effect.
 
 The mac client stores shared core state under:
 

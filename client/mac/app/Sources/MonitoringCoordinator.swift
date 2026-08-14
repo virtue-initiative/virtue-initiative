@@ -9,20 +9,6 @@ enum PermissionPhase {
     case needsRelaunch
 }
 
-/// UserDefaults keys + built-in defaults for runtime overrides. Capture/batch
-/// defaults are read from the Rust core via NativeBridge rather than
-/// duplicated here. Blank fields mean "use the built-in default" — the FFI
-/// layer omits blank keys from the override JSON entirely.
-private enum OverrideDefaults {
-    static let baseApiUrlKey = "VIRTUE_BASE_API_URL"
-    static let captureIntervalKey = "VIRTUE_CAPTURE_INTERVAL_SECONDS"
-    static let batchWindowKey = "VIRTUE_BATCH_WINDOW_SECONDS"
-
-    static let baseApiUrl = "https://api.virtueinitiative.org"
-    static let captureIntervalSeconds = String(NativeBridge.defaultCaptureIntervalSeconds())
-    static let batchWindowSeconds = String(NativeBridge.defaultBatchWindowSeconds())
-}
-
 /// Faithfully ports `main.rs`'s tray event loop state machine: the daemon
 /// poll cadence, the `STOPPED_TIMEOUT` grace period that tolerates a brief
 /// launchd restart race, the "Unreachable" (alive-but-busy) distinction, and
@@ -54,11 +40,6 @@ final class MonitoringCoordinator: ObservableObject {
     @Published private(set) var pendingRequestCount: Int = 0
     @Published private(set) var lastLoopAt: String = "<none>"
 
-    @Published var baseApiUrlOverride: String = ""
-    @Published var captureIntervalOverride: String = ""
-    @Published var batchWindowOverride: String = ""
-    @Published private(set) var overridesMessage: String?
-
     let buildLabel = NativeBridge.getBuildLabel()
 
     private var statusTimer: Timer?
@@ -73,7 +54,6 @@ final class MonitoringCoordinator: ObservableObject {
 
     init() {
         registerAsLoginItem()
-        loadOverrideInputs()
 
         let initError = NativeBridge.initialize()
         if let initError {
@@ -100,9 +80,8 @@ final class MonitoringCoordinator: ObservableObject {
         postRelaunchGraceUntil = Date().addingTimeInterval(Self.postRelaunchGrace)
 
         Task {
-            let error = await Task.detached(priority: .userInitiated) { [daemonExePath, overrides = runtimeOverrides()] () -> String? in
-                _ = NativeBridge.setOverrides(overrides)
-                return NativeBridge.ensureDaemonRunning(daemonExePath: daemonExePath)
+            let error = await Task.detached(priority: .userInitiated) { [daemonExePath] () -> String? in
+                NativeBridge.ensureDaemonRunning(daemonExePath: daemonExePath)
             }.value
             // Previously discarded entirely: if `launchctl bootstrap` fails
             // (e.g. leftover launchd state from a prior crash/kill), the app
@@ -226,61 +205,6 @@ final class MonitoringCoordinator: ObservableObject {
             permissionPhase = nil
             unexpectedStopMessage = nil
         }
-    }
-
-    // MARK: - Runtime overrides
-
-    /// Writes overrides to `config.json`, which the daemon's `ConfigModule`
-    /// hot-reloads on its next `Ping` — no relaunch required.
-    func applyOverrides() {
-        let overrides = runtimeOverrides()
-        persistOverrides(overrides)
-        overridesMessage = "Applying…"
-        Task {
-            let error = await Task.detached(priority: .userInitiated) {
-                NativeBridge.setOverrides(overrides)
-            }.value
-            overridesMessage = error.map { "Override update failed: \($0)" } ?? "Runtime overrides updated"
-        }
-    }
-
-    private func runtimeOverrides() -> RuntimeOverrides {
-        RuntimeOverrides(
-            baseApiUrl: baseApiUrlOverride.trimmingCharacters(in: .whitespacesAndNewlines),
-            captureIntervalSeconds: captureIntervalOverride.trimmingCharacters(in: .whitespacesAndNewlines),
-            batchWindowSeconds: batchWindowOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-        )
-    }
-
-    private func persistOverrides(_ overrides: RuntimeOverrides) {
-        let defaults = UserDefaults.standard
-        defaults.set(overrides.baseApiUrl, forKey: OverrideDefaults.baseApiUrlKey)
-        defaults.set(overrides.captureIntervalSeconds, forKey: OverrideDefaults.captureIntervalKey)
-        defaults.set(overrides.batchWindowSeconds, forKey: OverrideDefaults.batchWindowKey)
-    }
-
-    private func loadOverrideInputs() {
-        let defaults = UserDefaults.standard
-        baseApiUrlOverride = storedOverride(
-            forKey: OverrideDefaults.baseApiUrlKey,
-            defaults: defaults,
-            fallback: OverrideDefaults.baseApiUrl
-        )
-        captureIntervalOverride = storedOverride(
-            forKey: OverrideDefaults.captureIntervalKey,
-            defaults: defaults,
-            fallback: OverrideDefaults.captureIntervalSeconds
-        )
-        batchWindowOverride = storedOverride(
-            forKey: OverrideDefaults.batchWindowKey,
-            defaults: defaults,
-            fallback: OverrideDefaults.batchWindowSeconds
-        )
-    }
-
-    private func storedOverride(forKey key: String, defaults: UserDefaults, fallback: String) -> String {
-        let value = defaults.string(forKey: key)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (value?.isEmpty == false) ? value! : fallback
     }
 
     // MARK: - Status polling

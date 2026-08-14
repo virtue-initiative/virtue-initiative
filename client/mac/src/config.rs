@@ -7,15 +7,12 @@ use serde::{Deserialize, Serialize};
 use virtue_core::{AuthState, Config};
 
 const DEFAULT_BASE_API_URL: &str = virtue_core::DEFAULT_API_BASE_URL;
-const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = virtue_core::DEFAULT_CAPTURE_INTERVAL_SECONDS;
-const DEFAULT_BATCH_WINDOW_SECONDS: u64 = virtue_core::DEFAULT_BATCH_WINDOW_SECONDS;
 
 #[derive(Clone, Debug)]
 pub struct ClientPaths {
     pub config_dir: PathBuf,
     pub data_dir: PathBuf,
     pub state_dir: PathBuf,
-    pub runtime_config_file: PathBuf,
     pub ui_state_file: PathBuf,
     pub launch_agents_dir: PathBuf,
     pub logs_dir: PathBuf,
@@ -36,7 +33,6 @@ impl ClientPaths {
 
         Ok(Self {
             state_dir,
-            runtime_config_file: config_dir.join("config.json"),
             ui_state_file: config_dir.join("ui_state.json"),
             launch_agent_file: launch_agents_dir.join("org.virtueinitiative.virtue.daemon.plist"),
             config_dir,
@@ -77,9 +73,8 @@ pub fn build_core_config(paths: &ClientPaths) -> Config {
         default_device_name(),
         "macos",
         paths.state_dir.clone(),
-        Some(paths.runtime_config_file.clone()),
-        Duration::from_secs(DEFAULT_CAPTURE_INTERVAL_SECONDS),
-        Duration::from_secs(DEFAULT_BATCH_WINDOW_SECONDS),
+        Duration::from_secs(virtue_core::default_capture_interval_seconds()),
+        Duration::from_secs(virtue_core::default_batch_window_seconds()),
     )
 }
 

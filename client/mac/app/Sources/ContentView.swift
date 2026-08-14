@@ -7,7 +7,6 @@ struct ContentView: View {
     @State private var showStopConfirmation = false
     @State private var showLogoutConfirmation = false
     @State private var showStatusSheet = false
-    @State private var showOverridesSheet = false
 
     var body: some View {
         ScrollView {
@@ -25,9 +24,6 @@ struct ContentView: View {
         .background(VirtueBrand.bg)
         .sheet(isPresented: $showStatusSheet) {
             StatusSheet(coordinator: coordinator)
-        }
-        .sheet(isPresented: $showOverridesSheet) {
-            OverridesSheet(coordinator: coordinator)
         }
         .alert("Stop monitoring and quit?", isPresented: $showStopConfirmation) {
             Button("Cancel", role: .cancel) {}
@@ -128,11 +124,6 @@ struct ContentView: View {
                         }
                         .buttonStyle(VirtueButtonStyle())
                         .disabled(coordinator.isSigningOut)
-
-                        Button("Runtime Overrides") {
-                            showOverridesSheet = true
-                        }
-                        .buttonStyle(VirtueButtonStyle())
                     }
                     .padding(.top, 6)
                 } else {
@@ -148,12 +139,6 @@ struct ContentView: View {
                         loginError: coordinator.loginError,
                         onSubmit: coordinator.login
                     )
-                    .padding(.top, 6)
-
-                    Button("Runtime Overrides") {
-                        showOverridesSheet = true
-                    }
-                    .buttonStyle(VirtueButtonStyle())
                     .padding(.top, 6)
                 }
             }
