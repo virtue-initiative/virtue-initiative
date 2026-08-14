@@ -275,10 +275,14 @@ export async function verifyDeviceHashBatch(
   fail('device/hash/batch rows did not land in time');
 }
 
+/** Exits 1 immediately (there's nothing to clean up yet) if any command is missing. */
 export function requireCommands(cmds: string[]): void {
   for (const cmd of cmds) {
     const found = Bun.spawnSync(['which', cmd], { stdout: 'ignore', stderr: 'ignore' }).success;
-    if (!found) fail(`missing required command '${cmd}' on PATH`);
+    if (!found) {
+      console.error(`integration-test: missing required command '${cmd}' on PATH`);
+      process.exit(1);
+    }
   }
 }
 

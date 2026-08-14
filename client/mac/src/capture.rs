@@ -185,11 +185,28 @@ impl MacPlatformHooks {
 }
 
 impl ScreenshotHooks for MacPlatformHooks {
+    #[cfg(not(feature = "mock-capture"))]
     fn take_screenshot(&self) -> CoreResult<Screenshot> {
         let bytes = capture_screen().map_err(|err| CoreError::CommandFailed(err.to_string()))?;
         Ok(Screenshot {
             captured_at_ms: self.get_time_utc_ms()?,
             bytes,
+            content_type: "image/png".to_string(),
+        })
+    }
+
+    // CI has no headless way to grant Screen Recording permission, so a real
+    // `screencapture` always fails there (see `capture_screen`). This feature
+    // swaps in a fixed embedded image instead, so CI can exercise the real
+    // capture -> upload -> hash -> batch pipeline rather than only the
+    // CaptureFailed alert path. Compiled in only when explicitly requested
+    // (`cargo build --features mock-capture`) -- never by build-app.sh/
+    // build-dmg.sh, so it cannot end up in a shipped build.
+    #[cfg(feature = "mock-capture")]
+    fn take_screenshot(&self) -> CoreResult<Screenshot> {
+        Ok(Screenshot {
+            captured_at_ms: self.get_time_utc_ms()?,
+            bytes: include_bytes!("../assets/ci-mock-screenshot.png").to_vec(),
             content_type: "image/png".to_string(),
         })
     }
