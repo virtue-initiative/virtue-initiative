@@ -68,4 +68,8 @@ impl CoreError {
     pub fn is_bad_request(&self) -> bool {
         matches!(self, Self::HttpStatus { status: 400, .. })
     }
+
+    pub fn is_conflict(&self) -> bool {
+        matches!(self, Self::HttpStatus { status: 409, .. })
+    }
 }

@@ -1,0 +1,51 @@
+name: Hash Server Checks
+
+on:
+  pull_request:
+    paths:
+      - 'hash-server/**'
+      - '.github/workflows/hash-server.yml'
+  push:
+    branches:
+      - main
+      - staging
+    paths:
+      - 'hash-server/**'
+      - '.github/workflows/hash-server.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hash-server:
+    name: Hash Server
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          workspaces: hash-server
+
+      - name: Rust format check
+        run: cargo fmt --all -- --check
+        working-directory: hash-server
+
+      - name: Rust lint
+        run: cargo clippy --all-targets -- -D warnings
+        working-directory: hash-server
+
+      # SPEC.md section 4.2: "The rust unit and integration tests SHOULD be run in github CI."
+      - name: Rust tests
+        run: cargo test
+        working-directory: hash-server

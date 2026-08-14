@@ -1,13 +1,13 @@
 #!/usr/bin/env bun
 // Device -> api/hash-server integration smoke test (Windows).
 //
-// Boots the api worker locally against a fresh D1 database (the api's own
-// D1-backed /hash routes stand in for the standalone Rust hash-server in
-// local dev -- see api/src/lib/hash-server.ts and scripts/launch.sh), seeds
-// the deterministic dev account, builds and runs a small
-// `virtue-windows-ci-runner` binary that drives the real `virtue_windows`
-// monitoring code in-process, then asserts that hashes and batches actually
-// landed in the database.
+// Boots the api worker locally alongside a real standalone hash-server
+// process (see hash-server/SPEC.md and scripts/launch.sh, which starts it
+// the same way for local dev), seeds the deterministic dev account, builds
+// and runs a small `virtue-windows-ci-runner` binary that drives the real
+// `virtue_windows` monitoring code in-process, then asserts that a
+// device/batch landed in D1 and that the hash server actually ingested a
+// hash for it.
 //
 // Unlike Linux (`virtue login` CLI) and macOS (a daemon binary + an
 // IPC-socket login helper), the Windows client has no standalone daemon
@@ -43,6 +43,7 @@ import {
   fail,
   log,
   pickFreePort,
+  readDevVar,
   requireCommands,
   run,
   runIntegrationTest,
@@ -50,6 +51,7 @@ import {
   setupApiDevEnvironment,
   spawnLogged,
   startApiDevServer,
+  startHashServer,
   stopProcess,
   verifyDeviceHashBatch,
   waitForHttpReady,
@@ -59,6 +61,7 @@ const SCRIPT_DIR = import.meta.dir;
 const ROOT = join(SCRIPT_DIR, '../../..');
 const CLIENT_DIR = join(ROOT, 'client');
 const API_DIR = join(ROOT, 'api');
+const HASH_SERVER_DIR = join(ROOT, 'hash-server');
 
 // capture_interval_seconds has a 15s floor enforced by client/core/src/config.rs.
 const CAPTURE_INTERVAL_SECONDS = 15;
@@ -74,6 +77,7 @@ requireCommands(['bun', 'cargo']);
 
 const logDir = mkdtempSync(join(tmpdir(), 'virtue-windows-ci-log-'));
 const apiLog = join(logDir, 'api.log');
+const hashLog = join(logDir, 'hash-server.log');
 const runnerLog = join(logDir, 'runner.log');
 
 // Isolated PROGRAMDATA for the client under test only -- NOT set for the
@@ -90,11 +94,13 @@ const clientEnv: Record<string, string> = {
 };
 
 let apiProc: Subprocess | undefined;
+let hashProc: Subprocess | undefined;
 let runnerProc: Subprocess | undefined;
 
 async function cleanup(): Promise<void> {
   await stopProcess(runnerProc);
   await stopProcess(apiProc);
+  await stopProcess(hashProc);
   rmSync(tmpProgramData, { recursive: true, force: true });
   rmSync(logDir, { recursive: true, force: true });
 }
@@ -102,6 +108,8 @@ async function cleanup(): Promise<void> {
 async function dumpLogs(): Promise<void> {
   console.log('=== api log ===');
   if (existsSync(apiLog)) console.log(await Bun.file(apiLog).text());
+  console.log('=== hash server log ===');
+  if (existsSync(hashLog)) console.log(await Bun.file(hashLog).text());
   console.log('=== runner log ===');
   if (existsSync(runnerLog)) console.log(await Bun.file(runnerLog).text());
 }
@@ -115,12 +123,23 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
 
 async function main(): Promise<void> {
   const apiPort = await pickFreePort();
+  const hashPort = await pickFreePort();
   const apiBaseUrl = `http://localhost:${apiPort}`;
+  const hashBaseUrl = `http://localhost:${hashPort}`;
 
   await setupApiDevEnvironment(API_DIR);
+  const jwtPublicKeyPem = readDevVar(API_DIR, 'JWT_PUBLIC_KEY');
 
-  apiProc = startApiDevServer(API_DIR, apiPort, apiBaseUrl, apiLog);
-  await waitForHttpReady(`${apiBaseUrl}/`);
+  hashProc = startHashServer(
+    HASH_SERVER_DIR,
+    hashPort,
+    jwtPublicKeyPem,
+    join(logDir, 'hash-server.sqlite'),
+    hashLog,
+  );
+  apiProc = startApiDevServer(API_DIR, apiPort, hashBaseUrl, apiLog);
+  await waitForHttpReady(`${hashBaseUrl}/`, 'hash server');
+  await waitForHttpReady(`${apiBaseUrl}/`, 'api dev server');
 
   seedDevUser(ROOT);
 
@@ -170,7 +189,8 @@ async function main(): Promise<void> {
   const exitCode = await runnerProc.exited;
   if (exitCode !== 0) fail(`virtue-windows-ci-runner exited with code ${exitCode}`);
 
-  await verifyDeviceHashBatch(API_DIR, DEVICE_NAME);
+  const jwtPrivateKeyPem = readDevVar(API_DIR, 'JWT_PRIVATE_KEY');
+  await verifyDeviceHashBatch(API_DIR, HASH_SERVER_DIR, hashBaseUrl, jwtPrivateKeyPem, DEVICE_NAME);
 }
 
 await runIntegrationTest(main, dumpLogs);

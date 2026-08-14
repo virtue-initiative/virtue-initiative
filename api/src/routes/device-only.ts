@@ -14,7 +14,7 @@ import {
   markDeviceDeleted,
 } from '../lib/db';
 import { hashGet, hashReset } from '../lib/hash-server';
-import { encodeBase64, encodeHex } from '../lib/encoding';
+import { encodeBase64 } from '../lib/encoding';
 import { generateToken } from '../lib/jwt';
 import { putObject } from '../lib/r2';
 import { notifyPartnersAboutRiskLog, riskToSeverity } from '../lib/tamper';
@@ -111,7 +111,7 @@ async function buildDeviceState(
     hash_base_url: hashBaseUrl,
   };
   const token = await generateToken(
-    'hash-server',
+    'device',
     device.id,
     c.env.JWT_PRIVATE_KEY,
     HASH_TOKEN_TTL_SECONDS,
@@ -223,7 +223,7 @@ deviceOnly.post(
     } = c.req.valid('form');
 
     const hashState = await hashGet(c.env, device.id);
-    const endHash = encodeHex(hashState);
+    const endHash = hashState.hash;
     const batchId = uuidv4();
     const key = `user/${device.owner}/batches/${batchId}.enc`;
     const url = `${c.env.R2_URL}/${key}`;

@@ -1,16 +1,18 @@
 // Shared helpers for the per-platform device -> api/hash-server integration
-// tests: client/linux/scripts/integration-test.ts and
-// client/mac/scripts/integration-test.ts.
+// tests: client/linux/scripts/integration-test.ts, client/mac/scripts/
+// integration-test.ts, and client/windows/scripts/integration-test.ts.
 //
-// Both drive the same shape: boot the api worker locally against a fresh D1
-// database (the api's own D1-backed /hash routes stand in for the standalone
-// Rust hash-server in local dev -- see api/src/lib/hash-server.ts and
-// scripts/launch.sh), seed the deterministic dev account, build and run the
-// real platform daemon, log it in, wait briefly, then assert that hashes and
-// batches actually landed in the database.
+// All three drive the same shape: boot the api worker locally alongside a
+// real standalone hash-server process (see hash-server/SPEC.md and
+// scripts/launch.sh, which starts it the same way for local dev), seed the
+// deterministic dev account, build and run the real platform daemon, log it
+// in, wait briefly, then assert that a device/batch landed in D1 and that
+// the hash server actually ingested a hash for it.
 
-import { openSync, closeSync } from 'node:fs';
+import { openSync, closeSync, readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
+import { join } from 'node:path';
 import type { Subprocess } from 'bun';
 
 export const DEV_EMAIL = 'dev@dev.com';
@@ -88,8 +90,8 @@ export async function waitUntil(
   return false;
 }
 
-export async function waitForHttpReady(url: string, tries = 60): Promise<void> {
-  log('Waiting for api dev server to become ready');
+export async function waitForHttpReady(url: string, label: string, tries = 60): Promise<void> {
+  log(`Waiting for ${label} to become ready`);
   const ready = await waitUntil(tries, async () => {
     try {
       const res = await fetch(url);
@@ -98,7 +100,7 @@ export async function waitForHttpReady(url: string, tries = 60): Promise<void> {
       return false;
     }
   });
-  if (!ready) fail('api dev server did not become ready in time');
+  if (!ready) fail(`${label} did not become ready in time`);
 }
 
 export async function setupApiDevEnvironment(apiDir: string): Promise<void> {
@@ -114,10 +116,41 @@ export async function setupApiDevEnvironment(apiDir: string): Promise<void> {
   run(['bun', 'run', 'db:migrate:local'], { cwd: apiDir });
 }
 
+/** Reads and un-escapes a `NAME="..."` value from `apiDir`'s `.dev.vars` (see api/.dev.vars.example). */
+export function readDevVar(apiDir: string, name: string): string {
+  const contents = readFileSync(join(apiDir, '.dev.vars'), 'utf8');
+  const match = contents.match(new RegExp(`^${name}="(.*)"$`, 'm'));
+  if (!match) fail(`integration-test: ${name} not found in ${apiDir}/.dev.vars`);
+  return match[1].replace(/\\n/g, '\n');
+}
+
+/** Starts the real standalone hash server (hash-server/), the same way scripts/launch.sh does for local dev. */
+export function startHashServer(
+  hashServerDir: string,
+  hashPort: number,
+  jwtPublicKeyPem: string,
+  databasePath: string,
+  logPath: string,
+): Subprocess {
+  log('Starting hash server');
+  return spawnLogged(['cargo', 'run', '--quiet'], {
+    cwd: hashServerDir,
+    env: {
+      ...(process.env as Record<string, string>),
+      HOST: '127.0.0.1',
+      PORT: String(hashPort),
+      JWT_PUBLIC_KEY: jwtPublicKeyPem,
+      DATABASE_PATH: databasePath,
+      RUST_LOG: 'info',
+    },
+    logPath,
+  });
+}
+
 export function startApiDevServer(
   apiDir: string,
   apiPort: number,
-  apiBaseUrl: string,
+  hashBaseUrl: string,
   logPath: string,
 ): Subprocess {
   log('Starting api dev server');
@@ -130,7 +163,7 @@ export function startApiDevServer(
       '--port',
       String(apiPort),
       '--var',
-      `HASH_SERVER_URL:${apiBaseUrl}/api`,
+      `HASH_SERVER_URL:${hashBaseUrl}`,
     ],
     { cwd: apiDir, logPath },
   );
@@ -157,8 +190,11 @@ export function run(
   }
 }
 
-/** `wrangler d1 execute --json`, parsed directly -- no shell-out needed to extract the count. */
-function d1QueryCount(apiDir: string, sql: string): number {
+/** `wrangler d1 execute --json`, parsed directly -- no shell-out needed to extract fields. */
+function d1QueryJson(
+  apiDir: string,
+  sql: string,
+): Array<{ results?: Array<Record<string, unknown>> }> {
   const result = Bun.spawnSync(
     [
       'bun',
@@ -177,8 +213,55 @@ function d1QueryCount(apiDir: string, sql: string): number {
     { cwd: apiDir, stdout: 'pipe', stderr: 'inherit' },
   );
   if (!result.success) fail(`wrangler d1 execute failed for: ${sql}`);
-  const data = JSON.parse(result.stdout.toString());
-  return data[0]?.results?.[0]?.c ?? 0;
+  return JSON.parse(result.stdout.toString());
+}
+
+function d1QueryCount(apiDir: string, sql: string): number {
+  return (d1QueryJson(apiDir, sql)[0]?.results?.[0]?.c as number | undefined) ?? 0;
+}
+
+function d1QueryValue(apiDir: string, sql: string): string {
+  return (d1QueryJson(apiDir, sql)[0]?.results?.[0]?.v as string | undefined) ?? '';
+}
+
+/** `hex(id)` from D1 (big-endian, no dashes, uppercase) back to a standard lowercase UUID string. */
+function hexToUuid(hex: string): string {
+  const h = hex.toLowerCase();
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+}
+
+/** Mints a `server`-typed JWT via hash-server's own dev/test helper (see hash-server/SPEC.md section 4.1). */
+function mintServerToken(hashServerDir: string, privateKeyPemPath: string): string {
+  const result = Bun.spawnSync(
+    [
+      'cargo',
+      'run',
+      '--quiet',
+      '--example',
+      'mint_token',
+      '--',
+      'ci-integration-test',
+      'server',
+      privateKeyPemPath,
+    ],
+    { cwd: hashServerDir, stdout: 'pipe', stderr: 'inherit' },
+  );
+  if (!result.success) fail('failed to mint a hash-server server token');
+  return result.stdout.toString().trim();
+}
+
+/** `GET /hash?devices=<id>` on the standalone hash server, returning `last_received` (0 if unknown). */
+async function hashServerLastReceived(
+  hashBaseUrl: string,
+  serverToken: string,
+  deviceId: string,
+): Promise<number> {
+  const resp = await fetch(`${hashBaseUrl}/hash?devices=${deviceId}`, {
+    headers: { Authorization: `Bearer ${serverToken}` },
+  });
+  if (!resp.ok) fail(`hash server GET /hash failed: ${resp.status}`);
+  const body = (await resp.json()) as Record<string, { last_received: number }>;
+  return body[deviceId]?.last_received ?? 0;
 }
 
 function d1Dump(apiDir: string, label: string, sql: string): void {
@@ -204,28 +287,43 @@ function d1Dump(apiDir: string, label: string, sql: string): void {
 }
 
 /**
- * Asserts a device/hash/batch row landed for `deviceName`, retrying for a few
- * seconds since a `wrangler d1 execute --local` CLI process reading the same
- * on-disk D1 state can lag slightly behind Miniflare's in-process view right
- * after a write.
+ * Asserts a device row and at least one batch row landed in D1, and that the
+ * standalone hash server actually ingested a hash for that device -- all
+ * retried for a few seconds since a `wrangler d1 execute --local` CLI process
+ * reading the same on-disk D1 state can lag slightly behind Miniflare's
+ * in-process view right after a write.
  *
- * hash_states.count is a rolling per-batch-window counter, not a cumulative
- * total: api/src/routes/device-only.ts resets it to 0 after every successful
- * POST /d/batch (see hashReset() there), so with a short batch window it can
- * legitimately read 0 moments after a hash was ingested. hashed_at is never
- * touched by that reset (see localHashReset in api/src/lib/hash-server.ts),
- * so it's the durable signal that at least one hash was ever ingested.
+ * Hash-chain state itself no longer lives in D1 (see hash-server/SPEC.md) --
+ * it's checked directly against the hash server via `GET /hash?devices=<id>`,
+ * authenticated with a `server` token minted the same way the api does (see
+ * hash-server/examples/mint_token.rs). `last_received` is never cleared by
+ * POST /d/batch's hashReset() (SPEC.md section 2.3 -- reset zeroes the hash
+ * and seq but not last_received), so it's the durable signal that at least
+ * one hash was ever ingested, mirroring the old D1 `hashed_at` check.
  */
 export async function verifyDeviceHashBatch(
   apiDir: string,
+  hashServerDir: string,
+  hashBaseUrl: string,
+  jwtPrivateKeyPem: string,
   deviceName: string,
   tries = 15,
 ): Promise<void> {
-  log('Verifying database state');
+  log('Verifying D1 and hash-server state');
+
+  const keyDir = mkdtempSync(join(tmpdir(), 'virtue-ci-jwt-'));
+  let serverToken: string;
+  try {
+    const keyPath = join(keyDir, 'jwt-private-key.pem');
+    writeFileSync(keyPath, jwtPrivateKeyPem);
+    serverToken = mintServerToken(hashServerDir, keyPath);
+  } finally {
+    rmSync(keyDir, { recursive: true, force: true });
+  }
 
   let deviceCount = 0;
-  let hashCount = 0;
   let batchCount = 0;
+  let lastReceived = 0;
   let ok = false;
 
   for (let i = 0; i < tries; i++) {
@@ -233,18 +331,22 @@ export async function verifyDeviceHashBatch(
       apiDir,
       `SELECT COUNT(*) as c FROM devices WHERE name = '${deviceName}'`,
     );
-    hashCount = d1QueryCount(
-      apiDir,
-      `SELECT COUNT(*) as c FROM hash_states hs JOIN devices d ON d.id = hs.device_id WHERE d.name = '${deviceName}' AND hs.hashed_at IS NOT NULL`,
-    );
+    const deviceIdHex =
+      deviceCount >= 1
+        ? d1QueryValue(apiDir, `SELECT hex(id) as v FROM devices WHERE name = '${deviceName}'`)
+        : '';
     batchCount = d1QueryCount(
       apiDir,
       `SELECT COUNT(*) as c FROM batches b JOIN devices d ON d.id = b.device_id WHERE d.name = '${deviceName}'`,
     );
+    lastReceived = deviceIdHex
+      ? await hashServerLastReceived(hashBaseUrl, serverToken, hexToUuid(deviceIdHex))
+      : 0;
+
     console.log(
-      `device rows: ${deviceCount}, ever-hashed: ${hashCount}, batch rows: ${batchCount}`,
+      `device rows: ${deviceCount}, batch rows: ${batchCount}, hash-server last_received: ${lastReceived}`,
     );
-    ok = deviceCount >= 1 && hashCount >= 1 && batchCount >= 1;
+    ok = deviceCount >= 1 && batchCount >= 1 && lastReceived > 0;
     if (ok) break;
     await sleep(2);
   }
@@ -253,26 +355,21 @@ export async function verifyDeviceHashBatch(
 
   if (deviceCount < 1)
     console.error(`integration-test: expected a devices row for '${deviceName}'`);
-  if (hashCount < 1)
-    console.error(
-      `integration-test: expected a hash_states row with hashed_at set for '${deviceName}'`,
-    );
   if (batchCount < 1)
     console.error(`integration-test: expected at least one batch row for '${deviceName}'`);
+  if (lastReceived <= 0)
+    console.error(
+      `integration-test: expected the hash server to report last_received > 0 for '${deviceName}'`,
+    );
 
   d1Dump(apiDir, 'devices', 'SELECT hex(id) as id, name FROM devices');
-  d1Dump(
-    apiDir,
-    'hash_states',
-    'SELECT hex(device_id) as device_id, count, hashed_at FROM hash_states',
-  );
   d1Dump(
     apiDir,
     'batches',
     'SELECT hex(device_id) as device_id, COUNT(*) as n FROM batches GROUP BY device_id',
   );
 
-  fail('device/hash/batch rows did not land in time');
+  fail('device/batch rows or hash-server state did not land in time');
 }
 
 /** Exits 1 immediately (there's nothing to clean up yet) if any command is missing. */

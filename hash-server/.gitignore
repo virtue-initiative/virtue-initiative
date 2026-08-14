@@ -1,2 +1,5 @@
-target
-*.db*
+target/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.env

@@ -1,15 +1,21 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { SELF, env } from 'cloudflare:test';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { fetchMock, SELF, env } from 'cloudflare:test';
 import {
   authHeaders,
   BASE,
   clearDB,
   createDeviceForUser,
-  createServerToken,
   listEmailDeliveries,
   signupAndGetCookie,
   uuidToBytes,
 } from './helpers';
+import { installHashServerMock, seedHashState } from './hash-server-mock';
+
+beforeAll(() => {
+  fetchMock.activate();
+  fetchMock.disableNetConnect();
+  installHashServerMock();
+});
 
 beforeEach(clearDB);
 
@@ -33,12 +39,9 @@ describe('Data and device API routes', () => {
     expect(deviceInfo.settings.wrapping_keys[0]?.user_id).toBe(userId);
     expect(deviceInfo.settings.hash_base_url).toBeTruthy();
 
-    const hashUploadRes = await SELF.fetch(`${BASE}/hash`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${deviceInfo.token}` },
-      body: new Uint8Array(32).fill(7),
-    });
-    expect(hashUploadRes.status).toBe(200);
+    // Simulates the client having already uploaded a hash directly to the (mocked)
+    // hash server — the API itself never POSTs there, so there's no request to make.
+    seedHashState(device.id, { hash: '07'.repeat(32), seq: 1, last_received: 1000 });
 
     const form = new FormData();
     form.set('start_time', '1710000000000');
@@ -64,7 +67,7 @@ describe('Data and device API routes', () => {
       end_time: number;
     };
     expect(batch.id).toBeTruthy();
-    expect(batch.end_hash).toHaveLength(64);
+    expect(batch.end_hash).toBe('07'.repeat(32));
     expect(batch.url).toContain('/user/');
 
     const storedBatch = await env.DB.prepare('SELECT access_keys FROM batches WHERE id = ?')
@@ -91,13 +94,6 @@ describe('Data and device API routes', () => {
       encrypted_key: Buffer.from('owner-envelope').toString('base64'),
     });
     expect(data.batches[0]?.created_at).toEqual(expect.any(Number));
-
-    const serverToken = await createServerToken(device.id);
-    const resetRes = await SELF.fetch(`${BASE}/hash`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${serverToken}` },
-    });
-    expect(resetRes.status).toBe(200);
   });
 
   it("returns the accepted partner's batch envelope", async () => {

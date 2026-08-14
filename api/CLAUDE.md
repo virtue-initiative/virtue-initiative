@@ -6,16 +6,16 @@ Cloudflare Workers API using Hono. Entry point: `src/index.ts`.
 
 Two kinds of credential exist: **opaque session refresh tokens** (looked up in the `sessions` table) and **short-lived EdDSA JWTs**.
 
-| Token                | Kind   | TTL        | Auth header             | Notes                                                                                      |
-| -------------------- | ------ | ---------- | ----------------------- | ------------------------------------------------------------------------------------------ |
-| web refresh token    | opaque | 1 year     | `refresh_token` cookie¹ | Authenticates user/web routes directly                                                     |
-| device refresh token | opaque | ~1000 yr   | `Bearer <token>`        | Authenticates `/d/*` routes directly                                                       |
-| `hash-server`        | JWT    | 1 hour     | `Bearer <jwt>`          | Hash-server routes (`/hash`); minted by `POST /d/device`, `GET /d/device`, `POST /d/batch` |
-| `server`             | JWT    | 60 seconds | `Bearer <jwt>`          | Server-to-server (e.g. `DELETE /hash`, `GET /hash/info`)                                   |
+| Token                | Kind   | TTL        | Auth header             | Notes                                                                                                                                                 |
+| -------------------- | ------ | ---------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| web refresh token    | opaque | 1 year     | `refresh_token` cookie¹ | Authenticates user/web routes directly                                                                                                                |
+| device refresh token | opaque | ~1000 yr   | `Bearer <token>`        | Authenticates `/d/*` routes directly                                                                                                                  |
+| `device`             | JWT    | 1 hour     | `Bearer <jwt>`          | `POST /hash` on the standalone hash server (see `../hash-server/SPEC.md`), not this API; minted by `POST /d/device`, `GET /d/device`, `POST /d/batch` |
+| `server`             | JWT    | 60 seconds | `Bearer <jwt>`          | `GET /hash` / `DELETE /hash` on the standalone hash server; minted by this API, `sub` ignored                                                         |
 
 ¹ The web refresh token is also accepted as `Bearer <token>` (used by the cache worker).
 
-There is no access-token exchange: opaque refresh tokens authenticate their routes directly. The JWT `sub` is a device ID for `hash-server`/`server` tokens; the `type` claim distinguishes them.
+There is no access-token exchange: opaque refresh tokens authenticate their routes directly. Both JWT types authenticate against the standalone hash server, not any route on this API — this API only mints them. `sub` is the device ID for `device` tokens; ignored for `server` tokens.
 
 ## Validation pattern
 
@@ -40,7 +40,7 @@ HTTP status codes: 400 bad request, 401 unauthorized, 403 forbidden, 404 not fou
 ## Key files
 
 - `src/lib/db.ts` — all D1 database queries
-- `src/lib/hash-server.ts` — hash-chain state access (local D1 or remote hash server), used by `hashes.ts`, `device-only.ts`, `devices.ts`
+- `src/lib/hash-server.ts` — client for the standalone hash server (`GET`/`DELETE /hash`), used by `device-only.ts`, `devices.ts`
 - `src/lib/credentials.ts` — `verifyUserCredentials`, shared by `POST /login` and `POST /d/device`
 - `src/lib/app-url.ts` — `getAppUrl`, shared by every route that links back to the web app in an email
 - `src/middleware/auth.ts` — JWT verification, sets `c.get('sub')`

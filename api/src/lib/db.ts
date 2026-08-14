@@ -421,7 +421,6 @@ export async function listBatchUrlsForUser(db: D1Database, userId: string) {
 export async function deleteDeviceById(db: D1Database, deviceId: string) {
   const deviceIdBytes = uuidToBytes(deviceId);
   await db.prepare('DELETE FROM batches WHERE device_id = ?').bind(deviceIdBytes).run();
-  await db.prepare('DELETE FROM hash_states WHERE device_id = ?').bind(deviceIdBytes).run();
   return db.prepare('DELETE FROM devices WHERE id = ?').bind(deviceIdBytes).run();
 }
 
@@ -467,8 +466,6 @@ export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
     platform: string;
     created_at: number;
     last_upload_at: number | null;
-    last_hash_at: number | null;
-    pending_count: number;
     deleted_at: number | null;
   }>(
     db
@@ -476,9 +473,10 @@ export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
         // Pre-aggregate each owner's batches per device (using idx_batches_user_id,
         // since batches.user_id is always the device owner) before joining to devices.
         // This avoids the LEFT JOIN batches row-explosion that GROUP BY had to collapse.
+        // Hash-chain state (last_hash_at/pending_count) lives entirely in the hash
+        // server now — see hashGetMany in lib/hash-server.ts — not in D1.
         `SELECT d.id, d.owner, d.name, d.platform, d.created_at, d.deleted_at,
-                lu.last_upload_at,
-                hs.hashed_at AS last_hash_at, COALESCE(hs.count, 0) AS pending_count
+                lu.last_upload_at
          FROM devices d
          LEFT JOIN (
            SELECT device_id, MAX(end_time) AS last_upload_at
@@ -486,7 +484,6 @@ export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
            WHERE user_id IN (${placeholders(ownerIds.length)})
            GROUP BY device_id
          ) lu ON lu.device_id = d.id
-         LEFT JOIN hash_states hs ON hs.device_id = d.id
          WHERE d.owner IN (${placeholders(ownerIds.length)})
          ORDER BY d.created_at DESC`,
       )
