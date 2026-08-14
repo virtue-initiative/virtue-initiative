@@ -38,11 +38,11 @@ describe('JWT tokens', () => {
     expect(payload.type).toBe('server');
   });
 
-  it('generates and verifies a hash-server token', async () => {
-    const token = await generateToken('hash-server', 'device-123', TEST_JWT_PRIVATE_KEY, 3600);
+  it('generates and verifies a device token', async () => {
+    const token = await generateToken('device', 'device-123', TEST_JWT_PRIVATE_KEY, 3600);
     const payload = await verifyJWT(token, TEST_JWT_PUBLIC_KEY);
     expect(payload.sub).toBe('device-123');
-    expect(payload.type).toBe('hash-server');
+    expect(payload.type).toBe('device');
   });
 
   it('rejects a token signed with a different public key', async () => {

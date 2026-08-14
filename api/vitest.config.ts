@@ -14,7 +14,8 @@ export default defineWorkersConfig({
             AWS_ACCESS_KEY_ID: 'test-aws-key',
             AWS_SECRET_ACCESS_KEY: 'test-aws-secret',
             EMAIL_DELIVERY_MODE: 'log',
-            HASH_SERVER_URL: 'http://localhost/api',
+            // Intercepted by fetchMock's hash-server test double — see test/hash-server-mock.ts.
+            HASH_SERVER_URL: 'https://example.com',
           },
         },
       },

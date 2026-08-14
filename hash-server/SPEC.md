@@ -20,8 +20,7 @@ All error responses (not **2xx**) MUST have this shape.
 
 ### 1.2 Authentication
 
-JWTs MUST use `EdDSA` (Ed25519). This server only verifies tokens minted by the main
-API server — it never signs its own. The verification key is configured via the
+JWTs MUST use `EdDSA` (Ed25519). The verification key is configured via the
 `JWT_PUBLIC_KEY` environment variable (Ed25519 SPKI PEM), matching the main API's
 `JWT_PUBLIC_KEY`/`JWT_PRIVATE_KEY` pair.
 
@@ -35,7 +34,7 @@ The client MUST authenticate with this header.
 Authorization: Bearer <JWT>`
 ```
 
-The JWT SHOULD be signed by the main API server and MUST have 'hash-server' as the type claim and the device ID as the sub.
+The JWT SHOULD be signed by the main API server and MUST have 'device' as the type claim and the device ID as the sub.
 
 The server MUST reject invalid JWTs with **HTTP 401**.
 
@@ -63,7 +62,7 @@ stored = sha256(stored || hash)
 
 The server MUST return **HTTP 201** if the new state has been written to disk and MUST NOT return **HTTP 201** otherwise.
 
-The client SHOULD retry the request if it does not receive any of the following errors: `400`, `401`, `409`
+The client SHOULD retry the request if it receives and error, but SHOULD NOT retry if it receives any of the following errors: `400`, `401`, `409`.
 
 ### 2.2 `GET /hash?devices=[device_ids]`
 
@@ -105,16 +104,11 @@ The client MUST authenticate with this header.
 Authorization: Bearer <JWT>
 ```
 
-The JWT SHOULD be signed by the main API server and MUST have 'hash-server' as the type claim and the device ID as the sub.
+The JWT SHOULD be signed by the main API server and MUST have 'server' as the type claim. The sub claim SHOULD be ignored for `server` type tokens.
 
 The server MUST reject invalid JWTs with **HTTP 401**.
 
 The server SHOULD return **HTTP 400** on a malformed `device_id`
-
-Since a `hash-server` JWT already scopes the caller to one device (its `sub`), the
-`device` query parameter MUST equal the token's `sub`. The server MUST reject a
-mismatch with **HTTP 403** (`code: "forbidden"`) rather than resetting a different
-device than the one the token authorizes.
 
 The server MUST reset a device's hash to ZERO and also set the sequence number to zero.
 
@@ -145,8 +139,12 @@ The server...
 The server SHOULD use tokio as it's runtime, with axum for HTTP routing.
 
 Configuration is read from environment variables (a `.env` file is loaded if present):
-`HOST` (default `0.0.0.0`), `PORT` (default `8788`), `DATABASE_PATH` (default
-`hash-server.sqlite`), `JWT_PUBLIC_KEY` (required), `WRITE_BATCH_WINDOW_MS` (default `5`).
+
+- `JWT_PUBLIC_KEY` required
+- `HOST` default `0.0.0.0`
+- `PORT` default `8788`
+- `DATABASE_PATH` default `hash-server.sqlite`
+- `WRITE_BATCH_WINDOW_MS` default `20`
 
 ### 3.3 Database
 
@@ -160,19 +158,17 @@ response; they never touch SQLite directly.
 
 Writes MUST be fully written to the database before a successful response is returned to the client. Handlers only respond after the writer thread's transaction commits.
 
-`GET /hash` is served from an in-memory map mirroring the database, updated by the
-writer thread immediately after each commit, so reads never wait on the write queue or
-touch disk.
+`GET /hash` is served from SQLite directly, multiple readers are allowed in WAL mode, and after a commit, everything is fine.
 
 ## 4. Performance Testing
 
 We SHOULD have a script that uses h2load to test the number of valid requests per second over http.
 
-`scripts/bench.sh` (`--h1`, i.e. plain HTTP) has two modes: `read`, which repeatedly
+Details: `scripts/bench.sh` (`--h1`, i.e. plain HTTP) has two modes: `read`, which repeatedly
 calls `GET /hash?devices=<id>` (idempotent, so it measures real sustained throughput),
 and `write`, which repeatedly `POST`s a fixed body to `/hash` — only the first request
 in the run is a durable write, since h2load cannot vary the request body per call to
 give each request a strictly-increasing `seq`; every request after that is a fast 409.
 Treat the `write` number as the ceiling for the auth + parse + write-queue path, not
 for sustained disk-durable writes. Tokens for both modes are minted with
-`cargo run --example mint_token -- <sub> <hash-server|server> <private_key_pem_path>`.
+`cargo run --example mint_token -- <sub> <device|server> <private_key_pem_path>`.

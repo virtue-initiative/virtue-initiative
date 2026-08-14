@@ -130,7 +130,7 @@ async fn post_hash_requires_valid_jwt() {
 async fn post_hash_rejects_bad_body_length() {
     let server = spawn_server().await;
     let client = reqwest::Client::new();
-    let token = server.token("11111111-1111-4111-8111-111111111111", "hash-server");
+    let token = server.token("11111111-1111-4111-8111-111111111111", "device");
 
     let resp = client
         .post(format!("{}/hash", server.base_url))
@@ -150,7 +150,7 @@ async fn post_hash_chains_and_enforces_strictly_increasing_seq() {
     let server = spawn_server().await;
     let client = reqwest::Client::new();
     let device_id = "22222222-2222-4222-8222-222222222222";
-    let token = server.token(device_id, "hash-server");
+    let token = server.token(device_id, "device");
     let server_token = server.token("ignored", "server");
 
     let resp = client
@@ -250,7 +250,8 @@ async fn delete_hash_resets_and_returns_prior_state() {
     let server = spawn_server().await;
     let client = reqwest::Client::new();
     let device_id = "44444444-4444-4444-8444-444444444444";
-    let token = server.token(device_id, "hash-server");
+    let token = server.token(device_id, "device");
+    let server_token = server.token("ignored", "server");
 
     client
         .post(format!("{}/hash", server.base_url))
@@ -262,7 +263,7 @@ async fn delete_hash_resets_and_returns_prior_state() {
 
     let resp = client
         .delete(format!("{}/hash?device={device_id}", server.base_url))
-        .header("Authorization", format!("Bearer {token}"))
+        .header("Authorization", format!("Bearer {server_token}"))
         .send()
         .await
         .unwrap();
@@ -273,7 +274,7 @@ async fn delete_hash_resets_and_returns_prior_state() {
 
     let resp = client
         .delete(format!("{}/hash?device={device_id}", server.base_url))
-        .header("Authorization", format!("Bearer {token}"))
+        .header("Authorization", format!("Bearer {server_token}"))
         .send()
         .await
         .unwrap();
@@ -303,18 +304,19 @@ async fn delete_hash_resets_and_returns_prior_state() {
 }
 
 #[tokio::test]
-async fn delete_hash_rejects_device_mismatch() {
+async fn delete_hash_rejects_device_typed_token() {
     let server = spawn_server().await;
     let client = reqwest::Client::new();
     let device_id = "55555555-5555-4555-8555-555555555555";
-    let other_id = "66666666-6666-4666-8666-666666666666";
-    let token = server.token(device_id, "hash-server");
+    // DELETE requires a `server`-typed token (sub ignored); a `device`-typed
+    // token, even for the same device, must not authorize a reset.
+    let token = server.token(device_id, "device");
 
     let resp = client
-        .delete(format!("{}/hash?device={other_id}", server.base_url))
+        .delete(format!("{}/hash?device={device_id}", server.base_url))
         .header("Authorization", format!("Bearer {token}"))
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), 403);
+    assert_eq!(resp.status(), 401);
 }

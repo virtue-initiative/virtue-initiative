@@ -10,7 +10,7 @@
 # is the endpoint's steady-state benchmark: every request is idempotent, so
 # throughput reflects real sustained capacity.
 #
-# `write` repeatedly POSTs a fixed 40-byte body with a `hash-server` token
+# `write` repeatedly POSTs a fixed 40-byte body with a `device` token
 # for one device. Only the very first request in the run is a durable write
 # (201); every request after that is rejected as a 409 sequence conflict
 # before touching the database. h2load always repeats the same request body,
@@ -41,7 +41,7 @@ case "$MODE" in
     ;;
   write)
     DEVICE_ID="bench-$(date +%s)"
-    TOKEN=$(mint "$DEVICE_ID" "hash-server")
+    TOKEN=$(mint "$DEVICE_ID" "device")
     BODY_FILE=$(mktemp)
     trap 'rm -f "$BODY_FILE"' EXIT
     # unix_time=0 (4 LE bytes), seq=1 (4 LE bytes), hash=32 zero bytes.

@@ -137,6 +137,13 @@ pub struct UploadObserverState {
     pub settings: Option<DeviceSettings>,
     #[serde(default)]
     pub device_credentials: Option<DeviceCredentials>,
+    /// The last `seq` accepted by the hash server for this device — hash-server/SPEC.md
+    /// §2.1 requires each `POST /hash` to carry a `seq` strictly greater than this.
+    /// Reset to 0 in lockstep with every server-side reset: login, logout, and each
+    /// batch upload that lands (the API resets the server's hash state right after
+    /// storing the batch).
+    #[serde(default)]
+    pub next_hash_seq: u32,
 }
 
 impl UploadObserverState {
@@ -145,6 +152,7 @@ impl UploadObserverState {
         self.pending_hash_events.clear();
         self.last_batch_at_ms = None;
         self.post_login_proof_batches_remaining = POST_LOGIN_PROOF_BATCH_COUNT;
+        self.next_hash_seq = 0;
     }
 
     pub fn reset_for_logout(&mut self) {
@@ -154,6 +162,7 @@ impl UploadObserverState {
         self.post_login_proof_batches_remaining = 0;
         self.settings = None;
         self.device_credentials = None;
+        self.next_hash_seq = 0;
     }
 
     pub fn pending_request_count(&self) -> usize {
@@ -231,10 +240,13 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
     fn upload_hash(
         &mut self,
         hash_base_url: Option<&str>,
+        unix_time: u32,
+        seq: u32,
         content_hash: &[u8; 32],
     ) -> CoreResult<()> {
         let hash_jwt = self.ensure_hash_token()?;
-        self.api.upload_hash(hash_base_url, &hash_jwt, content_hash)
+        self.api
+            .upload_hash(hash_base_url, &hash_jwt, unix_time, seq, content_hash)
     }
 
     /// Returns the cached hash-server JWT, refreshing it via `GET /d/device` once it's
@@ -288,6 +300,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
             .settings
             .as_ref()
             .and_then(|s| s.hash_base_url.clone());
+        let unix_time = (now_ms / 1000) as u32;
         let events = std::mem::take(&mut self.state.pending_hash_events);
         let mut had_failure = false;
         self.state.pending_hash_events =
@@ -303,8 +316,10 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
                     }
                 };
                 let hash = compute_event_hash(&encoded);
-                match self.upload_hash(hash_base_url.as_deref(), &hash) {
+                let seq = self.state.next_hash_seq.saturating_add(1);
+                match self.upload_hash(hash_base_url.as_deref(), unix_time, seq, &hash) {
                     Ok(()) => {
+                        self.state.next_hash_seq = seq;
                         let is_high_risk = event
                             .risk
                             .is_some_and(|r| r >= crate::module::lifecycle::EXTRA_HIGH_RISK);
@@ -320,6 +335,20 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
                     Err(err) if err.is_bad_request() => {
                         self.log_permanent_hash_failure(now_ms, &event, &err);
                         None
+                    }
+                    Err(err) if err.is_conflict() => {
+                        // Our local seq counter is behind what the hash server has
+                        // stored (e.g. persisted state lost across a crash). seq isn't
+                        // part of the hash chain input, so retrying this same event
+                        // with a fresher seq is always safe — advance by 1 and let
+                        // backoff pace the retries rather than hammering the server.
+                        had_failure = true;
+                        self.state.next_hash_seq = seq;
+                        log_warning(
+                            "hash upload sequence conflict, advancing local seq and retrying",
+                            Some(&err),
+                        );
+                        Some(event)
                     }
                     Err(err) => {
                         had_failure = true;
@@ -407,6 +436,10 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
                     self.state.post_login_proof_batches_remaining -= 1;
                 }
                 self.state.last_batch_at_ms = Some(now_ms);
+                // A landed batch makes the API reset the hash server's stored state
+                // for this device (see api/SPEC.md), so the local seq counter must
+                // reset in lockstep or every subsequent upload will 409.
+                self.state.next_hash_seq = 0;
                 // A batch that just landed also resets the hash-token staleness
                 // clock, so ensure_hash_token rarely needs to hit the network on
                 // an active device.
@@ -1226,6 +1259,93 @@ mod tests {
             t.api.state().hash_uploads.len(),
             1,
             "no further attempts for a permanently rejected event"
+        );
+    }
+
+    #[test]
+    fn hash_seq_increments_and_resets_after_batch_lands() {
+        let mut b = EventTester::builder();
+        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
+        let mut t = b.build();
+        t.emit(1, login_event());
+        // Isolate seq behavior from the post-login proof-batch mechanic, which
+        // would otherwise land (and reset) a batch after the very first event.
+        {
+            let m = t.observer::<UploadModule<MockApiClient>>();
+            m.state.post_login_proof_batches_remaining = 0;
+            m.state.last_batch_at_ms = Some(0);
+        }
+
+        t.emit(2, skipped_upload());
+        t.emit(3, skipped_upload());
+        {
+            let s = t.api.state();
+            assert_eq!(s.hash_uploads.len(), 2);
+            assert_eq!(
+                s.hash_uploads[0].seq, 1,
+                "first upload uses seq 1 — 0 is never valid"
+            );
+            assert_eq!(
+                s.hash_uploads[1].seq, 2,
+                "seq strictly increases per upload"
+            );
+        }
+
+        // Force the batch holding both hashed events to land.
+        t.emit(4, FlushBatchNow);
+        assert_eq!(t.api.state().batch_uploads.len(), 1, "batch should land");
+        assert_eq!(
+            t.observer::<UploadModule<MockApiClient>>()
+                .state
+                .next_hash_seq,
+            0,
+            "a landed batch resets the local seq counter, mirroring the API's server-side reset"
+        );
+
+        t.emit(5, skipped_upload());
+        assert_eq!(
+            t.api.state().hash_uploads.last().unwrap().seq,
+            1,
+            "seq restarts at 1 after the reset"
+        );
+    }
+
+    #[test]
+    fn hash_sequence_conflict_advances_local_seq_and_retries() {
+        let mut b = EventTester::builder();
+        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
+        let mut t = b.build();
+        t.emit(1, login_event());
+
+        t.api.program_hash(Err(crate::error::CoreError::HttpStatus {
+            status: 409,
+            message: "sequence conflict".into(),
+        }));
+
+        t.emit(2, skipped_upload());
+        {
+            let s = t.api.state();
+            assert_eq!(s.hash_uploads.len(), 1, "first attempt uses seq 1");
+            assert_eq!(s.hash_uploads[0].seq, 1);
+        }
+        assert_eq!(
+            t.observer::<UploadModule<MockApiClient>>()
+                .state
+                .pending_hash_events
+                .len(),
+            1,
+            "a 409 keeps the event queued for retry rather than dropping it — seq isn't part \
+             of the hash chain input, so retrying with a fresher seq is always safe"
+        );
+
+        // Backoff after one failure is 1s: a ping exactly 1s later retries with a
+        // higher seq and this time succeeds.
+        t.emit(3, Ping);
+        let s = t.api.state();
+        assert_eq!(s.hash_uploads.len(), 2, "retry attempt made");
+        assert_eq!(
+            s.hash_uploads[1].seq, 2,
+            "retry uses a higher seq than the rejected attempt"
         );
     }
 

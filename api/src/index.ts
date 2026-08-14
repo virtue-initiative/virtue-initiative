@@ -5,7 +5,6 @@ import data from './routes/data';
 import deviceOnly from './routes/device-only';
 import devices from './routes/devices';
 import emailWebhooks from './routes/email-webhooks';
-import hashes from './routes/hashes';
 import partners from './routes/partners';
 import { stripApiBasePath } from './lib/base-path';
 import { getJWKS } from './lib/jwt';
@@ -49,7 +48,6 @@ app.route('/', emailWebhooks);
 app.route('/device', devices);
 app.route('/data', data);
 app.route('/d', deviceOnly);
-app.route('/hash', hashes);
 
 app.get('/r2/*', async (c) => {
   const key = c.req.path.replace(/^\/r2\//, '');

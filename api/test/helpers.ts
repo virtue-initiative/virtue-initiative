@@ -1,6 +1,6 @@
 import { env, SELF } from 'cloudflare:test';
-import { generateToken } from '../src/lib/jwt';
 import { clearMockEmailDeliveries, listMockEmailDeliveries } from '../src/lib/email';
+import { resetHashServerMock } from './hash-server-mock';
 
 export const BASE = 'http://localhost';
 
@@ -160,10 +160,6 @@ export async function createDeviceForUser(
   return { id: body.settings.id, refresh_token: body.refresh_token, token: body.token };
 }
 
-export async function createServerToken(deviceId: string) {
-  return generateToken('server', deviceId, env.JWT_PRIVATE_KEY, 60);
-}
-
 export async function listEmailDeliveries() {
   return listMockEmailDeliveries();
 }
@@ -233,10 +229,10 @@ export function extractTokenFromDelivery(
 
 export async function clearDB(): Promise<void> {
   clearMockEmailDeliveries();
+  resetHashServerMock();
   await env.DB.prepare('DELETE FROM email_tokens').run();
   await env.DB.prepare('DELETE FROM user_sessions').run();
   await env.DB.prepare('DELETE FROM device_sessions').run();
-  await env.DB.prepare('DELETE FROM hash_states').run();
   await env.DB.prepare('DELETE FROM batches').run();
   await env.DB.prepare('DELETE FROM partners').run();
   await env.DB.prepare('DELETE FROM devices').run();

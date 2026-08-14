@@ -90,10 +90,15 @@ pub trait ApiTransport: Send + Sync {
         device_refresh_token: &str,
         batch: &BatchUpload,
     ) -> CoreResult<UploadedBatchResponse>;
+    /// `unix_time` and `seq` are the wire-format prefix hash-server/SPEC.md §2.1
+    /// requires ahead of the 32-byte content hash: `seq` MUST be strictly greater
+    /// than the last `seq` accepted for this device (rejected with 409 otherwise).
     fn upload_hash(
         &self,
         hash_base_url: Option<&str>,
         hash_jwt: &str,
+        unix_time: u32,
+        seq: u32,
         content_hash: &[u8; 32],
     ) -> CoreResult<()>;
 
@@ -265,12 +270,20 @@ impl ApiTransport for ReqwestApiClient {
         &self,
         hash_base_url: Option<&str>,
         hash_jwt: &str,
+        unix_time: u32,
+        seq: u32,
         content_hash: &[u8; 32],
     ) -> CoreResult<()> {
+        // hash-server/SPEC.md §2.1: [unix_time:u32 LE][seq:u32 LE][sha hash:32 bytes].
+        let mut body = Vec::with_capacity(40);
+        body.extend_from_slice(&unix_time.to_le_bytes());
+        body.extend_from_slice(&seq.to_le_bytes());
+        body.extend_from_slice(content_hash);
+
         let response = self
             .request(Method::POST, hash_base_url, "/hash", Some(hash_jwt))
             .header("Content-Type", "application/octet-stream")
-            .body(content_hash.to_vec())
+            .body(body)
             .send()?;
         self.expect_success(response)
     }

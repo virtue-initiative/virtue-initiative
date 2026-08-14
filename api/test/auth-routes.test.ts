@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { SELF, env } from 'cloudflare:test';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { fetchMock, SELF, env } from 'cloudflare:test';
 import {
   authHeaders,
   BASE,
@@ -16,7 +16,14 @@ import {
   signupAndGetCookie,
   uuidToBytes,
 } from './helpers';
+import { installHashServerMock, seedHashState } from './hash-server-mock';
 import { CURRENT_HASH_PARAMS, verifyPasswordAuth } from '../src/lib/password';
+
+beforeAll(() => {
+  fetchMock.activate();
+  fetchMock.disableNetConnect();
+  installHashServerMock();
+});
 
 beforeEach(clearDB);
 
@@ -466,12 +473,9 @@ describe('Auth routes', () => {
     const { cookie, userId } = await signupAndGetCookie('delete-me@example.com', 'pw', 'Delete Me');
     const device = await createDeviceForUser('delete-me@example.com', 'pw', 'Phone', 'ios');
 
-    const hashUploadRes = await SELF.fetch(`${BASE}/hash`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${device.token}` },
-      body: new Uint8Array(32).fill(9),
-    });
-    expect(hashUploadRes.status).toBe(200);
+    // Simulates the client having already uploaded a hash directly to the (mocked)
+    // hash server — the API itself never POSTs there, so there's no request to make.
+    seedHashState(device.id, { hash: '09'.repeat(32), seq: 1, last_received: 500 });
 
     const form = new FormData();
     form.set('start_time', '1710000000000');

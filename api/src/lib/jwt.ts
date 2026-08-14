@@ -8,7 +8,7 @@ import {
   type JWK,
 } from 'jose';
 
-export type JWTType = 'server' | 'hash-server';
+export type JWTType = 'server' | 'device';
 
 export interface JWTPayload {
   sub: string;

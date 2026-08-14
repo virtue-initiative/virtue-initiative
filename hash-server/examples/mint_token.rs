@@ -1,4 +1,4 @@
-//! Dev/test-only helper: signs a hash-server or server JWT from a private key
+//! Dev/test-only helper: signs a device or server JWT from a private key
 //! PEM file, for manual testing (curl) and `scripts/bench.sh`. The hash
 //! server itself never mints tokens — that's the main API's job.
 
@@ -18,7 +18,7 @@ struct Claims {
 
 fn main() {
     let mut args = env::args().skip(1);
-    let usage = "usage: mint_token <sub> <hash-server|server> <private_key_pem_path>";
+    let usage = "usage: mint_token <sub> <device|server> <private_key_pem_path>";
     let sub = args.next().expect(usage);
     let typ = args.next().expect(usage);
     let key_path = args.next().expect(usage);

@@ -38,7 +38,7 @@ pub async fn ingest(
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<StatusCode, ApiError> {
-    let claims = app.jwt.require(&headers, "hash-server")?;
+    let claims = app.jwt.require(&headers, "device")?;
 
     if body.len() != 40 {
         return Err(ApiError::InvalidBody(Some(format!(
@@ -98,22 +98,14 @@ pub async fn reset(
     headers: HeaderMap,
     Query(query): Query<DeviceQuery>,
 ) -> Result<Json<DeviceInfo>, ApiError> {
-    let claims = app.jwt.require(&headers, "hash-server")?;
+    app.jwt.require(&headers, "server")?;
 
     let device_id = query.device.filter(|s| !s.is_empty()).ok_or_else(|| {
         ApiError::InvalidQuery(Some("'device' query parameter is required".into()))
     })?;
     validate_device_id(&device_id)?;
 
-    // A hash-server token only authorizes resetting the device it was minted
-    // for (its `sub`); the query parameter must name that same device.
-    if device_id != claims.sub {
-        return Err(ApiError::Forbidden(Some(
-            "token does not authorize resetting this device".into(),
-        )));
-    }
-
-    let prior = app.writer.reset(claims.sub).await?;
+    let prior = app.writer.reset(device_id).await?;
 
     Ok(Json(prior.into()))
 }

@@ -12,9 +12,9 @@ Base URL examples:
 - `Base64`: base64-encoded binary
 - `SHA256`: lowercase hex-encoded SHA-256 digest
 - `RefreshToken`: opaque web-session string, prefixed by purpose (e.g. `wst_...`). Set as the HTTPOnly `refresh_token` cookie by `POST /login`, `POST /signup`, and `POST /email-verification/validate`.
-- `HashServerToken`: EdDSA JWT (`Ed25519`) with `type: "hash-server"` and `sub = device id`; minted by `POST /d/device`, `GET /d/device`, and `POST /d/batch`
+- `HashServerToken`: EdDSA JWT (`Ed25519`) with `type: "device"` and `sub = device id`; minted by `POST /d/device`, `GET /d/device`, and `POST /d/batch`. Authenticates directly against the standalone hash server's `POST /hash` (see `../hash-server/SPEC.md`), not this API.
 - `DeviceRefreshToken`: opaque string returned by `POST /d/device`
-- `ServerToken`: EdDSA JWT (`Ed25519`) with `type: "server"` and `sub = device id`
+- `ServerToken`: EdDSA JWT (`Ed25519`) with `type: "server"` and `sub` ignored; minted by this API when it calls the hash server's `GET /hash` or `DELETE /hash`
 
 ## Shared Shapes
 
@@ -547,8 +547,8 @@ below.
 Requires an authenticated web session (the `refresh_token` cookie, or `Bearer <RefreshToken>`).
 
 Lists the requester's own devices plus those of users they watch. `last_hash_at` and
-`pending_count` reflect live hash-server state when a hash server is configured, otherwise the
-last values stored in D1.
+`pending_count` are fetched live from the hash server (see `../hash-server/SPEC.md`) in one
+batched call; both are `null`/`0` for any device if the hash server can't be reached.
 
 Response `200`:
 
@@ -620,7 +620,9 @@ The following routes use device auth:
 - `POST /d/device` takes the owner's email + `password_auth` directly (same credential
   material as `POST /login`) — no web session or prior device session required
 - `POST /d/logout`, `GET /d/device`, and `POST /d/batch` use a `DeviceRefreshToken`
-- `POST /hash`, `GET /hash`, and `DELETE /hash` use a `HashServerToken` or `ServerToken` as applicable
+
+Devices upload hash-chain state directly to the standalone hash server using the
+`HashServerToken` embedded in these responses — see `../hash-server/SPEC.md`, not this API.
 
 ### DeviceSettings
 
@@ -765,50 +767,6 @@ Response `201`:
 
 Every batch upload refreshes both settings and the hash token, piggybacking on the
 response so the device rarely needs a dedicated `GET /d/device` call.
-
-## Hash API
-
-### `POST /hash`
-
-Requires a `HashServerToken`.
-
-Uploads a single 32-byte plaintext content hash for the device hash chain.
-
-Response `200`:
-
-```js
-{
-  "ok": true
-}
-```
-
-### `GET /hash`
-
-Requires a `HashServerToken`.
-
-Returns the current 32-byte hash-chain state as binary.
-
-### `GET /hash/info`
-
-Requires a `HashServerToken` or `ServerToken`.
-
-Returns hash-chain metadata for the device.
-
-Response `200`:
-
-```js
-{
-  "count": Number,
-  "hashed_at": DateTime | null,
-  "updated_at": DateTime | null
-}
-```
-
-### `DELETE /hash`
-
-Requires a `ServerToken`.
-
-Resets the current device hash-chain state.
 
 ## Object storage
 

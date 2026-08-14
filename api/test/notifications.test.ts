@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { env, SELF } from 'cloudflare:test';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { env, fetchMock, SELF } from 'cloudflare:test';
 import {
   authHeaders,
   BASE,
@@ -10,6 +10,13 @@ import {
   signupAndGetCookie,
   uuidToBytes,
 } from './helpers';
+import { installHashServerMock } from './hash-server-mock';
+
+beforeAll(() => {
+  fetchMock.activate();
+  fetchMock.disableNetConnect();
+  installHashServerMock();
+});
 
 beforeEach(clearDB);
 

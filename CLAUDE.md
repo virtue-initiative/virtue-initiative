@@ -16,7 +16,7 @@ See `AGENTS.md` for how to run checks and tests for each component.
 
 `./scripts/setup.sh` — one-time: installs deps, copies `.dev.vars`, runs local D1 migrations, installs/trusts Caddy.
 
-`./scripts/launch.sh [--donate] [domain]` — starts `api`, `web`, and `landing` dev servers together (interleaved colored logs), each on a random free port:
+`./scripts/launch.sh [--donate] [domain]` — starts `api`, `web`, `landing`, and the standalone `hash-server` (see `hash-server/SPEC.md`) together (interleaved colored logs), each on a random free port. The hash server is minted a `JWT_PUBLIC_KEY` read from `api/.dev.vars` so it verifies tokens signed by the local API:
 
 - No `domain` arg: plain `http://localhost:<port>` for each service (ports differ per run — see the script's own startup banner). This is enough for most manual testing; browsers treat `http://localhost` as a secure context, so the API's `Secure` session cookie still gets set and sent.
 - With a `domain` arg (e.g. `./scripts/launch.sh myfeature`): registers `https://app.<domain>.localhost`, `https://<domain>.localhost`, etc. via the local Caddy instance (requires `setup.sh` to have run), mimicking the production URL structure.
@@ -103,7 +103,7 @@ Read these before touching crypto, batch, or auth code:
 - The AES-GCM nonce position or length (must be first 12 bytes)
 - The msgpack schema (`{events: [...]}` at the outer level, each event double-encoded)
 - The argon2id parameters or the HKDF label strings (`"auth"`, `"key"`)
-- The JWT token `type` claim values (`"hash-server"`, `"server"`)
+- The JWT token `type` claim values (`"device"`, `"server"`)
 - The hash chain input encoding rules (LE integers, sorted keys)
 
 ## Pull requests

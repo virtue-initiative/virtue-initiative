@@ -76,6 +76,8 @@ pub struct NotifyCall {
 pub struct HashCall {
     pub hash_base_url: Option<String>,
     pub hash_jwt: String,
+    pub unix_time: u32,
+    pub seq: u32,
     pub content_hash: [u8; 32],
 }
 
@@ -253,12 +255,16 @@ impl ApiTransport for MockApiClient {
         &self,
         hash_base_url: Option<&str>,
         hash_jwt: &str,
+        unix_time: u32,
+        seq: u32,
         content_hash: &[u8; 32],
     ) -> CoreResult<()> {
         let mut state = self.state();
         state.hash_uploads.push(HashCall {
             hash_base_url: hash_base_url.map(String::from),
             hash_jwt: hash_jwt.to_string(),
+            unix_time,
+            seq,
             content_hash: *content_hash,
         });
         if let Some(canned) = state.hash_responses.pop_front() {
