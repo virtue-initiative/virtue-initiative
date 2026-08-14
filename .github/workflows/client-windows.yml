@@ -199,6 +199,10 @@ jobs:
             client -> target
             hash-server -> target
 
+      - name: Build hash server
+        run: cargo build
+        working-directory: hash-server
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
