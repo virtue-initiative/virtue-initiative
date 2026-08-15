@@ -95,7 +95,8 @@ const initPromise = (async () => {
        end_time INTEGER NOT NULL,
        created_at INTEGER NOT NULL,
        start_hash TEXT,
-       end_hash TEXT
+       end_hash TEXT,
+       version TEXT
      )`,
   );
   db.exec(
@@ -157,8 +158,8 @@ function sqlMergeDataPage(viewerId: string, targetUserId: string, page: DataPage
   try {
     for (const batch of page.batches) {
       db.exec(
-        `INSERT OR IGNORE INTO batches(id,viewer_id,target_user_id,device_id,url,encrypted_key,start_time,end_time,created_at,end_hash)
-         VALUES(?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT OR IGNORE INTO batches(id,viewer_id,target_user_id,device_id,url,encrypted_key,start_time,end_time,created_at,end_hash,version)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
         {
           bind: [
             batch.id,
@@ -171,6 +172,7 @@ function sqlMergeDataPage(viewerId: string, targetUserId: string, page: DataPage
             batch.end_time,
             batch.created_at,
             batch.end_hash,
+            batch.version,
           ],
         },
       );
@@ -220,6 +222,7 @@ function sqlGetUnmaterializedBatches(
           end_time: row.end_time as number,
           created_at: row.created_at as number,
           end_hash: (row.end_hash as string | null) ?? '0'.repeat(64),
+          version: (row.version as string | null) ?? 'v0.1',
         }),
     },
   );
