@@ -169,6 +169,18 @@ fn init_logging(data_dir: &Path) {
     });
 }
 
+static DEFAULT_API_BASE_URL_C: OnceCell<CString> = OnceCell::new();
+
+/// Returns a pointer valid for the process lifetime (backed by a `OnceCell`-held
+/// `CString`) — unlike the other string-returning exports here, the caller must
+/// NOT pass this to `virtue_ios_free_string`.
+#[no_mangle]
+pub extern "C" fn virtue_ios_default_api_base_url() -> *const c_char {
+    DEFAULT_API_BASE_URL_C
+        .get_or_init(|| CString::new(DEFAULT_BASE_API_URL).expect("no NUL bytes in URL"))
+        .as_ptr()
+}
+
 #[no_mangle]
 pub extern "C" fn virtue_ios_default_capture_interval_seconds() -> u64 {
     virtue_core::default_capture_interval_seconds()
