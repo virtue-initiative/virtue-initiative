@@ -34,6 +34,19 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: TEMP - Print release signing certificate fingerprint
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          keystore_path="${RUNNER_TEMP}/virtue-release.jks"
+          printf '%s' "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > "${keystore_path}"
+          keytool -list -v -keystore "${keystore_path}" -alias "${ANDROID_KEY_ALIAS}" -storepass "${ANDROID_KEYSTORE_PASSWORD}"
+          rm -f "${keystore_path}"
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
