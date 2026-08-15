@@ -85,4 +85,4 @@ that rewrites `/api/*` to `/*` can replace this Worker-side prefix handling.
 
 ## API
 
-See the [API specification](./API.md).
+See the [API specification](./SPEC.md).

@@ -1,11 +1,14 @@
 import { screen, waitFor } from '@testing-library/preact';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
 import { describe, expect, it } from 'vitest';
 import { server } from '../../mocks/server';
 import { TEST_WATCHER, TEST_WATCHING } from '../../mocks/fixtures';
 import { renderWithClient } from '../../test-utils';
 import { Partners } from './index';
+
+const BASE = `http://localhost:8787/${CURRENT_API_VERSION}`;
 
 describe('Partners — sections', () => {
   it('shows "You monitor" section heading', async () => {
@@ -38,9 +41,7 @@ describe('Partners — sections', () => {
 
   it('shows empty messages when there are no partners', async () => {
     server.use(
-      http.get('http://localhost:8787/partner', () =>
-        HttpResponse.json({ watchers: [], watching: [] }),
-      ),
+      http.get(`${BASE}/partner`, () => HttpResponse.json({ watchers: [], watching: [] })),
     );
     renderWithClient(<Partners />);
     await waitFor(() => {
@@ -64,7 +65,7 @@ describe('Partners — Invite partner dialog', () => {
   it('calls POST /partner when invite is submitted', async () => {
     let inviteBody: unknown;
     server.use(
-      http.post('http://localhost:8787/partner', async ({ request }) => {
+      http.post(`${BASE}/partner`, async ({ request }) => {
         inviteBody = await request.json();
         return HttpResponse.json({ id: 'new-1', invite_token: 'tok' });
       }),

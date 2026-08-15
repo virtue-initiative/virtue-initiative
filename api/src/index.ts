@@ -6,8 +6,8 @@ import deviceOnly from './routes/device-only';
 import devices from './routes/devices';
 import emailWebhooks from './routes/email-webhooks';
 import partners from './routes/partners';
+import { isApiVersionGone, stripApiVersion } from './lib/api-version';
 import { stripApiBasePath } from './lib/base-path';
-import { getJWKS } from './lib/jwt';
 import {
   pruneExpiredBatches,
   pruneExpiredDeviceSessions,
@@ -18,8 +18,20 @@ import { runNotificationSchedule } from './lib/scheduler';
 import { Env, Variables } from './types/bindings';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>({
-  getPath: (request, options) =>
-    stripApiBasePath(new URL(request.url).pathname, options?.env?.API_BASE_PATH),
+  getPath: (request, options) => {
+    const basePathStripped = stripApiBasePath(
+      new URL(request.url).pathname,
+      options?.env?.API_BASE_PATH,
+    );
+    return stripApiVersion(basePathStripped, request);
+  },
+});
+
+app.use('/*', async (c, next) => {
+  if (isApiVersionGone(c.req.raw)) {
+    return c.json({ error: 'This API version is no longer supported' }, 410);
+  }
+  await next();
 });
 
 app.use(
@@ -41,11 +53,10 @@ app.get('/', (c) =>
   c.json({
     name: 'Virtue Initiative API',
     version: '1.0.0',
+    commit: c.env.COMMIT_SHA ?? 'unknown',
     status: 'ok',
   }),
 );
-
-app.get('/.well-known/jwks.json', async (c) => c.json(await getJWKS(c.env.JWT_PUBLIC_KEY)));
 
 app.route('/', auth);
 app.route('/', partners);

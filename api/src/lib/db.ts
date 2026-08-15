@@ -443,19 +443,6 @@ export async function listVisibleOwnerIds(db: D1Database, requesterId: string) {
   return [requesterId, ...partnerships.map((row) => row.watching_user_id)];
 }
 
-export async function canViewUserData(db: D1Database, ownerId: string, requesterId: string) {
-  if (ownerId === requesterId) return true;
-
-  const partnership = await db
-    .prepare(
-      "SELECT id FROM partners WHERE watching_user_id = ? AND watcher_user_id = ? AND status = 'accepted'",
-    )
-    .bind(uuidToBytes(ownerId), uuidToBytes(requesterId))
-    .first<{ id: ArrayBuffer }>();
-
-  return Boolean(partnership);
-}
-
 export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
   if (ownerIds.length === 0) {
     return [];
@@ -555,6 +542,7 @@ export async function createBatch(
     end_time: number;
     end_hash: string;
     access_keys: string;
+    version: string;
     high_risk_count?: number;
     medium_risk_count?: number;
     created_at: number;
@@ -564,8 +552,8 @@ export async function createBatch(
     .prepare(
       `INSERT INTO batches (
          id, user_id, device_id, url, start_time, end_time, end_hash, access_keys,
-         high_risk_count, medium_risk_count, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         version, high_risk_count, medium_risk_count, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       uuidToBytes(input.id),
@@ -576,6 +564,7 @@ export async function createBatch(
       input.end_time,
       input.end_hash,
       input.access_keys,
+      input.version,
       input.high_risk_count ?? 0,
       input.medium_risk_count ?? 0,
       input.created_at,
@@ -583,24 +572,15 @@ export async function createBatch(
     .run();
 }
 
-export async function listBatches(
-  db: D1Database,
-  ownerIds: string[],
-  filters: { deviceId?: string; since?: number },
-) {
+export async function listBatches(db: D1Database, ownerIds: string[], filters: { since?: number }) {
   if (ownerIds.length === 0) {
     return [];
   }
 
   const params: SqlValue[] = ownerIds.map(uuidToBytes);
-  let query = `SELECT id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at
+  let query = `SELECT id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, version, created_at
                FROM batches
                WHERE user_id IN (${placeholders(ownerIds.length)})`;
-
-  if (filters.deviceId) {
-    query += ' AND device_id = ?';
-    params.push(uuidToBytes(filters.deviceId));
-  }
 
   if (filters.since !== undefined) {
     query += ' AND created_at > ?';
@@ -618,6 +598,7 @@ export async function listBatches(
     end_time: number;
     end_hash: string;
     access_keys: string;
+    version: string;
     created_at: number;
   }>(db.prepare(query).bind(...params), ['id', 'user_id', 'device_id']);
 }
@@ -870,63 +851,30 @@ export async function listOwnedPartners(db: D1Database, ownerId: string) {
 }
 
 export async function listIncomingPartners(db: D1Database, partnerUserId: string) {
-  const rows = await allWithUuidFields<{
+  return allWithUuidFields<{
     id: string;
     status: string;
     created_at: number;
     watching_user_id: string;
     watching_user_email: string;
     watching_user_name: string | null;
-    settings: string;
   }>(
     db
       .prepare(
         `SELECT p.id, p.status, p.created_at,
-                u.id AS watching_user_id, u.email AS watching_user_email, u.name AS watching_user_name,
-                watcher.settings
+                u.id AS watching_user_id, u.email AS watching_user_email, u.name AS watching_user_name
           FROM partners p
           JOIN users u ON u.id = p.watching_user_id
-          JOIN users watcher ON watcher.id = p.watcher_user_id
           WHERE p.watcher_user_id = ?
           ORDER BY p.created_at DESC`,
       )
       .bind(uuidToBytes(partnerUserId)),
     ['id', 'watching_user_id'],
   );
-  return rows.map((row) => ({ ...row, settings: parseUserSettings(row.settings) }));
 }
 
 export async function deletePartnerById(db: D1Database, partnerId: string) {
   return db.prepare('DELETE FROM partners WHERE id = ?').bind(uuidToBytes(partnerId)).run();
-}
-
-export async function updatePartnerNotificationPreference(
-  db: D1Database,
-  input: {
-    partnership_id: string;
-    watcher_user_id: string;
-    email_frequency?: string;
-  },
-) {
-  const partnership = await db
-    .prepare('SELECT id FROM partners WHERE id = ? AND watcher_user_id = ?')
-    .bind(uuidToBytes(input.partnership_id), uuidToBytes(input.watcher_user_id))
-    .first<{ id: string }>();
-
-  if (!partnership) {
-    return null;
-  }
-
-  if (input.email_frequency !== undefined) {
-    await updateUser(db, input.watcher_user_id, {
-      settings: { email_frequency: input.email_frequency },
-    });
-  }
-
-  return {
-    partnership_id: input.partnership_id,
-    email_frequency: input.email_frequency,
-  };
 }
 
 export async function listBatchAccessRecipientsForOwner(db: D1Database, ownerId: string) {

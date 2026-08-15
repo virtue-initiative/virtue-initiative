@@ -47,7 +47,7 @@ HTTP status codes: 400 bad request, 401 unauthorized, 403 forbidden, 404 not fou
 - `src/middleware/validation.ts` — Zod validation wrapper
 - `src/routes/device-only.ts` — device registration, settings, and batch upload endpoints
 - `src/routes/data.ts` — data retrieval with access control
-- `API.md` — complete endpoint specification
+- `SPEC.md` — complete endpoint specification
 
 ## Type source of truth
 

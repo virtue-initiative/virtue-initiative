@@ -54,6 +54,7 @@ export const batchSchema = z.object({
   start_time: z.number(),
   end_time: z.number(),
   end_hash: z.string(),
+  version: z.string(),
   url: z.string(),
   encrypted_key: z.string(),
   created_at: z.number(),
@@ -71,39 +72,39 @@ export const dataLogSchema = z.object({
 });
 export type DataLog = z.infer<typeof dataLogSchema>;
 
-export const dataPageSchema = z.object({
-  batches: z.array(batchSchema),
-});
-export type DataPage = z.infer<typeof dataPageSchema>;
-
 const partnerUserSchema = z.object({
   id: z.string(),
   email: z.string(),
   name: z.string().optional(),
 });
 
-export const watchingPartnerSchema = z.object({
-  id: z.string(),
-  user: partnerUserSchema,
-  status: z.enum(['pending', 'accepted']),
-  digest_cadence: emailFrequencySchema,
-  created_at: z.number().optional(),
-});
-export type WatchingPartner = z.infer<typeof watchingPartnerSchema>;
-
-export const watcherPartnerSchema = z.object({
+export const partnerInfoSchema = z.object({
   id: z.string(),
   user: partnerUserSchema.extend({ id: z.string().optional() }),
   status: z.enum(['pending', 'accepted']),
   created_at: z.number().optional(),
 });
-export type WatcherPartner = z.infer<typeof watcherPartnerSchema>;
+export type PartnerInfo = z.infer<typeof partnerInfoSchema>;
+
+export const watchingPartnerSchema = partnerInfoSchema;
+export type WatchingPartner = PartnerInfo;
+
+export const watcherPartnerSchema = partnerInfoSchema;
+export type WatcherPartner = PartnerInfo;
 
 export const partnerRelationshipsSchema = z.object({
   watching: z.array(watchingPartnerSchema),
   watchers: z.array(watcherPartnerSchema),
 });
 export type PartnerRelationships = z.infer<typeof partnerRelationshipsSchema>;
+
+export const dataPageSchema = z.object({
+  batches: z.array(batchSchema),
+  user: userSchema,
+  watching: z.array(partnerInfoSchema),
+  watchers: z.array(partnerInfoSchema),
+});
+export type DataPage = z.infer<typeof dataPageSchema>;
 
 export const partnerInviteValidationSchema = z.object({
   ok: z.boolean(),
@@ -189,20 +190,12 @@ export type CreatePartnerPayload = z.infer<typeof createPartnerSchema>;
 export const inviteTokenSchema = z.object({ token: z.string().min(1) });
 export type InviteTokenPayload = z.infer<typeof inviteTokenSchema>;
 
-export const updateWatchingSchema = z
-  .object({ digest_cadence: emailFrequencySchema.optional() })
-  .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
-export type UpdateWatchingPayload = z.infer<typeof updateWatchingSchema>;
-
 export const updateDeviceSchema = z
   .object({ name: z.string().min(1).optional() })
   .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
 export type UpdateDevicePayload = z.infer<typeof updateDeviceSchema>;
 
 // ── Additional response schemas ──────────────────────────────────────────────
-
-export const loginResponseSchema = z.object({ ok: z.boolean() });
-export type LoginResponse = z.infer<typeof loginResponseSchema>;
 
 export const signupResponseSchema = z.object({
   user: z.object({
@@ -217,7 +210,7 @@ export type SignupResponse = z.infer<typeof signupResponseSchema>;
 export const emailVerifyResponseSchema = z.object({
   ok: z.boolean(),
   email: z.string(),
-  purpose: z.literal('email_change'),
+  purpose: z.enum(['email_change', 'email_verification']),
 });
 export type EmailVerifyResponse = z.infer<typeof emailVerifyResponseSchema>;
 
@@ -233,9 +226,3 @@ export const createPartnerResponseSchema = z.object({
   status: z.literal('pending'),
 });
 export type CreatePartnerResponse = z.infer<typeof createPartnerResponseSchema>;
-
-export const patchDeviceResponseSchema = z.object({
-  id: z.string(),
-  updated: z.boolean(),
-});
-export type PatchDeviceResponse = z.infer<typeof patchDeviceResponseSchema>;

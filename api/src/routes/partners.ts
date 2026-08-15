@@ -15,33 +15,20 @@ import {
   findUserById,
   listIncomingPartners,
   listOwnedPartners,
-  updatePartnerNotificationPreference,
 } from '../lib/db';
 import { renderPartnerAcceptedTemplate, renderPartnerInviteTemplate } from '../lib/email/templates';
-import {
-  DEFAULT_EMAIL_FREQUENCY,
-  emailFrequencies,
-  PARTNER_INVITE_TTL_MS,
-} from '../lib/email-domain';
+import { PARTNER_INVITE_TTL_MS } from '../lib/email-domain';
 import {
   createPartnerSchema,
   inviteTokenSchema,
-  updateWatchingSchema,
   type CreatePartnerResponse,
 } from '../../../shared-web/types';
 import { sendEmail } from '../lib/email';
+import { serializeWatchers, serializeWatching } from '../lib/serializers';
 import { assertTokenPurpose, generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
 
 const partners = new Hono<{ Bindings: Env; Variables: Variables }>();
-
-function toPublicNotificationCadence(emailFrequency: string | null | undefined) {
-  if (!emailFrequency || !(emailFrequencies as readonly string[]).includes(emailFrequency)) {
-    return 'daily' as const;
-  }
-
-  return emailFrequency as (typeof emailFrequencies)[number];
-}
 
 partners.post(
   '/partner',
@@ -110,7 +97,7 @@ partners.post(
       metadata: { partnerEmail: email, inviteToken },
     });
 
-    return c.json<CreatePartnerResponse>({ id, status: 'pending' }, 201);
+    return c.json<CreatePartnerResponse>({ id, status: 'pending' }, 200);
   },
 );
 
@@ -256,76 +243,26 @@ partners.get('/partner', authenticateWebSession(), async (c) => {
   ]);
 
   return c.json({
-    watching: incoming.map((partner) => ({
-      id: partner.id,
-      user: {
-        id: partner.watching_user_id,
-        email: partner.watching_user_email,
-        ...(partner.watching_user_name ? { name: partner.watching_user_name } : {}),
-      },
-      status: partner.status,
-      digest_cadence: toPublicNotificationCadence(
-        partner.settings.email_frequency ?? DEFAULT_EMAIL_FREQUENCY,
-      ),
-      created_at: partner.created_at,
-    })),
-    watchers: owned.map((partner) => ({
-      id: partner.id,
-      user: {
-        ...(partner.watcher_id ? { id: partner.watcher_id } : {}),
-        email: partner.watcher_email,
-        ...(partner.watcher_name ? { name: partner.watcher_name } : {}),
-      },
-      status: partner.status,
-      created_at: partner.created_at,
-    })),
+    watching: serializeWatching(incoming),
+    watchers: serializeWatchers(owned),
   });
 });
 
-partners.patch(
-  '/partner/watching/:id',
-  authenticateWebSession(),
-  validateZ('json', updateWatchingSchema),
-  async (c) => {
-    const { digest_cadence } = c.req.valid('json');
-
-    const result = await updatePartnerNotificationPreference(c.env.DB, {
-      partnership_id: c.req.param('id'),
-      watcher_user_id: c.get('sub'),
-      ...(digest_cadence ? { email_frequency: digest_cadence } : {}),
-    });
-
-    if (!result) {
-      return c.json({ error: 'Not found' }, 404);
-    }
-
-    return c.body(null, 204);
-  },
-);
-
-partners.delete('/partner/watcher/:id', authenticateWebSession(), async (c) => {
+partners.delete('/partner/:id', authenticateWebSession(), async (c) => {
+  const userId = c.get('sub');
   const partnerId = c.req.param('id');
-  const partnership = await findPartnerById(c.env.DB, partnerId);
-
-  if (!partnership || partnership.watching_user_id !== c.get('sub')) {
-    return c.json({ error: 'Not found' }, 404);
-  }
-
-  await deletePartnerById(c.env.DB, partnerId);
-  return c.body(null, 204);
-});
-
-partners.delete('/partner/watching/:id', authenticateWebSession(), async (c) => {
-  const partnerId = c.req.param('id');
-  const partnership = await findPartnerById(c.env.DB, partnerId);
-  const currentUser = await findUserById(c.env.DB, c.get('sub'));
+  const [partnership, currentUser] = await Promise.all([
+    findPartnerById(c.env.DB, partnerId),
+    findUserById(c.env.DB, userId),
+  ]);
 
   if (!partnership || !currentUser) {
     return c.json({ error: 'Not found' }, 404);
   }
 
   const canDelete =
-    partnership.watcher_user_id === c.get('sub') ||
+    partnership.watching_user_id === userId ||
+    partnership.watcher_user_id === userId ||
     (partnership.watcher_user_id === null && partnership.watcher_email === currentUser.email);
 
   if (!canDelete) {

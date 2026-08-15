@@ -85,7 +85,7 @@ export async function signupAndGetCookie(
     throw new Error(`signup-request failed: ${requestRes.status} ${await requestRes.text()}`);
   }
 
-  const deliveries = await listMockEmailDeliveries();
+  const deliveries = listMockEmailDeliveries();
   const signupDelivery = [...deliveries]
     .reverse()
     .find(
@@ -152,12 +152,39 @@ export async function createDeviceForUser(
   }
 
   const body = (await res.json()) as {
-    refresh_token: string;
-    settings: { id: string };
     token: string;
+    settings: { id: string; hash_token: string };
   };
 
-  return { id: body.settings.id, refresh_token: body.refresh_token, token: body.token };
+  return { id: body.settings.id, refresh_token: body.token, token: body.settings.hash_token };
+}
+
+export function batchMetadataForm(input: {
+  start_time: number;
+  end_time: number;
+  access_keys: Record<string, string>;
+  event_counts?: { total?: number; high?: number; medium?: number; screenshot?: number };
+  notifications?: unknown[];
+  file?: File;
+}): FormData {
+  const form = new FormData();
+  form.set(
+    'metadata',
+    JSON.stringify({
+      start_time: input.start_time,
+      end_time: input.end_time,
+      access_keys: input.access_keys,
+      event_counts: {
+        total: input.event_counts?.total ?? 0,
+        high: input.event_counts?.high ?? 0,
+        medium: input.event_counts?.medium ?? 0,
+        screenshot: input.event_counts?.screenshot ?? 0,
+      },
+      ...(input.notifications ? { notifications: input.notifications } : {}),
+    }),
+  );
+  form.set('file', input.file ?? new File([new Uint8Array([1, 2, 3])], 'batch.enc'));
+  return form;
 }
 
 export async function listEmailDeliveries() {

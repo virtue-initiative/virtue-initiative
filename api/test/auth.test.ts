@@ -57,6 +57,7 @@ describe('Opaque token purpose prefixes', () => {
     expect(generateOpaqueToken('device_session')).toMatch(/^dst_/);
     expect(generateOpaqueToken('signup')).toMatch(/^sut_/);
     expect(generateOpaqueToken('email_change')).toMatch(/^ect_/);
+    expect(generateOpaqueToken('email_verification')).toMatch(/^evt_/);
     expect(generateOpaqueToken('password_reset')).toMatch(/^prt_/);
     expect(generateOpaqueToken('partner_invite')).toMatch(/^pit_/);
   });

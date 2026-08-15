@@ -1,3 +1,4 @@
+use axum::ServiceExt;
 use hash_server::config::Config;
 
 #[tokio::main]
@@ -14,5 +15,7 @@ async fn main() {
         .unwrap_or_else(|e| panic!("failed to bind {bind_addr}: {e}"));
 
     tracing::info!("listening on {bind_addr}");
-    axum::serve(listener, app).await.expect("server error");
+    axum::serve(listener, app.into_make_service())
+        .await
+        .expect("server error");
 }

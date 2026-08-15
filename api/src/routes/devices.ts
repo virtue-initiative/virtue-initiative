@@ -16,7 +16,7 @@ import { sendEmail } from '../lib/email';
 import { renderDeviceDeletedTemplate } from '../lib/email/templates';
 import { deleteObject } from '../lib/r2';
 import { Env, Variables } from '../types/bindings';
-import { updateDeviceSchema, type PatchDeviceResponse } from '../../../shared-web/types';
+import { updateDeviceSchema } from '../../../shared-web/types';
 
 const devices = new Hono<{ Bindings: Env; Variables: Variables }>();
 const ONLINE_WINDOW_MS = 2 * 60 * 60 * 1000;
@@ -47,7 +47,7 @@ devices.get('/', authenticateWebSession(), async (c) => {
         last_upload_at: device.last_upload_at,
         // hash-server's last_received is unix *seconds* (hash-server/SPEC.md's
         // unix_time is a u32, so it can only be seconds); last_hash_at is a
-        // DateTime (millisecond Unix timestamp) per API.md, like every other
+        // DateTime (millisecond Unix timestamp) per SPEC.md, like every other
         // timestamp this API returns.
         last_hash_at: hi ? hi.last_received * 1000 : null,
         pending_count: hi ? hi.seq : 0,
@@ -76,7 +76,7 @@ devices.patch(
     const { name } = c.req.valid('json');
     await updateDevice(c.env.DB, deviceId, { name });
 
-    return c.json<PatchDeviceResponse>({ id: deviceId, updated: true });
+    return c.body(null, 204);
   },
 );
 

@@ -1,4 +1,5 @@
 /// <reference lib="webworker" />
+import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { decryptAndFlattenBatch, DecryptionError } from '../api/batch-materializer';
 import { unwrapBatchKey } from '../api/crypto';
@@ -94,7 +95,8 @@ const initPromise = (async () => {
        end_time INTEGER NOT NULL,
        created_at INTEGER NOT NULL,
        start_hash TEXT,
-       end_hash TEXT
+       end_hash TEXT,
+       version TEXT
      )`,
   );
   db.exec(
@@ -156,8 +158,8 @@ function sqlMergeDataPage(viewerId: string, targetUserId: string, page: DataPage
   try {
     for (const batch of page.batches) {
       db.exec(
-        `INSERT OR IGNORE INTO batches(id,viewer_id,target_user_id,device_id,url,encrypted_key,start_time,end_time,created_at,end_hash)
-         VALUES(?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT OR IGNORE INTO batches(id,viewer_id,target_user_id,device_id,url,encrypted_key,start_time,end_time,created_at,end_hash,version)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
         {
           bind: [
             batch.id,
@@ -170,6 +172,7 @@ function sqlMergeDataPage(viewerId: string, targetUserId: string, page: DataPage
             batch.end_time,
             batch.created_at,
             batch.end_hash,
+            batch.version,
           ],
         },
       );
@@ -219,6 +222,7 @@ function sqlGetUnmaterializedBatches(
           end_time: row.end_time as number,
           created_at: row.created_at as number,
           end_hash: (row.end_hash as string | null) ?? '0'.repeat(64),
+          version: (row.version as string | null) ?? 'v0.1',
         }),
     },
   );
@@ -388,7 +392,8 @@ const PROGRESS_THROTTLE_MS = 250;
 // result set each time. Only events materialized since the previous flush cross postMessage.
 const DELTA_INTERVAL_MS = 5000;
 const BASE =
-  (import.meta as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL ?? 'http://localhost:8787';
+  ((import.meta as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL ??
+    'http://localhost:8787') + `/${CURRENT_API_VERSION}`;
 
 let session: { userId: string; privateKey: CryptoKey | null } | null = null;
 
@@ -445,9 +450,8 @@ function matchesQuery(log: FeedLog, query: WorkerCacheQuery): boolean {
   return true;
 }
 
-async function fetchData(params?: { user?: string; since?: number }): Promise<DataPage> {
+async function fetchData(params?: { since?: number }): Promise<DataPage> {
   const qs = new URLSearchParams();
-  if (params?.user) qs.set('user', params.user);
   if (params?.since !== undefined) qs.set('since', String(params.since));
   const q = qs.toString();
   const res = await fetch(`${BASE}/data${q ? `?${q}` : ''}`, {
@@ -455,6 +459,29 @@ async function fetchData(params?: { user?: string; since?: number }): Promise<Da
   });
   if (!res.ok) throw new Error(`getData failed: ${res.status}`);
   return res.json() as Promise<DataPage>;
+}
+
+// GET /data now returns every batch the viewer can decrypt (their own plus every accepted
+// watched partner's) in one bundled response, with no server-side per-owner filtering.
+// BatchData doesn't carry an owner field, so attributing each batch to the right per-target
+// SQLite bucket below requires looking it up via its device's owner — GET /device already
+// returns exactly the same self-plus-watched-partners device set /data's batches can come
+// from, so it's a complete map for this purpose.
+let deviceOwnersFetch: Promise<Map<string, string>> | null = null;
+
+async function fetchDeviceOwners(): Promise<Map<string, string>> {
+  if (deviceOwnersFetch) return deviceOwnersFetch;
+  deviceOwnersFetch = (async () => {
+    const res = await fetch(`${BASE}/device`, { credentials: 'include' });
+    if (!res.ok) throw new Error(`getDevices failed: ${res.status}`);
+    const devices = (await res.json()) as Array<{ id: string; owner: string }>;
+    return new Map(devices.map((device) => [device.id, device.owner]));
+  })();
+  try {
+    return await deviceOwnersFetch;
+  } finally {
+    deviceOwnersFetch = null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -489,12 +516,21 @@ async function fetchAndDecrypt(targetUserId: string): Promise<void> {
   try {
     const since = sqlGetSince(viewerId, targetUserId);
     console.log('[cache-worker] fetching /data since=', since, 'for', targetUserId);
-    const page = await fetchData({
-      user: targetUserId === viewerId ? undefined : targetUserId,
-      since,
-    });
-    console.log('[cache-worker] /data returned', page.batches.length, 'batches');
-    sqlMergeDataPage(viewerId, targetUserId, page);
+    const [page, deviceOwners] = await Promise.all([fetchData({ since }), fetchDeviceOwners()]);
+    // /data no longer filters by owner server-side — scope this target's slice
+    // of the bundled response down to batches from devices it actually owns.
+    const scopedBatches = page.batches.filter(
+      (batch) => deviceOwners.get(batch.device_id) === targetUserId,
+    );
+    console.log(
+      '[cache-worker] /data returned',
+      page.batches.length,
+      'batches,',
+      scopedBatches.length,
+      'in scope for',
+      targetUserId,
+    );
+    sqlMergeDataPage(viewerId, targetUserId, { ...page, batches: scopedBatches });
   } catch (err) {
     console.warn('[cache-worker] fetch failed for', targetUserId, err);
     serveAll();

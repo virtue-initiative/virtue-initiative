@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
+import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
 import { APIClient } from './client';
 import { server } from '../../mocks/server';
 import { TEST_DEVICES, TEST_USER, TEST_WATCHER, TEST_WATCHING } from '../../mocks/fixtures';
 import { makeFakeSession } from '../../test-utils';
 
-const BASE = 'http://localhost:8787';
+const BASE = `http://localhost:8787/${CURRENT_API_VERSION}`;
 
 function makeClient() {
   return new APIClient(makeFakeSession());
@@ -198,10 +199,10 @@ describe('APIClient — invitePartner / removeWatcher / stopWatching', () => {
     expect((body as { email: string }).email).toBe('alice@example.com');
   });
 
-  it('calls DELETE /partner/watcher/:id for removeWatcher', async () => {
+  it('calls DELETE /partner/:id for removeWatcher', async () => {
     let deletedId: string | undefined;
     server.use(
-      http.delete(`${BASE}/partner/watcher/:id`, ({ params }) => {
+      http.delete(`${BASE}/partner/:id`, ({ params }) => {
         deletedId = params.id as string;
         return new HttpResponse(null, { status: 204 });
       }),
@@ -211,10 +212,10 @@ describe('APIClient — invitePartner / removeWatcher / stopWatching', () => {
     expect(deletedId).toBe('watcher-1');
   });
 
-  it('calls DELETE /partner/watching/:id for stopWatching', async () => {
+  it('calls DELETE /partner/:id for stopWatching', async () => {
     let deletedId: string | undefined;
     server.use(
-      http.delete(`${BASE}/partner/watching/:id`, ({ params }) => {
+      http.delete(`${BASE}/partner/:id`, ({ params }) => {
         deletedId = params.id as string;
         return new HttpResponse(null, { status: 204 });
       }),
