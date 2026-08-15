@@ -74,13 +74,27 @@ hdiutil convert "$TEMP_DMG_PATH" -format UDZO -ov -o "$DMG_PATH"
 rm -rf "$STAGING_DIR" "$TEMP_DMG_PATH"
 echo "Built ${DMG_PATH}"
 
-# Notarize + staple. Skipped for local/dev builds (adhoc-signed apps can't be
-# notarized): only runs when a notarytool keychain profile is configured.
+# Notarize + staple. Skipped for ad-hoc-signed builds (Apple rejects those
+# outright). Two credential sources are supported:
+#   - NOTARY_PROFILE: a `notarytool store-credentials` keychain profile,
+#     for local/dev use where the profile is registered once ahead of time.
+#   - ASC_KEY_ID/ASC_ISSUER_ID/ASC_API_KEY_PATH: an App Store Connect API key
+#     passed directly, for CI where there's no persistent keychain to store
+#     a profile in.
 if [[ -n "${NOTARY_PROFILE:-}" ]]; then
   echo "Submitting ${DMG_PATH} for notarization (profile: ${NOTARY_PROFILE})..."
   xcrun notarytool submit "$DMG_PATH" --keychain-profile "$NOTARY_PROFILE" --wait
   xcrun stapler staple "$DMG_PATH"
   echo "Notarized and stapled ${DMG_PATH}"
+elif [[ -n "${ASC_KEY_ID:-}" && -n "${ASC_ISSUER_ID:-}" && -n "${ASC_API_KEY_PATH:-}" ]]; then
+  echo "Submitting ${DMG_PATH} for notarization (API key: ${ASC_KEY_ID})..."
+  xcrun notarytool submit "$DMG_PATH" \
+    --key "$ASC_API_KEY_PATH" \
+    --key-id "$ASC_KEY_ID" \
+    --issuer "$ASC_ISSUER_ID" \
+    --wait
+  xcrun stapler staple "$DMG_PATH"
+  echo "Notarized and stapled ${DMG_PATH}"
 else
-  echo "NOTARY_PROFILE not set; skipping notarization."
+  echo "No notarization credentials set (NOTARY_PROFILE or ASC_KEY_ID/ASC_ISSUER_ID/ASC_API_KEY_PATH); skipping notarization."
 fi
