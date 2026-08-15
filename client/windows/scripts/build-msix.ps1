@@ -425,7 +425,7 @@ function Get-AppPackageName {
     return $name
 }
 
-function Get-InstalledPackageRevision {
+function Get-InstalledPackageBuildNumber {
     param([string]$PackageName)
 
     try {
@@ -443,55 +443,27 @@ function Get-InstalledPackageRevision {
 
     $versionText = $installed.Version.ToString()
     $versionParts = $versionText.Split('.')
-    if ($versionParts.Count -lt 4) {
+    if ($versionParts.Count -lt 3) {
         return 0
     }
 
-    return [int]$versionParts[3]
+    return [int]$versionParts[2]
 }
 
-function Get-CommitsSinceVersionBump {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$RepoRoot
-    )
+function Get-DevMsixBuildNumber {
+    param([string]$PackageName)
 
-    $git = (Get-Command git -ErrorAction SilentlyContinue | Select-Object -First 1).Source
-    if (-not $git) {
-        throw "git not found; cannot compute commits since the last version bump."
-    }
-
-    $bumpCommit = & $git -C $RepoRoot log -1 --format=%H -- client/version.properties 2>$null
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($bumpCommit)) {
-        throw "Unable to locate a commit that touched client/version.properties. Ensure the checkout has full history (fetch-depth: 0)."
-    }
-    $bumpCommit = $bumpCommit.Trim()
-
-    $countText = & $git -C $RepoRoot rev-list --count "$bumpCommit..HEAD" 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        throw "git rev-list failed while counting commits since the last version bump."
-    }
-
-    return [int]$countText.Trim()
-}
-
-function New-DevMsixRevision {
-    param(
-        [string]$PackageName,
-        [string]$RepoRoot
-    )
-
-    if ($env:GITHUB_ACTIONS -eq "true") {
-        $nextRevision = Get-CommitsSinceVersionBump -RepoRoot $RepoRoot
+    if ($env:GITHUB_RUN_NUMBER) {
+        $buildNumber = [int]$env:GITHUB_RUN_NUMBER
     } else {
-        $nextRevision = (Get-InstalledPackageRevision -PackageName $PackageName) + 1
+        $buildNumber = (Get-InstalledPackageBuildNumber -PackageName $PackageName) + 1
     }
 
-    if ($nextRevision -gt 65535) {
-        throw "Computed MSIX revision $nextRevision exceeds the Appx limit of 65535."
+    if ($buildNumber -gt 65535) {
+        throw "Computed MSIX build number $buildNumber exceeds the Appx limit of 65535."
     }
 
-    return $nextRevision
+    return $buildNumber
 }
 
 $VersionHelper = Join-Path $PSScriptRoot "Get-VersionInfo.ps1"
@@ -536,7 +508,7 @@ if ([string]::IsNullOrWhiteSpace($PackageVersion)) {
     $PackageVersion = Convert-ToMsixVersion -Value $VersionInfo.BaseVersion
     if ($VersionInfo.ReleaseChannel -eq "dev") {
         $versionParts = $PackageVersion.Split('.')
-        $versionParts[3] = [string](New-DevMsixRevision -PackageName $PackageName -RepoRoot $RepoRoot)
+        $versionParts[2] = [string](Get-DevMsixBuildNumber -PackageName $PackageName)
         $PackageVersion = $versionParts -join '.'
     }
 }
