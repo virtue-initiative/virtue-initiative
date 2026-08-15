@@ -79,9 +79,10 @@ xcodebuild -exportArchive \
   -exportPath "$EXPORT_PATH" \
   -exportOptionsPlist "$EXPORT_PATH/ExportOptions.plist"
 
-IPA_PATH="$EXPORT_PATH/VirtueIOS.ipa"
-if [[ ! -f "$IPA_PATH" ]]; then
-  echo "Exported .ipa not found: $IPA_PATH" >&2
+IPA_PATH="$(find "$EXPORT_PATH" -maxdepth 1 -name '*.ipa' -print -quit)"
+if [[ -z "$IPA_PATH" || ! -f "$IPA_PATH" ]]; then
+  echo "No exported .ipa found under: $EXPORT_PATH" >&2
+  ls -la "$EXPORT_PATH" >&2 || true
   exit 1
 fi
 
