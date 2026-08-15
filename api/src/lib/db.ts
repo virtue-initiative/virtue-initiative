@@ -178,7 +178,7 @@ export async function markUsersUnverifiedByEmails(db: D1Database, emails: string
 
   return db
     .prepare(
-      `UPDATE users SET email_verified = 0 WHERE lower(email) IN (${placeholders(normalized.length)})`,
+      `UPDATE users SET email_verified = 0 WHERE email IN (${placeholders(normalized.length)})`,
     )
     .bind(...normalized)
     .run();
@@ -196,7 +196,7 @@ export async function markUsersEmailBouncedByEmails(db: D1Database, emails: stri
     .prepare(
       `UPDATE users
        SET email_bounced_at = ?
-       WHERE lower(email) IN (${placeholders(normalized.length)})`,
+       WHERE email IN (${placeholders(normalized.length)})`,
     )
     .bind(Date.now(), ...normalized)
     .run();
@@ -213,6 +213,7 @@ export async function createUser(
     pub_key: ArrayBuffer;
     encrypted_priv_key: ArrayBuffer;
     name?: string;
+    email_verified?: boolean;
   },
 ) {
   return db
@@ -221,7 +222,7 @@ export async function createUser(
         id, email, password_hash, password_salt, password_params_version,
         name, email_verified, settings,
         pub_key, encrypted_priv_key, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       uuidToBytes(input.id),
@@ -230,6 +231,7 @@ export async function createUser(
       input.passwordSalt,
       input.passwordParamsVersion,
       input.name ?? null,
+      input.email_verified ? 1 : 0,
       JSON.stringify({ email_frequency: 'daily', timezone: 'UTC' }),
       input.pub_key,
       input.encrypted_priv_key,
@@ -632,6 +634,50 @@ export async function deleteExpiredBatchesChunk(db: D1Database, cutoff: number, 
   return result.meta.changes;
 }
 
+export async function deleteExpiredEmailTokensChunk(db: D1Database, cutoff: number, limit: number) {
+  const result = await db
+    .prepare(
+      `DELETE FROM email_tokens WHERE id IN (
+         SELECT id FROM email_tokens WHERE expires_at < ? ORDER BY expires_at ASC LIMIT ?
+       )`,
+    )
+    .bind(cutoff, limit)
+    .run();
+  return result.meta.changes;
+}
+
+export async function deleteExpiredUserSessionsChunk(
+  db: D1Database,
+  cutoff: number,
+  limit: number,
+) {
+  const result = await db
+    .prepare(
+      `DELETE FROM user_sessions WHERE refresh_token_hash IN (
+         SELECT refresh_token_hash FROM user_sessions WHERE expires_at < ? ORDER BY expires_at ASC LIMIT ?
+       )`,
+    )
+    .bind(cutoff, limit)
+    .run();
+  return result.meta.changes;
+}
+
+export async function deleteExpiredDeviceSessionsChunk(
+  db: D1Database,
+  cutoff: number,
+  limit: number,
+) {
+  const result = await db
+    .prepare(
+      `DELETE FROM device_sessions WHERE refresh_token_hash IN (
+         SELECT refresh_token_hash FROM device_sessions WHERE expires_at < ? ORDER BY expires_at ASC LIMIT ?
+       )`,
+    )
+    .bind(cutoff, limit)
+    .run();
+  return result.meta.changes;
+}
+
 export async function listBatchWindowsForUser(
   db: D1Database,
   userId: string,
@@ -914,6 +960,7 @@ export async function listAcceptedNotificationTargetsForUser(db: D1Database, use
     watcher_email: string;
     watcher_user_id: string | null;
     watcher_name: string | null;
+    watcher_email_verified: number;
     settings: string;
   }>(
     db
@@ -922,6 +969,7 @@ export async function listAcceptedNotificationTargetsForUser(db: D1Database, use
                 recipient.email AS watcher_email,
                 recipient.id AS watcher_user_id,
                 recipient.name AS watcher_name,
+                recipient.email_verified AS watcher_email_verified,
                 recipient.settings
           FROM partners p
           JOIN users recipient ON recipient.id = p.watcher_user_id

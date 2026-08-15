@@ -29,6 +29,10 @@ interface SendEmailInput extends EmailContent {
   related_partnership_id?: string;
   metadata?: Record<string, unknown>;
   allowUnverified?: boolean;
+  // Pass this when the caller already looked up the recipient (e.g. a fan-out
+  // over rows from a single batch query) to avoid a redundant per-call
+  // findUserByEmail lookup here.
+  recipientEmailVerified?: number;
 }
 
 let sesClient: SESv2Client | null = null;
@@ -55,13 +59,15 @@ function getSesClient(env: Env) {
 
 export async function sendEmail(input: SendEmailInput) {
   const id = uuidv4();
-  const recipientUser = await findUserByEmail(input.db, input.recipient);
+  const recipientEmailVerified =
+    input.recipientEmailVerified ??
+    (await findUserByEmail(input.db, input.recipient))?.email_verified;
   if (
     !input.allowUnverified &&
     input.kind !== 'email_verification' &&
     input.kind !== 'partner_invite' &&
-    recipientUser &&
-    recipientUser.email_verified !== 1
+    recipientEmailVerified !== undefined &&
+    recipientEmailVerified !== 1
   ) {
     console.info('email delivery skipped for unverified recipient', {
       kind: input.kind,

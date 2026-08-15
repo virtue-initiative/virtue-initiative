@@ -400,9 +400,9 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
     pub_key: decoded.data.pub_key,
     encrypted_priv_key: decoded.data.encrypted_priv_key,
     name,
+    email_verified: true,
   });
 
-  await updateUser(c.env.DB, userId, { email_verified: true });
   await consumeEmailToken(c.env.DB, record, Date.now());
 
   await createSession(c, userId);
