@@ -9,7 +9,7 @@ FILES=$(git diff --cached --name-only --diff-filter=ACMR | sed 's| |\\ |g')
 [ -z "$FILES" ] && exit 0
 
 # Prettify all selected files
-echo "$FILES" | xargs ./api/node_modules/.bin/prettier --ignore-unknown --write
+echo "$FILES" | xargs ./node_modules/.bin/prettier --ignore-unknown --write
 pushd client && cargo fmt --all && popd > /dev/null
 
 # Check if anything to be commited was changed by the formatters
