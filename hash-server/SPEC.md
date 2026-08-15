@@ -230,4 +230,4 @@ The staging server SHOULD be configured with RUST_LOG=debug.
 
 ### 5.3 Cloudflared
 
-Cloudflared MUST be configured on the oracle cloud VM and MUST route staging.hash.virtueinitiative.org to the staging server and hash.virtueinitiative.org to the production server.
+Cloudflared MUST be configured on the oracle cloud VM and MUST route staging-hash.virtueinitiative.org to the staging server and hash.virtueinitiative.org to the production server.
