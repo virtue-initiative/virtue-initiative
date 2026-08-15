@@ -8,7 +8,7 @@ use serde::Serialize;
 use crate::config::Config;
 use crate::crypto::derive_password_auth;
 use crate::error::{CoreError, CoreResult};
-use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, HashParams};
+use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, HashParams, NotifyPayload};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct UploadedBatchResponse {
@@ -30,9 +30,10 @@ pub struct DeviceState {
     pub hash_token: String,
 }
 
-/// Raw wire shape for the `{settings, token}` pair embedded in `POST /d/device`,
-/// `GET /d/device`, and `POST /d/batch` responses. `DeviceSettingsResponse` differs
-/// from the public `DeviceSettings` only in its `id`/`device_id` field name.
+/// Raw wire shape of `DeviceSettings` embedded in `POST /d/device`, `GET /d/device`,
+/// and `POST /d/batch` responses. Differs from the public `DeviceSettings` only in
+/// its `id`/`device_id` field name and the extra `hash_token` (the JWT hash-server
+/// token, pulled out separately by each caller below).
 #[derive(Deserialize)]
 struct DeviceRecipientResponse {
     user_id: String,
@@ -48,6 +49,7 @@ struct DeviceSettingsResponse {
     wrapping_keys: Vec<DeviceRecipientResponse>,
     #[serde(default)]
     hash_base_url: Option<String>,
+    hash_token: String,
 }
 
 impl From<DeviceSettingsResponse> for DeviceSettings {
@@ -67,12 +69,6 @@ impl From<DeviceSettingsResponse> for DeviceSettings {
             hash_base_url: response.hash_base_url,
         }
     }
-}
-
-#[derive(Deserialize)]
-struct DeviceStateResponse {
-    settings: DeviceSettingsResponse,
-    token: String,
 }
 
 pub trait ApiTransport: Send + Sync {
@@ -156,9 +152,8 @@ impl ApiTransport for ReqwestApiClient {
 
         #[derive(Deserialize)]
         struct RegisterDeviceResponse {
-            refresh_token: String,
-            #[serde(flatten)]
-            state: DeviceStateResponse,
+            token: String,
+            settings: DeviceSettingsResponse,
         }
 
         let material: LoginMaterialResponse = self.expect_json(
@@ -183,28 +178,30 @@ impl ApiTransport for ReqwestApiClient {
             }),
         )?;
 
-        let settings: DeviceSettings = response.state.settings.into();
+        let hash_token = response.settings.hash_token.clone();
+        let settings: DeviceSettings = response.settings.into();
         Ok(RegisteredDevice {
             credentials: DeviceCredentials {
                 device_id: settings.device_id.clone(),
-                refresh_token: response.refresh_token,
+                refresh_token: response.token,
             },
             settings,
-            hash_token: response.state.token,
+            hash_token,
         })
     }
 
     fn get_device_settings(&self, device_refresh_token: &str) -> CoreResult<DeviceState> {
-        let response: DeviceStateResponse = self.send_json(
+        let response: DeviceSettingsResponse = self.send_json(
             Method::GET,
             None,
             "/d/device",
             Some(device_refresh_token),
             None::<&()>,
         )?;
+        let hash_token = response.hash_token.clone();
         Ok(DeviceState {
-            settings: response.settings.into(),
-            hash_token: response.token,
+            settings: response.into(),
+            hash_token,
         })
     }
 
@@ -214,47 +211,56 @@ impl ApiTransport for ReqwestApiClient {
         batch: &BatchUpload,
     ) -> CoreResult<UploadedBatchResponse> {
         #[derive(Serialize)]
-        struct AccessKeysPayload<'a> {
-            keys: std::collections::BTreeMap<&'a str, &'a str>,
+        struct EventCounts {
+            total: u32,
+            high: u32,
+            medium: u32,
+            screenshot: u32,
+        }
+
+        #[derive(Serialize)]
+        struct BatchMetadata<'a> {
+            start_time: i64,
+            end_time: i64,
+            access_keys: std::collections::BTreeMap<&'a str, &'a str>,
+            event_counts: EventCounts,
+            notifications: &'a [NotifyPayload],
         }
 
         #[derive(Deserialize)]
         struct UploadBatchResponse {
             id: String,
-            #[serde(flatten)]
-            state: DeviceStateResponse,
+            settings: DeviceSettingsResponse,
         }
 
         let part = Part::bytes(batch.bytes.clone())
             .file_name("batch.enc")
             .mime_str("application/octet-stream")?;
-        let access_keys = serde_json::to_string(&AccessKeysPayload {
-            keys: batch
+        let metadata = serde_json::to_string(&BatchMetadata {
+            start_time: batch.start_time_ms,
+            end_time: batch.end_time_ms,
+            access_keys: batch
                 .access_keys
                 .iter()
                 .map(|entry| (entry.user_id.as_str(), entry.hpke_key_base64.as_str()))
                 .collect(),
+            event_counts: EventCounts {
+                total: batch.total_count,
+                high: batch.high_risk_count,
+                medium: batch.medium_risk_count,
+                screenshot: batch.screenshot_count,
+            },
+            notifications: &batch.notifications,
         })?;
-        let mut form = Form::new()
-            .part("file", part)
-            .text("start_time", batch.start_time_ms.to_string())
-            .text("end_time", batch.end_time_ms.to_string())
-            .text("high_risk_count", batch.high_risk_count.to_string())
-            .text("medium_risk_count", batch.medium_risk_count.to_string())
-            .text("access_keys", access_keys);
-        if !batch.notifications.is_empty() {
-            form = form.text(
-                "notifications",
-                serde_json::to_string(&batch.notifications)?,
-            );
-        }
+        let form = Form::new().part("file", part).text("metadata", metadata);
 
         let response: UploadBatchResponse =
             self.send_form(Method::POST, None, "/d/batch", device_refresh_token, form)?;
+        let hash_token = response.settings.hash_token.clone();
         Ok(UploadedBatchResponse {
             id: response.id,
-            settings: response.state.settings.into(),
-            hash_token: response.state.token,
+            settings: response.settings.into(),
+            hash_token,
         })
     }
 

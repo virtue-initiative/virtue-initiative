@@ -41,6 +41,10 @@ pub struct PendingBatchEvent {
     pub ts: i64,
     pub risk: f32,
     pub encoded: Vec<u8>,
+    /// Whether the source event was `UploadKind::Screenshot`, so the batch upload
+    /// can report `event_counts.screenshot` without decoding `encoded`.
+    #[serde(default)]
+    pub is_screenshot: bool,
     /// Alert-email metadata, set when the event's risk is >= `EXTRA_HIGH_RISK` at
     /// hash time. Rides with this event into the batch it's uploaded in — never
     /// sent standalone. Local/persisted state only, not part of the wire/hash
@@ -323,10 +327,12 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
                             .risk
                             .is_some_and(|r| r >= crate::module::lifecycle::EXTRA_HIGH_RISK);
                         let notify = is_high_risk.then(|| build_notify_payload(&event));
+                        let is_screenshot = matches!(event.event, UploadKind::Screenshot { .. });
                         self.state.pending_batch_events.push(PendingBatchEvent {
                             ts: event.ts,
                             risk: event.risk.unwrap_or(0.0),
                             encoded,
+                            is_screenshot,
                             notify,
                         });
                         None
@@ -413,6 +419,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
             .iter()
             .filter(|e| e.risk >= MEDIUM_RISK_RATING && e.risk < HIGH_RISK_RATING)
             .count() as u32;
+        let screenshot_count = items.iter().filter(|e| e.is_screenshot).count() as u32;
         let notifications: Vec<NotifyPayload> =
             items.iter().filter_map(|e| e.notify.clone()).collect();
         let encoded: Vec<Vec<u8>> = items.into_iter().map(|event| event.encoded).collect();
@@ -425,6 +432,7 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
             now_ms,
             high_risk_count,
             medium_risk_count,
+            screenshot_count,
             notifications,
         )?;
         match self.upload_batch(&batch) {
@@ -868,6 +876,7 @@ mod tests {
                     ts: 500,
                     risk: 0.0,
                     encoded: vec![1, 2, 3],
+                    is_screenshot: false,
                     notify: None,
                 });
         }
@@ -928,6 +937,7 @@ mod tests {
                 ts: 500,
                 risk: 0.0,
                 encoded: vec![1, 2, 3],
+                is_screenshot: false,
                 notify: None,
             });
 
@@ -1135,6 +1145,7 @@ mod tests {
                 ts: 500,
                 risk: 0.0,
                 encoded: vec![1, 2, 3],
+                is_screenshot: false,
                 notify: None,
             });
 
@@ -1361,6 +1372,7 @@ mod tests {
                 ts: 500,
                 risk: 0.0,
                 encoded: vec![1, 2, 3],
+                is_screenshot: false,
                 notify: None,
             });
 
@@ -1421,6 +1433,7 @@ mod tests {
                 ts: 500,
                 risk: 0.0,
                 encoded: vec![1, 2, 3],
+                is_screenshot: false,
                 notify: None,
             });
 

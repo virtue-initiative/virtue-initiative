@@ -334,11 +334,13 @@ immediately. A batch upload that fails with 404/401 means the device is gone and
 triggers logout; other failures leave the events queued and retry on the next
 batch attempt using the last known settings.
 
-Each `BatchUpload` also carries `high_risk_count`/`medium_risk_count`: tallies of how many
-events in the batch fall in the high (`risk >= 0.7`) and medium (`0.4 <= risk < 0.7`) bands,
-thresholds mirroring `shared-web/risk.ts`. These are computed client-side from per-event
-`risk` values before encryption, so the server can summarize tamper activity in partner
-digest emails without ever decrypting the batch.
+Each `BatchUpload` also carries `total_count`/`high_risk_count`/`medium_risk_count`/
+`screenshot_count`, sent to the server as `metadata.event_counts` (`{total, high, medium,
+screenshot}`). `high_risk_count`/`medium_risk_count` tally events falling in the high
+(`risk >= 0.7`) and medium (`0.4 <= risk < 0.7`) bands, thresholds mirroring
+`shared-web/risk.ts`; `screenshot_count` tallies `UploadKind::Screenshot` events. These are
+computed client-side from the per-event `risk`/kind before encryption, so the server can
+summarize tamper activity in partner digest emails without ever decrypting the batch.
 
 ## Notify flow
 
@@ -348,8 +350,9 @@ checks whether that event was high-risk and, if so, attaches a `NotifyPayload
 { ts, type, risk, title?, details? }` to the `PendingBatchEvent.notify` field. The
 notify payload then rides with that event into whichever batch carries it: `try_upload_batch`
 collects every `notify` present in the events it's about to send into `BatchUpload.notifications`
-and uploads them in the same `POST /d/batch` multipart request (`notifications` field —
-a JSON-encoded array), where the server processes them (best-effort) only after the
+and uploads them in the same `POST /d/batch` multipart request, as the `notifications` array
+inside the single JSON `metadata` field (alongside `start_time`, `end_time`, `access_keys`,
+and `event_counts`), where the server processes them (best-effort) only after the
 batch itself has durably persisted. A high-risk or heartbeat event still force-flushes
 the batch immediately (`handle_upload`'s `is_heartbeat || is_high_risk` check), so
 notify latency is preserved — it's just "flush the batch sooner" rather than "flush a
@@ -366,7 +369,10 @@ new_state    = sha256(current_state[32] || content_hash[32])
 
 `POST /hash` itself requires a `HashServerToken`, minted by `POST /d/device`, `GET
 /d/device`, and `POST /d/batch` — there is no longer a dedicated `POST /d/token`
-endpoint. `UploadModule::ensure_hash_token` caches the token from whichever of those
+endpoint. On the wire the token rides as `settings.hash_token` (part of the embedded
+`DeviceSettings`, not a sibling field); `api.rs` pulls it out into the separate
+`hash_token` field on `RegisteredDevice`/`DeviceState`/`UploadedBatchResponse`.
+`UploadModule::ensure_hash_token` caches the token from whichever of those
 responses arrived most recently and only calls `GET /d/device` when that cache goes
 stale (55 minutes) without a batch having refreshed it in the meantime.
 

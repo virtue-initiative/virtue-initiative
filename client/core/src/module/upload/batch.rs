@@ -22,6 +22,7 @@ impl BatchBuilder {
         end_time_ms: i64,
         high_risk_count: u32,
         medium_risk_count: u32,
+        screenshot_count: u32,
         notifications: Vec<NotifyPayload>,
     ) -> CoreResult<BatchUpload> {
         if encoded_events.is_empty() {
@@ -57,8 +58,10 @@ impl BatchBuilder {
             end_time_ms,
             bytes: encrypted,
             access_keys,
+            total_count: encoded_events.len() as u32,
             high_risk_count,
             medium_risk_count,
+            screenshot_count,
             notifications,
         })
     }
