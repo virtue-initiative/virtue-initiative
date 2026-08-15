@@ -15,6 +15,11 @@ DERIVED_DATA_PATH="$BUILD_DIR/derived-data"
 : "${IOS_ASC_KEY_ID:?IOS_ASC_KEY_ID is required}"
 : "${IOS_ASC_ISSUER_ID:?IOS_ASC_ISSUER_ID is required}"
 : "${IOS_ASC_API_KEY_PATH:?IOS_ASC_API_KEY_PATH is required (path to the .p8 file)}"
+: "${IOS_APP_PROVISIONING_PROFILE_PATH:?IOS_APP_PROVISIONING_PROFILE_PATH is required (path to the app .mobileprovision file)}"
+: "${IOS_EXT_PROVISIONING_PROFILE_PATH:?IOS_EXT_PROVISIONING_PROFILE_PATH is required (path to the extension .mobileprovision file)}"
+
+APP_PROFILE_NAME='Virtue iOS App Store'
+EXT_PROFILE_NAME='Virtue iOS Safari Ext App Store'
 
 source "${CLIENT_ROOT}/scripts/version.sh"
 
@@ -25,6 +30,11 @@ VIRTUE_BUILD_LABEL="$(virtue_build_label)"
 rm -rf "$BUILD_DIR"
 mkdir -p "$EXPORT_PATH"
 
+PROFILES_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+mkdir -p "$PROFILES_DIR"
+cp "$IOS_APP_PROVISIONING_PROFILE_PATH" "$PROFILES_DIR/virtue-ios-app-store.mobileprovision"
+cp "$IOS_EXT_PROVISIONING_PROFILE_PATH" "$PROFILES_DIR/virtue-ios-safari-ext-app-store.mobileprovision"
+
 echo "Archiving ${SCHEME} ${MARKETING_VERSION} (build ${CURRENT_PROJECT_VERSION})"
 
 xcodebuild archive \
@@ -34,16 +44,10 @@ xcodebuild archive \
   -destination "generic/platform=iOS" \
   -archivePath "$ARCHIVE_PATH" \
   -derivedDataPath "$DERIVED_DATA_PATH" \
-  -allowProvisioningUpdates \
-  -authenticationKeyPath "$IOS_ASC_API_KEY_PATH" \
-  -authenticationKeyID "$IOS_ASC_KEY_ID" \
-  -authenticationKeyIssuerID "$IOS_ASC_ISSUER_ID" \
   VIRTUE_APP_BUNDLE_ID=org.virtueinitiative.virtueios \
   MARKETING_VERSION="$MARKETING_VERSION" \
   CURRENT_PROJECT_VERSION="$CURRENT_PROJECT_VERSION" \
   VIRTUE_BUILD_LABEL="$VIRTUE_BUILD_LABEL" \
-  CODE_SIGN_STYLE=Automatic \
-  CODE_SIGN_IDENTITY="Apple Distribution" \
   DEVELOPMENT_TEAM="$IOS_TEAM_ID"
 
 cat > "$EXPORT_PATH/ExportOptions.plist" <<PLIST
@@ -56,7 +60,14 @@ cat > "$EXPORT_PATH/ExportOptions.plist" <<PLIST
 	<key>teamID</key>
 	<string>${IOS_TEAM_ID}</string>
 	<key>signingStyle</key>
-	<string>automatic</string>
+	<string>manual</string>
+	<key>provisioningProfiles</key>
+	<dict>
+		<key>org.virtueinitiative.virtueios</key>
+		<string>${APP_PROFILE_NAME}</string>
+		<key>org.virtueinitiative.virtueios.broadcast</key>
+		<string>${EXT_PROFILE_NAME}</string>
+	</dict>
 	<key>uploadSymbols</key>
 	<true/>
 </dict>
@@ -66,11 +77,7 @@ PLIST
 xcodebuild -exportArchive \
   -archivePath "$ARCHIVE_PATH" \
   -exportPath "$EXPORT_PATH" \
-  -exportOptionsPlist "$EXPORT_PATH/ExportOptions.plist" \
-  -allowProvisioningUpdates \
-  -authenticationKeyPath "$IOS_ASC_API_KEY_PATH" \
-  -authenticationKeyID "$IOS_ASC_KEY_ID" \
-  -authenticationKeyIssuerID "$IOS_ASC_ISSUER_ID"
+  -exportOptionsPlist "$EXPORT_PATH/ExportOptions.plist"
 
 IPA_PATH="$EXPORT_PATH/VirtueIOS.ipa"
 if [[ ! -f "$IPA_PATH" ]]; then
