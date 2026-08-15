@@ -13,7 +13,7 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
 - `Base64`: base64-encoded binary
 - `SHA256`: lowercase hex-encoded SHA-256 digest
 - `RefreshToken`: opaque web-session string, prefixed by purpose (e.g. `wst_...`). Set as the HTTPOnly `refresh_token` cookie by `POST /login`, `POST /signup`, and `POST /email-verification/validate`.
-- `HashServerToken`: EdDSA JWT (`Ed25519`) with `type: "hash-server"` and `sub = device id`; minted by `POST /d/device`, `GET /d/device`, and `POST /d/batch`
+- `HashServerToken`: EdDSA JWT (`Ed25519`) with `type: "device"` and `sub = device id`; minted by `POST /d/device`, `GET /d/device`, and `POST /d/batch`
 - `DeviceRefreshToken`: opaque string returned by `POST /d/device`
 - `ServerToken`: EdDSA JWT (`Ed25519`) with `type: "server"` and `sub = device id`
 
@@ -60,7 +60,7 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
   "last_upload_at": DateTime | null,
   "last_hash_at": DateTime | null,
   "pending_count": Number,
-  "status": "online" | "offline"
+  "status": "online" | "offline" | "logged_out"
 }
 ```
 
@@ -94,6 +94,24 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
 }
 ```
 
+**DeviceSettings**
+
+```js
+{
+  "id": UUID,
+  "name": "My Laptop",
+  "platform": "linux",
+  "wrapping_keys": [
+    {
+      "user_id": UUID,
+      "pub_key": Base64
+    }
+  ],
+  "hash_base_url": "https://..." | null,
+  "hash_token": HashServerToken
+}
+```
+
 
 ### 1.2 Authentication
 
@@ -115,7 +133,12 @@ The server SHOULD validate every request shape against a schema and return **HTT
 
 The client MUST accept extra fields in the response body.
 
-### 1.5 `GET /` - Health
+### 1.5 Status codes
+
+The server SHOULD return **HTTP 204** for responses with no body, and **HTTP 200** otherwise —
+including for endpoints that create a resource.
+
+### 1.6 `GET /` - Health
 
 MUST NOT require authentication. MUST return this shape:
 
@@ -281,7 +304,7 @@ If the email has been marked as unverified, the server SHOULD send a verificatio
 
 If it matches, the server MUST send **HTTP 204** and set the `refresh_token` cookie.
 
-### 2.8 `POST /email-verification`
+### 2.8 `POST /email-verification/validate`
 
 The client MUST provide a email token in the body.
 
@@ -532,7 +555,7 @@ On success, it must return **HTTP 200** with
 
 ```js
 {
-  "token": "opaque_token",
+  "token": DeviceRefreshToken,
   "settings": DeviceSettings
 }
 ```
@@ -586,6 +609,19 @@ The client MUST send a multipart form request:
 - `file`: encrypted batch blob
 
 The server MUST upload the file to object storage and store the metadata in the database.
+
+The server MUST return **HTTP 200** with the device's refreshed settings alongside the created batch:
+
+```js
+{
+  "id": UUID,
+  "start_time": DateTime,
+  "end_time": DateTime,
+  "end_hash": SHA256,
+  "url": "https://.../user/.../batches/...enc",
+  "settings": DeviceSettings
+}
+```
 
 > Note: We should version the encrypted batch format
 

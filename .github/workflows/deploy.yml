@@ -31,7 +31,7 @@ jobs:
       - name: Install dependencies
         run: bun install
         working-directory: ${{ github.workspace }}
-      - run: bun run ${{ github.ref_name == 'main' && 'deploy:prod' || 'deploy:staging' }}
+      - run: bun run ${{ github.ref_name == 'main' && 'deploy:prod' || 'deploy:staging' }} -- --var COMMIT_SHA:$GITHUB_SHA
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}

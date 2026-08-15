@@ -198,10 +198,10 @@ describe('APIClient — invitePartner / removeWatcher / stopWatching', () => {
     expect((body as { email: string }).email).toBe('alice@example.com');
   });
 
-  it('calls DELETE /partner/watcher/:id for removeWatcher', async () => {
+  it('calls DELETE /partner/:id for removeWatcher', async () => {
     let deletedId: string | undefined;
     server.use(
-      http.delete(`${BASE}/partner/watcher/:id`, ({ params }) => {
+      http.delete(`${BASE}/partner/:id`, ({ params }) => {
         deletedId = params.id as string;
         return new HttpResponse(null, { status: 204 });
       }),
@@ -211,10 +211,10 @@ describe('APIClient — invitePartner / removeWatcher / stopWatching', () => {
     expect(deletedId).toBe('watcher-1');
   });
 
-  it('calls DELETE /partner/watching/:id for stopWatching', async () => {
+  it('calls DELETE /partner/:id for stopWatching', async () => {
     let deletedId: string | undefined;
     server.use(
-      http.delete(`${BASE}/partner/watching/:id`, ({ params }) => {
+      http.delete(`${BASE}/partner/:id`, ({ params }) => {
         deletedId = params.id as string;
         return new HttpResponse(null, { status: 204 });
       }),

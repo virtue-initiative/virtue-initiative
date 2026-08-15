@@ -13,35 +13,13 @@ describe('API base path routing', () => {
 
     expect(rootRes.status).toBe(200);
     expect(prefixedRes.status).toBe(200);
-    expect(await prefixedRes.json()).toEqual(await rootRes.json());
-  });
-
-  it('serves the same JWKS with and without the configured base path', async () => {
-    const [rootRes, prefixedRes] = await Promise.all([
-      SELF.fetch(`${BASE}/.well-known/jwks.json`),
-      SELF.fetch(`${BASE}/api/.well-known/jwks.json`),
-    ]);
-
-    expect(rootRes.status).toBe(200);
-    expect(prefixedRes.status).toBe(200);
-
-    const rootJson = (await rootRes.json()) as {
-      keys: Array<Record<string, string>>;
-    };
-
-    expect(await prefixedRes.json()).toEqual(rootJson);
-    expect(rootJson).toMatchObject({
-      keys: [
-        {
-          alg: 'EdDSA',
-          crv: 'Ed25519',
-          kty: 'OKP',
-          use: 'sig',
-        },
-      ],
+    const rootBody = await rootRes.json();
+    expect(await prefixedRes.json()).toEqual(rootBody);
+    expect(rootBody).toMatchObject({
+      name: 'Virtue Initiative API',
+      version: '1.0.0',
+      status: 'ok',
     });
-    expect(rootJson.keys).toHaveLength(1);
-    expect(rootJson.keys[0]?.kid).toBeTruthy();
-    expect(rootJson.keys[0]?.x).toBeTruthy();
+    expect(rootBody).toHaveProperty('commit');
   });
 });

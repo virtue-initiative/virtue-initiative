@@ -3,6 +3,7 @@ import { fetchMock, SELF, env } from 'cloudflare:test';
 import {
   authHeaders,
   BASE,
+  batchMetadataForm,
   clearDB,
   createDeviceForUser,
   extractTokenFromDelivery,
@@ -85,8 +86,7 @@ describe('Auth routes', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: 'alice@example.com' }),
     });
-    expect(requestRes.status).toBe(200);
-    expect(await requestRes.json()).toEqual({ ok: true });
+    expect(requestRes.status).toBe(204);
 
     const deliveries = await listEmailDeliveries();
     expect(deliveries).toHaveLength(1);
@@ -115,7 +115,7 @@ describe('Auth routes', () => {
         name: 'Alice',
       }),
     });
-    expect(signupRes.status).toBe(201);
+    expect(signupRes.status).toBe(200);
     expect(signupRes.headers.get('set-cookie')).toContain('refresh_token=');
 
     const signupBody = (await signupRes.json()) as {
@@ -182,8 +182,7 @@ describe('Auth routes', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: 'taken@example.com' }),
     });
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true });
+    expect(res.status).toBe(204);
 
     const deliveries = await listEmailDeliveries();
     const notice = deliveries.find((delivery) => delivery.kind === 'account_exists_notice');
@@ -212,7 +211,7 @@ describe('Auth routes', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: 'racer@example.com' }),
     });
-    expect(requestRes.status).toBe(200);
+    expect(requestRes.status).toBe(204);
 
     const deliveries = await listEmailDeliveries();
     const signupDelivery = deliveries.find(
@@ -253,10 +252,8 @@ describe('Auth routes', () => {
         password_auth: await passwordAuthFor('pw'),
       }),
     });
-    expect(loginRes.status).toBe(200);
+    expect(loginRes.status).toBe(204);
     expect(loginRes.headers.get('set-cookie')).toContain('refresh_token=');
-    const loginBody = (await loginRes.json()) as { ok: boolean };
-    expect(loginBody).toEqual({ ok: true });
 
     const badLoginRes = await SELF.fetch(`${BASE}/login`, {
       method: 'POST',
@@ -267,6 +264,64 @@ describe('Auth routes', () => {
       }),
     });
     expect(badLoginRes.status).toBe(401);
+  });
+
+  it('sends a reverification email and 403s when logging into an unverified account, and the emailed token verifies it', async () => {
+    const { userId } = await signupAndGetCookie('unverified-login@example.com', 'pw');
+    await env.DB.prepare('UPDATE users SET email_verified = 0 WHERE id = ?')
+      .bind(uuidToBytes(userId))
+      .run();
+
+    const loginRes = await SELF.fetch(`${BASE}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'unverified-login@example.com',
+        password_auth: await passwordAuthFor('pw'),
+      }),
+    });
+    expect(loginRes.status).toBe(403);
+    expect(await loginRes.json()).toEqual({
+      error: 'Please verify your email before logging in. A verification email has been sent.',
+    });
+
+    const deliveries = await listEmailDeliveries();
+    // The signup flow earlier in this test already sent one `email_verification`-kind
+    // delivery (the initial signup link); this login attempt sends a second one, so take
+    // the most recent match rather than the first.
+    const verifyDelivery = [...deliveries]
+      .reverse()
+      .find(
+        (delivery) =>
+          delivery.kind === 'email_verification' &&
+          delivery.recipient_email === 'unverified-login@example.com',
+      );
+    expect(verifyDelivery).toBeTruthy();
+    const verificationToken = extractTokenFromDelivery(verifyDelivery!, 'token');
+    expect(verificationToken).toBeTruthy();
+
+    const verifyRes = await SELF.fetch(`${BASE}/email-verification/validate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: verificationToken }),
+    });
+    expect(verifyRes.status).toBe(200);
+    expect(await verifyRes.json()).toEqual({
+      ok: true,
+      email: 'unverified-login@example.com',
+      purpose: 'email_verification',
+    });
+    expect(verifyRes.headers.get('set-cookie')).toContain('refresh_token=');
+
+    const nowVerifiedLoginRes = await SELF.fetch(`${BASE}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'unverified-login@example.com',
+        password_auth: await passwordAuthFor('pw'),
+      }),
+    });
+    expect(nowVerifiedLoginRes.status).toBe(204);
   });
 
   it('returns the current user and allows updating profile fields', async () => {
@@ -477,38 +532,38 @@ describe('Auth routes', () => {
     // hash server — the API itself never POSTs there, so there's no request to make.
     seedHashState(device.id, { hash: '09'.repeat(32), seq: 1, last_received: 500 });
 
-    const form = new FormData();
-    form.set('start_time', '1710000000000');
-    form.set('end_time', '1710003600000');
-    form.set(
-      'access_keys',
-      JSON.stringify({
-        keys: { [userId]: Buffer.from('owner-envelope').toString('base64') },
-      }),
-    );
-    form.set('file', new File([new Uint8Array([4, 5, 6])], 'batch.enc'));
+    const form = batchMetadataForm({
+      start_time: 1710000000000,
+      end_time: 1710003600000,
+      access_keys: { [userId]: Buffer.from('owner-envelope').toString('base64') },
+      file: new File([new Uint8Array([4, 5, 6])], 'batch.enc'),
+    });
     const batchRes = await SELF.fetch(`${BASE}/d/batch`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${device.refresh_token}` },
       body: form,
     });
-    expect(batchRes.status).toBe(201);
+    expect(batchRes.status).toBe(200);
     const batch = (await batchRes.json()) as { id: string; url: string };
 
     expect(await env.BUCKET.head(batch.url.replace(`${env.R2_URL}/`, ''))).toBeTruthy();
 
-    const badDeleteRes = await SELF.fetch(`${BASE}/user`, {
-      method: 'DELETE',
-      headers: authHeaders(cookie),
-      body: JSON.stringify({ confirm_email: 'wrong@example.com' }),
-    });
+    const badDeleteRes = await SELF.fetch(
+      `${BASE}/user?confirm_email=${encodeURIComponent('wrong@example.com')}`,
+      {
+        method: 'DELETE',
+        headers: authHeaders(cookie),
+      },
+    );
     expect(badDeleteRes.status).toBe(400);
 
-    const deleteRes = await SELF.fetch(`${BASE}/user`, {
-      method: 'DELETE',
-      headers: authHeaders(cookie),
-      body: JSON.stringify({ confirm_email: 'delete-me@example.com' }),
-    });
+    const deleteRes = await SELF.fetch(
+      `${BASE}/user?confirm_email=${encodeURIComponent('delete-me@example.com')}`,
+      {
+        method: 'DELETE',
+        headers: authHeaders(cookie),
+      },
+    );
     expect(deleteRes.status).toBe(204);
     expect(deleteRes.headers.get('set-cookie')).toContain('refresh_token=');
 

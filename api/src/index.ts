@@ -7,7 +7,6 @@ import devices from './routes/devices';
 import emailWebhooks from './routes/email-webhooks';
 import partners from './routes/partners';
 import { stripApiBasePath } from './lib/base-path';
-import { getJWKS } from './lib/jwt';
 import {
   pruneExpiredBatches,
   pruneExpiredDeviceSessions,
@@ -41,11 +40,10 @@ app.get('/', (c) =>
   c.json({
     name: 'Virtue Initiative API',
     version: '1.0.0',
+    commit: c.env.COMMIT_SHA ?? 'unknown',
     status: 'ok',
   }),
 );
-
-app.get('/.well-known/jwks.json', async (c) => c.json(await getJWKS(c.env.JWT_PUBLIC_KEY)));
 
 app.route('/', auth);
 app.route('/', partners);

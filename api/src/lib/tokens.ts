@@ -5,6 +5,7 @@ export type TokenPurpose =
   | 'device_session'
   | 'signup'
   | 'email_change'
+  | 'email_verification'
   | 'password_reset'
   | 'partner_invite';
 
@@ -13,6 +14,7 @@ const TOKEN_PREFIXES: Record<TokenPurpose, string> = {
   device_session: 'dst_',
   signup: 'sut_',
   email_change: 'ect_',
+  email_verification: 'evt_',
   password_reset: 'prt_',
   partner_invite: 'pit_',
 };

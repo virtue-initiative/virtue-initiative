@@ -89,14 +89,14 @@ Key files:
 
 The `access_keys` JSON envelope and `DeviceSettings` shape are also shared between Rust and
 the API, but are plain JSON relay shapes — not independently-reimplemented crypto — so they
-aren't listed as one of the five contracts above. See `api/API.md` for their wire shapes.
+aren't listed as one of the five contracts above. See `api/SPEC.md` for their wire shapes.
 
 ## Key invariant files
 
 Read these before touching crypto, batch, or auth code:
 
 - `client/core/architecture.md` — canonical design doc for the Rust core
-- `api/API.md` — full API endpoint specification
+- `api/SPEC.md` — full API endpoint specification
 
 ## What not to change without full cross-component review
 

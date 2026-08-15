@@ -16,12 +16,10 @@ import type {
   PasswordResetValidation,
   SignupPayload,
   SignupResponse,
-  LoginResponse,
   EmailVerifyResponse,
   UpdateUserPayload,
   UpdateUserResponse,
   CreatePartnerResponse,
-  PatchDeviceResponse,
 } from '@virtueinitiative/shared-web/types';
 export type {
   EmailFrequency,
@@ -39,12 +37,10 @@ export type {
   PasswordResetValidation,
   SignupPayload,
   SignupResponse,
-  LoginResponse,
   EmailVerifyResponse,
   UpdateUserPayload,
   UpdateUserResponse,
   CreatePartnerResponse,
-  PatchDeviceResponse,
 };
 
 const BASE = (import.meta as any).env?.VITE_API_URL ?? 'http://localhost:8787';
@@ -175,13 +171,13 @@ export const api = {
   },
 
   login: (email: string, password_auth: string, timezone?: string) =>
-    req<LoginResponse>('/login', {
+    req<void>('/login', {
       method: 'POST',
       body: JSON.stringify({ email, password_auth, ...(timezone ? { timezone } : {}) }),
     }),
 
   signupRequest: (email: string, to?: string) =>
-    req<{ ok: boolean }>('/signup-request', {
+    req<void>('/signup-request', {
       method: 'POST',
       body: JSON.stringify({
         email,
@@ -206,9 +202,8 @@ export const api = {
     }),
 
   deleteUser: (confirm_email: string) =>
-    req<void>('/user', {
+    req<void>(`/user?confirm_email=${encodeURIComponent(confirm_email)}`, {
       method: 'DELETE',
-      body: JSON.stringify({ confirm_email }),
     }),
 
   verifyEmail: (token: string) =>
@@ -246,7 +241,7 @@ export const api = {
   getDevices: () => req<Device[]>('/device'),
 
   patchDevice: (id: string, patch: { name?: string }) =>
-    req<PatchDeviceResponse>(`/device/${id}`, {
+    req<void>(`/device/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }),
@@ -273,13 +268,16 @@ export const api = {
       body: JSON.stringify({ token: inviteToken }),
     }),
 
-  deleteWatcher: (id: string) => req<void>(`/partner/watcher/${id}`, { method: 'DELETE' }),
+  // The API exposes a single DELETE /partner/:id that works from either side of the
+  // partnership; deleteWatcher/deleteWatching stay as separate names here only because
+  // the call sites (removing a watcher vs. leaving a partnership you're watching) read
+  // more clearly that way.
+  deleteWatcher: (id: string) => req<void>(`/partner/${id}`, { method: 'DELETE' }),
 
-  deleteWatching: (id: string) => req<void>(`/partner/watching/${id}`, { method: 'DELETE' }),
+  deleteWatching: (id: string) => req<void>(`/partner/${id}`, { method: 'DELETE' }),
 
-  getData: (params?: { user?: string; since?: number }) => {
+  getData: (params?: { since?: number }) => {
     const qs = new URLSearchParams();
-    if (params?.user) qs.set('user', params.user);
     if (params?.since !== undefined) qs.set('since', String(params.since));
     const query = qs.toString();
     return req<DataPage>(`/data${query ? `?${query}` : ''}`);

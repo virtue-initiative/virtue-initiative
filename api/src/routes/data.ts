@@ -1,7 +1,14 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { authenticateWebSession } from '../middleware/auth';
-import { canViewUserData, listBatches } from '../lib/db';
+import {
+  findUserById,
+  listBatches,
+  listIncomingPartners,
+  listOwnedPartners,
+  listVisibleOwnerIds,
+} from '../lib/db';
+import { serializeUser, serializeWatchers, serializeWatching } from '../lib/serializers';
 import { validateZ } from '../middleware/validation';
 import { Env, Variables } from '../types/bindings';
 
@@ -9,34 +16,38 @@ const data = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 function getEncryptedKeyForUser(rawAccessKeys: string, userId: string) {
   try {
-    const payload = JSON.parse(rawAccessKeys) as { keys?: Record<string, string> };
-    return payload.keys?.[userId] ?? null;
+    const accessKeys = JSON.parse(rawAccessKeys) as Record<string, string>;
+    return accessKeys[userId] ?? null;
   } catch {
     return null;
   }
 }
 
 const listDataSchema = z.object({
-  device_id: z.uuid().optional(),
-  user: z.uuid().optional(),
   since: z.coerce.number().int().nonnegative().optional().default(0),
 });
 
 data.get('/', authenticateWebSession(), validateZ('query', listDataSchema), async (c) => {
-  const requesterId = c.get('sub');
-  const { device_id, user, since } = c.req.valid('query');
-  const targetUserId = user ?? requesterId;
+  const userId = c.get('sub');
+  const { since } = c.req.valid('query');
 
-  if (!(await canViewUserData(c.env.DB, targetUserId, requesterId))) {
-    return c.json({ error: 'Forbidden' }, 403);
+  const [user, ownerIds, owned, incoming] = await Promise.all([
+    findUserById(c.env.DB, userId),
+    listVisibleOwnerIds(c.env.DB, userId),
+    listOwnedPartners(c.env.DB, userId),
+    listIncomingPartners(c.env.DB, userId),
+  ]);
+
+  if (!user) {
+    return c.json({ error: 'Not found' }, 404);
   }
 
-  const batches = await listBatches(c.env.DB, [targetUserId], { deviceId: device_id, since });
+  const batches = await listBatches(c.env.DB, ownerIds, { since });
 
   return c.json({
     batches: batches
       .map((batch) => {
-        const encryptedKey = getEncryptedKeyForUser(batch.access_keys, requesterId);
+        const encryptedKey = getEncryptedKeyForUser(batch.access_keys, userId);
         if (!encryptedKey) {
           return null;
         }
@@ -53,6 +64,9 @@ data.get('/', authenticateWebSession(), validateZ('query', listDataSchema), asyn
         };
       })
       .filter((item) => item !== null),
+    user: serializeUser(user),
+    watching: serializeWatching(incoming),
+    watchers: serializeWatchers(owned),
   });
 });
 
