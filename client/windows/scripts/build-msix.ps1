@@ -450,13 +450,42 @@ function Get-InstalledPackageRevision {
     return [int]$versionParts[3]
 }
 
-function New-DevMsixRevision {
-    param([string]$PackageName)
+function Get-CommitsSinceVersionBump {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepoRoot
+    )
 
-    $utcNow = [DateTimeOffset]::UtcNow
-    $seed = (($utcNow.Year - 2000) * 366) + $utcNow.DayOfYear
-    $installedRevision = Get-InstalledPackageRevision -PackageName $PackageName
-    $nextRevision = [Math]::Max($seed, $installedRevision + 1)
+    $git = (Get-Command git -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+    if (-not $git) {
+        throw "git not found; cannot compute commits since the last version bump."
+    }
+
+    $bumpCommit = & $git -C $RepoRoot log -1 --format=%H -- client/version.properties 2>$null
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($bumpCommit)) {
+        throw "Unable to locate a commit that touched client/version.properties. Ensure the checkout has full history (fetch-depth: 0)."
+    }
+    $bumpCommit = $bumpCommit.Trim()
+
+    $countText = & $git -C $RepoRoot rev-list --count "$bumpCommit..HEAD" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        throw "git rev-list failed while counting commits since the last version bump."
+    }
+
+    return [int]$countText.Trim()
+}
+
+function New-DevMsixRevision {
+    param(
+        [string]$PackageName,
+        [string]$RepoRoot
+    )
+
+    if ($env:GITHUB_ACTIONS -eq "true") {
+        $nextRevision = Get-CommitsSinceVersionBump -RepoRoot $RepoRoot
+    } else {
+        $nextRevision = (Get-InstalledPackageRevision -PackageName $PackageName) + 1
+    }
 
     if ($nextRevision -gt 65535) {
         throw "Computed MSIX revision $nextRevision exceeds the Appx limit of 65535."
@@ -507,7 +536,7 @@ if ([string]::IsNullOrWhiteSpace($PackageVersion)) {
     $PackageVersion = Convert-ToMsixVersion -Value $VersionInfo.BaseVersion
     if ($VersionInfo.ReleaseChannel -eq "dev") {
         $versionParts = $PackageVersion.Split('.')
-        $versionParts[3] = [string](New-DevMsixRevision -PackageName $PackageName)
+        $versionParts[3] = [string](New-DevMsixRevision -PackageName $PackageName -RepoRoot $RepoRoot)
         $PackageVersion = $versionParts -join '.'
     }
 }
