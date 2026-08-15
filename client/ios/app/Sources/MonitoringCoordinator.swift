@@ -143,7 +143,7 @@ final class MonitoringCoordinator: ObservableObject {
             isSigningIn = false
             if let error {
                 statusMessage = "Login failed: \(error)"
-                loginError = "Invalid username or password"
+                loginError = error
                 return
             }
             password = ""
