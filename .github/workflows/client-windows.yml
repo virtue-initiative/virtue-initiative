@@ -1,7 +1,6 @@
 name: Client Windows Checks
 
 permissions:
-  id-token: write
   contents: write
 
 on:
@@ -100,34 +99,10 @@ jobs:
           "release_tag=$($info.ReleaseTag)" >> $env:GITHUB_OUTPUT
           "build_label=$($info.BuildLabel)" >> $env:GITHUB_OUTPUT
 
-      - name: Azure login
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
       - name: Build Windows MSIX (release)
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
-        env:
-          VIRTUE_WINDOWS_PACKAGE_PUBLISHER: ${{ vars.AZURE_CODESIGN_PUBLISHER_SUBJECT }}
-        run: ./windows/scripts/build-msix.ps1 -Profile Release -Version "${{ steps.version.outputs.build_label }}" -SkipSigning
+        run: ./windows/scripts/build-msix.ps1 -Profile Release -Version "${{ steps.version.outputs.build_label }}"
         working-directory: client
-
-      - name: Sign Windows MSIX artifacts with Azure Artifact Signing
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
-        uses: azure/artifact-signing-action@v1
-        with:
-          endpoint: ${{ vars.AZURE_CODESIGN_ENDPOINT }}
-          signing-account-name: ${{ vars.AZURE_CODESIGN_ACCOUNT_NAME }}
-          certificate-profile-name: ${{ vars.AZURE_CODESIGN_CERT_PROFILE }}
-          files-folder: ${{ github.workspace }}\client\windows\dist
-          files-folder-filter: 'Virtue.*.msix,virtue-*.msix'
-          files-folder-recurse: true
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
 
       - name: Repack Windows setup bundle
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
