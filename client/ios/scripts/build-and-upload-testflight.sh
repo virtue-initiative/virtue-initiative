@@ -35,6 +35,12 @@ mkdir -p "$PROFILES_DIR"
 cp "$IOS_APP_PROVISIONING_PROFILE_PATH" "$PROFILES_DIR/virtue-ios-app-store.mobileprovision"
 cp "$IOS_EXT_PROVISIONING_PROFILE_PATH" "$PROFILES_DIR/virtue-ios-safari-ext-app-store.mobileprovision"
 
+# altool only looks for the API key by ID in a fixed set of directories; it
+# doesn't accept an arbitrary path like xcodebuild's -authenticationKeyPath does.
+ASC_KEYS_DIR="$HOME/.appstoreconnect/private_keys"
+mkdir -p "$ASC_KEYS_DIR"
+cp "$IOS_ASC_API_KEY_PATH" "$ASC_KEYS_DIR/AuthKey_${IOS_ASC_KEY_ID}.p8"
+
 echo "Archiving ${SCHEME} ${MARKETING_VERSION} (build ${CURRENT_PROJECT_VERSION})"
 
 xcodebuild archive \
