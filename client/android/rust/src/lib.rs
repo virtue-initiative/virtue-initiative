@@ -29,8 +29,6 @@ static CORE: OnceCell<AndroidCore> = OnceCell::new();
 static LOG_GUARD: OnceCell<tracing_appender::non_blocking::WorkerGuard> = OnceCell::new();
 
 const DEFAULT_BASE_API_URL: &str = virtue_core::DEFAULT_API_BASE_URL;
-const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = virtue_core::DEFAULT_CAPTURE_INTERVAL_SECONDS;
-const DEFAULT_BATCH_WINDOW_SECONDS: u64 = virtue_core::DEFAULT_BATCH_WINDOW_SECONDS;
 const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
 const LOOP_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -41,7 +39,6 @@ const CAPTURE_STATUS_SESSION_UNAVAILABLE: i32 = 2;
 
 struct AndroidCore {
     state_dir: PathBuf,
-    runtime_config_file: PathBuf,
     java_vm: Arc<JavaVM>,
     // Cached at init time (main thread) so background threads can use the app class loader.
     screenshot_service_class: Arc<GlobalRef>,
@@ -239,30 +236,16 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeInit(
     _class: JClass,
     config_dir: JString,
     data_dir: JString,
-    base_api_url: JString,
-    capture_interval_seconds: JString,
-    batch_window_seconds: JString,
 ) -> jstring {
     let result = (|| -> Result<()> {
         let config_dir: String = env.get_string(&config_dir)?.into();
         let data_dir: String = env.get_string(&data_dir)?.into();
-        let base_api_url: String = env.get_string(&base_api_url)?.into();
-        let capture_interval_seconds: String = env.get_string(&capture_interval_seconds)?.into();
-        let batch_window_seconds: String = env.get_string(&batch_window_seconds)?.into();
 
         fs::create_dir_all(&config_dir)
             .with_context(|| format!("failed to create config dir {config_dir}"))?;
         fs::create_dir_all(&data_dir)
             .with_context(|| format!("failed to create data dir {data_dir}"))?;
         sanitize_state_dir(Path::new(&data_dir))?;
-
-        let runtime_config_file = Path::new(&config_dir).join("config.json");
-        write_runtime_overrides(
-            &runtime_config_file,
-            &base_api_url,
-            &capture_interval_seconds,
-            &batch_window_seconds,
-        )?;
 
         if CORE.get().is_none() {
             init_logging(Path::new(&data_dir));
@@ -319,7 +302,6 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeInit(
 
             CORE.set(AndroidCore {
                 state_dir: PathBuf::from(data_dir),
-                runtime_config_file,
                 java_vm,
                 screenshot_service_class,
                 stop: Arc::new(AtomicBool::new(false)),
@@ -329,31 +311,6 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeInit(
         }
 
         Ok(())
-    })();
-
-    to_jstring_result(&mut env, result)
-}
-
-#[no_mangle]
-pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeSetOverrides(
-    mut env: JNIEnv,
-    _class: JClass,
-    base_api_url: JString,
-    capture_interval_seconds: JString,
-    batch_window_seconds: JString,
-) -> jstring {
-    let result = (|| -> Result<()> {
-        let core = core()?;
-        let base_api_url: String = env.get_string(&base_api_url)?.into();
-        let capture_interval_seconds: String = env.get_string(&capture_interval_seconds)?.into();
-        let batch_window_seconds: String = env.get_string(&batch_window_seconds)?.into();
-
-        write_runtime_overrides(
-            &core.runtime_config_file,
-            &base_api_url,
-            &capture_interval_seconds,
-            &batch_window_seconds,
-        )
     })();
 
     to_jstring_result(&mut env, result)
@@ -621,51 +578,9 @@ fn build_core_config(core: &AndroidCore) -> Config {
         "android",
         "android",
         core.state_dir.clone(),
-        Some(core.runtime_config_file.clone()),
-        Duration::from_secs(DEFAULT_CAPTURE_INTERVAL_SECONDS),
-        Duration::from_secs(DEFAULT_BATCH_WINDOW_SECONDS),
+        Duration::from_secs(virtue_core::default_capture_interval_seconds()),
+        Duration::from_secs(virtue_core::default_batch_window_seconds()),
     )
-}
-
-fn write_runtime_overrides(
-    path: &Path,
-    base_api_url: &str,
-    capture_interval_seconds: &str,
-    batch_window_seconds: &str,
-) -> Result<()> {
-    let mut payload = serde_json::Map::new();
-    if !base_api_url.trim().is_empty() {
-        payload.insert(
-            "api_base_url".to_string(),
-            serde_json::Value::String(base_api_url.trim().to_string()),
-        );
-    }
-    if !capture_interval_seconds.trim().is_empty() {
-        payload.insert(
-            "capture_interval_seconds".to_string(),
-            serde_json::Value::Number(parse_u64(capture_interval_seconds)?.into()),
-        );
-    }
-    if !batch_window_seconds.trim().is_empty() {
-        payload.insert(
-            "batch_window_seconds".to_string(),
-            serde_json::Value::Number(parse_u64(batch_window_seconds)?.into()),
-        );
-    }
-
-    let bytes = serde_json::to_vec_pretty(&serde_json::Value::Object(payload))?;
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, bytes).with_context(|| format!("failed writing {}", tmp.display()))?;
-    fs::rename(&tmp, path)
-        .with_context(|| format!("failed replacing {} with {}", path.display(), tmp.display()))?;
-    Ok(())
-}
-
-fn parse_u64(value: &str) -> Result<u64> {
-    value
-        .trim()
-        .parse::<u64>()
-        .with_context(|| format!("invalid integer override: {value}"))
 }
 
 fn sanitize_state_dir(root: &Path) -> Result<()> {

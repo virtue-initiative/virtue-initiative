@@ -49,7 +49,7 @@ Everything else belongs in `core`.
 - `src/events.rs` — the `Ping` event struct; other typed events live inline in the
   module file that owns them (e.g. `Login`/`Logout` in `module/auth.rs`)
 - `src/events/remote.rs` — `RemoteEventBus` (cross-process JSON-line channel)
-- `src/assembly.rs` — `build_default_modules()` factory for the 8 default observers
+- `src/assembly.rs` — `build_default_modules()` factory for the 7 default observers
 
 The daemon loop is:
 
@@ -64,18 +64,17 @@ loop {
 }
 ```
 
-## The 8 observer modules (`src/module/`)
+## The 7 observer modules (`src/module/`)
 
 | Module                 | Handles                                                                | Emits                                                                   |
 | ---------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | `auth`                 | `LoginRequested`, `LogoutRequested`, `StatusRequest`                   | `Login`, `Logout`, `LoginResult`, `LogoutResult`, `PartialStatus::Auth` |
 | `lifecycle`            | `Ping`, `ProcessStarted`, `UserStopRequested`                          | `Upload` (lifecycle + alerts), `PartialStatus::Lifecycle`               |
-| `screenshot`           | `Login`, `Logout`, `Ping`, `ConfigChanged`                             | `Upload` (screenshot), `CaptureFailed`                                  |
+| `screenshot`           | `Login`, `Logout`, `Ping`                                              | `Upload` (screenshot), `CaptureFailed`                                  |
 | `upload`               | `Login`, `Logout`, `Upload`, `Ping`, `ProcessStopped`, `FlushBatchNow` | network I/O                                                             |
 | `capture_availability` | `CaptureFailed`                                                        | `Upload` (capture-failed alert)                                         |
 | `heartbeat`            | `Ping`                                                                 | `Upload` (heartbeat, once per 24h while authenticated)                  |
 | `status`               | `StatusRequest`, `PartialStatus`                                       | `StatusResponse`                                                        |
-| `config`               | `Ping`                                                                 | `ConfigChanged`                                                         |
 
 `lifecycle` derives suspend from `boot_clock − monotonic_clock` divergence
 rather than dedicated suspend/resume events — see `../tampering.md`.

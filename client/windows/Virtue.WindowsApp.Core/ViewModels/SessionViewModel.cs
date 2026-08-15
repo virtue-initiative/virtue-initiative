@@ -21,10 +21,6 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private string? _deviceId;
     private int _pendingRequestCount;
     private long? _lastScreenshotAtMs;
-    private string _apiBaseUrl = string.Empty;
-    private string _captureIntervalSeconds = string.Empty;
-    private string _batchWindowSeconds = string.Empty;
-    private string _configPath = "Loading config path...";
     private bool _isBusy;
     private bool _hasLoadedStatus;
     private bool _isHydratingEmailInput;
@@ -37,15 +33,12 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         _interopClient = interopClient;
         _windowsPackageVersion = windowsPackageVersion?.Trim() ?? string.Empty;
         RefreshCommand = new DelegateCommand(RefreshAsync, () => !IsBusy);
-        SaveSettingsCommand = new DelegateCommand(SaveSettingsAsync, () => !IsBusy);
         LogoutCommand = new DelegateCommand(LogoutAsync, () => !IsBusy);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public DelegateCommand RefreshCommand { get; }
-
-    public DelegateCommand SaveSettingsCommand { get; }
 
     public DelegateCommand LogoutCommand { get; }
 
@@ -200,39 +193,6 @@ public sealed class SessionViewModel : INotifyPropertyChanged
             _ => "Virtue: monitoring stopped",
         };
 
-    public string ApiBaseUrl
-    {
-        get => _apiBaseUrl;
-        set => SetProperty(ref _apiBaseUrl, value);
-    }
-
-    public string CaptureIntervalSeconds
-    {
-        get => _captureIntervalSeconds;
-        set => SetProperty(ref _captureIntervalSeconds, value);
-    }
-
-    public string BatchWindowSeconds
-    {
-        get => _batchWindowSeconds;
-        set => SetProperty(ref _batchWindowSeconds, value);
-    }
-
-    public string ConfigPath
-    {
-        get => _configPath;
-        private set
-        {
-            if (SetProperty(ref _configPath, value))
-            {
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ConfigPathDisplay)));
-            }
-        }
-    }
-
-    public string ConfigPathDisplay =>
-        string.IsNullOrWhiteSpace(ConfigPath) ? "Config path unavailable." : ConfigPath;
-
     public bool IsBusy
     {
         get => _isBusy;
@@ -241,7 +201,6 @@ public sealed class SessionViewModel : INotifyPropertyChanged
             if (SetProperty(ref _isBusy, value))
             {
                 RefreshCommand.RaiseCanExecuteChanged();
-                SaveSettingsCommand.RaiseCanExecuteChanged();
                 LogoutCommand.RaiseCanExecuteChanged();
             }
         }
@@ -344,35 +303,11 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         return Task.CompletedTask;
     }
 
-    public async Task SaveSettingsAsync()
-    {
-        if (!TryParseInteger(CaptureIntervalSeconds, out var captureIntervalSeconds, out var captureError))
-        {
-            StatusText = captureError;
-            return;
-        }
-
-        if (!TryParseInteger(BatchWindowSeconds, out var batchWindowSeconds, out var batchError))
-        {
-            StatusText = batchError;
-            return;
-        }
-
-        await RunBusyAsync(async () =>
-        {
-            StatusText = "Saving runtime settings...";
-            _interopClient.SetRuntimeConfig(new RuntimeConfigUpdate(ApiBaseUrl, captureIntervalSeconds, batchWindowSeconds));
-            await RefreshInternalAsync();
-            StatusText = "Runtime settings saved.";
-        }, "Saving runtime settings...");
-    }
-
     private Task RefreshInternalAsync()
     {
         var status = _interopClient.GetSessionStatus();
         HasLoadedStatus = true;
         var monitorStatus = _interopClient.GetMonitorStatus();
-        var runtimeConfig = _interopClient.GetRuntimeConfig();
         var resolvedMonitorState = ResolveMonitorState(_hasLoadedStatus, status.LoggedIn, monitorStatus.State);
         var isSignedIn = status.LoggedIn;
 
@@ -392,10 +327,6 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         {
             SetEmailInput(status.Email ?? string.Empty);
         }
-        ApiBaseUrl = runtimeConfig.ApiBaseUrl;
-        CaptureIntervalSeconds = runtimeConfig.CaptureIntervalSeconds.ToString();
-        BatchWindowSeconds = runtimeConfig.BatchWindowSeconds.ToString();
-        ConfigPath = runtimeConfig.ConfigPath;
 
         return Task.CompletedTask;
     }
@@ -480,27 +411,6 @@ public sealed class SessionViewModel : INotifyPropertyChanged
             TransitionMessage = null;
             IsBusy = false;
         }
-    }
-
-    private static bool TryParseInteger(string rawValue, out int? value, out string error)
-    {
-        if (string.IsNullOrWhiteSpace(rawValue))
-        {
-            value = null;
-            error = string.Empty;
-            return true;
-        }
-
-        if (int.TryParse(rawValue, out var parsed) && parsed >= 0)
-        {
-            value = parsed;
-            error = string.Empty;
-            return true;
-        }
-
-        value = null;
-        error = $"Expected a positive integer value, got '{rawValue}'.";
-        return false;
     }
 
     private bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

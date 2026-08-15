@@ -3,17 +3,7 @@ import Foundation
 @_silgen_name("virtue_ios_native_init")
 private func virtue_ios_native_init(
     _ configDir: UnsafePointer<CChar>?,
-    _ dataDir: UnsafePointer<CChar>?,
-    _ baseApiUrl: UnsafePointer<CChar>?,
-    _ captureIntervalSeconds: UnsafePointer<CChar>?,
-    _ batchWindowSeconds: UnsafePointer<CChar>?
-) -> UnsafeMutablePointer<CChar>?
-
-@_silgen_name("virtue_ios_native_set_overrides")
-private func virtue_ios_native_set_overrides(
-    _ baseApiUrl: UnsafePointer<CChar>?,
-    _ captureIntervalSeconds: UnsafePointer<CChar>?,
-    _ batchWindowSeconds: UnsafePointer<CChar>?
+    _ dataDir: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
 @_silgen_name("virtue_ios_native_login")
@@ -49,46 +39,12 @@ private func virtue_ios_native_request_pause_monitoring(
 @_silgen_name("virtue_ios_free_string")
 private func virtue_ios_free_string(_ value: UnsafeMutablePointer<CChar>?)
 
-struct RuntimeOverrides {
-    var baseApiUrl: String = ""
-    var captureIntervalSeconds: String = ""
-    var batchWindowSeconds: String = ""
-}
-
 enum NativeBridge {
-    static func initialize(configDir: String, dataDir: String, overrides: RuntimeOverrides) -> String? {
+    static func initialize(configDir: String, dataDir: String) -> String? {
         callReturningError {
             configDir.withCString { configDirCString in
                 dataDir.withCString { dataDirCString in
-                    overrides.baseApiUrl.withCString { baseApiCString in
-                        overrides.captureIntervalSeconds.withCString { captureIntervalCString in
-                            overrides.batchWindowSeconds.withCString { batchWindowCString in
-                                virtue_ios_native_init(
-                                    configDirCString,
-                                    dataDirCString,
-                                    baseApiCString,
-                                    captureIntervalCString,
-                                    batchWindowCString
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    static func setOverrides(_ overrides: RuntimeOverrides) -> String? {
-        callReturningError {
-            overrides.baseApiUrl.withCString { baseApiCString in
-                overrides.captureIntervalSeconds.withCString { captureIntervalCString in
-                    overrides.batchWindowSeconds.withCString { batchWindowCString in
-                        virtue_ios_native_set_overrides(
-                            baseApiCString,
-                            captureIntervalCString,
-                            batchWindowCString
-                        )
-                    }
+                    virtue_ios_native_init(configDirCString, dataDirCString)
                 }
             }
         }

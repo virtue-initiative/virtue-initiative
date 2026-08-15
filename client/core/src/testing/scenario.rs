@@ -11,7 +11,6 @@ use crate::events::bus::{EventBus, Observer, StateType};
 use crate::model::{AuthState, BatchRecipient, DeviceCredentials, DeviceSettings, ServiceStatus};
 use crate::module::auth::AuthModule;
 use crate::module::capture_availability::CaptureAvailabilityModule;
-use crate::module::config::ConfigModule;
 use crate::module::lifecycle::{LifecycleModule, LifecycleObserverState};
 use crate::module::screenshot::ScreenshotModule;
 use crate::module::status::StatusModule;
@@ -113,7 +112,6 @@ impl Scenario {
             Box::new(CaptureAvailabilityModule::new(Box::new(platform.clone()))),
             Box::new(AuthModule::new(api, device_name, platform_name)),
             Box::new(StatusModule::new(STATUS_PARTIAL_COUNT)),
-            Box::new(ConfigModule::new(config)),
         ];
 
         let state_path = state_dir.join("event_state.json");
@@ -373,7 +371,6 @@ impl Scenario {
             Box::new(CaptureAvailabilityModule::new(Box::new(platform.clone()))),
             Box::new(AuthModule::new(api, device_name, platform_name)),
             Box::new(StatusModule::new(STATUS_PARTIAL_COUNT)),
-            Box::new(ConfigModule::new(config)),
         ];
 
         let state_path = state_dir.join("event_state.json");
@@ -420,7 +417,6 @@ fn scenario_config(state_dir: PathBuf) -> Config {
         "scenario-device",
         "test-platform",
         state_dir,
-        None,
         Duration::from_secs(60),
         Duration::from_secs(60),
     )

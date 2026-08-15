@@ -18,7 +18,7 @@ client/
     src/
       api.rs            — ApiTransport trait + ReqwestApiClient
       assembly.rs       — build_default_modules() factory
-      config.rs         — Config struct + runtime override file
+      config.rs         — Config struct (compile-time defaults via env!())
       controller.rs     — ClientController (IPC client for CLI)
       crypto.rs         — AES-256-GCM, HPKE key wrap, hash computation
       error.rs          — CoreError / CoreResult
@@ -30,7 +30,6 @@ client/
       module/
         auth.rs         — AuthModule: login / logout / device settings
         capture_availability.rs — CaptureAvailabilityModule: failure threshold
-        config.rs       — ConfigModule: runtime override file hot-reload
         lifecycle.rs    — LifecycleModule: process/suspend/ping-gap alerts
         screenshot.rs   — ScreenshotModule: interval scheduling + capture
         status.rs       — StatusModule: partial-status aggregation
@@ -47,7 +46,7 @@ client/
 `core` is structured around a typed, in-process event bus.
 
 ```rust
-// Build the default set of 8 observer modules.
+// Build the default set of 7 observer modules.
 let observers = build_default_modules(config, platform, api, PlatformConfig::default())?;
 let mut bus = EventBus::new(observers, saved_state)?;
 
@@ -84,18 +83,17 @@ pub trait Observer: 'static {
 Use `crate::dispatch_event!(event, { pat: Type => expr, … })` inside `on_event`
 to pattern-match typed events without boilerplate.
 
-### The 8 default modules
+### The 7 default modules
 
 | Module                      | Key inputs                                                                              | Key outputs                                                             |
 | --------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | `LifecycleModule`           | `Ping`, `ProcessStarted`, `UserStopRequested`                                           | `Upload` (lifecycle + alert events), `PartialStatus::Lifecycle`         |
-| `ScreenshotModule`          | `Login`, `Logout`, `Ping`, `ConfigChanged`                                              | `Upload` (screenshot), `CaptureFailed`                                  |
-| `UploadModule`              | `Login`, `Logout`, `Upload`, `Ping`, `ProcessStopped`, `FlushBatchNow`, `ConfigChanged` | network I/O via `ApiTransport`; `LogoutRequested` on 404                |
+| `ScreenshotModule`          | `Login`, `Logout`, `Ping`                                                               | `Upload` (screenshot), `CaptureFailed`                                  |
+| `UploadModule`              | `Login`, `Logout`, `Upload`, `Ping`, `ProcessStopped`, `FlushBatchNow`                   | network I/O via `ApiTransport`; `LogoutRequested` on 404                |
 | `CaptureAvailabilityModule` | `CaptureFailed`                                                                         | `Upload` (capture-failed alert)                                         |
 | `HeartbeatModule`           | `Ping`                                                                                  | `Upload` (heartbeat, once per 24h while authenticated)                  |
-| `AuthModule`                | `LoginRequested`, `LogoutRequested`, `StatusRequest`, `ConfigChanged`                   | `Login`, `Logout`, `LoginResult`, `LogoutResult`, `PartialStatus::Auth` |
+| `AuthModule`                | `LoginRequested`, `LogoutRequested`, `StatusRequest`                                    | `Login`, `Logout`, `LoginResult`, `LogoutResult`, `PartialStatus::Auth` |
 | `StatusModule`              | `StatusRequest`, `PartialStatus` (from 3 sources)                                       | `StatusResponse`                                                        |
-| `ConfigModule`              | `Ping`                                                                                  | `ConfigChanged`                                                         |
 
 On iOS (`PlatformConfig::lifecycle_enabled == false`), `LifecycleModule` is
 replaced by a `NoopLifecycleModule` that only answers `StatusRequest` — see
@@ -229,22 +227,25 @@ sockets are used.
 - `device_name` — stable device identifier
 - `platform_name` — e.g. `"linux"`, `"mac"`, `"windows"`
 - `state_dir` — directory for all state files
-- `runtime_config_file` — optional path to `config_override.json` (hot-reloaded)
 - `screenshot_interval` — default 60 s
 - `batch_interval` — default 60 s
 
-Override keys supported in `config_override.json`:
-
-```json
-{
-  "api_base_url": "https://...",
-  "capture_interval_seconds": 30,
-  "batch_window_seconds": 120
-}
-```
-
-`ConfigModule` re-reads this file on every `Ping` and emits `ConfigChanged`
-only when a value actually changes.
+There is no runtime override mechanism: `api_base_url`, `capture_interval_seconds`,
+and `batch_window_seconds` are baked in at **compile time** via `env!()`, exactly
+like `DEFAULT_API_BASE_URL`. `client/core/build.rs` reads
+`VIRTUE_DEFAULT_API_URL`, `VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS`, and
+`VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS` from the process environment — falling
+back to an optional `client/.env` file (gitignored; see `client/.env.example`)
+for any of those not already set by a real env var — and emits them via
+`cargo:rustc-env`. `config.rs` exposes them as `DEFAULT_API_BASE_URL` (const)
+and `default_capture_interval_seconds()`/`default_batch_window_seconds()`
+(functions, since integer parsing needs a body). Real process/CI env vars
+always take precedence over `.env`. The interval floors (15s capture, 1s
+batch) are enforced as a `panic!` in `build.rs`, not a runtime clamp — an
+invalid or too-low value fails the build instead of silently getting clamped.
+Because every platform crate depends on `client/core`, and Cargo always runs a
+dependency's own `build.rs` when compiling it, this one `client/.env` file
+covers every platform.
 
 ## State files (under `Config.state_dir`)
 

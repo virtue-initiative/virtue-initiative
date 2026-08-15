@@ -512,10 +512,6 @@ public sealed partial class MainWindow : Window
             lines.Add($"windows_package: {ViewModel.WindowsPackageVersion}");
         }
 
-        lines.Add($"capture_interval_seconds: {ViewModel.CaptureIntervalSeconds}");
-        lines.Add($"batch_window_seconds: {ViewModel.BatchWindowSeconds}");
-        lines.Add($"base_api_url: {ViewModel.ApiBaseUrl}");
-
         if (!string.IsNullOrWhiteSpace(ViewModel.MonitorError))
         {
             lines.Add($"last_error: {ViewModel.MonitorError}");

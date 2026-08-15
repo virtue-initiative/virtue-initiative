@@ -1967,6 +1967,8 @@
 
     "@testing-library/dom/dom-accessibility-api": ["dom-accessibility-api@0.5.16", "", {}, "sha512-X7BJ2yElsnOJ30pZF4uIIDfBEVgF4XEBxL9Bxhy6dnrm5hkzqmsWHGTiHqRiITNhMyFLyAiWndIJP7Z1NTteDg=="],
 
+    "@virtueinitiative/web/@virtueinitiative/shared-web": ["@virtueinitiative/shared-web@file:shared-web", { "dependencies": { "zod": "^4.4.3" }, "devDependencies": { "preact": "^10.29.1", "prettier": "^3.8.3" }, "peerDependencies": { "preact": ">=10" } }],
+
     "@vitest/mocker/estree-walker": ["estree-walker@3.0.3", "", { "dependencies": { "@types/estree": "^1.0.0" } }, ""],
 
     "@vscode/emmet-helper/jsonc-parser": ["jsonc-parser@2.3.1", "", {}, ""],
@@ -2002,6 +2004,8 @@
     "is-inside-container/is-docker": ["is-docker@3.0.0", "", { "bin": "cli.js" }, ""],
 
     "katex/commander": ["commander@8.3.0", "", {}, "sha512-OkTL9umf+He2DZkUq8f8J9of7yL6RJKI24dVITBmNfZBmri9zYZQrKkuXiKhyfPSu8tUhnVBB1iKXevvnlR4Ww=="],
+
+    "landing/@virtueinitiative/shared-web": ["@virtueinitiative/shared-web@file:shared-web", { "dependencies": { "zod": "^4.4.3" }, "devDependencies": { "preact": "^10.29.1", "prettier": "^3.8.3" }, "peerDependencies": { "preact": ">=10" } }],
 
     "miniflare/ws": ["ws@8.18.0", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, ""],
 

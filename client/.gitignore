@@ -1,3 +1,6 @@
+# Local compile-time defaults (api url, capture/batch intervals); see .env.example
+.env
+
 # Rust build output
 target/
 target-docker/

@@ -223,16 +223,6 @@
                         android:layout_height="wrap_content"
                         android:text="@string/btn_sign_in"
                         android:backgroundTint="@color/virtue_forest" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/overridesButton"
-                        style="@style/Widget.App.Button.OutlinedButton"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/btn_runtime_overrides"
-                        android:textColor="@color/virtue_forest"
-                        app:strokeColor="@color/virtue_forest" />
                 </LinearLayout>
             </LinearLayout>
 
@@ -275,42 +265,16 @@
                         android:text="@string/btn_sign_out"
                         android:textColor="@color/virtue_forest"
                         app:strokeColor="@color/virtue_forest" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/overridesButtonSession"
-                        style="@style/Widget.App.Button.OutlinedButton"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/btn_runtime_overrides"
-                        android:textColor="@color/virtue_forest"
-                        app:strokeColor="@color/virtue_forest" />
                 </LinearLayout>
             </LinearLayout>
         </LinearLayout>
 
-        <!-- Hidden override inputs (for compatibility with existing MainActivity code) -->
+        <!-- Hidden inputs (for compatibility with existing MainActivity code) -->
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="0dp"
             android:orientation="vertical"
             android:visibility="gone">
-            <EditText
-                android:id="@+id/baseApiUrlInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
-            <EditText
-                android:id="@+id/captureIntervalInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
-            <EditText
-                android:id="@+id/batchWindowInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
-            <Button
-                android:id="@+id/saveOverridesButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
             <Button
                 android:id="@+id/grantCaptureButton"
                 android:layout_width="match_parent"

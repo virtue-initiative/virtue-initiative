@@ -6,8 +6,6 @@ use anyhow::{Context, Result};
 use virtue_core::Config;
 
 const DEFAULT_BASE_API_URL: &str = virtue_core::DEFAULT_API_BASE_URL;
-const DEFAULT_CAPTURE_INTERVAL_SECONDS: u64 = virtue_core::DEFAULT_CAPTURE_INTERVAL_SECONDS;
-const DEFAULT_BATCH_WINDOW_SECONDS: u64 = virtue_core::DEFAULT_BATCH_WINDOW_SECONDS;
 
 /// Set at build time by passing `VIRTUE_INSTANCE=<name>` to cargo. Controls
 /// which XDG subdirectory and systemd service name this binary uses.
@@ -18,7 +16,6 @@ pub struct ClientPaths {
     pub config_dir: PathBuf,
     pub data_dir: PathBuf,
     pub state_dir: PathBuf,
-    pub runtime_config_file: PathBuf,
 }
 
 impl ClientPaths {
@@ -39,7 +36,6 @@ impl ClientPaths {
         let data_dir = state_root.join(&dir_name);
         Self {
             state_dir: data_dir.clone(),
-            runtime_config_file: config_dir.join("config.json"),
             config_dir,
             data_dir,
         }
@@ -72,9 +68,8 @@ pub fn build_core_config(paths: &ClientPaths) -> Config {
         default_device_name(),
         "linux",
         paths.state_dir.clone(),
-        Some(paths.runtime_config_file.clone()),
-        Duration::from_secs(DEFAULT_CAPTURE_INTERVAL_SECONDS),
-        Duration::from_secs(DEFAULT_BATCH_WINDOW_SECONDS),
+        Duration::from_secs(virtue_core::default_capture_interval_seconds()),
+        Duration::from_secs(virtue_core::default_batch_window_seconds()),
     )
 }
 
@@ -102,17 +97,13 @@ mod tests {
     }
 
     #[test]
-    fn config_dir_and_runtime_file_are_under_config_root() {
+    fn config_dir_is_under_config_root() {
         let paths = ClientPaths::from_roots(
             PathBuf::from("/home/user/.config"),
             PathBuf::from("/home/user/.local/state"),
             None,
         );
         assert_eq!(paths.config_dir, PathBuf::from("/home/user/.config/virtue"));
-        assert_eq!(
-            paths.runtime_config_file,
-            PathBuf::from("/home/user/.config/virtue/config.json")
-        );
     }
 
     #[test]
@@ -143,10 +134,6 @@ mod tests {
         assert_eq!(
             paths.state_dir,
             PathBuf::from("/home/user/.local/state/virtue-dev")
-        );
-        assert_eq!(
-            paths.runtime_config_file,
-            PathBuf::from("/home/user/.config/virtue-dev/config.json")
         );
     }
 

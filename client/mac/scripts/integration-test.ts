@@ -27,7 +27,7 @@
 //
 // Requires: bun, cargo, curl, all on PATH. macOS only.
 
-import { mkdirSync, mkdtempSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Subprocess } from 'bun';
 import {
@@ -150,24 +150,17 @@ async function main(): Promise<void> {
   seedDevUser(ROOT);
 
   log('Building virtue-mac client (mock-capture)');
-  run(['cargo', 'build', '-p', 'virtue-mac', '--features', 'mock-capture'], { cwd: CLIENT_DIR });
+  run(['cargo', 'build', '-p', 'virtue-mac', '--features', 'mock-capture'], {
+    cwd: CLIENT_DIR,
+    env: {
+      ...(process.env as Record<string, string>),
+      VIRTUE_DEFAULT_API_URL: apiBaseUrl,
+      VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS: String(CAPTURE_INTERVAL_SECONDS),
+      VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS: String(BATCH_WINDOW_SECONDS),
+    },
+  });
   const virtueBin = join(CLIENT_DIR, 'target/debug/virtue-mac');
   const ciLoginBin = join(CLIENT_DIR, 'target/debug/virtue-mac-ci-login');
-
-  log('Writing isolated client config');
-  mkdirSync(clientAppSupport, { recursive: true });
-  await Bun.write(
-    join(clientAppSupport, 'config.json'),
-    JSON.stringify(
-      {
-        api_base_url: apiBaseUrl,
-        capture_interval_seconds: CAPTURE_INTERVAL_SECONDS,
-        batch_window_seconds: BATCH_WINDOW_SECONDS,
-      },
-      null,
-      2,
-    ),
-  );
 
   log('Starting the daemon');
   daemonProc = spawnLogged([virtueBin, 'daemon'], { env: clientEnv, logPath: daemonLog });

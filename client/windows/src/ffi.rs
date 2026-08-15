@@ -1,14 +1,10 @@
 use std::ffi::{CStr, CString, c_char};
-use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-use crate::config::{
-    ClientPaths, ResolvedRuntimeConfig, RuntimeConfigOverrides, default_device_name,
-    load_runtime_overrides, resolved_runtime_config, save_runtime_overrides,
-};
+use crate::config::{ClientPaths, default_device_name};
 use crate::resident_monitor::{self, MonitorStatusSnapshot};
 use crate::session::{SessionManager, SessionStatus};
 
@@ -145,16 +141,6 @@ impl From<SessionStatus> for SessionStatusPayload {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct RuntimeConfigPayload {
-    api_base_url: String,
-    capture_interval_seconds: u64,
-    batch_window_seconds: u64,
-    config_path: String,
-    build_label: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct MonitorStatusPayload {
     state: String,
     logged_in: bool,
@@ -173,18 +159,6 @@ impl From<MonitorStatusSnapshot> for MonitorStatusPayload {
     }
 }
 
-impl RuntimeConfigPayload {
-    fn from_resolved_config(value: ResolvedRuntimeConfig, config_path: PathBuf) -> Self {
-        Self {
-            api_base_url: value.api_base_url,
-            capture_interval_seconds: value.capture_interval_seconds,
-            batch_window_seconds: value.batch_window_seconds,
-            config_path: config_path.display().to_string(),
-            build_label: virtue_core::BUILD_LABEL.to_string(),
-        }
-    }
-}
-
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 struct LoginRequest {
@@ -194,46 +168,11 @@ struct LoginRequest {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn virtue_windows_init(
-    base_api_url: *const c_char,
-    capture_interval_seconds: *const c_char,
-    batch_window_seconds: *const c_char,
-) -> *mut c_char {
+pub extern "C" fn virtue_windows_init() -> *mut c_char {
     into_error_ptr((|| {
         let paths = ensure_paths_initialized()?;
         init_logging(&paths);
-
-        let base_api_url = c_string_or_empty(base_api_url);
-        let capture_interval_seconds = c_string_or_empty(capture_interval_seconds);
-        let batch_window_seconds = c_string_or_empty(batch_window_seconds);
-
-        if base_api_url.is_empty()
-            && capture_interval_seconds.is_empty()
-            && batch_window_seconds.is_empty()
-        {
-            return Ok(());
-        }
-
-        let mut overrides = load_runtime_overrides(&paths.runtime_config_file)?;
-        if !base_api_url.is_empty() {
-            overrides.api_base_url = Some(base_api_url);
-        }
-        if !capture_interval_seconds.is_empty() {
-            overrides.capture_interval_seconds = Some(
-                capture_interval_seconds
-                    .parse()
-                    .context("capture_interval_seconds must be an integer")?,
-            );
-        }
-        if !batch_window_seconds.is_empty() {
-            overrides.batch_window_seconds = Some(
-                batch_window_seconds
-                    .parse()
-                    .context("batch_window_seconds must be an integer")?,
-            );
-        }
-
-        save_runtime_overrides(&paths.runtime_config_file, &overrides)
+        Ok(())
     })())
 }
 
@@ -281,19 +220,6 @@ pub extern "C" fn virtue_windows_logout() -> *mut c_char {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn virtue_windows_get_runtime_config_json() -> *mut c_char {
-    into_json_ptr((|| {
-        let paths = current_paths()?;
-        paths.ensure_dirs()?;
-        let resolved = resolved_runtime_config(&paths)?;
-        Ok(RuntimeConfigPayload::from_resolved_config(
-            resolved,
-            paths.runtime_config_file,
-        ))
-    })())
-}
-
-#[unsafe(no_mangle)]
 pub extern "C" fn virtue_windows_start_monitoring() -> *mut c_char {
     into_error_ptr(resident_monitor::start_monitoring())
 }
@@ -318,22 +244,6 @@ pub extern "C" fn virtue_windows_get_monitor_status_json() -> *mut c_char {
     into_json_ptr(Ok(MonitorStatusPayload::from(
         resident_monitor::status_snapshot(),
     )))
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn virtue_windows_set_runtime_config_json(
-    config_json: *const c_char,
-) -> *mut c_char {
-    into_error_ptr((|| {
-        let paths = current_paths()?;
-        paths.ensure_dirs()?;
-
-        let config_json = c_string_or_empty(config_json);
-        let overrides: RuntimeConfigOverrides =
-            serde_json::from_str(&config_json).context("failed parsing runtime config json")?;
-        save_runtime_overrides(&paths.runtime_config_file, &overrides)?;
-        Ok(())
-    })())
 }
 
 #[unsafe(no_mangle)]
@@ -434,7 +344,7 @@ mod tests {
         let _program_data = ProgramDataGuard::set(&paths.base_dir);
         paths.ensure_dirs().expect("ensure dirs");
 
-        let init_ptr = virtue_windows_init(std::ptr::null(), std::ptr::null(), std::ptr::null());
+        let init_ptr = virtue_windows_init();
         assert!(init_ptr.is_null(), "init should succeed");
 
         let payload = virtue_windows_get_session_status_json();
@@ -457,38 +367,6 @@ mod tests {
         assert_eq!(json["loggedIn"], false);
         assert!(json.get("buildLabel").is_some());
         assert!(json.get("email").is_some());
-    }
-
-    #[test]
-    fn runtime_config_round_trip_works_through_ffi() {
-        let _guard = test_lock().lock().expect("test lock");
-        let paths = temporary_paths("config");
-        let _program_data = ProgramDataGuard::set(&paths.base_dir);
-        let base_url = c_value("https://dev-api.example.com");
-        let capture = c_value("45");
-        let batch = c_value("90");
-
-        let init_ptr = virtue_windows_init(base_url.as_ptr(), capture.as_ptr(), batch.as_ptr());
-        assert!(init_ptr.is_null(), "init should succeed");
-
-        let payload = ptr_to_string(virtue_windows_get_runtime_config_json());
-        let json: Value = serde_json::from_str(&payload).expect("valid json");
-
-        assert_eq!(json["apiBaseUrl"], "https://dev-api.example.com");
-        assert_eq!(json["captureIntervalSeconds"], 45);
-        assert_eq!(json["batchWindowSeconds"], 90);
-
-        let replacement = c_value(
-            r#"{"apiBaseUrl":"https://api2.example.com","captureIntervalSeconds":60,"batchWindowSeconds":120}"#,
-        );
-        let update_ptr = virtue_windows_set_runtime_config_json(replacement.as_ptr());
-        assert!(update_ptr.is_null(), "runtime config update should succeed");
-
-        let updated_payload = ptr_to_string(virtue_windows_get_runtime_config_json());
-        let updated: Value = serde_json::from_str(&updated_payload).expect("valid json");
-        assert_eq!(updated["apiBaseUrl"], "https://api2.example.com");
-        assert_eq!(updated["captureIntervalSeconds"], 60);
-        assert_eq!(updated["batchWindowSeconds"], 120);
     }
 
     #[test]

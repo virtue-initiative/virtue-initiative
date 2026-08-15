@@ -7,7 +7,6 @@ use crate::error::CoreResult;
 use crate::events::bus::{Emitter, EventBus, Observer, StateType};
 use crate::model::PartialStatus;
 use crate::model::{DeviceCredentials, DeviceSettings, Redacted};
-use crate::module::config::ConfigChanged;
 use crate::module::status::StatusRequest;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -194,7 +193,6 @@ impl<A: ApiTransport + Send + Sync + 'static> Observer for AuthModule<A> {
                 });
                 Ok(())
             },
-            ev: ConfigChanged => self.api.reconfigure(&ev.api_base_url),
         })
     }
 

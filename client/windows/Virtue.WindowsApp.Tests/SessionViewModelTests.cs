@@ -21,37 +21,12 @@ public sealed class SessionViewModelTests
     }
 
     [Fact]
-    public async Task InitializeAsync_LoadsSessionAndRuntimeConfig()
-    {
-        var fakeClient = new FakeRustInteropClient
-        {
-            SessionStatus = new SessionStatusPayload(false, null, "user@example.com", "build-123"),
-            MonitorStatus = new MonitorStatusPayload("signed_out", false, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 45, 90, @"C:\ProgramData\Virtue\config\config.json", "build-123"),
-        };
-        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
-
-        await viewModel.InitializeAsync();
-
-        Assert.Equal("build-123", viewModel.BuildLabel);
-        Assert.Equal("Build build-123 | Windows package 0.0.5.1234", viewModel.BuildLabelText);
-        Assert.Equal("user@example.com", viewModel.EmailInput);
-        Assert.Equal("https://api.example.com", viewModel.ApiBaseUrl);
-        Assert.Equal("45", viewModel.CaptureIntervalSeconds);
-        Assert.Equal("90", viewModel.BatchWindowSeconds);
-        Assert.Equal(@"C:\ProgramData\Virtue\config\config.json", viewModel.ConfigPath);
-        Assert.Equal(@"C:\ProgramData\Virtue\config\config.json", viewModel.ConfigPathDisplay);
-        Assert.Equal("Sign in to start monitoring.", viewModel.StatusText);
-    }
-
-    [Fact]
     public async Task LoginAsync_RefreshesStatusAfterSuccess()
     {
         var fakeClient = new FakeRustInteropClient
         {
             SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
             MonitorStatus = new MonitorStatusPayload("running", true, 0, 123, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\ProgramData\Virtue\config\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234")
         {
@@ -68,35 +43,12 @@ public sealed class SessionViewModelTests
     }
 
     [Fact]
-    public async Task SaveSettingsAsync_PassesRuntimeConfigUpdateToInterop()
-    {
-        var fakeClient = new FakeRustInteropClient
-        {
-            SessionStatus = new SessionStatusPayload(false, null, null, "build-123"),
-            MonitorStatus = new MonitorStatusPayload("signed_out", false, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 45, 90, @"C:\ProgramData\Virtue\config\config.json", "build-123"),
-        };
-        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234")
-        {
-            ApiBaseUrl = "https://dev-api.example.com",
-            CaptureIntervalSeconds = "30",
-            BatchWindowSeconds = "180",
-        };
-
-        await viewModel.SaveSettingsAsync();
-
-        Assert.Equal(new RuntimeConfigUpdate("https://dev-api.example.com", 30, 180), fakeClient.LastRuntimeConfigUpdate);
-        Assert.Equal("Runtime settings saved.", viewModel.StatusText);
-    }
-
-    [Fact]
     public async Task StopMonitoringFromTrayExitAsync_UsesExplicitTrayExitInterop()
     {
         var fakeClient = new FakeRustInteropClient
         {
             SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
             MonitorStatus = new MonitorStatusPayload("running", true, 0, 123, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\ProgramData\Virtue\config\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
 
@@ -113,7 +65,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(false, null, null, "build-123"),
             MonitorStatus = new MonitorStatusPayload("running", true, 4, 123, "stale error"),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\ProgramData\Virtue\config\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234")
         {
@@ -139,7 +90,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
             MonitorStatus = new MonitorStatusPayload("signed_out", false, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\ProgramData\Virtue\config\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
 
@@ -189,18 +139,6 @@ public sealed class SessionViewModelTests
     }
 
     [Fact]
-    public void RustInteropJson_SerializesDto()
-    {
-        var update = new RuntimeConfigUpdate("https://api.example.com", 30, 90);
-
-        var json = RustInteropJson.Serialize(update);
-
-        Assert.Contains("\"apiBaseUrl\"", json);
-        Assert.Contains("\"captureIntervalSeconds\"", json);
-        Assert.Contains("\"batchWindowSeconds\"", json);
-    }
-
-    [Fact]
     public async Task LoginAsync_FailsWithMissingEmail()
     {
         var fakeClient = new FakeRustInteropClient();
@@ -239,7 +177,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
             MonitorStatus = new MonitorStatusPayload("running", true, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
 
@@ -256,7 +193,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
             MonitorStatus = new MonitorStatusPayload("running", true, 0, 123, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
 
@@ -264,48 +200,6 @@ public sealed class SessionViewModelTests
 
         Assert.True(fakeClient.StopMonitoringCalled);
         Assert.Equal("Monitoring is stopped on this device.", viewModel.StatusText);
-    }
-
-    [Fact]
-    public async Task SaveSettingsAsync_FailsWithNonNumericCaptureInterval()
-    {
-        var fakeClient = new FakeRustInteropClient
-        {
-            SessionStatus = new SessionStatusPayload(false, null, null, "build-123"),
-            MonitorStatus = new MonitorStatusPayload("signed_out", false, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 45, 90, @"C:\cfg\config.json", "build-123"),
-        };
-        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234")
-        {
-            CaptureIntervalSeconds = "not-a-number",
-            BatchWindowSeconds = "90",
-        };
-
-        await viewModel.SaveSettingsAsync();
-
-        Assert.Null(fakeClient.LastRuntimeConfigUpdate);
-        Assert.Contains("not-a-number", viewModel.StatusText);
-    }
-
-    [Fact]
-    public async Task SaveSettingsAsync_FailsWithNegativeBatchWindow()
-    {
-        var fakeClient = new FakeRustInteropClient
-        {
-            SessionStatus = new SessionStatusPayload(false, null, null, "build-123"),
-            MonitorStatus = new MonitorStatusPayload("signed_out", false, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 45, 90, @"C:\cfg\config.json", "build-123"),
-        };
-        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234")
-        {
-            CaptureIntervalSeconds = "45",
-            BatchWindowSeconds = "-1",
-        };
-
-        await viewModel.SaveSettingsAsync();
-
-        Assert.Null(fakeClient.LastRuntimeConfigUpdate);
-        Assert.Contains("-1", viewModel.StatusText);
     }
 
     [Theory]
@@ -321,7 +215,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(loggedIn, loggedIn ? "device-1" : null, loggedIn ? "user@example.com" : null, "build-123"),
             MonitorStatus = new MonitorStatusPayload(monitorState, loggedIn, 0, null, lastError),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
 
@@ -337,7 +230,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(false, null, null, "build-123"),
             MonitorStatus = new MonitorStatusPayload("signed_out", false, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
 
@@ -353,7 +245,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
             MonitorStatus = new MonitorStatusPayload("running", true, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
 
@@ -370,7 +261,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(false, null, null, "build-123"),
             MonitorStatus = new MonitorStatusPayload("signed_out", false, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
 
@@ -396,7 +286,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(false, null, "server@example.com", "build-123"),
             MonitorStatus = new MonitorStatusPayload("signed_out", false, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
         viewModel.EmailInput = "typed@example.com";
@@ -413,7 +302,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(true, "device-1", "server@example.com", "build-123"),
             MonitorStatus = new MonitorStatusPayload("running", true, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
         viewModel.EmailInput = "typed@example.com";
@@ -448,7 +336,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
             MonitorStatus = new MonitorStatusPayload("running", true, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234")
         {
@@ -471,11 +358,7 @@ public sealed class SessionViewModelTests
 
         public MonitorStatusPayload MonitorStatus { get; set; } = new("stopped", false, 0, null, null);
 
-        public RuntimeConfigPayload RuntimeConfig { get; set; } = new(string.Empty, 300, 3600, string.Empty, "build-unknown");
-
         public (string Email, string Password, string? DeviceName)? LastLogin { get; private set; }
-
-        public RuntimeConfigUpdate? LastRuntimeConfigUpdate { get; private set; }
 
         public bool StartMonitoringCalled { get; private set; }
 
@@ -483,7 +366,7 @@ public sealed class SessionViewModelTests
 
         public bool StopMonitoringFromTrayExitCalled { get; private set; }
 
-        public void Initialize(RuntimeConfigUpdate? overrides = null)
+        public void Initialize()
         {
         }
 
@@ -507,19 +390,6 @@ public sealed class SessionViewModelTests
         public SessionStatusPayload GetSessionStatus() => SessionStatus;
 
         public MonitorStatusPayload GetMonitorStatus() => MonitorStatus;
-
-        public RuntimeConfigPayload GetRuntimeConfig() => RuntimeConfig;
-
-        public void SetRuntimeConfig(RuntimeConfigUpdate update)
-        {
-            LastRuntimeConfigUpdate = update;
-            RuntimeConfig = new RuntimeConfigPayload(
-                update.ApiBaseUrl ?? RuntimeConfig.ApiBaseUrl,
-                update.CaptureIntervalSeconds ?? RuntimeConfig.CaptureIntervalSeconds,
-                update.BatchWindowSeconds ?? RuntimeConfig.BatchWindowSeconds,
-                RuntimeConfig.ConfigPath,
-                RuntimeConfig.BuildLabel);
-        }
 
         public void Login(string email, string password, string? deviceName = null)
         {

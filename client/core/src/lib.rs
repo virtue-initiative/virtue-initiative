@@ -21,7 +21,7 @@ pub mod testing;
 pub use assembly::{build_default_modules, build_default_modules_reqwest};
 pub use build_info::{BUILD_LABEL, build_label};
 pub use config::{
-    Config, DEFAULT_API_BASE_URL, DEFAULT_BATCH_WINDOW_SECONDS, DEFAULT_CAPTURE_INTERVAL_SECONDS,
+    Config, DEFAULT_API_BASE_URL, default_batch_window_seconds, default_capture_interval_seconds,
 };
 pub use controller::ClientController;
 pub use error::{CoreError, CoreResult};
@@ -40,7 +40,6 @@ pub use model::{
     AuthState, BatchUpload, EventData, LogEntry, LoopOutcome, Screenshot, ServiceStatus,
 };
 pub use module::auth::{Login, LoginRequested, LoginResult, Logout, LogoutRequested, LogoutResult};
-pub use module::config::ConfigChanged;
 pub use module::lifecycle::{ProcessStarted, ProcessStopped, UserStopRequested};
 pub use module::screenshot::CaptureFailed;
 pub use module::status::{StatusRequest, StatusResponse};

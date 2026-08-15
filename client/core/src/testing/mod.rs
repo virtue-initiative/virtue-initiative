@@ -48,7 +48,6 @@ mod tests {
             "test-device",
             "test-platform",
             state_dir,
-            None,
             Duration::from_secs(300),
             Duration::from_secs(3600),
         )

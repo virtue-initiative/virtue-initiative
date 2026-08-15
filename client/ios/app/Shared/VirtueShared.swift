@@ -20,9 +20,6 @@ enum VirtueShared {
         return "0.0.0"
     }()
 
-    static let baseApiUrlKey = "VIRTUE_BASE_API_URL"
-    static let captureIntervalKey = "VIRTUE_CAPTURE_INTERVAL_SECONDS"
-    static let batchWindowKey = "VIRTUE_BATCH_WINDOW_SECONDS"
     static let monitoringEnabledKey = "VIRTUE_MONITORING_ENABLED"
     static let safariCaptureStateCodeKey = "VIRTUE_SAFARI_CAPTURE_STATE_CODE"
     static let safariPauseStopIssuedKey = "VIRTUE_SAFARI_PAUSE_STOP_ISSUED"

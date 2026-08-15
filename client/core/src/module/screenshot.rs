@@ -13,7 +13,6 @@ use crate::events::Ping;
 use crate::events::bus::{Emitter, EventBus, Observer, StateType};
 use crate::model::{ScreenshotSkipReason, UploadKind};
 use crate::module::auth::{Login, Logout};
-use crate::module::config::ConfigChanged;
 use crate::module::upload::Upload;
 use risk_classifier::RiskClassifier;
 use virtue_text_detection::ScreenshotOCR;
@@ -369,10 +368,6 @@ impl Observer for ScreenshotModule {
                 if let Some(fp) = &ev.update_fingerprint {
                     self.state.last_uploaded_fingerprint = Some(fp.clone());
                 }
-                Ok(())
-            },
-            ev: ConfigChanged => {
-                self.screenshot_interval_ms = ev.screenshot_interval_ms as i64;
                 Ok(())
             },
         })

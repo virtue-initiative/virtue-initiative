@@ -150,31 +150,6 @@ pub extern "C" fn virtue_mac_native_request_user_stop(source: *const c_char) -> 
     into_c_result(result)
 }
 
-/// Write runtime overrides (base API URL / capture interval / batch window) to
-/// `config.json`, which the daemon's `ConfigModule` hot-reloads on the next
-/// `Ping`. Blank fields omit that key so the daemon falls back to its
-/// built-in default. Mirrors iOS's `virtue_ios_native_set_overrides`.
-#[unsafe(no_mangle)]
-pub extern "C" fn virtue_mac_native_set_overrides(
-    base_api_url: *const c_char,
-    capture_interval_seconds: *const c_char,
-    batch_window_seconds: *const c_char,
-) -> *mut c_char {
-    let result = (|| -> Result<()> {
-        let core = core()?;
-        let base_api_url = c_string_or_empty(base_api_url);
-        let capture_interval_seconds = c_string_or_empty(capture_interval_seconds);
-        let batch_window_seconds = c_string_or_empty(batch_window_seconds);
-        write_runtime_overrides(
-            &core.paths.runtime_config_file,
-            &base_api_url,
-            &capture_interval_seconds,
-            &batch_window_seconds,
-        )
-    })();
-    into_c_result(result)
-}
-
 #[unsafe(no_mangle)]
 pub extern "C" fn virtue_mac_native_has_capture_permission() -> bool {
     has_screen_capture_access()
@@ -251,12 +226,12 @@ pub extern "C" fn virtue_mac_native_default_device_name() -> *mut c_char {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn virtue_mac_native_default_capture_interval_seconds() -> u64 {
-    virtue_core::DEFAULT_CAPTURE_INTERVAL_SECONDS
+    virtue_core::default_capture_interval_seconds()
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn virtue_mac_native_default_batch_window_seconds() -> u64 {
-    virtue_core::DEFAULT_BATCH_WINDOW_SECONDS
+    virtue_core::default_batch_window_seconds()
 }
 
 /// Resolve the daemon executable bundled inside the app at
@@ -323,45 +298,4 @@ fn into_c_result(result: Result<()>) -> *mut c_char {
         Ok(()) => std::ptr::null_mut(),
         Err(err) => string_to_c(err.to_string()),
     }
-}
-
-fn write_runtime_overrides(
-    path: &Path,
-    base_api_url: &str,
-    capture_interval_seconds: &str,
-    batch_window_seconds: &str,
-) -> Result<()> {
-    let mut payload = serde_json::Map::new();
-    if !base_api_url.trim().is_empty() {
-        payload.insert(
-            "api_base_url".to_string(),
-            serde_json::Value::String(base_api_url.trim().to_string()),
-        );
-    }
-    if !capture_interval_seconds.trim().is_empty() {
-        payload.insert(
-            "capture_interval_seconds".to_string(),
-            serde_json::Value::Number(parse_u64(capture_interval_seconds)?.into()),
-        );
-    }
-    if !batch_window_seconds.trim().is_empty() {
-        payload.insert(
-            "batch_window_seconds".to_string(),
-            serde_json::Value::Number(parse_u64(batch_window_seconds)?.into()),
-        );
-    }
-
-    let bytes = serde_json::to_vec_pretty(&serde_json::Value::Object(payload))?;
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes).with_context(|| format!("failed writing {}", tmp.display()))?;
-    std::fs::rename(&tmp, path)
-        .with_context(|| format!("failed replacing {} with {}", path.display(), tmp.display()))?;
-    Ok(())
-}
-
-fn parse_u64(value: &str) -> Result<u64> {
-    value
-        .trim()
-        .parse::<u64>()
-        .with_context(|| format!("invalid integer override: {value}"))
 }

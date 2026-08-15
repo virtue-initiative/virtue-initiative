@@ -58,8 +58,7 @@ fn status(paths: &ClientPaths) -> Result<()> {
 fn render_status_text(paths: &ClientPaths) -> Result<String> {
     let auth = read_auth_state(&paths.state_dir)?;
     let service_status = load_service_status(paths, &auth)?;
-    let mut config = build_core_config(paths);
-    config.refresh_from_runtime_file()?;
+    let config = build_core_config(paths);
     let mut lines = Vec::new();
     lines.push(format!("logged_in: {}", auth.device_credentials.is_some()));
     lines.push(format!("running: {}", service_status.is_running));

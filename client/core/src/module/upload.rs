@@ -15,7 +15,6 @@ use crate::events::Ping;
 use crate::events::bus::{Emitter, EventBus, Observer, StateType, log_error, log_warning};
 use crate::model::PartialStatus;
 use crate::module::auth::{Login, Logout, LogoutRequested};
-use crate::module::config::ConfigChanged;
 use crate::module::lifecycle::ProcessStopped;
 use crate::module::status::StatusRequest;
 
@@ -586,10 +585,6 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> Observer for UploadModule<
                     let now_ms = self.platform.get_time_utc_ms()?;
                     self.try_upload_batch(now_ms, emitter, false)?;
                 }
-                Ok(())
-            },
-            ev: ConfigChanged => {
-                self.batch_interval_ms = ev.batch_interval_ms as i64;
                 Ok(())
             },
         })

@@ -9,16 +9,20 @@
 // (`resident_monitor::start_monitoring`, `SessionManager::login_blocking`).
 //
 // This binary reproduces exactly what the WinUI app's `SessionViewModel`
-// does at startup and login time -- write runtime config overrides, start
-// monitoring, then log in (see `SessionViewModel.InitializeAsync`/
-// `LoginAsync`) -- then blocks for a fixed run window so the monitor's
-// background thread can actually capture/hash/batch/upload before the
-// process exits (which would otherwise kill that thread immediately).
+// does at startup and login time -- start monitoring, then log in (see
+// `SessionViewModel.InitializeAsync`/`LoginAsync`) -- then blocks for a
+// fixed run window so the monitor's background thread can actually
+// capture/hash/batch/upload before the process exits (which would
+// otherwise kill that thread immediately).
+//
+// The API base URL and capture/batch intervals are compile-time constants
+// baked into the `virtue_windows` lib this binary links (see
+// `client/core/build.rs` and `client/.env`) -- set them via env vars (or
+// `client/.env`) on the `cargo build` invocation, not via CLI flags here.
 //
 // Usage:
-//   virtue-windows-ci-runner --api-base-url <url> --email <email> --password <password>
-//     --device-name <name> [--capture-interval-seconds N] [--batch-window-seconds N]
-//     --run-duration-seconds N
+//   virtue-windows-ci-runner --email <email> --password <password>
+//     --device-name <name> --run-duration-seconds N
 //
 // Respects the PROGRAMDATA environment variable for isolation, same as the
 // product code (`ClientPaths::discover`).
@@ -29,24 +33,18 @@ use std::time::Duration;
 
 use clap::Parser;
 
-use virtue_windows::config::{ClientPaths, RuntimeConfigOverrides, save_runtime_overrides};
+use virtue_windows::config::ClientPaths;
 use virtue_windows::resident_monitor;
 use virtue_windows::session::SessionManager;
 
 #[derive(Parser)]
 struct Args {
     #[arg(long)]
-    api_base_url: String,
-    #[arg(long)]
     email: String,
     #[arg(long)]
     password: String,
     #[arg(long = "device-name")]
     device_name: String,
-    #[arg(long, default_value_t = 15)]
-    capture_interval_seconds: u64,
-    #[arg(long, default_value_t = 15)]
-    batch_window_seconds: u64,
     #[arg(long)]
     run_duration_seconds: u64,
 }
@@ -64,16 +62,6 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-
-    let overrides = RuntimeConfigOverrides {
-        api_base_url: Some(args.api_base_url),
-        capture_interval_seconds: Some(args.capture_interval_seconds),
-        batch_window_seconds: Some(args.batch_window_seconds),
-    };
-    if let Err(err) = save_runtime_overrides(&paths.runtime_config_file, &overrides) {
-        eprintln!("ci-runner: failed to write runtime config: {err:#}");
-        return ExitCode::FAILURE;
-    }
 
     if let Err(err) = resident_monitor::start_monitoring() {
         eprintln!("ci-runner: failed to start monitoring: {err:#}");

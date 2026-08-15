@@ -155,7 +155,15 @@ async function main(): Promise<void> {
       '--bin',
       'virtue-windows-ci-runner',
     ],
-    { cwd: CLIENT_DIR },
+    {
+      cwd: CLIENT_DIR,
+      env: {
+        ...(process.env as Record<string, string>),
+        VIRTUE_DEFAULT_API_URL: apiBaseUrl,
+        VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS: String(CAPTURE_INTERVAL_SECONDS),
+        VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS: String(BATCH_WINDOW_SECONDS),
+      },
+    },
   );
   const runnerBin = join(
     CLIENT_DIR,
@@ -166,18 +174,12 @@ async function main(): Promise<void> {
   runnerProc = spawnLogged(
     [
       runnerBin,
-      '--api-base-url',
-      apiBaseUrl,
       '--email',
       DEV_EMAIL,
       '--password',
       DEV_PASSWORD,
       '--device-name',
       DEVICE_NAME,
-      '--capture-interval-seconds',
-      String(CAPTURE_INTERVAL_SECONDS),
-      '--batch-window-seconds',
-      String(BATCH_WINDOW_SECONDS),
       '--run-duration-seconds',
       String(RUN_DURATION_SECONDS),
     ],
