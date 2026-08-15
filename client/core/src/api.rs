@@ -10,6 +10,13 @@ use crate::crypto::derive_password_auth;
 use crate::error::{CoreError, CoreResult};
 use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, HashParams, NotifyPayload};
 
+/// The whole codebase shares one version, tracked in `version.properties` (this crate's
+/// grandparent directory). This is that version's `/vX`/`/vX.Y` URL-prefix form
+/// (api/SPEC.md section 1.4, hash-server/SPEC.md section 1.3) — the same value is used
+/// for both the main API and the standalone hash server. Kept in sync by
+/// `scripts/update-version.sh`, which is the only thing that should ever edit this line.
+const API_VERSION: &str = "v0.1";
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct UploadedBatchResponse {
     pub id: String,
@@ -123,6 +130,7 @@ impl ApiTransport for ReqwestApiClient {
         self.send_empty(
             Method::POST,
             None,
+            API_VERSION,
             "/d/logout",
             Some(device_refresh_token),
             None::<&()>,
@@ -157,7 +165,7 @@ impl ApiTransport for ReqwestApiClient {
         }
 
         let material: LoginMaterialResponse = self.expect_json(
-            self.request(Method::GET, None, "/user/login-material", None)
+            self.request(Method::GET, None, API_VERSION, "/user/login-material", None)
                 .query(&[("email", email)])
                 .send()?,
         )?;
@@ -168,6 +176,7 @@ impl ApiTransport for ReqwestApiClient {
         let response: RegisterDeviceResponse = self.send_json(
             Method::POST,
             None,
+            API_VERSION,
             "/d/device",
             None,
             Some(&RegisterDeviceRequest {
@@ -194,6 +203,7 @@ impl ApiTransport for ReqwestApiClient {
         let response: DeviceSettingsResponse = self.send_json(
             Method::GET,
             None,
+            API_VERSION,
             "/d/device",
             Some(device_refresh_token),
             None::<&()>,
@@ -254,8 +264,14 @@ impl ApiTransport for ReqwestApiClient {
         })?;
         let form = Form::new().part("file", part).text("metadata", metadata);
 
-        let response: UploadBatchResponse =
-            self.send_form(Method::POST, None, "/d/batch", device_refresh_token, form)?;
+        let response: UploadBatchResponse = self.send_form(
+            Method::POST,
+            None,
+            API_VERSION,
+            "/d/batch",
+            device_refresh_token,
+            form,
+        )?;
         let hash_token = response.settings.hash_token.clone();
         Ok(UploadedBatchResponse {
             id: response.id,
@@ -279,7 +295,13 @@ impl ApiTransport for ReqwestApiClient {
         body.extend_from_slice(content_hash);
 
         let response = self
-            .request(Method::POST, hash_base_url, "/hash", Some(hash_jwt))
+            .request(
+                Method::POST,
+                hash_base_url,
+                API_VERSION,
+                "/hash",
+                Some(hash_jwt),
+            )
             .header("Content-Type", "application/octet-stream")
             .body(body)
             .send()?;
@@ -292,6 +314,7 @@ impl ReqwestApiClient {
         &self,
         method: Method,
         base_override: Option<&str>,
+        version: &str,
         path: &str,
         bearer_token: Option<&str>,
         body: Option<&TBody>,
@@ -300,7 +323,7 @@ impl ReqwestApiClient {
         TBody: Serialize + ?Sized,
         TResponse: for<'de> Deserialize<'de>,
     {
-        let mut request = self.request(method, base_override, path, bearer_token);
+        let mut request = self.request(method, base_override, version, path, bearer_token);
         if let Some(body) = body {
             request = request.json(body);
         }
@@ -313,6 +336,7 @@ impl ReqwestApiClient {
         &self,
         method: Method,
         base_override: Option<&str>,
+        version: &str,
         path: &str,
         bearer_token: Option<&str>,
         body: Option<&TBody>,
@@ -320,7 +344,7 @@ impl ReqwestApiClient {
     where
         TBody: Serialize + ?Sized,
     {
-        let mut request = self.request(method, base_override, path, bearer_token);
+        let mut request = self.request(method, base_override, version, path, bearer_token);
         if let Some(body) = body {
             request = request.json(body);
         }
@@ -332,6 +356,7 @@ impl ReqwestApiClient {
         &self,
         method: Method,
         base_override: Option<&str>,
+        version: &str,
         path: &str,
         bearer_token: &str,
         form: Form,
@@ -340,7 +365,7 @@ impl ReqwestApiClient {
         TResponse: for<'de> Deserialize<'de>,
     {
         let response = self
-            .request(method, base_override, path, Some(bearer_token))
+            .request(method, base_override, version, path, Some(bearer_token))
             .multipart(form)
             .send()?;
         self.expect_json(response)
@@ -350,13 +375,14 @@ impl ReqwestApiClient {
         &self,
         method: Method,
         base_override: Option<&str>,
+        version: &str,
         path: &str,
         bearer_token: Option<&str>,
     ) -> RequestBuilder {
         let base = base_override
             .unwrap_or(&self.base_url)
             .trim_end_matches('/');
-        let url = format!("{base}{path}");
+        let url = format!("{base}/{version}{path}");
         let mut request = self.client.request(method, url);
         if let Some(token) = bearer_token {
             request = request.bearer_auth(token);

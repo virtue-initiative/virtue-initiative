@@ -1,3 +1,4 @@
+import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
 import { sendToast } from '../toast';
 import '../cache/client';
 import type {
@@ -43,7 +44,8 @@ export type {
   CreatePartnerResponse,
 };
 
-const BASE = (import.meta as any).env?.VITE_API_URL ?? 'http://localhost:8787';
+const BASE =
+  ((import.meta as any).env?.VITE_API_URL ?? 'http://localhost:8787') + `/${CURRENT_API_VERSION}`;
 const NETWORK_ERROR_MESSAGE = "Error: Couldn't connect to the network. Try reloading.";
 const NETWORK_TOAST_THROTTLE_MS = 3_000;
 let lastNetworkToastAt = 0;

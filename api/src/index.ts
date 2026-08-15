@@ -6,6 +6,7 @@ import deviceOnly from './routes/device-only';
 import devices from './routes/devices';
 import emailWebhooks from './routes/email-webhooks';
 import partners from './routes/partners';
+import { isApiVersionGone, stripApiVersion } from './lib/api-version';
 import { stripApiBasePath } from './lib/base-path';
 import {
   pruneExpiredBatches,
@@ -17,8 +18,20 @@ import { runNotificationSchedule } from './lib/scheduler';
 import { Env, Variables } from './types/bindings';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>({
-  getPath: (request, options) =>
-    stripApiBasePath(new URL(request.url).pathname, options?.env?.API_BASE_PATH),
+  getPath: (request, options) => {
+    const basePathStripped = stripApiBasePath(
+      new URL(request.url).pathname,
+      options?.env?.API_BASE_PATH,
+    );
+    return stripApiVersion(basePathStripped, request);
+  },
+});
+
+app.use('/*', async (c, next) => {
+  if (isApiVersionGone(c.req.raw)) {
+    return c.json({ error: 'This API version is no longer supported' }, 410);
+  }
+  await next();
 });
 
 app.use(

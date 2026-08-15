@@ -133,6 +133,17 @@ The server SHOULD validate every request shape against a schema and return **HTT
 
 The client MUST accept extra fields in the response body.
 
+The client MUST prefixed the API with the current major version. For versions before `v1`, use `v0.x`. The server SHOULD return **HTTP 410 Gone** if it no longer supports a version.
+
+```
+  /api/v0.1/...
+  /api/v0.2/...
+  /api/v1/...
+  /api/v2/...
+```
+
+The API version SHOULD match the major version of the codebase (see client/version.properties).
+
 ### 1.5 Status codes
 
 The server SHOULD return **HTTP 204** for responses with no body, and **HTTP 200** otherwise —
@@ -150,6 +161,8 @@ MUST NOT require authentication. MUST return this shape:
   "status": "ok"
 }
 ```
+
+The version SHOULD match the version of the codebase.
 
 ## 2. Users and authentication
 

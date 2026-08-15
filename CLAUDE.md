@@ -1,5 +1,11 @@
 # CLAUDE.md
 
+## SPEC.md files
+
+Some components have a SPEC.md file. These files MUST be written with RFC-like language. If you need to change one, you SHOULD keep your changes as minimal as possible.
+
+SPEC.md is the source of truth and MUST be updated before the code is updated. They SHOULD NOT include full implementation details, but include enough to recreate something similar to the existing component.
+
 ## Repo map
 
 - `api/` — Cloudflare Workers REST API (TypeScript, Hono, D1 SQLite, R2 object storage)

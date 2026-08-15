@@ -1,4 +1,5 @@
 /// <reference lib="webworker" />
+import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { decryptAndFlattenBatch, DecryptionError } from '../api/batch-materializer';
 import { unwrapBatchKey } from '../api/crypto';
@@ -388,7 +389,8 @@ const PROGRESS_THROTTLE_MS = 250;
 // result set each time. Only events materialized since the previous flush cross postMessage.
 const DELTA_INTERVAL_MS = 5000;
 const BASE =
-  (import.meta as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL ?? 'http://localhost:8787';
+  ((import.meta as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL ??
+    'http://localhost:8787') + `/${CURRENT_API_VERSION}`;
 
 let session: { userId: string; privateKey: CryptoKey | null } | null = null;
 

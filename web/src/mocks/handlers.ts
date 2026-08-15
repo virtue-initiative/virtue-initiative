@@ -1,7 +1,8 @@
 import { http, HttpResponse } from 'msw';
+import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
 import { TEST_DEVICES, TEST_USER, TEST_WATCHER, TEST_WATCHING } from './fixtures';
 
-const BASE = 'http://localhost:8787';
+const BASE = `http://localhost:8787/${CURRENT_API_VERSION}`;
 
 const MOCK_HASH_PARAMS = {
   version: 'argon2id-v1',

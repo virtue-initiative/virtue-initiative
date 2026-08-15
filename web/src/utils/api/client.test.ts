@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
+import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
 import { APIClient } from './client';
 import { server } from '../../mocks/server';
 import { TEST_DEVICES, TEST_USER, TEST_WATCHER, TEST_WATCHING } from '../../mocks/fixtures';
 import { makeFakeSession } from '../../test-utils';
 
-const BASE = 'http://localhost:8787';
+const BASE = `http://localhost:8787/${CURRENT_API_VERSION}`;
 
 function makeClient() {
   return new APIClient(makeFakeSession());

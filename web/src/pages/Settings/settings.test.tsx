@@ -1,11 +1,14 @@
 import { screen, waitFor } from '@testing-library/preact';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
 import { describe, expect, it } from 'vitest';
 import { server } from '../../mocks/server';
 import { TEST_USER } from '../../mocks/fixtures';
 import { renderWithClient } from '../../test-utils';
 import { Settings } from './index';
+
+const BASE = `http://localhost:8787/${CURRENT_API_VERSION}`;
 
 describe('Settings — page renders', () => {
   it('shows the user display name', async () => {
@@ -34,7 +37,7 @@ describe('Settings — save name', () => {
   it('sends PATCH /user with updated name', async () => {
     let patchBody: unknown;
     server.use(
-      http.patch('http://localhost:8787/user', async ({ request }) => {
+      http.patch(`${BASE}/user`, async ({ request }) => {
         patchBody = await request.json();
         return HttpResponse.json({ email_verification_required: false });
       }),
@@ -61,7 +64,7 @@ describe('Settings — email frequency', () => {
   it('sends PATCH /user with updated email frequency', async () => {
     let patchBody: unknown;
     server.use(
-      http.patch('http://localhost:8787/user', async ({ request }) => {
+      http.patch(`${BASE}/user`, async ({ request }) => {
         patchBody = await request.json();
         return HttpResponse.json({ email_verification_required: false });
       }),
@@ -115,7 +118,7 @@ describe('Settings — delete account', () => {
   it('calls DELETE /user after typing matching email', async () => {
     let deleteCalled = false;
     server.use(
-      http.delete('http://localhost:8787/user', () => {
+      http.delete(`${BASE}/user`, () => {
         deleteCalled = true;
         return new HttpResponse(null, { status: 204 });
       }),
