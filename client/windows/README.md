@@ -88,27 +88,7 @@ The packaging script also runs the managed tests before producing the MSIX artif
 
 ## Release Signing
 
-GitHub Actions release packaging uses Azure Artifact Signing with OpenID Connect.
-
-Repository secrets:
-
-- `AZURE_CLIENT_ID`
-- `AZURE_TENANT_ID`
-- `AZURE_SUBSCRIPTION_ID`
-
-Repository variables:
-
-- `AZURE_CODESIGN_ACCOUNT_NAME`
-- `AZURE_CODESIGN_ENDPOINT`
-- `AZURE_CODESIGN_CERT_PROFILE`
-
-Recommended repository variable:
-
-- `AZURE_CODESIGN_PUBLISHER_SUBJECT`
-
-The publisher-subject variable should be the exact subject used by the Artifact Signing certificate profile, for example `CN=Jane Doe` for individual signing or the exact org subject string for organization signing. The MSIX manifest publisher must match this subject exactly.
-
-The workflow builds unsigned release artifacts, signs every `.msix` under `client/windows/dist/` with `azure/artifact-signing-action`, and then recreates the setup ZIP so the embedded MSIX is signed too.
+GitHub Actions release packaging no longer uses an external signing service. The manifest's `Identity Publisher` (`client/windows/Virtue.WindowsApp/Package.appxmanifest`) must always match the publisher assigned by Partner Center for this app's Store identity, so the workflow lets `build-msix.ps1` fall back to its built-in self-signed development certificate (the same path used for PR/Debug builds) rather than overriding the publisher with an external signing cert's subject. Microsoft Store re-signs the package on ingestion, so a self-signed upload is sufficient for submission; for sideload installs the generated `.cer` in the setup bundle still needs to be trusted on the target machine as before.
 
 ## Linux-Driven Remote Windows Loop
 
