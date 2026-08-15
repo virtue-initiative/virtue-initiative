@@ -5,6 +5,7 @@ export interface Env {
   JWT_PRIVATE_KEY: string;
   JWT_PUBLIC_KEY: string;
   API_BASE_PATH?: string;
+  COMMIT_SHA?: string;
   HASH_SERVER_URL: string;
   R2_URL: string;
   APP_URL: string;

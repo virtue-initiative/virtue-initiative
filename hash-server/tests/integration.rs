@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use axum::ServiceExt;
 use ed25519_dalek::SigningKey;
 use hash_server::config::Config;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
@@ -75,7 +76,9 @@ async fn spawn_server() -> TestServer {
     let addr = listener.local_addr().unwrap();
 
     tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
+        axum::serve(listener, app.into_make_service())
+            .await
+            .unwrap();
     });
 
     TestServer {
@@ -109,6 +112,55 @@ async fn get_root_returns_status_without_auth() {
     assert_eq!(body["status"], "ok");
     assert!(body["version"].is_string());
     assert!(body["commit"].is_string());
+}
+
+/// SPEC.md section 1.3: "The client MUST be prefixed the API with the current major
+/// version. For versions before `v1`, use `v0.x`."
+#[tokio::test]
+async fn get_root_routes_the_same_with_or_without_the_current_version_prefix() {
+    let server = spawn_server().await;
+    let client = reqwest::Client::new();
+
+    let unprefixed = client
+        .get(format!("{}/", server.base_url))
+        .send()
+        .await
+        .unwrap();
+    let prefixed = client
+        .get(format!("{}/v0.1/", server.base_url))
+        .send()
+        .await
+        .unwrap();
+    let prefixed_no_slash = client
+        .get(format!("{}/v0.1", server.base_url))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(unprefixed.status(), 200);
+    assert_eq!(prefixed.status(), 200);
+    assert_eq!(prefixed_no_slash.status(), 200);
+
+    let unprefixed_body: Value = unprefixed.json().await.unwrap();
+    let prefixed_body: Value = prefixed.json().await.unwrap();
+    assert_eq!(unprefixed_body, prefixed_body);
+}
+
+/// SPEC.md section 1.3: "The server SHOULD return HTTP 410 Gone if it no longer
+/// supports a version."
+#[tokio::test]
+async fn get_root_responds_410_for_a_no_longer_supported_version() {
+    let server = spawn_server().await;
+    let client = reqwest::Client::new();
+
+    for version in ["v0.2", "v1", "v2"] {
+        let resp = client
+            .get(format!("{}/{version}/", server.base_url))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 410, "version {version}");
+    }
 }
 
 #[tokio::test]

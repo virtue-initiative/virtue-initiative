@@ -24,6 +24,17 @@ JWTs MUST use `EdDSA` (Ed25519). The verification key is configured via the
 `JWT_PUBLIC_KEY` environment variable (Ed25519 SPKI PEM), matching the main API's
 `JWT_PUBLIC_KEY`/`JWT_PRIVATE_KEY` pair.
 
+### 1.3 Backwards compat
+
+The API MUST be prefixed with the current major version. For versions before `v1`, use `v0.x`. The server SHOULD return **HTTP 410 Gone** if it no longer supports a version.
+
+```
+  /v0.1/...
+  /v0.2/...
+  /v1/...
+  /v2/...
+```
+
 ## 2. Methods
 
 ### 2.1 `POST /hash`

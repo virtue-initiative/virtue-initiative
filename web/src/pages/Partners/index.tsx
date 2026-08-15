@@ -92,6 +92,7 @@ export function Partners() {
           <h2>You monitor</h2>
         </div>
         <PartnerArea
+          kind="watching"
           emptyLabel="You cannot monitor anyone yet."
           pending={pendingWatching}
           accepted={acceptedWatching}
@@ -107,6 +108,7 @@ export function Partners() {
           <InviteButton onInvitePartner={invitePartner} />
         </div>
         <PartnerArea
+          kind="watcher"
           emptyLabel="No one can monitor you yet."
           pending={pendingWatchers}
           accepted={acceptedWatchers}
@@ -120,6 +122,7 @@ export function Partners() {
 }
 
 function PartnerArea({
+  kind,
   emptyLabel,
   pending,
   accepted,
@@ -127,6 +130,7 @@ function PartnerArea({
   onRemoveWatching,
   onRemoveWatcher,
 }: {
+  kind: 'watching' | 'watcher';
   emptyLabel: string;
   pending: Array<WatchingPartner | WatcherPartner>;
   accepted: Array<WatchingPartner | WatcherPartner>;
@@ -146,6 +150,7 @@ function PartnerArea({
             partner.status === 'pending' ? (
               <PendingPartnerCard
                 key={partner.id}
+                kind={kind}
                 partner={partner}
                 onRemoveWatching={onRemoveWatching}
                 onRemoveWatcher={onRemoveWatcher}
@@ -153,11 +158,10 @@ function PartnerArea({
             ) : (
               <PartnerCard
                 key={partner.id}
+                kind={kind}
                 partner={partner}
                 devices={
-                  'digest_cadence' in partner
-                    ? (partnerDevicesByOwner.get(partner.user.id) ?? [])
-                    : []
+                  kind === 'watching' ? (partnerDevicesByOwner.get(partner.user.id) ?? []) : []
                 }
                 onRemoveWatching={onRemoveWatching}
                 onRemoveWatcher={onRemoveWatcher}
@@ -235,10 +239,12 @@ function InviteButton({ onInvitePartner }: { onInvitePartner: (email: string) =>
 }
 
 function PendingPartnerCard({
+  kind,
   partner,
   onRemoveWatching,
   onRemoveWatcher,
 }: {
+  kind: 'watching' | 'watcher';
   partner: WatchingPartner | WatcherPartner;
   onRemoveWatching: (id: string) => Promise<void>;
   onRemoveWatcher: (id: string) => Promise<void>;
@@ -253,9 +259,7 @@ function PendingPartnerCard({
   async function removeConfirmed() {
     setAction('remove');
     try {
-      await ('digest_cadence' in partner
-        ? onRemoveWatching(partner.id)
-        : onRemoveWatcher(partner.id));
+      await (kind === 'watching' ? onRemoveWatching(partner.id) : onRemoveWatcher(partner.id));
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'Failed to remove request', 'error');
       setAction(null);
@@ -310,18 +314,20 @@ function PendingPartnerCard({
 }
 
 function PartnerCard({
+  kind,
   partner,
   devices,
   onRemoveWatching,
   onRemoveWatcher,
 }: {
+  kind: 'watching' | 'watcher';
   partner: WatchingPartner | WatcherPartner;
   devices: Device[];
   onRemoveWatching: (id: string) => Promise<void>;
   onRemoveWatcher: (id: string) => Promise<void>;
 }) {
   const { route } = useLocation();
-  const isWatching = 'digest_cadence' in partner;
+  const isWatching = kind === 'watching';
   const [action, setAction] = useState<'remove' | null>(null);
   const { push: pushToast } = useToast();
   const confirmRef = useRef<HTMLDialogElement>(null);
@@ -332,9 +338,7 @@ function PartnerCard({
   async function removeConfirmed() {
     setAction('remove');
     try {
-      await ('digest_cadence' in partner
-        ? onRemoveWatching(partner.id)
-        : onRemoveWatcher(partner.id));
+      await (isWatching ? onRemoveWatching(partner.id) : onRemoveWatcher(partner.id));
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'Failed to remove partner', 'error');
       setAction(null);

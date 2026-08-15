@@ -1,7 +1,8 @@
 import { http, HttpResponse } from 'msw';
+import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
 import { TEST_DEVICES, TEST_USER, TEST_WATCHER, TEST_WATCHING } from './fixtures';
 
-const BASE = 'http://localhost:8787';
+const BASE = `http://localhost:8787/${CURRENT_API_VERSION}`;
 
 const MOCK_HASH_PARAMS = {
   version: 'argon2id-v1',
@@ -27,10 +28,10 @@ export const handlers = [
   }),
 
   // ── Login ──────────────────────────────────────────────────────────────
-  http.post(`${BASE}/login`, () => HttpResponse.json({ ok: true })),
+  http.post(`${BASE}/login`, () => new HttpResponse(null, { status: 204 })),
 
   // ── Signup ─────────────────────────────────────────────────────────────
-  http.post(`${BASE}/signup-request`, () => HttpResponse.json({ ok: true })),
+  http.post(`${BASE}/signup-request`, () => new HttpResponse(null, { status: 204 })),
   http.post(`${BASE}/signup`, () =>
     HttpResponse.json({
       user: { id: 'test-user-id', email: 'test@example.com', email_verified: true },
@@ -57,11 +58,7 @@ export const handlers = [
 
   // ── Devices ────────────────────────────────────────────────────────────
   http.get(`${BASE}/device`, () => HttpResponse.json(TEST_DEVICES)),
-  http.patch(`${BASE}/device/:id`, async ({ request, params }) => {
-    const body = (await request.json()) as { name?: string };
-    const device = TEST_DEVICES.find((d) => d.id === params.id);
-    return HttpResponse.json({ ...device, ...(body.name ? { name: body.name } : {}) });
-  }),
+  http.patch(`${BASE}/device/:id`, () => new HttpResponse(null, { status: 204 })),
   http.delete(`${BASE}/device/:id`, () => new HttpResponse(null, { status: 204 })),
 
   // ── Partners ───────────────────────────────────────────────────────────
@@ -75,9 +72,10 @@ export const handlers = [
     HttpResponse.json({ owner: { id: 'some-user', name: 'Some User', email: 'some@example.com' } }),
   ),
   http.post(`${BASE}/partner/accept`, () => HttpResponse.json({ id: 'new-partner-1' })),
-  http.delete(`${BASE}/partner/watcher/:id`, () => new HttpResponse(null, { status: 204 })),
-  http.delete(`${BASE}/partner/watching/:id`, () => new HttpResponse(null, { status: 204 })),
+  http.delete(`${BASE}/partner/:id`, () => new HttpResponse(null, { status: 204 })),
 
   // ── Data ───────────────────────────────────────────────────────────────
-  http.get(`${BASE}/data`, () => HttpResponse.json({ batches: [] })),
+  http.get(`${BASE}/data`, () =>
+    HttpResponse.json({ batches: [], user: TEST_USER, watching: [], watchers: [] }),
+  ),
 ];

@@ -2,6 +2,7 @@ import { Context, Hono } from 'hono';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { authenticateDeviceSession } from '../middleware/auth';
+import { CURRENT_API_VERSION } from '../lib/api-version';
 import { rateLimitByDevice } from '../middleware/rate-limit';
 import { validateZ } from '../middleware/validation';
 import {
@@ -42,30 +43,53 @@ const notifyEntrySchema = z.object({
   details: z.string().optional(),
 });
 
+const eventCountsSchema = z.object({
+  total: z.number().int().nonnegative(),
+  high: z.number().int().nonnegative(),
+  medium: z.number().int().nonnegative(),
+  screenshot: z.number().int().nonnegative(),
+});
+
+const batchMetadataSchema = z.object({
+  start_time: z.number().int().nonnegative(),
+  end_time: z.number().int().nonnegative(),
+  access_keys: z.record(z.uuid(), z.base64()),
+  event_counts: eventCountsSchema,
+  notifications: z.array(notifyEntrySchema).optional().default([]),
+});
+
+// Parses a multipart form field that carries a JSON string (e.g. `metadata`), surfacing
+// both malformed JSON and schema violations through the same zod issue-reporting path
+// as every other validateZ() failure.
+function jsonField<Schema extends z.ZodTypeAny>(schema: Schema, label: string) {
+  return z.string().transform((raw, ctx) => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      ctx.addIssue({ code: 'custom', message: `${label} must be valid JSON` });
+      return z.NEVER;
+    }
+
+    const result = schema.safeParse(parsed);
+    if (!result.success) {
+      for (const issue of result.error.issues) {
+        ctx.addIssue({ code: 'custom', message: issue.message, path: issue.path });
+      }
+      return z.NEVER;
+    }
+
+    return result.data as z.infer<Schema>;
+  });
+}
+
 const uploadBatchSchema = z.object({
-  start_time: z.coerce.number().int().nonnegative(),
-  end_time: z.coerce.number().int().nonnegative(),
-  access_keys: z.string().min(1),
-  high_risk_count: z.coerce.number().int().nonnegative().optional().default(0),
-  medium_risk_count: z.coerce.number().int().nonnegative().optional().default(0),
-  notifications: z.string().optional(),
+  metadata: jsonField(batchMetadataSchema, 'metadata'),
   file: z
     .instanceof(File)
     .refine((file) => file.size > 0, { message: 'File is empty' })
     .refine((file) => file.size <= 100 * 1024 * 1024, { message: 'File exceeds 100MB limit' }),
 });
-
-const accessKeysSchema = z.object({
-  keys: z.record(z.uuid(), z.base64()),
-});
-
-function parseAccessKeysPayload(raw: string) {
-  return accessKeysSchema.parse(JSON.parse(raw) as unknown);
-}
-
-function parseNotificationsPayload(raw: string) {
-  return z.array(notifyEntrySchema).parse(JSON.parse(raw) as unknown);
-}
 
 async function createDeviceSession(
   c: Context<{ Bindings: Env; Variables: Variables }>,
@@ -86,11 +110,11 @@ async function createDeviceSession(
 }
 
 /**
- * Builds the {settings, token} pair embedded in POST /d/device, GET /d/device, and
- * POST /d/batch responses — the one canonical place a device's wrapping keys and a
- * fresh hash-server token are assembled.
+ * Builds the DeviceSettings embedded in POST /d/device, GET /d/device, and POST /d/batch
+ * responses — the one canonical place a device's wrapping keys and a fresh hash-server
+ * token (DeviceSettings.hash_token) are assembled.
  */
-async function buildDeviceState(
+async function buildDeviceSettings(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   device: { id: string; owner: string; name: string; platform: string },
 ) {
@@ -100,7 +124,14 @@ async function buildDeviceState(
   }
 
   const recipients = await listBatchAccessRecipientsForOwner(c.env.DB, device.owner);
-  const settings = {
+  const hashToken = await generateToken(
+    'device',
+    device.id,
+    c.env.JWT_PRIVATE_KEY,
+    HASH_TOKEN_TTL_SECONDS,
+  );
+
+  return {
     id: device.id,
     name: device.name,
     platform: device.platform,
@@ -109,15 +140,8 @@ async function buildDeviceState(
       pub_key: encodeBase64(recipient.pub_key!),
     })),
     hash_base_url: hashBaseUrl,
+    hash_token: hashToken,
   };
-  const token = await generateToken(
-    'device',
-    device.id,
-    c.env.JWT_PRIVATE_KEY,
-    HASH_TOKEN_TTL_SECONDS,
-  );
-
-  return { settings, token };
 }
 
 /**
@@ -143,12 +167,12 @@ deviceOnly.post('/device', validateZ('json', registerDeviceSchema), async (c) =>
   await createDevice(c.env.DB, { id, owner, name, platform });
   const refreshToken = await createDeviceSession(c, id);
 
-  const state = await buildDeviceState(c, { id, owner, name, platform });
-  if (!state) {
+  const settings = await buildDeviceSettings(c, { id, owner, name, platform });
+  if (!settings) {
     return c.json({ error: 'Hash server not configured' }, 500);
   }
 
-  return c.json({ refresh_token: refreshToken, ...state }, 201);
+  return c.json({ token: refreshToken, settings }, 200);
 });
 
 /**
@@ -163,12 +187,12 @@ deviceOnly.get('/device', authenticateDeviceSession(), rateLimitByDevice(), asyn
     return c.json({ error: 'Not found' }, 404);
   }
 
-  const state = await buildDeviceState(c, device);
-  if (!state) {
+  const settings = await buildDeviceSettings(c, device);
+  if (!settings) {
     return c.json({ error: 'Hash server not configured' }, 500);
   }
 
-  return c.json(state);
+  return c.json(settings);
 });
 
 /**
@@ -196,9 +220,9 @@ deviceOnly.post('/logout', authenticateDeviceSession(), async (c) => {
 /**
  * POST /d/batch - Upload an encrypted batch blob for the authenticated device.
  *
- * Optionally carries a `notifications` field (JSON-encoded array) alongside the
- * batch: after the batch is durably persisted, each entry triggers the same
- * best-effort partner alert email that POST /d/notify used to send standalone.
+ * `metadata.notifications` (if any) trigger the same best-effort partner alert
+ * email that POST /d/notify used to send standalone, after the batch is durably
+ * persisted.
  */
 deviceOnly.post(
   '/batch',
@@ -212,15 +236,8 @@ deviceOnly.post(
       return c.json({ error: 'Not found' }, 404);
     }
 
-    const {
-      start_time,
-      end_time,
-      access_keys,
-      high_risk_count,
-      medium_risk_count,
-      notifications: rawNotifications,
-      file,
-    } = c.req.valid('form');
+    const { metadata, file } = c.req.valid('form');
+    const { start_time, end_time, access_keys, event_counts, notifications } = metadata;
 
     const hashState = await hashGet(c.env, device.id);
     const endHash = hashState.hash;
@@ -228,25 +245,6 @@ deviceOnly.post(
     const key = `user/${device.owner}/batches/${batchId}.enc`;
     const url = `${c.env.R2_URL}/${key}`;
     const createdAt = Date.now();
-    let parsedAccessKeys: z.infer<typeof accessKeysSchema>;
-    let notifications: z.infer<typeof notifyEntrySchema>[] = [];
-
-    try {
-      parsedAccessKeys = parseAccessKeysPayload(access_keys);
-      notifications = rawNotifications ? parseNotificationsPayload(rawNotifications) : [];
-    } catch (error) {
-      return c.json(
-        {
-          error: 'Bad Request',
-          details: {
-            errors: [
-              error instanceof Error ? error.message : 'Invalid access_keys or notifications',
-            ],
-          },
-        },
-        400,
-      );
-    }
 
     await putObject(c.env, key, await file.arrayBuffer(), 'application/octet-stream');
     await createBatch(c.env.DB, {
@@ -257,9 +255,10 @@ deviceOnly.post(
       start_time,
       end_time,
       end_hash: endHash,
-      access_keys: JSON.stringify(parsedAccessKeys),
-      high_risk_count,
-      medium_risk_count,
+      access_keys: JSON.stringify(access_keys),
+      version: CURRENT_API_VERSION,
+      high_risk_count: event_counts.high,
+      medium_risk_count: event_counts.medium,
       created_at: createdAt,
     });
     await hashReset(c.env, device.id);
@@ -287,12 +286,12 @@ deviceOnly.post(
       }
     }
 
-    const state = await buildDeviceState(c, device);
-    if (!state) {
+    const settings = await buildDeviceSettings(c, device);
+    if (!settings) {
       return c.json({ error: 'Hash server not configured' }, 500);
     }
 
-    return c.json({ id: batchId, start_time, end_time, end_hash: endHash, url, ...state }, 201);
+    return c.json({ id: batchId, start_time, end_time, end_hash: endHash, url, settings }, 200);
   },
 );
 

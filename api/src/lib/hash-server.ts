@@ -1,3 +1,4 @@
+import { CURRENT_API_VERSION } from './api-version';
 import { generateToken } from './jwt';
 import { Env } from '../types/bindings';
 
@@ -9,12 +10,14 @@ export interface HashState {
 
 const ZERO_HASH_STATE: HashState = { hash: '0'.repeat(64), seq: 0, last_received: 0 };
 
+// The whole codebase shares one version (see api-version.ts), which is also what the
+// hash server expects its own requests prefixed with (hash-server/SPEC.md section 1.3).
 function baseUrl(env: Env): string {
   const url = env.HASH_SERVER_URL?.trim();
   if (!url) {
     throw new Error('HASH_SERVER_URL is not configured');
   }
-  return url;
+  return `${url.replace(/\/+$/, '')}/${CURRENT_API_VERSION}`;
 }
 
 /** Fetches hash-chain state for a single device. Zero-filled if unknown to the hash server. */

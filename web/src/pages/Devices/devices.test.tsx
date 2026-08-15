@@ -1,11 +1,14 @@
 import { screen, waitFor } from '@testing-library/preact';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
 import { describe, expect, it } from 'vitest';
 import { server } from '../../mocks/server';
 import { TEST_DEVICES } from '../../mocks/fixtures';
 import { renderWithClient } from '../../test-utils';
 import { Devices } from './index';
+
+const BASE = `http://localhost:8787/${CURRENT_API_VERSION}`;
 
 describe('Devices — device list', () => {
   it('renders device names once loaded', async () => {
@@ -27,7 +30,7 @@ describe('Devices — device list', () => {
     let resolveDevices: (() => void) | undefined;
     server.use(
       http.get(
-        'http://localhost:8787/device',
+        `${BASE}/device`,
         () =>
           new Promise((resolve) => {
             resolveDevices = () => resolve(HttpResponse.json(TEST_DEVICES));
@@ -49,7 +52,7 @@ describe('Devices — device list', () => {
   });
 
   it('shows "No devices" once loaded with an empty list', async () => {
-    server.use(http.get('http://localhost:8787/device', () => HttpResponse.json([])));
+    server.use(http.get(`${BASE}/device`, () => HttpResponse.json([])));
 
     renderWithClient(<Devices />);
 
@@ -76,7 +79,7 @@ describe('Devices — Device rename', () => {
     let patchBody: unknown;
     let patchedId: string | undefined;
     server.use(
-      http.patch('http://localhost:8787/device/:id', async ({ request, params }) => {
+      http.patch(`${BASE}/device/:id`, async ({ request, params }) => {
         patchedId = params.id as string;
         patchBody = await request.json();
         return HttpResponse.json({ ...TEST_DEVICES[0], name: 'Renamed' });
@@ -105,7 +108,7 @@ describe('Devices — Device delete', () => {
   it('calls DELETE /device/:id after confirmation', async () => {
     let deletedId: string | undefined;
     server.use(
-      http.delete('http://localhost:8787/device/:id', ({ params }) => {
+      http.delete(`${BASE}/device/:id`, ({ params }) => {
         deletedId = params.id as string;
         return new HttpResponse(null, { status: 204 });
       }),

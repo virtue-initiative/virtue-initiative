@@ -210,10 +210,14 @@ pub struct BatchUpload {
     #[serde(with = "serde_bytes")]
     pub bytes: Vec<u8>,
     pub access_keys: Vec<BatchAccessKey>,
+    /// Total number of events in this batch.
+    pub total_count: u32,
     /// Number of events in this batch whose risk fell in the high band (>= 0.7).
     pub high_risk_count: u32,
     /// Number of events in this batch whose risk fell in the medium band (0.4–0.7).
     pub medium_risk_count: u32,
+    /// Number of `UploadKind::Screenshot` events in this batch.
+    pub screenshot_count: u32,
     /// Alert-email metadata for any high-risk events in this batch, carried
     /// alongside the batch upload instead of a separate notify call.
     #[serde(default)]

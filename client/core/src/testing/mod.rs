@@ -107,8 +107,10 @@ mod tests {
             end_time_ms: 1,
             bytes: vec![1, 2, 3],
             access_keys: Vec::new(),
+            total_count: 0,
             high_risk_count: 0,
             medium_risk_count: 0,
+            screenshot_count: 0,
             notifications: Vec::new(),
         };
         let response = api.upload_batch("tok", &batch).unwrap();

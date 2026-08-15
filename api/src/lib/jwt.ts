@@ -1,12 +1,4 @@
-import {
-  calculateJwkThumbprint,
-  exportJWK,
-  importPKCS8,
-  importSPKI,
-  jwtVerify,
-  SignJWT,
-  type JWK,
-} from 'jose';
+import { importPKCS8, importSPKI, jwtVerify, SignJWT } from 'jose';
 
 export type JWTType = 'server' | 'device';
 
@@ -18,22 +10,12 @@ export interface JWTPayload {
 }
 
 const JWT_ALGORITHM = 'EdDSA';
-const JWT_CURVE = 'Ed25519';
 
 type JWTPrivateKey = Awaited<ReturnType<typeof importPKCS8>>;
 type JWTPublicKey = Awaited<ReturnType<typeof importSPKI>>;
-type PublicJwk = JWK & {
-  alg: typeof JWT_ALGORITHM;
-  crv: typeof JWT_CURVE;
-  kid: string;
-  kty: 'OKP';
-  use: 'sig';
-  x: string;
-};
 
 const privateKeyCache = new Map<string, Promise<JWTPrivateKey>>();
 const publicKeyCache = new Map<string, Promise<JWTPublicKey>>();
-const publicJwkCache = new Map<string, Promise<PublicJwk>>();
 
 function normalizePem(pem: string) {
   const normalized = pem.replace(/\r\n/g, '\n').replace(/\\n/g, '\n').trim();
@@ -67,36 +49,6 @@ function getPublicKey(publicKeyPem: string) {
   }
 
   return keyPromise;
-}
-
-export async function getPublicJwk(publicKeyPem: string) {
-  const normalized = normalizePem(publicKeyPem);
-  let jwkPromise = publicJwkCache.get(normalized);
-
-  if (!jwkPromise) {
-    jwkPromise = (async () => {
-      const exported = await exportJWK(await getPublicKey(normalized));
-      const kid = await calculateJwkThumbprint(exported);
-
-      return {
-        ...exported,
-        alg: JWT_ALGORITHM,
-        crv: JWT_CURVE,
-        kid,
-        kty: 'OKP',
-        use: 'sig',
-      } as PublicJwk;
-    })();
-    publicJwkCache.set(normalized, jwkPromise);
-  }
-
-  return jwkPromise;
-}
-
-export async function getJWKS(publicKeyPem: string) {
-  return {
-    keys: [await getPublicJwk(publicKeyPem)],
-  };
 }
 
 export async function signJWT(

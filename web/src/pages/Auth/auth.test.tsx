@@ -2,12 +2,13 @@ import { render, screen, waitFor } from '@testing-library/preact';
 import userEvent from '@testing-library/user-event';
 import { LocationProvider } from 'preact-iso';
 import { ToastProvider } from '@virtueinitiative/shared-web';
+import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { server } from '../../mocks/server';
 import { Auth } from './index';
 
-const BASE = 'http://localhost:8787';
+const BASE = `http://localhost:8787/${CURRENT_API_VERSION}`;
 
 function renderAuth(mode: 'login' | 'signup' | 'forgot-password' = 'login') {
   return render(

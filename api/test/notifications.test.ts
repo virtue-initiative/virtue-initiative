@@ -3,6 +3,7 @@ import { env, fetchMock, SELF } from 'cloudflare:test';
 import {
   authHeaders,
   BASE,
+  batchMetadataForm,
   clearDB,
   createDeviceForUser,
   listEmailDeliveries,
@@ -25,15 +26,12 @@ async function uploadBatchWithNotification(
   ownerUserId: string,
   notification: Record<string, unknown>,
 ) {
-  const form = new FormData();
-  form.set('start_time', '1710000000000');
-  form.set('end_time', '1710003600000');
-  form.set(
-    'access_keys',
-    JSON.stringify({ keys: { [ownerUserId]: Buffer.from('owner-envelope').toString('base64') } }),
-  );
-  form.set('notifications', JSON.stringify([notification]));
-  form.set('file', new File([new Uint8Array([1, 2, 3])], 'batch.enc'));
+  const form = batchMetadataForm({
+    start_time: 1710000000000,
+    end_time: 1710003600000,
+    access_keys: { [ownerUserId]: Buffer.from('owner-envelope').toString('base64') },
+    notifications: [notification],
+  });
 
   return SELF.fetch(`${BASE}/d/batch`, {
     method: 'POST',
@@ -43,7 +41,7 @@ async function uploadBatchWithNotification(
 }
 
 describe('Notification routes and tamper alerts', () => {
-  it('stores notification frequency on the user and reflects it across monitored partners', async () => {
+  it('stores notification frequency on the user and lists partnerships without a per-partner cadence', async () => {
     const { cookie: ownerCookie } = await signupAndGetCookie('notify-owner@example.com', 'pw');
     const { cookie: partnerCookie, userId: partnerUserId } = await signupAndGetCookie(
       'notify-partner@example.com',
@@ -77,18 +75,15 @@ describe('Notification routes and tamper alerts', () => {
     });
     expect(listRes.status).toBe(200);
     const list = (await listRes.json()) as {
-      watching: Array<{
-        id: string;
-        user: { email: string };
-        digest_cadence: string;
-      }>;
+      watching: Array<{ id: string; user: { email: string } }>;
     };
     expect(list.watching[0]).toMatchObject({
       id: created.id,
       user: { email: 'notify-owner@example.com' },
-      digest_cadence: 'daily',
     });
+    expect(list.watching[0]).not.toHaveProperty('digest_cadence');
 
+    // Notification cadence is a per-user setting (PATCH /user), not a per-partnership one.
     const patchRes = await SELF.fetch(`${BASE}/user`, {
       method: 'PATCH',
       headers: authHeaders(partnerCookie),
@@ -104,20 +99,6 @@ describe('Notification routes and tamper alerts', () => {
     expect(userRes.status).toBe(200);
     expect((await userRes.json()) as { settings: { email_frequency: string } }).toMatchObject({
       settings: { email_frequency: 'alerts-only' },
-    });
-
-    const updatedRes = await SELF.fetch(`${BASE}/partner`, {
-      headers: authHeaders(partnerCookie),
-    });
-    const updated = (await updatedRes.json()) as {
-      watching: Array<{
-        id: string;
-        digest_cadence: string;
-      }>;
-    };
-    expect(updated.watching[0]).toMatchObject({
-      id: created.id,
-      digest_cadence: 'alerts-only',
     });
   });
 
@@ -165,7 +146,7 @@ describe('Notification routes and tamper alerts', () => {
       risk: 0.7,
     });
 
-    expect(logRes.status).toBe(201);
+    expect(logRes.status).toBe(200);
 
     const deliveries = await listEmailDeliveries();
     expect(deliveries.some((delivery) => delivery.kind === 'tamper_alert')).toBe(true);
@@ -222,7 +203,7 @@ describe('Notification routes and tamper alerts', () => {
       details: 'Custom alert details',
     });
 
-    expect(logRes.status).toBe(201);
+    expect(logRes.status).toBe(200);
 
     const tamperDelivery = (await listEmailDeliveries()).find(
       (delivery) => delivery.kind === 'tamper_alert',
@@ -271,7 +252,7 @@ describe('Notification routes and tamper alerts', () => {
       risk: 0.69,
     });
 
-    expect(logRes.status).toBe(201);
+    expect(logRes.status).toBe(200);
     expect((await listEmailDeliveries()).some((delivery) => delivery.kind === 'tamper_alert')).toBe(
       true,
     );
@@ -323,7 +304,7 @@ describe('Notification routes and tamper alerts', () => {
       type: 'heartbeat',
       risk: 0,
     });
-    expect(zeroRiskRes.status).toBe(201);
+    expect(zeroRiskRes.status).toBe(200);
     expect((await listEmailDeliveries()).some((delivery) => delivery.kind === 'tamper_alert')).toBe(
       true,
     );
@@ -386,7 +367,7 @@ describe('Notification routes and tamper alerts', () => {
       risk: 1,
     });
 
-    expect(logRes.status).toBe(201);
+    expect(logRes.status).toBe(200);
     const deliveries = await listEmailDeliveries();
     expect(deliveries).toHaveLength(baselineCount);
     expect(deliveries.some((delivery) => delivery.kind === 'tamper_alert')).toBe(false);
@@ -439,7 +420,7 @@ describe('Notification routes and tamper alerts', () => {
       risk: 1,
     });
 
-    expect(logRes.status).toBe(201);
+    expect(logRes.status).toBe(200);
     expect(await listEmailDeliveries()).toHaveLength(baselineCount);
   });
 });

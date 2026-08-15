@@ -64,8 +64,7 @@ describe('Main device routes', () => {
       body: JSON.stringify({ name: 'New Name' }),
     });
 
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ id: device.id, updated: true });
+    expect(res.status).toBe(204);
 
     const listRes = await SELF.fetch(`${BASE}/device`, {
       headers: authHeaders(cookie),
@@ -107,7 +106,7 @@ describe('Main device routes', () => {
       headers: authHeaders(ownerCookie),
       body: JSON.stringify({ email: 'partner2@example.com' }),
     });
-    expect(inviteRes.status).toBe(201);
+    expect(inviteRes.status).toBe(200);
     await inviteRes.json();
     const inviteDelivery = (await listEmailDeliveries()).find(
       (delivery) =>
@@ -151,7 +150,7 @@ describe('Main device routes', () => {
         email: 'delete-device-partner@example.com',
       }),
     });
-    expect(inviteRes.status).toBe(201);
+    expect(inviteRes.status).toBe(200);
     await inviteRes.json();
     const inviteDelivery = (await listEmailDeliveries()).find(
       (delivery) =>
@@ -218,7 +217,7 @@ describe('Main device routes', () => {
         email: 'delete-device-unverified-partner@example.com',
       }),
     });
-    expect(inviteRes.status).toBe(201);
+    expect(inviteRes.status).toBe(200);
     await inviteRes.json();
     const inviteDelivery = (await listEmailDeliveries()).find(
       (delivery) =>
