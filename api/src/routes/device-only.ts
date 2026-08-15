@@ -2,6 +2,7 @@ import { Context, Hono } from 'hono';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { authenticateDeviceSession } from '../middleware/auth';
+import { CURRENT_API_VERSION } from '../lib/api-version';
 import { rateLimitByDevice } from '../middleware/rate-limit';
 import { validateZ } from '../middleware/validation';
 import {
@@ -255,6 +256,7 @@ deviceOnly.post(
       end_time,
       end_hash: endHash,
       access_keys: JSON.stringify(access_keys),
+      version: CURRENT_API_VERSION,
       high_risk_count: event_counts.high,
       medium_risk_count: event_counts.medium,
       created_at: createdAt,

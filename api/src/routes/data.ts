@@ -58,6 +58,7 @@ data.get('/', authenticateWebSession(), validateZ('query', listDataSchema), asyn
           start_time: batch.start_time,
           end_time: batch.end_time,
           end_hash: batch.end_hash,
+          version: batch.version,
           url: batch.url,
           encrypted_key: encryptedKey,
           created_at: batch.created_at,

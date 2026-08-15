@@ -542,6 +542,7 @@ export async function createBatch(
     end_time: number;
     end_hash: string;
     access_keys: string;
+    version: string;
     high_risk_count?: number;
     medium_risk_count?: number;
     created_at: number;
@@ -551,8 +552,8 @@ export async function createBatch(
     .prepare(
       `INSERT INTO batches (
          id, user_id, device_id, url, start_time, end_time, end_hash, access_keys,
-         high_risk_count, medium_risk_count, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         version, high_risk_count, medium_risk_count, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       uuidToBytes(input.id),
@@ -563,6 +564,7 @@ export async function createBatch(
       input.end_time,
       input.end_hash,
       input.access_keys,
+      input.version,
       input.high_risk_count ?? 0,
       input.medium_risk_count ?? 0,
       input.created_at,
@@ -576,7 +578,7 @@ export async function listBatches(db: D1Database, ownerIds: string[], filters: {
   }
 
   const params: SqlValue[] = ownerIds.map(uuidToBytes);
-  let query = `SELECT id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at
+  let query = `SELECT id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, version, created_at
                FROM batches
                WHERE user_id IN (${placeholders(ownerIds.length)})`;
 
@@ -596,6 +598,7 @@ export async function listBatches(db: D1Database, ownerIds: string[], filters: {
     end_time: number;
     end_hash: string;
     access_keys: string;
+    version: string;
     created_at: number;
   }>(db.prepare(query).bind(...params), ['id', 'user_id', 'device_id']);
 }

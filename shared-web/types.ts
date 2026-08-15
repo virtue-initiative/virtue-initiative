@@ -54,6 +54,7 @@ export const batchSchema = z.object({
   start_time: z.number(),
   end_time: z.number(),
   end_hash: z.string(),
+  version: z.string(),
   url: z.string(),
   encrypted_key: z.string(),
   created_at: z.number(),

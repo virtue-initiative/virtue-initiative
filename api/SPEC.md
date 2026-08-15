@@ -73,6 +73,7 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
   "start_time": DateTime,
   "end_time": DateTime,
   "end_hash": SHA256,
+  "version": "v0.1" | "v1" | "...",
   "url": "https://.../user/.../batches/...enc",
   "encrypted_key": Base64,
   "created_at": DateTime
@@ -624,6 +625,8 @@ The client MUST send a multipart form request:
 
 The server MUST upload the file to object storage and store the metadata in the database.
 
+The server SHOULD store the current major version in the database alongside the encrypted batch (for versioning the encrypted batch).
+
 The server MUST return **HTTP 200** with the device's refreshed settings alongside the created batch:
 
 ```js
@@ -636,8 +639,6 @@ The server MUST return **HTTP 200** with the device's refreshed settings alongsi
   "settings": DeviceSettings
 }
 ```
-
-> Note: We should version the encrypted batch format
 
 ## 7. Other
 

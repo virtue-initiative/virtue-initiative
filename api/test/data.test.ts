@@ -11,6 +11,7 @@ import {
   uuidToBytes,
 } from './helpers';
 import { installHashServerMock, seedHashState } from './hash-server-mock';
+import { CURRENT_API_VERSION } from '../src/lib/api-version';
 
 beforeAll(() => {
   fetchMock.activate();
@@ -67,12 +68,15 @@ describe('Data and device API routes', () => {
     expect(batch.url).toContain('/user/');
     expect(batch.settings.hash_token).toBeTruthy();
 
-    const storedBatch = await env.DB.prepare('SELECT access_keys FROM batches WHERE id = ?')
+    const storedBatch = await env.DB.prepare(
+      'SELECT access_keys, version FROM batches WHERE id = ?',
+    )
       .bind(uuidToBytes(batch.id))
-      .first<{ access_keys: string }>();
+      .first<{ access_keys: string; version: string }>();
     expect(JSON.parse(storedBatch!.access_keys)).toEqual({
       [userId]: Buffer.from('owner-envelope').toString('base64'),
     });
+    expect(storedBatch!.version).toBe(CURRENT_API_VERSION);
 
     const dataRes = await SELF.fetch(`${BASE}/data?since=0`, {
       headers: authHeaders(userCookie),
@@ -82,6 +86,7 @@ describe('Data and device API routes', () => {
       batches: Array<{
         device_id: string;
         end_hash: string;
+        version: string;
         encrypted_key: string;
         created_at: number;
       }>;
@@ -91,6 +96,7 @@ describe('Data and device API routes', () => {
     };
     expect(data.batches[0]).toMatchObject({
       device_id: device.id,
+      version: CURRENT_API_VERSION,
       encrypted_key: Buffer.from('owner-envelope').toString('base64'),
     });
     expect(data.batches[0]?.created_at).toEqual(expect.any(Number));
