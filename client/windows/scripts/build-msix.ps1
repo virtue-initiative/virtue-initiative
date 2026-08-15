@@ -425,7 +425,7 @@ function Get-AppPackageName {
     return $name
 }
 
-function Get-InstalledPackageRevision {
+function Get-InstalledPackageBuildNumber {
     param([string]$PackageName)
 
     try {
@@ -443,26 +443,27 @@ function Get-InstalledPackageRevision {
 
     $versionText = $installed.Version.ToString()
     $versionParts = $versionText.Split('.')
-    if ($versionParts.Count -lt 4) {
+    if ($versionParts.Count -lt 3) {
         return 0
     }
 
-    return [int]$versionParts[3]
+    return [int]$versionParts[2]
 }
 
-function New-DevMsixRevision {
+function Get-DevMsixBuildNumber {
     param([string]$PackageName)
 
-    $utcNow = [DateTimeOffset]::UtcNow
-    $seed = (($utcNow.Year - 2000) * 366) + $utcNow.DayOfYear
-    $installedRevision = Get-InstalledPackageRevision -PackageName $PackageName
-    $nextRevision = [Math]::Max($seed, $installedRevision + 1)
-
-    if ($nextRevision -gt 65535) {
-        throw "Computed MSIX revision $nextRevision exceeds the Appx limit of 65535."
+    if ($env:GITHUB_RUN_NUMBER) {
+        $buildNumber = [int]$env:GITHUB_RUN_NUMBER
+    } else {
+        $buildNumber = (Get-InstalledPackageBuildNumber -PackageName $PackageName) + 1
     }
 
-    return $nextRevision
+    if ($buildNumber -gt 65535) {
+        throw "Computed MSIX build number $buildNumber exceeds the Appx limit of 65535."
+    }
+
+    return $buildNumber
 }
 
 $VersionHelper = Join-Path $PSScriptRoot "Get-VersionInfo.ps1"
@@ -507,7 +508,7 @@ if ([string]::IsNullOrWhiteSpace($PackageVersion)) {
     $PackageVersion = Convert-ToMsixVersion -Value $VersionInfo.BaseVersion
     if ($VersionInfo.ReleaseChannel -eq "dev") {
         $versionParts = $PackageVersion.Split('.')
-        $versionParts[3] = [string](New-DevMsixRevision -PackageName $PackageName)
+        $versionParts[2] = [string](Get-DevMsixBuildNumber -PackageName $PackageName)
         $PackageVersion = $versionParts -join '.'
     }
 }
