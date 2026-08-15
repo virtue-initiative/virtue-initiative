@@ -99,3 +99,48 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: ../scripts/publish-release.sh "${{ steps.version.outputs.release_tag }}" "${{ steps.version.outputs.build_label }}" "dist/VirtueIOS-${{ steps.version.outputs.build_label }}.zip" "${{ github.ref_name == 'main' && 'stable' || 'dev' }}"
         working-directory: client/ios
+
+      - name: Import signing certificate into CI keychain
+        if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+        env:
+          IOS_DIST_CERTIFICATE_P12_BASE64: ${{ secrets.IOS_DIST_CERTIFICATE_P12_BASE64 }}
+          IOS_DIST_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DIST_CERTIFICATE_PASSWORD }}
+          IOS_CI_KEYCHAIN_PASSWORD: ${{ secrets.IOS_CI_KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/virtue-ios-ci.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/virtue-ios-dist.p12"
+
+          echo "$IOS_DIST_CERTIFICATE_P12_BASE64" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$IOS_CI_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$IOS_CI_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$IOS_DIST_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$IOS_CI_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed 's/"//g')
+          security default-keychain -s "$KEYCHAIN_PATH"
+
+          rm -f "$CERT_PATH"
+
+      - name: Archive and upload to TestFlight
+        if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+        env:
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
+          IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
+          IOS_ASC_API_KEY_P8_BASE64: ${{ secrets.IOS_ASC_API_KEY_P8_BASE64 }}
+        run: |
+          set -euo pipefail
+          IOS_ASC_API_KEY_PATH="$RUNNER_TEMP/AuthKey_${IOS_ASC_KEY_ID}.p8"
+          echo "$IOS_ASC_API_KEY_P8_BASE64" | base64 --decode > "$IOS_ASC_API_KEY_PATH"
+          export IOS_ASC_API_KEY_PATH
+          ./scripts/build-and-upload-testflight.sh
+          rm -f "$IOS_ASC_API_KEY_PATH"
+        working-directory: client/ios
+
+      - name: Clean up CI keychain
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/staging'
+        run: |
+          security delete-keychain "$RUNNER_TEMP/virtue-ios-ci.keychain-db" || true
