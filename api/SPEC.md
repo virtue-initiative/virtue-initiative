@@ -79,7 +79,7 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
 }
 ```
 
-**Partner List Item**
+**PartnerInfo**
 
 ```js
 {
@@ -111,7 +111,11 @@ There are **TWO** types of tokens:
 
 The server SHOULD validate every request shape against a schema and return **HTTP 400** on failure.  
 
-### 1.4 `GET /` - Health
+### 1.4 Backwards compat
+
+The client MUST accept extra fields in the response body.
+
+### 1.5 `GET /` - Health
 
 MUST NOT require authentication. MUST return this shape:
 
@@ -431,31 +435,8 @@ The server MUST collect the lists of partners for the user and return **HTTP 200
 
 ```js
 {
-  "watching": [
-    {
-      "id": UUID,
-      "user": {
-        "id": UUID,
-        "email": "owner@example.com",
-        "name": "Owner Name" | undefined
-      },
-      "status": "pending" | "accepted",
-      "digest_cadence": "none" | "alerts-only" | "daily" | "weekly",
-      "created_at": DateTime
-    }
-  ],
-  "watchers": [
-    {
-      "id": UUID,
-      "user": {
-        "id": UUID | undefined,
-        "email": "partner@example.com",
-        "name": "Partner Name" | undefined
-      },
-      "status": "pending" | "accepted",
-      "created_at": DateTime
-    }
-  ]
+  "watching": PartnerInfo[],
+  "watchers": PartnerInfo[]
 }
 ```
 
@@ -471,4 +452,161 @@ The server MUST respond **HTTP 204**.
 
 ## 4. Device Management
 
+### 4.1 `GET /device`
 
+The client MUST be authenticated with a **Web Token**.
+
+The server SHOULD fetch the count from the hash server and the last updated from the hash server.
+
+The server SHOULD return **HTTP 200** plus a list of all the devices that a user can view.
+
+```js
+Device[]
+```
+
+### 4.2 `PATCH /device/:id`
+
+The client MUST be authenticated with a **Web Token** and send
+
+```js
+{
+  "name": "New Device Name"
+}
+````
+
+On success, the server MUST respond with **HTTP 204**.
+
+### 4.3 `DELETE /device/:id`
+
+The client MUST be authenticated with a **Web Token**.
+
+The server SHOULD return **HTTP 404** if the device does not exist or is not owned by the user.
+
+The server SHOULD delete the device with the stored batches and email the owner and watchers.
+
+On success, the server SHOULD return `204 No Content`.
+
+## 5. Data
+
+### 5.1 `GET /data`
+
+The client MUST be authenticated wit ha **Web Token**
+
+The client MAY send `?since=DateTime` to only receive batches since that time.
+
+The server MUST collect the user, partners, and batches and return them in this shape.
+
+```js
+{
+  "batches": BatchData[],
+  "watching": PartnerInfo[],
+  "watchers": PartnerInfo[],
+  "user": User,
+}
+```
+
+The server SHOULD filter the batches to only include batches the user can decrypt.
+
+The server MUST only return batches where `created_at > since`.
+
+## 6. Device Only
+
+### 6.1 `POST /d/device`
+
+The client MUST send
+
+```js
+{
+  "email": "user@example.com",
+  "password_auth": Base64,
+  "name": "My Laptop",
+  "platform": "linux"
+}
+```
+
+The server MUST validate the login (see `POST /login`) and create a long lived refresh token.
+
+It should also return the device settings (see `GET /d/device`)
+
+On success, it must return **HTTP 200** with
+
+```js
+{
+  "token": "opaque_token",
+  "settings": DeviceSettings
+}
+```
+
+### 6.2 `GET /d/device`
+
+The client MUST be authenticated with a **Device Token**.
+
+The server SHOULD create a fresh JWT hash server token (see the hash server spec) and return **HTTP 200** with
+
+```js
+DeviceSettings
+```
+
+### 6.3 `POST /d/logout`
+
+The client MUST be authenticated with a **Device Token**.
+
+The server MUST revoke the device token and soft-delete the device. It also resets the device hash state.
+
+On success, the server MUST respond with **HTTP 204**
+
+### 6.4 `POST /d/batch`
+
+The client MUST send a multipart form request:
+- `metadata`: JSON
+  - ```js
+    {
+      "start_time": DateTime,
+      "end_time": DateTime,
+      "access_keys`: {
+        "<user_id UUID>": Base64 // hpke_key
+      },
+      "event_counts": {
+        "total": non-negative int,
+        "high": non-negative int,
+        "medium": non-negative int,
+        "screenshot": non-negative int,
+      },
+      "notifications": [
+        {
+          ts: DateTime,
+          type: 'system_event',
+          risk: 0.7,
+          title: 'Device reported system event.' | undefined,
+          details: '...' | undefined
+        }
+      ]
+    }
+    ```
+- `file`: encrypted batch blob
+
+The server MUST upload the file to object storage and store the metadata in the database.
+
+> Note: We should version the encrypted batch format
+
+## 7. Other
+
+### 7.1 `GET /r2/*`
+
+This forwards to R2. Only used in dev. It SHOULD be disabled in production.
+
+### 7.2 `POST /email/sns`
+
+The server MUST handle any AWS SNS webhook.
+
+The server MUST confirm the subscription (`SubscriptionConfirmation`)
+
+The server SHOULD process `Bounce`/`Complaint` notifications by marking the users' emails as bounced and unverified.
+
+The server MUST respond **HTTP 200** with this shape.
+
+```js
+{ "ok": true, "subscribed": true }   // SubscriptionConfirmation
+{ "ok": true, "updated": Number }    // Bounce/Complaint notification
+{ "ok": true }                        // ignored event
+```
