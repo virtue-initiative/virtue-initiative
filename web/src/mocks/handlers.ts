@@ -76,6 +76,12 @@ export const handlers = [
 
   // ── Data ───────────────────────────────────────────────────────────────
   http.get(`${BASE}/data`, () =>
-    HttpResponse.json({ batches: [], user: TEST_USER, watching: [], watchers: [] }),
+    HttpResponse.json({
+      batches: [],
+      batches_complete: true,
+      user: TEST_USER,
+      watching: [],
+      watchers: [],
+    }),
   ),
 ];

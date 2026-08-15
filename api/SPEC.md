@@ -529,13 +529,14 @@ On success, the server SHOULD return `204 No Content`.
 
 The client MUST be authenticated wit ha **Web Token**
 
-The client MAY send `?since=DateTime` to only receive batches since that time.
+The client MAY send `?since=DateTime` to only receive batches since that time. The client MAY provide `?since=0` to get all batches.
 
 The server MUST collect the user, partners, and batches and return them in this shape.
 
 ```js
 {
   "batches": BatchData[],
+  "batches_complete": true,
   "watching": PartnerInfo[],
   "watchers": PartnerInfo[],
   "user": User,
@@ -543,6 +544,8 @@ The server MUST collect the user, partners, and batches and return them in this 
 ```
 
 The server SHOULD filter the batches to only include batches the user can decrypt.
+
+The server MAY return a subset of the batches and mark "batches_complete": false. The server MUST return oldest batches first.
 
 The server MUST only return batches where `created_at > since`.
 

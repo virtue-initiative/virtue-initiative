@@ -100,6 +100,7 @@ export type PartnerRelationships = z.infer<typeof partnerRelationshipsSchema>;
 
 export const dataPageSchema = z.object({
   batches: z.array(batchSchema),
+  batches_complete: z.boolean(),
   user: userSchema,
   watching: z.array(partnerInfoSchema),
   watchers: z.array(partnerInfoSchema),

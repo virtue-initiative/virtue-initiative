@@ -387,6 +387,11 @@ const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 const DECRYPT_CONCURRENCY = 24;
 // Frequent counts-only progress ticks for a smooth status-line counter.
 const PROGRESS_THROTTLE_MS = 250;
+// Safety cap on how many /data pages a single fetchAndDecrypt call will drain before
+// yielding — guards against a pathological server response that never sets
+// batches_complete. At the server's page size this is a generous backlog; anything left
+// over is picked up by the next fetch trigger.
+const MAX_DATA_PAGES_PER_FETCH = 50;
 // Coarser interval for shipping the actual newly-decrypted logs as a delta, so logs fill in
 // progressively during a long sync without re-sending (and re-querying) the whole growing
 // result set each time. Only events materialized since the previous flush cross postMessage.
@@ -514,23 +519,56 @@ async function fetchAndDecrypt(targetUserId: string): Promise<void> {
   };
 
   try {
-    const since = sqlGetSince(viewerId, targetUserId);
-    console.log('[cache-worker] fetching /data since=', since, 'for', targetUserId);
-    const [page, deviceOwners] = await Promise.all([fetchData({ since }), fetchDeviceOwners()]);
-    // /data no longer filters by owner server-side — scope this target's slice
-    // of the bundled response down to batches from devices it actually owns.
-    const scopedBatches = page.batches.filter(
-      (batch) => deviceOwners.get(batch.device_id) === targetUserId,
-    );
-    console.log(
-      '[cache-worker] /data returned',
-      page.batches.length,
-      'batches,',
-      scopedBatches.length,
-      'in scope for',
-      targetUserId,
-    );
-    sqlMergeDataPage(viewerId, targetUserId, { ...page, batches: scopedBatches });
+    const deviceOwnersPromise = fetchDeviceOwners();
+    let since = sqlGetSince(viewerId, targetUserId);
+    let complete = false;
+    let pageCount = 0;
+    while (!complete) {
+      pageCount++;
+      console.log(
+        '[cache-worker] fetching /data since=',
+        since,
+        'for',
+        targetUserId,
+        'page',
+        pageCount,
+      );
+      const [page, deviceOwners] = await Promise.all([fetchData({ since }), deviceOwnersPromise]);
+      // /data no longer filters by owner server-side — scope this target's slice
+      // of the bundled response down to batches from devices it actually owns.
+      const scopedBatches = page.batches.filter(
+        (batch) => deviceOwners.get(batch.device_id) === targetUserId,
+      );
+      console.log(
+        '[cache-worker] /data returned',
+        page.batches.length,
+        'batches,',
+        scopedBatches.length,
+        'in scope for',
+        targetUserId,
+        'complete=',
+        page.batches_complete,
+      );
+      sqlMergeDataPage(viewerId, targetUserId, { ...page, batches: scopedBatches });
+      complete = page.batches_complete;
+      // Advance by every batch in the bundled page, not just this target's slice: /data
+      // bundles all owners the viewer can decrypt into one paged response, so the limit
+      // that trips batches_complete=false may be driven by another target's backlog.
+      // Using only scopedBatches here could leave `since` stuck and loop forever.
+      for (const batch of page.batches) {
+        if (batch.created_at > since) since = batch.created_at;
+      }
+      if (!complete && pageCount >= MAX_DATA_PAGES_PER_FETCH) {
+        console.warn(
+          '[cache-worker] /data pagination exceeded',
+          MAX_DATA_PAGES_PER_FETCH,
+          'pages for',
+          targetUserId,
+          '- stopping early, remainder will be picked up on the next fetch',
+        );
+        break;
+      }
+    }
   } catch (err) {
     console.warn('[cache-worker] fetch failed for', targetUserId, err);
     serveAll();

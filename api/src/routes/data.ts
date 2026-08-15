@@ -27,6 +27,10 @@ const listDataSchema = z.object({
   since: z.coerce.number().int().nonnegative().optional().default(0),
 });
 
+// Cap the number of batches returned per request so a viewer with a very long history
+// can't produce an unbounded response; the client is expected to page through with `since`.
+export const DATA_BATCH_PAGE_LIMIT = 500;
+
 data.get('/', authenticateWebSession(), validateZ('query', listDataSchema), async (c) => {
   const userId = c.get('sub');
   const { since } = c.req.valid('query');
@@ -42,7 +46,12 @@ data.get('/', authenticateWebSession(), validateZ('query', listDataSchema), asyn
     return c.json({ error: 'Not found' }, 404);
   }
 
-  const batches = await listBatches(c.env.DB, ownerIds, { since });
+  const fetchedBatches = await listBatches(c.env.DB, ownerIds, {
+    since,
+    limit: DATA_BATCH_PAGE_LIMIT + 1,
+  });
+  const batchesComplete = fetchedBatches.length <= DATA_BATCH_PAGE_LIMIT;
+  const batches = fetchedBatches.slice(0, DATA_BATCH_PAGE_LIMIT);
 
   return c.json({
     batches: batches
@@ -65,6 +74,7 @@ data.get('/', authenticateWebSession(), validateZ('query', listDataSchema), asyn
         };
       })
       .filter((item) => item !== null),
+    batches_complete: batchesComplete,
     user: serializeUser(user),
     watching: serializeWatching(incoming),
     watchers: serializeWatchers(owned),

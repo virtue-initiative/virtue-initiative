@@ -12,6 +12,8 @@ import {
 } from './helpers';
 import { installHashServerMock, seedHashState } from './hash-server-mock';
 import { CURRENT_API_VERSION } from '../src/lib/api-version';
+import { createBatch } from '../src/lib/db';
+import { DATA_BATCH_PAGE_LIMIT } from '../src/routes/data';
 
 beforeAll(() => {
   fetchMock.activate();
@@ -90,6 +92,7 @@ describe('Data and device API routes', () => {
         encrypted_key: string;
         created_at: number;
       }>;
+      batches_complete: boolean;
       user: { id: string; email: string };
       watching: unknown[];
       watchers: unknown[];
@@ -100,6 +103,7 @@ describe('Data and device API routes', () => {
       encrypted_key: Buffer.from('owner-envelope').toString('base64'),
     });
     expect(data.batches[0]?.created_at).toEqual(expect.any(Number));
+    expect(data.batches_complete).toBe(true);
     expect(data.user).toMatchObject({ id: userId, email: 'alice@example.com' });
     expect(data.watching).toEqual([]);
     expect(data.watchers).toEqual([]);
@@ -169,6 +173,104 @@ describe('Data and device API routes', () => {
       Buffer.from('partner-envelope').toString('base64'),
     );
     expect(partnerData.watching[0]?.user.email).toBe('owner@example.com');
+  });
+
+  it('?since=0 returns every batch as complete when the backlog exactly fills the page limit', async () => {
+    const { cookie: userCookie, userId } = await signupAndGetCookie('since-zero@example.com');
+    const device = await createDeviceForUser('since-zero@example.com', 'password123');
+
+    const baseTime = 1710000000000;
+    for (let i = 0; i < DATA_BATCH_PAGE_LIMIT; i += 1) {
+      const id = `00000000-0000-4000-9100-${i.toString(16).padStart(12, '0')}`;
+      await createBatch(env.DB, {
+        id,
+        user_id: userId,
+        device_id: device.id,
+        url: `https://example.com/batch-${i}.enc`,
+        start_time: baseTime + i,
+        end_time: baseTime + i,
+        end_hash: `hash-${i}`,
+        access_keys: JSON.stringify({ [userId]: `key-${i}` }),
+        version: CURRENT_API_VERSION,
+        created_at: baseTime + i,
+      });
+    }
+
+    const res = await SELF.fetch(`${BASE}/data?since=0`, { headers: authHeaders(userCookie) });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      batches: Array<{ encrypted_key: string }>;
+      batches_complete: boolean;
+    };
+    expect(body.batches).toHaveLength(DATA_BATCH_PAGE_LIMIT);
+    expect(body.batches_complete).toBe(true);
+
+    // Omitting `since` entirely defaults to 0 and MUST behave identically.
+    const defaultedRes = await SELF.fetch(`${BASE}/data`, { headers: authHeaders(userCookie) });
+    expect(defaultedRes.status).toBe(200);
+    const defaultedBody = (await defaultedRes.json()) as {
+      batches: Array<{ encrypted_key: string }>;
+      batches_complete: boolean;
+    };
+    expect(defaultedBody.batches).toEqual(body.batches);
+    expect(defaultedBody.batches_complete).toBe(true);
+  });
+
+  it('pages a backlog larger than the per-request batch limit, oldest first', async () => {
+    const { cookie: userCookie, userId } = await signupAndGetCookie('pagination@example.com');
+    const device = await createDeviceForUser('pagination@example.com', 'password123');
+
+    const backlogSize = DATA_BATCH_PAGE_LIMIT + 20;
+    const baseTime = 1710000000000;
+    for (let i = 0; i < backlogSize; i += 1) {
+      const id = `00000000-0000-4000-9000-${i.toString(16).padStart(12, '0')}`;
+      await createBatch(env.DB, {
+        id,
+        user_id: userId,
+        device_id: device.id,
+        url: `https://example.com/batch-${i}.enc`,
+        start_time: baseTime + i,
+        end_time: baseTime + i,
+        end_hash: `hash-${i}`,
+        access_keys: JSON.stringify({ [userId]: `key-${i}` }),
+        version: CURRENT_API_VERSION,
+        created_at: baseTime + i,
+      });
+    }
+
+    const firstPageRes = await SELF.fetch(`${BASE}/data?since=0`, {
+      headers: authHeaders(userCookie),
+    });
+    expect(firstPageRes.status).toBe(200);
+    const firstPage = (await firstPageRes.json()) as {
+      batches: Array<{ created_at: number; encrypted_key: string }>;
+      batches_complete: boolean;
+    };
+    expect(firstPage.batches).toHaveLength(DATA_BATCH_PAGE_LIMIT);
+    expect(firstPage.batches_complete).toBe(false);
+    expect(firstPage.batches.map((b) => b.encrypted_key)).toEqual(
+      Array.from({ length: DATA_BATCH_PAGE_LIMIT }, (_, i) => `key-${i}`),
+    );
+    const createdAts = firstPage.batches.map((b) => b.created_at);
+    expect(createdAts).toEqual([...createdAts].sort((a, b) => a - b));
+
+    const cursor = firstPage.batches[firstPage.batches.length - 1]!.created_at;
+    const secondPageRes = await SELF.fetch(`${BASE}/data?since=${cursor}`, {
+      headers: authHeaders(userCookie),
+    });
+    expect(secondPageRes.status).toBe(200);
+    const secondPage = (await secondPageRes.json()) as {
+      batches: Array<{ created_at: number; encrypted_key: string }>;
+      batches_complete: boolean;
+    };
+    expect(secondPage.batches).toHaveLength(backlogSize - DATA_BATCH_PAGE_LIMIT);
+    expect(secondPage.batches_complete).toBe(true);
+    expect(secondPage.batches.map((b) => b.encrypted_key)).toEqual(
+      Array.from(
+        { length: backlogSize - DATA_BATCH_PAGE_LIMIT },
+        (_, i) => `key-${DATA_BATCH_PAGE_LIMIT + i}`,
+      ),
+    );
   });
 
   it('rejects a batch upload whose metadata is missing the required event_counts object', async () => {

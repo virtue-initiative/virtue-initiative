@@ -572,7 +572,11 @@ export async function createBatch(
     .run();
 }
 
-export async function listBatches(db: D1Database, ownerIds: string[], filters: { since?: number }) {
+export async function listBatches(
+  db: D1Database,
+  ownerIds: string[],
+  filters: { since?: number; limit?: number },
+) {
   if (ownerIds.length === 0) {
     return [];
   }
@@ -588,6 +592,11 @@ export async function listBatches(db: D1Database, ownerIds: string[], filters: {
   }
 
   query += ' ORDER BY created_at ASC';
+
+  if (filters.limit !== undefined) {
+    query += ' LIMIT ?';
+    params.push(filters.limit);
+  }
 
   return allWithUuidFields<{
     id: string;
