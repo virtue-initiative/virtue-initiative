@@ -112,22 +112,22 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
 }
 ```
 
-
 ### 1.2 Authentication
 
 The client MUST provide a refresh token in the Authorization header or a `refresh_token` cookie to access authenticated routes.
 
-Additionally, the client SHOULD use a cookie store to store any short lived JWT access token the server MAY provide. 
+Additionally, the client SHOULD use a cookie store to store any short lived JWT access token the server MAY provide.
 
 The server MUST reject any request that is missing a refresh token or a JWT cookie with **HTTP 401**. The server MAY reject any request with an invalid session token (even if it contains a valid cookie).
 
 There are **TWO** types of tokens:
+
 1. **Web Tokens**, these are the normal tokens, granted on `POST /login` and `POST /signup`
 2. **Device Tokens**, these are device tokens, granted on `POST /d/device` and have a limited scope.
 
 ### 1.3 Validation
 
-The server SHOULD validate every request shape against a schema and return **HTTP 400** on failure.  
+The server SHOULD validate every request shape against a schema and return **HTTP 400** on failure.
 
 ### 1.4 Backwards compat
 
@@ -273,7 +273,7 @@ If the client did not provide an email, the server MUST respond (**HTTP 200**) w
 }
 ```
 
-If the client did provide an email, the server MUST additionally respond with the salt for that user. It MUST provide a made up salt if the user does not exist. 
+If the client did provide an email, the server MUST additionally respond with the salt for that user. It MUST provide a made up salt if the user does not exist.
 
 ```js
 {
@@ -495,7 +495,7 @@ The client MUST be authenticated with a **Web Token** and send
 {
   "name": "New Device Name"
 }
-````
+```
 
 On success, the server MUST respond with **HTTP 204**.
 
@@ -567,7 +567,7 @@ The client MUST be authenticated with a **Device Token**.
 The server SHOULD create a fresh JWT hash server token (see the hash server spec) and return **HTTP 200** with
 
 ```js
-DeviceSettings
+DeviceSettings;
 ```
 
 ### 6.3 `POST /d/logout`
@@ -581,6 +581,7 @@ On success, the server MUST respond with **HTTP 204**
 ### 6.4 `POST /d/batch`
 
 The client MUST send a multipart form request:
+
 - `metadata`: JSON
   - ```js
     {
