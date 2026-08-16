@@ -53,8 +53,11 @@ APP_ROOT="target/macos/${APP_NAME}"
 # Invalid" once a real Team ID has ever been registered for this bundle ID,
 # since the ad-hoc signature has no Team ID to satisfy that check). CI has no
 # access to this identity, so it must override both vars to "-"/"" explicitly.
-CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-Developer ID Application: Jeffrey Baumes (6277E5UTS9)}"
-DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM:-6277E5UTS9}"
+# "Developer ID Application" (with no name/team suffix) matches whichever such
+# identity is present in the local signer's keychain, so this doesn't need to
+# hardcode any one developer's name.
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-Developer ID Application}"
+DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM:-Y2Z8ZS4D33}"
 
 case "$ARCH" in
   universal)

@@ -65,14 +65,76 @@ jobs:
       - name: Add Intel cross-compilation target
         run: rustup target add x86_64-apple-darwin
 
+      # Release builds (push to main/staging) sign with the real Developer ID
+      # Application identity and notarize, so downloaded DMGs open with no
+      # Gatekeeper block. PR builds and forks (no access to the cert secret)
+      # fall back to ad-hoc signing/no notarization automatically, since the
+      # `if:` guards below are false and CODESIGN_IDENTITY/DEVELOPMENT_TEAM
+      # stay at their ad-hoc defaults.
+      - name: Import signing certificate into CI keychain
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
+        env:
+          MACOS_DIST_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_DIST_CERTIFICATE_P12_BASE64 }}
+          MACOS_DIST_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_DIST_CERTIFICATE_PASSWORD }}
+          IOS_CI_KEYCHAIN_PASSWORD: ${{ secrets.IOS_CI_KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # The `secrets` context can't be referenced in a step `if:`, so the
+          # "is the cert secret set yet" check has to live here instead.
+          if [[ -z "$MACOS_DIST_CERTIFICATE_P12_BASE64" ]]; then
+            echo "MACOS_DIST_CERTIFICATE_P12_BASE64 not set; skipping cert import (ad-hoc signing fallback)."
+            exit 0
+          fi
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/virtue-macos-ci.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/virtue-macos-dist.p12"
+
+          echo "$MACOS_DIST_CERTIFICATE_P12_BASE64" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$IOS_CI_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$IOS_CI_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$MACOS_DIST_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$IOS_CI_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+
+          EXISTING_KEYCHAINS="$(security list-keychains -d user | sed 's/"//g')"
+          # Intentionally unquoted: security expects each existing keychain
+          # path as a separate argument, not one combined string.
+          # shellcheck disable=SC2086
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $EXISTING_KEYCHAINS
+          security default-keychain -s "$KEYCHAIN_PATH"
+
+          rm -f "$CERT_PATH"
+          echo "MACOS_SIGNING_READY=1" >> "$GITHUB_ENV"
+
+      - name: Prepare notarization API key
+        if: env.MACOS_SIGNING_READY == '1'
+        env:
+          IOS_ASC_API_KEY_P8_BASE64: ${{ secrets.IOS_ASC_API_KEY_P8_BASE64 }}
+          IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
+        run: |
+          set -euo pipefail
+          ASC_API_KEY_PATH="$RUNNER_TEMP/AuthKey_${IOS_ASC_KEY_ID}.p8"
+          echo "$IOS_ASC_API_KEY_P8_BASE64" | base64 --decode > "$ASC_API_KEY_PATH"
+          echo "ASC_API_KEY_PATH=$ASC_API_KEY_PATH" >> "$GITHUB_ENV"
+
       - name: Build macOS universal app bundle and DMG
         run: ./mac/scripts/build-dmg.sh
         working-directory: client
         env:
-          # CI has no access to a real Developer ID identity; build-app.sh
-          # otherwise now defaults to one for local dev (see its comments).
-          CODESIGN_IDENTITY: '-'
-          DEVELOPMENT_TEAM: ''
+          # Falls back to ad-hoc signing (CI has no access to a real Developer
+          # ID identity) unless the import step above ran and set these.
+          CODESIGN_IDENTITY: ${{ env.MACOS_SIGNING_READY == '1' && 'Developer ID Application' || '-' }}
+          DEVELOPMENT_TEAM: ${{ env.MACOS_SIGNING_READY == '1' && secrets.IOS_TEAM_ID || '' }}
+          ASC_KEY_ID: ${{ env.MACOS_SIGNING_READY == '1' && secrets.IOS_ASC_KEY_ID || '' }}
+          ASC_ISSUER_ID: ${{ env.MACOS_SIGNING_READY == '1' && secrets.IOS_ASC_ISSUER_ID || '' }}
+          # ASC_API_KEY_PATH comes from the "Prepare notarization API key" step via GITHUB_ENV
+
+      - name: Clean up CI keychain
+        if: always() && env.MACOS_SIGNING_READY == '1'
+        run: |
+          security delete-keychain "$RUNNER_TEMP/virtue-macos-ci.keychain-db" || true
+          rm -f "${ASC_API_KEY_PATH:-}"
 
       - name: Resolve version info
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
