@@ -90,6 +90,44 @@ The packaging script also runs the managed tests before producing the MSIX artif
 
 GitHub Actions release packaging no longer uses an external signing service. The manifest's `Identity Publisher` (`client/windows/Virtue.WindowsApp/Package.appxmanifest`) must always match the publisher assigned by Partner Center for this app's Store identity, so the workflow lets `build-msix.ps1` fall back to its built-in self-signed development certificate (the same path used for PR/Debug builds) rather than overriding the publisher with an external signing cert's subject. Microsoft Store re-signs the package on ingestion, so a self-signed upload is sufficient for submission; for sideload installs the generated `.cer` in the setup bundle still needs to be trusted on the target machine as before.
 
+## Store Staging Flight Submission
+
+Every push to `staging` runs `scripts/submit-store-flight.ps1` after the release MSIX is
+built and published, submitting that same artifact to a pre-created Microsoft Store
+"Staging" flight via the classic Store Submission API
+(`https://manage.devcenter.microsoft.com/v1.0/my/...`). This is a one-way push: it
+creates a new flight submission (deleting any stale, still-`PendingCommit` one left over
+from a prior run), replaces the flight's package with the new `.msix`, commits, and polls
+Partner Center briefly to catch immediate validation failures before letting the CI job
+succeed — Store certification and rollout to flight testers continues asynchronously
+afterward, the same way the iOS TestFlight upload step doesn't block on Apple's
+processing.
+
+This depends on one-time manual setup in Partner Center / Microsoft Entra ID that this
+repo cannot provision on its own:
+
+1. Register a Microsoft Entra ID application (Partner Center can create one directly from
+   its "Microsoft Entra applications" management page) and generate a client secret for
+   it in the Azure Portal (App registrations → Certificates & secrets).
+2. In Partner Center, under Account settings → User management → Microsoft Entra
+   applications, associate that app and grant it the Manager role on this developer
+   account. (Managing this page requires being signed in as a Partner Center Manager
+   who is also a Global Administrator of the Entra tenant.)
+3. Look up the app's Store ID in Partner Center (App → App identity).
+4. Create the "Staging" flight once in Partner Center (App overview → Package flights →
+   New package flight), picking the tester group. Its Flight ID (a GUID) isn't surfaced
+   directly in the UI — the reliable way to get it is to call the Store Submission API's
+   `listflights` endpoint once the Entra app's credentials work:
+   `GET https://manage.devcenter.microsoft.com/v1.0/my/applications/{STORE_APP_ID}/listflights`
+5. Add the tenant/client/app/flight IDs as repo **variables** (not secrets — they aren't
+   sensitive) and the client secret as a repo **secret**, read by
+   `submit-store-flight.ps1` via matching env var names in `client-windows.yml`:
+   - `WINSTORE_TENANT_ID` (variable) — Entra tenant ID
+   - `WINSTORE_CLIENT_ID` (variable) — Entra app (client) ID
+   - `WINSTORE_CLIENT_SECRET` (secret) — Entra app client secret
+   - `WINSTORE_APP_ID` (variable) — Partner Center Store ID for this app (e.g. `9NXXXXXXXXXX`)
+   - `WINSTORE_FLIGHT_ID` (variable) — GUID of the pre-created "Staging" flight
+
 ## Linux-Driven Remote Windows Loop
 
 If the current OS is Linux, always use this VM workflow for Windows builds and validation.

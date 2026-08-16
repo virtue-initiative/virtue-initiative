@@ -151,6 +151,18 @@ jobs:
         run: ./scripts/publish-release.sh "${{ steps.version.outputs.release_tag }}" "${{ steps.version.outputs.build_label }}" "windows/dist/virtue-windows-${{ steps.version.outputs.build_label }}-setup.zip" "${{ github.ref_name == 'main' && 'stable' || 'dev' }}"
         working-directory: client
 
+      - name: Submit Windows MSIX to Store Staging flight
+        if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+        shell: pwsh
+        env:
+          STORE_TENANT_ID: ${{ vars.WINSTORE_TENANT_ID }}
+          STORE_CLIENT_ID: ${{ vars.WINSTORE_CLIENT_ID }}
+          STORE_CLIENT_SECRET: ${{ secrets.WINSTORE_CLIENT_SECRET }}
+          STORE_APP_ID: ${{ vars.WINSTORE_APP_ID }}
+          STORE_FLIGHT_ID: ${{ vars.WINSTORE_FLIGHT_ID }}
+        run: ./windows/scripts/submit-store-flight.ps1 -PackagePath "windows/dist/virtue-windows-${{ steps.version.outputs.build_label }}.msix"
+        working-directory: client
+
   client-windows-integration:
     name: Client Windows Integration
     runs-on: windows-latest
