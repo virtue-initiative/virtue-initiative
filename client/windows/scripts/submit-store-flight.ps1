@@ -53,21 +53,31 @@ function Remove-StaleFlightSubmission {
         [hashtable]$Headers
     )
 
-    $listUri = "https://manage.devcenter.microsoft.com/v1.0/my/applications/$AppId/flights/$FlightId/submissions"
-    $existing = Invoke-RestMethod -Method Get -Uri $listUri -Headers $Headers
+    # There is no "list submissions for a flight" endpoint in the Store Submission
+    # API; the only way to discover an in-progress submission is the flight
+    # resource's pendingFlightSubmission field.
+    $flightUri = "https://manage.devcenter.microsoft.com/v1.0/my/applications/$AppId/flights/$FlightId"
+    $flight = Invoke-RestMethod -Method Get -Uri $flightUri -Headers $Headers
 
-    $pending = $existing.value | Where-Object { $_.status -eq "PendingCommit" } | Select-Object -First 1
-    if (-not $pending) {
+    if (-not $flight.pendingFlightSubmission -or -not $flight.pendingFlightSubmission.id) {
         return
     }
 
-    Write-Host "Found stale PendingCommit submission $($pending.id); deleting before creating a new one."
-    $deleteUri = "https://manage.devcenter.microsoft.com/v1.0/my/applications/$AppId/flights/$FlightId/submissions/$($pending.id)"
+    $pendingId = $flight.pendingFlightSubmission.id
+    $statusUri = "https://manage.devcenter.microsoft.com/v1.0/my/applications/$AppId/flights/$FlightId/submissions/$pendingId/status"
+    $status = Invoke-RestMethod -Method Get -Uri $statusUri -Headers $Headers
+
+    if ($status.status -ne "PendingCommit") {
+        return
+    }
+
+    Write-Host "Found stale PendingCommit submission $pendingId; deleting before creating a new one."
+    $deleteUri = "https://manage.devcenter.microsoft.com/v1.0/my/applications/$AppId/flights/$FlightId/submissions/$pendingId"
     try {
         Invoke-RestMethod -Method Delete -Uri $deleteUri -Headers $Headers | Out-Null
     }
     catch {
-        throw "A submission ($($pending.id)) is in progress for this flight and could not be deleted automatically (status was PendingCommit but delete failed). Check Partner Center before retrying. Error: $($_.Exception.Message)"
+        throw "A submission ($pendingId) is in progress for this flight and could not be deleted automatically (status was PendingCommit but delete failed). Check Partner Center before retrying. Error: $($_.Exception.Message)"
     }
 }
 
