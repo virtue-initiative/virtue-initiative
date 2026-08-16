@@ -74,7 +74,7 @@ function Remove-StaleFlightSubmission {
     Write-Host "Found stale PendingCommit submission $pendingId; deleting before creating a new one."
     $deleteUri = "https://manage.devcenter.microsoft.com/v1.0/my/applications/$AppId/flights/$FlightId/submissions/$pendingId"
     try {
-        Invoke-RestMethod -Method Delete -Uri $deleteUri -Headers $Headers | Out-Null
+        Invoke-RestMethod -Method Delete -Uri $deleteUri -Headers $Headers -Body "{}" -ContentType "application/json" | Out-Null
     }
     catch {
         throw "A submission ($pendingId) is in progress for this flight and could not be deleted automatically (status was PendingCommit but delete failed). Check Partner Center before retrying. Error: $($_.Exception.Message)"
@@ -89,7 +89,11 @@ function New-FlightSubmission {
     )
 
     $createUri = "https://manage.devcenter.microsoft.com/v1.0/my/applications/$AppId/flights/$FlightId/submissions"
-    return Invoke-RestMethod -Method Post -Uri $createUri -Headers $Headers
+    # The API rejects a POST with no body/Content-Type ("Only JSON content is
+    # accepted"); Invoke-RestMethod only attaches a Content-Type header when
+    # -Body is present, so an explicit empty JSON body is required even though
+    # the request logically carries no data.
+    return Invoke-RestMethod -Method Post -Uri $createUri -Headers $Headers -Body "{}" -ContentType "application/json"
 }
 
 function Update-FlightSubmissionPackages {
@@ -101,7 +105,7 @@ function Update-FlightSubmissionPackages {
         [hashtable]$Headers
     )
 
-    foreach ($package in $Submission.applicationPackages) {
+    foreach ($package in $Submission.flightPackages) {
         $package.fileStatus = "PendingDelete"
     }
 
@@ -109,7 +113,7 @@ function Update-FlightSubmissionPackages {
         fileName   = $PackageFileName
         fileStatus = "PendingUpload"
     }
-    $Submission.applicationPackages = @($Submission.applicationPackages) + $newPackage
+    $Submission.flightPackages = @($Submission.flightPackages) + $newPackage
 
     $updateUri = "https://manage.devcenter.microsoft.com/v1.0/my/applications/$AppId/flights/$FlightId/submissions/$($Submission.id)"
     $body = $Submission | ConvertTo-Json -Depth 20
@@ -135,10 +139,10 @@ function Start-FlightSubmissionCommit {
     )
 
     $commitUri = "https://manage.devcenter.microsoft.com/v1.0/my/applications/$AppId/flights/$FlightId/submissions/$SubmissionId/commit"
-    Invoke-RestMethod -Method Post -Uri $commitUri -Headers $Headers | Out-Null
+    Invoke-RestMethod -Method Post -Uri $commitUri -Headers $Headers -Body "{}" -ContentType "application/json" | Out-Null
 }
 
-$terminalFailureStatuses = @("CommitFailed", "CertificationFailed", "Release Failed", "ReleaseFailed")
+$terminalFailureStatuses = @("CommitFailed", "PreProcessingFailed", "CertificationFailed", "ReleaseFailed", "PublishFailed", "Canceled")
 
 function Wait-FlightSubmissionStatus {
     param(
@@ -166,7 +170,7 @@ function Wait-FlightSubmissionStatus {
             throw "Store submission failed with status $($status.status): $errorDetails"
         }
 
-        if ($status.status -notin @("CommitStarted", "PreProcessing", "PendingCommit")) {
+        if ($status.status -notin @("None", "PendingCommit", "CommitStarted", "PreProcessing")) {
             Write-Host "Submission passed initial processing with status: $($status.status)"
             return
         }
