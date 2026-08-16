@@ -425,7 +425,7 @@ function Get-AppPackageName {
     return $name
 }
 
-function Get-InstalledPackageBuildNumber {
+function Get-InstalledPackageBuildNumberFromAppxPackage {
     param([string]$PackageName)
 
     try {
@@ -448,6 +448,59 @@ function Get-InstalledPackageBuildNumber {
     }
 
     return [int]$versionParts[2]
+}
+
+# Get-AppxPackage enumerates packages registered to the *current interactive user
+# session*. A non-interactive caller (e.g. an SSH exec, which lands in Session 0)
+# has no such context and silently returns nothing rather than an error, even when
+# the package is genuinely installed under the desktop user. Fall back to reading
+# the package folder names directly out of WindowsApps, which is session-independent.
+# (Get-ChildItem is denied there even for Administrators; `cmd /c dir` is not.)
+function Get-InstalledPackageBuildNumberFromDisk {
+    param([string]$PackageName)
+
+    $windowsAppsDir = Join-Path $env:ProgramFiles "WindowsApps"
+    if (-not (Test-Path $windowsAppsDir)) {
+        return 0
+    }
+
+    $entries = cmd /c "dir `"$windowsAppsDir`" /b" 2>$null
+    if (-not $entries) {
+        return 0
+    }
+
+    $prefix = "$PackageName" + "_"
+    $bestBuildNumber = 0
+    foreach ($entry in $entries) {
+        if (-not $entry.StartsWith($prefix)) {
+            continue
+        }
+
+        $versionText = $entry.Substring($prefix.Length).Split('_')[0]
+        $versionParts = $versionText.Split('.')
+        if ($versionParts.Count -lt 3) {
+            continue
+        }
+
+        $buildNumber = 0
+        if ([int]::TryParse($versionParts[2], [ref]$buildNumber) -and $buildNumber -gt $bestBuildNumber) {
+            $bestBuildNumber = $buildNumber
+        }
+    }
+
+    return $bestBuildNumber
+}
+
+function Get-InstalledPackageBuildNumber {
+    param([string]$PackageName)
+
+    $fromAppxPackage = Get-InstalledPackageBuildNumberFromAppxPackage -PackageName $PackageName
+    $fromDisk = Get-InstalledPackageBuildNumberFromDisk -PackageName $PackageName
+
+    if ($fromDisk -gt $fromAppxPackage) {
+        return $fromDisk
+    }
+    return $fromAppxPackage
 }
 
 function Get-DevMsixBuildNumber {
