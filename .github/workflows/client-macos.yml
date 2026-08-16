@@ -72,15 +72,20 @@ jobs:
       # `if:` guards below are false and CODESIGN_IDENTITY/DEVELOPMENT_TEAM
       # stay at their ad-hoc defaults.
       - name: Import signing certificate into CI keychain
-        if: >
-          github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging') &&
-          secrets.MACOS_DIST_CERTIFICATE_P12_BASE64 != ''
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         env:
           MACOS_DIST_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_DIST_CERTIFICATE_P12_BASE64 }}
           MACOS_DIST_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_DIST_CERTIFICATE_PASSWORD }}
           IOS_CI_KEYCHAIN_PASSWORD: ${{ secrets.IOS_CI_KEYCHAIN_PASSWORD }}
         run: |
           set -euo pipefail
+          # The `secrets` context can't be referenced in a step `if:`, so the
+          # "is the cert secret set yet" check has to live here instead.
+          if [[ -z "$MACOS_DIST_CERTIFICATE_P12_BASE64" ]]; then
+            echo "MACOS_DIST_CERTIFICATE_P12_BASE64 not set; skipping cert import (ad-hoc signing fallback)."
+            exit 0
+          fi
+
           KEYCHAIN_PATH="$RUNNER_TEMP/virtue-macos-ci.keychain-db"
           CERT_PATH="$RUNNER_TEMP/virtue-macos-dist.p12"
 
@@ -92,7 +97,11 @@ jobs:
           security import "$CERT_PATH" -P "$MACOS_DIST_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple: -k "$IOS_CI_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
 
-          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed 's/"//g')
+          EXISTING_KEYCHAINS="$(security list-keychains -d user | sed 's/"//g')"
+          # Intentionally unquoted: security expects each existing keychain
+          # path as a separate argument, not one combined string.
+          # shellcheck disable=SC2086
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $EXISTING_KEYCHAINS
           security default-keychain -s "$KEYCHAIN_PATH"
 
           rm -f "$CERT_PATH"
