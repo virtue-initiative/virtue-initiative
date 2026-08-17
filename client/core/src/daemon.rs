@@ -362,7 +362,9 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
                 ..
             } = &mut *guard;
 
-            lifecycle::tick(lifecycle, upload, &self.platform, now_ms, expected_wakeup);
+            if self.platform.lifecycle_enabled() {
+                lifecycle::tick(lifecycle, upload, &self.platform, now_ms, expected_wakeup);
+            }
 
             let screen_active = !self.platform.is_locked_or_screensaver().unwrap_or(false);
             let mean_interval_ms = self.config.screenshot_interval.as_millis() as i64;

@@ -20,6 +20,7 @@ struct TestPlatformInner {
     locked_or_screensaver: bool,
     last_login_utc_ms: Option<i64>,
     last_logout_utc_ms: Option<i64>,
+    lifecycle_enabled: bool,
 }
 
 impl TestPlatformHooks {
@@ -37,6 +38,7 @@ impl TestPlatformHooks {
                 locked_or_screensaver: false,
                 last_login_utc_ms: None,
                 last_logout_utc_ms: None,
+                lifecycle_enabled: true,
             })),
         }
     }
@@ -63,6 +65,12 @@ impl TestPlatformHooks {
 
     pub fn set_last_logout(&self, utc_ms: Option<i64>) {
         self.lock().last_logout_utc_ms = utc_ms;
+    }
+
+    /// Mirrors `IosPlatformHooks::lifecycle_enabled() -> false` for tests
+    /// that need to exercise the "lifecycle check disabled" path.
+    pub fn set_lifecycle_enabled(&self, enabled: bool) {
+        self.lock().lifecycle_enabled = enabled;
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, TestPlatformInner> {
@@ -107,5 +115,9 @@ impl LifecycleHooks for TestPlatformHooks {
 
     fn get_last_logout_utc_ms(&self) -> CoreResult<Option<i64>> {
         Ok(self.lock().last_logout_utc_ms)
+    }
+
+    fn lifecycle_enabled(&self) -> bool {
+        self.lock().lifecycle_enabled
     }
 }

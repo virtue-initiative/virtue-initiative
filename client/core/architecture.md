@@ -42,8 +42,10 @@ client/
       storage.rs        — errors.log
       testing/          — MockApiClient, TestPlatformHooks, MockClock,
                            TestRandomSource, Scenario
-  linux/  mac/  windows/  android/  ios/   — platform wrappers (ios excluded
-                                              from the workspace — see below)
+  linux/  mac/  windows/  android/  ios/   — platform wrappers (ios has its
+                                              own standalone Cargo workspace,
+                                              not a member of client/'s — see
+                                              below)
 ```
 
 ## The daemon loop
@@ -202,12 +204,25 @@ direct method call on that shared daemon (`nativeLogin` → `daemon.login()`,
 `event_state.json`'s `auth` key directly from disk rather than going through
 the daemon, unchanged from before.
 
-### iOS — not ported
+### iOS — same C-FFI/`Arc<Daemon>` shape as Android, lifecycle disabled
 
-Screenshot capture is only possible while the Safari extension host is
-actively running, which makes this daemon's background-monitoring model
-fundamentally unworkable there. `client/ios` is excluded from the Cargo
-workspace; the directory is left in place, deletion is a separate decision.
+`virtue_ios_native_init` builds one `Daemon<IosPlatformHooks, ReqwestApiClient>`
+and stores it in process-global state, same pattern as Android's JNI bridge;
+every other `virtue_ios_native_*` call is a direct method call on that shared
+daemon. `client/ios/rust` is its own standalone Cargo workspace (not a
+`client/Cargo.toml` member — this predates the daemon rewrite), so it isn't
+covered by `cargo check --workspace` from `client/`; it has its own CI job
+(`.github/workflows/client-ios.yml`) that builds it directly.
+
+`IosPlatformHooks::lifecycle_enabled()` returns `false`: the monitoring
+process is a short-lived Safari extension host that the OS can suspend the
+instant the device locks, with no notification delivered to that process and
+no boot/shutdown/session API surface available to it at all — every stall
+looks identical to every other, so there's no way to build a meaningful "late
+wakeup" signal there. `Daemon::tick_once` skips `lifecycle::tick` entirely
+when this returns `false` (see "PlatformHooks" below) — screenshot capture,
+upload, and everything else still runs normally; only the tamper-detection
+check is disabled.
 
 ## Config model
 
@@ -258,7 +273,14 @@ fn is_locked_or_screensaver(&self) -> CoreResult<bool>;   // default: Ok(false)
 fn get_utc_clock_ms(&self) -> CoreResult<i64>;             // default: SystemTime::now()
 fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>>;
 fn get_last_logout_utc_ms(&self) -> CoreResult<Option<i64>>;
+fn lifecycle_enabled(&self) -> bool;                        // default: true
 ```
+
+`lifecycle_enabled` lets a platform opt out of the late-wakeup tamper check
+(`Daemon::tick_once` skips `lifecycle::tick` entirely when it returns
+`false`) while keeping everything else — screenshot capture, upload,
+status — running normally. iOS is the only platform that overrides it to
+`false`, for the reason described above.
 
 `get_boot_clock_ms`/`get_monotonic_clock_ms` were removed from this trait in
 the daemon rewrite — the late-wakeup model (`../SPEC.md` §2) doesn't use

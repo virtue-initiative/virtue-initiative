@@ -2,20 +2,17 @@ use std::ffi::{CStr, CString};
 use std::fs;
 use std::os::raw::{c_char, c_int};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::sync::Mutex;
-use std::thread;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
+use virtue_core::api::ReqwestApiClient;
 use virtue_core::{
-    build_default_modules_reqwest, load_state, store_state, AuthState, Config, CoreError,
-    CoreResult, DeviceSettings, EventBus, EventChannel, LifecycleHooks, LoginRequested,
-    LoginResult, LogoutRequested, Ping, PlatformConfig, PlatformHooks, ProcessStarted,
-    ProcessStopped, Redacted, Screenshot, ScreenshotHooks, StatusRequest, StatusResponse,
-    UserStopRequested,
+    AuthState, Config, CoreError, CoreResult, Daemon, DeviceSettings, LifecycleHooks, Screenshot,
+    ScreenshotHooks,
 };
 
 static CORE: OnceCell<IosCore> = OnceCell::new();
@@ -26,12 +23,6 @@ static CORE: OnceCell<IosCore> = OnceCell::new();
 static LOG_GUARD: OnceCell<tracing_appender::non_blocking::WorkerGuard> = OnceCell::new();
 
 const DEFAULT_BASE_API_URL: &str = virtue_core::DEFAULT_API_BASE_URL;
-const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(20);
-// Ping every second (like the Android client), independent of capture cadence
-// (governed separately by `capture_interval_seconds`). Lifecycle detection is
-// disabled entirely on iOS (see `build_bus`), so this cadence is purely about
-// keeping other modules (screenshot scheduling, upload batching) responsive.
-const LOOP_INTERVAL: Duration = Duration::from_secs(1);
 
 const CAPTURE_STATUS_READY: c_int = 0;
 const CAPTURE_STATUS_PERMISSION_MISSING: c_int = 1;
@@ -44,9 +35,11 @@ unsafe extern "C" {
     fn virtue_ios_capture_png_release(ptr: *const u8, len: usize);
 }
 
+type IosDaemon = Daemon<IosPlatformHooks, ReqwestApiClient>;
+
 struct IosCore {
     state_dir: PathBuf,
-    stop: AtomicBool,
+    daemon: Arc<IosDaemon>,
     daemon_running: Mutex<bool>,
 }
 
@@ -105,24 +98,13 @@ impl ScreenshotHooks for IosPlatformHooks {
             ))),
         }
     }
-
 }
 
-// Inert: iOS has no boot/shutdown/session API surface available to a Safari
-// extension host, and `PlatformConfig { lifecycle_enabled: false }` (set in
-// `build_bus`) means `LifecycleModule` is never constructed here — a
-// `NoopLifecycleModule` stands in instead. These methods only exist to
-// satisfy `PlatformHooks: ScreenshotHooks + LifecycleHooks`'s trait bound on
-// `build_default_modules_reqwest` and are never called.
+// iOS has no boot/shutdown/session API surface available to a Safari
+// extension host, and `lifecycle_enabled()` returning `false` means
+// `Daemon::tick_once` never calls `lifecycle::tick` at all — these two
+// getters exist only to satisfy the trait and are never read.
 impl LifecycleHooks for IosPlatformHooks {
-    fn get_boot_clock_ms(&self) -> CoreResult<i64> {
-        Ok(0)
-    }
-
-    fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
-        Ok(0)
-    }
-
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {
         Ok(None)
     }
@@ -130,9 +112,11 @@ impl LifecycleHooks for IosPlatformHooks {
     fn get_last_logout_utc_ms(&self) -> CoreResult<Option<i64>> {
         Ok(None)
     }
-}
 
-impl PlatformHooks for IosPlatformHooks {}
+    fn lifecycle_enabled(&self) -> bool {
+        false
+    }
+}
 
 /// Installs the process-wide `tracing` subscriber on first call, writing
 /// daily-rotated plain-text logs to `<data_dir>/logs/virtue.log`. Subsequent
@@ -209,9 +193,16 @@ pub extern "C" fn virtue_ios_native_init(
         if CORE.get().is_none() {
             init_logging(Path::new(&data_dir));
 
+            let state_dir = PathBuf::from(&data_dir);
+            let config = build_core_config(&state_dir);
+            let state_path = state_dir.join("event_state.json");
+            let api = ReqwestApiClient::new(&config)?;
+            let daemon = Daemon::new(config, IosPlatformHooks, api, state_path)
+                .map_err(|err| anyhow!("failed to construct daemon: {err}"))?;
+
             CORE.set(IosCore {
-                state_dir: PathBuf::from(data_dir),
-                stop: AtomicBool::new(false),
+                state_dir,
+                daemon: Arc::new(daemon),
                 daemon_running: Mutex::new(false),
             })
             .map_err(|_| anyhow!("core already initialized"))?;
@@ -234,19 +225,9 @@ pub extern "C" fn virtue_ios_native_login(
         let password = c_string_or_empty(password);
         let device_name = c_string_or_empty(device_name);
         let core = core()?;
-        let (mut bus, state_path) = build_bus(core)?;
-        let result = bus.request::<LoginRequested, LoginResult>(LoginRequested {
-            email,
-            password: Redacted(password),
-            device_name: Some(device_name),
-        })?;
-        if !result.success {
-            return Err(anyhow!(result.error.unwrap_or_else(|| {
-                "Login failed. Check your credentials and try again.".to_string()
-            })));
-        }
-        let state = bus.iter()?;
-        store_state(&state_path, &state)?;
+        core.daemon
+            .login(&email, &password, Some(&device_name))
+            .map_err(|err| anyhow!(err.to_string()))?;
         Ok(())
     })();
 
@@ -256,11 +237,7 @@ pub extern "C" fn virtue_ios_native_login(
 #[no_mangle]
 pub extern "C" fn virtue_ios_native_logout() -> *mut c_char {
     let result = (|| -> Result<()> {
-        let core = core()?;
-        let (mut bus, state_path) = build_bus(core)?;
-        bus.send(LogoutRequested)?;
-        let state = bus.iter()?;
-        store_state(&state_path, &state)?;
+        core()?.daemon.logout().map_err(|err| anyhow!(err.to_string()))?;
         Ok(())
     })();
 
@@ -294,20 +271,13 @@ pub extern "C" fn virtue_ios_native_get_device_id() -> *mut c_char {
     }
 }
 
-/// Build a transient bus from the shared event state and ask it for a status
-/// snapshot. Returns a JSON-serialized `ServiceStatus` (caller frees with
+/// Returns a JSON-serialized `ServiceStatus` (caller frees with
 /// `virtue_ios_free_string`), or null on failure.
-///
-/// Status is no longer published to a `status.json` file by the core; it is
-/// produced on demand via a `StatusRequest`/`StatusResponse` round-trip on the
-/// event bus, mirroring the Android client.
 #[no_mangle]
 pub extern "C" fn virtue_ios_native_get_status_json() -> *mut c_char {
     let json = (|| -> Result<String> {
         let core = core()?;
-        let (mut bus, _) = build_bus(core)?;
-        let response = bus.request::<StatusRequest, StatusResponse>(StatusRequest)?;
-        Ok(serde_json::to_string(&response.status)?)
+        Ok(serde_json::to_string(&core.daemon.status())?)
     })();
 
     match json {
@@ -332,14 +302,13 @@ pub extern "C" fn virtue_ios_native_run_daemon_loop() -> *mut c_char {
             }
             *guard = true;
         }
-        core.stop.store(false, Ordering::SeqCst);
 
-        let daemon_result = run_daemon_loop(core);
+        core.daemon.run_forever();
 
         if let Ok(mut guard) = core.daemon_running.lock() {
             *guard = false;
         }
-        daemon_result
+        Ok(())
     })();
 
     into_c_result(result)
@@ -348,8 +317,7 @@ pub extern "C" fn virtue_ios_native_run_daemon_loop() -> *mut c_char {
 #[no_mangle]
 pub extern "C" fn virtue_ios_native_stop_daemon() -> *mut c_char {
     let result = (|| -> Result<()> {
-        let core = core()?;
-        core.stop.store(true, Ordering::SeqCst);
+        core()?.daemon.request_stop();
         Ok(())
     })();
 
@@ -357,14 +325,9 @@ pub extern "C" fn virtue_ios_native_stop_daemon() -> *mut c_char {
 }
 
 #[no_mangle]
-pub extern "C" fn virtue_ios_native_pause_monitoring(source: *const c_char) -> *mut c_char {
+pub extern "C" fn virtue_ios_native_pause_monitoring(_source: *const c_char) -> *mut c_char {
     let result = (|| -> Result<()> {
-        let core = core()?;
-        let _source = match c_string_or_empty(source).trim() {
-            "" => "ios_pause_button".to_string(),
-            value => value.to_string(),
-        };
-        core.stop.store(true, Ordering::SeqCst);
+        core()?.daemon.request_stop();
         Ok(())
     })();
 
@@ -379,10 +342,7 @@ pub extern "C" fn virtue_ios_native_request_pause_monitoring(source: *const c_ch
             "" => "ios_pause_button".to_string(),
             value => value.to_string(),
         };
-        let (mut bus, state_path) = build_bus(core)?;
-        bus.send(UserStopRequested { source })?;
-        let state = bus.iter()?;
-        store_state(&state_path, &state)?;
+        core.daemon.note_user_stop(&source);
         Ok(())
     })();
 
@@ -401,70 +361,14 @@ pub unsafe extern "C" fn virtue_ios_free_string(value: *mut c_char) {
     let _ = unsafe { CString::from_raw(value) };
 }
 
-fn run_daemon_loop(core: &IosCore) -> Result<()> {
-    let (mut bus, state_path) = build_bus(core)?;
-    bus.send(ProcessStarted)?;
-    // The screenshot module's `enabled` flag is set on `Login` and persisted in
-    // `event_state.json`, so it survives across the separate login/daemon FFI calls
-    // and is already `true` here once the user has logged in. iOS has no lock/screen
-    // concept exposed to the daemon, so `is_locked_or_screensaver()` stays at the
-    // default `Ok(false)` and capture proceeds whenever the loop runs.
-    let state = bus.iter()?;
-    store_state(&state_path, &state)?;
-
-    while !core.stop.load(Ordering::SeqCst) {
-        if let Err(err) = (|| -> Result<()> {
-            bus.send(Ping)?;
-            let state = bus.iter()?;
-            store_state(&state_path, &state)?;
-            Ok(())
-        })() {
-            tracing::error!(error = %err, "ios-daemon");
-        }
-        sleep_interruptible(&core.stop, LOOP_INTERVAL);
-    }
-
-    bus.send(ProcessStopped)?;
-    let state = bus.iter()?;
-    let _ = store_state(&state_path, &state);
-    Ok(())
-}
-
-fn sleep_interruptible(stop: &AtomicBool, duration: Duration) {
-    let mut remaining = duration;
-    while remaining > Duration::ZERO && !stop.load(Ordering::SeqCst) {
-        let tick = remaining.min(Duration::from_secs(1));
-        thread::sleep(tick);
-        remaining = remaining.saturating_sub(tick);
-    }
-}
-
-fn build_bus(core: &IosCore) -> Result<(EventBus, PathBuf)> {
-    let cfg = build_core_config(core);
-    // The Safari extension host has no `UIApplication` and can be suspended by
-    // the OS the instant the device locks, with no notification delivered to
-    // this process, and no boot/shutdown/session API surface at all. There's no
-    // way to build a meaningful expected-running-window model here, so
-    // lifecycle detection is disabled entirely — `assembly::build_default_modules`
-    // constructs a `NoopLifecycleModule` instead of a real `LifecycleModule`.
-    let platform_config = PlatformConfig {
-        lifecycle_enabled: false,
-    };
-    let modules = build_default_modules_reqwest(cfg, IosPlatformHooks, platform_config)?;
-    let state_path = core.state_dir.join("event_state.json");
-    let bus = EventBus::new(modules, load_state(&state_path)?)?;
-    Ok((bus, state_path))
-}
-
-fn build_core_config(core: &IosCore) -> Config {
-    // The device name passed at construction is only a placeholder: device
-    // registration happens on login, which carries the user-chosen name on the
-    // `LoginRequested` event.
+fn build_core_config(state_dir: &Path) -> Config {
+    // The device name passed here is only a placeholder: device registration
+    // happens on login, which carries the user-chosen name explicitly.
     Config::new(
         DEFAULT_BASE_API_URL,
         "ios",
         "ios",
-        core.state_dir.clone(),
+        state_dir.to_path_buf(),
         Duration::from_secs(virtue_core::default_capture_interval_seconds()),
         Duration::from_secs(virtue_core::default_batch_window_seconds()),
     )

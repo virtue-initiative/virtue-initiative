@@ -148,6 +148,24 @@ fn late_wakeup_near_login_is_excused() {
     );
 }
 
+#[test]
+fn lifecycle_disabled_never_records_or_alerts_regardless_of_lateness() {
+    // Mirrors IosPlatformHooks::lifecycle_enabled() -> false.
+    let mut scenario = Scenario::authenticated();
+    scenario.platform.set_lifecycle_enabled(false);
+    scenario.at_t(0).tick();
+    let expected = scenario.state().next_wakeup_at_ms;
+
+    // Wildly late — would easily cross the 1-minute single-wakeup threshold
+    // if the check ran at all.
+    scenario.at_t(expected + 10 * 60_000).tick();
+
+    assert!(
+        scenario.state().lifecycle.late_wakeups.is_empty(),
+        "lifecycle_enabled(false) must skip the late-wakeup check entirely"
+    );
+}
+
 // ── CaptureAvailability ─────────────────────────────────────────────────────────
 
 fn force_screenshot_due(scenario: &mut Scenario) {

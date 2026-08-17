@@ -2,9 +2,15 @@
 
 Multi-platform Rust monitoring client. All platforms share `core/`; each platform crate
 is a thin wrapper that supplies raw screen data and OS hooks, then runs `core`'s
-`Daemon::run_forever()` loop. `client/ios/` is excluded from the Cargo workspace —
-screenshot capture there is only possible while the Safari extension host is
-actively running, which doesn't fit this daemon's background-monitoring model.
+`Daemon::run_forever()` loop. `client/ios/rust` has its own standalone Cargo
+workspace (not a `client/Cargo.toml` member) and its own CI job
+(`.github/workflows/client-ios.yml`), which also handles TestFlight/App
+Store releases — it isn't covered by workspace-wide `cargo check`/`test`
+runs from `client/`. iOS disables the daemon's late-wakeup tamper check
+(`IosPlatformHooks::lifecycle_enabled() -> false`) — the Safari extension
+host has no boot/shutdown/session API surface, so there's no meaningful
+"late wakeup" signal there — but otherwise runs the same daemon as every
+other platform.
 
 ## Where to find what
 
@@ -91,6 +97,11 @@ actively running, which doesn't fit this daemon's background-monitoring model.
   other `native*` JNI entry point calls a method on it directly
   (`nativeRunDaemonLoop` → `run_forever()`, `nativeStopDaemon` →
   `request_stop()`)
+- `ios/rust/src/lib.rs` — same C-FFI/`Arc<Daemon>` shape as Android
+  (`virtue_ios_native_init` builds one daemon; every other
+  `virtue_ios_native_*` call is a direct method call on it);
+  `IosPlatformHooks::lifecycle_enabled()` returns `false`, so
+  `lifecycle::tick` never runs there
 
 ### Configuration
 
