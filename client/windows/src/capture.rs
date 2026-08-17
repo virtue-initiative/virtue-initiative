@@ -3,9 +3,7 @@ use std::io::Cursor;
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, anyhow};
-use virtue_core::{
-    CoreError, CoreResult, LifecycleHooks, PlatformHooks, Screenshot, ScreenshotHooks,
-};
+use virtue_core::{CoreError, CoreResult, LifecycleHooks, Screenshot, ScreenshotHooks};
 
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Gdi::{
@@ -405,14 +403,6 @@ impl ScreenshotHooks for WindowsPlatformHooks {
 }
 
 impl LifecycleHooks for WindowsPlatformHooks {
-    fn get_boot_clock_ms(&self) -> CoreResult<i64> {
-        read_boot_clock_ms()
-    }
-
-    fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
-        read_monotonic_clock_ms()
-    }
-
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {
         read_last_login_utc_ms()
     }
@@ -421,8 +411,6 @@ impl LifecycleHooks for WindowsPlatformHooks {
         read_last_logout_utc_ms()
     }
 }
-
-impl PlatformHooks for WindowsPlatformHooks {}
 
 #[cfg(test)]
 mod tests {

@@ -9,11 +9,9 @@ use crate::module::upload::{FlushBatchNow, Upload};
 
 /// High-level client for communicating with a daemon over any [`EventChannel`].
 ///
-/// Generic over `C` so the same implementation works whether `C` is an
-/// in-process [`EventBus`] (tests, fully in-process use) or a
-/// [`RemoteEventBus`] (Linux/macOS socket, Windows in-process channel).
+/// Generic over `C` so the same implementation works with any transport —
+/// today that's [`RemoteEventBus`] (Linux/macOS socket).
 ///
-/// [`EventBus`]: crate::events::EventBus
 /// [`RemoteEventBus`]: crate::events::RemoteEventBus
 pub struct ClientController<C: EventChannel> {
     channel: C,
@@ -74,8 +72,8 @@ impl<C: EventChannel> ClientController<C> {
         })
     }
 
-    /// Queue `upload` into the daemon's live batch/hash pipeline. Picked up on
-    /// the daemon's next ping cycle (≤1s), same as an in-process `Upload`.
+    /// Queue `upload` into the daemon's live batch/hash pipeline. Picked up
+    /// promptly — the daemon's condvar wakes its loop as soon as this lands.
     pub fn queue_upload(&self, upload: Upload) -> CoreResult<()> {
         self.channel.publish(upload)
     }
@@ -104,53 +102,55 @@ impl ClientController<crate::events::RemoteEventBus> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 mod tests {
     use super::*;
-    use crate::events::bus::{Emitter, EventBus, Observer, StateType};
-    use std::any::Any;
+    use crate::events::IpcListener;
+    use std::thread;
 
-    /// Replies to `LoginRequested`/`LogoutRequested` with a failure result
-    /// carrying an empty error string, mimicking a daemon-reported failure
-    /// with no message (e.g. an empty response body upstream).
-    struct EmptyErrorResponder;
-
-    impl Observer for EmptyErrorResponder {
-        fn init(&mut self, _bus: &mut EventBus, _state: StateType) -> CoreResult<()> {
-            Ok(())
-        }
-
-        fn on_event(&mut self, event: &dyn Any, emitter: &Emitter) -> CoreResult<()> {
-            crate::dispatch_event!(event, {
-                _: LoginRequested => emitter.send(LoginResult {
+    /// A daemon-side stub that replies to `LoginRequested`/`LogoutRequested`
+    /// with a failure result carrying an empty error string, mimicking a
+    /// daemon-reported failure with no message.
+    fn spawn_empty_error_daemon() -> (std::path::PathBuf, thread::JoinHandle<()>) {
+        let sock = std::env::temp_dir().join(format!(
+            "virtue-controller-test-{}-{}.sock",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .subsec_nanos()
+        ));
+        let listener = IpcListener::bind(&sock).expect("bind");
+        let sock_for_thread = sock.clone();
+        let handle = thread::spawn(move || {
+            let mut remote = listener.blocking_accept().expect("accept");
+            let sender = remote.sender();
+            remote.subscribe(move |_: &LoginRequested| {
+                sender.send(LoginResult {
                     success: false,
                     error: Some(String::new()),
                     device_id: None,
-                }),
-                _: LogoutRequested => emitter.send(LogoutResult {
+                })
+            });
+            let sender2 = remote.sender();
+            remote.subscribe(move |_: &LogoutRequested| {
+                sender2.send(LogoutResult {
                     success: false,
                     error: Some(String::new()),
-                }),
-            })
-        }
-
-        fn save(&self) -> CoreResult<StateType> {
-            Ok(StateType::Null)
-        }
-
-        fn name(&self) -> &'static str {
-            "empty_error_responder"
-        }
-
-        fn as_any_mut(&mut self) -> &mut dyn Any {
-            self
-        }
+                })
+            });
+            remote.start();
+            // Keep the connection (and its reader thread) alive long enough
+            // for the test's requests to round-trip.
+            thread::sleep(std::time::Duration::from_secs(2));
+        });
+        (sock_for_thread, handle)
     }
 
     #[test]
     fn empty_login_error_becomes_default_remote_message() {
-        let bus = EventBus::new(vec![Box::new(EmptyErrorResponder)], StateType::Null).unwrap();
-        let mut controller = ClientController::new(bus);
+        let (sock, _daemon) = spawn_empty_error_daemon();
+        let mut controller = ClientController::connect(&sock).expect("connect");
 
         let err = controller
             .login("user@example.com", "password", None)
@@ -160,12 +160,13 @@ mod tests {
             CoreError::Remote(message) => assert_eq!(message, "login failed"),
             other => panic!("expected CoreError::Remote, got {other:?}"),
         }
+        let _ = std::fs::remove_file(&sock);
     }
 
     #[test]
     fn empty_logout_error_becomes_default_remote_message() {
-        let bus = EventBus::new(vec![Box::new(EmptyErrorResponder)], StateType::Null).unwrap();
-        let mut controller = ClientController::new(bus);
+        let (sock, _daemon) = spawn_empty_error_daemon();
+        let mut controller = ClientController::connect(&sock).expect("connect");
 
         let err = controller.logout().expect_err("logout should fail");
 
@@ -173,5 +174,6 @@ mod tests {
             CoreError::Remote(message) => assert_eq!(message, "logout failed"),
             other => panic!("expected CoreError::Remote, got {other:?}"),
         }
+        let _ = std::fs::remove_file(&sock);
     }
 }

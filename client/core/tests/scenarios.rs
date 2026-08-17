@@ -1,15 +1,15 @@
 //! Behavioral scenario tests using the `Scenario` DSL.
 //!
-//! Each scenario uses `virtue_core::testing::Scenario` to drive the service
-//! through a sequence of events without real HTTP, real screenshots, or
-//! wall-clock time.
+//! Each scenario uses `virtue_core::testing::Scenario` to drive a fully
+//! assembled `Daemon` through a sequence of ticks without real HTTP, real
+//! screenshots, real random draws, or wall-clock time.
 //!
 //! Run with:
 //!   cargo test -p virtue-core --features testing --test scenarios
 
-use virtue_core::module::lifecycle::LifecycleObserverState;
+use virtue_core::module::upload::Upload;
 use virtue_core::testing::Scenario;
-use virtue_core::{CaptureFailed, LogoutRequested, Upload, UploadKind, UserStopRequested};
+use virtue_core::{CoreError, UploadKind};
 
 // ── Basic unauthenticated loop ────────────────────────────────────────────────
 
@@ -18,52 +18,48 @@ fn fresh_unauthenticated_service_loops_cleanly_with_no_uploads() {
     let mut scenario = Scenario::new();
 
     scenario
-        .assert_is_running(true)
-        .assert_is_authenticated(false);
-
-    scenario
         .at_t(0)
-        .loop_iteration()
+        .tick()
         .at_t(60_000)
-        .loop_iteration()
+        .tick()
         .at_t(120_000)
-        .loop_iteration();
+        .tick();
 
+    let status = scenario.status();
+    assert!(status.is_running);
+    assert!(!status.is_authenticated);
     scenario
-        .assert_is_running(true)
-        .assert_is_authenticated(false)
         .assert_batch_upload_count(0)
         .assert_notify_count(0)
         .assert_errors_log_empty();
 }
 
-// ── ScreenshotModule ───────────────────────────────────────────────────────────
+// ── Screenshots ────────────────────────────────────────────────────────────────
 
 #[test]
 fn screenshot_taken_immediately_on_first_loop() {
     let mut scenario = Scenario::authenticated();
-    scenario.at_t(0).loop_iteration();
-    // Screenshot flows through batch; at least one upload expected.
+    scenario.at_t(0).tick();
     let has_upload = {
         let s = scenario.api.state();
         !s.batch_uploads.is_empty() || !s.hash_uploads.is_empty()
     };
     assert!(
         has_upload,
-        "expected at least one upload after first authenticated loop"
+        "expected at least one upload after first authenticated tick"
     );
 }
 
 #[test]
 fn screenshot_not_retaken_before_interval_elapses() {
     let mut scenario = Scenario::authenticated();
-    scenario.set_last_screenshot_at_ms(Some(0));
+    scenario.with_state_mut(|s| s.screenshot.next_screenshot_at_ms = Some(60_000));
     let uploads_before = {
         let s = scenario.api.state();
         s.batch_uploads.len() + s.hash_uploads.len()
     };
 
-    scenario.at_t(30_000).loop_iteration();
+    scenario.at_t(30_000).tick();
 
     let uploads_after = {
         let s = scenario.api.state();
@@ -71,149 +67,148 @@ fn screenshot_not_retaken_before_interval_elapses() {
     };
     assert_eq!(
         uploads_after, uploads_before,
-        "no new uploads expected before 60 s screenshot interval"
+        "no new uploads expected before the drawn screenshot time"
     );
 }
 
 #[test]
 fn screenshot_retaken_after_interval() {
     let mut scenario = Scenario::authenticated();
-    scenario.set_last_screenshot_at_ms(Some(0));
-    scenario.set_last_batch_at_ms(Some(0));
+    scenario.with_state_mut(|s| {
+        s.screenshot.next_screenshot_at_ms = Some(30_000);
+        s.upload.last_batch_at_ms = Some(0);
+    });
 
-    scenario.at_t(60_001).loop_iteration();
+    scenario.at_t(60_001).tick();
 
     let has_upload = {
         let s = scenario.api.state();
         !s.batch_uploads.is_empty() || !s.hash_uploads.is_empty()
     };
-    assert!(has_upload, "expected screenshot upload after 60 s interval");
+    assert!(has_upload, "expected screenshot upload once due");
 }
 
-// ── LifecycleModule ───────────────────────────────────────────────────────────
-
-#[test]
-fn login_poll_emits_lifecycle_upload() {
-    let mut scenario = Scenario::authenticated();
-    scenario.platform.set_last_login(Some(500));
-    scenario.at_t(1_000).loop_iteration();
-    assert!(
-        !scenario.api.state().hash_uploads.is_empty(),
-        "expected at least one hash upload from the SystemLogin lifecycle event"
-    );
-}
+// ── UserStopRequested (unrelated to the late-wakeup model, preserved) ──────────
 
 #[test]
 fn user_stop_emits_high_risk_upload() {
     let mut scenario = Scenario::authenticated();
-    scenario.queue(UserStopRequested {
-        source: "test".into(),
-    });
-    scenario.at_t(0).loop_iteration();
+    scenario.note_user_stop("test");
+    scenario.at_t(0).tick();
     assert!(
         !scenario.api.state().notify_calls.is_empty(),
         "expected an immediate notification for UserStop alert"
     );
 }
 
+// ── Late-wakeup model (client/core/SPEC.md §2) ─────────────────────────────────
+
 #[test]
-fn unexpected_gap_batches_alert_without_email() {
+fn late_wakeup_over_one_minute_triggers_alert() {
     let mut scenario = Scenario::authenticated();
-    // First loop establishes a baseline heartbeat sample.
-    scenario.at_t(0).loop_iteration();
-    // Suppress a second screenshot so the only new upload traffic is the alert itself.
-    scenario.set_last_screenshot_at_ms(Some(121_000));
-    let hashes_before = scenario.api.state().hash_uploads.len();
-    // A single 121s gap exceeds the sliding-window budget (120s) in one shot, so the
-    // UnexpectedGap alert fires — but it's high-risk, not immediate.
-    scenario.at_t(121_000).loop_iteration();
-    let state = scenario.api.state();
+    // First tick establishes a scheduled `next_wakeup_at_ms`.
+    scenario.at_t(0).tick();
+    let expected = scenario.state().next_wakeup_at_ms;
+
+    // Wake up 70s later than scheduled: over the 1-minute single-wakeup threshold.
+    scenario.at_t(expected + 70_000).tick();
+
     assert!(
-        state.notify_calls.is_empty(),
-        "unexpected gap must not trigger an immediate (emailed) notification"
+        scenario
+            .state()
+            .lifecycle
+            .late_wakeups
+            .iter()
+            .any(|&d| d > 60_000),
+        "expected the lateness to be recorded"
     );
+    let has_upload = {
+        let s = scenario.api.state();
+        !s.hash_uploads.is_empty() || !s.batch_uploads.is_empty()
+    };
     assert!(
-        state.hash_uploads.len() > hashes_before,
-        "unexpected gap alert should still be recorded via the batched hash path"
+        has_upload,
+        "late-wakeup alert should be recorded via the upload pipeline"
     );
 }
 
 #[test]
-fn suspend_divergence_suppresses_unexpected_gap_alert() {
+fn late_wakeup_near_login_is_excused() {
     let mut scenario = Scenario::authenticated();
-    scenario.at_t(1_000).loop_iteration();
-    // Simulate an 11s suspend: monotonic only advances 1s while boot/wall-clock
-    // advance 12s — the awake gap (1s) is well under threshold, so no alert.
-    scenario.platform.set_boot_clock_ms(12_000);
-    scenario.platform.set_monotonic_clock_ms(2_000);
-    scenario.at_t(12_000).loop_iteration();
-    assert_eq!(
-        scenario.api.state().notify_calls.len(),
-        0,
-        "expected no immediate notification when a suspend explains the gap"
+    scenario.at_t(0).tick();
+    let expected = scenario.state().next_wakeup_at_ms;
+    let late_at = expected + 70_000;
+
+    scenario.platform.set_last_login(Some(late_at));
+    scenario.at_t(late_at).tick();
+
+    assert!(
+        scenario.state().lifecycle.late_wakeups.is_empty(),
+        "a wakeup near a system login must be excused, not recorded"
     );
 }
 
-// ── CaptureAvailabilityModule ─────────────────────────────────────────────────
+// ── CaptureAvailability ─────────────────────────────────────────────────────────
+
+fn force_screenshot_due(scenario: &mut Scenario) {
+    scenario.with_state_mut(|s| s.screenshot.next_screenshot_at_ms = None);
+}
 
 #[test]
 fn four_capture_failures_below_threshold_no_upload() {
     let mut scenario = Scenario::authenticated();
-    scenario.set_last_screenshot_at_ms(Some(0));
     for _ in 0..4 {
-        scenario.queue(CaptureFailed);
+        scenario
+            .platform
+            .queue_screenshot(Err(CoreError::CommandFailed("boom".into())));
     }
-    scenario.at_t(30_000).loop_iteration();
+    for i in 0..4 {
+        force_screenshot_due(&mut scenario);
+        scenario.at_t((i + 1) * 1_000).tick();
+    }
     let state = scenario.api.state();
-    assert_eq!(
-        state.hash_uploads.len(),
-        0,
-        "4 failures < threshold, no hash upload"
-    );
-    assert_eq!(
-        state.batch_uploads.len(),
-        0,
-        "4 failures < threshold, no batch upload"
-    );
-    assert_eq!(
-        state.notify_calls.len(),
-        0,
-        "4 failures < threshold, no notification"
+    assert!(
+        state.hash_uploads.is_empty() && state.batch_uploads.is_empty(),
+        "4 failures < threshold, no upload expected"
     );
 }
 
 #[test]
 fn five_capture_failures_triggers_upload() {
     let mut scenario = Scenario::authenticated();
-    scenario.set_last_screenshot_at_ms(Some(0));
-    scenario.set_last_batch_at_ms(Some(0));
     for _ in 0..5 {
-        scenario.queue(CaptureFailed);
+        scenario
+            .platform
+            .queue_screenshot(Err(CoreError::CommandFailed("boom".into())));
     }
-    scenario.at_t(30_000).loop_iteration();
+    for i in 0..5 {
+        force_screenshot_due(&mut scenario);
+        scenario.at_t((i + 1) * 1_000).tick();
+    }
+    let state = scenario.api.state();
     assert!(
-        !scenario.api.state().hash_uploads.is_empty(),
-        "5 failures == threshold should trigger Upload → hash upload"
+        !state.hash_uploads.is_empty() || !state.batch_uploads.is_empty(),
+        "5 failures == threshold should trigger an upload"
     );
 }
 
-// ── UploadModule ──────────────────────────────────────────────────────────────
+// ── Upload: batching ──────────────────────────────────────────────────────────
 
 #[test]
 fn low_risk_upload_queued_until_batch_interval() {
     let mut scenario = Scenario::authenticated();
-    scenario.set_last_batch_at_ms(Some(0));
-    scenario.queue(Upload {
+    scenario.with_state_mut(|s| s.upload.last_batch_at_ms = Some(0));
+    scenario.queue_upload(Upload {
         risk: 0.0,
         kind: UploadKind::Dev {
             title: "test-event".into(),
             details: None,
         },
     });
-    scenario.at_t(30_000).loop_iteration();
+    scenario.at_t(30_000).tick();
     assert!(
         !scenario.api.state().hash_uploads.is_empty(),
-        "hash should upload immediately for low-risk events"
+        "hash should upload promptly for low-risk events"
     );
     assert_eq!(
         scenario.api.state().batch_uploads.len(),
@@ -225,17 +220,17 @@ fn low_risk_upload_queued_until_batch_interval() {
 #[test]
 fn batch_flushed_after_interval() {
     let mut scenario = Scenario::authenticated();
-    scenario.set_last_batch_at_ms(Some(0));
-    scenario.queue(Upload {
+    scenario.with_state_mut(|s| s.upload.last_batch_at_ms = Some(0));
+    scenario.queue_upload(Upload {
         risk: 0.0,
         kind: UploadKind::Dev {
             title: "test-event".into(),
             details: None,
         },
     });
-    scenario.at_t(30_000).loop_iteration();
+    scenario.at_t(30_000).tick();
     assert_eq!(scenario.api.state().batch_uploads.len(), 0);
-    scenario.at_t(60_000).loop_iteration();
+    scenario.at_t(60_000).tick();
     assert!(
         !scenario.api.state().batch_uploads.is_empty(),
         "batch should flush after 60 s interval"
@@ -245,74 +240,30 @@ fn batch_flushed_after_interval() {
 #[test]
 fn logout_clears_pending_state() {
     let mut scenario = Scenario::authenticated();
-    scenario.set_last_batch_at_ms(Some(0));
-    scenario.queue(Upload {
+    scenario.with_state_mut(|s| s.upload.last_batch_at_ms = Some(0));
+    scenario.queue_upload(Upload {
         risk: 0.0,
         kind: UploadKind::Dev {
             title: "pending-event".into(),
             details: None,
         },
     });
-    scenario.at_t(30_000).loop_iteration();
+    scenario.at_t(30_000).tick();
     assert_eq!(
         scenario.api.state().batch_uploads.len(),
         0,
         "precondition: batch not yet flushed"
     );
-    scenario.queue(LogoutRequested);
-    scenario.at_t(30_000).loop_iteration();
+
+    scenario.logout().expect("logout must succeed");
+    assert!(
+        scenario.state().upload.pending_batch_events.is_empty(),
+        "pending batch events should be discarded on logout"
+    );
     assert_eq!(
         scenario.api.state().batch_uploads.len(),
         0,
-        "pending batch events should be discarded on logout"
-    );
-}
-
-// ── LifecycleModule alert paths ───────────────────────────────────────────────
-
-#[test]
-fn unexpected_start_after_long_gap_since_login_emits_alert() {
-    let mut scenario = Scenario::authenticated();
-    scenario.platform.set_last_login(Some(0));
-    scenario.platform.set_boot_clock_ms(241_000);
-    scenario.platform.set_monotonic_clock_ms(241_000);
-    scenario.at_t(241_000).loop_iteration();
-    // UnexpectedStart is high-risk but batched (no immediate email).
-    let state = scenario.api.state();
-    assert!(
-        state.notify_calls.is_empty(),
-        "unexpected start must not trigger an immediate (emailed) notification"
-    );
-    assert!(
-        !state.hash_uploads.is_empty() || !state.batch_uploads.is_empty(),
-        "unexpected start alert should still be recorded via the batched path"
-    );
-}
-
-#[test]
-fn unexpected_stop_emits_alert_when_logout_arrives_after_last_sample() {
-    let mut scenario = Scenario::authenticated();
-    scenario.at_t(1_000).loop_iteration();
-    scenario.platform.set_last_logout(Some(62_000));
-    scenario.at_t(62_000).loop_iteration();
-    assert!(
-        !scenario.api.state().hash_uploads.is_empty(),
-        "expected an UnexpectedStop hash upload"
-    );
-}
-
-#[test]
-fn lifecycle_observer_state_can_be_seeded_directly() {
-    let mut scenario = Scenario::authenticated();
-    scenario.set_lifecycle_observer_state(LifecycleObserverState {
-        login_id: 5,
-        last_login_utc_ms: 1_000,
-        ..Default::default()
-    });
-    scenario.at_t(1_000).loop_iteration();
-    assert!(
-        scenario.api.state().notify_calls.is_empty(),
-        "seeding lifecycle state alone must not trigger any alert"
+        "no batch upload should have been triggered by logout"
     );
 }
 
@@ -320,20 +271,21 @@ fn lifecycle_observer_state_can_be_seeded_directly() {
 
 #[test]
 fn screenshot_state_survives_restart() {
-    // Create first service, backdate screenshot so the schedule shows "just taken".
+    // Create first service, backdate the schedule so the next screenshot is
+    // due well in the future.
     let mut scenario1 = Scenario::authenticated();
-    scenario1.set_last_screenshot_at_ms(Some(0));
-    scenario1.persist().expect("persist state");
+    scenario1.with_state_mut(|s| s.screenshot.next_screenshot_at_ms = Some(60_000));
+    scenario1.at_t(0).tick(); // persists the seeded state via a no-op tick
     let state_dir = scenario1.state_dir_path().to_path_buf();
 
-    // Second service loads the persisted state and should not take a new screenshot
-    // at t=30_000 because last_screenshot=Some(0) and interval=60 s.
+    // Second service loads the persisted state and should not take a new
+    // screenshot at t=30_000 because the drawn time (60_000) hasn't arrived.
     let mut scenario2 = Scenario::authenticated_with_state_dir(state_dir);
     let uploads_before = {
         let s = scenario2.api.state();
         s.batch_uploads.len() + s.hash_uploads.len()
     };
-    scenario2.at_t(30_000).loop_iteration();
+    scenario2.at_t(30_000).tick();
     let uploads_after = {
         let s = scenario2.api.state();
         s.batch_uploads.len() + s.hash_uploads.len()
@@ -344,6 +296,6 @@ fn screenshot_state_survives_restart() {
 
     assert_eq!(
         uploads_after, uploads_before,
-        "no new uploads expected when screenshot interval has not elapsed after restart"
+        "no new uploads expected when the screenshot schedule hasn't elapsed after restart"
     );
 }

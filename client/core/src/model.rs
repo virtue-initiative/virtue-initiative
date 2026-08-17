@@ -36,18 +36,6 @@ impl From<&str> for Redacted<String> {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum LifecycleKind {
-    /// A suspend interval detected retrospectively via boot-vs-monotonic
-    /// clock divergence.
-    SuspendDetected { duration_ms: i64 },
-    /// Start of a new expected-running window (OS session/user login).
-    SystemLogin { utc_ms: i64 },
-    /// End of an expected-running window (OS session/user logout).
-    SystemLogout { utc_ms: i64 },
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum ScreenshotSkipReason {
     StaticScreen,        // duplicate frame (fingerprint unchanged)
@@ -57,16 +45,11 @@ pub enum ScreenshotSkipReason {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum AlertReason {
-    /// The process wasn't running during a stretch of awake time between a
-    /// known login and the first observed heartbeat.
-    UnexpectedStart,
-    /// The process stopped running before the session's logout, leaving a
-    /// gap between the last heartbeat and the (possibly reconstructed)
-    /// logout timestamp.
-    UnexpectedStop,
-    /// A stretch of awake time (same boot) between two heartbeats with no
-    /// sample — crash, force-kill-and-restart, or frozen process.
-    UnexpectedGap,
+    /// The daemon woke up later than scheduled — either a single wakeup was
+    /// more than a minute late, or the sum of recent lateness (over the last
+    /// 10 tracked wakeups) exceeded 5 minutes. Excused near a system
+    /// login/logout. See `client/core/SPEC.md` §2.
+    LateWakeup,
     /// The user explicitly quit the monitor while it was expected to be
     /// running.
     UserStop,
@@ -87,10 +70,6 @@ pub enum UploadKind {
         /// was available.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         nsfw_detection: Option<f32>,
-    },
-    Lifecycle {
-        #[serde(flatten)]
-        kind: LifecycleKind,
     },
     LifecycleAlert {
         reason: AlertReason,
@@ -124,7 +103,6 @@ impl std::fmt::Debug for UploadKind {
                 "Screenshot {{ image: <{} bytes>, content_type: {content_type:?}, skin_detection: {skin_detection:?}, nsfw_detection: {nsfw_detection:?} }}",
                 image.len()
             ),
-            UploadKind::Lifecycle { kind } => write!(f, "Lifecycle {{ kind: {kind:?} }}"),
             UploadKind::LifecycleAlert { reason } => {
                 write!(f, "LifecycleAlert {{ reason: {reason:?} }}")
             }
@@ -139,25 +117,6 @@ impl std::fmt::Debug for UploadKind {
             UploadKind::Heartbeat => write!(f, "Heartbeat"),
         }
     }
-}
-
-/// A single piece of `ServiceStatus` reported by one module in response to a
-/// `StatusRequest`. Each module emits only the fields it owns; the status
-/// module merges them into a complete `ServiceStatus`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", content = "data", rename_all = "snake_case")]
-pub enum PartialStatus {
-    Auth {
-        is_authenticated: bool,
-        device_id: Option<String>,
-    },
-    Lifecycle {
-        is_running: bool,
-        last_loop_at_ms: Option<i64>,
-    },
-    Upload {
-        pending_request_count: usize,
-    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -306,39 +265,16 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    // `LifecycleKind` must serialize as a bare `"kind"`-tagged object flattened
-    // into `UploadKind::Lifecycle`'s `data` — this is exactly the wire shape
-    // the web viewer's `getLogCategory`/`getLogMessage` assume, and previously
-    // silently drifted from it when the variants gained fields (see #526).
     #[test]
-    fn lifecycle_kind_serializes_to_flattened_tagged_shape() {
-        assert_eq!(
-            serde_json::to_value(LifecycleKind::SuspendDetected {
-                duration_ms: 60_033
-            })
-            .unwrap(),
-            json!({ "kind": "suspend_detected", "duration_ms": 60_033 })
-        );
-        assert_eq!(
-            serde_json::to_value(LifecycleKind::SystemLogin { utc_ms: 123 }).unwrap(),
-            json!({ "kind": "system_login", "utc_ms": 123 })
-        );
-        assert_eq!(
-            serde_json::to_value(LifecycleKind::SystemLogout { utc_ms: 456 }).unwrap(),
-            json!({ "kind": "system_logout", "utc_ms": 456 })
-        );
-    }
-
-    #[test]
-    fn upload_kind_lifecycle_flattens_kind_into_data() {
-        let upload = UploadKind::Lifecycle {
-            kind: LifecycleKind::SystemLogin { utc_ms: 789 },
+    fn upload_kind_lifecycle_alert_serializes_to_tagged_shape() {
+        let upload = UploadKind::LifecycleAlert {
+            reason: AlertReason::LateWakeup,
         };
         assert_eq!(
             serde_json::to_value(upload).unwrap(),
             json!({
-                "type": "lifecycle",
-                "data": { "kind": "system_login", "utc_ms": 789 }
+                "type": "lifecycle_alert",
+                "data": { "reason": "late_wakeup" }
             })
         );
     }

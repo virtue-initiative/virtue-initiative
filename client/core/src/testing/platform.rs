@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::error::CoreResult;
 use crate::model::Screenshot;
-use crate::platform::{LifecycleHooks, PlatformHooks, ScreenshotHooks};
+use crate::platform::{LifecycleHooks, ScreenshotHooks};
 use crate::testing::clock::MockClock;
 use crate::testing::fixtures::tiny_png_screenshot;
 
@@ -18,8 +18,6 @@ struct TestPlatformInner {
     take_call_count: u64,
     default_screenshot: Screenshot,
     locked_or_screensaver: bool,
-    boot_clock_override_ms: Option<i64>,
-    monotonic_clock_override_ms: Option<i64>,
     last_login_utc_ms: Option<i64>,
     last_logout_utc_ms: Option<i64>,
 }
@@ -37,8 +35,6 @@ impl TestPlatformHooks {
                 take_call_count: 0,
                 default_screenshot: tiny_png_screenshot(),
                 locked_or_screensaver: false,
-                boot_clock_override_ms: None,
-                monotonic_clock_override_ms: None,
                 last_login_utc_ms: None,
                 last_logout_utc_ms: None,
             })),
@@ -59,22 +55,6 @@ impl TestPlatformHooks {
 
     pub fn set_locked_or_screensaver(&self, locked: bool) {
         self.lock().locked_or_screensaver = locked;
-    }
-
-    /// Override the boot clock returned by `get_boot_clock_ms`. Sticky until
-    /// overridden again; with no override, it tracks the shared `MockClock`
-    /// in lockstep (normal operation, no suspend/reboot).
-    pub fn set_boot_clock_ms(&self, ms: i64) {
-        self.lock().boot_clock_override_ms = Some(ms);
-    }
-
-    /// Override the monotonic clock returned by `get_monotonic_clock_ms`.
-    /// Sticky until overridden again. Freezing this while the wall clock (and
-    /// an unfrozen boot clock) advance simulates a suspend; resetting both
-    /// boot and monotonic to a small value while the wall clock keeps
-    /// climbing simulates a reboot.
-    pub fn set_monotonic_clock_ms(&self, ms: i64) {
-        self.lock().monotonic_clock_override_ms = Some(ms);
     }
 
     pub fn set_last_login(&self, utc_ms: Option<i64>) {
@@ -121,20 +101,6 @@ impl LifecycleHooks for TestPlatformHooks {
         Ok(self.clock.now_ms())
     }
 
-    fn get_boot_clock_ms(&self) -> CoreResult<i64> {
-        Ok(self
-            .lock()
-            .boot_clock_override_ms
-            .unwrap_or_else(|| self.clock.now_ms()))
-    }
-
-    fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
-        Ok(self
-            .lock()
-            .monotonic_clock_override_ms
-            .unwrap_or_else(|| self.clock.now_ms()))
-    }
-
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {
         Ok(self.lock().last_login_utc_ms)
     }
@@ -143,5 +109,3 @@ impl LifecycleHooks for TestPlatformHooks {
         Ok(self.lock().last_logout_utc_ms)
     }
 }
-
-impl PlatformHooks for TestPlatformHooks {}

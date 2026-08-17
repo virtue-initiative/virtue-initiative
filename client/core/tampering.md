@@ -1,79 +1,41 @@
 # Tampering Detection
 
-Canonical spec for `LifecycleModule` (`client/core/src/module/lifecycle.rs`).
-For a diagrammed walkthrough see the developer doc at
-`landing/src/content/help/developer/lifecycle.md`.
+**This document previously described a richer boot-vs-monotonic-clock
+suspend/reboot model (`GapTracker`, three separate gap buckets
+`UnexpectedGap`/`UnexpectedStart`/`UnexpectedStop`, `SuspendDetected`/
+`SystemLogin`/`SystemLogout` log rows, per-bucket sliding-window budgets and
+cooldowns). That model was retired in the single-sequential-daemon-loop
+rewrite as a deliberate simplification, not replaced feature-for-feature —
+see the rewrite plan's "Lifecycle model simplification" note. It no longer
+reflects the code.**
 
-## Model
+The current, much simpler model is specified in `SPEC.md` §2 (the daemon
+loop spec, kept minimal by design):
 
-The monitoring process is expected to run for a known window — login →
-logout. We detect any stretch of that window it wasn't running, excluding
-suspend, which is identified by comparing a boot clock (includes suspend)
-against a monotonic clock (excludes suspend) each `Ping`, not by subscribing
-to OS sleep/wake events.
+- Each tick compares the actual wakeup time to the wakeup time it was
+  scheduled for. The difference is appended to a last-10 array
+  (`LifecycleState.late_wakeups`), unless the wakeup is within 2 minutes of
+  a system login, or was scheduled within 2 minutes of a system logout — in
+  either case it's excused, not recorded.
+- An alert (`AlertReason::LateWakeup`, `HIGH_RISK_LIFECYCLE_ALERT`) fires
+  whenever a single entry exceeds 1 minute, or the sum of the array's
+  non-negative entries exceeds 5 minutes.
+- `UserStop` (`EXTRA_HIGH_RISK`, immediate) is unrelated to the above — it's
+  driven directly by an explicit user action (`Daemon::note_user_stop`,
+  reached via `UserStopRequested` over IPC) and was preserved unchanged
+  through the rewrite.
 
-## Events / log entries (closed set — exactly these seven)
-
-Informational (risk 0.0):
-
-- `SuspendDetected { duration_ms }` — a suspend interval detected
-  retrospectively via boot-vs-monotonic clock divergence
-- `SystemLogin { utc_ms }` — start of a new expected-running window
-- `SystemLogout { utc_ms }` — end of an expected-running window
-
-Alerts:
-
-- `UnexpectedStart` (risk `HIGH_RISK_LIFECYCLE_ALERT`, batched) — awake time
-  between a known login and the first heartbeat sample since
-- `UnexpectedStop` (risk `HIGH_RISK_LIFECYCLE_ALERT`, batched) — gap between
-  the last known-alive sample and the session's logout
-- `UnexpectedGap` (risk `HIGH_RISK_LIFECYCLE_ALERT`, batched) — awake time
-  between two consecutive samples in the same boot with no sample
-- `UserStop` (risk `EXTRA_HIGH_RISK`, immediate/emailed) — driven directly by
-  `UserStopRequested`, fired by every platform's explicit-stop entry point
-  before the process actually exits
-
-`ProcessStarted`/`ProcessStopped` still exist as internal events — the
-former drives when to poll the login/logout hooks, the latter is the
-upload module's flush-opportunity trigger — but produce no log row of
-their own.
-
-## Rules
-
-- Suspend is excused by construction: the monotonic clock doesn't advance
-  during suspend, so a mid-session `Δmonotonic` never includes suspended
-  time. No separate suspend-tracking state is needed.
-- Reboots reset the boot-relative clocks; a boot-clock value smaller than the
-  last recorded one is the reboot signal. Any math spanning a reboot anchors
-  on UTC + the login/logout hooks instead.
-- Each of the three gap buckets (`UnexpectedGap`/`UnexpectedStart`/
-  `UnexpectedStop`) uses the same sliding-window mechanism — gaps are summed
-  over a 10-minute window, and an alert only fires once the summed gap time
-  crosses that bucket's budget, with a 5-minute cooldown between repeat
-  alerts per bucket — but each bucket has its own budget: `UnexpectedGap`
-  (mid-session) is 2 min, `UnexpectedStart` is 4 min (to tolerate longer
-  boots), and `UnexpectedStop` is unchanged at 1 min. A single stall
-  shouldn't alert on its own.
-- A reconstructed (unclean-shutdown) logout timestamp is a _floor_, not
-  exact — it sits at or before the true end, so the computed
-  `UnexpectedStop` gap can only shrink, never be invented. A simultaneous
-  force-kill + power-pull correctly produces ~0 gap and stays silent; that's
-  intentional, not a detection gap (the machine was down, so no monitored
-  activity was possible either way).
-- `UserStop` and a later `UnexpectedStop` for the same incident are
-  independent — a user-initiated stop doesn't suppress or excuse the
-  eventual gap evaluation once the real logout timestamp arrives.
-- A sample recorded under an older login/logout window is never used for
-  mid-session `UnexpectedGap` evaluation against a newly observed login —
-  that elapsed time was already assessed via `UnexpectedStart`/
-  `UnexpectedStop` against that window's own boundary, so reusing it here
-  too would double-count a clean sign-out/sign-in cycle (no reboot) as a
-  false gap.
+Implementation: `client/core/src/module/lifecycle.rs`.
 
 ## Known limits (accepted under the current threat model)
 
-- **Quit-and-never-restart** produces no next-startup, so it's invisible to
+- **Quit-and-never-restart** produces no next tick, so it's invisible to
   this model locally. Caught only by heartbeat silence — a partner noticing
   logs stop arriving.
 - **Client-stored state is trusted.** Not defending against local tampering
   yet; that's a separate follow-up.
+- The simplified model no longer distinguishes _why_ a wakeup was late
+  (crash vs. suspend vs. late boot vs. force-kill-before-logout) the way the
+  retired model's three separate buckets did — it only measures lateness
+  against the schedule. This is an intentional trade of detection nuance for
+  a much smaller, easier-to-reason-about implementation.

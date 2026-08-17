@@ -14,7 +14,7 @@ use std::process::ExitCode;
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 #[cfg(debug_assertions)]
-use virtue_core::{AlertReason, LifecycleKind, ScreenshotSkipReason};
+use virtue_core::{AlertReason, ScreenshotSkipReason};
 use virtue_core::{ClientController, ScreenshotHooks, ServiceStatus, Upload, UploadKind};
 
 use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_backend};
@@ -96,10 +96,7 @@ struct SendLogArgs {
     /// Log type to emit. Use `all` to queue one of every type.
     #[arg(long = "type", value_name = "TYPE")]
     log_type: String,
-    /// Lifecycle kind (snake_case) when --type lifecycle, e.g. system_login, login.
-    #[arg(long)]
-    kind: Option<String>,
-    /// Alert reason (snake_case) when --type lifecycle_alert, e.g. ping_gap_while_running.
+    /// Alert reason (snake_case) when --type lifecycle_alert, e.g. late_wakeup.
     #[arg(long)]
     reason: Option<String>,
     /// Message body when --type alert.
@@ -387,15 +384,6 @@ fn build_send_kind(args: &SendLogArgs) -> Result<UploadKind> {
         Ok(serde_json::Value::String(value.to_string()))
     };
     match args.log_type.as_str() {
-        "lifecycle" => {
-            let kind = args
-                .kind
-                .as_deref()
-                .context("--kind is required for --type lifecycle")?;
-            let kind: LifecycleKind = serde_json::from_value(parse_enum(kind)?)
-                .with_context(|| format!("unknown lifecycle kind: {kind}"))?;
-            Ok(UploadKind::Lifecycle { kind })
-        }
         "lifecycle_alert" => {
             let reason = args
                 .reason
@@ -426,7 +414,7 @@ fn build_send_kind(args: &SendLogArgs) -> Result<UploadKind> {
             details: args.details.clone(),
         }),
         other => anyhow::bail!(
-            "unsupported --type {other:?} (expected: lifecycle, lifecycle_alert, screenshot_skipped, alert, capture_failed, dev, screenshot, or all)"
+            "unsupported --type {other:?} (expected: lifecycle_alert, screenshot_skipped, alert, capture_failed, dev, screenshot, or all)"
         ),
     }
 }
@@ -435,16 +423,7 @@ fn build_send_kind(args: &SendLogArgs) -> Result<UploadKind> {
 #[cfg(debug_assertions)]
 fn all_send_kinds() -> Vec<UploadKind> {
     use AlertReason::*;
-    let lifecycle = [
-        LifecycleKind::SuspendDetected {
-            duration_ms: 60_000,
-        },
-        LifecycleKind::SystemLogin { utc_ms: 0 },
-        LifecycleKind::SystemLogout { utc_ms: 0 },
-    ]
-    .into_iter()
-    .map(|kind| UploadKind::Lifecycle { kind });
-    let alerts = [UnexpectedStart, UnexpectedStop, UnexpectedGap, UserStop]
+    let alerts = [LateWakeup, UserStop]
         .into_iter()
         .map(|reason| UploadKind::LifecycleAlert { reason });
     let skips = [
@@ -453,8 +432,7 @@ fn all_send_kinds() -> Vec<UploadKind> {
     ]
     .into_iter()
     .map(|reason| UploadKind::ScreenshotSkipped { reason });
-    lifecycle
-        .chain(alerts)
+    alerts
         .chain(skips)
         .chain([
             UploadKind::Alert {

@@ -4070,7 +4070,6 @@ dependencies = [
  "hostname",
  "image",
  "ksni",
- "libc",
  "rustyline",
  "serde",
  "serde_json",

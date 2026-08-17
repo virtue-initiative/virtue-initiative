@@ -1,9 +1,9 @@
 pub mod api;
-pub mod assembly;
 pub mod build_info;
 pub mod config;
 pub mod controller;
 pub mod crypto;
+pub mod daemon;
 pub mod error;
 pub mod events;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -12,38 +12,34 @@ pub mod logging;
 pub mod model;
 pub mod module;
 pub mod platform;
+pub mod rng;
 pub mod state;
 pub mod storage;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
-pub use assembly::{build_default_modules, build_default_modules_reqwest};
 pub use build_info::{BUILD_LABEL, build_label};
 pub use config::{
     Config, DEFAULT_API_BASE_URL, default_batch_window_seconds, default_capture_interval_seconds,
 };
 pub use controller::ClientController;
+pub use daemon::{DAEMON_STATE_VERSION, Daemon, DaemonState};
 pub use error::{CoreError, CoreResult};
-pub use events::{
-    Emitter, Error as EventError, Event, EventBus, EventChannel, Observer, Ping, StateType,
-};
+pub use events::{Error as EventError, Event, EventChannel};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use events::{IpcError, IpcListener, RemoteEventBus, RemoteSender};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use ipc_bridge::IpcBridge;
 pub use model::{
-    AlertReason, DeviceCredentials, DeviceSettings, LifecycleKind, PartialStatus, Redacted,
-    ScreenshotSkipReason, UploadKind,
+    AlertReason, DeviceCredentials, DeviceSettings, Redacted, ScreenshotSkipReason, UploadKind,
 };
 pub use model::{
     AuthState, BatchUpload, EventData, LogEntry, LoopOutcome, Screenshot, ServiceStatus,
 };
-pub use module::auth::{Login, LoginRequested, LoginResult, Logout, LogoutRequested, LogoutResult};
-pub use module::lifecycle::{ProcessStarted, ProcessStopped, UserStopRequested};
-pub use module::screenshot::CaptureFailed;
+pub use module::auth::{LoginRequested, LoginResult, Logout, LogoutRequested, LogoutResult};
 pub use module::status::{StatusRequest, StatusResponse};
-pub use module::upload::FlushBatchNow;
-pub use module::upload::Upload;
-pub use platform::{LifecycleHooks, PlatformConfig, PlatformHooks, ScreenshotHooks};
+pub use module::upload::{FlushBatchNow, Upload};
+pub use platform::{LifecycleHooks, PlatformHooks, ScreenshotHooks};
+pub use rng::{OsRandomSource, RandomSource};
 pub use state::{load_state, store_state};

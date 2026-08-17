@@ -1,57 +1,22 @@
 pub mod api;
 pub mod clock;
-pub mod event_tester;
 pub mod fixtures;
 pub mod platform;
+pub mod rng;
 pub mod scenario;
-pub mod spawner;
 
 pub use api::{BatchCall, HashCall, MockApiClient, MockApiState, NotifyCall, RegisterDeviceCall};
 pub use clock::MockClock;
-pub use event_tester::{EventTester, EventTesterBuilder};
 pub use fixtures::{tiny_png_bytes, tiny_png_screenshot};
 pub use platform::TestPlatformHooks;
+pub use rng::TestRandomSource;
 pub use scenario::Scenario;
-pub use spawner::InlineSpawner;
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-    use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::Duration;
-
     use super::*;
     use crate::api::ApiTransport;
-    use crate::assembly::build_default_modules;
-    use crate::config::Config;
-    use crate::events::Ping;
-    use crate::events::bus::{EventBus, EventChannel, StateType};
-    use crate::module::status::{StatusRequest, StatusResponse};
-    use crate::platform::{PlatformConfig, ScreenshotHooks};
-
-    static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-    fn temp_state_dir() -> PathBuf {
-        let path = std::env::temp_dir().join(format!(
-            "virtue-core-testing-{}-{}",
-            std::process::id(),
-            TEST_DIR_COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(&path).expect("create temp state dir");
-        path
-    }
-
-    fn test_config(state_dir: PathBuf) -> Config {
-        Config::new(
-            "https://example.invalid",
-            "test-device",
-            "test-platform",
-            state_dir,
-            Duration::from_secs(300),
-            Duration::from_secs(3600),
-        )
-    }
+    use crate::platform::ScreenshotHooks;
 
     #[test]
     fn mock_clock_advances_and_sets() {
@@ -122,36 +87,14 @@ mod tests {
     }
 
     #[test]
-    fn bus_with_default_modules_constructs_and_runs_one_ping() {
-        let state_dir = temp_state_dir();
-        let config = test_config(state_dir.clone());
-        let platform = TestPlatformHooks::new();
-        let api = MockApiClient::new();
-        let inspector = api.clone();
-
-        let observers = build_default_modules(config, platform, api, PlatformConfig::default())
-            .expect("build modules must succeed");
-        let mut bus = EventBus::new(observers, StateType::Null).expect("bus must construct");
-
-        // No auth state → ping must not upload anything.
-        bus.send(Ping).unwrap();
-        bus.iter().unwrap();
-
-        let state = inspector.state();
-        assert!(
-            state.batch_uploads.is_empty(),
-            "unauthenticated loop must not upload batches"
-        );
-        assert!(
-            state.notify_calls.is_empty(),
-            "unauthenticated loop must not send notifications"
-        );
-
-        // Status request must return a valid response.
-        let status: StatusResponse = bus.request(StatusRequest).unwrap();
-        assert!(!status.status.is_authenticated);
-        assert!(status.status.is_running);
-
-        fs::remove_dir_all(&state_dir).ok();
+    fn test_random_source_serves_queued_then_default() {
+        let rng = TestRandomSource::new();
+        rng.queue(0.1);
+        rng.queue(0.2);
+        assert_eq!(rng.uniform(), 0.1);
+        assert_eq!(rng.uniform(), 0.2);
+        assert_eq!(rng.uniform(), 0.5);
+        use crate::rng::RandomSource;
+        let _ = &rng as &dyn RandomSource;
     }
 }

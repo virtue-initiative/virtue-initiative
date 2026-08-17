@@ -1,16 +1,23 @@
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use crate::events::bus::{Emitter, Error as EventError, Event, EventBus, EventChannel};
-use crate::events::remote::{IpcListener, RemoteEventBus, RemoteSender};
-use crate::module::auth::{LoginRequested, LoginResult, Logout, LogoutRequested, LogoutResult};
-use crate::module::lifecycle::{ProcessStopped, UserStopRequested};
+use crate::api::ApiTransport;
+use crate::daemon::Daemon;
+use crate::events::remote::{IpcListener, RemoteEventBus};
+use crate::module::auth::{LoginRequested, LoginResult, LogoutRequested, LogoutResult};
+use crate::module::lifecycle::UserStopRequested;
 use crate::module::status::{StatusRequest, StatusResponse};
 use crate::module::upload::{FlushBatchNow, Upload};
+use crate::platform::PlatformHooks;
 
+/// Accepts Unix-socket connections and wires each one's inbound requests
+/// directly to a shared [`Daemon`]'s synchronous methods, replying on that
+/// same connection. Retains a small broadcast list (via
+/// [`Daemon::add_broadcast_target`]) only for genuinely daemon-initiated
+/// pushes (`Logout`) — everything else is request/response, handled inline
+/// per connection.
 pub struct IpcBridge {
     accept_rx: std::sync::mpsc::Receiver<RemoteEventBus>,
-    clients: Arc<Mutex<Vec<RemoteSender>>>,
 }
 
 impl IpcBridge {
@@ -35,10 +42,7 @@ impl IpcBridge {
                         }
                     }
                 });
-                Some(Self {
-                    accept_rx,
-                    clients: Arc::new(Mutex::new(Vec::new())),
-                })
+                Some(Self { accept_rx })
             }
             Err(e) => {
                 tracing::error!(
@@ -51,65 +55,75 @@ impl IpcBridge {
         }
     }
 
-    /// Broadcast events of type `E` from the bus to all connected remote clients.
-    /// Dead senders (disconnected peers, or whose write fails) are pruned.
-    pub fn subscribe_outbound<E: Event + Clone>(&self, bus: &mut EventBus) {
-        let c = self.clients.clone();
-        bus.subscribe::<E>(move |ev| {
-            c.lock()
-                .unwrap()
-                .retain(|s| s.is_connected() && s.send(ev.clone()).is_ok());
-            Ok(())
-        });
-    }
-
-    /// Subscribe the standard daemon→controller set:
-    /// `LoginResult`, `LogoutResult`, `StatusResponse`, `Logout`, `EventError`.
-    pub fn subscribe_standard_outbound(&self, bus: &mut EventBus) {
-        self.subscribe_outbound::<LoginResult>(bus);
-        self.subscribe_outbound::<LogoutResult>(bus);
-        self.subscribe_outbound::<StatusResponse>(bus);
-        self.subscribe_outbound::<Logout>(bus);
-        self.subscribe_outbound::<EventError>(bus);
-    }
-
-    /// Register handlers on `remote` to forward the standard controller→daemon set
-    /// into the bus via `emitter`:
-    /// `LoginRequested`, `LogoutRequested`, `StatusRequest`, `UserStopRequested`,
-    /// `ProcessStopped`, `Upload`, `FlushBatchNow`.
-    pub fn forward_standard_inbound(remote: &mut RemoteEventBus, emitter: &Emitter) {
-        macro_rules! forward {
-            ($($T:ty),* $(,)?) => {
-                $(let e = emitter.clone(); remote.on::<$T>(move |ev| e.send(ev.clone()));)*
-            };
-        }
-        forward!(
-            LoginRequested,
-            LogoutRequested,
-            StatusRequest,
-            UserStopRequested,
-            ProcessStopped,
-            Upload,
-            FlushBatchNow,
-        );
-    }
-
-    /// Drain newly accepted connections, calling `setup` on each before storing
-    /// its outbound sender. `setup` is `Fn` (not `FnOnce`) — called once per connection.
-    pub fn accept_pending(
-        &mut self,
-        bus: &mut EventBus,
-        setup: impl Fn(&mut RemoteEventBus, &Emitter),
-    ) {
-        // Drop senders for peers that have disconnected. This runs every daemon
-        // loop iteration so dead connections are reclaimed even when no outbound
-        // event is being broadcast, preventing the socket fds from leaking.
-        self.clients.lock().unwrap().retain(|s| s.is_connected());
-
+    /// Drain newly-accepted connections, wiring each one directly to
+    /// `daemon` and starting its reader thread. Call this periodically (e.g.
+    /// once per `Daemon::run_forever` wakeup) from the platform daemon loop.
+    pub fn accept_pending<P, A>(&mut self, daemon: &Arc<Daemon<P, A>>)
+    where
+        P: PlatformHooks,
+        A: ApiTransport + Send + Sync + 'static,
+    {
         while let Ok(mut remote) = self.accept_rx.try_recv() {
-            let e = bus.emitter();
-            setup(&mut remote, &e);
-            self.clients.lock().unwrap().push(remote.sender());
+            let sender = remote.sender();
+            daemon.add_broadcast_target(sender.clone());
+
+            let d = Arc::clone(daemon);
+            let s = sender.clone();
+            remote.subscribe(move |req: &LoginRequested| {
+                let result = match d.login(&req.email, &req.password, req.device_name.as_deref()) {
+                    Ok(device_id) => LoginResult {
+                        success: true,
+                        error: None,
+                        device_id: Some(device_id),
+                    },
+                    Err(err) => LoginResult {
+                        success: false,
+                        error: Some(err.to_string()),
+                        device_id: None,
+                    },
+                };
+                s.send(result)
+            });
+
+            let d = Arc::clone(daemon);
+            let s = sender.clone();
+            remote.subscribe(move |_: &LogoutRequested| {
+                let result = match d.logout() {
+                    Ok(()) => LogoutResult {
+                        success: true,
+                        error: None,
+                    },
+                    Err(err) => LogoutResult {
+                        success: false,
+                        error: Some(err.to_string()),
+                    },
+                };
+                s.send(result)
+            });
+
+            let d = Arc::clone(daemon);
+            let s = sender.clone();
+            remote
+                .subscribe(move |_: &StatusRequest| s.send(StatusResponse { status: d.status() }));
+
+            let d = Arc::clone(daemon);
+            remote.subscribe(move |req: &UserStopRequested| {
+                d.note_user_stop(&req.source);
+                Ok(())
+            });
+
+            let d = Arc::clone(daemon);
+            remote.subscribe(move |req: &Upload| {
+                d.queue_upload(req.clone());
+                Ok(())
+            });
+
+            let d = Arc::clone(daemon);
+            remote.subscribe(move |_: &FlushBatchNow| {
+                d.flush_batch_now();
+                Ok(())
+            });
+
             remote.start();
         }
     }

@@ -16,7 +16,6 @@ dirs = "6"
 futures-util = "0.3"
 hostname = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
-libc = "0.2"
 ksni = { version = "0.3.3", features = ["blocking"] }
 crossterm = "0.28"
 rustyline = "14"

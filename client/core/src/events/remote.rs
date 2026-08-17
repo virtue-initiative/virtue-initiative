@@ -11,8 +11,9 @@ use std::thread;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, CoreResult};
+use crate::logging::log_error;
 
-use super::bus::{Event, EventChannel, log_error};
+use super::channel::{Event, EventChannel};
 
 // ── IPC error ─────────────────────────────────────────────────────────────────
 

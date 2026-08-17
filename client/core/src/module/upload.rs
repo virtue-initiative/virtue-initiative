@@ -1,8 +1,5 @@
 mod batch;
 
-use std::any::Any;
-use std::time::{Duration, Instant};
-
 use serde::{Deserialize, Serialize};
 
 use batch::BatchBuilder;
@@ -10,29 +7,37 @@ pub(crate) use batch::MAX_BATCH_ITEMS_PER_UPLOAD;
 
 use crate::api::{ApiTransport, UploadedBatchResponse};
 use crate::crypto::{CryptoEngine, compute_event_hash, encode_batch_event};
-use crate::error::{CoreError, CoreResult};
-use crate::events::Ping;
-use crate::events::bus::{Emitter, EventBus, Observer, StateType, log_error, log_warning};
-use crate::model::PartialStatus;
-use crate::module::auth::{Login, Logout, LogoutRequested};
-use crate::module::lifecycle::ProcessStopped;
-use crate::module::status::StatusRequest;
+use crate::error::CoreError;
+use crate::logging::{log_error, log_warning};
+use crate::model::{
+    BatchRecipient, BatchUpload, DeviceCredentials, DeviceSettings, LogEntry, NotifyPayload,
+    UploadKind,
+};
+use crate::storage::FileStateStore;
 
+/// Wire message for `ClientController::queue_upload` / `Daemon::queue_upload` —
+/// still needed for IPC serialization even though nothing dispatches it
+/// through an event bus anymore.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Upload {
     pub risk: f32,
     pub kind: UploadKind,
 }
 
+/// Wire message for `ClientController::flush_batch_now` / `Daemon::flush_batch_now`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FlushBatchNow;
-use crate::model::{
-    BatchRecipient, BatchUpload, DeviceCredentials, DeviceSettings, LogEntry, NotifyPayload,
-    UploadKind,
-};
-use crate::platform::ScreenshotHooks;
 
 pub(crate) const POST_LOGIN_PROOF_BATCH_COUNT: u32 = 3;
+const MAX_HASH_RETRIES_PER_LOOP: usize = 8;
+const HASH_TOKEN_MAX_AGE_MS: i64 = 55 * 60 * 1_000;
+
+const INITIAL_BACKOFF_MS: i64 = 1_000; // 1s
+const MAX_BACKOFF_MS: i64 = 20 * 60 * 1_000; // cap at 20 minutes
+
+/// Risk-rating band thresholds mirroring `shared-web/risk.ts` (`getRiskRating`).
+const HIGH_RISK_RATING: f32 = 0.7;
+const MEDIUM_RISK_RATING: f32 = 0.4;
 
 /// A hash-uploaded event awaiting batch upload, paired with its risk so the batch
 /// upload can report how many high/medium-risk events it carries.
@@ -47,15 +52,12 @@ pub struct PendingBatchEvent {
     pub is_screenshot: bool,
     /// Alert-email metadata, set when the event's risk is >= `EXTRA_HIGH_RISK` at
     /// hash time. Rides with this event into the batch it's uploaded in — never
-    /// sent standalone. Local/persisted state only, not part of the wire/hash
-    /// contract.
+    /// sent standalone.
     #[serde(default)]
     pub notify: Option<NotifyPayload>,
 }
 
-/// Builds the notification payload for a high-risk event. Title/details are pulled
-/// from the event body when present (e.g. `Dev` events); otherwise the server
-/// derives a fallback title from the event type.
+/// Builds the notification payload for a high-risk event.
 fn build_notify_payload(entry: &LogEntry) -> NotifyPayload {
     let value = serde_json::to_value(&entry.event).unwrap_or(serde_json::Value::Null);
     let event_type = value
@@ -81,22 +83,13 @@ fn build_notify_payload(entry: &LogEntry) -> NotifyPayload {
     }
 }
 
-const MAX_HASH_RETRIES_PER_LOOP: usize = 8;
-const HASH_TOKEN_MAX_AGE: Duration = Duration::from_secs(55 * 60);
-
-const INITIAL_BACKOFF_MS: i64 = 1_000; // 1s — matches today's single-failure retry-next-tick behavior
-const MAX_BACKOFF_MS: i64 = 20 * 60 * 1_000; // cap at 20 minutes — batch uploads normally happen
-// about once an hour (see DEFAULT_BATCH_WINDOW_SECONDS = 3600 in the Android/iOS crates), so a
-// 20-minute ceiling still guarantees at least ~3 retry attempts within a nominal batch period
-// during a sustained outage, rather than retrying at a rate disconnected from that cadence.
-
-/// Tracks per-queue exponential backoff. Not persisted — resets on process restart,
-/// which is fine: worst case is one immediate retry after a restart, then backoff
-/// re-accumulates.
-#[derive(Default)]
-struct RetryBackoff {
-    next_attempt_at_ms: i64,
-    current_backoff_ms: i64, // 0 until first failure; treated as INITIAL_BACKOFF_MS on first use
+/// Persisted per-queue exponential backoff (see `Daemon::new`'s comment on
+/// why this now survives a restart, unlike the pre-rewrite in-memory version).
+#[derive(Serialize, Deserialize, Default, Clone)]
+#[serde(default)]
+pub struct RetryBackoff {
+    pub next_attempt_at_ms: i64,
+    pub current_backoff_ms: i64, // 0 until first failure; treated as INITIAL_BACKOFF_MS on first use
 }
 
 impl RetryBackoff {
@@ -121,41 +114,55 @@ impl RetryBackoff {
         self.next_attempt_at_ms = 0;
         self.current_backoff_ms = 0;
     }
+
+    /// Makes the next attempt happen immediately, without resetting the
+    /// growing `current_backoff_ms` — used by an explicit flush request
+    /// (`Daemon::flush_batch_now`, or the shutdown flush) to bypass the
+    /// cooldown for one attempt.
+    fn make_ready_now(&mut self, now_ms: i64) {
+        self.next_attempt_at_ms = now_ms;
+    }
 }
 
-/// Risk-rating band thresholds mirroring `shared-web/risk.ts` (`getRiskRating`).
-/// A batch reports how many of its events land in the high (>= 0.7) and medium
-/// (0.4–0.7) bands so the server can summarize tamper activity in digest emails
-/// without reading the encrypted payload.
-const HIGH_RISK_RATING: f32 = 0.7;
-const MEDIUM_RISK_RATING: f32 = 0.4;
-
 #[derive(Serialize, Deserialize, Default, Clone)]
-pub struct UploadObserverState {
+#[serde(default)]
+pub struct UploadState {
     pub pending_batch_events: Vec<PendingBatchEvent>,
     pub pending_hash_events: Vec<LogEntry>,
     pub last_batch_at_ms: Option<i64>,
     pub post_login_proof_batches_remaining: u32,
-    #[serde(default)]
     pub settings: Option<DeviceSettings>,
-    #[serde(default)]
     pub device_credentials: Option<DeviceCredentials>,
     /// The last `seq` accepted by the hash server for this device — hash-server/SPEC.md
     /// §2.1 requires each `POST /hash` to carry a `seq` strictly greater than this.
     /// Reset to 0 in lockstep with every server-side reset: login, logout, and each
     /// batch upload that lands (the API resets the server's hash state right after
     /// storing the batch).
-    #[serde(default)]
     pub next_hash_seq: u32,
+    pub hash_backoff: RetryBackoff,
+    pub batch_backoff: RetryBackoff,
+    /// Cached hash-server JWT and the UTC-ms time it was fetched. Refreshed via
+    /// `GET /d/device` once older than `HASH_TOKEN_MAX_AGE_MS`.
+    pub hash_token_cache: Option<(String, i64)>,
+    /// Set when a heartbeat or extra-high-risk event is enqueued (or an
+    /// explicit flush is requested); makes the next batch plan bypass the
+    /// interval-wait check. Cleared once a batch successfully lands.
+    pub force_flush: bool,
+    /// Set specifically by a heartbeat enqueue (or an explicit flush);
+    /// additionally bypasses the screen-lock battery gate. Cleared once a
+    /// batch successfully lands.
+    pub bypass_lock: bool,
 }
 
-impl UploadObserverState {
+impl UploadState {
     pub fn reset_for_login(&mut self) {
         self.pending_batch_events.clear();
         self.pending_hash_events.clear();
         self.last_batch_at_ms = None;
         self.post_login_proof_batches_remaining = POST_LOGIN_PROOF_BATCH_COUNT;
         self.next_hash_seq = 0;
+        self.force_flush = false;
+        self.bypass_lock = false;
     }
 
     pub fn reset_for_logout(&mut self) {
@@ -166,6 +173,9 @@ impl UploadObserverState {
         self.settings = None;
         self.device_credentials = None;
         self.next_hash_seq = 0;
+        self.hash_token_cache = None;
+        self.force_flush = false;
+        self.bypass_lock = false;
     }
 
     pub fn pending_request_count(&self) -> usize {
@@ -173,120 +183,261 @@ impl UploadObserverState {
     }
 }
 
-/// Drains a retry queue, calling `try_one` on each item up to `max_retries` times per call.
-fn drain_retry_queue<T>(
-    events: Vec<T>,
-    max_retries: usize,
-    mut try_one: impl FnMut(T) -> Option<T>,
-) -> Vec<T> {
-    let mut still_pending = Vec::with_capacity(events.len());
+/// Enqueues `kind` for hash + batch upload. Called by every other module
+/// instead of publishing an `Upload` event. A no-op while unauthenticated.
+pub fn enqueue(state: &mut UploadState, now_ms: i64, risk: f32, kind: UploadKind) {
+    if state.device_credentials.is_none() {
+        return;
+    }
+    let is_heartbeat = matches!(kind, UploadKind::Heartbeat);
+    let is_high_risk = risk >= crate::module::lifecycle::EXTRA_HIGH_RISK;
+    state.pending_hash_events.push(LogEntry {
+        ts: now_ms,
+        risk: Some(risk),
+        event: kind,
+    });
+    if is_heartbeat {
+        state.force_flush = true;
+        state.bypass_lock = true;
+    } else if is_high_risk {
+        state.force_flush = true;
+    }
+}
+
+/// Bypasses the batch/hash backoff cooldown and forces the next tick to flush
+/// immediately, regardless of screen-lock state. Used by `Daemon::flush_batch_now`
+/// and the daemon's shutdown-time flush.
+pub fn request_immediate_flush(state: &mut UploadState, now_ms: i64) {
+    state.force_flush = true;
+    state.bypass_lock = true;
+    state.hash_backoff.make_ready_now(now_ms);
+    state.batch_backoff.make_ready_now(now_ms);
+}
+
+fn can_capture(settings: &DeviceSettings) -> bool {
+    !settings.wrapping_keys.is_empty()
+}
+
+fn batch_recipients(settings: &DeviceSettings) -> Result<Vec<BatchRecipient>, CoreError> {
+    if settings.wrapping_keys.is_empty() {
+        return Err(CoreError::InvalidState("no batch recipients available"));
+    }
+    Ok(settings.wrapping_keys.clone())
+}
+
+// ── Hash retries: plan / execute / commit ──────────────────────────────────
+
+pub struct HashRetryPlan {
+    device_id: String,
+    refresh_token: String,
+    hash_base_url: Option<String>,
+    cached_token: Option<(String, i64)>,
+    events: Vec<LogEntry>,
+    next_hash_seq: u32,
+    now_ms: i64,
+}
+
+/// Phase 4: decide whether hash retries should run this tick, and snapshot
+/// everything `execute_hash_retries` needs so it can run unlocked.
+pub fn plan_hash_retries(
+    state: &mut UploadState,
+    now_ms: i64,
+    screen_active: bool,
+) -> Option<HashRetryPlan> {
+    if state.pending_hash_events.is_empty() {
+        return None;
+    }
+    if !(screen_active || state.bypass_lock) {
+        return None;
+    }
+    if !state.hash_backoff.ready(now_ms) {
+        return None;
+    }
+    let creds = state.device_credentials.clone()?;
+    Some(HashRetryPlan {
+        device_id: creds.device_id,
+        refresh_token: creds.refresh_token,
+        hash_base_url: state
+            .settings
+            .as_ref()
+            .and_then(|s| s.hash_base_url.clone()),
+        cached_token: state.hash_token_cache.clone(),
+        // Drain rather than clone: `commit_hash_retries` splices whatever's
+        // left back in, so events enqueued concurrently while this plan runs
+        // unlocked (via `Daemon::queue_upload` on another thread) aren't lost.
+        events: std::mem::take(&mut state.pending_hash_events),
+        next_hash_seq: state.next_hash_seq,
+        now_ms,
+    })
+}
+
+pub struct HashRetryOutcome {
+    device_id: String,
+    still_pending: Vec<LogEntry>,
+    newly_hashed: Vec<PendingBatchEvent>,
+    next_hash_seq: u32,
+    had_failure: bool,
+    refreshed: Option<(String, DeviceSettings)>, // (hash_token, settings) from a GET /d/device refresh
+    permanent_failures: Vec<(LogEntry, CoreError)>,
+}
+
+/// Phase 5a: the actual network calls, run without holding the state lock.
+pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> HashRetryOutcome {
+    let HashRetryPlan {
+        device_id,
+        refresh_token,
+        hash_base_url,
+        cached_token,
+        events,
+        mut next_hash_seq,
+        now_ms,
+    } = plan;
+
+    let mut refreshed: Option<(String, DeviceSettings)> = None;
+    let needs_refresh = match &cached_token {
+        None => true,
+        Some((_, fetched_at)) => now_ms - fetched_at >= HASH_TOKEN_MAX_AGE_MS,
+    };
+    let mut hash_jwt = cached_token.map(|(token, _)| token).unwrap_or_default();
+    if needs_refresh || hash_jwt.is_empty() {
+        match api.get_device_settings(&refresh_token) {
+            Ok(result) => {
+                hash_jwt = result.hash_token.clone();
+                refreshed = Some((result.hash_token, result.settings));
+            }
+            Err(err) => {
+                log_warning(
+                    "failed to refresh hash token, deferring hash retries",
+                    Some(&err),
+                );
+                return HashRetryOutcome {
+                    device_id,
+                    still_pending: events,
+                    newly_hashed: Vec::new(),
+                    next_hash_seq,
+                    had_failure: true,
+                    refreshed: None,
+                    permanent_failures: Vec::new(),
+                };
+            }
+        }
+    }
+
+    let unix_time = (now_ms / 1000) as u32;
+    let mut still_pending = Vec::new();
+    let mut newly_hashed = Vec::new();
+    let mut permanent_failures = Vec::new();
+    let mut had_failure = false;
+    let mut retried = 0usize;
     let mut stop = false;
-    let mut retried = 0;
+
     for event in events {
-        if stop || retried >= max_retries {
+        if stop || retried >= MAX_HASH_RETRIES_PER_LOOP {
             still_pending.push(event);
             continue;
         }
         retried += 1;
-        if let Some(e) = try_one(event) {
-            still_pending.push(e);
-            stop = true;
-        }
-    }
-    still_pending
-}
-
-pub struct UploadModule<A: ApiTransport + Clone + Send + Sync + 'static> {
-    pub state: UploadObserverState,
-    api: A,
-    hash_token_cache: Option<(String, Instant)>,
-    pub batch_interval_ms: i64,
-    platform: Box<dyn ScreenshotHooks>,
-    pub authenticated: bool,
-    hash_backoff: RetryBackoff,
-    batch_backoff: RetryBackoff,
-    error_log: Option<crate::storage::FileStateStore>,
-}
-
-impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
-    pub fn new(platform: Box<dyn ScreenshotHooks>, api: A, batch_interval_ms: i64) -> Self {
-        Self {
-            state: UploadObserverState::default(),
-            api,
-            hash_token_cache: None,
-            batch_interval_ms,
-            platform,
-            authenticated: false,
-            hash_backoff: RetryBackoff::default(),
-            batch_backoff: RetryBackoff::default(),
-            error_log: None,
-        }
-    }
-
-    /// Records permanently-rejected (400) events for operator visibility. Purely
-    /// additive — tests that don't call this leave `error_log` as `None`, and
-    /// permanent-failure logging silently no-ops.
-    pub fn with_error_log(mut self, store: crate::storage::FileStateStore) -> Self {
-        self.error_log = Some(store);
-        self
-    }
-
-    fn upload_batch(&self, batch: &BatchUpload) -> CoreResult<UploadedBatchResponse> {
-        let creds = self
-            .state
-            .device_credentials
-            .as_ref()
-            .ok_or(CoreError::NotAuthenticated)?;
-        self.api.upload_batch(&creds.refresh_token, batch)
-    }
-
-    fn upload_hash(
-        &mut self,
-        hash_base_url: Option<&str>,
-        unix_time: u32,
-        seq: u32,
-        content_hash: &[u8; 32],
-    ) -> CoreResult<()> {
-        let hash_jwt = self.ensure_hash_token()?;
-        self.api
-            .upload_hash(hash_base_url, &hash_jwt, unix_time, seq, content_hash)
-    }
-
-    /// Returns the cached hash-server JWT, refreshing it via `GET /d/device` once it's
-    /// older than [`HASH_TOKEN_MAX_AGE`] — the replacement for the deleted
-    /// `POST /d/token`. A batch upload also refreshes this cache from its own response,
-    /// so on an active device this rarely needs to hit the network at all. The refresh
-    /// also opportunistically updates `state.settings`, same as a batch response does.
-    fn ensure_hash_token(&mut self) -> CoreResult<String> {
-        let refresh_token = self
-            .state
-            .device_credentials
-            .as_ref()
-            .ok_or(CoreError::NotAuthenticated)?
-            .refresh_token
-            .clone();
-
-        let needs_refresh = match &self.hash_token_cache {
-            None => true,
-            Some((_, fetched_at)) => fetched_at.elapsed() >= HASH_TOKEN_MAX_AGE,
+        let encoded = match encode_batch_event(&event) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                log_warning(
+                    "encode_batch_event failed, keeping event for retry",
+                    Some(&err),
+                );
+                still_pending.push(event);
+                continue;
+            }
         };
-
-        if needs_refresh {
-            let result = self.api.get_device_settings(&refresh_token)?;
-            self.hash_token_cache = Some((result.hash_token.clone(), Instant::now()));
-            self.state.settings = Some(result.settings);
-            Ok(result.hash_token)
-        } else {
-            Ok(self.hash_token_cache.as_ref().unwrap().0.clone())
+        let hash = compute_event_hash(&encoded);
+        let seq = next_hash_seq.saturating_add(1);
+        match api.upload_hash(hash_base_url.as_deref(), &hash_jwt, unix_time, seq, &hash) {
+            Ok(()) => {
+                next_hash_seq = seq;
+                let is_high_risk = event
+                    .risk
+                    .is_some_and(|r| r >= crate::module::lifecycle::EXTRA_HIGH_RISK);
+                let notify = is_high_risk.then(|| build_notify_payload(&event));
+                let is_screenshot = matches!(event.event, UploadKind::Screenshot { .. });
+                newly_hashed.push(PendingBatchEvent {
+                    ts: event.ts,
+                    risk: event.risk.unwrap_or(0.0),
+                    encoded,
+                    is_screenshot,
+                    notify,
+                });
+            }
+            Err(err) if err.is_bad_request() => {
+                permanent_failures.push((event, err));
+            }
+            Err(err) if err.is_conflict() => {
+                // Our local seq counter is behind the hash server's. seq isn't part
+                // of the hash chain input, so retrying with a fresher seq is safe.
+                had_failure = true;
+                next_hash_seq = seq;
+                log_warning(
+                    "hash upload sequence conflict, advancing local seq and retrying",
+                    Some(&err),
+                );
+                still_pending.push(event);
+                stop = true;
+            }
+            Err(err) => {
+                had_failure = true;
+                log_warning("hash upload failed, will retry", Some(&err));
+                still_pending.push(event);
+                stop = true;
+            }
         }
     }
 
-    fn log_permanent_hash_failure(&self, now_ms: i64, event: &LogEntry, err: &CoreError) {
+    HashRetryOutcome {
+        device_id,
+        still_pending,
+        newly_hashed,
+        next_hash_seq,
+        had_failure,
+        refreshed,
+        permanent_failures,
+    }
+}
+
+/// Phase 5c: apply the hash-retry outcome back into locked state.
+pub fn commit_hash_retries(
+    state: &mut UploadState,
+    outcome: HashRetryOutcome,
+    now_ms: i64,
+    error_log: Option<&FileStateStore>,
+) {
+    // A logout/re-login raced with this tick's unlocked network calls — the
+    // outcome no longer belongs to the current session; drop it silently.
+    if state
+        .device_credentials
+        .as_ref()
+        .is_none_or(|c| c.device_id != outcome.device_id)
+    {
+        return;
+    }
+
+    // Splice unclaimed events back at the front so anything enqueued
+    // concurrently (while this ran unlocked) stays queued behind them.
+    let mut pending = outcome.still_pending;
+    pending.append(&mut state.pending_hash_events);
+    state.pending_hash_events = pending;
+
+    state.pending_batch_events.extend(outcome.newly_hashed);
+    state.next_hash_seq = outcome.next_hash_seq;
+
+    if let Some((hash_token, settings)) = outcome.refreshed {
+        state.hash_token_cache = Some((hash_token, now_ms));
+        state.settings = Some(settings);
+    }
+
+    for (event, err) in &outcome.permanent_failures {
         log_error(
             "hash upload failed permanently (400), dropping event",
             Some(err),
         );
-        if let Some(store) = &self.error_log {
+        if let Some(store) = error_log {
             let _ = store.append_error_log(&format!(
                 "{now_ms} hash upload permanently rejected (400) for event ts={}: {err}",
                 event.ts
@@ -294,348 +445,179 @@ impl<A: ApiTransport + Clone + Send + Sync + 'static> UploadModule<A> {
         }
     }
 
-    fn retry_pending_hashes(&mut self, now_ms: i64) -> CoreResult<()> {
-        if self.state.pending_hash_events.is_empty() || !self.hash_backoff.ready(now_ms) {
-            return Ok(());
-        }
-        let hash_base_url = self
-            .state
-            .settings
-            .as_ref()
-            .and_then(|s| s.hash_base_url.clone());
-        let unix_time = (now_ms / 1000) as u32;
-        let events = std::mem::take(&mut self.state.pending_hash_events);
-        let mut had_failure = false;
-        self.state.pending_hash_events =
-            drain_retry_queue(events, MAX_HASH_RETRIES_PER_LOOP, |event| {
-                let encoded = match encode_batch_event(&event) {
-                    Ok(bytes) => bytes,
-                    Err(err) => {
-                        log_warning(
-                            "encode_batch_event failed, keeping event for retry",
-                            Some(&err),
-                        );
-                        return Some(event);
-                    }
-                };
-                let hash = compute_event_hash(&encoded);
-                let seq = self.state.next_hash_seq.saturating_add(1);
-                match self.upload_hash(hash_base_url.as_deref(), unix_time, seq, &hash) {
-                    Ok(()) => {
-                        self.state.next_hash_seq = seq;
-                        let is_high_risk = event
-                            .risk
-                            .is_some_and(|r| r >= crate::module::lifecycle::EXTRA_HIGH_RISK);
-                        let notify = is_high_risk.then(|| build_notify_payload(&event));
-                        let is_screenshot = matches!(event.event, UploadKind::Screenshot { .. });
-                        self.state.pending_batch_events.push(PendingBatchEvent {
-                            ts: event.ts,
-                            risk: event.risk.unwrap_or(0.0),
-                            encoded,
-                            is_screenshot,
-                            notify,
-                        });
-                        None
-                    }
-                    Err(err) if err.is_bad_request() => {
-                        self.log_permanent_hash_failure(now_ms, &event, &err);
-                        None
-                    }
-                    Err(err) if err.is_conflict() => {
-                        // Our local seq counter is behind what the hash server has
-                        // stored (e.g. persisted state lost across a crash). seq isn't
-                        // part of the hash chain input, so retrying this same event
-                        // with a fresher seq is always safe — advance by 1 and let
-                        // backoff pace the retries rather than hammering the server.
-                        had_failure = true;
-                        self.state.next_hash_seq = seq;
-                        log_warning(
-                            "hash upload sequence conflict, advancing local seq and retrying",
-                            Some(&err),
-                        );
-                        Some(event)
-                    }
-                    Err(err) => {
-                        had_failure = true;
-                        log_warning("hash upload failed, will retry", Some(&err));
-                        Some(event)
-                    }
-                }
-            });
-        if had_failure {
-            self.hash_backoff.record_failure(now_ms);
-        } else {
-            self.hash_backoff.record_success();
-        }
-        Ok(())
-    }
-
-    fn maybe_upload_batch(&mut self, now_ms: i64, emitter: &Emitter) -> CoreResult<()> {
-        if self.state.pending_batch_events.is_empty() {
-            return Ok(());
-        }
-        let should = self.state.post_login_proof_batches_remaining > 0
-            || self
-                .state
-                .last_batch_at_ms
-                .map(|last| now_ms - last >= self.batch_interval_ms)
-                .unwrap_or(true)
-            || self.state.pending_batch_events.len() >= MAX_BATCH_ITEMS_PER_UPLOAD;
-        if should {
-            self.try_upload_batch(now_ms, emitter, true)?;
-        }
-        Ok(())
-    }
-
-    pub(crate) fn try_upload_batch(
-        &mut self,
-        now_ms: i64,
-        emitter: &Emitter,
-        respect_backoff: bool,
-    ) -> CoreResult<()> {
-        if self.state.pending_batch_events.is_empty() {
-            return Ok(());
-        }
-        if respect_backoff && !self.batch_backoff.ready(now_ms) {
-            return Ok(());
-        }
-        // Settings come from the last Login/batch/ensure_hash_token response — no
-        // pre-batch fetch. Only proceed when there is at least one recipient to
-        // wrap for; otherwise keep the events queued until settings arrive.
-        let settings = match self.state.settings.as_ref() {
-            Some(s) if can_capture(s) => s,
-            _ => return Ok(()),
-        };
-        let count = self
-            .state
-            .pending_batch_events
-            .len()
-            .min(MAX_BATCH_ITEMS_PER_UPLOAD);
-        let mut items = self.state.pending_batch_events[..count].to_vec();
-        items.sort_by_key(|event| event.ts);
-        let start_time_ms = items[0].ts;
-        let high_risk_count = items.iter().filter(|e| e.risk >= HIGH_RISK_RATING).count() as u32;
-        let medium_risk_count = items
-            .iter()
-            .filter(|e| e.risk >= MEDIUM_RISK_RATING && e.risk < HIGH_RISK_RATING)
-            .count() as u32;
-        let screenshot_count = items.iter().filter(|e| e.is_screenshot).count() as u32;
-        let notifications: Vec<NotifyPayload> =
-            items.iter().filter_map(|e| e.notify.clone()).collect();
-        let encoded: Vec<Vec<u8>> = items.into_iter().map(|event| event.encoded).collect();
-        let recipients = batch_recipients(settings)?;
-        let batch = BatchBuilder::build_upload(
-            &encoded,
-            &CryptoEngine,
-            &recipients,
-            start_time_ms,
-            now_ms,
-            high_risk_count,
-            medium_risk_count,
-            screenshot_count,
-            notifications,
-        )?;
-        match self.upload_batch(&batch) {
-            Ok(response) => {
-                tracing::info!(count, start_time_ms, "batch upload ok");
-                self.state.pending_batch_events.drain(..count);
-                if self.state.post_login_proof_batches_remaining > 0 {
-                    self.state.post_login_proof_batches_remaining -= 1;
-                }
-                self.state.last_batch_at_ms = Some(now_ms);
-                // A landed batch makes the API reset the hash server's stored state
-                // for this device (see api/SPEC.md), so the local seq counter must
-                // reset in lockstep or every subsequent upload will 409.
-                self.state.next_hash_seq = 0;
-                // A batch that just landed also resets the hash-token staleness
-                // clock, so ensure_hash_token rarely needs to hit the network on
-                // an active device.
-                self.state.settings = Some(response.settings);
-                self.hash_token_cache = Some((response.hash_token, Instant::now()));
-                self.batch_backoff.record_success();
-                Ok(())
-            }
-            Err(err) if err.is_not_found() || err.is_unauthorized() => {
-                log_warning(
-                    "batch upload: device deregistered or unauth, logging out",
-                    Some(&err),
-                );
-                let _ = emitter.send(LogoutRequested);
-                Ok(())
-            }
-            Err(err) => {
-                log_warning("batch upload deferred", Some(&err));
-                self.batch_backoff.record_failure(now_ms);
-                Ok(())
-            }
-        }
-    }
-
-    fn handle_ping(&mut self, emitter: &Emitter) -> CoreResult<()> {
-        if !self.authenticated {
-            return Ok(());
-        }
-        // Battery: don't wake the network/radio while the screen is off/locked. Queued
-        // events persist and flush on the next ping once the screen is active.
-        if self.platform.is_locked_or_screensaver()? {
-            return Ok(());
-        }
-        let now_ms = self.platform.get_time_utc_ms()?;
-
-        if let Some(last) = self.state.last_batch_at_ms
-            && now_ms < last
-        {
-            self.state.last_batch_at_ms = None;
-        }
-
-        self.retry_pending_hashes(now_ms)?;
-        self.maybe_upload_batch(now_ms, emitter)?;
-        Ok(())
-    }
-
-    fn handle_upload(
-        &mut self,
-        risk: f32,
-        kind: crate::model::UploadKind,
-        emitter: &Emitter,
-    ) -> CoreResult<()> {
-        if !self.authenticated {
-            return Ok(());
-        }
-        let now_ms = self.platform.get_time_utc_ms()?;
-        // Heartbeats bypass the screen-lock gate: the whole point is to prove the
-        // device is alive when idle, so we upload even if the screen is locked.
-        let is_heartbeat = matches!(kind, UploadKind::Heartbeat);
-        let is_high_risk = risk >= crate::module::lifecycle::EXTRA_HIGH_RISK;
-        let entry = LogEntry {
-            ts: now_ms,
-            risk: Some(risk),
-            event: kind,
-        };
-        // High-risk events trigger an alert-email notification once their batch
-        // lands (the notify payload is attached to the PendingBatchEvent once the
-        // hash succeeds — see retry_pending_hashes), but the event body still
-        // rides through the hash chain + encrypted batch — the server never
-        // receives it unencrypted.
-        // Always enqueue, but only attempt network I/O while the screen is active
-        // (battery): a locked/off screen leaves events queued for the next ping flush.
-        self.state.pending_hash_events.push(entry);
-        let screen_active = !self.platform.is_locked_or_screensaver()?;
-        if screen_active || is_heartbeat {
-            self.retry_pending_hashes(now_ms)?;
-            if is_heartbeat || is_high_risk {
-                // Force an immediate batch flush — don't wait for the interval timer.
-                // For a high-risk event this also minimizes the delay before the
-                // attached notify email goes out, since it rides with this batch.
-                self.try_upload_batch(now_ms, emitter, true)?;
-            } else {
-                self.maybe_upload_batch(now_ms, emitter)?;
-            }
-        }
-        Ok(())
+    if outcome.had_failure {
+        state.hash_backoff.record_failure(now_ms);
+    } else {
+        state.hash_backoff.record_success();
     }
 }
 
-impl<A: ApiTransport + Clone + Send + Sync + 'static> Observer for UploadModule<A> {
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
+// ── Batch upload: plan / execute / commit ──────────────────────────────────
 
-    fn name(&self) -> &'static str {
-        "upload"
-    }
+pub struct BatchPlan {
+    device_id: String,
+    refresh_token: String,
+    batch: BatchUpload,
+    count: usize,
+}
 
-    fn init(&mut self, _bus: &mut EventBus, state: StateType) -> CoreResult<()> {
-        if !state.is_null() {
-            self.state = serde_json::from_value(state)?;
-            if self.state.device_credentials.is_some() {
-                self.authenticated = true;
+/// Phase 4: decide whether a batch upload should run this tick.
+pub fn plan_batch(
+    state: &UploadState,
+    now_ms: i64,
+    batch_interval_ms: i64,
+    screen_active: bool,
+) -> Option<BatchPlan> {
+    if state.pending_batch_events.is_empty() {
+        return None;
+    }
+    if !(screen_active || state.bypass_lock) {
+        return None;
+    }
+    let should = state.post_login_proof_batches_remaining > 0
+        || state
+            .last_batch_at_ms
+            .map(|last| now_ms - last >= batch_interval_ms)
+            .unwrap_or(true)
+        || state.force_flush
+        || state.pending_batch_events.len() >= MAX_BATCH_ITEMS_PER_UPLOAD;
+    if !should || !state.batch_backoff.ready(now_ms) {
+        return None;
+    }
+    let creds = state.device_credentials.as_ref()?;
+    let settings = state.settings.as_ref().filter(|s| can_capture(s))?;
+    let recipients = batch_recipients(settings).ok()?;
+
+    let count = state
+        .pending_batch_events
+        .len()
+        .min(MAX_BATCH_ITEMS_PER_UPLOAD);
+    let mut items = state.pending_batch_events[..count].to_vec();
+    items.sort_by_key(|event| event.ts);
+    let start_time_ms = items[0].ts;
+    let high_risk_count = items.iter().filter(|e| e.risk >= HIGH_RISK_RATING).count() as u32;
+    let medium_risk_count = items
+        .iter()
+        .filter(|e| e.risk >= MEDIUM_RISK_RATING && e.risk < HIGH_RISK_RATING)
+        .count() as u32;
+    let screenshot_count = items.iter().filter(|e| e.is_screenshot).count() as u32;
+    let notifications: Vec<NotifyPayload> = items.iter().filter_map(|e| e.notify.clone()).collect();
+    let encoded: Vec<Vec<u8>> = items.into_iter().map(|event| event.encoded).collect();
+
+    let batch = BatchBuilder::build_upload(
+        &encoded,
+        &CryptoEngine,
+        &recipients,
+        start_time_ms,
+        now_ms,
+        high_risk_count,
+        medium_risk_count,
+        screenshot_count,
+        notifications,
+    )
+    .ok()?;
+
+    Some(BatchPlan {
+        device_id: creds.device_id.clone(),
+        refresh_token: creds.refresh_token.clone(),
+        batch,
+        count,
+    })
+}
+
+pub enum BatchOutcome {
+    Uploaded {
+        device_id: String,
+        count: usize,
+        response: UploadedBatchResponse,
+    },
+    LoggedOut {
+        device_id: String,
+    },
+    Deferred {
+        device_id: String,
+    },
+}
+
+/// Phase 5b: the actual network call, run without holding the state lock.
+pub fn execute_batch<A: ApiTransport>(plan: BatchPlan, api: &A) -> BatchOutcome {
+    match api.upload_batch(&plan.refresh_token, &plan.batch) {
+        Ok(response) => {
+            tracing::info!(count = plan.count, "batch upload ok");
+            BatchOutcome::Uploaded {
+                device_id: plan.device_id,
+                count: plan.count,
+                response,
             }
         }
-        Ok(())
-    }
-
-    fn on_event(&mut self, event: &dyn Any, emitter: &Emitter) -> CoreResult<()> {
-        crate::dispatch_event!(event, {
-            ev: Login => {
-                self.authenticated = true;
-                // Registration already minted a hash token — seed the cache so we
-                // don't immediately turn around and hit GET /d/device for one.
-                self.hash_token_cache = Some((ev.hash_token.clone(), Instant::now()));
-                self.state.settings = Some(ev.settings.clone());
-                self.state.device_credentials = Some(ev.credentials.clone());
-                self.state.reset_for_login();
-                Ok(())
-            },
-            _: Logout => {
-                self.authenticated = false;
-                self.hash_token_cache = None;
-                self.state.reset_for_logout();
-                Ok(())
-            },
-            _: StatusRequest => {
-                let _ = emitter.send(PartialStatus::Upload {
-                    pending_request_count: self.state.pending_request_count(),
-                });
-                Ok(())
-            },
-            _: Ping => self.handle_ping(emitter),
-            _: ProcessStopped => {
-                if self.authenticated && !self.state.pending_batch_events.is_empty() {
-                    let now_ms = self.platform.get_time_utc_ms()?;
-                    let _ = self.try_upload_batch(now_ms, emitter, false);
-                }
-                Ok(())
-            },
-            ev: Upload => self.handle_upload(ev.risk, ev.kind.clone(), emitter),
-            _: FlushBatchNow => {
-                if self.authenticated {
-                    let now_ms = self.platform.get_time_utc_ms()?;
-                    self.try_upload_batch(now_ms, emitter, false)?;
-                }
-                Ok(())
-            },
-        })
-    }
-
-    fn save(&self) -> CoreResult<StateType> {
-        Ok(serde_json::to_value(&self.state)?)
+        Err(err) if err.is_not_found() || err.is_unauthorized() => {
+            log_warning(
+                "batch upload: device deregistered or unauth, logging out",
+                Some(&err),
+            );
+            BatchOutcome::LoggedOut {
+                device_id: plan.device_id,
+            }
+        }
+        Err(err) => {
+            log_warning("batch upload deferred", Some(&err));
+            BatchOutcome::Deferred {
+                device_id: plan.device_id,
+            }
+        }
     }
 }
 
-fn can_capture(settings: &DeviceSettings) -> bool {
-    !settings.wrapping_keys.is_empty()
-}
-
-fn batch_recipients(settings: &DeviceSettings) -> CoreResult<Vec<BatchRecipient>> {
-    use crate::error::CoreError;
-    if settings.wrapping_keys.is_empty() {
-        return Err(CoreError::InvalidState("no batch recipients available"));
+/// Phase 5c: apply the batch outcome back into locked state. Returns `true`
+/// if the outcome indicates the device should be logged out (deregistered or
+/// unauthorized) — the caller (`Daemon`) performs the actual logout.
+pub fn commit_batch(state: &mut UploadState, outcome: BatchOutcome, now_ms: i64) -> bool {
+    let device_id = match &outcome {
+        BatchOutcome::Uploaded { device_id, .. } => device_id,
+        BatchOutcome::LoggedOut { device_id } => device_id,
+        BatchOutcome::Deferred { device_id } => device_id,
+    };
+    if state
+        .device_credentials
+        .as_ref()
+        .is_none_or(|c| &c.device_id != device_id)
+    {
+        return false;
     }
-    Ok(settings.wrapping_keys.clone())
+
+    match outcome {
+        BatchOutcome::Uploaded {
+            count, response, ..
+        } => {
+            state.pending_batch_events.drain(..count);
+            if state.post_login_proof_batches_remaining > 0 {
+                state.post_login_proof_batches_remaining -= 1;
+            }
+            state.last_batch_at_ms = Some(now_ms);
+            // A landed batch makes the API reset the hash server's stored state
+            // for this device, so the local seq counter must reset in lockstep.
+            state.next_hash_seq = 0;
+            state.settings = Some(response.settings);
+            state.hash_token_cache = Some((response.hash_token, now_ms));
+            state.batch_backoff.record_success();
+            if state.pending_batch_events.is_empty() {
+                state.force_flush = false;
+                state.bypass_lock = false;
+            }
+            false
+        }
+        BatchOutcome::LoggedOut { .. } => true,
+        BatchOutcome::Deferred { .. } => {
+            state.batch_backoff.record_failure(now_ms);
+            false
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{FlushBatchNow, Upload, UploadModule};
-    use crate::events::Ping;
-    use crate::model::{
-        BatchRecipient, DeviceCredentials, DeviceSettings, LogEntry, PartialStatus,
-        ScreenshotSkipReason, UploadKind,
-    };
-    use crate::module::auth::{Login, Logout};
-    use crate::module::lifecycle::ProcessStopped;
-    use crate::module::status::StatusRequest;
-    use crate::testing::{EventTester, MockApiClient};
-
-    fn skipped_upload() -> Upload {
-        Upload {
-            risk: 0.0,
-            kind: UploadKind::ScreenshotSkipped {
-                reason: ScreenshotSkipReason::StaticScreen,
-            },
-        }
-    }
+    use super::*;
+    use crate::testing::MockApiClient;
 
     fn valid_credentials() -> DeviceCredentials {
         DeviceCredentials {
@@ -657,803 +639,123 @@ mod tests {
         }
     }
 
-    fn login_event() -> Login {
-        Login {
-            credentials: valid_credentials(),
-            settings: valid_settings(),
-            hash_token: "test-hash-token".into(),
-        }
+    #[allow(clippy::field_reassign_with_default)]
+    fn authenticated_state() -> UploadState {
+        let mut state = UploadState::default();
+        state.device_credentials = Some(valid_credentials());
+        state.settings = Some(valid_settings());
+        // Isolate tests from the post-login proof-batch mechanic, which would
+        // otherwise force a batch upload regardless of interval/lock state.
+        state.post_login_proof_batches_remaining = 0;
+        state.last_batch_at_ms = Some(0);
+        state
     }
 
     #[test]
-    fn upload_when_unauthenticated_is_silently_ignored() {
-        let mut b = EventTester::builder();
-        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
-        let mut t = b.build();
-        t.emit(
-            1,
-            Upload {
-                risk: 0.0,
-                kind: UploadKind::Dev {
-                    title: "ignored".into(),
-                    details: None,
-                },
+    fn enqueue_without_credentials_is_a_noop() {
+        let mut state = UploadState::default();
+        enqueue(&mut state, 1_000, 0.0, UploadKind::CaptureFailed);
+        assert!(state.pending_hash_events.is_empty());
+    }
+
+    #[test]
+    fn enqueue_heartbeat_forces_flush_and_bypasses_lock() {
+        let mut state = authenticated_state();
+        enqueue(&mut state, 1_000, 0.0, UploadKind::Heartbeat);
+        assert_eq!(state.pending_hash_events.len(), 1);
+        assert!(state.force_flush);
+        assert!(state.bypass_lock);
+    }
+
+    #[test]
+    fn enqueue_high_risk_forces_flush_but_not_lock_bypass() {
+        let mut state = authenticated_state();
+        enqueue(
+            &mut state,
+            1_000,
+            crate::module::lifecycle::EXTRA_HIGH_RISK,
+            UploadKind::Alert {
+                message: "test".into(),
             },
         );
-        assert!(t.api.state().hash_uploads.is_empty());
-        assert_eq!(
-            t.observer::<UploadModule<MockApiClient>>()
-                .state
-                .pending_hash_events
-                .len(),
-            0
-        );
+        assert!(state.force_flush);
+        assert!(!state.bypass_lock);
     }
 
     #[test]
-    fn login_sets_authenticated_credentials_and_settings() {
-        let mut b = EventTester::builder();
-        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
-        let mut t = b.build();
-        t.emit(1, login_event());
-        let m = t.observer::<UploadModule<MockApiClient>>();
+    fn hash_retry_round_trip_moves_event_into_batch_queue() {
+        let mut state = authenticated_state();
+        enqueue(&mut state, 1_000, 0.0, UploadKind::CaptureFailed);
+
+        let api = MockApiClient::new();
+        let plan = plan_hash_retries(&mut state, 1_000, true).expect("expected a hash plan");
+        let outcome = execute_hash_retries(plan, &api);
+        assert!(outcome.still_pending.is_empty());
+        assert_eq!(outcome.newly_hashed.len(), 1);
+        commit_hash_retries(&mut state, outcome, 1_000, None);
+
+        assert!(state.pending_hash_events.is_empty());
+        assert_eq!(state.pending_batch_events.len(), 1);
+        assert_eq!(state.next_hash_seq, 1);
+    }
+
+    #[test]
+    fn batch_plan_none_when_lock_gate_blocks_and_not_bypassed() {
+        let mut state = authenticated_state();
+        state.pending_batch_events.push(PendingBatchEvent {
+            ts: 0,
+            risk: 0.0,
+            encoded: vec![1, 2, 3],
+            is_screenshot: false,
+            notify: None,
+        });
+        assert!(plan_batch(&state, 1_000, 60_000, false).is_none());
+    }
+
+    #[test]
+    fn batch_upload_round_trip_drains_queue_and_advances_state() {
+        let mut state = authenticated_state();
+        state.pending_batch_events.push(PendingBatchEvent {
+            ts: 0,
+            risk: 0.0,
+            encoded: vec![1, 2, 3],
+            is_screenshot: false,
+            notify: None,
+        });
+
+        let api = MockApiClient::new();
+        state.last_batch_at_ms = None;
+        let plan = plan_batch(&state, 1_000, 60_000, true).expect("expected a batch plan");
+        let outcome = execute_batch(plan, &api);
+        let should_logout = commit_batch(&mut state, outcome, 1_000);
+        assert!(!should_logout);
+        assert!(state.pending_batch_events.is_empty());
+        assert_eq!(state.next_hash_seq, 0);
+    }
+
+    #[test]
+    fn commit_ignores_outcome_from_a_stale_session() {
+        let mut state = authenticated_state();
+        state.pending_batch_events.push(PendingBatchEvent {
+            ts: 0,
+            risk: 0.0,
+            encoded: vec![1, 2, 3],
+            is_screenshot: false,
+            notify: None,
+        });
+        let api = MockApiClient::new();
+        state.last_batch_at_ms = None;
+        let plan = plan_batch(&state, 1_000, 60_000, true).expect("expected a batch plan");
+
+        // Logout races the in-flight (unlocked) network call.
+        state.reset_for_logout();
+
+        let outcome = execute_batch(plan, &api);
+        let should_logout = commit_batch(&mut state, outcome, 1_000);
+        assert!(!should_logout);
         assert!(
-            m.state.settings.is_some(),
-            "login should set device settings"
-        );
-        assert!(
-            m.state.device_credentials.is_some(),
-            "login should set credentials"
-        );
-        assert_eq!(m.state.post_login_proof_batches_remaining, 3);
-    }
-
-    #[test]
-    fn logout_clears_authenticated_state() {
-        let mut b = EventTester::builder();
-        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
-        let mut t = b.build();
-        t.emit(1, login_event());
-        t.emit(1, Logout);
-        let m = t.observer::<UploadModule<MockApiClient>>();
-        assert!(m.state.settings.is_none(), "logout should clear settings");
-        assert!(
-            m.state.device_credentials.is_none(),
-            "logout should clear credentials"
-        );
-        assert!(
-            m.state.pending_hash_events.is_empty(),
-            "logout should clear pending events"
-        );
-        assert!(
-            m.state.pending_batch_events.is_empty(),
-            "logout should clear batch queue"
-        );
-    }
-
-    #[test]
-    fn hash_token_from_login_is_cached_and_reused_across_uploads() {
-        let mut b = EventTester::builder();
-        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
-        let mut t = b.build();
-        t.emit(1, login_event());
-        // Isolate hash-token caching from batch-upload interference: a landed batch
-        // also refreshes the cached token from its own response, which would
-        // otherwise replace the login-minted token this test is checking for.
-        {
-            let m = t.observer::<UploadModule<MockApiClient>>();
-            m.state.post_login_proof_batches_remaining = 0;
-            m.state.last_batch_at_ms = Some(0);
-        }
-
-        // Two low-risk uploads both flush through the hash server on an active screen.
-        t.emit(2, skipped_upload());
-        t.emit(3, skipped_upload());
-
-        let s = t.api.state();
-        assert_eq!(s.hash_uploads.len(), 2, "both hashes should upload");
-        assert!(
-            s.batch_uploads.is_empty(),
-            "batch interval not elapsed, no batch expected"
-        );
-        assert!(
-            s.hash_uploads
-                .iter()
-                .all(|h| h.hash_jwt == "test-hash-token"),
-            "both hash uploads should reuse the token minted at login"
-        );
-        assert_eq!(
-            s.get_device_settings_calls.len(),
-            0,
-            "the login-minted hash token should be cached and reused, no GET /d/device needed"
-        );
-    }
-
-    #[test]
-    fn batch_response_settings_update_recipients_for_the_next_batch() {
-        let mut b = EventTester::builder();
-        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
-        let mut t = b.build();
-        // Login seeds settings with a single recipient (the owner).
-        t.emit(1, login_event());
-
-        // A partner is added server-side: the next batch's response carries the
-        // updated recipient set. Settings now come from GET/POST /d/device and
-        // POST /d/batch responses, not a pre-batch fetch, so a newly added
-        // recipient shows up with a one-batch lag rather than immediately.
-        let updated_settings = DeviceSettings {
-            device_id: "test-device".into(),
-            name: "test device".into(),
-            platform: "test".into(),
-            wrapping_keys: vec![
-                BatchRecipient {
-                    user_id: "test-user".into(),
-                    pub_key_base64: "CQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
-                },
-                BatchRecipient {
-                    user_id: "partner-user".into(),
-                    pub_key_base64: "CQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
-                },
-            ],
-            hash_base_url: None,
-        };
-        t.api.program_batch(Ok(crate::api::UploadedBatchResponse {
-            id: "batch-1".into(),
-            settings: updated_settings,
-            hash_token: "fresh-hash-token".into(),
-        }));
-
-        // First low-risk upload flushes a batch (post-login proof batches force it
-        // out), wrapped for the single-recipient settings known since login.
-        t.emit(2, skipped_upload());
-
-        {
-            let s = t.api.state();
-            assert_eq!(s.batch_uploads.len(), 1, "first batch should upload");
-            let recipients: Vec<String> = s.batch_uploads[0]
-                .batch
-                .access_keys
-                .iter()
-                .map(|k| k.user_id.clone())
-                .collect();
-            assert_eq!(
-                recipients,
-                vec!["test-user".to_string()],
-                "first batch should still be wrapped for the settings known at login time"
-            );
-        }
-        assert_eq!(
-            t.observer::<UploadModule<MockApiClient>>()
-                .state
-                .settings
-                .as_ref()
-                .unwrap()
-                .wrapping_keys
-                .len(),
-            2,
-            "settings should be updated from the first batch's response"
-        );
-
-        // A second upload now uses the settings the first batch's response delivered.
-        t.emit(3, skipped_upload());
-        let s = t.api.state();
-        assert_eq!(s.batch_uploads.len(), 2, "second batch should upload");
-        let recipients: Vec<String> = s.batch_uploads[1]
-            .batch
-            .access_keys
-            .iter()
-            .map(|k| k.user_id.clone())
-            .collect();
-        assert_eq!(
-            recipients,
-            vec!["test-user".to_string(), "partner-user".to_string()],
-            "second batch should be wrapped using settings from the first batch's response"
-        );
-    }
-
-    #[test]
-    fn status_request_emits_pending_request_count() {
-        let mut b = EventTester::builder();
-        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
-        let mut t = b.build();
-        {
-            let m = t.observer::<UploadModule<MockApiClient>>();
-            m.authenticated = true;
-            m.state.device_credentials = Some(valid_credentials());
-            m.state.post_login_proof_batches_remaining = 0;
-            m.state.last_batch_at_ms = Some(1_000);
-            m.state.pending_hash_events.push(LogEntry {
-                ts: 0,
-                risk: Some(0.0),
-                event: UploadKind::Dev {
-                    title: "a".into(),
-                    details: None,
-                },
-            });
-            m.state
-                .pending_batch_events
-                .push(crate::module::upload::PendingBatchEvent {
-                    ts: 500,
-                    risk: 0.0,
-                    encoded: vec![1, 2, 3],
-                    is_screenshot: false,
-                    notify: None,
-                });
-        }
-        t.emit(1, StatusRequest);
-        t.assert_like::<PartialStatus>(crate::like!(PartialStatus::Upload {
-            pending_request_count: 2,
-        }));
-    }
-
-    #[test]
-    fn locked_screen_defers_uploads_until_active() {
-        let mut b = EventTester::builder();
-        b.platform().set_locked_or_screensaver(true);
-        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
-        let mut t = b.build();
-        t.emit(1, login_event());
-
-        // While locked, the event is queued but no network call fires on Upload or Ping.
-        t.emit(1, skipped_upload());
-        t.emit(2, Ping);
-        {
-            let s = t.api.state();
-            assert!(s.hash_uploads.is_empty(), "no hash upload while locked");
-            assert!(s.batch_uploads.is_empty(), "no batch upload while locked");
-            assert!(
-                s.notify_calls.is_empty(),
-                "no direct log upload while locked"
-            );
-        }
-        assert_eq!(
-            t.observer::<UploadModule<MockApiClient>>()
-                .state
-                .pending_hash_events
-                .len(),
-            1,
-            "event should remain queued while locked"
-        );
-
-        // Screen active again → next ping flushes the queue.
-        t.platform.set_locked_or_screensaver(false);
-        t.emit(3, Ping);
-        let s = t.api.state();
-        assert!(!s.hash_uploads.is_empty(), "hash flushes once active");
-        assert!(!s.batch_uploads.is_empty(), "batch flushes once active");
-    }
-
-    #[test]
-    fn flush_batch_now_uploads_while_locked() {
-        let mut b = EventTester::builder();
-        b.platform().set_locked_or_screensaver(true);
-        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
-        let mut t = b.build();
-        t.emit(1, login_event());
-        t.observer::<UploadModule<MockApiClient>>()
-            .state
-            .pending_batch_events
-            .push(crate::module::upload::PendingBatchEvent {
-                ts: 500,
-                risk: 0.0,
-                encoded: vec![1, 2, 3],
-                is_screenshot: false,
-                notify: None,
-            });
-
-        // A plain ping does not flush while locked.
-        t.emit(2, Ping);
-        assert!(t.api.state().batch_uploads.is_empty());
-
-        // FlushBatchNow is an explicit flush path → uploads regardless of lock.
-        t.emit(3, FlushBatchNow);
-        assert_eq!(t.api.state().batch_uploads.len(), 1);
-    }
-
-    #[test]
-    fn heartbeat_upload_bypasses_lock_and_forces_batch_flush() {
-        let mut b = EventTester::builder();
-        b.platform().set_locked_or_screensaver(true);
-        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
-        let mut t = b.build();
-        t.emit(1, login_event());
-
-        // With a locked screen a normal Upload is queued but not flushed.
-        t.emit(2, skipped_upload());
-        t.emit(3, Ping);
-        assert!(
-            t.api.state().batch_uploads.is_empty(),
-            "no batch while locked"
-        );
-
-        // A Heartbeat Upload bypasses the lock gate and forces the batch out.
-        t.emit(
-            4,
-            Upload {
-                risk: 0.0,
-                kind: UploadKind::Heartbeat,
-            },
-        );
-        assert!(
-            !t.api.state().batch_uploads.is_empty(),
-            "heartbeat should flush batch even while locked"
-        );
-    }
-
-    #[test]
-    fn extra_high_risk_upload_forces_batch_flush_regardless_of_interval() {
-        let mut b = EventTester::builder();
-        // Huge interval so `maybe_upload_batch` would never fire on its own.
-        b.add(UploadModule::new(
-            Box::new(b.platform()),
-            b.api(),
-            24 * 60 * 60 * 1_000,
-        ));
-        let mut t = b.build();
-        t.emit(1, login_event());
-
-        t.emit(
-            2,
-            Upload {
-                risk: crate::module::lifecycle::EXTRA_HIGH_RISK,
-                kind: UploadKind::Alert {
-                    message: "tamper detected".into(),
-                },
-            },
-        );
-
-        assert_eq!(
-            t.api.state().batch_uploads.len(),
-            1,
-            "extra-high-risk upload should force an immediate batch flush"
-        );
-        assert_eq!(
-            t.api.state().notify_calls.len(),
-            1,
-            "extra-high-risk upload should still send the notify email"
-        );
-        assert!(
-            t.observer::<UploadModule<MockApiClient>>()
-                .state
-                .pending_batch_events
-                .is_empty(),
-            "the event should have been uploaded, not left queued"
-        );
-    }
-
-    #[test]
-    fn ping_forces_batch_flush_before_sending_queued_notify() {
-        let mut b = EventTester::builder();
-        b.platform().set_locked_or_screensaver(true);
-        b.add(UploadModule::new(
-            Box::new(b.platform()),
-            b.api(),
-            24 * 60 * 60 * 1_000,
-        ));
-        let mut t = b.build();
-        t.emit(1, login_event());
-
-        // Extra-high-risk event arrives while locked: queued for later, no
-        // network I/O yet (matches the existing locked-screen deferral).
-        t.emit(
-            2,
-            Upload {
-                risk: crate::module::lifecycle::EXTRA_HIGH_RISK,
-                kind: UploadKind::Alert {
-                    message: "tamper detected".into(),
-                },
-            },
-        );
-        assert!(t.api.state().batch_uploads.is_empty());
-        assert!(t.api.state().notify_calls.is_empty());
-
-        // Screen unlocks; the next ping should flush the batch before sending
-        // the queued notify, even though the batch interval hasn't elapsed.
-        t.platform.set_locked_or_screensaver(false);
-        t.emit(3, Ping);
-
-        assert_eq!(
-            t.api.state().batch_uploads.len(),
-            1,
-            "ping should force the batch out ahead of the queued notify"
-        );
-        assert_eq!(
-            t.api.state().notify_calls.len(),
-            1,
-            "queued notify should still go out"
-        );
-    }
-
-    #[test]
-    fn transient_batch_failure_defers_notify_until_batch_actually_lands() {
-        let mut b = EventTester::builder();
-        // Huge interval so `maybe_upload_batch` would never fire on its own.
-        b.add(UploadModule::new(
-            Box::new(b.platform()),
-            b.api(),
-            24 * 60 * 60 * 1_000,
-        ));
-        let mut t = b.build();
-        t.emit(1, login_event());
-
-        // The batch upload fails transiently (e.g. a network blip): `try_upload_batch`
-        // logs and returns `Ok(())` without actually uploading or draining the queue.
-        t.api
-            .program_batch(Err(crate::error::CoreError::HttpStatus {
-                status: 503,
-                message: "boom".into(),
-            }));
-
-        t.emit(
-            2,
-            Upload {
-                risk: crate::module::lifecycle::EXTRA_HIGH_RISK,
-                kind: UploadKind::Alert {
-                    message: "tamper detected".into(),
-                },
-            },
-        );
-
-        // The event hasn't actually reached the server, so the notify email must not
-        // go out yet even though this is the extra-high-risk "flush immediately" path.
-        assert!(
-            t.api.state().notify_calls.is_empty(),
-            "notify must not fire while the batch upload has not actually landed"
-        );
-        assert!(
-            !t.observer::<UploadModule<MockApiClient>>()
-                .state
-                .pending_batch_events
-                .is_empty(),
-            "event should remain queued after a deferred batch failure"
-        );
-        assert!(
-            t.observer::<UploadModule<MockApiClient>>()
-                .state
-                .pending_batch_events
-                .iter()
-                .any(|e| e.notify.is_some()),
-            "the still-queued event should retain its notify payload for when the batch lands"
-        );
-
-        // A later ping, once the batch upload starts succeeding again, should flush the
-        // batch and only then release the queued notify.
-        t.emit(3, Ping);
-        assert_eq!(
-            t.api.state().batch_uploads.len(),
-            2,
-            "one failed attempt from the Upload event, one successful retry from the Ping"
-        );
-        assert_eq!(
-            t.api.state().notify_calls.len(),
-            1,
-            "notify should fire only after the batch actually landed"
-        );
-    }
-
-    #[test]
-    fn process_stopped_flushes_pending_uploads_while_locked() {
-        let mut b = EventTester::builder();
-        b.platform().set_locked_or_screensaver(true);
-        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
-        let mut t = b.build();
-        t.emit(1, login_event());
-        t.observer::<UploadModule<MockApiClient>>()
-            .state
-            .pending_batch_events
-            .push(crate::module::upload::PendingBatchEvent {
-                ts: 500,
-                risk: 0.0,
-                encoded: vec![1, 2, 3],
-                is_screenshot: false,
-                notify: None,
-            });
-
-        // ProcessStopped is a terminal flush path → uploads regardless of lock.
-        t.emit(2, ProcessStopped);
-        assert_eq!(t.api.state().batch_uploads.len(), 1);
-    }
-
-    #[test]
-    fn sustained_hash_upload_failure_backs_off_instead_of_retrying_every_tick() {
-        let mut b = EventTester::builder();
-        // Huge interval so batch logic never interferes with this hash-only test.
-        b.add(UploadModule::new(
-            Box::new(b.platform()),
-            b.api(),
-            24 * 60 * 60 * 1_000,
-        ));
-        let mut t = b.build();
-        t.emit(1, login_event());
-
-        for _ in 0..10 {
-            t.api.program_hash(Err(crate::error::CoreError::HttpStatus {
-                status: 503,
-                message: "boom".into(),
-            }));
-        }
-
-        // The first attempt happens immediately when the event is queued.
-        t.emit(2, skipped_upload());
-        assert_eq!(
-            t.api.state().hash_uploads.len(),
-            1,
-            "first attempt happens immediately"
-        );
-
-        // Backoff after one failure is 1s: a ping exactly 1s later should retry.
-        t.emit(3, Ping);
-        assert_eq!(
-            t.api.state().hash_uploads.len(),
-            2,
-            "backoff should allow a retry after 1s"
-        );
-
-        // Backoff doubles to 2s: a ping only 1s after that must NOT retry yet.
-        t.emit(4, Ping);
-        assert_eq!(
-            t.api.state().hash_uploads.len(),
-            2,
-            "must not retry every tick during a sustained outage"
-        );
-
-        // ...but 2s after the last attempt (t=5) it should.
-        t.emit(5, Ping);
-        assert_eq!(
-            t.api.state().hash_uploads.len(),
-            3,
-            "backoff window elapsed, retry should fire"
-        );
-
-        // Backoff doubles again to 4s: pings at t=6,7,8 must not retry.
-        t.emit(6, Ping);
-        t.emit(7, Ping);
-        t.emit(8, Ping);
-        assert_eq!(
-            t.api.state().hash_uploads.len(),
-            3,
-            "gap should keep growing, not reset back to 1s"
-        );
-
-        // 4s after the t=5 attempt (t=9) the retry should fire again.
-        t.emit(9, Ping);
-        assert_eq!(
-            t.api.state().hash_uploads.len(),
-            4,
-            "retry fires again once the longer window elapses"
-        );
-
-        assert_eq!(
-            t.observer::<UploadModule<MockApiClient>>()
-                .state
-                .pending_hash_events
-                .len(),
-            1,
-            "event should remain queued through the whole sustained outage"
-        );
-    }
-
-    #[test]
-    fn permanent_hash_failure_400_drops_event_without_retry() {
-        let mut b = EventTester::builder();
-        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
-        let mut t = b.build();
-        t.emit(1, login_event());
-
-        t.api.program_hash(Err(crate::error::CoreError::HttpStatus {
-            status: 400,
-            message: "bad event".into(),
-        }));
-
-        t.emit(2, skipped_upload());
-        assert_eq!(
-            t.api.state().hash_uploads.len(),
-            1,
-            "one attempt should be made"
-        );
-        assert!(
-            t.observer::<UploadModule<MockApiClient>>()
-                .state
-                .pending_hash_events
-                .is_empty(),
-            "permanently rejected event should be dropped, not kept for retry"
-        );
-
-        // No pending events remain, so a later ping makes no further hash calls.
-        t.emit(3, Ping);
-        assert_eq!(
-            t.api.state().hash_uploads.len(),
-            1,
-            "no further attempts for a permanently rejected event"
-        );
-    }
-
-    #[test]
-    fn hash_seq_increments_and_resets_after_batch_lands() {
-        let mut b = EventTester::builder();
-        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
-        let mut t = b.build();
-        t.emit(1, login_event());
-        // Isolate seq behavior from the post-login proof-batch mechanic, which
-        // would otherwise land (and reset) a batch after the very first event.
-        {
-            let m = t.observer::<UploadModule<MockApiClient>>();
-            m.state.post_login_proof_batches_remaining = 0;
-            m.state.last_batch_at_ms = Some(0);
-        }
-
-        t.emit(2, skipped_upload());
-        t.emit(3, skipped_upload());
-        {
-            let s = t.api.state();
-            assert_eq!(s.hash_uploads.len(), 2);
-            assert_eq!(
-                s.hash_uploads[0].seq, 1,
-                "first upload uses seq 1 — 0 is never valid"
-            );
-            assert_eq!(
-                s.hash_uploads[1].seq, 2,
-                "seq strictly increases per upload"
-            );
-        }
-
-        // Force the batch holding both hashed events to land.
-        t.emit(4, FlushBatchNow);
-        assert_eq!(t.api.state().batch_uploads.len(), 1, "batch should land");
-        assert_eq!(
-            t.observer::<UploadModule<MockApiClient>>()
-                .state
-                .next_hash_seq,
-            0,
-            "a landed batch resets the local seq counter, mirroring the API's server-side reset"
-        );
-
-        t.emit(5, skipped_upload());
-        assert_eq!(
-            t.api.state().hash_uploads.last().unwrap().seq,
-            1,
-            "seq restarts at 1 after the reset"
-        );
-    }
-
-    #[test]
-    fn hash_sequence_conflict_advances_local_seq_and_retries() {
-        let mut b = EventTester::builder();
-        b.add(UploadModule::new(Box::new(b.platform()), b.api(), 60_000));
-        let mut t = b.build();
-        t.emit(1, login_event());
-
-        t.api.program_hash(Err(crate::error::CoreError::HttpStatus {
-            status: 409,
-            message: "sequence conflict".into(),
-        }));
-
-        t.emit(2, skipped_upload());
-        {
-            let s = t.api.state();
-            assert_eq!(s.hash_uploads.len(), 1, "first attempt uses seq 1");
-            assert_eq!(s.hash_uploads[0].seq, 1);
-        }
-        assert_eq!(
-            t.observer::<UploadModule<MockApiClient>>()
-                .state
-                .pending_hash_events
-                .len(),
-            1,
-            "a 409 keeps the event queued for retry rather than dropping it — seq isn't part \
-             of the hash chain input, so retrying with a fresher seq is always safe"
-        );
-
-        // Backoff after one failure is 1s: a ping exactly 1s later retries with a
-        // higher seq and this time succeeds.
-        t.emit(3, Ping);
-        let s = t.api.state();
-        assert_eq!(s.hash_uploads.len(), 2, "retry attempt made");
-        assert_eq!(
-            s.hash_uploads[1].seq, 2,
-            "retry uses a higher seq than the rejected attempt"
-        );
-    }
-
-    #[test]
-    fn flush_batch_now_bypasses_batch_backoff_cooldown() {
-        let mut b = EventTester::builder();
-        b.add(UploadModule::new(
-            Box::new(b.platform()),
-            b.api(),
-            24 * 60 * 60 * 1_000,
-        ));
-        let mut t = b.build();
-        t.emit(1, login_event());
-        t.observer::<UploadModule<MockApiClient>>()
-            .state
-            .pending_batch_events
-            .push(crate::module::upload::PendingBatchEvent {
-                ts: 500,
-                risk: 0.0,
-                encoded: vec![1, 2, 3],
-                is_screenshot: false,
-                notify: None,
-            });
-
-        // First flush fails, putting `batch_backoff` into a ~1s cooldown.
-        t.api
-            .program_batch(Err(crate::error::CoreError::HttpStatus {
-                status: 503,
-                message: "boom".into(),
-            }));
-        t.emit(2, FlushBatchNow);
-        assert_eq!(
-            t.api.state().batch_uploads.len(),
-            1,
-            "first flush attempts and fails"
-        );
-
-        // A plain ping still inside the cooldown window must not retry — this
-        // is the backoff-respecting path that keeps a stuck endpoint from
-        // being hammered once per tick.
-        t.emit(2.5, Ping);
-        assert_eq!(
-            t.api.state().batch_uploads.len(),
-            1,
-            "ping should respect the batch backoff cooldown"
-        );
-
-        // An explicit FlushBatchNow, still inside that same cooldown window,
-        // must bypass it and attempt immediately.
-        t.emit(2.6, FlushBatchNow);
-        assert_eq!(
-            t.api.state().batch_uploads.len(),
-            2,
-            "FlushBatchNow should bypass the cooldown and retry immediately"
-        );
-        assert!(
-            t.observer::<UploadModule<MockApiClient>>()
-                .state
-                .pending_batch_events
-                .is_empty(),
-            "the bypassed retry should have succeeded and drained the queue"
-        );
-    }
-
-    #[test]
-    fn process_stopped_bypasses_batch_backoff_cooldown() {
-        let mut b = EventTester::builder();
-        b.add(UploadModule::new(
-            Box::new(b.platform()),
-            b.api(),
-            24 * 60 * 60 * 1_000,
-        ));
-        let mut t = b.build();
-        t.emit(1, login_event());
-        t.observer::<UploadModule<MockApiClient>>()
-            .state
-            .pending_batch_events
-            .push(crate::module::upload::PendingBatchEvent {
-                ts: 500,
-                risk: 0.0,
-                encoded: vec![1, 2, 3],
-                is_screenshot: false,
-                notify: None,
-            });
-
-        // First flush fails, putting `batch_backoff` into a ~1s cooldown.
-        t.api
-            .program_batch(Err(crate::error::CoreError::HttpStatus {
-                status: 503,
-                message: "boom".into(),
-            }));
-        t.emit(2, FlushBatchNow);
-        assert_eq!(t.api.state().batch_uploads.len(), 1);
-
-        // ProcessStopped fires well inside the cooldown window but, like
-        // FlushBatchNow, is a terminal one-shot flush and must not be
-        // silently swallowed by an unrelated earlier failure's backoff.
-        t.emit(2.2, ProcessStopped);
-        assert_eq!(
-            t.api.state().batch_uploads.len(),
-            2,
-            "ProcessStopped should bypass the cooldown and flush immediately"
+            state.pending_batch_events.is_empty(),
+            "logout already cleared the queue; the stale outcome must not resurrect it"
         );
     }
 }
