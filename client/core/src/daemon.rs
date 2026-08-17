@@ -10,7 +10,9 @@ use crate::config::Config;
 use crate::error::CoreResult;
 use crate::logging::log_warning;
 use crate::model::{AuthState, ServiceStatus};
-use crate::module::auth::{self, Logout};
+use crate::module::auth;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use crate::module::auth::Logout;
 use crate::module::capture_availability::{self, CaptureAvailabilityState};
 use crate::module::heartbeat::{self, HeartbeatState};
 use crate::module::lifecycle::{self, LifecycleState};
