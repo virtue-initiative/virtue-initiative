@@ -6,6 +6,7 @@ members = [
   "mac",
   "mac/rust",
   "windows",
+  "ios/rust",
   "text-detection",
 ]
 resolver = "2"

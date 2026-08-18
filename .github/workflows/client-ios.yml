@@ -35,15 +35,14 @@ jobs:
           cache-on-failure: true
           workspaces: |
             client -> target
-            client/ios/rust -> target
 
       - name: Rust build smoke test (core)
         run: cargo build -p virtue-core
         working-directory: client
 
       - name: Rust build smoke test (iOS bridge)
-        run: cargo build --manifest-path Cargo.toml
-        working-directory: client/ios/rust
+        run: cargo build -p virtue-ios
+        working-directory: client
 
       - name: Resolve version info
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')

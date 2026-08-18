@@ -37,6 +37,7 @@ jobs:
           cache-on-failure: true
           workspaces: |
             client -> target
+            hash-server -> target
 
       - name: Rust lint (core)
         run: cargo clippy -p virtue-core --all-targets -- -D warnings
@@ -53,6 +54,21 @@ jobs:
       - name: Rust scenario tests (core)
         run: cargo test -p virtue-core --features testing --test scenarios
         working-directory: client
+
+      - name: Build hash server
+        run: cargo build
+        working-directory: hash-server
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Run device -> api/hash integration test
+        run: bun client/mac/scripts/integration-test.ts
 
       - name: Add Intel cross-compilation target
         run: rustup target add x86_64-apple-darwin
@@ -162,39 +178,3 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: ./scripts/publish-release.sh "${{ steps.version.outputs.release_tag }}" "${{ steps.version.outputs.build_label }}" "target/macos/virtue-macos-${{ steps.version.outputs.build_label }}.dmg" "${{ github.ref_name == 'main' && 'stable' || 'dev' }}"
         working-directory: client
-
-  client-macos-integration:
-    name: Client macOS Integration
-    runs-on: macos-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          lfs: true
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          prefix-key: 'v2'
-          cache-on-failure: true
-          workspaces: |
-            client -> target
-            hash-server -> target
-
-      - name: Build hash server
-        run: cargo build
-        working-directory: hash-server
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Run device -> api/hash integration test
-        run: bun client/mac/scripts/integration-test.ts

@@ -3792,6 +3792,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "virtue-ios"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "once_cell",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "virtue-core",
+]
+
+[[package]]
 name = "virtue-linux"
 version = "0.1.0"
 dependencies = [

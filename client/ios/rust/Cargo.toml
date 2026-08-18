@@ -7,8 +7,6 @@ edition = "2021"
 name = "virtue_ios_rust"
 crate-type = ["staticlib"]
 
-[workspace]
-
 [dependencies]
 anyhow = "1"
 virtue_core = { package = "virtue-core", path = "../../core" }
