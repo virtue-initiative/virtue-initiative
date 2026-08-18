@@ -88,7 +88,7 @@ async fn run_daemon_service_loop(paths: &ClientPaths) -> Result<()> {
         Daemon::new(config, platform.clone(), api, state_path)
     })?);
 
-    virtue_core::spawn_ipc_server(paths.state_dir.join("daemon.sock"), Arc::clone(&daemon));
+    virtue_core::ipc::spawn_server(paths.state_dir.join("daemon.sock"), Arc::clone(&daemon));
 
     let shutdown = Arc::new(AtomicBool::new(false));
     let (signal_tx, mut signal_rx) = mpsc::unbounded_channel::<String>();

@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
-use virtue_core::ClientController;
+use virtue_core::ipc::ClientController;
 
 #[derive(Parser)]
 struct Args {

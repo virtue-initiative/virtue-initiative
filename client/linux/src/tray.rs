@@ -4,7 +4,7 @@ use std::thread;
 use std::time::Duration;
 
 use ksni::blocking::TrayMethods;
-use virtue_core::ClientController;
+use virtue_core::ipc::ClientController;
 
 use crate::config::{self, ClientPaths};
 

@@ -22,9 +22,6 @@ use crate::rng::{OsRandomSource, RandomSource};
 use crate::state::{load_state, store_state};
 use virtue_text_detection::ScreenshotOCR;
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-use crate::ipc::IpcPushTarget;
-
 /// Bump whenever `DaemonState`'s shape needs a breaking change that
 /// `#[serde(default)]` alone can't absorb; `Daemon::new` logs the version
 /// transition. No real migration step exists yet — every change so far has
@@ -103,8 +100,6 @@ pub struct Daemon<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> {
     classifier: Option<Arc<RiskClassifier>>,
     ocr: Option<Arc<ScreenshotOCR>>,
     rng: Arc<dyn RandomSource>,
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    ipc_client: Mutex<Option<IpcPushTarget>>,
 }
 
 impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
@@ -135,8 +130,6 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             classifier: screenshot::load_classifier().map(Arc::new),
             ocr: screenshot::load_ocr().map(Arc::new),
             rng: Arc::new(OsRandomSource),
-            #[cfg(any(target_os = "linux", target_os = "macos"))]
-            ipc_client: Mutex::new(None),
         };
 
         daemon.refresh_settings_on_startup();
@@ -199,25 +192,6 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         }
     }
 
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    fn broadcast_logout(&self) {
-        let guard = self.ipc_client.lock().expect("ipc client lock poisoned");
-        if let Some(target) = guard.as_ref() {
-            crate::ipc::push_logout(target);
-        }
-    }
-
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    fn broadcast_logout(&self) {}
-
-    /// Sets (or clears) the one connected IPC client eligible to receive
-    /// daemon-initiated pushes (a logout). Called by `ipc::serve_connection`
-    /// on accept and on disconnect.
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    pub(crate) fn set_ipc_client(&self, target: Option<IpcPushTarget>) {
-        *self.ipc_client.lock().expect("ipc client lock poisoned") = target;
-    }
-
     // ── Apply logic: the only code allowed to mutate a `DaemonState` ───────
     //
     // Each of these mirrors one public request method's effect, but operates
@@ -235,7 +209,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         password: &str,
         device_name_override: Option<&str>,
         now_ms: i64,
-    ) -> (CoreResult<String>, bool) {
+    ) -> CoreResult<String> {
         let DaemonState {
             auth,
             screenshot,
@@ -256,7 +230,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         )
     }
 
-    fn apply_logout(&self, state: &mut DaemonState) -> bool {
+    fn apply_logout(&self, state: &mut DaemonState) {
         let DaemonState {
             auth,
             screenshot,
@@ -363,24 +337,16 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     ) -> CoreResult<String> {
         let now_ms = self.now_ms();
         let mut guard = self.state.lock().expect("daemon state lock poisoned");
-        let (result, revoked) = self.apply_login(&mut guard, email, password, device_name, now_ms);
+        let result = self.apply_login(&mut guard, email, password, device_name, now_ms);
         self.persist(&guard);
-        drop(guard);
-        if revoked {
-            self.broadcast_logout();
-        }
         result
     }
 
     #[cfg(any(test, feature = "testing"))]
     pub fn test_logout(&self) -> CoreResult<()> {
         let mut guard = self.state.lock().expect("daemon state lock poisoned");
-        let revoked = self.apply_logout(&mut guard);
+        self.apply_logout(&mut guard);
         self.persist(&guard);
-        drop(guard);
-        if revoked {
-            self.broadcast_logout();
-        }
         Ok(())
     }
 
@@ -478,7 +444,6 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
 
             if !requests.is_empty() {
                 let mut fires: Vec<Box<dyn FnOnce() + Send>> = Vec::with_capacity(requests.len());
-                let mut revoked_session = false;
                 for req in requests {
                     match req {
                         DaemonRequest::Login {
@@ -487,21 +452,19 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
                             device_name,
                             reply,
                         } => {
-                            let (result, revoked) = self.apply_login(
+                            let result = self.apply_login(
                                 &mut working,
                                 &email,
                                 &password,
                                 device_name.as_deref(),
                                 now_ms,
                             );
-                            revoked_session |= revoked;
                             fires.push(Box::new(move || {
                                 let _ = reply.send(result);
                             }));
                         }
                         DaemonRequest::Logout { reply } => {
-                            let revoked = self.apply_logout(&mut working);
-                            revoked_session |= revoked;
+                            self.apply_logout(&mut working);
                             fires.push(Box::new(move || {
                                 let _ = reply.send(Ok(()));
                             }));
@@ -530,9 +493,6 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
 
                 *self.state.lock().expect("daemon state lock poisoned") = working.clone();
                 self.persist(&working);
-                if revoked_session {
-                    self.broadcast_logout();
-                }
                 for fire in fires {
                     fire();
                 }

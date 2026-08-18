@@ -39,7 +39,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
         Daemon::new(config, LinuxPlatformHooks::new(), api, state_path)
     })?);
 
-    virtue_core::spawn_ipc_server(paths.state_dir.join("daemon.sock"), Arc::clone(&daemon));
+    virtue_core::ipc::spawn_server(paths.state_dir.join("daemon.sock"), Arc::clone(&daemon));
 
     spawn_signal_handler(Arc::clone(&daemon));
 

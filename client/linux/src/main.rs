@@ -13,9 +13,10 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
+use virtue_core::ipc::ClientController;
 #[cfg(debug_assertions)]
 use virtue_core::{AlertReason, ScreenshotSkipReason};
-use virtue_core::{ClientController, ScreenshotHooks, ServiceStatus, Upload, UploadKind};
+use virtue_core::{ScreenshotHooks, ServiceStatus, Upload, UploadKind};
 
 use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_backend};
 use crate::config::{ClientPaths, build_core_config, default_device_name};

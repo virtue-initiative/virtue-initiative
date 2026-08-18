@@ -18,11 +18,17 @@
 //! loops `accept` -> serve that connection to completion -> `accept` again;
 //! a second client's `connect()` simply blocks until the first disconnects,
 //! via the OS listen backlog.
+//!
+//! This module gates itself rather than being gated at its `mod` declaration,
+//! so `target_os` lives in exactly one file: everything platform-conditional
+//! about the client is the existence of this transport.
+
+#![cfg(any(target_os = "linux", target_os = "macos"))]
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 
 use serde::{Deserialize, Serialize};
@@ -69,11 +75,6 @@ enum WireReply {
         status: ServiceStatus,
     },
     Ack,
-    /// Unprompted push, sent whenever the daemon transitions to logged-out
-    /// (explicit logout, an implicit revoke during `login()`, or a
-    /// server-forced logout on a 401/404 batch upload) — not a reply to any
-    /// particular request.
-    LoggedOut,
 }
 
 fn write_line<W: Write>(writer: &mut W, reply: &WireReply) -> std::io::Result<()> {
@@ -133,19 +134,6 @@ where
     }
 }
 
-/// The daemon's write half of its one current IPC connection, shared
-/// between the serving thread's replies and `Daemon::broadcast_logout`'s
-/// unprompted push. Wrapped in a `Mutex` so the two never interleave
-/// mid-line on the socket.
-pub(crate) type IpcPushTarget = Arc<Mutex<UnixStream>>;
-
-pub(crate) fn push_logout(target: &IpcPushTarget) {
-    let mut stream = target.lock().expect("ipc write lock poisoned");
-    if let Err(err) = write_line(&mut *stream, &WireReply::LoggedOut) {
-        tracing::warn!(error = %err, "daemon: failed to push logout to ipc client");
-    }
-}
-
 /// Spawn the one IPC-serving thread, listening at `sock_path` for the
 /// lifetime of the process. Logs and returns without spawning on bind
 /// failure.
@@ -186,12 +174,10 @@ where
     P: PlatformHooks,
     A: ApiTransport + Send + Sync + 'static,
 {
-    let Ok(write_stream) = stream.try_clone() else {
+    let Ok(mut write_half) = stream.try_clone() else {
         tracing::error!("daemon: ipc failed to clone connection for writing");
         return;
     };
-    let write_half: IpcPushTarget = Arc::new(Mutex::new(write_stream));
-    daemon.set_ipc_client(Some(Arc::clone(&write_half)));
 
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
@@ -217,15 +203,10 @@ where
             }
         };
         let reply = dispatch(daemon, request);
-        let mut guard = write_half.lock().expect("ipc write lock poisoned");
-        let write_result = write_line(&mut *guard, &reply);
-        drop(guard);
-        if write_result.is_err() {
+        if write_line(&mut write_half, &reply).is_err() {
             break;
         }
     }
-
-    daemon.set_ipc_client(None);
 }
 
 // ── Client ────────────────────────────────────────────────────────────────
@@ -241,13 +222,17 @@ fn connect_error(err: std::io::Error) -> CoreError {
     }
 }
 
-struct IpcClient {
+/// IPC client used by the CLI/tray to talk to the resident daemon: login,
+/// logout, status, and friends. A stable boundary every Linux/macOS platform
+/// crate depends on.
+pub struct ClientController {
     reader: BufReader<UnixStream>,
     writer: UnixStream,
 }
 
-impl IpcClient {
-    fn connect(path: &Path) -> CoreResult<Self> {
+impl ClientController {
+    /// Connect to the daemon listening at `path`.
+    pub fn connect(path: &Path) -> CoreResult<Self> {
         let stream = UnixStream::connect(path).map_err(connect_error)?;
         let reader_stream = stream.try_clone()?;
         Ok(Self {
@@ -256,63 +241,21 @@ impl IpcClient {
         })
     }
 
-    /// Send `request` and block for its reply, transparently handling any
-    /// unprompted `LoggedOut` push that arrives first by invoking
-    /// `on_logout` and continuing to wait — the CLI/tray only ever have one
-    /// request in flight at a time, so a push can't be mistaken for it.
-    fn call(
-        &mut self,
-        request: &WireRequest,
-        on_logout: Option<&(dyn Fn() + Send + Sync)>,
-    ) -> CoreResult<WireReply> {
-        let json = serde_json::to_string(request)?;
+    /// Send `request` and block for its reply. The daemon only ever writes
+    /// in response to a request, so the next line on the socket is always
+    /// this call's reply.
+    fn call(&mut self, request: WireRequest) -> CoreResult<WireReply> {
+        let json = serde_json::to_string(&request)?;
         self.writer.write_all(json.as_bytes())?;
         self.writer.write_all(b"\n")?;
         self.writer.flush()?;
 
-        loop {
-            let mut line = String::new();
-            let n = self.reader.read_line(&mut line)?;
-            if n == 0 {
-                return Err(CoreError::Ipc("connection to daemon closed".to_string()));
-            }
-            let reply: WireReply = serde_json::from_str(line.trim_end())?;
-            if matches!(reply, WireReply::LoggedOut) {
-                if let Some(handler) = on_logout {
-                    handler();
-                }
-                continue;
-            }
-            return Ok(reply);
+        let mut line = String::new();
+        let n = self.reader.read_line(&mut line)?;
+        if n == 0 {
+            return Err(CoreError::Ipc("connection to daemon closed".to_string()));
         }
-    }
-}
-
-/// IPC client used by the CLI/tray to talk to the resident daemon: login,
-/// logout, status, and friends, plus a callback for the daemon's unprompted
-/// logout push. A stable boundary every Linux/macOS platform crate depends
-/// on.
-pub struct ClientController {
-    client: IpcClient,
-    on_logout: Option<Box<dyn Fn() + Send + Sync>>,
-}
-
-impl ClientController {
-    fn new(client: IpcClient) -> Self {
-        Self {
-            client,
-            on_logout: None,
-        }
-    }
-
-    /// Connect to the daemon listening at `path`.
-    pub fn connect(path: &Path) -> CoreResult<Self> {
-        Ok(Self::new(IpcClient::connect(path)?))
-    }
-
-    fn call(&mut self, request: WireRequest) -> CoreResult<WireReply> {
-        let handler = self.on_logout.as_deref();
-        self.client.call(&request, handler)
+        Ok(serde_json::from_str(line.trim_end())?)
     }
 
     /// Send a login request and block until the reply is received. Returns
@@ -388,13 +331,6 @@ impl ClientController {
     pub fn flush_batch_now(&mut self) -> CoreResult<()> {
         self.call(WireRequest::FlushBatchNow)?;
         Ok(())
-    }
-
-    /// Register a handler for the daemon's unprompted logout push. Only
-    /// delivered while another call is in flight (see [`IpcClient::call`]) —
-    /// fine for the CLI/tray's short-lived, one-request-at-a-time usage.
-    pub fn on_logout(&mut self, handler: impl Fn() + Send + Sync + 'static) {
-        self.on_logout = Some(Box::new(handler));
     }
 }
 

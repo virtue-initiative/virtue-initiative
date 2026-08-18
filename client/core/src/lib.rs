@@ -4,7 +4,8 @@ pub mod config;
 pub mod crypto;
 pub mod daemon;
 pub mod error;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+/// Empty on platforms whose CLI/tray is in-process; see the module's own
+/// `#![cfg]`.
 pub mod ipc;
 pub mod logging;
 pub mod model;
@@ -22,8 +23,6 @@ pub use config::{
 };
 pub use daemon::{DAEMON_STATE_VERSION, Daemon, DaemonState};
 pub use error::{CoreError, CoreResult};
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-pub use ipc::{ClientController, spawn_server as spawn_ipc_server};
 pub use model::{
     AlertReason, DeviceCredentials, DeviceSettings, Redacted, ScreenshotSkipReason, UploadKind,
 };

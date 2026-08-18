@@ -2,7 +2,8 @@ use std::process::ExitCode;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use virtue_core::{AuthState, ClientController, ServiceStatus};
+use virtue_core::ipc::ClientController;
+use virtue_core::{AuthState, ServiceStatus};
 
 use virtue_mac::config::{ClientPaths, build_core_config, read_auth_state};
 use virtue_mac::daemon;

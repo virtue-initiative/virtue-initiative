@@ -9,10 +9,6 @@ use crate::module::upload::UploadState;
 /// active on the server forever). On success, updates `auth`, enables
 /// screenshot capture, and seeds `upload` with the fresh credentials/settings/
 /// hash token. Returns the new device id.
-///
-/// Returns `true` in addition to the result to tell the caller whether an
-/// existing session was revoked (so it can push a logout notice to the
-/// connected IPC client, if any).
 #[allow(clippy::too_many_arguments)]
 pub fn login<A: ApiTransport>(
     auth: &mut AuthState,
@@ -25,11 +21,9 @@ pub fn login<A: ApiTransport>(
     password: &str,
     device_name_override: Option<&str>,
     now_ms: i64,
-) -> (CoreResult<String>, bool) {
-    let mut revoked = false;
+) -> CoreResult<String> {
     if let Some(creds) = auth.device_credentials.take() {
         let _ = api.logout(&creds.refresh_token);
-        revoked = true;
     }
 
     let resolved_name = device_name_override
@@ -46,29 +40,25 @@ pub fn login<A: ApiTransport>(
             upload.settings = Some(registered.settings);
             upload.hash_token_cache = Some((registered.hash_token, now_ms));
             screenshot::enable(screenshot);
-            (Ok(device_id), revoked)
+            Ok(device_id)
         }
-        Err(err) => (Err(err), revoked),
+        Err(err) => Err(err),
     }
 }
 
 /// Logs out (best-effort server-side revoke), clears auth/upload state, and
-/// disables screenshot capture. Returns whether there was a session to
-/// revoke (so the caller can decide whether a `Logout` broadcast is
-/// warranted).
+/// disables screenshot capture.
 pub fn logout<A: ApiTransport>(
     auth: &mut AuthState,
     screenshot: &mut ScreenshotState,
     upload: &mut UploadState,
     api: &A,
-) -> bool {
-    let had_session = auth.device_credentials.is_some();
+) {
     if let Some(creds) = auth.device_credentials.take() {
         let _ = api.logout(&creds.refresh_token);
     }
     upload.reset_for_logout();
     screenshot::disable(screenshot);
-    had_session
 }
 
 #[cfg(test)]
@@ -83,7 +73,7 @@ mod tests {
         let mut upload = UploadState::default();
         let api = MockApiClient::new();
 
-        let (result, revoked) = login(
+        let result = login(
             &mut auth,
             &mut screenshot,
             &mut upload,
@@ -96,7 +86,10 @@ mod tests {
             1_000,
         );
         assert!(result.is_ok());
-        assert!(!revoked, "first login has nothing to revoke");
+        assert!(
+            api.state().logout_calls.is_empty(),
+            "first login has nothing to revoke"
+        );
         assert!(auth.device_credentials.is_some());
         assert!(upload.device_credentials.is_some());
         assert!(upload.settings.is_some());
@@ -122,7 +115,7 @@ mod tests {
             None,
             1_000,
         );
-        let (result, revoked) = login(
+        let result = login(
             &mut auth,
             &mut screenshot,
             &mut upload,
@@ -135,7 +128,6 @@ mod tests {
             2_000,
         );
         assert!(result.is_ok());
-        assert!(revoked);
         assert_eq!(api.state().logout_calls.len(), 1);
     }
 
@@ -167,7 +159,7 @@ mod tests {
         let mut upload = UploadState::default();
         let api = MockApiClient::new();
         api.program_register_device(Err(crate::error::CoreError::InvalidState("bad creds")));
-        let (result, _) = login(
+        let result = login(
             &mut auth,
             &mut screenshot,
             &mut upload,
@@ -185,13 +177,12 @@ mod tests {
     }
 
     #[test]
-    fn logout_without_session_reports_nothing_to_revoke() {
+    fn logout_without_session_does_not_call_the_server() {
         let mut auth = AuthState::default();
         let mut screenshot = ScreenshotState::default();
         let mut upload = UploadState::default();
         let api = MockApiClient::new();
-        let revoked = logout(&mut auth, &mut screenshot, &mut upload, &api);
-        assert!(!revoked);
+        logout(&mut auth, &mut screenshot, &mut upload, &api);
         assert!(api.state().logout_calls.is_empty());
     }
 
@@ -213,8 +204,7 @@ mod tests {
             None,
             1_000,
         );
-        let revoked = logout(&mut auth, &mut screenshot, &mut upload, &api);
-        assert!(revoked);
+        logout(&mut auth, &mut screenshot, &mut upload, &api);
         assert_eq!(api.state().logout_calls.len(), 1);
         assert!(!screenshot.enabled);
         assert!(upload.device_credentials.is_none());

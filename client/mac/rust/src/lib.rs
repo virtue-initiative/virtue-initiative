@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use once_cell::sync::OnceCell;
-use virtue_core::{AuthState, ClientController};
+use virtue_core::AuthState;
+use virtue_core::ipc::ClientController;
 use virtue_mac_platform::capture::{has_screen_capture_access, request_screen_capture_access};
 use virtue_mac_platform::config::{ClientPaths, ClientState, read_auth_state, save_state};
 use virtue_mac_platform::launch_agent;

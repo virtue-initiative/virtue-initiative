@@ -191,14 +191,20 @@ again }` — decoding a newline-JSON `WireRequest` off the socket, calling
   encoding the `WireReply` back. Only one client is ever connected at a
   time — a second `connect()` simply blocks in the OS listen backlog until
   the first disconnects — so there's no concurrent-connection bookkeeping.
-- A daemon-initiated push (currently just an unprompted logout — explicit
-  logout, an implicit revoke during `login()`, or a server-forced logout on
-  401/404) goes out via a single `Mutex<Option<IpcPushTarget>>` "current
-  client" slot on `Daemon` (`set_ipc_client`, set on accept and cleared on
-  disconnect), not a multi-connection broadcast registry.
+- The protocol is strictly request/reply — **the daemon never writes
+  unprompted**. The CLI/tray connects, sends one request, reads the reply,
+  and disconnects, so a push had nowhere to land anyway; both platforms
+  learn about a logout (explicit, an implicit revoke during `login()`, or a
+  server-forced one on 401/404) from their next `get_status()` poll. Keeping
+  it one-directional is also what lets `Daemon` stay free of any `ipc`
+  dependency, and therefore of any `target_os` cfg.
 - **`ClientController`** is the client side: connect, then block on each
-  request/reply round trip, transparently handling an unprompted logout push
-  arriving ahead of the reply it's actually waiting for.
+  request/reply round trip.
+- `ipc.rs` gates itself with an inner `#![cfg(any(target_os = "linux",
+  target_os = "macos"))]` rather than being gated at its `mod` declaration,
+  which confines `target_os` in this crate to that single line. `lib.rs`
+  declares the module unconditionally and deliberately does **not** re-export
+  its types; platform crates name `virtue_core::ipc::…` directly.
 
 ## Platform process model
 

@@ -72,7 +72,10 @@ other platform.
   again — only one client at a time), translating newline-JSON
   `WireRequest`s directly to `Daemon` method calls. `ClientController` is
   the client side — a stable boundary every Linux/Mac platform crate
-  depends on.
+  depends on, reached as `virtue_core::ipc::ClientController` (not
+  re-exported at the crate root, since the module doesn't exist on every
+  platform). The module carries its own `#![cfg]`, so `target_os` appears
+  in this one file and nowhere else in `core`.
 
 ### Status
 

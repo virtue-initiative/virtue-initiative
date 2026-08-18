@@ -110,9 +110,17 @@ real cross-process transport on top of those same methods:
   encode the `WireReply`) -> `accept` again. Only one client is ever
   connected at a time; a second `connect()` just blocks until the first
   disconnects. `ClientController` is the client side: login, logout, status,
-  and friends, plus a callback for the daemon's unprompted logout push
-  (`broadcast_logout`, via a single `Mutex<Option<..>>` "current client"
-  slot on `Daemon`, not a multi-connection registry).
+  and friends. The daemon only ever writes in reply to a request — there are
+  no unprompted pushes, so the CLI/tray learns about a logout from its next
+  `get_status()` poll.
+- `ipc.rs` gates *itself* with an inner `#![cfg(any(target_os = "linux",
+  target_os = "macos"))]`, so `target_os` appears in exactly one file in the
+  crate. `lib.rs` declares `pub mod ipc;` unconditionally (it's simply empty
+  elsewhere) and does not re-export its types — consumers name
+  `virtue_core::ipc::{ClientController, spawn_server}`, which keeps the
+  platform-conditional part of the API visibly scoped to the module that is
+  itself conditional. Nothing else in `core` may depend on `ipc`; that
+  coupling is what previously leaked `target_os` into `daemon.rs`.
 
 ## Testing
 
