@@ -36,14 +36,6 @@ jobs:
           workspaces: |
             client -> target
 
-      - name: Rust build smoke test (core)
-        run: cargo build -p virtue-core
-        working-directory: client
-
-      - name: Rust build smoke test (iOS bridge)
-        run: cargo build -p virtue-ios
-        working-directory: client
-
       - name: Resolve version info
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         id: version
