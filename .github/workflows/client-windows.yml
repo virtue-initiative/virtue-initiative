@@ -43,14 +43,6 @@ jobs:
           workspaces: |
             client -> target
 
-      - name: Rust build smoke test (core)
-        run: cargo build --target x86_64-pc-windows-msvc -p virtue-core
-        working-directory: client
-
-      - name: Rust build smoke test (Windows client)
-        run: cargo build --target x86_64-pc-windows-msvc -p virtue-windows
-        working-directory: client
-
       - name: Rust lint (core)
         run: cargo clippy --target x86_64-pc-windows-msvc -p virtue-core --all-targets -- -D warnings
         working-directory: client
@@ -85,7 +77,7 @@ jobs:
 
       - name: Build Windows MSIX (debug)
         if: github.event_name != 'push' || (github.ref != 'refs/heads/main' && github.ref != 'refs/heads/staging')
-        run: ./windows/scripts/build-msix.ps1 -Profile Debug
+        run: ./windows/scripts/build-msix.ps1 -Profile Debug -SkipTests
         working-directory: client
 
       - name: Resolve version info

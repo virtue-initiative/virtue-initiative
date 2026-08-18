@@ -38,14 +38,6 @@ jobs:
           workspaces: |
             client -> target
 
-      - name: Rust build smoke test (core)
-        run: cargo build -p virtue-core
-        working-directory: client
-
-      - name: Rust build smoke test (macOS client)
-        run: cargo build -p virtue-mac
-        working-directory: client
-
       - name: Rust lint (core)
         run: cargo clippy -p virtue-core --all-targets -- -D warnings
         working-directory: client

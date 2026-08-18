@@ -7,6 +7,7 @@ param(
     [string]$Profile = "Debug",
     [switch]$SkipBuild,
     [switch]$SkipSigning,
+    [switch]$SkipTests,
     [switch]$Clean,
     [string]$CacheRoot = "",
     [string]$SigningCertificatePath = "",
@@ -656,9 +657,11 @@ try {
         throw "Missing Rust interop DLL at $(Join-Path $RustOutputDir 'virtue_windows.dll')"
     }
 
-    & $dotnet test $WindowsTestsProject -c $Profile --no-restore
-    if ($LASTEXITCODE -ne 0) {
-        throw "dotnet test failed with exit code $LASTEXITCODE"
+    if (-not $SkipTests) {
+        & $dotnet test $WindowsTestsProject -c $Profile --no-restore
+        if ($LASTEXITCODE -ne 0) {
+            throw "dotnet test failed with exit code $LASTEXITCODE"
+        }
     }
 
     $manifestPublisher = Get-AppPackagePublisher -ManifestPath $WindowsAppManifest
