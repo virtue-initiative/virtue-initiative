@@ -68,15 +68,15 @@ pub fn disable(state: &mut ScreenshotState) {
     state.next_screenshot_at_ms = None;
 }
 
-/// What `plan` decided to do this tick — passed unlocked to `capture_and_process`.
+/// What `plan` decided to do this tick — passed to `capture_and_process`.
 pub struct CapturePlan {
     anchor: Option<fingerprint::Fingerprint>,
 }
 
-/// Phase 2a (cheap, still locked): decide whether a screenshot is due this
-/// tick, applying the locked/screensaver gate. Draws and stores the next
-/// scheduled time whenever a decision (capture or skip) is made, so pacing
-/// continues either way.
+/// Phase 2a (cheap): decide whether a screenshot is due this tick, applying
+/// the locked/screensaver gate. Draws and stores the next scheduled time
+/// whenever a decision (capture or skip) is made, so pacing continues either
+/// way.
 pub fn plan(
     state: &mut ScreenshotState,
     upload: &mut UploadState,
@@ -118,7 +118,7 @@ pub fn plan(
     }))
 }
 
-/// Outcome of the heavy (unlocked) capture pipeline.
+/// Outcome of the heavy capture pipeline.
 pub enum CaptureOutcome {
     Failed,
     StaticFrame,
@@ -129,8 +129,8 @@ pub enum CaptureOutcome {
     },
 }
 
-/// Phase 2b (slow, unlocked): capture -> fingerprint diff -> classify ->
-/// redact -> image process. Thread-free and unit-testable on its own.
+/// Phase 2b (slow): capture -> fingerprint diff -> classify -> redact ->
+/// image process. Unit-testable on its own.
 pub fn capture_and_process(
     plan: CapturePlan,
     hooks: &dyn ScreenshotHooks,
@@ -190,7 +190,7 @@ pub fn capture_and_process(
     }
 }
 
-/// Phase 2c (locked): apply the capture outcome.
+/// Phase 2c: apply the capture outcome.
 pub fn commit(
     state: &mut ScreenshotState,
     upload: &mut UploadState,

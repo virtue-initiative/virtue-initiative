@@ -28,10 +28,7 @@ fn fresh_unauthenticated_service_loops_cleanly_with_no_uploads() {
     let status = scenario.status();
     assert!(status.is_running);
     assert!(!status.is_authenticated);
-    scenario
-        .assert_batch_upload_count(0)
-        .assert_notify_count(0)
-        .assert_errors_log_empty();
+    scenario.assert_batch_upload_count(0).assert_notify_count(0);
 }
 
 // ── Screenshots ────────────────────────────────────────────────────────────────

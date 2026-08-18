@@ -121,9 +121,10 @@ impl Scenario {
 
     // --- driving the daemon ---
 
-    /// Run one `tick_once` at the current clock time.
+    /// Run one tick at the current clock time, single-threaded (no
+    /// `run_forever` loop thread involved).
     pub fn tick(&mut self) -> &mut Self {
-        self.daemon.tick_once(self.clock.now_ms());
+        self.daemon.tick_once_for_test(self.clock.now_ms());
         self
     }
 
@@ -140,11 +141,11 @@ impl Scenario {
         password: &str,
         device_name: Option<&str>,
     ) -> CoreResult<String> {
-        self.daemon.login(email, password, device_name)
+        self.daemon.test_login(email, password, device_name)
     }
 
     pub fn logout(&mut self) -> CoreResult<()> {
-        self.daemon.logout()
+        self.daemon.test_logout()
     }
 
     pub fn status(&mut self) -> ServiceStatus {
@@ -152,17 +153,17 @@ impl Scenario {
     }
 
     pub fn note_user_stop(&mut self, source: &str) -> &mut Self {
-        self.daemon.note_user_stop(source);
+        self.daemon.test_note_user_stop(source);
         self
     }
 
     pub fn queue_upload(&mut self, upload: Upload) -> &mut Self {
-        self.daemon.queue_upload(upload);
+        self.daemon.test_queue_upload(upload);
         self
     }
 
     pub fn flush_batch_now(&mut self) -> &mut Self {
-        self.daemon.flush_batch_now();
+        self.daemon.test_flush_batch_now();
         self
     }
 
@@ -192,29 +193,7 @@ impl Scenario {
         }
     }
 
-    pub fn read_errors_log(&self) -> String {
-        self.read_file("errors.log")
-    }
-
     // --- assertions ---
-
-    pub fn assert_errors_log_nonempty(&self) -> &Self {
-        let contents = self.read_errors_log();
-        assert!(
-            !contents.trim().is_empty(),
-            "expected errors.log to be non-empty but it was empty"
-        );
-        self
-    }
-
-    pub fn assert_errors_log_empty(&self) -> &Self {
-        let contents = self.read_errors_log();
-        assert!(
-            contents.trim().is_empty(),
-            "expected errors.log to be empty but got: {contents}"
-        );
-        self
-    }
 
     pub fn assert_batch_upload_count(&self, expected: usize) -> &Self {
         let actual = self.api.state().batch_uploads.len();

@@ -14,7 +14,6 @@ pub mod module;
 pub mod platform;
 pub mod rng;
 pub mod state;
-pub mod storage;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;

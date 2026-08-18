@@ -13,7 +13,6 @@ use crate::model::{
     BatchRecipient, BatchUpload, DeviceCredentials, DeviceSettings, LogEntry, NotifyPayload,
     UploadKind,
 };
-use crate::storage::FileStateStore;
 
 /// Wire message for `ClientController::queue_upload` / `Daemon::queue_upload` —
 /// still needed for IPC serialization even though nothing dispatches it
@@ -238,7 +237,7 @@ pub struct HashRetryPlan {
 }
 
 /// Phase 4: decide whether hash retries should run this tick, and snapshot
-/// everything `execute_hash_retries` needs so it can run unlocked.
+/// everything `execute_hash_retries` needs to make its network calls.
 pub fn plan_hash_retries(
     state: &mut UploadState,
     now_ms: i64,
@@ -262,9 +261,8 @@ pub fn plan_hash_retries(
             .as_ref()
             .and_then(|s| s.hash_base_url.clone()),
         cached_token: state.hash_token_cache.clone(),
-        // Drain rather than clone: `commit_hash_retries` splices whatever's
-        // left back in, so events enqueued concurrently while this plan runs
-        // unlocked (via `Daemon::queue_upload` on another thread) aren't lost.
+        // Drain rather than clone: cheaper, and commit_hash_retries splices
+        // whatever's left back in.
         events: std::mem::take(&mut state.pending_hash_events),
         next_hash_seq: state.next_hash_seq,
         now_ms,
@@ -401,15 +399,11 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
     }
 }
 
-/// Phase 5c: apply the hash-retry outcome back into locked state.
-pub fn commit_hash_retries(
-    state: &mut UploadState,
-    outcome: HashRetryOutcome,
-    now_ms: i64,
-    error_log: Option<&FileStateStore>,
-) {
-    // A logout/re-login raced with this tick's unlocked network calls — the
-    // outcome no longer belongs to the current session; drop it silently.
+/// Phase 5c: apply the hash-retry outcome.
+pub fn commit_hash_retries(state: &mut UploadState, outcome: HashRetryOutcome, now_ms: i64) {
+    // Defensive: apply_login/apply_logout only ever run between ticks, never
+    // mid-tick, so this should always match — but drop silently rather than
+    // corrupt a different session's queue if it somehow doesn't.
     if state
         .device_credentials
         .as_ref()
@@ -418,8 +412,8 @@ pub fn commit_hash_retries(
         return;
     }
 
-    // Splice unclaimed events back at the front so anything enqueued
-    // concurrently (while this ran unlocked) stays queued behind them.
+    // Splice unclaimed events back at the front so anything already queued
+    // (or enqueued by this same tick's other requests) stays behind them.
     let mut pending = outcome.still_pending;
     pending.append(&mut state.pending_hash_events);
     state.pending_hash_events = pending;
@@ -432,17 +426,11 @@ pub fn commit_hash_retries(
         state.settings = Some(settings);
     }
 
-    for (event, err) in &outcome.permanent_failures {
+    for (_, err) in &outcome.permanent_failures {
         log_error(
             "hash upload failed permanently (400), dropping event",
             Some(err),
         );
-        if let Some(store) = error_log {
-            let _ = store.append_error_log(&format!(
-                "{now_ms} hash upload permanently rejected (400) for event ts={}: {err}",
-                event.ts
-            ));
-        }
     }
 
     if outcome.had_failure {
@@ -568,9 +556,9 @@ pub fn execute_batch<A: ApiTransport>(plan: BatchPlan, api: &A) -> BatchOutcome 
     }
 }
 
-/// Phase 5c: apply the batch outcome back into locked state. Returns `true`
-/// if the outcome indicates the device should be logged out (deregistered or
-/// unauthorized) — the caller (`Daemon`) performs the actual logout.
+/// Phase 5c: apply the batch outcome. Returns `true` if the outcome
+/// indicates the device should be logged out (deregistered or unauthorized)
+/// — the caller (`Daemon`) performs the actual logout.
 pub fn commit_batch(state: &mut UploadState, outcome: BatchOutcome, now_ms: i64) -> bool {
     let device_id = match &outcome {
         BatchOutcome::Uploaded { device_id, .. } => device_id,
@@ -692,7 +680,7 @@ mod tests {
         let outcome = execute_hash_retries(plan, &api);
         assert!(outcome.still_pending.is_empty());
         assert_eq!(outcome.newly_hashed.len(), 1);
-        commit_hash_retries(&mut state, outcome, 1_000, None);
+        commit_hash_retries(&mut state, outcome, 1_000);
 
         assert!(state.pending_hash_events.is_empty());
         assert_eq!(state.pending_batch_events.len(), 1);
