@@ -6,6 +6,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use ureq::Agent;
 use ureq::http::{Response, StatusCode};
+use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 
 use crate::config::Config;
 use crate::crypto::derive_password_auth;
@@ -116,6 +117,25 @@ pub struct HttpApiClient {
     agent: Agent,
 }
 
+/// Trust the OS certificate store, so a device that has been told to trust an
+/// extra root (MDM, enterprise CA) behaves the way the rest of that OS does.
+///
+/// Android is the exception and stays on Mozilla's webpki bundle:
+/// `rustls-platform-verifier` there needs a JNI handle to an Android `Context`
+/// plus a Gradle-supplied Kotlin component and a Proguard keep rule.
+/// `nativeInit` currently receives no `Context`, so wiring that up is a
+/// separate Android-side change.
+fn root_certs() -> RootCerts {
+    #[cfg(target_os = "android")]
+    {
+        RootCerts::WebPki
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        RootCerts::PlatformVerifier
+    }
+}
+
 impl HttpApiClient {
     pub fn new(config: &Config) -> CoreResult<Self> {
         // `http_status_as_error(false)` keeps 4xx/5xx as ordinary responses so
@@ -123,6 +143,12 @@ impl HttpApiClient {
         let agent: Agent = Agent::config_builder()
             .timeout_global(Some(REQUEST_TIMEOUT))
             .http_status_as_error(false)
+            .tls_config(
+                TlsConfig::builder()
+                    .provider(TlsProvider::Rustls)
+                    .root_certs(root_certs())
+                    .build(),
+            )
             .build()
             .into();
         Ok(Self {

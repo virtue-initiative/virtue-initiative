@@ -43,9 +43,16 @@ sha2 = "0.10"
 thiserror = "2.0"
 tract-onnx = "0.21"
 tracing = "0.1"
-# Genuinely blocking HTTP. `rustls` pulls the ring-backed rustls stack plus
-# Mozilla's webpki roots; `cookies` is required by api/SPEC.md §1, which asks
-# clients to retain the server's short-lived JWT access cookie.
+# Genuinely blocking HTTP. `rustls` pulls the ring-backed rustls stack;
+# `cookies` is required by api/SPEC.md §1, which asks clients to retain the
+# server's short-lived JWT access cookie.
 ureq = { version = "3.4", default-features = false, features = ["cookies", "json", "rustls"] }
 virtue-text-detection = { path = "../text-detection" }
 webp = "0.3"
+
+# Verify certificates against the OS trust store everywhere it works with no
+# host-side setup. Android is deliberately excluded: rustls-platform-verifier
+# needs a JNI handle to an Android `Context`, a Kotlin component pulled in via
+# Gradle, and a Proguard keep rule, none of which exist yet — see api.rs.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+ureq = { version = "3.4", default-features = false, features = ["platform-verifier"] }
