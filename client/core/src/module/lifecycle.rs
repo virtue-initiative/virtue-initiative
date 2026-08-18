@@ -20,13 +20,6 @@ const SINGLE_LATE_THRESHOLD_MS: i64 = 60_000; // 1 minute
 const SUM_LATE_THRESHOLD_MS: i64 = 5 * 60_000; // 5 minutes
 const LOGIN_LOGOUT_EXCUSE_MS: i64 = 2 * 60_000; // 2 minutes
 
-/// IPC wire message for `ClientController::request_user_stop` — the CLI
-/// process asking the daemon to record an explicit user-initiated stop.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserStopRequested {
-    pub source: String,
-}
-
 #[derive(Serialize, Deserialize, Default, Clone)]
 #[serde(default)]
 pub struct LifecycleState {

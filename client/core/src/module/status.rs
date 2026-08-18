@@ -1,18 +1,7 @@
-use serde::{Deserialize, Serialize};
-
 use crate::model::{AuthState, ServiceStatus};
 use crate::module::upload::UploadState;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StatusRequest;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StatusResponse {
-    pub status: ServiceStatus,
-}
-
-/// Pure assembly of `ServiceStatus` from live daemon state — no fan-in
-/// required anymore now that everything lives in one `DaemonState`.
+/// Pure assembly of `ServiceStatus` from `&AuthState`/`&UploadState`.
 pub fn build(
     auth: &AuthState,
     upload: &UploadState,

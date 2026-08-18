@@ -1,44 +1,8 @@
-use serde::{Deserialize, Serialize};
-
 use crate::api::ApiTransport;
 use crate::error::CoreResult;
-use crate::model::{AuthState, Redacted};
+use crate::model::AuthState;
 use crate::module::screenshot::{self, ScreenshotState};
 use crate::module::upload::UploadState;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LoginRequested {
-    pub email: String,
-    pub password: Redacted<String>,
-    /// Optional device-name override chosen by the user at login. When `Some`
-    /// and non-empty, it takes precedence over the construction-time device
-    /// name (hostname / OS device name).
-    #[serde(default)]
-    pub device_name: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LoginResult {
-    pub success: bool,
-    pub error: Option<String>,
-    pub device_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LogoutRequested;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LogoutResult {
-    pub success: bool,
-    pub error: Option<String>,
-}
-
-/// Notification-only marker pushed to connected controllers whenever the
-/// daemon transitions to logged-out — whether from an explicit `logout()`
-/// call, an implicit revoke of a stale session during `login()`, or a
-/// server-forced logout (401/404 on a batch upload).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Logout;
 
 /// Logs in, revoking any existing device session first (a login while
 /// another session is still active would otherwise leave the old device row

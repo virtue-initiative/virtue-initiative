@@ -50,20 +50,22 @@ let daemon = Daemon::new(config, platform, api, state_path)?;
 daemon.run_forever(); // blocking — call from its own thread
 ```
 
-- `src/daemon.rs` — `Daemon<P, A>` / `DaemonState`; `tick_once` runs each
-  phase (lifecycle check, screenshot plan/capture/commit, capture-availability,
-  heartbeat, hash retries, batch upload, pick next wakeup, persist),
-  releasing the state lock around slow work (capture, network I/O).
-- `login`/`logout`/`status`/`note_user_stop`/`queue_upload`/`flush_batch_now`/
-  `request_stop` are plain synchronous `Daemon` methods, protected by an
-  `Arc<Mutex<DaemonState>>` + `Condvar` — no message queue. Each nudges the
-  loop's next wakeup to "now" and notifies the condvar so `run_forever`'s
-  sleep wakes promptly.
-- `src/events/channel.rs` — `Event`/`EventChannel`/`Error`, used only by
-  `RemoteEventBus` (IPC) now — there is no in-process event bus.
-- `src/events/remote.rs` — `RemoteEventBus` (cross-process JSON-line channel)
-- `src/ipc_bridge.rs` — `IpcBridge`: dispatches each accepted connection's
-  inbound requests directly to `Daemon` methods.
+- `src/daemon.rs` — `Daemon<P, A>` / `DaemonState`. `run_forever` waits for
+  either the next scheduled wakeup or an incoming `DaemonRequest`, applies
+  and persists any requests that arrived, then clones the current state once
+  and runs one tick (`run_phases`: lifecycle check, screenshot
+  plan/capture/commit, capture-availability, heartbeat, hash retries, batch
+  upload) against that owned clone with **no locking anywhere in the
+  middle**, writing the result back to the shared snapshot and to disk at
+  the end.
+- `login`/`logout`/`note_user_stop`/`queue_upload`/`flush_batch_now` are
+  `Daemon` methods that build a `DaemonRequest`, send it on an `mpsc`
+  channel, and block on a reply — the loop thread is the only place that
+  ever mutates `DaemonState`. `status()` is the one exception: a direct
+  lock-based read of the loop's last-committed snapshot, since there's
+  nothing to synchronize. `request_stop()` stays fire-and-forget.
+- `src/ipc.rs` (Linux/macOS only) — the cross-process transport for the
+  CLI/tray, sitting on top of the same `Daemon` methods; see "IPC" below.
 
 ## The 6 modules (`src/module/`)
 
@@ -96,13 +98,21 @@ already authenticated, refreshes device settings once before returning.
 
 ## IPC (Linux/Mac only)
 
-- `src/events/remote.rs` — `RemoteEventBus`: typed event channel over a Unix
-  socket
-- `src/ipc_bridge.rs` — `IpcBridge`: accepts connections, wires each one
-  directly to a shared `Arc<Daemon<...>>`
-- `src/controller.rs` — `ClientController`: IPC client used by the CLI for
-  login, logout, status. Its 6 public methods are a stable boundary — every
-  platform crate depends on this exact surface.
+Windows/Android/iOS need no code here at all — each holds one process-global
+`Arc<Daemon<..>>` and calls its methods directly, which is already the
+"thread channel" described above. Linux and macOS additionally run their
+CLI/tray as a separate OS process from the resident daemon, so they need a
+real cross-process transport on top of those same methods:
+
+- `src/ipc.rs` — single file. `spawn_server` binds a Unix socket and spawns
+  one thread that loops `accept` -> serve that connection to completion
+  (decode a newline-JSON `WireRequest`, call the matching `Daemon` method,
+  encode the `WireReply`) -> `accept` again. Only one client is ever
+  connected at a time; a second `connect()` just blocks until the first
+  disconnects. `ClientController` is the client side: login, logout, status,
+  and friends, plus a callback for the daemon's unprompted logout push
+  (`broadcast_logout`, via a single `Mutex<Option<..>>` "current client"
+  slot on `Daemon`, not a multi-connection registry).
 
 ## Testing
 

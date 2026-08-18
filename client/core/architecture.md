@@ -19,17 +19,14 @@ client/
     src/
       api.rs            — ApiTransport trait + ReqwestApiClient
       config.rs         — Config struct (compile-time defaults via env!())
-      controller.rs     — ClientController (IPC client for CLI)
       crypto.rs         — AES-256-GCM, HPKE key wrap, hash computation
       daemon.rs         — Daemon<P, A> / DaemonState — the sequential loop itself
       error.rs          — CoreError / CoreResult
-      events/
-        channel.rs      — Event / EventChannel / Error (IPC-only now)
-        remote.rs       — RemoteEventBus (cross-process, JSON lines)
-      ipc_bridge.rs      — IpcBridge (Linux/Mac daemon IPC accept loop)
+      ipc.rs            — ClientController + cross-process Unix-socket transport
+                           (Linux/Mac only)
       model.rs          — Shared structs (ServiceStatus, Screenshot, …)
       module/
-        auth.rs                  — login()/logout() + IPC message types
+        auth.rs                  — login()/logout()
         capture_availability.rs  — failure-window threshold
         heartbeat.rs             — 24h liveness ping
         lifecycle.rs             — late-wakeup tamper check + UserStop
@@ -39,7 +36,6 @@ client/
       platform.rs       — ScreenshotHooks / LifecycleHooks / PlatformHooks traits
       rng.rs            — RandomSource (screenshot cadence draws)
       state.rs          — load_state / store_state (event_state.json)
-      storage.rs        — errors.log
       testing/          — MockApiClient, TestPlatformHooks, MockClock,
                            TestRandomSource, Scenario
   linux/  mac/  windows/  android/  ios/   — platform wrappers (ios has its
@@ -52,21 +48,27 @@ client/
 
 `core` is structured around **one sequential loop**, not an event bus.
 `Daemon<P: PlatformHooks, A: ApiTransport>` owns an `Arc<Mutex<DaemonState>>`
-and a `Condvar`; `tick_once` runs the phases below in order, releasing the
-lock around slow work (screenshot capture, network I/O) so synchronous
-request methods (`login`, `status`, `queue_upload`, …) stay responsive even
-while a tick is mid-flight:
+(a read-only snapshot outside the loop thread) and an `mpsc::Sender<DaemonRequest>`.
+Each iteration of `run_forever` clones the state once, then runs the phases
+below straight through against that owned clone — no locking anywhere in the
+middle — before writing the result back to the shared snapshot and to disk:
 
 ```
-tick_once(now_ms):
-  lock: lifecycle::tick, screenshot::plan                        // phase 1, 2a
-  unlock: screenshot::capture_and_process                        // phase 2b
-  lock: screenshot::commit, capture_availability::tick,
-        heartbeat::tick, upload::plan_hash_retries                // phase 2c, 3, 4a
-  unlock: upload::execute_hash_retries (network)                  // phase 5a
-  lock: upload::commit_hash_retries, upload::plan_batch            // phase 5c, 4b
-  unlock: upload::execute_batch (network)                          // phase 5b
-  lock: upload::commit_batch, compute_next_wakeup, persist          // phase 5d, 6, 7
+run_forever loop:
+  wait for the next scheduled wakeup or an incoming DaemonRequest
+  drain any requests that arrived; apply + persist them; reply to each
+    (only after the persist succeeds)
+  working = state.lock().clone()
+  run_phases(&mut working, now_ms):
+    lifecycle::tick, screenshot::plan                              // phase 1, 2a
+    screenshot::capture_and_process                                // phase 2b
+    screenshot::commit, capture_availability::tick,
+      heartbeat::tick, upload::plan_hash_retries                   // phase 2c, 3, 4a
+    upload::execute_hash_retries (network)                         // phase 5a
+    upload::commit_hash_retries, upload::plan_batch                // phase 5c, 4b
+    upload::execute_batch (network)                                // phase 5b
+    upload::commit_batch                                           // phase 5d
+  compute_next_wakeup, persist, state.lock() = working              // phase 6, 7
 ```
 
 Hash results are committed _before_ the batch is planned so an event hashed
@@ -110,15 +112,32 @@ pub struct DaemonState {
 shape has somewhere to branch migration logic, rather than relying solely on
 `#[serde(default)]`.
 
-### Responsiveness: mutex + condvar, not a message queue
+### Responsiveness: a request channel, not a shared mutex
 
-`login`/`logout`/`status`/`note_user_stop`/`queue_upload`/`flush_batch_now`/
-`request_stop` are plain synchronous `&self` methods on `Daemon`. Each one
-that should reschedule the loop sets `next_wakeup_at_ms = now` under the
-lock, then calls `condvar.notify_one()` after releasing it — waking
-`run_forever`'s sleep promptly instead of waiting out the long interval.
-`status()` is a pure read and never notifies. This is the whole
-responsiveness mechanism: no message queue, no background dispatch thread.
+`login`/`logout`/`note_user_stop`/`queue_upload`/`flush_batch_now` build a
+`DaemonRequest` (each variant carries its own reply `Sender`), send it on the
+`mpsc` channel, and block on the reply — sending is itself the wakeup, since
+`run_forever` is blocked in `recv_timeout` waiting for exactly this. The loop
+thread is the only code that ever mutates `DaemonState`; a private `apply_*`
+function per request type does the actual mutation against the tick's owned
+clone (`apply_login`, `apply_logout`, …), while the public method is a thin
+wrapper around the channel round trip. Two internal call sites — the
+`should_logout` handling at the end of a tick, and the shutdown-time forced
+flush — call the `apply_*` function directly rather than the public method,
+since calling the public (channel-based) method from the loop thread itself
+would deadlock forever waiting on its own reply.
+
+`status()` is the one exception: a direct lock-based read of the shared
+snapshot, never routed through the channel — there's nothing to synchronize,
+and a channel round trip would needlessly queue a pure read behind an
+in-flight tick's network I/O. `request_stop()` stays fire-and-forget, sending
+a `DaemonRequest::Stop` the loop drains like any other request.
+
+A `#[cfg(any(test, feature = "testing"))]` bypass (`test_login`, `test_logout`,
+…, plus `tick_once_for_test`) calls the same `apply_*` functions directly
+under a lock instead of going through the channel, so the single-threaded
+`Scenario` test harness (which never runs `run_forever` on a background
+thread) can drive the daemon synchronously.
 
 ### The 6 modules
 
@@ -156,19 +175,30 @@ the same chance" requirement. Two gates then run:
 now, not just `serde_json::Value`); every tick's final locked phase persists
 it back via `state::store_state` (atomic tmp+rename).
 
-### IPC: relay and transport split (Linux/Mac only)
+### IPC: one file, one channel type (Linux/Mac only)
 
-- **`RemoteEventBus`** (`events/remote.rs`, unchanged) — typed JSON-line
-  event channel over a Unix socket; implements `EventChannel` so
-  `ClientController` is transport-agnostic.
-- **`IpcBridge`** (`ipc_bridge.rs`) — binds the listener and, per accepted
-  connection, wires inbound requests **directly to `Daemon` methods**
-  (`LoginRequested → daemon.login(...) → reply on this connection`), rather
-  than bridging into an in-process bus. Retains a small
-  `Mutex<Vec<RemoteSender>>` (via `Daemon::add_broadcast_target`) only for
-  genuinely daemon-initiated pushes — currently just `Logout`, sent whenever
-  the daemon transitions to logged-out (explicit logout, an implicit revoke
-  during `login()`, or a server-forced logout on 401/404).
+Windows/Android/iOS need no code here at all: each holds one process-global
+`Arc<Daemon<..>>` and calls its methods directly, which already **is** the
+one channel type in this system (`DaemonRequest`, see above). Linux/Mac
+additionally run their CLI/tray as a separate OS process, so `ipc.rs` adds a
+thin cross-process translator on top of those same `Daemon` methods:
+
+- **`spawn_server`** binds a Unix socket and spawns one thread total —
+  `loop { accept (blocking); serve that connection to completion; accept
+again }` — decoding a newline-JSON `WireRequest` off the socket, calling
+  the matching `Daemon` method (which internally round-trips the
+  `DaemonRequest` channel exactly like an in-process caller would), and
+  encoding the `WireReply` back. Only one client is ever connected at a
+  time — a second `connect()` simply blocks in the OS listen backlog until
+  the first disconnects — so there's no concurrent-connection bookkeeping.
+- A daemon-initiated push (currently just an unprompted logout — explicit
+  logout, an implicit revoke during `login()`, or a server-forced logout on
+  401/404) goes out via a single `Mutex<Option<IpcPushTarget>>` "current
+  client" slot on `Daemon` (`set_ipc_client`, set on accept and cleared on
+  disconnect), not a multi-connection broadcast registry.
+- **`ClientController`** is the client side: connect, then block on each
+  request/reply round trip, transparently handling an unprompted logout push
+  arriving ahead of the reply it's actually waiting for.
 
 ## Platform process model
 
@@ -178,12 +208,13 @@ each host language reaches it differs.
 ### Linux / Mac — separate daemon process
 
 The daemon runs as a separate process. `run_forever()` runs on its own
-thread; the process's main thread polls `IpcBridge::accept_pending` for new
-controller connections and watches for shutdown. Mac additionally polls a
-local boot-vs-monotonic divergence check (`MacPlatformHooks::boot_clock_ms`/
-`monotonic_clock_ms` — inherent methods, not part of `LifecycleHooks`) purely
-for a post-wake UX nudge (`daemon.flush_batch_now()`); this is independent
-daemon-loop plumbing, not part of the core alerting model.
+thread; `ipc::spawn_server` spawns the IPC-serving thread once at startup and
+returns immediately — no polling from the platform's main loop. Mac's main
+thread instead polls a local boot-vs-monotonic divergence check
+(`MacPlatformHooks::boot_clock_ms`/`monotonic_clock_ms` — inherent methods,
+not part of `LifecycleHooks`) purely for a post-wake UX nudge
+(`daemon.flush_batch_now()`); this is independent daemon-loop plumbing, not
+part of the core alerting model.
 
 ### Windows — in-process `Arc<Daemon>`
 
@@ -219,7 +250,7 @@ process is a short-lived Safari extension host that the OS can suspend the
 instant the device locks, with no notification delivered to that process and
 no boot/shutdown/session API surface available to it at all — every stall
 looks identical to every other, so there's no way to build a meaningful "late
-wakeup" signal there. `Daemon::tick_once` skips `lifecycle::tick` entirely
+wakeup" signal there. `run_phases` skips `lifecycle::tick` entirely
 when this returns `false` (see "PlatformHooks" below) — screenshot capture,
 upload, and everything else still runs normally; only the tamper-detection
 check is disabled.
@@ -257,7 +288,12 @@ covers every platform.
 | File               | Owner    | Purpose                                                                                          |
 | ------------------ | -------- | ------------------------------------------------------------------------------------------------ |
 | `event_state.json` | `Daemon` | Serialised `DaemonState` (screenshot schedule, upload queues, lifecycle late-wakeup array, auth) |
-| `errors.log`       | `upload` | Permanent failures (400 responses); append-only                                                  |
+
+Permanent hash-upload failures (400 responses) go through a normal
+`tracing::error!` call in `upload::commit_hash_retries`, not a dedicated file
+— every platform already has durable `tracing`-based logging (Linux ->
+stdout/journald; Mac/Windows/Android/iOS -> daily rotating file, see
+`src/logging.rs`).
 
 ## PlatformHooks
 
@@ -277,7 +313,7 @@ fn lifecycle_enabled(&self) -> bool;                        // default: true
 ```
 
 `lifecycle_enabled` lets a platform opt out of the late-wakeup tamper check
-(`Daemon::tick_once` skips `lifecycle::tick` entirely when it returns
+(`run_phases` skips `lifecycle::tick` entirely when it returns
 `false`) while keeping everything else — screenshot capture, upload,
 status — running normally. iOS is the only platform that overrides it to
 `false`, for the reason described above.
@@ -389,9 +425,11 @@ The `testing` feature (auto-enabled under `cfg(test)`) exposes:
 - `Scenario` — wraps a `Daemon<TestPlatformHooks, MockApiClient>` built via
   the same `Daemon::new` production uses; `tick()`/`tick_n()`,
   `at_t()`/`advance()`, `login()`/`logout()`/`status()`/`note_user_stop()`/
-  `queue_upload()`/`flush_batch_now()` (the same synchronous `Daemon`
-  methods real callers use), `state()` (lock+clone snapshot),
-  `with_state_mut()` (seed a precondition)
+  `queue_upload()`/`flush_batch_now()` (backed by `Daemon`'s
+  `#[cfg(any(test, feature = "testing"))]` bypass methods, which run the same
+  `apply_*` mutation logic real callers' channel round trips eventually
+  reach, just without a background loop thread), `state()` (lock+clone
+  snapshot), `with_state_mut()` (seed a precondition)
 - `fixtures` — minimal valid PNG for unit tests
 
 Integration tests live in `core/tests/scenarios.rs` and use `Scenario`.

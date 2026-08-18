@@ -11,8 +11,6 @@ use crate::error::{CoreError, CoreResult};
 use crate::logging::log_warning;
 use crate::model::{AuthState, ServiceStatus};
 use crate::module::auth;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-use crate::module::auth::Logout;
 use crate::module::capture_availability::{self, CaptureAvailabilityState};
 use crate::module::heartbeat::{self, HeartbeatState};
 use crate::module::lifecycle::{self, LifecycleState};
@@ -25,7 +23,7 @@ use crate::state::{load_state, store_state};
 use virtue_text_detection::ScreenshotOCR;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-use crate::events::RemoteSender;
+use crate::ipc::IpcPushTarget;
 
 /// Bump whenever `DaemonState`'s shape needs a breaking change that
 /// `#[serde(default)]` alone can't absorb; `Daemon::new` logs the version
@@ -106,7 +104,7 @@ pub struct Daemon<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> {
     ocr: Option<Arc<ScreenshotOCR>>,
     rng: Arc<dyn RandomSource>,
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    ipc_broadcast: Mutex<Vec<RemoteSender>>,
+    ipc_client: Mutex<Option<IpcPushTarget>>,
 }
 
 impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
@@ -138,7 +136,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             ocr: screenshot::load_ocr().map(Arc::new),
             rng: Arc::new(OsRandomSource),
             #[cfg(any(target_os = "linux", target_os = "macos"))]
-            ipc_broadcast: Mutex::new(Vec::new()),
+            ipc_client: Mutex::new(None),
         };
 
         daemon.refresh_settings_on_startup();
@@ -203,24 +201,21 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn broadcast_logout(&self) {
-        let mut clients = self
-            .ipc_broadcast
-            .lock()
-            .expect("ipc broadcast lock poisoned");
-        clients.retain(|s| s.is_connected() && s.send(Logout).is_ok());
+        let guard = self.ipc_client.lock().expect("ipc client lock poisoned");
+        if let Some(target) = guard.as_ref() {
+            crate::ipc::push_logout(target);
+        }
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     fn broadcast_logout(&self) {}
 
-    /// Registers `sender` to receive daemon-initiated pushes (`Logout`).
-    /// Used by `ipc_bridge` when a new connection is accepted.
+    /// Sets (or clears) the one connected IPC client eligible to receive
+    /// daemon-initiated pushes (a logout). Called by `ipc::serve_connection`
+    /// on accept and on disconnect.
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    pub fn add_broadcast_target(&self, sender: RemoteSender) {
-        self.ipc_broadcast
-            .lock()
-            .expect("ipc broadcast lock poisoned")
-            .push(sender);
+    pub(crate) fn set_ipc_client(&self, target: Option<IpcPushTarget>) {
+        *self.ipc_client.lock().expect("ipc client lock poisoned") = target;
     }
 
     // ── Apply logic: the only code allowed to mutate a `DaemonState` ───────

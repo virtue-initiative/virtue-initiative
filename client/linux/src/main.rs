@@ -302,13 +302,9 @@ fn daemon_stop(paths: ClientPaths, yes: bool) -> Result<()> {
         .request_user_stop("cli_daemon_stop")
         .context("failed to record stop intent")?;
 
-    // `request_user_stop` only publishes onto the IPC socket — it doesn't wait
-    // for the daemon to actually read and dispatch it. Without this round trip,
-    // `systemctl stop`'s SIGTERM can arrive before the daemon's next loop
-    // iteration drains the socket, silently dropping the immediate/emailed
-    // UserStop alert. `get_status` is a synchronous request/response over the
-    // same ordered connection, so its reply guarantees the daemon has already
-    // processed (and persisted) the earlier UserStopRequested.
+    // `request_user_stop` already blocks until the daemon acks the stop
+    // request; this extra round trip is just cheap insurance against
+    // `systemctl stop`'s SIGTERM racing the daemon's persist of it.
     let _ = client.get_status();
 
     run_systemctl_user(["stop", &svc])?;
@@ -449,7 +445,7 @@ fn all_send_kinds() -> Vec<UploadKind> {
 
 #[cfg(debug_assertions)]
 fn dev_send(paths: ClientPaths, args: SendLogArgs) -> Result<()> {
-    let client = connect_to_daemon(&paths)?;
+    let mut client = connect_to_daemon(&paths)?;
 
     let kinds = if args.log_type == "all" {
         // Screenshots are excluded here: the running daemon already produces real
@@ -492,7 +488,7 @@ fn dev_send(paths: ClientPaths, args: SendLogArgs) -> Result<()> {
 /// directly — the daemon holds that state in memory and rewrites the file on
 /// every ping (~1s), so a direct edit would race with (or be silently
 /// clobbered by) the daemon's next write.
-fn connect_to_daemon(paths: &ClientPaths) -> Result<ClientController<virtue_core::RemoteEventBus>> {
+fn connect_to_daemon(paths: &ClientPaths) -> Result<ClientController> {
     let sock = paths.state_dir.join("daemon.sock");
     ClientController::connect(&sock)
         .context("failed to connect to daemon (is it running? try `virtue daemon start`)")
@@ -502,7 +498,7 @@ fn dev_upload_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
     let title = args
         .title
         .unwrap_or_else(|| "Developer CLI log".to_string());
-    let client = connect_to_daemon(&paths)?;
+    let mut client = connect_to_daemon(&paths)?;
     // risk >= 1.0 routes through the encrypted batch plus an immediate POST /d/notify.
     client
         .queue_upload(Upload {
@@ -525,7 +521,7 @@ fn dev_add_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
     let title = args
         .title
         .unwrap_or_else(|| "Developer CLI batched log".to_string());
-    let client = connect_to_daemon(&paths)?;
+    let mut client = connect_to_daemon(&paths)?;
     client
         .queue_upload(Upload {
             risk: args.risk,
@@ -547,7 +543,7 @@ fn dev_add_screenshot(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()
     let screenshot = LinuxPlatformHooks::new()
         .take_screenshot()
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let client = connect_to_daemon(&paths)?;
+    let mut client = connect_to_daemon(&paths)?;
     client
         .queue_upload(Upload {
             risk: args.risk,

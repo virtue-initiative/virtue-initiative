@@ -14,18 +14,12 @@ use crate::model::{
     UploadKind,
 };
 
-/// Wire message for `ClientController::queue_upload` / `Daemon::queue_upload` —
-/// still needed for IPC serialization even though nothing dispatches it
-/// through an event bus anymore.
+/// Payload for `Daemon::queue_upload` / `ClientController::queue_upload`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Upload {
     pub risk: f32,
     pub kind: UploadKind,
 }
-
-/// Wire message for `ClientController::flush_batch_now` / `Daemon::flush_batch_now`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FlushBatchNow;
 
 pub(crate) const POST_LOGIN_PROOF_BATCH_COUNT: u32 = 3;
 const MAX_HASH_RETRIES_PER_LOOP: usize = 8;

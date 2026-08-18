@@ -16,23 +16,23 @@ other platform.
 
 ### The daemon loop itself
 
-- `core/src/daemon.rs` — `Daemon<P, A>` / `DaemonState`: one sequential loop
-  (`tick_once`) — check lifecycle, maybe take a screenshot, upload what's
-  queued, pick the next wakeup, sleep. See `core/SPEC.md` and
-  `core/architecture.md`.
-- `login`/`logout`/`status`/`note_user_stop`/`queue_upload`/`flush_batch_now`/
-  `request_stop` are plain synchronous `Daemon` methods, protected by an
-  `Arc<Mutex<DaemonState>>` + `Condvar` — not an event bus or message queue.
+- `core/src/daemon.rs` — `Daemon<P, A>` / `DaemonState`: one sequential loop.
+  Each tick clones the current state once, runs it straight through (lifecycle
+  check, maybe a screenshot, upload what's queued, pick the next wakeup) with
+  no locking anywhere in the middle, then writes the result back. See
+  `core/SPEC.md` and `core/architecture.md`.
+- `login`/`logout`/`note_user_stop`/`queue_upload`/`flush_batch_now` are
+  `Daemon` methods that send a request on an `mpsc` channel and block for the
+  loop thread's reply — the loop thread is the only place `DaemonState` is
+  ever mutated. `status()` is a direct lock-based read (nothing to
+  synchronize); `request_stop()` is fire-and-forget.
 
 ### Auth / login / logout
 
 - `core/src/module/auth.rs` — `login()`/`logout()`: calls the API, updates
   `AuthState`/`ScreenshotState`/`UploadState` directly (settings/hash token are
   subsequently refreshed opportunistically from every `GET /d/device` and
-  `POST /d/batch` response, not a dedicated pre-batch fetch); `LoginRequested`/
-  `LoginResult`/`Logout`/`LogoutRequested`/`LogoutResult` are the IPC wire
-  message types (`Logout` is a daemon-initiated push, sent whenever the
-  daemon transitions to logged-out)
+  `POST /d/batch` response, not a dedicated pre-batch fetch)
 
 ### Upload / batching / hash chain
 
@@ -65,14 +65,14 @@ other platform.
 
 ### IPC (daemon ↔ controller, Linux/Mac only)
 
-- `core/src/events/remote.rs` — `RemoteEventBus`: typed JSON-line event
-  channel over a Unix socket
-- `core/src/ipc_bridge.rs` — `IpcBridge`: accepts connections and dispatches
-  each one's inbound requests **directly to `Daemon` methods** (no
-  in-process bus to bridge into)
-- `core/src/controller.rs` — `ClientController`: IPC client used by the CLI
-  to query status, login, logout — a stable 6-method boundary every
-  platform depends on
+- `core/src/ipc.rs` — single file. Windows/Android/iOS need nothing here;
+  they already reach `Daemon` in-process. Linux/Mac's CLI/tray runs as a
+  separate process, so `spawn_server` binds a Unix socket and serves it on
+  one thread (`accept` -> serve one connection to completion -> `accept`
+  again — only one client at a time), translating newline-JSON
+  `WireRequest`s directly to `Daemon` method calls. `ClientController` is
+  the client side — a stable boundary every Linux/Mac platform crate
+  depends on.
 
 ### Status
 
@@ -82,8 +82,8 @@ other platform.
 
 ### Platform daemons / main loops
 
-- `linux/src/daemon.rs` — spawns `Daemon::run_forever()` on its own thread;
-  main thread polls `IpcBridge::accept_pending`
+- `linux/src/daemon.rs` — spawns the IPC server thread (`ipc::spawn_server`)
+  and `Daemon::run_forever()` on its own thread, then joins the latter
 - `mac/src/daemon.rs` — same, plus a local boot-vs-monotonic divergence poll
   (via `MacPlatformHooks`'s inherent `boot_clock_ms`/`monotonic_clock_ms`
   methods, not part of `LifecycleHooks`) driving a post-wake

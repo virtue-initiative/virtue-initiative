@@ -85,7 +85,7 @@ fn screenshot_retaken_after_interval() {
     assert!(has_upload, "expected screenshot upload once due");
 }
 
-// ── UserStopRequested (unrelated to the late-wakeup model, preserved) ──────────
+// ── User-initiated stop (unrelated to the late-wakeup model, preserved) ────────
 
 #[test]
 fn user_stop_emits_high_risk_upload() {

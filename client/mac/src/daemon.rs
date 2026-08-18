@@ -4,13 +4,13 @@ use std::time::Duration;
 
 use anyhow::Result;
 use tokio::sync::mpsc;
+use virtue_core::Daemon;
 use virtue_core::api::ReqwestApiClient;
-use virtue_core::{Daemon, IpcBridge};
 
 use crate::capture::MacPlatformHooks;
 use crate::config::{ClientPaths, build_core_config};
 
-const IPC_ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(200);
+const SUSPEND_CHECK_POLL_INTERVAL: Duration = Duration::from_millis(200);
 /// Boot-vs-monotonic divergence, measured locally each poll, worth treating as
 /// "the machine just woke from sleep" for UX purposes (a prompt batch flush).
 /// There's no real-time OS suspend/resume notification anymore (the core
@@ -88,7 +88,7 @@ async fn run_daemon_service_loop(paths: &ClientPaths) -> Result<()> {
         Daemon::new(config, platform.clone(), api, state_path)
     })?);
 
-    let mut ipc = IpcBridge::bind(&paths.state_dir.join("daemon.sock"));
+    virtue_core::spawn_ipc_server(paths.state_dir.join("daemon.sock"), Arc::clone(&daemon));
 
     let shutdown = Arc::new(AtomicBool::new(false));
     let (signal_tx, mut signal_rx) = mpsc::unbounded_channel::<String>();
@@ -97,17 +97,13 @@ async fn run_daemon_service_loop(paths: &ClientPaths) -> Result<()> {
     let loop_daemon = Arc::clone(&daemon);
     let loop_handle = std::thread::spawn(move || loop_daemon.run_forever());
 
-    // Accept IPC connections and watch for a local wake-from-sleep signal
-    // (see `LOCAL_SUSPEND_MIN_MS`) on this thread, while the daemon's own
-    // sequential loop runs on its own thread.
+    // Watch for a local wake-from-sleep signal (see `LOCAL_SUSPEND_MIN_MS`)
+    // on this thread, while the daemon's own sequential loop runs on its own
+    // thread.
     let mut last_clocks: Option<(i64, i64)> = None;
     loop {
         if shutdown.load(Ordering::SeqCst) || loop_handle.is_finished() {
             break;
-        }
-
-        if let Some(ipc) = &mut ipc {
-            ipc.accept_pending(&daemon);
         }
 
         if let (Ok(boot_ms), Ok(mono_ms)) =
@@ -129,7 +125,7 @@ async fn run_daemon_service_loop(paths: &ClientPaths) -> Result<()> {
                 }
                 break;
             }
-            _ = tokio::time::sleep(IPC_ACCEPT_POLL_INTERVAL) => {}
+            _ = tokio::time::sleep(SUSPEND_CHECK_POLL_INTERVAL) => {}
         }
     }
 

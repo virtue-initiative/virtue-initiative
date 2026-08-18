@@ -1,9 +1,8 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::Result;
+use virtue_core::Daemon;
 use virtue_core::api::ReqwestApiClient;
-use virtue_core::{Daemon, IpcBridge};
 
 use crate::capture::LinuxPlatformHooks;
 use crate::config::{ClientPaths, build_core_config};
@@ -40,24 +39,12 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
         Daemon::new(config, LinuxPlatformHooks::new(), api, state_path)
     })?);
 
-    let mut ipc = IpcBridge::bind(&paths.state_dir.join("daemon.sock"));
+    virtue_core::spawn_ipc_server(paths.state_dir.join("daemon.sock"), Arc::clone(&daemon));
 
     spawn_signal_handler(Arc::clone(&daemon));
 
     let loop_daemon = Arc::clone(&daemon);
     let loop_handle = std::thread::spawn(move || loop_daemon.run_forever());
-
-    // Accept newly-connected IPC clients on this thread while the daemon's
-    // own sequential loop runs on its own, until that loop exits (shutdown).
-    loop {
-        if let Some(ipc) = &mut ipc {
-            ipc.accept_pending(&daemon);
-        }
-        if loop_handle.is_finished() {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(200));
-    }
     let _ = loop_handle.join();
 
     std::process::exit(0);
