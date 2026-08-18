@@ -39,20 +39,32 @@ jobs:
             client -> target
             hash-server -> target
 
+      # Lint/test against the same --release --target aarch64-apple-darwin
+      # profile that "Build macOS universal app bundle and DMG" below uses
+      # for its arm64 slice, instead of the default (dev profile, implicit
+      # host target) cargo uses without these flags. Cargo keys its build
+      # cache on the exact (profile, target, features) tuple, so a mismatch
+      # there means every dependency gets recompiled from scratch per step;
+      # matching it here means lint/test warm the same target/aarch64-apple-darwin/release
+      # cache that build-app.sh's own arm64 build then reuses.
+      - name: Build aarch64 release artifacts
+        run: cargo build --release --target aarch64-apple-darwin -p virtue-mac -p virtue-mac-ffi
+        working-directory: client
+
       - name: Rust lint (core)
-        run: cargo clippy -p virtue-core --all-targets -- -D warnings
+        run: cargo clippy --release --target aarch64-apple-darwin -p virtue-core --all-targets -- -D warnings
         working-directory: client
 
       - name: Rust lint (macOS client)
-        run: cargo clippy -p virtue-mac --all-targets -- -D warnings
+        run: cargo clippy --release --target aarch64-apple-darwin -p virtue-mac --all-targets -- -D warnings
         working-directory: client
 
       - name: Rust tests (core)
-        run: cargo test -p virtue-core
+        run: cargo test --release --target aarch64-apple-darwin -p virtue-core
         working-directory: client
 
       - name: Rust scenario tests (core)
-        run: cargo test -p virtue-core --features testing --test scenarios
+        run: cargo test --release --target aarch64-apple-darwin -p virtue-core --features testing --test scenarios
         working-directory: client
 
       - name: Build hash server
