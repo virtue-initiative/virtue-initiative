@@ -25,11 +25,10 @@ mock-capture = []
 [dependencies]
 anyhow = "1"
 virtue_core = { package = "virtue-core", path = "../core" }
-chrono = { version = "0.4", features = ["clock", "serde"] }
+chrono = { version = "0.4", features = ["clock"] }
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
 hostname = "0.4"
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSDate", "NSNotification", "NSOperation", "NSRunLoop", "NSString", "block2"] }
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFBase", "CFString", "CFDictionary", "CFNumber"] }
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGSession"] }
 serde = { version = "1", features = ["derive"] }
@@ -38,4 +37,4 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "tim
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1", features = ["v4"] }

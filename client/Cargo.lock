@@ -516,7 +516,6 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
- "serde",
  "wasm-bindgen",
  "windows-link",
 ]
@@ -1570,22 +1569,11 @@ checksum = "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"
 dependencies = [
  "bytemuck",
  "byteorder-lite",
- "image-webp",
  "moxcms",
  "num-traits",
  "png",
  "zune-core",
  "zune-jpeg",
-]
-
-[[package]]
-name = "image-webp"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "525e9ff3e1a4be2fbea1fdf0e98686a6d98b4d8f937e1bf7402245af1909e8c3"
-dependencies = [
- "byteorder-lite",
- "quick-error",
 ]
 
 [[package]]
@@ -2351,16 +2339,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
 
 [[package]]
-name = "pbkdf2"
-version = "0.12.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8ed6a7761f76e3b9f92dfb0a60a6a6477c61024b775147ff0973a02653abaf2"
-dependencies = [
- "digest",
- "hmac",
-]
-
-[[package]]
 name = "peeking_take_while"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2606,12 +2584,6 @@ name = "pxfm"
 version = "0.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0c5ccf5294c6ccd63a74f1565028353830a9c2f5eb0c682c355c471726a6e3f"
-
-[[package]]
-name = "quick-error"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a993555f31e5a609f617c12db6250dedcac1b0a85076912c436e6fc9b2c8e6a3"
 
 [[package]]
 name = "quinn"
@@ -4037,11 +4009,9 @@ dependencies = [
  "base64",
  "chrono",
  "flate2",
- "hex",
  "hkdf",
  "hpke",
  "image",
- "pbkdf2",
  "rand_core 0.9.5",
  "reqwest",
  "rmp-serde",
@@ -4050,7 +4020,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "thiserror 2.0.18",
- "tokio",
  "tracing",
  "tract-onnx",
  "virtue-text-detection",
@@ -4062,16 +4031,13 @@ name = "virtue-linux"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "clap",
  "crossterm",
  "dirs",
- "futures-util",
  "hostname",
  "image",
  "ksni",
  "rustyline",
- "serde",
  "serde_json",
  "tokio",
  "tracing",
@@ -4091,7 +4057,6 @@ dependencies = [
  "hostname",
  "objc2-core-foundation",
  "objc2-core-graphics",
- "objc2-foundation",
  "serde",
  "serde_json",
  "tokio",
@@ -4131,17 +4096,12 @@ name = "virtue-windows"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64",
  "chrono",
  "clap",
- "hex",
  "hostname",
  "image",
- "rand 0.8.6",
- "reqwest",
  "serde",
  "serde_json",
- "tracing",
  "tracing-appender",
  "tracing-subscriber",
  "uuid",
