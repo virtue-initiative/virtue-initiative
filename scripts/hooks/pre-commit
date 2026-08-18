@@ -1,6 +1,11 @@
 #!/bin/bash
 
-pushd "$(dirname $0)/../.." > /dev/null
+# `core.hooksPath` is shared by every worktree of the repo and is typically an
+# absolute path into one checkout, so this script's own location says nothing
+# about which tree is being committed. Git runs hooks from the root of the
+# working tree the commit belongs to; resolve it from git, not from $0.
+ROOT="$(git rev-parse --show-toplevel)" || exit 1
+cd "$ROOT" || exit 1
 
 # Store the current state of the git index
 commit=$(git status --porcelain)
@@ -9,13 +14,15 @@ FILES=$(git diff --cached --name-only --diff-filter=ACMR | sed 's| |\\ |g')
 [ -z "$FILES" ] && exit 0
 
 # Prettify all selected files
-echo "$FILES" | xargs ./node_modules/.bin/prettier --ignore-unknown --write
-pushd client && cargo fmt --all && popd > /dev/null
+if [ -x ./node_modules/.bin/prettier ]; then
+  echo "$FILES" | xargs ./node_modules/.bin/prettier --ignore-unknown --write
+else
+  echo "pre-commit: ./node_modules/.bin/prettier not found in $ROOT; skipping prettier (run 'bun install')." >&2
+fi
+(cd client && cargo fmt --all)
 
 # Check if anything to be commited was changed by the formatters
 if [[ $(git status --porcelain) != "$commit" ]]; then
   echo "Code was formatted. Please review the changes and stage them before committing."
   exit 1
 fi
-
-popd > /dev/null
