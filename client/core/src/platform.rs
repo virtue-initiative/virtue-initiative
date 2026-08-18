@@ -51,17 +51,11 @@ pub trait LifecycleHooks: Send + Sync + 'static {
     fn get_last_logout_utc_ms(&self) -> CoreResult<Option<i64>>;
 
     /// Whether the late-wakeup tamper model (`client/core/SPEC.md` §2)
-    /// applies on this platform at all. `Daemon::tick_once` skips
-    /// `lifecycle::tick` entirely when this is `false`.
-    ///
-    /// `false` only on iOS: the monitoring process is a short-lived Safari
-    /// extension host that the OS can suspend the instant the device locks,
-    /// with no notification delivered to that process (extensions have no
-    /// `UIApplication`) and no boot/shutdown/session API surface available to
-    /// it at all — every stall looks identical to every other, so there is no
-    /// way to build a meaningful "late wakeup" signal. Screenshot capture,
-    /// upload, and everything else still runs normally; only this one check
-    /// is disabled.
+    /// applies on this platform at all — skips `lifecycle::tick` entirely
+    /// when `false`. Only iOS returns `false`: its Safari extension host can
+    /// be suspended the instant the device locks with no notification and no
+    /// boot/shutdown/session API at all, so every stall looks identical and
+    /// there's no meaningful "late wakeup" signal to build there.
     fn lifecycle_enabled(&self) -> bool {
         true
     }

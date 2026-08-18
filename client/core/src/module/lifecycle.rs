@@ -28,7 +28,7 @@ pub struct LifecycleState {
     pub late_wakeups: VecDeque<i64>,
 }
 
-/// Phase 1 of `Daemon::tick_once`: compares `now_ms` to the wakeup time this
+/// Phase 1 of `Daemon::run_phases`: compares `now_ms` to the wakeup time this
 /// tick was scheduled for (the daemon's `next_wakeup_at_ms` as of the end of
 /// the previous tick) and records how late the daemon woke, unless excused by
 /// proximity to a system login/logout. Alerts via [`upload::enqueue`] once the

@@ -11,8 +11,8 @@ use crate::module::upload::UploadState;
 /// hash token. Returns the new device id.
 ///
 /// Returns `true` in addition to the result to tell the caller whether an
-/// existing session was revoked (so it can broadcast `Logout` to other
-/// connected controllers).
+/// existing session was revoked (so it can push a logout notice to the
+/// connected IPC client, if any).
 #[allow(clippy::too_many_arguments)]
 pub fn login<A: ApiTransport>(
     auth: &mut AuthState,
