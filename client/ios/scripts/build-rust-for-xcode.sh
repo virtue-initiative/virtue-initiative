@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 
+export PATH="$HOME/.cargo/bin:$PATH"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${SRCROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 RUST_DIR="$ROOT_DIR/rust"
