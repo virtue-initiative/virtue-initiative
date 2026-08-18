@@ -17,7 +17,7 @@ client/
     SPEC.md             — source of truth for the daemon loop's behavior
     Cargo.toml
     src/
-      api.rs            — ApiTransport trait + ReqwestApiClient
+      api.rs            — ApiTransport trait + HttpApiClient
       config.rs         — Config struct (compile-time defaults via env!())
       crypto.rs         — AES-256-GCM, HPKE key wrap, hash computation
       daemon.rs         — Daemon<P, A> / DaemonState — the sequential loop itself
@@ -237,7 +237,7 @@ the daemon, unchanged from before.
 
 ### iOS — same C-FFI/`Arc<Daemon>` shape as Android, lifecycle disabled
 
-`virtue_ios_native_init` builds one `Daemon<IosPlatformHooks, ReqwestApiClient>`
+`virtue_ios_native_init` builds one `Daemon<IosPlatformHooks, HttpApiClient>`
 and stores it in process-global state, same pattern as Android's JNI bridge;
 every other `virtue_ios_native_*` call is a direct method call on that shared
 daemon. `client/ios/rust` is its own standalone Cargo workspace (not a

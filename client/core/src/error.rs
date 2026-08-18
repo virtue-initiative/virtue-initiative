@@ -21,7 +21,7 @@ pub enum CoreError {
     #[error("image error: {0}")]
     Image(#[from] image::ImageError),
     #[error("HTTP error: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(#[from] ureq::Error),
     #[error("base64 decode error: {0}")]
     Base64(#[from] base64::DecodeError),
     #[error("argon2 error: {0}")]

@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::Result;
 use tokio::sync::mpsc;
 use virtue_core::Daemon;
-use virtue_core::api::ReqwestApiClient;
+use virtue_core::api::HttpApiClient;
 
 use crate::capture::MacPlatformHooks;
 use crate::config::{ClientPaths, build_core_config};
@@ -19,7 +19,7 @@ const SUSPEND_CHECK_POLL_INTERVAL: Duration = Duration::from_millis(200);
 /// core alerting model. See `client/CLAUDE.md`.
 const LOCAL_SUSPEND_MIN_MS: i64 = 5_000;
 
-type MacDaemon = Daemon<MacPlatformHooks, ReqwestApiClient>;
+type MacDaemon = Daemon<MacPlatformHooks, HttpApiClient>;
 
 /// Installs the process-wide `tracing` subscriber, writing daily-rotated
 /// plain-text logs to `paths.logs_dir` (`~/Library/Logs/virtue.log`). The
@@ -84,7 +84,7 @@ async fn run_daemon_service_loop(paths: &ClientPaths) -> Result<()> {
     let platform = MacPlatformHooks::new();
 
     let daemon: Arc<MacDaemon> = Arc::new(tokio::task::block_in_place(|| {
-        let api = ReqwestApiClient::new(&config)?;
+        let api = HttpApiClient::new(&config)?;
         Daemon::new(config, platform.clone(), api, state_path)
     })?);
 

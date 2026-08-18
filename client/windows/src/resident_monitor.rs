@@ -6,12 +6,12 @@ use std::thread;
 use anyhow::Result;
 use serde::Serialize;
 use virtue_core::Daemon;
-use virtue_core::api::ReqwestApiClient;
+use virtue_core::api::HttpApiClient;
 
 use crate::capture::WindowsPlatformHooks;
 use crate::config::{ClientPaths, build_core_config};
 
-type WindowsDaemon = Daemon<WindowsPlatformHooks, ReqwestApiClient>;
+type WindowsDaemon = Daemon<WindowsPlatformHooks, HttpApiClient>;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -95,7 +95,7 @@ pub fn start_monitoring() -> Result<()> {
     let config = build_core_config(&paths);
     let state_path = paths.state_dir.join("event_state.json");
     let daemon = (|| -> Result<Arc<WindowsDaemon>> {
-        let api = ReqwestApiClient::new(&config)?;
+        let api = HttpApiClient::new(&config)?;
         Ok(Arc::new(Daemon::new(
             config,
             WindowsPlatformHooks::new(),

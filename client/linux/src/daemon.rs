@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use virtue_core::Daemon;
-use virtue_core::api::ReqwestApiClient;
+use virtue_core::api::HttpApiClient;
 
 use crate::capture::LinuxPlatformHooks;
 use crate::config::{ClientPaths, build_core_config};
 use crate::tray;
 
-type LinuxDaemon = Daemon<LinuxPlatformHooks, ReqwestApiClient>;
+type LinuxDaemon = Daemon<LinuxPlatformHooks, HttpApiClient>;
 
 /// Installs the process-wide `tracing` subscriber. Captured on stdout, which
 /// systemd's `Type=simple` unit forwards to journald — no new log file on
@@ -35,7 +35,7 @@ pub async fn run_daemon(paths: &ClientPaths) -> Result<()> {
     let config = build_core_config(paths);
     let state_path = paths.state_dir.join("event_state.json");
     let daemon: Arc<LinuxDaemon> = Arc::new(tokio::task::block_in_place(|| {
-        let api = ReqwestApiClient::new(&config)?;
+        let api = HttpApiClient::new(&config)?;
         Daemon::new(config, LinuxPlatformHooks::new(), api, state_path)
     })?);
 

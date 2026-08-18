@@ -10,7 +10,7 @@ use jni::sys::{jboolean, jstring};
 use jni::{JNIEnv, JavaVM};
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
-use virtue_core::api::ReqwestApiClient;
+use virtue_core::api::HttpApiClient;
 use virtue_core::{
     AuthState, Config, CoreError, CoreResult, Daemon, DeviceSettings, LifecycleHooks, Screenshot,
     ScreenshotHooks,
@@ -31,7 +31,7 @@ const CAPTURE_STATUS_READY: i32 = 0;
 const CAPTURE_STATUS_PERMISSION_MISSING: i32 = 1;
 const CAPTURE_STATUS_SESSION_UNAVAILABLE: i32 = 2;
 
-type AndroidDaemon = Daemon<AndroidPlatformHooks, ReqwestApiClient>;
+type AndroidDaemon = Daemon<AndroidPlatformHooks, HttpApiClient>;
 
 struct AndroidCore {
     state_dir: PathBuf,
@@ -279,7 +279,7 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeInit(
                 screenshot_service_class,
             };
             let state_path = state_dir.join("event_state.json");
-            let api = ReqwestApiClient::new(&config)?;
+            let api = HttpApiClient::new(&config)?;
             let daemon = Daemon::new(config, platform, api, state_path)
                 .map_err(|err| anyhow!("failed to construct daemon: {err}"))?;
 

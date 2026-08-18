@@ -9,7 +9,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
-use virtue_core::api::ReqwestApiClient;
+use virtue_core::api::HttpApiClient;
 use virtue_core::{
     AuthState, Config, CoreError, CoreResult, Daemon, DeviceSettings, LifecycleHooks, Screenshot,
     ScreenshotHooks,
@@ -35,7 +35,7 @@ unsafe extern "C" {
     fn virtue_ios_capture_png_release(ptr: *const u8, len: usize);
 }
 
-type IosDaemon = Daemon<IosPlatformHooks, ReqwestApiClient>;
+type IosDaemon = Daemon<IosPlatformHooks, HttpApiClient>;
 
 struct IosCore {
     state_dir: PathBuf,
@@ -196,7 +196,7 @@ pub extern "C" fn virtue_ios_native_init(
             let state_dir = PathBuf::from(&data_dir);
             let config = build_core_config(&state_dir);
             let state_path = state_dir.join("event_state.json");
-            let api = ReqwestApiClient::new(&config)?;
+            let api = HttpApiClient::new(&config)?;
             let daemon = Daemon::new(config, IosPlatformHooks, api, state_path)
                 .map_err(|err| anyhow!("failed to construct daemon: {err}"))?;
 

@@ -1,9 +1,11 @@
+use std::time::Duration;
+
 use base64::Engine;
-use reqwest::Method;
-use reqwest::blocking::multipart::{Form, Part};
-use reqwest::blocking::{Client, RequestBuilder, Response};
+use rand_core::{OsRng, TryRngCore};
 use serde::Deserialize;
 use serde::Serialize;
+use ureq::Agent;
+use ureq::http::{Response, StatusCode};
 
 use crate::config::Config;
 use crate::crypto::derive_password_auth;
@@ -106,35 +108,36 @@ pub trait ApiTransport: Send + Sync {
     ) -> CoreResult<()>;
 }
 
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+
 #[derive(Debug, Clone)]
-pub struct ReqwestApiClient {
+pub struct HttpApiClient {
     base_url: String,
-    client: Client,
+    agent: Agent,
 }
 
-impl ReqwestApiClient {
+impl HttpApiClient {
     pub fn new(config: &Config) -> CoreResult<Self> {
-        let client = Client::builder()
-            .cookie_store(true)
-            .timeout(std::time::Duration::from_secs(5))
-            .build()?;
+        // `http_status_as_error(false)` keeps 4xx/5xx as ordinary responses so
+        // `ensure_success` can read the body for the server's error message.
+        let agent: Agent = Agent::config_builder()
+            .timeout_global(Some(REQUEST_TIMEOUT))
+            .http_status_as_error(false)
+            .build()
+            .into();
         Ok(Self {
             base_url: config.api_base_url.trim_end_matches('/').to_string(),
-            client,
+            agent,
         })
     }
 }
 
-impl ApiTransport for ReqwestApiClient {
+impl ApiTransport for HttpApiClient {
     fn logout(&self, device_refresh_token: &str) -> CoreResult<()> {
-        self.send_empty(
-            Method::POST,
-            None,
-            API_VERSION,
-            "/d/logout",
-            Some(device_refresh_token),
-            None::<&()>,
-        )
+        let response = self
+            .post(None, "/d/logout", Some(device_refresh_token))
+            .send_empty()?;
+        self.expect_success(response)
     }
 
     fn register_device(
@@ -165,26 +168,22 @@ impl ApiTransport for ReqwestApiClient {
         }
 
         let material: LoginMaterialResponse = self.expect_json(
-            self.request(Method::GET, None, API_VERSION, "/user/login-material", None)
-                .query(&[("email", email)])
-                .send()?,
+            self.get(None, "/user/login-material", None)
+                .query("email", email)
+                .call()?,
         )?;
         let password_salt =
             base64::engine::general_purpose::STANDARD.decode(material.password_salt)?;
         let password_auth = derive_password_auth(password, &password_salt, &material.params)?;
 
-        let response: RegisterDeviceResponse = self.send_json(
-            Method::POST,
-            None,
-            API_VERSION,
-            "/d/device",
-            None,
-            Some(&RegisterDeviceRequest {
-                email,
-                password_auth: base64::engine::general_purpose::STANDARD.encode(password_auth),
-                name,
-                platform,
-            }),
+        let response: RegisterDeviceResponse = self.expect_json(
+            self.post(None, "/d/device", None)
+                .send_json(RegisterDeviceRequest {
+                    email,
+                    password_auth: base64::engine::general_purpose::STANDARD.encode(password_auth),
+                    name,
+                    platform,
+                })?,
         )?;
 
         let hash_token = response.settings.hash_token.clone();
@@ -200,13 +199,9 @@ impl ApiTransport for ReqwestApiClient {
     }
 
     fn get_device_settings(&self, device_refresh_token: &str) -> CoreResult<DeviceState> {
-        let response: DeviceSettingsResponse = self.send_json(
-            Method::GET,
-            None,
-            API_VERSION,
-            "/d/device",
-            Some(device_refresh_token),
-            None::<&()>,
+        let response: DeviceSettingsResponse = self.expect_json(
+            self.get(None, "/d/device", Some(device_refresh_token))
+                .call()?,
         )?;
         let hash_token = response.hash_token.clone();
         Ok(DeviceState {
@@ -243,9 +238,6 @@ impl ApiTransport for ReqwestApiClient {
             settings: DeviceSettingsResponse,
         }
 
-        let part = Part::bytes(batch.bytes.clone())
-            .file_name("batch.enc")
-            .mime_str("application/octet-stream")?;
         let metadata = serde_json::to_string(&BatchMetadata {
             start_time: batch.start_time_ms,
             end_time: batch.end_time_ms,
@@ -262,15 +254,13 @@ impl ApiTransport for ReqwestApiClient {
             },
             notifications: &batch.notifications,
         })?;
-        let form = Form::new().part("file", part).text("metadata", metadata);
 
-        let response: UploadBatchResponse = self.send_form(
-            Method::POST,
-            None,
-            API_VERSION,
-            "/d/batch",
-            device_refresh_token,
-            form,
+        let boundary = multipart_boundary();
+        let body = encode_multipart(&boundary, &batch.bytes, &metadata);
+        let response: UploadBatchResponse = self.expect_json(
+            self.post(None, "/d/batch", Some(device_refresh_token))
+                .content_type(format!("multipart/form-data; boundary={boundary}"))
+                .send(&body)?,
         )?;
         let hash_token = response.settings.hash_token.clone();
         Ok(UploadedBatchResponse {
@@ -295,118 +285,68 @@ impl ApiTransport for ReqwestApiClient {
         body.extend_from_slice(content_hash);
 
         let response = self
-            .request(
-                Method::POST,
-                hash_base_url,
-                API_VERSION,
-                "/hash",
-                Some(hash_jwt),
-            )
-            .header("Content-Type", "application/octet-stream")
-            .body(body)
-            .send()?;
+            .post(hash_base_url, "/hash", Some(hash_jwt))
+            .content_type("application/octet-stream")
+            .send(&body)?;
         self.expect_success(response)
     }
 }
 
-impl ReqwestApiClient {
-    fn send_json<TBody, TResponse>(
+impl HttpApiClient {
+    fn get(
         &self,
-        method: Method,
         base_override: Option<&str>,
-        version: &str,
         path: &str,
         bearer_token: Option<&str>,
-        body: Option<&TBody>,
-    ) -> CoreResult<TResponse>
-    where
-        TBody: Serialize + ?Sized,
-        TResponse: for<'de> Deserialize<'de>,
-    {
-        let mut request = self.request(method, base_override, version, path, bearer_token);
-        if let Some(body) = body {
-            request = request.json(body);
+    ) -> ureq::RequestBuilder<ureq::typestate::WithoutBody> {
+        let builder = self.agent.get(self.url(base_override, path));
+        match bearer_token {
+            Some(token) => builder.header("Authorization", format!("Bearer {token}")),
+            None => builder,
         }
-
-        let response = request.send()?;
-        self.expect_json(response)
     }
 
-    fn send_empty<TBody>(
+    fn post(
         &self,
-        method: Method,
         base_override: Option<&str>,
-        version: &str,
         path: &str,
         bearer_token: Option<&str>,
-        body: Option<&TBody>,
-    ) -> CoreResult<()>
-    where
-        TBody: Serialize + ?Sized,
-    {
-        let mut request = self.request(method, base_override, version, path, bearer_token);
-        if let Some(body) = body {
-            request = request.json(body);
+    ) -> ureq::RequestBuilder<ureq::typestate::WithBody> {
+        let builder = self.agent.post(self.url(base_override, path));
+        match bearer_token {
+            Some(token) => builder.header("Authorization", format!("Bearer {token}")),
+            None => builder,
         }
-        let response = request.send()?;
-        self.expect_success(response)
     }
 
-    fn send_form<TResponse>(
-        &self,
-        method: Method,
-        base_override: Option<&str>,
-        version: &str,
-        path: &str,
-        bearer_token: &str,
-        form: Form,
-    ) -> CoreResult<TResponse>
-    where
-        TResponse: for<'de> Deserialize<'de>,
-    {
-        let response = self
-            .request(method, base_override, version, path, Some(bearer_token))
-            .multipart(form)
-            .send()?;
-        self.expect_json(response)
-    }
-
-    fn request(
-        &self,
-        method: Method,
-        base_override: Option<&str>,
-        version: &str,
-        path: &str,
-        bearer_token: Option<&str>,
-    ) -> RequestBuilder {
+    fn url(&self, base_override: Option<&str>, path: &str) -> String {
         let base = base_override
             .unwrap_or(&self.base_url)
             .trim_end_matches('/');
-        let url = format!("{base}/{version}{path}");
-        let mut request = self.client.request(method, url);
-        if let Some(token) = bearer_token {
-            request = request.bearer_auth(token);
-        }
-        request
+        format!("{base}/{API_VERSION}{path}")
     }
 
-    fn expect_json<T: for<'de> Deserialize<'de>>(&self, response: Response) -> CoreResult<T> {
-        let response = self.ensure_success(response)?;
-        Ok(response.json()?)
+    fn expect_json<T: for<'de> Deserialize<'de>>(
+        &self,
+        response: Response<ureq::Body>,
+    ) -> CoreResult<T> {
+        let mut response = self.ensure_success(response)?;
+        Ok(response.body_mut().read_json()?)
     }
 
-    fn expect_success(&self, response: Response) -> CoreResult<()> {
+    fn expect_success(&self, response: Response<ureq::Body>) -> CoreResult<()> {
         let _ = self.ensure_success(response)?;
         Ok(())
     }
 
-    fn ensure_success(&self, response: Response) -> CoreResult<Response> {
+    fn ensure_success(&self, response: Response<ureq::Body>) -> CoreResult<Response<ureq::Body>> {
         let status = response.status();
         if status.is_success() {
             return Ok(response);
         }
 
-        let body = response.text().ok();
+        let mut response = response;
+        let body = response.body_mut().read_to_string().ok();
         let message = error_message_from_body(status, body.as_deref());
 
         Err(CoreError::HttpStatus {
@@ -416,10 +356,42 @@ impl ReqwestApiClient {
     }
 }
 
+/// Builds the `multipart/form-data` body `POST /d/batch` expects: the encrypted
+/// batch as a `file` part plus a `metadata` text field. Hand-rolled because
+/// ureq's own multipart support lives under its semver-exempt `unversioned`
+/// module, and this form never varies.
+fn encode_multipart(boundary: &str, batch: &[u8], metadata: &str) -> Vec<u8> {
+    let mut body = Vec::with_capacity(batch.len() + metadata.len() + 256);
+    body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+    body.extend_from_slice(
+        b"Content-Disposition: form-data; name=\"file\"; filename=\"batch.enc\"\r\n",
+    );
+    body.extend_from_slice(b"Content-Type: application/octet-stream\r\n\r\n");
+    body.extend_from_slice(batch);
+    body.extend_from_slice(format!("\r\n--{boundary}\r\n").as_bytes());
+    body.extend_from_slice(b"Content-Disposition: form-data; name=\"metadata\"\r\n\r\n");
+    body.extend_from_slice(metadata.as_bytes());
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    body
+}
+
+/// A random boundary, so it cannot collide with the encrypted batch bytes it
+/// delimits.
+fn multipart_boundary() -> String {
+    let mut raw = [0u8; 16];
+    OsRng.try_fill_bytes(&mut raw).expect("OS RNG unavailable");
+    let mut boundary = String::with_capacity(38);
+    boundary.push_str("virtue-");
+    for byte in raw {
+        boundary.push_str(&format!("{byte:02x}"));
+    }
+    boundary
+}
+
 /// Derives a non-empty error message from a non-2xx response body, falling
 /// back to a status-line-bearing message (e.g. "HTTP 502 Bad Gateway error")
 /// when the body is missing, empty, or unparseable.
-fn error_message_from_body(status: reqwest::StatusCode, body: Option<&str>) -> String {
+fn error_message_from_body(status: StatusCode, body: Option<&str>) -> String {
     let fallback = body
         .filter(|s| !s.trim().is_empty())
         .map(str::to_string)
@@ -484,23 +456,69 @@ mod tests {
     use super::*;
 
     #[test]
+    fn multipart_body_has_both_parts_in_order() {
+        let body = encode_multipart("BOUND", &[0xde, 0xad], "{\"a\":1}");
+        let text = String::from_utf8_lossy(&body);
+
+        assert!(text.starts_with("--BOUND\r\n"));
+        assert!(text.contains(
+            "Content-Disposition: form-data; name=\"file\"; filename=\"batch.enc\"\r\n\
+             Content-Type: application/octet-stream\r\n\r\n"
+        ));
+        assert!(text.contains("Content-Disposition: form-data; name=\"metadata\"\r\n\r\n"));
+        assert!(text.ends_with("\r\n--BOUND--\r\n"));
+        assert!(
+            text.find("name=\"file\"") < text.find("name=\"metadata\""),
+            "the file part must come first"
+        );
+    }
+
+    #[test]
+    fn multipart_body_keeps_batch_bytes_verbatim() {
+        // The batch is AES-GCM ciphertext: arbitrary bytes, including ones that
+        // look like CRLFs and boundary markers. None of it may be escaped or
+        // re-encoded on the way out.
+        let batch: Vec<u8> = (0u8..=255).collect();
+        let body = encode_multipart("BOUND", &batch, "{}");
+
+        let header_end = body
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .expect("file part headers")
+            + 4;
+        assert_eq!(&body[header_end..header_end + batch.len()], &batch[..]);
+    }
+
+    #[test]
+    fn multipart_boundaries_are_unique_and_well_formed() {
+        let a = multipart_boundary();
+        let b = multipart_boundary();
+        assert_ne!(a, b, "each request needs a fresh boundary");
+        // RFC 2046 §5.1.1: boundaries are at most 70 chars from a restricted set.
+        assert!(a.len() <= 70);
+        assert!(
+            a.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'),
+            "unexpected character in boundary {a}"
+        );
+    }
+
+    #[test]
     fn error_message_from_body_falls_back_on_empty_body() {
-        let message =
-            error_message_from_body(reqwest::StatusCode::from_u16(401).unwrap(), Some(""));
+        let message = error_message_from_body(StatusCode::from_u16(401).unwrap(), Some(""));
         assert!(!message.is_empty());
         assert!(message.contains("401"));
     }
 
     #[test]
     fn error_message_from_body_falls_back_on_missing_body() {
-        let message = error_message_from_body(reqwest::StatusCode::from_u16(500).unwrap(), None);
+        let message = error_message_from_body(StatusCode::from_u16(500).unwrap(), None);
         assert!(!message.is_empty());
         assert!(message.contains("500"));
     }
 
     #[test]
     fn error_message_from_body_includes_reason_phrase_on_fallback() {
-        let message = error_message_from_body(reqwest::StatusCode::from_u16(502).unwrap(), None);
+        let message = error_message_from_body(StatusCode::from_u16(502).unwrap(), None);
         assert!(message.contains("502"));
         assert!(message.contains("Bad Gateway"));
     }
@@ -508,7 +526,7 @@ mod tests {
     #[test]
     fn error_message_from_body_uses_error_field() {
         let message = error_message_from_body(
-            reqwest::StatusCode::from_u16(400).unwrap(),
+            StatusCode::from_u16(400).unwrap(),
             Some(r#"{"error":"bad email"}"#),
         );
         assert_eq!(message, "bad email");

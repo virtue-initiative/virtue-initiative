@@ -35,7 +35,6 @@ hpke = "0.13.0"
 # so PNG is the only decoder needed. WebP is encoded via the `webp` crate.
 image = { version = "0.25", default-features = false, features = ["png"] }
 rand_core = { version = "0.9.5", features = ["os_rng"] }
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "cookies", "json", "multipart", "rustls-tls-native-roots", "rustls-tls-webpki-roots"] }
 rmp-serde = "1.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_bytes = "0.11"
@@ -44,5 +43,9 @@ sha2 = "0.10"
 thiserror = "2.0"
 tract-onnx = "0.21"
 tracing = "0.1"
+# Genuinely blocking HTTP. `rustls` pulls the ring-backed rustls stack plus
+# Mozilla's webpki roots; `cookies` is required by api/SPEC.md §1, which asks
+# clients to retain the server's short-lived JWT access cookie.
+ureq = { version = "3.4", default-features = false, features = ["cookies", "json", "rustls"] }
 virtue-text-detection = { path = "../text-detection" }
 webp = "0.3"
