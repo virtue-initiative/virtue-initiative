@@ -27,7 +27,7 @@ ignored = ["serde_bytes"]
 [dependencies]
 aes-gcm = "0.10"
 argon2 = "0.5"
-base64 = "0.22"
+base64 = "0.23"
 flate2 = "1.1"
 hkdf = "0.12.4"
 hpke = "0.13.0"
