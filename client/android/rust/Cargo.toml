@@ -6,8 +6,6 @@ edition = "2021"
 [lib]
 crate-type = ["cdylib"]
 
-[workspace]
-
 [dependencies]
 anyhow = "1"
 virtue_core = { package = "virtue-core", path = "../../core" }

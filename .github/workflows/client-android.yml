@@ -44,7 +44,7 @@ jobs:
         with:
           cache-on-failure: true
           workspaces: |
-            client/android/rust -> target
+            client -> target
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
