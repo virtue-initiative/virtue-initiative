@@ -44,24 +44,36 @@ jobs:
             client -> target
             hash-server -> target
 
+      - name: Determine build profile
+        id: profile
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "push" && ( "${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/staging" ) ]]; then
+            echo "cargo_release_flag=--release" >> "$GITHUB_OUTPUT"
+            echo "dotnet_config=Release" >> "$GITHUB_OUTPUT"
+          else
+            echo "cargo_release_flag=" >> "$GITHUB_OUTPUT"
+            echo "dotnet_config=Debug" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Rust lint (core)
-        run: cargo clippy --target x86_64-pc-windows-msvc -p virtue-core --all-targets -- -D warnings
+        run: cargo clippy --target x86_64-pc-windows-msvc ${{ steps.profile.outputs.cargo_release_flag }} -p virtue-core --all-targets -- -D warnings
         working-directory: client
 
       - name: Rust lint (Windows client)
-        run: cargo clippy --target x86_64-pc-windows-msvc -p virtue-windows --all-targets -- -D warnings
+        run: cargo clippy --target x86_64-pc-windows-msvc ${{ steps.profile.outputs.cargo_release_flag }} -p virtue-windows --all-targets -- -D warnings
         working-directory: client
 
       - name: Rust tests (core)
-        run: cargo test --target x86_64-pc-windows-msvc -p virtue-core
+        run: cargo test --target x86_64-pc-windows-msvc ${{ steps.profile.outputs.cargo_release_flag }} -p virtue-core
         working-directory: client
 
       - name: Rust scenario tests (core)
-        run: cargo test --target x86_64-pc-windows-msvc -p virtue-core --features testing --test scenarios
+        run: cargo test --target x86_64-pc-windows-msvc ${{ steps.profile.outputs.cargo_release_flag }} -p virtue-core --features testing --test scenarios
         working-directory: client
 
       - name: Rust tests (Windows client)
-        run: cargo test --target x86_64-pc-windows-msvc -p virtue-windows
+        run: cargo test --target x86_64-pc-windows-msvc ${{ steps.profile.outputs.cargo_release_flag }} -p virtue-windows
         working-directory: client
 
       - name: Build hash server
@@ -73,6 +85,14 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
       - name: Install dependencies
         run: bun install
 
@@ -80,7 +100,7 @@ jobs:
         run: bun client/windows/scripts/integration-test.ts
 
       - name: Test WinUI core library
-        run: dotnet test ./windows/Virtue.WindowsApp.Tests/Virtue.WindowsApp.Tests.csproj -c Debug
+        run: dotnet test ./windows/Virtue.WindowsApp.Tests/Virtue.WindowsApp.Tests.csproj -c ${{ steps.profile.outputs.dotnet_config }}
         working-directory: client
 
       - name: Build Windows MSIX (debug)
@@ -101,7 +121,7 @@ jobs:
 
       - name: Build Windows MSIX (release)
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
-        run: ./windows/scripts/build-msix.ps1 -Profile Release -Version "${{ steps.version.outputs.build_label }}"
+        run: ./windows/scripts/build-msix.ps1 -Profile Release -Version "${{ steps.version.outputs.build_label }}" -SkipTests
         working-directory: client
 
       - name: Repack Windows setup bundle

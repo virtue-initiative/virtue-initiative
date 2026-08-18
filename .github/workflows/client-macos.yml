@@ -39,32 +39,45 @@ jobs:
             client -> target
             hash-server -> target
 
-      # Lint/test against the same --release --target aarch64-apple-darwin
-      # profile that "Build macOS universal app bundle and DMG" below uses
-      # for its arm64 slice, instead of the default (dev profile, implicit
-      # host target) cargo uses without these flags. Cargo keys its build
-      # cache on the exact (profile, target, features) tuple, so a mismatch
-      # there means every dependency gets recompiled from scratch per step;
-      # matching it here means lint/test warm the same target/aarch64-apple-darwin/release
-      # cache that build-app.sh's own arm64 build then reuses.
-      - name: Build aarch64 release artifacts
-        run: cargo build --release --target aarch64-apple-darwin -p virtue-mac -p virtue-mac-ffi
+      - name: Determine build profile
+        id: profile
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "push" && ( "${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/staging" ) ]]; then
+            echo "cargo_release_flag=--release" >> "$GITHUB_OUTPUT"
+            echo "mac_dmg_flags=" >> "$GITHUB_OUTPUT"
+          else
+            echo "cargo_release_flag=" >> "$GITHUB_OUTPUT"
+            echo "mac_dmg_flags=--profile debug --arch arm64" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Lint/test against the same --target aarch64-apple-darwin profile that
+      # "Build macOS universal app bundle and DMG" below uses for its arm64
+      # slice (release on push to main/staging, debug otherwise), instead of
+      # the default (dev profile, implicit host target) cargo uses without
+      # these flags. Cargo keys its build cache on the exact (profile,
+      # target, features) tuple, so a mismatch there means every dependency
+      # gets recompiled from scratch per step; matching it here means
+      # lint/test warm the same target/aarch64-apple-darwin/<profile> cache
+      # that build-app.sh's own arm64 build then reuses.
+      - name: Build aarch64 artifacts
+        run: cargo build ${{ steps.profile.outputs.cargo_release_flag }} --target aarch64-apple-darwin -p virtue-mac -p virtue-mac-ffi
         working-directory: client
 
       - name: Rust lint (core)
-        run: cargo clippy --release --target aarch64-apple-darwin -p virtue-core --all-targets -- -D warnings
+        run: cargo clippy ${{ steps.profile.outputs.cargo_release_flag }} --target aarch64-apple-darwin -p virtue-core --all-targets -- -D warnings
         working-directory: client
 
       - name: Rust lint (macOS client)
-        run: cargo clippy --release --target aarch64-apple-darwin -p virtue-mac --all-targets -- -D warnings
+        run: cargo clippy ${{ steps.profile.outputs.cargo_release_flag }} --target aarch64-apple-darwin -p virtue-mac --all-targets -- -D warnings
         working-directory: client
 
       - name: Rust tests (core)
-        run: cargo test --release --target aarch64-apple-darwin -p virtue-core
+        run: cargo test ${{ steps.profile.outputs.cargo_release_flag }} --target aarch64-apple-darwin -p virtue-core
         working-directory: client
 
       - name: Rust scenario tests (core)
-        run: cargo test --release --target aarch64-apple-darwin -p virtue-core --features testing --test scenarios
+        run: cargo test ${{ steps.profile.outputs.cargo_release_flag }} --target aarch64-apple-darwin -p virtue-core --features testing --test scenarios
         working-directory: client
 
       - name: Build hash server
@@ -75,6 +88,14 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
 
       - name: Install dependencies
         run: bun install
@@ -139,7 +160,7 @@ jobs:
           echo "ASC_API_KEY_PATH=$ASC_API_KEY_PATH" >> "$GITHUB_ENV"
 
       - name: Build macOS universal app bundle and DMG
-        run: ./mac/scripts/build-dmg.sh
+        run: ./mac/scripts/build-dmg.sh ${{ steps.profile.outputs.mac_dmg_flags }}
         working-directory: client
         env:
           # Falls back to ad-hoc signing (CI has no access to a real Developer

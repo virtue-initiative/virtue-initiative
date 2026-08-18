@@ -9,7 +9,11 @@ SCHEME="VirtueIOS"
 BUILD_DIR="$IOS_DIR/.build-testflight"
 ARCHIVE_PATH="$BUILD_DIR/VirtueIOS.xcarchive"
 EXPORT_PATH="$BUILD_DIR/export"
-DERIVED_DATA_PATH="$BUILD_DIR/derived-data"
+# Reuses the derived data build-ios.sh already populated earlier in the same CI
+# job (client-ios.yml's "Build iOS app bundle" step), so this archive step
+# relinks/re-signs already-compiled object files instead of recompiling the
+# whole app from scratch.
+DERIVED_DATA_PATH="$IOS_DIR/.derived-data-ci-ios"
 
 : "${IOS_TEAM_ID:?IOS_TEAM_ID is required}"
 : "${IOS_ASC_KEY_ID:?IOS_ASC_KEY_ID is required}"
