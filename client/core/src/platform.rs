@@ -41,6 +41,16 @@ pub trait LifecycleHooks: Send + Sync + 'static {
             .map_err(|_| CoreError::InvalidState("system clock overflow"))
     }
 
+    /// A clock that does not advance while the system is suspended — used
+    /// only by `lifecycle::tick`'s suspend evidence (`SPEC.md` §2), never in
+    /// place of `get_utc_clock_ms` itself. Default falls back to
+    /// `get_utc_clock_ms`: on a platform with no distinct suspend-safe
+    /// primitive, suspend evidence simply never triggers, which is safe (it
+    /// can only ever *add* an excuse, never remove one).
+    fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
+        self.get_utc_clock_ms()
+    }
+
     /// Start of the current expected-running window (OS session/user login),
     /// as a UTC timestamp. `None` if not yet knowable.
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>>;

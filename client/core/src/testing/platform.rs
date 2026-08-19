@@ -21,6 +21,9 @@ struct TestPlatformInner {
     last_login_utc_ms: Option<i64>,
     last_logout_utc_ms: Option<i64>,
     lifecycle_enabled: bool,
+    /// When `Some`, overrides `get_monotonic_clock_ms()` instead of it
+    /// mirroring `clock` (the default — see `set_monotonic_clock_override`).
+    monotonic_override_ms: Option<i64>,
 }
 
 impl TestPlatformHooks {
@@ -39,6 +42,7 @@ impl TestPlatformHooks {
                 last_login_utc_ms: None,
                 last_logout_utc_ms: None,
                 lifecycle_enabled: true,
+                monotonic_override_ms: None,
             })),
         }
     }
@@ -71,6 +75,16 @@ impl TestPlatformHooks {
     /// that need to exercise the "lifecycle check disabled" path.
     pub fn set_lifecycle_enabled(&self, enabled: bool) {
         self.lock().lifecycle_enabled = enabled;
+    }
+
+    /// Diverges `get_monotonic_clock_ms()` from `clock` (the UTC clock) — by
+    /// default it mirrors `clock` exactly, like every platform's real
+    /// suspend-safe clock does while the system isn't suspended. Simulate a
+    /// suspend by setting this to a fixed value and then advancing `clock`
+    /// (real time passes, the suspend-safe clock doesn't); pass `None` to
+    /// resume mirroring `clock` again (simulating a resume).
+    pub fn set_monotonic_clock_override(&self, ms: Option<i64>) {
+        self.lock().monotonic_override_ms = ms;
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, TestPlatformInner> {
@@ -107,6 +121,10 @@ impl ScreenshotHooks for TestPlatformHooks {
 impl LifecycleHooks for TestPlatformHooks {
     fn get_utc_clock_ms(&self) -> CoreResult<i64> {
         Ok(self.clock.now_ms())
+    }
+
+    fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
+        Ok(self.lock().monotonic_override_ms.unwrap_or(self.clock.now_ms()))
     }
 
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {

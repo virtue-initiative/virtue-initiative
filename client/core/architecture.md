@@ -313,6 +313,7 @@ fn is_locked_or_screensaver(&self) -> CoreResult<bool>;   // default: Ok(false)
 
 // LifecycleHooks
 fn get_utc_clock_ms(&self) -> CoreResult<i64>;             // default: SystemTime::now()
+fn get_monotonic_clock_ms(&self) -> CoreResult<i64>;       // default: falls back to get_utc_clock_ms
 fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>>;
 fn get_last_logout_utc_ms(&self) -> CoreResult<Option<i64>>;
 fn lifecycle_enabled(&self) -> bool;                        // default: true
@@ -324,12 +325,16 @@ fn lifecycle_enabled(&self) -> bool;                        // default: true
 status — running normally. iOS is the only platform that overrides it to
 `false`, for the reason described above.
 
-`get_boot_clock_ms`/`get_monotonic_clock_ms` were removed from this trait in
-the daemon rewrite — the late-wakeup model (`../SPEC.md` §2) doesn't use
-boot/monotonic clock divergence at all. Mac still reads its own boot/
-monotonic clocks for a local post-wake UX check, but as **inherent methods**
-on `MacPlatformHooks` (`capture.rs`), called directly by `mac/src/daemon.rs`
-— not through this trait.
+`get_monotonic_clock_ms` (a clock that doesn't advance while the system is
+suspended) feeds only `lifecycle::tick`'s suspend evidence (`../SPEC.md`
+§2) — a third excuse, alongside login/logout evidence, that can only ever
+*add* an excuse (its default falls back to `get_utc_clock_ms`, under which
+it never triggers). Screenshot scheduling itself is unaffected and still
+paces off the wall clock; this hook isn't on `ScreenshotHooks`. Mac
+separately reads its own boot/monotonic clocks for a local post-wake UX
+check, but as **inherent methods** on `MacPlatformHooks` (`capture.rs`),
+called directly by `mac/src/daemon.rs` — not through this trait, and
+unrelated to the suspend evidence above.
 
 `PlatformHooks: ScreenshotHooks + LifecycleHooks` is a blanket impl (`impl<T:
 ScreenshotHooks + LifecycleHooks> PlatformHooks for T {}`) — platforms never

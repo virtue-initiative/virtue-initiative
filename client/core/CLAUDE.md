@@ -18,7 +18,7 @@ See `../CLAUDE.md` (repo root) for the exact wire formats and constraints.
 ## PlatformHooks
 
 Keep the traits minimal. Platforms implement `ScreenshotHooks` (screen capture,
-lock detection) and `LifecycleHooks` (the three hooks the late-wakeup model needs):
+lock detection) and `LifecycleHooks` (the hooks the late-wakeup model needs):
 
 ```rust
 // ScreenshotHooks
@@ -28,16 +28,18 @@ is_locked_or_screensaver() -> Result<bool>
 
 // LifecycleHooks
 get_utc_clock_ms() -> Result<i64>
+get_monotonic_clock_ms() -> Result<i64>  // default: falls back to get_utc_clock_ms
 get_last_login_utc_ms() -> Result<Option<i64>>
 get_last_logout_utc_ms() -> Result<Option<i64>>
 ```
 
 `PlatformHooks: ScreenshotHooks + LifecycleHooks` is a blanket impl — platforms
-never implement it directly. `get_boot_clock_ms`/`get_monotonic_clock_ms` were
-removed from `LifecycleHooks` in the daemon rewrite (the late-wakeup model
-doesn't use them); Mac keeps its own boot/monotonic clock reads as **inherent**
-methods on `MacPlatformHooks` for a local post-wake UX check unrelated to the
-core model — see `architecture.md`.
+never implement it directly. `get_monotonic_clock_ms` (a clock that doesn't
+advance while suspended) feeds only `lifecycle::tick`'s suspend evidence
+(`SPEC.md` §2) — it's not on `ScreenshotHooks`, and screenshot scheduling
+itself still paces off the wall clock. Mac separately keeps its own boot/
+monotonic clock reads as **inherent** methods on `MacPlatformHooks` for a
+local post-wake UX check unrelated to the core model — see `architecture.md`.
 
 Everything else belongs in `core`.
 

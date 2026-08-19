@@ -15,8 +15,11 @@ loop spec, kept minimal by design):
 - Each tick compares the actual wakeup time to the wakeup time it was
   scheduled for. The difference is appended to a last-10 array
   (`LifecycleState.late_wakeups`), unless the wakeup is within 2 minutes of
-  a system login, or was scheduled within 2 minutes of a system logout — in
-  either case it's excused, not recorded.
+  a system login, was scheduled within 2 minutes of a system logout, or a
+  suspend (detected via divergence between the wall clock and a clock that
+  doesn't advance while suspended) accounts for essentially the whole gap —
+  in any of these cases it's excused, not recorded. Unlike the login/logout
+  pair, suspend evidence can only ever add an excuse, never block one.
 - An alert (`UploadKind::ScreenshotMissed`, `HIGH_RISK_LIFECYCLE_ALERT`) fires
   whenever a single entry exceeds 1 minute, or the sum of the array's
   non-negative entries exceeds 5 minutes.
@@ -36,8 +39,10 @@ Implementation: `client/core/src/module/lifecycle.rs`.
   logs stop arriving.
 - **Client-stored state is trusted.** Not defending against local tampering
   yet; that's a separate follow-up.
-- The simplified model no longer distinguishes _why_ a wakeup was late
-  (crash vs. suspend vs. late boot vs. force-kill-before-logout) the way the
-  retired model's three separate buckets did — it only measures lateness
-  against the schedule. This is an intentional trade of detection nuance for
-  a much smaller, easier-to-reason-about implementation.
+- The simplified model still doesn't distinguish _why_ a non-excused wakeup
+  was late (crash vs. late boot vs. force-kill-before-logout) the way the
+  retired model's three separate buckets did — a suspend is now excused
+  (see above), but every other cause of lateness is measured the same way,
+  as a single undifferentiated gap against the schedule. This remains an
+  intentional trade of detection nuance for a much smaller,
+  easier-to-reason-about implementation.

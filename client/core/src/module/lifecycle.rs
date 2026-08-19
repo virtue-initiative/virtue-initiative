@@ -19,6 +19,13 @@ const MAX_TRACKED_WAKEUPS: usize = 10;
 const SINGLE_LATE_THRESHOLD_MS: i64 = 60_000; // 1 minute
 const SUM_LATE_THRESHOLD_MS: i64 = 5 * 60_000; // 5 minutes
 const LOGIN_LOGOUT_EXCUSE_MS: i64 = 2 * 60_000; // 2 minutes
+/// Floor below which a measured clock divergence is treated as noise (clock
+/// jitter, NTP adjustment) rather than a real suspend. See `SPEC.md` §2.
+const SUSPEND_EVIDENCE_MIN_MS: i64 = 5_000;
+/// Slack allowed between the measured suspended duration and the gap being
+/// evaluated for the suspend evidence to still count as "explains the gap" —
+/// tolerates wake-up scheduling jitter without requiring an exact match.
+const SUSPEND_EVIDENCE_SLACK_MS: i64 = SINGLE_LATE_THRESHOLD_MS;
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 #[serde(default)]
@@ -36,6 +43,12 @@ pub struct LifecycleState {
     /// checked, or alerted on — so the gap the stop itself caused is never
     /// mistaken for tampering. See `SPEC.md` §2.
     pub monitoring_stopped: bool,
+    /// Real UTC time and suspend-safe-clock (`LifecycleHooks::get_monotonic_clock_ms`)
+    /// reading, both captured at the end of the previous `tick()` call — the
+    /// baseline `tick()` diffs against to compute suspend evidence. `None`
+    /// before the first tick. See `SPEC.md` §2.
+    pub last_tick_utc_ms: Option<i64>,
+    pub last_tick_suspend_safe_ms: Option<i64>,
 }
 
 /// Phase 1 of `Daemon::run_phases`: compares `now_ms` to the wakeup time this
@@ -55,9 +68,21 @@ pub fn tick(
     now_ms: i64,
     expected_wakeup_at_ms: i64,
 ) {
+    // Captured unconditionally (even on an early return below) so the next
+    // call always has a fresh baseline to diff suspend evidence against.
+    let previous_utc_ms = state.last_tick_utc_ms;
+    let previous_suspend_safe_ms = state.last_tick_suspend_safe_ms;
+    let current_suspend_safe_ms = hooks.get_monotonic_clock_ms().ok();
+    state.last_tick_utc_ms = Some(now_ms);
+    if let Some(current) = current_suspend_safe_ms {
+        state.last_tick_suspend_safe_ms = Some(current);
+    }
+
     if expected_wakeup_at_ms == 0 || state.monitoring_stopped {
         return;
     }
+
+    let diff_ms = now_ms - expected_wakeup_at_ms;
 
     // Each side is `None` (no evidence either way), `Some(true)` (supports a
     // legitimate session transition), or `Some(false)` (contradicts one). A
@@ -77,13 +102,31 @@ pub fn tick(
         .flatten()
         .map(|logout_ms| (expected_wakeup_at_ms - logout_ms).abs() <= LOGIN_LOGOUT_EXCUSE_MS);
 
-    let has_evidence = login_evidence.is_some() || logout_evidence.is_some();
+    // Suspend evidence (SPEC.md §2): the shortfall between real-time elapsed
+    // and suspend-safe-clock elapsed since the previous tick reveals how long
+    // the system was suspended over that span. Unlike the two signals above,
+    // this one can only ever support an excuse — it's left `None` (never
+    // `Some(false)`) whenever it doesn't clearly explain the gap, so it can
+    // never block a login/logout-supported excuse the way a contradicting
+    // signal does.
+    let suspend_evidence =
+        match (previous_utc_ms, previous_suspend_safe_ms, current_suspend_safe_ms) {
+            (Some(prev_utc), Some(prev_suspend_safe), Some(current)) => {
+                let utc_elapsed_ms = now_ms - prev_utc;
+                let suspend_safe_elapsed_ms = current - prev_suspend_safe;
+                let suspended_ms = (utc_elapsed_ms - suspend_safe_elapsed_ms).max(0);
+                let explains_gap = suspended_ms + SUSPEND_EVIDENCE_SLACK_MS >= diff_ms;
+                (suspended_ms >= SUSPEND_EVIDENCE_MIN_MS && explains_gap).then_some(true)
+            }
+            _ => None,
+        };
+
+    let has_evidence = login_evidence.is_some() || logout_evidence.is_some() || suspend_evidence.is_some();
     let contradicted = login_evidence == Some(false) || logout_evidence == Some(false);
     if has_evidence && !contradicted {
         return;
     }
 
-    let diff_ms = now_ms - expected_wakeup_at_ms;
     state.late_wakeups.push_back(diff_ms);
     while state.late_wakeups.len() > MAX_TRACKED_WAKEUPS {
         state.late_wakeups.pop_front();
@@ -201,6 +244,25 @@ mod tests {
     use crate::module::upload::UploadState;
     use crate::testing::TestPlatformHooks;
 
+    /// Calls `tick`, first syncing `hooks`' mock clock to `now_ms` — matching
+    /// the production invariant that `now_ms` passed into `tick` always
+    /// equals `hooks.get_time_utc_ms()`/`get_monotonic_clock_ms()` at that
+    /// same moment (see `daemon.rs::now_ms`). Keeping the mock in sync means
+    /// the suspend-evidence baseline (`SPEC.md` §2) sees zero divergence
+    /// across these calls unless a test explicitly diverges the two clocks
+    /// (see the "suspend evidence" tests below), so every pre-existing test
+    /// here is unaffected by suspend evidence.
+    fn tick_at(
+        state: &mut LifecycleState,
+        upload: &mut UploadState,
+        hooks: &TestPlatformHooks,
+        now_ms: i64,
+        expected_wakeup_at_ms: i64,
+    ) {
+        hooks.clock.set(now_ms);
+        tick(state, upload, hooks, now_ms, expected_wakeup_at_ms);
+    }
+
     #[allow(clippy::field_reassign_with_default)]
     fn upload_with_credentials() -> UploadState {
         let mut upload = UploadState::default();
@@ -235,7 +297,7 @@ mod tests {
         let mut state = LifecycleState::default();
         let mut upload = upload_with_credentials();
         let hooks = TestPlatformHooks::new();
-        tick(&mut state, &mut upload, &hooks, 1_000, 0);
+        tick_at(&mut state, &mut upload, &hooks, 1_000, 0);
         assert!(state.late_wakeups.is_empty());
         assert!(!has_late_wakeup_alert(&upload));
     }
@@ -246,7 +308,7 @@ mod tests {
         let mut upload = upload_with_credentials();
         let hooks = TestPlatformHooks::new();
         // 5s late — well under the 1-minute single-wakeup threshold.
-        tick(&mut state, &mut upload, &hooks, 305_000, 300_000);
+        tick_at(&mut state, &mut upload, &hooks, 305_000, 300_000);
         assert_eq!(state.late_wakeups, [5_000]);
         assert!(!has_late_wakeup_alert(&upload));
     }
@@ -256,7 +318,7 @@ mod tests {
         let mut state = LifecycleState::default();
         let mut upload = upload_with_credentials();
         let hooks = TestPlatformHooks::new();
-        tick(&mut state, &mut upload, &hooks, 361_001, 300_000);
+        tick_at(&mut state, &mut upload, &hooks, 361_001, 300_000);
         assert!(has_late_wakeup_alert(&upload));
     }
 
@@ -270,10 +332,10 @@ mod tests {
         // first tick (expected_wakeup_at_ms == 0) is a no-op by design, so
         // seed one throwaway tick first to get a nonzero `expected` baseline.
         let mut expected = 1_000i64;
-        tick(&mut state, &mut upload, &hooks, expected, 0);
+        tick_at(&mut state, &mut upload, &hooks, expected, 0);
         for _ in 0..10 {
             let now = expected + 31_000;
-            tick(&mut state, &mut upload, &hooks, now, expected);
+            tick_at(&mut state, &mut upload, &hooks, now, expected);
             expected = now;
         }
         assert!(has_late_wakeup_alert(&upload));
@@ -289,7 +351,7 @@ mod tests {
         let mut expected = 0i64;
         for _ in 0..10 {
             let now = expected - 1_000; // 1s early each time
-            tick(&mut state, &mut upload, &hooks, now, expected);
+            tick_at(&mut state, &mut upload, &hooks, now, expected);
             expected = now;
         }
         assert!(!has_late_wakeup_alert(&upload));
@@ -303,7 +365,7 @@ mod tests {
         // now_ms is within 2 minutes of a reported login — a huge lateness is
         // excused entirely (not even recorded).
         hooks.set_last_login(Some(360_500));
-        tick(&mut state, &mut upload, &hooks, 361_000, 300_000);
+        tick_at(&mut state, &mut upload, &hooks, 361_000, 300_000);
         assert!(state.late_wakeups.is_empty());
         assert!(!has_late_wakeup_alert(&upload));
     }
@@ -316,9 +378,53 @@ mod tests {
         // The *expected* wakeup time (not now_ms) is within 2 minutes of a
         // reported logout.
         hooks.set_last_logout(Some(301_000));
-        tick(&mut state, &mut upload, &hooks, 500_000, 300_000);
+        tick_at(&mut state, &mut upload, &hooks, 500_000, 300_000);
         assert!(state.late_wakeups.is_empty());
         assert!(!has_late_wakeup_alert(&upload));
+    }
+
+    // ── Suspend evidence (SPEC.md §2) ───────────────────────────────────────
+
+    #[test]
+    fn suspend_that_explains_the_whole_gap_is_excused() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        // Seed the baseline (first tick, no schedule yet) at t=0 with the
+        // suspend-safe clock also at 0.
+        tick_at(&mut state, &mut upload, &hooks, 0, 0);
+
+        // Freeze the suspend-safe clock — simulating a ~1 hour suspend —
+        // while real time (and the next scheduled wakeup) advances normally.
+        hooks.set_monotonic_clock_override(Some(0));
+        tick_at(&mut state, &mut upload, &hooks, 3_900_000, 300_000);
+
+        assert!(state.late_wakeups.is_empty());
+        assert!(!has_late_wakeup_alert(&upload));
+    }
+
+    #[test]
+    fn brief_suspend_coincident_with_a_long_kill_does_not_excuse() {
+        // A daemon killed for ~2.7 hours, during which the machine also
+        // happened to suspend for a real but brief 30s — the suspend must
+        // NOT be allowed to excuse the much larger kill-induced gap it only
+        // partially covers. This is the suspend-evidence analog of
+        // `kill_then_reboot_still_alerts_despite_a_nearby_login`.
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        tick_at(&mut state, &mut upload, &hooks, 0, 0);
+
+        // Suspend-safe clock advances 9_970_000ms while real time advances
+        // 10_000_000ms — a 30s divergence, against a ~9_700_000ms gap.
+        hooks.set_monotonic_clock_override(Some(9_970_000));
+        tick_at(&mut state, &mut upload, &hooks, 10_000_000, 300_000);
+
+        assert!(
+            state.late_wakeups.is_empty(),
+            "cleared after alerting, not because it was excused"
+        );
+        assert!(has_late_wakeup_alert(&upload));
     }
 
     #[test]
@@ -335,7 +441,7 @@ mod tests {
         let hooks = TestPlatformHooks::new();
         hooks.set_last_logout(Some(900_000));
         hooks.set_last_login(Some(950_500));
-        tick(&mut state, &mut upload, &hooks, 951_000, 300_000);
+        tick_at(&mut state, &mut upload, &hooks, 951_000, 300_000);
         // Counted (not excused) and alerted on — then cleared per SPEC.md §2.
         assert!(state.late_wakeups.is_empty());
         assert!(has_late_wakeup_alert(&upload));
@@ -354,7 +460,7 @@ mod tests {
         let hooks = TestPlatformHooks::new();
         hooks.set_last_logout(Some(900_000));
         hooks.set_last_login(Some(950_000));
-        tick(&mut state, &mut upload, &hooks, 2_000_000, 900_500);
+        tick_at(&mut state, &mut upload, &hooks, 2_000_000, 900_500);
         // Counted (not excused) and alerted on — then cleared per SPEC.md §2.
         assert!(state.late_wakeups.is_empty());
         assert!(has_late_wakeup_alert(&upload));
@@ -367,14 +473,14 @@ mod tests {
         let mut state = LifecycleState::default();
         let mut upload = upload_with_credentials();
         let hooks = TestPlatformHooks::new();
-        tick(&mut state, &mut upload, &hooks, 361_001, 300_000);
+        tick_at(&mut state, &mut upload, &hooks, 361_001, 300_000);
         assert!(has_late_wakeup_alert(&upload));
         assert!(state.late_wakeups.is_empty());
 
         // Without the clear, the 61s-late entry above would still be sitting
         // in the array and this on-time-ish follow-up tick would alert a
         // second time for the same already-reported incident.
-        tick(&mut state, &mut upload, &hooks, 361_501, 361_001);
+        tick_at(&mut state, &mut upload, &hooks, 361_501, 361_001);
         assert_eq!(
             late_wakeup_alert_count(&upload),
             1,
@@ -388,10 +494,10 @@ mod tests {
         let mut upload = upload_with_credentials();
         let hooks = TestPlatformHooks::new();
         let mut expected = 1_000i64;
-        tick(&mut state, &mut upload, &hooks, expected, 0);
+        tick_at(&mut state, &mut upload, &hooks, expected, 0);
         for _ in 0..10 {
             let now = expected + 31_000;
-            tick(&mut state, &mut upload, &hooks, now, expected);
+            tick_at(&mut state, &mut upload, &hooks, now, expected);
             expected = now;
         }
         assert_eq!(late_wakeup_alert_count(&upload), 1);
@@ -401,7 +507,7 @@ mod tests {
         // in the buffer and the sum would still be over budget, alerting
         // again for the same underlying incident on this next tick.
         let now = expected + 31_000;
-        tick(&mut state, &mut upload, &hooks, now, expected);
+        tick_at(&mut state, &mut upload, &hooks, now, expected);
         assert_eq!(
             late_wakeup_alert_count(&upload),
             1,
@@ -417,7 +523,7 @@ mod tests {
         let mut expected = 1_000i64;
         for i in 0..15 {
             let now = expected + i; // tiny, harmless lateness
-            tick(&mut state, &mut upload, &hooks, now, expected);
+            tick_at(&mut state, &mut upload, &hooks, now, expected);
             expected = now;
         }
         assert_eq!(state.late_wakeups.len(), MAX_TRACKED_WAKEUPS);
@@ -579,8 +685,8 @@ mod tests {
         // while `request_stop` is being serviced), including one with a gap
         // that would otherwise alert. Under the old one-shot-flag design the
         // very first tick here would have wrongly burned the excuse.
-        tick(&mut state, &mut upload, &hooks, 100, 50);
-        tick(&mut state, &mut upload, &hooks, 10_000_000, 300_000);
+        tick_at(&mut state, &mut upload, &hooks, 100, 50);
+        tick_at(&mut state, &mut upload, &hooks, 10_000_000, 300_000);
         assert!(state.monitoring_stopped);
         assert!(state.late_wakeups.is_empty());
         assert!(!has_late_wakeup_alert(&upload));
@@ -599,7 +705,7 @@ mod tests {
         );
 
         // Checking is fully back to normal: a late wakeup is recorded again.
-        tick(&mut state, &mut upload, &hooks, 20_305_000, 20_300_000);
+        tick_at(&mut state, &mut upload, &hooks, 20_305_000, 20_300_000);
         assert_eq!(state.late_wakeups.len(), 1);
     }
 
