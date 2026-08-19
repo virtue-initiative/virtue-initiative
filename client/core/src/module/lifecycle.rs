@@ -177,15 +177,20 @@ pub fn note_user_stop(
 /// redundantly but harmlessly, wherever a platform explicitly signals that
 /// monitoring has resumed — see `Daemon::note_user_start`).
 ///
-/// Returns whether a stop was actually active (i.e. whether this call did
-/// anything). The caller uses that to decide whether to also reset the
-/// wakeup schedule baseline: it must NOT be reset unconditionally on every
-/// restart, since that would let a plain kill signal escape detection too
-/// — see `SPEC.md` §2 and the `daemon.rs` caller.
-pub fn note_user_start(state: &mut LifecycleState) -> bool {
+/// Only enqueues the `UserStart` upload (and reports having done anything)
+/// when a stop was actually active — a no-op call (e.g. an ordinary launch
+/// that never called `note_user_stop`) must stay silent. The caller uses
+/// the return value to decide whether to also reset the wakeup schedule
+/// baseline: it must NOT be reset unconditionally on every restart, since
+/// that would let a plain kill signal escape detection too — see
+/// `SPEC.md` §2 and the `daemon.rs` caller.
+pub fn note_user_start(state: &mut LifecycleState, upload: &mut UploadState, now_ms: i64) -> bool {
     let was_stopped = state.monitoring_stopped;
     state.monitoring_stopped = false;
     state.late_wakeups.clear();
+    if was_stopped {
+        upload::enqueue(upload, now_ms, 0.0, UploadKind::UserStart);
+    }
     was_stopped
 }
 
@@ -216,6 +221,13 @@ mod tests {
             .iter()
             .filter(|e| matches!(e.event, UploadKind::ScreenshotMissed))
             .count()
+    }
+
+    fn has_user_start_event(upload: &UploadState) -> bool {
+        upload
+            .pending_hash_events
+            .iter()
+            .any(|e| matches!(e.event, UploadKind::UserStart))
     }
 
     #[test]
@@ -579,8 +591,12 @@ mod tests {
         // itself compared against a stale pre-stop schedule is `daemon.rs`'s
         // job (`apply_note_user_start`), exercised end-to-end in
         // `tests/scenarios.rs::user_stop_excuse_survives_across_a_real_restart_not_just_the_next_tick`.
-        assert!(note_user_start(&mut state));
+        assert!(note_user_start(&mut state, &mut upload, 1_000_000));
         assert!(!state.monitoring_stopped);
+        assert!(
+            has_user_start_event(&upload),
+            "resuming from an actual stop should log a UserStart event"
+        );
 
         // Checking is fully back to normal: a late wakeup is recorded again.
         tick(&mut state, &mut upload, &hooks, 20_305_000, 20_300_000);
@@ -592,9 +608,12 @@ mod tests {
         // A plain kill (no `note_user_stop`) must not be excused — asserted
         // more fully in `daemon.rs`'s `apply_note_user_start`, but at this
         // layer `note_user_start` must at least report there was nothing to
-        // resume, so the caller knows not to reset the wakeup schedule.
+        // resume (so the caller knows not to reset the wakeup schedule) and
+        // must not log a spurious `UserStart` on every ordinary launch.
         let mut state = LifecycleState::default();
-        assert!(!note_user_start(&mut state));
+        let mut upload = upload_with_credentials();
+        assert!(!note_user_start(&mut state, &mut upload, 1_000));
         assert!(!state.monitoring_stopped);
+        assert!(!has_user_start_event(&upload));
     }
 }

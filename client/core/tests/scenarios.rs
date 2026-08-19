@@ -123,10 +123,18 @@ fn user_stop_excuse_survives_across_a_real_restart_not_just_the_next_tick() {
     let mut scenario2 = Scenario::authenticated_with_state_dir(state_dir);
     assert!(!scenario2.state().lifecycle.monitoring_stopped);
 
-    // Push the next screenshot draw well past this test's tick so the only
-    // possible source of an upload is the lifecycle late-wakeup alert this
-    // test is checking for, not an unrelated (legitimate) screenshot capture.
-    scenario2.with_state_mut(|s| s.screenshot.next_screenshot_at_ms = Some(1_000_000_000));
+    // Push the next screenshot draw well past this test's tick, and drop the
+    // `UserStart` event `Daemon::new` just queued (covered precisely by
+    // `lifecycle::tests::ticks_before_the_daemon_actually_stops_do_not_consume_the_excuse`),
+    // so the only possible source of an upload below is the lifecycle
+    // late-wakeup alert this test is checking for.
+    scenario2.with_state_mut(|s| {
+        s.screenshot.next_screenshot_at_ms = Some(1_000_000_000);
+        s.upload.pending_hash_events.clear();
+        s.upload.pending_batch_events.clear();
+        s.upload.force_flush = false;
+        s.upload.bypass_lock = false;
+    });
 
     let uploads_before = {
         let s = scenario2.api.state();

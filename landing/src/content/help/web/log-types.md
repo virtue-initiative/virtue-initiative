@@ -66,6 +66,10 @@ device shutting down cleanly.
 
 A user stopped the monitoring process.
 
+## Monitoring Resumed by User
+
+A user resumed monitoring after previously stopping it.
+
 ## Unexpected Restart
 
 The monitoring process restarted unexpectedly.

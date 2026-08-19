@@ -61,6 +61,9 @@ pub enum UploadKind {
     /// The user explicitly quit the monitor while it was expected to be
     /// running. Always high risk.
     UserStop,
+    /// Monitoring resumed after a prior `UserStop`. Always risk 0% — purely
+    /// informational, pairing with the `UserStop` it follows.
+    UserStart,
     ScreenshotSkipped {
         reason: ScreenshotSkipReason,
     },
@@ -105,6 +108,7 @@ impl std::fmt::Debug for UploadKind {
                 image.len()
             ),
             UploadKind::UserStop => write!(f, "UserStop"),
+            UploadKind::UserStart => write!(f, "UserStart"),
             UploadKind::ScreenshotSkipped { reason } => {
                 write!(f, "ScreenshotSkipped {{ reason: {reason:?} }}")
             }

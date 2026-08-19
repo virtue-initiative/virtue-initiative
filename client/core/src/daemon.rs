@@ -142,8 +142,9 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         // wasn't stopped (including a plain kill, which must NOT be excused
         // — see `SPEC.md` §2 and `lifecycle::note_user_start`).
         {
+            let now_ms = daemon.now_ms();
             let mut guard = daemon.state.lock().expect("daemon state lock poisoned");
-            daemon.apply_note_user_start(&mut guard);
+            daemon.apply_note_user_start(&mut guard, now_ms);
             daemon.persist(&guard);
         }
 
@@ -263,8 +264,8 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     /// Resets the wakeup schedule baseline too, but only when a stop was
     /// actually active — see `lifecycle::note_user_start`'s doc comment for
     /// why an unconditional reset would defeat detection of a plain kill.
-    fn apply_note_user_start(&self, state: &mut DaemonState) {
-        if lifecycle::note_user_start(&mut state.lifecycle) {
+    fn apply_note_user_start(&self, state: &mut DaemonState, now_ms: i64) {
+        if lifecycle::note_user_start(&mut state.lifecycle, &mut state.upload, now_ms) {
             state.next_wakeup_at_ms = 0;
         }
     }
@@ -397,8 +398,9 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
 
     #[cfg(any(test, feature = "testing"))]
     pub fn test_note_user_start(&self) {
+        let now_ms = self.now_ms();
         let mut guard = self.state.lock().expect("daemon state lock poisoned");
-        self.apply_note_user_start(&mut guard);
+        self.apply_note_user_start(&mut guard, now_ms);
         self.persist(&guard);
     }
 
@@ -538,7 +540,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
                             }));
                         }
                         DaemonRequest::NoteUserStart { reply } => {
-                            self.apply_note_user_start(&mut working);
+                            self.apply_note_user_start(&mut working, now_ms);
                             fires.push(Box::new(move || {
                                 let _ = reply.send(());
                             }));

@@ -20,6 +20,7 @@ describe('getLogCategory — titles', () => {
     expect(getLogCategory(log('system_login', { utc_ms: 0 }))).toBe('System Login');
     expect(getLogCategory(log('system_logout', { utc_ms: 0 }))).toBe('System Logout');
     expect(getLogCategory(log('user_stop'))).toBe('Monitoring Stopped by User');
+    expect(getLogCategory(log('user_start'))).toBe('Monitoring Resumed by User');
     expect(getLogCategory(log('screenshot_missed'))).toBe('Screenshot Missed');
     expect(getLogCategory(log('capture_failed'))).toBe('Capture Failed');
     expect(getLogCategory(log('screenshot_skipped'))).toBe('Screenshot Skipped');
