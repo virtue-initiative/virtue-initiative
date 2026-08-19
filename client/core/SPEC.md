@@ -38,6 +38,8 @@ The late wakeups array MUST be cleared after an alert is sent (to prevent duplic
 
 The late wakeup event SHOULD be called "screenshot_missed".
 
+A clean, intentional stop (`request_stop`) MUST excuse the gap that follows it — the next tick's lateness check MUST be skipped once, rather than recorded, so stopping and later restarting the daemon isn't reported as tampering.
+
 ## 3. Screenshots
 
 Screenshots MUST be captured randomly (i.e. every second there is the same chance as any other second) about every 5 minutes.
@@ -65,6 +67,8 @@ Both hash server uploads and batch uploads MUST be stored in the state object an
 When the daemon detects that the System Login time changed, it MUST send a "system login at" event (risk 0%).
 
 When the daemon detects thtat hte System Logout time changed, it MUST send a "system logout at" event (risk 0%).
+
+The first System Login/Logout time observed (i.e. there is no prior value to compare against) MUST NOT be reported — it only establishes the baseline a later change is measured against.
 
 ## 6. Client API
 

@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{AlertReason, UploadKind};
+use crate::model::UploadKind;
 use crate::module::upload::{self, UploadState};
 use crate::platform::LifecycleHooks;
 
@@ -30,6 +30,10 @@ pub struct LifecycleState {
     /// reported once. See `SPEC.md` §5.
     pub last_seen_login_ms: Option<i64>,
     pub last_seen_logout_ms: Option<i64>,
+    /// Set right before a clean `request_stop` shutdown, consumed by the very
+    /// next `tick()` to excuse the gap the stop itself caused. See
+    /// `SPEC.md` §2.
+    pub excuse_next_late_wakeup: bool,
 }
 
 /// Phase 1 of `Daemon::run_phases`: compares `now_ms` to the wakeup time this
@@ -49,6 +53,11 @@ pub fn tick(
     expected_wakeup_at_ms: i64,
 ) {
     if expected_wakeup_at_ms == 0 {
+        return;
+    }
+
+    if state.excuse_next_late_wakeup {
+        state.excuse_next_late_wakeup = false;
         return;
     }
 
@@ -101,8 +110,9 @@ pub fn tick(
 
 /// Phase 1b of `Daemon::run_phases`: detects a change in the last known
 /// system login/logout time since the previous tick and records a
-/// zero-risk informational event each time one is seen. See
-/// `client/core/SPEC.md` §5.
+/// zero-risk informational event each time one is seen. The very first
+/// observation (no prior baseline) only seeds `last_seen_*` — it does not
+/// count as a "change" and is not reported. See `client/core/SPEC.md` §5.
 pub fn note_session_events(
     state: &mut LifecycleState,
     upload: &mut UploadState,
@@ -112,26 +122,41 @@ pub fn note_session_events(
     if let Ok(Some(login_ms)) = hooks.get_last_login_utc_ms()
         && state.last_seen_login_ms != Some(login_ms)
     {
+        let had_baseline = state.last_seen_login_ms.is_some();
         state.last_seen_login_ms = Some(login_ms);
-        upload::enqueue(
-            upload,
-            now_ms,
-            0.0,
-            UploadKind::SystemLoginAt { at_ms: login_ms },
-        );
+        if had_baseline {
+            upload::enqueue(
+                upload,
+                now_ms,
+                0.0,
+                UploadKind::SystemLogin { utc_ms: login_ms },
+            );
+        }
     }
 
     if let Ok(Some(logout_ms)) = hooks.get_last_logout_utc_ms()
         && state.last_seen_logout_ms != Some(logout_ms)
     {
+        let had_baseline = state.last_seen_logout_ms.is_some();
         state.last_seen_logout_ms = Some(logout_ms);
-        upload::enqueue(
-            upload,
-            now_ms,
-            0.0,
-            UploadKind::SystemLogoutAt { at_ms: logout_ms },
-        );
+        if had_baseline {
+            upload::enqueue(
+                upload,
+                now_ms,
+                0.0,
+                UploadKind::SystemLogout { utc_ms: logout_ms },
+            );
+        }
     }
+}
+
+/// Marks the very next `tick()` call as excused, right before a clean,
+/// intentional shutdown — called from `Daemon::run_forever`'s `request_stop`
+/// path. Prevents the gap while the daemon was deliberately stopped from
+/// being reported as tampering when it starts back up. See
+/// `client/core/SPEC.md` §2.
+pub fn note_intentional_stop(state: &mut LifecycleState) {
+    state.excuse_next_late_wakeup = true;
 }
 
 /// Handles an explicit user-initiated stop — an immediate high-risk alert,
@@ -139,14 +164,7 @@ pub fn note_session_events(
 /// `Daemon::note_user_stop`.
 pub fn note_user_stop(upload: &mut UploadState, now_ms: i64, source: &str) {
     tracing::info!(source, "user-initiated stop");
-    upload::enqueue(
-        upload,
-        now_ms,
-        EXTRA_HIGH_RISK,
-        UploadKind::LifecycleAlert {
-            reason: AlertReason::UserStop,
-        },
-    );
+    upload::enqueue(upload, now_ms, EXTRA_HIGH_RISK, UploadKind::UserStop);
 }
 
 #[cfg(test)]
@@ -378,14 +396,7 @@ mod tests {
         let entry = upload
             .pending_hash_events
             .iter()
-            .find(|e| {
-                matches!(
-                    e.event,
-                    UploadKind::LifecycleAlert {
-                        reason: AlertReason::UserStop
-                    }
-                )
-            })
+            .find(|e| matches!(e.event, UploadKind::UserStop))
             .expect("expected a UserStop alert");
         assert!(entry.risk.unwrap() >= EXTRA_HIGH_RISK);
         assert!(
@@ -396,45 +407,67 @@ mod tests {
 
     // ── Other events (SPEC.md §5) ───────────────────────────────────────────
 
-    fn system_event(upload: &UploadState, at_ms: i64, login: bool) -> Option<f32> {
+    fn system_event(upload: &UploadState, utc_ms: i64, login: bool) -> Option<f32> {
         upload
             .pending_hash_events
             .iter()
             .find_map(|e| match &e.event {
-                UploadKind::SystemLoginAt { at_ms: seen } if login && *seen == at_ms => e.risk,
-                UploadKind::SystemLogoutAt { at_ms: seen } if !login && *seen == at_ms => e.risk,
+                UploadKind::SystemLogin { utc_ms: seen } if login && *seen == utc_ms => e.risk,
+                UploadKind::SystemLogout { utc_ms: seen } if !login && *seen == utc_ms => e.risk,
                 _ => None,
             })
     }
 
     #[test]
-    fn system_login_at_event_sent_when_login_time_changes() {
+    fn first_observation_only_seeds_the_baseline_and_is_not_reported() {
+        // SPEC.md §5: "The first System Login/Logout time observed [...]
+        // MUST NOT be reported — it only establishes the baseline a later
+        // change is measured against."
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        hooks.set_last_login(Some(1_000));
+        hooks.set_last_logout(Some(2_000));
+
+        note_session_events(&mut state, &mut upload, &hooks, 1_500);
+
+        assert!(upload.pending_hash_events.is_empty());
+        assert_eq!(state.last_seen_login_ms, Some(1_000));
+        assert_eq!(state.last_seen_logout_ms, Some(2_000));
+    }
+
+    #[test]
+    fn system_login_at_event_sent_when_login_time_changes_after_a_baseline_is_established() {
         // SPEC.md §5: "When the daemon detects that the System Login time
         // changed, it MUST send a "system login at" event (risk 0%)."
         let mut state = LifecycleState::default();
         let mut upload = upload_with_credentials();
         let hooks = TestPlatformHooks::new();
         hooks.set_last_login(Some(1_000));
+        note_session_events(&mut state, &mut upload, &hooks, 1_400); // seeds baseline, no event
 
-        note_session_events(&mut state, &mut upload, &hooks, 1_500);
+        hooks.set_last_login(Some(9_000));
+        note_session_events(&mut state, &mut upload, &hooks, 9_500);
 
-        assert_eq!(system_event(&upload, 1_000, true), Some(0.0));
-        assert_eq!(state.last_seen_login_ms, Some(1_000));
+        assert_eq!(system_event(&upload, 9_000, true), Some(0.0));
+        assert_eq!(state.last_seen_login_ms, Some(9_000));
     }
 
     #[test]
-    fn system_logout_at_event_sent_when_logout_time_changes() {
+    fn system_logout_at_event_sent_when_logout_time_changes_after_a_baseline_is_established() {
         // SPEC.md §5: "When the daemon detects tha[t] th[e] System Logout
         // time changed, it MUST send a "system logout at" event (risk 0%)."
         let mut state = LifecycleState::default();
         let mut upload = upload_with_credentials();
         let hooks = TestPlatformHooks::new();
         hooks.set_last_logout(Some(2_000));
+        note_session_events(&mut state, &mut upload, &hooks, 2_400); // seeds baseline, no event
 
-        note_session_events(&mut state, &mut upload, &hooks, 2_500);
+        hooks.set_last_logout(Some(20_000));
+        note_session_events(&mut state, &mut upload, &hooks, 20_500);
 
-        assert_eq!(system_event(&upload, 2_000, false), Some(0.0));
-        assert_eq!(state.last_seen_logout_ms, Some(2_000));
+        assert_eq!(system_event(&upload, 20_000, false), Some(0.0));
+        assert_eq!(state.last_seen_logout_ms, Some(20_000));
     }
 
     #[test]
@@ -462,13 +495,42 @@ mod tests {
         let mut upload = upload_with_credentials();
         let hooks = TestPlatformHooks::new();
         hooks.set_last_login(Some(1_000));
-        note_session_events(&mut state, &mut upload, &hooks, 1_500);
+        note_session_events(&mut state, &mut upload, &hooks, 1_400); // seeds baseline, no event
+
+        hooks.set_last_login(Some(5_000));
+        note_session_events(&mut state, &mut upload, &hooks, 5_500);
 
         hooks.set_last_login(Some(9_000));
         note_session_events(&mut state, &mut upload, &hooks, 9_500);
 
-        assert_eq!(system_event(&upload, 1_000, true), Some(0.0));
+        assert_eq!(system_event(&upload, 1_000, true), None);
+        assert_eq!(system_event(&upload, 5_000, true), Some(0.0));
         assert_eq!(system_event(&upload, 9_000, true), Some(0.0));
         assert_eq!(state.last_seen_login_ms, Some(9_000));
+    }
+
+    // ── Intentional-stop excuse (SPEC.md §2) ────────────────────────────────
+
+    #[test]
+    fn note_intentional_stop_excuses_only_the_next_tick() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+
+        note_intentional_stop(&mut state);
+        assert!(state.excuse_next_late_wakeup);
+
+        // A huge gap right after a clean stop — would otherwise alert, but
+        // is excused once.
+        tick(&mut state, &mut upload, &hooks, 10_000_000, 300_000);
+        assert!(state.late_wakeups.is_empty());
+        assert!(!has_late_wakeup_alert(&upload));
+        assert!(!state.excuse_next_late_wakeup);
+
+        // The excuse is one-shot: the next late wakeup after that is
+        // recorded normally (kept small so it doesn't itself cross the
+        // alert threshold and get cleared right back out).
+        tick(&mut state, &mut upload, &hooks, 10_305_000, 10_300_000);
+        assert_eq!(state.late_wakeups.len(), 1);
     }
 }

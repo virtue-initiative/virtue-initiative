@@ -56,7 +56,7 @@ other platform.
 ### Lifecycle / tamper alerts
 
 - `core/src/module/lifecycle.rs` — `tick()`: compares actual vs. scheduled
-  wakeup time each tick and alerts (`AlertReason::LateWakeup`) on a single
+  wakeup time each tick and alerts (`UploadKind::ScreenshotMissed`) on a single
   late wakeup > 1 min or a last-10-array sum > 5 min, excused near a system
   login/logout; `note_user_stop()` — immediate high-risk alert, unrelated to
   the late-wakeup check. See `core/SPEC.md` §2; `core/tampering.md` is now

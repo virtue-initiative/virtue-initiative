@@ -17,26 +17,39 @@ function log(type: string, data: Record<string, unknown> = {}): DataLog {
 describe('getLogCategory — titles', () => {
   it('uses the improved, human-readable titles', () => {
     expect(getLogCategory(log('screenshot'))).toBe('Screenshot');
+    expect(getLogCategory(log('system_login', { utc_ms: 0 }))).toBe('System Login');
+    expect(getLogCategory(log('system_logout', { utc_ms: 0 }))).toBe('System Logout');
+    expect(getLogCategory(log('user_stop'))).toBe('Monitoring Stopped by User');
+    expect(getLogCategory(log('screenshot_missed'))).toBe('Screenshot Missed');
+    expect(getLogCategory(log('capture_failed'))).toBe('Capture Failed');
+    expect(getLogCategory(log('screenshot_skipped'))).toBe('Screenshot Skipped');
+    expect(getLogCategory(log('heartbeat'))).toBe('Heartbeat');
+  });
+
+  it('still recognizes the pre-rewrite lifecycle/lifecycle_alert shapes for older stored logs', () => {
     expect(getLogCategory(log('lifecycle', { kind: 'system_login' }))).toBe('System Login');
     expect(getLogCategory(log('lifecycle', { kind: 'system_logout' }))).toBe('System Logout');
     expect(getLogCategory(log('lifecycle', { kind: 'suspend_detected' }))).toBe('Suspend Detected');
     expect(getLogCategory(log('lifecycle_alert', { reason: 'unexpected_gap' }))).toBe(
       'Unexpected Gap',
     );
-    expect(getLogCategory(log('capture_failed'))).toBe('Capture Failed');
-    expect(getLogCategory(log('screenshot_skipped'))).toBe('Screenshot Skipped');
-    expect(getLogCategory(log('heartbeat'))).toBe('Heartbeat');
+    expect(getLogCategory(log('lifecycle_alert', { reason: 'user_stop' }))).toBe(
+      'Monitoring Stopped by User',
+    );
   });
 });
 
 describe('getLogMessage', () => {
   it('builds device-specific messages per log kind', () => {
     expect(getLogMessage(log('heartbeat'), 'Bob’s PC')).toBe('Heartbeat received from Bob’s PC');
-    expect(getLogMessage(log('lifecycle', { kind: 'system_login' }), 'Bob’s PC')).toBe(
+    expect(getLogMessage(log('system_login', { utc_ms: 0 }), 'Bob’s PC')).toBe(
       'Bob’s PC was logged into or started up',
     );
-    expect(getLogMessage(log('lifecycle', { kind: 'system_logout' }), 'Bob’s PC')).toBe(
+    expect(getLogMessage(log('system_logout', { utc_ms: 0 }), 'Bob’s PC')).toBe(
       'Bob’s PC was logged out of or shut down',
+    );
+    expect(getLogMessage(log('screenshot_missed'), 'Bob’s PC')).toBe(
+      'Bob’s PC missed a scheduled screenshot',
     );
     expect(
       getLogMessage(

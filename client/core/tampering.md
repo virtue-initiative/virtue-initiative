@@ -17,7 +17,7 @@ loop spec, kept minimal by design):
   (`LifecycleState.late_wakeups`), unless the wakeup is within 2 minutes of
   a system login, or was scheduled within 2 minutes of a system logout — in
   either case it's excused, not recorded.
-- An alert (`AlertReason::LateWakeup`, `HIGH_RISK_LIFECYCLE_ALERT`) fires
+- An alert (`UploadKind::ScreenshotMissed`, `HIGH_RISK_LIFECYCLE_ALERT`) fires
   whenever a single entry exceeds 1 minute, or the sum of the array's
   non-negative entries exceeds 5 minutes.
 - `UserStop` (`EXTRA_HIGH_RISK`, immediate) is unrelated to the above — it's

@@ -24,11 +24,9 @@ pub use config::{
 pub use daemon::{DAEMON_STATE_VERSION, Daemon, DaemonState};
 pub use error::{CoreError, CoreResult};
 pub use model::{
-    AlertReason, DeviceCredentials, DeviceSettings, Redacted, ScreenshotSkipReason, UploadKind,
-};
-pub use model::{
     AuthState, BatchUpload, EventData, LogEntry, LoopOutcome, Screenshot, ServiceStatus,
 };
+pub use model::{DeviceCredentials, DeviceSettings, Redacted, ScreenshotSkipReason, UploadKind};
 pub use module::upload::Upload;
 pub use platform::{LifecycleHooks, PlatformHooks, ScreenshotHooks};
 pub use rng::{OsRandomSource, RandomSource};

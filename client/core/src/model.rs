@@ -42,14 +42,6 @@ pub enum ScreenshotSkipReason {
     LockedOrScreensaver, // session locked / screensaver / screen off
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "snake_case")]
-pub enum AlertReason {
-    /// The user explicitly quit the monitor while it was expected to be
-    /// running.
-    UserStop,
-}
-
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum UploadKind {
@@ -66,9 +58,9 @@ pub enum UploadKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         nsfw_detection: Option<f32>,
     },
-    LifecycleAlert {
-        reason: AlertReason,
-    },
+    /// The user explicitly quit the monitor while it was expected to be
+    /// running. Always high risk.
+    UserStop,
     ScreenshotSkipped {
         reason: ScreenshotSkipReason,
     },
@@ -87,13 +79,13 @@ pub enum UploadKind {
     ScreenshotMissed,
     /// The daemon detected that the last known system login time changed.
     /// Always risk 0%. See `client/core/SPEC.md` §5.
-    SystemLoginAt {
-        at_ms: i64,
+    SystemLogin {
+        utc_ms: i64,
     },
     /// The daemon detected that the last known system logout time changed.
     /// Always risk 0%. See `client/core/SPEC.md` §5.
-    SystemLogoutAt {
-        at_ms: i64,
+    SystemLogout {
+        utc_ms: i64,
     },
 }
 
@@ -112,9 +104,7 @@ impl std::fmt::Debug for UploadKind {
                 "Screenshot {{ image: <{} bytes>, content_type: {content_type:?}, skin_detection: {skin_detection:?}, nsfw_detection: {nsfw_detection:?} }}",
                 image.len()
             ),
-            UploadKind::LifecycleAlert { reason } => {
-                write!(f, "LifecycleAlert {{ reason: {reason:?} }}")
-            }
+            UploadKind::UserStop => write!(f, "UserStop"),
             UploadKind::ScreenshotSkipped { reason } => {
                 write!(f, "ScreenshotSkipped {{ reason: {reason:?} }}")
             }
@@ -125,11 +115,11 @@ impl std::fmt::Debug for UploadKind {
             }
             UploadKind::Heartbeat => write!(f, "Heartbeat"),
             UploadKind::ScreenshotMissed => write!(f, "ScreenshotMissed"),
-            UploadKind::SystemLoginAt { at_ms } => {
-                write!(f, "SystemLoginAt {{ at_ms: {at_ms:?} }}")
+            UploadKind::SystemLogin { utc_ms } => {
+                write!(f, "SystemLogin {{ utc_ms: {utc_ms:?} }}")
             }
-            UploadKind::SystemLogoutAt { at_ms } => {
-                write!(f, "SystemLogoutAt {{ at_ms: {at_ms:?} }}")
+            UploadKind::SystemLogout { utc_ms } => {
+                write!(f, "SystemLogout {{ utc_ms: {utc_ms:?} }}")
             }
         }
     }
@@ -282,16 +272,11 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn upload_kind_lifecycle_alert_serializes_to_tagged_shape() {
-        let upload = UploadKind::LifecycleAlert {
-            reason: AlertReason::UserStop,
-        };
+    fn upload_kind_user_stop_serializes_to_tagged_shape() {
+        let upload = UploadKind::UserStop;
         assert_eq!(
             serde_json::to_value(upload).unwrap(),
-            json!({
-                "type": "lifecycle_alert",
-                "data": { "reason": "user_stop" }
-            })
+            json!({ "type": "user_stop" })
         );
     }
 
@@ -307,25 +292,25 @@ mod tests {
     }
 
     #[test]
-    fn upload_kind_system_login_at_serializes_to_tagged_shape() {
-        let upload = UploadKind::SystemLoginAt { at_ms: 1_000 };
+    fn upload_kind_system_login_serializes_to_tagged_shape() {
+        let upload = UploadKind::SystemLogin { utc_ms: 1_000 };
         assert_eq!(
             serde_json::to_value(upload).unwrap(),
             json!({
-                "type": "system_login_at",
-                "data": { "at_ms": 1_000 }
+                "type": "system_login",
+                "data": { "utc_ms": 1_000 }
             })
         );
     }
 
     #[test]
-    fn upload_kind_system_logout_at_serializes_to_tagged_shape() {
-        let upload = UploadKind::SystemLogoutAt { at_ms: 2_000 };
+    fn upload_kind_system_logout_serializes_to_tagged_shape() {
+        let upload = UploadKind::SystemLogout { utc_ms: 2_000 };
         assert_eq!(
             serde_json::to_value(upload).unwrap(),
             json!({
-                "type": "system_logout_at",
-                "data": { "at_ms": 2_000 }
+                "type": "system_logout",
+                "data": { "utc_ms": 2_000 }
             })
         );
     }

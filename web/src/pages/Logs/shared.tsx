@@ -37,6 +37,7 @@ function getLogMetadata(log: DataLog) {
 type LogCaseKey =
   | 'screenshot'
   | 'screenshot_skipped'
+  | 'screenshot_missed'
   | 'system_login'
   | 'system_logout'
   | 'suspend_detected'
@@ -61,6 +62,16 @@ function getLogCaseKey(log: DataLog): LogCaseKey {
       return 'screenshot';
     case 'screenshot_skipped':
       return 'screenshot_skipped';
+    case 'screenshot_missed':
+      return 'screenshot_missed';
+    case 'system_login':
+      return 'system_login';
+    case 'system_logout':
+      return 'system_logout';
+    case 'user_stop':
+      return 'user_stop';
+    // `lifecycle`/`lifecycle_alert` are the pre-rewrite client's wire shapes
+    // — no longer sent, but kept here so already-stored logs still render.
     case 'lifecycle':
       if (kind === 'system_login') return 'system_login';
       if (kind === 'system_logout') return 'system_logout';
@@ -107,6 +118,11 @@ const LOG_KIND_TABLE: Record<
       if (reason === 'locked_or_screensaver') return `Screen locked, screenshot skipped on ${d}`;
       return `Screenshot skipped on ${d}`;
     },
+  },
+  screenshot_missed: {
+    category: 'Screenshot Missed',
+    icon: ClockIcon,
+    message: (d) => `${d} missed a scheduled screenshot`,
   },
   system_login: {
     category: 'System Login',
@@ -225,12 +241,17 @@ export function getLogMessage(log: DataLog, deviceName: string): string {
 export const LOG_TYPES = [
   'screenshot',
   'screenshot_skipped',
-  'lifecycle',
-  'lifecycle_alert',
+  'screenshot_missed',
+  'system_login',
+  'system_logout',
+  'user_stop',
   'alert',
   'capture_failed',
   'dev',
   'heartbeat',
+  // Pre-rewrite wire shapes, kept so already-stored logs still render.
+  'lifecycle',
+  'lifecycle_alert',
 ] as const;
 
 const _dayLabelFmt = new Intl.DateTimeFormat(undefined, {
