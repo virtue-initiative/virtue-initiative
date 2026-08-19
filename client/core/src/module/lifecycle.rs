@@ -31,8 +31,9 @@ pub struct LifecycleState {
 /// Phase 1 of `Daemon::run_phases`: compares `now_ms` to the wakeup time this
 /// tick was scheduled for (the daemon's `next_wakeup_at_ms` as of the end of
 /// the previous tick) and records how late the daemon woke, unless excused by
-/// proximity to a system login/logout. Alerts via [`upload::enqueue`] once the
-/// late-wakeup budget is crossed. See `client/core/SPEC.md` §2.
+/// a login/logout bracket that isn't contradicted by the other side's
+/// evidence (see the excuse logic below). Alerts via [`upload::enqueue`] once
+/// the late-wakeup budget is crossed. See `client/core/SPEC.md` §2.
 ///
 /// `expected_wakeup_at_ms == 0` means no wakeup has ever been scheduled yet
 /// (the daemon's very first tick) — nothing to compare against.
@@ -47,19 +48,27 @@ pub fn tick(
         return;
     }
 
-    let near_login = hooks
+    // Each side is `None` (no evidence either way), `Some(true)` (supports a
+    // legitimate session transition), or `Some(false)` (contradicts one). A
+    // gap is excused only if at least one side supports it and neither side
+    // contradicts — a single contradicting signal (e.g. the daemon was
+    // killed well before an eventual reboot, so `expected_wakeup_at_ms`
+    // isn't actually near the logout) blocks the excuse even though the
+    // other side looks fine on its own. See `SPEC.md` §2.
+    let login_evidence = hooks
         .get_last_login_utc_ms()
         .ok()
         .flatten()
-        .is_some_and(|login_ms| (now_ms - login_ms).abs() <= LOGIN_LOGOUT_EXCUSE_MS);
-    let near_logout = hooks
+        .map(|login_ms| (now_ms - login_ms).abs() <= LOGIN_LOGOUT_EXCUSE_MS);
+    let logout_evidence = hooks
         .get_last_logout_utc_ms()
         .ok()
         .flatten()
-        .is_some_and(|logout_ms| {
-            (expected_wakeup_at_ms - logout_ms).abs() <= LOGIN_LOGOUT_EXCUSE_MS
-        });
-    if near_login || near_logout {
+        .map(|logout_ms| (expected_wakeup_at_ms - logout_ms).abs() <= LOGIN_LOGOUT_EXCUSE_MS);
+
+    let has_evidence = login_evidence.is_some() || logout_evidence.is_some();
+    let contradicted = login_evidence == Some(false) || logout_evidence == Some(false);
+    if has_evidence && !contradicted {
         return;
     }
 
@@ -216,6 +225,43 @@ mod tests {
         tick(&mut state, &mut upload, &hooks, 500_000, 300_000);
         assert!(state.late_wakeups.is_empty());
         assert!(!has_late_wakeup_alert(&upload));
+    }
+
+    #[test]
+    fn kill_then_reboot_still_alerts_despite_a_nearby_login() {
+        // The daemon was killed well before the machine was actually
+        // rebooted: `expected_wakeup_at_ms` (300_000, computed before the
+        // kill) is nowhere near the reboot's logout (900_000), even though
+        // the restart happens right after the reboot's login (now_ms is
+        // close to 950_000). The contradicting logout evidence must block
+        // the login excuse — this is the exact "kill it, then reboot to
+        // dodge detection" gap the excuse model exists to catch.
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        hooks.set_last_logout(Some(900_000));
+        hooks.set_last_login(Some(950_500));
+        tick(&mut state, &mut upload, &hooks, 951_000, 300_000);
+        assert_eq!(state.late_wakeups, [951_000 - 300_000]);
+        assert!(has_late_wakeup_alert(&upload));
+    }
+
+    #[test]
+    fn never_restarted_after_reboot_still_alerts_despite_a_nearby_logout() {
+        // Autostart is disabled: the machine rebooted (a real logout/login
+        // pair fires right around the reboot) but the daemon itself isn't
+        // manually started until long after. `expected_wakeup_at_ms`
+        // (900_500) is close to the logout (900_000), but `now_ms`
+        // (2_000_000) is nowhere near the login (950_000) that followed it.
+        // The contradicting login evidence must block the logout excuse.
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        hooks.set_last_logout(Some(900_000));
+        hooks.set_last_login(Some(950_000));
+        tick(&mut state, &mut upload, &hooks, 2_000_000, 900_500);
+        assert_eq!(state.late_wakeups, [2_000_000 - 900_500]);
+        assert!(has_late_wakeup_alert(&upload));
     }
 
     #[test]

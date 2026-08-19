@@ -25,12 +25,12 @@ loop(persisted state):
 
 ## 2. Tamper detection
 
-It SHOULD do tamper detection by comparing the current time to the expected wakeup time. The difference SHOULD be added to the late wakeups array unless
+It SHOULD do tamper detection by comparing the current time to the expected wakeup time. The difference SHOULD be added to the late wakeups array unless the gap is explained by a legitimate session transition, checked from both ends:
 
-- the current time is within 2 minutes of the last system login
-- the expected wakeup time was within 2 minutes of the last system logout
+- login evidence: the current time is within 2 minutes of the last system login
+- logout evidence: the expected wakeup time was within 2 minutes of the last system logout
 
-In the above cases, it SHOULD skip adding to the late wakeups array.
+Each piece of evidence is either unavailable (the platform hook returned nothing), supporting (within its 2-minute window), or contradicting (available but outside the window). The gap MUST be excused (skipped, not added to the late wakeups array) only if at least one piece of evidence is supporting and neither piece is contradicting. A single contradicting signal MUST block the excuse even if the other signal is supporting — this is what keeps a daemon that was killed well before an eventual reboot (stale expected-wakeup vs. the reboot's logout) or one that isn't restarted until long after the surrounding login (e.g. autostart disabled) from riding a login/logout event it wasn't actually bracketed by.
 
 The late wakeups array SHOULD track the last 10 wakeups. If a single late wakeup is greater than 1 minute or the sum (of the non-negative values) is greater than 5 minutes we SHOULD alert.
 
