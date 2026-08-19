@@ -4,7 +4,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use virtue_core::{AuthState, Config};
+use virtue_core::ipc::ClientController;
+use virtue_core::module::status;
+use virtue_core::{AuthState, Config, DaemonState, ServiceStatus};
 
 const DEFAULT_BASE_API_URL: &str = virtue_core::DEFAULT_API_BASE_URL;
 
@@ -112,6 +114,29 @@ pub fn read_auth_state(state_dir: &Path) -> Result<AuthState> {
         return Ok(serde_json::from_value(auth.clone())?);
     }
     Ok(AuthState::default())
+}
+
+/// The current service status: live from the daemon over IPC when it's
+/// reachable, or computed from its last state persisted to disk otherwise
+/// (e.g. the launchd agent is stopped) — the daemon process not running is
+/// not the same as the user being logged out. Either way this goes through
+/// `virtue_core::module::status::build`, the same pure function the daemon
+/// itself uses, so the two paths can't drift apart. See `core/SPEC.md` §6.3.
+pub fn load_service_status(paths: &ClientPaths) -> Result<ServiceStatus> {
+    let sock = paths.state_dir.join("daemon.sock");
+    if let Ok(mut client) = ClientController::connect(&sock)
+        && let Ok(status) = client.get_status()
+    {
+        return Ok(status);
+    }
+    let state_path = paths.state_dir.join("event_state.json");
+    let state: DaemonState = virtue_core::load_state(&state_path)?;
+    Ok(status::build(
+        &state.auth,
+        &state.upload,
+        state.last_tick_at_ms,
+        false,
+    ))
 }
 
 pub fn save_state(path: &Path, state: &ClientState) -> Result<()> {

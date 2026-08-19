@@ -68,18 +68,46 @@ When the daemon detects thtat hte System Logout time changed, it MUST send a "sy
 
 ## 6. Client API
 
-The core MUST expose an API to the clients.
+The core MUST expose the following methods to clients. Each blocks until the loop thread has applied and persisted the request, except `status`, which reads the last-committed state directly, and `request_stop`, which is fire-and-forget.
 
-### 6.1 Login
+### 6.1 login
 
-This MUST log in the user.
+`login(email, password, device_name?) -> device_id`
 
-### 6.2 Logout
+MUST revoke any existing device session first, then register a new device with the API. On success MUST store the returned device credentials, settings, and hash token, and MUST enable screenshot capture. On failure MUST leave the client logged out. `device_name` is optional; if absent or blank, the platform's configured default name MUST be used.
 
-This MUST log out the user.
+### 6.2 logout
 
-### 6.3 Status
+`logout()`
 
-This MUST return the current status (runs `[module]::GetStatus` for each module and returns the info).
+MUST best-effort revoke the device session with the API, MUST clear stored device credentials, and MUST disable screenshot capture.
 
-### 6.4 Rest...
+### 6.3 status
+
+`status() -> { is_authenticated, is_running, device_id, last_loop_at_ms, pending_request_count }`
+
+MUST return, without blocking on the loop: whether the user is authenticated, whether the loop is running, the device id (if any), the timestamp of the last completed tick (if any), and the number of requests currently queued.
+
+### 6.4 note_user_stop
+
+`note_user_stop(source)`
+
+MUST record that the user explicitly stopped monitoring while it was expected to be running (see §2's `user_stop` alert).
+
+### 6.5 queue_upload
+
+`queue_upload(upload)`
+
+MUST enqueue the given event directly for hashing and batch upload, bypassing the daemon's own capture/lifecycle logic.
+
+### 6.6 flush_batch_now
+
+`flush_batch_now()`
+
+MUST force the next tick to upload the current batch immediately rather than waiting for the batch interval.
+
+### 6.7 request_stop
+
+`request_stop()`
+
+MUST stop the loop after its current tick. The loop MAY be started again afterward.

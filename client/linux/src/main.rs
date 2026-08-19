@@ -16,10 +16,10 @@ use clap::{Args, Parser, Subcommand};
 use virtue_core::ipc::ClientController;
 #[cfg(debug_assertions)]
 use virtue_core::{AlertReason, ScreenshotSkipReason};
-use virtue_core::{ScreenshotHooks, ServiceStatus, Upload, UploadKind};
+use virtue_core::{ScreenshotHooks, Upload, UploadKind};
 
 use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_backend};
-use crate::config::{ClientPaths, build_core_config, default_device_name};
+use crate::config::{ClientPaths, build_core_config, default_device_name, load_service_status};
 
 const BUILD_LABEL: &str = virtue_core::BUILD_LABEL;
 
@@ -729,17 +729,6 @@ fn format_risk(risk: f32) -> String {
         value.pop();
     }
     value
-}
-
-fn load_service_status(paths: &ClientPaths) -> Result<ServiceStatus> {
-    // Try to get live status from the daemon via IPC; fall back to defaults.
-    let sock = paths.state_dir.join("daemon.sock");
-    if let Ok(mut client) = ClientController::connect(&sock)
-        && let Ok(status) = client.get_status()
-    {
-        return Ok(status);
-    }
-    Ok(ServiceStatus::default())
 }
 
 #[cfg(test)]

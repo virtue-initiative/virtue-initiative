@@ -4,7 +4,6 @@ use std::thread;
 use std::time::Duration;
 
 use ksni::blocking::TrayMethods;
-use virtue_core::ipc::ClientController;
 
 use crate::config::{self, ClientPaths};
 
@@ -139,11 +138,8 @@ fn run_one_tray_session(
 }
 
 fn build_tooltip(paths: &ClientPaths) -> String {
-    let sock = paths.state_dir.join("daemon.sock");
-    let is_authenticated = ClientController::connect(&sock)
-        .ok()
-        .and_then(|mut c| c.get_status().ok())
-        .map(|s| s.is_authenticated)
+    let is_authenticated = config::load_service_status(paths)
+        .map(|status| status.is_authenticated)
         .unwrap_or(false);
 
     let bin = match config::INSTANCE {

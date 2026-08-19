@@ -291,7 +291,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     /// tick's network I/O).
     pub fn status(&self) -> ServiceStatus {
         let guard = self.state.lock().expect("daemon state lock poisoned");
-        status::build(&guard.auth, &guard.upload, guard.last_tick_at_ms)
+        status::build(&guard.auth, &guard.upload, guard.last_tick_at_ms, true)
     }
 
     pub fn note_user_stop(&self, source: &str) {

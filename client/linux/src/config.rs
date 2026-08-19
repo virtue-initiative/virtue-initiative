@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use virtue_core::Config;
+use virtue_core::ipc::ClientController;
+use virtue_core::module::status;
+use virtue_core::{Config, DaemonState, ServiceStatus, load_state};
 
 const DEFAULT_BASE_API_URL: &str = virtue_core::DEFAULT_API_BASE_URL;
 
@@ -73,6 +75,29 @@ pub fn build_core_config(paths: &ClientPaths) -> Config {
     )
 }
 
+/// The current service status: live from the daemon over IPC when it's
+/// reachable, or computed from its last state persisted to disk otherwise
+/// (e.g. the systemd service is stopped) — the daemon process not running is
+/// not the same as the user being logged out. Either way this goes through
+/// `virtue_core::module::status::build`, the same pure function the daemon
+/// itself uses, so the two paths can't drift apart. See `core/SPEC.md` §6.3.
+pub fn load_service_status(paths: &ClientPaths) -> Result<ServiceStatus> {
+    let sock = paths.state_dir.join("daemon.sock");
+    if let Ok(mut client) = ClientController::connect(&sock)
+        && let Ok(status) = client.get_status()
+    {
+        return Ok(status);
+    }
+    let state_path = paths.state_dir.join("event_state.json");
+    let state: DaemonState = load_state(&state_path)?;
+    Ok(status::build(
+        &state.auth,
+        &state.upload,
+        state.last_tick_at_ms,
+        false,
+    ))
+}
+
 fn xdg_base_dir(env_name: &str, fallback_suffix: &str) -> Result<PathBuf> {
     if let Some(value) = std::env::var_os(env_name).filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(value));
@@ -86,7 +111,9 @@ fn xdg_base_dir(env_name: &str, fallback_suffix: &str) -> Result<PathBuf> {
 mod tests {
     use std::path::PathBuf;
 
-    use super::ClientPaths;
+    use virtue_core::{AuthState, DeviceCredentials};
+
+    use super::{ClientPaths, load_service_status};
 
     #[test]
     fn state_dir_is_under_state_root() {
@@ -145,5 +172,52 @@ mod tests {
             Some(""),
         );
         assert_eq!(paths.config_dir, PathBuf::from("/home/user/.config/virtue"));
+    }
+
+    /// A fresh, unique scratch `ClientPaths` per test, pointed at a state
+    /// dir with no `daemon.sock` in it — `load_service_status` can never
+    /// reach a live daemon here, so it always exercises the disk fallback.
+    fn scratch_paths(test_name: &str) -> ClientPaths {
+        let dir = std::env::temp_dir().join(format!(
+            "virtue-linux-config-test-{test_name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create scratch state dir");
+        ClientPaths {
+            config_dir: dir.clone(),
+            data_dir: dir.clone(),
+            state_dir: dir,
+        }
+    }
+
+    #[test]
+    fn status_defaults_to_logged_out_when_daemon_is_unreachable_and_never_ran() {
+        let paths = scratch_paths("missing-file");
+        let status = load_service_status(&paths).unwrap();
+        assert!(!status.is_authenticated);
+        assert!(!status.is_running);
+    }
+
+    #[test]
+    fn status_reflects_credentials_persisted_by_the_daemon_even_when_it_is_stopped() {
+        let paths = scratch_paths("with-credentials");
+        let persisted_auth = AuthState {
+            device_credentials: Some(DeviceCredentials {
+                device_id: "dev-123".to_string(),
+                refresh_token: "refresh-abc".to_string(),
+            }),
+        };
+        let event_state = serde_json::json!({ "auth": persisted_auth });
+        std::fs::write(
+            paths.state_dir.join("event_state.json"),
+            serde_json::to_vec(&event_state).unwrap(),
+        )
+        .unwrap();
+
+        let status = load_service_status(&paths).unwrap();
+        assert!(status.is_authenticated);
+        assert!(!status.is_running);
+        assert_eq!(status.device_id.as_deref(), Some("dev-123"));
     }
 }
