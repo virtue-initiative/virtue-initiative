@@ -393,6 +393,27 @@ fn query_screensaver_active() -> Option<bool> {
 }
 
 impl LifecycleHooks for LinuxPlatformHooks {
+    // `CLOCK_MONOTONIC` excludes time spent suspended (unlike
+    // `CLOCK_BOOTTIME`, which includes it) — see `clock_gettime(2)`. Feeds
+    // only `lifecycle::tick`'s suspend evidence (`SPEC.md` §2); screenshot
+    // scheduling is unaffected.
+    fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
+        let mut ts = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        // SAFETY: `ts` is a valid, owned out-param that does not outlive this
+        // call; `clock_gettime` has no other preconditions.
+        let rc = unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
+        if rc != 0 {
+            return Err(CoreError::CommandFailed(format!(
+                "clock_gettime(CLOCK_MONOTONIC) failed: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
+        Ok(ts.tv_sec * 1000 + ts.tv_nsec / 1_000_000)
+    }
+
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {
         Ok(query_session_login_time_ms())
     }
@@ -471,6 +492,20 @@ mod tests {
         let hooks = LinuxPlatformHooks::new();
         let ms = hooks.get_time_utc_ms().expect("clock should not fail");
         assert!(ms > 0);
+    }
+
+    #[test]
+    fn platform_hooks_get_monotonic_clock_ms_is_positive_and_advances() {
+        let hooks = LinuxPlatformHooks::new();
+        let first = hooks
+            .get_monotonic_clock_ms()
+            .expect("clock should not fail");
+        assert!(first > 0);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let second = hooks
+            .get_monotonic_clock_ms()
+            .expect("clock should not fail");
+        assert!(second >= first);
     }
 
     #[test]

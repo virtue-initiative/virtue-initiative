@@ -3792,6 +3792,7 @@ dependencies = [
  "hostname",
  "image",
  "ksni",
+ "libc",
  "rustyline",
  "serde_json",
  "tokio",
