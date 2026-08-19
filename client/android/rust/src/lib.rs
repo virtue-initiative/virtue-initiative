@@ -169,9 +169,30 @@ impl AndroidPlatformHooks {
             })
             .map_err(|err| CoreError::CommandFailed(format!("elapsedRealtime failed: {err}")))
     }
+
+    /// `SystemClock.uptimeMillis()`: milliseconds since boot, EXCLUDING time
+    /// spent in deep sleep — unlike `elapsed_realtime_ms` above. Feeds only
+    /// `lifecycle::tick`'s suspend evidence (`SPEC.md` §2).
+    fn uptime_millis_ms(&self) -> CoreResult<i64> {
+        self.java_vm
+            .attach_current_thread(|env| -> Result<i64, jni::errors::Error> {
+                env.call_static_method(
+                    jni_str!("android/os/SystemClock"),
+                    jni_str!("uptimeMillis"),
+                    jni_sig!("()J"),
+                    &[],
+                )?
+                .j()
+            })
+            .map_err(|err| CoreError::CommandFailed(format!("uptimeMillis failed: {err}")))
+    }
 }
 
 impl LifecycleHooks for AndroidPlatformHooks {
+    fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
+        self.uptime_millis_ms()
+    }
+
     // Android has no OS "login" concept; the expected-running window is modeled
     // as "whenever the device is powered on", so login = device boot time.
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {
