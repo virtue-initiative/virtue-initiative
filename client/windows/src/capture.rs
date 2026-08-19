@@ -1,6 +1,14 @@
 use std::io::Cursor;
 #[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+#[cfg(target_os = "windows")]
 use std::process::{Command, Stdio};
+
+// Suppresses the console window that would otherwise flash on screen when
+// spawning a console subprocess (e.g. `wevtutil`) from this GUI app, which
+// has no console of its own for the child to inherit.
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 use anyhow::{Context, Result, anyhow};
 use virtue_core::{CoreError, CoreResult, LifecycleHooks, Screenshot, ScreenshotHooks};
@@ -258,6 +266,7 @@ fn read_eventlog_last_before_boot_ms(boot_start_utc_ms: i64) -> Option<i64> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .ok()?;
     if !output.status.success() {
