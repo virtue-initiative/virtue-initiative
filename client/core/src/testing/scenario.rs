@@ -157,6 +157,11 @@ impl Scenario {
         self
     }
 
+    pub fn note_user_start(&mut self) -> &mut Self {
+        self.daemon.test_note_user_start();
+        self
+    }
+
     pub fn queue_upload(&mut self, upload: Upload) -> &mut Self {
         self.daemon.test_queue_upload(upload);
         self

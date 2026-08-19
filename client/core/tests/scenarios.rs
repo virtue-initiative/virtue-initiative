@@ -98,6 +98,56 @@ fn user_stop_emits_high_risk_upload() {
     );
 }
 
+#[test]
+fn user_stop_excuse_survives_across_a_real_restart_not_just_the_next_tick() {
+    // Regression test: `note_user_stop`'s excuse was previously consumed by
+    // whatever tick ran next -- even one firing while the daemon is still
+    // shutting down, well before the process actually exits -- leaving the
+    // real stopped-time gap unprotected and reported as tampering on the
+    // next launch. See `SPEC.md` §2 and `lifecycle::note_user_start`.
+    let mut scenario1 = Scenario::authenticated();
+    scenario1.at_t(0).tick(); // establishes a schedule
+    scenario1.note_user_stop("test");
+
+    // A couple of ticks happen before the process actually exits (e.g.
+    // while `request_stop` is being serviced) -- these must not consume the
+    // excuse.
+    scenario1.at_t(100).tick();
+    scenario1.at_t(200).tick();
+    assert!(scenario1.state().lifecycle.monitoring_stopped);
+
+    let state_dir = scenario1.state_dir_path().to_path_buf();
+
+    // Time passes while the process is down, then it restarts -- a fresh
+    // `Daemon::new` via a fresh `Scenario`, exactly like a real relaunch.
+    let mut scenario2 = Scenario::authenticated_with_state_dir(state_dir);
+    assert!(!scenario2.state().lifecycle.monitoring_stopped);
+
+    // Push the next screenshot draw well past this test's tick so the only
+    // possible source of an upload is the lifecycle late-wakeup alert this
+    // test is checking for, not an unrelated (legitimate) screenshot capture.
+    scenario2.with_state_mut(|s| s.screenshot.next_screenshot_at_ms = Some(1_000_000_000));
+
+    let uploads_before = {
+        let s = scenario2.api.state();
+        s.batch_uploads.len() + s.hash_uploads.len()
+    };
+
+    // First tick of the new session, an hour after the old schedule -- must
+    // still be excused rather than reported as a missed wakeup.
+    scenario2.at_t(3_600_000).tick();
+
+    let uploads_after = {
+        let s = scenario2.api.state();
+        s.batch_uploads.len() + s.hash_uploads.len()
+    };
+    assert_eq!(
+        uploads_before, uploads_after,
+        "the gap caused by a legitimate user stop must not be reported as a missed wakeup on restart"
+    );
+    assert!(scenario2.state().lifecycle.late_wakeups.is_empty());
+}
+
 // ── Late-wakeup model (client/core/SPEC.md §2) ─────────────────────────────────
 
 #[test]

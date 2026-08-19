@@ -31,9 +31,11 @@ pub struct LifecycleState {
     pub last_seen_login_ms: Option<i64>,
     pub last_seen_logout_ms: Option<i64>,
     /// Set by `note_user_stop` (never by a plain clean shutdown — see that
-    /// function's doc comment for why), consumed by the very next `tick()`
-    /// to excuse the gap the stop itself caused. See `SPEC.md` §2.
-    pub excuse_next_late_wakeup: bool,
+    /// function's doc comment for why) and cleared by `note_user_start`.
+    /// While true, `tick()` ignores lateness entirely — no gap is recorded,
+    /// checked, or alerted on — so the gap the stop itself caused is never
+    /// mistaken for tampering. See `SPEC.md` §2.
+    pub monitoring_stopped: bool,
 }
 
 /// Phase 1 of `Daemon::run_phases`: compares `now_ms` to the wakeup time this
@@ -44,7 +46,8 @@ pub struct LifecycleState {
 /// the late-wakeup budget is crossed. See `client/core/SPEC.md` §2.
 ///
 /// `expected_wakeup_at_ms == 0` means no wakeup has ever been scheduled yet
-/// (the daemon's very first tick) — nothing to compare against.
+/// (the daemon's very first tick, or the first tick after `note_user_start`
+/// reset the schedule) — nothing to compare against.
 pub fn tick(
     state: &mut LifecycleState,
     upload: &mut UploadState,
@@ -52,12 +55,7 @@ pub fn tick(
     now_ms: i64,
     expected_wakeup_at_ms: i64,
 ) {
-    if expected_wakeup_at_ms == 0 {
-        return;
-    }
-
-    if state.excuse_next_late_wakeup {
-        state.excuse_next_late_wakeup = false;
+    if expected_wakeup_at_ms == 0 || state.monitoring_stopped {
         return;
     }
 
@@ -154,14 +152,15 @@ pub fn note_session_events(
 /// independent of the late-wakeup model above. Called directly by
 /// `Daemon::note_user_stop`.
 ///
-/// This is the ONLY thing that excuses the next tick's lateness check
-/// (`excuse_next_late_wakeup`) — deliberately not tied to a clean
-/// `request_stop` shutdown in general, since every platform's signal handler
-/// also calls `request_stop` on a plain SIGTERM/kill. Excusing on any clean
-/// exit would let the simplest possible evasion (just kill the process)
-/// silently defeat tamper detection; excusing only here means the gap is
-/// forgiven exactly when — and only when — it was already reported via this
-/// alert. See `client/core/SPEC.md` §2.
+/// This is the ONLY thing that suspends lateness checking
+/// (`monitoring_stopped`) — deliberately not tied to a clean `request_stop`
+/// shutdown in general, since every platform's signal handler also calls
+/// `request_stop` on a plain SIGTERM/kill. Excusing on any clean exit would
+/// let the simplest possible evasion (just kill the process) silently
+/// defeat tamper detection; excusing only here means the gap is forgiven
+/// exactly when — and only when — it was already reported via this alert.
+/// Checking resumes only once `note_user_start` is called. See
+/// `client/core/SPEC.md` §2.
 pub fn note_user_stop(
     state: &mut LifecycleState,
     upload: &mut UploadState,
@@ -170,7 +169,24 @@ pub fn note_user_stop(
 ) {
     tracing::info!(source, "user-initiated stop");
     upload::enqueue(upload, now_ms, EXTRA_HIGH_RISK, UploadKind::UserStop);
-    state.excuse_next_late_wakeup = true;
+    state.monitoring_stopped = true;
+}
+
+/// Re-enables lifecycle tamper detection after a prior `note_user_stop`.
+/// Called by `Daemon::new` for every fresh monitoring session (and,
+/// redundantly but harmlessly, wherever a platform explicitly signals that
+/// monitoring has resumed — see `Daemon::note_user_start`).
+///
+/// Returns whether a stop was actually active (i.e. whether this call did
+/// anything). The caller uses that to decide whether to also reset the
+/// wakeup schedule baseline: it must NOT be reset unconditionally on every
+/// restart, since that would let a plain kill signal escape detection too
+/// — see `SPEC.md` §2 and the `daemon.rs` caller.
+pub fn note_user_start(state: &mut LifecycleState) -> bool {
+    let was_stopped = state.monitoring_stopped;
+    state.monitoring_stopped = false;
+    state.late_wakeups.clear();
+    was_stopped
 }
 
 #[cfg(test)]
@@ -413,16 +429,16 @@ mod tests {
     }
 
     #[test]
-    fn user_stop_excuses_only_the_next_late_wakeup_check() {
+    fn user_stop_suspends_lateness_checking_until_user_start() {
         // A kill-signal-triggered clean exit (SIGTERM etc.) must NOT excuse
         // anything on its own — only an actual user_stop alert should, since
         // that's the one case where the gap has already been reported.
         let mut state = LifecycleState::default();
-        assert!(!state.excuse_next_late_wakeup);
+        assert!(!state.monitoring_stopped);
 
         let mut upload = upload_with_credentials();
         note_user_stop(&mut state, &mut upload, 1_000, "test");
-        assert!(state.excuse_next_late_wakeup);
+        assert!(state.monitoring_stopped);
     }
 
     // ── Other events (SPEC.md §5) ───────────────────────────────────────────
@@ -532,25 +548,53 @@ mod tests {
     // ── Intentional-stop excuse (SPEC.md §2) ────────────────────────────────
 
     #[test]
-    fn user_stop_excuse_consumed_by_only_the_next_tick() {
+    fn ticks_before_the_daemon_actually_stops_do_not_consume_the_excuse() {
+        // Regression test: `note_user_stop` and the eventual process exit
+        // are two separate events, and the daemon can still tick in
+        // between (e.g. servicing the `request_stop` that follows). Those
+        // in-between ticks must not burn the excuse — only the real gap
+        // caused by the daemon actually being down should be, and that
+        // gap isn't visible until `note_user_start` runs on the next
+        // session. See `SPEC.md` §2.
         let mut state = LifecycleState::default();
         let mut upload = upload_with_credentials();
         let hooks = TestPlatformHooks::new();
 
         note_user_stop(&mut state, &mut upload, 0, "test");
-        assert!(state.excuse_next_late_wakeup);
+        assert!(state.monitoring_stopped);
 
-        // A huge gap right after a user stop — would otherwise alert, but
-        // is excused once.
+        // A handful of ticks happen before the process actually exits (e.g.
+        // while `request_stop` is being serviced), including one with a gap
+        // that would otherwise alert. Under the old one-shot-flag design the
+        // very first tick here would have wrongly burned the excuse.
+        tick(&mut state, &mut upload, &hooks, 100, 50);
         tick(&mut state, &mut upload, &hooks, 10_000_000, 300_000);
+        assert!(state.monitoring_stopped);
         assert!(state.late_wakeups.is_empty());
         assert!(!has_late_wakeup_alert(&upload));
-        assert!(!state.excuse_next_late_wakeup);
 
-        // The excuse is one-shot: the next late wakeup after that is
-        // recorded normally (kept small so it doesn't itself cross the
-        // alert threshold and get cleared right back out).
-        tick(&mut state, &mut upload, &hooks, 10_305_000, 10_300_000);
+        // Time passes while the process is down. Restarting: `note_user_start`
+        // runs once per fresh session (mirroring `Daemon::new`). Resetting
+        // the wakeup-schedule baseline so the first post-restart tick isn't
+        // itself compared against a stale pre-stop schedule is `daemon.rs`'s
+        // job (`apply_note_user_start`), exercised end-to-end in
+        // `tests/scenarios.rs::user_stop_excuse_survives_across_a_real_restart_not_just_the_next_tick`.
+        assert!(note_user_start(&mut state));
+        assert!(!state.monitoring_stopped);
+
+        // Checking is fully back to normal: a late wakeup is recorded again.
+        tick(&mut state, &mut upload, &hooks, 20_305_000, 20_300_000);
         assert_eq!(state.late_wakeups.len(), 1);
+    }
+
+    #[test]
+    fn note_user_start_is_a_no_op_when_not_stopped() {
+        // A plain kill (no `note_user_stop`) must not be excused — asserted
+        // more fully in `daemon.rs`'s `apply_note_user_start`, but at this
+        // layer `note_user_start` must at least report there was nothing to
+        // resume, so the caller knows not to reset the wakeup schedule.
+        let mut state = LifecycleState::default();
+        assert!(!note_user_start(&mut state));
+        assert!(!state.monitoring_stopped);
     }
 }

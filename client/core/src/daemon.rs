@@ -47,6 +47,9 @@ enum DaemonRequest {
         source: String,
         reply: mpsc::Sender<()>,
     },
+    NoteUserStart {
+        reply: mpsc::Sender<()>,
+    },
     QueueUpload {
         upload: Upload,
         reply: mpsc::Sender<()>,
@@ -131,6 +134,18 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             ocr: screenshot::load_ocr().map(Arc::new),
             rng: Arc::new(OsRandomSource),
         };
+
+        // Every fresh `Daemon` instance is a new monitoring session: if the
+        // previous session ended via `note_user_stop`, resume normally
+        // rather than comparing this tick's wakeup against a schedule from
+        // before the (now-excused) stop. A no-op when the previous session
+        // wasn't stopped (including a plain kill, which must NOT be excused
+        // — see `SPEC.md` §2 and `lifecycle::note_user_start`).
+        {
+            let mut guard = daemon.state.lock().expect("daemon state lock poisoned");
+            daemon.apply_note_user_start(&mut guard);
+            daemon.persist(&guard);
+        }
 
         daemon.refresh_settings_on_startup();
         Ok(daemon)
@@ -244,6 +259,16 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         lifecycle::note_user_stop(&mut state.lifecycle, &mut state.upload, now_ms, source);
     }
 
+    /// Re-enables lifecycle tamper detection after a prior `note_user_stop`.
+    /// Resets the wakeup schedule baseline too, but only when a stop was
+    /// actually active — see `lifecycle::note_user_start`'s doc comment for
+    /// why an unconditional reset would defeat detection of a plain kill.
+    fn apply_note_user_start(&self, state: &mut DaemonState) {
+        if lifecycle::note_user_start(&mut state.lifecycle) {
+            state.next_wakeup_at_ms = 0;
+        }
+    }
+
     fn apply_queue_upload(&self, state: &mut DaemonState, now_ms: i64, upload: Upload) {
         upload::enqueue(&mut state.upload, now_ms, upload.risk, upload.kind);
     }
@@ -303,6 +328,18 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         }
     }
 
+    /// Explicitly marks monitoring as resumed after a prior `note_user_stop`
+    /// — see `lifecycle::note_user_start`. `Daemon::new` already calls the
+    /// state-only equivalent once at construction, so most platforms never
+    /// need this; it exists for platforms like Android where the same
+    /// `Daemon` instance's loop can be stopped and resumed without a fresh
+    /// `Daemon::new` in between.
+    pub fn note_user_start(&self) {
+        if let Err(err) = self.call(|reply| DaemonRequest::NoteUserStart { reply }) {
+            log_warning("note_user_start: daemon loop unreachable", Some(&err));
+        }
+    }
+
     pub fn queue_upload(&self, upload: Upload) {
         if let Err(err) = self.call(|reply| DaemonRequest::QueueUpload { upload, reply }) {
             log_warning("queue_upload: daemon loop unreachable", Some(&err));
@@ -355,6 +392,13 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         let now_ms = self.now_ms();
         let mut guard = self.state.lock().expect("daemon state lock poisoned");
         self.apply_note_user_stop(&mut guard, now_ms, source);
+        self.persist(&guard);
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub fn test_note_user_start(&self) {
+        let mut guard = self.state.lock().expect("daemon state lock poisoned");
+        self.apply_note_user_start(&mut guard);
         self.persist(&guard);
     }
 
@@ -489,6 +533,12 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
                         }
                         DaemonRequest::NoteUserStop { source, reply } => {
                             self.apply_note_user_stop(&mut working, now_ms, &source);
+                            fires.push(Box::new(move || {
+                                let _ = reply.send(());
+                            }));
+                        }
+                        DaemonRequest::NoteUserStart { reply } => {
+                            self.apply_note_user_start(&mut working);
                             fires.push(Box::new(move || {
                                 let _ = reply.send(());
                             }));
@@ -641,9 +691,6 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         }
         if !state.upload.pending_batch_events.is_empty() {
             candidate = candidate.min(state.upload.batch_backoff.next_attempt_at_ms.max(now_ms));
-        }
-        if state.upload.force_flush {
-            candidate = candidate.min(now_ms);
         }
 
         candidate.max(now_ms)

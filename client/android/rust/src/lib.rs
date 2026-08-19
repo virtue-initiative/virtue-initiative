@@ -404,6 +404,15 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeRunDa
             *guard = true;
         }
 
+        // `Daemon::new` (in `nativeInit`) already does this once, but the
+        // accessibility service can stop and resume this same loop many
+        // times within one process without a fresh `nativeInit` in between
+        // — each resume needs its own `note_user_start` to clear a prior
+        // `note_user_stop`, or tamper detection would stay suspended for
+        // the rest of the process's life. A no-op when not currently
+        // stopped. See `client/core/SPEC.md` §2.
+        core.daemon.note_user_start();
+
         core.daemon.run_forever();
 
         if let Ok(mut guard) = core.daemon_running.lock() {
