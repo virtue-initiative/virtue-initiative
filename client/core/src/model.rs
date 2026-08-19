@@ -45,11 +45,6 @@ pub enum ScreenshotSkipReason {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum AlertReason {
-    /// The daemon woke up later than scheduled — either a single wakeup was
-    /// more than a minute late, or the sum of recent lateness (over the last
-    /// 10 tracked wakeups) exceeded 5 minutes. Excused near a system
-    /// login/logout. See `client/core/SPEC.md` §2.
-    LateWakeup,
     /// The user explicitly quit the monitor while it was expected to be
     /// running.
     UserStop,
@@ -86,6 +81,20 @@ pub enum UploadKind {
         details: Option<String>,
     },
     Heartbeat,
+    /// A single wakeup was more than a minute late, or the sum of recent
+    /// lateness (over the last 10 tracked wakeups) exceeded 5 minutes.
+    /// Excused near a system login/logout. See `client/core/SPEC.md` §2.
+    ScreenshotMissed,
+    /// The daemon detected that the last known system login time changed.
+    /// Always risk 0%. See `client/core/SPEC.md` §5.
+    SystemLoginAt {
+        at_ms: i64,
+    },
+    /// The daemon detected that the last known system logout time changed.
+    /// Always risk 0%. See `client/core/SPEC.md` §5.
+    SystemLogoutAt {
+        at_ms: i64,
+    },
 }
 
 /// Hand-written so the captured screenshot bytes never reach a log line
@@ -115,6 +124,13 @@ impl std::fmt::Debug for UploadKind {
                 write!(f, "Dev {{ title: {title:?}, details: {details:?} }}")
             }
             UploadKind::Heartbeat => write!(f, "Heartbeat"),
+            UploadKind::ScreenshotMissed => write!(f, "ScreenshotMissed"),
+            UploadKind::SystemLoginAt { at_ms } => {
+                write!(f, "SystemLoginAt {{ at_ms: {at_ms:?} }}")
+            }
+            UploadKind::SystemLogoutAt { at_ms } => {
+                write!(f, "SystemLogoutAt {{ at_ms: {at_ms:?} }}")
+            }
         }
     }
 }
@@ -268,13 +284,48 @@ mod tests {
     #[test]
     fn upload_kind_lifecycle_alert_serializes_to_tagged_shape() {
         let upload = UploadKind::LifecycleAlert {
-            reason: AlertReason::LateWakeup,
+            reason: AlertReason::UserStop,
         };
         assert_eq!(
             serde_json::to_value(upload).unwrap(),
             json!({
                 "type": "lifecycle_alert",
-                "data": { "reason": "late_wakeup" }
+                "data": { "reason": "user_stop" }
+            })
+        );
+    }
+
+    #[test]
+    fn upload_kind_screenshot_missed_serializes_to_tagged_shape() {
+        // SPEC.md §2: "The late wakeup event SHOULD be called
+        // \"screenshot_missed\"."
+        let upload = UploadKind::ScreenshotMissed;
+        assert_eq!(
+            serde_json::to_value(upload).unwrap(),
+            json!({ "type": "screenshot_missed" })
+        );
+    }
+
+    #[test]
+    fn upload_kind_system_login_at_serializes_to_tagged_shape() {
+        let upload = UploadKind::SystemLoginAt { at_ms: 1_000 };
+        assert_eq!(
+            serde_json::to_value(upload).unwrap(),
+            json!({
+                "type": "system_login_at",
+                "data": { "at_ms": 1_000 }
+            })
+        );
+    }
+
+    #[test]
+    fn upload_kind_system_logout_at_serializes_to_tagged_shape() {
+        let upload = UploadKind::SystemLogoutAt { at_ms: 2_000 };
+        assert_eq!(
+            serde_json::to_value(upload).unwrap(),
+            json!({
+                "type": "system_logout_at",
+                "data": { "at_ms": 2_000 }
             })
         );
     }

@@ -4,7 +4,7 @@ mod daemon;
 mod tray;
 
 use std::io::{self, Write};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
@@ -97,7 +97,7 @@ struct SendLogArgs {
     /// Log type to emit. Use `all` to queue one of every type.
     #[arg(long = "type", value_name = "TYPE")]
     log_type: String,
-    /// Alert reason (snake_case) when --type lifecycle_alert, e.g. late_wakeup.
+    /// Alert reason (snake_case) when --type lifecycle_alert, e.g. user_stop.
     #[arg(long)]
     reason: Option<String>,
     /// Message body when --type alert.
@@ -382,14 +382,14 @@ fn build_send_kind(args: &SendLogArgs) -> Result<UploadKind> {
     };
     match args.log_type.as_str() {
         "lifecycle_alert" => {
-            let reason = args
-                .reason
-                .as_deref()
-                .context("--reason is required for --type lifecycle_alert")?;
+            let reason = args.reason.as_deref().unwrap_or("user_stop");
             let reason: AlertReason = serde_json::from_value(parse_enum(reason)?)
                 .with_context(|| format!("unknown alert reason: {reason}"))?;
             Ok(UploadKind::LifecycleAlert { reason })
         }
+        "screenshot_missed" => Ok(UploadKind::ScreenshotMissed),
+        "system_login_at" => Ok(UploadKind::SystemLoginAt { at_ms: now_ms() }),
+        "system_logout_at" => Ok(UploadKind::SystemLogoutAt { at_ms: now_ms() }),
         "alert" => Ok(UploadKind::Alert {
             message: args
                 .message
@@ -411,16 +411,27 @@ fn build_send_kind(args: &SendLogArgs) -> Result<UploadKind> {
             details: args.details.clone(),
         }),
         other => anyhow::bail!(
-            "unsupported --type {other:?} (expected: lifecycle_alert, screenshot_skipped, alert, capture_failed, dev, screenshot, or all)"
+            "unsupported --type {other:?} (expected: lifecycle_alert, screenshot_missed, system_login_at, system_logout_at, screenshot_skipped, alert, capture_failed, dev, screenshot, or all)"
         ),
     }
+}
+
+/// Current UTC time in milliseconds — used as the `at_ms` for dev-triggered
+/// `system_login_at`/`system_logout_at` events, which have no real login/logout
+/// to report.
+#[cfg(debug_assertions)]
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 /// Every concrete log variant `dev send --all` queues — one per web log icon.
 #[cfg(debug_assertions)]
 fn all_send_kinds() -> Vec<UploadKind> {
     use AlertReason::*;
-    let alerts = [LateWakeup, UserStop]
+    let alerts = [UserStop]
         .into_iter()
         .map(|reason| UploadKind::LifecycleAlert { reason });
     let skips = [
@@ -429,6 +440,7 @@ fn all_send_kinds() -> Vec<UploadKind> {
     ]
     .into_iter()
     .map(|reason| UploadKind::ScreenshotSkipped { reason });
+    let at_ms = now_ms();
     alerts
         .chain(skips)
         .chain([
@@ -440,6 +452,9 @@ fn all_send_kinds() -> Vec<UploadKind> {
                 title: "Developer CLI log".to_string(),
                 details: None,
             },
+            UploadKind::ScreenshotMissed,
+            UploadKind::SystemLoginAt { at_ms },
+            UploadKind::SystemLogoutAt { at_ms },
         ])
         .collect()
 }

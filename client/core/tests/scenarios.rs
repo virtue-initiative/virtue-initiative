@@ -110,14 +110,10 @@ fn late_wakeup_over_one_minute_triggers_alert() {
     // Wake up 70s later than scheduled: over the 1-minute single-wakeup threshold.
     scenario.at_t(expected + 70_000).tick();
 
+    // SPEC.md §2: cleared after the alert is sent, to prevent duplicates.
     assert!(
-        scenario
-            .state()
-            .lifecycle
-            .late_wakeups
-            .iter()
-            .any(|&d| d > 60_000),
-        "expected the lateness to be recorded"
+        scenario.state().lifecycle.late_wakeups.is_empty(),
+        "expected the late wakeups array to be cleared after alerting"
     );
     let has_upload = {
         let s = scenario.api.state();

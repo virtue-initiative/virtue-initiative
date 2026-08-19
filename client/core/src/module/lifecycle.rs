@@ -26,6 +26,10 @@ pub struct LifecycleState {
     /// Lateness (`actual - expected`, may be negative) of the last up to
     /// [`MAX_TRACKED_WAKEUPS`] non-excused wakeups, oldest first.
     pub late_wakeups: VecDeque<i64>,
+    /// Last system login/logout time seen, so a change can be detected and
+    /// reported once. See `SPEC.md` §5.
+    pub last_seen_login_ms: Option<i64>,
+    pub last_seen_logout_ms: Option<i64>,
 }
 
 /// Phase 1 of `Daemon::run_phases`: compares `now_ms` to the wakeup time this
@@ -86,9 +90,46 @@ pub fn tick(
             upload,
             now_ms,
             HIGH_RISK_LIFECYCLE_ALERT,
-            UploadKind::LifecycleAlert {
-                reason: AlertReason::LateWakeup,
-            },
+            UploadKind::ScreenshotMissed,
+        );
+        // See `SPEC.md` §2: cleared so the same already-alerted-on lateness
+        // doesn't still be sitting in the array to alert again on the very
+        // next tick.
+        state.late_wakeups.clear();
+    }
+}
+
+/// Phase 1b of `Daemon::run_phases`: detects a change in the last known
+/// system login/logout time since the previous tick and records a
+/// zero-risk informational event each time one is seen. See
+/// `client/core/SPEC.md` §5.
+pub fn note_session_events(
+    state: &mut LifecycleState,
+    upload: &mut UploadState,
+    hooks: &dyn LifecycleHooks,
+    now_ms: i64,
+) {
+    if let Ok(Some(login_ms)) = hooks.get_last_login_utc_ms()
+        && state.last_seen_login_ms != Some(login_ms)
+    {
+        state.last_seen_login_ms = Some(login_ms);
+        upload::enqueue(
+            upload,
+            now_ms,
+            0.0,
+            UploadKind::SystemLoginAt { at_ms: login_ms },
+        );
+    }
+
+    if let Ok(Some(logout_ms)) = hooks.get_last_logout_utc_ms()
+        && state.last_seen_logout_ms != Some(logout_ms)
+    {
+        state.last_seen_logout_ms = Some(logout_ms);
+        upload::enqueue(
+            upload,
+            now_ms,
+            0.0,
+            UploadKind::SystemLogoutAt { at_ms: logout_ms },
         );
     }
 }
@@ -126,14 +167,15 @@ mod tests {
     }
 
     fn has_late_wakeup_alert(upload: &UploadState) -> bool {
-        upload.pending_hash_events.iter().any(|e| {
-            matches!(
-                e.event,
-                UploadKind::LifecycleAlert {
-                    reason: AlertReason::LateWakeup
-                }
-            )
-        })
+        late_wakeup_alert_count(upload) > 0
+    }
+
+    fn late_wakeup_alert_count(upload: &UploadState) -> usize {
+        upload
+            .pending_hash_events
+            .iter()
+            .filter(|e| matches!(e.event, UploadKind::ScreenshotMissed))
+            .count()
     }
 
     #[test]
@@ -242,7 +284,8 @@ mod tests {
         hooks.set_last_logout(Some(900_000));
         hooks.set_last_login(Some(950_500));
         tick(&mut state, &mut upload, &hooks, 951_000, 300_000);
-        assert_eq!(state.late_wakeups, [951_000 - 300_000]);
+        // Counted (not excused) and alerted on — then cleared per SPEC.md §2.
+        assert!(state.late_wakeups.is_empty());
         assert!(has_late_wakeup_alert(&upload));
     }
 
@@ -260,8 +303,58 @@ mod tests {
         hooks.set_last_logout(Some(900_000));
         hooks.set_last_login(Some(950_000));
         tick(&mut state, &mut upload, &hooks, 2_000_000, 900_500);
-        assert_eq!(state.late_wakeups, [2_000_000 - 900_500]);
+        // Counted (not excused) and alerted on — then cleared per SPEC.md §2.
+        assert!(state.late_wakeups.is_empty());
         assert!(has_late_wakeup_alert(&upload));
+    }
+
+    #[test]
+    fn late_wakeups_array_is_cleared_after_an_alert_is_sent() {
+        // SPEC.md §2: "The late wakeups array MUST be cleared after an alert
+        // is sent (to prevent duplicates)."
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        tick(&mut state, &mut upload, &hooks, 361_001, 300_000);
+        assert!(has_late_wakeup_alert(&upload));
+        assert!(state.late_wakeups.is_empty());
+
+        // Without the clear, the 61s-late entry above would still be sitting
+        // in the array and this on-time-ish follow-up tick would alert a
+        // second time for the same already-reported incident.
+        tick(&mut state, &mut upload, &hooks, 361_501, 361_001);
+        assert_eq!(
+            late_wakeup_alert_count(&upload),
+            1,
+            "clearing after the alert must prevent a duplicate"
+        );
+    }
+
+    #[test]
+    fn accumulated_alert_does_not_duplicate_on_the_next_tick() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        let mut expected = 1_000i64;
+        tick(&mut state, &mut upload, &hooks, expected, 0);
+        for _ in 0..10 {
+            let now = expected + 31_000;
+            tick(&mut state, &mut upload, &hooks, now, expected);
+            expected = now;
+        }
+        assert_eq!(late_wakeup_alert_count(&upload), 1);
+        assert!(state.late_wakeups.is_empty());
+
+        // Without clearing, 9 of the 10 contributing entries would still be
+        // in the buffer and the sum would still be over budget, alerting
+        // again for the same underlying incident on this next tick.
+        let now = expected + 31_000;
+        tick(&mut state, &mut upload, &hooks, now, expected);
+        assert_eq!(
+            late_wakeup_alert_count(&upload),
+            1,
+            "clearing after the alert must prevent a duplicate"
+        );
     }
 
     #[test]
@@ -299,5 +392,83 @@ mod tests {
             upload.force_flush,
             "extra-high-risk upload should force an immediate flush"
         );
+    }
+
+    // ── Other events (SPEC.md §5) ───────────────────────────────────────────
+
+    fn system_event(upload: &UploadState, at_ms: i64, login: bool) -> Option<f32> {
+        upload
+            .pending_hash_events
+            .iter()
+            .find_map(|e| match &e.event {
+                UploadKind::SystemLoginAt { at_ms: seen } if login && *seen == at_ms => e.risk,
+                UploadKind::SystemLogoutAt { at_ms: seen } if !login && *seen == at_ms => e.risk,
+                _ => None,
+            })
+    }
+
+    #[test]
+    fn system_login_at_event_sent_when_login_time_changes() {
+        // SPEC.md §5: "When the daemon detects that the System Login time
+        // changed, it MUST send a "system login at" event (risk 0%)."
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        hooks.set_last_login(Some(1_000));
+
+        note_session_events(&mut state, &mut upload, &hooks, 1_500);
+
+        assert_eq!(system_event(&upload, 1_000, true), Some(0.0));
+        assert_eq!(state.last_seen_login_ms, Some(1_000));
+    }
+
+    #[test]
+    fn system_logout_at_event_sent_when_logout_time_changes() {
+        // SPEC.md §5: "When the daemon detects tha[t] th[e] System Logout
+        // time changed, it MUST send a "system logout at" event (risk 0%)."
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        hooks.set_last_logout(Some(2_000));
+
+        note_session_events(&mut state, &mut upload, &hooks, 2_500);
+
+        assert_eq!(system_event(&upload, 2_000, false), Some(0.0));
+        assert_eq!(state.last_seen_logout_ms, Some(2_000));
+    }
+
+    #[test]
+    fn no_system_event_sent_when_login_and_logout_time_are_unchanged() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        hooks.set_last_login(Some(1_000));
+        hooks.set_last_logout(Some(2_000));
+
+        note_session_events(&mut state, &mut upload, &hooks, 1_500);
+        let count_after_first = upload.pending_hash_events.len();
+        note_session_events(&mut state, &mut upload, &hooks, 3_000);
+
+        assert_eq!(
+            upload.pending_hash_events.len(),
+            count_after_first,
+            "an unchanged login/logout time must not send a duplicate event"
+        );
+    }
+
+    #[test]
+    fn system_event_sent_again_when_login_time_changes_a_second_time() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        hooks.set_last_login(Some(1_000));
+        note_session_events(&mut state, &mut upload, &hooks, 1_500);
+
+        hooks.set_last_login(Some(9_000));
+        note_session_events(&mut state, &mut upload, &hooks, 9_500);
+
+        assert_eq!(system_event(&upload, 1_000, true), Some(0.0));
+        assert_eq!(system_event(&upload, 9_000, true), Some(0.0));
+        assert_eq!(state.last_seen_login_ms, Some(9_000));
     }
 }

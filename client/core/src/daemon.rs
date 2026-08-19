@@ -558,6 +558,12 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
                 now_ms,
                 expected_wakeup,
             );
+            lifecycle::note_session_events(
+                &mut working.lifecycle,
+                &mut working.upload,
+                &self.platform,
+                now_ms,
+            );
         }
 
         let screen_active = !self.platform.is_locked_or_screensaver().unwrap_or(false);
