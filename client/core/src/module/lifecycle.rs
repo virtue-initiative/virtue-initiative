@@ -184,6 +184,7 @@ pub fn note_session_events(
         if let Some(baseline) = state.last_seen_login_ms {
             // Allow for jitter
             if login_ms - baseline > 1000 {
+                state.last_seen_login_ms = Some(login_ms);
                 upload::enqueue(
                     upload,
                     now_ms,
