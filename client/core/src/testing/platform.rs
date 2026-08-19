@@ -124,7 +124,10 @@ impl LifecycleHooks for TestPlatformHooks {
     }
 
     fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
-        Ok(self.lock().monotonic_override_ms.unwrap_or(self.clock.now_ms()))
+        Ok(self
+            .lock()
+            .monotonic_override_ms
+            .unwrap_or(self.clock.now_ms()))
     }
 
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {

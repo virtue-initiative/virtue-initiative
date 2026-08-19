@@ -84,23 +84,40 @@ pub fn tick(
 
     let diff_ms = now_ms - expected_wakeup_at_ms;
 
-    // Each side is `None` (no evidence either way), `Some(true)` (supports a
-    // legitimate session transition), or `Some(false)` (contradicts one). A
-    // gap is excused only if at least one side supports it and neither side
-    // contradicts — a single contradicting signal (e.g. the daemon was
-    // killed well before an eventual reboot, so `expected_wakeup_at_ms`
-    // isn't actually near the logout) blocks the excuse even though the
-    // other side looks fine on its own. See `SPEC.md` §2.
-    let login_evidence = hooks
+    // Raw proximity of each timestamp to the moment it's relevant to — but a
+    // stale login/logout (e.g. from a reboot days ago, still the most recent
+    // one logind/journald knows about) is *always* "far" in ordinary
+    // operation, so "far" must not by itself mean "contradicts": it only
+    // becomes a contradiction below when paired with the *other* side being
+    // near, which is what actually signals a reboot bracket that doesn't
+    // line up with this gap.
+    let login_near = hooks
         .get_last_login_utc_ms()
         .ok()
         .flatten()
         .map(|login_ms| (now_ms - login_ms).abs() <= LOGIN_LOGOUT_EXCUSE_MS);
-    let logout_evidence = hooks
+    let logout_near = hooks
         .get_last_logout_utc_ms()
         .ok()
         .flatten()
         .map(|logout_ms| (expected_wakeup_at_ms - logout_ms).abs() <= LOGIN_LOGOUT_EXCUSE_MS);
+
+    // Combined login/logout evidence: `None` (no evidence either way),
+    // `Some(true)` (supports a legitimate session transition), or
+    // `Some(false)` (contradicts one). A gap is excused only if at least one
+    // side supports it and neither side contradicts — a single contradicting
+    // signal (e.g. the daemon was killed well before an eventual reboot, so
+    // `expected_wakeup_at_ms` isn't actually near the logout) blocks the
+    // excuse even though the other side looks fine on its own. Requiring one
+    // side to be near before the other's absence/mismatch counts for
+    // anything is what keeps an ordinary suspend (neither timestamp
+    // anywhere near this gap — nothing reports a reboot at all) from being
+    // misread as a contradiction. See `SPEC.md` §2.
+    let login_logout_evidence = match (login_near, logout_near) {
+        (Some(true), Some(false)) | (Some(false), Some(true)) => Some(false),
+        (Some(true), _) | (_, Some(true)) => Some(true),
+        _ => None,
+    };
 
     // Suspend evidence (SPEC.md §2): the shortfall between real-time elapsed
     // and suspend-safe-clock elapsed since the previous tick reveals how long
@@ -109,20 +126,23 @@ pub fn tick(
     // `Some(false)`) whenever it doesn't clearly explain the gap, so it can
     // never block a login/logout-supported excuse the way a contradicting
     // signal does.
-    let suspend_evidence =
-        match (previous_utc_ms, previous_suspend_safe_ms, current_suspend_safe_ms) {
-            (Some(prev_utc), Some(prev_suspend_safe), Some(current)) => {
-                let utc_elapsed_ms = now_ms - prev_utc;
-                let suspend_safe_elapsed_ms = current - prev_suspend_safe;
-                let suspended_ms = (utc_elapsed_ms - suspend_safe_elapsed_ms).max(0);
-                let explains_gap = suspended_ms + SUSPEND_EVIDENCE_SLACK_MS >= diff_ms;
-                (suspended_ms >= SUSPEND_EVIDENCE_MIN_MS && explains_gap).then_some(true)
-            }
-            _ => None,
-        };
+    let suspend_evidence = match (
+        previous_utc_ms,
+        previous_suspend_safe_ms,
+        current_suspend_safe_ms,
+    ) {
+        (Some(prev_utc), Some(prev_suspend_safe), Some(current)) => {
+            let utc_elapsed_ms = now_ms - prev_utc;
+            let suspend_safe_elapsed_ms = current - prev_suspend_safe;
+            let suspended_ms = (utc_elapsed_ms - suspend_safe_elapsed_ms).max(0);
+            let explains_gap = suspended_ms + SUSPEND_EVIDENCE_SLACK_MS >= diff_ms;
+            (suspended_ms >= SUSPEND_EVIDENCE_MIN_MS && explains_gap).then_some(true)
+        }
+        _ => None,
+    };
 
-    let has_evidence = login_evidence.is_some() || logout_evidence.is_some() || suspend_evidence.is_some();
-    let contradicted = login_evidence == Some(false) || logout_evidence == Some(false);
+    let has_evidence = login_logout_evidence.is_some() || suspend_evidence.is_some();
+    let contradicted = login_logout_evidence == Some(false);
     if has_evidence && !contradicted {
         return;
     }
@@ -396,6 +416,29 @@ mod tests {
 
         // Freeze the suspend-safe clock — simulating a ~1 hour suspend —
         // while real time (and the next scheduled wakeup) advances normally.
+        hooks.set_monotonic_clock_override(Some(0));
+        tick_at(&mut state, &mut upload, &hooks, 3_900_000, 300_000);
+
+        assert!(state.late_wakeups.is_empty());
+        assert!(!has_late_wakeup_alert(&upload));
+    }
+
+    #[test]
+    fn suspend_is_excused_even_with_a_stale_unrelated_login_and_logout_on_record() {
+        // Regression test: on a real desktop, `get_last_login_utc_ms`/
+        // `get_last_logout_utc_ms` almost always return *something* — the
+        // timestamps of whatever session/reboot last happened, even if that
+        // was days ago and has nothing to do with this gap. Those stale,
+        // unrelated timestamps must not be treated as contradicting the
+        // suspend excuse just because they're far from `now`/`expected` —
+        // only a genuine near/far *mismatch between the two sides* should.
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        hooks.set_last_login(Some(-10_000_000));
+        hooks.set_last_logout(Some(-10_100_000));
+        tick_at(&mut state, &mut upload, &hooks, 0, 0);
+
         hooks.set_monotonic_clock_override(Some(0));
         tick_at(&mut state, &mut upload, &hooks, 3_900_000, 300_000);
 
