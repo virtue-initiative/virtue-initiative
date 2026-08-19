@@ -72,6 +72,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun login() {
+        // nativeLogin() blocks waiting for a reply from the daemon loop thread,
+        // so the loop must already be running before we call it. The loop is
+        // only ever started by the accessibility service (on connect, or via
+        // resume() after a prior logout paused it) — require that first rather
+        // than attempting a login that can only time out.
+        if (!VirtueAccessibilityService.isConnected()) {
+            showAccessibilityOnboarding()
+            return
+        }
+        if (!VirtueAccessibilityService.isEnabled()) {
+            VirtueAccessibilityService.resume()
+        }
+
         val email = binding.emailInput.text?.toString()?.trim().orEmpty()
         val password = binding.passwordInput.text?.toString().orEmpty()
         val deviceName = binding.deviceNameInput.text?.toString()?.trim()
@@ -98,13 +111,6 @@ class MainActivity : AppCompatActivity() {
 
             if (error == null) {
                 refreshUi()
-                if (!VirtueAccessibilityService.isConnected()) {
-                    showAccessibilityOnboarding()
-                } else if (!VirtueAccessibilityService.isEnabled()) {
-                    VirtueAccessibilityService.resume()
-                    setStatus("Monitoring started.")
-                    refreshUi()
-                }
             } else {
                 setStatus("Login failed: $error")
             }
@@ -218,8 +224,9 @@ class MainActivity : AppCompatActivity() {
                 "Virtue needs Accessibility permission to monitor your screen.\n\n" +
                 "1. Tap \"Open Settings\" below\n" +
                 "2. Find \"Virtue\" in the list\n" +
-                "3. Toggle it on and confirm\n\n" +
-                "Monitoring will start automatically once enabled."
+                "3. Toggle it on and confirm\n" +
+                "4. Return here to sign in\n\n" +
+                "Monitoring will start automatically once you're signed in."
             )
             .setPositiveButton("Open Settings") { _, _ -> openAccessibilitySettings() }
             .setNegativeButton(getString(R.string.dialog_cancel), null)
