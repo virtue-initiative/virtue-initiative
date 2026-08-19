@@ -20,10 +20,12 @@ loop spec, kept minimal by design):
 - An alert (`UploadKind::ScreenshotMissed`, `HIGH_RISK_LIFECYCLE_ALERT`) fires
   whenever a single entry exceeds 1 minute, or the sum of the array's
   non-negative entries exceeds 5 minutes.
-- `UserStop` (`EXTRA_HIGH_RISK`, immediate) is unrelated to the above — it's
-  driven directly by an explicit user action (`Daemon::note_user_stop`,
-  reached via `UserStopRequested` over IPC) and was preserved unchanged
-  through the rewrite.
+- `UserStop` (`EXTRA_HIGH_RISK`, immediate) is driven directly by an explicit
+  user action (`Daemon::note_user_stop`, reached via `UserStopRequested`
+  over IPC) and was preserved unchanged through the rewrite. It also excuses
+  the very next tick's late-wakeup check (see `SPEC.md` §2) — deliberately
+  scoped to this exact call, not to a plain clean shutdown, since every
+  platform's signal handler also cleanly exits on a bare kill signal.
 
 Implementation: `client/core/src/module/lifecycle.rs`.
 

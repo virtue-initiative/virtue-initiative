@@ -30,9 +30,9 @@ pub struct LifecycleState {
     /// reported once. See `SPEC.md` §5.
     pub last_seen_login_ms: Option<i64>,
     pub last_seen_logout_ms: Option<i64>,
-    /// Set right before a clean `request_stop` shutdown, consumed by the very
-    /// next `tick()` to excuse the gap the stop itself caused. See
-    /// `SPEC.md` §2.
+    /// Set by `note_user_stop` (never by a plain clean shutdown — see that
+    /// function's doc comment for why), consumed by the very next `tick()`
+    /// to excuse the gap the stop itself caused. See `SPEC.md` §2.
     pub excuse_next_late_wakeup: bool,
 }
 
@@ -150,21 +150,27 @@ pub fn note_session_events(
     }
 }
 
-/// Marks the very next `tick()` call as excused, right before a clean,
-/// intentional shutdown — called from `Daemon::run_forever`'s `request_stop`
-/// path. Prevents the gap while the daemon was deliberately stopped from
-/// being reported as tampering when it starts back up. See
-/// `client/core/SPEC.md` §2.
-pub fn note_intentional_stop(state: &mut LifecycleState) {
-    state.excuse_next_late_wakeup = true;
-}
-
 /// Handles an explicit user-initiated stop — an immediate high-risk alert,
 /// independent of the late-wakeup model above. Called directly by
 /// `Daemon::note_user_stop`.
-pub fn note_user_stop(upload: &mut UploadState, now_ms: i64, source: &str) {
+///
+/// This is the ONLY thing that excuses the next tick's lateness check
+/// (`excuse_next_late_wakeup`) — deliberately not tied to a clean
+/// `request_stop` shutdown in general, since every platform's signal handler
+/// also calls `request_stop` on a plain SIGTERM/kill. Excusing on any clean
+/// exit would let the simplest possible evasion (just kill the process)
+/// silently defeat tamper detection; excusing only here means the gap is
+/// forgiven exactly when — and only when — it was already reported via this
+/// alert. See `client/core/SPEC.md` §2.
+pub fn note_user_stop(
+    state: &mut LifecycleState,
+    upload: &mut UploadState,
+    now_ms: i64,
+    source: &str,
+) {
     tracing::info!(source, "user-initiated stop");
     upload::enqueue(upload, now_ms, EXTRA_HIGH_RISK, UploadKind::UserStop);
+    state.excuse_next_late_wakeup = true;
 }
 
 #[cfg(test)]
@@ -391,8 +397,9 @@ mod tests {
 
     #[test]
     fn user_stop_emits_immediate_extra_high_risk_alert() {
+        let mut state = LifecycleState::default();
         let mut upload = upload_with_credentials();
-        note_user_stop(&mut upload, 1_000, "test");
+        note_user_stop(&mut state, &mut upload, 1_000, "test");
         let entry = upload
             .pending_hash_events
             .iter()
@@ -403,6 +410,19 @@ mod tests {
             upload.force_flush,
             "extra-high-risk upload should force an immediate flush"
         );
+    }
+
+    #[test]
+    fn user_stop_excuses_only_the_next_late_wakeup_check() {
+        // A kill-signal-triggered clean exit (SIGTERM etc.) must NOT excuse
+        // anything on its own — only an actual user_stop alert should, since
+        // that's the one case where the gap has already been reported.
+        let mut state = LifecycleState::default();
+        assert!(!state.excuse_next_late_wakeup);
+
+        let mut upload = upload_with_credentials();
+        note_user_stop(&mut state, &mut upload, 1_000, "test");
+        assert!(state.excuse_next_late_wakeup);
     }
 
     // ── Other events (SPEC.md §5) ───────────────────────────────────────────
@@ -512,15 +532,15 @@ mod tests {
     // ── Intentional-stop excuse (SPEC.md §2) ────────────────────────────────
 
     #[test]
-    fn note_intentional_stop_excuses_only_the_next_tick() {
+    fn user_stop_excuse_consumed_by_only_the_next_tick() {
         let mut state = LifecycleState::default();
         let mut upload = upload_with_credentials();
         let hooks = TestPlatformHooks::new();
 
-        note_intentional_stop(&mut state);
+        note_user_stop(&mut state, &mut upload, 0, "test");
         assert!(state.excuse_next_late_wakeup);
 
-        // A huge gap right after a clean stop — would otherwise alert, but
+        // A huge gap right after a user stop — would otherwise alert, but
         // is excused once.
         tick(&mut state, &mut upload, &hooks, 10_000_000, 300_000);
         assert!(state.late_wakeups.is_empty());

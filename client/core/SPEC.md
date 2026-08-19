@@ -38,7 +38,7 @@ The late wakeups array MUST be cleared after an alert is sent (to prevent duplic
 
 The late wakeup event SHOULD be called "screenshot_missed".
 
-A clean, intentional stop (`request_stop`) MUST excuse the gap that follows it — the next tick's lateness check MUST be skipped once, rather than recorded, so stopping and later restarting the daemon isn't reported as tampering.
+A user-initiated stop MUST excuse the gap that follows it — the next tick's lateness check MUST be skipped once, rather than recorded, so restarting after it isn't also reported as tampering on top of the user-stop alert. A stop MUST NOT be excused this way merely because the process exited cleanly (e.g. a caught termination signal) — only an actual user-initiated stop, since anything broader would let simply killing the process defeat tamper detection.
 
 ## 3. Screenshots
 

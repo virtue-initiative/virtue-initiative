@@ -241,7 +241,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     }
 
     fn apply_note_user_stop(&self, state: &mut DaemonState, now_ms: i64, source: &str) {
-        lifecycle::note_user_stop(&mut state.upload, now_ms, source);
+        lifecycle::note_user_stop(&mut state.lifecycle, &mut state.upload, now_ms, source);
     }
 
     fn apply_queue_upload(&self, state: &mut DaemonState, now_ms: i64, upload: Upload) {
@@ -525,10 +525,6 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
                 if should_logout {
                     self.apply_logout(&mut working);
                 }
-                // A clean, requested stop — excuse the gap it's about to
-                // cause rather than let it look like tampering on restart.
-                // See `SPEC.md` §2.
-                lifecycle::note_intentional_stop(&mut working.lifecycle);
                 *self.state.lock().expect("daemon state lock poisoned") = working.clone();
                 self.persist(&working);
                 self.restore_request_receiver(rx);
