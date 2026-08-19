@@ -19,14 +19,7 @@ object NativeBridge {
             if (initialized) return null
             val dataDir = context.filesDir.resolve("core-data")
 
-            // The application context is passed through to Rust so
-            // rustls-platform-verifier can reach Android's trust store; use the
-            // application context rather than an Activity so the verifier never
-            // holds a reference to a destroyed Activity.
-            val appContext = context.applicationContext
-
             var error = nativeInit(
-                appContext,
                 context.filesDir.resolve("core-config").absolutePath,
                 dataDir.absolutePath
             )
@@ -35,7 +28,6 @@ object NativeBridge {
                 android.util.Log.w("NativeBridge", "Init serialization error, wiping core-data: $error")
                 dataDir.deleteRecursively()
                 error = nativeInit(
-                    appContext,
                     context.filesDir.resolve("core-config").absolutePath,
                     dataDir.absolutePath
                 )
@@ -48,7 +40,6 @@ object NativeBridge {
     }
 
     external fun nativeInit(
-        context: Context,
         configDir: String,
         dataDir: String
     ): String?

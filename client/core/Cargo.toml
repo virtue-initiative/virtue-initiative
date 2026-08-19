@@ -46,9 +46,10 @@ tracing = "0.1"
 # Genuinely blocking HTTP. `rustls` pulls the ring-backed rustls stack;
 # `cookies` is required by api/SPEC.md §1, which asks clients to retain the
 # server's short-lived JWT access cookie. `platform-verifier` verifies
-# certificates against the OS trust store — on Android that additionally needs
-# `rustls_platform_verifier::android::init_with_env` called with the app
-# `Context` before the first handshake, see `client/android/rust/src/lib.rs`.
-ureq = { version = "3.4", default-features = false, features = ["cookies", "json", "platform-verifier", "rustls"] }
+# certificates against the OS trust store, used on every platform except
+# Android; `rustls-webpki-roots` backs Android instead (bundled Mozilla
+# roots), since the platform-verifier crate's Kotlin half pulls in JNI/Gradle
+# plumbing that isn't worth it there. See `HttpApiClient::new` in `src/api.rs`.
+ureq = { version = "3.4", default-features = false, features = ["cookies", "json", "platform-verifier", "rustls", "rustls-webpki-roots"] }
 virtue-text-detection = { path = "../text-detection" }
 webp = "0.3"

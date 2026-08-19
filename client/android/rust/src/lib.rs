@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use jni::errors::ThrowRuntimeExAndDefault;
-use jni::objects::{Global, JByteArray, JClass, JObject, JString, JValue};
+use jni::objects::{Global, JByteArray, JClass, JString, JValue};
 use jni::sys::{jboolean, jstring};
 use jni::{jni_sig, jni_str, Env, EnvUnowned, JavaVM};
 use once_cell::sync::OnceCell;
@@ -259,18 +259,10 @@ fn init_logging(data_dir: &Path) {
 pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeInit<'l>(
     mut unowned_env: EnvUnowned<'l>,
     _class: JClass<'l>,
-    context: JObject<'l>,
     config_dir: JString<'l>,
     data_dir: JString<'l>,
 ) -> jstring {
     native_result(&mut unowned_env, |env| -> Result<()> {
-        // Must happen before any TLS handshake: rustls-platform-verifier needs
-        // a JVM handle to reach Android's trust store, and `HttpApiClient`
-        // below builds the agent that uses it. The Kotlin half of the verifier
-        // comes from the `rustls:rustls-platform-verifier` Gradle artifact.
-        rustls_platform_verifier::android::init_with_env(env, context)
-            .context("failed to initialize the Android certificate verifier")?;
-
         let config_dir: String = config_dir.to_string();
         let data_dir: String = data_dir.to_string();
 

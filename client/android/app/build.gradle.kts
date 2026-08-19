@@ -122,10 +122,6 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("com.google.mlkit:text-recognition:16.0.1")
-    // Kotlin half of rustls-platform-verifier; the Rust half calls into it to
-    // reach Android's trust store. Version must track the
-    // rustls-platform-verifier-android crate cargo resolves.
-    implementation("rustls:rustls-platform-verifier:0.1.1")
 }
 
 val buildRustRelease by tasks.registering(Exec::class) {

@@ -33,6 +33,11 @@
     <!-- Messages -->
     <string name="msg_sign_in_to_start">Sign in to start monitoring</string>
     <string name="msg_grant_permission">After signing in, grant screenshot permission to enable monitoring.</string>
+    <string name="msg_onboarding_intro">Virtue needs Accessibility permission to monitor your screen. This lets Virtue capture screenshots for accountability — no interaction data is collected.</string>
+    <string name="msg_onboarding_steps">1. Tap \"Open Accessibility Settings\" below\n2. Find \"Virtue\" in the list\n3. Toggle it on and confirm\n4. Return to this app</string>
+    <string name="msg_onboarding_waiting">Waiting for Accessibility permission…</string>
+    <string name="btn_open_accessibility_settings">Open Accessibility Settings</string>
+    <string name="msg_core_init_failed">Setup failed to complete: %s. Please close and reopen the app.</string>
 
     <!-- Dialogs -->
     <string name="dialog_sign_out_title">Sign out?</string>

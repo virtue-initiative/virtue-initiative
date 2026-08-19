@@ -180,33 +180,35 @@ pub fn note_session_events(
     hooks: &dyn LifecycleHooks,
     now_ms: i64,
 ) {
-    if let Ok(Some(login_ms)) = hooks.get_last_login_utc_ms()
-        && state.last_seen_login_ms != Some(login_ms)
-    {
-        let had_baseline = state.last_seen_login_ms.is_some();
-        state.last_seen_login_ms = Some(login_ms);
-        if had_baseline {
-            upload::enqueue(
-                upload,
-                now_ms,
-                0.0,
-                UploadKind::SystemLogin { utc_ms: login_ms },
-            );
+    if let Ok(Some(login_ms)) = hooks.get_last_login_utc_ms() {
+        if let Some(baseline) = state.last_seen_login_ms {
+            // Allow for jitter
+            if login_ms - baseline > 1000 {
+                upload::enqueue(
+                    upload,
+                    now_ms,
+                    0.0,
+                    UploadKind::SystemLogin { utc_ms: login_ms },
+                );
+            }
+        } else {
+            state.last_seen_login_ms = Some(login_ms);
         }
     }
 
-    if let Ok(Some(logout_ms)) = hooks.get_last_logout_utc_ms()
-        && state.last_seen_logout_ms != Some(logout_ms)
-    {
-        let had_baseline = state.last_seen_logout_ms.is_some();
-        state.last_seen_logout_ms = Some(logout_ms);
-        if had_baseline {
-            upload::enqueue(
-                upload,
-                now_ms,
-                0.0,
-                UploadKind::SystemLogout { utc_ms: logout_ms },
-            );
+    if let Ok(Some(logout_ms)) = hooks.get_last_logout_utc_ms() {
+        if let Some(baseline) = state.last_seen_logout_ms {
+            if logout_ms - baseline > 1000 {
+                state.last_seen_logout_ms = Some(logout_ms);
+                upload::enqueue(
+                    upload,
+                    now_ms,
+                    0.0,
+                    UploadKind::SystemLogout { utc_ms: logout_ms },
+                );
+            }
+        } else {
+            state.last_seen_logout_ms = Some(logout_ms);
         }
     }
 }

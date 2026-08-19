@@ -3745,7 +3745,6 @@ dependencies = [
  "anyhow",
  "jni",
  "once_cell",
- "rustls-platform-verifier",
  "serde",
  "serde_json",
  "tracing",

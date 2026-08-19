@@ -121,15 +121,23 @@ impl HttpApiClient {
     pub fn new(config: &Config) -> CoreResult<Self> {
         // `http_status_as_error(false)` keeps 4xx/5xx as ordinary responses so
         // `ensure_success` can read the body for the server's error message.
+        // Trust the OS certificate store, so a device told to trust an extra
+        // root (MDM, enterprise CA) behaves the way the rest of that OS does.
+        // Android is the exception: it uses bundled Mozilla roots instead,
+        // to avoid the platform-verifier crate's extra JNI/Gradle plumbing
+        // there (see `client/android/rust/Cargo.toml`).
+        #[cfg(not(target_os = "android"))]
+        let root_certs = RootCerts::PlatformVerifier;
+        #[cfg(target_os = "android")]
+        let root_certs = RootCerts::WebPki;
+
         let agent: Agent = Agent::config_builder()
             .timeout_global(Some(REQUEST_TIMEOUT))
             .http_status_as_error(false)
-            // Trust the OS certificate store, so a device told to trust an extra
-            // root (MDM, enterprise CA) behaves the way the rest of that OS does.
             .tls_config(
                 TlsConfig::builder()
                     .provider(TlsProvider::Rustls)
-                    .root_certs(RootCerts::PlatformVerifier)
+                    .root_certs(root_certs)
                     .build(),
             )
             .build()

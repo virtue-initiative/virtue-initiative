@@ -52,8 +52,7 @@ class MainActivity : AppCompatActivity() {
         binding.signOutButton.setOnClickListener { logout() }
         binding.statusDetailsButton.setOnClickListener { showStatusDetails() }
         binding.pauseResumeButton.setOnClickListener { toggleMonitoring() }
-        binding.grantCaptureButton.setOnClickListener { openAccessibilitySettings() }
-        binding.startServiceButton.setOnClickListener { openAccessibilitySettings() }
+        binding.openAccessibilitySettingsButton.setOnClickListener { openAccessibilitySettings() }
 
         binding.websiteLink.setOnClickListener {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://virtueinitiative.org")))
@@ -145,39 +144,70 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshUi() {
         val loggedIn = NativeBridge.nativeIsLoggedIn()
-        binding.loginPanel.visibility = if (loggedIn) android.view.View.GONE else android.view.View.VISIBLE
-        binding.sessionPanel.visibility = if (loggedIn) android.view.View.VISIBLE else android.view.View.GONE
+        val accessibilityConnected = VirtueAccessibilityService.isConnected()
 
-        if (loggedIn) {
-            binding.deviceIdText.text = deviceName()
-            binding.statusButtonsLayout.visibility = android.view.View.VISIBLE
-
-            when {
-                VirtueAccessibilityService.isEnabled() -> {
-                    binding.statusTitle.text = getString(R.string.status_monitoring)
-                    binding.pauseResumeButton.text = getString(R.string.btn_pause_monitoring)
-                    setStatus("Monitoring service is running")
-                }
-                VirtueAccessibilityService.isPaused() -> {
-                    binding.statusTitle.text = getString(R.string.status_paused)
-                    binding.pauseResumeButton.text = getString(R.string.btn_resume_monitoring)
-                    setStatus("Monitoring is paused")
-                }
-                VirtueAccessibilityService.isConnected() -> {
-                    binding.statusTitle.text = getString(R.string.status_waiting)
-                    binding.pauseResumeButton.text = getString(R.string.btn_resume_monitoring)
-                    setStatus("Accessibility service connected — tap Resume to start")
-                }
-                else -> {
-                    binding.statusTitle.text = getString(R.string.status_waiting)
-                    binding.pauseResumeButton.text = getString(R.string.btn_resume_monitoring)
-                    setStatus("Enable Virtue in Accessibility Settings to start monitoring")
-                }
-            }
-        } else {
-            binding.statusTitle.text = getString(R.string.status_signed_out)
+        // First-install flow: nothing else can happen (login blocks waiting on the
+        // daemon loop, which the accessibility service is what starts) until the
+        // service is connected, so keep signed-out users on the onboarding screen
+        // until then.
+        if (!loggedIn && !accessibilityConnected) {
+            binding.onboardingPanel.visibility = android.view.View.VISIBLE
+            binding.loginPanel.visibility = android.view.View.GONE
+            binding.sessionPanel.visibility = android.view.View.GONE
             binding.statusButtonsLayout.visibility = android.view.View.GONE
+            binding.onboardingStatusText.text = getString(R.string.msg_onboarding_waiting)
+            binding.statusTitle.text = getString(R.string.status_signed_out)
             setStatus(getString(R.string.msg_sign_in_to_start))
+            return
+        }
+
+        if (!loggedIn) {
+            // Accessibility just connected (or already was) — make sure the core
+            // actually finished initializing before handing off to the login screen,
+            // since login() blocks on a daemon loop thread that only the core's
+            // successful init can start.
+            val initError = NativeBridge.ensureInitialized(this)
+            val coreReady = initError == null
+            binding.onboardingPanel.visibility = if (coreReady) android.view.View.GONE else android.view.View.VISIBLE
+            binding.loginPanel.visibility = if (coreReady) android.view.View.VISIBLE else android.view.View.GONE
+            binding.sessionPanel.visibility = android.view.View.GONE
+            binding.statusButtonsLayout.visibility = android.view.View.GONE
+            if (!coreReady) {
+                binding.onboardingStatusText.text = getString(R.string.msg_core_init_failed, initError)
+            }
+            binding.statusTitle.text = getString(R.string.status_signed_out)
+            setStatus(getString(R.string.msg_sign_in_to_start))
+            return
+        }
+
+        binding.onboardingPanel.visibility = android.view.View.GONE
+        binding.loginPanel.visibility = android.view.View.GONE
+        binding.sessionPanel.visibility = android.view.View.VISIBLE
+
+        binding.deviceIdText.text = deviceName()
+        binding.statusButtonsLayout.visibility = android.view.View.VISIBLE
+
+        when {
+            VirtueAccessibilityService.isEnabled() -> {
+                binding.statusTitle.text = getString(R.string.status_monitoring)
+                binding.pauseResumeButton.text = getString(R.string.btn_pause_monitoring)
+                setStatus("Monitoring service is running")
+            }
+            VirtueAccessibilityService.isPaused() -> {
+                binding.statusTitle.text = getString(R.string.status_paused)
+                binding.pauseResumeButton.text = getString(R.string.btn_resume_monitoring)
+                setStatus("Monitoring is paused")
+            }
+            VirtueAccessibilityService.isConnected() -> {
+                binding.statusTitle.text = getString(R.string.status_waiting)
+                binding.pauseResumeButton.text = getString(R.string.btn_resume_monitoring)
+                setStatus("Accessibility service connected — tap Resume to start")
+            }
+            else -> {
+                binding.statusTitle.text = getString(R.string.status_waiting)
+                binding.pauseResumeButton.text = getString(R.string.btn_resume_monitoring)
+                setStatus("Enable Virtue in Accessibility Settings to start monitoring")
+            }
         }
     }
 
