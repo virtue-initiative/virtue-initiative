@@ -3748,6 +3748,7 @@ dependencies = [
  "rustls-platform-verifier",
  "serde",
  "serde_json",
+ "tracing",
  "tracing-appender",
  "tracing-subscriber",
  "virtue-core",

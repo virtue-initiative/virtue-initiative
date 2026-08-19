@@ -401,7 +401,14 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             .lock()
             .expect("daemon state lock poisoned")
             .take()
-            .expect("run_forever called more than once")
+            .expect("run_forever called while already running")
+    }
+
+    /// Hands the receiver back after a clean exit so a later `run_forever`
+    /// call can take it again — see the doc comment on `run_forever` for why
+    /// this needs to be restartable rather than a true one-shot.
+    fn restore_request_receiver(&self, rx: mpsc::Receiver<DaemonRequest>) {
+        *self.request_rx.lock().expect("daemon state lock poisoned") = Some(rx);
     }
 
     /// Blocking loop. Each iteration: wait for either the next scheduled
@@ -409,6 +416,14 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     /// arrived (replying only once that's durable); then run one tick
     /// against an owned clone of the state, with no locking in the middle,
     /// and write the result back.
+    ///
+    /// Callable more than once across a `Daemon`'s lifetime — just not
+    /// concurrently with itself. Linux/Mac/Windows only ever call this once,
+    /// for the life of the process, but Android's accessibility service
+    /// starts and stops this same loop repeatedly within one process
+    /// (pause/resume monitoring, logout, the service reconnecting), so a
+    /// clean return (via `Stop` or channel disconnect) hands the request
+    /// receiver back rather than consuming it permanently.
     pub fn run_forever(&self) {
         let rx = self.take_request_receiver();
         loop {
@@ -422,7 +437,10 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             let first = match rx.recv_timeout(Duration::from_millis(wait_ms)) {
                 Ok(req) => Some(req),
                 Err(RecvTimeoutError::Timeout) => None,
-                Err(RecvTimeoutError::Disconnected) => return,
+                Err(RecvTimeoutError::Disconnected) => {
+                    self.restore_request_receiver(rx);
+                    return;
+                }
             };
 
             let mut requests: Vec<DaemonRequest> = first.into_iter().collect();
@@ -509,6 +527,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
                 }
                 *self.state.lock().expect("daemon state lock poisoned") = working.clone();
                 self.persist(&working);
+                self.restore_request_receiver(rx);
                 return;
             }
 
@@ -622,5 +641,36 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         }
 
         candidate.max(now_ms)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use crate::testing::Scenario;
+
+    /// Android's accessibility service starts and stops this same loop
+    /// repeatedly within one process (pause/resume monitoring, logout, the
+    /// service reconnecting) — `run_forever` must tolerate being called
+    /// again after a clean stop, not just once per `Daemon`. Regression test
+    /// for the receiver being consumed permanently on first use.
+    #[test]
+    fn run_forever_is_restartable_after_a_clean_stop() {
+        let scenario = Scenario::new();
+        let daemon = &scenario.daemon;
+
+        std::thread::scope(|scope| {
+            for _ in 0..2 {
+                let handle = scope.spawn(|| daemon.run_forever());
+                // Give the loop a moment to reach its `recv_timeout` wait
+                // before stopping it, so this exercises the same
+                // request/response path production code relies on rather
+                // than racing the thread spawn.
+                std::thread::sleep(Duration::from_millis(20));
+                daemon.request_stop();
+                handle.join().expect("run_forever must not panic");
+            }
+        });
     }
 }

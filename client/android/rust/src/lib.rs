@@ -222,6 +222,14 @@ fn init_logging(data_dir: &Path) {
             .with_ansi(false)
             .init();
 
+        // jni's catch_unwind (see `native_result` below) collapses every panic
+        // into "Rust panic: non-string panic payload" with no detail once it
+        // crosses into the Java exception — this is the only place the real
+        // message/location survives, so it needs to be captured here.
+        std::panic::set_hook(Box::new(|info| {
+            tracing::error!(panic = %info, "daemon thread panicked");
+        }));
+
         guard
     });
 }
