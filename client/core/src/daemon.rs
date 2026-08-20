@@ -19,7 +19,7 @@ use crate::module::status;
 use crate::module::upload::{self, Upload, UploadState};
 use crate::platform::PlatformHooks;
 use crate::rng::{OsRandomSource, RandomSource};
-use crate::state::{load_state, store_state};
+use crate::state::{load_state, lock_state, store_state};
 use virtue_text_detection::ScreenshotOCR;
 
 /// Bump whenever `DaemonState`'s shape needs a breaking change that
@@ -143,9 +143,9 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         // — see `SPEC.md` §2 and `lifecycle::note_user_start`).
         {
             let now_ms = daemon.now_ms();
-            let mut guard = daemon.state.lock().expect("daemon state lock poisoned");
-            daemon.apply_note_user_start(&mut guard, now_ms);
-            daemon.persist(&guard);
+            daemon.with_locked_state(|working| {
+                daemon.apply_note_user_start(working, now_ms);
+            });
         }
 
         daemon.refresh_settings_on_startup();
@@ -187,10 +187,10 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         let now_ms = self.now_ms();
         match self.api.get_device_settings(&refresh_token) {
             Ok(result) => {
-                let mut guard = self.state.lock().expect("daemon state lock poisoned");
-                guard.upload.settings = Some(result.settings);
-                guard.upload.hash_token_cache = Some((result.hash_token, now_ms));
-                self.persist(&guard);
+                self.with_locked_state(|working| {
+                    working.upload.settings = Some(result.settings);
+                    working.upload.hash_token_cache = Some((result.hash_token, now_ms));
+                });
             }
             Err(err) => {
                 log_warning("startup device-settings refresh failed", Some(&err));
@@ -206,6 +206,46 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         if let Err(err) = store_state(&self.state_path, state) {
             tracing::error!(error = %err, "daemon: failed to persist state");
         }
+    }
+
+    /// Runs one cross-process-safe read-modify-write cycle: acquires the
+    /// SPEC.md §7 lock, re-reads `state_path` from disk (rather than trusting
+    /// the in-memory cache, which may be stale relative to another process's
+    /// writes), lets `f` mutate the freshly-read copy, persists it, and
+    /// updates the in-memory cache — all before releasing the lock.
+    ///
+    /// Every mutate-then-persist path MUST go through this (not call
+    /// `persist` directly) so two `Daemon`s against the same `state_path`
+    /// (iOS only — see SPEC.md §7) can't race a lost update.
+    fn with_locked_state<R>(&self, f: impl FnOnce(&mut DaemonState) -> R) -> R {
+        let _lock = match lock_state(&self.state_path) {
+            Ok(lock) => Some(lock),
+            Err(err) => {
+                tracing::error!(
+                    error = %err,
+                    "daemon: failed to acquire cross-process state lock; proceeding without it"
+                );
+                None
+            }
+        };
+
+        let mut working = load_state(&self.state_path).unwrap_or_else(|err| {
+            tracing::warn!(
+                error = %err,
+                "daemon: failed to reload state under lock; falling back to in-memory copy"
+            );
+            self.state
+                .lock()
+                .expect("daemon state lock poisoned")
+                .clone()
+        });
+
+        let result = f(&mut working);
+
+        self.persist(&working);
+        *self.state.lock().expect("daemon state lock poisoned") = working;
+
+        result
     }
 
     // ── Apply logic: the only code allowed to mutate a `DaemonState` ───────
@@ -447,21 +487,123 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             .lock()
             .expect("daemon state lock poisoned")
             .take()
-            .expect("run_forever called while already running")
+            .expect("run_forever/tick_once called while already running")
     }
 
     /// Hands the receiver back after a clean exit so a later `run_forever`
-    /// call can take it again — see the doc comment on `run_forever` for why
-    /// this needs to be restartable rather than a true one-shot.
+    /// or `tick_once` call can take it again — see `run_forever`'s doc
+    /// comment for why this needs to be restartable rather than a true
+    /// one-shot.
     fn restore_request_receiver(&self, rx: mpsc::Receiver<DaemonRequest>) {
         *self.request_rx.lock().expect("daemon state lock poisoned") = Some(rx);
+    }
+
+    /// Applies and persists `requests` (already drained from the channel,
+    /// `Stop` filtered out by the caller), replying to each only once that's
+    /// durable. A no-op if `requests` is empty. Shared by `run_forever` and
+    /// `tick_once` — the only difference between them is how they gather the
+    /// batch of requests to hand in here.
+    fn apply_requests(&self, requests: Vec<DaemonRequest>, now_ms: i64) {
+        if requests.is_empty() {
+            return;
+        }
+
+        let fires: Vec<Box<dyn FnOnce() + Send>> = self.with_locked_state(|working| {
+            let mut fires: Vec<Box<dyn FnOnce() + Send>> = Vec::with_capacity(requests.len());
+            for req in requests {
+                match req {
+                    DaemonRequest::Login {
+                        email,
+                        password,
+                        device_name,
+                        reply,
+                    } => {
+                        let result = self.apply_login(
+                            working,
+                            &email,
+                            &password,
+                            device_name.as_deref(),
+                            now_ms,
+                        );
+                        fires.push(Box::new(move || {
+                            let _ = reply.send(result);
+                        }));
+                    }
+                    DaemonRequest::Logout { reply } => {
+                        self.apply_logout(working);
+                        fires.push(Box::new(move || {
+                            let _ = reply.send(Ok(()));
+                        }));
+                    }
+                    DaemonRequest::NoteUserStop { source, reply } => {
+                        self.apply_note_user_stop(working, now_ms, &source);
+                        fires.push(Box::new(move || {
+                            let _ = reply.send(());
+                        }));
+                    }
+                    DaemonRequest::NoteUserStart { reply } => {
+                        self.apply_note_user_start(working, now_ms);
+                        fires.push(Box::new(move || {
+                            let _ = reply.send(());
+                        }));
+                    }
+                    DaemonRequest::QueueUpload { upload, reply } => {
+                        self.apply_queue_upload(working, now_ms, upload);
+                        fires.push(Box::new(move || {
+                            let _ = reply.send(());
+                        }));
+                    }
+                    DaemonRequest::FlushBatchNow { reply } => {
+                        self.apply_flush_batch_now(working, now_ms);
+                        fires.push(Box::new(move || {
+                            let _ = reply.send(());
+                        }));
+                    }
+                    DaemonRequest::Stop => unreachable!("filtered out by the caller"),
+                }
+            }
+            fires
+        });
+
+        for fire in fires {
+            fire();
+        }
+    }
+
+    /// Runs one normal tick (phases + next-wakeup + persist). Shared by
+    /// `run_forever` and `tick_once`.
+    fn run_tick(&self, now_ms: i64) {
+        self.with_locked_state(|working| {
+            let (_, should_logout) = self.run_phases(working, now_ms);
+            if should_logout {
+                self.apply_logout(working);
+            }
+            working.next_wakeup_at_ms = self.compute_next_wakeup(working, now_ms);
+            working.last_tick_at_ms = Some(now_ms);
+        });
+    }
+
+    /// Best-effort final flush on `Stop`: force any queued hash/batch items
+    /// out immediately rather than leaving them to wait out a wakeup that
+    /// will never come. Shared by `run_forever` and `tick_once`.
+    fn run_stopping_flush(&self, now_ms: i64) {
+        self.with_locked_state(|working| {
+            self.apply_flush_batch_now(working, now_ms);
+            let (_, should_logout) = self.run_phases(working, now_ms);
+            if should_logout {
+                self.apply_logout(working);
+            }
+        });
     }
 
     /// Blocking loop. Each iteration: wait for either the next scheduled
     /// wakeup or an incoming request; apply and persist any requests that
     /// arrived (replying only once that's durable); then run one tick
-    /// against an owned clone of the state, with no locking in the middle,
-    /// and write the result back.
+    /// against a freshly-reloaded copy of the state and write the result
+    /// back. Both the request-application step and the tick go through
+    /// `with_locked_state`, so each is its own cross-process-safe
+    /// read-modify-write cycle (SPEC.md §7) — there's still no *in-process*
+    /// locking in the middle of either one.
     ///
     /// Callable more than once across a `Daemon`'s lifetime — just not
     /// concurrently with itself. Linux/Mac/Windows only ever call this once,
@@ -500,98 +642,53 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             };
 
             let now_ms = self.now_ms();
-            let mut working = self
-                .state
-                .lock()
-                .expect("daemon state lock poisoned")
-                .clone();
-
-            if !requests.is_empty() {
-                let mut fires: Vec<Box<dyn FnOnce() + Send>> = Vec::with_capacity(requests.len());
-                for req in requests {
-                    match req {
-                        DaemonRequest::Login {
-                            email,
-                            password,
-                            device_name,
-                            reply,
-                        } => {
-                            let result = self.apply_login(
-                                &mut working,
-                                &email,
-                                &password,
-                                device_name.as_deref(),
-                                now_ms,
-                            );
-                            fires.push(Box::new(move || {
-                                let _ = reply.send(result);
-                            }));
-                        }
-                        DaemonRequest::Logout { reply } => {
-                            self.apply_logout(&mut working);
-                            fires.push(Box::new(move || {
-                                let _ = reply.send(Ok(()));
-                            }));
-                        }
-                        DaemonRequest::NoteUserStop { source, reply } => {
-                            self.apply_note_user_stop(&mut working, now_ms, &source);
-                            fires.push(Box::new(move || {
-                                let _ = reply.send(());
-                            }));
-                        }
-                        DaemonRequest::NoteUserStart { reply } => {
-                            self.apply_note_user_start(&mut working, now_ms);
-                            fires.push(Box::new(move || {
-                                let _ = reply.send(());
-                            }));
-                        }
-                        DaemonRequest::QueueUpload { upload, reply } => {
-                            self.apply_queue_upload(&mut working, now_ms, upload);
-                            fires.push(Box::new(move || {
-                                let _ = reply.send(());
-                            }));
-                        }
-                        DaemonRequest::FlushBatchNow { reply } => {
-                            self.apply_flush_batch_now(&mut working, now_ms);
-                            fires.push(Box::new(move || {
-                                let _ = reply.send(());
-                            }));
-                        }
-                        DaemonRequest::Stop => unreachable!("filtered out above"),
-                    }
-                }
-
-                *self.state.lock().expect("daemon state lock poisoned") = working.clone();
-                self.persist(&working);
-                for fire in fires {
-                    fire();
-                }
-            }
+            self.apply_requests(requests, now_ms);
 
             if stopping {
-                // Best-effort final flush: force any queued hash/batch items
-                // out immediately rather than leaving them to wait out a
-                // wakeup that will never come.
-                self.apply_flush_batch_now(&mut working, now_ms);
-                let (_, should_logout) = self.run_phases(&mut working, now_ms);
-                if should_logout {
-                    self.apply_logout(&mut working);
-                }
-                *self.state.lock().expect("daemon state lock poisoned") = working.clone();
-                self.persist(&working);
+                self.run_stopping_flush(now_ms);
                 self.restore_request_receiver(rx);
                 return;
             }
 
-            let (_, should_logout) = self.run_phases(&mut working, now_ms);
-            if should_logout {
-                self.apply_logout(&mut working);
-            }
-            working.next_wakeup_at_ms = self.compute_next_wakeup(&working, now_ms);
-            working.last_tick_at_ms = Some(now_ms);
-            *self.state.lock().expect("daemon state lock poisoned") = working.clone();
-            self.persist(&working);
+            self.run_tick(now_ms);
         }
+    }
+
+    /// Applies and persists whatever requests are currently queued and,
+    /// unless a `Stop` was among them, runs exactly one tick — then returns
+    /// without blocking or looping. See SPEC.md §6.8: for a platform with no
+    /// way to keep a background thread alive between invocations (iOS's
+    /// Safari-extension native message handler — the OS only guarantees it
+    /// runs for the duration of one `beginRequest`/`completeRequest` round
+    /// trip, not a persistent background loop; see `architecture.md`), call
+    /// this once per invocation instead of `run_forever`.
+    ///
+    /// Not callable concurrently with `run_forever` or with itself on the
+    /// same `Daemon` (same restriction as `run_forever`, enforced the same
+    /// way — see `take_request_receiver`).
+    pub fn tick_once(&self) {
+        let rx = self.take_request_receiver();
+        let now_ms = self.now_ms();
+
+        let mut requests: Vec<DaemonRequest> = Vec::new();
+        while let Ok(req) = rx.try_recv() {
+            requests.push(req);
+        }
+        let stopping = {
+            let had_stop = requests.iter().any(|r| matches!(r, DaemonRequest::Stop));
+            requests.retain(|r| !matches!(r, DaemonRequest::Stop));
+            had_stop
+        };
+
+        self.apply_requests(requests, now_ms);
+
+        if stopping {
+            self.run_stopping_flush(now_ms);
+        } else {
+            self.run_tick(now_ms);
+        }
+
+        self.restore_request_receiver(rx);
     }
 
     /// One full sequential pass over `working` — lifecycle check, screenshot

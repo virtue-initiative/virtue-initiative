@@ -117,3 +117,19 @@ MUST force the next tick to upload the current batch immediately rather than wai
 `request_stop()`
 
 MUST stop the loop after its current tick. The loop MAY be started again afterward.
+
+### 6.8 tick_once
+
+`tick_once()`
+
+MUST apply and persist any currently-queued requests, then MUST run exactly one tick, then MUST return — without waiting for a scheduled wakeup and without looping. For a platform with no way to keep a background thread alive between invocations (iOS's Safari-extension native message handler, which the OS only guarantees runs for the duration of one request/response round trip — see `architecture.md`), this MUST be the method called once per invocation instead of `run_forever`. MUST NOT be called concurrently with `run_forever` or with itself on the same `Daemon`.
+
+## 7. State persistence
+
+State MUST be persisted to a single JSON file (`state_path`) via a tmp-file-plus-rename so a reader never observes a partially-written file.
+
+On platforms where more than one OS process can construct a `Daemon` against the same `state_path` concurrently (iOS: the Safari extension's own daemon and the app's on-demand daemon started to service a blocking client call), each read-modify-write of that state — whether applying a client request or running a tick — MUST be serialized against other processes by holding an OS-level advisory exclusive lock on a sibling lock file (`state_path` with its extension replaced by `.lock`) for the full span from re-reading state through persisting the result. The lock MUST be released between iterations/requests rather than held for a `Daemon`'s whole lifetime, so a process not currently mutating state cannot starve another process's access.
+
+Because a `Daemon`'s working copy is normally cached in memory across iterations to avoid re-reading disk on every tick, a process MUST re-read `state_path` from disk immediately after acquiring the lock and before applying any mutation, rather than trusting its in-memory cache — otherwise its eventual persist would silently discard whatever another process wrote since this process's last read.
+
+This locking MUST NOT be required — though it MAY be applied unconditionally, since it is then always uncontended — on platforms where at most one process ever holds a `Daemon` for a given `state_path` (Linux/Mac/Windows, which route all other processes' access through `ipc.rs`'s socket instead of a second `Daemon`; Android's single-process model).

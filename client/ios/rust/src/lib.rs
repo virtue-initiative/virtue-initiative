@@ -314,6 +314,23 @@ pub extern "C" fn virtue_ios_native_run_daemon_loop() -> *mut c_char {
     into_c_result(result)
 }
 
+/// Applies any pending requests and runs exactly one tick, then returns —
+/// see `Daemon::tick_once` / SPEC.md §6.8. This is what the Safari
+/// extension's native message handler calls (synchronously, once per
+/// `beginRequest`) instead of `virtue_ios_native_run_daemon_loop`: the OS
+/// only guarantees that process runs for the duration of one message's
+/// round trip, not long enough for a background loop thread to do anything
+/// useful.
+#[no_mangle]
+pub extern "C" fn virtue_ios_native_tick_once() -> *mut c_char {
+    let result = (|| -> Result<()> {
+        core()?.daemon.tick_once();
+        Ok(())
+    })();
+
+    into_c_result(result)
+}
+
 #[no_mangle]
 pub extern "C" fn virtue_ios_native_stop_daemon() -> *mut c_char {
     let result = (|| -> Result<()> {
@@ -343,6 +360,16 @@ pub extern "C" fn virtue_ios_native_request_pause_monitoring(source: *const c_ch
             value => value.to_string(),
         };
         core.daemon.note_user_stop(&source);
+        Ok(())
+    })();
+
+    into_c_result(result)
+}
+
+#[no_mangle]
+pub extern "C" fn virtue_ios_native_request_resume_monitoring() -> *mut c_char {
+    let result = (|| -> Result<()> {
+        core()?.daemon.note_user_start();
         Ok(())
     })();
 

@@ -29,6 +29,10 @@ aes-gcm = "0.10"
 argon2 = "0.5"
 base64 = "0.23"
 flate2 = "1.1"
+# Cross-process advisory locking for `state.rs`'s sibling `.lock` file — see
+# SPEC.md §7. `flock`-backed on every Unix target we ship (incl. iOS/Android),
+# `LockFileEx`-backed on Windows.
+fs2 = "0.4"
 hkdf = "0.12.4"
 hpke = "0.13.0"
 # Every platform's `take_screenshot` returns PNG (`content_type: "image/png"`),
