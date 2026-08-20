@@ -7,14 +7,17 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 ARCH="universal"
+PROFILE="release"
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [--arch universal|arm64|x86_64]
+Usage: $(basename "$0") [--arch universal|arm64|x86_64] [--profile debug|release]
 
   --arch universal   Build both architectures and lipo them (default; what CI/release use).
   --arch arm64        Build only the Apple Silicon slice. Faster for local iteration on arm64 hosts.
   --arch x86_64        Build only the Intel slice. Faster for local iteration on Intel hosts.
+  --profile debug     Build the debug profile. Faster; used for PR/non-release CI runs.
+  --profile release   Build the release profile (default; what CI/release use).
 EOF
 }
 
@@ -22,6 +25,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --arch)
       ARCH="$2"
+      shift 2
+      ;;
+    --profile)
+      PROFILE="$2"
       shift 2
       ;;
     -h|--help)
@@ -35,6 +42,14 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+case "$PROFILE" in
+  debug|release) ;;
+  *)
+    echo "Unknown --profile value: $PROFILE (expected debug|release)" >&2
+    exit 1
+    ;;
+esac
 
 CLIENT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MAC_ROOT="${CLIENT_ROOT}/mac"
@@ -78,6 +93,15 @@ case "$ARCH" in
     ;;
 esac
 
+if [[ "$PROFILE" == "release" ]]; then
+  CARGO_PROFILE_FLAG="--release"
+  XCODE_CONFIGURATION="Release"
+else
+  CARGO_PROFILE_FLAG=""
+  XCODE_CONFIGURATION="Debug"
+fi
+CARGO_PROFILE_DIR="$PROFILE"
+
 PROJECT_PATH="${MAC_ROOT}/VirtueMac.xcodeproj"
 if [[ ! -d "$PROJECT_PATH" ]]; then
   echo "Missing ${PROJECT_PATH}. Run mac/scripts/generate-project.sh (requires xcodegen) and commit the result." >&2
@@ -100,16 +124,16 @@ fi
 #    VIRTUE_MAC_RUST_PREBUILT below, avoids paying for that twice.
 for target in "${DAEMON_TARGETS[@]}"; do
   rustup target add "$target" >/dev/null 2>&1 || true
-  VIRTUE_BUILD_LABEL="$BUILD_LABEL" cargo build --release --target "$target" -p virtue-mac -p virtue-mac-ffi
+  VIRTUE_BUILD_LABEL="$BUILD_LABEL" cargo build $CARGO_PROFILE_FLAG --target "$target" -p virtue-mac -p virtue-mac-ffi
 done
 UNIVERSAL_DAEMON_DIR="target/macos-universal-daemon"
 mkdir -p "$UNIVERSAL_DAEMON_DIR"
 if [[ "${#DAEMON_TARGETS[@]}" -eq 1 ]]; then
-  cp "target/${DAEMON_TARGETS[0]}/release/virtue-mac" "${UNIVERSAL_DAEMON_DIR}/virtue-daemon"
+  cp "target/${DAEMON_TARGETS[0]}/${CARGO_PROFILE_DIR}/virtue-mac" "${UNIVERSAL_DAEMON_DIR}/virtue-daemon"
 else
   lipo -create \
-    "target/${DAEMON_TARGETS[0]}/release/virtue-mac" \
-    "target/${DAEMON_TARGETS[1]}/release/virtue-mac" \
+    "target/${DAEMON_TARGETS[0]}/${CARGO_PROFILE_DIR}/virtue-mac" \
+    "target/${DAEMON_TARGETS[1]}/${CARGO_PROFILE_DIR}/virtue-mac" \
     -output "${UNIVERSAL_DAEMON_DIR}/virtue-daemon"
 fi
 
@@ -129,7 +153,7 @@ export VIRTUE_MAC_RUST_PREBUILT=1
   XCODEBUILD_ARGS=(
     -project VirtueMac.xcodeproj
     -scheme VirtueMac
-    -configuration Release
+    -configuration "${XCODE_CONFIGURATION}"
     -derivedDataPath "${CLIENT_ROOT}/target/macos/DerivedData"
     MARKETING_VERSION="${BASE_VERSION}"
     CURRENT_PROJECT_VERSION="${APPLE_BUILD_NUMBER}"
@@ -151,7 +175,7 @@ export VIRTUE_MAC_RUST_PREBUILT=1
 
 rm -rf "$APP_ROOT"
 mkdir -p "$(dirname "$APP_ROOT")"
-cp -R "target/macos/DerivedData/Build/Products/Release/${APP_NAME}" "$APP_ROOT"
+cp -R "target/macos/DerivedData/Build/Products/${XCODE_CONFIGURATION}/${APP_NAME}" "$APP_ROOT"
 
 # 3. Bundle the universal daemon binary inside the app. `daemon_exe_path()`
 #    (Rust FFI) and the coordinator both resolve this same path at runtime.

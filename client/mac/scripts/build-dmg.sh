@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLIENT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "$CLIENT_ROOT"
 
-"${SCRIPT_DIR}/build-app.sh"
+"${SCRIPT_DIR}/build-app.sh" "$@"
 
 source "${CLIENT_ROOT}/scripts/version.sh"
 

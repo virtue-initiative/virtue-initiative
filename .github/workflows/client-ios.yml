@@ -35,15 +35,6 @@ jobs:
           cache-on-failure: true
           workspaces: |
             client -> target
-            client/ios/rust -> target
-
-      - name: Rust build smoke test (core)
-        run: cargo build -p virtue-core
-        working-directory: client
-
-      - name: Rust build smoke test (iOS bridge)
-        run: cargo build --manifest-path Cargo.toml
-        working-directory: client/ios/rust
 
       - name: Resolve version info
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
@@ -55,13 +46,22 @@ jobs:
           echo "build_label=$(virtue_build_label)" >> "$GITHUB_OUTPUT"
         working-directory: client
 
-      - name: iOS app build smoke test (simulator)
-        run: ./scripts/build-ios.sh --destination "generic/platform=iOS Simulator" --derived-data .derived-data-ci-ios
-        working-directory: client/ios
+      - name: Rust lint (iOS client)
+        run: cargo clippy -p virtue-ios --all-targets -- -D warnings
+        working-directory: client
 
-      - name: Build iOS app bundle (release, unsigned)
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
-        run: ./scripts/build-ios.sh --destination "generic/platform=iOS" --configuration Release --derived-data .derived-data-ci-ios-release --code-signing-allowed NO
+      - name: Determine build configuration
+        id: profile
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "push" && ( "${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/staging" ) ]]; then
+            echo "xcode_configuration_flag=--configuration Release" >> "$GITHUB_OUTPUT"
+          else
+            echo "xcode_configuration_flag=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build iOS app bundle (unsigned)
+        run: ./scripts/build-ios.sh --destination "generic/platform=iOS" ${{ steps.profile.outputs.xcode_configuration_flag }} --derived-data .derived-data-ci-ios --code-signing-allowed NO
         working-directory: client/ios
 
       - name: Package iOS app bundle
@@ -69,7 +69,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          app_path=".derived-data-ci-ios-release/Build/Products/Release-iphoneos/VirtueIOS.app"
+          app_path=".derived-data-ci-ios/Build/Products/Release-iphoneos/VirtueIOS.app"
           if [[ ! -d "${app_path}" ]]; then
             echo "Built iOS app bundle not found: ${app_path}" >&2
             exit 1

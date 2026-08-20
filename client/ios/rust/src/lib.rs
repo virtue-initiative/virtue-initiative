@@ -237,7 +237,10 @@ pub extern "C" fn virtue_ios_native_login(
 #[no_mangle]
 pub extern "C" fn virtue_ios_native_logout() -> *mut c_char {
     let result = (|| -> Result<()> {
-        core()?.daemon.logout().map_err(|err| anyhow!(err.to_string()))?;
+        core()?
+            .daemon
+            .logout()
+            .map_err(|err| anyhow!(err.to_string()))?;
         Ok(())
     })();
 
