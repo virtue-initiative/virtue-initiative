@@ -7,6 +7,7 @@ import preact from '@astrojs/preact';
 import mermaid from 'astro-mermaid';
 
 export default defineConfig({
+  site: 'https://virtueinitiative.org',
   trailingSlash: 'never',
   build: {
     format: 'file',
