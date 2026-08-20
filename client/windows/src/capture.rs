@@ -103,7 +103,7 @@ pub fn capture_screen_png() -> Result<Vec<u8>> {
         }
 
         let mut rgba = Vec::with_capacity(bgra.len());
-        for px in bgra.chunks_exact(4) {
+        for px in bgra.as_chunks::<4>().0 {
             rgba.push(px[2]);
             rgba.push(px[1]);
             rgba.push(px[0]);
