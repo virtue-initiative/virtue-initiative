@@ -78,6 +78,27 @@ export function sleep(seconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 }
 
+/**
+ * Windows briefly holds a file lock after a child process exits and its
+ * dup'd stdout/stderr fd is closed, so a plain `rmSync` right after
+ * `stopProcess` can race an `EBUSY`/`ENOTEMPTY`. Retry with backoff instead
+ * of failing cleanup over a lock the OS is about to release on its own.
+ */
+export async function rmSyncRetry(path: string): Promise<void> {
+  const delaysMs = [50, 100, 200, 400, 800];
+  for (const delay of delaysMs) {
+    try {
+      rmSync(path, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'EBUSY' && code !== 'ENOTEMPTY') throw err;
+      await sleep(delay / 1000);
+    }
+  }
+  rmSync(path, { recursive: true, force: true });
+}
+
 /** Polls `condition` once a second until it returns true or `tries` is exhausted. */
 export async function waitUntil(
   tries: number,
