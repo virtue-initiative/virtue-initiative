@@ -255,7 +255,7 @@ fn build_icon() -> ksni::Icon {
         let width = 16_i32;
         let height = 16_i32;
         let mut argb = vec![0_u8; (width * height * 4) as usize];
-        for pixel in argb.chunks_exact_mut(4) {
+        for pixel in argb.as_chunks_mut::<4>().0 {
             pixel.copy_from_slice(&[0xff, 0x20, 0x20, 0x20]);
         }
         ksni::Icon {
@@ -276,7 +276,7 @@ fn build_icon() -> ksni::Icon {
     let width = decoded.width() as i32;
     let height = decoded.height() as i32;
     let mut argb = decoded.into_raw();
-    for pixel in argb.chunks_exact_mut(4) {
+    for pixel in argb.as_chunks_mut::<4>().0 {
         pixel.rotate_right(1);
     }
 
