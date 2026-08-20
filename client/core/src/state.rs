@@ -45,6 +45,7 @@ pub fn lock_state(path: &Path) -> CoreResult<StateLock> {
     let lock_path = path.with_extension("lock");
     let file = OpenOptions::new()
         .create(true)
+        .truncate(true)
         .write(true)
         .open(&lock_path)?;
     file.lock_exclusive()?;
