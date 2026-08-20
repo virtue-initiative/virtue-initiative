@@ -2,9 +2,6 @@ use std::io;
 
 use thiserror::Error;
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-use crate::events::remote::IpcError;
-
 pub type CoreResult<T> = Result<T, CoreError>;
 
 #[derive(Debug, Error)]
@@ -24,7 +21,7 @@ pub enum CoreError {
     #[error("image error: {0}")]
     Image(#[from] image::ImageError),
     #[error("HTTP error: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(#[from] ureq::Error),
     #[error("base64 decode error: {0}")]
     Base64(#[from] base64::DecodeError),
     #[error("argon2 error: {0}")]
@@ -47,13 +44,6 @@ pub enum CoreError {
     Classifier(String),
     #[error("IPC error: {0}")]
     Ipc(String),
-}
-
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-impl From<IpcError> for CoreError {
-    fn from(e: IpcError) -> Self {
-        CoreError::Ipc(e.to_string())
-    }
 }
 
 impl CoreError {

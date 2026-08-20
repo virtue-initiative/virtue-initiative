@@ -4,6 +4,20 @@
 //! knows its own process model — but the naming/retention knobs are pure
 //! logic worth centralizing rather than reimplementing per platform.
 
+pub fn log_error(msg: &str, err: Option<&dyn std::fmt::Display>) {
+    match err {
+        Some(e) => tracing::error!(error = %e, "{msg}"),
+        None => tracing::error!("{msg}"),
+    }
+}
+
+pub fn log_warning(msg: &str, err: Option<&dyn std::fmt::Display>) {
+    match err {
+        Some(e) => tracing::warn!(error = %e, "{msg}"),
+        None => tracing::warn!("{msg}"),
+    }
+}
+
 /// Default `EnvFilter` directive — the fallback when no runtime override
 /// (`RUST_LOG`, where supported) is present. Always debug-level for
 /// `virtue_core` so release builds retain the same diagnostic detail as

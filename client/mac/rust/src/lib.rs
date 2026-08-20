@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use once_cell::sync::OnceCell;
-use virtue_core::{AuthState, ClientController};
+use virtue_core::AuthState;
+use virtue_core::ipc::ClientController;
 use virtue_mac_platform::capture::{has_screen_capture_access, request_screen_capture_access};
 use virtue_mac_platform::config::{ClientPaths, ClientState, read_auth_state, save_state};
 use virtue_mac_platform::launch_agent;
@@ -116,7 +117,7 @@ pub extern "C" fn virtue_mac_native_get_status_json() -> *mut c_char {
 /// stopped, `1`) from a timeout/IPC error (daemon alive but busy, `2`). A
 /// successful status response always means running (`0`), since the
 /// lifecycle module hardcodes `is_running: true` whenever it can answer a
-/// `StatusRequest`.
+/// status request at all.
 #[unsafe(no_mangle)]
 pub extern "C" fn virtue_mac_native_poll_daemon_status() -> c_int {
     let Ok(core) = core() else {
@@ -132,8 +133,8 @@ pub extern "C" fn virtue_mac_native_poll_daemon_status() -> c_int {
     }
 }
 
-/// Send `UserStopRequested` to the daemon and wait for a status round-trip on
-/// the same connection, guaranteeing the daemon processed it before the
+/// Tell the daemon a user requested a stop, and wait for a status round-trip
+/// on the same connection, guaranteeing the daemon processed it before the
 /// caller proceeds to stop the launch agent.
 #[unsafe(no_mangle)]
 pub extern "C" fn virtue_mac_native_request_user_stop(source: *const c_char) -> *mut c_char {

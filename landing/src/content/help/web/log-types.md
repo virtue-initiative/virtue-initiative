@@ -41,6 +41,14 @@ is asleep; this entry is logged retrospectively once monitoring resumes.
 A monitoring lifecycle event occurred that doesn't fall into the categories
 above.
 
+## Screenshot Missed
+
+A scheduled screenshot was noticeably late, or several recent ones added up to
+a longer-than-expected delay, and it wasn't explained by a nearby sign-in or
+sign-out. This can happen when the device was offline, under heavy load, or
+asleep without recording a sleep event. An occasional one is normal; frequent
+ones are worth investigating.
+
 ## Unexpected Gap
 
 There was a gap in monitoring while the app was running — no events arrived for
@@ -57,6 +65,10 @@ device shutting down cleanly.
 ## Monitoring Stopped by User
 
 A user stopped the monitoring process.
+
+## Monitoring Resumed by User
+
+A user resumed monitoring after previously stopping it.
 
 ## Unexpected Restart
 

@@ -135,10 +135,18 @@ final class MonitoringCoordinator: ObservableObject {
         let pw = password
         let trimmedDeviceName = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedDeviceName = trimmedDeviceName.isEmpty ? UIDevice.current.name : trimmedDeviceName
+        let configDirPath = configDir.path
+        let dataDirPath = dataDir.path
 
         Task { @MainActor in
-            let error = await Task.detached(priority: .userInitiated) {
-                NativeBridge.login(email: trimmedEmail, password: pw, deviceName: resolvedDeviceName)
+            let error = await Task.detached(priority: .userInitiated) { () -> String? in
+                if let initError = NativeBridge.ensureInitialized(
+                    configDir: configDirPath,
+                    dataDir: dataDirPath
+                ) {
+                    return initError
+                }
+                return NativeBridge.login(email: trimmedEmail, password: pw, deviceName: resolvedDeviceName)
             }.value
             isSigningIn = false
             if let error {
@@ -160,9 +168,12 @@ final class MonitoringCoordinator: ObservableObject {
         statusMessage = "Signing out..."
 
         isSigningOut = true
+        let configDirPath = configDir.path
+        let dataDirPath = dataDir.path
         Task { @MainActor in
             let error = await Task.detached(priority: .userInitiated) {
-                NativeBridge.logout()
+                NativeBridge.ensureInitialized(configDir: configDirPath, dataDir: dataDirPath)
+                return NativeBridge.logout()
             }.value
             isSigningOut = false
             statusMessage = error.map { "Logout warning: \($0)" } ?? "Signed out"
@@ -174,20 +185,40 @@ final class MonitoringCoordinator: ObservableObject {
 
     func toggleMonitoring() {
         let nextValue = !monitoringEnabled
-        if !nextValue {
-            if let error = NativeBridge.requestPauseMonitoring(source: "ios_pause_button") {
+        guard !nextValue else {
+            Task { @MainActor in
+                let error = await Task.detached(priority: .userInitiated) {
+                    NativeBridge.requestResumeMonitoring()
+                }.value
+                if let error {
+                    statusMessage = "Resume request failed: \(error)"
+                    refreshCoreStatus()
+                    refreshSafariStatus()
+                    return
+                }
+                setMonitoringEnabled(true)
+                refreshCoreStatus()
+                refreshSafariStatus()
+                statusMessage = "Monitoring resumed. Open Safari to restart capture."
+            }
+            return
+        }
+
+        Task { @MainActor in
+            let error = await Task.detached(priority: .userInitiated) {
+                NativeBridge.requestPauseMonitoring(source: "ios_pause_button")
+            }.value
+            if let error {
                 statusMessage = "Pause request failed: \(error)"
                 refreshCoreStatus()
                 refreshSafariStatus()
                 return
             }
+            setMonitoringEnabled(false)
+            refreshCoreStatus()
+            refreshSafariStatus()
+            statusMessage = "Monitoring paused. Safari capture will stop on the next extension heartbeat."
         }
-        setMonitoringEnabled(nextValue)
-        refreshCoreStatus()
-        refreshSafariStatus()
-        statusMessage = nextValue
-            ? "Monitoring resumed. Open Safari to restart capture."
-            : "Monitoring paused. Safari capture will stop on the next extension heartbeat."
     }
 
     private func initializeCore() {
@@ -199,7 +230,7 @@ final class MonitoringCoordinator: ObservableObject {
             return
         }
 
-        let error = NativeBridge.initialize(
+        let error = NativeBridge.ensureInitialized(
             configDir: configDir.path,
             dataDir: dataDir.path
         )

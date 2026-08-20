@@ -1,9 +1,7 @@
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, anyhow};
-use virtue_core::{
-    CoreError, CoreResult, LifecycleHooks, PlatformHooks, Screenshot, ScreenshotHooks,
-};
+use virtue_core::{CoreError, CoreResult, LifecycleHooks, Screenshot, ScreenshotHooks};
 
 #[derive(Clone, Copy, Debug)]
 pub enum CaptureBackend {
@@ -230,7 +228,18 @@ impl LinuxPlatformHooks {
 
 impl ScreenshotHooks for LinuxPlatformHooks {
     fn take_screenshot(&self) -> CoreResult<Screenshot> {
-        let bytes = capture_screen().map_err(|err| CoreError::CommandFailed(err.to_string()))?;
+        let bytes = capture_screen().map_err(|err| {
+            let message = err.to_string();
+            if is_session_unavailable_text(&message) {
+                // Common/expected while no graphical session is active (e.g. before
+                // login) — the capture cadence is now on the order of minutes, so this
+                // no longer needs throttled logging.
+                tracing::debug!(error = %message, "capture session unavailable");
+            } else {
+                tracing::warn!(error = %message, "screenshot capture failed");
+            }
+            CoreError::CommandFailed(message)
+        })?;
         Ok(Screenshot {
             captured_at_ms: self.get_time_utc_ms()?,
             bytes,
@@ -383,29 +392,26 @@ fn query_screensaver_active() -> Option<bool> {
     None
 }
 
-fn read_clock_ms(clock_id: libc::clockid_t) -> CoreResult<i64> {
-    let mut ts = libc::timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    // SAFETY: `ts` is a valid, owned `timespec` we pass as an out-param; `clock_gettime`
-    // does not retain the pointer past the call.
-    let rc = unsafe { libc::clock_gettime(clock_id, &mut ts) };
-    if rc != 0 {
-        return Err(CoreError::CommandFailed(
-            std::io::Error::last_os_error().to_string(),
-        ));
-    }
-    Ok(ts.tv_sec * 1000 + ts.tv_nsec / 1_000_000)
-}
-
 impl LifecycleHooks for LinuxPlatformHooks {
-    fn get_boot_clock_ms(&self) -> CoreResult<i64> {
-        read_clock_ms(libc::CLOCK_BOOTTIME)
-    }
-
+    // `CLOCK_MONOTONIC` excludes time spent suspended (unlike
+    // `CLOCK_BOOTTIME`, which includes it) — see `clock_gettime(2)`. Feeds
+    // only `lifecycle::tick`'s suspend evidence (`SPEC.md` §2); screenshot
+    // scheduling is unaffected.
     fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
-        read_clock_ms(libc::CLOCK_MONOTONIC)
+        let mut ts = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        // SAFETY: `ts` is a valid, owned out-param that does not outlive this
+        // call; `clock_gettime` has no other preconditions.
+        let rc = unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
+        if rc != 0 {
+            return Err(CoreError::CommandFailed(format!(
+                "clock_gettime(CLOCK_MONOTONIC) failed: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
+        Ok(ts.tv_sec * 1000 + ts.tv_nsec / 1_000_000)
     }
 
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {
@@ -431,12 +437,10 @@ impl LifecycleHooks for LinuxPlatformHooks {
     }
 }
 
-impl PlatformHooks for LinuxPlatformHooks {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use virtue_core::{LifecycleHooks, ScreenshotHooks};
+    use virtue_core::ScreenshotHooks;
 
     #[test]
     fn is_session_unavailable_text_matches_known_error_strings() {
@@ -491,20 +495,17 @@ mod tests {
     }
 
     #[test]
-    fn boot_clock_includes_at_least_as_much_as_monotonic_clock() {
+    fn platform_hooks_get_monotonic_clock_ms_is_positive_and_advances() {
         let hooks = LinuxPlatformHooks::new();
-        let boot = hooks
-            .get_boot_clock_ms()
-            .expect("boot clock should not fail");
-        let mono = hooks
+        let first = hooks
             .get_monotonic_clock_ms()
-            .expect("monotonic clock should not fail");
-        assert!(boot >= 0);
-        assert!(mono >= 0);
-        assert!(
-            boot >= mono,
-            "CLOCK_BOOTTIME ({boot}) should be >= CLOCK_MONOTONIC ({mono}) since it includes suspend"
-        );
+            .expect("clock should not fail");
+        assert!(first > 0);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let second = hooks
+            .get_monotonic_clock_ms()
+            .expect("clock should not fail");
+        assert!(second >= first);
     }
 
     #[test]

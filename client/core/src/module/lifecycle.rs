@@ -1,957 +1,771 @@
-use std::any::Any;
+use std::collections::VecDeque;
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::CoreResult;
-use crate::events::Ping;
-use crate::events::bus::{Emitter, EventBus, Observer, StateType};
-use crate::model::{AlertReason, LifecycleKind, PartialStatus, UploadKind};
-use crate::module::status::StatusRequest;
-use crate::module::upload::Upload;
+use crate::model::UploadKind;
+use crate::module::upload::{self, UploadState};
 use crate::platform::LifecycleHooks;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProcessStarted;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProcessStopped;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserStopRequested {
-    pub source: String,
-}
 
 pub(crate) const EXTRA_HIGH_RISK: f32 = 0.9;
 /// High-risk lifecycle alerts that are still noteworthy but don't warrant an
 /// immediate notification. The upload module routes `risk >= EXTRA_HIGH_RISK`
-/// through the immediate (emailed) path; keeping these just below that threshold
-/// flags them as high for review/sorting while letting them ride the normal
-/// batch.
+/// through the immediate (emailed) path; keeping late-wakeup alerts just below
+/// that threshold flags them as high for review/sorting while letting them
+/// ride the normal batch.
 pub(crate) const HIGH_RISK_LIFECYCLE_ALERT: f32 = 0.8;
 
-// Sliding-window gap-budget detection, shared by all three gap buckets below.
-// A single stall can be a blip (heavy capture/classify cycle, a slow poll) —
-// alerting on one is twitchy, so we sum the time lost to over-threshold gaps
-// inside a sliding window and only alert when that sustained gap budget is
-// exceeded. Each bucket has its own budget: startup gets the most headroom
-// since a legitimate boot can take longer than a plain mid-session stall.
-const PER_GAP_THRESHOLD_MS: i64 = 10_000; // a gap must exceed 10s to count
-const GAP_WINDOW_MS: i64 = 10 * 60 * 1_000; // 10-min sliding window
-const GAP_BUDGET_MS: i64 = 2 * 60 * 1_000; // UnexpectedGap (mid-session): alert at >= 2 min in window
-const STARTUP_GAP_BUDGET_MS: i64 = 4 * 60 * 1_000; // UnexpectedStart: alert at >= 4 min, to tolerate longer boots
-const STOP_GAP_BUDGET_MS: i64 = 60_000; // UnexpectedStop: alert at >= 1 min, unchanged
-const GAP_ALERT_COOLDOWN_MS: i64 = 5 * 60 * 1_000; // <= one alert per 5 min
-
-const SUSPEND_MIN_MS: i64 = 5_000; // boot-vs-monotonic divergence worth logging
-const LOGIN_POLL_INTERVAL_MS: i64 = 5 * 60 * 1_000; // coarse poll cadence while running
-
-/// A single heartbeat's clock readings, used to compute the delta to the next
-/// heartbeat.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default)]
-pub struct HeartbeatSample {
-    pub utc_ms: i64,
-    pub boot_clock_ms: i64,
-    pub monotonic_clock_ms: i64,
-    pub login_id: u64,
-}
-
-/// Sliding-window gap-budget tracker shared by the three gap buckets
-/// (unexpected gap / start / stop). Holds `(ts_ms, gap_ms)` for each gap that
-/// exceeded the per-gap threshold; entries age out of the window.
-/// `last_alert_ms` is the cooldown anchor (0 = never alerted).
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-#[serde(default)]
-pub struct GapTracker {
-    pub gaps: Vec<(i64, i64)>,
-    pub last_alert_ms: i64,
-}
-
-impl GapTracker {
-    fn record(&mut self, now_ms: i64, gap_ms: i64) {
-        self.gaps.push((now_ms, gap_ms));
-    }
-
-    /// Prune to the sliding window, sum the remaining gap time, and report
-    /// whether the budget is newly crossed (respecting the cooldown). Gaps
-    /// are intentionally NOT cleared on alert — chronic stalls keep
-    /// re-alerting each cooldown, while one-off bursts age out of the window.
-    fn crossed_budget(&mut self, now_ms: i64, budget_ms: i64) -> bool {
-        let window_start = now_ms - GAP_WINDOW_MS;
-        self.gaps.retain(|(ts, _)| *ts >= window_start);
-        let total: i64 = self.gaps.iter().map(|(_, gap)| *gap).sum();
-
-        // The `== 0` short-circuit keeps the very first alert from being
-        // suppressed by the cooldown (which is anchored at 0 = "never alerted").
-        let cooldown_ok =
-            self.last_alert_ms == 0 || now_ms - self.last_alert_ms >= GAP_ALERT_COOLDOWN_MS;
-
-        if total >= budget_ms && cooldown_ok {
-            self.last_alert_ms = now_ms;
-            true
-        } else {
-            false
-        }
-    }
-}
+/// See `client/core/SPEC.md` §2.
+const MAX_TRACKED_WAKEUPS: usize = 10;
+const SINGLE_LATE_THRESHOLD_MS: i64 = 60_000; // 1 minute
+const SUM_LATE_THRESHOLD_MS: i64 = 5 * 60_000; // 5 minutes
+const LOGIN_LOGOUT_EXCUSE_MS: i64 = 2 * 60_000; // 2 minutes
+/// Floor below which a measured clock divergence is treated as noise (clock
+/// jitter, NTP adjustment) rather than a real suspend. See `SPEC.md` §2.
+const SUSPEND_EVIDENCE_MIN_MS: i64 = 5_000;
+/// Slack allowed between the measured suspended duration and the gap being
+/// evaluated for the suspend evidence to still count as "explains the gap" —
+/// tolerates wake-up scheduling jitter without requiring an exact match.
+const SUSPEND_EVIDENCE_SLACK_MS: i64 = SINGLE_LATE_THRESHOLD_MS;
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 #[serde(default)]
-pub struct LifecycleObserverState {
-    /// Bumped each time `get_last_login_utc_ms` reports a login newer than
-    /// `last_login_utc_ms`. Tags each `HeartbeatSample` with the session it
-    /// belongs to.
-    pub login_id: u64,
-    pub last_login_utc_ms: i64,
-    pub last_logout_utc_ms: i64,
-
-    /// Just the previous tick's clock readings — O(1), not a growing history.
-    pub last_sample: Option<HeartbeatSample>,
-    /// Last observed boot-clock value, used to detect a reboot (the
-    /// boot-relative clocks resetting to a smaller value than previously seen).
-    pub last_boot_clock_ms: i64,
-    /// Throttles `get_last_login_utc_ms`/`get_last_logout_utc_ms`, which can
-    /// be expensive (D-Bus round-trips, subprocess shell-outs) — polled at
-    /// most every `LOGIN_POLL_INTERVAL_MS`, plus whenever `ProcessStarted`
-    /// fires or a reboot is detected.
-    pub last_login_poll_at_ms: i64,
-
-    pub unexpected_gap: GapTracker,
-    pub unexpected_start: GapTracker,
-    pub unexpected_stop: GapTracker,
+pub struct LifecycleState {
+    /// Lateness (`actual - expected`, may be negative) of the last up to
+    /// [`MAX_TRACKED_WAKEUPS`] non-excused wakeups, oldest first.
+    pub late_wakeups: VecDeque<i64>,
+    /// Last system login/logout time seen, so a change can be detected and
+    /// reported once. See `SPEC.md` §5.
+    pub last_seen_login_ms: Option<i64>,
+    pub last_seen_logout_ms: Option<i64>,
+    /// Set by `note_user_stop` (never by a plain clean shutdown — see that
+    /// function's doc comment for why) and cleared by `note_user_start`.
+    /// While true, `tick()` ignores lateness entirely — no gap is recorded,
+    /// checked, or alerted on — so the gap the stop itself caused is never
+    /// mistaken for tampering. See `SPEC.md` §2.
+    pub monitoring_stopped: bool,
+    /// Real UTC time and suspend-safe-clock (`LifecycleHooks::get_monotonic_clock_ms`)
+    /// reading, both captured at the end of the previous `tick()` call — the
+    /// baseline `tick()` diffs against to compute suspend evidence. `None`
+    /// before the first tick. See `SPEC.md` §2.
+    pub last_tick_utc_ms: Option<i64>,
+    pub last_tick_suspend_safe_ms: Option<i64>,
 }
 
-pub struct LifecycleModule {
-    pub state: LifecycleObserverState,
-    hooks: Box<dyn LifecycleHooks>,
+/// Phase 1 of `Daemon::run_phases`: compares `now_ms` to the wakeup time this
+/// tick was scheduled for (the daemon's `next_wakeup_at_ms` as of the end of
+/// the previous tick) and records how late the daemon woke, unless excused by
+/// a login/logout bracket that isn't contradicted by the other side's
+/// evidence (see the excuse logic below). Alerts via [`upload::enqueue`] once
+/// the late-wakeup budget is crossed. See `client/core/SPEC.md` §2.
+///
+/// `expected_wakeup_at_ms == 0` means no wakeup has ever been scheduled yet
+/// (the daemon's very first tick, or the first tick after `note_user_start`
+/// reset the schedule) — nothing to compare against.
+pub fn tick(
+    state: &mut LifecycleState,
+    upload: &mut UploadState,
+    hooks: &dyn LifecycleHooks,
+    now_ms: i64,
+    expected_wakeup_at_ms: i64,
+) {
+    // Captured unconditionally (even on an early return below) so the next
+    // call always has a fresh baseline to diff suspend evidence against.
+    let previous_utc_ms = state.last_tick_utc_ms;
+    let previous_suspend_safe_ms = state.last_tick_suspend_safe_ms;
+    let current_suspend_safe_ms = hooks.get_monotonic_clock_ms().ok();
+    state.last_tick_utc_ms = Some(now_ms);
+    if let Some(current) = current_suspend_safe_ms {
+        state.last_tick_suspend_safe_ms = Some(current);
+    }
+
+    if expected_wakeup_at_ms == 0 || state.monitoring_stopped {
+        return;
+    }
+
+    let diff_ms = now_ms - expected_wakeup_at_ms;
+
+    // Raw proximity of each timestamp to the moment it's relevant to — but a
+    // stale login/logout (e.g. from a reboot days ago, still the most recent
+    // one logind/journald knows about) is *always* "far" in ordinary
+    // operation, so "far" must not by itself mean "contradicts": it only
+    // becomes a contradiction below when paired with the *other* side being
+    // near, which is what actually signals a reboot bracket that doesn't
+    // line up with this gap.
+    let login_near = hooks
+        .get_last_login_utc_ms()
+        .ok()
+        .flatten()
+        .map(|login_ms| (now_ms - login_ms).abs() <= LOGIN_LOGOUT_EXCUSE_MS);
+    let logout_near = hooks
+        .get_last_logout_utc_ms()
+        .ok()
+        .flatten()
+        .map(|logout_ms| (expected_wakeup_at_ms - logout_ms).abs() <= LOGIN_LOGOUT_EXCUSE_MS);
+
+    // Combined login/logout evidence: `None` (no evidence either way),
+    // `Some(true)` (supports a legitimate session transition), or
+    // `Some(false)` (contradicts one). A gap is excused only if at least one
+    // side supports it and neither side contradicts — a single contradicting
+    // signal (e.g. the daemon was killed well before an eventual reboot, so
+    // `expected_wakeup_at_ms` isn't actually near the logout) blocks the
+    // excuse even though the other side looks fine on its own. Requiring one
+    // side to be near before the other's absence/mismatch counts for
+    // anything is what keeps an ordinary suspend (neither timestamp
+    // anywhere near this gap — nothing reports a reboot at all) from being
+    // misread as a contradiction. See `SPEC.md` §2.
+    let login_logout_evidence = match (login_near, logout_near) {
+        (Some(true), Some(false)) | (Some(false), Some(true)) => Some(false),
+        (Some(true), _) | (_, Some(true)) => Some(true),
+        _ => None,
+    };
+
+    // Suspend evidence (SPEC.md §2): the shortfall between real-time elapsed
+    // and suspend-safe-clock elapsed since the previous tick reveals how long
+    // the system was suspended over that span. Unlike the two signals above,
+    // this one can only ever support an excuse — it's left `None` (never
+    // `Some(false)`) whenever it doesn't clearly explain the gap, so it can
+    // never block a login/logout-supported excuse the way a contradicting
+    // signal does.
+    let suspend_evidence = match (
+        previous_utc_ms,
+        previous_suspend_safe_ms,
+        current_suspend_safe_ms,
+    ) {
+        (Some(prev_utc), Some(prev_suspend_safe), Some(current)) => {
+            let utc_elapsed_ms = now_ms - prev_utc;
+            let suspend_safe_elapsed_ms = current - prev_suspend_safe;
+            let suspended_ms = (utc_elapsed_ms - suspend_safe_elapsed_ms).max(0);
+            let explains_gap = suspended_ms + SUSPEND_EVIDENCE_SLACK_MS >= diff_ms;
+            (suspended_ms >= SUSPEND_EVIDENCE_MIN_MS && explains_gap).then_some(true)
+        }
+        _ => None,
+    };
+
+    let has_evidence = login_logout_evidence.is_some() || suspend_evidence.is_some();
+    let contradicted = login_logout_evidence == Some(false);
+    if has_evidence && !contradicted {
+        return;
+    }
+
+    state.late_wakeups.push_back(diff_ms);
+    while state.late_wakeups.len() > MAX_TRACKED_WAKEUPS {
+        state.late_wakeups.pop_front();
+    }
+
+    let max_single = state.late_wakeups.iter().copied().max().unwrap_or(0);
+    let sum_nonneg: i64 = state.late_wakeups.iter().copied().filter(|&d| d > 0).sum();
+
+    if max_single > SINGLE_LATE_THRESHOLD_MS || sum_nonneg > SUM_LATE_THRESHOLD_MS {
+        upload::enqueue(
+            upload,
+            now_ms,
+            HIGH_RISK_LIFECYCLE_ALERT,
+            UploadKind::ScreenshotMissed,
+        );
+        // See `SPEC.md` §2: cleared so the same already-alerted-on lateness
+        // doesn't still be sitting in the array to alert again on the very
+        // next tick.
+        state.late_wakeups.clear();
+    }
 }
 
-impl LifecycleModule {
-    pub fn new(hooks: Box<dyn LifecycleHooks>) -> Self {
-        Self {
-            state: LifecycleObserverState::default(),
-            hooks,
-        }
-    }
-
-    fn handle_ping(&mut self, emitter: &Emitter) -> CoreResult<()> {
-        let utc_ms = self.hooks.get_utc_clock_ms()?;
-        let boot_ms = self.hooks.get_boot_clock_ms()?;
-        let mono_ms = self.hooks.get_monotonic_clock_ms()?;
-
-        // A boot-clock value smaller than the last recorded one is the reboot
-        // signal — the boot-relative clocks just reset, so a delta across
-        // this boundary is meaningless; skip the mid-session math for this
-        // tick and fall straight to the login/logout edge checks below,
-        // anchored on UTC rather than the (now-reset) boot-relative clocks.
-        let rebooted = self.state.last_boot_clock_ms > 0 && boot_ms < self.state.last_boot_clock_ms;
-
-        let should_poll = rebooted
-            || self.state.last_login_poll_at_ms == 0
-            || utc_ms - self.state.last_login_poll_at_ms >= LOGIN_POLL_INTERVAL_MS;
-        if should_poll {
-            self.poll_login_logout(utc_ms, boot_ms, mono_ms, emitter)?;
-        }
-
-        // A `prev` sample recorded under an older login_id predates a login/logout
-        // boundary that was just (re)observed above — the elapsed time already went
-        // through `evaluate_unexpected_start`/`evaluate_unexpected_stop` against that
-        // boundary, so treating it as mid-session awake-but-unsampled time here as
-        // well would double-count a clean sign-out/sign-in (or quit/relaunch across
-        // one) as a false `UnexpectedGap`.
-        if !rebooted
-            && let Some(prev) = self.state.last_sample
-            && prev.login_id == self.state.login_id
-        {
-            self.evaluate_unexpected_gap(utc_ms, boot_ms, mono_ms, prev, emitter)?;
-        }
-
-        self.state.last_sample = Some(HeartbeatSample {
-            utc_ms,
-            boot_clock_ms: boot_ms,
-            monotonic_clock_ms: mono_ms,
-            login_id: self.state.login_id,
-        });
-        self.state.last_boot_clock_ms = boot_ms;
-
-        Ok(())
-    }
-
-    /// Mid-session gap: awake time between two consecutive samples in the
-    /// same boot that exceeds the per-gap threshold. The monotonic clock
-    /// already excludes suspend, so the delta directly measures awake-but-
-    /// unsampled time — crash, force-kill-and-restart, or a frozen process.
-    fn evaluate_unexpected_gap(
-        &mut self,
-        utc_ms: i64,
-        boot_ms: i64,
-        mono_ms: i64,
-        prev: HeartbeatSample,
-        emitter: &Emitter,
-    ) -> CoreResult<()> {
-        let delta_mono = mono_ms - prev.monotonic_clock_ms;
-        let delta_boot = boot_ms - prev.boot_clock_ms;
-        let suspend_ms = (delta_boot - delta_mono).max(0);
-
-        if delta_mono > PER_GAP_THRESHOLD_MS {
-            self.state.unexpected_gap.record(utc_ms, delta_mono);
-            if self
-                .state
-                .unexpected_gap
-                .crossed_budget(utc_ms, GAP_BUDGET_MS)
-            {
-                let _ = emitter.send(Upload {
-                    risk: HIGH_RISK_LIFECYCLE_ALERT,
-                    kind: UploadKind::LifecycleAlert {
-                        reason: AlertReason::UnexpectedGap,
-                    },
-                });
+/// Phase 1b of `Daemon::run_phases`: detects a change in the last known
+/// system login/logout time since the previous tick and records a
+/// zero-risk informational event each time one is seen. The very first
+/// observation (no prior baseline) only seeds `last_seen_*` — it does not
+/// count as a "change" and is not reported. See `client/core/SPEC.md` §5.
+pub fn note_session_events(
+    state: &mut LifecycleState,
+    upload: &mut UploadState,
+    hooks: &dyn LifecycleHooks,
+    now_ms: i64,
+) {
+    if let Ok(Some(login_ms)) = hooks.get_last_login_utc_ms() {
+        if let Some(baseline) = state.last_seen_login_ms {
+            // Allow for jitter
+            if login_ms - baseline > 1000 {
+                state.last_seen_login_ms = Some(login_ms);
+                upload::enqueue(
+                    upload,
+                    now_ms,
+                    0.0,
+                    UploadKind::SystemLogin { utc_ms: login_ms },
+                );
             }
+        } else {
+            state.last_seen_login_ms = Some(login_ms);
         }
-
-        if suspend_ms >= SUSPEND_MIN_MS {
-            let _ = emitter.send(Upload {
-                risk: 0.0,
-                kind: UploadKind::Lifecycle {
-                    kind: LifecycleKind::SuspendDetected {
-                        duration_ms: suspend_ms,
-                    },
-                },
-            });
-        }
-
-        Ok(())
     }
 
-    fn poll_login_logout(
-        &mut self,
-        utc_ms: i64,
-        boot_ms: i64,
-        mono_ms: i64,
-        emitter: &Emitter,
-    ) -> CoreResult<()> {
-        self.state.last_login_poll_at_ms = utc_ms;
-
-        if let Some(login_ms) = self.hooks.get_last_login_utc_ms()? {
-            self.observe_login(login_ms, utc_ms, boot_ms, mono_ms, emitter)?;
-        }
-        if let Some(logout_ms) = self.hooks.get_last_logout_utc_ms()? {
-            self.observe_logout(logout_ms, emitter)?;
-        }
-
-        Ok(())
-    }
-
-    fn observe_login(
-        &mut self,
-        login_ms: i64,
-        utc_ms: i64,
-        boot_ms: i64,
-        mono_ms: i64,
-        emitter: &Emitter,
-    ) -> CoreResult<()> {
-        if login_ms <= self.state.last_login_utc_ms {
-            return Ok(());
-        }
-        self.state.login_id += 1;
-        self.state.last_login_utc_ms = login_ms;
-        let _ = emitter.send(Upload {
-            risk: 0.0,
-            kind: UploadKind::Lifecycle {
-                kind: LifecycleKind::SystemLogin { utc_ms: login_ms },
-            },
-        });
-        self.evaluate_unexpected_start(login_ms, utc_ms, boot_ms, mono_ms, emitter)
-    }
-
-    fn observe_logout(&mut self, logout_ms: i64, emitter: &Emitter) -> CoreResult<()> {
-        if logout_ms <= self.state.last_logout_utc_ms {
-            return Ok(());
-        }
-        self.state.last_logout_utc_ms = logout_ms;
-        let _ = emitter.send(Upload {
-            risk: 0.0,
-            kind: UploadKind::Lifecycle {
-                kind: LifecycleKind::SystemLogout { utc_ms: logout_ms },
-            },
-        });
-        self.evaluate_unexpected_stop(logout_ms, emitter)
-    }
-
-    /// Unexpected start: awake time between a known login and the first
-    /// heartbeat sample observed since, exceeding the per-gap threshold —
-    /// the session was live and awake but we weren't running yet (disabled
-    /// autostart, late launch). Suspend accumulated since boot is backed out
-    /// conservatively (see architecture notes): we have no clock sample at
-    /// the exact moment of login, only at first-observed-heartbeat, so this
-    /// slightly over-excuses suspend that happened before login — which only
-    /// ever shrinks the alert window, never invents one.
-    fn evaluate_unexpected_start(
-        &mut self,
-        login_ms: i64,
-        utc_ms: i64,
-        boot_ms: i64,
-        mono_ms: i64,
-        emitter: &Emitter,
-    ) -> CoreResult<()> {
-        let raw_gap = utc_ms - login_ms;
-        if raw_gap <= 0 {
-            return Ok(());
-        }
-        let suspend_since_boot = (boot_ms - mono_ms).max(0);
-        let excusable = suspend_since_boot.min(raw_gap);
-        let gap = raw_gap - excusable;
-
-        if gap > PER_GAP_THRESHOLD_MS {
-            self.state.unexpected_start.record(utc_ms, gap);
-            if self
-                .state
-                .unexpected_start
-                .crossed_budget(utc_ms, STARTUP_GAP_BUDGET_MS)
-            {
-                let _ = emitter.send(Upload {
-                    risk: HIGH_RISK_LIFECYCLE_ALERT,
-                    kind: UploadKind::LifecycleAlert {
-                        reason: AlertReason::UnexpectedStart,
-                    },
-                });
+    if let Ok(Some(logout_ms)) = hooks.get_last_logout_utc_ms() {
+        if let Some(baseline) = state.last_seen_logout_ms {
+            if logout_ms - baseline > 1000 {
+                state.last_seen_logout_ms = Some(logout_ms);
+                upload::enqueue(
+                    upload,
+                    now_ms,
+                    0.0,
+                    UploadKind::SystemLogout { utc_ms: logout_ms },
+                );
             }
+        } else {
+            state.last_seen_logout_ms = Some(logout_ms);
         }
-
-        Ok(())
-    }
-
-    /// Unexpected stop: gap between the last known-alive sample and the
-    /// session's logout, exceeding the per-gap threshold — we stopped
-    /// running before the session ended (deliberate quit or kill before
-    /// logout). When the logout timestamp is itself a reconstructed floor
-    /// (unclean shutdown), it sits at or before the true end, so the gap can
-    /// only shrink, never be invented — a simultaneous force-kill + power
-    /// pull correctly produces ~0 gap and stays silent.
-    fn evaluate_unexpected_stop(&mut self, logout_ms: i64, emitter: &Emitter) -> CoreResult<()> {
-        let Some(last_sample) = self.state.last_sample else {
-            return Ok(());
-        };
-        let gap = (logout_ms - last_sample.utc_ms).max(0);
-
-        if gap > PER_GAP_THRESHOLD_MS {
-            self.state.unexpected_stop.record(logout_ms, gap);
-            if self
-                .state
-                .unexpected_stop
-                .crossed_budget(logout_ms, STOP_GAP_BUDGET_MS)
-            {
-                let _ = emitter.send(Upload {
-                    risk: HIGH_RISK_LIFECYCLE_ALERT,
-                    kind: UploadKind::LifecycleAlert {
-                        reason: AlertReason::UnexpectedStop,
-                    },
-                });
-            }
-        }
-
-        Ok(())
     }
 }
 
-impl Observer for LifecycleModule {
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
-    fn name(&self) -> &'static str {
-        "lifecycle"
-    }
-
-    fn init(&mut self, _bus: &mut EventBus, state: StateType) -> CoreResult<()> {
-        if !state.is_null() {
-            self.state = serde_json::from_value(state)?;
-        }
-        Ok(())
-    }
-
-    fn on_event(&mut self, event: &dyn Any, emitter: &Emitter) -> CoreResult<()> {
-        crate::dispatch_event!(event, {
-            _: Ping => self.handle_ping(emitter),
-            _: ProcessStarted => {
-                // Force a fresh login/logout poll on the very next Ping,
-                // rather than waiting out the coarse throttle — a process
-                // restart is exactly when a login/logout is likely to have
-                // changed underneath us.
-                self.state.last_login_poll_at_ms = 0;
-                Ok(())
-            },
-            _: StatusRequest => {
-                let last_loop_at_ms = self.state.last_sample.map(|s| s.utc_ms);
-                let _ = emitter.send(PartialStatus::Lifecycle { is_running: true, last_loop_at_ms });
-                Ok(())
-            },
-            _: UserStopRequested => {
-                let _ = emitter.send(Upload {
-                    risk: EXTRA_HIGH_RISK,
-                    kind: UploadKind::LifecycleAlert { reason: AlertReason::UserStop },
-                });
-                Ok(())
-            },
-        })
-    }
-
-    fn save(&self) -> CoreResult<StateType> {
-        Ok(serde_json::to_value(&self.state)?)
-    }
+/// Handles an explicit user-initiated stop — an immediate high-risk alert,
+/// independent of the late-wakeup model above. Called directly by
+/// `Daemon::note_user_stop`.
+///
+/// This is the ONLY thing that suspends lateness checking
+/// (`monitoring_stopped`) — deliberately not tied to a clean `request_stop`
+/// shutdown in general, since every platform's signal handler also calls
+/// `request_stop` on a plain SIGTERM/kill. Excusing on any clean exit would
+/// let the simplest possible evasion (just kill the process) silently
+/// defeat tamper detection; excusing only here means the gap is forgiven
+/// exactly when — and only when — it was already reported via this alert.
+/// Checking resumes only once `note_user_start` is called. See
+/// `client/core/SPEC.md` §2.
+pub fn note_user_stop(
+    state: &mut LifecycleState,
+    upload: &mut UploadState,
+    now_ms: i64,
+    source: &str,
+) {
+    tracing::info!(source, "user-initiated stop");
+    upload::enqueue(upload, now_ms, EXTRA_HIGH_RISK, UploadKind::UserStop);
+    state.monitoring_stopped = true;
 }
 
-/// Stand-in for platforms where `PlatformConfig::lifecycle_enabled` is
-/// `false` (currently only iOS, which has no boot/shutdown/session signal
-/// available to its Safari-extension-host process). Keeps `name() ==
-/// "lifecycle"` so the state-file key stays stable and answers
-/// `StatusRequest` so `StatusModule`'s partial-status count is still
-/// satisfied, but otherwise does nothing.
-#[derive(Default)]
-pub struct NoopLifecycleModule;
-
-impl NoopLifecycleModule {
-    pub fn new() -> Self {
-        Self
+/// Re-enables lifecycle tamper detection after a prior `note_user_stop`.
+/// Called by `Daemon::new` for every fresh monitoring session (and,
+/// redundantly but harmlessly, wherever a platform explicitly signals that
+/// monitoring has resumed — see `Daemon::note_user_start`).
+///
+/// Only enqueues the `UserStart` upload (and reports having done anything)
+/// when a stop was actually active — a no-op call (e.g. an ordinary launch
+/// that never called `note_user_stop`) must stay silent. The caller uses
+/// the return value to decide whether to also reset the wakeup schedule
+/// baseline: it must NOT be reset unconditionally on every restart, since
+/// that would let a plain kill signal escape detection too — see
+/// `SPEC.md` §2 and the `daemon.rs` caller.
+pub fn note_user_start(state: &mut LifecycleState, upload: &mut UploadState, now_ms: i64) -> bool {
+    let was_stopped = state.monitoring_stopped;
+    state.monitoring_stopped = false;
+    state.late_wakeups.clear();
+    if was_stopped {
+        upload::enqueue(upload, now_ms, 0.0, UploadKind::UserStart);
     }
-}
-
-impl Observer for NoopLifecycleModule {
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
-    fn name(&self) -> &'static str {
-        "lifecycle"
-    }
-
-    fn init(&mut self, _bus: &mut EventBus, _state: StateType) -> CoreResult<()> {
-        Ok(())
-    }
-
-    fn on_event(&mut self, event: &dyn Any, emitter: &Emitter) -> CoreResult<()> {
-        crate::dispatch_event!(event, {
-            _: StatusRequest => {
-                let _ = emitter.send(PartialStatus::Lifecycle { is_running: true, last_loop_at_ms: None });
-                Ok(())
-            },
-        })
-    }
-
-    fn save(&self) -> CoreResult<StateType> {
-        Ok(StateType::Null)
-    }
+    was_stopped
 }
 
 #[cfg(test)]
 mod tests {
-    use super::UserStopRequested;
-    use super::{
-        EXTRA_HIGH_RISK, HIGH_RISK_LIFECYCLE_ALERT, LifecycleModule, ProcessStarted, ProcessStopped,
-    };
-    use crate::events::Ping;
-    use crate::model::PartialStatus;
-    use crate::model::{AlertReason, LifecycleKind, UploadKind};
-    use crate::module::status::StatusRequest;
-    use crate::module::upload::Upload;
-    use crate::testing::EventTester;
+    use super::*;
+    use crate::model::UploadKind;
+    use crate::module::upload::UploadState;
+    use crate::testing::TestPlatformHooks;
 
-    #[test]
-    fn status_request_emits_lifecycle_partial_status() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
-        let mut t = b.build();
-        t.emit(1, StatusRequest);
-        t.assert_like::<PartialStatus>(crate::like!(PartialStatus::Lifecycle { .. }));
+    /// Calls `tick`, first syncing `hooks`' mock clock to `now_ms` — matching
+    /// the production invariant that `now_ms` passed into `tick` always
+    /// equals `hooks.get_time_utc_ms()`/`get_monotonic_clock_ms()` at that
+    /// same moment (see `daemon.rs::now_ms`). Keeping the mock in sync means
+    /// the suspend-evidence baseline (`SPEC.md` §2) sees zero divergence
+    /// across these calls unless a test explicitly diverges the two clocks
+    /// (see the "suspend evidence" tests below), so every pre-existing test
+    /// here is unaffected by suspend evidence.
+    fn tick_at(
+        state: &mut LifecycleState,
+        upload: &mut UploadState,
+        hooks: &TestPlatformHooks,
+        now_ms: i64,
+        expected_wakeup_at_ms: i64,
+    ) {
+        hooks.clock.set(now_ms);
+        tick(state, upload, hooks, now_ms, expected_wakeup_at_ms);
+    }
+
+    #[allow(clippy::field_reassign_with_default)]
+    fn upload_with_credentials() -> UploadState {
+        let mut upload = UploadState::default();
+        upload.device_credentials = Some(crate::model::DeviceCredentials {
+            device_id: "d".into(),
+            refresh_token: "r".into(),
+        });
+        upload
+    }
+
+    fn has_late_wakeup_alert(upload: &UploadState) -> bool {
+        late_wakeup_alert_count(upload) > 0
+    }
+
+    fn late_wakeup_alert_count(upload: &UploadState) -> usize {
+        upload
+            .pending_hash_events
+            .iter()
+            .filter(|e| matches!(e.event, UploadKind::ScreenshotMissed))
+            .count()
+    }
+
+    fn has_user_start_event(upload: &UploadState) -> bool {
+        upload
+            .pending_hash_events
+            .iter()
+            .any(|e| matches!(e.event, UploadKind::UserStart))
     }
 
     #[test]
-    fn routine_process_start_stop_produces_no_log_row() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
-        let mut t = b.build();
-        t.emit(1, ProcessStarted);
-        t.emit(2, ProcessStopped);
-        t.assert_not_like(crate::like!(Upload {
-            kind: UploadKind::Lifecycle { .. },
-            ..
-        }));
+    fn first_tick_with_no_scheduled_wakeup_is_a_noop() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        tick_at(&mut state, &mut upload, &hooks, 1_000, 0);
+        assert!(state.late_wakeups.is_empty());
+        assert!(!has_late_wakeup_alert(&upload));
     }
 
     #[test]
-    fn login_poll_emits_system_login_and_tracks_state() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
-        let mut t = b.build();
-        t.platform.set_last_login(Some(500));
-        t.emit(1, Ping);
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::Lifecycle {
-                kind: LifecycleKind::SystemLogin { utc_ms: 500 }
-            },
-            ..
-        }));
-        assert_eq!(t.observer::<LifecycleModule>().state.last_login_utc_ms, 500);
-        assert_eq!(t.observer::<LifecycleModule>().state.login_id, 1);
+    fn small_lateness_is_tracked_but_does_not_alert() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        // 5s late — well under the 1-minute single-wakeup threshold.
+        tick_at(&mut state, &mut upload, &hooks, 305_000, 300_000);
+        assert_eq!(state.late_wakeups, [5_000]);
+        assert!(!has_late_wakeup_alert(&upload));
     }
 
     #[test]
-    fn logout_poll_emits_system_logout() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
-        let mut t = b.build();
-        t.platform.set_last_logout(Some(500));
-        t.emit(1, Ping);
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::Lifecycle {
-                kind: LifecycleKind::SystemLogout { utc_ms: 500 }
-            },
-            ..
-        }));
-        assert_eq!(
-            t.observer::<LifecycleModule>().state.last_logout_utc_ms,
-            500
-        );
+    fn single_wakeup_over_one_minute_late_alerts() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        tick_at(&mut state, &mut upload, &hooks, 361_001, 300_000);
+        assert!(has_late_wakeup_alert(&upload));
     }
 
     #[test]
-    fn sub_budget_unexpected_gap_does_not_alert() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
-        let mut t = b.build();
-        // Seed a prior sample; boot/monotonic default to tracking the mock
-        // wall clock (no suspend) unless overridden.
-        t.platform.set_boot_clock_ms(1_000);
-        t.platform.set_monotonic_clock_ms(1_000);
-        t.emit(1, Ping);
-        t.clear_captured();
-
-        // A single 30s gap: over the 10s per-gap threshold (recorded) but
-        // under the 120s sliding-window budget, so no alert fires.
-        t.platform.set_boot_clock_ms(31_000);
-        t.platform.set_monotonic_clock_ms(31_000);
-        t.emit(31, Ping);
-        t.assert_not_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::UnexpectedGap
-            },
-            ..
-        }));
-    }
-
-    #[test]
-    fn accumulated_unexpected_gaps_cross_budget_and_alert() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
-        let mut t = b.build();
-        t.platform.set_boot_clock_ms(1_000);
-        t.platform.set_monotonic_clock_ms(1_000);
-        t.emit(1, Ping);
-        t.clear_captured();
-
-        // Three 45s gaps: 45 -> 90 (both under the 120s budget), then 135 >= 120 alerts.
-        t.platform.set_boot_clock_ms(46_000);
-        t.platform.set_monotonic_clock_ms(46_000);
-        t.emit(46, Ping);
-        t.platform.set_boot_clock_ms(91_000);
-        t.platform.set_monotonic_clock_ms(91_000);
-        t.emit(91, Ping);
-        t.assert_not_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::UnexpectedGap
-            },
-            ..
-        }));
-        t.clear_captured();
-
-        t.platform.set_boot_clock_ms(136_000);
-        t.platform.set_monotonic_clock_ms(136_000);
-        t.emit(136, Ping);
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::UnexpectedGap
-            },
-            ..
-        }));
-        let alert = t
-            .captured::<Upload>()
-            .into_iter()
-            .find(|e| {
-                matches!(
-                    e.kind,
-                    UploadKind::LifecycleAlert {
-                        reason: AlertReason::UnexpectedGap
-                    }
-                )
-            })
-            .unwrap();
-        assert!(
-            alert.risk >= HIGH_RISK_LIFECYCLE_ALERT && alert.risk < EXTRA_HIGH_RISK,
-            "unexpected-gap alert should be high but not immediate, got {}",
-            alert.risk
-        );
-    }
-
-    #[test]
-    fn cooldown_suppresses_repeat_unexpected_gap_alert() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
-        let mut t = b.build();
-        t.platform.set_boot_clock_ms(1_000);
-        t.platform.set_monotonic_clock_ms(1_000);
-        t.emit(1, Ping);
-
-        // First gap of 130s crosses the 120s budget directly and alerts.
-        t.platform.set_boot_clock_ms(131_000);
-        t.platform.set_monotonic_clock_ms(131_000);
-        t.emit(131, Ping);
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::UnexpectedGap
-            },
-            ..
-        }));
-        t.clear_captured();
-
-        // 40s later (< 5-min cooldown): another gap crosses budget again but is suppressed.
-        t.platform.set_boot_clock_ms(171_000);
-        t.platform.set_monotonic_clock_ms(171_000);
-        t.emit(171, Ping);
-        t.assert_not_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::UnexpectedGap
-            },
-            ..
-        }));
-        t.clear_captured();
-
-        // Well past the cooldown: the chronic stall re-alerts.
-        t.platform.set_boot_clock_ms(600_000);
-        t.platform.set_monotonic_clock_ms(600_000);
-        t.emit(600, Ping);
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::UnexpectedGap
-            },
-            ..
-        }));
-    }
-
-    #[test]
-    fn suspend_excuses_unexpected_gap() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
-        let mut t = b.build();
-        t.platform.set_boot_clock_ms(1_000);
-        t.platform.set_monotonic_clock_ms(1_000);
-        t.emit(1, Ping);
-        t.clear_captured();
-
-        // 10 minutes of wall-clock/boot time pass, but monotonic only
-        // advances 30s (the machine was suspended for the rest) — no
-        // UnexpectedGap alert, but a SuspendDetected log is emitted.
-        t.platform.set_boot_clock_ms(601_000);
-        t.platform.set_monotonic_clock_ms(31_000);
-        t.emit(601, Ping);
-        t.assert_not_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::UnexpectedGap
-            },
-            ..
-        }));
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::Lifecycle {
-                kind: LifecycleKind::SuspendDetected { .. }
-            },
-            ..
-        }));
-    }
-
-    #[test]
-    fn login_boundary_since_prev_sample_excuses_unexpected_gap() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
-        let mut t = b.build();
-        t.platform.set_boot_clock_ms(1_000);
-        t.platform.set_monotonic_clock_ms(1_000);
-        t.emit(1, Ping);
-        t.clear_captured();
-
-        // A real login/logout cycle (sign-out then sign-in, no reboot) happens
-        // between this sample and the next: a new login is observed 350s later,
-        // well past the per-gap threshold. Without accounting for the login
-        // boundary, this would be misread as mid-session awake-but-unsampled
-        // time and double-alert as UnexpectedGap on top of UnexpectedStart.
-        t.platform.set_last_login(Some(50_000));
-        t.platform.set_boot_clock_ms(400_000);
-        t.platform.set_monotonic_clock_ms(400_000);
-        t.emit(400, Ping);
-
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::Lifecycle {
-                kind: LifecycleKind::SystemLogin { utc_ms: 50_000 }
-            },
-            ..
-        }));
-        t.assert_not_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::UnexpectedGap
-            },
-            ..
-        }));
-        assert!(
-            t.observer::<LifecycleModule>()
-                .state
-                .unexpected_gap
-                .gaps
-                .is_empty()
-        );
-    }
-
-    #[test]
-    fn unexpected_start_alerts_when_login_precedes_first_sample_by_more_than_threshold() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
-        let mut t = b.build();
-        t.platform.set_last_login(Some(100));
-        t.platform.set_boot_clock_ms(241_000);
-        t.platform.set_monotonic_clock_ms(241_000);
-        t.emit(241, Ping);
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::UnexpectedStart
-            },
-            ..
-        }));
-    }
-
-    #[test]
-    fn seventy_five_second_boot_does_not_trigger_unexpected_start() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
-        let mut t = b.build();
-        // Regression test for the reported Mac boot that took 75s and
-        // incorrectly alerted under the old 60s startup budget. Under the
-        // new 240s budget, it must stay silent.
-        t.platform.set_last_login(Some(100));
-        t.platform.set_boot_clock_ms(75_100);
-        t.platform.set_monotonic_clock_ms(75_100);
-        t.emit(75, Ping);
-        t.assert_not_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::UnexpectedStart
-            },
-            ..
-        }));
-    }
-
-    #[test]
-    fn unexpected_start_excused_by_suspend_since_boot() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
-        let mut t = b.build();
-        t.platform.set_last_login(Some(100));
-        // 60s of wall-clock/boot time since login, but monotonic shows only
-        // 5s of that was actually awake (55s of suspend) — the awake gap
-        // (5s) is under the per-gap threshold, so no alert.
-        t.platform.set_boot_clock_ms(60_000);
-        t.platform.set_monotonic_clock_ms(5_000);
-        t.emit(60, Ping);
-        t.assert_not_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::UnexpectedStart
-            },
-            ..
-        }));
-    }
-
-    #[test]
-    fn unexpected_start_silent_with_no_known_login() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
-        let mut t = b.build();
-        // No `set_last_login` call — hook returns None, so there's nothing to
-        // anchor an unexpected-start check against.
-        t.emit(60, Ping);
-        t.assert_not_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::UnexpectedStart
-            },
-            ..
-        }));
-    }
-
-    #[test]
-    fn unexpected_stop_alerts_when_logout_arrives_well_after_last_sample() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
-        let mut t = b.build();
-        t.platform.set_boot_clock_ms(1_000);
-        t.platform.set_monotonic_clock_ms(1_000);
-        t.emit(1, Ping);
-        t.clear_captured();
-
-        // Logout is reported 60s after our last heartbeat. Force an immediate
-        // poll (rather than waiting out the 5-min throttle) via ProcessStarted.
-        t.platform.set_last_logout(Some(61_000));
-        t.emit(61, ProcessStarted);
-        t.emit(61, Ping);
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::UnexpectedStop
-            },
-            ..
-        }));
-        let alert = t
-            .captured::<Upload>()
-            .into_iter()
-            .find(|e| {
-                matches!(
-                    e.kind,
-                    UploadKind::LifecycleAlert {
-                        reason: AlertReason::UnexpectedStop
-                    }
-                )
-            })
-            .unwrap();
-        assert!(
-            alert.risk >= HIGH_RISK_LIFECYCLE_ALERT && alert.risk < EXTRA_HIGH_RISK,
-            "unexpected-stop alert should be high but not immediate, got {}",
-            alert.risk
-        );
-    }
-
-    #[test]
-    fn floor_reconstruction_landing_on_last_sample_does_not_alert() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
-        let mut t = b.build();
-        t.platform.set_boot_clock_ms(60_000);
-        t.platform.set_monotonic_clock_ms(60_000);
-        t.emit(60, Ping);
-        t.clear_captured();
-
-        // A reconstructed logout floor that lands at/before our last known
-        // sample (the "simultaneous force-kill + power pull" case) produces
-        // zero/near-zero gap and must not alert.
-        t.platform.set_last_logout(Some(60_000));
-        t.emit(120, ProcessStarted);
-        t.emit(120, Ping);
-        t.assert_not_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::UnexpectedStop
-            },
-            ..
-        }));
-    }
-
-    #[test]
-    fn reboot_regression_does_not_corrupt_mid_session_math() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
-        let mut t = b.build();
-        t.platform.set_boot_clock_ms(500_000);
-        t.platform.set_monotonic_clock_ms(500_000);
-        t.emit(500, Ping);
-        t.clear_captured();
-
-        // Reboot: boot/monotonic clocks reset to small values while wall
-        // clock keeps climbing. Must not be misread as a huge mid-session gap.
-        t.platform.set_boot_clock_ms(2_000);
-        t.platform.set_monotonic_clock_ms(2_000);
-        t.emit(600, Ping);
-        t.assert_not_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::UnexpectedGap
-            },
-            ..
-        }));
-        assert_eq!(
-            t.observer::<LifecycleModule>().state.last_boot_clock_ms,
-            2_000
-        );
-    }
-
-    #[test]
-    fn user_stop_fires_immediate_alert_and_later_gap_still_evaluated() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
-        let mut t = b.build();
-        t.platform.set_boot_clock_ms(1_000);
-        t.platform.set_monotonic_clock_ms(1_000);
-        t.emit(1, Ping);
-
-        // Explicit user-initiated stop: immediate high-risk alert.
-        t.emit(
-            2,
-            UserStopRequested {
-                source: "test".into(),
-            },
-        );
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::UserStop
-            },
-            ..
-        }));
-        let user_stop = t
-            .captured::<Upload>()
-            .into_iter()
-            .find(|e| {
-                matches!(
-                    e.kind,
-                    UploadKind::LifecycleAlert {
-                        reason: AlertReason::UserStop
-                    }
-                )
-            })
-            .unwrap();
-        assert!(
-            user_stop.risk >= EXTRA_HIGH_RISK,
-            "user stop should be immediate/extra-high risk"
-        );
-        t.clear_captured();
-
-        // The session's logout eventually arrives (via the poll, forced
-        // immediately rather than waiting out the throttle), long after the
-        // stop — the resulting gap is still independently evaluated and
-        // alerts, even though the stop was user-initiated.
-        t.platform.set_last_logout(Some(63_000));
-        t.emit(63, ProcessStarted);
-        t.emit(63, Ping);
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::LifecycleAlert {
-                reason: AlertReason::UnexpectedStop
-            },
-            ..
-        }));
-    }
-
-    #[test]
-    fn state_round_trips_through_save_and_load() {
-        let mut b = EventTester::builder();
-        b.add(LifecycleModule::new(Box::new(b.platform())));
-        let mut t = b.build();
-
-        t.platform.set_last_login(Some(30_000));
-        t.emit(30, Ping);
-        t.platform.set_last_login(None);
-
-        {
-            let s = &t.observer::<LifecycleModule>().state;
-            assert_eq!(s.last_login_utc_ms, 30_000);
-            assert_eq!(s.login_id, 1);
+    fn accumulated_lateness_over_five_minutes_alerts() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        // Ten *recorded* wakeups each 31s late: sum = 310s > 300s (5 min), but
+        // no single one exceeds the 1-minute per-wakeup threshold. The very
+        // first tick (expected_wakeup_at_ms == 0) is a no-op by design, so
+        // seed one throwaway tick first to get a nonzero `expected` baseline.
+        let mut expected = 1_000i64;
+        tick_at(&mut state, &mut upload, &hooks, expected, 0);
+        for _ in 0..10 {
+            let now = expected + 31_000;
+            tick_at(&mut state, &mut upload, &hooks, now, expected);
+            expected = now;
         }
+        assert!(has_late_wakeup_alert(&upload));
+    }
 
-        let saved = t.bus.save().unwrap();
+    #[test]
+    fn negative_diffs_do_not_count_toward_the_sum_budget() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        // Early wakeups (negative diff) must not offset or contribute to the
+        // non-negative sum in a way that fools the budget either direction.
+        let mut expected = 0i64;
+        for _ in 0..10 {
+            let now = expected - 1_000; // 1s early each time
+            tick_at(&mut state, &mut upload, &hooks, now, expected);
+            expected = now;
+        }
+        assert!(!has_late_wakeup_alert(&upload));
+    }
 
-        let mut b2 = EventTester::builder();
-        b2.add(LifecycleModule::new(Box::new(b2.platform())));
-        b2.with_state(saved);
-        let mut t2 = b2.build();
+    #[test]
+    fn wakeup_near_login_is_excused() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        // now_ms is within 2 minutes of a reported login — a huge lateness is
+        // excused entirely (not even recorded).
+        hooks.set_last_login(Some(360_500));
+        tick_at(&mut state, &mut upload, &hooks, 361_000, 300_000);
+        assert!(state.late_wakeups.is_empty());
+        assert!(!has_late_wakeup_alert(&upload));
+    }
 
-        let s2 = &t2.observer::<LifecycleModule>().state;
-        assert_eq!(s2.last_login_utc_ms, 30_000);
-        assert_eq!(s2.login_id, 1);
-        assert!(s2.last_sample.is_some());
+    #[test]
+    fn wakeup_near_logout_is_excused() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        // The *expected* wakeup time (not now_ms) is within 2 minutes of a
+        // reported logout.
+        hooks.set_last_logout(Some(301_000));
+        tick_at(&mut state, &mut upload, &hooks, 500_000, 300_000);
+        assert!(state.late_wakeups.is_empty());
+        assert!(!has_late_wakeup_alert(&upload));
+    }
+
+    // ── Suspend evidence (SPEC.md §2) ───────────────────────────────────────
+
+    #[test]
+    fn suspend_that_explains_the_whole_gap_is_excused() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        // Seed the baseline (first tick, no schedule yet) at t=0 with the
+        // suspend-safe clock also at 0.
+        tick_at(&mut state, &mut upload, &hooks, 0, 0);
+
+        // Freeze the suspend-safe clock — simulating a ~1 hour suspend —
+        // while real time (and the next scheduled wakeup) advances normally.
+        hooks.set_monotonic_clock_override(Some(0));
+        tick_at(&mut state, &mut upload, &hooks, 3_900_000, 300_000);
+
+        assert!(state.late_wakeups.is_empty());
+        assert!(!has_late_wakeup_alert(&upload));
+    }
+
+    #[test]
+    fn suspend_is_excused_even_with_a_stale_unrelated_login_and_logout_on_record() {
+        // Regression test: on a real desktop, `get_last_login_utc_ms`/
+        // `get_last_logout_utc_ms` almost always return *something* — the
+        // timestamps of whatever session/reboot last happened, even if that
+        // was days ago and has nothing to do with this gap. Those stale,
+        // unrelated timestamps must not be treated as contradicting the
+        // suspend excuse just because they're far from `now`/`expected` —
+        // only a genuine near/far *mismatch between the two sides* should.
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        hooks.set_last_login(Some(-10_000_000));
+        hooks.set_last_logout(Some(-10_100_000));
+        tick_at(&mut state, &mut upload, &hooks, 0, 0);
+
+        hooks.set_monotonic_clock_override(Some(0));
+        tick_at(&mut state, &mut upload, &hooks, 3_900_000, 300_000);
+
+        assert!(state.late_wakeups.is_empty());
+        assert!(!has_late_wakeup_alert(&upload));
+    }
+
+    #[test]
+    fn brief_suspend_coincident_with_a_long_kill_does_not_excuse() {
+        // A daemon killed for ~2.7 hours, during which the machine also
+        // happened to suspend for a real but brief 30s — the suspend must
+        // NOT be allowed to excuse the much larger kill-induced gap it only
+        // partially covers. This is the suspend-evidence analog of
+        // `kill_then_reboot_still_alerts_despite_a_nearby_login`.
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        tick_at(&mut state, &mut upload, &hooks, 0, 0);
+
+        // Suspend-safe clock advances 9_970_000ms while real time advances
+        // 10_000_000ms — a 30s divergence, against a ~9_700_000ms gap.
+        hooks.set_monotonic_clock_override(Some(9_970_000));
+        tick_at(&mut state, &mut upload, &hooks, 10_000_000, 300_000);
+
+        assert!(
+            state.late_wakeups.is_empty(),
+            "cleared after alerting, not because it was excused"
+        );
+        assert!(has_late_wakeup_alert(&upload));
+    }
+
+    #[test]
+    fn kill_then_reboot_still_alerts_despite_a_nearby_login() {
+        // The daemon was killed well before the machine was actually
+        // rebooted: `expected_wakeup_at_ms` (300_000, computed before the
+        // kill) is nowhere near the reboot's logout (900_000), even though
+        // the restart happens right after the reboot's login (now_ms is
+        // close to 950_000). The contradicting logout evidence must block
+        // the login excuse — this is the exact "kill it, then reboot to
+        // dodge detection" gap the excuse model exists to catch.
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        hooks.set_last_logout(Some(900_000));
+        hooks.set_last_login(Some(950_500));
+        tick_at(&mut state, &mut upload, &hooks, 951_000, 300_000);
+        // Counted (not excused) and alerted on — then cleared per SPEC.md §2.
+        assert!(state.late_wakeups.is_empty());
+        assert!(has_late_wakeup_alert(&upload));
+    }
+
+    #[test]
+    fn never_restarted_after_reboot_still_alerts_despite_a_nearby_logout() {
+        // Autostart is disabled: the machine rebooted (a real logout/login
+        // pair fires right around the reboot) but the daemon itself isn't
+        // manually started until long after. `expected_wakeup_at_ms`
+        // (900_500) is close to the logout (900_000), but `now_ms`
+        // (2_000_000) is nowhere near the login (950_000) that followed it.
+        // The contradicting login evidence must block the logout excuse.
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        hooks.set_last_logout(Some(900_000));
+        hooks.set_last_login(Some(950_000));
+        tick_at(&mut state, &mut upload, &hooks, 2_000_000, 900_500);
+        // Counted (not excused) and alerted on — then cleared per SPEC.md §2.
+        assert!(state.late_wakeups.is_empty());
+        assert!(has_late_wakeup_alert(&upload));
+    }
+
+    #[test]
+    fn late_wakeups_array_is_cleared_after_an_alert_is_sent() {
+        // SPEC.md §2: "The late wakeups array MUST be cleared after an alert
+        // is sent (to prevent duplicates)."
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        tick_at(&mut state, &mut upload, &hooks, 361_001, 300_000);
+        assert!(has_late_wakeup_alert(&upload));
+        assert!(state.late_wakeups.is_empty());
+
+        // Without the clear, the 61s-late entry above would still be sitting
+        // in the array and this on-time-ish follow-up tick would alert a
+        // second time for the same already-reported incident.
+        tick_at(&mut state, &mut upload, &hooks, 361_501, 361_001);
+        assert_eq!(
+            late_wakeup_alert_count(&upload),
+            1,
+            "clearing after the alert must prevent a duplicate"
+        );
+    }
+
+    #[test]
+    fn accumulated_alert_does_not_duplicate_on_the_next_tick() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        let mut expected = 1_000i64;
+        tick_at(&mut state, &mut upload, &hooks, expected, 0);
+        for _ in 0..10 {
+            let now = expected + 31_000;
+            tick_at(&mut state, &mut upload, &hooks, now, expected);
+            expected = now;
+        }
+        assert_eq!(late_wakeup_alert_count(&upload), 1);
+        assert!(state.late_wakeups.is_empty());
+
+        // Without clearing, 9 of the 10 contributing entries would still be
+        // in the buffer and the sum would still be over budget, alerting
+        // again for the same underlying incident on this next tick.
+        let now = expected + 31_000;
+        tick_at(&mut state, &mut upload, &hooks, now, expected);
+        assert_eq!(
+            late_wakeup_alert_count(&upload),
+            1,
+            "clearing after the alert must prevent a duplicate"
+        );
+    }
+
+    #[test]
+    fn late_wakeups_array_evicts_beyond_ten_entries() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        let mut expected = 1_000i64;
+        for i in 0..15 {
+            let now = expected + i; // tiny, harmless lateness
+            tick_at(&mut state, &mut upload, &hooks, now, expected);
+            expected = now;
+        }
+        assert_eq!(state.late_wakeups.len(), MAX_TRACKED_WAKEUPS);
+    }
+
+    #[test]
+    fn user_stop_emits_immediate_extra_high_risk_alert() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        note_user_stop(&mut state, &mut upload, 1_000, "test");
+        let entry = upload
+            .pending_hash_events
+            .iter()
+            .find(|e| matches!(e.event, UploadKind::UserStop))
+            .expect("expected a UserStop alert");
+        assert!(entry.risk.unwrap() >= EXTRA_HIGH_RISK);
+        assert!(
+            upload.force_flush,
+            "extra-high-risk upload should force an immediate flush"
+        );
+    }
+
+    #[test]
+    fn user_stop_suspends_lateness_checking_until_user_start() {
+        // A kill-signal-triggered clean exit (SIGTERM etc.) must NOT excuse
+        // anything on its own — only an actual user_stop alert should, since
+        // that's the one case where the gap has already been reported.
+        let mut state = LifecycleState::default();
+        assert!(!state.monitoring_stopped);
+
+        let mut upload = upload_with_credentials();
+        note_user_stop(&mut state, &mut upload, 1_000, "test");
+        assert!(state.monitoring_stopped);
+    }
+
+    // ── Other events (SPEC.md §5) ───────────────────────────────────────────
+
+    fn system_event(upload: &UploadState, utc_ms: i64, login: bool) -> Option<f32> {
+        upload
+            .pending_hash_events
+            .iter()
+            .find_map(|e| match &e.event {
+                UploadKind::SystemLogin { utc_ms: seen } if login && *seen == utc_ms => e.risk,
+                UploadKind::SystemLogout { utc_ms: seen } if !login && *seen == utc_ms => e.risk,
+                _ => None,
+            })
+    }
+
+    #[test]
+    fn first_observation_only_seeds_the_baseline_and_is_not_reported() {
+        // SPEC.md §5: "The first System Login/Logout time observed [...]
+        // MUST NOT be reported — it only establishes the baseline a later
+        // change is measured against."
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        hooks.set_last_login(Some(1_000));
+        hooks.set_last_logout(Some(2_000));
+
+        note_session_events(&mut state, &mut upload, &hooks, 1_500);
+
+        assert!(upload.pending_hash_events.is_empty());
+        assert_eq!(state.last_seen_login_ms, Some(1_000));
+        assert_eq!(state.last_seen_logout_ms, Some(2_000));
+    }
+
+    #[test]
+    fn system_login_at_event_sent_when_login_time_changes_after_a_baseline_is_established() {
+        // SPEC.md §5: "When the daemon detects that the System Login time
+        // changed, it MUST send a "system login at" event (risk 0%)."
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        hooks.set_last_login(Some(1_000));
+        note_session_events(&mut state, &mut upload, &hooks, 1_400); // seeds baseline, no event
+
+        hooks.set_last_login(Some(9_000));
+        note_session_events(&mut state, &mut upload, &hooks, 9_500);
+
+        assert_eq!(system_event(&upload, 9_000, true), Some(0.0));
+        assert_eq!(state.last_seen_login_ms, Some(9_000));
+    }
+
+    #[test]
+    fn system_logout_at_event_sent_when_logout_time_changes_after_a_baseline_is_established() {
+        // SPEC.md §5: "When the daemon detects tha[t] th[e] System Logout
+        // time changed, it MUST send a "system logout at" event (risk 0%)."
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        hooks.set_last_logout(Some(2_000));
+        note_session_events(&mut state, &mut upload, &hooks, 2_400); // seeds baseline, no event
+
+        hooks.set_last_logout(Some(20_000));
+        note_session_events(&mut state, &mut upload, &hooks, 20_500);
+
+        assert_eq!(system_event(&upload, 20_000, false), Some(0.0));
+        assert_eq!(state.last_seen_logout_ms, Some(20_000));
+    }
+
+    #[test]
+    fn no_system_event_sent_when_login_and_logout_time_are_unchanged() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        hooks.set_last_login(Some(1_000));
+        hooks.set_last_logout(Some(2_000));
+
+        note_session_events(&mut state, &mut upload, &hooks, 1_500);
+        let count_after_first = upload.pending_hash_events.len();
+        note_session_events(&mut state, &mut upload, &hooks, 3_000);
+
+        assert_eq!(
+            upload.pending_hash_events.len(),
+            count_after_first,
+            "an unchanged login/logout time must not send a duplicate event"
+        );
+    }
+
+    #[test]
+    fn system_event_sent_again_when_login_time_changes_a_second_time() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+        hooks.set_last_login(Some(1_000));
+        note_session_events(&mut state, &mut upload, &hooks, 1_400); // seeds baseline, no event
+
+        hooks.set_last_login(Some(5_000));
+        note_session_events(&mut state, &mut upload, &hooks, 5_500);
+
+        hooks.set_last_login(Some(9_000));
+        note_session_events(&mut state, &mut upload, &hooks, 9_500);
+
+        assert_eq!(system_event(&upload, 1_000, true), None);
+        assert_eq!(system_event(&upload, 5_000, true), Some(0.0));
+        assert_eq!(system_event(&upload, 9_000, true), Some(0.0));
+        assert_eq!(state.last_seen_login_ms, Some(9_000));
+    }
+
+    // ── Intentional-stop excuse (SPEC.md §2) ────────────────────────────────
+
+    #[test]
+    fn ticks_before_the_daemon_actually_stops_do_not_consume_the_excuse() {
+        // Regression test: `note_user_stop` and the eventual process exit
+        // are two separate events, and the daemon can still tick in
+        // between (e.g. servicing the `request_stop` that follows). Those
+        // in-between ticks must not burn the excuse — only the real gap
+        // caused by the daemon actually being down should be, and that
+        // gap isn't visible until `note_user_start` runs on the next
+        // session. See `SPEC.md` §2.
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        let hooks = TestPlatformHooks::new();
+
+        note_user_stop(&mut state, &mut upload, 0, "test");
+        assert!(state.monitoring_stopped);
+
+        // A handful of ticks happen before the process actually exits (e.g.
+        // while `request_stop` is being serviced), including one with a gap
+        // that would otherwise alert. Under the old one-shot-flag design the
+        // very first tick here would have wrongly burned the excuse.
+        tick_at(&mut state, &mut upload, &hooks, 100, 50);
+        tick_at(&mut state, &mut upload, &hooks, 10_000_000, 300_000);
+        assert!(state.monitoring_stopped);
+        assert!(state.late_wakeups.is_empty());
+        assert!(!has_late_wakeup_alert(&upload));
+
+        // Time passes while the process is down. Restarting: `note_user_start`
+        // runs once per fresh session (mirroring `Daemon::new`). Resetting
+        // the wakeup-schedule baseline so the first post-restart tick isn't
+        // itself compared against a stale pre-stop schedule is `daemon.rs`'s
+        // job (`apply_note_user_start`), exercised end-to-end in
+        // `tests/scenarios.rs::user_stop_excuse_survives_across_a_real_restart_not_just_the_next_tick`.
+        assert!(note_user_start(&mut state, &mut upload, 1_000_000));
+        assert!(!state.monitoring_stopped);
+        assert!(
+            has_user_start_event(&upload),
+            "resuming from an actual stop should log a UserStart event"
+        );
+
+        // Checking is fully back to normal: a late wakeup is recorded again.
+        tick_at(&mut state, &mut upload, &hooks, 20_305_000, 20_300_000);
+        assert_eq!(state.late_wakeups.len(), 1);
+    }
+
+    #[test]
+    fn note_user_start_is_a_no_op_when_not_stopped() {
+        // A plain kill (no `note_user_stop`) must not be excused — asserted
+        // more fully in `daemon.rs`'s `apply_note_user_start`, but at this
+        // layer `note_user_start` must at least report there was nothing to
+        // resume (so the caller knows not to reset the wakeup schedule) and
+        // must not log a spurious `UserStart` on every ordinary launch.
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        assert!(!note_user_start(&mut state, &mut upload, 1_000));
+        assert!(!state.monitoring_stopped);
+        assert!(!has_user_start_event(&upload));
     }
 }

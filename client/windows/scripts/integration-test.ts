@@ -32,7 +32,7 @@
 //
 // Requires: bun, cargo, all on PATH. Windows only.
 
-import { mkdtempSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Subprocess } from 'bun';
@@ -52,6 +52,7 @@ import {
   spawnLogged,
   startApiDevServer,
   startHashServer,
+  rmSyncRetry,
   stopProcess,
   verifyDeviceHashBatch,
   waitForHttpReady,
@@ -101,8 +102,8 @@ async function cleanup(): Promise<void> {
   await stopProcess(runnerProc);
   await stopProcess(apiProc);
   await stopProcess(hashProc);
-  rmSync(tmpProgramData, { recursive: true, force: true });
-  rmSync(logDir, { recursive: true, force: true });
+  await rmSyncRetry(tmpProgramData);
+  await rmSyncRetry(logDir);
 }
 
 async function dumpLogs(): Promise<void> {

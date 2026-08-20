@@ -37,6 +37,7 @@ function getLogMetadata(log: DataLog) {
 type LogCaseKey =
   | 'screenshot'
   | 'screenshot_skipped'
+  | 'screenshot_missed'
   | 'system_login'
   | 'system_logout'
   | 'suspend_detected'
@@ -45,6 +46,7 @@ type LogCaseKey =
   | 'unexpected_stop'
   | 'unexpected_start'
   | 'user_stop'
+  | 'user_start'
   | 'lifecycle_alert_other'
   | 'alert'
   | 'capture_failed'
@@ -61,6 +63,18 @@ function getLogCaseKey(log: DataLog): LogCaseKey {
       return 'screenshot';
     case 'screenshot_skipped':
       return 'screenshot_skipped';
+    case 'screenshot_missed':
+      return 'screenshot_missed';
+    case 'system_login':
+      return 'system_login';
+    case 'system_logout':
+      return 'system_logout';
+    case 'user_stop':
+      return 'user_stop';
+    case 'user_start':
+      return 'user_start';
+    // `lifecycle`/`lifecycle_alert` are the pre-rewrite client's wire shapes
+    // — no longer sent, but kept here so already-stored logs still render.
     case 'lifecycle':
       if (kind === 'system_login') return 'system_login';
       if (kind === 'system_logout') return 'system_logout';
@@ -108,6 +122,11 @@ const LOG_KIND_TABLE: Record<
       return `Screenshot skipped on ${d}`;
     },
   },
+  screenshot_missed: {
+    category: 'Screenshot Missed',
+    icon: ClockIcon,
+    message: (d) => `${d} missed a scheduled screenshot`,
+  },
   system_login: {
     category: 'System Login',
     icon: SignInIcon,
@@ -153,6 +172,11 @@ const LOG_KIND_TABLE: Record<
     category: 'Monitoring Stopped by User',
     icon: ExclamationTriangleIcon,
     message: (d) => `Monitoring stopped by user on ${d}`,
+  },
+  user_start: {
+    category: 'Monitoring Resumed by User',
+    icon: SignInIcon,
+    message: (d) => `Monitoring resumed by user on ${d}`,
   },
   lifecycle_alert_other: {
     category: 'Alert',
@@ -225,12 +249,18 @@ export function getLogMessage(log: DataLog, deviceName: string): string {
 export const LOG_TYPES = [
   'screenshot',
   'screenshot_skipped',
-  'lifecycle',
-  'lifecycle_alert',
+  'screenshot_missed',
+  'system_login',
+  'system_logout',
+  'user_stop',
+  'user_start',
   'alert',
   'capture_failed',
   'dev',
   'heartbeat',
+  // Pre-rewrite wire shapes, kept so already-stored logs still render.
+  'lifecycle',
+  'lifecycle_alert',
 ] as const;
 
 const _dayLabelFmt = new Intl.DateTimeFormat(undefined, {

@@ -1,11 +1,17 @@
 use std::io::Cursor;
 #[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+#[cfg(target_os = "windows")]
 use std::process::{Command, Stdio};
 
+// Suppresses the console window that would otherwise flash on screen when
+// spawning a console subprocess (e.g. `wevtutil`) from this GUI app, which
+// has no console of its own for the child to inherit.
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 use anyhow::{Context, Result, anyhow};
-use virtue_core::{
-    CoreError, CoreResult, LifecycleHooks, PlatformHooks, Screenshot, ScreenshotHooks,
-};
+use virtue_core::{CoreError, CoreResult, LifecycleHooks, Screenshot, ScreenshotHooks};
 
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Gdi::{
@@ -97,7 +103,7 @@ pub fn capture_screen_png() -> Result<Vec<u8>> {
         }
 
         let mut rgba = Vec::with_capacity(bgra.len());
-        for px in bgra.chunks_exact(4) {
+        for px in bgra.as_chunks::<4>().0 {
             rgba.push(px[2]);
             rgba.push(px[1]);
             rgba.push(px[0]);
@@ -260,6 +266,7 @@ fn read_eventlog_last_before_boot_ms(boot_start_utc_ms: i64) -> Option<i64> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .ok()?;
     if !output.status.success() {
@@ -405,10 +412,8 @@ impl ScreenshotHooks for WindowsPlatformHooks {
 }
 
 impl LifecycleHooks for WindowsPlatformHooks {
-    fn get_boot_clock_ms(&self) -> CoreResult<i64> {
-        read_boot_clock_ms()
-    }
-
+    // `QueryUnbiasedInterruptTime` excludes time spent suspended. Feeds only
+    // `lifecycle::tick`'s suspend evidence (`SPEC.md` §2).
     fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
         read_monotonic_clock_ms()
     }
@@ -421,8 +426,6 @@ impl LifecycleHooks for WindowsPlatformHooks {
         read_last_logout_utc_ms()
     }
 }
-
-impl PlatformHooks for WindowsPlatformHooks {}
 
 #[cfg(test)]
 mod tests {

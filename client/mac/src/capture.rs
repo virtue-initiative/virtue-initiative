@@ -4,9 +4,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, anyhow};
 use uuid::Uuid;
-use virtue_core::{
-    CoreError, CoreResult, LifecycleHooks, PlatformHooks, Screenshot, ScreenshotHooks,
-};
+use virtue_core::{CoreError, CoreResult, LifecycleHooks, Screenshot, ScreenshotHooks};
 
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
@@ -187,7 +185,15 @@ impl MacPlatformHooks {
 impl ScreenshotHooks for MacPlatformHooks {
     #[cfg(not(feature = "mock-capture"))]
     fn take_screenshot(&self) -> CoreResult<Screenshot> {
-        let bytes = capture_screen().map_err(|err| CoreError::CommandFailed(err.to_string()))?;
+        let bytes = capture_screen().map_err(|err| {
+            let message = err.to_string();
+            if is_permission_missing_error(&message) {
+                tracing::warn!(error = %message, "capture permission missing");
+            } else {
+                tracing::warn!(error = %message, "screenshot capture failed");
+            }
+            CoreError::CommandFailed(message)
+        })?;
         Ok(Screenshot {
             captured_at_ms: self.get_time_utc_ms()?,
             bytes,
@@ -284,17 +290,33 @@ fn mach_ticks_to_ms(ticks: u64) -> CoreResult<i64> {
     Ok((ns / 1_000_000) as i64)
 }
 
-impl LifecycleHooks for MacPlatformHooks {
-    fn get_boot_clock_ms(&self) -> CoreResult<i64> {
+impl MacPlatformHooks {
+    /// Time since boot, in milliseconds, INCLUDING time spent suspended.
+    /// Not part of `LifecycleHooks` (the core late-wakeup model doesn't use
+    /// boot/monotonic clocks) — called directly by `daemon.rs`'s file-local
+    /// post-wake UX suppression check, which is independent daemon-loop UX
+    /// plumbing, not part of the core alerting model. See `client/CLAUDE.md`.
+    pub fn boot_clock_ms(&self) -> CoreResult<i64> {
         // SAFETY: `mach_continuous_time` takes no arguments and has no
         // preconditions.
         mach_ticks_to_ms(unsafe { mach_continuous_time() })
     }
 
-    fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
+    /// Time since boot, in milliseconds, EXCLUDING time spent suspended. See
+    /// `boot_clock_ms`.
+    pub fn monotonic_clock_ms(&self) -> CoreResult<i64> {
         // SAFETY: `mach_absolute_time` takes no arguments and has no
         // preconditions.
         mach_ticks_to_ms(unsafe { mach_absolute_time() })
+    }
+}
+
+impl LifecycleHooks for MacPlatformHooks {
+    // Feeds only `lifecycle::tick`'s suspend evidence (`SPEC.md` §2); the
+    // local post-wake UX check in `mac/src/daemon.rs` reads `boot_clock_ms`/
+    // `monotonic_clock_ms` directly instead, independent of this trait.
+    fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
+        self.monotonic_clock_ms()
     }
 
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {
@@ -336,8 +358,6 @@ impl LifecycleHooks for MacPlatformHooks {
         Ok(parse_last_logout_mac(&text))
     }
 }
-
-impl PlatformHooks for MacPlatformHooks {}
 
 #[cfg(test)]
 mod tests {
