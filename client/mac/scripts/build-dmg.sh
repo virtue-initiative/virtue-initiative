@@ -39,9 +39,24 @@ DEVICE="$(printf '%s\n' "$ATTACH_OUTPUT" | awk '/\/Volumes\// {print $1; exit}')
 MOUNT_PATH="$(printf '%s\n' "$ATTACH_OUTPUT" | awk '/\/Volumes\// {print substr($0, index($0, "/Volumes/")); exit}')"
 DISK_NAME="$(basename "$MOUNT_PATH")"
 
+# Finder closes the volume window asynchronously, so it can still hold the
+# mount for a few seconds after osascript returns and `hdiutil detach` fails
+# with "Resource busy". Retry before falling back to a forced detach.
+detach_device() {
+  local attempt
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    if hdiutil detach "$DEVICE" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  echo "hdiutil detach ${DEVICE} still busy after 10 attempts; forcing." >&2
+  hdiutil detach "$DEVICE" -force
+}
+
 cleanup() {
   if mount | grep -q "on ${MOUNT_PATH} "; then
-    hdiutil detach "$DEVICE" >/dev/null 2>&1 || true
+    detach_device >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
@@ -66,7 +81,8 @@ tell application "Finder"
 end tell
 EOF
 
-hdiutil detach "$DEVICE"
+sync
+detach_device
 trap - EXIT
 
 hdiutil convert "$TEMP_DMG_PATH" -format UDZO -ov -o "$DMG_PATH"
