@@ -159,14 +159,14 @@ fn user_stop_excuse_survives_across_a_real_restart_not_just_the_next_tick() {
 // ── Late-wakeup model (client/core/SPEC.md §2) ─────────────────────────────────
 
 #[test]
-fn late_wakeup_over_one_minute_triggers_alert() {
+fn late_wakeup_over_two_minutes_triggers_alert() {
     let mut scenario = Scenario::authenticated();
     // First tick establishes a scheduled `next_wakeup_at_ms`.
     scenario.at_t(0).tick();
     let expected = scenario.state().next_wakeup_at_ms;
 
-    // Wake up 70s later than scheduled: over the 1-minute single-wakeup threshold.
-    scenario.at_t(expected + 70_000).tick();
+    // Wake up 130s later than scheduled: over the 2-minute single-wakeup threshold.
+    scenario.at_t(expected + 130_000).tick();
 
     // SPEC.md §2: cleared after the alert is sent, to prevent duplicates.
     assert!(
@@ -207,7 +207,7 @@ fn lifecycle_disabled_never_records_or_alerts_regardless_of_lateness() {
     scenario.at_t(0).tick();
     let expected = scenario.state().next_wakeup_at_ms;
 
-    // Wildly late — would easily cross the 1-minute single-wakeup threshold
+    // Wildly late — would easily cross the 2-minute single-wakeup threshold
     // if the check ran at all.
     scenario.at_t(expected + 10 * 60_000).tick();
 
