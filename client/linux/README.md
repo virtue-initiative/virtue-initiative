@@ -83,7 +83,9 @@ The client uses `XDG_CONFIG_HOME` and `XDG_STATE_HOME` when those variables are 
 
 The script bundles `libtesseract`/`liblept`/`libjpeg` into the package (instead of depending
 on the OS-provided packages, whose names — and in libjpeg's case, ABI — vary across distro
-versions) and uses `patchelf` to set their RPATH.
+versions) and uses `patchelf` to set their RPATH. It also bundles the `eng.traineddata`
+Tesseract language data file so OCR-based screenshot redaction works out of the box, without
+depending on the OS `tesseract-ocr-eng` package.
 
 ### Recommended: Docker build (widest compatibility)
 
