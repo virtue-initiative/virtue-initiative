@@ -92,6 +92,21 @@ for soname in $BUNDLE_SONAMES; do
     patchelf --set-rpath '$ORIGIN' "$PKG_DIR/usr/lib/$PKG_NAME/$soname"
 done
 
+# Bundle the eng.traineddata Tesseract language data file the same way the
+# .so libs above are bundled, instead of depending on the OS tesseract-ocr-eng
+# package (whose path/naming is distro-versioned, e.g.
+# /usr/share/tesseract-ocr/5/tessdata vs 4.00/tessdata). We only need the
+# file dropped by that package in the build image, not a runtime dependency
+# on it. text-detection/src/linux.rs looks for a `tessdata` dir next to the
+# installed binary and points Tesseract at it when found.
+ENG_TRAINEDDATA="$(find /usr/share -name eng.traineddata 2>/dev/null | head -1)"
+if [[ -z "$ENG_TRAINEDDATA" ]]; then
+    echo "ERROR: eng.traineddata not found (is tesseract-ocr-eng installed in the build image?)" >&2
+    exit 1
+fi
+mkdir -p "$PKG_DIR/usr/lib/$PKG_NAME/tessdata"
+install -m 0644 "$ENG_TRAINEDDATA" "$PKG_DIR/usr/lib/$PKG_NAME/tessdata/eng.traineddata"
+
 # Auto-detect remaining shared library dependencies via dpkg-shlibdeps, since
 # the binary links libraries pulled in transitively by Cargo dependencies
 # (leptess/tesseract-sys) that aren't tracked anywhere else. Run it across the
