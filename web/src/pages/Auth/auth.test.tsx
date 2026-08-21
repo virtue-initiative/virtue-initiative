@@ -90,14 +90,14 @@ describe('Auth — signup', () => {
 });
 
 describe('Auth — finish signup', () => {
-  it('renders a disabled email field populated from the signup token', async () => {
+  it('renders a read-only email field populated from the signup token', async () => {
     window.history.pushState({}, '', '/signup?signup_token=test-token');
     renderAuth('signup');
 
     await waitFor(() => {
       const emailInput = screen.getByPlaceholderText('you@example.com') as HTMLInputElement;
       expect(emailInput.value).toBe('test@example.com');
-      expect(emailInput).toBeDisabled();
+      expect(emailInput).toHaveAttribute('readonly');
     });
 
     expect(screen.getByPlaceholderText('Choose a password')).toBeInTheDocument();
