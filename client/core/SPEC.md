@@ -11,7 +11,7 @@ loop(persisted state):
   state = check lifecycle(state)
   state = take screenshot(state)
 
-  if late_wakeups.max() > 1000*60 OR late_wakeups.sum() > 1000*60*5:
+  if late_wakeups.max() > 1000*60*2 OR late_wakeups.sum() > 1000*60*5:
     upload alert
 
   take screenshot
@@ -34,7 +34,7 @@ Each piece of evidence is either unavailable (the platform hook returned nothing
 
 A third piece of evidence — suspend evidence — MUST also be considered, to excuse a gap caused by the system being suspended rather than by tampering. It is computed by comparing the real-time elapsed since the previous tick against the elapsed time on a clock that does not advance while the system is suspended, over that same span; a shortfall reveals how much of the span the system spent suspended. Unlike login/logout evidence, suspend evidence MUST only ever support an excuse, never contradict one — it MUST NOT be able to block a login/logout-supported excuse. It MUST support the excuse only when the detected suspended duration accounts for essentially the whole gap (allowing a small amount of slack for wake-up scheduling jitter); a gap only partially covered by a brief suspend (e.g. a killed process whose downtime happens to also span a real suspend) MUST NOT be excused by this evidence.
 
-The late wakeups array SHOULD track the last 10 wakeups. If a single late wakeup is greater than 1 minute or the sum (of the non-negative values) is greater than 5 minutes we SHOULD alert.
+The late wakeups array SHOULD track the last 10 wakeups. If a single late wakeup is greater than 2 minutes or the sum (of the non-negative values) is greater than 5 minutes we SHOULD alert.
 
 The late wakeups array MUST be cleared after an alert is sent (to prevent duplicates).
 

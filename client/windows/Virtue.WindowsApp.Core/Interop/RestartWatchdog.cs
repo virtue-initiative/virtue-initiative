@@ -12,6 +12,10 @@ namespace Virtue.WindowsApp.Core.Interop;
 /// single-instance redirect (see `App.EnsureSingleInstanceAsync`) makes each
 /// attempt a no-op when the app is already running, so no separate "is it
 /// running" check is needed here.
+///
+/// 1 minute is Task Scheduler's floor for a repeating trigger — confirmed against
+/// schtasks.exe, which rejects a sub-minute `Interval` (e.g. `PT45S`) as out of
+/// range even via an XML task definition, so there's no way to go faster than this.
 /// </summary>
 public static class RestartWatchdog
 {

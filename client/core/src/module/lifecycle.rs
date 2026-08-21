@@ -16,7 +16,7 @@ pub(crate) const HIGH_RISK_LIFECYCLE_ALERT: f32 = 0.8;
 
 /// See `client/core/SPEC.md` §2.
 const MAX_TRACKED_WAKEUPS: usize = 10;
-const SINGLE_LATE_THRESHOLD_MS: i64 = 60_000; // 1 minute
+const SINGLE_LATE_THRESHOLD_MS: i64 = 2 * 60_000; // 2 minutes
 const SUM_LATE_THRESHOLD_MS: i64 = 5 * 60_000; // 5 minutes
 const LOGIN_LOGOUT_EXCUSE_MS: i64 = 2 * 60_000; // 2 minutes
 /// Floor below which a measured clock divergence is treated as noise (clock
@@ -330,18 +330,18 @@ mod tests {
         let mut state = LifecycleState::default();
         let mut upload = upload_with_credentials();
         let hooks = TestPlatformHooks::new();
-        // 5s late — well under the 1-minute single-wakeup threshold.
+        // 5s late — well under the 2-minute single-wakeup threshold.
         tick_at(&mut state, &mut upload, &hooks, 305_000, 300_000);
         assert_eq!(state.late_wakeups, [5_000]);
         assert!(!has_late_wakeup_alert(&upload));
     }
 
     #[test]
-    fn single_wakeup_over_one_minute_late_alerts() {
+    fn single_wakeup_over_two_minutes_late_alerts() {
         let mut state = LifecycleState::default();
         let mut upload = upload_with_credentials();
         let hooks = TestPlatformHooks::new();
-        tick_at(&mut state, &mut upload, &hooks, 361_001, 300_000);
+        tick_at(&mut state, &mut upload, &hooks, 420_001, 300_000);
         assert!(has_late_wakeup_alert(&upload));
     }
 
@@ -351,7 +351,7 @@ mod tests {
         let mut upload = upload_with_credentials();
         let hooks = TestPlatformHooks::new();
         // Ten *recorded* wakeups each 31s late: sum = 310s > 300s (5 min), but
-        // no single one exceeds the 1-minute per-wakeup threshold. The very
+        // no single one exceeds the 2-minute per-wakeup threshold. The very
         // first tick (expected_wakeup_at_ms == 0) is a no-op by design, so
         // seed one throwaway tick first to get a nonzero `expected` baseline.
         let mut expected = 1_000i64;
@@ -519,14 +519,14 @@ mod tests {
         let mut state = LifecycleState::default();
         let mut upload = upload_with_credentials();
         let hooks = TestPlatformHooks::new();
-        tick_at(&mut state, &mut upload, &hooks, 361_001, 300_000);
+        tick_at(&mut state, &mut upload, &hooks, 420_001, 300_000);
         assert!(has_late_wakeup_alert(&upload));
         assert!(state.late_wakeups.is_empty());
 
-        // Without the clear, the 61s-late entry above would still be sitting
+        // Without the clear, the 120s-late entry above would still be sitting
         // in the array and this on-time-ish follow-up tick would alert a
         // second time for the same already-reported incident.
-        tick_at(&mut state, &mut upload, &hooks, 361_501, 361_001);
+        tick_at(&mut state, &mut upload, &hooks, 420_501, 420_001);
         assert_eq!(
             late_wakeup_alert_count(&upload),
             1,
