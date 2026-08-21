@@ -246,22 +246,27 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
           </p>
         )}
 
-        <form class="auth-form" onSubmit={handleSubmit}>
-          <Field label="Email">
+        <form class="auth-form" method="post" onSubmit={handleSubmit}>
+          <Field label="Email" id="email">
             <Input
+              id="email"
+              name="email"
               type="email"
               value={email}
               onInput={(e) => setEmail((e.target as HTMLInputElement).value)}
               placeholder="you@example.com"
-              autoComplete="email"
+              autoComplete={authMode === 'login' ? 'email' : 'username'}
               required
-              disabled={authMode === 'reset' || authMode === 'finish-signup'}
+              readOnly={authMode === 'reset' || authMode === 'finish-signup'}
+              tabIndex={authMode === 'reset' || authMode === 'finish-signup' ? -1 : undefined}
             />
           </Field>
 
           {authMode === 'finish-signup' && (
-            <Field label="Name">
+            <Field label="Name" id="name">
               <Input
+                id="name"
+                name="name"
                 type="text"
                 value={name}
                 onInput={(e) => setName((e.target as HTMLInputElement).value)}
@@ -280,8 +285,11 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
                     ? 'Choose a password'
                     : 'Password'
               }
+              id="password"
             >
               <Input
+                id="password"
+                name="password"
                 type="password"
                 value={password}
                 onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
@@ -303,8 +311,10 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
           )}
 
           {(authMode === 'reset' || authMode === 'finish-signup') && (
-            <Field label="Confirm password">
+            <Field label="Confirm password" id="password-confirm">
               <Input
+                id="password-confirm"
+                name="password-confirm"
                 type="password"
                 value={confirm}
                 onInput={(e) => setConfirm((e.target as HTMLInputElement).value)}
