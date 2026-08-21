@@ -171,6 +171,7 @@ Remote logs are always written locally under:
 - Launching the app from Start reuses the resident instance and opens the settings/login window.
 - Closing the settings window hides it back to the tray.
 - Tray `Exit` asks for confirmation before stopping active monitoring, records an explicit user stop, stops resident monitoring, and exits the app without logging the device out.
+- The app registers a per-user Scheduled Task (`VirtueResidentWatchdog`, every 1 minute) at startup that relaunches `Virtue.WindowsApp.exe` if it isn't running, covering accidental crashes/hangs. The app's existing single-instance redirect makes each periodic relaunch attempt a no-op while the app is already running, so the task doesn't need its own "is it running" check, and the relaunch comes back into the tray quietly (same as the startup task). Tray `Exit` deletes the task first so a deliberate exit isn't resurrected. Windows' Application Recovery and Restart API (`RegisterApplicationRestart`) was tried first but does not automatically relaunch MSIX-packaged apps (confirmed both by community reports and by testing on this repo's `virtue-win11` VM: registration succeeds and WER correctly reports the crash/hang, but no relaunch follows), hence the Scheduled Task instead. See `Virtue.WindowsApp.Core/Interop/RestartWatchdog.cs` and `Virtue.WindowsApp/App.xaml.cs`.
 - `client/core` is intentionally unchanged by this architecture; Windows-specific behavior lives under `client/windows/`.
 
 ## Runtime Data Locations

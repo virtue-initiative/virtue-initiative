@@ -3,6 +3,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.Windows.AppLifecycle;
 using Windows.ApplicationModel;
 using Windows.ApplicationModel.Activation;
+using WinRT;
 using Virtue.WindowsApp.Core.Tray;
 using Virtue.WindowsApp.Core.Interop;
 using Virtue.WindowsApp.Core.ViewModels;
@@ -66,8 +67,10 @@ public partial class App : Application
             await InitializeViewModelAsync(_viewModel);
             StartRefreshLoop();
 
+            RegisterWatchdog();
+
             var activation = AppLifecycleInstance.GetCurrent().GetActivatedEventArgs();
-            if (!IsStartupActivation(activation))
+            if (!IsQuietActivation(activation))
             {
                 ShowMainWindow();
             }
@@ -151,7 +154,7 @@ public partial class App : Application
 
     private void MainInstanceOnActivated(object? sender, AppActivationArguments args)
     {
-        if (IsStartupActivation(args))
+        if (IsQuietActivation(args))
         {
             return;
         }
@@ -159,7 +162,18 @@ public partial class App : Application
         _ = _dispatcherQueue?.TryEnqueue(ShowMainWindow);
     }
 
-    private bool IsStartupActivation(AppActivationArguments activation)
+    /// <summary>
+    /// Command-line arg the watchdog Scheduled Task relaunches with, so the resident
+    /// process comes back into the tray quietly rather than popping a window.
+    /// </summary>
+    private const string WatchdogRelaunchArg = "--restarted-by-watchdog";
+
+    private static bool IsQuietActivation(AppActivationArguments activation)
+    {
+        return IsStartupActivation(activation) || IsWatchdogActivation(activation);
+    }
+
+    private static bool IsStartupActivation(AppActivationArguments activation)
     {
         if (activation.Kind != ExtendedActivationKind.StartupTask)
         {
@@ -167,6 +181,33 @@ public partial class App : Application
         }
 
         return activation.Data is StartupTaskActivatedEventArgs;
+    }
+
+    private static bool IsWatchdogActivation(AppActivationArguments activation)
+    {
+        if (activation.Kind != ExtendedActivationKind.Launch || activation.Data is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var launchArgs = activation.Data.As<Windows.ApplicationModel.Activation.ILaunchActivatedEventArgs>();
+            return launchArgs.Arguments.Contains(WatchdogRelaunchArg, StringComparison.Ordinal);
+        }
+        catch (InvalidCastException)
+        {
+            return false;
+        }
+    }
+
+    private static void RegisterWatchdog()
+    {
+        var exePath = Environment.ProcessPath;
+        if (!string.IsNullOrEmpty(exePath))
+        {
+            RestartWatchdog.Register(exePath, WatchdogRelaunchArg);
+        }
     }
 
     private void ShowMainWindow()
@@ -239,6 +280,7 @@ public partial class App : Application
 
         try
         {
+            RestartWatchdog.Unregister();
             _refreshLoopCancellation?.Cancel();
             if (_viewModel is not null)
             {
