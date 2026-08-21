@@ -11,13 +11,13 @@ export const helpSidebar: HelpNavItem[] = [
   },
   {
     label: 'Installation',
-    href: '/help/installation',
+    href: '/download',
     items: [
-      { label: 'Windows', href: '/help/installation/windows' },
-      { label: 'Mac', href: '/help/installation/mac' },
-      { label: 'Linux', href: '/help/installation/linux' },
-      { label: 'Android', href: '/help/installation/android' },
-      { label: 'iOS', href: '/help/installation/ios' },
+      { label: 'Windows', href: '/download#windows' },
+      { label: 'Mac', href: '/download#mac' },
+      { label: 'Linux', href: '/download#linux' },
+      { label: 'Android', href: '/download#android' },
+      { label: 'iOS', href: '/download#ios' },
     ],
   },
   {

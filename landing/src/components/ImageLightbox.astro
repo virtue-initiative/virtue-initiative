@@ -1,0 +1,54 @@
+---
+// Click-to-enlarge for every image in markdown-rendered content (.help-doc
+// covers help pages, blog posts, and the download-instructions panels).
+// One instance is included in each page layout; the click listener is
+// delegated on document so it also covers content added after load.
+---
+
+<dialog id="image-lightbox" class="image-lightbox">
+  <button type="button" class="image-lightbox-close" aria-label="Close image preview">
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke-width="1.5"
+      stroke="currentColor"
+      aria-hidden="true"
+    >
+      <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"></path>
+    </svg>
+  </button>
+  <img class="image-lightbox-img" alt="" />
+</dialog>
+
+<script>
+  const dialog = document.getElementById('image-lightbox');
+  const image = dialog?.querySelector('.image-lightbox-img');
+  const closeButton = dialog?.querySelector('.image-lightbox-close');
+
+  if (
+    dialog instanceof HTMLDialogElement &&
+    image instanceof HTMLImageElement &&
+    closeButton instanceof HTMLButtonElement
+  ) {
+    document.addEventListener('click', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLImageElement)) return;
+      if (!target.closest('.help-doc')) return;
+
+      image.src = target.currentSrc || target.src;
+      image.alt = target.alt;
+      dialog.showModal();
+    });
+
+    closeButton.addEventListener('click', () => dialog.close());
+
+    dialog.addEventListener('click', (event) => {
+      if (event.target === dialog) dialog.close();
+    });
+
+    dialog.addEventListener('close', () => {
+      image.src = '';
+    });
+  }
+</script>
