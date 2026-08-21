@@ -17,7 +17,7 @@ pub struct CaptureProbe {
 
 pub fn detect_backend() -> Option<CaptureBackend> {
     detect_backend_from(
-        env_var_nonempty("WAYLAND_DISPLAY").is_some(),
+        resolve_session_env_var("WAYLAND_DISPLAY").is_some(),
         resolve_x11_display().is_some(),
     )
 }
@@ -88,7 +88,11 @@ pub fn is_session_unavailable_text(text: &str) -> bool {
 }
 
 fn capture_wayland() -> Result<Vec<u8>> {
-    run_capture_command("grim", &["-"], &[]).with_context(
+    let mut env_overrides = Vec::new();
+    if let Some(wayland_display) = resolve_session_env_var("WAYLAND_DISPLAY") {
+        env_overrides.push(("WAYLAND_DISPLAY", wayland_display));
+    }
+    run_capture_command("grim", &["-"], &env_overrides).with_context(
         || "grim capture failed (Wayland usually requires compositor support and permissions)",
     )
 }
@@ -129,7 +133,31 @@ fn env_var_nonempty(name: &str) -> Option<String> {
 }
 
 fn resolve_x11_display() -> Option<String> {
-    env_var_nonempty("DISPLAY").or_else(detect_x11_socket_display)
+    resolve_session_env_var("DISPLAY").or_else(detect_x11_socket_display)
+}
+
+/// Resolves a session environment variable, preferring this process's own (frozen at
+/// exec time) environment, and falling back to the systemd `--user` manager's live
+/// environment if unset here. Compositors typically push variables like
+/// `WAYLAND_DISPLAY` into the systemd `--user` manager after they start, and that push
+/// isn't reliably ordered before this daemon's own activation — this fallback lets the
+/// daemon recover on its next capture tick without needing a restart.
+fn resolve_session_env_var(name: &str) -> Option<String> {
+    env_var_nonempty(name).or_else(|| systemd_user_environment_var(name))
+}
+
+fn systemd_user_environment_var(name: &str) -> Option<String> {
+    let connection = zbus::blocking::Connection::session().ok()?;
+    let proxy = SystemdManagerProxy::new(&connection).ok()?;
+    let environment = proxy.environment().ok()?;
+    environment.iter().find_map(|entry| {
+        let (key, value) = entry.split_once('=')?;
+        if key == name && !value.is_empty() {
+            Some(value.to_string())
+        } else {
+            None
+        }
+    })
 }
 
 fn detect_x11_socket_display() -> Option<String> {
@@ -299,6 +327,22 @@ trait Login1Session {
     /// Session start time, µs since epoch.
     #[zbus(property)]
     fn timestamp(&self) -> zbus::Result<u64>;
+}
+
+// Blocking proxy for the systemd `--user` manager, exposed on the session bus (same
+// object `systemctl --user show-environment` reads). Used to recover session variables
+// like `WAYLAND_DISPLAY` that a compositor imported after this daemon's own env snapshot
+// was taken at exec time.
+#[zbus::proxy(
+    interface = "org.freedesktop.systemd1.Manager",
+    default_service = "org.freedesktop.systemd1",
+    default_path = "/org/freedesktop/systemd1",
+    gen_async = false,
+    gen_blocking = true
+)]
+trait SystemdManager {
+    #[zbus(property)]
+    fn environment(&self) -> zbus::Result<Vec<String>>;
 }
 
 /// Real UID of this process, read from `/proc/self/status` (no libc dependency).
