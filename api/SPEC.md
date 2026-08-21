@@ -219,7 +219,27 @@ The server MUST create an account for the user and return **HTTP 200** with this
 }
 ```
 
-### 2.3 `POST /password-reset`
+### 2.3 `POST /signup/validate`
+
+The client MUST send a signup verification token.
+
+```js
+{
+  "token": "opaque-string",
+}
+```
+
+The server MUST respond **HTTP 400** if the token is invalid, expired, or an account already exists for its email.
+
+The server MUST respond **HTTP 200** with the pending signup's email.
+
+```js
+{
+  "email": "user@example.com"
+}
+```
+
+### 2.4 `POST /password-reset`
 
 The client MUST send the email to request a password reset:
 
@@ -233,7 +253,7 @@ If the account exists, the server SHOULD send a password reset email, otherwise 
 
 The server SHOULD always respond with **HTTP 204**.
 
-### 2.4 `POST /password-reset/validate`
+### 2.5 `POST /password-reset/validate`
 
 The client MUST send a password-reset token.
 
@@ -253,7 +273,7 @@ The server MUST respond **HTTP 200** with the account email.
 }
 ```
 
-### 2.5 `POST /password-reset/finalize`
+### 2.6 `POST /password-reset/finalize`
 
 The client MUST send the follow request data.
 
@@ -273,7 +293,7 @@ The server MUST respond **HTTP 401** if the token is invalid or not found.
 
 The server MUST update the user with the new information and return **HTTP 204**.
 
-### 2.6 `GET /user/login-material`
+### 2.7 `GET /user/login-material`
 
 The client MAY send an email as a query param `?email=[email]`.
 
@@ -296,7 +316,7 @@ If the client did provide an email, the server MUST additionally respond with th
 }
 ```
 
-### 2.7 `POST /login`
+### 2.8 `POST /login`
 
 The client MUST send this request shape
 
@@ -318,7 +338,7 @@ If the email has been marked as unverified, the server SHOULD send a verificatio
 
 If it matches, the server MUST send **HTTP 204** and set the `refresh_token` cookie.
 
-### 2.8 `POST /email-verification/validate`
+### 2.9 `POST /email-verification/validate`
 
 The client MUST provide a email token in the body.
 
@@ -341,7 +361,7 @@ The server MUST respond with **HTTP 200**:
 }
 ```
 
-### 2.9 `POST /logout`
+### 2.10 `POST /logout`
 
 The client MUST authenticate with a **Web Token**.
 
@@ -349,7 +369,7 @@ The server MUST invalidate the session and clear the refresh_token.
 
 The server MUST respond with **HTTP 204**.
 
-### 2.7 `GET /user`
+### 2.11 `GET /user`
 
 The client MUST authenticate with either token.
 
@@ -359,7 +379,7 @@ The server MUST return the currently authenticated user.
 User;
 ```
 
-### 2.10 `PATCH /user`
+### 2.12 `PATCH /user`
 
 The client MUST authenticate with a **Web Token**.
 
@@ -389,7 +409,7 @@ The server MUST return this response shape.
 }
 ```
 
-### 2.11 `DELETE /user?confirm_email=[email]`
+### 2.13 `DELETE /user?confirm_email=[email]`
 
 The client MUST be authenticated with a **Web Token**.
 

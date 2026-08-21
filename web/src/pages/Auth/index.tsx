@@ -62,6 +62,7 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [resetTokenValid, setResetTokenValid] = useState(!resetToken);
+  const [signupTokenValid, setSignupTokenValid] = useState(!signupToken);
   const [signupVerificationEmail, setSignupVerificationEmail] = useState('');
   const signupVerificationDialogRef = useRef<HTMLDialogElement>(null);
 
@@ -81,6 +82,23 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
       })
       .finally(() => setLoading(false));
   }, [authMode, resetToken]);
+
+  useEffect(() => {
+    if (!signupToken || authMode !== 'finish-signup') return;
+    setLoading(true);
+    api
+      .validateSignupToken(signupToken)
+      .then((result) => {
+        setEmail(result.email);
+        setSignupTokenValid(true);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        setSignupTokenValid(false);
+        setError(err instanceof Error ? err.message : 'Signup token is invalid');
+      })
+      .finally(() => setLoading(false));
+  }, [authMode, signupToken]);
 
   async function handleSubmit(e: Event) {
     e.preventDefault();
@@ -105,6 +123,9 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
       } else if (authMode === 'finish-signup') {
         if (!signupToken) {
           throw new Error('Signup token is missing');
+        }
+        if (!signupTokenValid) {
+          throw new Error('Signup token is invalid or expired');
         }
         if (password !== confirm) {
           throw new Error('Passwords do not match');
@@ -226,19 +247,17 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
         )}
 
         <form class="auth-form" onSubmit={handleSubmit}>
-          {authMode !== 'finish-signup' && (
-            <Field label="Email">
-              <Input
-                type="email"
-                value={email}
-                onInput={(e) => setEmail((e.target as HTMLInputElement).value)}
-                placeholder="you@example.com"
-                autoComplete="email"
-                required
-                disabled={authMode === 'reset'}
-              />
-            </Field>
-          )}
+          <Field label="Email">
+            <Input
+              type="email"
+              value={email}
+              onInput={(e) => setEmail((e.target as HTMLInputElement).value)}
+              placeholder="you@example.com"
+              autoComplete="email"
+              required
+              disabled={authMode === 'reset' || authMode === 'finish-signup'}
+            />
+          </Field>
 
           {authMode === 'finish-signup' && (
             <Field label="Name">
@@ -275,7 +294,10 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
                 }
                 autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
                 required
-                disabled={authMode === 'reset' && !resetTokenValid}
+                disabled={
+                  (authMode === 'reset' && !resetTokenValid) ||
+                  (authMode === 'finish-signup' && !signupTokenValid)
+                }
               />
             </Field>
           )}
@@ -289,7 +311,10 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
                 placeholder="Retype your password"
                 autoComplete="new-password"
                 required
-                disabled={authMode === 'reset' && !resetTokenValid}
+                disabled={
+                  (authMode === 'reset' && !resetTokenValid) ||
+                  (authMode === 'finish-signup' && !signupTokenValid)
+                }
               />
             </Field>
           )}

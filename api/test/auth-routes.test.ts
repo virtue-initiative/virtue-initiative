@@ -241,6 +241,56 @@ describe('Auth routes', () => {
     expect(consumedToken?.consumed_at).not.toBeNull();
   });
 
+  it('signup/validate resolves the email for a pending signup token', async () => {
+    const requestRes = await SELF.fetch(`${BASE}/signup-request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'pending@example.com' }),
+    });
+    expect(requestRes.status).toBe(204);
+
+    const deliveries = await listEmailDeliveries();
+    const verificationToken = extractTokenFromDelivery(deliveries[0]!, 'signup_token');
+
+    const validateRes = await SELF.fetch(`${BASE}/signup/validate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: verificationToken }),
+    });
+    expect(validateRes.status).toBe(200);
+    expect(await validateRes.json()).toEqual({ email: 'pending@example.com' });
+  });
+
+  it('signup/validate rejects an invalid, expired, or already-claimed token', async () => {
+    const badRes = await SELF.fetch(`${BASE}/signup/validate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: 'not-a-real-token' }),
+    });
+    expect(badRes.status).toBe(400);
+    expect(await badRes.json()).toEqual({ error: 'Invalid or expired verification token' });
+
+    const requestRes = await SELF.fetch(`${BASE}/signup-request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'claimed@example.com' }),
+    });
+    expect(requestRes.status).toBe(204);
+    const deliveries = await listEmailDeliveries();
+    const verificationToken = extractTokenFromDelivery(deliveries[0]!, 'signup_token');
+
+    // Someone else claims the email in the window between /signup-request and /signup/validate.
+    await signupAndGetCookie('claimed@example.com', 'someone-else');
+
+    const claimedRes = await SELF.fetch(`${BASE}/signup/validate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: verificationToken }),
+    });
+    expect(claimedRes.status).toBe(400);
+    expect(await claimedRes.json()).toEqual({ error: 'Invalid or expired verification token' });
+  });
+
   it('logs in with password_auth and sets a refresh cookie', async () => {
     await signupAndGetCookie('bob@example.com', 'pw');
 

@@ -30,6 +30,7 @@ import { serializeUser } from '../lib/serializers';
 import {
   signupRequestSchema,
   signupSchema,
+  signupValidateSchema,
   loginMaterialQuerySchema,
   loginSchema,
   verifyEmailSchema,
@@ -358,6 +359,22 @@ auth.post('/signup-request', validateZ('json', signupRequestSchema), async (c) =
   });
 
   return c.body(null, 204);
+});
+
+auth.post('/signup/validate', validateZ('json', signupValidateSchema), async (c) => {
+  const { token } = c.req.valid('json');
+  const record = await getValidTokenRecord(c.env.DB, token, 'signup');
+
+  if (!record) {
+    return c.json({ error: 'Invalid or expired verification token' }, 400);
+  }
+
+  const existingUser = await findUserByEmail(c.env.DB, record.email);
+  if (existingUser) {
+    return c.json({ error: 'Invalid or expired verification token' }, 400);
+  }
+
+  return c.json({ email: record.email });
 });
 
 auth.post('/signup', validateZ('json', signupSchema), async (c) => {
