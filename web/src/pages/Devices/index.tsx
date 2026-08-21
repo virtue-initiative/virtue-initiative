@@ -23,7 +23,6 @@ import { LANDING_URL } from '../../utils/landing-url';
 import './style.css';
 
 const DOWNLOAD_URL = `${LANDING_URL}/download`;
-const INSTALLATION_URL = `${LANDING_URL}/help/installation`;
 
 export function Devices() {
   const api = useAPIContext();
@@ -102,7 +101,7 @@ function AddDeviceButton() {
         </ol>
         <DialogActions
           left={
-            <Button variant="ghost" href={INSTALLATION_URL} target="_blank" rel="noreferrer">
+            <Button variant="ghost" href={DOWNLOAD_URL} target="_blank" rel="noreferrer">
               View guide
             </Button>
           }

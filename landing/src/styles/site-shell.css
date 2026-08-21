@@ -31,6 +31,12 @@ body {
   z-index: 10;
 }
 
+@media (max-width: 640px) {
+  .site-header-shell {
+    position: static;
+  }
+}
+
 .site-header {
   display: flex;
   align-items: center;

@@ -82,7 +82,7 @@ A general alert was raised. Open the entry to read the alert message.
 
 Screenshot capture failed repeatedly on the device. This usually points to a
 configuration or permissions problem with screen capture — see the
-[installation guide](/help/installation) for your platform.
+[installation guide](/download) for your platform.
 
 ## Developer
 
