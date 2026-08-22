@@ -8,6 +8,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 virtue_core = { package = "virtue-core", path = "../../core" }
 virtue_text_detection = { package = "virtue-text-detection", path = "../../text-detection" }
 jni = "0.22"

@@ -65,6 +65,17 @@
                         android:textSize="12sp"
                         android:textColor="?attr/colorOnSurfaceVariant"
                         android:layout_marginTop="4dp" />
+
+                    <TextView
+                        android:id="@+id/reportBugLink"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/btn_report_bug"
+                        android:textSize="14sp"
+                        android:textColor="@color/virtue_forest"
+                        android:layout_marginTop="6dp"
+                        android:clickable="true"
+                        android:focusable="true" />
                 </LinearLayout>
             </LinearLayout>
         </LinearLayout>

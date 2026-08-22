@@ -29,6 +29,8 @@
     <string name="btn_pause_monitoring">Pause Monitoring</string>
     <string name="btn_resume_monitoring">Resume Monitoring</string>
     <string name="btn_done">Done</string>
+    <string name="btn_report_bug">Report a Bug</string>
+    <string name="btn_send_report">Send Report</string>
 
     <!-- Messages -->
     <string name="msg_sign_in_to_start">Sign in to start monitoring</string>
@@ -48,6 +50,15 @@
     <string name="dialog_resume_message">Resume monitoring on this device?</string>
     <string name="dialog_cancel">Cancel</string>
     <string name="dialog_confirm">Confirm</string>
+    <string name="dialog_report_bug_title">Report a Bug</string>
+    <string name="report_bug_description_hint">Describe the issue</string>
+    <string name="report_bug_contact_email_hint">Contact email (optional)</string>
+    <string name="report_bug_include_logs">Include the last day of diagnostic logs</string>
+    <string name="report_bug_include_logs_caption">Includes timestamps, monitoring status, and error messages from the last day. No screenshots or window titles are included. Known tokens are redacted automatically.</string>
+    <string name="report_bug_message_required">Please describe the issue.</string>
+    <string name="report_bug_send_failed">Failed to send the report.</string>
+    <string name="dialog_report_sent_title">Report Sent</string>
+    <string name="dialog_report_sent_message">Thanks — your report was sent to the Virtue Initiative team.</string>
 
     <!-- Accessibility service -->
     <string name="accessibility_service_label">Virtue Screen Monitor</string>

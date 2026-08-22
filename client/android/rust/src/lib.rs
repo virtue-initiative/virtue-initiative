@@ -11,7 +11,7 @@ use jni::sys::{jboolean, jstring};
 use jni::{jni_sig, jni_str, Env, EnvUnowned, JavaVM};
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
-use virtue_core::api::HttpApiClient;
+use virtue_core::api::{BugReportRequest, HttpApiClient};
 use virtue_core::{
     AuthState, Config, CoreError, CoreResult, Daemon, DeviceSettings, LifecycleHooks, Screenshot,
     ScreenshotHooks,
@@ -474,6 +474,87 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeGetSt
             .unwrap_or_else(|_| "{}".to_string()),
         )
     })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeReportIssue<'l>(
+    mut unowned_env: EnvUnowned<'l>,
+    _class: JClass<'l>,
+    message: JString<'l>,
+    contact_email: JString<'l>,
+    include_logs: jboolean,
+    platform_details: JString<'l>,
+) -> jstring {
+    native_result(&mut unowned_env, |_env| -> Result<()> {
+        let message: String = message.to_string();
+        let message = message.trim().to_string();
+        if message.is_empty() {
+            return Err(anyhow!("message is required"));
+        }
+        let contact_email: String = contact_email.to_string();
+        let contact_email = (!contact_email.is_empty()).then_some(contact_email);
+        let platform_details: String = platform_details.to_string();
+
+        let core = core()?;
+        let bearer_token = read_auth_state(&core.state_dir)
+            .and_then(|auth| auth.device_credentials)
+            .map(|creds| creds.refresh_token);
+
+        let logs = include_logs
+            .then(|| recent_logs(&core.state_dir))
+            .flatten();
+
+        let config = build_core_config(&core.state_dir);
+        let api = HttpApiClient::new(&config)?;
+        api.report_issue(
+            bearer_token.as_deref(),
+            &BugReportRequest {
+                message: &message,
+                contact_email: contact_email.as_deref(),
+                platform: "android",
+                app_version: virtue_core::BUILD_LABEL,
+                platform_details: Some(&platform_details),
+            },
+            logs.as_deref(),
+        )
+        .context("failed to submit bug report")?;
+
+        Ok(())
+    })
+}
+
+/// Best-effort last day of this device's operational logs: today's and (if
+/// present) yesterday's daily-rotated log file from `<state_dir>/logs` (see
+/// `init_logging`), redacted (`virtue_core::api::redact_secrets`) and trimmed
+/// to the API's attachment size cap, keeping the most recent bytes. Mirrors
+/// the Windows/Linux `report-issue` helpers of the same name.
+fn recent_logs(state_dir: &Path) -> Option<Vec<u8>> {
+    let log_dir = state_dir.join("logs");
+    let today = chrono::Local::now().date_naive();
+    let mut combined = String::new();
+
+    for date in [today, today - chrono::Duration::days(1)] {
+        let file_name = format!(
+            "{}.{}.log",
+            virtue_core::logging::DEFAULT_FILE_LOG_POLICY.file_name_prefix,
+            date.format("%Y-%m-%d")
+        );
+        if let Ok(contents) = fs::read_to_string(log_dir.join(file_name)) {
+            combined.push_str(&contents);
+        }
+    }
+
+    if combined.is_empty() {
+        return None;
+    }
+
+    let redacted = virtue_core::api::redact_secrets(&combined);
+    let mut logs = redacted.into_bytes();
+    if logs.len() > virtue_core::api::MAX_LOG_ATTACHMENT_BYTES {
+        let start = logs.len() - virtue_core::api::MAX_LOG_ATTACHMENT_BYTES;
+        logs.drain(0..start);
+    }
+    Some(logs)
 }
 
 pub fn is_interactive(env: &mut Env) -> jni::errors::Result<bool> {
