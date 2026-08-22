@@ -262,8 +262,11 @@ fn report_issue(
         return Ok(());
     }
 
+    let device_refresh_token = read_device_refresh_token(&paths);
+
     let contact_email = match contact_email {
         Some(email) => Some(email),
+        None if device_refresh_token.is_some() => None,
         None => {
             let mut rl = rustyline::DefaultEditor::new()?;
             let entered = rl.readline("Contact email (optional, press Enter to skip): ")?;
@@ -273,7 +276,6 @@ fn report_issue(
     };
 
     let platform_details = linux_platform_details();
-    let device_refresh_token = read_device_refresh_token(&paths);
     let logs = recent_logs();
 
     println!("This report will be sent to the Virtue Initiative team and will include:");
