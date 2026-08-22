@@ -158,7 +158,7 @@ async fn run() -> Result<()> {
         }
         Commands::Logout { yes } => tokio::task::block_in_place(|| logout(paths, yes)),
         Commands::Daemon { command } => daemon_command(paths, command).await,
-        Commands::Status { json } => status(paths, json),
+        Commands::Status { json } => tokio::task::block_in_place(|| status(paths, json)),
         Commands::Dev { command } => tokio::task::block_in_place(|| dev(paths, command)),
         Commands::ReportIssue {
             message,
