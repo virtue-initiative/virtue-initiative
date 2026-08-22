@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-use crate::config::{ClientPaths, default_device_name};
+use crate::config::{ClientPaths, build_core_config, default_device_name};
 use crate::resident_monitor::{self, MonitorStatusSnapshot};
 use crate::session::{SessionManager, SessionStatus};
 
@@ -167,6 +167,14 @@ struct LoginRequest {
     device_name: Option<String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct ReportIssueRequest {
+    message: String,
+    contact_email: Option<String>,
+    include_logs: bool,
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn virtue_windows_init() -> *mut c_char {
     into_error_ptr((|| {
@@ -217,6 +225,205 @@ pub extern "C" fn virtue_windows_logout() -> *mut c_char {
         manager.logout_blocking()?;
         Ok(())
     })())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn virtue_windows_report_issue(request_json: *const c_char) -> *mut c_char {
+    into_error_ptr((|| {
+        let request_json = c_string_or_empty(request_json);
+        let request: ReportIssueRequest = serde_json::from_str(&request_json)
+            .context("failed parsing report-issue request json")?;
+
+        let message = request.message.trim().to_string();
+        if message.is_empty() {
+            return Err(anyhow!("message is required"));
+        }
+
+        let paths = ensure_paths_initialized()?;
+
+        // Read the device refresh token straight off disk, same disk-fallback
+        // approach the Linux `report-issue` command uses, so a report can be
+        // attributed to this device even when the resident daemon isn't
+        // running (or hasn't finished starting up yet).
+        let state: virtue_core::DaemonState =
+            virtue_core::load_state(&paths.state_dir.join("event_state.json")).unwrap_or_default();
+        let bearer_token = state
+            .auth
+            .device_credentials
+            .map(|creds| creds.refresh_token);
+
+        let platform_details = windows_platform_details();
+        let logs = request.include_logs.then(|| recent_logs(&paths)).flatten();
+
+        let config = build_core_config(&paths);
+        let api = virtue_core::api::HttpApiClient::new(&config)?;
+        api.report_issue(
+            bearer_token.as_deref(),
+            &virtue_core::api::BugReportRequest {
+                message: &message,
+                contact_email: request.contact_email.as_deref(),
+                platform: "windows",
+                app_version: virtue_core::BUILD_LABEL,
+                platform_details: Some(&platform_details),
+            },
+            logs.as_deref(),
+        )
+        .context("failed to submit bug report")?;
+
+        Ok(())
+    })())
+}
+
+/// Best-effort "ProductName; DisplayVersion (Build CurrentBuildNumber)" string
+/// read from `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion`, e.g.
+/// `"Windows 11 Pro; 23H2 (Build 22631)"`. Falls back to a fixed placeholder
+/// on any registry error, mirroring the Linux client's `"unknown"` fallback
+/// in `linux_platform_details`.
+#[cfg(target_os = "windows")]
+fn windows_platform_details() -> String {
+    let product_name = read_registry_string_value(
+        "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
+        "ProductName",
+    );
+    let display_version = read_registry_string_value(
+        "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
+        "DisplayVersion",
+    )
+    .or_else(|| {
+        read_registry_string_value(
+            "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
+            "ReleaseId",
+        )
+    });
+    let build_number = read_registry_string_value(
+        "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
+        "CurrentBuildNumber",
+    );
+
+    let mut parts = Vec::new();
+    if let Some(product_name) = product_name {
+        parts.push(product_name);
+    }
+
+    let version_part = match (display_version, build_number) {
+        (Some(version), Some(build)) => Some(format!("{version} (Build {build})")),
+        (Some(version), None) => Some(version),
+        (None, Some(build)) => Some(format!("Build {build}")),
+        (None, None) => None,
+    };
+    if let Some(version_part) = version_part {
+        parts.push(version_part);
+    }
+
+    if parts.is_empty() {
+        "Windows (unknown version)".to_string()
+    } else {
+        parts.join("; ")
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn windows_platform_details() -> String {
+    "Windows (unknown version)".to_string()
+}
+
+/// Reads a single `REG_SZ` value under `HKLM\<key_path>`, or `None` on any
+/// error (missing key/value, wrong type, non-UTF-16 data).
+#[cfg(target_os = "windows")]
+fn read_registry_string_value(key_path: &str, value_name: &str) -> Option<String> {
+    use windows::Win32::System::Registry::{
+        HKEY, HKEY_LOCAL_MACHINE, KEY_READ, RegCloseKey, RegOpenKeyExW, RegQueryValueExW,
+    };
+    use windows::core::PCWSTR;
+
+    let key_path_wide: Vec<u16> = format!("{key_path}\0").encode_utf16().collect();
+    let value_name_wide: Vec<u16> = format!("{value_name}\0").encode_utf16().collect();
+
+    unsafe {
+        let mut hkey = HKEY::default();
+        let open_result = RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            PCWSTR::from_raw(key_path_wide.as_ptr()),
+            Some(0),
+            KEY_READ,
+            &mut hkey,
+        );
+        if open_result.is_err() {
+            return None;
+        }
+
+        // Grow-and-retry: query the required size first, then fetch into a
+        // buffer of exactly that size (values here are short, so one retry
+        // at most is expected in practice).
+        let mut data_size = 0u32;
+        let size_result = RegQueryValueExW(
+            hkey,
+            PCWSTR::from_raw(value_name_wide.as_ptr()),
+            None,
+            None,
+            None,
+            Some(&mut data_size),
+        );
+        if size_result.is_err() || data_size == 0 {
+            let _ = RegCloseKey(hkey);
+            return None;
+        }
+
+        let mut buffer = vec![0u8; data_size as usize];
+        let query_result = RegQueryValueExW(
+            hkey,
+            PCWSTR::from_raw(value_name_wide.as_ptr()),
+            None,
+            None,
+            Some(buffer.as_mut_ptr()),
+            Some(&mut data_size),
+        );
+        let _ = RegCloseKey(hkey);
+
+        if query_result.is_err() {
+            return None;
+        }
+
+        let wide: Vec<u16> = buffer[..data_size as usize]
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        let value = String::from_utf16_lossy(&wide);
+        let trimmed = value.trim_end_matches('\0').trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    }
+}
+
+/// Best-effort last day of this device's operational logs: today's and (if
+/// present) yesterday's daily-rotated log file from `paths.log_dir` (see
+/// `init_logging`), redacted (`virtue_core::api::redact_secrets`) and trimmed
+/// to the API's attachment size cap, keeping the most recent bytes.
+fn recent_logs(paths: &ClientPaths) -> Option<Vec<u8>> {
+    let today = chrono::Local::now().date_naive();
+    let mut combined = String::new();
+
+    for date in [today, today - chrono::Duration::days(1)] {
+        let file_name = format!(
+            "{}.{}.log",
+            virtue_core::logging::DEFAULT_FILE_LOG_POLICY.file_name_prefix,
+            date.format("%Y-%m-%d")
+        );
+        if let Ok(contents) = std::fs::read_to_string(paths.log_dir.join(file_name)) {
+            combined.push_str(&contents);
+        }
+    }
+
+    if combined.is_empty() {
+        return None;
+    }
+
+    let redacted = virtue_core::api::redact_secrets(&combined);
+    let mut logs = redacted.into_bytes();
+    if logs.len() > virtue_core::api::MAX_LOG_ATTACHMENT_BYTES {
+        let start = logs.len() - virtue_core::api::MAX_LOG_ATTACHMENT_BYTES;
+        logs.drain(0..start);
+    }
+    Some(logs)
 }
 
 #[unsafe(no_mangle)]
@@ -387,5 +594,47 @@ mod tests {
         assert!(json.get("loggedIn").is_some());
         assert!(json.get("pendingRequestCount").is_some());
         assert!(json.get("lastError").is_some());
+    }
+
+    #[test]
+    fn report_issue_returns_a_useful_error_string_for_empty_message() {
+        let _guard = test_lock().lock().expect("test lock");
+        let request = c_value(r#"{"message":"   "}"#);
+        let error = ptr_to_string(virtue_windows_report_issue(request.as_ptr()));
+        assert_eq!(error, "message is required");
+    }
+
+    #[test]
+    fn windows_platform_details_is_never_empty() {
+        assert!(!windows_platform_details().is_empty());
+    }
+
+    #[test]
+    fn recent_logs_returns_none_when_no_log_files_exist() {
+        let _guard = test_lock().lock().expect("test lock");
+        let paths = temporary_paths("recent-logs-none");
+        paths.ensure_dirs().expect("ensure dirs");
+
+        assert!(recent_logs(&paths).is_none());
+    }
+
+    #[test]
+    fn recent_logs_redacts_secrets_and_returns_todays_log() {
+        let _guard = test_lock().lock().expect("test lock");
+        let paths = temporary_paths("recent-logs-present");
+        paths.ensure_dirs().expect("ensure dirs");
+
+        let today = chrono::Local::now().date_naive().format("%Y-%m-%d");
+        let file_name = format!("virtue.{today}.log");
+        std::fs::write(
+            paths.log_dir.join(file_name),
+            "auth failed: token wst_AbCdEf123456ghijklmnop rejected\n",
+        )
+        .expect("write log file");
+
+        let logs = recent_logs(&paths).expect("logs should be present");
+        let text = String::from_utf8(logs).expect("logs should be utf8");
+        assert!(!text.contains("wst_"));
+        assert!(text.contains("[redacted]"));
     }
 }

@@ -64,6 +64,13 @@ public sealed class RustInteropClient : IRustInteropClient
         ThrowIfError(error);
     }
 
+    public void ReportIssue(string message, string? contactEmail, bool includeLogs)
+    {
+        var payload = RustInteropJson.Serialize(new ReportIssueRequest(message, contactEmail, includeLogs));
+        var error = NativeMethods.virtue_windows_report_issue(payload);
+        ThrowIfError(error);
+    }
+
     private static T ReadJsonPayload<T>(IntPtr pointer)
     {
         var raw = TakeOwnedUtf8(pointer);
@@ -171,6 +178,10 @@ public sealed class RustInteropClient : IRustInteropClient
 
         [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
         internal static extern IntPtr virtue_windows_logout();
+
+        [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern IntPtr virtue_windows_report_issue(
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string requestJson);
 
         [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
         internal static extern void virtue_windows_free_string(IntPtr value);

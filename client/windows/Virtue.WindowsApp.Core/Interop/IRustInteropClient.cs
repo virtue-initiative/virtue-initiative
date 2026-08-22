@@ -10,4 +10,5 @@ public interface IRustInteropClient
     MonitorStatusPayload GetMonitorStatus();
     void Login(string email, string password, string? deviceName = null);
     void Logout();
+    void ReportIssue(string message, string? contactEmail, bool includeLogs);
 }

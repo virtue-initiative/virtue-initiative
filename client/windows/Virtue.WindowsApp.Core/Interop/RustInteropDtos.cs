@@ -17,3 +17,8 @@ internal sealed record LoginRequest(
     string Email,
     string Password,
     string? DeviceName);
+
+internal sealed record ReportIssueRequest(
+    string Message,
+    string? ContactEmail,
+    bool IncludeLogs);
