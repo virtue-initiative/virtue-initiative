@@ -500,9 +500,7 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeRepor
             .and_then(|auth| auth.device_credentials)
             .map(|creds| creds.refresh_token);
 
-        let logs = include_logs
-            .then(|| recent_logs(&core.state_dir))
-            .flatten();
+        let logs = include_logs.then(|| recent_logs(&core.state_dir)).flatten();
 
         let config = build_core_config(&core.state_dir);
         let api = HttpApiClient::new(&config)?;
