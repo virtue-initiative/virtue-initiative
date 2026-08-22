@@ -4,6 +4,7 @@ public interface ITrayIconHost : IDisposable
 {
     event EventHandler? OpenRequested;
     event EventHandler? ExitRequested;
+    event EventHandler? ReportBugRequested;
     event EventHandler? SessionLogoffObserved;
     event EventHandler? SystemShutdownObserved;
 

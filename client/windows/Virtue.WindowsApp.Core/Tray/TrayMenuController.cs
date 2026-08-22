@@ -9,12 +9,14 @@ public sealed class TrayMenuController : IDisposable
         _host = host ?? BuildDefaultHost();
         _host.OpenRequested += (_, _) => OpenRequested?.Invoke(this, EventArgs.Empty);
         _host.ExitRequested += (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty);
+        _host.ReportBugRequested += (_, _) => ReportBugRequested?.Invoke(this, EventArgs.Empty);
         _host.SessionLogoffObserved += (_, _) => SessionLogoffObserved?.Invoke(this, EventArgs.Empty);
         _host.SystemShutdownObserved += (_, _) => SystemShutdownObserved?.Invoke(this, EventArgs.Empty);
     }
 
     public event EventHandler? OpenRequested;
     public event EventHandler? ExitRequested;
+    public event EventHandler? ReportBugRequested;
     public event EventHandler? SessionLogoffObserved;
     public event EventHandler? SystemShutdownObserved;
 

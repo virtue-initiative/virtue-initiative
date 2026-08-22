@@ -24,6 +24,7 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
     private const int LrLoadFromFile = 0x00000010;
     private const int IdTrayOpen = 2001;
     private const int IdTrayExit = 2002;
+    private const int IdTrayReportBug = 2003;
     private const int WindowId = 1;
     private static readonly uint WmTrayIcon = WmApp + 1;
 
@@ -44,6 +45,7 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
 
     public event EventHandler? OpenRequested;
     public event EventHandler? ExitRequested;
+    public event EventHandler? ReportBugRequested;
     public event EventHandler? SessionLogoffObserved;
     public event EventHandler? SystemShutdownObserved;
 
@@ -77,6 +79,7 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
 
         _menuHandle = CreatePopupMenu();
         _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayOpen, "Open");
+        _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayReportBug, "Report a Bug");
         _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayExit, "Exit");
 
         AddOrUpdateIcon(NimAdd);
@@ -227,6 +230,10 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
                 if (command == IdTrayOpen)
                 {
                     OpenRequested?.Invoke(this, EventArgs.Empty);
+                }
+                else if (command == IdTrayReportBug)
+                {
+                    ReportBugRequested?.Invoke(this, EventArgs.Empty);
                 }
                 else if (command == IdTrayExit)
                 {

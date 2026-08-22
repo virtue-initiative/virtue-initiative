@@ -276,6 +276,17 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         }, "Signing out...");
     }
 
+    public async Task<bool> SubmitBugReportAsync(string message, string? contactEmail, bool includeLogs)
+    {
+        var succeeded = false;
+        await RunBusyAsync(async () =>
+        {
+            await Task.Run(() => _interopClient.ReportIssue(message, contactEmail, includeLogs));
+            succeeded = true;
+        }, "Sending report...");
+        return succeeded;
+    }
+
     public async Task RefreshAsync()
     {
         await RunBusyAsync(async () =>

@@ -232,6 +232,9 @@ public sealed partial class MainWindow : Window
         var detailsButton = CreateActionButton("Status Details");
         detailsButton.Click += StatusDetailsButton_OnClick;
 
+        var reportBugButton = CreateActionButton("Report a Bug");
+        reportBugButton.Click += async (_, _) => await ShowReportBugDialogAsync();
+
         var stopMonitoringButton = CreateActionButton("Stop Monitoring");
         stopMonitoringButton.Click += StopMonitoringButton_OnClick;
 
@@ -246,6 +249,7 @@ public sealed partial class MainWindow : Window
             Margin = new Thickness(0, 18, 0, 0),
         };
         actionRow.Children.Add(detailsButton);
+        actionRow.Children.Add(reportBugButton);
         actionRow.Children.Add(_signedInActionsPanel);
 
         var content = new StackPanel { Spacing = 8 };
@@ -482,6 +486,145 @@ public sealed partial class MainWindow : Window
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                 MinHeight = 320,
+            },
+        };
+        ApplyDialogTheme(dialog);
+
+        if (Content is FrameworkElement root)
+        {
+            dialog.XamlRoot = root.XamlRoot;
+        }
+
+        await dialog.ShowAsync();
+    }
+
+    public async Task ShowReportBugDialogAsync()
+    {
+        var messageBox = new TextBox
+        {
+            PlaceholderText = "Describe the issue",
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            Height = 120,
+        };
+        StyleInput(messageBox);
+
+        var contactEmailBox = new TextBox
+        {
+            PlaceholderText = "Contact email (optional)",
+            Text = ViewModel.LoggedIn ? ViewModel.AccountEmail : string.Empty,
+        };
+        StyleInput(contactEmailBox);
+
+        var includeLogsCheckBox = new CheckBox
+        {
+            Content = "Include the last day of diagnostic logs",
+            IsChecked = true,
+            FontFamily = BodyFont,
+            Foreground = InkBrush,
+        };
+
+        var includeLogsCaption = new TextBlock
+        {
+            Text = "Includes timestamps, monitoring status, and error messages from the last day. " +
+                   "No screenshots or window titles are included. Known tokens are redacted automatically.",
+            TextWrapping = TextWrapping.Wrap,
+            FontFamily = BodyFont,
+            FontSize = 12,
+            Foreground = Ink3Brush,
+            Margin = new Thickness(28, 0, 0, 0),
+        };
+
+        var reportErrorTextBlock = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = DangerBrush,
+            FontFamily = BodyFont,
+            Visibility = Visibility.Collapsed,
+        };
+
+        var content = new StackPanel { Spacing = 12, Width = 420 };
+        content.Children.Add(messageBox);
+        content.Children.Add(contactEmailBox);
+        content.Children.Add(includeLogsCheckBox);
+        content.Children.Add(includeLogsCaption);
+        content.Children.Add(reportErrorTextBlock);
+
+        var dialog = new ContentDialog
+        {
+            Title = CreateDialogTitle("Report a Bug"),
+            PrimaryButtonText = "Send Report",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            Content = content,
+        };
+        ApplyDialogTheme(dialog);
+
+        if (Content is FrameworkElement root)
+        {
+            dialog.XamlRoot = root.XamlRoot;
+        }
+
+        var reportSent = false;
+        dialog.PrimaryButtonClick += async (_, args) =>
+        {
+            var message = messageBox.Text.Trim();
+            if (string.IsNullOrEmpty(message))
+            {
+                args.Cancel = true;
+                reportErrorTextBlock.Text = "Please describe the issue.";
+                reportErrorTextBlock.Visibility = Visibility.Visible;
+                return;
+            }
+
+            var deferral = args.GetDeferral();
+            try
+            {
+                var contactEmail = contactEmailBox.Text.Trim();
+                var succeeded = await ViewModel.SubmitBugReportAsync(
+                    message,
+                    string.IsNullOrEmpty(contactEmail) ? null : contactEmail,
+                    includeLogsCheckBox.IsChecked == true);
+
+                if (!succeeded)
+                {
+                    args.Cancel = true;
+                    reportErrorTextBlock.Text = ViewModel.ErrorText ?? "Failed to send the report.";
+                    reportErrorTextBlock.Visibility = Visibility.Visible;
+                }
+                else
+                {
+                    reportSent = true;
+                }
+            }
+            finally
+            {
+                deferral.Complete();
+            }
+        };
+
+        await dialog.ShowAsync();
+
+        if (reportSent)
+        {
+            await ShowReportBugConfirmationAsync();
+        }
+    }
+
+    private async Task ShowReportBugConfirmationAsync()
+    {
+        var dialog = new ContentDialog
+        {
+            Title = CreateDialogTitle("Report Sent"),
+            CloseButtonText = "Close",
+            DefaultButton = ContentDialogButton.Close,
+            Content = new TextBlock
+            {
+                Text = "Thanks — your report was sent to the Virtue Initiative team.",
+                TextWrapping = TextWrapping.Wrap,
+                FontFamily = BodyFont,
+                Foreground = Ink2Brush,
+                Width = 380,
             },
         };
         ApplyDialogTheme(dialog);

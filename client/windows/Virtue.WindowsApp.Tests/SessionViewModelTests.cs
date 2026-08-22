@@ -312,6 +312,48 @@ public sealed class SessionViewModelTests
     }
 
     [Fact]
+    public async Task SubmitBugReportAsync_ReturnsTrueAndForwardsFieldsOnSuccess()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        var result = await viewModel.SubmitBugReportAsync("Screenshots stopped uploading", "me@example.com", true);
+
+        Assert.True(result);
+        Assert.Equal(("Screenshots stopped uploading", "me@example.com", true), fakeClient.LastReportIssue);
+        Assert.Null(viewModel.ErrorText);
+    }
+
+    [Fact]
+    public async Task SubmitBugReportAsync_ReturnsFalseAndSetsErrorTextOnFailure()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            ReportIssueError = new InvalidOperationException("Too many requests"),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        var result = await viewModel.SubmitBugReportAsync("Screenshots stopped uploading", null, false);
+
+        Assert.False(result);
+        Assert.Equal("Too many requests", viewModel.ErrorText);
+    }
+
+    [Fact]
+    public void TrayMenuController_RoutesReportBugEvent()
+    {
+        var host = new NullTrayIconHost();
+        var controller = new TrayMenuController(host);
+        var reportBugRaised = false;
+
+        controller.ReportBugRequested += (_, _) => reportBugRaised = true;
+
+        host.RequestReportBug();
+
+        Assert.True(reportBugRaised);
+    }
+
+    [Fact]
     public void TrayMenuController_RoutesAllSystemEvents()
     {
         var host = new NullTrayIconHost();
@@ -402,6 +444,20 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = SessionStatus with { LoggedIn = false };
             MonitorStatus = MonitorStatus with { State = "signed_out", LoggedIn = false, LastError = null };
+        }
+
+        public (string Message, string? ContactEmail, bool IncludeLogs)? LastReportIssue { get; private set; }
+
+        public Exception? ReportIssueError { get; set; }
+
+        public void ReportIssue(string message, string? contactEmail, bool includeLogs)
+        {
+            if (ReportIssueError is not null)
+            {
+                throw ReportIssueError;
+            }
+
+            LastReportIssue = (message, contactEmail, includeLogs);
         }
     }
 }
