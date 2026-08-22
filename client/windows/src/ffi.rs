@@ -385,8 +385,10 @@ fn read_registry_string_value(key_path: &str, value_name: &str) -> Option<String
         }
 
         let wide: Vec<u16> = buffer[..data_size as usize]
-            .chunks_exact(2)
-            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u16::from_le_bytes(*pair))
             .collect();
         let value = String::from_utf16_lossy(&wide);
         let trimmed = value.trim_end_matches('\0').trim();
