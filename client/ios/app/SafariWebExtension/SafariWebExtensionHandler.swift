@@ -1,7 +1,72 @@
+import Darwin
 import Foundation
 import SafariServices
 
 private let extensionMessageKey = "message"
+
+/// Extension-process diagnostics, attached to every response sent back to
+/// `background.js` so they show up in Safari Web Inspector's JS console
+/// (which is reachable from the phone; OS-level logs are not). This is the
+/// cheapest way to see, from the failing device itself, how long the App
+/// Extension process has been alive and how its resident memory trends
+/// right up until the process gets jetsam-killed for memory pressure — the
+/// last diagnostics line logged by `background.js` before a gap in console
+/// output pinpoints roughly where/when that kill happened.
+private enum ProcessDiagnostics {
+    static let processStartedAt = Date()
+
+    private static let lock = NSLock()
+    private static var requestCount: Int = 0
+    private static var screenshotCount: Int = 0
+
+    static func nextRequestCount() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        requestCount += 1
+        return requestCount
+    }
+
+    /// Called from `virtue_ios_capture_png_write` on every frame actually handed
+    /// to the Rust daemon for processing — i.e. a real capture+classify cycle,
+    /// not just a `capture_frame` message arriving from `content.js` (most of
+    /// those don't coincide with the daemon's own capture schedule).
+    static func recordScreenshotCaptured() {
+        lock.lock()
+        defer { lock.unlock() }
+        screenshotCount += 1
+    }
+
+    /// Resident set size in MB via `task_info(MACH_TASK_BASIC_INFO)`, or -1 if unavailable.
+    static func residentMemoryMB() -> Double {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<mach_task_basic_info>.size / MemoryLayout<natural_t>.size
+        )
+        let result: kern_return_t = withUnsafeMutablePointer(to: &info) { infoPtr in
+            infoPtr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { intPtr in
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), intPtr, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return -1 }
+        return Double(info.resident_size) / 1024.0 / 1024.0
+    }
+
+    static func snapshot() -> [String: Any] {
+        lock.lock()
+        let currentScreenshotCount = screenshotCount
+        lock.unlock()
+
+        return [
+            "diag_mem_mb": (residentMemoryMB() * 100).rounded() / 100,
+            "diag_uptime_s": Date().timeIntervalSince(processStartedAt),
+            "diag_request_count": nextRequestCount(),
+            "diag_daemon_running": SafariSharedStateStore.shared.readDaemonRunning(),
+            "diag_screenshot_count": currentScreenshotCount,
+            "diag_nsfw_run_count": virtue_ios_native_nsfw_run_count(),
+            "diag_batch_upload_count": virtue_ios_native_batch_upload_count(),
+        ]
+    }
+}
 
 @_silgen_name("virtue_ios_native_init")
 private func virtue_ios_native_init(
@@ -11,6 +76,12 @@ private func virtue_ios_native_init(
 
 @_silgen_name("virtue_ios_native_tick_once")
 private func virtue_ios_native_tick_once() -> UnsafeMutablePointer<CChar>?
+
+@_silgen_name("virtue_ios_native_nsfw_run_count")
+private func virtue_ios_native_nsfw_run_count() -> UInt64
+
+@_silgen_name("virtue_ios_native_batch_upload_count")
+private func virtue_ios_native_batch_upload_count() -> UInt64
 
 @_silgen_name("virtue_ios_free_string")
 private func virtue_ios_free_string(_ value: UnsafeMutablePointer<CChar>?)
@@ -168,6 +239,12 @@ private final class SafariSharedStateStore {
         defaults?.set(error, forKey: VirtueShared.safariLastErrorKey)
         defaults?.set(stateCode, forKey: VirtueShared.safariCaptureStateCodeKey)
         lock.unlock()
+    }
+
+    func readDaemonRunning() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return defaults?.bool(forKey: VirtueShared.safariDaemonRunningKey) ?? false
     }
 
     func markDaemonState(running: Bool, error: String?) {
@@ -344,6 +421,7 @@ public func virtue_ios_capture_png_write(
     frame.copyBytes(to: raw.assumingMemoryBound(to: UInt8.self), count: frame.count)
     outBuffer.pointee = UnsafePointer(raw.assumingMemoryBound(to: UInt8.self))
     outLength.pointee = frame.count
+    ProcessDiagnostics.recordScreenshotCaptured()
     return 0
 }
 
@@ -356,7 +434,8 @@ public func virtue_ios_capture_png_release(_ buffer: UnsafePointer<UInt8>?, _ le
 
 final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
     func beginRequest(with context: NSExtensionContext) {
-        let responsePayload = handleRequest(context)
+        var responsePayload = handleRequest(context)
+        responsePayload.merge(ProcessDiagnostics.snapshot()) { current, _ in current }
         let response = NSExtensionItem()
         response.userInfo = [extensionMessageKey: responsePayload]
         context.completeRequest(returningItems: [response], completionHandler: nil)

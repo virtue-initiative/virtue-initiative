@@ -334,6 +334,22 @@ pub extern "C" fn virtue_ios_native_tick_once() -> *mut c_char {
     into_c_result(result)
 }
 
+/// Process-lifetime count of NSFW model invocations, for the same
+/// memory-diagnostics purpose as `virtue_ios_native_batch_upload_count`.
+#[no_mangle]
+pub extern "C" fn virtue_ios_native_nsfw_run_count() -> u64 {
+    virtue_core::module::screenshot::risk_classifier::nsfw_model_invocation_count()
+}
+
+/// Process-lifetime count of successful batch uploads, surfaced to
+/// `background.js`'s console via `ProcessDiagnostics` so memory trends can be
+/// correlated with capture/classify/upload activity without needing the Rust
+/// file logs.
+#[no_mangle]
+pub extern "C" fn virtue_ios_native_batch_upload_count() -> u64 {
+    virtue_core::module::upload::batch_upload_count()
+}
+
 #[no_mangle]
 pub extern "C" fn virtue_ios_native_stop_daemon() -> *mut c_char {
     let result = (|| -> Result<()> {

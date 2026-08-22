@@ -1,7 +1,20 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use image::DynamicImage;
 use tract_onnx::prelude::*;
 
 use crate::error::{CoreError, CoreResult};
+
+static NSFW_MODEL_INVOCATIONS: AtomicU64 = AtomicU64::new(0);
+
+/// Process-lifetime count of `classify()` calls that actually ran the NSFW
+/// ONNX model (i.e. the skin gate didn't skip it) — not persisted across
+/// restarts, just a lightweight always-available tally for platform-side
+/// memory diagnostics (see the iOS `virtue_ios_native_nsfw_run_count` FFI
+/// export).
+pub fn nsfw_model_invocation_count() -> u64 {
+    NSFW_MODEL_INVOCATIONS.load(Ordering::Relaxed)
+}
 
 const INPUT_SIZE: u32 = 224;
 
@@ -72,6 +85,7 @@ impl RiskClassifier {
             });
         }
 
+        NSFW_MODEL_INVOCATIONS.fetch_add(1, Ordering::Relaxed);
         let model_score = self.run_inference(&img)?;
         Ok(RiskScores {
             risk: contribution + model_score * MODEL_WEIGHT,
