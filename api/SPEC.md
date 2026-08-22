@@ -684,11 +684,7 @@ The server MUST respond **HTTP 200** with this shape.
 
 ### API-042 `POST /bug-report`
 
-This endpoint backs a "report issue" action on the website and device clients. It exists to
-get a free-text report into a human inbox, not to file anything structured.
-
-The client MAY authenticate with a **Web Token** or a **Device Token**. The client MAY also send
-no token at all (e.g. a device that isn't logged in yet, or a logged-out website visitor).
+The client MAY authenticate with a **Web Token** or a **Device Token**. The client MAY also send no token at all.
 
 The client MUST send a multipart form request:
 
@@ -704,35 +700,22 @@ The client MUST send a multipart form request:
     ```
 - `log_file`: recent client log excerpt (e.g. plain text), undefined if the client has none to offer
 
-`contact_email` is only for the client to supply a way to follow up when it's not already implied
-by an authenticated user/device; the client SHOULD omit it when authenticated with a token whose
-account email is already known to the server.
+The client SHOULD omit `contact_email` when authenticated with a token.
 
-`platform_details` is free text for whatever OS/environment detail the client can gather (e.g. the
-Linux client SHOULD send kernel version plus `/etc/os-release`'s `NAME`/`VERSION`). If the client
-omits it, the server SHOULD fill it in from the request's `User-Agent` header instead — the best a
-browser client can offer without extra client-side work.
+The client SHOULD gather OS/kernel details and send it in `platform_details`.
 
-`log_file`, when sent, SHOULD cover roughly the last day of that client's operational logs (e.g.
-the Linux client SHOULD gather this via `journalctl --user -u <service> --since -1day`) — the
-client's own diagnostic trace (errors, capture/upload status), not screenshot content or window
-titles, neither of which ever passes through client logging. A client that attaches logs MUST
-warn the user what will be sent (that a day of logs is included) before submitting, and SHOULD
-redact known secret/token patterns (its own opaque session tokens, JWTs) from the excerpt before
-sending, as defense-in-depth against a future logging regression. The server SHOULD reject a
-`log_file` above a reasonable size cap (e.g. 8MB) with **HTTP 400**.
+If the client omits it, the server SHOULD fill it in from the request's `User-Agent` header instead.
 
-The server SHOULD rate limit this endpoint by client IP address, since it MAY be called without
-authentication, and MUST respond **HTTP 429** with `{ "error": "Too many requests" }` once the
-limit is exceeded.
+`log_file`, when sent, SHOULD cover roughly the last day of that client's operational logs.
 
-The server MUST email the report to a fixed internal address (not configurable per-request),
-including the message, `platform`/`app_version`/`platform_details` if available, and, when
-authenticated, the reporting user's or device's identity. For a Device Token, the server MUST
-resolve the device's owning account and treat that account's email the same as a Web Token's:
-included in the body and used for Reply-To. The server SHOULD set the Reply-To header of that
-email to `contact_email` (or the authenticated user's/device owner's email) if available. The
-server MUST attach `log_file` (if sent) to that email as-is. The email SHOULD be minimally
-formatted plain text — this is an internal notification, not a user-facing template.
+A client that attaches logs MUST warn the user what will be sent (that a day of logs is included) before submitting.
+
+The server SHOULD reject a `log_file` above a reasonable size cap (e.g. 8MB) with **HTTP 400**.
+
+The server SHOULD rate limit this endpoint by client IP address, since it MAY be called without authentication, and MUST respond **HTTP 429** with `{ "error": "Too many requests" }` once the limit is exceeded.
+
+The server MUST email the report to a fixed internal address and include, the message, `platform`/`app_version`/`platform_details` if available, and, when authenticated, the reporting user's or device's identity.
+
+The server SHOULD set the Reply-To header to the `contact_email` or the email of the authenticated account.
 
 On success, the server MUST respond **HTTP 204**.
