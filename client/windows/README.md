@@ -174,6 +174,41 @@ Remote logs are always written locally under:
 - The app registers a per-user Scheduled Task (`VirtueResidentWatchdog`, every 1 minute — Task Scheduler's floor for a repeating trigger, confirmed against `schtasks.exe` on this repo's `virtue-win11` VM: a sub-minute `Interval` is rejected as out of range even via an XML task definition) at startup that relaunches `Virtue.WindowsApp.exe` if it isn't running, covering accidental crashes/hangs. The app's existing single-instance redirect makes each periodic relaunch attempt a no-op while the app is already running, so the task doesn't need its own "is it running" check, and the relaunch comes back into the tray quietly (same as the startup task). Tray `Exit` deletes the task first so a deliberate exit isn't resurrected. Windows' Application Recovery and Restart API (`RegisterApplicationRestart`) was tried first but does not automatically relaunch MSIX-packaged apps (confirmed both by community reports and by testing on this repo's `virtue-win11` VM: registration succeeds and WER correctly reports the crash/hang, but no relaunch follows), hence the Scheduled Task instead. See `Virtue.WindowsApp.Core/Interop/RestartWatchdog.cs` and `Virtue.WindowsApp/App.xaml.cs`. The `client/core` late-wakeup tamper threshold (`client/core/SPEC.md` §2) was raised from 1 to 2 minutes so a normal ~1-minute watchdog relaunch doesn't itself trip the tamper alert.
 - `client/core` is intentionally unchanged by this architecture; Windows-specific behavior lives under `client/windows/`.
 
+## Store Update Handling
+
+`StoreUpdateManager` (`Virtue.WindowsApp/Update/StoreUpdateManager.cs`) checks the Microsoft
+Store for package updates every 4 hours via `StoreContext.GetAppAndOptionalStorePackageUpdatesAsync`,
+and if one is found, downloads/stages it in the background via
+`RequestDownloadStorePackageUpdatesAsync` — this does not require the resident daemon to stop.
+It lives in `Virtue.WindowsApp` (the WinUI project, `net8.0-windows10.0.19041.0`) rather than
+`Virtue.WindowsApp.Core` (plain `net8.0`, no Windows SDK projection, kept that way so it stays
+unit-testable and platform-neutral — the same reason `RestartWatchdog` avoids WinRT), since
+`StoreContext` is a WinRT API only usable from the packaged process.
+
+Once an update is staged, `App.xaml.cs` polls every 5 minutes for a safe point to install it —
+`UpdateRestartPolicy.ShouldRestartNow` (`Virtue.WindowsApp.Core/Interop/UpdateRestartPolicy.cs`,
+unit-tested) requires the settings/login window to be hidden and no login/logout in progress
+(`SessionViewModel.IsBusy`), but forces the restart through after a 6-hour deferral cap even if
+the window stays open. A tray "Restart to Update" menu item lets a user trigger it immediately
+instead of waiting. Either path stops the daemon the same way an OS session logoff/shutdown
+does (`RustInteropClient.StopMonitoringForOsSessionEnd`, **not** the tray-Exit path — this is
+not a user-initiated stop and must not log the device out), then calls
+`RequestDownloadAndInstallStorePackageUpdatesAsync` (fast, since the package was already staged)
+and exits. `RestartWatchdog` is deliberately left registered through this (unlike tray Exit) so
+its existing per-minute poll relaunches the updated build, and the released
+`AppLifecycleInstance` key means the relaunched process becomes the new primary instance with
+no extra code, exactly like a crash-recovery relaunch.
+
+There is no data-corruption risk from installing mid-tick: `DaemonState` is persisted after
+every tick and uploads use persisted backoff, so `stop_monitoring()` can only ever wait for an
+in-flight tick to finish (never truncate it) before returning — the same property that already
+makes `RestartWatchdog` safe for crash recovery. The one real cost is that this restart is
+**not** eligible for CORE-002's `note_user_stop` excuse (only an actual user-initiated stop may
+use it), so it's recorded as ordinary late-wakeup lateness — but that's exactly the gap shape
+crash-recovery relaunches already produce, which is what the 1-to-2-minute threshold bump
+described above already accounts for. No `client/core`/SPEC.md changes were needed for this
+feature.
+
 ## Runtime Data Locations
 
 The WinUI app and Rust resident monitoring host share state under `%PROGRAMDATA%\Virtue`:

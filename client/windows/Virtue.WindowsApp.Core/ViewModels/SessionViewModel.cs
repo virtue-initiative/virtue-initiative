@@ -27,6 +27,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private bool _hasUserEditedEmailInput;
     private string? _transitionMessage;
     private string? _errorText;
+    private bool _updateReady;
 
     public SessionViewModel(IRustInteropClient interopClient, string? windowsPackageVersion = null)
     {
@@ -181,6 +182,9 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     public string MonitorStateDisplay => MonitorState.Replace('_', ' ');
 
     public string TrayTooltip =>
+        BaseTrayTooltip + (_updateReady ? " (update ready)" : string.Empty);
+
+    private string BaseTrayTooltip =>
         MonitorState switch
         {
             "loading" => "Virtue: loading status",
@@ -192,6 +196,20 @@ public sealed class SessionViewModel : INotifyPropertyChanged
             "signed_out" => "Virtue: sign in required",
             _ => "Virtue: monitoring stopped",
         };
+
+    /// <summary>
+    /// Called once a Store update has finished downloading/staging, so the tray tooltip
+    /// reflects it. See <c>Virtue.WindowsApp.Update.StoreUpdateManager</c>.
+    /// </summary>
+    public void NotifyUpdateStaged()
+    {
+        if (SetProperty(ref _updateReady, true, nameof(UpdateReady)))
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TrayTooltip)));
+        }
+    }
+
+    public bool UpdateReady => _updateReady;
 
     public bool IsBusy
     {
