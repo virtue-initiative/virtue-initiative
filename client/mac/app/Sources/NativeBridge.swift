@@ -13,11 +13,21 @@ private func virtue_mac_native_login(
 @_silgen_name("virtue_mac_native_logout")
 private func virtue_mac_native_logout() -> UnsafeMutablePointer<CChar>?
 
+@_silgen_name("virtue_mac_native_report_issue")
+private func virtue_mac_native_report_issue(
+    _ message: UnsafePointer<CChar>?,
+    _ contactEmail: UnsafePointer<CChar>?,
+    _ includeLogs: Bool
+) -> UnsafeMutablePointer<CChar>?
+
 @_silgen_name("virtue_mac_native_is_logged_in")
 private func virtue_mac_native_is_logged_in() -> Bool
 
 @_silgen_name("virtue_mac_native_get_device_id")
 private func virtue_mac_native_get_device_id() -> UnsafeMutablePointer<CChar>?
+
+@_silgen_name("virtue_mac_native_get_account_email")
+private func virtue_mac_native_get_account_email() -> UnsafeMutablePointer<CChar>?
 
 @_silgen_name("virtue_mac_native_get_status_json")
 private func virtue_mac_native_get_status_json() -> UnsafeMutablePointer<CChar>?
@@ -108,6 +118,16 @@ enum NativeBridge {
         }
     }
 
+    static func reportIssue(message: String, contactEmail: String?, includeLogs: Bool) -> String? {
+        callReturningError {
+            message.withCString { messageCString in
+                withOptionalCString(contactEmail) { contactEmailCString in
+                    virtue_mac_native_report_issue(messageCString, contactEmailCString, includeLogs)
+                }
+            }
+        }
+    }
+
     static func isLoggedIn() -> Bool {
         virtue_mac_native_is_logged_in()
     }
@@ -118,6 +138,10 @@ enum NativeBridge {
 
     static func getStatusJson() -> String? {
         consumeOptionalString(virtue_mac_native_get_status_json())
+    }
+
+    static func getAccountEmail() -> String? {
+        consumeOptionalString(virtue_mac_native_get_account_email())
     }
 
     static func pollDaemonStatus() -> DaemonStatus {
@@ -201,5 +225,15 @@ enum NativeBridge {
         _ call: () -> UnsafeMutablePointer<CChar>?
     ) -> String? {
         consumeOptionalString(call())
+    }
+
+    private static func withOptionalCString<Result>(
+        _ value: String?,
+        _ body: (UnsafePointer<CChar>?) -> Result
+    ) -> Result {
+        guard let value else {
+            return body(nil)
+        }
+        return value.withCString(body)
     }
 }

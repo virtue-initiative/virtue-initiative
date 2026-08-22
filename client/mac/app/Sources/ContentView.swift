@@ -7,6 +7,8 @@ struct ContentView: View {
     @State private var showStopConfirmation = false
     @State private var showLogoutConfirmation = false
     @State private var showStatusSheet = false
+    @State private var showReportBugSheet = false
+    @State private var showReportBugConfirmation = false
 
     var body: some View {
         ScrollView {
@@ -24,6 +26,16 @@ struct ContentView: View {
         .background(VirtueBrand.bg)
         .sheet(isPresented: $showStatusSheet) {
             StatusSheet(coordinator: coordinator)
+        }
+        .sheet(isPresented: $showReportBugSheet) {
+            ReportBugSheet(coordinator: coordinator) {
+                showReportBugConfirmation = true
+            }
+        }
+        .alert("Report Sent", isPresented: $showReportBugConfirmation) {
+            Button("OK") {}
+        } message: {
+            Text("Thanks — your report was sent to the Virtue Initiative team.")
         }
         .alert("Stop monitoring and quit?", isPresented: $showStopConfirmation) {
             Button("Cancel", role: .cancel) {}
@@ -92,6 +104,11 @@ struct ContentView: View {
                 HStack(spacing: 10) {
                     Button("Status Details") {
                         showStatusSheet = true
+                    }
+                    .buttonStyle(VirtueButtonStyle())
+
+                    Button("Report a Bug") {
+                        showReportBugSheet = true
                     }
                     .buttonStyle(VirtueButtonStyle())
 
