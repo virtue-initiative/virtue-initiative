@@ -9,7 +9,7 @@ import {
   Textarea,
   useToast,
 } from '@virtueinitiative/shared-web';
-import { api } from '../utils/api';
+import { api, useUser } from '../utils/api';
 
 type ReportBugDialogProps = {
   dialogRef: { current: HTMLDialogElement | null };
@@ -20,6 +20,7 @@ export function ReportBugDialog({ dialogRef }: ReportBugDialogProps) {
   const [contactEmail, setContactEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const { push: pushToast } = useToast();
+  const user = useUser();
 
   function close() {
     dialogRef.current?.close();
@@ -62,7 +63,14 @@ export function ReportBugDialog({ dialogRef }: ReportBugDialogProps) {
             autoFocus
           />
         </Field>
-        <Field label="Contact email (optional)" helpText="In case we need more details.">
+        <Field
+          label="Contact email (optional)"
+          helpText={
+            user?.email
+              ? `Leave blank to use your account email (${user.email}).`
+              : 'In case we need more details.'
+          }
+        >
           <Input
             type="email"
             value={contactEmail}
