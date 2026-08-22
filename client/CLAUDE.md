@@ -48,7 +48,7 @@ other platform.
 ### Screenshot capture
 
 - `core/src/module/screenshot.rs` — `plan()`/`capture_and_process()`/`commit()`:
-  random exponential-cadence scheduling (SPEC.md §3 — not a fixed interval),
+  random exponential-cadence scheduling (CORE-003 — not a fixed interval),
   lock/screensaver gate, screen-change diff gate, redaction, risk classification
 - `linux/src/capture.rs`, `mac/src/capture.rs`, `windows/src/capture.rs` — platform
   `take_screenshot()` implementations
@@ -59,7 +59,7 @@ other platform.
   wakeup time each tick and alerts (`UploadKind::ScreenshotMissed`) on a single
   late wakeup > 1 min or a last-10-array sum > 5 min, excused near a system
   login/logout; `note_user_stop()` — immediate high-risk alert, unrelated to
-  the late-wakeup check. See `core/SPEC.md` §2; `core/tampering.md` is now
+  the late-wakeup check. See CORE-002; `core/tampering.md` is now
   just a pointer there (a richer suspend/reboot/gap-bucket model was retired
   in the daemon rewrite).
 

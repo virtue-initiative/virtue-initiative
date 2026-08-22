@@ -36,7 +36,7 @@ get_last_logout_utc_ms() -> Result<Option<i64>>
 `PlatformHooks: ScreenshotHooks + LifecycleHooks` is a blanket impl — platforms
 never implement it directly. `get_monotonic_clock_ms` (a clock that doesn't
 advance while suspended) feeds only `lifecycle::tick`'s suspend evidence
-(`SPEC.md` §2) — it's not on `ScreenshotHooks`, and screenshot scheduling
+(CORE-002) — it's not on `ScreenshotHooks`, and screenshot scheduling
 itself still paces off the wall clock. Mac separately keeps its own boot/
 monotonic clock reads as **inherent** methods on `MacPlatformHooks` for a
 local post-wake UX check unrelated to the core model — see `architecture.md`.
@@ -87,7 +87,7 @@ trait, no event dispatch. A module that needs to enqueue work calls
 
 `lifecycle::tick` compares actual vs. scheduled wakeup time each tick and
 alerts on a single late wakeup > 1 min or a last-10-array sum > 5 min,
-excused near a system login/logout — see `SPEC.md` §2 and `tampering.md`
+excused near a system login/logout — see CORE-002 and `tampering.md`
 (now a short pointer to SPEC.md, not its own model).
 
 ## State persistence

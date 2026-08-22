@@ -48,7 +48,7 @@ pub struct ScreenshotState {
 
 /// Draws the next screenshot time via an exponential inter-arrival: every
 /// second has the same chance of being chosen, averaging `mean_ms` apart. See
-/// `client/core/SPEC.md` §3.
+/// CORE-003.
 fn draw_next_screenshot_at_ms(now_ms: i64, mean_ms: i64, rng: &dyn RandomSource) -> i64 {
     let u = rng.uniform();
     let delay_ms = -(mean_ms as f64) * (1.0 - u).ln();

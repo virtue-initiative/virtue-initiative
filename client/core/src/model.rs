@@ -78,15 +78,15 @@ pub enum UploadKind {
     Heartbeat,
     /// A single wakeup was more than a minute late, or the sum of recent
     /// lateness (over the last 10 tracked wakeups) exceeded 5 minutes.
-    /// Excused near a system login/logout. See `client/core/SPEC.md` §2.
+    /// Excused near a system login/logout. See CORE-002.
     ScreenshotMissed,
     /// The daemon detected that the last known system login time changed.
-    /// Always risk 0%. See `client/core/SPEC.md` §5.
+    /// Always risk 0%. See CORE-006.
     SystemLogin {
         utc_ms: i64,
     },
     /// The daemon detected that the last known system logout time changed.
-    /// Always risk 0%. See `client/core/SPEC.md` §5.
+    /// Always risk 0%. See CORE-006.
     SystemLogout {
         utc_ms: i64,
     },
@@ -286,7 +286,7 @@ mod tests {
 
     #[test]
     fn upload_kind_screenshot_missed_serializes_to_tagged_shape() {
-        // SPEC.md §2: "The late wakeup event SHOULD be called
+        // CORE-002: "The late wakeup event SHOULD be called
         // \"screenshot_missed\"."
         let upload = UploadKind::ScreenshotMissed;
         assert_eq!(

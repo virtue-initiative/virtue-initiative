@@ -216,8 +216,8 @@ private final class SafariNativeRuntime {
     /// for extra background time *after* this method (and therefore
     /// `completeRequest`) has already returned. These are two different
     /// budgets: `performExpiringActivity` extends how long the process may
-    /// keep running, not how long WebKit waits for the reply — seeSPEC.md
-    /// §6.8 and `architecture.md` for why there's no persistent daemon loop
+    /// keep running, not how long WebKit waits for the reply — see SPEC.md
+    /// CORE-015 and `architecture.md` for why there's no persistent daemon loop
     /// here at all (unlike Linux/Mac/Windows/Android, or the app target's own
     /// temporary loop).
     ///

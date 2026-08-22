@@ -15,7 +15,7 @@ use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, HashParams, N
 
 /// The whole codebase shares one version, tracked in `version.properties` (this crate's
 /// grandparent directory). This is that version's `/vX`/`/vX.Y` URL-prefix form
-/// (api/SPEC.md section 1.4, hash-server/SPEC.md section 1.3) — the same value is used
+/// (API-005, HASH-004) — the same value is used
 /// for both the main API and the standalone hash server. Kept in sync by
 /// `scripts/update-version.sh`, which is the only thing that should ever edit this line.
 const API_VERSION: &str = "v0.1";
@@ -96,7 +96,7 @@ pub trait ApiTransport: Send + Sync {
         device_refresh_token: &str,
         batch: &BatchUpload,
     ) -> CoreResult<UploadedBatchResponse>;
-    /// `unix_time` and `seq` are the wire-format prefix hash-server/SPEC.md §2.1
+    /// `unix_time` and `seq` are the wire-format prefix HASH-006
     /// requires ahead of the 32-byte content hash: `seq` MUST be strictly greater
     /// than the last `seq` accepted for this device (rejected with 409 otherwise).
     fn upload_hash(
@@ -295,7 +295,7 @@ impl ApiTransport for HttpApiClient {
         seq: u32,
         content_hash: &[u8; 32],
     ) -> CoreResult<()> {
-        // hash-server/SPEC.md §2.1: [unix_time:u32 LE][seq:u32 LE][sha hash:32 bytes].
+        // HASH-006: [unix_time:u32 LE][seq:u32 LE][sha hash:32 bytes].
         let mut body = Vec::with_capacity(40);
         body.extend_from_slice(&unix_time.to_le_bytes());
         body.extend_from_slice(&seq.to_le_bytes());

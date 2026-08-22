@@ -251,7 +251,7 @@ function hexToUuid(hex: string): string {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
 }
 
-/** Mints a `server`-typed JWT via hash-server's own dev/test helper (see hash-server/SPEC.md section 4.1). */
+/** Mints a `server`-typed JWT via hash-server's own dev/test helper (see HASH-016). */
 function mintServerToken(hashServerDir: string, privateKeyPemPath: string): string {
   const result = Bun.spawnSync(
     [
@@ -318,7 +318,7 @@ function d1Dump(apiDir: string, label: string, sql: string): void {
  * it's checked directly against the hash server via `GET /hash?devices=<id>`,
  * authenticated with a `server` token minted the same way the api does (see
  * hash-server/examples/mint_token.rs). `last_received` is never cleared by
- * POST /d/batch's hashReset() (SPEC.md section 2.3 -- reset zeroes the hash
+ * POST /d/batch's hashReset() (HASH-008 -- reset zeroes the hash
  * and seq but not last_received), so it's the durable signal that at least
  * one hash was ever ingested, mirroring the old D1 `hashed_at` check.
  */

@@ -312,7 +312,7 @@ impl MacPlatformHooks {
 }
 
 impl LifecycleHooks for MacPlatformHooks {
-    // Feeds only `lifecycle::tick`'s suspend evidence (`SPEC.md` §2); the
+    // Feeds only `lifecycle::tick`'s suspend evidence (CORE-002); the
     // local post-wake UX check in `mac/src/daemon.rs` reads `boot_clock_ms`/
     // `monotonic_clock_ms` directly instead, independent of this trait.
     fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {

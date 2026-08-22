@@ -30,7 +30,7 @@ argon2 = "0.5"
 base64 = "0.23"
 flate2 = "1.1"
 # Cross-process advisory locking for `state.rs`'s sibling `.lock` file — see
-# SPEC.md §7. `flock`-backed on every Unix target we ship (incl. iOS/Android),
+# CORE-016. `flock`-backed on every Unix target we ship (incl. iOS/Android),
 # `LockFileEx`-backed on Windows.
 fs2 = "0.4"
 hkdf = "0.12.4"
@@ -48,7 +48,7 @@ thiserror = "2.0"
 tract-onnx = "0.21"
 tracing = "0.1"
 # Genuinely blocking HTTP. `rustls` pulls the ring-backed rustls stack;
-# `cookies` is required by api/SPEC.md §1, which asks clients to retain the
+# `cookies` is required by API-001, which asks clients to retain the
 # server's short-lived JWT access cookie. `platform-verifier` verifies
 # certificates against the OS trust store, used on every platform except
 # Android; `rustls-webpki-roots` backs Android instead (bundled Mozilla

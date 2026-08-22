@@ -32,7 +32,7 @@ impl From<DeviceState> for DeviceInfo {
     }
 }
 
-/// `POST /hash` — see SPEC.md section 2.1.
+/// `POST /hash` — see HASH-006.
 pub async fn ingest(
     State(app): State<AppState>,
     headers: HeaderMap,
@@ -62,7 +62,7 @@ pub struct DevicesQuery {
     devices: Option<String>,
 }
 
-/// `GET /hash?devices=[device_ids]` — see SPEC.md section 2.2.
+/// `GET /hash?devices=[device_ids]` — see HASH-007.
 pub async fn get_many(
     State(app): State<AppState>,
     headers: HeaderMap,
@@ -92,7 +92,7 @@ pub struct DeviceQuery {
     device: Option<String>,
 }
 
-/// `DELETE /hash?device=device1` — see SPEC.md section 2.3.
+/// `DELETE /hash?device=device1` — see HASH-008.
 pub async fn reset(
     State(app): State<AppState>,
     headers: HeaderMap,

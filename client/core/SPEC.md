@@ -1,6 +1,6 @@
 # Virtue Core
 
-## 1. Overview
+## CORE-001 Overview
 
 The core MUST be structured around a single daemon loop. It's primary goal is to take screenshots (using the platform hooks), while detecting if a screenshot was missed for any reason.
 
@@ -23,7 +23,7 @@ loop(persisted state):
   sleep until next time
 ```
 
-## 2. Tamper detection
+## CORE-002 Tamper detection
 
 It SHOULD do tamper detection by comparing the current time to the expected wakeup time. The difference SHOULD be added to the late wakeups array unless the gap is explained by a legitimate session transition, checked from both ends:
 
@@ -42,11 +42,11 @@ The late wakeup event SHOULD be called "screenshot_missed".
 
 A user-initiated stop MUST excuse the gap that follows it — the lateness check MUST be skipped once, rather than recorded, so restarting after it isn't also reported as tampering on top of the user-stop alert. This skip MUST apply to the first tick of the monitoring session that follows the daemon actually stopping and restarting, not to any tick that runs beforehand in the same still-running session (e.g. while an already-requested stop is still being processed) — a tick that happens before the daemon has actually stopped isn't the gap being excused, and consuming the excuse there would leave the real gap unprotected. A stop MUST NOT be excused this way merely because the process exited cleanly (e.g. a caught termination signal) — only an actual user-initiated stop, since anything broader would let simply killing the process defeat tamper detection.
 
-## 3. Screenshots
+## CORE-003 Screenshots
 
 Screenshots MUST be captured randomly (i.e. every second there is the same chance as any other second) about every 5 minutes.
 
-### 3.1 Content detection
+### CORE-004 Content detection
 
 Screenshots SHOULD be processed with the content detection logic.
 
@@ -54,7 +54,7 @@ Screenshots SHOULD first be filtered based on a skin tone detector. If it rates 
 
 Screenshots SHOULD then be redacted using an OCR engine and then compressed into small WebP.
 
-## 4. Uploading
+## CORE-005 Uploading
 
 Requests SHOULD be queued to be uploaded in a batch.
 
@@ -64,7 +64,7 @@ Both hash server uploads and batch uploads MUST be stored in the state object an
 
 > Note: device settings SHOULD be refreshed on process startup and on batch upload and saved to the state object
 
-## 5. Other events
+## CORE-006 Other events
 
 When the daemon detects that the System Login time changed, it MUST send a "system login at" event (risk 0%).
 
@@ -72,59 +72,59 @@ When the daemon detects thtat hte System Logout time changed, it MUST send a "sy
 
 The first System Login/Logout time observed (i.e. there is no prior value to compare against) MUST NOT be reported — it only establishes the baseline a later change is measured against.
 
-## 6. Client API
+## CORE-007 Client API
 
 The core MUST expose the following methods to clients. Each blocks until the loop thread has applied and persisted the request, except `status`, which reads the last-committed state directly, and `request_stop`, which is fire-and-forget.
 
-### 6.1 login
+### CORE-008 login
 
 `login(email, password, device_name?) -> device_id`
 
 MUST revoke any existing device session first, then register a new device with the API. On success MUST store the returned device credentials, settings, and hash token, and MUST enable screenshot capture. On failure MUST leave the client logged out. `device_name` is optional; if absent or blank, the platform's configured default name MUST be used.
 
-### 6.2 logout
+### CORE-009 logout
 
 `logout()`
 
 MUST best-effort revoke the device session with the API, MUST clear stored device credentials, and MUST disable screenshot capture.
 
-### 6.3 status
+### CORE-010 status
 
 `status() -> { is_authenticated, is_running, device_id, last_loop_at_ms, pending_request_count }`
 
 MUST return, without blocking on the loop: whether the user is authenticated, whether the loop is running, the device id (if any), the timestamp of the last completed tick (if any), and the number of requests currently queued.
 
-### 6.4 note_user_stop
+### CORE-011 note_user_stop
 
 `note_user_stop(source)`
 
 MUST record that the user explicitly stopped monitoring while it was expected to be running (see §2's `user_stop` alert).
 
-### 6.5 queue_upload
+### CORE-012 queue_upload
 
 `queue_upload(upload)`
 
 MUST enqueue the given event directly for hashing and batch upload, bypassing the daemon's own capture/lifecycle logic.
 
-### 6.6 flush_batch_now
+### CORE-013 flush_batch_now
 
 `flush_batch_now()`
 
 MUST force the next tick to upload the current batch immediately rather than waiting for the batch interval.
 
-### 6.7 request_stop
+### CORE-014 request_stop
 
 `request_stop()`
 
 MUST stop the loop after its current tick. The loop MAY be started again afterward.
 
-### 6.8 tick_once
+### CORE-015 tick_once
 
 `tick_once()`
 
 MUST apply and persist any currently-queued requests, then MUST run exactly one tick, then MUST return — without waiting for a scheduled wakeup and without looping. For a platform with no way to keep a background thread alive between invocations (iOS's Safari-extension native message handler, which the OS only guarantees runs for the duration of one request/response round trip — see `architecture.md`), this MUST be the method called once per invocation instead of `run_forever`. MUST NOT be called concurrently with `run_forever` or with itself on the same `Daemon`.
 
-## 7. State persistence
+## CORE-016 State persistence
 
 State MUST be persisted to a single JSON file (`state_path`) via a tmp-file-plus-rename so a reader never observes a partially-written file.
 

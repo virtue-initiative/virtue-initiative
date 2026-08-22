@@ -1,10 +1,10 @@
 # Virtue Initiative API Server
 
-## 1. Overview
+## API-001 Overview
 
 This spec defines the main API server for Virtue Initiative. It handles users, devices and batches.
 
-### 1.1 Types
+### API-002 Types
 
 **Basic Types**
 
@@ -113,7 +113,7 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
 }
 ```
 
-### 1.2 Authentication
+### API-003 Authentication
 
 The client MUST provide a refresh token in the Authorization header or a `refresh_token` cookie to access authenticated routes.
 
@@ -126,11 +126,11 @@ There are **TWO** types of tokens:
 1. **Web Tokens**, these are the normal tokens, granted on `POST /login` and `POST /signup`
 2. **Device Tokens**, these are device tokens, granted on `POST /d/device` and have a limited scope.
 
-### 1.3 Validation
+### API-004 Validation
 
 The server SHOULD validate every request shape against a schema and return **HTTP 400** on failure.
 
-### 1.4 Backwards compat
+### API-005 Backwards compat
 
 The client MUST accept extra fields in the response body.
 
@@ -145,12 +145,12 @@ The client MUST prefixed the API with the current major version. For versions be
 
 The API version SHOULD match the major version of the codebase (see client/version.properties).
 
-### 1.5 Status codes
+### API-006 Status codes
 
 The server SHOULD return **HTTP 204** for responses with no body, and **HTTP 200** otherwise —
 including for endpoints that create a resource.
 
-### 1.6 `GET /` - Health
+### API-007 `GET /` - Health
 
 MUST NOT require authentication. MUST return this shape:
 
@@ -165,9 +165,9 @@ MUST NOT require authentication. MUST return this shape:
 
 The version SHOULD match the version of the codebase.
 
-## 2. Users and authentication
+## API-008 Users and authentication
 
-### 2.1 `POST /signup-request`
+### API-009 `POST /signup-request`
 
 The client MUST provide this shape.
 
@@ -184,7 +184,7 @@ If a user at that email already exists, the server MUST send a notification to t
 
 In BOTH cases, the server MUST respond **HTTP 204**.
 
-### 2.2 `POST /signup`
+### API-010 `POST /signup`
 
 The client MUST provide this request shape.
 
@@ -219,7 +219,7 @@ The server MUST create an account for the user and return **HTTP 200** with this
 }
 ```
 
-### 2.3 `POST /signup/validate`
+### API-011 `POST /signup/validate`
 
 The client MUST send a signup verification token.
 
@@ -239,7 +239,7 @@ The server MUST respond **HTTP 200** with the pending signup's email.
 }
 ```
 
-### 2.4 `POST /password-reset`
+### API-012 `POST /password-reset`
 
 The client MUST send the email to request a password reset:
 
@@ -253,7 +253,7 @@ If the account exists, the server SHOULD send a password reset email, otherwise 
 
 The server SHOULD always respond with **HTTP 204**.
 
-### 2.5 `POST /password-reset/validate`
+### API-013 `POST /password-reset/validate`
 
 The client MUST send a password-reset token.
 
@@ -273,7 +273,7 @@ The server MUST respond **HTTP 200** with the account email.
 }
 ```
 
-### 2.6 `POST /password-reset/finalize`
+### API-014 `POST /password-reset/finalize`
 
 The client MUST send the follow request data.
 
@@ -293,7 +293,7 @@ The server MUST respond **HTTP 401** if the token is invalid or not found.
 
 The server MUST update the user with the new information and return **HTTP 204**.
 
-### 2.7 `GET /user/login-material`
+### API-015 `GET /user/login-material`
 
 The client MAY send an email as a query param `?email=[email]`.
 
@@ -316,7 +316,7 @@ If the client did provide an email, the server MUST additionally respond with th
 }
 ```
 
-### 2.8 `POST /login`
+### API-016 `POST /login`
 
 The client MUST send this request shape
 
@@ -338,7 +338,7 @@ If the email has been marked as unverified, the server SHOULD send a verificatio
 
 If it matches, the server MUST send **HTTP 204** and set the `refresh_token` cookie.
 
-### 2.9 `POST /email-verification/validate`
+### API-017 `POST /email-verification/validate`
 
 The client MUST provide a email token in the body.
 
@@ -361,7 +361,7 @@ The server MUST respond with **HTTP 200**:
 }
 ```
 
-### 2.10 `POST /logout`
+### API-018 `POST /logout`
 
 The client MUST authenticate with a **Web Token**.
 
@@ -369,7 +369,7 @@ The server MUST invalidate the session and clear the refresh_token.
 
 The server MUST respond with **HTTP 204**.
 
-### 2.11 `GET /user`
+### API-019 `GET /user`
 
 The client MUST authenticate with either token.
 
@@ -379,7 +379,7 @@ The server MUST return the currently authenticated user.
 User;
 ```
 
-### 2.12 `PATCH /user`
+### API-020 `PATCH /user`
 
 The client MUST authenticate with a **Web Token**.
 
@@ -409,7 +409,7 @@ The server MUST return this response shape.
 }
 ```
 
-### 2.13 `DELETE /user?confirm_email=[email]`
+### API-021 `DELETE /user?confirm_email=[email]`
 
 The client MUST be authenticated with a **Web Token**.
 
@@ -417,9 +417,9 @@ The client MUST send the user's email in the query. The server SHOULD respond wi
 
 If the email matches, the server SHOULD permanently delete the account. The server SHOULD delete all devices, batches, sessions, and tokens. The server SHOULD NOT delete the batch data in R2, instead it should be deleted by the normal 30 day cycle.
 
-## 3. Partners
+## API-022 Partners
 
-### 3.1 `POST /partner`
+### API-023 `POST /partner`
 
 The client MUST authenticate with a **Web Token** and send
 
@@ -440,7 +440,7 @@ The server SHOULD then respond **HTTP 200**
 }
 ```
 
-### 3.2 `POST /partner/validate`
+### API-024 `POST /partner/validate`
 
 To get the information about an invite (often before signing up), the client MUST send.
 
@@ -466,7 +466,7 @@ For a correct token, server MUST return **HTTP 200**.
 }
 ```
 
-### 3.3 `POST /partner/accept`
+### API-025 `POST /partner/accept`
 
 The client MUST be authenticated with a **Web Token** and send
 
@@ -484,7 +484,7 @@ The server MUST finalize the partnership and return **HTTP 200**:
 }
 ```
 
-### 3.4 `GET /partner`
+### API-026 `GET /partner`
 
 The client MUST be authenticated with a **Web Token.**
 
@@ -497,7 +497,7 @@ The server MUST collect the lists of partners for the user and return **HTTP 200
 }
 ```
 
-### 3.5 `DELETE /partner/:id`
+### API-027 `DELETE /partner/:id`
 
 The client MUST be authenticated with a **Web Token**.
 
@@ -507,9 +507,9 @@ The server MUST delete the partnership and notify the other user.
 
 The server MUST respond **HTTP 204**.
 
-## 4. Device Management
+## API-028 Device Management
 
-### 4.1 `GET /device`
+### API-029 `GET /device`
 
 The client MUST be authenticated with a **Web Token**.
 
@@ -521,7 +521,7 @@ The server SHOULD return **HTTP 200** plus a list of all the devices that a user
 Device[]
 ```
 
-### 4.2 `PATCH /device/:id`
+### API-030 `PATCH /device/:id`
 
 The client MUST be authenticated with a **Web Token** and send
 
@@ -533,7 +533,7 @@ The client MUST be authenticated with a **Web Token** and send
 
 On success, the server MUST respond with **HTTP 204**.
 
-### 4.3 `DELETE /device/:id`
+### API-031 `DELETE /device/:id`
 
 The client MUST be authenticated with a **Web Token**.
 
@@ -543,9 +543,9 @@ The server SHOULD delete the device with the stored batches and email the owner 
 
 On success, the server SHOULD return `204 No Content`.
 
-## 5. Data
+## API-032 Data
 
-### 5.1 `GET /data`
+### API-033 `GET /data`
 
 The client MUST be authenticated wit ha **Web Token**
 
@@ -566,9 +566,9 @@ The server SHOULD filter the batches to only include batches the user can decryp
 
 The server MUST only return batches where `created_at > since`.
 
-## 6. Device Only
+## API-034 Device Only
 
-### 6.1 `POST /d/device`
+### API-035 `POST /d/device`
 
 The client MUST send
 
@@ -594,7 +594,7 @@ On success, it must return **HTTP 200** with
 }
 ```
 
-### 6.2 `GET /d/device`
+### API-036 `GET /d/device`
 
 The client MUST be authenticated with a **Device Token**.
 
@@ -604,7 +604,7 @@ The server SHOULD create a fresh JWT hash server token (see the hash server spec
 DeviceSettings;
 ```
 
-### 6.3 `POST /d/logout`
+### API-037 `POST /d/logout`
 
 The client MUST be authenticated with a **Device Token**.
 
@@ -612,7 +612,7 @@ The server MUST revoke the device token and soft-delete the device. It also rese
 
 On success, the server MUST respond with **HTTP 204**
 
-### 6.4 `POST /d/batch`
+### API-038 `POST /d/batch`
 
 The client MUST send a multipart form request:
 
@@ -660,13 +660,13 @@ The server MUST return **HTTP 200** with the device's refreshed settings alongsi
 }
 ```
 
-## 7. Other
+## API-039 Other
 
-### 7.1 `GET /r2/*`
+### API-040 `GET /r2/*`
 
 This forwards to R2. Only used in dev. It SHOULD be disabled in production.
 
-### 7.2 `POST /email/sns`
+### API-041 `POST /email/sns`
 
 The server MUST handle any AWS SNS webhook.
 

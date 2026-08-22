@@ -45,7 +45,7 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
         working-directory: hash-server
 
-      # SPEC.md section 4.2: "The rust unit and integration tests SHOULD be run in github CI."
+      # HASH-017: "The rust unit and integration tests SHOULD be run in github CI."
       - name: Rust tests
         run: cargo test
         working-directory: hash-server

@@ -6,6 +6,14 @@ Some components have a SPEC.md file. These files MUST be written with RFC-like l
 
 SPEC.md is the source of truth and MUST be updated before the code is updated. They SHOULD NOT include full implementation details, but include enough to recreate something similar to the existing component.
 
+Each numbered section is tagged with a stable ID scoped to its file (e.g. `API-032`, `HASH-005`, `CORE-002`), not a positional number, so cross-references in code comments survive reordering or insertion. A new section MUST get the next unused number for its file; numbers MUST NOT be reused, even after the section they named is deleted. IDs need not stay in numeric or document order. Code comments SHOULD cite the bare ID (e.g. `HASH-005`) rather than repeating the file path:
+
+| Prefix | File                |
+| ------ | ------------------- |
+| `API`  | `api/SPEC.md`       |
+| `HASH` | `hash-server/SPEC.md` |
+| `CORE` | `client/core/SPEC.md` |
+
 ## Repo map
 
 - `api/` — Cloudflare Workers REST API (TypeScript, Hono, D1 SQLite, R2 object storage)

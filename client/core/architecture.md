@@ -155,7 +155,7 @@ thread) can drive the daemon synchronously.
 
 `screenshot::plan` draws the next capture time via an **exponential
 inter-arrival** (`next = now + (-mean_ms * ln(1 - u))`, `u` from
-`RandomSource`) rather than a fixed interval — SPEC.md §3's "every second has
+`RandomSource`) rather than a fixed interval — CORE-003's "every second has
 the same chance" requirement. Two gates then run:
 
 1. **Lock / screensaver gate** — checked in `plan` _before_ capturing via
@@ -269,7 +269,7 @@ check is disabled.
 - `device_name` — stable device identifier
 - `platform_name` — e.g. `"linux"`, `"mac"`, `"windows"`
 - `state_dir` — directory for all state files
-- `screenshot_interval` — mean of the random exponential draw (SPEC.md §3), default 60s in tests
+- `screenshot_interval` — mean of the random exponential draw (CORE-003), default 60s in tests
 - `batch_interval` — default 60 s
 
 There is no runtime override mechanism: `api_base_url`, `capture_interval_seconds`,
@@ -326,8 +326,7 @@ status — running normally. iOS is the only platform that overrides it to
 `false`, for the reason described above.
 
 `get_monotonic_clock_ms` (a clock that doesn't advance while the system is
-suspended) feeds only `lifecycle::tick`'s suspend evidence (`../SPEC.md`
-§2) — a third excuse, alongside login/logout evidence, that can only ever
+suspended) feeds only `lifecycle::tick`'s suspend evidence (CORE-002) — a third excuse, alongside login/logout evidence, that can only ever
 *add* an excuse (its default falls back to `get_utc_clock_ms`, under which
 it never triggers). Screenshot scheduling itself is unaffected and still
 paces off the wall clock; this hook isn't on `ScreenshotHooks`. Mac
@@ -423,8 +422,8 @@ persisted — no longer `Instant`-based) is refreshed from whichever of those
 responses arrived most recently and only triggers a `GET /d/device` call
 (inside `execute_hash_retries`, unlocked) when that cache goes stale (55
 minutes) without a batch having refreshed it in the meantime. `Daemon::new`
-also performs one such refresh at startup if already authenticated (SPEC.md
-§4's "refreshed on process startup" requirement).
+also performs one such refresh at startup if already authenticated (CORE-005's
+"refreshed on process startup" requirement).
 
 ## Testing
 

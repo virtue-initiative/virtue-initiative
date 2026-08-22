@@ -133,7 +133,7 @@ replace_line \
 # --- API version sync -------------------------------------------------------
 # The whole codebase — main API, hash server, and this client — shares one version,
 # BASE_VERSION above. This derives its `/vX`/`/vX.Y` URL-prefix form (api/SPEC.md
-# section 1.4, hash-server/SPEC.md section 1.3: "For versions before v1, use v0.x") and
+# API-005, HASH-004: "For versions before v1, use v0.x") and
 # writes it into every file that has to hardcode a copy because it can't import
 # shared-web/api-version.ts directly (Rust, and hash-server is a separate deployable).
 # shared-web/api-version.ts is the copy web/ and api/ actually import; it's written

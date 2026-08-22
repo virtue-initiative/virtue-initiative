@@ -24,7 +24,7 @@ describe('API base path routing', () => {
   });
 });
 
-describe('API version prefix (SPEC.md section 1.4)', () => {
+describe('API version prefix (API-005)', () => {
   it('routes requests prefixed with the current major version the same as unprefixed requests', async () => {
     const [unprefixed, apiPrefixed, versionOnly] = await Promise.all([
       SELF.fetch(`${BASE}/user/login-material`),

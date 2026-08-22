@@ -318,7 +318,7 @@ pub extern "C" fn virtue_ios_native_run_daemon_loop() -> *mut c_char {
 }
 
 /// Applies any pending requests and runs exactly one tick, then returns —
-/// see `Daemon::tick_once` / SPEC.md §6.8. This is what the Safari
+/// see `Daemon::tick_once` / CORE-015. This is what the Safari
 /// extension's native message handler calls (synchronously, once per
 /// `beginRequest`) instead of `virtue_ios_native_run_daemon_loop`: the OS
 /// only guarantees that process runs for the duration of one message's
