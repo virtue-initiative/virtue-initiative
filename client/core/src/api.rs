@@ -40,6 +40,78 @@ pub struct DeviceState {
     pub hash_token: String,
 }
 
+/// Request body for `POST /bug-report` (API-042). Not part of `ApiTransport`/
+/// `MockApiClient` — this is a standalone diagnostic action, not part of the
+/// daemon's login/upload lifecycle those exist to test.
+#[derive(Debug, Clone, Serialize)]
+pub struct BugReportRequest<'a> {
+    pub message: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contact_email: Option<&'a str>,
+    pub platform: &'a str,
+    pub app_version: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub platform_details: Option<&'a str>,
+}
+
+/// Client-side mirror of the API's `MAX_LOG_ATTACHMENT_BYTES` (API-042) — shared
+/// so every platform's `report-issue`-style flow trims its log excerpt before
+/// sending rather than letting the server reject it.
+pub const MAX_LOG_ATTACHMENT_BYTES: usize = 8 * 1024 * 1024;
+
+/// Opaque-session-token prefixes this codebase hands out (`api/src/lib/tokens.ts`'s
+/// `TOKEN_PREFIXES`) — kept in sync manually, since native clients have no
+/// build-time link to that TypeScript file.
+const SECRET_TOKEN_PREFIXES: [&str; 7] = ["wst_", "dst_", "sut_", "ect_", "evt_", "prt_", "pit_"];
+
+/// True for a `header.payload.signature`-shaped JWT: three dot-separated
+/// base64url segments, each long enough not to false-positive on ordinary
+/// dotted text (version strings, filenames, ellipses).
+fn looks_like_jwt(word: &str) -> bool {
+    let parts: Vec<&str> = word.split('.').collect();
+    parts.len() == 3
+        && parts.iter().all(|p| {
+            p.len() >= 8
+                && p.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        })
+}
+
+fn looks_like_secret_token(word: &str) -> bool {
+    SECRET_TOKEN_PREFIXES
+        .iter()
+        .any(|prefix| word.contains(prefix))
+        || looks_like_jwt(word)
+}
+
+/// Defense-in-depth scrub of anything in gathered log text that looks like one
+/// of this codebase's opaque session tokens or a JWT, before it leaves a
+/// device as a `POST /bug-report` `log_file` attachment (API-042). Shared
+/// across platforms rather than duplicated per client, since the token shapes
+/// it looks for are the same everywhere.
+///
+/// Nothing in `core`'s current `tracing` call sites logs a credential
+/// (verified by inspecting every `log_error`/`log_warning`/`tracing::*!` call
+/// site plus `ureq::Error`'s `Display` impl), but this is cheap insurance
+/// against a future logging change, or a dependency's own log line, leaking
+/// one.
+pub fn redact_secrets(text: &str) -> String {
+    text.split_inclusive(char::is_whitespace)
+        .map(|chunk| {
+            let word = chunk.trim_end();
+            let trailing_whitespace = &chunk[word.len()..];
+            let core = word.trim_matches(|c: char| {
+                !c.is_ascii_alphanumeric() && c != '_' && c != '-' && c != '.'
+            });
+            if !core.is_empty() && looks_like_secret_token(core) {
+                format!("[redacted]{trailing_whitespace}")
+            } else {
+                chunk.to_string()
+            }
+        })
+        .collect()
+}
+
 /// Raw wire shape of `DeviceSettings` embedded in `POST /d/device`, `GET /d/device`,
 /// and `POST /d/batch` responses. Differs from the public `DeviceSettings` only in
 /// its `id`/`device_id` field name and the extra `hash_token` (the JWT hash-server
@@ -146,6 +218,25 @@ impl HttpApiClient {
             base_url: config.api_base_url.trim_end_matches('/').to_string(),
             agent,
         })
+    }
+
+    /// `bearer_token` is the device's refresh token if this device is logged in, or
+    /// `None` to submit anonymously; `log_file` is an optional attachment, e.g. recent
+    /// client logs (the server accepts both — API-042).
+    pub fn report_issue(
+        &self,
+        bearer_token: Option<&str>,
+        request: &BugReportRequest,
+        log_file: Option<&[u8]>,
+    ) -> CoreResult<()> {
+        let metadata = serde_json::to_string(request)?;
+        let boundary = multipart_boundary();
+        let body = encode_bug_report_multipart(&boundary, &metadata, log_file);
+        let response = self
+            .post(None, "/bug-report", bearer_token)
+            .content_type(format!("multipart/form-data; boundary={boundary}"))
+            .send(&body)?;
+        self.expect_success(response)
     }
 }
 
@@ -392,6 +483,25 @@ fn encode_multipart(boundary: &str, batch: &[u8], metadata: &str) -> Vec<u8> {
     body
 }
 
+/// Builds the `multipart/form-data` body `POST /bug-report` expects: a JSON
+/// `metadata` field plus an optional `log_file` attachment (API-042).
+fn encode_bug_report_multipart(boundary: &str, metadata: &str, log_file: Option<&[u8]>) -> Vec<u8> {
+    let mut body = Vec::with_capacity(metadata.len() + log_file.map_or(0, <[u8]>::len) + 256);
+    body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+    body.extend_from_slice(b"Content-Disposition: form-data; name=\"metadata\"\r\n\r\n");
+    body.extend_from_slice(metadata.as_bytes());
+    if let Some(log_file) = log_file {
+        body.extend_from_slice(format!("\r\n--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(
+            b"Content-Disposition: form-data; name=\"log_file\"; filename=\"recent-logs.txt\"\r\n",
+        );
+        body.extend_from_slice(b"Content-Type: text/plain\r\n\r\n");
+        body.extend_from_slice(log_file);
+    }
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    body
+}
+
 /// A random boundary, so it cannot collide with the encrypted batch bytes it
 /// delimits.
 fn multipart_boundary() -> String {
@@ -504,6 +614,60 @@ mod tests {
             .expect("file part headers")
             + 4;
         assert_eq!(&body[header_end..header_end + batch.len()], &batch[..]);
+    }
+
+    #[test]
+    fn bug_report_multipart_omits_log_file_part_when_none() {
+        let body = encode_bug_report_multipart("BOUND", "{\"message\":\"hi\"}", None);
+        let text = String::from_utf8_lossy(&body);
+
+        assert!(text.contains("Content-Disposition: form-data; name=\"metadata\"\r\n\r\n"));
+        assert!(!text.contains("log_file"));
+        assert!(text.ends_with("\r\n--BOUND--\r\n"));
+    }
+
+    #[test]
+    fn bug_report_multipart_includes_log_file_part_when_given() {
+        let body = encode_bug_report_multipart("BOUND", "{}", Some(b"line one\nline two\n"));
+        let text = String::from_utf8_lossy(&body);
+
+        assert!(text.contains(
+            "Content-Disposition: form-data; name=\"log_file\"; filename=\"recent-logs.txt\"\r\n\
+             Content-Type: text/plain\r\n\r\n"
+        ));
+        assert!(text.contains("line one\nline two\n"));
+        assert!(
+            text.find("name=\"metadata\"") < text.find("name=\"log_file\""),
+            "the metadata part must come first"
+        );
+    }
+
+    #[test]
+    fn redact_secrets_scrubs_opaque_session_tokens() {
+        let input = "auth failed: token wst_AbCdEf123456ghijklmnop rejected";
+        let redacted = redact_secrets(input);
+        assert!(!redacted.contains("wst_"));
+        assert_eq!(redacted, "auth failed: token [redacted] rejected");
+    }
+
+    #[test]
+    fn redact_secrets_scrubs_jwt_shaped_strings() {
+        let input =
+            "Authorization: Bearer eyJhbGciOiJFZERTQSJ9.eyJzdWIiOiJhYmMifQ.c2lnbmF0dXJlYnl0ZXM";
+        let redacted = redact_secrets(input);
+        assert_eq!(redacted, "Authorization: Bearer [redacted]");
+    }
+
+    #[test]
+    fn redact_secrets_leaves_ordinary_text_untouched() {
+        let input = "2026-01-01T00:00:00+0000 host virtue[123]: batch upload ok count=3";
+        assert_eq!(redact_secrets(input), input);
+    }
+
+    #[test]
+    fn redact_secrets_does_not_false_positive_on_short_dotted_text() {
+        let input = "build 1.2.3 ok";
+        assert_eq!(redact_secrets(input), input);
     }
 
     #[test]

@@ -27,6 +27,9 @@ HASH_SERVER_URL=http://localhost:8788
 # Can be changed to SES
 EMAIL_DELIVERY_MODE=log
 
+# Where POST /bug-report emails get sent
+BUG_REPORT_EMAIL=help@virtueinitiative.org
+
 # AWS credentials for SES
 # AWS_ACCESS_KEY_ID=
 # AWS_SECRET_ACCESS_KEY=

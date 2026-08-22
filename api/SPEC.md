@@ -681,3 +681,41 @@ The server MUST respond **HTTP 200** with this shape.
 { "ok": true, "updated": Number }    // Bounce/Complaint notification
 { "ok": true }                        // ignored event
 ```
+
+### API-042 `POST /bug-report`
+
+The client MAY authenticate with a **Web Token** or a **Device Token**. The client MAY also send no token at all.
+
+The client MUST send a multipart form request:
+
+- `metadata`: JSON
+  - ```js
+    {
+      "message": "Description of the problem",
+      "contact_email": "user@example.com" | undefined,
+      "platform": "linux" | "windows" | "mac" | "android" | "ios" | "web" | undefined,
+      "app_version": "1.2.3" | undefined,
+      "platform_details": "Linux 6.8.0-60-lowlatency; Ubuntu 24.04" | undefined
+    }
+    ```
+- `log_file`: recent client log excerpt (e.g. plain text), undefined if the client has none to offer
+
+The client SHOULD omit `contact_email` when authenticated with a token.
+
+The client SHOULD gather OS/kernel details and send it in `platform_details`.
+
+If the client omits it, the server SHOULD fill it in from the request's `User-Agent` header instead.
+
+`log_file`, when sent, SHOULD cover roughly the last day of that client's operational logs.
+
+A client that attaches logs MUST warn the user what will be sent (that a day of logs is included) before submitting.
+
+The server SHOULD reject a `log_file` above a reasonable size cap (e.g. 8MB) with **HTTP 400**.
+
+The server SHOULD rate limit this endpoint by client IP address, since it MAY be called without authentication, and MUST respond **HTTP 429** with `{ "error": "Too many requests" }` once the limit is exceeded.
+
+The server MUST email the report to a fixed internal address and include, the message, `platform`/`app_version`/`platform_details` if available, and, when authenticated, the reporting user's or device's identity.
+
+The server SHOULD set the Reply-To header to the `contact_email` or the email of the authenticated account.
+
+On success, the server MUST respond **HTTP 204**.

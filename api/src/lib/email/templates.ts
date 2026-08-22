@@ -639,3 +639,32 @@ export function renderPartnerDigestTemplate(input: {
     html: footer.html,
   };
 }
+
+// Internal-only notification (not sent to an app user), so this deliberately
+// skips renderEmailDocument's branded card/footer and just outputs plain text
+// wrapped in <pre> — there is no reader here to design for.
+export function renderBugReportTemplate(input: {
+  message: string;
+  contactEmail?: string | null;
+  reporter?: string | null;
+  platform?: string | null;
+  appVersion?: string | null;
+  platformDetails?: string | null;
+  hasLogAttachment?: boolean;
+}) {
+  const details: string[] = [];
+  if (input.reporter) details.push(`Reporter: ${input.reporter}`);
+  if (input.contactEmail) details.push(`Contact email: ${input.contactEmail}`);
+  if (input.platform) details.push(`Platform: ${input.platform}`);
+  if (input.appVersion) details.push(`App version: ${input.appVersion}`);
+  if (input.platformDetails) details.push(`Platform details: ${input.platformDetails}`);
+  if (input.hasLogAttachment) details.push('Attached: recent-logs.txt');
+
+  const text = [...details, '', input.message].join('\n');
+
+  return {
+    subject: `Bug report: ${input.message.slice(0, 80)}`,
+    text,
+    html: `<pre>${escapeHtml(text)}</pre>`,
+  };
+}

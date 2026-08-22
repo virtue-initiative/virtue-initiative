@@ -3,6 +3,7 @@ mod config;
 mod daemon;
 mod tray;
 
+use std::fs;
 use std::io::{self, Write};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -10,6 +11,7 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use std::process::Command;
 use std::process::ExitCode;
+use std::process::Stdio;
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
@@ -60,6 +62,17 @@ enum Commands {
     Dev {
         #[command(subcommand)]
         command: DevCommands,
+    },
+    #[command(about = "Report an issue to the Virtue Initiative team")]
+    ReportIssue {
+        /// Skips the interactive prompt; the report is submitted as-is.
+        #[arg(long)]
+        message: Option<String>,
+        #[arg(long)]
+        contact_email: Option<String>,
+        /// Skips the "here's what will be sent" confirmation prompt.
+        #[arg(long)]
+        yes: bool,
     },
 }
 
@@ -145,8 +158,13 @@ async fn run() -> Result<()> {
         }
         Commands::Logout { yes } => tokio::task::block_in_place(|| logout(paths, yes)),
         Commands::Daemon { command } => daemon_command(paths, command).await,
-        Commands::Status { json } => status(paths, json),
+        Commands::Status { json } => tokio::task::block_in_place(|| status(paths, json)),
         Commands::Dev { command } => tokio::task::block_in_place(|| dev(paths, command)),
+        Commands::ReportIssue {
+            message,
+            contact_email,
+            yes,
+        } => tokio::task::block_in_place(|| report_issue(paths, message, contact_email, yes)),
     }
 }
 
@@ -223,6 +241,184 @@ fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
 
     println!("Logged out. Monitoring is disabled on this device until you run `virtue login`.");
     Ok(())
+}
+
+fn report_issue(
+    paths: ClientPaths,
+    message: Option<String>,
+    contact_email: Option<String>,
+    yes: bool,
+) -> Result<()> {
+    let message = match message {
+        Some(message) => message,
+        None => {
+            let mut rl = rustyline::DefaultEditor::new()?;
+            rl.readline("Describe the issue: ")?
+        }
+    };
+    let message = message.trim().to_string();
+    if message.is_empty() {
+        println!("No message entered; nothing was sent.");
+        return Ok(());
+    }
+
+    let device_refresh_token = read_device_refresh_token(&paths);
+
+    let contact_email = match contact_email {
+        Some(email) => Some(email),
+        None if device_refresh_token.is_some() => None,
+        None => {
+            let mut rl = rustyline::DefaultEditor::new()?;
+            let entered = rl.readline("Contact email (optional, press Enter to skip): ")?;
+            let entered = entered.trim();
+            (!entered.is_empty()).then(|| entered.to_string())
+        }
+    };
+
+    let platform_details = linux_platform_details();
+    let logs = recent_logs();
+
+    println!("This report will be sent to the Virtue Initiative team and will include:");
+    println!("  - Your message: \"{message}\"");
+    if let Some(email) = &contact_email {
+        println!("  - Your contact email: {email}");
+    }
+    println!("  - Platform details: {platform_details}");
+    if device_refresh_token.is_some() {
+        println!("  - This device's identity and your account email (you're logged in)");
+    }
+    match &logs {
+        Some(logs) => println!(
+            "  - The last day of this device's operational logs ({} KB) from \
+             `journalctl --user -u {}`: diagnostic entries only (errors, capture/upload status) \
+             — no screenshots or screenshot content, and no window titles.",
+            logs.len().div_ceil(1024),
+            service_name(),
+        ),
+        None => println!("  - (no logs found to attach)"),
+    }
+
+    if !yes && !prompt_yes_no("Send this report?", true)? {
+        println!("Report cancelled.");
+        return Ok(());
+    }
+
+    let config = build_core_config(&paths);
+    let api = virtue_core::api::HttpApiClient::new(&config)?;
+    api.report_issue(
+        device_refresh_token.as_deref(),
+        &virtue_core::api::BugReportRequest {
+            message: &message,
+            contact_email: contact_email.as_deref(),
+            platform: "linux",
+            app_version: BUILD_LABEL,
+            platform_details: Some(&platform_details),
+        },
+        logs.as_deref(),
+    )
+    .context("failed to submit bug report")?;
+
+    println!("Thanks — your report was sent to the Virtue Initiative team.");
+    Ok(())
+}
+
+/// Best-effort last day of this device's `virtue` user-service logs, redacted
+/// (see `virtue_core::api::redact_secrets`) and trimmed to the API's
+/// attachment size cap (keeping the most recent bytes, since those are the
+/// most relevant to a just-encountered issue).
+fn recent_logs() -> Option<Vec<u8>> {
+    let output = Command::new("journalctl")
+        .args([
+            "--user",
+            "-u",
+            &service_name(),
+            "--since",
+            "-1 day",
+            "--no-pager",
+            "-o",
+            "short-iso",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+
+    if !output.status.success() || output.stdout.is_empty() {
+        return None;
+    }
+
+    let redacted = virtue_core::api::redact_secrets(&String::from_utf8_lossy(&output.stdout));
+    let mut logs = redacted.into_bytes();
+    if logs.len() > virtue_core::api::MAX_LOG_ATTACHMENT_BYTES {
+        let start = logs.len() - virtue_core::api::MAX_LOG_ATTACHMENT_BYTES;
+        logs.drain(0..start);
+    }
+    Some(logs)
+}
+
+/// Reads this device's refresh token straight off disk rather than through
+/// the daemon, so `report-issue` still works (anonymously otherwise) even
+/// when the daemon isn't running. See CORE-010's disk-fallback precedent in
+/// `load_service_status`.
+fn read_device_refresh_token(paths: &ClientPaths) -> Option<String> {
+    let state_path = paths.state_dir.join("event_state.json");
+    let state: virtue_core::DaemonState = virtue_core::load_state(&state_path).ok()?;
+    state
+        .auth
+        .device_credentials
+        .map(|creds| creds.refresh_token)
+}
+
+/// Best-effort OS description for `platform_details`: kernel release plus
+/// `/etc/os-release`'s NAME/VERSION, e.g. "Linux 6.8.0-60-lowlatency;
+/// Ubuntu 24.04.1 LTS".
+fn linux_platform_details() -> String {
+    let kernel = Command::new("uname")
+        .arg("-r")
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    let os_release = fs::read_to_string("/etc/os-release")
+        .ok()
+        .map(|contents| parse_os_release(&contents));
+
+    let mut parts = Vec::new();
+    if let Some(kernel) = kernel {
+        parts.push(format!("Linux {kernel}"));
+    }
+    if let Some((name, version)) = os_release {
+        match (name, version) {
+            (Some(name), Some(version)) => parts.push(format!("{name} {version}")),
+            (Some(name), None) => parts.push(name),
+            (None, _) => {}
+        }
+    }
+
+    if parts.is_empty() {
+        "unknown".to_string()
+    } else {
+        parts.join("; ")
+    }
+}
+
+/// Parses `NAME=`/`VERSION=` out of `/etc/os-release` (each value optionally
+/// double-quoted, per the os-release(5) format).
+fn parse_os_release(contents: &str) -> (Option<String>, Option<String>) {
+    let mut name = None;
+    let mut version = None;
+    for line in contents.lines() {
+        if let Some(value) = line.strip_prefix("NAME=") {
+            name = Some(value.trim_matches('"').to_string());
+        } else if let Some(value) = line.strip_prefix("VERSION=") {
+            version = Some(value.trim_matches('"').to_string());
+        }
+    }
+    (name, version)
 }
 
 fn status(paths: ClientPaths, json: bool) -> Result<()> {
@@ -724,8 +920,58 @@ fn format_risk(risk: f32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Commands, DaemonCommands};
+    use super::{Cli, Commands, DaemonCommands, parse_os_release};
     use clap::Parser;
+
+    #[test]
+    fn cli_accepts_report_issue_command() {
+        let cli = Cli::try_parse_from(["virtue", "report-issue"])
+            .expect("report-issue command should parse");
+        assert!(matches!(
+            cli.command,
+            Commands::ReportIssue {
+                message: None,
+                contact_email: None,
+                yes: false,
+            }
+        ));
+    }
+
+    #[test]
+    fn cli_accepts_report_issue_flags() {
+        let cli = Cli::try_parse_from([
+            "virtue",
+            "report-issue",
+            "--message",
+            "Screenshots stopped uploading",
+            "--contact-email",
+            "me@example.com",
+            "--yes",
+        ])
+        .expect("report-issue flags should parse");
+        assert!(matches!(
+            cli.command,
+            Commands::ReportIssue { message: Some(m), contact_email: Some(e), yes: true }
+                if m == "Screenshots stopped uploading" && e == "me@example.com"
+        ));
+    }
+
+    #[test]
+    fn parse_os_release_reads_name_and_version() {
+        let contents = "NAME=\"Ubuntu\"\nVERSION=\"24.04.1 LTS (Noble Numbat)\"\nID=ubuntu\n";
+        assert_eq!(
+            parse_os_release(contents),
+            (
+                Some("Ubuntu".to_string()),
+                Some("24.04.1 LTS (Noble Numbat)".to_string())
+            )
+        );
+    }
+
+    #[test]
+    fn parse_os_release_handles_missing_fields() {
+        assert_eq!(parse_os_release("ID=arch\n"), (None, None));
+    }
 
     #[test]
     fn cli_accepts_login_command() {
