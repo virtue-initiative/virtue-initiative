@@ -289,8 +289,7 @@ fn report_issue(
         Some(logs) => println!(
             "  - The last day of this device's operational logs ({} KB) from \
              `journalctl --user -u {}`: diagnostic entries only (errors, capture/upload status) \
-             — no screenshots or screenshot content, and no window titles. Known tokens/secrets \
-             are redacted before sending.",
+             — no screenshots or screenshot content, and no window titles.",
             logs.len().div_ceil(1024),
             service_name(),
         ),

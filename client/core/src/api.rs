@@ -46,9 +46,11 @@ pub struct DeviceState {
 #[derive(Debug, Clone, Serialize)]
 pub struct BugReportRequest<'a> {
     pub message: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub contact_email: Option<&'a str>,
     pub platform: &'a str,
     pub app_version: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub platform_details: Option<&'a str>,
 }
 
