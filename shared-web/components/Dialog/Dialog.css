@@ -8,6 +8,7 @@
   background: var(--surface);
   color: var(--text);
   box-shadow: var(--shadow-md);
+  text-align: left;
 
   &::backdrop {
     background: var(--overlay);
