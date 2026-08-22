@@ -58,6 +58,8 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://virtueinitiative.org")))
         }
 
+        binding.reportBugLink.setOnClickListener { showReportBugDialog() }
+
         KeepAliveWorker.schedule(this)
         requestBackgroundFriendlySettings()
         refreshUi()
@@ -109,6 +111,7 @@ class MainActivity : AppCompatActivity() {
             binding.loginButton.isEnabled = true
 
             if (error == null) {
+                AccountEmailStore.save(this@MainActivity, email)
                 refreshUi()
             } else {
                 setStatus("Login failed: $error")
@@ -133,6 +136,7 @@ class MainActivity : AppCompatActivity() {
                             }
                         }
                     }
+                    AccountEmailStore.clear(this@MainActivity)
                     VirtueAccessibilityService.pause()
                     ScreenshotService.stop(this@MainActivity)
                     refreshUi()
@@ -434,6 +438,123 @@ class MainActivity : AppCompatActivity() {
         )
         doneBtn.setOnClickListener { dialog.dismiss() }
         dialog.show()
+    }
+
+    private fun showReportBugDialog() {
+        val dp = resources.displayMetrics.density
+
+        val descriptionLayout = com.google.android.material.textfield.TextInputLayout(this).apply {
+            boxBackgroundMode = com.google.android.material.textfield.TextInputLayout.BOX_BACKGROUND_OUTLINE
+        }
+        val descriptionInput = com.google.android.material.textfield.TextInputEditText(descriptionLayout.context).apply {
+            hint = getString(R.string.report_bug_description_hint)
+            isSingleLine = false
+            minLines = 3
+            maxLines = 6
+        }
+        descriptionLayout.addView(descriptionInput)
+
+        val emailLayout = com.google.android.material.textfield.TextInputLayout(this).apply {
+            boxBackgroundMode = com.google.android.material.textfield.TextInputLayout.BOX_BACKGROUND_OUTLINE
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (12 * dp).toInt() }
+        }
+        val emailInput = com.google.android.material.textfield.TextInputEditText(emailLayout.context).apply {
+            hint = getString(R.string.report_bug_contact_email_hint)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+            setText(AccountEmailStore.load(this@MainActivity).orEmpty())
+        }
+        emailLayout.addView(emailInput)
+
+        val includeLogsCheckBox = android.widget.CheckBox(this).apply {
+            text = getString(R.string.report_bug_include_logs)
+            isChecked = true
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (14 * dp).toInt() }
+        }
+
+        val includeLogsCaption = TextView(this).apply {
+            text = getString(R.string.report_bug_include_logs_caption)
+            textSize = 12f
+            setTextColor(0xFF9C9682.toInt())
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (4 * dp).toInt() }
+        }
+
+        val errorText = TextView(this).apply {
+            setTextColor(0xFFEF4444.toInt())
+            visibility = android.view.View.GONE
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (10 * dp).toInt() }
+        }
+
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = (20 * dp).toInt()
+            setPadding(pad, pad, pad, 0)
+            addView(descriptionLayout)
+            addView(emailLayout)
+            addView(includeLogsCheckBox)
+            addView(includeLogsCaption)
+            addView(errorText)
+        }
+
+        val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.dialog_report_bug_title))
+            .setView(content)
+            .setPositiveButton(getString(R.string.btn_send_report), null)
+            .setNegativeButton(getString(R.string.dialog_cancel), null)
+            .create()
+
+        dialog.setOnShowListener {
+            val sendButton = dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE)
+            sendButton.setOnClickListener {
+                val message = descriptionInput.text?.toString()?.trim().orEmpty()
+                if (message.isEmpty()) {
+                    errorText.text = getString(R.string.report_bug_message_required)
+                    errorText.visibility = android.view.View.VISIBLE
+                    return@setOnClickListener
+                }
+
+                val contactEmail = emailInput.text?.toString()?.trim().orEmpty()
+                val includeLogs = includeLogsCheckBox.isChecked
+                val platformDetails = androidPlatformDetails()
+
+                sendButton.isEnabled = false
+                lifecycleScope.launch {
+                    val error = withContext(Dispatchers.IO) {
+                        NativeBridge.nativeReportIssue(message, contactEmail, includeLogs, platformDetails)
+                    }
+                    sendButton.isEnabled = true
+
+                    if (error == null) {
+                        dialog.dismiss()
+                        showReportSentDialog()
+                    } else {
+                        errorText.text = getString(R.string.report_bug_send_failed)
+                        errorText.visibility = android.view.View.VISIBLE
+                    }
+                }
+            }
+        }
+
+        dialog.show()
+    }
+
+    private fun showReportSentDialog() {
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.dialog_report_sent_title))
+            .setMessage(getString(R.string.dialog_report_sent_message))
+            .setPositiveButton(getString(R.string.btn_done), null)
+            .show()
+    }
+
+    private fun androidPlatformDetails(): String {
+        return "Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT}); ${deviceName()}"
     }
 
     private fun formatTimestampMs(ms: Long): String {

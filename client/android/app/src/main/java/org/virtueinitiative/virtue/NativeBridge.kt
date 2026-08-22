@@ -51,4 +51,10 @@ object NativeBridge {
     external fun nativeStopDaemon(): String?
     external fun nativeNoteUserStop(source: String): String?
     external fun nativeGetStatusJson(): String
+    external fun nativeReportIssue(
+        message: String,
+        contactEmail: String,
+        includeLogs: Boolean,
+        platformDetails: String
+    ): String?
 }
