@@ -13,6 +13,7 @@
 		5188731D1EEC6BD5A5FFAF29 /* MonitoringCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEC65E353F74300A665CAF36 /* MonitoringCoordinator.swift */; };
 		59CF74E58D6F876BC06C0E9D /* VirtueMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41804153F1E76D2C46B7E251 /* VirtueMacApp.swift */; };
 		7FD43B539BE365F6C475A652 /* ApplicationServices.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 72020BD32DBCC1A5559326B6 /* ApplicationServices.framework */; };
+		905CCFBCB7514CAA1814974C /* ReportBugSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DECCC2D9A726133E6F5F5EE4 /* ReportBugSheet.swift */; };
 		F07E6593210A054AA700AB65 /* StatusSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF53D4E18246A0144F67A054 /* StatusSheet.swift */; };
 		FAA5A585CF46E803782F70E5 /* NativeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C2AC02ABF6297F0C75A1FDA /* NativeBridge.swift */; };
 /* End PBXBuildFile section */
@@ -26,6 +27,7 @@
 		694D4847EBC1A16DB15D473D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		72020BD32DBCC1A5559326B6 /* ApplicationServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = ApplicationServices.framework; sourceTree = "<group>"; };
 		CF53D4E18246A0144F67A054 /* StatusSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusSheet.swift; sourceTree = "<group>"; };
+		DECCC2D9A726133E6F5F5EE4 /* ReportBugSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportBugSheet.swift; sourceTree = "<group>"; };
 		FEC65E353F74300A665CAF36 /* MonitoringCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringCoordinator.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -67,6 +69,7 @@
 				055BD2FE6FCEDDEC3BE4C0AF /* ContentView.swift */,
 				FEC65E353F74300A665CAF36 /* MonitoringCoordinator.swift */,
 				3C2AC02ABF6297F0C75A1FDA /* NativeBridge.swift */,
+				DECCC2D9A726133E6F5F5EE4 /* ReportBugSheet.swift */,
 				CF53D4E18246A0144F67A054 /* StatusSheet.swift */,
 				41804153F1E76D2C46B7E251 /* VirtueMacApp.swift */,
 			);
@@ -199,6 +202,7 @@
 				11B013F0E56013B1C6C6EC60 /* ContentView.swift in Sources */,
 				5188731D1EEC6BD5A5FFAF29 /* MonitoringCoordinator.swift in Sources */,
 				FAA5A585CF46E803782F70E5 /* NativeBridge.swift in Sources */,
+				905CCFBCB7514CAA1814974C /* ReportBugSheet.swift in Sources */,
 				F07E6593210A054AA700AB65 /* StatusSheet.swift in Sources */,
 				59CF74E58D6F876BC06C0E9D /* VirtueMacApp.swift in Sources */,
 			);

@@ -22,9 +22,10 @@ const LOCAL_SUSPEND_MIN_MS: i64 = 5_000;
 type MacDaemon = Daemon<MacPlatformHooks, HttpApiClient>;
 
 /// Installs the process-wide `tracing` subscriber, writing daily-rotated
-/// plain-text logs to `paths.logs_dir` (`~/Library/Logs/virtue.log`). The
-/// returned guard must be kept alive for the life of the process — dropping
-/// it stops the background writer thread that flushes buffered log lines.
+/// plain-text logs to `paths.logs_dir` (`~/Library/Logs/virtue.<date>.log`).
+/// The returned guard must be kept alive for the life of the process —
+/// dropping it stops the background writer thread that flushes buffered log
+/// lines.
 ///
 /// A launchd stdout/stderr redirect (see `launch_agent.rs`) remains as a
 /// fallback safety net for output emitted before this installs, or panics
@@ -43,24 +44,45 @@ pub fn init_logging(paths: &ClientPaths) -> tracing_appender::non_blocking::Work
         eprintln!("failed to prune old logs: {err}");
     }
 
-    let file_appender = tracing_appender::rolling::daily(
-        &paths.logs_dir,
-        virtue_core::logging::DEFAULT_FILE_LOG_POLICY.file_name_prefix,
-    );
-    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    // Matches the Windows client's `Builder` usage: an explicit `.log` suffix
+    // (the plain `rolling::daily` constructor leaves the filename extensionless,
+    // e.g. `virtue.2026-08-22` with no suffix at all).
+    let file_appender = tracing_appender::rolling::Builder::new()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix(virtue_core::logging::DEFAULT_FILE_LOG_POLICY.file_name_prefix)
+        .filename_suffix("log")
+        .build(&paths.logs_dir);
 
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         tracing_subscriber::EnvFilter::new(virtue_core::logging::default_filter_directive(cfg!(
             debug_assertions
         )))
     });
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_writer(non_blocking)
-        .with_ansi(false)
-        .init();
 
-    guard
+    match file_appender {
+        Ok(file_appender) => {
+            let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+            tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .with_writer(non_blocking)
+                .with_ansi(false)
+                .init();
+            guard
+        }
+        Err(err) => {
+            eprintln!(
+                "failed to open log file in {}: {err}",
+                paths.logs_dir.display()
+            );
+            let (non_blocking, guard) = tracing_appender::non_blocking(std::io::stderr());
+            tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .with_writer(non_blocking)
+                .with_ansi(false)
+                .init();
+            guard
+        }
+    }
 }
 
 pub fn run_daemon(paths: &ClientPaths) -> Result<()> {

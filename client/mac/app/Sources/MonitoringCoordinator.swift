@@ -30,6 +30,7 @@ final class MonitoringCoordinator: ObservableObject {
     @Published private(set) var isSigningOut: Bool = false
     @Published private(set) var loginError: String?
     @Published private(set) var deviceId: String = "<none>"
+    @Published private(set) var accountEmail: String?
 
     @Published private(set) var daemonStatus: DaemonStatus = .stopped
     @Published private(set) var unexpectedStopMessage: String?
@@ -147,6 +148,23 @@ final class MonitoringCoordinator: ObservableObject {
             }.value
             isSigningOut = false
             refreshSessionState()
+        }
+    }
+
+    /// Submits a bug report, invoking `completion` with `nil` on success or an
+    /// error message on failure. Off-main like every other native call that
+    /// touches the network/daemon.
+    func submitBugReport(
+        message: String,
+        contactEmail: String?,
+        includeLogs: Bool,
+        completion: @escaping (String?) -> Void
+    ) {
+        Task {
+            let error = await Task.detached(priority: .userInitiated) {
+                NativeBridge.reportIssue(message: message, contactEmail: contactEmail, includeLogs: includeLogs)
+            }.value
+            completion(error)
         }
     }
 
@@ -305,6 +323,7 @@ final class MonitoringCoordinator: ObservableObject {
     private func refreshSessionState() {
         loggedIn = NativeBridge.isLoggedIn()
         deviceId = NativeBridge.getDeviceId() ?? "<none>"
+        accountEmail = NativeBridge.getAccountEmail()
     }
 
     private func refreshPermissionPhase() {
