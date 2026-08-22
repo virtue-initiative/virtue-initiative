@@ -12,12 +12,12 @@ use tower_layer::Layer;
 use tower_service::Service;
 
 /// The whole codebase shares one version, tracked in `client/version.properties`. This
-/// is that version's `/vX`/`/vX.Y` URL-prefix form (SPEC.md section 1.3) — kept in sync
+/// is that version's `/vX`/`/vX.Y` URL-prefix form (HASH-004) — kept in sync
 /// by `client/scripts/update-version.sh`, which is the only thing that should ever edit
 /// this line.
 const CURRENT_API_VERSION: &str = "v0.1";
 
-/// SPEC.md section 1.3: strips a leading `/vX` or `/vX.Y` path segment naming the
+/// HASH-004: strips a leading `/vX` or `/vX.Y` path segment naming the
 /// current version before routing, and responds 410 Gone for any other version.
 /// Requests with no version segment at all are passed through unchanged, so existing
 /// unversioned callers keep working.

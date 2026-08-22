@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Benchmarks a running hash-server with h2load over plain HTTP, per SPEC.md
+# Benchmarks a running hash-server with h2load over plain HTTP, per HASH-016
 # section 4. Requires h2load (nghttp2) on PATH.
 #
 # Usage:

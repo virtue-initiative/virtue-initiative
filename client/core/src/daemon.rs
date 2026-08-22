@@ -140,7 +140,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         // rather than comparing this tick's wakeup against a schedule from
         // before the (now-excused) stop. A no-op when the previous session
         // wasn't stopped (including a plain kill, which must NOT be excused
-        // — see `SPEC.md` §2 and `lifecycle::note_user_start`).
+        // — see CORE-002 and `lifecycle::note_user_start`).
         {
             let now_ms = daemon.now_ms();
             daemon.with_locked_state(|working| {
@@ -209,14 +209,14 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     }
 
     /// Runs one cross-process-safe read-modify-write cycle: acquires the
-    /// SPEC.md §7 lock, re-reads `state_path` from disk (rather than trusting
+    /// CORE-016 lock, re-reads `state_path` from disk (rather than trusting
     /// the in-memory cache, which may be stale relative to another process's
     /// writes), lets `f` mutate the freshly-read copy, persists it, and
     /// updates the in-memory cache — all before releasing the lock.
     ///
     /// Every mutate-then-persist path MUST go through this (not call
     /// `persist` directly) so two `Daemon`s against the same `state_path`
-    /// (iOS only — see SPEC.md §7) can't race a lost update.
+    /// (iOS only — see CORE-016) can't race a lost update.
     fn with_locked_state<R>(&self, f: impl FnOnce(&mut DaemonState) -> R) -> R {
         let _lock = match lock_state(&self.state_path) {
             Ok(lock) => Some(lock),
@@ -602,7 +602,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     /// against a freshly-reloaded copy of the state and write the result
     /// back. Both the request-application step and the tick go through
     /// `with_locked_state`, so each is its own cross-process-safe
-    /// read-modify-write cycle (SPEC.md §7) — there's still no *in-process*
+    /// read-modify-write cycle (CORE-016) — there's still no *in-process*
     /// locking in the middle of either one.
     ///
     /// Callable more than once across a `Daemon`'s lifetime — just not
@@ -656,7 +656,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
 
     /// Applies and persists whatever requests are currently queued and,
     /// unless a `Stop` was among them, runs exactly one tick — then returns
-    /// without blocking or looping. See SPEC.md §6.8: for a platform with no
+    /// without blocking or looping. See CORE-015: for a platform with no
     /// way to keep a background thread alive between invocations (iOS's
     /// Safari-extension native message handler — the OS only guarantees it
     /// runs for the duration of one `beginRequest`/`completeRequest` round

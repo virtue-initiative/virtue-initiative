@@ -80,7 +80,7 @@ pub fn build_core_config(paths: &ClientPaths) -> Config {
 /// (e.g. the systemd service is stopped) — the daemon process not running is
 /// not the same as the user being logged out. Either way this goes through
 /// `virtue_core::module::status::build`, the same pure function the daemon
-/// itself uses, so the two paths can't drift apart. See `core/SPEC.md` §6.3.
+/// itself uses, so the two paths can't drift apart. See CORE-010.
 pub fn load_service_status(paths: &ClientPaths) -> Result<ServiceStatus> {
     let sock = paths.state_dir.join("daemon.sock");
     if let Ok(mut client) = ClientController::connect(&sock)

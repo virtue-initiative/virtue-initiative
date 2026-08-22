@@ -413,7 +413,7 @@ impl ScreenshotHooks for WindowsPlatformHooks {
 
 impl LifecycleHooks for WindowsPlatformHooks {
     // `QueryUnbiasedInterruptTime` excludes time spent suspended. Feeds only
-    // `lifecycle::tick`'s suspend evidence (`SPEC.md` §2).
+    // `lifecycle::tick`'s suspend evidence (CORE-002).
     fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
         read_monotonic_clock_ms()
     }

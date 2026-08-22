@@ -17,6 +17,7 @@ import type {
   PasswordResetValidation,
   SignupPayload,
   SignupResponse,
+  SignupValidation,
   EmailVerifyResponse,
   UpdateUserPayload,
   UpdateUserResponse,
@@ -38,6 +39,7 @@ export type {
   PasswordResetValidation,
   SignupPayload,
   SignupResponse,
+  SignupValidation,
   EmailVerifyResponse,
   UpdateUserPayload,
   UpdateUserResponse,
@@ -191,6 +193,12 @@ export const api = {
     req<SignupResponse>('/signup', {
       method: 'POST',
       body: JSON.stringify(payload),
+    }),
+
+  validateSignupToken: (token: string) =>
+    req<SignupValidation>('/signup/validate', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
     }),
 
   logout: () => req<void>('/logout', { method: 'POST' }),

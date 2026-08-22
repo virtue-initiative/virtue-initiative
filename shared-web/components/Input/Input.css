@@ -24,6 +24,16 @@
     opacity: 0.6;
     cursor: not-allowed;
   }
+
+  &:read-only {
+    opacity: 0.6;
+    cursor: not-allowed;
+    caret-color: transparent;
+  }
+
+  &:read-only:focus {
+    border-color: var(--border);
+  }
 }
 
 .vi-input--md {

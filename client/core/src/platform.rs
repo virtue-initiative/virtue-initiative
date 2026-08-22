@@ -42,7 +42,7 @@ pub trait LifecycleHooks: Send + Sync + 'static {
     }
 
     /// A clock that does not advance while the system is suspended — used
-    /// only by `lifecycle::tick`'s suspend evidence (`SPEC.md` §2), never in
+    /// only by `lifecycle::tick`'s suspend evidence (CORE-002), never in
     /// place of `get_utc_clock_ms` itself. Default falls back to
     /// `get_utc_clock_ms`: on a platform with no distinct suspend-safe
     /// primitive, suspend evidence simply never triggers, which is safe (it
@@ -60,7 +60,7 @@ pub trait LifecycleHooks: Send + Sync + 'static {
     /// session is presumed still open.
     fn get_last_logout_utc_ms(&self) -> CoreResult<Option<i64>>;
 
-    /// Whether the late-wakeup tamper model (`client/core/SPEC.md` §2)
+    /// Whether the late-wakeup tamper model (CORE-002)
     /// applies on this platform at all — skips `lifecycle::tick` entirely
     /// when `false`. Only iOS returns `false`: its Safari extension host can
     /// be suspended the instant the device locks with no notification and no

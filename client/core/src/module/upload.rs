@@ -127,7 +127,7 @@ pub struct UploadState {
     pub settings: Option<DeviceSettings>,
     pub device_credentials: Option<DeviceCredentials>,
     /// The last `seq` accepted by the hash server for this device — hash-server/SPEC.md
-    /// §2.1 requires each `POST /hash` to carry a `seq` strictly greater than this.
+    /// HASH-006 requires each `POST /hash` to carry a `seq` strictly greater than this.
     /// Reset to 0 in lockstep with every server-side reset: login, logout, and each
     /// batch upload that lands (the API resets the server's hash state right after
     /// storing the batch).

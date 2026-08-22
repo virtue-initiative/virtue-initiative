@@ -61,7 +61,7 @@ impl WriteHandle {
 }
 
 /// Opens the database, loads existing state into `devices`, and starts the
-/// single dedicated writer thread required by SPEC.md section 3.3. All
+/// single dedicated writer thread required by HASH-013. All
 /// mutations funnel through this thread and are grouped into one transaction
 /// per batch window so concurrent writers never block on SQLite locks.
 pub fn spawn_writer(
@@ -213,7 +213,7 @@ fn process_batch(conn: &mut Connection, batch: Vec<WriteCommand>, devices: &Shar
                     .get(&device_id)
                     .copied()
                     .unwrap_or_else(|| snapshot.get(&device_id).copied().unwrap_or_default());
-                // SPEC.md section 2.3: the reset MUST NOT touch last_received.
+                // HASH-008: the reset MUST NOT touch last_received.
                 let new_state = DeviceState {
                     hash: ZERO_HASH,
                     seq: 0,

@@ -439,7 +439,7 @@ fn query_screensaver_active() -> Option<bool> {
 impl LifecycleHooks for LinuxPlatformHooks {
     // `CLOCK_MONOTONIC` excludes time spent suspended (unlike
     // `CLOCK_BOOTTIME`, which includes it) — see `clock_gettime(2)`. Feeds
-    // only `lifecycle::tick`'s suspend evidence (`SPEC.md` §2); screenshot
+    // only `lifecycle::tick`'s suspend evidence (CORE-002); screenshot
     // scheduling is unaffected.
     fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
         let mut ts = libc::timespec {

@@ -2,7 +2,7 @@ use axum::extract::Request;
 use axum::middleware::Next;
 use axum::response::Response;
 
-/// SPEC.md section 3.4: logs every request at debug level, without the body.
+/// HASH-014: logs every request at debug level, without the body.
 pub async fn log_request(req: Request, next: Next) -> Response {
     tracing::debug!(method = %req.method(), path = %req.uri().path(), "request");
     next.run(req).await
@@ -38,11 +38,11 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
 
-        // SPEC.md section 3.4: "The server SHOULD log every request at level debug."
+        // HASH-014: "The server SHOULD log every request at level debug."
         assert!(logs_contain("request"));
         assert!(logs_contain("POST"));
         assert!(logs_contain("/hash"));
-        // SPEC.md section 3.4: "The server SHOULD NOT log the body of every request."
+        // HASH-014: "The server SHOULD NOT log the body of every request."
         assert!(!logs_contain(secret_body));
     }
 }

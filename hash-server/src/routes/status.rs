@@ -9,7 +9,7 @@ pub struct StatusInfo {
     status: &'static str,
 }
 
-/// `GET /` — see SPEC.md section 2.4.
+/// `GET /` — see HASH-009.
 pub async fn status() -> Json<StatusInfo> {
     Json(StatusInfo {
         name: "Virtue Initiative Hash API",

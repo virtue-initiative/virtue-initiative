@@ -119,6 +119,11 @@ export const passwordResetValidationSchema = z.object({
 });
 export type PasswordResetValidation = z.infer<typeof passwordResetValidationSchema>;
 
+export const signupValidationSchema = z.object({
+  email: z.string(),
+});
+export type SignupValidation = z.infer<typeof signupValidationSchema>;
+
 // ── Request schemas ──────────────────────────────────────────────────────────
 
 export const signupRequestSchema = z.object({
@@ -136,6 +141,9 @@ export const signupSchema = z.object({
   name: z.string().min(1).optional(),
 });
 export type SignupPayload = z.infer<typeof signupSchema>;
+
+export const signupValidateSchema = z.object({ token: z.string().min(1) });
+export type SignupValidatePayload = z.infer<typeof signupValidateSchema>;
 
 export const loginMaterialQuerySchema = z.object({ email: z.email().optional() });
 export type LoginMaterialQuery = z.infer<typeof loginMaterialQuerySchema>;

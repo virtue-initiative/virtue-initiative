@@ -1,10 +1,10 @@
 # Hash API Server
 
-## 1. Overview
+## HASH-001 Overview
 
 The hash server SHOULD have one endpoint with three methods and one status endpoint.
 
-### 1.1 Error Responses
+### HASH-002 Error Responses
 
 All error responses (not **2xx**) MUST have this shape.
 
@@ -18,13 +18,13 @@ All error responses (not **2xx**) MUST have this shape.
 
 `code` is one of: `invalid_body`, `invalid_query`, `unauthorized`, `forbidden`, `sequence_conflict`, `internal_error`.
 
-### 1.2 Authentication
+### HASH-003 Authentication
 
 JWTs MUST use `EdDSA` (Ed25519). The verification key is configured via the
 `JWT_PUBLIC_KEY` environment variable (Ed25519 SPKI PEM), matching the main API's
 `JWT_PUBLIC_KEY`/`JWT_PRIVATE_KEY` pair.
 
-### 1.3 Backwards compat
+### HASH-004 Backwards compat
 
 The API MUST be prefixed with the current major version. For versions before `v1`, use `v0.x`. The server SHOULD return **HTTP 410 Gone** if it no longer supports a version.
 
@@ -35,9 +35,9 @@ The API MUST be prefixed with the current major version. For versions before `v1
   /v2/...
 ```
 
-## 2. Methods
+## HASH-005 Methods
 
-### 2.1 `POST /hash`
+### HASH-006 `POST /hash`
 
 The client MUST authenticate with this header.
 
@@ -75,7 +75,7 @@ The server MUST return **HTTP 201** if the new state has been written to disk an
 
 The client SHOULD retry the request if it receives and error, but SHOULD NOT retry if it receives any of the following errors: `400`, `401`, `409`.
 
-### 2.2 `GET /hash?devices=[device_ids]`
+### HASH-007 `GET /hash?devices=[device_ids]`
 
 The client (in this case, the main API server) MUST authenticate with this header.
 
@@ -107,7 +107,7 @@ The server MUST return a ZERO hash, a 0 count and a 0 for last_received if it do
 }
 ```
 
-### 2.3 `DELETE /hash?device=device1`
+### HASH-008 `DELETE /hash?device=device1`
 
 The client MUST authenticate with this header.
 
@@ -135,7 +135,7 @@ On success, the server MUST return **HTTP 200** with the following shape. With t
 }
 ```
 
-### 2.4 `GET /`
+### HASH-009 `GET /`
 
 This endpoint MUST not require authentication, and MUST return **HTTP 200** unless the server is down.
 
@@ -152,9 +152,9 @@ The endpoint MAY return a status other than "ok" IF it has a way to detect degra
 }
 ```
 
-## 3. Implementation
+## HASH-010 Implementation
 
-### 3.1 High level overview
+### HASH-011 High level overview
 
 The server...
 
@@ -164,7 +164,7 @@ The server...
 - SHOULD use SQLite as its backend database
 - SHOULD be as fast as possible
 
-### 3.2 Server
+### HASH-012 Server
 
 The server SHOULD use tokio as it's runtime, with axum for HTTP routing.
 
@@ -176,7 +176,7 @@ Configuration is read from environment variables (a `.env` file is loaded if pre
 - `DATABASE_PATH` default `hash-server.sqlite`
 - `WRITE_BATCH_WINDOW_MS` default `20`
 
-### 3.3 Database
+### HASH-013 Database
 
 SQLite (via `rusqlite`, bundled) SHOULD be configured in WAL with synchronous = full.
 
@@ -190,7 +190,7 @@ Writes MUST be fully written to the database before a successful response is ret
 
 `GET /hash` is served from SQLite directly, multiple readers are allowed in WAL mode, and after a commit, everything is fine.
 
-### 3.4 Logging
+### HASH-014 Logging
 
 The server SHOULD log every request at level debug.
 
@@ -198,9 +198,9 @@ The server SHOULD NOT log the body of every request.
 
 The server SHOULD log every unexpected error (5xx codes).
 
-## 4. Testing
+## HASH-015 Testing
 
-### 4.1 Performance
+### HASH-016 Performance
 
 We SHOULD have a script that uses h2load to test the number of valid requests per second over http.
 
@@ -213,17 +213,17 @@ Treat the `write` number as the ceiling for the auth + parse + write-queue path,
 for sustained disk-durable writes. Tokens for both modes are minted with
 `cargo run --example mint_token -- <sub> <device|server> <private_key_pem_path>`.
 
-### 4.2 CI
+### HASH-017 CI
 
 The rust unit and integration tests SHOULD be run in github CI.
 
-## 5. Deployment
+## HASH-018 Deployment
 
-### 5.1 Location
+### HASH-019 Location
 
 Both a STAGING (on push/merge to staging) and PRODUCTION (on push/merge to main) deployment SHOULD be deployed to our oracle cloud A1 VM at hash.virtueinitiative.org port 22.
 
-### 5.2 Method
+### HASH-020 Method
 
 The built binary and systemd service SHOULD be copied over SSH to the oracle cloud VM from within CI. The staging binary SHOULD be named `staging-virtue-hash` and the production binary SHOULD be named `virtue-hash`
 
@@ -239,6 +239,6 @@ configured with `PORT=8789`. Cloudflared (section 5.3) MUST route to the matchin
 
 The staging server SHOULD be configured with RUST_LOG=debug.
 
-### 5.3 Cloudflared
+### HASH-021 Cloudflared
 
 Cloudflared MUST be configured on the oracle cloud VM and MUST route staging-hash.virtueinitiative.org to the staging server and hash.virtueinitiative.org to the production server.

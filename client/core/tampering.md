@@ -9,7 +9,7 @@ rewrite as a deliberate simplification, not replaced feature-for-feature —
 see the rewrite plan's "Lifecycle model simplification" note. It no longer
 reflects the code.**
 
-The current, much simpler model is specified in `SPEC.md` §2 (the daemon
+The current, much simpler model is specified in CORE-002 (the daemon
 loop spec, kept minimal by design):
 
 - Each tick compares the actual wakeup time to the wakeup time it was
@@ -26,7 +26,7 @@ loop spec, kept minimal by design):
 - `UserStop` (`EXTRA_HIGH_RISK`, immediate) is driven directly by an explicit
   user action (`Daemon::note_user_stop`, reached via `UserStopRequested`
   over IPC) and was preserved unchanged through the rewrite. It also excuses
-  the very next tick's late-wakeup check (see `SPEC.md` §2) — deliberately
+  the very next tick's late-wakeup check (see CORE-002) — deliberately
   scoped to this exact call, not to a plain clean shutdown, since every
   platform's signal handler also cleanly exits on a bare kill signal.
 

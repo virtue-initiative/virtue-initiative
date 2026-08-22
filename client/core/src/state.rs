@@ -33,7 +33,7 @@ pub fn store_state<T: Serialize>(path: &Path, state: &T) -> CoreResult<()> {
 
 /// Holds an OS-level advisory exclusive lock on `path`'s sibling `.lock`
 /// file for as long as it's alive — released automatically on drop (closing
-/// the fd releases the `flock`/`LockFileEx` hold). See SPEC.md §7: this is
+/// the fd releases the `flock`/`LockFileEx` hold). See CORE-016: this is
 /// what serializes two processes (e.g. iOS's Safari-extension daemon and the
 /// app's on-demand daemon) from racing a read-modify-write of the same
 /// `state_path`. Blocks until the lock is available.

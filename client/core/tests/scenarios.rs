@@ -104,7 +104,7 @@ fn user_stop_excuse_survives_across_a_real_restart_not_just_the_next_tick() {
     // whatever tick ran next -- even one firing while the daemon is still
     // shutting down, well before the process actually exits -- leaving the
     // real stopped-time gap unprotected and reported as tampering on the
-    // next launch. See `SPEC.md` §2 and `lifecycle::note_user_start`.
+    // next launch. See CORE-002 and `lifecycle::note_user_start`.
     let mut scenario1 = Scenario::authenticated();
     scenario1.at_t(0).tick(); // establishes a schedule
     scenario1.note_user_stop("test");
@@ -156,7 +156,7 @@ fn user_stop_excuse_survives_across_a_real_restart_not_just_the_next_tick() {
     assert!(scenario2.state().lifecycle.late_wakeups.is_empty());
 }
 
-// ── Late-wakeup model (client/core/SPEC.md §2) ─────────────────────────────────
+// ── Late-wakeup model (CORE-002) ─────────────────────────────────
 
 #[test]
 fn late_wakeup_over_two_minutes_triggers_alert() {
@@ -168,7 +168,7 @@ fn late_wakeup_over_two_minutes_triggers_alert() {
     // Wake up 130s later than scheduled: over the 2-minute single-wakeup threshold.
     scenario.at_t(expected + 130_000).tick();
 
-    // SPEC.md §2: cleared after the alert is sent, to prevent duplicates.
+    // CORE-002: cleared after the alert is sent, to prevent duplicates.
     assert!(
         scenario.state().lifecycle.late_wakeups.is_empty(),
         "expected the late wakeups array to be cleared after alerting"

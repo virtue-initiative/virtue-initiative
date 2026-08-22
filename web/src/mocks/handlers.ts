@@ -37,6 +37,7 @@ export const handlers = [
       user: { id: 'test-user-id', email: 'test@example.com', email_verified: true },
     }),
   ),
+  http.post(`${BASE}/signup/validate`, () => HttpResponse.json({ email: 'test@example.com' })),
 
   // ── Logout ─────────────────────────────────────────────────────────────
   http.post(`${BASE}/logout`, () => new HttpResponse(null, { status: 204 })),

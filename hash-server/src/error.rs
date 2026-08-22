@@ -11,7 +11,7 @@ struct ErrorBody {
     details: Option<String>,
 }
 
-/// The shapes of failure this server can produce, per SPEC.md section 1.1.
+/// The shapes of failure this server can produce, per HASH-002.
 /// Every variant maps to one (status, code, message) triple.
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
@@ -63,7 +63,7 @@ impl IntoResponse for ApiError {
                 None,
             ),
             ApiError::Internal(details) => {
-                // SPEC.md section 3.4: every unexpected (5xx) error is logged.
+                // HASH-014: every unexpected (5xx) error is logged.
                 tracing::error!(details = details.as_deref().unwrap_or(""), "internal error");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -91,7 +91,7 @@ mod tests {
     use super::*;
     use tracing_test::traced_test;
 
-    // SPEC.md section 3.4: "The server SHOULD log every unexpected error (5xx codes)."
+    // HASH-014: "The server SHOULD log every unexpected error (5xx codes)."
     #[traced_test]
     #[test]
     fn internal_errors_are_logged() {

@@ -172,7 +172,7 @@ impl AndroidPlatformHooks {
 
     /// `SystemClock.uptimeMillis()`: milliseconds since boot, EXCLUDING time
     /// spent in deep sleep — unlike `elapsed_realtime_ms` above. Feeds only
-    /// `lifecycle::tick`'s suspend evidence (`SPEC.md` §2).
+    /// `lifecycle::tick`'s suspend evidence (CORE-002).
     fn uptime_millis_ms(&self) -> CoreResult<i64> {
         self.java_vm
             .attach_current_thread(|env| -> Result<i64, jni::errors::Error> {
@@ -423,7 +423,7 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeRunDa
         // — each resume needs its own `note_user_start` to clear a prior
         // `note_user_stop`, or tamper detection would stay suspended for
         // the rest of the process's life. A no-op when not currently
-        // stopped. See `client/core/SPEC.md` §2.
+        // stopped. See CORE-002.
         core.daemon.note_user_start();
 
         core.daemon.run_forever();

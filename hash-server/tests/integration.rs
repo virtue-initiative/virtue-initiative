@@ -114,7 +114,7 @@ async fn get_root_returns_status_without_auth() {
     assert!(body["commit"].is_string());
 }
 
-/// SPEC.md section 1.3: "The client MUST be prefixed the API with the current major
+/// HASH-004: "The client MUST be prefixed the API with the current major
 /// version. For versions before `v1`, use `v0.x`."
 #[tokio::test]
 async fn get_root_routes_the_same_with_or_without_the_current_version_prefix() {
@@ -146,7 +146,7 @@ async fn get_root_routes_the_same_with_or_without_the_current_version_prefix() {
     assert_eq!(unprefixed_body, prefixed_body);
 }
 
-/// SPEC.md section 1.3: "The server SHOULD return HTTP 410 Gone if it no longer
+/// HASH-004: "The server SHOULD return HTTP 410 Gone if it no longer
 /// supports a version."
 #[tokio::test]
 async fn get_root_responds_410_for_a_no_longer_supported_version() {
@@ -353,7 +353,7 @@ async fn delete_hash_resets_and_returns_prior_state() {
     let body: Value = resp.json().await.unwrap();
     assert_eq!(body["hash"], hex::encode([0u8; 32]));
     assert_eq!(body["seq"], 0);
-    // SPEC.md section 2.3: a reset "SHOULD NOT reset the last_received time" —
+    // HASH-008: a reset "SHOULD NOT reset the last_received time" —
     // this reflects state going into the *second* reset, i.e. right after the
     // first one, so last_received must still be what the first POST set.
     assert_eq!(body["last_received"], 500);

@@ -14,13 +14,13 @@ pub(crate) const EXTRA_HIGH_RISK: f32 = 0.9;
 /// ride the normal batch.
 pub(crate) const HIGH_RISK_LIFECYCLE_ALERT: f32 = 0.8;
 
-/// See `client/core/SPEC.md` §2.
+/// See CORE-002.
 const MAX_TRACKED_WAKEUPS: usize = 10;
 const SINGLE_LATE_THRESHOLD_MS: i64 = 2 * 60_000; // 2 minutes
 const SUM_LATE_THRESHOLD_MS: i64 = 5 * 60_000; // 5 minutes
 const LOGIN_LOGOUT_EXCUSE_MS: i64 = 2 * 60_000; // 2 minutes
 /// Floor below which a measured clock divergence is treated as noise (clock
-/// jitter, NTP adjustment) rather than a real suspend. See `SPEC.md` §2.
+/// jitter, NTP adjustment) rather than a real suspend. See CORE-002.
 const SUSPEND_EVIDENCE_MIN_MS: i64 = 5_000;
 /// Slack allowed between the measured suspended duration and the gap being
 /// evaluated for the suspend evidence to still count as "explains the gap" —
@@ -34,19 +34,19 @@ pub struct LifecycleState {
     /// [`MAX_TRACKED_WAKEUPS`] non-excused wakeups, oldest first.
     pub late_wakeups: VecDeque<i64>,
     /// Last system login/logout time seen, so a change can be detected and
-    /// reported once. See `SPEC.md` §5.
+    /// reported once. See CORE-006.
     pub last_seen_login_ms: Option<i64>,
     pub last_seen_logout_ms: Option<i64>,
     /// Set by `note_user_stop` (never by a plain clean shutdown — see that
     /// function's doc comment for why) and cleared by `note_user_start`.
     /// While true, `tick()` ignores lateness entirely — no gap is recorded,
     /// checked, or alerted on — so the gap the stop itself caused is never
-    /// mistaken for tampering. See `SPEC.md` §2.
+    /// mistaken for tampering. See CORE-002.
     pub monitoring_stopped: bool,
     /// Real UTC time and suspend-safe-clock (`LifecycleHooks::get_monotonic_clock_ms`)
     /// reading, both captured at the end of the previous `tick()` call — the
     /// baseline `tick()` diffs against to compute suspend evidence. `None`
-    /// before the first tick. See `SPEC.md` §2.
+    /// before the first tick. See CORE-002.
     pub last_tick_utc_ms: Option<i64>,
     pub last_tick_suspend_safe_ms: Option<i64>,
 }
@@ -56,7 +56,7 @@ pub struct LifecycleState {
 /// the previous tick) and records how late the daemon woke, unless excused by
 /// a login/logout bracket that isn't contradicted by the other side's
 /// evidence (see the excuse logic below). Alerts via [`upload::enqueue`] once
-/// the late-wakeup budget is crossed. See `client/core/SPEC.md` §2.
+/// the late-wakeup budget is crossed. See CORE-002.
 ///
 /// `expected_wakeup_at_ms == 0` means no wakeup has ever been scheduled yet
 /// (the daemon's very first tick, or the first tick after `note_user_start`
@@ -112,14 +112,14 @@ pub fn tick(
     // side to be near before the other's absence/mismatch counts for
     // anything is what keeps an ordinary suspend (neither timestamp
     // anywhere near this gap — nothing reports a reboot at all) from being
-    // misread as a contradiction. See `SPEC.md` §2.
+    // misread as a contradiction. See CORE-002.
     let login_logout_evidence = match (login_near, logout_near) {
         (Some(true), Some(false)) | (Some(false), Some(true)) => Some(false),
         (Some(true), _) | (_, Some(true)) => Some(true),
         _ => None,
     };
 
-    // Suspend evidence (SPEC.md §2): the shortfall between real-time elapsed
+    // Suspend evidence (CORE-002): the shortfall between real-time elapsed
     // and suspend-safe-clock elapsed since the previous tick reveals how long
     // the system was suspended over that span. Unlike the two signals above,
     // this one can only ever support an excuse — it's left `None` (never
@@ -162,7 +162,7 @@ pub fn tick(
             HIGH_RISK_LIFECYCLE_ALERT,
             UploadKind::ScreenshotMissed,
         );
-        // See `SPEC.md` §2: cleared so the same already-alerted-on lateness
+        // See CORE-002: cleared so the same already-alerted-on lateness
         // doesn't still be sitting in the array to alert again on the very
         // next tick.
         state.late_wakeups.clear();
@@ -173,7 +173,7 @@ pub fn tick(
 /// system login/logout time since the previous tick and records a
 /// zero-risk informational event each time one is seen. The very first
 /// observation (no prior baseline) only seeds `last_seen_*` — it does not
-/// count as a "change" and is not reported. See `client/core/SPEC.md` §5.
+/// count as a "change" and is not reported. See CORE-006.
 pub fn note_session_events(
     state: &mut LifecycleState,
     upload: &mut UploadState,
@@ -226,7 +226,7 @@ pub fn note_session_events(
 /// defeat tamper detection; excusing only here means the gap is forgiven
 /// exactly when — and only when — it was already reported via this alert.
 /// Checking resumes only once `note_user_start` is called. See
-/// `client/core/SPEC.md` §2.
+/// CORE-002.
 pub fn note_user_stop(
     state: &mut LifecycleState,
     upload: &mut UploadState,
@@ -249,7 +249,7 @@ pub fn note_user_stop(
 /// the return value to decide whether to also reset the wakeup schedule
 /// baseline: it must NOT be reset unconditionally on every restart, since
 /// that would let a plain kill signal escape detection too — see
-/// `SPEC.md` §2 and the `daemon.rs` caller.
+/// CORE-002 and the `daemon.rs` caller.
 pub fn note_user_start(state: &mut LifecycleState, upload: &mut UploadState, now_ms: i64) -> bool {
     let was_stopped = state.monitoring_stopped;
     state.monitoring_stopped = false;
@@ -271,7 +271,7 @@ mod tests {
     /// the production invariant that `now_ms` passed into `tick` always
     /// equals `hooks.get_time_utc_ms()`/`get_monotonic_clock_ms()` at that
     /// same moment (see `daemon.rs::now_ms`). Keeping the mock in sync means
-    /// the suspend-evidence baseline (`SPEC.md` §2) sees zero divergence
+    /// the suspend-evidence baseline (CORE-002) sees zero divergence
     /// across these calls unless a test explicitly diverges the two clocks
     /// (see the "suspend evidence" tests below), so every pre-existing test
     /// here is unaffected by suspend evidence.
@@ -406,7 +406,7 @@ mod tests {
         assert!(!has_late_wakeup_alert(&upload));
     }
 
-    // ── Suspend evidence (SPEC.md §2) ───────────────────────────────────────
+    // ── Suspend evidence (CORE-002) ───────────────────────────────────────
 
     #[test]
     fn suspend_that_explains_the_whole_gap_is_excused() {
@@ -488,7 +488,7 @@ mod tests {
         hooks.set_last_logout(Some(900_000));
         hooks.set_last_login(Some(950_500));
         tick_at(&mut state, &mut upload, &hooks, 951_000, 300_000);
-        // Counted (not excused) and alerted on — then cleared per SPEC.md §2.
+        // Counted (not excused) and alerted on — then cleared per CORE-002.
         assert!(state.late_wakeups.is_empty());
         assert!(has_late_wakeup_alert(&upload));
     }
@@ -507,14 +507,14 @@ mod tests {
         hooks.set_last_logout(Some(900_000));
         hooks.set_last_login(Some(950_000));
         tick_at(&mut state, &mut upload, &hooks, 2_000_000, 900_500);
-        // Counted (not excused) and alerted on — then cleared per SPEC.md §2.
+        // Counted (not excused) and alerted on — then cleared per CORE-002.
         assert!(state.late_wakeups.is_empty());
         assert!(has_late_wakeup_alert(&upload));
     }
 
     #[test]
     fn late_wakeups_array_is_cleared_after_an_alert_is_sent() {
-        // SPEC.md §2: "The late wakeups array MUST be cleared after an alert
+        // CORE-002: "The late wakeups array MUST be cleared after an alert
         // is sent (to prevent duplicates)."
         let mut state = LifecycleState::default();
         let mut upload = upload_with_credentials();
@@ -605,7 +605,7 @@ mod tests {
         assert!(state.monitoring_stopped);
     }
 
-    // ── Other events (SPEC.md §5) ───────────────────────────────────────────
+    // ── Other events (CORE-006) ───────────────────────────────────────────
 
     fn system_event(upload: &UploadState, utc_ms: i64, login: bool) -> Option<f32> {
         upload
@@ -620,7 +620,7 @@ mod tests {
 
     #[test]
     fn first_observation_only_seeds_the_baseline_and_is_not_reported() {
-        // SPEC.md §5: "The first System Login/Logout time observed [...]
+        // CORE-006: "The first System Login/Logout time observed [...]
         // MUST NOT be reported — it only establishes the baseline a later
         // change is measured against."
         let mut state = LifecycleState::default();
@@ -638,7 +638,7 @@ mod tests {
 
     #[test]
     fn system_login_at_event_sent_when_login_time_changes_after_a_baseline_is_established() {
-        // SPEC.md §5: "When the daemon detects that the System Login time
+        // CORE-006: "When the daemon detects that the System Login time
         // changed, it MUST send a "system login at" event (risk 0%)."
         let mut state = LifecycleState::default();
         let mut upload = upload_with_credentials();
@@ -655,7 +655,7 @@ mod tests {
 
     #[test]
     fn system_logout_at_event_sent_when_logout_time_changes_after_a_baseline_is_established() {
-        // SPEC.md §5: "When the daemon detects tha[t] th[e] System Logout
+        // CORE-006: "When the daemon detects tha[t] th[e] System Logout
         // time changed, it MUST send a "system logout at" event (risk 0%)."
         let mut state = LifecycleState::default();
         let mut upload = upload_with_credentials();
@@ -709,7 +709,7 @@ mod tests {
         assert_eq!(state.last_seen_login_ms, Some(9_000));
     }
 
-    // ── Intentional-stop excuse (SPEC.md §2) ────────────────────────────────
+    // ── Intentional-stop excuse (CORE-002) ────────────────────────────────
 
     #[test]
     fn ticks_before_the_daemon_actually_stops_do_not_consume_the_excuse() {
@@ -719,7 +719,7 @@ mod tests {
         // in-between ticks must not burn the excuse — only the real gap
         // caused by the daemon actually being down should be, and that
         // gap isn't visible until `note_user_start` runs on the next
-        // session. See `SPEC.md` §2.
+        // session. See CORE-002.
         let mut state = LifecycleState::default();
         let mut upload = upload_with_credentials();
         let hooks = TestPlatformHooks::new();
