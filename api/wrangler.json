@@ -45,7 +45,8 @@
         "AWS_SES_REGION": "us-east-1",
         "AWS_SES_FROM_EMAIL": "notifications@virtueinitiative.org",
         "EMAIL_DELIVERY_MODE": "ses",
-        "HASH_SERVER_URL": "https://hash.virtueinitiative.org"
+        "HASH_SERVER_URL": "https://hash.virtueinitiative.org",
+        "BUG_REPORT_EMAIL": "help@virtueinitiative.org"
       },
       "ratelimits": [
         {
@@ -92,7 +93,8 @@
         "AWS_SES_REGION": "us-east-1",
         "AWS_SES_FROM_EMAIL": "notifications@virtueinitiative.org",
         "EMAIL_DELIVERY_MODE": "ses",
-        "HASH_SERVER_URL": "https://staging-hash.virtueinitiative.org"
+        "HASH_SERVER_URL": "https://staging-hash.virtueinitiative.org",
+        "BUG_REPORT_EMAIL": "help@virtueinitiative.org"
       },
       "ratelimits": [
         {

@@ -10,6 +10,10 @@
   - Clears local auth/device state and disables monitoring.
 - `virtue status`
   - Shows login and monitoring state.
+- `virtue report-issue [--message ...] [--contact-email ...] [--yes]`
+  - Prompts for a description (and optional contact email) and emails it to the Virtue Initiative team, attaching the last day of this device's `virtue` service logs (via `journalctl --user`). These are diagnostic logs only — no screenshots or screenshot content, no window titles — and any known secret/token patterns are redacted before sending.
+  - Prints exactly what will be sent (message, contact email, platform details, log attachment) and asks for confirmation before submitting; `--yes` skips the prompt.
+  - Works whether or not the daemon is running or the device is logged in; attaches this device's identity automatically when it's logged in.
 - `virtue daemon`
   - Background worker used by systemd.
   - On desktop sessions, it also starts a minimal tray icon with hover status.

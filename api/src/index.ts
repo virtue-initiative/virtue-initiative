@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import auth from './routes/auth';
+import bugReport from './routes/bug-report';
 import data from './routes/data';
 import deviceOnly from './routes/device-only';
 import devices from './routes/devices';
@@ -59,6 +60,7 @@ app.get('/', (c) =>
 );
 
 app.route('/', auth);
+app.route('/', bugReport);
 app.route('/', partners);
 app.route('/', emailWebhooks);
 app.route('/device', devices);

@@ -30,6 +30,7 @@ export const emailKinds = [
   'weekly_digest',
   'account_exists_notice',
   'email_in_use_notice',
+  'bug_report',
 ] as const;
 
 export type EmailKind = (typeof emailKinds)[number];

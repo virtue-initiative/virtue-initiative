@@ -15,6 +15,7 @@ export interface Env {
   AWS_SES_REGION: string;
   AWS_SES_FROM_EMAIL: string;
   EMAIL_DELIVERY_MODE: 'ses' | 'log';
+  BUG_REPORT_EMAIL: string;
 }
 
 export interface Variables {

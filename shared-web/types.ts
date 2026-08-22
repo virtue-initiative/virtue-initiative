@@ -192,6 +192,15 @@ export type UpdateUserPayload = z.infer<typeof updateUserSchema>;
 export const deleteUserSchema = z.object({ confirm_email: z.email() });
 export type DeleteUserPayload = z.infer<typeof deleteUserSchema>;
 
+export const bugReportSchema = z.object({
+  message: z.string().min(1).max(10000),
+  contact_email: z.email().optional(),
+  platform: z.string().min(1).max(32).optional(),
+  app_version: z.string().min(1).max(32).optional(),
+  platform_details: z.string().min(1).max(2000).optional(),
+});
+export type BugReportPayload = z.infer<typeof bugReportSchema>;
+
 export const createPartnerSchema = z.object({ email: z.email() });
 export type CreatePartnerPayload = z.infer<typeof createPartnerSchema>;
 
