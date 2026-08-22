@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 
+export PATH="$HOME/.cargo/bin:$PATH"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${SRCROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 RUST_DIR="$ROOT_DIR/rust"
@@ -19,6 +21,11 @@ if [ "${CONFIGURATION:-Debug}" = "Release" ]; then
   CARGO_EXTRA="--release"
 fi
 
+# client/ios/rust is a member of the client/ Cargo workspace, so cargo
+# always builds into the shared client/target dir (the same one
+# `cargo build -p virtue-ios` and CI's rust-cache step use).
+TARGET_DIR="${CARGO_TARGET_DIR:-$(cd "$RUST_DIR/../.." && pwd)/target}"
+
 LIB_DEST="$BUILT_PRODUCTS_DIR/$LIB_NAME"
 rm -f "$LIB_DEST"
 
@@ -36,7 +43,7 @@ if [ "${PLATFORM_NAME:-}" = "iphoneos" ]; then
   local_target="aarch64-apple-ios"
   echo "Building Rust bridge for target: ${local_target} (config: ${CONFIGURATION:-Debug})"
   build_target "$local_target"
-  cp "$RUST_DIR/target/$local_target/$PROFILE_DIR/$LIB_NAME" "$LIB_DEST"
+  cp "$TARGET_DIR/$local_target/$PROFILE_DIR/$LIB_NAME" "$LIB_DEST"
 else
   LIB_INPUTS=""
   LIB_COUNT=0
@@ -46,7 +53,7 @@ else
     arm_target="aarch64-apple-ios-sim"
     echo "Building Rust bridge for target: ${arm_target} (config: ${CONFIGURATION:-Debug})"
     build_target "$arm_target"
-    LIB_INPUTS="$LIB_INPUTS $RUST_DIR/target/$arm_target/$PROFILE_DIR/$LIB_NAME"
+    LIB_INPUTS="$LIB_INPUTS $TARGET_DIR/$arm_target/$PROFILE_DIR/$LIB_NAME"
     LIB_COUNT=$((LIB_COUNT + 1))
     ;;
   esac
@@ -56,7 +63,7 @@ else
     x86_target="x86_64-apple-ios"
     echo "Building Rust bridge for target: ${x86_target} (config: ${CONFIGURATION:-Debug})"
     build_target "$x86_target"
-    LIB_INPUTS="$LIB_INPUTS $RUST_DIR/target/$x86_target/$PROFILE_DIR/$LIB_NAME"
+    LIB_INPUTS="$LIB_INPUTS $TARGET_DIR/$x86_target/$PROFILE_DIR/$LIB_NAME"
     LIB_COUNT=$((LIB_COUNT + 1))
     ;;
   esac

@@ -13,7 +13,7 @@ function parseUserSettings(json: string | null): { email_frequency: string; time
   }
 }
 
-function uuidToBytes(uuid: string): ArrayBuffer {
+export function uuidToBytes(uuid: string): ArrayBuffer {
   const normalized = normalizeUuidString(uuid);
   const hex = normalized.replace(/-/g, '');
 
@@ -119,13 +119,13 @@ export async function findUserByEmail(db: D1Database, email: string) {
     email_bounced_at: number | null;
     settings: string;
     pub_key: ArrayBuffer | null;
-    priv_key: ArrayBuffer | null;
+    encrypted_priv_key: ArrayBuffer | null;
   }>(
     db
       .prepare(
         `SELECT id, email, password_hash, password_salt, password_params_version,
                 name, email_verified, email_bounced_at, settings,
-                pub_key, priv_key
+                pub_key, encrypted_priv_key
          FROM users
          WHERE email = ?`,
       )
@@ -145,12 +145,12 @@ export async function findUserById(db: D1Database, userId: string) {
     email_bounced_at: number | null;
     settings: string;
     pub_key: ArrayBuffer | null;
-    priv_key: ArrayBuffer | null;
+    encrypted_priv_key: ArrayBuffer | null;
   }>(
     db
       .prepare(
         `SELECT id, email, name, email_verified, email_bounced_at, settings,
-                pub_key, priv_key
+                pub_key, encrypted_priv_key
          FROM users
          WHERE id = ?`,
       )
@@ -178,7 +178,7 @@ export async function markUsersUnverifiedByEmails(db: D1Database, emails: string
 
   return db
     .prepare(
-      `UPDATE users SET email_verified = 0 WHERE lower(email) IN (${placeholders(normalized.length)})`,
+      `UPDATE users SET email_verified = 0 WHERE email IN (${placeholders(normalized.length)})`,
     )
     .bind(...normalized)
     .run();
@@ -196,7 +196,7 @@ export async function markUsersEmailBouncedByEmails(db: D1Database, emails: stri
     .prepare(
       `UPDATE users
        SET email_bounced_at = ?
-       WHERE lower(email) IN (${placeholders(normalized.length)})`,
+       WHERE email IN (${placeholders(normalized.length)})`,
     )
     .bind(Date.now(), ...normalized)
     .run();
@@ -211,8 +211,9 @@ export async function createUser(
     passwordSalt: ArrayBuffer;
     passwordParamsVersion: string;
     pub_key: ArrayBuffer;
-    priv_key: ArrayBuffer;
+    encrypted_priv_key: ArrayBuffer;
     name?: string;
+    email_verified?: boolean;
   },
 ) {
   return db
@@ -220,8 +221,8 @@ export async function createUser(
       `INSERT INTO users (
         id, email, password_hash, password_salt, password_params_version,
         name, email_verified, settings,
-        pub_key, priv_key, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+        pub_key, encrypted_priv_key, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       uuidToBytes(input.id),
@@ -230,9 +231,10 @@ export async function createUser(
       input.passwordSalt,
       input.passwordParamsVersion,
       input.name ?? null,
+      input.email_verified ? 1 : 0,
       JSON.stringify({ email_frequency: 'daily', timezone: 'UTC' }),
       input.pub_key,
-      input.priv_key,
+      input.encrypted_priv_key,
       Date.now(),
     )
     .run();
@@ -251,7 +253,7 @@ export async function updateUser(
     email_bounced_at?: number | null;
     settings?: { email_frequency?: string; timezone?: string };
     pub_key?: ArrayBuffer;
-    priv_key?: ArrayBuffer;
+    encrypted_priv_key?: ArrayBuffer;
   },
 ) {
   const updates: string[] = [];
@@ -308,9 +310,9 @@ export async function updateUser(
     params.push(fields.pub_key);
   }
 
-  if (fields.priv_key !== undefined) {
-    updates.push('priv_key = ?');
-    params.push(fields.priv_key);
+  if (fields.encrypted_priv_key !== undefined) {
+    updates.push('encrypted_priv_key = ?');
+    params.push(fields.encrypted_priv_key);
   }
 
   if (updates.length === 0) {
@@ -421,7 +423,6 @@ export async function listBatchUrlsForUser(db: D1Database, userId: string) {
 export async function deleteDeviceById(db: D1Database, deviceId: string) {
   const deviceIdBytes = uuidToBytes(deviceId);
   await db.prepare('DELETE FROM batches WHERE device_id = ?').bind(deviceIdBytes).run();
-  await db.prepare('DELETE FROM hash_states WHERE device_id = ?').bind(deviceIdBytes).run();
   return db.prepare('DELETE FROM devices WHERE id = ?').bind(deviceIdBytes).run();
 }
 
@@ -442,19 +443,6 @@ export async function listVisibleOwnerIds(db: D1Database, requesterId: string) {
   return [requesterId, ...partnerships.map((row) => row.watching_user_id)];
 }
 
-export async function canViewUserData(db: D1Database, ownerId: string, requesterId: string) {
-  if (ownerId === requesterId) return true;
-
-  const partnership = await db
-    .prepare(
-      "SELECT id FROM partners WHERE watching_user_id = ? AND watcher_user_id = ? AND status = 'accepted'",
-    )
-    .bind(uuidToBytes(ownerId), uuidToBytes(requesterId))
-    .first<{ id: ArrayBuffer }>();
-
-  return Boolean(partnership);
-}
-
 export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
   if (ownerIds.length === 0) {
     return [];
@@ -467,8 +455,6 @@ export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
     platform: string;
     created_at: number;
     last_upload_at: number | null;
-    last_hash_at: number | null;
-    pending_count: number;
     deleted_at: number | null;
   }>(
     db
@@ -476,9 +462,10 @@ export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
         // Pre-aggregate each owner's batches per device (using idx_batches_user_id,
         // since batches.user_id is always the device owner) before joining to devices.
         // This avoids the LEFT JOIN batches row-explosion that GROUP BY had to collapse.
+        // Hash-chain state (last_hash_at/pending_count) lives entirely in the hash
+        // server now — see hashGetMany in lib/hash-server.ts — not in D1.
         `SELECT d.id, d.owner, d.name, d.platform, d.created_at, d.deleted_at,
-                lu.last_upload_at,
-                hs.hashed_at AS last_hash_at, COALESCE(hs.count, 0) AS pending_count
+                lu.last_upload_at
          FROM devices d
          LEFT JOIN (
            SELECT device_id, MAX(end_time) AS last_upload_at
@@ -486,7 +473,6 @@ export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
            WHERE user_id IN (${placeholders(ownerIds.length)})
            GROUP BY device_id
          ) lu ON lu.device_id = d.id
-         LEFT JOIN hash_states hs ON hs.device_id = d.id
          WHERE d.owner IN (${placeholders(ownerIds.length)})
          ORDER BY d.created_at DESC`,
       )
@@ -556,6 +542,7 @@ export async function createBatch(
     end_time: number;
     end_hash: string;
     access_keys: string;
+    version: string;
     high_risk_count?: number;
     medium_risk_count?: number;
     created_at: number;
@@ -565,8 +552,8 @@ export async function createBatch(
     .prepare(
       `INSERT INTO batches (
          id, user_id, device_id, url, start_time, end_time, end_hash, access_keys,
-         high_risk_count, medium_risk_count, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         version, high_risk_count, medium_risk_count, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       uuidToBytes(input.id),
@@ -577,6 +564,7 @@ export async function createBatch(
       input.end_time,
       input.end_hash,
       input.access_keys,
+      input.version,
       input.high_risk_count ?? 0,
       input.medium_risk_count ?? 0,
       input.created_at,
@@ -584,24 +572,15 @@ export async function createBatch(
     .run();
 }
 
-export async function listBatches(
-  db: D1Database,
-  ownerIds: string[],
-  filters: { deviceId?: string; since?: number },
-) {
+export async function listBatches(db: D1Database, ownerIds: string[], filters: { since?: number }) {
   if (ownerIds.length === 0) {
     return [];
   }
 
   const params: SqlValue[] = ownerIds.map(uuidToBytes);
-  let query = `SELECT id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at
+  let query = `SELECT id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, version, created_at
                FROM batches
                WHERE user_id IN (${placeholders(ownerIds.length)})`;
-
-  if (filters.deviceId) {
-    query += ' AND device_id = ?';
-    params.push(uuidToBytes(filters.deviceId));
-  }
 
   if (filters.since !== undefined) {
     query += ' AND created_at > ?';
@@ -619,6 +598,7 @@ export async function listBatches(
     end_time: number;
     end_hash: string;
     access_keys: string;
+    version: string;
     created_at: number;
   }>(db.prepare(query).bind(...params), ['id', 'user_id', 'device_id']);
 }
@@ -628,6 +608,50 @@ export async function deleteExpiredBatchesChunk(db: D1Database, cutoff: number, 
     .prepare(
       `DELETE FROM batches WHERE id IN (
          SELECT id FROM batches WHERE created_at < ? ORDER BY created_at ASC LIMIT ?
+       )`,
+    )
+    .bind(cutoff, limit)
+    .run();
+  return result.meta.changes;
+}
+
+export async function deleteExpiredEmailTokensChunk(db: D1Database, cutoff: number, limit: number) {
+  const result = await db
+    .prepare(
+      `DELETE FROM email_tokens WHERE id IN (
+         SELECT id FROM email_tokens WHERE expires_at < ? ORDER BY expires_at ASC LIMIT ?
+       )`,
+    )
+    .bind(cutoff, limit)
+    .run();
+  return result.meta.changes;
+}
+
+export async function deleteExpiredUserSessionsChunk(
+  db: D1Database,
+  cutoff: number,
+  limit: number,
+) {
+  const result = await db
+    .prepare(
+      `DELETE FROM user_sessions WHERE refresh_token_hash IN (
+         SELECT refresh_token_hash FROM user_sessions WHERE expires_at < ? ORDER BY expires_at ASC LIMIT ?
+       )`,
+    )
+    .bind(cutoff, limit)
+    .run();
+  return result.meta.changes;
+}
+
+export async function deleteExpiredDeviceSessionsChunk(
+  db: D1Database,
+  cutoff: number,
+  limit: number,
+) {
+  const result = await db
+    .prepare(
+      `DELETE FROM device_sessions WHERE refresh_token_hash IN (
+         SELECT refresh_token_hash FROM device_sessions WHERE expires_at < ? ORDER BY expires_at ASC LIMIT ?
        )`,
     )
     .bind(cutoff, limit)
@@ -827,63 +851,30 @@ export async function listOwnedPartners(db: D1Database, ownerId: string) {
 }
 
 export async function listIncomingPartners(db: D1Database, partnerUserId: string) {
-  const rows = await allWithUuidFields<{
+  return allWithUuidFields<{
     id: string;
     status: string;
     created_at: number;
     watching_user_id: string;
     watching_user_email: string;
     watching_user_name: string | null;
-    settings: string;
   }>(
     db
       .prepare(
         `SELECT p.id, p.status, p.created_at,
-                u.id AS watching_user_id, u.email AS watching_user_email, u.name AS watching_user_name,
-                watcher.settings
+                u.id AS watching_user_id, u.email AS watching_user_email, u.name AS watching_user_name
           FROM partners p
           JOIN users u ON u.id = p.watching_user_id
-          JOIN users watcher ON watcher.id = p.watcher_user_id
           WHERE p.watcher_user_id = ?
           ORDER BY p.created_at DESC`,
       )
       .bind(uuidToBytes(partnerUserId)),
     ['id', 'watching_user_id'],
   );
-  return rows.map((row) => ({ ...row, settings: parseUserSettings(row.settings) }));
 }
 
 export async function deletePartnerById(db: D1Database, partnerId: string) {
   return db.prepare('DELETE FROM partners WHERE id = ?').bind(uuidToBytes(partnerId)).run();
-}
-
-export async function updatePartnerNotificationPreference(
-  db: D1Database,
-  input: {
-    partnership_id: string;
-    watcher_user_id: string;
-    email_frequency?: string;
-  },
-) {
-  const partnership = await db
-    .prepare('SELECT id FROM partners WHERE id = ? AND watcher_user_id = ?')
-    .bind(uuidToBytes(input.partnership_id), uuidToBytes(input.watcher_user_id))
-    .first<{ id: string }>();
-
-  if (!partnership) {
-    return null;
-  }
-
-  if (input.email_frequency !== undefined) {
-    await updateUser(db, input.watcher_user_id, {
-      settings: { email_frequency: input.email_frequency },
-    });
-  }
-
-  return {
-    partnership_id: input.partnership_id,
-    email_frequency: input.email_frequency,
-  };
 }
 
 export async function listBatchAccessRecipientsForOwner(db: D1Database, ownerId: string) {
@@ -917,6 +908,7 @@ export async function listAcceptedNotificationTargetsForUser(db: D1Database, use
     watcher_email: string;
     watcher_user_id: string | null;
     watcher_name: string | null;
+    watcher_email_verified: number;
     settings: string;
   }>(
     db
@@ -925,6 +917,7 @@ export async function listAcceptedNotificationTargetsForUser(db: D1Database, use
                 recipient.email AS watcher_email,
                 recipient.id AS watcher_user_id,
                 recipient.name AS watcher_name,
+                recipient.email_verified AS watcher_email_verified,
                 recipient.settings
           FROM partners p
           JOIN users recipient ON recipient.id = p.watcher_user_id
@@ -995,11 +988,18 @@ export async function findEmailTokenByHash(db: D1Database, tokenHash: string, pu
   }>(purpose ? prepared.bind(tokenHash, purpose) : prepared.bind(tokenHash), ['id', 'user_id']);
 }
 
-export async function consumeEmailToken(db: D1Database, tokenId: string, consumedAt: number) {
-  return db
+export async function consumeEmailToken(
+  db: D1Database,
+  token: { id: string; user_id: string | null; purpose: string },
+  consumedAt: number,
+) {
+  await db
     .prepare('UPDATE email_tokens SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL')
-    .bind(consumedAt, uuidToBytes(tokenId))
+    .bind(consumedAt, uuidToBytes(token.id))
     .run();
+  if (token.user_id) {
+    await invalidateEmailTokens(db, token.user_id, token.purpose);
+  }
 }
 
 export async function createSessionRecord(
@@ -1139,80 +1139,4 @@ export async function listDigestEligiblePartnerships(db: D1Database) {
     ['partnership_id', 'watching_user_id', 'watcher_user_id'],
   );
   return rows.map((row) => ({ ...row, settings: parseUserSettings(row.settings) }));
-}
-
-export async function getHashState(db: D1Database, deviceId: string) {
-  return firstWithUuidFields<{
-    device_id: string;
-    state: ArrayBuffer;
-    updated_at: number;
-    count: number;
-    hashed_at: number | null;
-  }>(
-    db
-      .prepare(
-        'SELECT device_id, state, updated_at, count, hashed_at FROM hash_states WHERE device_id = ?',
-      )
-      .bind(uuidToBytes(deviceId)),
-    ['device_id'],
-  );
-}
-
-export async function upsertHashState(
-  db: D1Database,
-  input: { device_id: string; state: ArrayBuffer; updated_at: number; hashed_at: number },
-) {
-  return db
-    .prepare(
-      `INSERT INTO hash_states (device_id, state, updated_at, count, hashed_at)
-       VALUES (?, ?, ?, 1, ?)
-       ON CONFLICT(device_id) DO UPDATE SET
-           state = excluded.state,
-           updated_at = excluded.updated_at,
-           count = count + 1,
-           hashed_at = excluded.hashed_at`,
-    )
-    .bind(uuidToBytes(input.device_id), input.state, input.updated_at, input.hashed_at)
-    .run();
-}
-
-export async function resetHashState(db: D1Database, deviceId: string, updatedAt: number) {
-  return db
-    .prepare(
-      `INSERT INTO hash_states (device_id, state, updated_at, count)
-       VALUES (?, ?, ?, 0)
-       ON CONFLICT(device_id) DO UPDATE SET
-           state = excluded.state,
-           updated_at = excluded.updated_at,
-           count = 0`,
-    )
-    .bind(uuidToBytes(deviceId), new Uint8Array(32).buffer, updatedAt)
-    .run();
-}
-
-export async function incrementHashCount(db: D1Database, deviceId: string, now: number) {
-  return db
-    .prepare(
-      `INSERT INTO hash_states (device_id, state, updated_at, count, hashed_at)
-       VALUES (?, ?, ?, 1, ?)
-       ON CONFLICT(device_id) DO UPDATE SET
-           count = count + 1,
-           hashed_at = excluded.hashed_at,
-           updated_at = excluded.updated_at`,
-    )
-    .bind(uuidToBytes(deviceId), new Uint8Array(32).buffer, now, now)
-    .run();
-}
-
-export async function resetHashCount(db: D1Database, deviceId: string, now: number) {
-  return db
-    .prepare(
-      `INSERT INTO hash_states (device_id, state, updated_at, count)
-       VALUES (?, ?, ?, 0)
-       ON CONFLICT(device_id) DO UPDATE SET
-           count = 0,
-           updated_at = excluded.updated_at`,
-    )
-    .bind(uuidToBytes(deviceId), new Uint8Array(32).buffer, now)
-    .run();
 }

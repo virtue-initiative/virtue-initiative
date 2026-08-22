@@ -1,34 +1,29 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { SELF } from 'cloudflare:test';
-import {
-  BASE,
-  authHeaders,
-  clearDB,
-  createDeviceForUser,
-  createServerToken,
-  signupAndGetCookie,
-} from './helpers';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { fetchMock, SELF } from 'cloudflare:test';
+import { BASE, authHeaders, clearDB, createDeviceForUser, signupAndGetCookie } from './helpers';
+import { getHashState, installHashServerMock, seedHashState } from './hash-server-mock';
+
+beforeAll(() => {
+  fetchMock.activate();
+  fetchMock.disableNetConnect();
+  installHashServerMock();
+});
 
 beforeEach(clearDB);
 
 describe('POST /d/logout', () => {
   it('revokes the device session, soft-deletes the device, and resets its hash state', async () => {
     const { cookie } = await signupAndGetCookie('logout@example.com');
-    const device = await createDeviceForUser(cookie, 'Laptop', 'linux');
+    const device = await createDeviceForUser(
+      'logout@example.com',
+      'password123',
+      'Laptop',
+      'linux',
+    );
 
-    const hashTokenRes = await SELF.fetch(`${BASE}/d/token`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${device.refresh_token}` },
-    });
-    expect(hashTokenRes.status).toBe(200);
-    const { hash_token } = (await hashTokenRes.json()) as { hash_token: string };
-
-    const hashUploadRes = await SELF.fetch(`${BASE}/hash`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${hash_token}` },
-      body: new Uint8Array(32).fill(9),
-    });
-    expect(hashUploadRes.status).toBe(200);
+    // Simulates the client having already uploaded a hash directly to the (mocked)
+    // hash server — the API itself never POSTs there, so there's no request to make.
+    seedHashState(device.id, { hash: '09'.repeat(32), seq: 1, last_received: 500 });
 
     const logoutRes = await SELF.fetch(`${BASE}/d/logout`, {
       method: 'POST',
@@ -50,13 +45,7 @@ describe('POST /d/logout', () => {
       status: 'logged_out',
     });
 
-    const serverToken = await createServerToken(device.id);
-    const infoRes = await SELF.fetch(`${BASE}/hash/info`, {
-      headers: { Authorization: `Bearer ${serverToken}` },
-    });
-    expect(infoRes.status).toBe(200);
-    const info = (await infoRes.json()) as { count: number };
-    expect(info.count).toBe(0);
+    expect(getHashState(device.id)).toMatchObject({ seq: 0, hash: '0'.repeat(64) });
   });
 
   it('rejects logout without a valid device session', async () => {

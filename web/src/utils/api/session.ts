@@ -86,7 +86,7 @@ export class Session {
       password_auth: passwordAuth.toBase64(),
       password_salt: passwordSalt.toBase64(),
       pub_key: keyPair.publicKey.toBase64(),
-      priv_key: encryptedPrivateKey.toBase64(),
+      encrypted_priv_key: encryptedPrivateKey.toBase64(),
       ...(name ? { name } : {}),
     });
     await saveWrappingKey(wrappingKey);
@@ -151,9 +151,9 @@ async function decryptStoredPrivateKey(
   user: User,
   wrappingKey: CryptoKey,
 ): Promise<CryptoKey | null> {
-  if (!user.priv_key) return null;
+  if (!user.encrypted_priv_key) return null;
   try {
-    const raw = await decryptBatch(wrappingKey, Uint8Array.fromBase64(user.priv_key));
+    const raw = await decryptBatch(wrappingKey, Uint8Array.fromBase64(user.encrypted_priv_key));
     return await importUserPrivateKey(raw);
   } catch (err) {
     console.error('Failed to restore private key', err);

@@ -44,7 +44,7 @@ jobs:
         with:
           cache-on-failure: true
           workspaces: |
-            client/android/rust -> target
+            client -> target
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -74,11 +74,16 @@ jobs:
           echo "ANDROID_NDK_ROOT=${ANDROID_SDK_ROOT}/ndk/26.1.10909125" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/26.1.10909125" >> "$GITHUB_ENV"
 
+      - name: Cache cargo-ndk binary
+        uses: actions/cache@v4
+        id: cargo-ndk-cache
+        with:
+          path: ~/.cargo/bin/cargo-ndk
+          key: ${{ runner.os }}-cargo-ndk-4.1.2
+
       - name: Install cargo-ndk
-        run: |
-          if ! command -v cargo-ndk >/dev/null 2>&1; then
-            cargo install cargo-ndk --locked
-          fi
+        if: steps.cargo-ndk-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-ndk --version 4.1.2 --locked
 
       - name: Resolve version info
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
@@ -91,7 +96,8 @@ jobs:
         working-directory: client
 
       - name: Android lint + build (debug)
-        run: ./gradlew --no-daemon :app:lintDebug :app:assembleDebug
+        if: github.event_name != 'push' || (github.ref != 'refs/heads/main' && github.ref != 'refs/heads/staging')
+        run: ./gradlew --no-daemon -PrustProfile=debug :app:lintDebug :app:assembleDebug
         working-directory: client/android
 
       - name: Decode Android signing keystore
@@ -116,9 +122,9 @@ jobs:
             echo "ANDROID_KEY_PASSWORD=${ANDROID_KEY_PASSWORD}"
           } >> "$GITHUB_ENV"
 
-      - name: Android build (release)
+      - name: Android lint + build (release)
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
-        run: ./gradlew --no-daemon :app:assembleRelease
+        run: ./gradlew --no-daemon -PrustProfile=release :app:lintRelease :app:assembleRelease
         working-directory: client/android
 
       - name: Package Android artifact

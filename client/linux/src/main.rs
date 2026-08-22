@@ -4,7 +4,7 @@ mod daemon;
 mod tray;
 
 use std::io::{self, Write};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
@@ -14,11 +14,12 @@ use std::process::ExitCode;
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 #[cfg(debug_assertions)]
-use virtue_core::{AlertReason, LifecycleKind, ScreenshotSkipReason};
-use virtue_core::{ClientController, ScreenshotHooks, ServiceStatus, Upload, UploadKind};
+use virtue_core::ScreenshotSkipReason;
+use virtue_core::ipc::ClientController;
+use virtue_core::{ScreenshotHooks, Upload, UploadKind};
 
 use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_backend};
-use crate::config::{ClientPaths, build_core_config, default_device_name};
+use crate::config::{ClientPaths, build_core_config, default_device_name, load_service_status};
 
 const BUILD_LABEL: &str = virtue_core::BUILD_LABEL;
 
@@ -96,10 +97,7 @@ struct SendLogArgs {
     /// Log type to emit. Use `all` to queue one of every type.
     #[arg(long = "type", value_name = "TYPE")]
     log_type: String,
-    /// Lifecycle kind (snake_case) when --type lifecycle, e.g. system_login, login.
-    #[arg(long)]
-    kind: Option<String>,
-    /// Alert reason (snake_case) when --type lifecycle_alert, e.g. ping_gap_while_running.
+    /// Skip reason (snake_case) when --type screenshot_skipped, e.g. static_screen.
     #[arg(long)]
     reason: Option<String>,
     /// Message body when --type alert.
@@ -228,8 +226,7 @@ fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
 }
 
 fn status(paths: ClientPaths, json: bool) -> Result<()> {
-    let mut config = build_core_config(&paths);
-    config.refresh_from_runtime_file()?;
+    let config = build_core_config(&paths);
     let status = load_service_status(&paths)?;
 
     let logged_in = status.is_authenticated;
@@ -306,13 +303,9 @@ fn daemon_stop(paths: ClientPaths, yes: bool) -> Result<()> {
         .request_user_stop("cli_daemon_stop")
         .context("failed to record stop intent")?;
 
-    // `request_user_stop` only publishes onto the IPC socket — it doesn't wait
-    // for the daemon to actually read and dispatch it. Without this round trip,
-    // `systemctl stop`'s SIGTERM can arrive before the daemon's next loop
-    // iteration drains the socket, silently dropping the immediate/emailed
-    // UserStop alert. `get_status` is a synchronous request/response over the
-    // same ordered connection, so its reply guarantees the daemon has already
-    // processed (and persisted) the earlier UserStopRequested.
+    // `request_user_stop` already blocks until the daemon acks the stop
+    // request; this extra round trip is just cheap insurance against
+    // `systemctl stop`'s SIGTERM racing the daemon's persist of it.
     let _ = client.get_status();
 
     run_systemctl_user(["stop", &svc])?;
@@ -388,24 +381,10 @@ fn build_send_kind(args: &SendLogArgs) -> Result<UploadKind> {
         Ok(serde_json::Value::String(value.to_string()))
     };
     match args.log_type.as_str() {
-        "lifecycle" => {
-            let kind = args
-                .kind
-                .as_deref()
-                .context("--kind is required for --type lifecycle")?;
-            let kind: LifecycleKind = serde_json::from_value(parse_enum(kind)?)
-                .with_context(|| format!("unknown lifecycle kind: {kind}"))?;
-            Ok(UploadKind::Lifecycle { kind })
-        }
-        "lifecycle_alert" => {
-            let reason = args
-                .reason
-                .as_deref()
-                .context("--reason is required for --type lifecycle_alert")?;
-            let reason: AlertReason = serde_json::from_value(parse_enum(reason)?)
-                .with_context(|| format!("unknown alert reason: {reason}"))?;
-            Ok(UploadKind::LifecycleAlert { reason })
-        }
+        "user_stop" => Ok(UploadKind::UserStop),
+        "screenshot_missed" => Ok(UploadKind::ScreenshotMissed),
+        "system_login" => Ok(UploadKind::SystemLogin { utc_ms: now_ms() }),
+        "system_logout" => Ok(UploadKind::SystemLogout { utc_ms: now_ms() }),
         "alert" => Ok(UploadKind::Alert {
             message: args
                 .message
@@ -427,37 +406,35 @@ fn build_send_kind(args: &SendLogArgs) -> Result<UploadKind> {
             details: args.details.clone(),
         }),
         other => anyhow::bail!(
-            "unsupported --type {other:?} (expected: lifecycle, lifecycle_alert, screenshot_skipped, alert, capture_failed, dev, screenshot, or all)"
+            "unsupported --type {other:?} (expected: user_stop, screenshot_missed, system_login, system_logout, screenshot_skipped, alert, capture_failed, dev, screenshot, or all)"
         ),
     }
+}
+
+/// Current UTC time in milliseconds — used as the `utc_ms` for dev-triggered
+/// `system_login`/`system_logout` events, which have no real login/logout
+/// to report.
+#[cfg(debug_assertions)]
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 /// Every concrete log variant `dev send --all` queues — one per web log icon.
 #[cfg(debug_assertions)]
 fn all_send_kinds() -> Vec<UploadKind> {
-    use AlertReason::*;
-    let lifecycle = [
-        LifecycleKind::SuspendDetected {
-            duration_ms: 60_000,
-        },
-        LifecycleKind::SystemLogin { utc_ms: 0 },
-        LifecycleKind::SystemLogout { utc_ms: 0 },
-    ]
-    .into_iter()
-    .map(|kind| UploadKind::Lifecycle { kind });
-    let alerts = [UnexpectedStart, UnexpectedStop, UnexpectedGap, UserStop]
-        .into_iter()
-        .map(|reason| UploadKind::LifecycleAlert { reason });
     let skips = [
         ScreenshotSkipReason::StaticScreen,
         ScreenshotSkipReason::LockedOrScreensaver,
     ]
     .into_iter()
     .map(|reason| UploadKind::ScreenshotSkipped { reason });
-    lifecycle
-        .chain(alerts)
-        .chain(skips)
+    let utc_ms = now_ms();
+    skips
         .chain([
+            UploadKind::UserStop,
             UploadKind::Alert {
                 message: "Developer test alert".to_string(),
             },
@@ -466,13 +443,16 @@ fn all_send_kinds() -> Vec<UploadKind> {
                 title: "Developer CLI log".to_string(),
                 details: None,
             },
+            UploadKind::ScreenshotMissed,
+            UploadKind::SystemLogin { utc_ms },
+            UploadKind::SystemLogout { utc_ms },
         ])
         .collect()
 }
 
 #[cfg(debug_assertions)]
 fn dev_send(paths: ClientPaths, args: SendLogArgs) -> Result<()> {
-    let client = connect_to_daemon(&paths)?;
+    let mut client = connect_to_daemon(&paths)?;
 
     let kinds = if args.log_type == "all" {
         // Screenshots are excluded here: the running daemon already produces real
@@ -515,7 +495,7 @@ fn dev_send(paths: ClientPaths, args: SendLogArgs) -> Result<()> {
 /// directly — the daemon holds that state in memory and rewrites the file on
 /// every ping (~1s), so a direct edit would race with (or be silently
 /// clobbered by) the daemon's next write.
-fn connect_to_daemon(paths: &ClientPaths) -> Result<ClientController<virtue_core::RemoteEventBus>> {
+fn connect_to_daemon(paths: &ClientPaths) -> Result<ClientController> {
     let sock = paths.state_dir.join("daemon.sock");
     ClientController::connect(&sock)
         .context("failed to connect to daemon (is it running? try `virtue daemon start`)")
@@ -525,7 +505,7 @@ fn dev_upload_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
     let title = args
         .title
         .unwrap_or_else(|| "Developer CLI log".to_string());
-    let client = connect_to_daemon(&paths)?;
+    let mut client = connect_to_daemon(&paths)?;
     // risk >= 1.0 routes through the encrypted batch plus an immediate POST /d/notify.
     client
         .queue_upload(Upload {
@@ -548,7 +528,7 @@ fn dev_add_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
     let title = args
         .title
         .unwrap_or_else(|| "Developer CLI batched log".to_string());
-    let client = connect_to_daemon(&paths)?;
+    let mut client = connect_to_daemon(&paths)?;
     client
         .queue_upload(Upload {
             risk: args.risk,
@@ -570,7 +550,7 @@ fn dev_add_screenshot(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()
     let screenshot = LinuxPlatformHooks::new()
         .take_screenshot()
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let client = connect_to_daemon(&paths)?;
+    let mut client = connect_to_daemon(&paths)?;
     client
         .queue_upload(Upload {
             risk: args.risk,
@@ -740,17 +720,6 @@ fn format_risk(risk: f32) -> String {
         value.pop();
     }
     value
-}
-
-fn load_service_status(paths: &ClientPaths) -> Result<ServiceStatus> {
-    // Try to get live status from the daemon via IPC; fall back to defaults.
-    let sock = paths.state_dir.join("daemon.sock");
-    if let Ok(mut client) = ClientController::connect(&sock)
-        && let Ok(status) = client.get_status()
-    {
-        return Ok(status);
-    }
-    Ok(ServiceStatus::default())
 }
 
 #[cfg(test)]

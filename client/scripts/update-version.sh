@@ -130,4 +130,44 @@ replace_line \
   '[0-9]+\.[0-9]+\.[0-9]+-dev' \
   "${DEV_VERSION}"
 
+# --- API version sync -------------------------------------------------------
+# The whole codebase — main API, hash server, and this client — shares one version,
+# BASE_VERSION above. This derives its `/vX`/`/vX.Y` URL-prefix form (api/SPEC.md
+# API-005, HASH-004: "For versions before v1, use v0.x") and
+# writes it into every file that has to hardcode a copy because it can't import
+# shared-web/api-version.ts directly (Rust, and hash-server is a separate deployable).
+# shared-web/api-version.ts is the copy web/ and api/ actually import; it's written
+# here too so it never has to be hand-edited.
+
+api_version_prefix() {
+  local version="$1"
+  local major="${version%%.*}"
+  local minor="${version#*.}"
+  minor="${minor%%.*}"
+
+  if (( major < 1 )); then
+    printf 'v%s.%s\n' "${major}" "${minor}"
+  else
+    printf 'v%s\n' "${major}"
+  fi
+}
+
+API_VERSION_PREFIX="$(api_version_prefix "${BASE_VERSION}")"
+
+replace_line \
+  "${VIRTUE_REPO_ROOT}/shared-web/api-version.ts" \
+  "^export const CURRENT_API_VERSION = '.*';\$" \
+  "export const CURRENT_API_VERSION = '${API_VERSION_PREFIX}';"
+
+replace_line \
+  "${VIRTUE_REPO_ROOT}/hash-server/src/api_version.rs" \
+  '^const CURRENT_API_VERSION: &str = ".*";$' \
+  "const CURRENT_API_VERSION: \&str = \"${API_VERSION_PREFIX}\";"
+
+replace_line \
+  "${CLIENT_ROOT}/core/src/api.rs" \
+  '^const API_VERSION: &str = ".*";$' \
+  "const API_VERSION: \&str = \"${API_VERSION_PREFIX}\";"
+
 echo "Synchronized versioned files to ${BASE_VERSION}"
+echo "Synchronized API version prefix to ${API_VERSION_PREFIX}"

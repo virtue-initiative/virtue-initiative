@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
   email_bounced_at INTEGER,
   settings TEXT NOT NULL DEFAULT '{}',
   pub_key BLOB,
-  priv_key BLOB,
+  encrypted_priv_key BLOB,
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS batches (
   end_time INTEGER NOT NULL,
   end_hash TEXT NOT NULL,
   access_keys TEXT NOT NULL,
+  version TEXT NOT NULL DEFAULT '',
   high_risk_count INTEGER NOT NULL DEFAULT 0,
   medium_risk_count INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
@@ -94,15 +95,6 @@ CREATE TABLE IF NOT EXISTS device_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_device_sessions_device_id ON device_sessions(device_id);
-
-CREATE TABLE IF NOT EXISTS hash_states (
-  device_id BLOB PRIMARY KEY,
-  state BLOB NOT NULL,
-  updated_at INTEGER NOT NULL,
-  count INTEGER NOT NULL DEFAULT 0,
-  hashed_at INTEGER,
-  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
-);
 `;
 
 const statements = schema

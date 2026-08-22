@@ -17,7 +17,7 @@ beforeEach(clearDB);
 const DAILY_BATCH_ID = '00000000-0000-4000-8000-000000000001';
 const WEEKLY_BATCH_ID = '00000000-0000-4000-8000-000000000003';
 const OLD_DAILY_BATCH_ID = '00000000-0000-4000-8000-000000000004';
-const EMPTY_ACCESS_KEYS = JSON.stringify({ keys: [] });
+const EMPTY_ACCESS_KEYS = JSON.stringify({ keys: {} });
 
 describe('Notification scheduler', () => {
   it('sends a daily digest at the configured local hour using the prior 24 hours', async () => {
@@ -66,8 +66,18 @@ describe('Notification scheduler', () => {
       }),
     });
 
-    const device = await createDeviceForUser(ownerCookie, 'Digest Device', 'linux');
-    const silentDevice = await createDeviceForUser(ownerCookie, 'Silent Device', 'linux');
+    const device = await createDeviceForUser(
+      'digest-owner@example.com',
+      'pw',
+      'Digest Device',
+      'linux',
+    );
+    const silentDevice = await createDeviceForUser(
+      'digest-owner@example.com',
+      'pw',
+      'Silent Device',
+      'linux',
+    );
     await env.DB.prepare('UPDATE devices SET created_at = ? WHERE id IN (?, ?)')
       .bind(previousWindowStart, uuidToBytes(device.id), uuidToBytes(silentDevice.id))
       .run();
@@ -158,8 +168,18 @@ describe('Notification scheduler', () => {
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
 
-    const device = await createDeviceForUser(ownerCookie, 'Batch Device', 'linux');
-    const silentDevice = await createDeviceForUser(ownerCookie, 'Silent Device', 'linux');
+    const device = await createDeviceForUser(
+      'batch-owner@example.com',
+      'pw',
+      'Batch Device',
+      'linux',
+    );
+    const silentDevice = await createDeviceForUser(
+      'batch-owner@example.com',
+      'pw',
+      'Silent Device',
+      'linux',
+    );
     await env.DB.prepare('UPDATE devices SET created_at = ? WHERE id IN (?, ?)')
       .bind(previousWindowStart, uuidToBytes(device.id), uuidToBytes(silentDevice.id))
       .run();
@@ -239,8 +259,18 @@ describe('Notification scheduler', () => {
       });
     }
 
-    const ownerOneDevice = await createDeviceForUser(ownerOneCookie, 'Owner One Device', 'linux');
-    const ownerTwoDevice = await createDeviceForUser(ownerTwoCookie, 'Owner Two Device', 'linux');
+    const ownerOneDevice = await createDeviceForUser(
+      'multi-owner-one@example.com',
+      'pw',
+      'Owner One Device',
+      'linux',
+    );
+    const ownerTwoDevice = await createDeviceForUser(
+      'multi-owner-two@example.com',
+      'pw',
+      'Owner Two Device',
+      'linux',
+    );
 
     await env.DB.prepare(
       `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at)
@@ -329,7 +359,12 @@ describe('Notification scheduler', () => {
       body: JSON.stringify({ settings: { email_frequency: 'weekly' } }),
     });
 
-    const device = await createDeviceForUser(ownerCookie, 'Twice Device', 'linux');
+    const device = await createDeviceForUser(
+      'twice-owner@example.com',
+      'pw',
+      'Twice Device',
+      'linux',
+    );
     await env.DB.prepare(
       `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,

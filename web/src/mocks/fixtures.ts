@@ -7,7 +7,7 @@ export const TEST_USER: User = {
   email_bounced_at: null,
   name: 'Test User',
   pub_key: undefined,
-  priv_key: undefined,
+  encrypted_priv_key: undefined,
   settings: {
     email_frequency: 'daily',
     timezone: 'UTC',
@@ -45,6 +45,5 @@ export const TEST_WATCHING: WatchingPartner = {
   id: 'watching-1',
   user: { id: 'watching-user-1', name: 'Bob', email: 'bob@example.com' },
   status: 'accepted',
-  digest_cadence: 'daily',
   created_at: Date.now() - 86_400_000,
 };

@@ -1,6 +1,8 @@
 ---
+import CanonicalLink from '../components/CanonicalLink.astro';
 import Footer from '../components/Footer.astro';
 import Header from '../components/Header.astro';
+import ImageLightbox from '../components/ImageLightbox.astro';
 import NoindexMeta from '../components/NoindexMeta.astro';
 import '../styles/global.css';
 
@@ -19,6 +21,7 @@ const title = pageTitle ? `${pageTitle} - The Virtue Initiative` : 'The Virtue I
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <NoindexMeta />
+    <CanonicalLink />
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
@@ -38,5 +41,6 @@ const title = pageTitle ? `${pageTitle} - The Virtue Initiative` : 'The Virtue I
       <slot />
     </main>
     <Footer />
+    <ImageLightbox />
   </body>
 </html>

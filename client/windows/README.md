@@ -40,7 +40,7 @@ From WSL:
 
 ```bash
 cd /home/jeff/code/virtue-initiative/client/windows
-./scripts/build-msix.sh -Version 0.0.9-dev -Profile Debug
+./scripts/build-msix.sh -Version 0.1.0-dev -Profile Debug
 ```
 
 Expected output:
@@ -88,27 +88,45 @@ The packaging script also runs the managed tests before producing the MSIX artif
 
 ## Release Signing
 
-GitHub Actions release packaging uses Azure Artifact Signing with OpenID Connect.
+GitHub Actions release packaging no longer uses an external signing service. The manifest's `Identity Publisher` (`client/windows/Virtue.WindowsApp/Package.appxmanifest`) must always match the publisher assigned by Partner Center for this app's Store identity, so the workflow lets `build-msix.ps1` fall back to its built-in self-signed development certificate (the same path used for PR/Debug builds) rather than overriding the publisher with an external signing cert's subject. Microsoft Store re-signs the package on ingestion, so a self-signed upload is sufficient for submission; for sideload installs the generated `.cer` in the setup bundle still needs to be trusted on the target machine as before.
 
-Repository secrets:
+## Store Staging Flight Submission
 
-- `AZURE_CLIENT_ID`
-- `AZURE_TENANT_ID`
-- `AZURE_SUBSCRIPTION_ID`
+Every push to `staging` runs `scripts/submit-store-flight.ps1` after the release MSIX is
+built and published, submitting that same artifact to a pre-created Microsoft Store
+"Staging" flight via the classic Store Submission API
+(`https://manage.devcenter.microsoft.com/v1.0/my/...`). This is a one-way push: it
+creates a new flight submission (deleting any stale, still-`PendingCommit` one left over
+from a prior run), replaces the flight's package with the new `.msix`, commits, and polls
+Partner Center briefly to catch immediate validation failures before letting the CI job
+succeed — Store certification and rollout to flight testers continues asynchronously
+afterward, the same way the iOS TestFlight upload step doesn't block on Apple's
+processing.
 
-Repository variables:
+This depends on one-time manual setup in Partner Center / Microsoft Entra ID that this
+repo cannot provision on its own:
 
-- `AZURE_CODESIGN_ACCOUNT_NAME`
-- `AZURE_CODESIGN_ENDPOINT`
-- `AZURE_CODESIGN_CERT_PROFILE`
-
-Recommended repository variable:
-
-- `AZURE_CODESIGN_PUBLISHER_SUBJECT`
-
-The publisher-subject variable should be the exact subject used by the Artifact Signing certificate profile, for example `CN=Jane Doe` for individual signing or the exact org subject string for organization signing. The MSIX manifest publisher must match this subject exactly.
-
-The workflow builds unsigned release artifacts, signs every `.msix` under `client/windows/dist/` with `azure/artifact-signing-action`, and then recreates the setup ZIP so the embedded MSIX is signed too.
+1. Register a Microsoft Entra ID application (Partner Center can create one directly from
+   its "Microsoft Entra applications" management page) and generate a client secret for
+   it in the Azure Portal (App registrations → Certificates & secrets).
+2. In Partner Center, under Account settings → User management → Microsoft Entra
+   applications, associate that app and grant it the Manager role on this developer
+   account. (Managing this page requires being signed in as a Partner Center Manager
+   who is also a Global Administrator of the Entra tenant.)
+3. Look up the app's Store ID in Partner Center (App → App identity).
+4. Create the "Staging" flight once in Partner Center (App overview → Package flights →
+   New package flight), picking the tester group. Its Flight ID (a GUID) isn't surfaced
+   directly in the UI — the reliable way to get it is to call the Store Submission API's
+   `listflights` endpoint once the Entra app's credentials work:
+   `GET https://manage.devcenter.microsoft.com/v1.0/my/applications/{STORE_APP_ID}/listflights`
+5. Add the tenant/client/app/flight IDs as repo **variables** (not secrets — they aren't
+   sensitive) and the client secret as a repo **secret**, read by
+   `submit-store-flight.ps1` via matching env var names in `client-windows.yml`:
+   - `WINSTORE_TENANT_ID` (variable) — Entra tenant ID
+   - `WINSTORE_CLIENT_ID` (variable) — Entra app (client) ID
+   - `WINSTORE_CLIENT_SECRET` (secret) — Entra app client secret
+   - `WINSTORE_APP_ID` (variable) — Partner Center Store ID for this app (e.g. `9NXXXXXXXXXX`)
+   - `WINSTORE_FLIGHT_ID` (variable) — GUID of the pre-created "Staging" flight
 
 ## Linux-Driven Remote Windows Loop
 
@@ -138,7 +156,7 @@ Build the Windows MSIX package from Linux:
 ./client/windows/scripts/remote-windows-build.sh \
   --build-host win11 \
   --mode msix \
-  --version 0.0.9-dev \
+  --version 0.1.0-dev \
   --profile Debug
 ```
 
@@ -153,23 +171,24 @@ Remote logs are always written locally under:
 - Launching the app from Start reuses the resident instance and opens the settings/login window.
 - Closing the settings window hides it back to the tray.
 - Tray `Exit` asks for confirmation before stopping active monitoring, records an explicit user stop, stops resident monitoring, and exits the app without logging the device out.
+- The app registers a per-user Scheduled Task (`VirtueResidentWatchdog`, every 1 minute — Task Scheduler's floor for a repeating trigger, confirmed against `schtasks.exe` on this repo's `virtue-win11` VM: a sub-minute `Interval` is rejected as out of range even via an XML task definition) at startup that relaunches `Virtue.WindowsApp.exe` if it isn't running, covering accidental crashes/hangs. The app's existing single-instance redirect makes each periodic relaunch attempt a no-op while the app is already running, so the task doesn't need its own "is it running" check, and the relaunch comes back into the tray quietly (same as the startup task). Tray `Exit` deletes the task first so a deliberate exit isn't resurrected. Windows' Application Recovery and Restart API (`RegisterApplicationRestart`) was tried first but does not automatically relaunch MSIX-packaged apps (confirmed both by community reports and by testing on this repo's `virtue-win11` VM: registration succeeds and WER correctly reports the crash/hang, but no relaunch follows), hence the Scheduled Task instead. See `Virtue.WindowsApp.Core/Interop/RestartWatchdog.cs` and `Virtue.WindowsApp/App.xaml.cs`. The `client/core` late-wakeup tamper threshold (`client/core/SPEC.md` §2) was raised from 1 to 2 minutes so a normal ~1-minute watchdog relaunch doesn't itself trip the tamper alert.
 - `client/core` is intentionally unchanged by this architecture; Windows-specific behavior lives under `client/windows/`.
 
 ## Runtime Data Locations
 
 The WinUI app and Rust resident monitoring host share state under `%PROGRAMDATA%\Virtue`:
 
-- `%PROGRAMDATA%\Virtue\config\config.json`
 - `%PROGRAMDATA%\Virtue\config\ui_state.json`
 - `%PROGRAMDATA%\Virtue\config\token_store.json`
 - `%PROGRAMDATA%\Virtue\data\lifecycle_state.json`
 - `%PROGRAMDATA%\Virtue\data\logs\virtue.<date>.log` (daily-rotated diagnostic log)
 
-Runtime config overrides continue to support:
-
-- `apiBaseUrl`
-- `captureIntervalSeconds`
-- `batchWindowSeconds`
+`api_base_url`, `capture_interval_seconds`, and `batch_window_seconds` are no longer
+runtime-configurable. They're compile-time constants baked in by `client/core/build.rs`
+via `env!()`. To set local dev values, copy `client/.env.example` to `client/.env`
+(gitignored) and set `VIRTUE_DEFAULT_API_URL`, `VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS`,
+and `VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS` there; real process/CI env vars still take
+precedence over `.env`.
 
 The Rust FFI surface exposed to the WinUI app is:
 
@@ -180,8 +199,6 @@ The Rust FFI surface exposed to the WinUI app is:
 - `virtue_windows_get_session_status_json`
 - `virtue_windows_login`
 - `virtue_windows_logout`
-- `virtue_windows_get_runtime_config_json`
-- `virtue_windows_set_runtime_config_json`
 - `virtue_windows_free_string`
 
 ## Troubleshooting

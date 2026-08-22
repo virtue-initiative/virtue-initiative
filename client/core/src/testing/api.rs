@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use crate::api::{ApiTransport, UploadedBatchResponse};
+use crate::api::{ApiTransport, DeviceState, RegisteredDevice, UploadedBatchResponse};
 use crate::error::CoreResult;
 use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, NotifyPayload};
 
@@ -26,24 +26,21 @@ pub struct MockApiClient {
 
 pub struct MockApiState {
     // --- recordings ---
-    pub login_calls: Vec<(String, String)>,
     pub logout_calls: Vec<String>,
     pub register_device_calls: Vec<RegisterDeviceCall>,
     pub get_device_settings_calls: Vec<String>,
-    pub get_hash_token_calls: Vec<String>,
     pub batch_uploads: Vec<BatchCall>,
+    /// Derived from each successful `upload_batch` call's `batch.notifications` —
+    /// there is no standalone notify method anymore, so this records what the
+    /// batch carried rather than a separate API call.
     pub notify_calls: Vec<NotifyCall>,
     pub hash_uploads: Vec<HashCall>,
-    pub reconfigure_calls: Vec<String>,
 
     // --- canned responses (FIFO per method) ---
-    pub login_responses: VecDeque<CoreResult<String>>,
     pub logout_responses: VecDeque<CoreResult<()>>,
-    pub register_device_responses: VecDeque<CoreResult<DeviceCredentials>>,
-    pub get_device_settings_responses: VecDeque<CoreResult<DeviceSettings>>,
-    pub get_hash_token_responses: VecDeque<CoreResult<String>>,
+    pub register_device_responses: VecDeque<CoreResult<RegisteredDevice>>,
+    pub get_device_settings_responses: VecDeque<CoreResult<DeviceState>>,
     pub batch_responses: VecDeque<CoreResult<UploadedBatchResponse>>,
-    pub notify_responses: VecDeque<CoreResult<()>>,
     pub hash_responses: VecDeque<CoreResult<()>>,
 
     // --- default values used when the canned queue is empty ---
@@ -56,7 +53,8 @@ pub struct MockApiState {
 
 #[derive(Debug, Clone)]
 pub struct RegisterDeviceCall {
-    pub user_refresh_token: String,
+    pub email: String,
+    pub password: String,
     pub name: String,
     pub platform: String,
 }
@@ -77,29 +75,25 @@ pub struct NotifyCall {
 pub struct HashCall {
     pub hash_base_url: Option<String>,
     pub hash_jwt: String,
+    pub unix_time: u32,
+    pub seq: u32,
     pub content_hash: [u8; 32],
 }
 
 impl Default for MockApiState {
     fn default() -> Self {
         Self {
-            login_calls: Vec::new(),
             logout_calls: Vec::new(),
             register_device_calls: Vec::new(),
             get_device_settings_calls: Vec::new(),
-            get_hash_token_calls: Vec::new(),
             batch_uploads: Vec::new(),
             notify_calls: Vec::new(),
             hash_uploads: Vec::new(),
-            reconfigure_calls: Vec::new(),
 
-            login_responses: VecDeque::new(),
             logout_responses: VecDeque::new(),
             register_device_responses: VecDeque::new(),
             get_device_settings_responses: VecDeque::new(),
-            get_hash_token_responses: VecDeque::new(),
             batch_responses: VecDeque::new(),
-            notify_responses: VecDeque::new(),
             hash_responses: VecDeque::new(),
 
             default_device_id: "mock-device".to_string(),
@@ -136,30 +130,18 @@ impl MockApiClient {
 
     // --- convenience programming helpers (each pushes one canned response) ---
 
-    pub fn program_login(&self, response: CoreResult<String>) {
-        self.state().login_responses.push_back(response);
-    }
-
-    pub fn program_register_device(&self, response: CoreResult<DeviceCredentials>) {
+    pub fn program_register_device(&self, response: CoreResult<RegisteredDevice>) {
         self.state().register_device_responses.push_back(response);
     }
 
-    pub fn program_get_device_settings(&self, response: CoreResult<DeviceSettings>) {
+    pub fn program_get_device_settings(&self, response: CoreResult<DeviceState>) {
         self.state()
             .get_device_settings_responses
             .push_back(response);
     }
 
-    pub fn program_get_hash_token(&self, response: CoreResult<String>) {
-        self.state().get_hash_token_responses.push_back(response);
-    }
-
     pub fn program_batch(&self, response: CoreResult<UploadedBatchResponse>) {
         self.state().batch_responses.push_back(response);
-    }
-
-    pub fn program_notify(&self, response: CoreResult<()>) {
-        self.state().notify_responses.push_back(response);
     }
 
     pub fn program_hash(&self, response: CoreResult<()>) {
@@ -174,25 +156,6 @@ impl Default for MockApiClient {
 }
 
 impl ApiTransport for MockApiClient {
-    fn reconfigure(&mut self, api_base_url: &str) -> CoreResult<()> {
-        self.state()
-            .reconfigure_calls
-            .push(api_base_url.to_string());
-        Ok(())
-    }
-
-    fn login(&self, username: &str, password: &str) -> CoreResult<String> {
-        let mut state = self.state();
-        state
-            .login_calls
-            .push((username.to_string(), password.to_string()));
-        if let Some(canned) = state.login_responses.pop_front() {
-            canned
-        } else {
-            Ok("mock-user-refresh-token".to_string())
-        }
-    }
-
     fn logout(&self, device_refresh_token: &str) -> CoreResult<()> {
         let mut state = self.state();
         state.logout_calls.push(device_refresh_token.to_string());
@@ -205,27 +168,33 @@ impl ApiTransport for MockApiClient {
 
     fn register_device(
         &self,
-        user_refresh_token: &str,
+        email: &str,
+        password: &str,
         name: &str,
         platform: &str,
-    ) -> CoreResult<DeviceCredentials> {
+    ) -> CoreResult<RegisteredDevice> {
         let mut state = self.state();
         state.register_device_calls.push(RegisterDeviceCall {
-            user_refresh_token: user_refresh_token.to_string(),
+            email: email.to_string(),
+            password: password.to_string(),
             name: name.to_string(),
             platform: platform.to_string(),
         });
         if let Some(canned) = state.register_device_responses.pop_front() {
             canned
         } else {
-            Ok(DeviceCredentials {
-                device_id: state.default_device_id.clone(),
-                refresh_token: state.default_refresh_token.clone(),
+            Ok(RegisteredDevice {
+                credentials: DeviceCredentials {
+                    device_id: state.default_device_id.clone(),
+                    refresh_token: state.default_refresh_token.clone(),
+                },
+                settings: state.default_device_settings.clone(),
+                hash_token: state.default_hash_token.clone(),
             })
         }
     }
 
-    fn get_device_settings(&self, device_refresh_token: &str) -> CoreResult<DeviceSettings> {
+    fn get_device_settings(&self, device_refresh_token: &str) -> CoreResult<DeviceState> {
         let mut state = self.state();
         state
             .get_device_settings_calls
@@ -233,19 +202,10 @@ impl ApiTransport for MockApiClient {
         if let Some(canned) = state.get_device_settings_responses.pop_front() {
             canned
         } else {
-            Ok(state.default_device_settings.clone())
-        }
-    }
-
-    fn get_hash_token(&self, device_refresh_token: &str) -> CoreResult<String> {
-        let mut state = self.state();
-        state
-            .get_hash_token_calls
-            .push(device_refresh_token.to_string());
-        if let Some(canned) = state.get_hash_token_responses.pop_front() {
-            canned
-        } else {
-            Ok(state.default_hash_token.clone())
+            Ok(DeviceState {
+                settings: state.default_device_settings.clone(),
+                hash_token: state.default_hash_token.clone(),
+            })
         }
     }
 
@@ -259,39 +219,43 @@ impl ApiTransport for MockApiClient {
             device_refresh_token: device_refresh_token.to_string(),
             batch: batch.clone(),
         });
-        if let Some(canned) = state.batch_responses.pop_front() {
+        let response = if let Some(canned) = state.batch_responses.pop_front() {
             canned
         } else {
             state.batch_id_counter += 1;
             Ok(UploadedBatchResponse {
                 id: format!("mock-batch-{}", state.batch_id_counter),
+                settings: state.default_device_settings.clone(),
+                hash_token: state.default_hash_token.clone(),
             })
+        };
+        // Notify only counts once the batch actually lands (mirrors what the
+        // real server does: notifications are processed after the batch commits).
+        if response.is_ok() {
+            for payload in &batch.notifications {
+                state.notify_calls.push(NotifyCall {
+                    device_refresh_token: device_refresh_token.to_string(),
+                    payload: payload.clone(),
+                });
+            }
         }
-    }
-
-    fn notify(&self, device_refresh_token: &str, payload: &NotifyPayload) -> CoreResult<()> {
-        let mut state = self.state();
-        state.notify_calls.push(NotifyCall {
-            device_refresh_token: device_refresh_token.to_string(),
-            payload: payload.clone(),
-        });
-        if let Some(canned) = state.notify_responses.pop_front() {
-            canned
-        } else {
-            Ok(())
-        }
+        response
     }
 
     fn upload_hash(
         &self,
         hash_base_url: Option<&str>,
         hash_jwt: &str,
+        unix_time: u32,
+        seq: u32,
         content_hash: &[u8; 32],
     ) -> CoreResult<()> {
         let mut state = self.state();
         state.hash_uploads.push(HashCall {
             hash_base_url: hash_base_url.map(String::from),
             hash_jwt: hash_jwt.to_string(),
+            unix_time,
+            seq,
             content_hash: *content_hash,
         });
         if let Some(canned) = state.hash_responses.pop_front() {

@@ -7,7 +7,7 @@ beforeEach(clearDB);
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const RETENTION_MS = 30 * DAY_MS;
-const EMPTY_ACCESS_KEYS = JSON.stringify({ keys: [] });
+const EMPTY_ACCESS_KEYS = JSON.stringify({ keys: {} });
 
 async function insertBatch(
   id: string,
@@ -45,8 +45,13 @@ describe('pruneExpiredBatches', () => {
   it('deletes batches older than 30 days and keeps recent ones', async () => {
     const now = Date.UTC(2026, 0, 6, 0, 0, 0);
     const { userId } = await signupAndGetCookie('retention-owner@example.com', 'pw');
-    const { cookie } = await signupAndGetCookie('retention-owner-login@example.com', 'pw');
-    const device = await createDeviceForUser(cookie, 'Retention Device', 'linux');
+    await signupAndGetCookie('retention-owner-login@example.com', 'pw');
+    const device = await createDeviceForUser(
+      'retention-owner-login@example.com',
+      'pw',
+      'Retention Device',
+      'linux',
+    );
 
     const oldId = '00000000-0000-4000-8000-000000000101';
     const recentId = '00000000-0000-4000-8000-000000000102';
@@ -70,8 +75,13 @@ describe('pruneExpiredBatches', () => {
   it('retains a batch created exactly at the 30-day boundary', async () => {
     const now = Date.UTC(2026, 0, 6, 0, 0, 0);
     const { userId } = await signupAndGetCookie('retention-boundary@example.com', 'pw');
-    const { cookie } = await signupAndGetCookie('retention-boundary-login@example.com', 'pw');
-    const device = await createDeviceForUser(cookie, 'Boundary Device', 'linux');
+    await signupAndGetCookie('retention-boundary-login@example.com', 'pw');
+    const device = await createDeviceForUser(
+      'retention-boundary-login@example.com',
+      'pw',
+      'Boundary Device',
+      'linux',
+    );
 
     const boundaryId = '00000000-0000-4000-8000-000000000103';
     await insertBatch(
@@ -91,8 +101,13 @@ describe('pruneExpiredBatches', () => {
   it('drains a backlog larger than the per-round-trip chunk limit', async () => {
     const now = Date.UTC(2026, 0, 6, 0, 0, 0);
     const { userId } = await signupAndGetCookie('retention-backlog@example.com', 'pw');
-    const { cookie } = await signupAndGetCookie('retention-backlog-login@example.com', 'pw');
-    const device = await createDeviceForUser(cookie, 'Backlog Device', 'linux');
+    await signupAndGetCookie('retention-backlog-login@example.com', 'pw');
+    const device = await createDeviceForUser(
+      'retention-backlog-login@example.com',
+      'pw',
+      'Backlog Device',
+      'linux',
+    );
 
     const backlogSize = 620; // exceeds the 500-row PRUNE_CHUNK_LIMIT
     for (let i = 0; i < backlogSize; i += 1) {

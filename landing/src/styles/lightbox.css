@@ -1,0 +1,58 @@
+.help-doc img {
+  cursor: zoom-in;
+}
+
+.image-lightbox {
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  padding: 0;
+  /* Fixed box (not a max-*) so the image below is asked to actually fill it,
+     scaling up past its natural size on small screenshots instead of just
+     capping out at whichever is smaller. */
+  width: min(90vw, 1400px);
+  height: 90vh;
+  /* The site's global `* { margin: 0 }` reset (shared-web/base.css) strips
+     the UA stylesheet's default `dialog { margin: auto }`, which is what
+     centers a modal <dialog> — restore it explicitly, along with the fixed
+     positioning that pairs with it, or the dialog renders pinned top-left. */
+  position: fixed;
+  inset: 0;
+  margin: auto;
+
+  &::backdrop {
+    background: color-mix(in srgb, black 70%, transparent);
+  }
+}
+
+.image-lightbox-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* Scales the image to fill the box above (growing past its natural size
+     when needed) while preserving aspect ratio and never cropping it. */
+  object-fit: contain;
+  border-radius: 12px;
+  cursor: zoom-out;
+}
+
+.image-lightbox-close {
+  position: fixed;
+  top: 1.25rem;
+  right: 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: none;
+  border-radius: 999px;
+  background: color-mix(in srgb, black 55%, transparent);
+  color: white; /* literal: icon on a dark scrim over the enlarged photo */
+  cursor: pointer;
+
+  & svg {
+    width: 1.35em;
+    height: 1.35em;
+  }
+}

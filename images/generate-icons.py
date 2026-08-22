@@ -234,6 +234,23 @@ def ios_icon_filename(spec: dict[str, str | int]) -> str:
     return f"Icon-App-{idiom}-{size}@{scale}.png"
 
 
+SAFARI_EXTENSION_ICON_SIZES = (16, 32, 48, 96, 128, 256, 512)
+
+
+def save_safari_extension_icons(
+    master: Image.Image, resources_dir: Path, background: Background
+) -> list[Path]:
+    images_dir = resources_dir / "images"
+    outputs = []
+    for size in SAFARI_EXTENSION_ICON_SIZES:
+        target_path = images_dir / f"icon-{size}.png"
+        # Safari masks the extension icon itself (toolbar, Settings list), so
+        # this matches the iOS app icon treatment: full-bleed square.
+        save_png(master, target_path, size, background)
+        outputs.append(target_path)
+    return outputs
+
+
 def save_ios_app_icons(
     master: Image.Image, assets_dir: Path, background: Background
 ) -> list[Path]:
@@ -568,6 +585,13 @@ def main() -> None:
     if args.target in ("all", "ios"):
         ios_assets = root / "client" / "ios" / "app" / "Assets.xcassets"
         outputs.extend(save_ios_app_icons(master, ios_assets, square_bg))
+
+        safari_ext_resources = (
+            root / "client" / "ios" / "app" / "SafariWebExtension" / "Resources"
+        )
+        outputs.extend(
+            save_safari_extension_icons(master, safari_ext_resources, square_bg)
+        )
 
     print("Generated icon assets:")
     for path in outputs:

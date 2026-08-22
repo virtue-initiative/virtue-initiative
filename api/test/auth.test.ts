@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { generateToken, verifyJWT } from '../src/lib/jwt';
 import { generatePasswordSalt, hashPasswordAuth, verifyPasswordAuth } from '../src/lib/password';
+import { assertTokenPurpose, generateOpaqueToken } from '../src/lib/tokens';
 import {
   TEST_JWT_PRIVATE_KEY,
   TEST_JWT_PUBLIC_KEY,
@@ -37,15 +38,41 @@ describe('JWT tokens', () => {
     expect(payload.type).toBe('server');
   });
 
-  it('generates and verifies a hash-server token', async () => {
-    const token = await generateToken('hash-server', 'device-123', TEST_JWT_PRIVATE_KEY, 3600);
+  it('generates and verifies a device token', async () => {
+    const token = await generateToken('device', 'device-123', TEST_JWT_PRIVATE_KEY, 3600);
     const payload = await verifyJWT(token, TEST_JWT_PUBLIC_KEY);
     expect(payload.sub).toBe('device-123');
-    expect(payload.type).toBe('hash-server');
+    expect(payload.type).toBe('device');
   });
 
   it('rejects a token signed with a different public key', async () => {
     const token = await generateToken('server', 'device-123', TEST_JWT_PRIVATE_KEY, 60);
     await expect(verifyJWT(token, TEST_OTHER_JWT_PUBLIC_KEY)).rejects.toThrow();
+  });
+});
+
+describe('Opaque token purpose prefixes', () => {
+  it('prefixes generated tokens by purpose', () => {
+    expect(generateOpaqueToken('web_session')).toMatch(/^wst_/);
+    expect(generateOpaqueToken('device_session')).toMatch(/^dst_/);
+    expect(generateOpaqueToken('signup')).toMatch(/^sut_/);
+    expect(generateOpaqueToken('email_change')).toMatch(/^ect_/);
+    expect(generateOpaqueToken('email_verification')).toMatch(/^evt_/);
+    expect(generateOpaqueToken('password_reset')).toMatch(/^prt_/);
+    expect(generateOpaqueToken('partner_invite')).toMatch(/^pit_/);
+  });
+
+  it('accepts a token whose prefix matches the asserted purpose', () => {
+    const token = generateOpaqueToken('web_session');
+    expect(() => assertTokenPurpose(token, 'web_session')).not.toThrow();
+  });
+
+  it('rejects a token whose prefix does not match the asserted purpose', () => {
+    const token = generateOpaqueToken('device_session');
+    expect(() => assertTokenPurpose(token, 'web_session')).toThrow();
+  });
+
+  it('rejects an unprefixed legacy-shaped token', () => {
+    expect(() => assertTokenPurpose('just-some-opaque-string', 'web_session')).toThrow();
   });
 });

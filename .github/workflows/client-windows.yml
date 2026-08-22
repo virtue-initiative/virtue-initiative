@@ -1,7 +1,6 @@
 name: Client Windows Checks
 
 permissions:
-  id-token: write
   contents: write
 
 on:
@@ -43,50 +42,70 @@ jobs:
           cache-on-failure: true
           workspaces: |
             client -> target
+            hash-server -> target
 
-      - name: Rust build smoke test (core)
-        run: cargo build --target x86_64-pc-windows-msvc -p virtue-core
-        working-directory: client
-
-      - name: Rust build smoke test (Windows client)
-        run: cargo build --target x86_64-pc-windows-msvc -p virtue-windows
-        working-directory: client
+      - name: Determine build profile
+        id: profile
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "push" && ( "${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/staging" ) ]]; then
+            echo "cargo_release_flag=--release" >> "$GITHUB_OUTPUT"
+            echo "dotnet_config=Release" >> "$GITHUB_OUTPUT"
+          else
+            echo "cargo_release_flag=" >> "$GITHUB_OUTPUT"
+            echo "dotnet_config=Debug" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Rust lint (core)
-        run: cargo clippy --target x86_64-pc-windows-msvc -p virtue-core --all-targets -- -D warnings
+        run: cargo clippy --target x86_64-pc-windows-msvc ${{ steps.profile.outputs.cargo_release_flag }} -p virtue-core --all-targets -- -D warnings
         working-directory: client
 
       - name: Rust lint (Windows client)
-        run: cargo clippy --target x86_64-pc-windows-msvc -p virtue-windows --all-targets -- -D warnings
+        run: cargo clippy --target x86_64-pc-windows-msvc ${{ steps.profile.outputs.cargo_release_flag }} -p virtue-windows --all-targets -- -D warnings
         working-directory: client
 
       - name: Rust tests (core)
-        run: cargo test --target x86_64-pc-windows-msvc -p virtue-core
+        run: cargo test --target x86_64-pc-windows-msvc ${{ steps.profile.outputs.cargo_release_flag }} -p virtue-core
         working-directory: client
 
       - name: Rust scenario tests (core)
-        run: cargo test --target x86_64-pc-windows-msvc -p virtue-core --features testing --test scenarios
+        run: cargo test --target x86_64-pc-windows-msvc ${{ steps.profile.outputs.cargo_release_flag }} -p virtue-core --features testing --test scenarios
         working-directory: client
 
       - name: Rust tests (Windows client)
-        run: cargo test --target x86_64-pc-windows-msvc -p virtue-windows
+        run: cargo test --target x86_64-pc-windows-msvc ${{ steps.profile.outputs.cargo_release_flag }} -p virtue-windows
         working-directory: client
 
-      - name: Restore WinUI solution dependencies
-        run: dotnet restore ./windows/Virtue.WindowsApp/Virtue.WindowsApp.csproj
-        working-directory: client
+      - name: Build hash server
+        run: cargo build
+        working-directory: hash-server
 
-      - name: Build WinUI core library
-        run: dotnet build ./windows/Virtue.WindowsApp.Core/Virtue.WindowsApp.Core.csproj -c Debug
-        working-directory: client
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Run device -> api/hash integration test
+        run: bun client/windows/scripts/integration-test.ts
 
       - name: Test WinUI core library
-        run: dotnet test ./windows/Virtue.WindowsApp.Tests/Virtue.WindowsApp.Tests.csproj -c Debug
+        run: dotnet test ./windows/Virtue.WindowsApp.Tests/Virtue.WindowsApp.Tests.csproj -c ${{ steps.profile.outputs.dotnet_config }}
         working-directory: client
 
       - name: Build Windows MSIX (debug)
         if: github.event_name != 'push' || (github.ref != 'refs/heads/main' && github.ref != 'refs/heads/staging')
-        run: ./windows/scripts/build-msix.ps1 -Profile Debug
+        run: ./windows/scripts/build-msix.ps1 -Profile Debug -SkipTests
         working-directory: client
 
       - name: Resolve version info
@@ -100,34 +119,10 @@ jobs:
           "release_tag=$($info.ReleaseTag)" >> $env:GITHUB_OUTPUT
           "build_label=$($info.BuildLabel)" >> $env:GITHUB_OUTPUT
 
-      - name: Azure login
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
       - name: Build Windows MSIX (release)
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
-        env:
-          VIRTUE_WINDOWS_PACKAGE_PUBLISHER: ${{ vars.AZURE_CODESIGN_PUBLISHER_SUBJECT }}
-        run: ./windows/scripts/build-msix.ps1 -Profile Release -Version "${{ steps.version.outputs.build_label }}" -SkipSigning
+        run: ./windows/scripts/build-msix.ps1 -Profile Release -Version "${{ steps.version.outputs.build_label }}" -SkipTests
         working-directory: client
-
-      - name: Sign Windows MSIX artifacts with Azure Artifact Signing
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
-        uses: azure/artifact-signing-action@v1
-        with:
-          endpoint: ${{ vars.AZURE_CODESIGN_ENDPOINT }}
-          signing-account-name: ${{ vars.AZURE_CODESIGN_ACCOUNT_NAME }}
-          certificate-profile-name: ${{ vars.AZURE_CODESIGN_CERT_PROFILE }}
-          files-folder: ${{ github.workspace }}\client\windows\dist
-          files-folder-filter: 'Virtue.*.msix,virtue-*.msix'
-          files-folder-recurse: true
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
 
       - name: Repack Windows setup bundle
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
@@ -174,4 +169,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./scripts/publish-release.sh "${{ steps.version.outputs.release_tag }}" "${{ steps.version.outputs.build_label }}" "windows/dist/virtue-windows-${{ steps.version.outputs.build_label }}-setup.zip" "${{ github.ref_name == 'main' && 'stable' || 'dev' }}"
+        working-directory: client
+
+      - name: Submit Windows MSIX to Store Staging flight
+        if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+        shell: pwsh
+        env:
+          STORE_TENANT_ID: ${{ vars.WINSTORE_TENANT_ID }}
+          STORE_CLIENT_ID: ${{ vars.WINSTORE_CLIENT_ID }}
+          STORE_CLIENT_SECRET: ${{ secrets.WINSTORE_CLIENT_SECRET }}
+          STORE_APP_ID: ${{ vars.WINSTORE_APP_ID }}
+          STORE_FLIGHT_ID: ${{ vars.WINSTORE_FLIGHT_ID }}
+        run: ./windows/scripts/submit-store-flight.ps1 -PackagePath "windows/dist/virtue-windows-${{ steps.version.outputs.build_label }}.msix"
         working-directory: client

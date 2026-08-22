@@ -2,12 +2,13 @@ import { render, screen, waitFor } from '@testing-library/preact';
 import userEvent from '@testing-library/user-event';
 import { LocationProvider } from 'preact-iso';
 import { ToastProvider } from '@virtueinitiative/shared-web';
+import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { server } from '../../mocks/server';
 import { Auth } from './index';
 
-const BASE = 'http://localhost:8787';
+const BASE = `http://localhost:8787/${CURRENT_API_VERSION}`;
 
 function renderAuth(mode: 'login' | 'signup' | 'forgot-password' = 'login') {
   return render(
@@ -85,6 +86,24 @@ describe('Auth — signup', () => {
     await waitFor(() => {
       expect(screen.getByText('Check your email')).toBeInTheDocument();
     });
+  });
+});
+
+describe('Auth — finish signup', () => {
+  it('renders a read-only email field populated from the signup token', async () => {
+    window.history.pushState({}, '', '/signup?signup_token=test-token');
+    renderAuth('signup');
+
+    await waitFor(() => {
+      const emailInput = screen.getByPlaceholderText('you@example.com') as HTMLInputElement;
+      expect(emailInput.value).toBe('test@example.com');
+      expect(emailInput).toHaveAttribute('readonly');
+    });
+
+    expect(screen.getByPlaceholderText('Choose a password')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Retype your password')).toBeInTheDocument();
+
+    window.history.pushState({}, '', '/');
   });
 });
 

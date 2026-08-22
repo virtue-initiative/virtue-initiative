@@ -1,198 +1,83 @@
-use std::any::Any;
+use crate::model::{AuthState, ServiceStatus};
+use crate::module::upload::UploadState;
 
-use serde::{Deserialize, Serialize};
-
-use crate::error::CoreResult;
-use crate::events::bus::{Emitter, EventBus, Observer, StateType};
-use crate::model::PartialStatus;
-use crate::model::ServiceStatus;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StatusRequest;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StatusResponse {
-    pub status: ServiceStatus,
-}
-
-pub struct StatusModule {
-    expected_count: usize,
-    received: usize,
-    pending: ServiceStatus,
-}
-
-impl StatusModule {
-    pub fn new(expected_count: usize) -> Self {
-        Self {
-            expected_count,
-            received: 0,
-            pending: ServiceStatus::default(),
-        }
-    }
-
-    fn handle_partial(&mut self, partial: &PartialStatus, emitter: &Emitter) {
-        match partial {
-            PartialStatus::Auth {
-                is_authenticated,
-                device_id,
-            } => {
-                self.pending.is_authenticated = *is_authenticated;
-                self.pending.device_id = device_id.clone();
-            }
-            PartialStatus::Lifecycle {
-                is_running,
-                last_loop_at_ms,
-            } => {
-                self.pending.is_running = *is_running;
-                self.pending.last_loop_at_ms = *last_loop_at_ms;
-            }
-            PartialStatus::Upload {
-                pending_request_count,
-            } => {
-                self.pending.pending_request_count = *pending_request_count;
-            }
-        }
-        self.received += 1;
-        if self.received >= self.expected_count {
-            let _ = emitter.send(StatusResponse {
-                status: self.pending.clone(),
-            });
-            self.received = 0;
-        }
-    }
-}
-
-impl Observer for StatusModule {
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
-    fn name(&self) -> &'static str {
-        "status"
-    }
-
-    fn init(&mut self, _bus: &mut EventBus, _state: StateType) -> CoreResult<()> {
-        Ok(())
-    }
-
-    fn on_event(&mut self, event: &dyn Any, emitter: &Emitter) -> CoreResult<()> {
-        crate::dispatch_event!(event, {
-            _: StatusRequest => {
-                self.pending = ServiceStatus::default();
-                self.received = 0;
-                Ok(())
-            },
-            partial: PartialStatus => {
-                self.handle_partial(partial, emitter);
-                Ok(())
-            },
-        })
-    }
-
-    fn save(&self) -> CoreResult<StateType> {
-        Ok(StateType::Null)
+/// Pure assembly of `ServiceStatus` from `&AuthState`/`&UploadState`. Works
+/// equally whether the daemon loop is actually running: callers with no live
+/// daemon to ask (e.g. a CLI whose resident process is stopped) can load a
+/// persisted `DaemonState` from disk and pass its `auth`/`upload`/
+/// `last_tick_at_ms` straight through with `is_running: false`, rather than
+/// fabricating a status that's blind to real auth/pending-request state.
+pub fn build(
+    auth: &AuthState,
+    upload: &UploadState,
+    last_loop_at_ms: Option<i64>,
+    is_running: bool,
+) -> ServiceStatus {
+    ServiceStatus {
+        is_authenticated: auth.device_credentials.is_some(),
+        is_running,
+        device_id: auth
+            .device_credentials
+            .as_ref()
+            .map(|c| c.device_id.clone()),
+        last_loop_at_ms,
+        pending_request_count: upload.pending_request_count(),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{StatusModule, StatusRequest, StatusResponse};
-    use crate::model::PartialStatus;
-    use crate::testing::EventTester;
+    use super::*;
+    use crate::model::DeviceCredentials;
 
     #[test]
-    fn one_partial_with_expected_one_triggers_response() {
-        let mut b = EventTester::builder();
-        b.capture::<StatusResponse>();
-        b.add(StatusModule::new(1));
-        let mut t = b.build();
-        t.emit(1, StatusRequest);
-        t.emit(
-            1,
-            PartialStatus::Auth {
-                is_authenticated: true,
-                device_id: Some("dev".into()),
-            },
-        );
-        assert_eq!(
-            t.captured::<StatusResponse>().len(),
-            1,
-            "expected StatusResponse"
-        );
+    fn unauthenticated_status_reflects_defaults() {
+        let status = build(&AuthState::default(), &UploadState::default(), None, true);
+        assert!(!status.is_authenticated);
+        assert!(status.is_running);
+        assert_eq!(status.device_id, None);
+        assert_eq!(status.pending_request_count, 0);
     }
 
     #[test]
-    fn response_only_after_all_expected_fragments_received() {
-        let mut b = EventTester::builder();
-        b.capture::<StatusResponse>();
-        b.add(StatusModule::new(3));
-        let mut t = b.build();
-        t.emit(1, StatusRequest);
-        t.emit(
-            1,
-            PartialStatus::Auth {
-                is_authenticated: false,
-                device_id: None,
-            },
-        );
-        assert!(
-            t.captured::<StatusResponse>().is_empty(),
-            "should not respond after 1 of 3"
-        );
-
-        t.emit(
-            1,
-            PartialStatus::Lifecycle {
-                is_running: true,
-                last_loop_at_ms: Some(1_000),
-            },
-        );
-        assert!(
-            t.captured::<StatusResponse>().is_empty(),
-            "should not respond after 2 of 3"
-        );
-
-        t.emit(
-            1,
-            PartialStatus::Upload {
-                pending_request_count: 7,
-            },
-        );
-        let r = t.captured::<StatusResponse>();
-        assert_eq!(r.len(), 1);
-        assert!(!r[0].status.is_authenticated);
-        assert!(r[0].status.is_running);
-        assert_eq!(r[0].status.last_loop_at_ms, Some(1_000));
-        assert_eq!(r[0].status.pending_request_count, 7);
+    fn authenticated_status_reports_device_id_and_pending_count() {
+        let auth = AuthState {
+            device_credentials: Some(DeviceCredentials {
+                device_id: "dev-1".into(),
+                refresh_token: "r".into(),
+            }),
+        };
+        let mut upload = UploadState::default();
+        upload
+            .pending_batch_events
+            .push(crate::module::upload::PendingBatchEvent {
+                ts: 0,
+                risk: 0.0,
+                encoded: vec![1],
+                is_screenshot: false,
+                notify: None,
+            });
+        let status = build(&auth, &upload, Some(1_234), true);
+        assert!(status.is_authenticated);
+        assert_eq!(status.device_id.as_deref(), Some("dev-1"));
+        assert_eq!(status.last_loop_at_ms, Some(1_234));
+        assert_eq!(status.pending_request_count, 1);
     }
 
     #[test]
-    fn new_status_request_resets_accumulated_state() {
-        let mut b = EventTester::builder();
-        b.capture::<StatusResponse>();
-        b.add(StatusModule::new(1));
-        let mut t = b.build();
-        t.emit(1, StatusRequest);
-        t.emit(
-            1,
-            PartialStatus::Auth {
-                is_authenticated: true,
-                device_id: Some("dev1".into()),
-            },
-        );
-        assert_eq!(t.captured::<StatusResponse>().len(), 1);
-        t.clear_captured();
-
-        t.emit(1, StatusRequest);
-        t.emit(
-            1,
-            PartialStatus::Auth {
-                is_authenticated: false,
-                device_id: None,
-            },
-        );
-        let r = t.captured::<StatusResponse>();
-        assert_eq!(r.len(), 1);
-        assert!(!r[0].status.is_authenticated);
+    fn status_reflects_a_caller_supplied_is_running_value() {
+        // A caller with no live daemon to ask (e.g. a stopped CLI daemon
+        // process) computes status from persisted state alone and must be
+        // able to report `is_running: false` while still reflecting real
+        // auth/pending-request state.
+        let auth = AuthState {
+            device_credentials: Some(DeviceCredentials {
+                device_id: "dev-1".into(),
+                refresh_token: "r".into(),
+            }),
+        };
+        let status = build(&auth, &UploadState::default(), None, false);
+        assert!(status.is_authenticated);
+        assert!(!status.is_running);
     }
 }

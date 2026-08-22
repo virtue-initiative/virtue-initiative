@@ -19,7 +19,6 @@ struct ContentView: View {
     @State private var showPauseConfirmation = false
     @State private var showLogoutConfirmation = false
     @State private var showStatusSheet = false
-    @State private var showOverridesSheet = false
 
     var body: some View {
         NavigationStack {
@@ -37,9 +36,6 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showStatusSheet) {
             StatusSheet(coordinator: coordinator)
-        }
-        .sheet(isPresented: $showOverridesSheet) {
-            OverridesSheet(coordinator: coordinator)
         }
         .alert("Pause monitoring?", isPresented: $showPauseConfirmation) {
             Button("Cancel", role: .cancel) {}
@@ -131,11 +127,6 @@ struct ContentView: View {
                         }
                         .buttonStyle(VirtueButtonStyle())
                         .disabled(coordinator.isSigningOut)
-
-                        Button("Runtime Overrides") {
-                            showOverridesSheet = true
-                        }
-                        .buttonStyle(VirtueButtonStyle())
                     }
                     .padding(.top, 6)
                 } else {
@@ -161,11 +152,6 @@ struct ContentView: View {
                             }
                             .buttonStyle(VirtueButtonStyle(prominent: true))
                             .disabled(coordinator.isSigningIn)
-
-                            Button("Runtime Overrides") {
-                                showOverridesSheet = true
-                            }
-                            .buttonStyle(VirtueButtonStyle())
                         }
 
                         if let error = coordinator.loginError {
@@ -279,50 +265,6 @@ private struct StatusSheet: View {
             .scrollContentBackground(.hidden)
             .background(VirtueBrand.bg)
             .navigationTitle("Status Details")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
-        }
-    }
-}
-
-private struct OverridesSheet: View {
-    @ObservedObject var coordinator: MonitoringCoordinator
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("Runtime Overrides") {
-                    TextField("VIRTUE_BASE_API_URL", text: $coordinator.baseApiUrlOverride)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .listRowBackground(VirtueBrand.surface)
-                    TextField("VIRTUE_CAPTURE_INTERVAL_SECONDS", text: $coordinator.captureIntervalOverride)
-                        .keyboardType(.numberPad)
-                        .listRowBackground(VirtueBrand.surface)
-                    TextField("VIRTUE_BATCH_WINDOW_SECONDS", text: $coordinator.batchWindowOverride)
-                        .keyboardType(.numberPad)
-                        .listRowBackground(VirtueBrand.surface)
-                }
-
-                Section {
-                    Button("Apply Overrides") {
-                        coordinator.applyOverrides()
-                        dismiss()
-                    }
-                    .listRowBackground(VirtueBrand.surface)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-                }
-            }
-            .scrollContentBackground(.hidden)
-            .background(VirtueBrand.bg)
-            .navigationTitle("Runtime Overrides")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

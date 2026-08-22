@@ -7,5 +7,5 @@ sidebar_position: 1
 To get set up, all you have to do is:
 
 1. [Create an account](/signup)
-2. [Install one of the monitoring apps](/help/installation)
+2. [Install one of the monitoring apps](/download)
 3. [Invite a partner to your account](/help/web/inviting-a-partner)

@@ -5,17 +5,33 @@ import data from './routes/data';
 import deviceOnly from './routes/device-only';
 import devices from './routes/devices';
 import emailWebhooks from './routes/email-webhooks';
-import hashes from './routes/hashes';
 import partners from './routes/partners';
+import { isApiVersionGone, stripApiVersion } from './lib/api-version';
 import { stripApiBasePath } from './lib/base-path';
-import { getJWKS } from './lib/jwt';
-import { pruneExpiredBatches } from './lib/retention';
+import {
+  pruneExpiredBatches,
+  pruneExpiredDeviceSessions,
+  pruneExpiredEmailTokens,
+  pruneExpiredUserSessions,
+} from './lib/retention';
 import { runNotificationSchedule } from './lib/scheduler';
 import { Env, Variables } from './types/bindings';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>({
-  getPath: (request, options) =>
-    stripApiBasePath(new URL(request.url).pathname, options?.env?.API_BASE_PATH),
+  getPath: (request, options) => {
+    const basePathStripped = stripApiBasePath(
+      new URL(request.url).pathname,
+      options?.env?.API_BASE_PATH,
+    );
+    return stripApiVersion(basePathStripped, request);
+  },
+});
+
+app.use('/*', async (c, next) => {
+  if (isApiVersionGone(c.req.raw)) {
+    return c.json({ error: 'This API version is no longer supported' }, 410);
+  }
+  await next();
 });
 
 app.use(
@@ -37,11 +53,10 @@ app.get('/', (c) =>
   c.json({
     name: 'Virtue Initiative API',
     version: '1.0.0',
+    commit: c.env.COMMIT_SHA ?? 'unknown',
     status: 'ok',
   }),
 );
-
-app.get('/.well-known/jwks.json', async (c) => c.json(await getJWKS(c.env.JWT_PUBLIC_KEY)));
 
 app.route('/', auth);
 app.route('/', partners);
@@ -49,7 +64,6 @@ app.route('/', emailWebhooks);
 app.route('/device', devices);
 app.route('/data', data);
 app.route('/d', deviceOnly);
-app.route('/hash', hashes);
 
 app.get('/r2/*', async (c) => {
   const key = c.req.path.replace(/^\/r2\//, '');
@@ -80,5 +94,8 @@ export default {
   scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(runNotificationSchedule(env, controller.scheduledTime));
     ctx.waitUntil(pruneExpiredBatches(env, controller.scheduledTime));
+    ctx.waitUntil(pruneExpiredEmailTokens(env, controller.scheduledTime));
+    ctx.waitUntil(pruneExpiredUserSessions(env, controller.scheduledTime));
+    ctx.waitUntil(pruneExpiredDeviceSessions(env, controller.scheduledTime));
   },
 };

@@ -41,6 +41,18 @@ export default defineConfig(({ mode }) => {
       }),
     ],
     server: {
+      // Vite's dev server answers CORS preflight requests itself (before the
+      // /api proxy below even runs) using its own default cors options, which
+      // don't set Access-Control-Allow-Credentials. Since api.ts's req()
+      // always sets Content-Type: application/json (forcing a preflight) and
+      // fetches with credentials: 'include', that default silently breaks
+      // every API call in domain mode (app.<domain>.localhost, where /api is
+      // proxied rather than same-port). Configure it to match what the real
+      // API's cors() middleware (api/src/index.ts) sends.
+      cors: {
+        origin: true,
+        credentials: true,
+      },
       proxy: {
         '/api': {
           target: process.env.VITE_API_PROXY_TARGET ?? 'http://localhost:8787',

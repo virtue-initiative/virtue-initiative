@@ -5,61 +5,35 @@ import {
   deleteDeviceById,
   findOwnedDevice,
   findUserById,
-  getHashState,
   listBatchUrlsForDevice,
   listAcceptedNotificationTargetsForUser,
   listDevicesForOwners,
   listVisibleOwnerIds,
   updateDevice,
 } from '../lib/db';
+import { hashGetMany } from '../lib/hash-server';
 import { sendEmail } from '../lib/email';
 import { renderDeviceDeletedTemplate } from '../lib/email/templates';
 import { deleteObject } from '../lib/r2';
-import { generateToken } from '../lib/jwt';
 import { Env, Variables } from '../types/bindings';
-import { updateDeviceSchema, type PatchDeviceResponse } from '../../../shared-web/types';
+import { updateDeviceSchema } from '../../../shared-web/types';
 
 const devices = new Hono<{ Bindings: Env; Variables: Variables }>();
 const ONLINE_WINDOW_MS = 2 * 60 * 60 * 1000;
-function getAppUrl(env: Env) {
-  return env.APP_URL;
-}
 
 devices.get('/', authenticateWebSession(), async (c) => {
   const ownerIds = await listVisibleOwnerIds(c.env.DB, c.get('sub'));
   const rows = await listDevicesForOwners(c.env.DB, ownerIds);
 
-  const hashServerUrl = c.env.HASH_SERVER_URL?.trim() || null;
-  const hashInfo = new Map<string, { count: number; hashed_at: number | null }>();
-
-  if (hashServerUrl?.endsWith('/api')) {
-    // Hack: when the hash server is this API itself, skip the HTTP round-trip
-    // and read the hash state directly from D1.
-    await Promise.all(
-      rows.map(async (device) => {
-        const state = await getHashState(c.env.DB, device.id);
-        if (state) {
-          hashInfo.set(device.id, { count: state.count, hashed_at: state.hashed_at });
-        }
-      }),
+  let hashInfo = new Map<string, { hash: string; seq: number; last_received: number }>();
+  try {
+    hashInfo = await hashGetMany(
+      c.env,
+      rows.map((device) => device.id),
     );
-  } else if (hashServerUrl) {
-    await Promise.all(
-      rows.map(async (device) => {
-        try {
-          const token = await generateToken('server', device.id, c.env.JWT_PRIVATE_KEY, 60);
-          const resp = await fetch(`${hashServerUrl}/hash/info`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          if (resp.ok) {
-            const info = (await resp.json()) as { count: number; hashed_at: number | null };
-            hashInfo.set(device.id, info);
-          }
-        } catch {
-          // fall back to D1 values for this device
-        }
-      }),
-    );
+  } catch {
+    // Hash server unreachable — fall back to unknown (zero) state for every device
+    // below rather than failing the whole listing.
   }
 
   return c.json(
@@ -71,8 +45,12 @@ devices.get('/', authenticateWebSession(), async (c) => {
         name: device.name,
         platform: device.platform,
         last_upload_at: device.last_upload_at,
-        last_hash_at: hi ? hi.hashed_at : device.last_hash_at,
-        pending_count: hi ? hi.count : device.pending_count,
+        // hash-server's last_received is unix *seconds* (hash-server/SPEC.md's
+        // unix_time is a u32, so it can only be seconds); last_hash_at is a
+        // DateTime (millisecond Unix timestamp) per SPEC.md, like every other
+        // timestamp this API returns.
+        last_hash_at: hi ? hi.last_received * 1000 : null,
+        pending_count: hi ? hi.seq : 0,
         status: device.deleted_at
           ? 'logged_out'
           : device.last_upload_at && Date.now() - device.last_upload_at < ONLINE_WINDOW_MS
@@ -98,7 +76,7 @@ devices.patch(
     const { name } = c.req.valid('json');
     await updateDevice(c.env.DB, deviceId, { name });
 
-    return c.json<PatchDeviceResponse>({ id: deviceId, updated: true });
+    return c.body(null, 204);
   },
 );
 
@@ -125,7 +103,7 @@ devices.delete('/:id', authenticateWebSession(), async (c) => {
   if (owner) {
     const email = renderDeviceDeletedTemplate({
       appName: c.env.APP_NAME,
-      appUrl: getAppUrl(c.env),
+      appUrl: c.env.APP_URL,
       recipientName: owner.name,
       deviceName: device.name,
       devicePlatform: device.platform,
@@ -152,7 +130,7 @@ devices.delete('/:id', authenticateWebSession(), async (c) => {
 
     const email = renderDeviceDeletedTemplate({
       appName: c.env.APP_NAME,
-      appUrl: getAppUrl(c.env),
+      appUrl: c.env.APP_URL,
       recipientName: target.watcher_name,
       deviceName: device.name,
       devicePlatform: device.platform,

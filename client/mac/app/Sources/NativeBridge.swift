@@ -30,13 +30,6 @@ private func virtue_mac_native_request_user_stop(
     _ source: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
-@_silgen_name("virtue_mac_native_set_overrides")
-private func virtue_mac_native_set_overrides(
-    _ baseApiUrl: UnsafePointer<CChar>?,
-    _ captureIntervalSeconds: UnsafePointer<CChar>?,
-    _ batchWindowSeconds: UnsafePointer<CChar>?
-) -> UnsafeMutablePointer<CChar>?
-
 @_silgen_name("virtue_mac_native_has_capture_permission")
 private func virtue_mac_native_has_capture_permission() -> Bool
 
@@ -90,32 +83,10 @@ enum DaemonStatus: Int32 {
     case unreachable = 2
 }
 
-struct RuntimeOverrides {
-    var baseApiUrl: String = ""
-    var captureIntervalSeconds: String = ""
-    var batchWindowSeconds: String = ""
-}
-
 enum NativeBridge {
     static func initialize() -> String? {
         callReturningError {
             virtue_mac_native_init()
-        }
-    }
-
-    static func setOverrides(_ overrides: RuntimeOverrides) -> String? {
-        callReturningError {
-            overrides.baseApiUrl.withCString { baseApiCString in
-                overrides.captureIntervalSeconds.withCString { captureIntervalCString in
-                    overrides.batchWindowSeconds.withCString { batchWindowCString in
-                        virtue_mac_native_set_overrides(
-                            baseApiCString,
-                            captureIntervalCString,
-                            batchWindowCString
-                        )
-                    }
-                }
-            }
         }
     }
 

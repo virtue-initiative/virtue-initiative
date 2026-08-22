@@ -3,17 +3,7 @@ import Foundation
 @_silgen_name("virtue_ios_native_init")
 private func virtue_ios_native_init(
     _ configDir: UnsafePointer<CChar>?,
-    _ dataDir: UnsafePointer<CChar>?,
-    _ baseApiUrl: UnsafePointer<CChar>?,
-    _ captureIntervalSeconds: UnsafePointer<CChar>?,
-    _ batchWindowSeconds: UnsafePointer<CChar>?
-) -> UnsafeMutablePointer<CChar>?
-
-@_silgen_name("virtue_ios_native_set_overrides")
-private func virtue_ios_native_set_overrides(
-    _ baseApiUrl: UnsafePointer<CChar>?,
-    _ captureIntervalSeconds: UnsafePointer<CChar>?,
-    _ batchWindowSeconds: UnsafePointer<CChar>?
+    _ dataDir: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
 @_silgen_name("virtue_ios_native_login")
@@ -46,31 +36,105 @@ private func virtue_ios_native_request_pause_monitoring(
     _ source: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
+@_silgen_name("virtue_ios_native_request_resume_monitoring")
+private func virtue_ios_native_request_resume_monitoring() -> UnsafeMutablePointer<CChar>?
+
 @_silgen_name("virtue_ios_free_string")
 private func virtue_ios_free_string(_ value: UnsafeMutablePointer<CChar>?)
 
-struct RuntimeOverrides {
-    var baseApiUrl: String = ""
-    var captureIntervalSeconds: String = ""
-    var batchWindowSeconds: String = ""
-}
-
 enum NativeBridge {
-    static func initialize(configDir: String, dataDir: String, overrides: RuntimeOverrides) -> String? {
+    private static let initLock = NSLock()
+    private static var initialized = false
+
+    private static let daemonQueue = DispatchQueue(label: "org.virtueinitiative.ios.app.daemon")
+    private static let daemonLock = NSLock()
+    private static var daemonLoopRefCount = 0
+
+    /// Idempotent, retry-capable init: safe to call from every entry point
+    /// (app launch, login, logout, status refresh) since a failed attempt
+    /// doesn't permanently brick later calls the way a single one-shot
+    /// `initialize` call at app launch would.
+    @discardableResult
+    static func ensureInitialized(configDir: String, dataDir: String) -> String? {
+        initLock.lock()
+        defer { initLock.unlock() }
+
+        if initialized {
+            return nil
+        }
+
+        var error = rawInitialize(configDir: configDir, dataDir: dataDir)
+        if let currentError = error, currentError.contains("serialization error") {
+            // Corrupted state files — wipe and retry once
+            try? FileManager.default.removeItem(atPath: dataDir)
+            try? FileManager.default.createDirectory(
+                atPath: dataDir,
+                withIntermediateDirectories: true
+            )
+            error = rawInitialize(configDir: configDir, dataDir: dataDir)
+        }
+
+        if error == nil {
+            initialized = true
+        }
+        return error
+    }
+
+    /// `login`/`logout`/`requestPauseMonitoring` block on a reply from the
+    /// daemon's `run_forever()` loop thread, so it must be running in this
+    /// process for the call to complete. Unlike Android (one process), the
+    /// Safari extension is a *separate OS process* that runs its own
+    /// independent `Daemon` against the same on-disk state file with no
+    /// cross-process locking — so this process's loop is started only for
+    /// the duration of the calls that need it (ref-counted, to tolerate
+    /// overlapping calls) and stopped immediately after, rather than left
+    /// running continuously, to keep the window where both processes could
+    /// tick — and race each other's writes — as small as possible.
+    private static func withDaemonLoop<T>(_ body: () -> T) -> T {
+        daemonLock.lock()
+        daemonLoopRefCount += 1
+        let shouldStart = daemonLoopRefCount == 1
+        daemonLock.unlock()
+
+        if shouldStart {
+            daemonQueue.async {
+                if let error = runDaemonLoop() {
+                    NSLog("Virtue: daemon loop exited with error: \(error)")
+                }
+            }
+        }
+
+        let result = body()
+
+        daemonLock.lock()
+        daemonLoopRefCount -= 1
+        let shouldStop = daemonLoopRefCount == 0
+        daemonLock.unlock()
+
+        if shouldStop {
+            _ = rawStopDaemon()
+        }
+
+        return result
+    }
+
+    private static func rawInitialize(configDir: String, dataDir: String) -> String? {
         callReturningError {
             configDir.withCString { configDirCString in
                 dataDir.withCString { dataDirCString in
-                    overrides.baseApiUrl.withCString { baseApiCString in
-                        overrides.captureIntervalSeconds.withCString { captureIntervalCString in
-                            overrides.batchWindowSeconds.withCString { batchWindowCString in
-                                virtue_ios_native_init(
-                                    configDirCString,
-                                    dataDirCString,
-                                    baseApiCString,
-                                    captureIntervalCString,
-                                    batchWindowCString
-                                )
-                            }
+                    virtue_ios_native_init(configDirCString, dataDirCString)
+                }
+            }
+        }
+    }
+
+    static func login(email: String, password: String, deviceName: String) -> String? {
+        withDaemonLoop {
+            callReturningError {
+                email.withCString { emailCString in
+                    password.withCString { passwordCString in
+                        deviceName.withCString { deviceNameCString in
+                            virtue_ios_native_login(emailCString, passwordCString, deviceNameCString)
                         }
                     }
                 }
@@ -78,37 +142,11 @@ enum NativeBridge {
         }
     }
 
-    static func setOverrides(_ overrides: RuntimeOverrides) -> String? {
-        callReturningError {
-            overrides.baseApiUrl.withCString { baseApiCString in
-                overrides.captureIntervalSeconds.withCString { captureIntervalCString in
-                    overrides.batchWindowSeconds.withCString { batchWindowCString in
-                        virtue_ios_native_set_overrides(
-                            baseApiCString,
-                            captureIntervalCString,
-                            batchWindowCString
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    static func login(email: String, password: String, deviceName: String) -> String? {
-        callReturningError {
-            email.withCString { emailCString in
-                password.withCString { passwordCString in
-                    deviceName.withCString { deviceNameCString in
-                        virtue_ios_native_login(emailCString, passwordCString, deviceNameCString)
-                    }
-                }
-            }
-        }
-    }
-
     static func logout() -> String? {
-        callReturningError {
-            virtue_ios_native_logout()
+        withDaemonLoop {
+            callReturningError {
+                virtue_ios_native_logout()
+            }
         }
     }
 
@@ -136,22 +174,32 @@ enum NativeBridge {
         return value
     }
 
-    static func runDaemonLoop() -> String? {
+    private static func runDaemonLoop() -> String? {
         callReturningError {
             virtue_ios_native_run_daemon_loop()
         }
     }
 
-    static func stopDaemon() -> String? {
+    private static func rawStopDaemon() -> String? {
         callReturningError {
             virtue_ios_native_stop_daemon()
         }
     }
 
     static func requestPauseMonitoring(source: String) -> String? {
-        callReturningError {
-            source.withCString { sourceCString in
-                virtue_ios_native_request_pause_monitoring(sourceCString)
+        withDaemonLoop {
+            callReturningError {
+                source.withCString { sourceCString in
+                    virtue_ios_native_request_pause_monitoring(sourceCString)
+                }
+            }
+        }
+    }
+
+    static func requestResumeMonitoring() -> String? {
+        withDaemonLoop {
+            callReturningError {
+                virtue_ios_native_request_resume_monitoring()
             }
         }
     }

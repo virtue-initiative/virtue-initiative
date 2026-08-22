@@ -1,6 +1,6 @@
 [package]
 name = "virtue-windows"
-version = "0.0.9"
+version = "0.1.0"
 edition = "2024"
 description = "Virtue Windows client"
 build = "build.rs"
@@ -10,42 +10,36 @@ name = "virtue_windows"
 path = "src/lib.rs"
 crate-type = ["rlib", "cdylib"]
 
+[[bin]]
+name = "virtue-windows-ci-runner"
+path = "src/bin/ci-runner.rs"
+
 [dependencies]
 anyhow = "1"
 virtue_core = { package = "virtue-core", path = "../core" }
-base64 = "0.22"
-chrono = { version = "0.4", features = ["clock", "serde"] }
-hex = "0.4"
+chrono = { version = "0.4", features = ["clock"] }
+clap = { version = "4", features = ["derive"] }
 hostname = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
-rand = "0.8"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1", features = ["v4"] }
 
 [build-dependencies]
 winresource = "0.1"
-
-[dev-dependencies]
-tempfile = "3"
 
 [dependencies.windows]
 version = "0.62"
 features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
-  "Win32_Graphics_Imaging",
   "Win32_Security",
   "Win32_Security_Authentication_Identity",
   "Win32_System_Registry",
   "Win32_System_StationsAndDesktops",
-  "Win32_System_SystemInformation",
   "Win32_System_Threading",
   "Win32_System_WindowsProgramming",
-  "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
 ]

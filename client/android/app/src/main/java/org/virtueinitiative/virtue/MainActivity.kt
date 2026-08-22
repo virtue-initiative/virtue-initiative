@@ -39,8 +39,6 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
         binding.versionText.text = "Build ${BuildConfig.VIRTUE_BUILD_LABEL}"
 
-        populateOverrideInputs()
-
         if (binding.deviceNameInput.text.isNullOrBlank()) {
             binding.deviceNameInput.setText(deviceName())
         }
@@ -50,15 +48,11 @@ class MainActivity : AppCompatActivity() {
             setStatus("Core init failed: $initError")
         }
 
-        binding.saveOverridesButton.setOnClickListener { saveOverrides(applyNow = true, showSavedMessage = true) }
         binding.loginButton.setOnClickListener { login() }
         binding.signOutButton.setOnClickListener { logout() }
-        binding.overridesButton.setOnClickListener { showOverridesDialog() }
-        binding.overridesButtonSession.setOnClickListener { showOverridesDialog() }
         binding.statusDetailsButton.setOnClickListener { showStatusDetails() }
         binding.pauseResumeButton.setOnClickListener { toggleMonitoring() }
-        binding.grantCaptureButton.setOnClickListener { openAccessibilitySettings() }
-        binding.startServiceButton.setOnClickListener { openAccessibilitySettings() }
+        binding.openAccessibilitySettingsButton.setOnClickListener { openAccessibilitySettings() }
 
         binding.websiteLink.setOnClickListener {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://virtueinitiative.org")))
@@ -77,7 +71,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun login() {
-        if (!saveOverrides(applyNow = true, showSavedMessage = false)) return
+        // nativeLogin() blocks waiting for a reply from the daemon loop thread,
+        // so the loop must already be running before we call it. The loop is
+        // only ever started by the accessibility service (on connect, or via
+        // resume() after a prior logout paused it) — require that first rather
+        // than attempting a login that can only time out.
+        if (!VirtueAccessibilityService.isConnected()) {
+            showAccessibilityOnboarding()
+            return
+        }
+        if (!VirtueAccessibilityService.isEnabled()) {
+            VirtueAccessibilityService.resume()
+        }
 
         val email = binding.emailInput.text?.toString()?.trim().orEmpty()
         val password = binding.passwordInput.text?.toString().orEmpty()
@@ -105,13 +110,6 @@ class MainActivity : AppCompatActivity() {
 
             if (error == null) {
                 refreshUi()
-                if (!VirtueAccessibilityService.isConnected()) {
-                    showAccessibilityOnboarding()
-                } else if (!VirtueAccessibilityService.isEnabled()) {
-                    VirtueAccessibilityService.resume()
-                    setStatus("Monitoring started.")
-                    refreshUi()
-                }
             } else {
                 setStatus("Login failed: $error")
             }
@@ -146,39 +144,70 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshUi() {
         val loggedIn = NativeBridge.nativeIsLoggedIn()
-        binding.loginPanel.visibility = if (loggedIn) android.view.View.GONE else android.view.View.VISIBLE
-        binding.sessionPanel.visibility = if (loggedIn) android.view.View.VISIBLE else android.view.View.GONE
+        val accessibilityConnected = VirtueAccessibilityService.isConnected()
 
-        if (loggedIn) {
-            binding.deviceIdText.text = deviceName()
-            binding.statusButtonsLayout.visibility = android.view.View.VISIBLE
-
-            when {
-                VirtueAccessibilityService.isEnabled() -> {
-                    binding.statusTitle.text = getString(R.string.status_monitoring)
-                    binding.pauseResumeButton.text = getString(R.string.btn_pause_monitoring)
-                    setStatus("Monitoring service is running")
-                }
-                VirtueAccessibilityService.isPaused() -> {
-                    binding.statusTitle.text = getString(R.string.status_paused)
-                    binding.pauseResumeButton.text = getString(R.string.btn_resume_monitoring)
-                    setStatus("Monitoring is paused")
-                }
-                VirtueAccessibilityService.isConnected() -> {
-                    binding.statusTitle.text = getString(R.string.status_waiting)
-                    binding.pauseResumeButton.text = getString(R.string.btn_resume_monitoring)
-                    setStatus("Accessibility service connected — tap Resume to start")
-                }
-                else -> {
-                    binding.statusTitle.text = getString(R.string.status_waiting)
-                    binding.pauseResumeButton.text = getString(R.string.btn_resume_monitoring)
-                    setStatus("Enable Virtue in Accessibility Settings to start monitoring")
-                }
-            }
-        } else {
-            binding.statusTitle.text = getString(R.string.status_signed_out)
+        // First-install flow: nothing else can happen (login blocks waiting on the
+        // daemon loop, which the accessibility service is what starts) until the
+        // service is connected, so keep signed-out users on the onboarding screen
+        // until then.
+        if (!loggedIn && !accessibilityConnected) {
+            binding.onboardingPanel.visibility = android.view.View.VISIBLE
+            binding.loginPanel.visibility = android.view.View.GONE
+            binding.sessionPanel.visibility = android.view.View.GONE
             binding.statusButtonsLayout.visibility = android.view.View.GONE
+            binding.onboardingStatusText.text = getString(R.string.msg_onboarding_waiting)
+            binding.statusTitle.text = getString(R.string.status_signed_out)
             setStatus(getString(R.string.msg_sign_in_to_start))
+            return
+        }
+
+        if (!loggedIn) {
+            // Accessibility just connected (or already was) — make sure the core
+            // actually finished initializing before handing off to the login screen,
+            // since login() blocks on a daemon loop thread that only the core's
+            // successful init can start.
+            val initError = NativeBridge.ensureInitialized(this)
+            val coreReady = initError == null
+            binding.onboardingPanel.visibility = if (coreReady) android.view.View.GONE else android.view.View.VISIBLE
+            binding.loginPanel.visibility = if (coreReady) android.view.View.VISIBLE else android.view.View.GONE
+            binding.sessionPanel.visibility = android.view.View.GONE
+            binding.statusButtonsLayout.visibility = android.view.View.GONE
+            if (!coreReady) {
+                binding.onboardingStatusText.text = getString(R.string.msg_core_init_failed, initError)
+            }
+            binding.statusTitle.text = getString(R.string.status_signed_out)
+            setStatus(getString(R.string.msg_sign_in_to_start))
+            return
+        }
+
+        binding.onboardingPanel.visibility = android.view.View.GONE
+        binding.loginPanel.visibility = android.view.View.GONE
+        binding.sessionPanel.visibility = android.view.View.VISIBLE
+
+        binding.deviceIdText.text = deviceName()
+        binding.statusButtonsLayout.visibility = android.view.View.VISIBLE
+
+        when {
+            VirtueAccessibilityService.isEnabled() -> {
+                binding.statusTitle.text = getString(R.string.status_monitoring)
+                binding.pauseResumeButton.text = getString(R.string.btn_pause_monitoring)
+                setStatus("Monitoring service is running")
+            }
+            VirtueAccessibilityService.isPaused() -> {
+                binding.statusTitle.text = getString(R.string.status_paused)
+                binding.pauseResumeButton.text = getString(R.string.btn_resume_monitoring)
+                setStatus("Monitoring is paused")
+            }
+            VirtueAccessibilityService.isConnected() -> {
+                binding.statusTitle.text = getString(R.string.status_waiting)
+                binding.pauseResumeButton.text = getString(R.string.btn_resume_monitoring)
+                setStatus("Accessibility service connected — tap Resume to start")
+            }
+            else -> {
+                binding.statusTitle.text = getString(R.string.status_waiting)
+                binding.pauseResumeButton.text = getString(R.string.btn_resume_monitoring)
+                setStatus("Enable Virtue in Accessibility Settings to start monitoring")
+            }
         }
     }
 
@@ -225,8 +254,9 @@ class MainActivity : AppCompatActivity() {
                 "Virtue needs Accessibility permission to monitor your screen.\n\n" +
                 "1. Tap \"Open Settings\" below\n" +
                 "2. Find \"Virtue\" in the list\n" +
-                "3. Toggle it on and confirm\n\n" +
-                "Monitoring will start automatically once enabled."
+                "3. Toggle it on and confirm\n" +
+                "4. Return here to sign in\n\n" +
+                "Monitoring will start automatically once you're signed in."
             )
             .setPositiveButton("Open Settings") { _, _ -> openAccessibilitySettings() }
             .setNegativeButton(getString(R.string.dialog_cancel), null)
@@ -265,178 +295,6 @@ class MainActivity : AppCompatActivity() {
         return if (model.startsWith(manufacturer, ignoreCase = true)) model else "$manufacturer $model"
     }
 
-    private fun populateOverrideInputs() {
-        val overrides = OverrideSettings.load(this)
-        binding.baseApiUrlInput.setText(overrides.baseApiUrl.orEmpty())
-        binding.captureIntervalInput.setText(overrides.captureIntervalSeconds.orEmpty())
-        binding.batchWindowInput.setText(overrides.batchWindowSeconds.orEmpty())
-    }
-
-    private fun saveOverrides(applyNow: Boolean, showSavedMessage: Boolean): Boolean {
-        val baseUrl = binding.baseApiUrlInput.text?.toString().orEmpty().trim()
-        val captureInterval = binding.captureIntervalInput.text?.toString().orEmpty().trim()
-        val batchWindow = binding.batchWindowInput.text?.toString().orEmpty().trim()
-
-        if (baseUrl.isNotEmpty() && !baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
-            setStatus("VIRTUE_BASE_API_URL must start with http:// or https://")
-            return false
-        }
-        if (captureInterval.isNotEmpty() && captureInterval.toLongOrNull()?.let { it > 0 } != true) {
-            setStatus("VIRTUE_CAPTURE_INTERVAL_SECONDS must be a positive integer")
-            return false
-        }
-        if (batchWindow.isNotEmpty() && batchWindow.toLongOrNull()?.let { it > 0 } != true) {
-            setStatus("VIRTUE_BATCH_WINDOW_SECONDS must be a positive integer")
-            return false
-        }
-
-        val values = OverrideValues(
-            baseApiUrl = baseUrl.ifEmpty { null },
-            captureIntervalSeconds = captureInterval.ifEmpty { null },
-            batchWindowSeconds = batchWindow.ifEmpty { null }
-        )
-        OverrideSettings.save(this, values)
-
-        if (applyNow) {
-            val error = NativeBridge.applyOverrides(this)
-            if (error != null) {
-                setStatus("Failed to apply overrides: $error")
-                return false
-            }
-        }
-
-        if (showSavedMessage) setStatus("Overrides saved")
-        return true
-    }
-
-    private fun showOverridesDialog() {
-        val bgColor = 0xFFF4EFE3.toInt()
-        val cardColor = 0xFFFBF7EA.toInt()
-        val borderColor = 0xFFD9D1BC.toInt()
-        val labelColor = 0xFF9C9682.toInt()
-        val valueColor = 0xFF1B1A16.toInt()
-        val dp = resources.displayMetrics.density
-
-        fun cardDrawable() = GradientDrawable().apply {
-            setColor(cardColor)
-            cornerRadius = 4 * dp
-            setStroke((1 * dp).toInt(), borderColor)
-        }
-
-        fun divider() = android.view.View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, (1 * dp).toInt()
-            ).apply { topMargin = (14 * dp).toInt(); bottomMargin = (14 * dp).toInt() }
-            setBackgroundColor(borderColor)
-        }
-
-        fun makeField(label: String, value: String, numeric: Boolean): android.widget.EditText {
-            return android.widget.EditText(this).apply {
-                setText(value)
-                hint = label
-                setHintTextColor(labelColor)
-                setTextColor(valueColor)
-                textSize = 15f
-                inputType = if (numeric)
-                    android.text.InputType.TYPE_CLASS_NUMBER
-                else
-                    android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
-                background = null
-                setPadding(0, (4 * dp).toInt(), 0, (4 * dp).toInt())
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-            }
-        }
-
-        val apiEdit = makeField(getString(R.string.override_api_url), binding.baseApiUrlInput.text.toString(), numeric = false)
-        val captureEdit = makeField(getString(R.string.override_capture_interval), binding.captureIntervalInput.text.toString(), numeric = true)
-        val batchEdit = makeField(getString(R.string.override_batch_window), binding.batchWindowInput.text.toString(), numeric = true)
-
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = cardDrawable()
-            val pad = (20 * dp).toInt()
-            setPadding(pad, pad, pad, pad)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-        }
-        card.addView(apiEdit)
-        card.addView(divider())
-        card.addView(captureEdit)
-        card.addView(divider())
-        card.addView(batchEdit)
-
-        val cancelBtn = com.google.android.material.button.MaterialButton(
-            this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle
-        ).apply {
-            text = getString(R.string.dialog_cancel)
-            setTextColor(0xFF1E3A2E.toInt())
-            strokeColor = android.content.res.ColorStateList.valueOf(0xFF1E3A2E.toInt())
-            backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.TRANSPARENT)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = (8 * dp).toInt() }
-        }
-        val applyBtn = com.google.android.material.button.MaterialButton(this).apply {
-            text = getString(R.string.btn_apply_overrides)
-            backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF1E3A2E.toInt())
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-        }
-
-        val outerScroll = ScrollView(this).apply { setBackgroundColor(bgColor) }
-        val outerContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            val pad = (20 * dp).toInt()
-            setPadding(pad, pad, pad, pad)
-        }
-        outerScroll.addView(outerContainer)
-
-        outerContainer.addView(TextView(this).apply {
-            text = getString(R.string.section_overrides)
-            textSize = 20f
-            setTextColor(valueColor)
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = (18 * dp).toInt() }
-        })
-        outerContainer.addView(card)
-        outerContainer.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = (16 * dp).toInt() }
-            addView(cancelBtn)
-            addView(applyBtn)
-        })
-
-        val dialog = Dialog(this, android.R.style.Theme_Material_Light_NoActionBar_Fullscreen)
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
-        dialog.setContentView(outerScroll)
-        dialog.window?.apply {
-            setLayout(
-                android.view.WindowManager.LayoutParams.MATCH_PARENT,
-                android.view.WindowManager.LayoutParams.MATCH_PARENT
-            )
-            setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-        }
-
-        cancelBtn.setOnClickListener { dialog.dismiss() }
-        applyBtn.setOnClickListener {
-            binding.baseApiUrlInput.setText(apiEdit.text)
-            binding.captureIntervalInput.setText(captureEdit.text)
-            binding.batchWindowInput.setText(batchEdit.text)
-            if (saveOverrides(applyNow = true, showSavedMessage = true)) dialog.dismiss()
-        }
-
-        dialog.show()
-    }
-
     private fun showStatusDetails() {
         val json = runCatching { JSONObject(NativeBridge.nativeGetStatusJson()) }.getOrElse { JSONObject() }
         val lifecycle = json.optJSONObject("lifecycle") ?: JSONObject()
@@ -450,9 +308,6 @@ class MainActivity : AppCompatActivity() {
         val primaryService = snapshot.optString("primary_service", "unknown")
         val capturePermission = snapshot.optString("capture_permission", "unknown")
         val captureAvailability = snapshot.optString("capture_availability", "unknown")
-
-        val overrides = OverrideSettings.load(this)
-        val apiUrl = overrides.baseApiUrl ?: "https://api.virtueinitiative.org"
 
         val bgColor = 0xFFF4EFE3.toInt()
         val cardColor = 0xFFFBF7EA.toInt()
@@ -553,7 +408,6 @@ class MainActivity : AppCompatActivity() {
             "Status" to binding.statusText.text.toString(),
             "Accessibility service" to a11yStatus,
             "Pending requests" to pendingRequests.toString(),
-            "API" to apiUrl,
         ))
 
         outerContainer.addView(sectionLabel("Core Lifecycle"))

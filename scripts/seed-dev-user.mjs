@@ -97,9 +97,9 @@ const pubKeyHex = toHex(pubKeyBytes);
 const privKeyHex = toHex(encryptedPrivKey);
 
 const sql = `
-INSERT OR IGNORE INTO users (id, email, password_hash, password_salt, password_params_version, email_verified, pub_key, priv_key)
+INSERT OR IGNORE INTO users (id, email, password_hash, password_salt, password_params_version, email_verified, pub_key, encrypted_priv_key)
 VALUES (X'${USER_ID_HEX}', '${EMAIL}', '${passwordHash}', X'${saltHex}', 'argon2id-v1', 1, X'${pubKeyHex}', X'${privKeyHex}');
-UPDATE users SET pub_key = X'${pubKeyHex}', priv_key = X'${privKeyHex}' WHERE id = X'${USER_ID_HEX}';
+UPDATE users SET pub_key = X'${pubKeyHex}', encrypted_priv_key = X'${privKeyHex}' WHERE id = X'${USER_ID_HEX}';
 `;
 
 const tmpFile = join(ROOT, '.seed-dev-user-tmp.sql');

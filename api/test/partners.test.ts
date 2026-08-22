@@ -30,7 +30,7 @@ describe('Partner routes', () => {
       headers: authHeaders(ownerCookie),
       body: JSON.stringify({ email: 'partner@example.com' }),
     });
-    expect(createRes.status).toBe(201);
+    expect(createRes.status).toBe(200);
     const created = (await createRes.json()) as { id: string };
 
     const inviteDelivery = (await listEmailDeliveries()).find(
@@ -79,7 +79,7 @@ describe('Partner routes', () => {
       ownerUserId,
     );
 
-    const deleteRes = await SELF.fetch(`${BASE}/partner/watching/${created.id}`, {
+    const deleteRes = await SELF.fetch(`${BASE}/partner/${created.id}`, {
       method: 'DELETE',
       headers: authHeaders(partnerCookie),
     });
@@ -96,7 +96,7 @@ describe('Partner routes', () => {
       headers: authHeaders(ownerCookie),
       body: JSON.stringify({ email: 'future@example.com' }),
     });
-    expect(inviteRes.status).toBe(201);
+    expect(inviteRes.status).toBe(200);
     const created = (await inviteRes.json()) as { id: string };
     const inviteDelivery = (await listEmailDeliveries()).find(
       (delivery) =>
@@ -140,6 +140,58 @@ describe('Partner routes', () => {
     expect(owned?.status).toBe('accepted');
   });
 
+  it('lets either side of an accepted partnership delete it via DELETE /partner/:id', async () => {
+    const { cookie: ownerCookie, userId: ownerUserId } = await signupAndGetCookie(
+      'owner3@example.com',
+      'pw',
+      'Owner',
+    );
+    const { cookie: partnerCookie } = await signupAndGetCookie(
+      'partner3@example.com',
+      'pw',
+      'Partner',
+    );
+    const { cookie: outsiderCookie } = await signupAndGetCookie('outsider3@example.com', 'pw');
+    await markUserEmailVerified(ownerUserId);
+
+    const createRes = await SELF.fetch(`${BASE}/partner`, {
+      method: 'POST',
+      headers: authHeaders(ownerCookie),
+      body: JSON.stringify({ email: 'partner3@example.com' }),
+    });
+    const created = (await createRes.json()) as { id: string };
+    const inviteDelivery = (await listEmailDeliveries()).find(
+      (delivery) =>
+        delivery.kind === 'partner_invite' && delivery.recipient_email === 'partner3@example.com',
+    );
+    const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
+    await SELF.fetch(`${BASE}/partner/accept`, {
+      method: 'POST',
+      headers: authHeaders(partnerCookie),
+      body: JSON.stringify({ token: inviteMetadata.inviteToken }),
+    });
+
+    const outsiderDeleteRes = await SELF.fetch(`${BASE}/partner/${created.id}`, {
+      method: 'DELETE',
+      headers: authHeaders(outsiderCookie),
+    });
+    expect(outsiderDeleteRes.status).toBe(404);
+
+    // The owning side (the person being watched) can also delete the partnership,
+    // not just the watcher — DELETE /partner/:id works from either direction.
+    const ownerDeleteRes = await SELF.fetch(`${BASE}/partner/${created.id}`, {
+      method: 'DELETE',
+      headers: authHeaders(ownerCookie),
+    });
+    expect(ownerDeleteRes.status).toBe(204);
+
+    const ownerListRes = await SELF.fetch(`${BASE}/partner`, {
+      headers: authHeaders(ownerCookie),
+    });
+    const ownerList = (await ownerListRes.json()) as { watchers: Array<{ id: string }> };
+    expect(ownerList.watchers.find((partner) => partner.id === created.id)).toBeUndefined();
+  });
+
   it('prevents accepting your own invite link', async () => {
     const { cookie: ownerCookie, userId: ownerUserId } =
       await signupAndGetCookie('owner4@example.com');
@@ -152,7 +204,7 @@ describe('Partner routes', () => {
         email: 'someone-else@example.com',
       }),
     });
-    expect(createRes.status).toBe(201);
+    expect(createRes.status).toBe(200);
     const inviteDelivery = (await listEmailDeliveries()).find(
       (delivery) =>
         delivery.kind === 'partner_invite' &&
