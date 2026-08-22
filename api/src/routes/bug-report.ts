@@ -29,7 +29,7 @@ const bugReportFormSchema = z.object({
 
 type ReporterIdentity =
   | { kind: 'user'; id: string; email?: string }
-  | { kind: 'device'; id: string; name?: string; platform?: string };
+  | { kind: 'device'; id: string; name?: string; platform?: string; ownerEmail?: string };
 
 /** Best-effort auth: reports are accepted with or without a token, so failures here just mean "anonymous". */
 async function resolveReporterIdentity(
@@ -58,11 +58,13 @@ async function resolveReporterIdentity(
     const session = await findSessionByRefreshTokenHash(c.env.DB, hashOpaqueToken(token), 'device');
     if (session?.device_id && session.expires_at > Date.now()) {
       const device = await findDeviceById(c.env.DB, session.device_id);
+      const owner = device?.owner ? await findUserById(c.env.DB, device.owner) : undefined;
       return {
         kind: 'device',
         id: session.device_id,
         name: device?.name,
         platform: device?.platform,
+        ownerEmail: owner?.email,
       };
     }
   } catch {
@@ -84,11 +86,17 @@ bugReport.post(
       identity?.kind === 'user'
         ? `User ${identity.email ?? identity.id}`
         : identity?.kind === 'device'
-          ? `Device "${identity.name ?? identity.id}" (${identity.platform ?? 'unknown platform'})`
+          ? `Device "${identity.name ?? identity.id}" (${identity.platform ?? 'unknown platform'})` +
+            (identity.ownerEmail ? ` owned by ${identity.ownerEmail}` : '')
           : 'Anonymous (no session)';
 
-    const contactEmail =
-      body.contact_email ?? (identity?.kind === 'user' ? identity.email : undefined);
+    const identityEmail =
+      identity?.kind === 'user'
+        ? identity.email
+        : identity?.kind === 'device'
+          ? identity.ownerEmail
+          : undefined;
+    const contactEmail = body.contact_email ?? identityEmail;
 
     // The client MAY supply richer platform_details (e.g. the Linux client sends
     // kernel/os-release info); when it doesn't, fall back to the User-Agent the

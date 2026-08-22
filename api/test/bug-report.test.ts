@@ -86,6 +86,7 @@ describe('POST /bug-report', () => {
     expect(report).toBeTruthy();
     expect(report!.text).toContain('Bug Report Laptop');
     expect(report!.text).toContain('linux');
+    expect(report!.text).toContain('device-owner@example.com');
   });
 
   it('uses the sent platform_details when the client provides one', async () => {

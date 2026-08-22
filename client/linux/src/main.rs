@@ -283,7 +283,7 @@ fn report_issue(
     }
     println!("  - Platform details: {platform_details}");
     if device_refresh_token.is_some() {
-        println!("  - This device's identity (you're logged in)");
+        println!("  - This device's identity and your account email (you're logged in)");
     }
     match &logs {
         Some(logs) => println!(

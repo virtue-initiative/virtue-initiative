@@ -728,8 +728,10 @@ limit is exceeded.
 
 The server MUST email the report to a fixed internal address (not configurable per-request),
 including the message, `platform`/`app_version`/`platform_details` if available, and, when
-authenticated, the reporting user's or device's identity. The server SHOULD set the Reply-To
-header of that email to `contact_email` (or the authenticated user's email) if available. The
+authenticated, the reporting user's or device's identity. For a Device Token, the server MUST
+resolve the device's owning account and treat that account's email the same as a Web Token's:
+included in the body and used for Reply-To. The server SHOULD set the Reply-To header of that
+email to `contact_email` (or the authenticated user's/device owner's email) if available. The
 server MUST attach `log_file` (if sent) to that email as-is. The email SHOULD be minimally
 formatted plain text — this is an internal notification, not a user-facing template.
 
