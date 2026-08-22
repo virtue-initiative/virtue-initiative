@@ -1,5 +1,7 @@
 mod batch;
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use serde::{Deserialize, Serialize};
 
 use batch::BatchBuilder;
@@ -13,6 +15,16 @@ use crate::model::{
     BatchRecipient, BatchUpload, DeviceCredentials, DeviceSettings, LogEntry, NotifyPayload,
     UploadKind,
 };
+
+static BATCH_UPLOAD_SUCCESS_COUNT: AtomicU64 = AtomicU64::new(0);
+
+/// Process-lifetime count of successful `POST /d/batch` uploads — not persisted
+/// across restarts, just a lightweight always-available tally for platform-side
+/// memory diagnostics (see the iOS `virtue_ios_native_batch_upload_count` FFI
+/// export).
+pub fn batch_upload_count() -> u64 {
+    BATCH_UPLOAD_SUCCESS_COUNT.load(Ordering::Relaxed)
+}
 
 /// Payload for `Daemon::queue_upload` / `ClientController::queue_upload`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -526,6 +538,7 @@ pub fn execute_batch<A: ApiTransport>(plan: BatchPlan, api: &A) -> BatchOutcome 
     match api.upload_batch(&plan.refresh_token, &plan.batch) {
         Ok(response) => {
             tracing::info!(count = plan.count, "batch upload ok");
+            BATCH_UPLOAD_SUCCESS_COUNT.fetch_add(1, Ordering::Relaxed);
             BatchOutcome::Uploaded {
                 device_id: plan.device_id,
                 count: plan.count,
