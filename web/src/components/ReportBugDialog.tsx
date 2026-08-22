@@ -1,5 +1,6 @@
 import { useState } from 'preact/hooks';
 import {
+  Alert,
   Button,
   Dialog,
   DialogActions,
@@ -53,6 +54,10 @@ export function ReportBugDialog({ dialogRef }: ReportBugDialogProps) {
     <Dialog dialogRef={dialogRef} onClose={handleClose}>
       <DialogHeader>Report a bug</DialogHeader>
       <form onSubmit={handleSubmit}>
+        <Alert variant="info">
+          If this is about your monitoring logs or screenshots, report it from the Virtue client app
+          on that device instead — it can attach the relevant logs automatically.
+        </Alert>
         <Field label="What went wrong?">
           <Textarea
             value={message}
