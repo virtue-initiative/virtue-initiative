@@ -51,6 +51,7 @@ final class MonitoringCoordinator: ObservableObject {
     @Published private(set) var loginError: String? = nil
     @Published private(set) var loggedIn: Bool = false
     @Published private(set) var deviceId: String = "<none>"
+    @Published private(set) var accountEmail: String?
     @Published private(set) var monitoringEnabled: Bool = VirtueShared.defaultMonitoringEnabled
     @Published private(set) var monitorSummary: String = "idle"
     @Published private(set) var pendingRequestCount: Int = 0
@@ -156,6 +157,10 @@ final class MonitoringCoordinator: ObservableObject {
             }
             password = ""
             setMonitoringEnabled(true)
+            // Core's AuthState/DeviceCredentials don't carry the account email, so this
+            // is app-layer state persisted here purely to prefill the bug-report form's
+            // contact-email field — mirrors the Android client's AccountEmailStore.
+            UserDefaults.standard.set(trimmedEmail, forKey: VirtueShared.accountEmailKey)
             refreshSessionState()
             refreshCoreStatus()
             refreshSafariStatus()
@@ -177,6 +182,7 @@ final class MonitoringCoordinator: ObservableObject {
             }.value
             isSigningOut = false
             statusMessage = error.map { "Logout warning: \($0)" } ?? "Signed out"
+            UserDefaults.standard.removeObject(forKey: VirtueShared.accountEmailKey)
             refreshSessionState()
             refreshCoreStatus()
             refreshSafariStatus()
@@ -221,6 +227,35 @@ final class MonitoringCoordinator: ObservableObject {
         }
     }
 
+    /// Submits a bug report, invoking `completion` with `nil` on success or an
+    /// error message on failure. Off-main like every other native call that
+    /// touches the network/daemon.
+    func submitBugReport(
+        message: String,
+        contactEmail: String?,
+        includeLogs: Bool,
+        completion: @escaping (String?) -> Void
+    ) {
+        let details = platformDetails()
+        Task { @MainActor in
+            let error = await Task.detached(priority: .userInitiated) {
+                NativeBridge.reportIssue(
+                    message: message,
+                    contactEmail: contactEmail,
+                    includeLogs: includeLogs,
+                    platformDetails: details
+                )
+            }.value
+            completion(error)
+        }
+    }
+
+    /// Best-effort "iOS <version> (<model>)" string, e.g. `"iOS 17.5.1 (iPhone)"`.
+    private func platformDetails() -> String {
+        let device = UIDevice.current
+        return "\(device.systemName) \(device.systemVersion) (\(device.model))"
+    }
+
     private func initializeCore() {
         do {
             try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
@@ -246,6 +281,7 @@ final class MonitoringCoordinator: ObservableObject {
         loggedIn = NativeBridge.isLoggedIn()
         deviceId = NativeBridge.getDeviceId() ?? "<none>"
         monitoringEnabled = readMonitoringEnabledPreference()
+        accountEmail = UserDefaults.standard.string(forKey: VirtueShared.accountEmailKey)
     }
 
     private func bindAppLifecycleState() {

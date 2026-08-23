@@ -19,6 +19,8 @@ struct ContentView: View {
     @State private var showPauseConfirmation = false
     @State private var showLogoutConfirmation = false
     @State private var showStatusSheet = false
+    @State private var showReportBugSheet = false
+    @State private var showReportBugConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -36,6 +38,16 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showStatusSheet) {
             StatusSheet(coordinator: coordinator)
+        }
+        .sheet(isPresented: $showReportBugSheet) {
+            ReportBugSheet(coordinator: coordinator) {
+                showReportBugConfirmation = true
+            }
+        }
+        .alert("Report Sent", isPresented: $showReportBugConfirmation) {
+            Button("OK") {}
+        } message: {
+            Text("Thanks — your report was sent to the Virtue Initiative team.")
         }
         .alert("Pause monitoring?", isPresented: $showPauseConfirmation) {
             Button("Cancel", role: .cancel) {}
@@ -70,6 +82,12 @@ struct ContentView: View {
                     Text("Build \(VirtueShared.buildLabel)")
                         .font(.footnote)
                         .foregroundStyle(VirtueBrand.textMuted)
+                    Button("Report a Bug") {
+                        showReportBugSheet = true
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(VirtueBrand.accent)
+                    .padding(.top, 2)
                 }
 
                 Spacer(minLength: 0)
@@ -389,7 +407,7 @@ private struct AppBrandIcon: View {
     }
 }
 
-private enum VirtueBrand {
+enum VirtueBrand {
     // Forest green — matches --accent / --forest in shared-web/tokens.css
     static let accent = Color(
         red: 30.0 / 255.0,

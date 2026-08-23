@@ -25,6 +25,14 @@ private func virtue_ios_native_get_device_id() -> UnsafeMutablePointer<CChar>?
 @_silgen_name("virtue_ios_native_get_status_json")
 private func virtue_ios_native_get_status_json() -> UnsafeMutablePointer<CChar>?
 
+@_silgen_name("virtue_ios_native_report_issue")
+private func virtue_ios_native_report_issue(
+    _ message: UnsafePointer<CChar>?,
+    _ contactEmail: UnsafePointer<CChar>?,
+    _ includeLogs: Bool,
+    _ platformDetails: UnsafePointer<CChar>?
+) -> UnsafeMutablePointer<CChar>?
+
 @_silgen_name("virtue_ios_native_run_daemon_loop")
 private func virtue_ios_native_run_daemon_loop() -> UnsafeMutablePointer<CChar>?
 
@@ -174,6 +182,28 @@ enum NativeBridge {
         return value
     }
 
+    static func reportIssue(
+        message: String,
+        contactEmail: String?,
+        includeLogs: Bool,
+        platformDetails: String
+    ) -> String? {
+        callReturningError {
+            message.withCString { messageCString in
+                withOptionalCString(contactEmail) { contactEmailCString in
+                    platformDetails.withCString { platformDetailsCString in
+                        virtue_ios_native_report_issue(
+                            messageCString,
+                            contactEmailCString,
+                            includeLogs,
+                            platformDetailsCString
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     private static func runDaemonLoop() -> String? {
         callReturningError {
             virtue_ios_native_run_daemon_loop()
@@ -213,5 +243,15 @@ enum NativeBridge {
         let message = String(cString: errorPtr)
         virtue_ios_free_string(errorPtr)
         return message
+    }
+
+    private static func withOptionalCString<Result>(
+        _ value: String?,
+        _ body: (UnsafePointer<CChar>?) -> Result
+    ) -> Result {
+        guard let value else {
+            return body(nil)
+        }
+        return value.withCString(body)
     }
 }

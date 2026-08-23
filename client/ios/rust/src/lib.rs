@@ -9,7 +9,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
-use virtue_core::api::HttpApiClient;
+use virtue_core::api::{BugReportRequest, HttpApiClient};
 use virtue_core::{
     AuthState, Config, CoreError, CoreResult, Daemon, DeviceSettings, LifecycleHooks, Screenshot,
     ScreenshotHooks,
@@ -119,9 +119,15 @@ impl LifecycleHooks for IosPlatformHooks {
 }
 
 /// Installs the process-wide `tracing` subscriber on first call, writing
-/// daily-rotated plain-text logs to `<data_dir>/logs/virtue.log`. Subsequent
-/// calls are no-ops. No runtime override (no shell env vars on mobile) — the
-/// compiled-in default filter for the build type is used directly.
+/// daily-rotated plain-text logs to `<data_dir>/logs/virtue.<date>.log`.
+/// Subsequent calls are no-ops. No runtime override (no shell env vars on
+/// mobile) — the compiled-in default filter for the build type is used
+/// directly.
+///
+/// Uses the same `Builder` with an explicit `.log` filename suffix that
+/// Mac/Windows use (the bare `rolling::daily` constructor leaves the
+/// filename extensionless, e.g. `virtue.2026-08-22`) — `recent_logs` below
+/// depends on that suffix to find today's/yesterday's files.
 fn init_logging(data_dir: &Path) {
     LOG_GUARD.get_or_init(|| {
         let log_dir = data_dir.join("logs");
@@ -135,21 +141,37 @@ fn init_logging(data_dir: &Path) {
             eprintln!("failed to prune old logs: {err}");
         }
 
-        let file_appender = tracing_appender::rolling::daily(
-            &log_dir,
-            virtue_core::logging::DEFAULT_FILE_LOG_POLICY.file_name_prefix,
+        let file_appender = tracing_appender::rolling::Builder::new()
+            .rotation(tracing_appender::rolling::Rotation::DAILY)
+            .filename_prefix(virtue_core::logging::DEFAULT_FILE_LOG_POLICY.file_name_prefix)
+            .filename_suffix("log")
+            .build(&log_dir);
+
+        let filter = tracing_subscriber::EnvFilter::new(
+            virtue_core::logging::default_filter_directive(cfg!(debug_assertions)),
         );
-        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
-        tracing_subscriber::fmt()
-            .with_env_filter(tracing_subscriber::EnvFilter::new(
-                virtue_core::logging::default_filter_directive(cfg!(debug_assertions)),
-            ))
-            .with_writer(non_blocking)
-            .with_ansi(false)
-            .init();
-
-        guard
+        match file_appender {
+            Ok(file_appender) => {
+                let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+                tracing_subscriber::fmt()
+                    .with_env_filter(filter)
+                    .with_writer(non_blocking)
+                    .with_ansi(false)
+                    .init();
+                guard
+            }
+            Err(err) => {
+                eprintln!("failed to open log file in {}: {err}", log_dir.display());
+                let (non_blocking, guard) = tracing_appender::non_blocking(std::io::stderr());
+                tracing_subscriber::fmt()
+                    .with_env_filter(filter)
+                    .with_writer(non_blocking)
+                    .with_ansi(false)
+                    .init();
+                guard
+            }
+        }
     });
 }
 
@@ -272,6 +294,93 @@ pub extern "C" fn virtue_ios_native_get_device_id() -> *mut c_char {
             .unwrap_or(std::ptr::null_mut()),
         None => std::ptr::null_mut(),
     }
+}
+
+/// Submits `POST /bug-report` (API-042). `contact_email` is treated as unset
+/// when blank. `platform_details` is gathered by the Swift side (via
+/// `UIDevice`) and passed straight through, mirroring the Android client's
+/// Kotlin-side `platformDetails` parameter — unlike Mac/Windows, there's no
+/// natural place to shell out for OS version info from this crate. Reads the
+/// device's refresh token straight off disk, same disk-fallback approach
+/// every other platform's `report-issue` flow uses, so a report can be
+/// attributed to this device even if it isn't currently signed in to a fresh
+/// `Daemon`; when `include_logs` is true, reads/redacts/trims the last two
+/// days of this device's own rotated log files (`<state_dir>/logs`) for the
+/// optional attachment.
+#[no_mangle]
+pub extern "C" fn virtue_ios_native_report_issue(
+    message: *const c_char,
+    contact_email: *const c_char,
+    include_logs: bool,
+    platform_details: *const c_char,
+) -> *mut c_char {
+    let result = (|| -> Result<()> {
+        let core = core()?;
+        let message = c_string_or_empty(message).trim().to_string();
+        if message.is_empty() {
+            return Err(anyhow!("message is required"));
+        }
+        let contact_email = c_string_or_empty(contact_email);
+        let contact_email =
+            (!contact_email.trim().is_empty()).then(|| contact_email.trim().to_string());
+        let platform_details = c_string_or_empty(platform_details);
+
+        let bearer_token = read_auth_state(&core.state_dir)
+            .device_credentials
+            .map(|creds| creds.refresh_token);
+
+        let logs = include_logs.then(|| recent_logs(&core.state_dir)).flatten();
+
+        let config = build_core_config(&core.state_dir);
+        let api = HttpApiClient::new(&config)?;
+        api.report_issue(
+            bearer_token.as_deref(),
+            &BugReportRequest {
+                message: &message,
+                contact_email: contact_email.as_deref(),
+                platform: "ios",
+                app_version: virtue_core::BUILD_LABEL,
+                platform_details: Some(&platform_details),
+            },
+            logs.as_deref(),
+        )
+        .context("failed to submit bug report")?;
+        Ok(())
+    })();
+    into_c_result(result)
+}
+
+/// Best-effort last two days of this device's own logs: today's and (if
+/// present) yesterday's daily-rotated log file from `<state_dir>/logs` (see
+/// `init_logging`), redacted (`virtue_core::api::redact_secrets`) and
+/// trimmed to the API's attachment size cap, keeping the most recent bytes.
+fn recent_logs(state_dir: &Path) -> Option<Vec<u8>> {
+    let log_dir = state_dir.join("logs");
+    let today = chrono::Local::now().date_naive();
+    let mut combined = String::new();
+
+    for date in [today, today - chrono::Duration::days(1)] {
+        let file_name = format!(
+            "{}.{}.log",
+            virtue_core::logging::DEFAULT_FILE_LOG_POLICY.file_name_prefix,
+            date.format("%Y-%m-%d")
+        );
+        if let Ok(contents) = fs::read_to_string(log_dir.join(file_name)) {
+            combined.push_str(&contents);
+        }
+    }
+
+    if combined.is_empty() {
+        return None;
+    }
+
+    let redacted = virtue_core::api::redact_secrets(&combined);
+    let mut logs = redacted.into_bytes();
+    if logs.len() > virtue_core::api::MAX_LOG_ATTACHMENT_BYTES {
+        let start = logs.len() - virtue_core::api::MAX_LOG_ATTACHMENT_BYTES;
+        logs.drain(0..start);
+    }
+    Some(logs)
 }
 
 /// Returns a JSON-serialized `ServiceStatus` (caller frees with
@@ -474,7 +583,7 @@ fn c_string_or_empty(ptr: *const c_char) -> String {
 fn into_c_result(result: Result<()>) -> *mut c_char {
     match result {
         Ok(()) => std::ptr::null_mut(),
-        Err(err) => CString::new(err.to_string())
+        Err(err) => CString::new(format!("{err:#}"))
             .map(CString::into_raw)
             .unwrap_or(std::ptr::null_mut()),
     }

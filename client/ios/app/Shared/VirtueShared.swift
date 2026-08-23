@@ -24,6 +24,7 @@ enum VirtueShared {
     }()
 
     static let monitoringEnabledKey = "VIRTUE_MONITORING_ENABLED"
+    static let accountEmailKey = "VIRTUE_ACCOUNT_EMAIL"
     static let safariCaptureStateCodeKey = "VIRTUE_SAFARI_CAPTURE_STATE_CODE"
     static let safariPauseStopIssuedKey = "VIRTUE_SAFARI_PAUSE_STOP_ISSUED"
 

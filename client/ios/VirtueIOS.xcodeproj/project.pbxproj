@@ -21,6 +21,7 @@
 		A51145928D574A0D8FD4B59C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3BBD9A53091E10E166D28CE6 /* Assets.xcassets */; };
 		B99E69BF65320433BEB44DFE /* CaptureCallbacks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EB2097040279F2D68D63571 /* CaptureCallbacks.swift */; };
 		BBBFFA2BF80D57AE03825FD8 /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 883C68547A16351396259AB7 /* manifest.json */; };
+		CBC7AB754A4A7D412C0F2787 /* ReportBugSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BEB11654D19D9A8B4D0069F /* ReportBugSheet.swift */; };
 		C5414D7CE65F599E9999F4AA /* background.js in Resources */ = {isa = PBXBuildFile; fileRef = 79294B334D6E1BC723B66893 /* background.js */; };
 		D421490A6A73B0F84D2ACE64 /* icon-96.png in Resources */ = {isa = PBXBuildFile; fileRef = D98192CE253871A073278C27 /* icon-96.png */; };
 		D71AC5E78D4C54DBC7C85940 /* content.js in Resources */ = {isa = PBXBuildFile; fileRef = 11C2314DE20A2FE8644630C0 /* content.js */; };
@@ -70,6 +71,7 @@
 		883C68547A16351396259AB7 /* manifest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = manifest.json; sourceTree = "<group>"; };
 		B4C1B49DBF60DA7DA474AA57 /* icon-48.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon-48.png"; sourceTree = "<group>"; };
 		B9318D22E92C9D6BC594C78C /* VirtueShared.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtueShared.swift; sourceTree = "<group>"; };
+		2BEB11654D19D9A8B4D0069F /* ReportBugSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportBugSheet.swift; sourceTree = "<group>"; };
 		D98192CE253871A073278C27 /* icon-96.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon-96.png"; sourceTree = "<group>"; };
 		DFC6D4D2C5FC6F4FA7F6FF50 /* VirtueIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VirtueIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		EC5C926E46F575E39B52F4F5 /* NativeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBridge.swift; sourceTree = "<group>"; };
@@ -125,6 +127,7 @@
 				6EB2097040279F2D68D63571 /* CaptureCallbacks.swift */,
 				35759B57C5B754C19376FDAE /* MonitoringCoordinator.swift */,
 				EC5C926E46F575E39B52F4F5 /* NativeBridge.swift */,
+				2BEB11654D19D9A8B4D0069F /* ReportBugSheet.swift */,
 				F2360D5FD87E7DDC76809DCF /* VirtueIOSApp.swift */,
 			);
 			path = Sources;
@@ -297,6 +300,7 @@
 				B99E69BF65320433BEB44DFE /* CaptureCallbacks.swift in Sources */,
 				2B519D76DE9CC56A244D58F9 /* MonitoringCoordinator.swift in Sources */,
 				0AFE31F0286592AC45E0F760 /* NativeBridge.swift in Sources */,
+				CBC7AB754A4A7D412C0F2787 /* ReportBugSheet.swift in Sources */,
 				224EC8F88AE6F6E1A0BD9705 /* VirtueIOSApp.swift in Sources */,
 				EF4DAF33BF771649BCEFE118 /* VirtueShared.swift in Sources */,
 			);
