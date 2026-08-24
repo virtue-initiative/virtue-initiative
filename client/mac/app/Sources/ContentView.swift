@@ -101,11 +101,23 @@ struct ContentView: View {
                         .foregroundStyle(VirtueBrand.danger)
                 }
 
+                if let forceCaptureMessage = coordinator.forceCaptureMessage {
+                    Text(forceCaptureMessage)
+                        .font(.subheadline)
+                        .foregroundStyle(VirtueBrand.textMuted)
+                }
+
                 HStack(spacing: 10) {
                     Button("Status Details") {
                         showStatusSheet = true
                     }
                     .buttonStyle(VirtueButtonStyle())
+
+                    Button(coordinator.isForceCapturing ? "Capturing…" : "Force Screenshot & Upload") {
+                        coordinator.forceCapture()
+                    }
+                    .buttonStyle(VirtueButtonStyle())
+                    .disabled(!coordinator.loggedIn || coordinator.isForceCapturing)
 
                     Button("Report a Bug") {
                         showReportBugSheet = true
