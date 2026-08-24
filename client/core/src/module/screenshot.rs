@@ -44,6 +44,15 @@ pub struct ScreenshotState {
     /// sub-threshold drift eventually crosses the threshold and forces a fresh upload.
     #[serde(default, deserialize_with = "deserialize_fingerprint_lenient")]
     pub last_uploaded_fingerprint: Option<fingerprint::Fingerprint>,
+    /// Set by `request_forced_capture` (via `Daemon::request_forced_capture`)
+    /// and consumed by the next tick run by a process that reports
+    /// `ScreenshotHooks::can_force_capture_now() == true` — see that trait
+    /// method's doc comment. Persisted (not just in-memory) so it survives
+    /// across the process boundary on iOS, where the request and the
+    /// eventual capture happen in two different OS processes coordinating
+    /// only through this on-disk state (CORE-016).
+    #[serde(default)]
+    pub force_capture_requested: bool,
 }
 
 /// Draws the next screenshot time via an exponential inter-arrival: every
@@ -66,6 +75,14 @@ pub fn enable(state: &mut ScreenshotState) {
 pub fn disable(state: &mut ScreenshotState) {
     state.enabled = false;
     state.next_screenshot_at_ms = None;
+}
+
+/// Queues a one-shot forced capture for the next tick run by a process that
+/// can actually service it (see `ScreenshotHooks::can_force_capture_now`).
+/// Cross-process-safe: the caller persists `state` under the same lock every
+/// other daemon-state mutation uses (`Daemon::with_locked_state`).
+pub fn request_forced_capture(state: &mut ScreenshotState) {
+    state.force_capture_requested = true;
 }
 
 /// What `plan` decided to do this tick — passed to `capture_and_process`.
@@ -487,6 +504,14 @@ mod tests {
         let hooks = TestPlatformHooks::new();
         let plan = plan_forced(&state, &hooks).unwrap();
         assert!(plan.is_none());
+    }
+
+    #[test]
+    fn request_forced_capture_sets_the_flag() {
+        let mut state = ScreenshotState::default();
+        assert!(!state.force_capture_requested);
+        request_forced_capture(&mut state);
+        assert!(state.force_capture_requested);
     }
 
     #[test]

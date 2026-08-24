@@ -432,6 +432,15 @@ public func virtue_ios_capture_png_release(_ buffer: UnsafePointer<UInt8>?, _ le
     free(UnsafeMutableRawPointer(mutating: buffer))
 }
 
+/// Unlike the app target's stub (`CaptureCallbacks.swift`), this process has
+/// a real frame source (`SafariFrameStore`, fed by `content.js`), so it's the
+/// one that services a queued force-capture request — see
+/// `ScreenshotHooks::can_force_capture_now`.
+@_cdecl("virtue_ios_can_force_capture")
+public func virtue_ios_can_force_capture() -> Bool {
+    true
+}
+
 final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
     func beginRequest(with context: NSExtensionContext) {
         var responsePayload = handleRequest(context)

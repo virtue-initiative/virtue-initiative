@@ -72,6 +72,8 @@ final class MonitoringCoordinator: ObservableObject {
     @Published private(set) var safariLastError: String = "<none>"
     @Published private(set) var safariDaemonStatus: String = "No daemon state yet"
 
+    @Published private(set) var forceCaptureMessage: String?
+
     private var didBecomeActiveObserver: NSObjectProtocol?
     private var willEnterForegroundObserver: NSObjectProtocol?
     private var statusRefreshTimer: Timer?
@@ -224,6 +226,28 @@ final class MonitoringCoordinator: ObservableObject {
             refreshCoreStatus()
             refreshSafariStatus()
             statusMessage = "Monitoring paused. Safari capture will stop on the next extension heartbeat."
+        }
+    }
+
+    /// Queues a one-shot forced capture. Unlike Windows/Mac/Android, this
+    /// process (the app) has no real screenshot source — only the Safari
+    /// extension process does, and it only runs when Safari itself invokes
+    /// it — so this can only *queue* the request for the extension's next
+    /// real heartbeat, not capture immediately. The confirmation message
+    /// reflects that honestly and clears itself after a few seconds.
+    func requestForceCapture() {
+        Task { @MainActor in
+            let error = await Task.detached(priority: .userInitiated) {
+                NativeBridge.requestForceCapture()
+            }.value
+            let message = error.map { "Force capture request failed: \($0)" }
+                ?? "Force capture queued — will run the next time Safari is active."
+            forceCaptureMessage = message
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            // Only clear if a later call hasn't already replaced this message.
+            if forceCaptureMessage == message {
+                forceCaptureMessage = nil
+            }
         }
     }
 

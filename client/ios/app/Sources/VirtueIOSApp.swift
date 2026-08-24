@@ -106,11 +106,23 @@ struct ContentView: View {
                     .font(.body)
                     .foregroundStyle(VirtueBrand.textMuted)
 
+                if let forceCaptureMessage = coordinator.forceCaptureMessage {
+                    Text(forceCaptureMessage)
+                        .font(.subheadline)
+                        .foregroundStyle(VirtueBrand.textMuted)
+                }
+
                 HStack(spacing: 10) {
                     Button("Status Details") {
                         showStatusSheet = true
                     }
                     .buttonStyle(VirtueButtonStyle())
+
+                    Button("Force Screenshot & Upload") {
+                        coordinator.requestForceCapture()
+                    }
+                    .buttonStyle(VirtueButtonStyle())
+                    .disabled(!coordinator.loggedIn || !coordinator.monitoringEnabled)
 
                     Button(coordinator.monitoringEnabled ? "Pause Monitoring" : "Resume Monitoring") {
                         if coordinator.monitoringEnabled {
@@ -123,6 +135,13 @@ struct ContentView: View {
                     .disabled(!coordinator.loggedIn)
                 }
                 .padding(.top, 6)
+
+                Text(
+                    "Queues a capture for the next time Safari is open and active — this app has no direct " +
+                    "screen access, so it can't capture instantly the way the Safari extension can."
+                )
+                .font(.caption)
+                .foregroundStyle(VirtueBrand.textMuted)
             }
         }
     }

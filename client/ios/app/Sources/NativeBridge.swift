@@ -47,6 +47,9 @@ private func virtue_ios_native_request_pause_monitoring(
 @_silgen_name("virtue_ios_native_request_resume_monitoring")
 private func virtue_ios_native_request_resume_monitoring() -> UnsafeMutablePointer<CChar>?
 
+@_silgen_name("virtue_ios_native_request_force_capture")
+private func virtue_ios_native_request_force_capture() -> UnsafeMutablePointer<CChar>?
+
 @_silgen_name("virtue_ios_free_string")
 private func virtue_ios_free_string(_ value: UnsafeMutablePointer<CChar>?)
 
@@ -231,6 +234,18 @@ enum NativeBridge {
             callReturningError {
                 virtue_ios_native_request_resume_monitoring()
             }
+        }
+    }
+
+    /// Queues a one-shot forced capture for the Safari extension process to
+    /// service on its next real heartbeat — this process (the app) has no
+    /// real frame source and never attempts the capture itself, so unlike
+    /// `login`/`logout`/`requestPauseMonitoring`/`requestResumeMonitoring`
+    /// this does NOT need `withDaemonLoop`: it's a direct, cross-process-safe
+    /// state write with no reply to wait on from a loop thread.
+    static func requestForceCapture() -> String? {
+        callReturningError {
+            virtue_ios_native_request_force_capture()
         }
     }
 

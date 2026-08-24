@@ -307,6 +307,72 @@ fn forced_capture_flushes_the_batch_without_waiting_for_the_interval() {
     );
 }
 
+// ── Queued forced capture (iOS cross-process handoff) ───────────────────────────
+
+#[test]
+fn queued_force_capture_is_serviced_by_a_capable_process_on_its_next_tick() {
+    let mut scenario = Scenario::authenticated();
+    scenario.at_t(0).tick();
+    scenario.with_state_mut(|s| {
+        s.screenshot.next_screenshot_at_ms = Some(1_000_000_000);
+    });
+    let uploads_before = {
+        let s = scenario.api.state();
+        s.batch_uploads.len() + s.hash_uploads.len()
+    };
+
+    scenario.request_forced_capture();
+    assert!(
+        scenario.state().screenshot.force_capture_requested,
+        "the request should be persisted before any tick services it"
+    );
+
+    scenario.at_t(1_000).tick();
+
+    let uploads_after = {
+        let s = scenario.api.state();
+        s.batch_uploads.len() + s.hash_uploads.len()
+    };
+    assert!(
+        uploads_after > uploads_before,
+        "a capable process's next tick should service the queued request"
+    );
+    assert!(
+        !scenario.state().screenshot.force_capture_requested,
+        "the request should be cleared once serviced"
+    );
+}
+
+#[test]
+fn queued_force_capture_is_left_untouched_by_a_process_that_cannot_service_it() {
+    let mut scenario = Scenario::authenticated();
+    scenario.at_t(0).tick();
+    scenario.with_state_mut(|s| {
+        s.screenshot.next_screenshot_at_ms = Some(1_000_000_000);
+    });
+    scenario.platform.set_can_force_capture_now(false);
+    let uploads_before = {
+        let s = scenario.api.state();
+        s.batch_uploads.len() + s.hash_uploads.len()
+    };
+
+    scenario.request_forced_capture();
+    scenario.at_t(1_000).tick();
+
+    let uploads_after = {
+        let s = scenario.api.state();
+        s.batch_uploads.len() + s.hash_uploads.len()
+    };
+    assert_eq!(
+        uploads_after, uploads_before,
+        "a process that can't service the request must not consume it"
+    );
+    assert!(
+        scenario.state().screenshot.force_capture_requested,
+        "the request must survive for a capable process's later tick"
+    );
+}
+
 // ── Upload: batching ──────────────────────────────────────────────────────────
 
 #[test]
