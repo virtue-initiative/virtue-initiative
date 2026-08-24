@@ -262,6 +262,9 @@ class MainActivity : AppCompatActivity() {
             } else {
                 setStatus(getString(R.string.msg_force_capture_failed, error))
             }
+            // Transient confirmation/error — revert to the real status after a beat
+            // rather than leaving it stuck here, matching toggleMonitoring's pattern.
+            binding.root.postDelayed({ refreshUi() }, 2500)
         }
     }
 
