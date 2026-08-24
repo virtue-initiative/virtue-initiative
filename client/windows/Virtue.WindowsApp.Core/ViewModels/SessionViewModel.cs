@@ -28,6 +28,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private string? _transitionMessage;
     private string? _errorText;
     private bool _updateReady;
+    private string? _updateCountdownText;
 
     public SessionViewModel(IRustInteropClient interopClient, string? windowsPackageVersion = null)
     {
@@ -210,6 +211,21 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     }
 
     public bool UpdateReady => _updateReady;
+
+    public string? UpdateCountdownText
+    {
+        get => _updateCountdownText;
+        private set => SetProperty(ref _updateCountdownText, value);
+    }
+
+    /// <summary>
+    /// Called each time the countdown to the forced Store-update restart deadline is
+    /// recomputed, so the in-window notice can show it. See <c>App.EvaluateUpdateRestart</c>.
+    /// </summary>
+    public void SetUpdateCountdownText(string? text)
+    {
+        UpdateCountdownText = text;
+    }
 
     public bool IsBusy
     {

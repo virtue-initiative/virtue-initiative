@@ -9,31 +9,49 @@ namespace Virtue.WindowsApp.Core.Interop;
 /// <see cref="StoreUpdateManager"/>'s doc comment for why. What this policy actually guards
 /// is UX: don't restart out from under an actively-interacting user or mid-login. A deferral
 /// cap forces the restart through even if the window happens to stay open indefinitely.
+///
+/// The "window hidden -> restart immediately" half of the old decision now lives directly in
+/// <c>App.EvaluateUpdateRestart</c> (it's a state/event check, not really "policy"). What
+/// remains here is: computing the forced-restart deadline, deciding whether that deadline has
+/// been reached, and formatting the countdown shown in the in-window notice.
 /// </summary>
 public static class UpdateRestartPolicy
 {
     public static readonly TimeSpan DeferralCap = TimeSpan.FromHours(6);
 
-    /// <param name="mainWindowVisible">Whether the settings/login window is currently shown to the user.</param>
-    /// <param name="sessionIsBusy">Whether <c>SessionViewModel.IsBusy</c> is set (e.g. a login/logout in progress).</param>
     /// <param name="updateStagedAtUtc">When the update finished downloading/staging.</param>
+    public static DateTimeOffset GetDeadlineUtc(DateTimeOffset updateStagedAtUtc) =>
+        updateStagedAtUtc + DeferralCap;
+
+    /// <param name="sessionIsBusy">Whether <c>SessionViewModel.IsBusy</c> is set (e.g. a login/logout in progress).</param>
+    /// <param name="deadlineUtc">The forced-restart deadline, from <see cref="GetDeadlineUtc"/>.</param>
     /// <param name="nowUtc">Current time, passed in for testability.</param>
-    public static bool ShouldRestartNow(
-        bool mainWindowVisible,
-        bool sessionIsBusy,
-        DateTimeOffset updateStagedAtUtc,
-        DateTimeOffset nowUtc)
+    public static bool ShouldForceRestart(bool sessionIsBusy, DateTimeOffset deadlineUtc, DateTimeOffset nowUtc)
     {
         if (sessionIsBusy)
         {
             return false;
         }
 
-        if (!mainWindowVisible)
+        return nowUtc >= deadlineUtc;
+    }
+
+    /// <summary>
+    /// Formats a duration remaining before the forced restart, for the in-window notice.
+    /// </summary>
+    public static string FormatCountdown(TimeSpan remaining)
+    {
+        if (remaining <= TimeSpan.Zero)
         {
-            return true;
+            return "any moment";
         }
 
-        return nowUtc - updateStagedAtUtc >= DeferralCap;
+        if (remaining >= TimeSpan.FromHours(1))
+        {
+            return $"{(int)remaining.TotalHours}h {remaining.Minutes}m";
+        }
+
+        var minutes = Math.Max(1, remaining.Minutes);
+        return $"{minutes}m";
     }
 }

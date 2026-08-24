@@ -185,14 +185,26 @@ It lives in `Virtue.WindowsApp` (the WinUI project, `net8.0-windows10.0.19041.0`
 unit-testable and platform-neutral — the same reason `RestartWatchdog` avoids WinRT), since
 `StoreContext` is a WinRT API only usable from the packaged process.
 
-Once an update is staged, `App.xaml.cs` polls every 5 minutes for a safe point to install it —
-`UpdateRestartPolicy.ShouldRestartNow` (`Virtue.WindowsApp.Core/Interop/UpdateRestartPolicy.cs`,
-unit-tested) requires the settings/login window to be hidden and no login/logout in progress
-(`SessionViewModel.IsBusy`), but forces the restart through after a 6-hour deferral cap even if
-the window stays open. A tray "Restart to Update" menu item lets a user trigger it immediately
-instead of waiting. Either path stops the daemon the same way an OS session logoff/shutdown
-does (`RustInteropClient.StopMonitoringForOsSessionEnd`, **not** the tray-Exit path — this is
-not a user-initiated stop and must not log the device out), then calls
+Once an update is staged, restart is driven by one shared decision method,
+`App.EvaluateUpdateRestart()`, called from three places: immediately when the update stages,
+from a 1-minute countdown timer, and from `MainWindow.Hidden` — an event raised at the end of
+every `HideToTray()` call (the X-button close, the tray-Exit confirmation's cancel-path
+re-hide, and the update flow's own hide all funnel through it uniformly), so the restart fires
+the instant the window closes instead of waiting for the next timer tick. If the window is
+hidden and no login/logout is in progress (`SessionViewModel.IsBusy`), it restarts right away.
+If the window is visible, it instead updates an in-window notice card with a countdown
+(`UpdateRestartPolicy.GetDeadlineUtc`/`FormatCountdown`,
+`Virtue.WindowsApp.Core/Interop/UpdateRestartPolicy.cs`, unit-tested) reading "Virtue will
+close and update in ...", with a "Close now and update" button below it. Once the 6-hour
+deferral cap is reached (`UpdateRestartPolicy.ShouldForceRestart`), `EvaluateUpdateRestart()`
+hides the window itself, which re-raises `Hidden` and re-enters the method — now that the
+window reports hidden, it takes the immediate-restart branch. The notice button and the tray
+"Restart to Update" menu item both call the same manual-restart handler, bypassing the
+busy/deadline check as an explicit user request. An `Interlocked`-guarded flag in
+`InstallUpdateAndRestartAsync` ensures only the first of these concurrent triggers actually
+proceeds. Either path stops the daemon the same way an OS session logoff/shutdown does
+(`RustInteropClient.StopMonitoringForOsSessionEnd`, **not** the tray-Exit path — this is not a
+user-initiated stop and must not log the device out), then calls
 `RequestDownloadAndInstallStorePackageUpdatesAsync` (fast, since the package was already staged)
 and exits. `RestartWatchdog` is deliberately left registered through this (unlike tray Exit) so
 its existing per-minute poll relaunches the updated build, and the released

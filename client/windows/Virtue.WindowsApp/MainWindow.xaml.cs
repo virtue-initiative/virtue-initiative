@@ -32,6 +32,8 @@ public sealed partial class MainWindow : Window
     private readonly TextBox _deviceNameTextBox;
     private readonly Border _statusDot;
     private readonly TextBlock _errorTextBlock;
+    private readonly Border _updateNoticeCard;
+    private readonly TextBlock _updateNoticeTextBlock;
     private Button? _signInButton;
     private bool _allowClose;
 
@@ -84,6 +86,13 @@ public sealed partial class MainWindow : Window
             Foreground = DangerBrush,
             FontFamily = BodyFont,
         };
+        _updateNoticeTextBlock = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            FontFamily = BodyFont,
+            Foreground = InkBrush,
+        };
+        _updateNoticeCard = BuildUpdateNoticeCard();
 
         Content = BuildContent();
         ViewModel.PropertyChanged += ViewModelOnPropertyChanged;
@@ -99,11 +108,24 @@ public sealed partial class MainWindow : Window
 
     public bool IsVisibleToUser { get; private set; }
 
+    /// <summary>
+    /// Raised at the end of <see cref="HideToTray"/>, i.e. every time the window transitions
+    /// to hidden — the X-button close, the tray-Exit confirmation's cancel-path re-hide, and
+    /// the update flow's own hide all funnel through here uniformly. Lets
+    /// <c>App.EvaluateUpdateRestart</c> react the instant the window closes instead of waiting
+    /// for the next countdown tick.
+    /// </summary>
+    public event EventHandler? Hidden;
+
+    /// <summary>Raised by the in-window update notice's "Close now and update" button.</summary>
+    public event EventHandler? CloseNowAndUpdateRequested;
+
     public void HideToTray()
     {
         var windowHandle = WindowNative.GetWindowHandle(this);
         ShowWindow(windowHandle, ShowWindowCommands.Hide);
         IsVisibleToUser = false;
+        Hidden?.Invoke(this, EventArgs.Empty);
     }
 
     public void ShowFromTray()
@@ -148,6 +170,7 @@ public sealed partial class MainWindow : Window
         };
 
         contentStack.Children.Add(BuildHeader());
+        contentStack.Children.Add(_updateNoticeCard);
         contentStack.Children.Add(BuildStatusCard());
         contentStack.Children.Add(BuildAccountCard());
 
@@ -205,6 +228,21 @@ public sealed partial class MainWindow : Window
         textStack.Children.Add(websiteLink);
 
         return header;
+    }
+
+    private Border BuildUpdateNoticeCard()
+    {
+        var closeNowButton = CreateActionButton("Close now and update");
+        closeNowButton.Click += (_, _) => CloseNowAndUpdateRequested?.Invoke(this, EventArgs.Empty);
+
+        var content = new StackPanel { Spacing = 8 };
+        content.Children.Add(CreateSectionLabel("Update Ready"));
+        content.Children.Add(_updateNoticeTextBlock);
+        content.Children.Add(closeNowButton);
+
+        var card = CreateCard(content);
+        card.BorderBrush = WarningBrush;
+        return card;
     }
 
     private UIElement BuildStatusCard()
@@ -691,6 +729,11 @@ public sealed partial class MainWindow : Window
 
     private void SyncFromViewModel()
     {
+        _updateNoticeCard.Visibility = ViewModel.UpdateReady ? Visibility.Visible : Visibility.Collapsed;
+        _updateNoticeTextBlock.Text = ViewModel.UpdateCountdownText is { } countdown
+            ? $"Virtue will close and update in {countdown}."
+            : "An update is ready and will install soon.";
+
         _statusTextBlock.Text = BuildPrimaryStatusText();
         var statusBrush = StatusBrush();
         _statusTextBlock.Foreground = statusBrush;

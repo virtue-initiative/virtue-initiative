@@ -8,42 +8,79 @@ public sealed class UpdateRestartPolicyTests
     private static readonly DateTimeOffset StagedAt = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
     [Fact]
-    public void Busy_NeverRestarts_RegardlessOfWindowOrTime()
+    public void GetDeadlineUtc_IsStagedAtPlusDeferralCap()
     {
-        Assert.False(UpdateRestartPolicy.ShouldRestartNow(
-            mainWindowVisible: false,
+        Assert.Equal(StagedAt + UpdateRestartPolicy.DeferralCap, UpdateRestartPolicy.GetDeadlineUtc(StagedAt));
+    }
+
+    [Fact]
+    public void ShouldForceRestart_Busy_NeverRestarts_RegardlessOfDeadline()
+    {
+        var deadline = UpdateRestartPolicy.GetDeadlineUtc(StagedAt);
+        Assert.False(UpdateRestartPolicy.ShouldForceRestart(
             sessionIsBusy: true,
-            updateStagedAtUtc: StagedAt,
-            nowUtc: StagedAt + UpdateRestartPolicy.DeferralCap + TimeSpan.FromDays(1)));
+            deadlineUtc: deadline,
+            nowUtc: deadline + TimeSpan.FromDays(1)));
     }
 
     [Fact]
-    public void WindowHidden_AndNotBusy_RestartsImmediately()
+    public void ShouldForceRestart_BeforeDeadline_DoesNotRestart()
     {
-        Assert.True(UpdateRestartPolicy.ShouldRestartNow(
-            mainWindowVisible: false,
+        var deadline = UpdateRestartPolicy.GetDeadlineUtc(StagedAt);
+        Assert.False(UpdateRestartPolicy.ShouldForceRestart(
             sessionIsBusy: false,
-            updateStagedAtUtc: StagedAt,
-            nowUtc: StagedAt));
+            deadlineUtc: deadline,
+            nowUtc: deadline - TimeSpan.FromMinutes(1)));
     }
 
     [Fact]
-    public void WindowVisible_UnderDeferralCap_DoesNotRestart()
+    public void ShouldForceRestart_AtDeadline_AndNotBusy_ForcesRestart()
     {
-        Assert.False(UpdateRestartPolicy.ShouldRestartNow(
-            mainWindowVisible: true,
+        var deadline = UpdateRestartPolicy.GetDeadlineUtc(StagedAt);
+        Assert.True(UpdateRestartPolicy.ShouldForceRestart(
             sessionIsBusy: false,
-            updateStagedAtUtc: StagedAt,
-            nowUtc: StagedAt + UpdateRestartPolicy.DeferralCap - TimeSpan.FromMinutes(1)));
+            deadlineUtc: deadline,
+            nowUtc: deadline));
     }
 
     [Fact]
-    public void WindowVisible_AtOrPastDeferralCap_AndNotBusy_ForcesRestart()
+    public void ShouldForceRestart_AfterDeadline_AndNotBusy_ForcesRestart()
     {
-        Assert.True(UpdateRestartPolicy.ShouldRestartNow(
-            mainWindowVisible: true,
+        var deadline = UpdateRestartPolicy.GetDeadlineUtc(StagedAt);
+        Assert.True(UpdateRestartPolicy.ShouldForceRestart(
             sessionIsBusy: false,
-            updateStagedAtUtc: StagedAt,
-            nowUtc: StagedAt + UpdateRestartPolicy.DeferralCap));
+            deadlineUtc: deadline,
+            nowUtc: deadline + TimeSpan.FromMinutes(1)));
+    }
+
+    [Fact]
+    public void FormatCountdown_OneHourOrMore_ShowsHoursAndMinutes()
+    {
+        Assert.Equal("3h 12m", UpdateRestartPolicy.FormatCountdown(TimeSpan.FromMinutes(192)));
+    }
+
+    [Fact]
+    public void FormatCountdown_ExactlyOneHour_ShowsHoursAndMinutes()
+    {
+        Assert.Equal("1h 0m", UpdateRestartPolicy.FormatCountdown(TimeSpan.FromHours(1)));
+    }
+
+    [Fact]
+    public void FormatCountdown_UnderOneHour_ShowsMinutesOnly()
+    {
+        Assert.Equal("42m", UpdateRestartPolicy.FormatCountdown(TimeSpan.FromMinutes(42)));
+    }
+
+    [Fact]
+    public void FormatCountdown_UnderOneMinute_ShowsAtLeastOneMinute()
+    {
+        Assert.Equal("1m", UpdateRestartPolicy.FormatCountdown(TimeSpan.FromSeconds(30)));
+    }
+
+    [Fact]
+    public void FormatCountdown_ZeroOrNegative_ShowsAnyMoment()
+    {
+        Assert.Equal("any moment", UpdateRestartPolicy.FormatCountdown(TimeSpan.Zero));
+        Assert.Equal("any moment", UpdateRestartPolicy.FormatCountdown(TimeSpan.FromMinutes(-5)));
     }
 }
