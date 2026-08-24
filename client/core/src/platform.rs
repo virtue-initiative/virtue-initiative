@@ -27,6 +27,23 @@ pub trait ScreenshotHooks: Send + Sync + 'static {
     fn is_locked_or_screensaver(&self) -> CoreResult<bool> {
         Ok(false)
     }
+
+    /// Whether *this process* can actually service a queued
+    /// `ScreenshotState::force_capture_requested` request right now. `true`
+    /// for every normal platform (the default) — the process that owns the
+    /// daemon loop is also the one with a real `take_screenshot()`. iOS is
+    /// the sole exception: the main app process and the Safari extension
+    /// process each run their own independent `Daemon` against the same
+    /// on-disk state (CORE-016), but only the extension process has a real
+    /// frame source — the app target's `take_screenshot()` is a hardcoded
+    /// stub that always fails (see `client/ios/app/Sources/CaptureCallbacks.swift`).
+    /// Without this, the app process's own tick (e.g. the one `run_forever`
+    /// runs right after servicing a login/logout/pause/resume request) would
+    /// immediately consume and fail a request meant for the extension
+    /// process to service on its next real heartbeat.
+    fn can_force_capture_now(&self) -> bool {
+        true
+    }
 }
 
 /// Live, per-tick I/O feeding the lifecycle late-wakeup model. See

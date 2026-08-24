@@ -53,6 +53,11 @@ other platform.
   `plan_forced()` is the on-demand "capture now" entry point (wired through
   `Daemon::force_capture_now`): bypasses the interval-due gate but keeps the
   locked/screensaver gate, then reuses `capture_and_process`/`commit` unchanged.
+  `Daemon::request_forced_capture()` is the iOS-only variant: it just sets
+  `ScreenshotState::force_capture_requested` under the usual cross-process
+  lock and returns immediately (no loop thread needed), and `run_phases`
+  services (and clears) that flag with `plan_forced` on the next tick run by
+  a process where `ScreenshotHooks::can_force_capture_now()` is true.
 - `linux/src/capture.rs`, `mac/src/capture.rs`, `windows/src/capture.rs` — platform
   `take_screenshot()` implementations
 
@@ -107,7 +112,16 @@ other platform.
   (`virtue_ios_native_init` builds one daemon; every other
   `virtue_ios_native_*` call is a direct method call on it);
   `IosPlatformHooks::lifecycle_enabled()` returns `false`, so
-  `lifecycle::tick` never runs there
+  `lifecycle::tick` never runs there. Uniquely on iOS, the main app process
+  and the Safari extension process each run their own independent `Daemon`
+  against the same on-disk state (CORE-016) — only the extension process has
+  a real frame source (`SafariFrameStore`; the app target's
+  `take_screenshot()` is a hardcoded-failing stub, see
+  `app/Sources/CaptureCallbacks.swift`). `ScreenshotHooks::can_force_capture_now()`
+  (default `true` everywhere else) distinguishes the two targets via a
+  `virtue_ios_can_force_capture` extern, so `Daemon::request_forced_capture()`
+  (a queued one-shot request, consumed by whichever process's next tick
+  reports it can actually capture) only ever gets serviced by the extension.
 
 ### Configuration
 

@@ -25,6 +25,7 @@ lock detection) and `LifecycleHooks` (the hooks the late-wakeup model needs):
 take_screenshot() -> Result<Screenshot>
 get_time_utc_ms() -> Result<i64>
 is_locked_or_screensaver() -> Result<bool>
+can_force_capture_now() -> bool  // default: true
 
 // LifecycleHooks
 get_utc_clock_ms() -> Result<i64>
@@ -66,6 +67,10 @@ daemon.run_forever(); // blocking — call from its own thread
   ever mutates `DaemonState`. `status()` is the one exception: a direct
   lock-based read of the loop's last-committed snapshot, since there's
   nothing to synchronize. `request_stop()` stays fire-and-forget.
+  `request_forced_capture()` is a third shape (iOS-only): it doesn't touch
+  the request channel at all, just a direct `with_locked_state` call, so it
+  works even when no loop is running in this process — see
+  `../CLAUDE.md`'s iOS section.
 - `src/ipc.rs` (Linux/macOS only) — the cross-process transport for the
   CLI/tray, sitting on top of the same `Daemon` methods; see "IPC" below.
 

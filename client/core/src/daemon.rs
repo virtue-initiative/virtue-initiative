@@ -439,6 +439,21 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         }
     }
 
+    /// Queues a one-shot forced capture for the next tick run by a process
+    /// that can actually service it (`ScreenshotHooks::can_force_capture_now`)
+    /// — see that trait method and `ScreenshotState::force_capture_requested`
+    /// for the full explanation. Unlike `force_capture_now` (which requires
+    /// the loop thread to be running to reply), this is a direct
+    /// cross-process-safe locked read-modify-write with no request-channel
+    /// round trip, so it's safe to call whether or not `run_forever` is
+    /// active in this process — iOS's main app calls it without ever
+    /// spinning up its own daemon loop.
+    pub fn request_forced_capture(&self) {
+        self.with_locked_state(|working| {
+            screenshot::request_forced_capture(&mut working.screenshot);
+        });
+    }
+
     /// Fire-and-forget, same as before — Windows/Android track real shutdown
     /// by joining the loop thread's handle separately.
     pub fn request_stop(&self) {
@@ -777,18 +792,41 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
 
         let screen_active = !self.platform.is_locked_or_screensaver().unwrap_or(false);
         let mean_interval_ms = self.config.screenshot_interval.as_millis() as i64;
-        let capture_plan = match screenshot::plan(
-            &mut working.screenshot,
-            &mut working.upload,
-            &self.platform,
-            now_ms,
-            mean_interval_ms,
-            self.rng.as_ref(),
-        ) {
-            Ok(plan) => plan,
-            Err(err) => {
-                tracing::error!(phase = "screenshot_plan", error = %err, "daemon phase failed");
-                None
+
+        // A queued `request_forced_capture()` is only serviced by a process
+        // that reports it can actually capture (see
+        // `ScreenshotHooks::can_force_capture_now`) — on every other
+        // platform that's always this process, but on iOS it's specifically
+        // NOT the main app process, so the flag survives untouched here for
+        // the Safari extension's next tick to pick up.
+        let force_requested =
+            working.screenshot.force_capture_requested && self.platform.can_force_capture_now();
+        if force_requested {
+            working.screenshot.force_capture_requested = false;
+        }
+
+        let capture_plan = if force_requested {
+            match screenshot::plan_forced(&working.screenshot, &self.platform) {
+                Ok(plan) => plan,
+                Err(err) => {
+                    tracing::error!(phase = "screenshot_plan_forced", error = %err, "daemon phase failed");
+                    None
+                }
+            }
+        } else {
+            match screenshot::plan(
+                &mut working.screenshot,
+                &mut working.upload,
+                &self.platform,
+                now_ms,
+                mean_interval_ms,
+                self.rng.as_ref(),
+            ) {
+                Ok(plan) => plan,
+                Err(err) => {
+                    tracing::error!(phase = "screenshot_plan", error = %err, "daemon phase failed");
+                    None
+                }
             }
         };
 
@@ -808,6 +846,9 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             captured,
             now_ms,
         );
+        if force_requested {
+            upload::request_immediate_flush(&mut working.upload, now_ms);
+        }
         capture_availability::tick(
             &mut working.capture_availability,
             &mut working.upload,

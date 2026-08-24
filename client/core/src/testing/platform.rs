@@ -24,6 +24,7 @@ struct TestPlatformInner {
     /// When `Some`, overrides `get_monotonic_clock_ms()` instead of it
     /// mirroring `clock` (the default — see `set_monotonic_clock_override`).
     monotonic_override_ms: Option<i64>,
+    can_force_capture_now: bool,
 }
 
 impl TestPlatformHooks {
@@ -43,6 +44,7 @@ impl TestPlatformHooks {
                 last_logout_utc_ms: None,
                 lifecycle_enabled: true,
                 monotonic_override_ms: None,
+                can_force_capture_now: true,
             })),
         }
     }
@@ -87,6 +89,14 @@ impl TestPlatformHooks {
         self.lock().monotonic_override_ms = ms;
     }
 
+    /// Mirrors iOS's app-target-vs-extension-target split (see
+    /// `ScreenshotHooks::can_force_capture_now`'s doc comment) for tests that
+    /// need to exercise the "this process can't service a queued force
+    /// capture" path.
+    pub fn set_can_force_capture_now(&self, can: bool) {
+        self.lock().can_force_capture_now = can;
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, TestPlatformInner> {
         self.inner.lock().expect("TestPlatformHooks state poisoned")
     }
@@ -115,6 +125,10 @@ impl ScreenshotHooks for TestPlatformHooks {
 
     fn is_locked_or_screensaver(&self) -> CoreResult<bool> {
         Ok(self.lock().locked_or_screensaver)
+    }
+
+    fn can_force_capture_now(&self) -> bool {
+        self.lock().can_force_capture_now
     }
 }
 

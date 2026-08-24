@@ -25,3 +25,12 @@ public func virtue_ios_capture_png_release(_ buffer: UnsafePointer<UInt8>?, _ le
     _ = buffer
     _ = length
 }
+
+/// The app target has no real frame source (see the comment on
+/// `virtue_ios_capture_status` above), so it can never service a queued
+/// force-capture request itself — only the Safari extension target can
+/// (see its own `virtue_ios_can_force_capture` in `SafariWebExtensionHandler.swift`).
+@_cdecl("virtue_ios_can_force_capture")
+public func virtue_ios_can_force_capture() -> Bool {
+    false
+}

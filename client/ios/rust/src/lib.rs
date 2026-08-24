@@ -33,6 +33,12 @@ unsafe extern "C" {
     fn virtue_ios_capture_status() -> c_int;
     fn virtue_ios_capture_png_write(out_ptr: *mut *const u8, out_len: *mut usize) -> c_int;
     fn virtue_ios_capture_png_release(ptr: *const u8, len: usize);
+    /// Distinguishes the app target (always `false` — `CaptureCallbacks.swift`)
+    /// from the Safari extension target (always `true` —
+    /// `SafariWebExtensionHandler.swift`), since both targets link this same
+    /// Rust code but only the extension process has a real frame source. See
+    /// `ScreenshotHooks::can_force_capture_now`.
+    fn virtue_ios_can_force_capture() -> bool;
 }
 
 type IosDaemon = Daemon<IosPlatformHooks, HttpApiClient>;
@@ -97,6 +103,10 @@ impl ScreenshotHooks for IosPlatformHooks {
                 "unexpected capture status code: {other}"
             ))),
         }
+    }
+
+    fn can_force_capture_now(&self) -> bool {
+        unsafe { virtue_ios_can_force_capture() }
     }
 }
 
@@ -398,6 +408,21 @@ pub extern "C" fn virtue_ios_native_get_status_json() -> *mut c_char {
             .unwrap_or(std::ptr::null_mut()),
         Err(_) => std::ptr::null_mut(),
     }
+}
+
+/// Queues a one-shot forced capture, serviced by the next tick run by a
+/// process that reports `can_force_capture_now() == true` — on iOS, that's
+/// specifically the Safari extension process, not this call's caller (the
+/// main app). No daemon loop needs to be running in this process for this
+/// call to succeed, unlike `login`/`logout`/etc.
+#[no_mangle]
+pub extern "C" fn virtue_ios_native_request_force_capture() -> *mut c_char {
+    let result = (|| -> Result<()> {
+        core()?.daemon.request_forced_capture();
+        Ok(())
+    })();
+
+    into_c_result(result)
 }
 
 #[no_mangle]
