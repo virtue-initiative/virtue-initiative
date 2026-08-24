@@ -135,6 +135,16 @@
                     app:strokeColor="@color/virtue_forest" />
 
                 <com.google.android.material.button.MaterialButton
+                    android:id="@+id/forceCaptureButton"
+                    style="@style/Widget.App.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/btn_force_capture"
+                    android:textColor="@color/virtue_forest"
+                    app:strokeColor="@color/virtue_forest" />
+
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/pauseResumeButton"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"

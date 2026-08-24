@@ -52,6 +52,7 @@ class MainActivity : AppCompatActivity() {
         binding.signOutButton.setOnClickListener { logout() }
         binding.statusDetailsButton.setOnClickListener { showStatusDetails() }
         binding.pauseResumeButton.setOnClickListener { toggleMonitoring() }
+        binding.forceCaptureButton.setOnClickListener { forceCapture() }
         binding.openAccessibilitySettingsButton.setOnClickListener { openAccessibilitySettings() }
 
         binding.websiteLink.setOnClickListener {
@@ -245,6 +246,23 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton(getString(R.string.dialog_cancel), null)
             .show()
+    }
+
+    private fun forceCapture() {
+        binding.forceCaptureButton.isEnabled = false
+        setStatus(getString(R.string.msg_force_capture_started))
+        lifecycleScope.launch {
+            val error = withContext(Dispatchers.IO) {
+                NativeBridge.nativeForceCapture()
+            }
+            binding.forceCaptureButton.isEnabled = true
+
+            if (error == null) {
+                setStatus(getString(R.string.msg_force_capture_succeeded))
+            } else {
+                setStatus(getString(R.string.msg_force_capture_failed, error))
+            }
+        }
     }
 
     private fun openAccessibilitySettings() {
