@@ -9,6 +9,7 @@ export interface Env {
   HASH_SERVER_URL: string;
   R2_URL: string;
   APP_URL: string;
+  LANDING_URL: string;
   APP_NAME: string;
   AWS_ACCESS_KEY_ID: string;
   AWS_SECRET_ACCESS_KEY: string;

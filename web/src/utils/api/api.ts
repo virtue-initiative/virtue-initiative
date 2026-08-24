@@ -22,6 +22,7 @@ import type {
   UpdateUserPayload,
   UpdateUserResponse,
   CreatePartnerResponse,
+  BugReportPayload,
 } from '@virtueinitiative/shared-web/types';
 export type {
   EmailFrequency,
@@ -44,6 +45,7 @@ export type {
   UpdateUserPayload,
   UpdateUserResponse,
   CreatePartnerResponse,
+  BugReportPayload,
 };
 
 const BASE =
@@ -285,6 +287,12 @@ export const api = {
   deleteWatcher: (id: string) => req<void>(`/partner/${id}`, { method: 'DELETE' }),
 
   deleteWatching: (id: string) => req<void>(`/partner/${id}`, { method: 'DELETE' }),
+
+  reportBug: (payload: BugReportPayload) => {
+    const form = new FormData();
+    form.set('metadata', JSON.stringify(payload));
+    return req<void>('/bug-report', { method: 'POST', body: form });
+  },
 
   getData: (params?: { since?: number }) => {
     const qs = new URLSearchParams();

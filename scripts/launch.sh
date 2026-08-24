@@ -199,6 +199,7 @@ if [ -n "$DOMAIN" ]; then
     export VITE_LANDING_URL="https://${DOMAIN}.localhost"
     export __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS="$ALLOWED_HOSTS"
     export PUBLIC_APP_URL="https://app.${DOMAIN}.localhost"
+    export PUBLIC_API_URL="https://app.${DOMAIN}.localhost/api"
     printf '\n  Landing : http://%s.localhost  /  https://%s.localhost\n' "$DOMAIN" "$DOMAIN"
     printf '  Web     : http://app.%s.localhost  /  https://app.%s.localhost\n' "$DOMAIN" "$DOMAIN"
     printf '  API     : https://app.%s.localhost/api\n' "$DOMAIN"
@@ -222,6 +223,7 @@ if [ -n "$DOMAIN" ]; then
     start_hash_server
     run "api"     "31" "api"     bun run dev -- --port "$API_PORT" \
         --var "APP_URL:https://app.${DOMAIN}.localhost" \
+        --var "LANDING_URL:https://${DOMAIN}.localhost" \
         --var "R2_URL:https://app.${DOMAIN}.localhost/r2" \
         --var "HASH_SERVER_URL:http://localhost:${HASH_PORT}"
     [ "$DONATE" = 1 ] && start_donate "https://${DOMAIN}.localhost"
@@ -232,6 +234,7 @@ else
     export VITE_API_PROXY_TARGET="http://localhost:${API_PORT}"
     export VITE_LANDING_URL="http://localhost:${LANDING_PORT}"
     export PUBLIC_APP_URL="http://localhost:${WEB_PORT}"
+    export PUBLIC_API_URL="http://localhost:${API_PORT}"
     [ "$DONATE" = 1 ] && export PUBLIC_DONATE_API_URL="http://localhost:${DONATE_PORT}"
     printf '\n  Landing : http://localhost:%s\n' "$LANDING_PORT"
     printf '  Web     : http://localhost:%s\n' "$WEB_PORT"
@@ -244,6 +247,7 @@ else
     start_hash_server
     run "api"     "31" "api"     bun run dev -- --port "$API_PORT" \
         --var "APP_URL:http://localhost:${WEB_PORT}" \
+        --var "LANDING_URL:http://localhost:${LANDING_PORT}" \
         --var "R2_URL:http://localhost:${API_PORT}/r2" \
         --var "HASH_SERVER_URL:http://localhost:${HASH_PORT}"
     [ "$DONATE" = 1 ] && start_donate "http://localhost:${LANDING_PORT}"

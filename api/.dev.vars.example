@@ -9,6 +9,10 @@ JWT_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAbYBZuUYl4eRF+lRwOKOk
 # Web app URL. Its origin is also used for CORS.
 APP_URL=http://localhost:5173
 
+# Landing site URL. Its origin is also used for CORS (anonymous bug reports are
+# submitted directly from there).
+LANDING_URL=http://localhost:4321
+
 # App name used in outbound emails.
 APP_NAME=Virtue Initiative
 

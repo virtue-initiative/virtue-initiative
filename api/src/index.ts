@@ -39,7 +39,7 @@ app.use(
   '/*',
   cors({
     origin: (origin, c) => {
-      const allowedOrigins = [c.env.APP_URL, 'http://localhost:5173'].map(
+      const allowedOrigins = [c.env.APP_URL, c.env.LANDING_URL, 'http://localhost:5173'].map(
         (url) => new URL(url).origin,
       );
       return allowedOrigins.find((o) => o === origin);
