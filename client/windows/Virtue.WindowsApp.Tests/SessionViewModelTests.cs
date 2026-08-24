@@ -365,6 +365,34 @@ public sealed class SessionViewModelTests
     }
 
     [Fact]
+    public async Task ForceCaptureAsync_ReturnsTrueAndInvokesInteropOnSuccess()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        var result = await viewModel.ForceCaptureAsync();
+
+        Assert.True(result);
+        Assert.True(fakeClient.ForceScreenshotAndUploadCalled);
+        Assert.Null(viewModel.ErrorText);
+    }
+
+    [Fact]
+    public async Task ForceCaptureAsync_ReturnsFalseAndSetsErrorTextOnFailure()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            ForceScreenshotAndUploadError = new InvalidOperationException("monitoring is not running"),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        var result = await viewModel.ForceCaptureAsync();
+
+        Assert.False(result);
+        Assert.Equal("monitoring is not running", viewModel.ErrorText);
+    }
+
+    [Fact]
     public void TrayMenuController_RoutesReportBugEvent()
     {
         var host = new NullTrayIconHost();

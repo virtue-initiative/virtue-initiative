@@ -310,6 +310,19 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         }, "Signing out...");
     }
 
+    public async Task<bool> ForceCaptureAsync()
+    {
+        var succeeded = false;
+        await RunBusyAsync(async () =>
+        {
+            await Task.Run(() => _interopClient.ForceScreenshotAndUpload());
+            await RefreshInternalAsync();
+            StatusText = BuildStatusText();
+            succeeded = true;
+        }, "Capturing screenshot...");
+        return succeeded;
+    }
+
     public async Task<bool> SubmitBugReportAsync(string message, string? contactEmail, bool includeLogs)
     {
         var succeeded = false;

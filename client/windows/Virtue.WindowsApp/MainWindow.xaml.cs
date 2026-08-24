@@ -273,11 +273,15 @@ public sealed partial class MainWindow : Window
         var reportBugButton = CreateActionButton("Report a Bug");
         reportBugButton.Click += async (_, _) => await ShowReportBugDialogAsync();
 
+        var forceCaptureButton = CreateActionButton("Force Screenshot & Upload");
+        forceCaptureButton.Click += async (_, _) => await ForceCaptureButton_OnClickAsync();
+
         var stopMonitoringButton = CreateActionButton("Stop Monitoring");
         stopMonitoringButton.Click += StopMonitoringButton_OnClick;
 
         _signedInActionsPanel.Orientation = Orientation.Horizontal;
         _signedInActionsPanel.Spacing = 10;
+        _signedInActionsPanel.Children.Add(forceCaptureButton);
         _signedInActionsPanel.Children.Add(stopMonitoringButton);
 
         var actionRow = new StackPanel
@@ -712,6 +716,41 @@ public sealed partial class MainWindow : Window
         {
             await app.RequestResidentShutdownAsync();
         }
+    }
+
+    private async Task ForceCaptureButton_OnClickAsync()
+    {
+        var succeeded = await ViewModel.ForceCaptureAsync();
+        if (succeeded)
+        {
+            await ShowForceCaptureConfirmationAsync();
+        }
+    }
+
+    private async Task ShowForceCaptureConfirmationAsync()
+    {
+        var dialog = new ContentDialog
+        {
+            Title = CreateDialogTitle("Screenshot Captured"),
+            CloseButtonText = "Close",
+            DefaultButton = ContentDialogButton.Close,
+            Content = new TextBlock
+            {
+                Text = "A screenshot was captured and is uploading.",
+                TextWrapping = TextWrapping.Wrap,
+                FontFamily = BodyFont,
+                Foreground = Ink2Brush,
+                Width = 380,
+            },
+        };
+        ApplyDialogTheme(dialog);
+
+        if (Content is FrameworkElement root)
+        {
+            dialog.XamlRoot = root.XamlRoot;
+        }
+
+        await dialog.ShowAsync();
     }
 
     private void PasswordBox_OnPasswordChanged(object sender, RoutedEventArgs e)
