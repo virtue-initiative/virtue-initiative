@@ -461,6 +461,17 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeNoteU
 }
 
 #[no_mangle]
+pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeForceCapture<'l>(
+    mut unowned_env: EnvUnowned<'l>,
+    _class: JClass<'l>,
+) -> jstring {
+    native_result(&mut unowned_env, |_env| -> Result<()> {
+        core()?.daemon.force_capture_now();
+        Ok(())
+    })
+}
+
+#[no_mangle]
 pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeGetStatusJson<'l>(
     mut unowned_env: EnvUnowned<'l>,
     _class: JClass<'l>,
