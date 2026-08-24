@@ -58,6 +58,7 @@ enum WireRequest {
         upload: Upload,
     },
     FlushBatchNow,
+    ForceCapture,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -129,6 +130,10 @@ where
         }
         WireRequest::FlushBatchNow => {
             daemon.flush_batch_now();
+            WireReply::Ack
+        }
+        WireRequest::ForceCapture => {
+            daemon.force_capture_now();
             WireReply::Ack
         }
     }
@@ -332,6 +337,14 @@ impl ClientController {
         self.call(WireRequest::FlushBatchNow)?;
         Ok(())
     }
+
+    /// Ask the daemon to force an immediate screenshot capture (bypassing the
+    /// normal interval-due gate, but still honoring the locked/screensaver
+    /// and fingerprint-dedup gates) and flush it out right away.
+    pub fn force_capture_now(&mut self) -> CoreResult<()> {
+        self.call(WireRequest::ForceCapture)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -391,6 +404,17 @@ mod tests {
         let status = controller.get_status().expect("status");
         assert!(status.is_running);
         assert!(!status.is_authenticated);
+
+        let _ = std::fs::remove_file(&sock);
+    }
+
+    #[test]
+    fn force_capture_round_trips_over_the_socket() {
+        let sock = test_sock_path("force-capture");
+        let _daemon = spawn_test_daemon(&sock);
+
+        let mut controller = ClientController::connect(&sock).expect("connect");
+        controller.force_capture_now().expect("force capture");
 
         let _ = std::fs::remove_file(&sock);
     }
