@@ -289,6 +289,23 @@ pub extern "C" fn virtue_mac_native_request_user_stop(source: *const c_char) -> 
     into_c_result(result)
 }
 
+/// Forces an immediate screenshot capture (bypassing the normal interval-due
+/// gate, but still honoring the locked/screensaver and fingerprint-dedup
+/// gates) and requests an immediate batch flush, so the result uploads
+/// without waiting out the normal batch interval.
+#[unsafe(no_mangle)]
+pub extern "C" fn virtue_mac_native_force_capture() -> *mut c_char {
+    let result = (|| -> Result<()> {
+        let core = core()?;
+        let sock = core.paths.state_dir.join("daemon.sock");
+        let mut client = ClientController::connect(&sock)
+            .context("failed to connect to daemon (is it running?)")?;
+        client.force_capture_now().context("force capture failed")?;
+        Ok(())
+    })();
+    into_c_result(result)
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn virtue_mac_native_has_capture_permission() -> bool {
     has_screen_capture_access()

@@ -41,6 +41,9 @@ final class MonitoringCoordinator: ObservableObject {
     @Published private(set) var pendingRequestCount: Int = 0
     @Published private(set) var lastLoopAt: String = "<none>"
 
+    @Published private(set) var isForceCapturing: Bool = false
+    @Published private(set) var forceCaptureMessage: String?
+
     let buildLabel = NativeBridge.getBuildLabel()
 
     private var statusTimer: Timer?
@@ -185,6 +188,32 @@ final class MonitoringCoordinator: ObservableObject {
                 }.value
             }
             NSApplication.shared.terminate(nil)
+        }
+    }
+
+    /// Forces an immediate screenshot capture, bypassing the normal
+    /// interval-due gate (still honors the locked/screensaver and
+    /// fingerprint-dedup gates). Shows a transient confirmation/error
+    /// message that clears itself after a few seconds, rather than sticking
+    /// around forever.
+    func forceCapture() {
+        guard loggedIn, !isForceCapturing else {
+            return
+        }
+        isForceCapturing = true
+        forceCaptureMessage = "Capturing screenshot…"
+        Task {
+            let error = await Task.detached(priority: .userInitiated) {
+                NativeBridge.forceCapture()
+            }.value
+            isForceCapturing = false
+            let message = error.map { "Force screenshot failed: \($0)" } ?? "Screenshot captured and uploading"
+            forceCaptureMessage = message
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            // Only clear if a later call hasn't already replaced this message.
+            if forceCaptureMessage == message {
+                forceCaptureMessage = nil
+            }
         }
     }
 

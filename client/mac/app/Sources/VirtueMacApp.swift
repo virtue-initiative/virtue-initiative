@@ -53,6 +53,12 @@ private struct MenuBarMenuContent: View {
                 openWindow(id: "main")
                 NSApp.activate(ignoringOtherApps: true)
             }
+        } else {
+            Divider()
+            Button("Force Screenshot & Upload") {
+                coordinator.forceCapture()
+            }
+            .disabled(coordinator.isForceCapturing)
         }
 
         Divider()
