@@ -7,6 +7,7 @@ using WinRT;
 using Virtue.WindowsApp.Core.Tray;
 using Virtue.WindowsApp.Core.Interop;
 using Virtue.WindowsApp.Core.ViewModels;
+using Virtue.WindowsApp.Update;
 using WinUiLaunchActivatedEventArgs = Microsoft.UI.Xaml.LaunchActivatedEventArgs;
 using StartupTaskActivatedEventArgs = Windows.ApplicationModel.Activation.StartupTaskActivatedEventArgs;
 using AppLifecycleInstance = Microsoft.Windows.AppLifecycle.AppInstance;
@@ -22,6 +23,11 @@ public partial class App : Application
     private CancellationTokenSource? _refreshLoopCancellation;
     private AppLifecycleInstance? _mainInstance;
     private DispatcherQueue? _dispatcherQueue;
+    private StoreUpdateManager? _updateManager;
+    private CancellationTokenSource? _countdownCancellation;
+    private DateTimeOffset? _updateStagedAtUtc;
+    private int _updateRestartStarted;
+    private static readonly TimeSpan CountdownTickInterval = TimeSpan.FromMinutes(1);
     private static readonly string StartupLogPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
         "Virtue",
@@ -59,6 +65,7 @@ public partial class App : Application
             _trayController.OpenRequested += (_, _) => ShowMainWindow();
             _trayController.ExitRequested += async (_, _) => await RequestResidentShutdownAsync();
             _trayController.ReportBugRequested += async (_, _) => await ShowReportBugFromTrayAsync();
+            _trayController.RestartToUpdateRequested += (_, _) => _ = HandleManualRestartToUpdateAsync();
             _trayController.SessionLogoffObserved += (_, _) => HandleSessionLogoff();
             _trayController.SystemShutdownObserved += (_, _) => HandleSystemShutdown();
             _trayController.Initialize();
@@ -69,6 +76,11 @@ public partial class App : Application
             StartRefreshLoop();
 
             RegisterWatchdog();
+
+            _updateManager = new StoreUpdateManager();
+            _updateManager.UpdateStaged += (_, _) => OnUpdateStaged();
+            _updateManager.UpdateCheckFailed += (_, reason) => LogStartup($"Store update check/download failed: {reason}");
+            _updateManager.Start();
 
             var activation = AppLifecycleInstance.GetCurrent().GetActivatedEventArgs();
             if (!IsQuietActivation(activation))
@@ -236,6 +248,8 @@ public partial class App : Application
 
         LogStartup("MainWindow created.");
         var window = new MainWindow(_viewModel);
+        window.Hidden += (_, _) => EvaluateUpdateRestart();
+        window.CloseNowAndUpdateRequested += (_, _) => _ = HandleManualRestartToUpdateAsync();
         window.Activate();
         LogStartup("MainWindow activated.");
         return window;
@@ -292,6 +306,8 @@ public partial class App : Application
         {
             RestartWatchdog.Unregister();
             _refreshLoopCancellation?.Cancel();
+            _countdownCancellation?.Cancel();
+            _updateManager?.Dispose();
             if (_viewModel is not null)
             {
                 if (_viewModel.LoggedIn)
@@ -383,6 +399,134 @@ public partial class App : Application
         catch (Exception ex)
         {
             LogStartup($"System shutdown lifecycle handling failed: {ex}");
+        }
+    }
+
+    /// <summary>
+    /// Fired once <see cref="StoreUpdateManager"/> finishes downloading/staging an update.
+    /// Reflects the state in the tray tooltip, evaluates immediately (covers the case where
+    /// the window is already hidden, and seeds the countdown text if it's open), then starts a
+    /// 1-minute timer that re-evaluates each tick — see <see cref="EvaluateUpdateRestart"/>.
+    /// </summary>
+    private void OnUpdateStaged()
+    {
+        _updateStagedAtUtc = DateTimeOffset.UtcNow;
+        _ = _dispatcherQueue?.TryEnqueue(() => _viewModel?.NotifyUpdateStaged());
+        LogStartup("Store update staged.");
+
+        EvaluateUpdateRestart();
+
+        _countdownCancellation?.Cancel();
+        _countdownCancellation = new CancellationTokenSource();
+        var token = _countdownCancellation.Token;
+        _ = Task.Run(async () =>
+        {
+            using var timer = new PeriodicTimer(CountdownTickInterval);
+            while (await timer.WaitForNextTickAsync(token))
+            {
+                EvaluateUpdateRestart();
+            }
+        }, token);
+    }
+
+    /// <summary>
+    /// The single decision point for the staged-update restart: called immediately when an
+    /// update stages, every minute while it's pending, and every time the main window
+    /// transitions to hidden (<see cref="MainWindow.Hidden"/>). If the window is hidden and the
+    /// session isn't busy, restarts right away. Otherwise updates the in-window countdown text,
+    /// and once the 6-hour deferral cap is reached, hides the window itself — which re-raises
+    /// <see cref="MainWindow.Hidden"/> and re-enters this method, taking the hidden branch to
+    /// actually restart.
+    /// </summary>
+    private void EvaluateUpdateRestart()
+    {
+        if (_updateManager?.IsUpdateStaged != true || _updateStagedAtUtc is not { } stagedAtUtc)
+        {
+            return;
+        }
+
+        var sessionIsBusy = _viewModel?.IsBusy ?? false;
+        var mainWindowVisible = _mainWindow?.IsVisibleToUser ?? false;
+
+        if (!mainWindowVisible)
+        {
+            if (!sessionIsBusy)
+            {
+                _ = InstallUpdateAndRestartAsync();
+            }
+
+            return;
+        }
+
+        var deadlineUtc = UpdateRestartPolicy.GetDeadlineUtc(stagedAtUtc);
+        var now = DateTimeOffset.UtcNow;
+        var countdownText = UpdateRestartPolicy.FormatCountdown(deadlineUtc - now);
+        _ = _dispatcherQueue?.TryEnqueue(() => _viewModel?.SetUpdateCountdownText(countdownText));
+
+        if (UpdateRestartPolicy.ShouldForceRestart(sessionIsBusy, deadlineUtc, now))
+        {
+            _ = _dispatcherQueue?.TryEnqueue(() => _mainWindow?.HideToTray());
+        }
+    }
+
+    /// <summary>
+    /// The tray "Restart to Update" menu item's and the in-window "Close now and update"
+    /// button's shared handler — an explicit user request always proceeds immediately,
+    /// bypassing the busy/deadline check (unlike the automatic path).
+    /// </summary>
+    private async Task HandleManualRestartToUpdateAsync()
+    {
+        if (_updateManager?.IsUpdateStaged != true)
+        {
+            return;
+        }
+
+        await InstallUpdateAndRestartAsync();
+    }
+
+    /// <summary>
+    /// Stops resident monitoring the same way an OS session logoff/shutdown does (NOT the
+    /// tray-exit path — this must not be treated as a user-initiated stop for CORE-002
+    /// purposes, and it must not log the device out), installs the staged Store update, and
+    /// exits. `RestartWatchdog` is deliberately left registered (unlike tray Exit) so its
+    /// existing per-minute poll relaunches the updated build.
+    ///
+    /// Can legitimately be reached from several concurrent triggers around the same
+    /// moment (a <see cref="MainWindow.Hidden"/> event, a countdown tick, and the manual
+    /// button/tray item), so an <see cref="Interlocked"/> guard ensures only the first call
+    /// actually proceeds.
+    /// </summary>
+    private async Task InstallUpdateAndRestartAsync()
+    {
+        if (Interlocked.CompareExchange(ref _updateRestartStarted, 1, 0) != 0)
+        {
+            return;
+        }
+
+        _countdownCancellation?.Cancel();
+        // MainWindow is a WinRT object with UI-thread affinity; this method may run on a
+        // background poll thread (the automatic countdown path) as well as the UI thread
+        // (the manual tray-menu/button path), so always marshal the hide through the dispatcher.
+        _ = _dispatcherQueue?.TryEnqueue(() => _mainWindow?.HideToTray());
+
+        try
+        {
+            _refreshLoopCancellation?.Cancel();
+            new RustInteropClient().StopMonitoringForOsSessionEnd();
+            LogStartup("Stopped resident monitoring for Store update install.");
+
+            var installed = await _updateManager!.TryInstallStagedUpdateAsync();
+            LogStartup($"Update install call returned (installed={installed}).");
+        }
+        catch (Exception ex)
+        {
+            LogStartup($"Update install failed: {ex}");
+        }
+        finally
+        {
+            // Application.Exit() also has UI-thread affinity — same reasoning as the
+            // HideToTray() marshal above.
+            _ = _dispatcherQueue?.TryEnqueue(() => Current.Exit());
         }
     }
 

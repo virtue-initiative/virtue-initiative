@@ -21,6 +21,31 @@ public sealed class SessionViewModelTests
     }
 
     [Fact]
+    public void NotifyUpdateStaged_AppendsUpdateReadySuffixToTrayTooltip()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        viewModel.NotifyUpdateStaged();
+
+        Assert.True(viewModel.UpdateReady);
+        Assert.Equal("Virtue: loading status (update ready)", viewModel.TrayTooltip);
+    }
+
+    [Fact]
+    public void SetUpdateCountdownText_UpdatesProperty()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        Assert.Null(viewModel.UpdateCountdownText);
+
+        viewModel.SetUpdateCountdownText("42m");
+
+        Assert.Equal("42m", viewModel.UpdateCountdownText);
+    }
+
+    [Fact]
     public async Task LoginAsync_RefreshesStatusAfterSuccess()
     {
         var fakeClient = new FakeRustInteropClient
@@ -351,6 +376,20 @@ public sealed class SessionViewModelTests
         host.RequestReportBug();
 
         Assert.True(reportBugRaised);
+    }
+
+    [Fact]
+    public void TrayMenuController_RoutesRestartToUpdateEvent()
+    {
+        var host = new NullTrayIconHost();
+        var controller = new TrayMenuController(host);
+        var restartToUpdateRaised = false;
+
+        controller.RestartToUpdateRequested += (_, _) => restartToUpdateRaised = true;
+
+        host.RequestRestartToUpdate();
+
+        Assert.True(restartToUpdateRaised);
     }
 
     [Fact]
