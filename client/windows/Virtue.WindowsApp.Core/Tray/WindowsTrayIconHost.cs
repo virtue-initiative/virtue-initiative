@@ -7,6 +7,7 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
     private const int NifMessage = 0x00000001;
     private const int NifIcon = 0x00000002;
     private const int NifTip = 0x00000004;
+    private const int NifInfo = 0x00000010;
     private const int NimAdd = 0x00000000;
     private const int NimModify = 0x00000001;
     private const int NimDelete = 0x00000002;
@@ -26,6 +27,7 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
     private const int IdTrayExit = 2002;
     private const int IdTrayReportBug = 2003;
     private const int IdTrayRestartToUpdate = 2004;
+    private const int IdTrayForceCapture = 2005;
     private const int WindowId = 1;
     private static readonly uint WmTrayIcon = WmApp + 1;
 
@@ -48,6 +50,7 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
     public event EventHandler? ExitRequested;
     public event EventHandler? ReportBugRequested;
     public event EventHandler? RestartToUpdateRequested;
+    public event EventHandler? ForceCaptureRequested;
     public event EventHandler? SessionLogoffObserved;
     public event EventHandler? SystemShutdownObserved;
 
@@ -81,6 +84,7 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
 
         _menuHandle = CreatePopupMenu();
         _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayOpen, "Open");
+        _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayForceCapture, "Force Screenshot && Upload");
         _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayReportBug, "Report a Bug");
         _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayRestartToUpdate, "Restart to Update");
         _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayExit, "Exit");
@@ -96,6 +100,27 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
         {
             AddOrUpdateIcon(NimModify);
         }
+    }
+
+    public void ShowBalloonTip(string title, string text)
+    {
+        if (!_iconAdded || _windowHandle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var data = new NotifyIconData
+        {
+            cbSize = Marshal.SizeOf<NotifyIconData>(),
+            hWnd = _windowHandle,
+            uID = WindowId,
+            uFlags = NifInfo,
+            szTip = BuildToolTip(_toolTip),
+            szInfo = text.Length <= 255 ? text : text[..255],
+            szInfoTitle = title.Length <= 63 ? title : title[..63],
+        };
+
+        _ = Shell_NotifyIcon(NimModify, ref data);
     }
 
     public void Dispose()
@@ -241,6 +266,10 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
                 else if (command == IdTrayRestartToUpdate)
                 {
                     RestartToUpdateRequested?.Invoke(this, EventArgs.Empty);
+                }
+                else if (command == IdTrayForceCapture)
+                {
+                    ForceCaptureRequested?.Invoke(this, EventArgs.Empty);
                 }
                 else if (command == IdTrayExit)
                 {

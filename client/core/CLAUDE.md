@@ -60,8 +60,8 @@ daemon.run_forever(); // blocking — call from its own thread
   upload) against that owned clone with **no locking anywhere in the
   middle**, writing the result back to the shared snapshot and to disk at
   the end.
-- `login`/`logout`/`note_user_stop`/`queue_upload`/`flush_batch_now` are
-  `Daemon` methods that build a `DaemonRequest`, send it on an `mpsc`
+- `login`/`logout`/`note_user_stop`/`queue_upload`/`flush_batch_now`/
+  `force_capture_now` are `Daemon` methods that build a `DaemonRequest`, send it on an `mpsc`
   channel, and block on a reply — the loop thread is the only place that
   ever mutates `DaemonState`. `status()` is the one exception: a direct
   lock-based read of the loop's last-committed snapshot, since there's
@@ -79,7 +79,7 @@ trait, no event dispatch. A module that needs to enqueue work calls
 | ---------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `auth`                 | (writes into `AuthState`/`ScreenshotState`/`UploadState`) | `login()`, `logout()`                                                                                                      |
 | `lifecycle`            | `LifecycleState`                                          | `tick()` (late-wakeup check), `note_user_stop()`                                                                           |
-| `screenshot`           | `ScreenshotState`                                         | `plan()`, `capture_and_process()`, `commit()`                                                                              |
+| `screenshot`           | `ScreenshotState`                                         | `plan()`, `plan_forced()` (on-demand capture, bypasses the interval gate), `capture_and_process()`, `commit()`             |
 | `upload`               | `UploadState`                                             | `enqueue()`, `plan_hash_retries`/`execute_hash_retries`/`commit_hash_retries`, `plan_batch`/`execute_batch`/`commit_batch` |
 | `capture_availability` | `CaptureAvailabilityState`                                | `note_failure()`, `tick()`                                                                                                 |
 | `heartbeat`            | `HeartbeatState`                                          | `tick()`                                                                                                                   |

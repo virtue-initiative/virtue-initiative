@@ -172,6 +172,11 @@ impl Scenario {
         self
     }
 
+    pub fn force_capture_now(&mut self) -> &mut Self {
+        self.daemon.test_force_capture();
+        self
+    }
+
     /// A cloned snapshot of the daemon's current state.
     pub fn state(&self) -> DaemonState {
         self.daemon.state_snapshot()

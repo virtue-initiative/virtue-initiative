@@ -49,7 +49,10 @@ other platform.
 
 - `core/src/module/screenshot.rs` — `plan()`/`capture_and_process()`/`commit()`:
   random exponential-cadence scheduling (CORE-003 — not a fixed interval),
-  lock/screensaver gate, screen-change diff gate, redaction, risk classification
+  lock/screensaver gate, screen-change diff gate, redaction, risk classification.
+  `plan_forced()` is the on-demand "capture now" entry point (wired through
+  `Daemon::force_capture_now`): bypasses the interval-due gate but keeps the
+  locked/screensaver gate, then reuses `capture_and_process`/`commit` unchanged.
 - `linux/src/capture.rs`, `mac/src/capture.rs`, `windows/src/capture.rs` — platform
   `take_screenshot()` implementations
 

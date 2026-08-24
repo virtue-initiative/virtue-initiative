@@ -57,6 +57,9 @@ enum DaemonRequest {
     FlushBatchNow {
         reply: mpsc::Sender<()>,
     },
+    ForceCapture {
+        reply: mpsc::Sender<()>,
+    },
     Stop,
 }
 
@@ -318,6 +321,39 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         upload::request_immediate_flush(&mut state.upload, now_ms);
     }
 
+    /// Runs a forced (on-demand) capture through the same
+    /// `capture_and_process`/`commit` pipeline `run_phases` uses, then
+    /// requests an immediate batch flush so the result doesn't wait out the
+    /// normal batch interval.
+    fn apply_force_capture(&self, state: &mut DaemonState, now_ms: i64) {
+        let plan = match screenshot::plan_forced(&state.screenshot, &self.platform) {
+            Ok(plan) => plan,
+            Err(err) => {
+                tracing::error!(phase = "screenshot_plan_forced", error = %err, "daemon phase failed");
+                None
+            }
+        };
+
+        let captured = plan.map(|plan| {
+            screenshot::capture_and_process(
+                plan,
+                &self.platform,
+                self.classifier.as_deref(),
+                self.ocr.as_deref(),
+            )
+        });
+
+        screenshot::commit(
+            &mut state.screenshot,
+            &mut state.upload,
+            &mut state.capture_availability,
+            captured,
+            now_ms,
+        );
+
+        upload::request_immediate_flush(&mut state.upload, now_ms);
+    }
+
     // ── Public request methods ──────────────────────────────────────────
     //
     // Each blocks on a fresh reply channel until the loop thread has applied
@@ -393,6 +429,16 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         }
     }
 
+    /// Forces an immediate screenshot capture (bypassing the normal
+    /// interval-due gate, but still honoring the locked/screensaver gate and
+    /// the fingerprint dedup gate) and requests an immediate batch flush so
+    /// the result uploads without waiting out the normal batch interval.
+    pub fn force_capture_now(&self) {
+        if let Err(err) = self.call(|reply| DaemonRequest::ForceCapture { reply }) {
+            log_warning("force_capture_now: daemon loop unreachable", Some(&err));
+        }
+    }
+
     /// Fire-and-forget, same as before — Windows/Android track real shutdown
     /// by joining the loop thread's handle separately.
     pub fn request_stop(&self) {
@@ -457,6 +503,14 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         let now_ms = self.now_ms();
         let mut guard = self.state.lock().expect("daemon state lock poisoned");
         self.apply_flush_batch_now(&mut guard, now_ms);
+        self.persist(&guard);
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub fn test_force_capture(&self) {
+        let now_ms = self.now_ms();
+        let mut guard = self.state.lock().expect("daemon state lock poisoned");
+        self.apply_force_capture(&mut guard, now_ms);
         self.persist(&guard);
     }
 
@@ -555,6 +609,12 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
                     }
                     DaemonRequest::FlushBatchNow { reply } => {
                         self.apply_flush_batch_now(working, now_ms);
+                        fires.push(Box::new(move || {
+                            let _ = reply.send(());
+                        }));
+                    }
+                    DaemonRequest::ForceCapture { reply } => {
+                        self.apply_force_capture(working, now_ms);
                         fires.push(Box::new(move || {
                             let _ = reply.send(());
                         }));

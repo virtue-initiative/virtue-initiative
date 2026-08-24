@@ -118,6 +118,30 @@ pub fn plan(
     }))
 }
 
+/// Builds a forced-capture plan, bypassing the interval-due gate (Gate 0)
+/// but keeping the locked/screensaver gate (Gate 1). Used for an
+/// on-demand "capture now" request rather than the normal cadence. Unlike
+/// `plan`, this never touches `state.next_screenshot_at_ms` — the schedule
+/// for the next *automatic* capture is left undisturbed — and never
+/// enqueues a `ScreenshotSkipped` upload when locked, since there's no
+/// scheduled slot being consumed. `anchor` is always `None`, so the
+/// fingerprint-diff gate in `capture_and_process` always treats the forced
+/// frame as changed (same as the very first capture ever).
+pub fn plan_forced(
+    state: &ScreenshotState,
+    hooks: &dyn ScreenshotHooks,
+) -> CoreResult<Option<CapturePlan>> {
+    if !state.enabled {
+        return Ok(None);
+    }
+
+    if hooks.is_locked_or_screensaver()? {
+        return Ok(None);
+    }
+
+    Ok(Some(CapturePlan { anchor: None }))
+}
+
 /// Outcome of the heavy capture pipeline.
 pub enum CaptureOutcome {
     Failed,
@@ -430,6 +454,39 @@ mod tests {
         hooks.queue_screenshot(Err(crate::error::CoreError::CommandFailed("boom".into())));
         let outcome = capture_and_process(CapturePlan { anchor: None }, &hooks, None, None);
         assert!(matches!(outcome, CaptureOutcome::Failed));
+    }
+
+    #[test]
+    fn plan_forced_bypasses_the_interval_due_gate() {
+        let mut state = ScreenshotState::default();
+        enable(&mut state);
+        state.next_screenshot_at_ms = Some(1_000_000_000);
+        let hooks = TestPlatformHooks::new();
+        let plan = plan_forced(&state, &hooks).unwrap();
+        assert!(plan.is_some());
+        assert_eq!(
+            state.next_screenshot_at_ms,
+            Some(1_000_000_000),
+            "plan_forced must not disturb the normal capture schedule"
+        );
+    }
+
+    #[test]
+    fn plan_forced_still_respects_locked_or_screensaver() {
+        let mut state = ScreenshotState::default();
+        enable(&mut state);
+        let hooks = TestPlatformHooks::new();
+        hooks.set_locked_or_screensaver(true);
+        let plan = plan_forced(&state, &hooks).unwrap();
+        assert!(plan.is_none());
+    }
+
+    #[test]
+    fn plan_forced_is_a_noop_when_disabled() {
+        let state = ScreenshotState::default();
+        let hooks = TestPlatformHooks::new();
+        let plan = plan_forced(&state, &hooks).unwrap();
+        assert!(plan.is_none());
     }
 
     #[test]

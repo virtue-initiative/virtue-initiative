@@ -393,6 +393,30 @@ public sealed class SessionViewModelTests
     }
 
     [Fact]
+    public void TrayMenuController_RoutesForceCaptureEvent()
+    {
+        var host = new NullTrayIconHost();
+        var controller = new TrayMenuController(host);
+        var forceCaptureRaised = false;
+
+        controller.ForceCaptureRequested += (_, _) => forceCaptureRaised = true;
+
+        host.RequestForceCapture();
+
+        Assert.True(forceCaptureRaised);
+    }
+
+    [Fact]
+    public void ForceScreenshotAndUpload_InvokesInterop()
+    {
+        var fakeClient = new FakeRustInteropClient();
+
+        fakeClient.ForceScreenshotAndUpload();
+
+        Assert.True(fakeClient.ForceScreenshotAndUploadCalled);
+    }
+
+    [Fact]
     public void TrayMenuController_RoutesAllSystemEvents()
     {
         var host = new NullTrayIconHost();
@@ -497,6 +521,20 @@ public sealed class SessionViewModelTests
             }
 
             LastReportIssue = (message, contactEmail, includeLogs);
+        }
+
+        public bool ForceScreenshotAndUploadCalled { get; private set; }
+
+        public Exception? ForceScreenshotAndUploadError { get; set; }
+
+        public void ForceScreenshotAndUpload()
+        {
+            if (ForceScreenshotAndUploadError is not null)
+            {
+                throw ForceScreenshotAndUploadError;
+            }
+
+            ForceScreenshotAndUploadCalled = true;
         }
     }
 }

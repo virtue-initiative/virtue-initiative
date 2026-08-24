@@ -114,8 +114,8 @@ shape has somewhere to branch migration logic, rather than relying solely on
 
 ### Responsiveness: a request channel, not a shared mutex
 
-`login`/`logout`/`note_user_stop`/`queue_upload`/`flush_batch_now` build a
-`DaemonRequest` (each variant carries its own reply `Sender`), send it on the
+`login`/`logout`/`note_user_stop`/`queue_upload`/`flush_batch_now`/`force_capture_now`
+build a `DaemonRequest` (each variant carries its own reply `Sender`), send it on the
 `mpsc` channel, and block on the reply — sending is itself the wakeup, since
 `run_forever` is blocked in `recv_timeout` waiting for exactly this. The loop
 thread is the only code that ever mutates `DaemonState`; a private `apply_*`

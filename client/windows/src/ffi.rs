@@ -449,6 +449,11 @@ pub extern "C" fn virtue_windows_stop_monitoring_for_os_session_end() -> *mut c_
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn virtue_windows_force_capture() -> *mut c_char {
+    into_error_ptr(resident_monitor::force_capture_now())
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn virtue_windows_get_monitor_status_json() -> *mut c_char {
     into_json_ptr(Ok(MonitorStatusPayload::from(
         resident_monitor::status_snapshot(),
@@ -596,6 +601,13 @@ mod tests {
         assert!(json.get("loggedIn").is_some());
         assert!(json.get("pendingRequestCount").is_some());
         assert!(json.get("lastError").is_some());
+    }
+
+    #[test]
+    fn force_capture_returns_a_useful_error_string_when_monitoring_is_not_running() {
+        let _guard = test_lock().lock().expect("test lock");
+        let error = ptr_to_string(virtue_windows_force_capture());
+        assert_eq!(error, "monitoring is not running");
     }
 
     #[test]

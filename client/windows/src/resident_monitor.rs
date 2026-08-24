@@ -222,6 +222,12 @@ pub fn app_logout() -> Result<()> {
     Ok(())
 }
 
+pub fn force_capture_now() -> Result<()> {
+    let daemon = current_daemon().ok_or_else(|| anyhow::anyhow!("monitoring is not running"))?;
+    daemon.force_capture_now();
+    Ok(())
+}
+
 fn update_snapshot(update: impl FnOnce(&mut MonitorStatusSnapshot)) {
     let controller = controller();
     let mut state = controller.state.lock().expect("monitor controller lock");
