@@ -40,6 +40,9 @@ private func virtue_mac_native_request_user_stop(
     _ source: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
+@_silgen_name("virtue_mac_native_force_capture")
+private func virtue_mac_native_force_capture() -> UnsafeMutablePointer<CChar>?
+
 @_silgen_name("virtue_mac_native_has_capture_permission")
 private func virtue_mac_native_has_capture_permission() -> Bool
 
@@ -153,6 +156,12 @@ enum NativeBridge {
             source.withCString { sourceCString in
                 virtue_mac_native_request_user_stop(sourceCString)
             }
+        }
+    }
+
+    static func forceCapture() -> String? {
+        callReturningError {
+            virtue_mac_native_force_capture()
         }
     }
 
