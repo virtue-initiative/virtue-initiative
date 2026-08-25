@@ -107,28 +107,42 @@ struct ContentView: View {
                         .foregroundStyle(VirtueBrand.textMuted)
                 }
 
-                HStack(spacing: 10) {
-                    Button("Status Details") {
-                        showStatusSheet = true
-                    }
-                    .buttonStyle(VirtueButtonStyle())
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        Button("Status Details") {
+                            showStatusSheet = true
+                        }
+                        .buttonStyle(VirtueButtonStyle())
 
-                    Button(coordinator.isForceCapturing ? "Capturing…" : "Force Screenshot & Upload") {
-                        coordinator.forceCapture()
+                        Button(coordinator.isForceCapturing ? "Capturing…" : "Force Screenshot & Upload") {
+                            coordinator.forceCapture()
+                        }
+                        .buttonStyle(VirtueButtonStyle())
+                        .disabled(!coordinator.loggedIn || coordinator.isForceCapturing)
+                        .overlay {
+                            // A disabled view stops receiving the hover events that
+                            // drive `.help()`, so host the tooltip on a plain
+                            // (non-disabled) overlay instead of the button itself.
+                            if !coordinator.loggedIn {
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .help("Sign in to use this feature")
+                            }
+                        }
                     }
-                    .buttonStyle(VirtueButtonStyle())
-                    .disabled(!coordinator.loggedIn || coordinator.isForceCapturing)
 
-                    Button("Report a Bug") {
-                        showReportBugSheet = true
-                    }
-                    .buttonStyle(VirtueButtonStyle())
+                    HStack(spacing: 10) {
+                        Button("Report a Bug") {
+                            showReportBugSheet = true
+                        }
+                        .buttonStyle(VirtueButtonStyle())
 
-                    Button("Stop Monitoring and Quit") {
-                        showStopConfirmation = true
+                        Button("Stop Monitoring and Quit") {
+                            showStopConfirmation = true
+                        }
+                        .buttonStyle(VirtueButtonStyle(prominent: true))
+                        .disabled(!coordinator.loggedIn)
                     }
-                    .buttonStyle(VirtueButtonStyle(prominent: true))
-                    .disabled(!coordinator.loggedIn)
                 }
                 .padding(.top, 6)
             }
