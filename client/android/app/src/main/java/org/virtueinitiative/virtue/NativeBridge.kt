@@ -49,6 +49,7 @@ object NativeBridge {
     external fun nativeGetDeviceId(): String?
     external fun nativeRunDaemonLoop(): String?
     external fun nativeStopDaemon(): String?
+    external fun nativeForceCapture(): String?
     external fun nativeNoteUserStop(source: String): String?
     external fun nativeGetStatusJson(): String
     external fun nativeReportIssue(

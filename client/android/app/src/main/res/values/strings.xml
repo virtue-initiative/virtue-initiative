@@ -26,6 +26,7 @@
     <string name="btn_sign_in">Sign In</string>
     <string name="btn_sign_out">Sign Out</string>
     <string name="btn_status_details">Status Details</string>
+    <string name="btn_force_capture">Force Screenshot &amp; Upload</string>
     <string name="btn_pause_monitoring">Pause Monitoring</string>
     <string name="btn_resume_monitoring">Resume Monitoring</string>
     <string name="btn_done">Done</string>
@@ -40,6 +41,9 @@
     <string name="msg_onboarding_waiting">Waiting for Accessibility permission…</string>
     <string name="btn_open_accessibility_settings">Open Accessibility Settings</string>
     <string name="msg_core_init_failed">Setup failed to complete: %s. Please close and reopen the app.</string>
+    <string name="msg_force_capture_started">Capturing screenshot…</string>
+    <string name="msg_force_capture_succeeded">Screenshot captured and uploading</string>
+    <string name="msg_force_capture_failed">Force screenshot failed: %s</string>
 
     <!-- Dialogs -->
     <string name="dialog_sign_out_title">Sign out?</string>
