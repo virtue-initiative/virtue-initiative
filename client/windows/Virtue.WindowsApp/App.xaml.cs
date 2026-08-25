@@ -66,6 +66,7 @@ public partial class App : Application
             _trayController.ExitRequested += async (_, _) => await RequestResidentShutdownAsync();
             _trayController.ReportBugRequested += async (_, _) => await ShowReportBugFromTrayAsync();
             _trayController.RestartToUpdateRequested += (_, _) => _ = HandleManualRestartToUpdateAsync();
+            _trayController.ForceCaptureRequested += async (_, _) => await ForceCaptureAsync();
             _trayController.SessionLogoffObserved += (_, _) => HandleSessionLogoff();
             _trayController.SystemShutdownObserved += (_, _) => HandleSystemShutdown();
             _trayController.Initialize();
@@ -236,6 +237,20 @@ public partial class App : Application
         if (_mainWindow is not null)
         {
             await _mainWindow.ShowReportBugDialogAsync();
+        }
+    }
+
+    private async Task ForceCaptureAsync()
+    {
+        try
+        {
+            await Task.Run(() => new RustInteropClient().ForceScreenshotAndUpload());
+            _trayController?.ShowBalloonTip("Virtue", "Screenshot captured and uploading");
+        }
+        catch (InvalidOperationException ex)
+        {
+            LogStartup($"Force capture failed: {ex}");
+            _trayController?.ShowBalloonTip("Virtue", $"Force screenshot failed: {ex.Message}");
         }
     }
 

@@ -365,6 +365,34 @@ public sealed class SessionViewModelTests
     }
 
     [Fact]
+    public async Task ForceCaptureAsync_ReturnsTrueAndInvokesInteropOnSuccess()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        var result = await viewModel.ForceCaptureAsync();
+
+        Assert.True(result);
+        Assert.True(fakeClient.ForceScreenshotAndUploadCalled);
+        Assert.Null(viewModel.ErrorText);
+    }
+
+    [Fact]
+    public async Task ForceCaptureAsync_ReturnsFalseAndSetsErrorTextOnFailure()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            ForceScreenshotAndUploadError = new InvalidOperationException("monitoring is not running"),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        var result = await viewModel.ForceCaptureAsync();
+
+        Assert.False(result);
+        Assert.Equal("monitoring is not running", viewModel.ErrorText);
+    }
+
+    [Fact]
     public void TrayMenuController_RoutesReportBugEvent()
     {
         var host = new NullTrayIconHost();
@@ -390,6 +418,30 @@ public sealed class SessionViewModelTests
         host.RequestRestartToUpdate();
 
         Assert.True(restartToUpdateRaised);
+    }
+
+    [Fact]
+    public void TrayMenuController_RoutesForceCaptureEvent()
+    {
+        var host = new NullTrayIconHost();
+        var controller = new TrayMenuController(host);
+        var forceCaptureRaised = false;
+
+        controller.ForceCaptureRequested += (_, _) => forceCaptureRaised = true;
+
+        host.RequestForceCapture();
+
+        Assert.True(forceCaptureRaised);
+    }
+
+    [Fact]
+    public void ForceScreenshotAndUpload_InvokesInterop()
+    {
+        var fakeClient = new FakeRustInteropClient();
+
+        fakeClient.ForceScreenshotAndUpload();
+
+        Assert.True(fakeClient.ForceScreenshotAndUploadCalled);
     }
 
     [Fact]
@@ -497,6 +549,20 @@ public sealed class SessionViewModelTests
             }
 
             LastReportIssue = (message, contactEmail, includeLogs);
+        }
+
+        public bool ForceScreenshotAndUploadCalled { get; private set; }
+
+        public Exception? ForceScreenshotAndUploadError { get; set; }
+
+        public void ForceScreenshotAndUpload()
+        {
+            if (ForceScreenshotAndUploadError is not null)
+            {
+                throw ForceScreenshotAndUploadError;
+            }
+
+            ForceScreenshotAndUploadCalled = true;
         }
     }
 }

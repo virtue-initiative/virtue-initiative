@@ -261,6 +261,52 @@ fn five_capture_failures_triggers_upload() {
     );
 }
 
+// ── Forced capture ───────────────────────────────────────────────────────────
+
+#[test]
+fn forced_capture_uploads_immediately_bypassing_interval_and_dedup() {
+    let mut scenario = Scenario::authenticated();
+    // Establish a schedule and an uploaded fingerprint so a normal tick
+    // right now would neither be due nor pass the fingerprint diff gate.
+    scenario.at_t(0).tick();
+    scenario.with_state_mut(|s| {
+        s.screenshot.next_screenshot_at_ms = Some(1_000_000_000);
+    });
+    let uploads_before = {
+        let s = scenario.api.state();
+        s.batch_uploads.len() + s.hash_uploads.len()
+    };
+
+    scenario.at_t(1_000).force_capture_now().tick();
+
+    let uploads_after = {
+        let s = scenario.api.state();
+        s.batch_uploads.len() + s.hash_uploads.len()
+    };
+    assert!(
+        uploads_after > uploads_before,
+        "forced capture should upload even though the interval hasn't elapsed"
+    );
+    assert_eq!(
+        scenario.state().screenshot.next_screenshot_at_ms,
+        Some(1_000_000_000),
+        "forced capture must not disturb the normal capture schedule"
+    );
+}
+
+#[test]
+fn forced_capture_flushes_the_batch_without_waiting_for_the_interval() {
+    let mut scenario = Scenario::authenticated();
+    scenario.with_state_mut(|s| s.upload.last_batch_at_ms = Some(0));
+
+    scenario.at_t(1_000).force_capture_now().tick();
+
+    assert!(
+        !scenario.api.state().batch_uploads.is_empty(),
+        "forced capture should flush the batch immediately rather than waiting for the batch interval"
+    );
+}
+
 // ── Upload: batching ──────────────────────────────────────────────────────────
 
 #[test]

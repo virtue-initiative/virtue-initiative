@@ -64,6 +64,12 @@ public sealed class RustInteropClient : IRustInteropClient
         ThrowIfError(error);
     }
 
+    public void ForceScreenshotAndUpload()
+    {
+        var error = NativeMethods.virtue_windows_force_capture();
+        ThrowIfError(error);
+    }
+
     public void ReportIssue(string message, string? contactEmail, bool includeLogs)
     {
         var payload = RustInteropJson.Serialize(new ReportIssueRequest(message, contactEmail, includeLogs));
@@ -178,6 +184,9 @@ public sealed class RustInteropClient : IRustInteropClient
 
         [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
         internal static extern IntPtr virtue_windows_logout();
+
+        [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern IntPtr virtue_windows_force_capture();
 
         [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
         internal static extern IntPtr virtue_windows_report_issue(
