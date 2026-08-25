@@ -30,6 +30,10 @@ public sealed class TrayMenuController : IDisposable
 
     public void ShowBalloonTip(string title, string text) => _host.ShowBalloonTip(title, text);
 
+    public void SetForceCaptureAvailable(bool available) => _host.SetForceCaptureAvailable(available);
+
+    public void SetRestartToUpdateAvailable(bool available) => _host.SetRestartToUpdateAvailable(available);
+
     public void RequestOpen() => OpenRequested?.Invoke(this, EventArgs.Empty);
 
     public void RequestExit() => ExitRequested?.Invoke(this, EventArgs.Empty);

@@ -13,4 +13,6 @@ public interface ITrayIconHost : IDisposable
     void Initialize();
     void UpdateToolTip(string toolTip);
     void ShowBalloonTip(string title, string text);
+    void SetForceCaptureAvailable(bool available);
+    void SetRestartToUpdateAvailable(bool available);
 }

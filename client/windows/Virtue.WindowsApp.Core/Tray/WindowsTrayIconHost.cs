@@ -28,6 +28,9 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
     private const int IdTrayReportBug = 2003;
     private const int IdTrayRestartToUpdate = 2004;
     private const int IdTrayForceCapture = 2005;
+    private const int MfByCommand = 0x00000000;
+    private const int MfEnabled = 0x00000000;
+    private const int MfGrayed = 0x00000001;
     private const int WindowId = 1;
     private static readonly uint WmTrayIcon = WmApp + 1;
 
@@ -89,8 +92,35 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
         _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayRestartToUpdate, "Restart to Update");
         _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayExit, "Exit");
 
+        // Both start disabled: Force Screenshot needs an active (logged-in) monitoring
+        // session, and Restart to Update only applies once an update has actually staged.
+        // The app calls SetForceCaptureAvailable/SetRestartToUpdateAvailable as those
+        // conditions change.
+        _ = EnableMenuItem(_menuHandle, IdTrayForceCapture, MfByCommand | MfGrayed);
+        _ = EnableMenuItem(_menuHandle, IdTrayRestartToUpdate, MfByCommand | MfGrayed);
+
         AddOrUpdateIcon(NimAdd);
         _initialized = true;
+    }
+
+    public void SetForceCaptureAvailable(bool available)
+    {
+        if (_menuHandle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        _ = EnableMenuItem(_menuHandle, IdTrayForceCapture, MfByCommand | (available ? MfEnabled : MfGrayed));
+    }
+
+    public void SetRestartToUpdateAvailable(bool available)
+    {
+        if (_menuHandle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        _ = EnableMenuItem(_menuHandle, IdTrayRestartToUpdate, MfByCommand | (available ? MfEnabled : MfGrayed));
     }
 
     public void UpdateToolTip(string toolTip)
@@ -413,6 +443,9 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool DestroyMenu(IntPtr hMenu);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int EnableMenuItem(IntPtr hMenu, int uIDEnableItem, int uEnable);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool TrackPopupMenu(
