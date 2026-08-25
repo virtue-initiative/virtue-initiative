@@ -207,14 +207,14 @@ pub fn capture_and_process(
     };
 
     let redacted = redact_if_ocr(ocr, &screenshot.bytes, decoded);
-    let processed = match image_pipeline::ImagePipeline.process_image(redacted, screenshot.captured_at_ms)
-    {
-        Ok(p) => p,
-        Err(err) => {
-            tracing::error!(error = %err, "screenshot image pipeline failed");
-            return CaptureOutcome::Failed;
-        }
-    };
+    let processed =
+        match image_pipeline::ImagePipeline.process_image(redacted, screenshot.captured_at_ms) {
+            Ok(p) => p,
+            Err(err) => {
+                tracing::error!(error = %err, "screenshot image pipeline failed");
+                return CaptureOutcome::Failed;
+            }
+        };
 
     CaptureOutcome::Uploaded {
         risk,

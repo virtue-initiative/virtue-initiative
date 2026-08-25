@@ -23,7 +23,11 @@ impl ImagePipeline {
     /// Same as [`process`](Self::process), but takes an already-decoded image so a caller that
     /// decoded the screenshot earlier (e.g. for the fingerprint/classifier, or to redact text)
     /// doesn't pay for yet another full-resolution PNG decode of the same frame.
-    pub fn process_image(&self, decoded: DynamicImage, captured_at_ms: i64) -> CoreResult<Screenshot> {
+    pub fn process_image(
+        &self,
+        decoded: DynamicImage,
+        captured_at_ms: i64,
+    ) -> CoreResult<Screenshot> {
         let (orig_width, orig_height) = decoded.dimensions();
         let scale = TARGET_SMALL_DIM as f32 / orig_width.min(orig_height) as f32;
         let target_width = (orig_width as f32 * scale).round().max(1.0) as u32;
