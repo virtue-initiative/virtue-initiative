@@ -54,9 +54,12 @@ impl ScreenshotOCR {
             &NSDictionary::new(),
         );
 
-        // Build recognition request.
+        // Build recognition request. `.Fast` rather than `.Accurate`: this result is only used
+        // for bounding boxes to redact, not for transcription quality, and `.Accurate`'s heavier
+        // on-device language model measured at 5-10x the resident memory of `.Fast` for the same
+        // frame (and several seconds slower) — see the memory investigation this call is part of.
         let request = VNRecognizeTextRequest::new();
-        request.setRecognitionLevel(VNRequestTextRecognitionLevel::Accurate);
+        request.setRecognitionLevel(VNRequestTextRecognitionLevel::Fast);
 
         if let Some(lang) = &self.language {
             let ns_lang = NSString::from_str(lang);

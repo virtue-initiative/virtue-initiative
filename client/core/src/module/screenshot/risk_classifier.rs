@@ -1,5 +1,4 @@
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::OnceLock;
 
 use image::DynamicImage;
 use tract_nnef::prelude::*;
@@ -46,26 +45,24 @@ pub struct RiskScores {
 
 pub struct RiskClassifier {
     model_bytes: &'static [u8],
-    // `None` once initialized means the model failed to build (logged once, at that point) —
-    // distinct from not-yet-attempted, so a permanently broken model doesn't retry every call.
-    model: OnceLock<Option<NsfwModel>>,
 }
 
 impl RiskClassifier {
     /// `model_bytes` is an NNEF tar (not ONNX) — pre-converted offline via
     /// `examples/onnx_to_nnef.rs` (see that file for how to regenerate it from the source ONNX
     /// model, and why it's *not* pre-optimized). Building the model (NNEF parse + optimize) is
-    /// deferred to the first [`classify`](Self::classify_image) call that actually needs it —
-    /// measured at ~50MB on iOS — rather than paid unconditionally here, since the cheap
-    /// skin-tone gate below skips the model entirely for most screenshots (terminals, code,
-    /// docs), and the iOS Safari extension process typically only lives for a single request
-    /// (CORE-015), so eager construction here means paying that cost on every single capture
-    /// whether or not the model ends up running.
+    /// deferred to the first [`classify`](Self::classify_image) call that actually needs it, and
+    /// the built model is dropped again as soon as that call returns — measured at ~40MB on iOS
+    /// — rather than being cached for the process's lifetime. The cheap skin-tone gate below
+    /// skips the model entirely for most screenshots (terminals, code, docs), so caching would
+    /// buy nothing in the common case where the extension process only ever handles one capture
+    /// (CORE-015); the one case it *would* help — a process that survives across several
+    /// captures — is exactly the case where caching is harmful, since it would turn a transient
+    /// ~40MB cost into a permanent baseline for the rest of that process's life, stacking with
+    /// every later capture's own decode/redact allocations. Rebuilding costs a few seconds of
+    /// CPU on each triggering capture instead, which is preferable to that standing memory risk.
     pub fn new(model_bytes: &'static [u8]) -> Self {
-        Self {
-            model_bytes,
-            model: OnceLock::new(),
-        }
+        Self { model_bytes }
     }
 
     /// Returns the [`RiskScores`] for an image using a two-stage cascade:
@@ -96,39 +93,28 @@ impl RiskClassifier {
             });
         }
 
-        let Some(model) = self.model() else {
-            // Model unavailable (failed to build; already logged in `model()`) — fail safe to
-            // the skin-only contribution, same as a skipped gate.
-            return Ok(RiskScores {
-                risk: contribution,
-                skin,
-                nsfw: None,
-            });
+        let model = match Self::build_model(self.model_bytes) {
+            Ok(model) => model,
+            Err(err) => {
+                // Model unavailable (failed to build) — fail safe to the skin-only
+                // contribution, same as a skipped gate, but log loudly since this means every
+                // capture's risk score is missing its model component until fixed.
+                tracing::error!(error = %err, "NSFW classifier unavailable, falling back to skin-only risk");
+                return Ok(RiskScores {
+                    risk: contribution,
+                    skin,
+                    nsfw: None,
+                });
+            }
         };
 
         NSFW_MODEL_INVOCATIONS.fetch_add(1, Ordering::Relaxed);
-        let model_score = Self::run_inference(model, img)?;
+        let model_score = Self::run_inference(&model, img)?;
         Ok(RiskScores {
             risk: contribution + model_score * MODEL_WEIGHT,
             skin,
             nsfw: Some(model_score),
         })
-    }
-
-    /// Builds the model on first call (logging loudly on failure) and reuses it thereafter.
-    fn model(&self) -> Option<&NsfwModel> {
-        self.model
-            .get_or_init(|| match Self::build_model(self.model_bytes) {
-                Ok(model) => Some(model),
-                Err(err) => {
-                    tracing::error!(
-                        error = %err,
-                        "NSFW classifier disabled, all screenshot risk will be 0"
-                    );
-                    None
-                }
-            })
-            .as_ref()
     }
 
     fn build_model(model_bytes: &[u8]) -> CoreResult<NsfwModel> {

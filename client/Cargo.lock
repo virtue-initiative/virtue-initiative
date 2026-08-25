@@ -3802,6 +3802,7 @@ dependencies = [
  "once_cell",
  "serde",
  "serde_json",
+ "tracing",
  "tracing-appender",
  "tracing-subscriber",
  "virtue-core",
