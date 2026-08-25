@@ -137,7 +137,7 @@ struct ContentView: View {
                         }
                         .buttonStyle(VirtueButtonStyle())
 
-                        Button("Stop Monitoring and Quit") {
+                        Button("Stop Monitoring & Quit") {
                             showStopConfirmation = true
                         }
                         .buttonStyle(VirtueButtonStyle(prominent: true))
