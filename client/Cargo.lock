@@ -3786,6 +3786,7 @@ dependencies = [
  "sha2",
  "thiserror 2.0.18",
  "tracing",
+ "tract-nnef",
  "tract-onnx",
  "ureq",
  "virtue-text-detection",

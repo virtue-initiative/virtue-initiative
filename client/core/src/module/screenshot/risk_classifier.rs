@@ -1,14 +1,15 @@
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
 
 use image::DynamicImage;
-use tract_onnx::prelude::*;
+use tract_nnef::prelude::*;
 
 use crate::error::{CoreError, CoreResult};
 
 static NSFW_MODEL_INVOCATIONS: AtomicU64 = AtomicU64::new(0);
 
 /// Process-lifetime count of `classify()` calls that actually ran the NSFW
-/// ONNX model (i.e. the skin gate didn't skip it) — not persisted across
+/// model (i.e. the skin gate didn't skip it) — not persisted across
 /// restarts, just a lightweight always-available tally for platform-side
 /// memory diagnostics (see the iOS `virtue_ios_native_nsfw_run_count` FFI
 /// export).
@@ -44,23 +45,27 @@ pub struct RiskScores {
 }
 
 pub struct RiskClassifier {
-    model: NsfwModel,
+    model_bytes: &'static [u8],
+    // `None` once initialized means the model failed to build (logged once, at that point) —
+    // distinct from not-yet-attempted, so a permanently broken model doesn't retry every call.
+    model: OnceLock<Option<NsfwModel>>,
 }
 
 impl RiskClassifier {
-    pub fn new(model_bytes: &[u8]) -> CoreResult<Self> {
-        let n = INPUT_SIZE as i32;
-        let model = tract_onnx::onnx()
-            .model_for_read(&mut std::io::Cursor::new(model_bytes))
-            .map_err(|e| CoreError::Classifier(e.to_string()))?
-            // MobileNetV2 NSFW model expects a fixed NHWC [1, 224, 224, 3] f32 input.
-            .with_input_fact(0, f32::fact([1, n, n, 3]).into())
-            .map_err(|e| CoreError::Classifier(e.to_string()))?
-            .into_optimized()
-            .map_err(|e| CoreError::Classifier(e.to_string()))?
-            .into_runnable()
-            .map_err(|e| CoreError::Classifier(e.to_string()))?;
-        Ok(Self { model })
+    /// `model_bytes` is an NNEF tar (not ONNX) — pre-converted offline via
+    /// `examples/onnx_to_nnef.rs` (see that file for how to regenerate it from the source ONNX
+    /// model, and why it's *not* pre-optimized). Building the model (NNEF parse + optimize) is
+    /// deferred to the first [`classify`](Self::classify_image) call that actually needs it —
+    /// measured at ~50MB on iOS — rather than paid unconditionally here, since the cheap
+    /// skin-tone gate below skips the model entirely for most screenshots (terminals, code,
+    /// docs), and the iOS Safari extension process typically only lives for a single request
+    /// (CORE-015), so eager construction here means paying that cost on every single capture
+    /// whether or not the model ends up running.
+    pub fn new(model_bytes: &'static [u8]) -> Self {
+        Self {
+            model_bytes,
+            model: OnceLock::new(),
+        }
     }
 
     /// Returns the [`RiskScores`] for an image using a two-stage cascade:
@@ -70,12 +75,18 @@ impl RiskClassifier {
     ///    which contributes up to 70%.
     ///
     /// Most screenshots (terminals, code, docs) have negligible skin and return early
-    /// without any ONNX inference (`nsfw = None`), keeping the daemon loop fast enough to
+    /// without ever building the model (`nsfw = None`), keeping the daemon loop fast enough to
     /// avoid `UnexpectedGap` false alerts.
     pub fn classify(&self, image_bytes: &[u8]) -> CoreResult<RiskScores> {
         let img = image::load_from_memory(image_bytes)?;
+        self.classify_image(&img)
+    }
 
-        let skin = skin_score(&img);
+    /// Same as [`classify`](Self::classify), but takes an already-decoded image so a caller
+    /// that also needs the decoded image for something else (e.g. the fingerprint) doesn't pay
+    /// for a second full PNG decode of the same bytes.
+    pub fn classify_image(&self, img: &DynamicImage) -> CoreResult<RiskScores> {
+        let skin = skin_score(img);
         let contribution = skin * SKIN_WEIGHT;
         if contribution <= SKIN_GATE {
             return Ok(RiskScores {
@@ -85,8 +96,18 @@ impl RiskClassifier {
             });
         }
 
+        let Some(model) = self.model() else {
+            // Model unavailable (failed to build; already logged in `model()`) — fail safe to
+            // the skin-only contribution, same as a skipped gate.
+            return Ok(RiskScores {
+                risk: contribution,
+                skin,
+                nsfw: None,
+            });
+        };
+
         NSFW_MODEL_INVOCATIONS.fetch_add(1, Ordering::Relaxed);
-        let model_score = self.run_inference(&img)?;
+        let model_score = Self::run_inference(model, img)?;
         Ok(RiskScores {
             risk: contribution + model_score * MODEL_WEIGHT,
             skin,
@@ -94,8 +115,34 @@ impl RiskClassifier {
         })
     }
 
+    /// Builds the model on first call (logging loudly on failure) and reuses it thereafter.
+    fn model(&self) -> Option<&NsfwModel> {
+        self.model
+            .get_or_init(|| match Self::build_model(self.model_bytes) {
+                Ok(model) => Some(model),
+                Err(err) => {
+                    tracing::error!(
+                        error = %err,
+                        "NSFW classifier disabled, all screenshot risk will be 0"
+                    );
+                    None
+                }
+            })
+            .as_ref()
+    }
+
+    fn build_model(model_bytes: &[u8]) -> CoreResult<NsfwModel> {
+        tract_nnef::nnef()
+            .model_for_read(&mut std::io::Cursor::new(model_bytes))
+            .map_err(|e| CoreError::Classifier(e.to_string()))?
+            .into_optimized()
+            .map_err(|e| CoreError::Classifier(e.to_string()))?
+            .into_runnable()
+            .map_err(|e| CoreError::Classifier(e.to_string()))
+    }
+
     /// Returns P(nsfw) ∈ [0.0, 1.0] from the MobileNetV2 model for the full image.
-    fn run_inference(&self, img: &DynamicImage) -> CoreResult<f32> {
+    fn run_inference(model: &NsfwModel, img: &DynamicImage) -> CoreResult<f32> {
         // MobileNet preprocessing: resize straight to 224×224 (no center crop),
         // RGB channel order, scale pixels to [0, 1].
         let resized = img.resize_exact(
@@ -112,8 +159,7 @@ impl RiskClassifier {
             })
             .into();
 
-        let outputs = self
-            .model
+        let outputs = model
             .run(tvec![tensor.into()])
             .map_err(|e| CoreError::Classifier(e.to_string()))?;
 

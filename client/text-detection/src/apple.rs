@@ -18,10 +18,16 @@ impl ScreenshotOCR {
     }
 
     pub fn detect(&self, image: &[u8]) -> Result<OcrResult, OcrError> {
-        // Decode to get pixel dimensions for bounding box coordinate conversion.
-        let img = image::load_from_memory(image).map_err(|e| OcrError::ImageLoad(e.to_string()))?;
-        let w = img.width() as f32;
-        let h = img.height() as f32;
+        // Read just the header for pixel dimensions (bounding box coordinate conversion) —
+        // Vision decodes the actual pixels itself via `NSData` below, so a full `image`-crate
+        // decode here would be a second (redundant) full-resolution pixel buffer.
+        let (width, height) = image::ImageReader::new(std::io::Cursor::new(image))
+            .with_guessed_format()
+            .map_err(|e| OcrError::ImageLoad(e.to_string()))?
+            .into_dimensions()
+            .map_err(|e| OcrError::ImageLoad(e.to_string()))?;
+        let w = width as f32;
+        let h = height as f32;
 
         let (regions, lines) = unsafe { self.run_vision(image, w, h) }?;
         Ok(OcrResult {
