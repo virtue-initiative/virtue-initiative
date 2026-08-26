@@ -14,7 +14,7 @@ use risk_classifier::RiskClassifier;
 use virtue_text_detection::ScreenshotOCR;
 
 #[cfg(not(test))]
-const MODEL_BYTES: &[u8] = include_bytes!("../../models/nsfw_small_v1.onnx");
+const MODEL_BYTES: &[u8] = include_bytes!("../../models/nsfw_small_v1.nnef.tar");
 
 /// Lenient deserializer for the dedup fingerprint: any value that doesn't match the current
 /// [`fingerprint::Fingerprint`] shape — e.g. a fingerprint written by an older build whose
@@ -166,13 +166,26 @@ pub fn capture_and_process(
         Err(_) => return CaptureOutcome::Failed,
     };
 
-    // Gate 2 — screen-change diff vs the last *uploaded* frame. A failed fingerprint
-    // is `None`, which falls through to the upload path (fail-safe to upload). With no
-    // prior uploaded fingerprint we always upload the first frame.
-    let fp = fingerprint::fingerprint(&screenshot.bytes).ok();
-    let static_frame = match (plan.anchor.as_ref(), fp.as_ref()) {
-        (Some(prev), Some(cur)) => !fingerprint::changed(prev, cur),
-        _ => false,
+    // Decoded once and shared by the fingerprint, the classifier, redaction, and the image
+    // pipeline below — all of them only need derivatives of the same decoded frame, so
+    // decoding it repeatedly would be a wasted full-resolution allocation each time. A decode
+    // failure here is unrecoverable (every step downstream needs a decoded image), so it fails
+    // the whole capture immediately rather than limping through steps that would all fail on
+    // the same bytes anyway.
+    let decoded = match image::load_from_memory(&screenshot.bytes) {
+        Ok(img) => img,
+        Err(err) => {
+            tracing::error!(error = %err, "screenshot decode failed");
+            return CaptureOutcome::Failed;
+        }
+    };
+
+    // Gate 2 — screen-change diff vs the last *uploaded* frame. With no prior uploaded
+    // fingerprint we always upload the first frame.
+    let fp = fingerprint::fingerprint_from_image(&decoded);
+    let static_frame = match plan.anchor.as_ref() {
+        Some(prev) => !fingerprint::changed(prev, &fp),
+        None => false,
     };
     if static_frame {
         return CaptureOutcome::StaticFrame;
@@ -181,7 +194,7 @@ pub fn capture_and_process(
     // Classify before the (consuming) image pipeline. A `None` classifier (model
     // failed to load) or a classify error fails safe to risk 0 with no raw scores,
     // logged so an always-0 misconfiguration is diagnosable.
-    let scores = classifier.and_then(|c| match c.classify(&screenshot.bytes) {
+    let scores = classifier.and_then(|c| match c.classify_image(&decoded) {
         Ok(scores) => Some(scores),
         Err(err) => {
             tracing::warn!(error = %err, "classify failed, recording risk 0");
@@ -193,14 +206,15 @@ pub fn capture_and_process(
         None => (0.0, None, None),
     };
 
-    let screenshot = redact_if_ocr(ocr, screenshot);
-    let processed = match image_pipeline::ImagePipeline.process(screenshot) {
-        Ok(p) => p,
-        Err(err) => {
-            tracing::error!(error = %err, "screenshot image pipeline failed");
-            return CaptureOutcome::Failed;
-        }
-    };
+    let redacted = redact_if_ocr(ocr, &screenshot.bytes, decoded);
+    let processed =
+        match image_pipeline::ImagePipeline.process_image(redacted, screenshot.captured_at_ms) {
+            Ok(p) => p,
+            Err(err) => {
+                tracing::error!(error = %err, "screenshot image pipeline failed");
+                return CaptureOutcome::Failed;
+            }
+        };
 
     CaptureOutcome::Uploaded {
         risk,
@@ -210,7 +224,7 @@ pub fn capture_and_process(
             skin_detection,
             nsfw_detection,
         },
-        fingerprint: fp,
+        fingerprint: Some(fp),
     }
 }
 
@@ -250,35 +264,32 @@ pub fn commit(
     }
 }
 
+/// Detects and blacks out on-screen text, operating on the already-decoded frame (`img`) so
+/// this doesn't need its own PNG decode — `engine.detect` still needs the original encoded
+/// `bytes` since Vision/Tesseract/etc. decode the frame themselves internally.
 fn redact_if_ocr(
     ocr: Option<&ScreenshotOCR>,
-    shot: crate::model::Screenshot,
-) -> crate::model::Screenshot {
+    bytes: &[u8],
+    img: image::DynamicImage,
+) -> image::DynamicImage {
     let Some(engine) = ocr else {
-        return shot;
+        return img;
     };
-    let mut shot = shot;
-    match engine.detect(&shot.bytes) {
-        Ok(result) if !result.regions.is_empty() => {
-            if let Err(err) = redact_text_regions(&mut shot, &result.regions) {
-                tracing::warn!(error = %err, "text redaction failed, uploading unredacted");
-            }
-            shot
-        }
-        Ok(_) => shot,
+    match engine.detect(bytes) {
+        Ok(result) if !result.regions.is_empty() => redact_text_regions(img, &result.regions),
+        Ok(_) => img,
         Err(err) => {
             tracing::warn!(error = %err, "OCR failed, uploading unredacted");
-            shot
+            img
         }
     }
 }
 
 fn redact_text_regions(
-    shot: &mut crate::model::Screenshot,
+    img: image::DynamicImage,
     regions: &[virtue_text_detection::TextRegion],
-) -> CoreResult<()> {
-    let mut img =
-        image::load_from_memory_with_format(&shot.bytes, image::ImageFormat::Png)?.to_rgba8();
+) -> image::DynamicImage {
+    let mut img = img.to_rgba8();
     for r in regions {
         let bb = &r.bounding_box;
         for py in (bb.y as u32)..((bb.y + bb.height) as u32).min(img.height()) {
@@ -287,28 +298,16 @@ fn redact_text_regions(
             }
         }
     }
-    let dyn_img = image::DynamicImage::ImageRgba8(img);
-    let mut out = Vec::new();
-    dyn_img.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)?;
-    shot.bytes = out;
-    Ok(())
+    image::DynamicImage::ImageRgba8(img)
 }
 
-/// Loads the embedded NSFW classifier model. `None` (with a loud log) if it
-/// fails to load — every screenshot risk then reads 0 rather than crashing.
+/// Builds the (lazily-initializing) NSFW classifier. Construction itself is infallible — the
+/// model isn't actually parsed/built until the first classification that needs it; see
+/// [`RiskClassifier::new`].
 pub fn load_classifier() -> Option<RiskClassifier> {
     #[cfg(not(test))]
     {
-        match RiskClassifier::new(MODEL_BYTES) {
-            Ok(classifier) => Some(classifier),
-            Err(err) => {
-                tracing::error!(
-                    error = %err,
-                    "NSFW classifier disabled, all screenshot risk will be 0"
-                );
-                None
-            }
-        }
+        Some(RiskClassifier::new(MODEL_BYTES))
     }
     #[cfg(test)]
     {

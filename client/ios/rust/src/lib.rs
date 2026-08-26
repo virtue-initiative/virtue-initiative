@@ -151,7 +151,7 @@ fn init_logging(data_dir: &Path) {
             virtue_core::logging::default_filter_directive(cfg!(debug_assertions)),
         );
 
-        match file_appender {
+        let guard = match file_appender {
             Ok(file_appender) => {
                 let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
                 tracing_subscriber::fmt()
@@ -171,7 +171,17 @@ fn init_logging(data_dir: &Path) {
                     .init();
                 guard
             }
-        }
+        };
+
+        // Default Rust panic messages go to stderr, which isn't captured anywhere visible from
+        // inside the App Extension sandbox (no Console/log stream output reaches it either) —
+        // route panics through tracing instead, so a panic-induced abort still leaves a record
+        // in the same log file everything else writes to.
+        std::panic::set_hook(Box::new(|info| {
+            tracing::error!(panic = %info, "PANIC");
+        }));
+
+        guard
     });
 }
 

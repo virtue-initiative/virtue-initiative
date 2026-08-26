@@ -19,6 +19,12 @@ required-features = ["testing"]
 [build-dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
+# Only used by examples/onnx_to_nnef.rs and examples/compare_onnx_nnef.rs (offline
+# ONNX→NNEF conversion tooling for the NSFW model — see risk_classifier.rs) — not part of
+# the shipped runtime, which loads the pre-converted NNEF file via tract-nnef instead.
+[dev-dependencies]
+tract-onnx = "0.21"
+
 # `serde_bytes` is only ever named inside `#[serde(with = "serde_bytes")]`
 # attributes, which cargo-machete's source scan can't see.
 [package.metadata.cargo-machete]
@@ -45,7 +51,7 @@ serde_bytes = "0.11"
 serde_json = "1.0"
 sha2 = "0.10"
 thiserror = "2.0"
-tract-onnx = "0.21"
+tract-nnef = "0.21"
 tracing = "0.1"
 # Genuinely blocking HTTP. `rustls` pulls the ring-backed rustls stack;
 # `cookies` is required by API-001, which asks clients to retain the

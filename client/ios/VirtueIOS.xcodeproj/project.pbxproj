@@ -366,6 +366,8 @@
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lvirtue_ios_rust",
+					"-framework",
+					Vision,
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "$(VIRTUE_APP_BUNDLE_ID).broadcast";
 				PRODUCT_NAME = VirtueSafariWebExtension;
@@ -559,6 +561,8 @@
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lvirtue_ios_rust",
+					"-framework",
+					Vision,
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "$(VIRTUE_APP_BUNDLE_ID).broadcast";
 				PRODUCT_NAME = VirtueSafariWebExtension;
