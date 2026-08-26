@@ -44,6 +44,18 @@ start_for_user_once() {
 
 # Enable globally so newly logged-in users auto-start without manual enable.
 systemctl --global enable virtue.service >/dev/null 2>&1 || true
+
+# System-level (not --user) timer that periodically checks for and installs
+# a newer .deb from GitHub Releases; requires root, unlike virtue.service.
+# Only official published-release builds ship with this turned on -- a
+# locally-built package (native/Docker build, or a PR's --debug CI build)
+# has auto-update-enabled=0 so it never overwrites itself from GitHub.
+if [ "$(cat /usr/lib/virtue/auto-update-enabled 2>/dev/null || echo 0)" = "1" ]; then
+  systemctl enable --now virtue-update.timer >/dev/null 2>&1 || true
+else
+  systemctl disable --now virtue-update.timer >/dev/null 2>&1 || true
+fi
+
 STARTED_USERS=""
 
 if command -v loginctl >/dev/null 2>&1; then

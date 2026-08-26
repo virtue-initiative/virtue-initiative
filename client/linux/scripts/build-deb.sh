@@ -8,6 +8,7 @@ source "${CLIENT_ROOT}/scripts/version.sh"
 
 BASE_VERSION="$(virtue_base_version)"
 BUILD_LABEL="$(virtue_build_label)"
+RELEASE_TAG="$(virtue_release_tag)"
 ARCH="$(dpkg --print-architecture)"
 
 INSTANCE=""
@@ -60,6 +61,28 @@ else
         "$PKG_DIR/usr/lib/systemd/user/virtue.service"
     install -m 0755 linux/packaging/debian/postinst "$PKG_DIR/DEBIAN/postinst"
     install -m 0755 linux/packaging/debian/prerm "$PKG_DIR/DEBIAN/prerm"
+
+    mkdir -p "$PKG_DIR/usr/lib/systemd/system"
+    install -m 0644 linux/packaging/systemd/virtue-update.service \
+        "$PKG_DIR/usr/lib/systemd/system/virtue-update.service"
+    install -m 0644 linux/packaging/systemd/virtue-update.timer \
+        "$PKG_DIR/usr/lib/systemd/system/virtue-update.timer"
+
+    mkdir -p "$PKG_DIR/usr/lib/$PKG_NAME"
+    install -m 0755 linux/packaging/scripts/virtue-update-check.sh \
+        "$PKG_DIR/usr/lib/$PKG_NAME/update-check.sh"
+    printf '%s\n' "$RELEASE_TAG" > "$PKG_DIR/usr/lib/$PKG_NAME/release-tag"
+    printf '%s\n' "$BUILD_LABEL" > "$PKG_DIR/usr/lib/$PKG_NAME/build-label"
+
+    # Auto-update defaults to OFF so a locally-built package (a dev's own
+    # native/Docker build, or a PR's --debug CI build) never installs a
+    # timer that could overwrite it with whatever's on GitHub Releases.
+    # Only the CI job that actually publishes a release build sets this.
+    AUTO_UPDATE_ENABLED="0"
+    if [[ "${VIRTUE_ENABLE_AUTO_UPDATE:-}" == "1" ]]; then
+        AUTO_UPDATE_ENABLED="1"
+    fi
+    printf '%s\n' "$AUTO_UPDATE_ENABLED" > "$PKG_DIR/usr/lib/$PKG_NAME/auto-update-enabled"
 fi
 
 # Bundle libtesseract/liblept/libjpeg into the package instead of depending on
@@ -133,6 +156,11 @@ SHLIBS_DEPENDS="$(dpkg-shlibdeps -O "$PKG_DIR/usr/bin/$BIN_NAME" "$PKG_DIR"/usr/
     | sed -E 's/^, //; s/, ,/,/g; s/, $//')"
 rm -rf debian
 
+EXTRA_DEPENDS="systemd"
+if [[ -z "$INSTANCE" ]]; then
+    EXTRA_DEPENDS="$EXTRA_DEPENDS, curl, jq"
+fi
+
 cat > "$PKG_DIR/DEBIAN/control" <<CONTROL
 Package: $PKG_NAME
 Version: $BASE_VERSION
@@ -140,7 +168,7 @@ Section: utils
 Priority: optional
 Architecture: $ARCH
 Maintainer: Virtue Initiative <support@virtue.app>
-Depends: systemd, $SHLIBS_DEPENDS
+Depends: $EXTRA_DEPENDS, $SHLIBS_DEPENDS
 Description: Virtue Linux monitoring client
  Virtue command line and background service for screenshot monitoring.
 CONTROL
