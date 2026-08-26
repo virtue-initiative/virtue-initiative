@@ -73,6 +73,16 @@ else
         "$PKG_DIR/usr/lib/$PKG_NAME/update-check.sh"
     printf '%s\n' "$RELEASE_TAG" > "$PKG_DIR/usr/lib/$PKG_NAME/release-tag"
     printf '%s\n' "$BUILD_LABEL" > "$PKG_DIR/usr/lib/$PKG_NAME/build-label"
+
+    # Auto-update defaults to OFF so a locally-built package (a dev's own
+    # native/Docker build, or a PR's --debug CI build) never installs a
+    # timer that could overwrite it with whatever's on GitHub Releases.
+    # Only the CI job that actually publishes a release build sets this.
+    AUTO_UPDATE_ENABLED="0"
+    if [[ "${VIRTUE_ENABLE_AUTO_UPDATE:-}" == "1" ]]; then
+        AUTO_UPDATE_ENABLED="1"
+    fi
+    printf '%s\n' "$AUTO_UPDATE_ENABLED" > "$PKG_DIR/usr/lib/$PKG_NAME/auto-update-enabled"
 fi
 
 # Bundle libtesseract/liblept/libjpeg into the package instead of depending on

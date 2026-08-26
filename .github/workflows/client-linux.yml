@@ -111,7 +111,10 @@ jobs:
       - name: Build Linux .deb package
         run: |
           if [[ "${{ github.event_name }}" == "push" && ( "${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/staging" ) ]]; then
-            ./linux/scripts/build-deb-docker.sh
+            # Only the build that actually gets published to GitHub Releases
+            # ships with auto-update turned on -- PR/debug builds must not
+            # risk overwriting a developer's local install.
+            VIRTUE_ENABLE_AUTO_UPDATE=1 ./linux/scripts/build-deb-docker.sh
           else
             ./linux/scripts/build-deb-docker.sh --debug
           fi
