@@ -9,6 +9,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const RETENTION_MS = 30 * DAY_MS;
 const EMPTY_ACCESS_KEYS = JSON.stringify({ keys: {} });
 
+const INSERT_BATCH_SQL = `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
 async function insertBatch(
   id: string,
   userId: string,
@@ -16,10 +19,7 @@ async function insertBatch(
   url: string,
   createdAt: number,
 ) {
-  await env.DB.prepare(
-    `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  )
+  await env.DB.prepare(INSERT_BATCH_SQL)
     .bind(
       uuidToBytes(id),
       uuidToBytes(userId),
@@ -32,6 +32,28 @@ async function insertBatch(
       createdAt,
     )
     .run();
+}
+
+// One D1 round-trip per row (via insertBatch) is slow enough at a few hundred
+// rows to strain the local test runtime's socket under CI load; batching
+// keeps this test's own setup fast and out of the way of what it's testing.
+async function insertBatches(
+  rows: { id: string; userId: string; deviceId: string; url: string; createdAt: number }[],
+) {
+  const statements = rows.map((row) =>
+    env.DB.prepare(INSERT_BATCH_SQL).bind(
+      uuidToBytes(row.id),
+      uuidToBytes(row.userId),
+      uuidToBytes(row.deviceId),
+      row.url,
+      row.createdAt,
+      row.createdAt,
+      `hash-${row.id}`,
+      EMPTY_ACCESS_KEYS,
+      row.createdAt,
+    ),
+  );
+  await env.DB.batch(statements);
 }
 
 async function batchCount() {
@@ -110,16 +132,15 @@ describe('pruneExpiredBatches', () => {
     );
 
     const backlogSize = 620; // exceeds the 500-row PRUNE_CHUNK_LIMIT
-    for (let i = 0; i < backlogSize; i += 1) {
-      const id = `00000000-0000-4000-9000-${i.toString(16).padStart(12, '0')}`;
-      await insertBatch(
-        id,
+    await insertBatches(
+      Array.from({ length: backlogSize }, (_, i) => ({
+        id: `00000000-0000-4000-9000-${i.toString(16).padStart(12, '0')}`,
         userId,
-        device.id,
-        `https://example.com/backlog-${i}.enc`,
-        now - RETENTION_MS - DAY_MS,
-      );
-    }
+        deviceId: device.id,
+        url: `https://example.com/backlog-${i}.enc`,
+        createdAt: now - RETENTION_MS - DAY_MS,
+      })),
+    );
 
     const deleted = await pruneExpiredBatches(env, now);
 

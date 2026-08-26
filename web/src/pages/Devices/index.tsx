@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
-import { Device, useAPIContext, useDevices } from '../../utils/api';
+import { Device, describeError, useAPIContext, useDevices } from '../../utils/api';
 import { PageHeading } from '../../components/PageHeading';
 import { DevicesIcon } from '../../components/icons';
 import {
@@ -160,7 +160,8 @@ function DeviceCard({
       await onUpdateDevice(device.id, { name });
       dialogRef.current?.close();
     } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Failed to save', 'error');
+      const message = describeError(err, 'Failed to save');
+      if (message) pushToast(message, 'error');
     } finally {
       setSaving(false);
     }
@@ -172,7 +173,8 @@ function DeviceCard({
       await onRemoveDevice(device.id);
       closeDeleteDialog();
     } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Failed to delete device', 'error');
+      const message = describeError(err, 'Failed to delete device');
+      if (message) pushToast(message, 'error');
     } finally {
       setDeleting(false);
     }

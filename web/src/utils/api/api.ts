@@ -101,6 +101,16 @@ function firstValidationMessage(details: unknown): string | null {
   return null;
 }
 
+export function describeError(err: unknown, fallback: string): string | null {
+  if (err && typeof err === 'object' && 'toastHandled' in err) {
+    return null;
+  }
+  if (err instanceof Error && err.message) {
+    return err.message;
+  }
+  return fallback;
+}
+
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
 

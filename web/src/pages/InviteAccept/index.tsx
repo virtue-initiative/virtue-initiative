@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api as rawApi, PartnerInviteValidation } from '../../utils/api/api';
-import { useAPIContext } from '../../utils/api';
+import { describeError, useAPIContext } from '../../utils/api';
 import { Button, Card } from '@virtueinitiative/shared-web';
 import '../../styles/email-link.css';
 
@@ -13,7 +13,7 @@ function navigate(path: string) {
 type InviteState =
   | { status: 'loading' }
   | { status: 'success'; ownerName?: string; ownerEmail: string }
-  | { status: 'error'; message: string };
+  | { status: 'error'; message: string | null };
 
 export function InviteAccept() {
   const apiClient = useAPIContext();
@@ -46,7 +46,7 @@ export function InviteAccept() {
       .catch((err: unknown) => {
         setState({
           status: 'error',
-          message: err instanceof Error ? err.message : 'Failed to accept invite.',
+          message: describeError(err, 'Failed to accept invite.'),
         });
       });
   }, [apiClient]);
@@ -70,7 +70,7 @@ export function InviteAccept() {
         {state.status === 'error' && (
           <>
             <h2>Invite error</h2>
-            <p>{state.message}</p>
+            {state.message && <p>{state.message}</p>}
             <Button variant="primary" type="button" onClick={() => navigate('/')}>
               Back to dashboard
             </Button>
