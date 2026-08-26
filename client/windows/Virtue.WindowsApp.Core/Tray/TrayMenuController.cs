@@ -10,7 +10,6 @@ public sealed class TrayMenuController : IDisposable
         _host.OpenRequested += (_, _) => OpenRequested?.Invoke(this, EventArgs.Empty);
         _host.ExitRequested += (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty);
         _host.ReportBugRequested += (_, _) => ReportBugRequested?.Invoke(this, EventArgs.Empty);
-        _host.RestartToUpdateRequested += (_, _) => RestartToUpdateRequested?.Invoke(this, EventArgs.Empty);
         _host.ForceCaptureRequested += (_, _) => ForceCaptureRequested?.Invoke(this, EventArgs.Empty);
         _host.SessionLogoffObserved += (_, _) => SessionLogoffObserved?.Invoke(this, EventArgs.Empty);
         _host.SystemShutdownObserved += (_, _) => SystemShutdownObserved?.Invoke(this, EventArgs.Empty);
@@ -19,10 +18,12 @@ public sealed class TrayMenuController : IDisposable
     public event EventHandler? OpenRequested;
     public event EventHandler? ExitRequested;
     public event EventHandler? ReportBugRequested;
-    public event EventHandler? RestartToUpdateRequested;
     public event EventHandler? ForceCaptureRequested;
     public event EventHandler? SessionLogoffObserved;
     public event EventHandler? SystemShutdownObserved;
+
+    /// <summary>The tray host's hidden window — see <see cref="ITrayIconHost.WindowHandle"/>.</summary>
+    public IntPtr WindowHandle => _host.WindowHandle;
 
     public void Initialize() => _host.Initialize();
 
@@ -31,8 +32,6 @@ public sealed class TrayMenuController : IDisposable
     public void ShowBalloonTip(string title, string text) => _host.ShowBalloonTip(title, text);
 
     public void SetForceCaptureAvailable(bool available) => _host.SetForceCaptureAvailable(available);
-
-    public void SetRestartToUpdateAvailable(bool available) => _host.SetRestartToUpdateAvailable(available);
 
     public void RequestOpen() => OpenRequested?.Invoke(this, EventArgs.Empty);
 

@@ -407,17 +407,18 @@ public sealed class SessionViewModelTests
     }
 
     [Fact]
-    public void TrayMenuController_RoutesRestartToUpdateEvent()
+    public void NullTrayIconHost_HasNoWindowHandle()
     {
-        var host = new NullTrayIconHost();
+        Assert.Equal(IntPtr.Zero, new NullTrayIconHost().WindowHandle);
+    }
+
+    [Fact]
+    public void TrayMenuController_ForwardsWindowHandleFromHost()
+    {
+        var host = new FakeTrayIconHost { WindowHandle = new IntPtr(0x1234) };
         var controller = new TrayMenuController(host);
-        var restartToUpdateRaised = false;
 
-        controller.RestartToUpdateRequested += (_, _) => restartToUpdateRaised = true;
-
-        host.RequestRestartToUpdate();
-
-        Assert.True(restartToUpdateRaised);
+        Assert.Equal(new IntPtr(0x1234), controller.WindowHandle);
     }
 
     [Fact]
@@ -483,6 +484,45 @@ public sealed class SessionViewModelTests
         await viewModel.BackgroundRefreshAsync();
 
         Assert.True(viewModel.LoggedIn);
+    }
+
+    /// <summary>Minimal host used to prove <see cref="TrayMenuController"/> forwards its host's HWND.</summary>
+    private sealed class FakeTrayIconHost : ITrayIconHost
+    {
+        public event EventHandler? OpenRequested;
+        public event EventHandler? ExitRequested;
+        public event EventHandler? ReportBugRequested;
+        public event EventHandler? ForceCaptureRequested;
+        public event EventHandler? SessionLogoffObserved;
+        public event EventHandler? SystemShutdownObserved;
+
+        public IntPtr WindowHandle { get; set; }
+
+        public void Initialize()
+        {
+            _ = OpenRequested;
+            _ = ExitRequested;
+            _ = ReportBugRequested;
+            _ = ForceCaptureRequested;
+            _ = SessionLogoffObserved;
+            _ = SystemShutdownObserved;
+        }
+
+        public void UpdateToolTip(string toolTip)
+        {
+        }
+
+        public void ShowBalloonTip(string title, string text)
+        {
+        }
+
+        public void SetForceCaptureAvailable(bool available)
+        {
+        }
+
+        public void Dispose()
+        {
+        }
     }
 
     private sealed class FakeRustInteropClient : IRustInteropClient
