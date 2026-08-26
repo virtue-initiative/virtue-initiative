@@ -44,6 +44,11 @@ start_for_user_once() {
 
 # Enable globally so newly logged-in users auto-start without manual enable.
 systemctl --global enable virtue.service >/dev/null 2>&1 || true
+
+# System-level (not --user) timer that periodically checks for and installs
+# a newer .deb from GitHub Releases; requires root, unlike virtue.service.
+systemctl enable --now virtue-update.timer >/dev/null 2>&1 || true
+
 STARTED_USERS=""
 
 if command -v loginctl >/dev/null 2>&1; then

@@ -74,6 +74,34 @@ local API or with different intervals, set `VIRTUE_DEFAULT_API_URL`,
 
 The client uses `XDG_CONFIG_HOME` and `XDG_STATE_HOME` when those variables are set. Otherwise it falls back to `~/.config/virtue` for config and `~/.local/state/virtue` for mutable state.
 
+## Auto-update
+
+The package installs a system-level (not `--user`) `virtue-update.timer` /
+`virtue-update.service` pair, enabled and started by `postinst`. The timer fires 10 minutes
+after boot and then every 6 hours (± a random 30-minute delay), running
+`/usr/lib/virtue/update-check.sh` as root.
+
+The script polls the GitHub Releases API for the release tag baked into the package at build
+time (`/usr/lib/virtue/release-tag` — `<VERSION>` on the `main`-branch/stable channel,
+`<VERSION>-dev` on every other branch/dev channel, matching whichever channel this exact build
+was produced from; see `client/scripts/version.sh`). If the release's current `.deb` asset for
+this architecture has a different embedded build label than the locally installed one
+(`/usr/lib/virtue/build-label`), it downloads and `dpkg -i`s it, falling back to
+`apt-get install -f -y` on a dependency failure. Installing the new `.deb` re-runs `postinst`,
+which restarts `virtue.service` for every logged-in user — the same upgrade path as a manual
+`dpkg -i`. A `flock` on `/run/lock/virtue-update.lock` prevents overlapping runs; a failed run
+exits non-zero and is simply retried at the next timer firing.
+
+Check status/logs with:
+
+```bash
+systemctl status virtue-update.timer
+journalctl -u virtue-update.service
+```
+
+`--instance`-suffixed side-by-side builds (used for local dev/testing) do not get this timer,
+matching how they also skip `postinst`/`prerm`/the regular systemd unit install.
+
 ## Wayland and X11
 
 `virtue login` runs a capture probe.
