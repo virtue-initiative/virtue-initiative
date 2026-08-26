@@ -22,6 +22,14 @@ public sealed class NullTrayIconHost : ITrayIconHost
     {
     }
 
+    public void SetForceCaptureAvailable(bool available)
+    {
+    }
+
+    public void SetRestartToUpdateAvailable(bool available)
+    {
+    }
+
     public void RequestOpen() => OpenRequested?.Invoke(this, EventArgs.Empty);
 
     public void RequestExit() => ExitRequested?.Invoke(this, EventArgs.Empty);

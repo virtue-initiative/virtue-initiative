@@ -40,6 +40,12 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
     private bool _iconAdded;
     private uint _taskbarCreatedMessage;
     private string _toolTip = "Virtue";
+    // Force Screenshot needs an active (logged-in) monitoring session, and Restart to
+    // Update only applies once an update has actually staged — both start unavailable
+    // and are hidden from the menu entirely (rather than shown-but-disabled) until the
+    // app calls SetForceCaptureAvailable/SetRestartToUpdateAvailable.
+    private bool _forceCaptureAvailable;
+    private bool _restartToUpdateAvailable;
 
     public WindowsTrayIconHost()
     {
@@ -82,15 +88,61 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
             throw new InvalidOperationException("Failed to create tray host window.");
         }
 
-        _menuHandle = CreatePopupMenu();
-        _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayOpen, "Open");
-        _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayForceCapture, "Force Screenshot && Upload");
-        _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayReportBug, "Report a Bug");
-        _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayRestartToUpdate, "Restart to Update");
-        _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayExit, "Exit");
+        RebuildMenu();
 
         AddOrUpdateIcon(NimAdd);
         _initialized = true;
+    }
+
+    public void SetForceCaptureAvailable(bool available)
+    {
+        if (_forceCaptureAvailable == available)
+        {
+            return;
+        }
+
+        _forceCaptureAvailable = available;
+        RebuildMenu();
+    }
+
+    public void SetRestartToUpdateAvailable(bool available)
+    {
+        if (_restartToUpdateAvailable == available)
+        {
+            return;
+        }
+
+        _restartToUpdateAvailable = available;
+        RebuildMenu();
+    }
+
+    /// Rebuilds the popup menu from scratch so unavailable items (Force Screenshot before
+    /// login, Restart to Update before one is staged) are omitted entirely rather than
+    /// shown disabled — Win32 popup menus have no per-item show/hide, so this is the
+    /// standard way to change which items are present.
+    private void RebuildMenu()
+    {
+        var oldMenuHandle = _menuHandle;
+
+        _menuHandle = CreatePopupMenu();
+        _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayOpen, "Open");
+        if (_forceCaptureAvailable)
+        {
+            _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayForceCapture, "Force Screenshot && Upload");
+        }
+
+        _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayReportBug, "Report a Bug");
+        if (_restartToUpdateAvailable)
+        {
+            _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayRestartToUpdate, "Restart to Update");
+        }
+
+        _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayExit, "Exit");
+
+        if (oldMenuHandle != IntPtr.Zero)
+        {
+            DestroyMenu(oldMenuHandle);
+        }
     }
 
     public void UpdateToolTip(string toolTip)

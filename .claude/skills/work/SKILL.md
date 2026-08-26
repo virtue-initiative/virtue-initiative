@@ -56,15 +56,44 @@ Do **not** prefix the message with `/work` or any slash command.
 
 ### 5. Spawn Claude in a new tmux window
 
-Determine the current tmux session, open a new window rooted at the worktree, start
-Claude with plan permissions mode, then send the composed prompt via `send-keys`:
+Determine the current tmux session, open a new window rooted at the worktree with
+just the bare `claude` invocation (no prompt text on the command line), then inject
+the composed prompt via a tmux paste buffer once Claude has started.
+
+**Do not** interpolate the composed prompt into the `tmux new-window` command string
+(e.g. `... "claude ... \"$PROMPT\""`). That string gets flattened by the _current_
+shell and then re-parsed by a _second_ shell in the new pane, so any `"`, `` ` ``,
+`$`, or bare words in the prompt (e.g. a line like `` `POST /bug-report` `` mentioning
+an HTTP method) can be split into separate commands or trigger an unrelated CLI tool
+sitting in PATH — this has broken silently before (the new window ends up stuck at a
+strange prompt like `Please enter content ... to be POSTed:` instead of running
+Claude at all). Loading the prompt into a tmux buffer and pasting it sidesteps all
+shell re-parsing, since the pane receives it as literal bytes:
 
 ```bash
 SESSION=$(tmux display-message -p '#S')
 BRANCH=<branch>
-PROMPT="<composed prompt>"
-tmux new-window -t "$SESSION" -n "$BRANCH" -c "$WORKTREE" "claude --permission-mode plan --dangerously-skip-permissions --remote-control \"$BRANCH\" \"$PROMPT\""
+tmux new-window -t "$SESSION" -n "$BRANCH" -c "$WORKTREE" "claude --permission-mode plan --dangerously-skip-permissions --remote-control \"$BRANCH\""
+
+# Wait for Claude's UI to be up before pasting (poll instead of a fixed sleep).
+for i in $(seq 1 30); do
+  tmux capture-pane -t "$SESSION:$BRANCH" -p | grep -q '>' && break
+  sleep 1
+done
+
+PROMPT_FILE=$(mktemp)
+cat > "$PROMPT_FILE" <<'PROMPT_EOF'
+<composed prompt — written verbatim, no need to escape quotes/backticks/$>
+PROMPT_EOF
+tmux load-buffer -b work-prompt "$PROMPT_FILE"
+tmux paste-buffer -b work-prompt -d -t "$SESSION:$BRANCH"
+tmux send-keys -t "$SESSION:$BRANCH" Enter
+rm -f "$PROMPT_FILE"
 ```
+
+If the window closes or looks stuck right after creation, check it with
+`tmux capture-pane -t "$SESSION:$BRANCH" -p` before retrying — do not blindly
+re-run the same command.
 
 After spawning the window, report to the user:
 

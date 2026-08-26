@@ -281,6 +281,11 @@ public partial class App : Application
         {
             _trayController?.UpdateToolTip(_viewModel.TrayTooltip);
         }
+
+        if (e.PropertyName is nameof(SessionViewModel.LoggedIn) && _viewModel is not null)
+        {
+            _trayController?.SetForceCaptureAvailable(_viewModel.LoggedIn);
+        }
     }
 
     private void StartRefreshLoop()
@@ -427,6 +432,7 @@ public partial class App : Application
     {
         _updateStagedAtUtc = DateTimeOffset.UtcNow;
         _ = _dispatcherQueue?.TryEnqueue(() => _viewModel?.NotifyUpdateStaged());
+        _trayController?.SetRestartToUpdateAvailable(true);
         LogStartup("Store update staged.");
 
         EvaluateUpdateRestart();

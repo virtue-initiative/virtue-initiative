@@ -54,17 +54,24 @@ After entering the PIN, wait a few seconds and take a screenshot to confirm the 
 
 ## SSH access
 
-SSH is configured in `~/.ssh/config` as `Host virtue-win11` (Administrator@192.168.122.128).
-The VM must be running and fully booted before SSH is available (use the poll loop above).
+The VM has a single account: **Andrew Baumes**, signed in via Microsoft account
+`help@virtueinitiative.org` (local username `help`, profile `C:\Users\help`), which is also
+the account SSH connects as. SSH is configured in `~/.ssh/config` as `Host virtue-win11`
+(help@192.168.122.128). The VM must be running and fully booted before SSH is available (use
+the poll loop above).
 
 ```bash
 ssh virtue-win11 "powershell <command>"
 ```
 
-**Note:** SSH runs as Administrator in a separate Windows session from the interactive desktop user (Andrew Baumes). This means:
+SSH sessions get a fully elevated token automatically (UAC's split-token filtering only
+applies to interactive logons, not network/SSH logons), so no separate Administrator account
+or UAC workaround is needed to run elevated commands over SSH.
 
-- Commands that read/write files or check services work fine.
-- GUI launch via `Start-Process shell:AppsFolder\...` will **not** show a window on the desktop — use the virsh keyboard method below to launch GUI apps.
+**Note:** SSH still runs in a separate Windows session from the interactive desktop — GUI
+launch via `Start-Process shell:AppsFolder\...` will **not** show a window on the desktop, and
+`Get-Process` won't see GUI apps running in the interactive session. Use the virsh keyboard
+method below to launch GUI apps and see them on screen.
 
 ## Build the MSIX
 
@@ -142,7 +149,8 @@ ssh virtue-win11 "powershell Get-AppxPackage -Name 'VirtueInitiative.VirtueWindo
 ```
 
 Note: `Get-Process` may return nothing even when the app is running, because the app runs in the
-interactive user session while SSH runs as Administrator in a separate session.
+interactive desktop session while SSH runs in a separate (non-interactive) session, even
+though both are the same user account.
 
 ## Send keyboard input (general)
 
@@ -160,3 +168,8 @@ virsh --connect qemu:///system send-key virtue-win11 --codeset linux KEY_ESC
 - The Virtue client is not pre-installed; build and install the MSIX before testing client behavior.
 - The `--connect qemu:///system` flag is required because the VMs are owned by the system daemon, not the user session.
 - sccache is installed on the VM and speeds up Rust rebuilds significantly.
+- Sleep, hibernate, and display-off timeouts have been set to "never" (`powercfg /change
+standby-timeout-ac 0`, `monitor-timeout-ac 0`, `hibernate-timeout-ac 0`, and their `-dc`
+  counterparts, plus `powercfg /hibernate off`) so the VM doesn't suspend or lock mid-task.
+  These are OS settings, not VM config, so they only need reapplying if the VM disk is reset
+  or reprovisioned.
