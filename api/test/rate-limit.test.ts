@@ -16,8 +16,18 @@ describe('Per-device rate limiting', () => {
     const headers = { Authorization: `Bearer ${device.refresh_token}` };
 
     // wrangler.json's staging RATE_LIMITER is configured for 60 requests/60s.
+    //
+    // Miniflare's local RATE_LIMITER simulator is a plain fixed-window counter
+    // keyed by `Math.floor(Date.now() / periodMs)` against the real wall clock
+    // (see node_modules/@cloudflare/vitest-pool-workers's bundled
+    // miniflare/dist/src/workers/ratelimit/ratelimit.worker.js): if this burst
+    // straddles a 60s boundary, the window flip clears the in-memory bucket
+    // mid-burst, and a smaller-than-60 remainder on either side of the split
+    // never trips the limit. Firing 130 (> 2x the limit) guarantees at least
+    // one side of any single such split still exceeds 60, so the test can't
+    // flake on that reset.
     const responses = await Promise.all(
-      Array.from({ length: 65 }, () => SELF.fetch(`${BASE}/d/device`, { headers })),
+      Array.from({ length: 130 }, () => SELF.fetch(`${BASE}/d/device`, { headers })),
     );
 
     const statuses = responses.map((res: Response) => res.status);
@@ -26,7 +36,7 @@ describe('Per-device rate limiting', () => {
 
     const limited = responses.find((res: Response) => res.status === 429)!;
     expect(await limited.json()).toEqual({ error: 'Too many requests' });
-  });
+  }, 20000); // 130 concurrent requests can outrun the default 10s timeout under CI load
 
   it('does not rate limit two different devices independently of each other', async () => {
     await signupAndGetCookie('two-devices@example.com');
