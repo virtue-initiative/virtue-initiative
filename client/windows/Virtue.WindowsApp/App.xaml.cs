@@ -65,7 +65,6 @@ public partial class App : Application
             _trayController.OpenRequested += (_, _) => ShowMainWindow();
             _trayController.ExitRequested += async (_, _) => await RequestResidentShutdownAsync();
             _trayController.ReportBugRequested += async (_, _) => await ShowReportBugFromTrayAsync();
-            _trayController.RestartToUpdateRequested += (_, _) => _ = HandleManualRestartToUpdateAsync();
             _trayController.ForceCaptureRequested += async (_, _) => await ForceCaptureAsync();
             _trayController.SessionLogoffObserved += (_, _) => HandleSessionLogoff();
             _trayController.SystemShutdownObserved += (_, _) => HandleSystemShutdown();
@@ -78,9 +77,13 @@ public partial class App : Application
 
             RegisterWatchdog();
 
-            _updateManager = new StoreUpdateManager();
+            // The tray host's hidden window is the process's only HWND in resident mode, and
+            // StoreContext needs one before any Store call that can show UI — see
+            // StoreUpdateManager's owner-window note. Initialize() ran above, so it exists.
+            _updateManager = new StoreUpdateManager(_trayController.WindowHandle);
             _updateManager.UpdateStaged += (_, _) => OnUpdateStaged();
             _updateManager.UpdateCheckFailed += (_, reason) => LogStartup($"Store update check/download failed: {reason}");
+            _updateManager.Log += (_, message) => LogStartup(message);
             _updateManager.Start();
 
             var activation = AppLifecycleInstance.GetCurrent().GetActivatedEventArgs();
@@ -284,7 +287,11 @@ public partial class App : Application
 
         if (e.PropertyName is nameof(SessionViewModel.LoggedIn) && _viewModel is not null)
         {
-            _trayController?.SetForceCaptureAvailable(_viewModel.LoggedIn);
+            // SetForceCaptureAvailable rebuilds the tray HMENU, and HMENUs are USER objects
+            // owned by the thread that creates them, so keep that work on the UI thread that
+            // owns the tray window rather than on whatever thread raised PropertyChanged.
+            var loggedIn = _viewModel.LoggedIn;
+            _ = _dispatcherQueue?.TryEnqueue(() => _trayController?.SetForceCaptureAvailable(loggedIn));
         }
     }
 
@@ -432,7 +439,6 @@ public partial class App : Application
     {
         _updateStagedAtUtc = DateTimeOffset.UtcNow;
         _ = _dispatcherQueue?.TryEnqueue(() => _viewModel?.NotifyUpdateStaged());
-        _trayController?.SetRestartToUpdateAvailable(true);
         LogStartup("Store update staged.");
 
         EvaluateUpdateRestart();
@@ -486,18 +492,20 @@ public partial class App : Application
 
         if (UpdateRestartPolicy.ShouldForceRestart(sessionIsBusy, deadlineUtc, now))
         {
+            LogStartup("Update deferral cap reached; hiding window to force the update restart.");
             _ = _dispatcherQueue?.TryEnqueue(() => _mainWindow?.HideToTray());
         }
     }
 
     /// <summary>
-    /// The tray "Restart to Update" menu item's and the in-window "Close now and update"
-    /// button's shared handler — an explicit user request always proceeds immediately,
-    /// bypassing the busy/deadline check (unlike the automatic path).
+    /// The in-window "Close now and update" button's handler — an explicit user request always
+    /// proceeds immediately, bypassing the busy/deadline check (unlike the automatic path).
     /// </summary>
     private async Task HandleManualRestartToUpdateAsync()
     {
-        if (_updateManager?.IsUpdateStaged != true)
+        var staged = _updateManager?.IsUpdateStaged == true;
+        LogStartup($"Manual restart-to-update requested (update staged={staged}).");
+        if (!staged)
         {
             return;
         }
@@ -514,8 +522,14 @@ public partial class App : Application
     ///
     /// Can legitimately be reached from several concurrent triggers around the same
     /// moment (a <see cref="MainWindow.Hidden"/> event, a countdown tick, and the manual
-    /// button/tray item), so an <see cref="Interlocked"/> guard ensures only the first call
+    /// button), so an <see cref="Interlocked"/> guard ensures only the first call
     /// actually proceeds.
+    ///
+    /// Exits only if the install actually succeeded (the Store API normally terminates the app
+    /// itself in that case). On failure, exiting anyway would spin: the watchdog relaunches
+    /// within a minute, the check re-stages, and the app exits again — with monitoring down the
+    /// whole time. Instead monitoring is resumed and <see cref="StoreUpdateManager"/>'s retry
+    /// backoff picks the update up again on its next cycle.
     /// </summary>
     private async Task InstallUpdateAndRestartAsync()
     {
@@ -527,7 +541,7 @@ public partial class App : Application
         _countdownCancellation?.Cancel();
         // MainWindow is a WinRT object with UI-thread affinity; this method may run on a
         // background poll thread (the automatic countdown path) as well as the UI thread
-        // (the manual tray-menu/button path), so always marshal the hide through the dispatcher.
+        // (the manual in-window button path), so always marshal the hide through the dispatcher.
         _ = _dispatcherQueue?.TryEnqueue(() => _mainWindow?.HideToTray());
 
         try
@@ -538,16 +552,45 @@ public partial class App : Application
 
             var installed = await _updateManager!.TryInstallStagedUpdateAsync();
             LogStartup($"Update install call returned (installed={installed}).");
+            if (!installed)
+            {
+                ResumeAfterFailedUpdateInstall();
+                return;
+            }
         }
         catch (Exception ex)
         {
             LogStartup($"Update install failed: {ex}");
+            ResumeAfterFailedUpdateInstall();
+            return;
+        }
+
+        // Application.Exit() has UI-thread affinity — same reasoning as the HideToTray()
+        // marshal above.
+        _ = _dispatcherQueue?.TryEnqueue(() => Current.Exit());
+    }
+
+    /// <summary>
+    /// Undoes the pre-install teardown when the install didn't happen: restarts the monitoring
+    /// daemon and the status refresh loop this method stopped, and releases the one-shot
+    /// restart guard so a later staged update can try again.
+    /// </summary>
+    private void ResumeAfterFailedUpdateInstall()
+    {
+        LogStartup("Update install did not complete; resuming monitoring and leaving the retry to the update loop.");
+        try
+        {
+            new RustInteropClient().StartMonitoring();
+            _refreshLoopCancellation = null;
+            StartRefreshLoop();
+        }
+        catch (Exception ex)
+        {
+            LogStartup($"Failed to resume monitoring after an unsuccessful update install: {ex}");
         }
         finally
         {
-            // Application.Exit() also has UI-thread affinity — same reasoning as the
-            // HideToTray() marshal above.
-            _ = _dispatcherQueue?.TryEnqueue(() => Current.Exit());
+            Interlocked.Exchange(ref _updateRestartStarted, 0);
         }
     }
 

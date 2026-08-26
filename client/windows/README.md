@@ -176,14 +176,31 @@ Remote logs are always written locally under:
 
 ## Store Update Handling
 
-`StoreUpdateManager` (`Virtue.WindowsApp/Update/StoreUpdateManager.cs`) checks the Microsoft
-Store for package updates every 4 hours via `StoreContext.GetAppAndOptionalStorePackageUpdatesAsync`,
-and if one is found, downloads/stages it in the background via
-`RequestDownloadStorePackageUpdatesAsync` — this does not require the resident daemon to stop.
-It lives in `Virtue.WindowsApp` (the WinUI project, `net8.0-windows10.0.19041.0`) rather than
-`Virtue.WindowsApp.Core` (plain `net8.0`, no Windows SDK projection, kept that way so it stays
-unit-testable and platform-neutral — the same reason `RestartWatchdog` avoids WinRT), since
-`StoreContext` is a WinRT API only usable from the packaged process.
+`StoreUpdateManager` (`Virtue.WindowsApp/Update/StoreUpdateManager.cs`) polls the Microsoft
+Store via `StoreContext.GetAppAndOptionalStorePackageUpdatesAsync`, and if one is found,
+downloads/stages it in the background via `RequestDownloadStorePackageUpdatesAsync` — this does
+not require the resident daemon to stop. It lives in `Virtue.WindowsApp` (the WinUI project,
+`net8.0-windows10.0.19041.0`) rather than `Virtue.WindowsApp.Core` (plain `net8.0`, no Windows
+SDK projection, kept that way so it stays unit-testable and platform-neutral — the same reason
+`RestartWatchdog` avoids WinRT), since `StoreContext` is a WinRT API only usable from the
+packaged process.
+
+**The `StoreContext` needs an owner window.** In a packaged _desktop_ app (as opposed to a UWP
+one), the context returned by `StoreContext.GetDefault()` must be associated with an owner HWND
+via the `IInitializeWithWindow` interop — `WinRT.Interop.InitializeWithWindow.Initialize(context,
+hwnd)` — before any Store call that _can_ show UI. `GetAppAndOptionalStorePackageUpdatesAsync`
+doesn't need one, but both `RequestDownloadStorePackageUpdatesAsync` and
+`RequestDownloadAndInstallStorePackageUpdatesAsync` do; without it they fail with
+`ERROR_INVALID_WINDOW_HANDLE` (`0x80070578`), which is what every build before this one did — so
+auto-update never actually worked, and neither did the "update ready" UI downstream of it. The
+app normally runs resident with no `MainWindow` at all, so the owner is the tray host's hidden
+top-level window, surfaced as `ITrayIconHost.WindowHandle` (a raw `IntPtr`, so `Core` keeps its
+no-WinRT constraint): the one HWND guaranteed to exist for the whole process lifetime.
+
+Check cadence comes from `StoreUpdateRetryPolicy`
+(`Virtue.WindowsApp.Core/Interop/StoreUpdateRetryPolicy.cs`, unit-tested): 4 hours after a clean
+check, but a failed one retries after 5 minutes and doubles up to an hour, so a transient (or
+newly-introduced) failure no longer costs a full 4-hour cycle.
 
 Once an update is staged, restart is driven by one shared decision method,
 `App.EvaluateUpdateRestart()`, called from three places: immediately when the update stages,
@@ -198,18 +215,50 @@ If the window is visible, it instead updates an in-window notice card with a cou
 close and update in ...", with a "Close now and update" button below it. Once the 6-hour
 deferral cap is reached (`UpdateRestartPolicy.ShouldForceRestart`), `EvaluateUpdateRestart()`
 hides the window itself, which re-raises `Hidden` and re-enters the method — now that the
-window reports hidden, it takes the immediate-restart branch. The notice button and the tray
-"Restart to Update" menu item both call the same manual-restart handler, bypassing the
-busy/deadline check as an explicit user request. An `Interlocked`-guarded flag in
-`InstallUpdateAndRestartAsync` ensures only the first of these concurrent triggers actually
-proceeds. Either path stops the daemon the same way an OS session logoff/shutdown does
-(`RustInteropClient.StopMonitoringForOsSessionEnd`, **not** the tray-Exit path — this is not a
-user-initiated stop and must not log the device out), then calls
+window reports hidden, it takes the immediate-restart branch. The notice button calls the
+manual-restart handler, bypassing the busy/deadline check as an explicit user request. An
+`Interlocked`-guarded flag in `InstallUpdateAndRestartAsync` ensures only the first of these
+concurrent triggers actually proceeds. Either path stops the daemon the same way an OS session
+logoff/shutdown does (`RustInteropClient.StopMonitoringForOsSessionEnd`, **not** the tray-Exit
+path — this is not a user-initiated stop and must not log the device out), then calls
 `RequestDownloadAndInstallStorePackageUpdatesAsync` (fast, since the package was already staged)
 and exits. `RestartWatchdog` is deliberately left registered through this (unlike tray Exit) so
 its existing per-minute poll relaunches the updated build, and the released
 `AppLifecycleInstance` key means the relaunched process becomes the new primary instance with
 no extra code, exactly like a crash-recovery relaunch.
+
+There is deliberately **no tray "Restart to Update" item**. With the window closed —
+the resident app's normal state — `EvaluateUpdateRestart()` restarts _immediately_ on staging,
+so such an item would appear only in the instant before the process exits (or in the narrow
+window where a login/logout is in flight). The window-open case is already served by the
+in-window card, and dropping the item also removes the one caller that rebuilt the tray HMENU
+from a threadpool thread — HMENUs are USER objects owned by their creating thread, so
+`SetForceCaptureAvailable` is likewise marshalled through the UI dispatcher.
+
+The app **only exits when the install actually succeeded**. Exiting on a failed install would
+spin — watchdog relaunch within a minute, re-stage, exit again, with monitoring down throughout
+— so a `false` return from `TryInstallStagedUpdateAsync` instead resumes monitoring and the
+refresh loop, releases the restart guard, and leaves the retry to the check loop's backoff.
+
+`%PROGRAMDATA%\Virtue\ui-startup.log` is the only observability channel on a Store install, so
+the whole check lifecycle is logged there — including the zero-updates case, which used to be
+silent and made "checked, nothing available" indistinguishable from "never checked". A healthy
+auto-update reads roughly:
+
+```
+Store update check starting (owner window initialized=True).
+Store update check found 1 update(s).
+Store update download started.
+Store update download finished (OverallState=Completed).
+Store update staged.
+Stopped resident monitoring for Store update install.
+Store update install re-fetch found 1 update(s).
+Update install call returned (installed=True).
+```
+
+Failures are logged as `Store update check/download failed: <Type>: <message> (0x........)` —
+the HRESULT is included deliberately, since it is what identifies a Store failure (`0x80070578`
+being the missing-owner-window one above).
 
 There is no data-corruption risk from installing mid-tick: `DaemonState` is persisted after
 every tick and uploads use persisted backoff, so `stop_monitoring()` can only ever wait for an

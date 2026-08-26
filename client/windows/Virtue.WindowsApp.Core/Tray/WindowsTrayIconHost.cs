@@ -26,7 +26,6 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
     private const int IdTrayOpen = 2001;
     private const int IdTrayExit = 2002;
     private const int IdTrayReportBug = 2003;
-    private const int IdTrayRestartToUpdate = 2004;
     private const int IdTrayForceCapture = 2005;
     private const int WindowId = 1;
     private static readonly uint WmTrayIcon = WmApp + 1;
@@ -40,12 +39,10 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
     private bool _iconAdded;
     private uint _taskbarCreatedMessage;
     private string _toolTip = "Virtue";
-    // Force Screenshot needs an active (logged-in) monitoring session, and Restart to
-    // Update only applies once an update has actually staged — both start unavailable
-    // and are hidden from the menu entirely (rather than shown-but-disabled) until the
-    // app calls SetForceCaptureAvailable/SetRestartToUpdateAvailable.
+    // Force Screenshot needs an active (logged-in) monitoring session, so it starts
+    // unavailable and is hidden from the menu entirely (rather than shown-but-disabled)
+    // until the app calls SetForceCaptureAvailable.
     private bool _forceCaptureAvailable;
-    private bool _restartToUpdateAvailable;
 
     public WindowsTrayIconHost()
     {
@@ -55,10 +52,12 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
     public event EventHandler? OpenRequested;
     public event EventHandler? ExitRequested;
     public event EventHandler? ReportBugRequested;
-    public event EventHandler? RestartToUpdateRequested;
     public event EventHandler? ForceCaptureRequested;
     public event EventHandler? SessionLogoffObserved;
     public event EventHandler? SystemShutdownObserved;
+
+    /// <inheritdoc />
+    public IntPtr WindowHandle => _windowHandle;
 
     public void Initialize()
     {
@@ -105,21 +104,11 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
         RebuildMenu();
     }
 
-    public void SetRestartToUpdateAvailable(bool available)
-    {
-        if (_restartToUpdateAvailable == available)
-        {
-            return;
-        }
-
-        _restartToUpdateAvailable = available;
-        RebuildMenu();
-    }
-
-    /// Rebuilds the popup menu from scratch so unavailable items (Force Screenshot before
-    /// login, Restart to Update before one is staged) are omitted entirely rather than
-    /// shown disabled — Win32 popup menus have no per-item show/hide, so this is the
-    /// standard way to change which items are present.
+    /// Rebuilds the popup menu from scratch so an unavailable item (Force Screenshot
+    /// before login) is omitted entirely rather than shown disabled — Win32 popup menus
+    /// have no per-item show/hide, so this is the standard way to change which items are
+    /// present. The HMENU is a USER object owned by the calling thread, so callers must
+    /// keep this on the thread that owns the tray window.
     private void RebuildMenu()
     {
         var oldMenuHandle = _menuHandle;
@@ -132,11 +121,6 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
         }
 
         _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayReportBug, "Report a Bug");
-        if (_restartToUpdateAvailable)
-        {
-            _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayRestartToUpdate, "Restart to Update");
-        }
-
         _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayExit, "Exit");
 
         if (oldMenuHandle != IntPtr.Zero)
@@ -314,10 +298,6 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
                 else if (command == IdTrayReportBug)
                 {
                     ReportBugRequested?.Invoke(this, EventArgs.Empty);
-                }
-                else if (command == IdTrayRestartToUpdate)
-                {
-                    RestartToUpdateRequested?.Invoke(this, EventArgs.Empty);
                 }
                 else if (command == IdTrayForceCapture)
                 {
