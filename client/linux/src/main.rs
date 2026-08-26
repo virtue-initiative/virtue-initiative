@@ -5,7 +5,7 @@ mod tray;
 
 use std::fs;
 use std::io::{self, Write};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
@@ -63,6 +63,10 @@ enum Commands {
         #[command(subcommand)]
         command: DevCommands,
     },
+    #[command(
+        about = "Force an immediate screenshot capture and upload, same as Force Screenshot & Upload on other platforms"
+    )]
+    ForceScreenshot,
     #[command(about = "Report an issue to the Virtue Initiative team")]
     ReportIssue {
         /// Skips the interactive prompt; the report is submitted as-is.
@@ -93,10 +97,6 @@ enum DevCommands {
     UploadLog(DeveloperEventArgs),
     #[command(about = "Queue a developer log into the next encrypted batch")]
     AddLog(DeveloperEventArgs),
-    #[command(about = "Capture a screenshot and queue it into the next encrypted batch")]
-    AddScreenshot(DeveloperEventArgs),
-    #[command(about = "Upload any queued batch items right now")]
-    UploadBatch,
     #[cfg(debug_assertions)]
     #[command(about = "Queue a log of any type into the next batch (debug builds only)")]
     Send(SendLogArgs),
@@ -160,6 +160,7 @@ async fn run() -> Result<()> {
         Commands::Daemon { command } => daemon_command(paths, command).await,
         Commands::Status { json } => tokio::task::block_in_place(|| status(paths, json)),
         Commands::Dev { command } => tokio::task::block_in_place(|| dev(paths, command)),
+        Commands::ForceScreenshot => tokio::task::block_in_place(|| force_screenshot(paths)),
         Commands::ReportIssue {
             message,
             contact_email,
@@ -562,8 +563,6 @@ fn dev(paths: ClientPaths, command: DevCommands) -> Result<()> {
     match command {
         DevCommands::UploadLog(args) => dev_upload_log(paths, args),
         DevCommands::AddLog(args) => dev_add_log(paths, args),
-        DevCommands::AddScreenshot(args) => dev_add_screenshot(paths, args),
-        DevCommands::UploadBatch => dev_upload_batch(paths),
         #[cfg(debug_assertions)]
         DevCommands::Send(args) => dev_send(paths, args),
     }
@@ -680,7 +679,7 @@ fn dev_send(paths: ClientPaths, args: SendLogArgs) -> Result<()> {
     }
 
     println!(
-        "Queued {count} log(s) in the next batch with risk {}. Run `virtue dev upload-batch` to send them now.",
+        "Queued {count} log(s) in the next batch with risk {}. Run `virtue force-screenshot` to send them now.",
         format_risk(args.risk)
     );
     Ok(())
@@ -742,75 +741,15 @@ fn dev_add_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
     Ok(())
 }
 
-fn dev_add_screenshot(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
-    let screenshot = LinuxPlatformHooks::new()
-        .take_screenshot()
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+fn force_screenshot(paths: ClientPaths) -> Result<()> {
     let mut client = connect_to_daemon(&paths)?;
     client
-        .queue_upload(Upload {
-            risk: args.risk,
-            kind: UploadKind::Screenshot {
-                image: screenshot.bytes,
-                content_type: screenshot.content_type,
-                skin_detection: None,
-                nsfw_detection: None,
-            },
-        })
-        .context("failed to queue developer screenshot")?;
-
+        .force_capture_now()
+        .context("failed to request forced screenshot capture")?;
     println!(
-        "Captured and queued a developer screenshot with risk {}.",
-        format_risk(args.risk)
+        "Requested a forced screenshot capture (bypasses the interval gate, still honors \
+         the lock/screensaver and dedup gates) and flushed the queue for immediate upload."
     );
-    Ok(())
-}
-
-fn dev_upload_batch(paths: ClientPaths) -> Result<()> {
-    let mut client = connect_to_daemon(&paths)?;
-
-    let initial_pending = client
-        .get_status()
-        .context("failed to query daemon status")?
-        .pending_request_count;
-    if initial_pending == 0 {
-        println!("No pending batch items to upload.");
-        return Ok(());
-    }
-
-    client
-        .flush_batch_now()
-        .context("failed to request batch flush")?;
-
-    // The flush is processed asynchronously on the daemon's next ping cycle
-    // (≤1s) plus however long the network upload takes. Give it a full cycle
-    // before the first check, then keep polling as long as it's still making
-    // progress, up to a generous cap.
-    std::thread::sleep(Duration::from_millis(1200));
-    let mut remaining = client
-        .get_status()
-        .context("failed to query daemon status")?
-        .pending_request_count;
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while remaining > 0 && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(500));
-        let seen = client
-            .get_status()
-            .context("failed to query daemon status")?
-            .pending_request_count;
-        if seen == remaining {
-            break;
-        }
-        remaining = seen;
-    }
-
-    let attempted = initial_pending.saturating_sub(remaining);
-    if remaining == 0 {
-        println!("Processed {attempted} batch item(s); no batch items remain queued.");
-    } else {
-        println!("Processed {attempted} batch item(s); {remaining} batch item(s) remain queued.");
-    }
-
     Ok(())
 }
 

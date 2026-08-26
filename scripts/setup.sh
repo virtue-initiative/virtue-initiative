@@ -1,17 +1,76 @@
 #!/bin/sh
 
 # Sets up the repo (installs deps, copies config files, etc.)
+#
+# Usage: setup.sh [--tmux|-t] [worktree]
+#
+#   worktree       optional path for a new git worktree to create and set up
+#   --tmux|-t      requires worktree; instead of setting up in this shell,
+#                  opens a new tmux window at the worktree and runs setup
+#                  there, then splits it into a `claude` pane and a plain
+#                  terminal pane
+
+tmux_mode=0
+worktree=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --tmux|-t)
+      tmux_mode=1
+      shift
+      ;;
+    *)
+      worktree="$1"
+      shift
+      ;;
+  esac
+done
+
+if [ "$tmux_mode" = "1" ] && [ -z "$worktree" ]; then
+  echo "Error: --tmux/-t requires a worktree path, e.g. setup.sh --tmux ../my-worktree" >&2
+  exit 1
+fi
+
+if [ "$tmux_mode" = "1" ] && [ -z "$TMUX" ]; then
+  echo "Error: --tmux/-t must be run from inside a tmux session" >&2
+  exit 1
+fi
 
 initial_dir="$(pwd)"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+if [ ! -z "$worktree" ]; then
+  git fetch
+  branch="$(basename "$worktree")"
+  git branch "$branch" origin/staging
+  git worktree add "$worktree" "$branch"
+  ROOT="$ROOT/$worktree"
+  echo "Creating new worktree: $worktree (branch $branch)"
+fi
+
+if [ "$tmux_mode" = "1" ]; then
+  worktree_abs="$(cd "$worktree" && pwd)"
+  session="$(tmux display-message -p '#S')"
+  name="$(basename "$worktree_abs")"
+
+  tmux new-window -t "$session" -n "$name" -c "$worktree_abs"
+  tmux send-keys -t "$session:$name" './scripts/setup.sh && claude' Enter
+  tmux split-window -h -t "$session:$name" -c "$worktree_abs"
+
+  echo "Worktree created at $worktree_abs"
+  echo "Opening tmux window '$name' (setup + claude in one pane, a plain terminal in the other)"
+  exit 0
+fi
+
+echo "Repo root: $ROOT"
 
 setdir() {
   cd "$ROOT/$1"
 }
 
 # Web deps
-setdir "." && bun install
+setdir "." && bun install && ./scripts/seed-dev-user.mjs
 
 # Web setup
 setdir "api"
@@ -68,3 +127,9 @@ if [ "$(curl -sf http://localhost:2019/config/apps/http/servers/dev 2>/dev/null)
 fi
 
 cd "$initial_dir"
+
+if [ ! -z "$worktree" ]; then
+  cd "$worktree"
+  echo 'Set up in worktree!'
+fi
+
