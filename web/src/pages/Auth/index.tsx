@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { api, finishSignup, login, requestSignup, useSetAPIClient } from '../../utils/api';
+import {
+  api,
+  describeError,
+  finishSignup,
+  login,
+  requestSignup,
+  useSetAPIClient,
+} from '../../utils/api';
 import {
   derivePasswordMaterial,
   encryptData,
@@ -78,7 +85,7 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
       })
       .catch((err: unknown) => {
         setResetTokenValid(false);
-        setError(err instanceof Error ? err.message : 'Reset token is invalid');
+        setError(describeError(err, 'Reset token is invalid'));
       })
       .finally(() => setLoading(false));
   }, [authMode, resetToken]);
@@ -95,7 +102,7 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
       })
       .catch((err: unknown) => {
         setSignupTokenValid(false);
-        setError(err instanceof Error ? err.message : 'Signup token is invalid');
+        setError(describeError(err, 'Signup token is invalid'));
       })
       .finally(() => setLoading(false));
   }, [authMode, signupToken]);
@@ -167,7 +174,7 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
         navigate('/', true);
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Something went wrong');
+      setError(describeError(err, 'Something went wrong'));
     } finally {
       setLoading(false);
     }

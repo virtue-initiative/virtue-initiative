@@ -10,7 +10,7 @@ import {
   Textarea,
   useToast,
 } from '@virtueinitiative/shared-web';
-import { api, useUser } from '../utils/api';
+import { api, describeError, useUser } from '../utils/api';
 
 type ReportBugDialogProps = {
   dialogRef: { current: HTMLDialogElement | null };
@@ -44,7 +44,8 @@ export function ReportBugDialog({ dialogRef }: ReportBugDialogProps) {
       pushToast('Thanks for the report — we’ll take a look.', 'success');
       close();
     } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Failed to send report', 'error');
+      const message = describeError(err, 'Failed to send report');
+      if (message) pushToast(message, 'error');
     } finally {
       setLoading(false);
     }

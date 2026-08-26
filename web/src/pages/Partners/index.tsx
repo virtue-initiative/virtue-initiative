@@ -4,6 +4,7 @@ import {
   Device,
   WatchingPartner,
   WatcherPartner,
+  describeError,
   useAPIContext,
   useDevices,
   usePartners,
@@ -196,7 +197,8 @@ function InviteButton({ onInvitePartner }: { onInvitePartner: (email: string) =>
       await onInvitePartner(email);
       close();
     } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Failed to send invite', 'error');
+      const message = describeError(err, 'Failed to send invite');
+      if (message) pushToast(message, 'error');
     } finally {
       setLoading(false);
     }
@@ -261,7 +263,8 @@ function PendingPartnerCard({
     try {
       await (kind === 'watching' ? onRemoveWatching(partner.id) : onRemoveWatcher(partner.id));
     } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Failed to remove request', 'error');
+      const message = describeError(err, 'Failed to remove request');
+      if (message) pushToast(message, 'error');
       setAction(null);
     }
   }
@@ -340,7 +343,8 @@ function PartnerCard({
     try {
       await (isWatching ? onRemoveWatching(partner.id) : onRemoveWatcher(partner.id));
     } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Failed to remove partner', 'error');
+      const message = describeError(err, 'Failed to remove partner');
+      if (message) pushToast(message, 'error');
       setAction(null);
     }
   }
