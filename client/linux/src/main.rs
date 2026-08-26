@@ -63,6 +63,10 @@ enum Commands {
         #[command(subcommand)]
         command: DevCommands,
     },
+    #[command(
+        about = "Force an immediate screenshot capture and upload, same as Force Screenshot & Upload on other platforms"
+    )]
+    ForceScreenshot,
     #[command(about = "Report an issue to the Virtue Initiative team")]
     ReportIssue {
         /// Skips the interactive prompt; the report is submitted as-is.
@@ -93,10 +97,6 @@ enum DevCommands {
     UploadLog(DeveloperEventArgs),
     #[command(about = "Queue a developer log into the next encrypted batch")]
     AddLog(DeveloperEventArgs),
-    #[command(
-        about = "Force an immediate screenshot capture and upload, same as Force Screenshot & Upload on other platforms"
-    )]
-    ForceScreenshot,
     #[cfg(debug_assertions)]
     #[command(about = "Queue a log of any type into the next batch (debug builds only)")]
     Send(SendLogArgs),
@@ -160,6 +160,7 @@ async fn run() -> Result<()> {
         Commands::Daemon { command } => daemon_command(paths, command).await,
         Commands::Status { json } => tokio::task::block_in_place(|| status(paths, json)),
         Commands::Dev { command } => tokio::task::block_in_place(|| dev(paths, command)),
+        Commands::ForceScreenshot => tokio::task::block_in_place(|| force_screenshot(paths)),
         Commands::ReportIssue {
             message,
             contact_email,
@@ -562,7 +563,6 @@ fn dev(paths: ClientPaths, command: DevCommands) -> Result<()> {
     match command {
         DevCommands::UploadLog(args) => dev_upload_log(paths, args),
         DevCommands::AddLog(args) => dev_add_log(paths, args),
-        DevCommands::ForceScreenshot => dev_force_screenshot(paths),
         #[cfg(debug_assertions)]
         DevCommands::Send(args) => dev_send(paths, args),
     }
@@ -679,7 +679,7 @@ fn dev_send(paths: ClientPaths, args: SendLogArgs) -> Result<()> {
     }
 
     println!(
-        "Queued {count} log(s) in the next batch with risk {}. Run `virtue dev force-screenshot` to send them now.",
+        "Queued {count} log(s) in the next batch with risk {}. Run `virtue force-screenshot` to send them now.",
         format_risk(args.risk)
     );
     Ok(())
@@ -741,7 +741,7 @@ fn dev_add_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
     Ok(())
 }
 
-fn dev_force_screenshot(paths: ClientPaths) -> Result<()> {
+fn force_screenshot(paths: ClientPaths) -> Result<()> {
     let mut client = connect_to_daemon(&paths)?;
     client
         .force_capture_now()
