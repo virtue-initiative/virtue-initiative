@@ -96,8 +96,9 @@ Every push to `staging` runs `scripts/submit-store-flight.ps1` after the release
 built and published, submitting that same artifact to a pre-created Microsoft Store
 "Staging" flight via the classic Store Submission API
 (`https://manage.devcenter.microsoft.com/v1.0/my/...`). This is a one-way push: it
-creates a new flight submission (deleting any stale, still-`PendingCommit` one left over
-from a prior run), replaces the flight's package with the new `.msix`, commits, and polls
+creates a new flight submission (cancelling any in-progress submission left over from a
+prior run, whatever stage it is at — uncommitted, processing, or in certification —
+since any of them block creating a new one), replaces the flight's package with the new `.msix`, commits, and polls
 Partner Center briefly to catch immediate validation failures before letting the CI job
 succeed — Store certification and rollout to flight testers continues asynchronously
 afterward, the same way the iOS TestFlight upload step doesn't block on Apple's
