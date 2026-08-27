@@ -63,21 +63,22 @@ function Remove-StaleFlightSubmission {
         return
     }
 
+    # Any pending submission blocks creating a new one, whatever stage it is at
+    # (PendingCommit, CommitStarted, PreProcessing, Certification, ...), so cancel
+    # it unconditionally rather than only in one status. The status fetch is for
+    # logging; DELETE is the API's only cancel mechanism and returns 409 for the
+    # states it genuinely refuses to drop.
     $pendingId = $flight.pendingFlightSubmission.id
     $statusUri = "https://manage.devcenter.microsoft.com/v1.0/my/applications/$AppId/flights/$FlightId/submissions/$pendingId/status"
     $status = Invoke-RestMethod -Method Get -Uri $statusUri -Headers $Headers
 
-    if ($status.status -ne "PendingCommit") {
-        return
-    }
-
-    Write-Host "Found stale PendingCommit submission $pendingId; deleting before creating a new one."
+    Write-Host "Found in-progress submission $pendingId (status: $($status.status)); deleting before creating a new one."
     $deleteUri = "https://manage.devcenter.microsoft.com/v1.0/my/applications/$AppId/flights/$FlightId/submissions/$pendingId"
     try {
         Invoke-RestMethod -Method Delete -Uri $deleteUri -Headers $Headers -Body "{}" -ContentType "application/json" | Out-Null
     }
     catch {
-        throw "A submission ($pendingId) is in progress for this flight and could not be deleted automatically (status was PendingCommit but delete failed). Check Partner Center before retrying. Error: $($_.Exception.Message)"
+        throw "A submission ($pendingId) is in progress for this flight and could not be deleted automatically (status was $($status.status)). Check Partner Center before retrying. Error: $($_.Exception.Message)"
     }
 }
 
