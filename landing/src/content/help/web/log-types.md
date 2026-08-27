@@ -5,8 +5,8 @@ sidebar_position: 2
 # Log types
 
 Every entry in your log feed has a **type** and a matching icon. Most entries are
-routine activity (screenshots, sign-ins, suspend/resume). A few are **alerts** that
-flag a gap or interruption in monitoring worth a second look.
+routine activity (screenshots, sign-ins). A few are **alerts** that flag an
+interruption in monitoring worth a second look.
 
 Open any entry to see its details, the device it came from, and a link back to
 this page.
@@ -31,16 +31,6 @@ without a separate login step)
 
 The user logged out of this computer, or the computer was shut down
 
-## Suspend Detected
-
-The device was asleep for a while. No screenshots are captured while a device
-is asleep; this entry is logged retrospectively once monitoring resumes.
-
-## Activity
-
-A monitoring lifecycle event occurred that doesn't fall into the categories
-above.
-
 ## Screenshot Missed
 
 A scheduled screenshot was noticeably late, or several recent ones added up to
@@ -49,19 +39,6 @@ sign-out. This can happen when the device was offline, under heavy load, or
 asleep without recording a sleep event. An occasional one is normal; frequent
 ones are worth investigating.
 
-## Unexpected Gap
-
-There was a gap in monitoring while the app was running — no events arrived for
-longer than expected. This can happen when the device was offline, under heavy
-load, or asleep without recording a sleep event. An occasional gap is normal;
-frequent gaps are worth investigating.
-
-## Process Stopped Unexpectedly
-
-Monitoring was stopped before the device's session ended normally. This can
-indicate the app was closed or killed rather than the user logging out or the
-device shutting down cleanly.
-
 ## Monitoring Stopped by User
 
 A user stopped the monitoring process.
@@ -69,10 +46,6 @@ A user stopped the monitoring process.
 ## Monitoring Resumed by User
 
 A user resumed monitoring after previously stopping it.
-
-## Unexpected Restart
-
-The monitoring process restarted unexpectedly.
 
 ## Repeated Restarts
 
@@ -95,3 +68,8 @@ configuration or permissions problem with screen capture — see the
 
 A developer or diagnostic log entry. These are produced by developer tooling and
 are not part of normal monitoring.
+
+## Heartbeat
+
+A periodic signal confirming the device is online and monitoring is still
+running, even when there's nothing else to report.
