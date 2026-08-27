@@ -2,41 +2,87 @@ import Combine
 import Foundation
 import UIKit
 
-private struct CoreServiceStatus: Decodable {
+/// One entry in the daemon's recent-errors ring — `virtue_core::StatusError`.
+struct CoreStatusError: Decodable {
+    let atMs: Int64
+    let context: String
+    let message: String
+
+    private enum CodingKeys: String, CodingKey {
+        case atMs = "at_ms"
+        case context
+        case message
+    }
+}
+
+/// Why the most recent capture attempt produced no screenshot —
+/// `virtue_core::StatusSkipReason`.
+enum CoreSkipReason: String, Decodable {
+    case staticScreen = "static_screen"
+    case lockedOrScreensaver = "locked_or_screensaver"
+    case captureFailed = "capture_failed"
+    case unknown
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = CoreSkipReason(rawValue: raw) ?? .unknown
+    }
+
+    var label: String {
+        switch self {
+        case .staticScreen: return "Screen unchanged since the last upload"
+        case .lockedOrScreensaver: return "Screen locked or screensaver active"
+        case .captureFailed: return "Capture failed"
+        case .unknown: return "Unknown"
+        }
+    }
+}
+
+/// Mirrors `virtue_core::ServiceStatus` — the shared status-page payload
+/// (`client/core/SPEC.md` CORE-010) every platform renders. Kept as a local
+/// copy because the iOS app doesn't link `shared-swift`'s VirtueKit the way
+/// the Mac app does.
+struct CoreServiceStatus: Decodable {
     let isRunning: Bool
     let isAuthenticated: Bool
-    let lastLoopAtMs: Int64?
-    let lastScreenshotAtMs: Int64?
-    let lastBatchAtMs: Int64?
+    let accountEmail: String?
+    let deviceId: String?
+    let deviceName: String?
+    let partnerCount: Int?
+    let pendingHashCount: Int?
+    let pendingBatchCount: Int?
     let pendingRequestCount: Int
-    let lifecycle: CoreLifecycleStatus?
+    let lastLoopAtMs: Int64?
+    let lastScreenshotAttemptAtMs: Int64?
+    let lastScreenshotAtMs: Int64?
+    let lastSkipReason: CoreSkipReason?
+    let lastBatchAtMs: Int64?
+    let recentErrors: [CoreStatusError]?
+    let apiBaseUrl: String?
+    let hashBaseUrl: String?
+    let captureIntervalSeconds: Int64?
+    let batchWindowSeconds: Int64?
 
     private enum CodingKeys: String, CodingKey {
         case isRunning = "is_running"
         case isAuthenticated = "is_authenticated"
-        case lastLoopAtMs = "last_loop_at_ms"
-        case lastScreenshotAtMs = "last_screenshot_at_ms"
-        case lastBatchAtMs = "last_batch_at_ms"
+        case accountEmail = "account_email"
+        case deviceId = "device_id"
+        case deviceName = "device_name"
+        case partnerCount = "partner_count"
+        case pendingHashCount = "pending_hash_count"
+        case pendingBatchCount = "pending_batch_count"
         case pendingRequestCount = "pending_request_count"
-        case lifecycle
-    }
-}
-
-private struct CoreLifecycleStatus: Decodable {
-    let snapshot: CoreLifecycleSnapshot
-}
-
-private struct CoreLifecycleSnapshot: Decodable {
-    let userSession: String
-    let primaryService: String
-    let capturePermission: String
-    let captureAvailability: String
-
-    private enum CodingKeys: String, CodingKey {
-        case userSession = "user_session"
-        case primaryService = "primary_service"
-        case capturePermission = "capture_permission"
-        case captureAvailability = "capture_availability"
+        case lastLoopAtMs = "last_loop_at_ms"
+        case lastScreenshotAttemptAtMs = "last_screenshot_attempt_at_ms"
+        case lastScreenshotAtMs = "last_screenshot_at_ms"
+        case lastSkipReason = "last_skip_reason"
+        case lastBatchAtMs = "last_batch_at_ms"
+        case recentErrors = "recent_errors"
+        case apiBaseUrl = "api_base_url"
+        case hashBaseUrl = "hash_base_url"
+        case captureIntervalSeconds = "capture_interval_seconds"
+        case batchWindowSeconds = "batch_window_seconds"
     }
 }
 
@@ -59,10 +105,10 @@ final class MonitoringCoordinator: ObservableObject {
     @Published private(set) var lastCoreLoop: String = "<none>"
     @Published private(set) var lastCoreScreenshot: String = "<none>"
     @Published private(set) var lastCoreBatch: String = "<none>"
-    @Published private(set) var coreUserSession: String = "unknown"
-    @Published private(set) var corePrimaryService: String = "unknown"
-    @Published private(set) var coreCapturePermission: String = "unknown"
-    @Published private(set) var coreCaptureAvailability: String = "unknown"
+    @Published private(set) var lastCoreScreenshotAttempt: String = "<none>"
+    /// The full shared status payload (CORE-010) the Status Details sheet
+    /// renders; the scalars above stay for the main screen's own bindings.
+    @Published private(set) var coreStatus: CoreServiceStatus?
 
     @Published private(set) var safariCaptureHealth: String = "No Safari extension heartbeat yet"
     @Published private(set) var safariPermissionSummary: String = "Unknown"
@@ -421,15 +467,12 @@ final class MonitoringCoordinator: ObservableObject {
         pendingRequestCount = serviceStatus?.pendingRequestCount ?? 0
         lastCoreLoop = formatMillisTimestamp(serviceStatus?.lastLoopAtMs)
         lastCoreScreenshot = formatMillisTimestamp(serviceStatus?.lastScreenshotAtMs)
+        lastCoreScreenshotAttempt = formatMillisTimestamp(serviceStatus?.lastScreenshotAttemptAtMs)
         lastCoreBatch = formatMillisTimestamp(serviceStatus?.lastBatchAtMs)
-        coreUserSession = normalizedLifecycleValue(serviceStatus?.lifecycle?.snapshot.userSession)
-        corePrimaryService = normalizedLifecycleValue(serviceStatus?.lifecycle?.snapshot.primaryService)
-        coreCapturePermission = normalizedLifecycleValue(
-            serviceStatus?.lifecycle?.snapshot.capturePermission
-        )
-        coreCaptureAvailability = normalizedLifecycleValue(
-            serviceStatus?.lifecycle?.snapshot.captureAvailability
-        )
+        coreStatus = serviceStatus
+        if let apiBaseUrl = serviceStatus?.apiBaseUrl, !apiBaseUrl.isEmpty {
+            currentApiBaseUrl = apiBaseUrl
+        }
 
         if !loggedIn {
             monitorSummary = "signed out"
@@ -481,6 +524,18 @@ final class MonitoringCoordinator: ObservableObject {
         return defaults.double(forKey: key)
     }
 
+    /// Local time plus a relative age, for the status sheet's timestamps —
+    /// "when did this last work?" is what those rows are really answering.
+    func formatStatusTimestamp(_ timestampMs: Int64?) -> String {
+        guard let timestampMs else {
+            return "<none>"
+        }
+        let date = Date(timeIntervalSince1970: TimeInterval(timestampMs) / 1000)
+        let relative = RelativeDateTimeFormatter()
+        relative.unitsStyle = .short
+        return "\(formatAbsoluteTime(date.timeIntervalSince1970)) (\(relative.localizedString(for: date, relativeTo: Date())))"
+    }
+
     private func formatMillisTimestamp(_ timestampMs: Int64?) -> String {
         guard let timestampMs else {
             return "<none>"
@@ -494,13 +549,6 @@ final class MonitoringCoordinator: ObservableObject {
         formatter.dateStyle = .none
         formatter.timeStyle = .medium
         return formatter.string(from: Date(timeIntervalSince1970: timestamp))
-    }
-
-    private func normalizedLifecycleValue(_ value: String?) -> String {
-        guard let value, !value.isEmpty else {
-            return "unknown"
-        }
-        return value.replacingOccurrences(of: "_", with: " ")
     }
 
     private func deriveSafariPermissionSummary(

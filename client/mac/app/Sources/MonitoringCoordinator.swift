@@ -40,6 +40,9 @@ final class MonitoringCoordinator: ObservableObject {
 
     @Published private(set) var pendingRequestCount: Int = 0
     @Published private(set) var lastLoopAt: String = "<none>"
+    /// The full shared status payload (CORE-010) the Status Details sheet
+    /// renders. The scalars above stay for the main window's own bindings.
+    @Published private(set) var coreStatus: CoreServiceStatus?
 
     @Published private(set) var isForceCapturing: Bool = false
     @Published private(set) var forceCaptureMessage: String?
@@ -342,6 +345,7 @@ final class MonitoringCoordinator: ObservableObject {
         if let json = snapshot.statusJson, let status = CoreServiceStatus.decode(fromJson: json) {
             pendingRequestCount = status.pendingRequestCount
             lastLoopAt = status.lastLoopAtMs.map(formatMillisTimestamp) ?? "<none>"
+            coreStatus = status
         }
         // Local TCC cache check, not IPC — cheap enough to run on the main actor.
         if NativeBridge.hasCapturePermission() {
@@ -381,6 +385,27 @@ final class MonitoringCoordinator: ObservableObject {
             return "Login failed. Check your email and password and try again."
         }
         return "Login failed: \(raw)"
+    }
+
+    /// Local time plus a relative age — "when did this last work?" is the
+    /// question every timestamp on the status sheet is really answering.
+    func formatStatusTimestamp(_ timestampMs: Int64?) -> String {
+        guard let timestampMs else { return "<none>" }
+        let date = Date(timeIntervalSince1970: TimeInterval(timestampMs) / 1000)
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .medium
+        let relative = RelativeDateTimeFormatter()
+        relative.unitsStyle = .short
+        return "\(formatter.string(from: date)) (\(relative.localizedString(for: date, relativeTo: Date())))"
+    }
+
+    /// Where this app's daemon writes its rolling log files — surfaced on the
+    /// status sheet so a user can find them without knowing the convention.
+    var logDirectory: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library")
+            .appendingPathComponent("Logs")
     }
 
     private func formatMillisTimestamp(_ timestampMs: Int64) -> String {
