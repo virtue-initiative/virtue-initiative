@@ -9,8 +9,8 @@ set positional-arguments
 
 # One-time repo bootstrap: installs deps, copies config, runs local migrations.
 [group('dev')]
-setup:
-    ./scripts/setup.sh
+setup *args:
+    ./scripts/setup.sh {{args}}
 
 # Start api, web, landing, and the standalone hash-server together.
 [group('dev')]
