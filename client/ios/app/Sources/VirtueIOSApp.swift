@@ -243,6 +243,9 @@ struct ContentView: View {
     }
 }
 
+/// The status page (see `client/core/SPEC.md` CORE-010): the same sections, in
+/// the same order, as every other platform's status screen, followed by the
+/// iOS-only Safari extension section.
 private struct StatusSheet: View {
     @ObservedObject var coordinator: MonitoringCoordinator
     @Environment(\.dismiss) private var dismiss
@@ -250,24 +253,56 @@ private struct StatusSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Service") {
+                Section("Account") {
                     DetailRow(label: "Summary", value: coordinator.monitorSummary)
                     DetailRow(label: "Status", value: coordinator.statusMessage)
+                    DetailRow(label: "Email", value: status?.accountEmail ?? coordinator.accountEmail ?? "<none>")
+                    DetailRow(label: "Device name", value: status?.deviceName ?? "<none>")
+                    DetailRow(label: "Partners", value: status?.partnerCount.map(String.init) ?? "<unknown>")
+                }
+
+                Section("Queues") {
+                    DetailRow(label: "Waiting for hash", value: "\(status?.pendingHashCount ?? 0)")
+                    DetailRow(label: "Waiting in batch", value: "\(status?.pendingBatchCount ?? 0)")
                     DetailRow(label: "Pending requests", value: "\(coordinator.pendingRequestCount)")
-                    DetailRow(label: "API", value: coordinator.currentApiBaseUrl)
+                    DetailRow(label: "Last batch upload", value: coordinator.lastCoreBatch)
                 }
 
-                Section("Core Lifecycle") {
-                    DetailRow(label: "User session", value: coordinator.coreUserSession)
-                    DetailRow(label: "Primary service", value: coordinator.corePrimaryService)
-                    DetailRow(label: "Capture permission", value: coordinator.coreCapturePermission)
-                    DetailRow(label: "Capture availability", value: coordinator.coreCaptureAvailability)
-                }
-
-                Section("Timing") {
+                Section("Capture") {
                     DetailRow(label: "Last loop", value: coordinator.lastCoreLoop)
+                    DetailRow(label: "Last attempt", value: coordinator.lastCoreScreenshotAttempt)
                     DetailRow(label: "Last screenshot", value: coordinator.lastCoreScreenshot)
-                    DetailRow(label: "Last batch", value: coordinator.lastCoreBatch)
+                    DetailRow(label: "Last skip reason", value: status?.lastSkipReason?.label ?? "<none>")
+                }
+
+                Section("Recent errors") {
+                    if let errors = status?.recentErrors, !errors.isEmpty {
+                        ForEach(Array(errors.prefix(5).enumerated()), id: \.offset) { _, error in
+                            DetailRow(
+                                label: "\(coordinator.formatStatusTimestamp(error.atMs)) · \(error.context)",
+                                value: error.message
+                            )
+                        }
+                    } else {
+                        DetailRow(label: "Errors", value: "None")
+                    }
+                }
+
+                Section("Advanced") {
+                    DetailRow(label: "Device ID", value: coordinator.deviceId)
+                    DetailRow(label: "API URL", value: status?.apiBaseUrl ?? coordinator.currentApiBaseUrl)
+                    DetailRow(label: "Hash base URL", value: status?.hashBaseUrl ?? "<default>")
+                    DetailRow(
+                        label: "Capture interval",
+                        value: status?.captureIntervalSeconds.map { "\($0)s" }
+                            ?? "\(VirtueShared.defaultCaptureIntervalSeconds)s"
+                    )
+                    DetailRow(
+                        label: "Batch window",
+                        value: status?.batchWindowSeconds.map { "\($0)s" }
+                            ?? "\(VirtueShared.defaultBatchWindowSeconds)s"
+                    )
+                    DetailRow(label: "Build", value: VirtueShared.buildLabel)
                 }
 
                 Section("Safari Extension") {
@@ -293,6 +328,8 @@ private struct StatusSheet: View {
             }
         }
     }
+
+    private var status: CoreServiceStatus? { coordinator.coreStatus }
 }
 
 private struct VirtueButtonStyle: ButtonStyle {
