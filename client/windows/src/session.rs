@@ -28,8 +28,14 @@ impl SessionManager {
 
         Ok(SessionStatus {
             logged_in: snapshot.logged_in,
-            device_id: None,
-            email: state.email,
+            // The daemon is the authority on which device is registered; the
+            // UI state file only remembers the email that was typed in.
+            device_id: snapshot.core.as_ref().and_then(|s| s.device_id.clone()),
+            email: snapshot
+                .core
+                .as_ref()
+                .and_then(|s| s.account_email.clone())
+                .or(state.email),
         })
     }
 

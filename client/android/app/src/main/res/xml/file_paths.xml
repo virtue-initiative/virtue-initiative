@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- The daemon's rolling log files, written by client/android/rust's
+         init_logging into <filesDir>/core-data/logs. -->
+    <files-path
+        name="core_logs"
+        path="core-data/logs/" />
+    <!-- The `.txt` copy the Status Details screen hands to a viewer; the
+         originals have no extension, which some viewers won't render. -->
+    <cache-path
+        name="readable_logs"
+        path="logs/" />
+</paths>

@@ -72,8 +72,11 @@ enum WireReply {
         success: bool,
         error: Option<String>,
     },
+    /// Boxed: `ServiceStatus` is by far the largest variant's payload
+    /// (CORE-010 made it a full status page's worth of fields), and an
+    /// unboxed one would size every reply this enum carries.
     Status {
-        status: ServiceStatus,
+        status: Box<ServiceStatus>,
     },
     Ack,
 }
@@ -118,7 +121,7 @@ where
             },
         },
         WireRequest::Status => WireReply::Status {
-            status: daemon.status(),
+            status: Box::new(daemon.status()),
         },
         WireRequest::NoteUserStop { source } => {
             daemon.note_user_stop(&source);
@@ -313,7 +316,7 @@ impl ClientController {
     /// Send a status request and block until the reply is received.
     pub fn get_status(&mut self) -> CoreResult<ServiceStatus> {
         match self.call(WireRequest::Status)? {
-            WireReply::Status { status } => Ok(status),
+            WireReply::Status { status } => Ok(*status),
             _ => Err(CoreError::Ipc("unexpected reply to status".to_string())),
         }
     }

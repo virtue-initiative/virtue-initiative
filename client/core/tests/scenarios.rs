@@ -9,7 +9,7 @@
 
 use virtue_core::module::upload::Upload;
 use virtue_core::testing::Scenario;
-use virtue_core::{CoreError, UploadKind};
+use virtue_core::{CoreError, StatusSkipReason, UploadKind};
 
 // ── Basic unauthenticated loop ────────────────────────────────────────────────
 
@@ -412,5 +412,85 @@ fn screenshot_state_survives_restart() {
     assert_eq!(
         uploads_after, uploads_before,
         "no new uploads expected when the screenshot schedule hasn't elapsed after restart"
+    );
+}
+
+// ── Status page data (CORE-010 / CORE-018) ────────────────────────────────────
+
+#[test]
+fn status_reports_the_account_device_and_last_screenshot_after_a_capture() {
+    let mut scenario = Scenario::authenticated();
+    scenario.at_t(1_000).tick();
+
+    let status = scenario.status();
+    assert!(status.is_authenticated);
+    assert_eq!(
+        status.account_email.as_deref(),
+        Some("scenario@example.org")
+    );
+    assert_eq!(status.device_name.as_deref(), Some("scenario device"));
+    // One wrapping key (the owner's own) means no partners yet.
+    assert_eq!(status.partner_count, Some(0));
+    assert_eq!(status.last_screenshot_attempt_at_ms, Some(1_000));
+    assert_eq!(status.last_screenshot_at_ms, Some(1_000));
+    assert_eq!(status.last_skip_reason, None);
+    assert!(status.capture_interval_seconds > 0);
+    assert!(!status.api_base_url.is_empty());
+}
+
+#[test]
+fn status_reports_a_skip_reason_when_the_screen_is_locked() {
+    let mut scenario = Scenario::authenticated();
+    scenario.platform.set_locked_or_screensaver(true);
+    scenario.at_t(1_000).tick();
+
+    let status = scenario.status();
+    assert_eq!(
+        status.last_skip_reason,
+        Some(StatusSkipReason::LockedOrScreensaver)
+    );
+    assert_eq!(status.last_screenshot_attempt_at_ms, Some(1_000));
+    assert_eq!(status.last_screenshot_at_ms, None);
+
+    // Unlocking and capturing clears the reason rather than leaving it stale.
+    scenario.platform.set_locked_or_screensaver(false);
+    scenario.with_state_mut(|s| s.screenshot.next_screenshot_at_ms = None);
+    scenario.at_t(2_000).tick();
+    assert_eq!(scenario.status().last_skip_reason, None);
+}
+
+#[test]
+fn status_reports_recent_upload_errors_and_they_survive_a_restart() {
+    let mut scenario = Scenario::authenticated();
+    scenario
+        .api
+        .program_hash(Err(CoreError::CommandFailed("hash server down".into())));
+    scenario.at_t(1_000).tick();
+
+    let status = scenario.status();
+    let error = status
+        .recent_errors
+        .first()
+        .expect("a failed hash upload should be recorded");
+    assert_eq!(error.context, "hash_upload");
+    assert!(
+        error.message.contains("hash server down"),
+        "unexpected message: {}",
+        error.message
+    );
+    assert!(status.pending_hash_count > 0);
+
+    // The ring is persisted, so a daemon that has just restarted can still
+    // explain why it is behind (CORE-018).
+    let state_dir = scenario.state_dir_path().to_path_buf();
+    let mut restarted = Scenario::authenticated_with_state_dir(state_dir);
+    let after_restart = restarted.status();
+    drop(scenario);
+    assert_eq!(
+        after_restart
+            .recent_errors
+            .first()
+            .map(|e| e.context.clone()),
+        Some("hash_upload".to_string())
     );
 }

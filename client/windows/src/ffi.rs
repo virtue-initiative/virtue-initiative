@@ -141,20 +141,94 @@ impl From<SessionStatus> for SessionStatusPayload {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct StatusErrorPayload {
+    at_ms: i64,
+    context: String,
+    message: String,
+}
+
+/// The status page's data (CORE-010), plus the Windows-only monitor state and
+/// log directory the WinUI dialog also shows. Written out field by field
+/// rather than flattening `ServiceStatus`, so this stays one explicit
+/// camelCase contract with the C# DTO — see the contract test below.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct MonitorStatusPayload {
     state: String,
     logged_in: bool,
+    account_email: Option<String>,
+    device_id: Option<String>,
+    device_name: Option<String>,
+    partner_count: Option<usize>,
+    pending_hash_count: usize,
+    pending_batch_count: usize,
     pending_request_count: usize,
+    last_loop_at_ms: Option<i64>,
+    last_screenshot_attempt_at_ms: Option<i64>,
+    last_screenshot_at_ms: Option<i64>,
+    last_skip_reason: Option<String>,
+    last_batch_at_ms: Option<i64>,
+    recent_errors: Vec<StatusErrorPayload>,
+    api_base_url: Option<String>,
+    hash_base_url: Option<String>,
+    capture_interval_seconds: Option<u64>,
+    batch_window_seconds: Option<u64>,
     last_error: Option<String>,
+    log_directory: Option<String>,
+}
+
+fn skip_reason_label(reason: &virtue_core::StatusSkipReason) -> &'static str {
+    match reason {
+        virtue_core::StatusSkipReason::StaticScreen => "Screen unchanged since the last upload",
+        virtue_core::StatusSkipReason::LockedOrScreensaver => "Screen locked or screensaver active",
+        virtue_core::StatusSkipReason::CaptureFailed => "Capture failed",
+    }
 }
 
 impl From<MonitorStatusSnapshot> for MonitorStatusPayload {
     fn from(value: MonitorStatusSnapshot) -> Self {
+        let core = value.core;
         Self {
             state: value.state,
             logged_in: value.logged_in,
+            account_email: core.as_ref().and_then(|s| s.account_email.clone()),
+            device_id: core.as_ref().and_then(|s| s.device_id.clone()),
+            device_name: core.as_ref().and_then(|s| s.device_name.clone()),
+            partner_count: core.as_ref().and_then(|s| s.partner_count),
+            pending_hash_count: core.as_ref().map(|s| s.pending_hash_count).unwrap_or(0),
+            pending_batch_count: core.as_ref().map(|s| s.pending_batch_count).unwrap_or(0),
             pending_request_count: value.pending_request_count,
+            last_loop_at_ms: core.as_ref().and_then(|s| s.last_loop_at_ms),
+            last_screenshot_attempt_at_ms: core
+                .as_ref()
+                .and_then(|s| s.last_screenshot_attempt_at_ms),
+            last_screenshot_at_ms: core.as_ref().and_then(|s| s.last_screenshot_at_ms),
+            last_skip_reason: core
+                .as_ref()
+                .and_then(|s| s.last_skip_reason.as_ref())
+                .map(|reason| skip_reason_label(reason).to_string()),
+            last_batch_at_ms: core.as_ref().and_then(|s| s.last_batch_at_ms),
+            recent_errors: core
+                .as_ref()
+                .map(|s| {
+                    s.recent_errors
+                        .iter()
+                        .map(|error| StatusErrorPayload {
+                            at_ms: error.at_ms,
+                            context: error.context.clone(),
+                            message: error.message.clone(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            api_base_url: core.as_ref().map(|s| s.api_base_url.clone()),
+            hash_base_url: core.as_ref().and_then(|s| s.hash_base_url.clone()),
+            capture_interval_seconds: core.as_ref().map(|s| s.capture_interval_seconds),
+            batch_window_seconds: core.as_ref().map(|s| s.batch_window_seconds),
             last_error: value.last_error,
+            log_directory: ClientPaths::discover()
+                .ok()
+                .map(|paths| paths.log_dir.display().to_string()),
         }
     }
 }
@@ -601,6 +675,28 @@ mod tests {
         assert!(json.get("loggedIn").is_some());
         assert!(json.get("pendingRequestCount").is_some());
         assert!(json.get("lastError").is_some());
+        // The shared status-page fields (CORE-010) the WinUI dialog renders.
+        for key in [
+            "accountEmail",
+            "deviceId",
+            "deviceName",
+            "partnerCount",
+            "pendingHashCount",
+            "pendingBatchCount",
+            "lastLoopAtMs",
+            "lastScreenshotAttemptAtMs",
+            "lastScreenshotAtMs",
+            "lastSkipReason",
+            "lastBatchAtMs",
+            "recentErrors",
+            "apiBaseUrl",
+            "hashBaseUrl",
+            "captureIntervalSeconds",
+            "batchWindowSeconds",
+            "logDirectory",
+        ] {
+            assert!(json.get(key).is_some(), "missing key: {key}");
+        }
     }
 
     #[test]

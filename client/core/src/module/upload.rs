@@ -283,6 +283,11 @@ pub struct HashRetryOutcome {
     had_failure: bool,
     refreshed: Option<(String, DeviceSettings)>, // (hash_token, settings) from a GET /d/device refresh
     permanent_failures: Vec<(LogEntry, CoreError)>,
+    /// `(context, message)` pairs for everything that went wrong this pass,
+    /// handed to the daemon for the status page's recent-errors ring
+    /// (CORE-018) — this phase runs without access to state, so it can't
+    /// record them itself.
+    pub errors: Vec<(String, String)>,
 }
 
 /// Phase 5a: the actual network calls, run without holding the state lock.
@@ -322,6 +327,10 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
                     had_failure: true,
                     refreshed: None,
                     permanent_failures: Vec::new(),
+                    errors: vec![(
+                        "settings_refresh".to_string(),
+                        format!("failed to refresh hash token: {err}"),
+                    )],
                 };
             }
         }
@@ -331,6 +340,7 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
     let mut still_pending = Vec::new();
     let mut newly_hashed = Vec::new();
     let mut permanent_failures = Vec::new();
+    let mut errors: Vec<(String, String)> = Vec::new();
     let mut had_failure = false;
     let mut retried = 0usize;
     let mut stop = false;
@@ -348,6 +358,10 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
                     "encode_batch_event failed, keeping event for retry",
                     Some(&err),
                 );
+                errors.push((
+                    "hash_upload".to_string(),
+                    format!("encoding an event failed: {err}"),
+                ));
                 still_pending.push(event);
                 continue;
             }
@@ -371,6 +385,10 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
                 });
             }
             Err(err) if err.is_bad_request() => {
+                errors.push((
+                    "hash_upload".to_string(),
+                    format!("hash server rejected an event permanently: {err}"),
+                ));
                 permanent_failures.push((event, err));
             }
             Err(err) if err.is_conflict() => {
@@ -382,12 +400,20 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
                     "hash upload sequence conflict, advancing local seq and retrying",
                     Some(&err),
                 );
+                errors.push((
+                    "hash_upload".to_string(),
+                    format!("hash upload sequence conflict, will retry: {err}"),
+                ));
                 still_pending.push(event);
                 stop = true;
             }
             Err(err) => {
                 had_failure = true;
                 log_warning("hash upload failed, will retry", Some(&err));
+                errors.push((
+                    "hash_upload".to_string(),
+                    format!("hash upload failed, will retry: {err}"),
+                ));
                 still_pending.push(event);
                 stop = true;
             }
@@ -402,6 +428,7 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
         had_failure,
         refreshed,
         permanent_failures,
+        errors,
     }
 }
 
@@ -527,10 +554,25 @@ pub enum BatchOutcome {
     },
     LoggedOut {
         device_id: String,
+        error: String,
     },
     Deferred {
         device_id: String,
+        error: String,
     },
+}
+
+impl BatchOutcome {
+    /// The `(context, message)` pair to record in the status page's
+    /// recent-errors ring (CORE-018), if this outcome was a failure.
+    pub fn error(&self) -> Option<(String, String)> {
+        match self {
+            BatchOutcome::Uploaded { .. } => None,
+            BatchOutcome::LoggedOut { error, .. } | BatchOutcome::Deferred { error, .. } => {
+                Some(("batch_upload".to_string(), error.clone()))
+            }
+        }
+    }
 }
 
 /// Phase 5b: the actual network call, run without holding the state lock.
@@ -552,12 +594,14 @@ pub fn execute_batch<A: ApiTransport>(plan: BatchPlan, api: &A) -> BatchOutcome 
             );
             BatchOutcome::LoggedOut {
                 device_id: plan.device_id,
+                error: format!("device deregistered or unauthorized, logging out: {err}"),
             }
         }
         Err(err) => {
             log_warning("batch upload deferred", Some(&err));
             BatchOutcome::Deferred {
                 device_id: plan.device_id,
+                error: format!("batch upload deferred: {err}"),
             }
         }
     }
@@ -569,8 +613,8 @@ pub fn execute_batch<A: ApiTransport>(plan: BatchPlan, api: &A) -> BatchOutcome 
 pub fn commit_batch(state: &mut UploadState, outcome: BatchOutcome, now_ms: i64) -> bool {
     let device_id = match &outcome {
         BatchOutcome::Uploaded { device_id, .. } => device_id,
-        BatchOutcome::LoggedOut { device_id } => device_id,
-        BatchOutcome::Deferred { device_id } => device_id,
+        BatchOutcome::LoggedOut { device_id, .. } => device_id,
+        BatchOutcome::Deferred { device_id, .. } => device_id,
     };
     if state
         .device_credentials

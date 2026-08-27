@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using Microsoft.UI;
@@ -517,6 +518,7 @@ public sealed partial class MainWindow : Window
             Width = 520,
         };
 
+        var logDirectory = ViewModel.MonitorStatus?.LogDirectory;
         var dialog = new ContentDialog
         {
             Title = CreateDialogTitle("Virtue Status"),
@@ -530,6 +532,18 @@ public sealed partial class MainWindow : Window
                 MinHeight = 320,
             },
         };
+
+        if (!string.IsNullOrWhiteSpace(logDirectory))
+        {
+            dialog.PrimaryButtonText = "Open log folder";
+            dialog.PrimaryButtonClick += (_, args) =>
+            {
+                // Keep the dialog open: opening Explorer isn't a "done here"
+                // action, and closing would force a reopen to read on.
+                args.Cancel = true;
+                OpenLogFolder(logDirectory!);
+            };
+        }
         ApplyDialogTheme(dialog);
 
         if (Content is FrameworkElement root)
@@ -679,28 +693,67 @@ public sealed partial class MainWindow : Window
         await dialog.ShowAsync();
     }
 
+    /// <summary>
+    /// The status page (client/core/SPEC.md CORE-010): the same sections, in
+    /// the same order, as every other platform's status screen, plus the
+    /// Windows-specific monitor state, package version, and log directory.
+    /// </summary>
     private string BuildStatusDetailsText()
     {
+        var status = ViewModel.MonitorStatus;
         var lines = new List<string>
         {
-            $"logged_in: {ViewModel.LoggedIn.ToString().ToLowerInvariant()}",
-            $"monitor_state: {ViewModel.MonitorState}",
-            $"email: {DisplayOrPlaceholder(ViewModel.AccountEmail)}",
-            $"device_id: {DisplayOrPlaceholder(ViewModel.DeviceId)}",
-            $"pending_request_count: {ViewModel.PendingRequestCount}",
-            $"last_screenshot_at: {FormatUnixTimestamp(ViewModel.LastScreenshotAtMs)}",
-            $"build: {ViewModel.BuildLabel}",
+            "Account",
+            $"  signed in:          {ViewModel.LoggedIn.ToString().ToLowerInvariant()}",
+            $"  email:              {DisplayOrPlaceholder(ViewModel.AccountEmail)}",
+            $"  device name:        {DisplayOrPlaceholder(status?.DeviceName)}",
+            $"  partners:           {status?.PartnerCount?.ToString() ?? "<unknown>"}",
+            string.Empty,
+            "Queues",
+            $"  waiting for hash:   {status?.PendingHashCount ?? 0}",
+            $"  waiting in batch:   {status?.PendingBatchCount ?? 0}",
+            $"  last batch upload:  {FormatUnixTimestamp(status?.LastBatchAtMs)}",
+            string.Empty,
+            "Capture",
+            $"  monitor state:      {ViewModel.MonitorState}",
+            $"  last loop:          {FormatUnixTimestamp(status?.LastLoopAtMs)}",
+            $"  last attempt:       {FormatUnixTimestamp(status?.LastScreenshotAttemptAtMs)}",
+            $"  last screenshot:    {FormatUnixTimestamp(ViewModel.LastScreenshotAtMs)}",
+            $"  last skip reason:   {DisplayOrPlaceholder(status?.LastSkipReason)}",
+            string.Empty,
+            "Recent errors",
         };
+
+        var recentErrors = status?.RecentErrors;
+        if (recentErrors is null || recentErrors.Count == 0)
+        {
+            lines.Add(string.IsNullOrWhiteSpace(ViewModel.MonitorError)
+                ? "  (none)"
+                : $"  {ViewModel.MonitorError}");
+        }
+        else
+        {
+            foreach (var error in recentErrors.Take(5))
+            {
+                lines.Add($"  {FormatUnixTimestamp(error.AtMs)} [{error.Context}] {error.Message}");
+            }
+        }
+
+        lines.Add(string.Empty);
+        lines.Add("Advanced");
+        lines.Add($"  device id:          {DisplayOrPlaceholder(ViewModel.DeviceId)}");
+        lines.Add($"  api url:            {DisplayOrPlaceholder(status?.ApiBaseUrl)}");
+        lines.Add($"  hash base url:      {(string.IsNullOrWhiteSpace(status?.HashBaseUrl) ? "<default>" : status!.HashBaseUrl)}");
+        lines.Add($"  capture interval:   {(status?.CaptureIntervalSeconds is long capture ? $"{capture}s" : "<unknown>")}");
+        lines.Add($"  batch window:       {(status?.BatchWindowSeconds is long batch ? $"{batch}s" : "<unknown>")}");
+        lines.Add($"  build:              {ViewModel.BuildLabel}");
 
         if (!string.IsNullOrWhiteSpace(ViewModel.WindowsPackageVersion))
         {
-            lines.Add($"windows_package: {ViewModel.WindowsPackageVersion}");
+            lines.Add($"  windows package:    {ViewModel.WindowsPackageVersion}");
         }
 
-        if (!string.IsNullOrWhiteSpace(ViewModel.MonitorError))
-        {
-            lines.Add($"last_error: {ViewModel.MonitorError}");
-        }
+        lines.Add($"  logs:               {DisplayOrPlaceholder(status?.LogDirectory)}");
 
         return string.Join(Environment.NewLine, lines);
     }
@@ -937,6 +990,25 @@ public sealed partial class MainWindow : Window
 
         args.Cancel = true;
         HideToTray();
+    }
+
+    private static void OpenLogFolder(string logDirectory)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = logDirectory,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            // Nothing actionable for the user here — the path is printed in
+            // the dialog either way, so a failed launch isn't worth an error
+            // dialog on top of the status dialog.
+            System.Diagnostics.Debug.WriteLine($"failed to open log folder: {ex}");
+        }
     }
 
     private static string DisplayOrPlaceholder(string? value) =>

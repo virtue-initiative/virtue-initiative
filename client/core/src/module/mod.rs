@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod capture_availability;
+pub mod errors;
 pub mod heartbeat;
 pub mod lifecycle;
 pub mod screenshot;

@@ -138,19 +138,27 @@ fn run_one_tray_session(
 }
 
 fn build_tooltip(paths: &ClientPaths) -> String {
-    let is_authenticated = config::load_service_status(paths)
-        .map(|status| status.is_authenticated)
-        .unwrap_or(false);
+    let status = config::load_service_status(paths).ok();
 
     let bin = match config::INSTANCE {
         Some(n) if !n.is_empty() => format!("virtue-{n}"),
         _ => "virtue".to_string(),
     };
 
-    if is_authenticated {
-        format!("Signed in. Run '{bin} status' from a terminal for details.")
-    } else {
-        format!("Not signed in. Run '{bin} login' from a terminal.")
+    match status {
+        Some(status) if status.is_authenticated => {
+            let pending = status.pending_hash_count + status.pending_batch_count;
+            let queue = if pending == 0 {
+                "nothing queued".to_string()
+            } else {
+                format!("{pending} waiting to upload")
+            };
+            let account = status
+                .account_email
+                .unwrap_or_else(|| "signed in".to_string());
+            format!("{account} — {queue}. Run '{bin} status' from a terminal for details.")
+        }
+        _ => format!("Not signed in. Run '{bin} login' from a terminal."),
     }
 }
 

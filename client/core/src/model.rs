@@ -42,6 +42,19 @@ pub enum ScreenshotSkipReason {
     LockedOrScreensaver, // session locked / screensaver / screen off
 }
 
+/// Why the most recent screenshot attempt didn't produce an upload. Kept
+/// deliberately separate from [`ScreenshotSkipReason`], which is a wire
+/// format the API and web app decode: this one is local status only (CORE-018)
+/// and can gain variants — such as an outright capture failure, which is not a
+/// "skip" — without touching the uploaded event shape.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum StatusSkipReason {
+    StaticScreen,
+    LockedOrScreensaver,
+    CaptureFailed,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum UploadKind {
@@ -253,15 +266,69 @@ pub struct HashParams {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AuthState {
     pub device_credentials: Option<DeviceCredentials>,
+    /// The email the device was registered with, kept so every platform's
+    /// status page can name the signed-in account (CORE-010) instead of each
+    /// one stashing it separately. `None` on states written before this
+    /// existed, and cleared on logout.
+    #[serde(default)]
+    pub account_email: Option<String>,
 }
 
+/// One entry in the daemon's recent-errors ring (CORE-018). `context` is a
+/// short stable identifier for the failing phase (`"batch_upload"`,
+/// `"screenshot_capture"`, …) so a UI can group or filter without parsing
+/// `message`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StatusError {
+    pub at_ms: i64,
+    pub context: String,
+    pub message: String,
+}
+
+/// Everything a platform's status page shows, assembled by
+/// `module::status::build`. See CORE-010; every field but `is_running` is
+/// derivable from persisted state plus compile-time config, so a client whose
+/// daemon isn't running reports the same data from disk.
+///
+/// New fields are all `#[serde(default)]`: this struct is the IPC wire shape
+/// between a client and a possibly-older daemon process (`ipc.rs`).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ServiceStatus {
     pub is_authenticated: bool,
     pub is_running: bool,
+    #[serde(default)]
+    pub account_email: Option<String>,
     pub device_id: Option<String>,
-    pub last_loop_at_ms: Option<i64>,
+    #[serde(default)]
+    pub device_name: Option<String>,
+    /// Wrapping keys minus the owner's own key. `None` until device settings
+    /// have been fetched at least once — distinct from a real count of zero.
+    #[serde(default)]
+    pub partner_count: Option<usize>,
+    #[serde(default)]
+    pub pending_hash_count: usize,
+    #[serde(default)]
+    pub pending_batch_count: usize,
     pub pending_request_count: usize,
+    pub last_loop_at_ms: Option<i64>,
+    #[serde(default)]
+    pub last_screenshot_attempt_at_ms: Option<i64>,
+    #[serde(default)]
+    pub last_screenshot_at_ms: Option<i64>,
+    #[serde(default)]
+    pub last_skip_reason: Option<StatusSkipReason>,
+    #[serde(default)]
+    pub last_batch_at_ms: Option<i64>,
+    #[serde(default)]
+    pub recent_errors: Vec<StatusError>,
+    #[serde(default)]
+    pub api_base_url: String,
+    #[serde(default)]
+    pub hash_base_url: Option<String>,
+    #[serde(default)]
+    pub capture_interval_seconds: u64,
+    #[serde(default)]
+    pub batch_window_seconds: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

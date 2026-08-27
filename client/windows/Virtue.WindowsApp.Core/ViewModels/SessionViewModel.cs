@@ -21,6 +21,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private string? _deviceId;
     private int _pendingRequestCount;
     private long? _lastScreenshotAtMs;
+    private MonitorStatusPayload? _monitorStatus;
     private bool _isBusy;
     private bool _hasLoadedStatus;
     private bool _isHydratingEmailInput;
@@ -178,6 +179,17 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     {
         get => _lastScreenshotAtMs;
         private set => SetProperty(ref _lastScreenshotAtMs, value);
+    }
+
+    /// <summary>
+    /// The last full status payload read from the core, which the Status
+    /// Details dialog renders. Individual properties above stay for the parts
+    /// the main window binds to directly.
+    /// </summary>
+    public MonitorStatusPayload? MonitorStatus
+    {
+        get => _monitorStatus;
+        private set => SetProperty(ref _monitorStatus, value);
     }
 
     public string MonitorStateDisplay => MonitorState.Replace('_', ' ');
@@ -357,6 +369,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         MonitorError = _loggedIn ? monitorStatus.LastError : null;
         PendingRequestCount = _loggedIn ? monitorStatus.PendingRequestCount : 0;
         LastScreenshotAtMs = _loggedIn ? monitorStatus.LastScreenshotAtMs : null;
+        MonitorStatus = monitorStatus;
 
         return Task.CompletedTask;
     }
@@ -371,12 +384,15 @@ public sealed class SessionViewModel : INotifyPropertyChanged
 
         BuildLabel = status.BuildLabel;
         LoggedIn = isSignedIn;
-        DeviceId = isSignedIn ? status.DeviceId : null;
-        AccountEmail = status.Email ?? string.Empty;
+        DeviceId = isSignedIn ? (status.DeviceId ?? monitorStatus.DeviceId) : null;
+        // Only fall back to the daemon's email while signed in — a stale
+        // monitor snapshot must not resurrect an email after a sign-out.
+        AccountEmail = status.Email ?? (isSignedIn ? monitorStatus.AccountEmail : null) ?? string.Empty;
         MonitorState = resolvedMonitorState;
         MonitorError = isSignedIn ? monitorStatus.LastError : null;
         PendingRequestCount = isSignedIn ? monitorStatus.PendingRequestCount : 0;
         LastScreenshotAtMs = isSignedIn ? monitorStatus.LastScreenshotAtMs : null;
+        MonitorStatus = monitorStatus;
         if (isSignedIn)
         {
             SetEmailInput(status.Email ?? string.Empty);

@@ -30,6 +30,10 @@
     <string name="btn_pause_monitoring">Pause Monitoring</string>
     <string name="btn_resume_monitoring">Resume Monitoring</string>
     <string name="btn_done">Done</string>
+    <string name="btn_open_log">Open log file</string>
+    <string name="open_log_chooser">Open Virtue log</string>
+    <string name="open_log_unavailable">No log file has been written yet.</string>
+    <string name="open_log_no_viewer">No app on this device can open a text file.</string>
     <string name="btn_report_bug">Report a Bug</string>
     <string name="btn_send_report">Send Report</string>
 

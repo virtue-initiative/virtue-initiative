@@ -69,7 +69,7 @@ daemon.run_forever(); // blocking — call from its own thread
 - `src/ipc.rs` (Linux/macOS only) — the cross-process transport for the
   CLI/tray, sitting on top of the same `Daemon` methods; see "IPC" below.
 
-## The 6 modules (`src/module/`)
+## The 7 modules (`src/module/`)
 
 Each is a plain `struct FooState` (serde default) plus free functions — no
 trait, no event dispatch. A module that needs to enqueue work calls
@@ -83,7 +83,8 @@ trait, no event dispatch. A module that needs to enqueue work calls
 | `upload`               | `UploadState`                                             | `enqueue()`, `plan_hash_retries`/`execute_hash_retries`/`commit_hash_retries`, `plan_batch`/`execute_batch`/`commit_batch` |
 | `capture_availability` | `CaptureAvailabilityState`                                | `note_failure()`, `tick()`                                                                                                 |
 | `heartbeat`            | `HeartbeatState`                                          | `tick()`                                                                                                                   |
-| `status`               | —                                                         | `build()` (pure `ServiceStatus` assembly)                                                                                  |
+| `errors`               | `ErrorState`                                              | `record()`, `record_all()` (bounded recent-errors ring, CORE-018)                                                          |
+| `status`               | —                                                         | `build()` (pure `ServiceStatus` assembly from `&DaemonState` + `&Config`)                                                  |
 
 `lifecycle::tick` compares actual vs. scheduled wakeup time each tick and
 alerts on a single late wakeup > 1 min or a last-10-array sum > 5 min,
@@ -115,8 +116,8 @@ real cross-process transport on top of those same methods:
   and friends. The daemon only ever writes in reply to a request — there are
   no unprompted pushes, so the CLI/tray learns about a logout from its next
   `get_status()` poll.
-- `ipc.rs` gates *itself* with an inner `#![cfg(any(target_os = "linux",
-  target_os = "macos"))]`, so `target_os` appears in exactly one file in the
+- `ipc.rs` gates _itself_ with an inner `#![cfg(any(target_os = "linux",
+target_os = "macos"))]`, so `target_os` appears in exactly one file in the
   crate. `lib.rs` declares `pub mod ipc;` unconditionally (it's simply empty
   elsewhere) and does not re-export its types — consumers name
   `virtue_core::ipc::{ClientController, spawn_server}`, which keeps the

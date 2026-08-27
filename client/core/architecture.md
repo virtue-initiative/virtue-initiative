@@ -28,6 +28,7 @@ client/
       module/
         auth.rs                  — login()/logout()
         capture_availability.rs  — failure-window threshold
+        errors.rs                — bounded recent-errors ring (CORE-018)
         heartbeat.rs             — 24h liveness ping
         lifecycle.rs             — late-wakeup tamper check + UserStop
         screenshot.rs            — plan/capture/commit + dedup + redaction
@@ -103,6 +104,7 @@ pub struct DaemonState {
     pub upload: UploadState,
     pub capture_availability: CaptureAvailabilityState,
     pub heartbeat: HeartbeatState,
+    pub errors: ErrorState,
     pub next_wakeup_at_ms: i64,
     pub last_tick_at_ms: Option<i64>,
 }
@@ -139,7 +141,7 @@ under a lock instead of going through the channel, so the single-threaded
 `Scenario` test harness (which never runs `run_forever` on a background
 thread) can drive the daemon synchronously.
 
-### The 6 modules
+### The 7 modules
 
 | Module                 | Owns                                                                        | Notable functions                                                                                                                      |
 | ---------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
@@ -149,7 +151,8 @@ thread) can drive the daemon synchronously.
 | `upload`               | `UploadState`                                                               | `enqueue()`, `plan_hash_retries()`/`execute_hash_retries()`/`commit_hash_retries()`, `plan_batch()`/`execute_batch()`/`commit_batch()` |
 | `capture_availability` | `CaptureAvailabilityState`                                                  | `note_failure()`, `tick()`                                                                                                             |
 | `heartbeat`            | `HeartbeatState`                                                            | `tick()` (reads `upload.device_credentials` for auth — no separate flag)                                                               |
-| `status`               | nothing                                                                     | `build()` — pure `ServiceStatus` assembly from `&AuthState`/`&UploadState`                                                             |
+| `errors`               | `ErrorState` (`recent: VecDeque<StatusError>`, capped at 20)                | `record()`, `record_all()` — the recent-errors ring the status page shows (CORE-018)                                                   |
+| `status`               | nothing                                                                     | `build()` — pure `ServiceStatus` assembly from `&DaemonState` + `&Config` (CORE-010)                                                   |
 
 ### Screenshot dedup (two gates) + random cadence
 

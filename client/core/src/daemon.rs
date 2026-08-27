@@ -12,9 +12,12 @@ use crate::logging::log_warning;
 use crate::model::{AuthState, ServiceStatus};
 use crate::module::auth;
 use crate::module::capture_availability::{self, CaptureAvailabilityState};
+use crate::module::errors::{self, ErrorState};
 use crate::module::heartbeat::{self, HeartbeatState};
 use crate::module::lifecycle::{self, LifecycleState};
-use crate::module::screenshot::{self, ScreenshotState, risk_classifier::RiskClassifier};
+use crate::module::screenshot::{
+    self, CaptureOutcome, ScreenshotState, risk_classifier::RiskClassifier,
+};
 use crate::module::status;
 use crate::module::upload::{self, Upload, UploadState};
 use crate::platform::PlatformHooks;
@@ -83,6 +86,8 @@ pub struct DaemonState {
     pub upload: UploadState,
     pub capture_availability: CaptureAvailabilityState,
     pub heartbeat: HeartbeatState,
+    #[serde(default)]
+    pub errors: ErrorState,
     pub next_wakeup_at_ms: i64,
     pub last_tick_at_ms: Option<i64>,
 }
@@ -197,6 +202,14 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             }
             Err(err) => {
                 log_warning("startup device-settings refresh failed", Some(&err));
+                self.with_locked_state(|working| {
+                    errors::record(
+                        &mut working.errors,
+                        now_ms,
+                        "settings_refresh",
+                        format!("startup device-settings refresh failed: {err}"),
+                    );
+                });
             }
         }
     }
@@ -330,6 +343,12 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             Ok(plan) => plan,
             Err(err) => {
                 tracing::error!(phase = "screenshot_plan_forced", error = %err, "daemon phase failed");
+                errors::record(
+                    &mut state.errors,
+                    now_ms,
+                    "screenshot_capture",
+                    format!("forced capture could not be planned: {err}"),
+                );
                 None
             }
         };
@@ -342,6 +361,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
                 self.ocr.as_deref(),
             )
         });
+        record_capture_failure(&mut state.errors, captured.as_ref(), now_ms);
 
         screenshot::commit(
             &mut state.screenshot,
@@ -393,7 +413,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     /// tick's network I/O).
     pub fn status(&self) -> ServiceStatus {
         let guard = self.state.lock().expect("daemon state lock poisoned");
-        status::build(&guard.auth, &guard.upload, guard.last_tick_at_ms, true)
+        status::build(&guard, &self.config, true)
     }
 
     pub fn note_user_stop(&self, source: &str) {
@@ -788,6 +808,12 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             Ok(plan) => plan,
             Err(err) => {
                 tracing::error!(phase = "screenshot_plan", error = %err, "daemon phase failed");
+                errors::record(
+                    &mut working.errors,
+                    now_ms,
+                    "screenshot_capture",
+                    format!("capture could not be planned: {err}"),
+                );
                 None
             }
         };
@@ -800,6 +826,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
                 self.ocr.as_deref(),
             )
         });
+        record_capture_failure(&mut working.errors, captured.as_ref(), now_ms);
 
         screenshot::commit(
             &mut working.screenshot,
@@ -820,6 +847,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         let hash_plan = upload::plan_hash_retries(&mut working.upload, now_ms, screen_active);
         let hash_outcome = hash_plan.map(|plan| upload::execute_hash_retries(plan, &self.api));
         if let Some(outcome) = hash_outcome {
+            errors::record_all(&mut working.errors, now_ms, outcome.errors.clone());
             upload::commit_hash_retries(&mut working.upload, outcome, now_ms);
         }
 
@@ -828,7 +856,12 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             upload::plan_batch(&working.upload, now_ms, batch_interval_ms, screen_active);
         let batch_outcome = batch_plan.map(|plan| upload::execute_batch(plan, &self.api));
         let should_logout = batch_outcome
-            .map(|outcome| upload::commit_batch(&mut working.upload, outcome, now_ms))
+            .map(|outcome| {
+                if let Some((context, message)) = outcome.error() {
+                    errors::record(&mut working.errors, now_ms, &context, message);
+                }
+                upload::commit_batch(&mut working.upload, outcome, now_ms)
+            })
             .unwrap_or(false);
 
         (screen_active, should_logout)
@@ -853,6 +886,15 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         }
 
         candidate.max(now_ms)
+    }
+}
+
+/// Mirrors a failed capture into the status page's recent-errors ring
+/// (CORE-018). `screenshot::commit` consumes the outcome, so this runs just
+/// before it, and is shared by the scheduled and forced capture paths.
+fn record_capture_failure(errors: &mut ErrorState, outcome: Option<&CaptureOutcome>, now_ms: i64) {
+    if let Some(CaptureOutcome::Failed { reason }) = outcome {
+        errors::record(errors, now_ms, "screenshot_capture", reason.clone());
     }
 }
 
