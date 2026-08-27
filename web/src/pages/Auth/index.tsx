@@ -18,6 +18,7 @@ import {
   Alert,
   Button,
   Card,
+  Checkbox,
   Dialog,
   DialogActions,
   DialogHeader,
@@ -25,6 +26,7 @@ import {
   Input,
   SegmentedControl,
 } from '@virtueinitiative/shared-web';
+import { LANDING_URL } from '../../utils/landing-url';
 
 type AuthMode = 'login' | 'signup' | 'forgot' | 'reset' | 'finish-signup';
 
@@ -61,6 +63,10 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
       : mode === 'signup' && signupToken
         ? 'finish-signup'
         : mode;
+  // The Terms say an account is created subject to them, so both halves of the
+  // two-step signup gate on acceptance: the request step here, and the
+  // finish step reached from the emailed link (possibly on another device).
+  const requiresTermsAcceptance = authMode === 'signup' || authMode === 'finish-signup';
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
@@ -70,6 +76,7 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
   const [loading, setLoading] = useState(false);
   const [resetTokenValid, setResetTokenValid] = useState(!resetToken);
   const [signupTokenValid, setSignupTokenValid] = useState(!signupToken);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [signupVerificationEmail, setSignupVerificationEmail] = useState('');
   const signupVerificationDialogRef = useRef<HTMLDialogElement>(null);
 
@@ -114,6 +121,10 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
     setLoading(true);
 
     try {
+      if (requiresTermsAcceptance && !acceptedTerms) {
+        throw new Error('Please accept the Terms of Use and Privacy Policy to continue.');
+      }
+
       if (authMode === 'login') {
         const client = await login(email, password);
         if (toParam) {
@@ -127,6 +138,7 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
         signupVerificationDialogRef.current?.showModal();
         setPassword('');
         setConfirm('');
+        setAcceptedTerms(false);
       } else if (authMode === 'finish-signup') {
         if (!signupToken) {
           throw new Error('Signup token is missing');
@@ -336,7 +348,35 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
             </Field>
           )}
 
-          {(authMode === 'signup' || authMode === 'finish-signup') && (
+          {requiresTermsAcceptance && (
+            <div class="auth-terms">
+              <Checkbox
+                id="accept-terms"
+                name="accept-terms"
+                checked={acceptedTerms}
+                onChange={(e) => setAcceptedTerms((e.target as HTMLInputElement).checked)}
+                disabled={authMode === 'finish-signup' && !signupTokenValid}
+              />
+              <label class="hint-text auth-terms-label" for="accept-terms">
+                I have read and agree to the{' '}
+                <a class="auth-link" href={`${LANDING_URL}/terms`} target="_blank" rel="noreferrer">
+                  Terms of Use
+                </a>{' '}
+                and{' '}
+                <a
+                  class="auth-link"
+                  href={`${LANDING_URL}/privacy`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Privacy Policy
+                </a>
+                .
+              </label>
+            </div>
+          )}
+
+          {requiresTermsAcceptance && (
             <p class="hint-text">
               During sign-up, Virtue creates an end-to-end encryption key for your account. It
               protects your uploaded logs, screenshots, and blocks so only you and partners you
@@ -347,7 +387,12 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
           {status && <Alert variant="success">{status}</Alert>}
           {error && <Alert variant="error">{error}</Alert>}
 
-          <Button variant="primary" type="submit" class="auth-submit" disabled={loading}>
+          <Button
+            variant="primary"
+            type="submit"
+            class="auth-submit"
+            disabled={loading || (requiresTermsAcceptance && !acceptedTerms)}
+          >
             {loading
               ? 'Please wait…'
               : authMode === 'login'

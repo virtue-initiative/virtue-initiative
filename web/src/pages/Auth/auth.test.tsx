@@ -81,11 +81,40 @@ describe('Auth — signup', () => {
     renderAuth('signup');
 
     await user.type(screen.getByPlaceholderText('you@example.com'), 'new@example.com');
+    await user.click(screen.getByRole('checkbox'));
     await user.click(screen.getByRole('button', { name: /send verification email/i }));
 
     await waitFor(() => {
-      expect(screen.getByText('Check your email')).toBeInTheDocument();
+      // The dialog's children render even while it is closed, so assert on the
+      // <dialog> itself rather than merely on the presence of its heading.
+      expect(screen.getByText('Check your email').closest('dialog')).toHaveAttribute('open');
     });
+  });
+
+  it('links to the Terms of Use and Privacy Policy', () => {
+    renderAuth('signup');
+
+    expect(screen.getByRole('link', { name: /terms of use/i })).toHaveAttribute(
+      'href',
+      expect.stringContaining('/terms'),
+    );
+    expect(screen.getByRole('link', { name: /privacy policy/i })).toHaveAttribute(
+      'href',
+      expect.stringContaining('/privacy'),
+    );
+  });
+
+  it('blocks the signup request until the terms are accepted', async () => {
+    const user = userEvent.setup();
+    renderAuth('signup');
+
+    await user.type(screen.getByPlaceholderText('you@example.com'), 'new@example.com');
+
+    const submit = screen.getByRole('button', { name: /send verification email/i });
+    expect(submit).toBeDisabled();
+
+    await user.click(screen.getByRole('checkbox'));
+    expect(submit).toBeEnabled();
   });
 });
 
@@ -102,6 +131,24 @@ describe('Auth — finish signup', () => {
 
     expect(screen.getByPlaceholderText('Choose a password')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Retype your password')).toBeInTheDocument();
+
+    window.history.pushState({}, '', '/');
+  });
+
+  it('blocks account creation until the terms are accepted', async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, '', '/signup?signup_token=test-token');
+    renderAuth('signup');
+
+    await waitFor(() => {
+      expect(screen.getByRole('checkbox')).toBeEnabled();
+    });
+
+    const submit = screen.getByRole('button', { name: /create account/i });
+    expect(submit).toBeDisabled();
+
+    await user.click(screen.getByRole('checkbox'));
+    expect(submit).toBeEnabled();
 
     window.history.pushState({}, '', '/');
   });
