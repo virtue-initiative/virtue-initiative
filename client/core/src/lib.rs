@@ -26,7 +26,10 @@ pub use error::{CoreError, CoreResult};
 pub use model::{
     AuthState, BatchUpload, EventData, LogEntry, LoopOutcome, Screenshot, ServiceStatus,
 };
-pub use model::{DeviceCredentials, DeviceSettings, Redacted, ScreenshotSkipReason, UploadKind};
+pub use model::{
+    DeviceCredentials, DeviceSettings, Redacted, ScreenshotSkipReason, StatusError,
+    StatusSkipReason, UploadKind,
+};
 pub use module::upload::Upload;
 pub use platform::{LifecycleHooks, PlatformHooks, ScreenshotHooks};
 pub use rng::{OsRandomSource, RandomSource};

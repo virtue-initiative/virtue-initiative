@@ -80,7 +80,7 @@ if ! command -v just > /dev/null 2>&1; then
 fi
 
 # Web deps
-setdir "." && bun install && ./scripts/seed-dev-user.mjs
+setdir "." && bun install
 
 # Shared config that's identical across worktrees (secrets, machine-local
 # paths), then .env (repo root, per-worktree overrides) on top of it. See
@@ -120,6 +120,7 @@ setdir "api"
 cp .dev.vars.example .dev.vars
 apply_shared_env "JWT_PRIVATE_KEY JWT_PUBLIC_KEY APP_URL LANDING_URL APP_NAME API_BASE_PATH R2_URL HASH_SERVER_URL EMAIL_DELIVERY_MODE BUG_REPORT_EMAIL AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION"
 yes | bun run db:migrate:local
+./scripts/seed-dev-user.mjs
 
 # Donations API setup
 setdir "api-donate"

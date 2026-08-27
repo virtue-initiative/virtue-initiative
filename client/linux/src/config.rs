@@ -90,12 +90,7 @@ pub fn load_service_status(paths: &ClientPaths) -> Result<ServiceStatus> {
     }
     let state_path = paths.state_dir.join("event_state.json");
     let state: DaemonState = load_state(&state_path)?;
-    Ok(status::build(
-        &state.auth,
-        &state.upload,
-        state.last_tick_at_ms,
-        false,
-    ))
+    Ok(status::build(&state, &build_core_config(paths), false))
 }
 
 fn xdg_base_dir(env_name: &str, fallback_suffix: &str) -> Result<PathBuf> {
@@ -207,6 +202,7 @@ mod tests {
                 device_id: "dev-123".to_string(),
                 refresh_token: "refresh-abc".to_string(),
             }),
+            account_email: Some("alice@example.org".to_string()),
         };
         let event_state = serde_json::json!({ "auth": persisted_auth });
         std::fs::write(
@@ -219,5 +215,10 @@ mod tests {
         assert!(status.is_authenticated);
         assert!(!status.is_running);
         assert_eq!(status.device_id.as_deref(), Some("dev-123"));
+        assert_eq!(status.account_email.as_deref(), Some("alice@example.org"));
+        // The advanced fields come from the compile-time config, so they are
+        // populated even on the daemon-stopped path.
+        assert!(!status.api_base_url.is_empty());
+        assert!(status.capture_interval_seconds > 0);
     }
 }

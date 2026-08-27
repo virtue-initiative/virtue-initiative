@@ -35,6 +35,9 @@ pub fn login<A: ApiTransport>(
         Ok(registered) => {
             let device_id = registered.credentials.device_id.clone();
             auth.device_credentials = Some(registered.credentials.clone());
+            // Kept so every platform's status page can name the signed-in
+            // account without stashing the email separately (CORE-010).
+            auth.account_email = Some(email.trim().to_string());
             upload.reset_for_login();
             upload.device_credentials = Some(registered.credentials);
             upload.settings = Some(registered.settings);
@@ -57,6 +60,7 @@ pub fn logout<A: ApiTransport>(
     if let Some(creds) = auth.device_credentials.take() {
         let _ = api.logout(&creds.refresh_token);
     }
+    auth.account_email = None;
     upload.reset_for_logout();
     screenshot::disable(screenshot);
 }
@@ -93,6 +97,7 @@ mod tests {
         assert!(auth.device_credentials.is_some());
         assert!(upload.device_credentials.is_some());
         assert!(upload.settings.is_some());
+        assert_eq!(auth.account_email.as_deref(), Some("alice@example.org"));
         assert!(screenshot.enabled);
     }
 
@@ -208,5 +213,6 @@ mod tests {
         assert_eq!(api.state().logout_calls.len(), 1);
         assert!(!screenshot.enabled);
         assert!(upload.device_credentials.is_none());
+        assert!(auth.account_email.is_none());
     }
 }

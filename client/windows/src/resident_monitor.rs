@@ -7,6 +7,7 @@ use anyhow::Result;
 use serde::Serialize;
 use virtue_core::Daemon;
 use virtue_core::api::HttpApiClient;
+use virtue_core::model::ServiceStatus;
 
 use crate::capture::WindowsPlatformHooks;
 use crate::config::{ClientPaths, build_core_config};
@@ -20,6 +21,10 @@ pub struct MonitorStatusSnapshot {
     pub logged_in: bool,
     pub pending_request_count: usize,
     pub last_error: Option<String>,
+    /// The shared, cross-platform status payload (CORE-010). `None` before
+    /// the resident daemon has been built — the Windows-only fields above
+    /// still describe the app's own monitor state in that case.
+    pub core: Option<ServiceStatus>,
 }
 
 impl Default for MonitorStatusSnapshot {
@@ -29,6 +34,7 @@ impl Default for MonitorStatusSnapshot {
             logged_in: false,
             pending_request_count: 0,
             last_error: None,
+            core: None,
         }
     }
 }
@@ -176,6 +182,7 @@ pub fn status_snapshot() -> MonitorStatusSnapshot {
         update_snapshot(|snapshot| {
             snapshot.logged_in = status.is_authenticated;
             snapshot.pending_request_count = status.pending_request_count;
+            snapshot.core = Some(status.clone());
             if snapshot.state != "error" {
                 snapshot.state = if status.is_authenticated {
                     "running".to_string()

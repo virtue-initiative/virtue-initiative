@@ -90,9 +90,31 @@ MUST best-effort revoke the device session with the API, MUST clear stored devic
 
 ### CORE-010 status
 
-`status() -> { is_authenticated, is_running, device_id, last_loop_at_ms, pending_request_count }`
+```
+status() -> {
+  is_authenticated, is_running,
+  account_email, device_id, device_name, partner_count,
+  pending_hash_count, pending_batch_count, pending_request_count,
+  last_loop_at_ms, last_screenshot_attempt_at_ms, last_screenshot_at_ms,
+  last_skip_reason, last_batch_at_ms,
+  recent_errors,
+  api_base_url, hash_base_url, capture_interval_seconds, batch_window_seconds
+}
+```
 
-MUST return, without blocking on the loop: whether the user is authenticated, whether the loop is running, the device id (if any), the timestamp of the last completed tick (if any), and the number of requests currently queued.
+MUST return, without blocking on the loop:
+
+- `is_authenticated` / `is_running` — whether device credentials are stored, and whether the loop is running.
+- `account_email`, `device_id`, `device_name` — the account and device this install is registered as, where known.
+- `partner_count` — the number of partners this device wraps batch keys for: the number of wrapping keys minus the owner's own key. MUST be absent when device settings have never been fetched, which is distinct from a count of zero.
+- `pending_hash_count` / `pending_batch_count` — the number of events waiting to be uploaded to the hash server, and the number waiting to go out in a batch. `pending_request_count` is retained as the coarser combined figure.
+- `last_loop_at_ms` — the timestamp of the last completed tick (if any).
+- `last_screenshot_attempt_at_ms`, `last_screenshot_at_ms`, `last_skip_reason` — see CORE-018.
+- `last_batch_at_ms` — when a batch last uploaded successfully.
+- `recent_errors` — see CORE-018.
+- `api_base_url`, `hash_base_url`, `capture_interval_seconds`, `batch_window_seconds` — the effective configuration this build is running with, for the diagnostics/advanced section of a client's status page.
+
+Every field except `is_running` MUST be derivable from persisted state plus the compile-time configuration, so a client whose daemon process is not running can compute the same status from `state_path` alone and report only `is_running: false`.
 
 ### CORE-011 note_user_stop
 
@@ -139,3 +161,12 @@ This locking MUST NOT be required — though it MAY be applied unconditionally, 
 If `state_path` exists but its contents cannot be parsed into the expected state type (truncated by a crash, corrupted, or written by an incompatible older/newer build), the reader MUST treat this the same as a missing file — falling back to that type's default value — rather than treating it as a fatal error. This MUST be logged (at error level) so the condition is diagnosable, but MUST NOT prevent `Daemon::new` from returning successfully. Losing an unreadable file's contents is an acceptable trade-off against the alternative: a `Daemon` that fails to construct leaves every caller permanently unable to distinguish "not authenticated" from "state unreadable," including on platforms whose UI has no path to report or recover from a `Daemon::new` failure short of clearing the file manually or reinstalling.
 
 Before falling back to the default value, the reader MUST copy the unparseable file's original bytes, unmodified, to a sibling path so they remain available for debugging — otherwise the next persisted write silently overwrites the only evidence of what went wrong. A best-effort failure to write that backup (e.g. a read-only volume) MUST be logged but MUST NOT itself prevent the fallback to the default value.
+
+## CORE-018 Retained status data
+
+For a client's status page to be useful, the daemon MUST retain the following in persisted state rather than only emitting it as an upload event or a log line:
+
+- `last_screenshot_attempt_at_ms` — the time of the most recent tick at which a screenshot was due and acted on, whether it resulted in an upload, a skip, or a failure.
+- `last_screenshot_at_ms` — the time of the most recent screenshot that was actually captured and enqueued for upload.
+- `last_skip_reason` — why the most recent attempt did not produce a screenshot (see CORE-003's gates, plus capture failure). It MUST be cleared as soon as an attempt succeeds, so a stale reason cannot outlive the condition that caused it.
+- `recent_errors` — a bounded, newest-first ring of the most recent errors the daemon hit (capture, hash upload, batch upload, settings refresh, state persistence), each with the time it occurred, a short stable context identifier, and the error's message. The ring MUST be capped (20 entries) so state cannot grow without bound, and MUST survive a restart, since a client whose daemon has just crashed and restarted is exactly when this is worth reading.

@@ -83,8 +83,13 @@ other platform.
 ### Status
 
 - `core/src/module/status.rs` — `build()`: pure `ServiceStatus` assembly
-  from `&AuthState`/`&UploadState` — no fan-in, since everything lives in
-  one `DaemonState` now
+  from `&DaemonState` + `&Config` — no fan-in, since everything lives in
+  one `DaemonState` now. It is the single source every platform's status
+  page renders (CORE-010); add a field here rather than per platform.
+- `core/src/module/errors.rs` — `ErrorState`: the bounded, persisted
+  recent-errors ring the status page shows (CORE-018). The `execute_*`
+  phases can't touch state, so they hand `(context, message)` pairs back on
+  their outcome and `daemon.rs` records them.
 
 ### Platform daemons / main loops
 

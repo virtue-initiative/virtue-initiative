@@ -43,6 +43,7 @@ impl Scenario {
                 device_id: "scenario-device".into(),
                 refresh_token: "scenario-device-refresh".into(),
             }),
+            account_email: Some("scenario@example.org".into()),
         };
         let settings = DeviceSettings {
             device_id: "scenario-device".into(),

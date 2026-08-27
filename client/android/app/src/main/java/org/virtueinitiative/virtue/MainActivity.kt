@@ -321,18 +321,42 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showStatusDetails() {
+        // Every field here comes from the shared core status payload
+        // (client/core/SPEC.md CORE-010), so this screen shows the same things
+        // as the desktop clients', plus the Android-specific rows below.
         val json = runCatching { JSONObject(NativeBridge.nativeGetStatusJson()) }.getOrElse { JSONObject() }
-        val lifecycle = json.optJSONObject("lifecycle") ?: JSONObject()
-        val snapshot = lifecycle.optJSONObject("snapshot") ?: JSONObject()
 
+        // `optString` renders a JSON null as the literal "null", so absent and
+        // null values are both routed through `isNull` first.
+        fun optText(key: String): String =
+            if (json.isNull(key)) "—" else json.optString(key, "").ifBlank { "—" }
+        fun optTime(key: String): String = formatTimestampMs(json.optLong(key, 0))
+
+        val accountEmail = optText("account_email")
+        val deviceName = optText("device_name")
+        val partners = if (json.isNull("partner_count")) "unknown" else json.optInt("partner_count", 0).toString()
+        val pendingHash = json.optInt("pending_hash_count", 0)
+        val pendingBatch = json.optInt("pending_batch_count", 0)
         val pendingRequests = json.optInt("pending_request_count", 0)
-        val lastLoop = formatTimestampMs(json.optLong("last_loop_at_ms", 0))
-        val lastScreenshot = formatTimestampMs(json.optLong("last_screenshot_at_ms", 0))
-        val lastBatch = formatTimestampMs(json.optLong("last_batch_at_ms", 0))
-        val userSession = snapshot.optString("user_session", "unknown")
-        val primaryService = snapshot.optString("primary_service", "unknown")
-        val capturePermission = snapshot.optString("capture_permission", "unknown")
-        val captureAvailability = snapshot.optString("capture_availability", "unknown")
+        val lastLoop = optTime("last_loop_at_ms")
+        val lastAttempt = optTime("last_screenshot_attempt_at_ms")
+        val lastScreenshot = optTime("last_screenshot_at_ms")
+        val lastBatch = optTime("last_batch_at_ms")
+        val skipReason = when (if (json.isNull("last_skip_reason")) "" else json.optString("last_skip_reason", "")) {
+            "static_screen" -> "Screen unchanged since the last upload"
+            "locked_or_screensaver" -> "Screen locked or screensaver active"
+            "capture_failed" -> "Capture failed"
+            else -> "—"
+        }
+        val recentErrors = json.optJSONArray("recent_errors")
+        val apiBaseUrl = optText("api_base_url")
+        val hashBaseUrl = if (json.isNull("hash_base_url")) "default" else json.optString("hash_base_url", "").ifBlank { "default" }
+        val captureInterval = "${json.optLong("capture_interval_seconds", 0)}s"
+        val batchWindow = "${json.optLong("batch_window_seconds", 0)}s"
+        val deviceId = optText("device_id")
+        val logFile = java.io.File(filesDir, "core-data/logs")
+            .listFiles()
+            ?.maxByOrNull { it.lastModified() }
 
         val bgColor = 0xFFF4EFE3.toInt()
         val cardColor = 0xFFFBF7EA.toInt()
@@ -427,28 +451,70 @@ class MainActivity : AppCompatActivity() {
             else -> "Not enabled"
         }
 
-        outerContainer.addView(sectionLabel("Service"))
+        outerContainer.addView(sectionLabel("Account"))
         outerContainer.addView(makeCard(
             "Summary" to binding.statusTitle.text.toString(),
             "Status" to binding.statusText.text.toString(),
-            "Accessibility service" to a11yStatus,
+            "Email" to accountEmail,
+            "Device name" to deviceName,
+            "Partners" to partners,
+        ))
+
+        outerContainer.addView(sectionLabel("Queues"))
+        outerContainer.addView(makeCard(
+            "Waiting for hash" to pendingHash.toString(),
+            "Waiting in batch" to pendingBatch.toString(),
             "Pending requests" to pendingRequests.toString(),
+            "Last batch upload" to lastBatch,
         ))
 
-        outerContainer.addView(sectionLabel("Core Lifecycle"))
+        outerContainer.addView(sectionLabel("Capture"))
         outerContainer.addView(makeCard(
-            "User session" to userSession,
-            "Primary service" to primaryService,
-            "Capture permission" to capturePermission,
-            "Capture availability" to captureAvailability,
-        ))
-
-        outerContainer.addView(sectionLabel("Timing"))
-        outerContainer.addView(makeCard(
+            "Accessibility service" to a11yStatus,
             "Last loop" to lastLoop,
+            "Last attempt" to lastAttempt,
             "Last screenshot" to lastScreenshot,
-            "Last batch" to lastBatch,
+            "Last skip reason" to skipReason,
         ))
+
+        outerContainer.addView(sectionLabel("Recent errors"))
+        val errorRows = mutableListOf<Pair<String, String>>()
+        if (recentErrors != null) {
+            for (i in 0 until minOf(recentErrors.length(), 5)) {
+                val error = recentErrors.optJSONObject(i) ?: continue
+                errorRows.add(
+                    "${formatTimestampMs(error.optLong("at_ms", 0))} · ${error.optString("context")}"
+                        to error.optString("message")
+                )
+            }
+        }
+        outerContainer.addView(
+            if (errorRows.isEmpty()) makeCard("Errors" to "None")
+            else makeCard(*errorRows.toTypedArray())
+        )
+
+        outerContainer.addView(sectionLabel("Advanced"))
+        outerContainer.addView(makeCard(
+            "Device ID" to deviceId,
+            "API URL" to apiBaseUrl,
+            "Hash base URL" to hashBaseUrl,
+            "Capture interval" to captureInterval,
+            "Batch window" to batchWindow,
+            "Log file" to (logFile?.absolutePath ?: "—"),
+        ))
+
+        val openLogBtn = com.google.android.material.button.MaterialButton(this).apply {
+            text = getString(R.string.btn_open_log)
+            setTextColor(0xFF1E3A2E.toInt())
+            strokeColor = android.content.res.ColorStateList.valueOf(0xFF1E3A2E.toInt())
+            strokeWidth = (1 * dp).toInt()
+            backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.TRANSPARENT)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            setOnClickListener { openLogFile(logFile) }
+        }
+        outerContainer.addView(openLogBtn)
 
         val dialog = Dialog(this, android.R.style.Theme_Material_Light_NoActionBar_Fullscreen)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
@@ -576,6 +642,54 @@ class MainActivity : AppCompatActivity() {
 
     private fun androidPlatformDetails(): String {
         return "Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT}); ${deviceName()}"
+    }
+
+    /**
+     * Opens the newest rolling log file in a text viewer — an app-internal file
+     * is otherwise unreachable to the user. Falls back to the share sheet when
+     * no installed app can view `text/plain`, since that at least gets the file
+     * somewhere the user can read it.
+     */
+    private fun openLogFile(logFile: java.io.File?) {
+        if (logFile == null || !logFile.exists()) {
+            setStatus(getString(R.string.open_log_unavailable))
+            return
+        }
+        // The rolling log files are named `virtue.<date>` with no extension, so
+        // a viewer that sniffs the type from the file name (rather than the
+        // intent's) refuses to render them. Hand out a `.txt` copy instead —
+        // which also keeps the viewer off a file the daemon is still appending to.
+        val readable = java.io.File(cacheDir, "logs").let { dir ->
+            dir.mkdirs()
+            java.io.File(dir, "virtue-log.txt").also { logFile.copyTo(it, overwrite = true) }
+        }
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            this,
+            "$packageName.fileprovider",
+            readable,
+        )
+        val view = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "text/plain")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        if (view.resolveActivity(packageManager) != null) {
+            startActivity(Intent.createChooser(view, getString(R.string.open_log_chooser)))
+            return
+        }
+
+        // No viewer installed (a bare emulator image, say) — hand the file to
+        // whatever can take it instead, so the log still gets somewhere readable.
+        val share = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            startActivity(Intent.createChooser(share, getString(R.string.open_log_chooser)))
+        } catch (e: android.content.ActivityNotFoundException) {
+            android.util.Log.w("MainActivity", "no app can open or receive the log file", e)
+            setStatus(getString(R.string.open_log_no_viewer))
+        }
     }
 
     private fun formatTimestampMs(ms: Long): String {

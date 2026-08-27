@@ -5,7 +5,7 @@ pub mod risk_classifier;
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
-use crate::model::{ScreenshotSkipReason, UploadKind};
+use crate::model::{ScreenshotSkipReason, StatusSkipReason, UploadKind};
 use crate::module::capture_availability::{self, CaptureAvailabilityState};
 use crate::module::upload::{self, UploadState};
 use crate::platform::ScreenshotHooks;
@@ -44,6 +44,16 @@ pub struct ScreenshotState {
     /// sub-threshold drift eventually crosses the threshold and forces a fresh upload.
     #[serde(default, deserialize_with = "deserialize_fingerprint_lenient")]
     pub last_uploaded_fingerprint: Option<fingerprint::Fingerprint>,
+    /// CORE-018 status data: when a capture was last attempted (whether it
+    /// uploaded, was skipped, or failed), when one last actually produced an
+    /// upload, and why the most recent attempt didn't. `last_skip_reason` is
+    /// cleared by every successful capture so it can't outlive its cause.
+    #[serde(default)]
+    pub last_attempt_at_ms: Option<i64>,
+    #[serde(default)]
+    pub last_capture_at_ms: Option<i64>,
+    #[serde(default)]
+    pub last_skip_reason: Option<StatusSkipReason>,
 }
 
 /// Draws the next screenshot time via an exponential inter-arrival: every
@@ -101,6 +111,8 @@ pub fn plan(
     if hooks.is_locked_or_screensaver()? {
         state.next_screenshot_at_ms =
             Some(draw_next_screenshot_at_ms(now_ms, mean_interval_ms, rng));
+        state.last_attempt_at_ms = Some(now_ms);
+        state.last_skip_reason = Some(StatusSkipReason::LockedOrScreensaver);
         upload::enqueue(
             upload,
             now_ms,
@@ -144,7 +156,11 @@ pub fn plan_forced(
 
 /// Outcome of the heavy capture pipeline.
 pub enum CaptureOutcome {
-    Failed,
+    Failed {
+        /// Why the capture failed, kept for the status page's recent-errors
+        /// ring (CORE-018) rather than only reaching the log.
+        reason: String,
+    },
     StaticFrame,
     Uploaded {
         risk: f32,
@@ -163,7 +179,11 @@ pub fn capture_and_process(
 ) -> CaptureOutcome {
     let screenshot = match hooks.take_screenshot() {
         Ok(s) => s,
-        Err(_) => return CaptureOutcome::Failed,
+        Err(err) => {
+            return CaptureOutcome::Failed {
+                reason: format!("take_screenshot failed: {err}"),
+            };
+        }
     };
 
     // Decoded once and shared by the fingerprint, the classifier, redaction, and the image
@@ -176,7 +196,9 @@ pub fn capture_and_process(
         Ok(img) => img,
         Err(err) => {
             tracing::error!(error = %err, "screenshot decode failed");
-            return CaptureOutcome::Failed;
+            return CaptureOutcome::Failed {
+                reason: format!("screenshot decode failed: {err}"),
+            };
         }
     };
 
@@ -212,7 +234,9 @@ pub fn capture_and_process(
             Ok(p) => p,
             Err(err) => {
                 tracing::error!(error = %err, "screenshot image pipeline failed");
-                return CaptureOutcome::Failed;
+                return CaptureOutcome::Failed {
+                    reason: format!("screenshot image pipeline failed: {err}"),
+                };
             }
         };
 
@@ -236,12 +260,18 @@ pub fn commit(
     outcome: Option<CaptureOutcome>,
     now_ms: i64,
 ) {
+    if outcome.is_some() {
+        state.last_attempt_at_ms = Some(now_ms);
+    }
+
     match outcome {
         None => {}
-        Some(CaptureOutcome::Failed) => {
+        Some(CaptureOutcome::Failed { .. }) => {
+            state.last_skip_reason = Some(StatusSkipReason::CaptureFailed);
             capture_availability::note_failure(availability, now_ms);
         }
         Some(CaptureOutcome::StaticFrame) => {
+            state.last_skip_reason = Some(StatusSkipReason::StaticScreen);
             upload::enqueue(
                 upload,
                 now_ms,
@@ -256,6 +286,8 @@ pub fn commit(
             kind,
             fingerprint,
         }) => {
+            state.last_capture_at_ms = Some(now_ms);
+            state.last_skip_reason = None;
             upload::enqueue(upload, now_ms, risk, kind);
             if let Some(fp) = fingerprint {
                 state.last_uploaded_fingerprint = Some(fp);
@@ -452,7 +484,7 @@ mod tests {
         let hooks = TestPlatformHooks::new();
         hooks.queue_screenshot(Err(crate::error::CoreError::CommandFailed("boom".into())));
         let outcome = capture_and_process(CapturePlan { anchor: None }, &hooks, None, None);
-        assert!(matches!(outcome, CaptureOutcome::Failed));
+        assert!(matches!(outcome, CaptureOutcome::Failed { .. }));
     }
 
     #[test]

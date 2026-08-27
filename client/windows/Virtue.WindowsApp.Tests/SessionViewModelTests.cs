@@ -68,6 +68,76 @@ public sealed class SessionViewModelTests
     }
 
     [Fact]
+    public async Task RefreshAsync_ExposesTheFullStatusPagePayload()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
+            MonitorStatus = new MonitorStatusPayload(
+                "running",
+                true,
+                2,
+                123,
+                null,
+                AccountEmail: "user@example.com",
+                DeviceId: "device-1",
+                DeviceName: "Work Laptop",
+                PartnerCount: 2,
+                PendingHashCount: 3,
+                PendingBatchCount: 4,
+                LastLoopAtMs: 500,
+                LastScreenshotAttemptAtMs: 400,
+                LastSkipReason: "Screen locked or screensaver active",
+                LastBatchAtMs: 300,
+                RecentErrors: new[] { new StatusErrorPayload(200, "batch_upload", "boom") },
+                ApiBaseUrl: "https://api.example.org",
+                HashBaseUrl: "https://hash.example.org",
+                CaptureIntervalSeconds: 300,
+                BatchWindowSeconds: 60,
+                LogDirectory: @"C:\ProgramData\Virtue\data\logs"),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        await viewModel.RefreshAsync();
+
+        var status = viewModel.MonitorStatus;
+        Assert.NotNull(status);
+        Assert.Equal("Work Laptop", status!.DeviceName);
+        Assert.Equal(2, status.PartnerCount);
+        Assert.Equal(3, status.PendingHashCount);
+        Assert.Equal(4, status.PendingBatchCount);
+        Assert.Equal(400, status.LastScreenshotAttemptAtMs);
+        Assert.Equal("Screen locked or screensaver active", status.LastSkipReason);
+        Assert.Single(status.RecentErrors!);
+        Assert.Equal("https://api.example.org", status.ApiBaseUrl);
+        Assert.Equal(@"C:\ProgramData\Virtue\data\logs", status.LogDirectory);
+        Assert.Equal(123, viewModel.LastScreenshotAtMs);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_FallsBackToTheDaemonsDeviceIdWhenTheSessionHasNone()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(true, null, null, "build-123"),
+            MonitorStatus = new MonitorStatusPayload(
+                "running",
+                true,
+                0,
+                null,
+                null,
+                AccountEmail: "user@example.com",
+                DeviceId: "device-from-daemon"),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        await viewModel.RefreshAsync();
+
+        Assert.Equal("device-from-daemon", viewModel.DeviceId);
+        Assert.Equal("user@example.com", viewModel.AccountEmail);
+    }
+
+    [Fact]
     public async Task StopMonitoringFromTrayExitAsync_UsesExplicitTrayExitInterop()
     {
         var fakeClient = new FakeRustInteropClient

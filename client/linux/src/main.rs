@@ -18,7 +18,7 @@ use clap::{Args, Parser, Subcommand};
 #[cfg(debug_assertions)]
 use virtue_core::ScreenshotSkipReason;
 use virtue_core::ipc::ClientController;
-use virtue_core::{ScreenshotHooks, Upload, UploadKind};
+use virtue_core::{ScreenshotHooks, StatusSkipReason, Upload, UploadKind};
 
 use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_backend};
 use crate::config::{ClientPaths, build_core_config, default_device_name, load_service_status};
@@ -422,45 +422,182 @@ fn parse_os_release(contents: &str) -> (Option<String>, Option<String>) {
     (name, version)
 }
 
-fn status(paths: ClientPaths, json: bool) -> Result<()> {
-    let config = build_core_config(&paths);
-    let status = load_service_status(&paths)?;
+/// Formats a UTC-ms timestamp as a local-time string plus a relative age,
+/// which is what actually answers "is this thing working right now?".
+fn format_timestamp(now_ms: i64, value: Option<i64>) -> String {
+    let Some(ms) = value else {
+        return "<none>".to_string();
+    };
+    let secs = ms / 1000;
+    let stamp = chrono::DateTime::from_timestamp(secs, 0)
+        .map(|dt| {
+            dt.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string()
+        })
+        .unwrap_or_else(|| ms.to_string());
+    format!("{stamp} ({})", format_age(now_ms - ms))
+}
 
-    let logged_in = status.is_authenticated;
-    let device_id = status.device_id.as_deref().unwrap_or("<none>").to_string();
+fn format_age(delta_ms: i64) -> String {
+    if delta_ms < 0 {
+        return "in the future".to_string();
+    }
+    let secs = delta_ms / 1000;
+    match secs {
+        0..=59 => format!("{secs}s ago"),
+        60..=3599 => format!("{}m ago", secs / 60),
+        3600..=86_399 => format!("{}h ago", secs / 3600),
+        _ => format!("{}d ago", secs / 86_400),
+    }
+}
+
+fn skip_reason_label(reason: &StatusSkipReason) -> &'static str {
+    match reason {
+        StatusSkipReason::StaticScreen => "screen unchanged since the last upload",
+        StatusSkipReason::LockedOrScreensaver => "screen locked or screensaver active",
+        StatusSkipReason::CaptureFailed => "capture failed",
+    }
+}
+
+fn log_command() -> String {
+    format!("journalctl --user -u {} --since -1h", service_name())
+}
+
+fn status(paths: ClientPaths, json: bool) -> Result<()> {
+    // Every field below comes from `load_service_status` — the shared
+    // `status::build` (CORE-010), which already folds in the compile-time
+    // config — so there is nothing for this command to assemble itself.
+    let status = load_service_status(&paths)?;
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+
     let backend = match detect_backend() {
         Some(CaptureBackend::Wayland) => "wayland",
         Some(CaptureBackend::X11) => "x11",
         None => "<unknown>",
     };
+    let service_active = is_user_service_active().unwrap_or(false);
 
     if json {
-        println!(
-            "{}",
-            serde_json::json!({
-                "logged_in": logged_in,
-                "running": status.is_running,
-                "pending_request_count": status.pending_request_count,
-                "device_id": device_id,
-                "capture_interval_seconds": config.screenshot_interval.as_secs(),
-                "batch_window_seconds": config.batch_interval.as_secs(),
-                "base_api_url": config.api_base_url,
-                "backend": backend,
-            })
-        );
-    } else {
-        println!("logged_in: {logged_in}");
-        println!("running: {}", status.is_running);
-        println!("pending_request_count: {}", status.pending_request_count);
-        println!("device_id: {device_id}");
-        println!(
-            "capture_interval_seconds: {}",
-            config.screenshot_interval.as_secs()
-        );
-        println!("batch_window_seconds: {}", config.batch_interval.as_secs());
-        println!("base_api_url: {}", config.api_base_url);
-        println!("backend: {backend}");
+        let mut value = serde_json::to_value(&status)?;
+        if let Some(object) = value.as_object_mut() {
+            // Linux-only extras, alongside the shared `ServiceStatus` fields
+            // every platform's status page renders (CORE-010).
+            object.insert("backend".into(), backend.into());
+            object.insert("service_name".into(), service_name().into());
+            object.insert("service_active".into(), service_active.into());
+            object.insert(
+                "state_dir".into(),
+                paths.state_dir.display().to_string().into(),
+            );
+            object.insert("log_command".into(), log_command().into());
+            // Retained for compatibility with anything parsing the older
+            // key names this command printed.
+            object.insert("logged_in".into(), status.is_authenticated.into());
+            object.insert("running".into(), status.is_running.into());
+            object.insert("base_api_url".into(), status.api_base_url.clone().into());
+        }
+        println!("{}", serde_json::to_string_pretty(&value)?);
+        return Ok(());
     }
+
+    let none = "<none>".to_string();
+
+    println!("Account");
+    println!("  signed in:            {}", status.is_authenticated);
+    println!(
+        "  email:                {}",
+        status.account_email.as_ref().unwrap_or(&none)
+    );
+    println!(
+        "  device name:          {}",
+        status.device_name.as_ref().unwrap_or(&none)
+    );
+    println!(
+        "  partners:             {}",
+        status
+            .partner_count
+            .map(|count| count.to_string())
+            .unwrap_or_else(|| "<unknown>".to_string())
+    );
+
+    println!();
+    println!("Queues");
+    println!("  waiting for hash:     {}", status.pending_hash_count);
+    println!("  waiting in batch:     {}", status.pending_batch_count);
+    println!(
+        "  last batch upload:    {}",
+        format_timestamp(now_ms, status.last_batch_at_ms)
+    );
+
+    println!();
+    println!("Capture");
+    println!("  daemon running:       {}", status.is_running);
+    println!(
+        "  last loop:            {}",
+        format_timestamp(now_ms, status.last_loop_at_ms)
+    );
+    println!(
+        "  last attempt:         {}",
+        format_timestamp(now_ms, status.last_screenshot_attempt_at_ms)
+    );
+    println!(
+        "  last screenshot:      {}",
+        format_timestamp(now_ms, status.last_screenshot_at_ms)
+    );
+    println!(
+        "  last skip reason:     {}",
+        status
+            .last_skip_reason
+            .as_ref()
+            .map(|reason| skip_reason_label(reason).to_string())
+            .unwrap_or_else(|| none.clone())
+    );
+    println!("  capture backend:      {backend}");
+
+    println!();
+    println!("Recent errors");
+    if status.recent_errors.is_empty() {
+        println!("  (none)");
+    } else {
+        for error in status.recent_errors.iter().take(5) {
+            println!(
+                "  {} [{}] {}",
+                format_timestamp(now_ms, Some(error.at_ms)),
+                error.context,
+                error.message
+            );
+        }
+    }
+
+    println!();
+    println!("Advanced");
+    println!(
+        "  device id:            {}",
+        status.device_id.unwrap_or(none.clone())
+    );
+    println!("  api url:              {}", status.api_base_url);
+    println!(
+        "  hash base url:        {}",
+        status
+            .hash_base_url
+            .unwrap_or_else(|| "<default>".to_string())
+    );
+    println!(
+        "  capture interval:     {}s",
+        status.capture_interval_seconds
+    );
+    println!("  batch window:         {}s", status.batch_window_seconds);
+    println!(
+        "  systemd service:      {} ({})",
+        service_name(),
+        if service_active { "active" } else { "inactive" }
+    );
+    println!("  state dir:            {}", paths.state_dir.display());
+    println!("  logs:                 {}", log_command());
 
     Ok(())
 }

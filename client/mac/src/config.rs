@@ -131,12 +131,7 @@ pub fn load_service_status(paths: &ClientPaths) -> Result<ServiceStatus> {
     }
     let state_path = paths.state_dir.join("event_state.json");
     let state: DaemonState = virtue_core::load_state(&state_path)?;
-    Ok(status::build(
-        &state.auth,
-        &state.upload,
-        state.last_tick_at_ms,
-        false,
-    ))
+    Ok(status::build(&state, &build_core_config(paths), false))
 }
 
 pub fn save_state(path: &Path, state: &ClientState) -> Result<()> {
