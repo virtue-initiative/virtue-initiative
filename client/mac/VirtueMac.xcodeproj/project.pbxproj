@@ -14,6 +14,9 @@
 		59CF74E58D6F876BC06C0E9D /* VirtueMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41804153F1E76D2C46B7E251 /* VirtueMacApp.swift */; };
 		7FD43B539BE365F6C475A652 /* ApplicationServices.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 72020BD32DBCC1A5559326B6 /* ApplicationServices.framework */; };
 		905CCFBCB7514CAA1814974C /* ReportBugSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DECCC2D9A726133E6F5F5EE4 /* ReportBugSheet.swift */; };
+		BE856DC35C44F1702CC3636F /* UpdateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A152102984E15E3D2092BA0 /* UpdateController.swift */; };
+		CDCB5D186D1FD75981AB9143 /* SparkleSelectorAudit.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA29675B07F6B62BF2637F6A /* SparkleSelectorAudit.swift */; };
+		E40C111B3979DC1BA51FEED6 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = E37397B598B74500308D17BA /* Sparkle */; };
 		F07E6593210A054AA700AB65 /* StatusSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF53D4E18246A0144F67A054 /* StatusSheet.swift */; };
 		FAA5A585CF46E803782F70E5 /* NativeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C2AC02ABF6297F0C75A1FDA /* NativeBridge.swift */; };
 /* End PBXBuildFile section */
@@ -26,6 +29,8 @@
 		4B9ABF2C4EE68B7B48ACAF7D /* VirtueMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VirtueMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		694D4847EBC1A16DB15D473D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		72020BD32DBCC1A5559326B6 /* ApplicationServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = ApplicationServices.framework; sourceTree = "<group>"; };
+		8A152102984E15E3D2092BA0 /* UpdateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateController.swift; sourceTree = "<group>"; };
+		BA29675B07F6B62BF2637F6A /* SparkleSelectorAudit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SparkleSelectorAudit.swift; sourceTree = "<group>"; };
 		CF53D4E18246A0144F67A054 /* StatusSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusSheet.swift; sourceTree = "<group>"; };
 		DECCC2D9A726133E6F5F5EE4 /* ReportBugSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportBugSheet.swift; sourceTree = "<group>"; };
 		FEC65E353F74300A665CAF36 /* MonitoringCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringCoordinator.swift; sourceTree = "<group>"; };
@@ -37,6 +42,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				0946C5109E37F3FAEE99088C /* VirtueKit in Frameworks */,
+				E40C111B3979DC1BA51FEED6 /* Sparkle in Frameworks */,
 				7FD43B539BE365F6C475A652 /* ApplicationServices.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -70,7 +76,9 @@
 				FEC65E353F74300A665CAF36 /* MonitoringCoordinator.swift */,
 				3C2AC02ABF6297F0C75A1FDA /* NativeBridge.swift */,
 				DECCC2D9A726133E6F5F5EE4 /* ReportBugSheet.swift */,
+				BA29675B07F6B62BF2637F6A /* SparkleSelectorAudit.swift */,
 				CF53D4E18246A0144F67A054 /* StatusSheet.swift */,
+				8A152102984E15E3D2092BA0 /* UpdateController.swift */,
 				41804153F1E76D2C46B7E251 /* VirtueMacApp.swift */,
 			);
 			path = Sources;
@@ -119,6 +127,7 @@
 			name = VirtueMac;
 			packageProductDependencies = (
 				082894B96DBA8A27A0ECE9E8 /* VirtueKit */,
+				E37397B598B74500308D17BA /* Sparkle */,
 			);
 			productName = VirtueMac;
 			productReference = 4B9ABF2C4EE68B7B48ACAF7D /* VirtueMac.app */;
@@ -150,6 +159,7 @@
 			mainGroup = 3B9B07D913F0BE5742624F43;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				37FAA9A8DDE106844BA86EDB /* XCRemoteSwiftPackageReference "Sparkle" */,
 				F09A76F6B0F22225FB80E2E7 /* XCLocalSwiftPackageReference "../shared-swift" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -203,7 +213,9 @@
 				5188731D1EEC6BD5A5FFAF29 /* MonitoringCoordinator.swift in Sources */,
 				FAA5A585CF46E803782F70E5 /* NativeBridge.swift in Sources */,
 				905CCFBCB7514CAA1814974C /* ReportBugSheet.swift in Sources */,
+				CDCB5D186D1FD75981AB9143 /* SparkleSelectorAudit.swift in Sources */,
 				F07E6593210A054AA700AB65 /* StatusSheet.swift in Sources */,
+				BE856DC35C44F1702CC3636F /* UpdateController.swift in Sources */,
 				59CF74E58D6F876BC06C0E9D /* VirtueMacApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -328,6 +340,9 @@
 				SWIFT_VERSION = 5.0;
 				VIRTUE_APP_BUNDLE_ID = org.virtueinitiative.virtue.mac;
 				VIRTUE_BUILD_LABEL = "$(MARKETING_VERSION)";
+				VIRTUE_RELEASE_CHANNEL = "";
+				VIRTUE_SPARKLE_FEED_URL = "";
+				VIRTUE_SPARKLE_PUBLIC_KEY = "";
 			};
 			name = Debug;
 		};
@@ -391,6 +406,9 @@
 				SWIFT_VERSION = 5.0;
 				VIRTUE_APP_BUNDLE_ID = org.virtueinitiative.virtue.mac;
 				VIRTUE_BUILD_LABEL = "$(MARKETING_VERSION)";
+				VIRTUE_RELEASE_CHANNEL = "";
+				VIRTUE_SPARKLE_FEED_URL = "";
+				VIRTUE_SPARKLE_PUBLIC_KEY = "";
 			};
 			name = Release;
 		};
@@ -424,10 +442,26 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		37FAA9A8DDE106844BA86EDB /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.9.6;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		082894B96DBA8A27A0ECE9E8 /* VirtueKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = VirtueKit;
+		};
+		E37397B598B74500308D17BA /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 37FAA9A8DDE106844BA86EDB /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

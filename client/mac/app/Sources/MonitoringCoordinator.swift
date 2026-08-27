@@ -48,6 +48,18 @@ final class MonitoringCoordinator: ObservableObject {
 
     private var statusTimer: Timer?
     private var isPolling = false
+    /// `VirtueBuildLabel` as it was on disk when this process launched, for
+    /// detecting that the bundle has since been replaced. See
+    /// `checkForReplacedBundle`.
+    private let launchedBuildLabel =
+        Bundle.main.object(forInfoDictionaryKey: "VirtueBuildLabel") as? String ?? ""
+    private var pendingReplacedBundleLabel: String?
+    /// One-shot: `openApplication` is async and the poll fires every 2s, so
+    /// without this a slow handover would spawn a burst of new instances.
+    private var isRelaunchingIntoNewBundle = false
+    /// Set by the app once the updater exists; nil in builds without
+    /// auto-update wired in.
+    weak var updateController: UpdateController?
     private var relaunching = false
     private var gracefulShutdown = false
     private var stoppedSince: Date?
@@ -57,6 +69,7 @@ final class MonitoringCoordinator: ObservableObject {
         NativeBridge.daemonExePath(appBundlePath: Bundle.main.bundlePath)
 
     init() {
+        terminateOtherInstances()
         registerAsLoginItem()
 
         let initError = NativeBridge.initialize()
@@ -283,6 +296,7 @@ final class MonitoringCoordinator: ObservableObject {
         guard !relaunching, !isPolling else {
             return
         }
+        checkForReplacedBundle()
         isPolling = true
         Task {
             let snapshot = await Task.detached(priority: .utility) { () -> PolledSnapshot in
@@ -357,6 +371,102 @@ final class MonitoringCoordinator: ObservableObject {
 
     private func refreshPermissionPhase() {
         permissionPhase = NativeBridge.hasCapturePermission() ? nil : .needsRequest
+    }
+
+    // MARK: - Stale instances (issue #539)
+
+    /// Dragging a new `Virtue.app` over a running one leaves the *old* app
+    /// process alive, and opening the new one then yields two menu bar icons
+    /// backed by two different app versions — both talking to one daemon.
+    /// Newest launch wins: terminate any other running instance of this
+    /// bundle id before doing anything else.
+    ///
+    /// This is only about duplicate *app* processes. The daemon is a
+    /// LaunchAgent, singleton by construction, and is restarted a few lines
+    /// later by `ensureDaemonRunning`.
+    private func terminateOtherInstances() {
+        let others = NSRunningApplication.runningApplications(
+            withBundleIdentifier: Bundle.main.bundleIdentifier ?? ""
+        ).filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
+
+        for other in others {
+            // Not `forceTerminate`: a normal terminate lets the old instance
+            // unwind cleanly. It has no unsaved state and no quit handler
+            // that records a user stop, so this does not look like tampering
+            // to the daemon.
+            other.terminate()
+        }
+    }
+
+    /// The other half of the drag-install problem: this process is now
+    /// running code from a bundle that has been replaced on disk. Detect it
+    /// by re-reading `VirtueBuildLabel` from the on-disk `Info.plist` (the
+    /// in-memory `Bundle` copy is cached at launch and never changes) and
+    /// relaunch into the new version, which will in turn kickstart the
+    /// daemon onto the new binary.
+    ///
+    /// Requires two consecutive polls to agree before acting, so a bundle
+    /// caught mid-copy can't trigger a relaunch into a half-written app.
+    private func checkForReplacedBundle() {
+        guard !isRelaunchingIntoNewBundle else {
+            return
+        }
+        // Sparkle does its own quit-install-relaunch dance; racing it with a
+        // second relaunch would be a mess.
+        guard !isUpdateInProgress() else {
+            pendingReplacedBundleLabel = nil
+            return
+        }
+
+        let infoPlistURL = Bundle.main.bundleURL
+            .appendingPathComponent("Contents")
+            .appendingPathComponent("Info.plist")
+        guard
+            let onDisk = NSDictionary(contentsOf: infoPlistURL),
+            let diskLabel = onDisk["VirtueBuildLabel"] as? String,
+            !diskLabel.isEmpty,
+            diskLabel != launchedBuildLabel
+        else {
+            pendingReplacedBundleLabel = nil
+            return
+        }
+
+        guard pendingReplacedBundleLabel == diskLabel else {
+            pendingReplacedBundleLabel = diskLabel
+            return
+        }
+
+        relaunchSelf()
+    }
+
+    private func isUpdateInProgress() -> Bool {
+        updateController?.isUpdateSessionInProgress ?? false
+    }
+
+    /// Relaunch this app from its (new) bundle and exit. `open` is used
+    /// rather than re-exec'ing so the replacement process is started by
+    /// launchservices against the new bundle, not inherited from this one.
+    private func relaunchSelf() {
+        isRelaunchingIntoNewBundle = true
+        let bundleURL = Bundle.main.bundleURL
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: bundleURL, configuration: configuration) { _, error in
+            if let error {
+                NSLog("Failed to relaunch after bundle replacement: \(error)")
+                // Let a later poll try again rather than sitting on a stale
+                // bundle forever.
+                Task { @MainActor in
+                    self.isRelaunchingIntoNewBundle = false
+                }
+                return
+            }
+            // The new instance's own `terminateOtherInstances()` would get
+            // us anyway; exiting here just makes the handover immediate.
+            Task { @MainActor in
+                NSApp.terminate(nil)
+            }
+        }
     }
 
     /// Only the daemon is a `LaunchAgent` (`RunAtLoad`); the app itself (and
