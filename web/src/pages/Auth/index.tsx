@@ -63,10 +63,10 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
       : mode === 'signup' && signupToken
         ? 'finish-signup'
         : mode;
-  // The Terms say an account is created subject to them, so both halves of the
-  // two-step signup gate on acceptance: the request step here, and the
-  // finish step reached from the emailed link (possibly on another device).
-  const requiresTermsAcceptance = authMode === 'signup' || authMode === 'finish-signup';
+  // Gated on the finish step rather than the request step: this is where the
+  // account is actually created, and the emailed link may be opened on a
+  // different device than the one that requested it.
+  const requiresTermsAcceptance = authMode === 'finish-signup';
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
@@ -138,7 +138,6 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
         signupVerificationDialogRef.current?.showModal();
         setPassword('');
         setConfirm('');
-        setAcceptedTerms(false);
       } else if (authMode === 'finish-signup') {
         if (!signupToken) {
           throw new Error('Signup token is missing');
@@ -376,7 +375,7 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
             </div>
           )}
 
-          {requiresTermsAcceptance && (
+          {(authMode === 'signup' || authMode === 'finish-signup') && (
             <p class="hint-text">
               During sign-up, Virtue creates an end-to-end encryption key for your account. It
               protects your uploaded logs, screenshots, and blocks so only you and partners you

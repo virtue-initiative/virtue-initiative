@@ -81,7 +81,6 @@ describe('Auth — signup', () => {
     renderAuth('signup');
 
     await user.type(screen.getByPlaceholderText('you@example.com'), 'new@example.com');
-    await user.click(screen.getByRole('checkbox'));
     await user.click(screen.getByRole('button', { name: /send verification email/i }));
 
     await waitFor(() => {
@@ -91,30 +90,11 @@ describe('Auth — signup', () => {
     });
   });
 
-  it('links to the Terms of Use and Privacy Policy', () => {
+  it('does not gate the request step on accepting the terms', () => {
     renderAuth('signup');
 
-    expect(screen.getByRole('link', { name: /terms of use/i })).toHaveAttribute(
-      'href',
-      expect.stringContaining('/terms'),
-    );
-    expect(screen.getByRole('link', { name: /privacy policy/i })).toHaveAttribute(
-      'href',
-      expect.stringContaining('/privacy'),
-    );
-  });
-
-  it('blocks the signup request until the terms are accepted', async () => {
-    const user = userEvent.setup();
-    renderAuth('signup');
-
-    await user.type(screen.getByPlaceholderText('you@example.com'), 'new@example.com');
-
-    const submit = screen.getByRole('button', { name: /send verification email/i });
-    expect(submit).toBeDisabled();
-
-    await user.click(screen.getByRole('checkbox'));
-    expect(submit).toBeEnabled();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /send verification email/i })).toBeEnabled();
   });
 });
 
@@ -149,6 +129,24 @@ describe('Auth — finish signup', () => {
 
     await user.click(screen.getByRole('checkbox'));
     expect(submit).toBeEnabled();
+
+    window.history.pushState({}, '', '/');
+  });
+
+  it('links to the Terms of Use and Privacy Policy', async () => {
+    window.history.pushState({}, '', '/signup?signup_token=test-token');
+    renderAuth('signup');
+
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: /terms of use/i })).toHaveAttribute(
+        'href',
+        expect.stringContaining('/terms'),
+      );
+    });
+    expect(screen.getByRole('link', { name: /privacy policy/i })).toHaveAttribute(
+      'href',
+      expect.stringContaining('/privacy'),
+    );
 
     window.history.pushState({}, '', '/');
   });
