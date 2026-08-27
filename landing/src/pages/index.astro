@@ -193,15 +193,7 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
               <td class="yes"><CheckIcon /></td>
               <td class="yes"><CheckIcon /></td>
               <td class="yes"><CheckIcon /></td>
-              <td class="no"><MinusIcon /></td>
-            </tr>
-            <tr>
-              <td>Detects shutdowns</td>
               <td class="yes"><CheckIcon /></td>
-              <td class="yes"><CheckIcon /></td>
-              <td class="yes"><CheckIcon /></td>
-              <td class="yes"><CheckIcon /></td>
-              <td class="no"><MinusIcon /></td>
             </tr>
             <tr>
               <td>End-to-end encryption</td>
@@ -209,7 +201,7 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
               <td class="yes"><CheckIcon /></td>
               <td class="yes"><CheckIcon /></td>
               <td class="yes"><CheckIcon /></td>
-              <td class="no"><MinusIcon /></td>
+              <td class="yes"><CheckIcon /></td>
             </tr>
             <tr>
               <td>Daily/weekly email reports</td>
@@ -217,22 +209,22 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
               <td class="yes"><CheckIcon /></td>
               <td class="yes"><CheckIcon /></td>
               <td class="yes"><CheckIcon /></td>
-              <td class="no"><MinusIcon /></td>
+              <td class="yes"><CheckIcon /></td>
             </tr>
             <tr>
               <td>Immediate email alerts</td>
-              <td class="no"><MinusIcon /></td>
-              <td class="no"><MinusIcon /></td>
-              <td class="no"><MinusIcon /></td>
-              <td class="no"><MinusIcon /></td>
-              <td class="no"><MinusIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
             </tr>
             <tr>
               <td>Detects tampering</td>
-              <td class="no"><MinusIcon /></td>
-              <td class="no"><MinusIcon /></td>
-              <td class="no"><MinusIcon /></td>
-              <td class="no"><MinusIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
               <td class="no"><MinusIcon /></td>
             </tr>
             <tr>
@@ -245,11 +237,19 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
             </tr>
             <tr>
               <td>Image risk classification</td>
-              <td class="no"><MinusIcon /></td>
-              <td class="no"><MinusIcon /></td>
-              <td class="no"><MinusIcon /></td>
-              <td class="no"><MinusIcon /></td>
-              <td class="no"><MinusIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+            </tr>
+            <tr>
+              <td>Text redaction</td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
+              <td class="yes"><CheckIcon /></td>
             </tr>
           </tbody>
         </table>
@@ -259,7 +259,8 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
           <sup>1</sup> Android currently requires sideloading the app.
         </p>
         <p id="platform-footnote-2">
-          <sup>2</sup> iOS Safari monitoring coming soon.
+          <sup>2</sup> iOS monitoring runs inside a Safari extension and is currently available
+          via TestFlight beta.
         </p>
       </div>
     </section>
