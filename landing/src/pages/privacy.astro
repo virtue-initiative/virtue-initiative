@@ -68,10 +68,12 @@ import SiteLayout from '../layouts/SiteLayout.astro';
       <li>
         <strong>Donation records</strong> - if you donate, you are redirected to Stripe's own hosted checkout
         page to enter your payment details. Those details go straight to Stripe and are never sent to
-        our servers, so we never see your card number. Stripe then reports the completed donation back
-        to us, and we keep that record: your name, email address, phone number, the amount, whether the
-        donation recurs, and Stripe's identifiers for you and for any recurring donation. Stripe may also
-        collect a billing address, which we do not store.
+        our servers, so we never see your full card number - Stripe shows us only the card brand, its
+        expiry, and its last four digits. Stripe then reports the completed donation back to us, and we
+        keep that record: your name, email address, phone number, the amount, whether the donation recurs,
+        and Stripe's identifiers for you and for any recurring donation. Stripe may also collect a billing
+        address; we do not store it in our own systems, but like the partial card details it is visible
+        to us in our Stripe account.
       </li>
       <li>
         <strong>Email preferences</strong> - how often you want to receive alert and summary emails, and
