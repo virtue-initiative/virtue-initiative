@@ -38,7 +38,25 @@ type CacheRequest =
       viewerId: string;
       targetUserId: string;
       deviceId: string;
+    }
+  | {
+      id: string;
+      method: 'getDecryptionStats';
+      viewerId: string;
+      targetUserId: string;
+      deviceId?: string;
+      startTime?: number;
+      endTime?: number;
     };
+
+export type DecryptionStats = {
+  totalBatches: number;
+  decryptedBatches: number;
+  failedBatches: number;
+  failureReasons: { error: string; count: number }[];
+  totalEvents: number;
+  totalScreenshots: number;
+};
 
 type CacheResponse = { id: string; result: unknown } | { id: string; error: string };
 type CacheChunk = {
@@ -369,6 +387,88 @@ function sqlGetDeviceBatchEndTimes(
     },
   );
   return times;
+}
+
+function sqlGetDecryptionStats(
+  viewerId: string,
+  targetUserId: string,
+  deviceId?: string,
+  startTime?: number,
+  endTime?: number,
+): DecryptionStats {
+  let batchWhere = `b.viewer_id=? AND b.target_user_id=?`;
+  const batchBind: unknown[] = [viewerId, targetUserId];
+  if (deviceId) {
+    batchWhere += ` AND b.device_id=?`;
+    batchBind.push(deviceId);
+  }
+  if (startTime !== undefined && endTime !== undefined) {
+    batchWhere += ` AND b.start_time<=? AND b.end_time>=?`;
+    batchBind.push(endTime, startTime);
+  }
+
+  const totalBatches =
+    (db.selectValue(`SELECT COUNT(*) FROM batches b WHERE ${batchWhere}`, batchBind) as
+      | number
+      | undefined) ?? 0;
+
+  const decryptedBatches =
+    (db.selectValue(
+      `SELECT COUNT(*) FROM batches b JOIN materialized_batch_ids m ON b.id=m.batch_id WHERE ${batchWhere}`,
+      batchBind,
+    ) as number | undefined) ?? 0;
+
+  const failedBatches =
+    (db.selectValue(
+      `SELECT COUNT(*) FROM batches b JOIN failed_batch_ids f ON b.id=f.batch_id WHERE ${batchWhere}`,
+      batchBind,
+    ) as number | undefined) ?? 0;
+
+  const failureReasons: { error: string; count: number }[] = [];
+  db.exec(
+    `SELECT f.error AS error, COUNT(*) AS c FROM batches b JOIN failed_batch_ids f ON b.id=f.batch_id
+     WHERE ${batchWhere} GROUP BY f.error ORDER BY c DESC LIMIT 10`,
+    {
+      bind: batchBind,
+      rowMode: 'object',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      callback: (row: any) =>
+        failureReasons.push({
+          error: (row.error as string | null) ?? 'Unknown error',
+          count: row.c as number,
+        }),
+    },
+  );
+
+  let eventWhere = `viewer_id=? AND target_user_id=?`;
+  const eventBind: unknown[] = [viewerId, targetUserId];
+  if (deviceId) {
+    eventWhere += ` AND device_id=?`;
+    eventBind.push(deviceId);
+  }
+  if (startTime !== undefined && endTime !== undefined) {
+    eventWhere += ` AND ts BETWEEN ? AND ?`;
+    eventBind.push(startTime, endTime);
+  }
+
+  const totalEvents =
+    (db.selectValue(`SELECT COUNT(*) FROM events WHERE ${eventWhere}`, eventBind) as
+      | number
+      | undefined) ?? 0;
+  const totalScreenshots =
+    (db.selectValue(
+      `SELECT COUNT(*) FROM events WHERE ${eventWhere} AND image_w IS NOT NULL`,
+      eventBind,
+    ) as number | undefined) ?? 0;
+
+  return {
+    totalBatches,
+    decryptedBatches,
+    failedBatches,
+    failureReasons,
+    totalEvents,
+    totalScreenshots,
+  };
 }
 
 function sqlMarkBatchFailed(batchId: string, error: string): void {
@@ -722,6 +822,15 @@ async function dispatchOneShot(req: CacheRequest): Promise<unknown> {
   }
   if (req.method === 'getDeviceBatchEndTimes') {
     return sqlGetDeviceBatchEndTimes(req.viewerId, req.targetUserId, req.deviceId);
+  }
+  if (req.method === 'getDecryptionStats') {
+    return sqlGetDecryptionStats(
+      req.viewerId,
+      req.targetUserId,
+      req.deviceId,
+      req.startTime,
+      req.endTime,
+    );
   }
   return 0;
 }

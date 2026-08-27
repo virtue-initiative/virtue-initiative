@@ -46,6 +46,7 @@ export const helpSidebar: HelpNavItem[] = [
     items: [
       { label: 'Inviting a partner', href: '/help/web/inviting-a-partner' },
       { label: 'Log types', href: '/help/web/log-types' },
+      { label: 'Decryption errors', href: '/help/web/decryption-errors' },
     ],
   },
   {

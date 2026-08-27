@@ -26,7 +26,25 @@ export type CacheRequest =
       viewerId: string;
       targetUserId: string;
       deviceId: string;
+    }
+  | {
+      id: string;
+      method: 'getDecryptionStats';
+      viewerId: string;
+      targetUserId: string;
+      deviceId?: string;
+      startTime?: number;
+      endTime?: number;
     };
+
+export type DecryptionStats = {
+  totalBatches: number;
+  decryptedBatches: number;
+  failedBatches: number;
+  failureReasons: { error: string; count: number }[];
+  totalEvents: number;
+  totalScreenshots: number;
+};
 
 export type CacheResponse = { id: string; result: unknown } | { id: string; error: string };
 
@@ -69,6 +87,13 @@ export interface CacheClient {
     targetUserId: string,
     deviceId: string,
   ): Promise<number[]>;
+  getDecryptionStats(
+    viewerId: string,
+    targetUserId: string,
+    deviceId?: string,
+    startTime?: number,
+    endTime?: number,
+  ): Promise<DecryptionStats>;
 }
 
 const CHANNEL_NAME = 'cache-worker';
@@ -294,6 +319,16 @@ export function createCacheClient(): CacheClient {
 
     getDeviceBatchEndTimes: (viewerId, targetUserId, deviceId) =>
       call<number[]>({ method: 'getDeviceBatchEndTimes', viewerId, targetUserId, deviceId }),
+
+    getDecryptionStats: (viewerId, targetUserId, deviceId, startTime, endTime) =>
+      call<DecryptionStats>({
+        method: 'getDecryptionStats',
+        viewerId,
+        targetUserId,
+        deviceId,
+        startTime,
+        endTime,
+      }),
   };
 }
 
