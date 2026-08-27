@@ -17,8 +17,8 @@
 //
 // The API base URL and capture/batch intervals are compile-time constants
 // baked into the `virtue_windows` lib this binary links (see
-// `client/core/build.rs` and `client/.env`) -- set them via env vars (or
-// `client/.env`) on the `cargo build` invocation, not via CLI flags here.
+// `client/core/build.rs` and repo-root `.env`) -- set them via env vars (or
+// `.env`) on the `cargo build` invocation, not via CLI flags here.
 //
 // Usage:
 //   virtue-windows-ci-runner --email <email> --password <password>

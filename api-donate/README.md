@@ -45,7 +45,11 @@ The repo's launch script can run this worker alongside the web/api/landing dev s
 ```
 
 Rather than editing `.dev.vars` each time, put shared secrets in `~/.config/virtue-dev.env`
-(sourced by the launch script). It's read as shell, so use `KEY=value`:
+(machine-wide) and/or `.env` at the repo root (per-worktree override — see `.env.example`).
+These are the repo's general-purpose "set once, available everywhere" mechanism — see the
+root `AGENTS.md` for the full list of recognized keys across `api`, `api-donate`, the client
+build, and Android, plus `scripts/setup.sh`, which copies any of these values it finds into a
+freshly created `.dev.vars`. Both files are read as shell, so use `KEY=value`:
 
 ```sh
 STRIPE_SECRET_KEY=sk_test_...

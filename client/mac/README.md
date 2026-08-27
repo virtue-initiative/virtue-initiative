@@ -41,8 +41,9 @@ The tray app waits for the daemon to come up, but it now stays open and keeps po
 There are no runtime config overrides — `api_base_url`, `capture_interval_seconds`, and
 `batch_window_seconds` are compile-time constants baked into the binary via `env!()`
 (see `client/core/build.rs`). To set local values for development, copy
-`client/.env.example` to `client/.env` (gitignored) and edit it; real process/CI env
-vars always take precedence over that file. Rebuild for changes to take effect.
+`.env.example` (repo root) to `.env` (gitignored) and edit it; real process/CI env
+vars always take precedence over that file, and `~/.config/virtue-dev.env` (see root
+`AGENTS.md`) fills in anything `.env` doesn't set. Rebuild for changes to take effect.
 
 The mac client stores shared core state under:
 

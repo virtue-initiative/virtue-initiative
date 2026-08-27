@@ -125,10 +125,10 @@ adb shell am start -n org.virtueinitiative.virtue/.MainActivity
 ## Local API URL / interval configuration
 
 `api_base_url`, `capture_interval_seconds`, and `batch_window_seconds` are compile-time
-defaults baked into the native core via `client/.env` (see `client/.env.example`) — there is
+defaults baked into the native core via the repo-root `.env` (see `.env.example`) — there is
 no runtime override mechanism. Set `VIRTUE_DEFAULT_API_URL`,
 `VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS`, and `VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS` in
-`client/.env` before building `client/android/rust` to point a local build at a dev API.
+`.env` at the repo root before building `client/android/rust` to point a local build at a dev API.
 
 Important for emulator networking:
 

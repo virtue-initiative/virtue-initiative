@@ -49,8 +49,8 @@ Extension. ReplayKit/system broadcast is removed.
 - `api_base_url`, `capture_interval_seconds`, and `batch_window_seconds` are
   compile-time constants baked into `virtue-core` via `env!()` (see
   `client/core/build.rs`) — there is no runtime override mechanism on any
-  platform. To use local dev values, copy `client/.env.example` to
-  `client/.env` (gitignored) and set `VIRTUE_DEFAULT_API_URL`,
+  platform. To use local dev values, copy `.env.example` (repo root) to
+  `.env` (gitignored) and set `VIRTUE_DEFAULT_API_URL`,
   `VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS`, `VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS`
   before building.
 

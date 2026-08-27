@@ -201,7 +201,7 @@ again }` — decoding a newline-JSON `WireRequest` off the socket, calling
 - **`ClientController`** is the client side: connect, then block on each
   request/reply round trip.
 - `ipc.rs` gates itself with an inner `#![cfg(any(target_os = "linux",
-  target_os = "macos"))]` rather than being gated at its `mod` declaration,
+target_os = "macos"))]` rather than being gated at its `mod` declaration,
   which confines `target_os` in this crate to that single line. `lib.rs`
   declares the module unconditionally and deliberately does **not** re-export
   its types; platform crates name `virtue_core::ipc::…` directly.
@@ -277,17 +277,18 @@ and `batch_window_seconds` are baked in at **compile time** via `env!()`, exactl
 like `DEFAULT_API_BASE_URL`. `client/core/build.rs` reads
 `VIRTUE_DEFAULT_API_URL`, `VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS`, and
 `VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS` from the process environment — falling
-back to an optional `client/.env` file (gitignored; see `client/.env.example`)
-for any of those not already set by a real env var — and emits them via
-`cargo:rustc-env`. `config.rs` exposes them as `DEFAULT_API_BASE_URL` (const)
-and `default_capture_interval_seconds()`/`default_batch_window_seconds()`
+back to the repo-root `.env` (gitignored; see `.env.example`) and then to
+`~/.config/virtue-dev.env` (see root `AGENTS.md`) for any of those not already
+set by a real env var — and emits them via `cargo:rustc-env`. `config.rs`
+exposes them as `DEFAULT_API_BASE_URL` (const) and
+`default_capture_interval_seconds()`/`default_batch_window_seconds()`
 (functions, since integer parsing needs a body). Real process/CI env vars
-always take precedence over `.env`. The interval floors (15s capture, 1s
-batch) are enforced as a `panic!` in `build.rs`, not a runtime clamp — an
-invalid or too-low value fails the build instead of silently getting clamped.
-Because every platform crate depends on `client/core`, and Cargo always runs a
-dependency's own `build.rs` when compiling it, this one `client/.env` file
-covers every platform.
+always take precedence, then the repo-root `.env`, then the machine-wide file.
+The interval floors (15s capture, 1s batch) are enforced as a `panic!` in
+`build.rs`, not a runtime clamp — an invalid or too-low value fails the build
+instead of silently getting clamped. Because every platform crate depends on
+`client/core`, and Cargo always runs a dependency's own `build.rs` when
+compiling it, this one loading path covers every platform.
 
 ## State files (under `Config.state_dir`)
 
@@ -327,7 +328,7 @@ status — running normally. iOS is the only platform that overrides it to
 
 `get_monotonic_clock_ms` (a clock that doesn't advance while the system is
 suspended) feeds only `lifecycle::tick`'s suspend evidence (CORE-002) — a third excuse, alongside login/logout evidence, that can only ever
-*add* an excuse (its default falls back to `get_utc_clock_ms`, under which
+_add_ an excuse (its default falls back to `get_utc_clock_ms`, under which
 it never triggers). Screenshot scheduling itself is unaffected and still
 paces off the wall clock; this hook isn't on `ScreenshotHooks`. Mac
 separately reads its own boot/monotonic clocks for a local post-wake UX

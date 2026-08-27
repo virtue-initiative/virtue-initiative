@@ -1,29 +1,43 @@
-# Shared environment for the Virtue Android CLI (scripts/cli/va).
+# Shared environment for the Android dev scripts (build.sh, install.sh, etc).
 #
 # This file is committed and path-parametrized: it only sets sensible
 # *defaults*. Anything machine-specific belongs in the override layers below,
 # in priority order (later wins):
 #
 #   1. Defaults in this file.
-#   2. scripts/cli/env.local.sh            (untracked, your machine overrides —
-#                                            e.g. a storage-redirected SDK setup)
-#   3. Variables already exported in your shell.
+#   2. ~/.config/virtue-dev.env  (untracked, shared across every worktree on
+#                                 this machine — see AGENTS.md)
+#   3. .env at the repo root     (untracked, this worktree's overrides — e.g.
+#                                 a storage-redirected SDK setup; see AGENTS.md
+#                                 and .env.example)
+#   4. Variables already exported in your shell.
 #
 # Nothing here is destructive — every assignment respects a value that is
 # already set in the environment.
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+
 # ---------------------------------------------------------------------------
-# 2. Untracked machine-local overrides, sourced first so the values they set
-#    (ANDROID_SDK_ROOT, JAVA_HOME, redirected caches, …) win over the defaults
-#    below via the ${VAR:-default} guards.
+# 2 & 3. Machine-wide shared config, then this worktree's override on top of
+#    it, sourced before the shell-exported vars below still win.
 # ---------------------------------------------------------------------------
-if [ -f "${VIRTUE_ANDROID_CLI_DIR:-$(dirname "${BASH_SOURCE[0]:-$0}")}/env.local.sh" ]; then
+VIRTUE_DEV_ENV="${VIRTUE_DEV_ENV:-$HOME/.config/virtue-dev.env}"
+if [ -f "$VIRTUE_DEV_ENV" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$VIRTUE_DEV_ENV"
+  set +a
+fi
+if [ -f "$REPO_ROOT/.env" ]; then
+  set -a
   # shellcheck disable=SC1091
-  . "${VIRTUE_ANDROID_CLI_DIR:-$(dirname "${BASH_SOURCE[0]:-$0}")}/env.local.sh"
+  . "$REPO_ROOT/.env"
+  set +a
 fi
 
 # ---------------------------------------------------------------------------
-# 1. Defaults (only applied if still unset after the override above).
+# 1. Defaults (only applied if still unset after the overrides above).
 # ---------------------------------------------------------------------------
 export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}"
 export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"

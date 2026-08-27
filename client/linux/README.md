@@ -65,7 +65,7 @@ at **compile time** — there is no runtime override file. To build against a
 local API or with different intervals, set `VIRTUE_DEFAULT_API_URL`,
 `VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS`, and/or
 `VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS` (as real env vars, or via a
-`client/.env` file copied from `client/.env.example`) before running
+`.env` file at the repo root, copied from `.env.example`) before running
 `cargo build`.
 
 `virtue status` prints the current build-resolved values.
