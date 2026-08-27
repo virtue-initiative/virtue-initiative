@@ -155,6 +155,12 @@ core-test:
 linux-build:
     ./client/linux/scripts/build-deb.sh
 
+# Build the Linux .deb package and install it (sudo dpkg -i).
+[group('linux')]
+linux-install:
+    ./client/linux/scripts/build-deb.sh
+    sudo dpkg -i "$(ls -t client/target/debian/*.deb | head -1)"
+
 # Run the Linux client's test suite.
 [group('linux')]
 [working-directory: 'client']
