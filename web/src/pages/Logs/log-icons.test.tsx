@@ -22,6 +22,7 @@ describe('getLogCategory — titles', () => {
     expect(getLogCategory(log('user_stop'))).toBe('Monitoring Stopped by User');
     expect(getLogCategory(log('user_start'))).toBe('Monitoring Resumed by User');
     expect(getLogCategory(log('screenshot_missed'))).toBe('Screenshot Missed');
+    expect(getLogCategory(log('repeated_restarts'))).toBe('Repeated Restarts');
     expect(getLogCategory(log('capture_failed'))).toBe('Capture Failed');
     expect(getLogCategory(log('screenshot_skipped'))).toBe('Screenshot Skipped');
     expect(getLogCategory(log('heartbeat'))).toBe('Heartbeat');
@@ -51,6 +52,9 @@ describe('getLogMessage', () => {
     );
     expect(getLogMessage(log('screenshot_missed'), 'Bob’s PC')).toBe(
       'Bob’s PC missed a scheduled screenshot',
+    );
+    expect(getLogMessage(log('repeated_restarts', { count: 20 }), 'Bob’s PC')).toBe(
+      'Bob’s PC restarted 20 times in a short window',
     );
     expect(
       getLogMessage(

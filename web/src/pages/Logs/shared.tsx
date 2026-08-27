@@ -47,6 +47,7 @@ type LogCaseKey =
   | 'unexpected_start'
   | 'user_stop'
   | 'user_start'
+  | 'repeated_restarts'
   | 'lifecycle_alert_other'
   | 'alert'
   | 'capture_failed'
@@ -73,6 +74,8 @@ function getLogCaseKey(log: DataLog): LogCaseKey {
       return 'user_stop';
     case 'user_start':
       return 'user_start';
+    case 'repeated_restarts':
+      return 'repeated_restarts';
     // `lifecycle`/`lifecycle_alert` are the pre-rewrite client's wire shapes
     // — no longer sent, but kept here so already-stored logs still render.
     case 'lifecycle':
@@ -178,6 +181,16 @@ const LOG_KIND_TABLE: Record<
     icon: SignInIcon,
     message: (d) => `Monitoring resumed by user on ${d}`,
   },
+  repeated_restarts: {
+    category: 'Repeated Restarts',
+    icon: ExclamationTriangleIcon,
+    message: (d, data) => {
+      const count = data.count as number | undefined;
+      return count
+        ? `${d} restarted ${count} times in a short window`
+        : `${d} restarted repeatedly in a short window`;
+    },
+  },
   lifecycle_alert_other: {
     category: 'Alert',
     icon: ExclamationTriangleIcon,
@@ -254,6 +267,7 @@ export const LOG_TYPES = [
   'system_logout',
   'user_stop',
   'user_start',
+  'repeated_restarts',
   'alert',
   'capture_failed',
   'dev',

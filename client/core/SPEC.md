@@ -170,3 +170,13 @@ For a client's status page to be useful, the daemon MUST retain the following in
 - `last_screenshot_at_ms` — the time of the most recent screenshot that was actually captured and enqueued for upload.
 - `last_skip_reason` — why the most recent attempt did not produce a screenshot (see CORE-003's gates, plus capture failure). It MUST be cleared as soon as an attempt succeeds, so a stale reason cannot outlive the condition that caused it.
 - `recent_errors` — a bounded, newest-first ring of the most recent errors the daemon hit (capture, hash upload, batch upload, settings refresh, state persistence), each with the time it occurred, a short stable context identifier, and the error's message. The ring MUST be capped (20 entries) so state cannot grow without bound, and MUST survive a restart, since a client whose daemon has just crashed and restarted is exactly when this is worth reading.
+
+## CORE-019 Repeated restart detection
+
+The daemon SHOULD track the timestamps of its own restarts, pruned to a
+rolling 10-minute window, and SHOULD alert once 20 restarts fall within that
+window, regardless of user-stop status. Alerts MUST be rate-limited to at
+most one per 30 minutes. The restart-timestamps array MUST be cleared once
+the threshold is reached, alert sent or not. The event SHOULD be called
+"repeated_restarts". This check MUST be skipped where `lifecycle_enabled` is
+false (see CORE-002).

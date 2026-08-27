@@ -74,6 +74,13 @@ A user resumed monitoring after previously stopping it.
 
 The monitoring process restarted unexpectedly.
 
+## Repeated Restarts
+
+The monitoring process was started, stopped, or killed and relaunched an
+unusually high number of times in a short span. This can indicate someone is
+repeatedly trying to disable monitoring by killing the process, or a genuine
+crash loop. Investigate if you see this.
+
 ## Alert
 
 A general alert was raised. Open the entry to read the alert message.

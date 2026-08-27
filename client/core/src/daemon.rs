@@ -153,6 +153,9 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             let now_ms = daemon.now_ms();
             daemon.with_locked_state(|working| {
                 daemon.apply_note_user_start(working, now_ms);
+                if daemon.platform.lifecycle_enabled() {
+                    daemon.apply_note_restart(working, now_ms);
+                }
             });
         }
 
@@ -324,6 +327,10 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         if lifecycle::note_user_start(&mut state.lifecycle, &mut state.upload, now_ms) {
             state.next_wakeup_at_ms = 0;
         }
+    }
+
+    fn apply_note_restart(&self, state: &mut DaemonState, now_ms: i64) {
+        lifecycle::note_restart(&mut state.lifecycle, &mut state.upload, now_ms);
     }
 
     fn apply_queue_upload(&self, state: &mut DaemonState, now_ms: i64, upload: Upload) {

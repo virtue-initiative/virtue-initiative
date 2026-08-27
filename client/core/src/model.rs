@@ -103,6 +103,13 @@ pub enum UploadKind {
     SystemLogout {
         utc_ms: i64,
     },
+    /// The daemon process started more than `RESTART_ALERT_THRESHOLD` times
+    /// within a rolling window — evidence of a crash loop or repeated kill.
+    /// See CORE-018.
+    RepeatedRestarts {
+        count: u32,
+        window_ms: i64,
+    },
 }
 
 /// Hand-written so the captured screenshot bytes never reach a log line
@@ -137,6 +144,12 @@ impl std::fmt::Debug for UploadKind {
             }
             UploadKind::SystemLogout { utc_ms } => {
                 write!(f, "SystemLogout {{ utc_ms: {utc_ms:?} }}")
+            }
+            UploadKind::RepeatedRestarts { count, window_ms } => {
+                write!(
+                    f,
+                    "RepeatedRestarts {{ count: {count:?}, window_ms: {window_ms:?} }}"
+                )
             }
         }
     }
