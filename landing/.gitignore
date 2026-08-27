@@ -4,3 +4,6 @@
 node_modules
 dist
 src/data/releases.json
+
+# Generated at build time by scripts/build-appcast.mjs
+public/appcast.xml

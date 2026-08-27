@@ -163,6 +163,12 @@ jobs:
         run: ./mac/scripts/build-dmg.sh ${{ steps.profile.outputs.mac_dmg_flags }}
         working-directory: client
         env:
+          # Bakes the Sparkle feed URL + public key into the app. Gated on
+          # MACOS_SIGNING_READY, not just the branch: Sparkle refuses an update
+          # that isn't signed by the same Developer ID as the running app, so
+          # enabling auto-update on an ad-hoc-signed build would ship an
+          # updater that can never successfully install anything.
+          VIRTUE_ENABLE_AUTO_UPDATE: ${{ env.MACOS_SIGNING_READY == '1' && '1' || '' }}
           # Falls back to ad-hoc signing (CI has no access to a real Developer
           # ID identity) unless the import step above ran and set these.
           CODESIGN_IDENTITY: ${{ env.MACOS_SIGNING_READY == '1' && 'Developer ID Application' || '-' }}
@@ -204,10 +210,41 @@ jobs:
           ./scripts/clear-prerelease-assets.sh "${{ steps.version.outputs.release_tag }}" "Virtue-*.dmg"
         working-directory: client
 
+      # The appcast <item> must be produced here, on the macOS runner: sign_update
+      # is a macOS binary, and this keeps the release key off every other job.
+      # The landing site assembles these fragments into the served feed.
+      - name: Build signed appcast item
+        if: env.MACOS_SIGNING_READY == '1'
+        shell: bash
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$SPARKLE_ED_PRIVATE_KEY" ]]; then
+            echo "SPARKLE_ED_PRIVATE_KEY is not set; cannot publish an appcast item." >&2
+            exit 1
+          fi
+          ./mac/scripts/make-appcast-item.sh \
+            "target/macos/virtue-macos-${{ steps.version.outputs.build_label }}.dmg" \
+            "https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.release_tag }}/virtue-macos-${{ steps.version.outputs.build_label }}.dmg" \
+            "${{ github.ref_name == 'main' && 'stable' || 'dev' }}" \
+            "target/macos/appcast-item-macos.xml"
+        working-directory: client
+
       - name: Publish macOS release asset
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./scripts/publish-release.sh "${{ steps.version.outputs.release_tag }}" "${{ steps.version.outputs.build_label }}" "target/macos/virtue-macos-${{ steps.version.outputs.build_label }}.dmg" "${{ github.ref_name == 'main' && 'stable' || 'dev' }}"
+        working-directory: client
+
+      # Uploaded after the DMG so the feed can never advertise an enclosure URL
+      # that isn't downloadable yet.
+      - name: Publish appcast item asset
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging') && env.MACOS_SIGNING_READY == '1'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ steps.version.outputs.release_tag }}" "target/macos/appcast-item-macos.xml" --clobber -R "${{ github.repository }}"
         working-directory: client
