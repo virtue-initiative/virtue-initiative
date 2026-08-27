@@ -5,6 +5,7 @@ import { PageHeading } from '../../components/PageHeading';
 import { LogsIcon } from '../../components/icons';
 import { LogsGallery } from './LogsGallery';
 import { LogsList } from './LogsList';
+import { DecryptionStatsButton } from './DecryptionStatsDialog';
 import { getRiskRating, type RiskRating } from '@virtueinitiative/shared-web/risk';
 import { FeedLog, formatDayLabel, getLogCategory, LOG_CATEGORIES } from './shared';
 import './style.css';
@@ -333,6 +334,13 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
                   : null}
               </>
             )}
+            <DecryptionStatsButton
+              viewerId={userId ?? ''}
+              targetUserId={activeTargetUserId ?? ''}
+              deviceId={selectedDevice ?? undefined}
+              startTime={weekStart}
+              endTime={weekEnd}
+            />
           </p>
 
           <div class="logs-sticky-date" aria-live="polite">
