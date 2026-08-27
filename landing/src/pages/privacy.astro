@@ -66,9 +66,12 @@ import SiteLayout from '../layouts/SiteLayout.astro';
         email and are not linked to your monitoring data.
       </li>
       <li>
-        <strong>Donation records</strong> - if you donate, our payment processor collects your payment
-        details and we retain the resulting record: your name, email address, phone number if you provided
-        one, the amount, and whether the donation recurs. We never receive or store your full card number.
+        <strong>Donation records</strong> - if you donate, you are redirected to Stripe's own hosted checkout
+        page to enter your payment details. Those details go straight to Stripe and are never sent to
+        our servers, so we never see your card number. Stripe then reports the completed donation back
+        to us, and we keep that record: your name, email address, phone number, the amount, whether the
+        donation recurs, and Stripe's identifiers for you and for any recurring donation. Stripe may also
+        collect a billing address, which we do not store.
       </li>
       <li>
         <strong>Email preferences</strong> - how often you want to receive alert and summary emails, and
