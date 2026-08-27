@@ -1,17 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-SDK_ROOT="${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}"
-
-if [[ -d "$SDK_ROOT/cmdline-tools/latest/bin" ]]; then
-  export PATH="$SDK_ROOT/cmdline-tools/latest/bin:$PATH"
-fi
-if [[ -d "$SDK_ROOT/platform-tools" ]]; then
-  export PATH="$SDK_ROOT/platform-tools:$PATH"
-fi
-if [[ -d "$SDK_ROOT/emulator" ]]; then
-  export PATH="$SDK_ROOT/emulator:$PATH"
-fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/env.sh"
 
 require_bin() {
   local cmd="$1"
@@ -23,7 +14,7 @@ require_bin() {
 }
 
 echo "== Android doctor =="
-echo "ANDROID_SDK_ROOT=$SDK_ROOT"
+echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
 
 require_bin java
 require_bin javac

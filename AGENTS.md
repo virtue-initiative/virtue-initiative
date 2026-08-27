@@ -2,6 +2,8 @@
 
 This repository is split across several independently-tested areas. When you change code, run the checks for every area you touched. If you change shared code or cross-cutting behavior, run all affected sections, not just the one you started in.
 
+Run `just --list` to see the everyday build/dev/format/test/typecheck commands, grouped by component. The root `justfile` is a thin catalog wrapping the commands documented below — it only covers the common dev-loop commands, not every script in the repo (deploys, DB migrations, packaging, etc. are still run directly; see the relevant section below). When a command sequence below changes, keep the matching `just` recipe in sync.
+
 ## General rules
 
 - Prefer matching the existing GitHub Actions workflows in `.github/workflows/`.
@@ -210,8 +212,10 @@ cargo clippy --target x86_64-pc-windows-msvc -p virtue-windows --all-targets -- 
 cargo test --target x86_64-pc-windows-msvc -p virtue-core
 cargo test --target x86_64-pc-windows-msvc -p virtue-core --features testing --test scenarios
 cargo test --target x86_64-pc-windows-msvc -p virtue-windows
-./windows/scripts/build-installer.ps1 -Profile Debug
+./windows/scripts/build-msix.ps1 -Profile Debug
 ```
+
+Note: this file previously named the packaging script `build-installer.ps1`; the actual script is `build-msix.ps1` (see `client/windows/scripts/`).
 
 Notes:
 
@@ -298,6 +302,48 @@ If you need to mirror deployment locally:
 - `api-donate/`: `bun run deploy:staging` or `bun run deploy:prod`
 
 These require the appropriate Cloudflare credentials and, for landing, GitHub release access.
+
+## Centralized dev config: `~/.config/virtue-dev.env` and `.env`
+
+The user typically works across several worktrees of this repo at once. Two plain shell files
+(`KEY=value` lines) layer together as the source of dev-time secrets and machine/worktree config,
+in priority order (later wins over earlier, and real process/CI env vars always win over both):
+
+1. `~/.config/virtue-dev.env` (overridable via `VIRTUE_DEV_ENV`) — the machine-wide layer.
+   Anything genuinely identical across every worktree on a given machine (most secrets, SDK
+   paths) goes here so it isn't re-entered per worktree.
+2. `.env` at the repo root (gitignored; see `.env.example`) — the per-worktree override layer,
+   for anything that should vary between worktrees (or that you don't want machine-wide).
+
+Both are sourced by:
+
+- `scripts/launch.sh` — exports the merged values to the dev servers it starts, and passes the
+  `api/.dev.vars` keys below through to `wrangler dev` as `--var` flags, so they take effect
+  live without editing `.dev.vars`.
+- `scripts/setup.sh` — sources them and copies any of the `.dev.vars` keys below that are set
+  onto the freshly copied `.dev.vars` files, so a new worktree (or one run without `launch.sh`,
+  e.g. `wrangler dev` directly) still picks them up.
+- `client/android/scripts/env.sh` — sources them as an override layer for the Android dev
+  scripts (`build.sh`, `install.sh`, etc.), beneath its own built-in defaults.
+- `client/core/build.rs` — reads them (repo-root `.env` first) to fill in whichever of the
+  `VIRTUE_DEFAULT_*` compile-time keys below aren't already set by a real env var, replacing
+  the old `client/.env`-only mechanism.
+
+Recognized keys:
+
+| Key                                                                                                                           | Used by                                                        |
+| ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`                                                                                           | `api/.dev.vars`                                                |
+| `APP_NAME`, `API_BASE_PATH`, `EMAIL_DELIVERY_MODE`, `BUG_REPORT_EMAIL`                                                        | `api/.dev.vars`                                                |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`                                                                    | `api/.dev.vars` (SES)                                          |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`                                                                                  | `api-donate/.dev.vars`, `scripts/launch.sh --donate`           |
+| `PUBLIC_STRIPE_PORTAL_URL`                                                                                                    | `scripts/launch.sh --donate` (landing "Manage donations" link) |
+| `VIRTUE_DEFAULT_API_URL`, `VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS`, `VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS`                    | `client/core/build.rs` (compile-time client defaults)          |
+| `ANDROID_SDK_ROOT`, `ANDROID_HOME`, `ANDROID_NDK_ROOT`, `ANDROID_NDK_HOME`, `VIRTUE_AVD`, `VIRTUE_PACKAGE`, `VIRTUE_ACTIVITY` | `client/android/scripts/*.sh`                                  |
+
+Note: `APP_URL`, `LANDING_URL`, `R2_URL`, and `HASH_SERVER_URL` are _not_ on this list — `launch.sh`
+always computes them itself from the ports it picks that run, so overriding them here would have
+no effect under `launch.sh` (they'd only apply if you ran `wrangler dev` directly).
 
 ## Minimum recommended local validation
 

@@ -20,7 +20,6 @@ fn main() {
     println!("cargo:rerun-if-env-changed=GITHUB_REF_NAME");
     println!("cargo:rerun-if-changed=../version.properties");
     println!("cargo:rerun-if-changed=../../.git/HEAD");
-    println!("cargo:rerun-if-changed=../.env");
 
     assert_model_resolved();
 
@@ -37,16 +36,41 @@ fn main() {
     println!("cargo:rustc-env=VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS={batch_window_seconds}");
 }
 
-/// Loads `client/.env` (sibling of `core/`) if present, setting each `KEY=VALUE` pair as a
-/// process env var — but only if that key isn't already set, so real process/CI env vars
-/// always take precedence over the file. Lets a developer set local compile-time defaults
-/// (API URL, intervals) without exporting shell env vars.
+/// Loads compile-time defaults (API URL, intervals) from, in priority order: the repo-root
+/// `.env` (per-worktree overrides), then `~/.config/virtue-dev.env` (machine-wide defaults,
+/// `$VIRTUE_DEV_ENV`-overridable — see root AGENTS.md; shared with the shell scripts that
+/// source the same file). Each `KEY=VALUE` pair is set as a process env var only if that key
+/// isn't already set — by an earlier, higher-priority file in this same loop, or by a real
+/// process/CI env var set before `cargo build` ran — so real env vars always win, and the
+/// repo-root file wins over the machine-wide one.
 fn load_dotenv() {
     let Ok(manifest_dir) = env::var("CARGO_MANIFEST_DIR") else {
         return;
     };
-    let dotenv_path = PathBuf::from(manifest_dir).join("../.env");
-    let Ok(contents) = fs::read_to_string(&dotenv_path) else {
+    // client/core -> repo root is two levels up.
+    let repo_root = PathBuf::from(&manifest_dir).join("../..");
+    let repo_env = repo_root.join(".env");
+
+    let shared_env = env::var("VIRTUE_DEV_ENV")
+        .ok()
+        .map(PathBuf::from)
+        .or_else(|| home_dir().map(|home| home.join(".config/virtue-dev.env")));
+
+    for path in [Some(repo_env), shared_env].into_iter().flatten() {
+        println!("cargo:rerun-if-changed={}", path.display());
+        load_dotenv_file(&path);
+    }
+}
+
+fn home_dir() -> Option<PathBuf> {
+    env::var("HOME")
+        .or_else(|_| env::var("USERPROFILE"))
+        .ok()
+        .map(PathBuf::from)
+}
+
+fn load_dotenv_file(path: &PathBuf) {
+    let Ok(contents) = fs::read_to_string(path) else {
         return;
     };
 

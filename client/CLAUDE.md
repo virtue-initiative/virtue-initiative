@@ -112,9 +112,10 @@ other platform.
 ### Configuration
 
 - `core/src/config.rs` — `Config`: API base URL, screenshot/batch intervals, state dir.
-  All three values are compile-time constants baked in via `env!()` through
-  `core/build.rs`, which also loads an optional `client/.env` file (gitignored;
-  see `client/.env.example`) — there is no runtime override mechanism.
+  All three values are compile-time constants baked in via `env!()` through `core/build.rs`,
+  which also loads the repo-root `.env` (gitignored; see `.env.example`) and, beneath that,
+  `~/.config/virtue-dev.env` (see root `AGENTS.md`) for local compile-time defaults — there
+  is no runtime override mechanism.
 - `linux/src/config.rs`, `mac/src/config.rs`, `windows/src/config.rs` — path discovery
 
 ### Testing

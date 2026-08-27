@@ -11,8 +11,10 @@
 #
 # Shared configuration (e.g. STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
 # PUBLIC_STRIPE_PORTAL_URL) can live in ~/.config/virtue-dev.env so it doesn't
-# have to be copied into each worker's .dev.vars. That file is sourced below and
-# its values are passed through to the relevant dev servers.
+# have to be copied into each worker's .dev.vars. That file is sourced below,
+# then .env (repo root, per-worktree overrides — see AGENTS.md) is sourced on
+# top of it, and the merged values are passed through to the relevant dev
+# servers.
 
 DOMAIN=""
 DONATE=0
@@ -36,6 +38,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Shared dev configuration. Anything exported here (secrets, portal URLs, etc.)
 # is available to the child dev servers without editing per-worker .dev.vars.
+# .env (repo root) is sourced second so its values win over the machine-wide file.
 VIRTUE_DEV_ENV="${VIRTUE_DEV_ENV:-$HOME/.config/virtue-dev.env}"
 if [ -f "$VIRTUE_DEV_ENV" ]; then
     set -a
@@ -43,6 +46,21 @@ if [ -f "$VIRTUE_DEV_ENV" ]; then
     . "$VIRTUE_DEV_ENV"
     set +a
 fi
+if [ -f "$ROOT/.env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . "$ROOT/.env"
+    set +a
+fi
+
+# api/.dev.vars keys that can be centrally overridden (see AGENTS.md); passed
+# as --var so they win over api/.dev.vars without editing that file.
+API_EXTRA_VARS=()
+for _key in JWT_PRIVATE_KEY JWT_PUBLIC_KEY APP_NAME API_BASE_PATH EMAIL_DELIVERY_MODE BUG_REPORT_EMAIL AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION; do
+    eval "_value=\${$_key:-}"
+    [ -n "$_value" ] && API_EXTRA_VARS+=(--var "$_key:$_value")
+done
+unset _key _value
 
 # Pick 5 unique free ports in one bun process so the OS can't reuse them between calls.
 read -r API_PORT WEB_PORT LANDING_PORT DONATE_PORT HASH_PORT < <(bun -e "
@@ -225,7 +243,8 @@ if [ -n "$DOMAIN" ]; then
         --var "APP_URL:https://app.${DOMAIN}.localhost" \
         --var "LANDING_URL:https://${DOMAIN}.localhost" \
         --var "R2_URL:https://app.${DOMAIN}.localhost/r2" \
-        --var "HASH_SERVER_URL:http://localhost:${HASH_PORT}"
+        --var "HASH_SERVER_URL:http://localhost:${HASH_PORT}" \
+        "${API_EXTRA_VARS[@]}"
     [ "$DONATE" = 1 ] && start_donate "https://${DOMAIN}.localhost"
     run "web"     "32" "web"     bun run dev -- --port "$WEB_PORT" --host 127.0.0.1
     run "landing" "34" "landing" bun run dev -- --port "$LANDING_PORT" --host 127.0.0.1
@@ -249,7 +268,8 @@ else
         --var "APP_URL:http://localhost:${WEB_PORT}" \
         --var "LANDING_URL:http://localhost:${LANDING_PORT}" \
         --var "R2_URL:http://localhost:${API_PORT}/r2" \
-        --var "HASH_SERVER_URL:http://localhost:${HASH_PORT}"
+        --var "HASH_SERVER_URL:http://localhost:${HASH_PORT}" \
+        "${API_EXTRA_VARS[@]}"
     [ "$DONATE" = 1 ] && start_donate "http://localhost:${LANDING_PORT}"
     run "web"     "32" "web"     bun run dev -- --port "$WEB_PORT"
     run "landing" "34" "landing" bun run dev -- --port "$LANDING_PORT"

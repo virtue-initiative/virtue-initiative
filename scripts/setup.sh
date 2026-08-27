@@ -69,17 +69,62 @@ setdir() {
   cd "$ROOT/$1"
 }
 
+# just — install if missing (the root justfile is the command catalog: `just --list`).
+# The justfile uses [group(...)] recipe attributes (just >= 1.27), which is newer
+# than the version in most distro package managers, so install the prebuilt
+# binary from the official install script rather than via apt.
+if ! command -v just > /dev/null 2>&1; then
+  echo "Installing just..."
+  curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh \
+    | sudo bash -s -- --to /usr/local/bin
+fi
+
 # Web deps
 setdir "." && bun install && ./scripts/seed-dev-user.mjs
+
+# Shared config that's identical across worktrees (secrets, machine-local
+# paths), then .env (repo root, per-worktree overrides) on top of it. See
+# AGENTS.md for the recognized keys.
+VIRTUE_DEV_ENV="${VIRTUE_DEV_ENV:-$HOME/.config/virtue-dev.env}"
+if [ -f "$VIRTUE_DEV_ENV" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$VIRTUE_DEV_ENV"
+  set +a
+fi
+if [ -f "$ROOT/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$ROOT/.env"
+  set +a
+fi
+
+# Copies keys already set in $VIRTUE_DEV_ENV onto a freshly copied .dev.vars,
+# so a new worktree doesn't need them retyped. $1 = keys to check, space-separated.
+apply_shared_env() {
+  for key in $1; do
+    eval "value=\${$key:-}"
+    if [ -n "$value" ]; then
+      # .dev.vars.example already ships a placeholder line for most of these
+      # keys, so drop any existing line for this key before appending the
+      # real value from the shared env.
+      grep -v "^${key}=" .dev.vars > .dev.vars.tmp || true
+      mv .dev.vars.tmp .dev.vars
+      printf '%s=%s\n' "$key" "$value" >> .dev.vars
+    fi
+  done
+}
 
 # Web setup
 setdir "api"
 cp .dev.vars.example .dev.vars
+apply_shared_env "JWT_PRIVATE_KEY JWT_PUBLIC_KEY APP_URL LANDING_URL APP_NAME API_BASE_PATH R2_URL HASH_SERVER_URL EMAIL_DELIVERY_MODE BUG_REPORT_EMAIL AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION"
 yes | bun run db:migrate:local
 
 # Donations API setup
 setdir "api-donate"
 cp .dev.vars.example .dev.vars
+apply_shared_env "STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET"
 yes | bun run db:migrate:local
 
 # Caddy — install if missing

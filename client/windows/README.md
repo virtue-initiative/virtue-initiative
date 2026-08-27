@@ -281,10 +281,10 @@ The WinUI app and Rust resident monitoring host share state under `%PROGRAMDATA%
 
 `api_base_url`, `capture_interval_seconds`, and `batch_window_seconds` are no longer
 runtime-configurable. They're compile-time constants baked in by `client/core/build.rs`
-via `env!()`. To set local dev values, copy `client/.env.example` to `client/.env`
+via `env!()`. To set local dev values, copy `.env.example` (repo root) to `.env`
 (gitignored) and set `VIRTUE_DEFAULT_API_URL`, `VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS`,
 and `VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS` there; real process/CI env vars still take
-precedence over `.env`.
+precedence over `.env`, which in turn takes precedence over `~/.config/virtue-dev.env`.
 
 The Rust FFI surface exposed to the WinUI app is:
 
