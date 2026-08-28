@@ -9,6 +9,7 @@ const riskRatingToSeverity: Record<RiskRating, TamperSeverity> = {
   marginal: 'info',
   moderate: 'warning',
   high: 'critical',
+  alert: 'critical',
 };
 
 export function riskToSeverity(risk: number | null | undefined): TamperSeverity | null {
