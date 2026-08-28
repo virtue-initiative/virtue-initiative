@@ -217,6 +217,155 @@ fn lifecycle_disabled_never_records_or_alerts_regardless_of_lateness() {
     );
 }
 
+// ── Repeated restart detection (CORE-018) ─────────────────────────────────
+
+fn has_repeated_restarts_notify(scenario: &Scenario) -> bool {
+    scenario
+        .api
+        .state()
+        .notify_calls
+        .iter()
+        .any(|call| call.payload.event_type == "repeated_restarts")
+}
+
+/// Whether a `RepeatedRestarts` event is sitting queued in `scenario`'s
+/// persisted upload state -- catches an incorrect early enqueue even before
+/// any tick has flushed it out to a notify call.
+fn has_pending_repeated_restarts_event(scenario: &Scenario) -> bool {
+    scenario
+        .state()
+        .upload
+        .pending_hash_events
+        .iter()
+        .any(|e| matches!(e.event, UploadKind::RepeatedRestarts { .. }))
+}
+
+#[test]
+fn twenty_restarts_within_ten_minutes_triggers_a_repeated_restarts_alert() {
+    // Every constructed `Scenario` must be kept alive: `Scenario::Drop`
+    // removes its `state_dir`, so reassigning/dropping an old one mid-loop
+    // would wipe out the shared directory the next restart depends on.
+    let mut scenarios = vec![Scenario::authenticated()]; // restart #1, at t=0
+    let state_dir = scenarios[0].state_dir_path().to_path_buf();
+
+    // 18 more restarts (2..=19), each 10s apart, well within the 10-minute
+    // window -- still below the 20-restart threshold.
+    for i in 1..19 {
+        scenarios.push(Scenario::authenticated_with_state_dir_at(
+            state_dir.clone(),
+            i * 10_000,
+        ));
+    }
+    assert!(
+        !has_pending_repeated_restarts_event(scenarios.last().unwrap()),
+        "19 restarts must not yet alert"
+    );
+
+    // The 20th restart crosses the threshold.
+    let mut last = Scenario::authenticated_with_state_dir_at(state_dir, 19 * 10_000);
+    last.at_t(19 * 10_000).tick();
+    assert!(
+        has_repeated_restarts_notify(&last),
+        "the 20th restart within the window should trigger an immediate alert"
+    );
+    assert!(last.state().lifecycle.restart_times.is_empty());
+}
+
+#[test]
+fn restarts_spaced_more_than_ten_minutes_apart_never_alert() {
+    let mut scenarios = vec![Scenario::authenticated()];
+    let state_dir = scenarios[0].state_dir_path().to_path_buf();
+
+    // 25 restarts, each ~11 minutes apart -- never more than one within the
+    // rolling 10-minute window at a time.
+    for i in 1..25 {
+        let mut next =
+            Scenario::authenticated_with_state_dir_at(state_dir.clone(), i * 11 * 60_000);
+        next.at_t(i * 11 * 60_000).tick();
+        scenarios.push(next);
+    }
+    assert!(!scenarios.iter().any(has_repeated_restarts_notify));
+}
+
+// Each `Scenario` has its own fresh `MockApiClient`, so `notify_calls`
+// counts don't accumulate across restarts -- what matters is whether the
+// *specific* restart that crosses the threshold fires its own notify.
+
+#[test]
+fn a_second_burst_within_the_cooldown_does_not_alert_twice() {
+    let mut scenarios = vec![Scenario::authenticated()];
+    let state_dir = scenarios[0].state_dir_path().to_path_buf();
+
+    for i in 1..19 {
+        scenarios.push(Scenario::authenticated_with_state_dir_at(
+            state_dir.clone(),
+            i * 10_000,
+        ));
+    }
+    let mut first_burst_last =
+        Scenario::authenticated_with_state_dir_at(state_dir.clone(), 19 * 10_000);
+    first_burst_last.at_t(19 * 10_000).tick();
+    assert!(
+        has_repeated_restarts_notify(&first_burst_last),
+        "the first burst should alert"
+    );
+
+    // A second burst of 20 restarts starting a few minutes later -- still
+    // within the 30-minute cooldown from the first alert.
+    let base = 19 * 10_000 + 60_000;
+    for i in 0..19 {
+        scenarios.push(Scenario::authenticated_with_state_dir_at(
+            state_dir.clone(),
+            base + i * 10_000,
+        ));
+    }
+    let mut second_burst_last =
+        Scenario::authenticated_with_state_dir_at(state_dir, base + 19 * 10_000);
+    second_burst_last.at_t(base + 19 * 10_000).tick();
+
+    assert!(
+        !has_repeated_restarts_notify(&second_burst_last),
+        "a second threshold-crossing within the cooldown must not send another alert"
+    );
+}
+
+#[test]
+fn a_burst_after_the_cooldown_expires_alerts_again() {
+    let mut scenarios = vec![Scenario::authenticated()];
+    let state_dir = scenarios[0].state_dir_path().to_path_buf();
+
+    for i in 1..19 {
+        scenarios.push(Scenario::authenticated_with_state_dir_at(
+            state_dir.clone(),
+            i * 10_000,
+        ));
+    }
+    let mut first_burst_last =
+        Scenario::authenticated_with_state_dir_at(state_dir.clone(), 19 * 10_000);
+    first_burst_last.at_t(19 * 10_000).tick();
+    assert!(
+        has_repeated_restarts_notify(&first_burst_last),
+        "the first burst should alert"
+    );
+
+    // A second burst starting well after the 30-minute cooldown has elapsed.
+    let base = 19 * 10_000 + 31 * 60_000;
+    for i in 0..19 {
+        scenarios.push(Scenario::authenticated_with_state_dir_at(
+            state_dir.clone(),
+            base + i * 10_000,
+        ));
+    }
+    let mut second_burst_last =
+        Scenario::authenticated_with_state_dir_at(state_dir, base + 19 * 10_000);
+    second_burst_last.at_t(base + 19 * 10_000).tick();
+
+    assert!(
+        has_repeated_restarts_notify(&second_burst_last),
+        "a burst occurring after the cooldown expires should alert again"
+    );
+}
+
 // ── CaptureAvailability ─────────────────────────────────────────────────────────
 
 fn force_screenshot_due(scenario: &mut Scenario) {

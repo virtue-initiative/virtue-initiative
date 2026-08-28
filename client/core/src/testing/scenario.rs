@@ -73,12 +73,16 @@ impl Scenario {
                 .expect("seed event state with auth");
         }
 
-        Self::from_state_dir(state_dir, settings)
+        Self::from_state_dir(state_dir, settings, 0)
     }
 
-    fn from_state_dir(state_dir: PathBuf, settings: Option<DeviceSettings>) -> Self {
+    fn from_state_dir(
+        state_dir: PathBuf,
+        settings: Option<DeviceSettings>,
+        initial_ms: i64,
+    ) -> Self {
         let config = scenario_config(state_dir.clone());
-        let clock = MockClock::default();
+        let clock = MockClock::new(initial_ms);
         let platform = TestPlatformHooks::with_clock(clock.clone());
         let api = MockApiClient::new();
         if let Some(ref s) = settings {
@@ -105,7 +109,16 @@ impl Scenario {
     /// Build an authenticated service that reuses an *existing* state
     /// directory — used to test state surviving a daemon restart.
     pub fn authenticated_with_state_dir(state_dir: PathBuf) -> Self {
-        Self::from_state_dir(state_dir, None)
+        Self::from_state_dir(state_dir, None, 0)
+    }
+
+    /// Same as [`Scenario::authenticated_with_state_dir`], but constructs the
+    /// `Daemon` (and thus runs its one-time `Daemon::new` startup logic, e.g.
+    /// restart-loop tracking) with the mock clock already set to `now_ms` —
+    /// used to simulate a real restart happening at a specific time rather
+    /// than always at t=0.
+    pub fn authenticated_with_state_dir_at(state_dir: PathBuf, now_ms: i64) -> Self {
+        Self::from_state_dir(state_dir, None, now_ms)
     }
 
     // --- time control ---

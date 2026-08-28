@@ -27,6 +27,11 @@ const SUSPEND_EVIDENCE_MIN_MS: i64 = 5_000;
 /// tolerates wake-up scheduling jitter without requiring an exact match.
 const SUSPEND_EVIDENCE_SLACK_MS: i64 = SINGLE_LATE_THRESHOLD_MS;
 
+/// See CORE-019.
+const RESTART_WINDOW_MS: i64 = 10 * 60_000; // 10 minutes
+const RESTART_ALERT_THRESHOLD: usize = 20;
+const RESTART_ALERT_COOLDOWN_MS: i64 = 30 * 60_000; // 30 minutes
+
 #[derive(Serialize, Deserialize, Default, Clone)]
 #[serde(default)]
 pub struct LifecycleState {
@@ -49,6 +54,12 @@ pub struct LifecycleState {
     /// before the first tick. See CORE-002.
     pub last_tick_utc_ms: Option<i64>,
     pub last_tick_suspend_safe_ms: Option<i64>,
+    /// UTC timestamps of recent daemon (re)starts, oldest first, pruned to
+    /// RESTART_WINDOW_MS. See CORE-019.
+    pub restart_times: VecDeque<i64>,
+    /// When a repeated-restart alert last actually fired (not merely when the
+    /// threshold was crossed — see RESTART_ALERT_COOLDOWN_MS). See CORE-019.
+    pub last_restart_alert_at_ms: Option<i64>,
 }
 
 /// Phase 1 of `Daemon::run_phases`: compares `now_ms` to the wakeup time this
@@ -258,6 +269,43 @@ pub fn note_user_start(state: &mut LifecycleState, upload: &mut UploadState, now
         upload::enqueue(upload, now_ms, 0.0, UploadKind::UserStart);
     }
     was_stopped
+}
+
+/// Records a fresh daemon (re)start and alerts if the count within
+/// RESTART_WINDOW_MS crosses RESTART_ALERT_THRESHOLD, unless the last such
+/// alert fired within RESTART_ALERT_COOLDOWN_MS. Called once per
+/// `Daemon::new()`, unconditionally of user-stop status — a repeatedly
+/// killed daemon is exactly the not-user-initiated case. See CORE-019.
+pub fn note_restart(state: &mut LifecycleState, upload: &mut UploadState, now_ms: i64) {
+    state.restart_times.push_back(now_ms);
+    while state
+        .restart_times
+        .front()
+        .is_some_and(|&t| now_ms - t > RESTART_WINDOW_MS)
+    {
+        state.restart_times.pop_front();
+    }
+
+    if state.restart_times.len() >= RESTART_ALERT_THRESHOLD {
+        let cooldown_active = state
+            .last_restart_alert_at_ms
+            .is_some_and(|last| now_ms - last < RESTART_ALERT_COOLDOWN_MS);
+        if !cooldown_active {
+            upload::enqueue(
+                upload,
+                now_ms,
+                EXTRA_HIGH_RISK,
+                UploadKind::RepeatedRestarts {
+                    count: state.restart_times.len() as u32,
+                    window_ms: RESTART_WINDOW_MS,
+                },
+            );
+            state.last_restart_alert_at_ms = Some(now_ms);
+        }
+        // Cleared either way so the count doesn't grow unboundedly while
+        // suppressed by the cooldown.
+        state.restart_times.clear();
+    }
 }
 
 #[cfg(test)]
@@ -767,5 +815,120 @@ mod tests {
         assert!(!note_user_start(&mut state, &mut upload, 1_000));
         assert!(!state.monitoring_stopped);
         assert!(!has_user_start_event(&upload));
+    }
+
+    // ── Repeated restart detection (CORE-019) ─────────────────────────────
+
+    fn repeated_restarts_alert_count(upload: &UploadState) -> usize {
+        upload
+            .pending_hash_events
+            .iter()
+            .filter(|e| matches!(e.event, UploadKind::RepeatedRestarts { .. }))
+            .count()
+    }
+
+    #[test]
+    fn fewer_than_threshold_restarts_does_not_alert() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        for i in 0..(RESTART_ALERT_THRESHOLD - 1) {
+            note_restart(&mut state, &mut upload, i as i64 * 1_000);
+        }
+        assert_eq!(repeated_restarts_alert_count(&upload), 0);
+        assert_eq!(state.restart_times.len(), RESTART_ALERT_THRESHOLD - 1);
+    }
+
+    #[test]
+    fn threshold_restarts_within_window_alerts_once_and_clears() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        for i in 0..RESTART_ALERT_THRESHOLD {
+            // Spaced 1s apart -- well within the 10-minute window.
+            note_restart(&mut state, &mut upload, i as i64 * 1_000);
+        }
+        assert_eq!(repeated_restarts_alert_count(&upload), 1);
+        assert!(state.restart_times.is_empty());
+        let entry = upload
+            .pending_hash_events
+            .iter()
+            .find(|e| matches!(e.event, UploadKind::RepeatedRestarts { .. }))
+            .unwrap();
+        assert!(entry.risk.unwrap() >= EXTRA_HIGH_RISK);
+    }
+
+    #[test]
+    fn restarts_older_than_the_window_are_pruned_and_do_not_count() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        // 19 restarts, then a big gap past the window, then one more --
+        // the old 19 must have been pruned by the time the 20th arrives, so
+        // this must not alert.
+        for i in 0..(RESTART_ALERT_THRESHOLD - 1) {
+            note_restart(&mut state, &mut upload, i as i64 * 1_000);
+        }
+        note_restart(&mut state, &mut upload, RESTART_WINDOW_MS + 1_000_000);
+        assert_eq!(repeated_restarts_alert_count(&upload), 0);
+        assert_eq!(state.restart_times.len(), 1);
+    }
+
+    #[test]
+    fn restarts_spread_past_the_window_never_accumulate_to_threshold() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        // Each restart is spaced further apart than the window, so no two
+        // are ever in the window together at once.
+        for i in 0..(RESTART_ALERT_THRESHOLD as i64 * 2) {
+            note_restart(&mut state, &mut upload, i * (RESTART_WINDOW_MS + 1));
+        }
+        assert_eq!(repeated_restarts_alert_count(&upload), 0);
+        assert_eq!(state.restart_times.len(), 1);
+    }
+
+    #[test]
+    fn second_threshold_crossing_within_cooldown_is_suppressed() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        for i in 0..RESTART_ALERT_THRESHOLD {
+            note_restart(&mut state, &mut upload, i as i64 * 1_000);
+        }
+        assert_eq!(repeated_restarts_alert_count(&upload), 1);
+
+        // A second burst of 20, starting just after the first alert fired,
+        // well within the 30-minute cooldown.
+        let base = RESTART_ALERT_THRESHOLD as i64 * 1_000 + 1_000;
+        for i in 0..RESTART_ALERT_THRESHOLD {
+            note_restart(&mut state, &mut upload, base + i as i64 * 1_000);
+        }
+        assert_eq!(
+            repeated_restarts_alert_count(&upload),
+            1,
+            "cooldown should suppress the second alert"
+        );
+        assert!(
+            state.restart_times.is_empty(),
+            "restart times must still be cleared even when the alert is suppressed"
+        );
+    }
+
+    #[test]
+    fn alert_after_cooldown_expires_fires_again() {
+        let mut state = LifecycleState::default();
+        let mut upload = upload_with_credentials();
+        for i in 0..RESTART_ALERT_THRESHOLD {
+            note_restart(&mut state, &mut upload, i as i64 * 1_000);
+        }
+        assert_eq!(repeated_restarts_alert_count(&upload), 1);
+        let first_alert_at = state.last_restart_alert_at_ms.unwrap();
+
+        // A second burst starting after the 30-minute cooldown has elapsed.
+        let base = first_alert_at + RESTART_ALERT_COOLDOWN_MS + 1;
+        for i in 0..RESTART_ALERT_THRESHOLD {
+            note_restart(&mut state, &mut upload, base + i as i64 * 1_000);
+        }
+        assert_eq!(
+            repeated_restarts_alert_count(&upload),
+            2,
+            "a burst after the cooldown expires should alert again"
+        );
     }
 }
