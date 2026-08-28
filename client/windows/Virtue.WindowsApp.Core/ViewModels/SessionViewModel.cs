@@ -31,6 +31,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private bool _updateReady;
     private string? _updateCountdownText;
     private string? _updateCheckStatusText;
+    private bool _updateInstalling;
 
     public SessionViewModel(IRustInteropClient interopClient, string? windowsPackageVersion = null)
     {
@@ -233,17 +234,34 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     public void NotifyUpdateUnstaged()
     {
         UpdateCountdownText = null;
+        UpdateInstalling = false;
         if (SetProperty(ref _updateReady, false, nameof(UpdateReady)))
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TrayTooltip)));
         }
     }
 
+    /// <summary>
+    /// Called once the install has actually been started, which ends with the OS terminating
+    /// this process and the restart watchdog relaunching it. The notice card says so and its
+    /// button goes dead, so the wait doesn't read as the button having done nothing.
+    /// </summary>
+    public void NotifyUpdateInstalling()
+    {
+        UpdateInstalling = true;
+    }
+
+    public bool UpdateInstalling
+    {
+        get => _updateInstalling;
+        private set => SetProperty(ref _updateInstalling, value);
+    }
+
     public bool UpdateReady => _updateReady;
 
     /// <summary>
-    /// Feedback for the manual "Check for updates" button, rendered beneath it. Null when there
-    /// is nothing to say; a found update reports itself through the Update Ready card instead.
+    /// Feedback for the manual "Check for updates" button, rendered beside it. Every check
+    /// outcome maps to some text here — an empty line after a click reads as a hang.
     /// </summary>
     public string? UpdateCheckStatusText
     {

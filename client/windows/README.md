@@ -172,7 +172,7 @@ Remote logs are always written locally under:
 - Launching the app from Start reuses the resident instance and opens the settings/login window.
 - Closing the settings window hides it back to the tray.
 - Tray `Exit` asks for confirmation before stopping active monitoring, records an explicit user stop, stops resident monitoring, and exits the app without logging the device out.
-- The app registers a per-user Scheduled Task (`VirtueResidentWatchdog`, every 1 minute — Task Scheduler's floor for a repeating trigger, confirmed against `schtasks.exe` on this repo's `virtue-win11` VM: a sub-minute `Interval` is rejected as out of range even via an XML task definition) at startup that relaunches `Virtue.WindowsApp.exe` if it isn't running, covering accidental crashes/hangs. The app's existing single-instance redirect makes each periodic relaunch attempt a no-op while the app is already running, so the task doesn't need its own "is it running" check, and the relaunch comes back into the tray quietly (same as the startup task). Tray `Exit` deletes the task first so a deliberate exit isn't resurrected. Windows' Application Recovery and Restart API (`RegisterApplicationRestart`) was tried first but does not automatically relaunch MSIX-packaged apps (confirmed both by community reports and by testing on this repo's `virtue-win11` VM: registration succeeds and WER correctly reports the crash/hang, but no relaunch follows), hence the Scheduled Task instead. See `Virtue.WindowsApp.Core/Interop/RestartWatchdog.cs` and `Virtue.WindowsApp/App.xaml.cs`. The `client/core` late-wakeup tamper threshold (`client/core/SPEC.md` §2) was raised from 1 to 2 minutes so a normal ~1-minute watchdog relaunch doesn't itself trip the tamper alert.
+- The app registers a per-user Scheduled Task (`VirtueResidentWatchdog`, every 1 minute — Task Scheduler's floor for a repeating trigger, confirmed against `schtasks.exe` on this repo's `virtue-win11` VM: a sub-minute `Interval` is rejected as out of range even via an XML task definition) at startup that relaunches `Virtue.WindowsApp.exe` if it isn't running, covering accidental crashes/hangs. The app's existing single-instance redirect makes each periodic relaunch attempt a no-op while the app is already running, so the task doesn't need its own "is it running" check, and the relaunch comes back into the tray quietly (same as the startup task). The task's command is the app execution alias `%LOCALAPPDATA%\Microsoft\WindowsApps\virtue-initiative.exe` (declared as a `uap5:AppExecutionAlias` in `Package.appxmanifest`; resolved by `AppLaunchPath`, unit-tested), **not** `Environment.ProcessPath`. `Environment.ProcessPath` for an MSIX app is version-stamped (`...\WindowsApps\..._0.1.1.0_x64__...\Virtue.WindowsApp.exe`), so a Store update deleted the directory the task pointed at and every later run failed with `0x80070002` (`ERROR_FILE_NOT_FOUND`) — the app the update had just terminated was never brought back, and re-registering on launch couldn't repair it because nothing was left to launch. `explorer.exe shell:AppsFolder\...` is the other version-independent way to start a packaged app but drops command-line arguments, which the quiet-relaunch flag needs. Check a suspect machine with `schtasks /Query /TN VirtueResidentWatchdog /XML` and `Get-ScheduledTaskInfo -TaskName VirtueResidentWatchdog` (`LastTaskResult`). Tray `Exit` deletes the task first so a deliberate exit isn't resurrected. Windows' Application Recovery and Restart API (`RegisterApplicationRestart`) was tried first but does not automatically relaunch MSIX-packaged apps (confirmed both by community reports and by testing on this repo's `virtue-win11` VM: registration succeeds and WER correctly reports the crash/hang, but no relaunch follows), hence the Scheduled Task instead. See `Virtue.WindowsApp.Core/Interop/RestartWatchdog.cs` and `Virtue.WindowsApp/App.xaml.cs`. The `client/core` late-wakeup tamper threshold (`client/core/SPEC.md` §2) was raised from 1 to 2 minutes so a normal ~1-minute watchdog relaunch doesn't itself trip the tamper alert.
 - `client/core` is intentionally unchanged by this architecture; Windows-specific behavior lives under `client/windows/`.
 
 ## Store Update Handling
@@ -190,7 +190,7 @@ packaged process.
 can show an OS consent dialog, and [the install one always
 does](https://learn.microsoft.com/en-us/windows/uwp/packaging/self-install-package-updates).
 That dialog is owned by the HWND the `StoreContext` was initialized with, which in resident mode
-is the tray host's _hidden_ window — so pressing "Close now and update" appeared to do nothing at
+is the tray host's _hidden_ window — so pressing the notice's restart button appeared to do nothing at
 all while the install sat waiting on a dialog no one could see. `StoreUpdateManager` therefore
 prefers `TrySilentDownloadStorePackageUpdatesAsync` /
 `TrySilentDownloadAndInstallStorePackageUpdatesAsync` whenever
@@ -238,8 +238,8 @@ sentinel below and the manual re-check are picked up promptly and all staging st
 thread. The status card's **Check for updates** button calls `RequestCheckNow()`, which releases
 a semaphore that slice waits on — short-circuiting the cadence is its _only_ effect. Feedback
 appears next to it via `SessionViewModel.UpdateCheckStatusText` ("Checking for updates..." →
-"Up to date." / "Update check failed."); a check that _found_ something reports itself through
-the Update Ready card instead.
+"No updates found." / "Update found; downloading..." / "Update check failed."); see the status-line
+rules below.
 
 Once an update is staged, restart is driven by one shared decision method,
 `App.EvaluateUpdateRestart()`, called from four places: immediately when the update stages, from
@@ -254,8 +254,8 @@ Its whole body is marshalled onto the UI thread, since it reads `MainWindow.IsVi
 If the window is hidden and no login/logout is in progress (`SessionViewModel.IsBusy`), it
 restarts right away. If the window is visible, it instead updates an in-window notice card with a
 countdown (`UpdateRestartPolicy.GetDeadlineUtc`/`FormatCountdown`,
-`Virtue.WindowsApp.Core/Interop/UpdateRestartPolicy.cs`, unit-tested) reading "Virtue will close
-and update in ...", with a "Close now and update" button below it. Once the 6-hour deferral cap is
+`Virtue.WindowsApp.Core/Interop/UpdateRestartPolicy.cs`, unit-tested) reading "Virtue will restart
+to update in ...", with a "Restart now to update" button below it. Once the 6-hour deferral cap is
 reached (`UpdateRestartPolicy.ShouldForceRestart`), `EvaluateUpdateRestart()` hides the window
 itself, which re-raises `Hidden` and re-enters the method — now that the window reports hidden, it
 takes the immediate-restart branch. The notice button calls the manual-restart handler, bypassing
@@ -265,6 +265,23 @@ concurrent triggers actually proceeds. `RestartWatchdog` is deliberately left re
 all of this (unlike tray Exit) so its existing per-minute poll relaunches the updated build, and
 the released `AppLifecycleInstance` key means the relaunched process becomes the new primary
 instance with no extra code, exactly like a crash-recovery relaunch.
+
+Pressing the notice's button also sets `RelaunchWindowFlag`
+(`%PROGRAMDATA%\Virtue\show-window-on-next-launch`, unit-tested) and flips the card to
+"Installing the update. Virtue will close and restart itself within a minute." with the button
+disabled. The flag is consumed by the next launch, which then shows the main window instead of
+coming back quietly into the tray: the user asked for a restart, so the process vanishing with
+nothing visibly returning is the wrong feedback. It is consumed unconditionally at startup, and
+also by `ClearStagedUpdateAfterFailedInstall()` (where the process survived, so no launch is
+coming), so a stale flag can't pop a window at some unrelated later launch. An automatic
+window-closed update sets no flag and stays quiet.
+
+The status line beside "Check for updates" reports every terminal outcome — "No updates found.",
+"Update found; downloading...", "Update downloaded.", "Update check failed.", "Update install did
+not complete; it will be retried." — and the button short-circuits to "Update already downloaded."
+when one is staged, since the check loop skips checks entirely in that state and the line would
+otherwise sit on "Checking for updates..." forever. Nothing sets it back to empty: a blank line
+after a click is indistinguishable from a hang.
 
 There is deliberately **no tray "Restart to Update" item**. With the window closed —
 the resident app's normal state — `EvaluateUpdateRestart()` restarts _immediately_ on staging,

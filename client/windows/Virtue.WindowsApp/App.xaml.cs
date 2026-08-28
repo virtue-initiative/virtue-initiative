@@ -88,12 +88,22 @@ public partial class App : Application
                 SetUpdateCheckStatus("Update check failed.");
             };
             _updateManager.CheckCompleted += (_, foundUpdate) =>
-                SetUpdateCheckStatus(foundUpdate ? null : "Up to date.");
+                SetUpdateCheckStatus(foundUpdate ? "Update found; downloading..." : "No updates found.");
             _updateManager.Log += (_, message) => LogStartup(message);
             _updateManager.Start();
 
             var activation = AppLifecycleInstance.GetCurrent().GetActivatedEventArgs();
-            if (!IsQuietActivation(activation))
+            // Consumed unconditionally so a flag left behind by an install that never completed
+            // doesn't pop a window at some unrelated later launch.
+            var restoreWindowAfterUpdate = RelaunchWindowFlag.TryConsume(RelaunchWindowFlag.FlagPath);
+            var quiet = (IsQuietActivation(activation) || HasWatchdogArgOnCommandLine())
+                && !restoreWindowAfterUpdate;
+            if (restoreWindowAfterUpdate)
+            {
+                LogStartup("Relaunched after a user-requested update install; restoring the main window.");
+            }
+
+            if (!quiet)
             {
                 ShowMainWindow();
             }
@@ -224,13 +234,36 @@ public partial class App : Application
         }
     }
 
+    /// <summary>
+    /// A launch through the app execution alias (how the watchdog starts us now — see
+    /// <see cref="AppLaunchPath"/>) does not always surface its arguments through
+    /// <c>ILaunchActivatedEventArgs</c>, so the process command line is checked as well. Only
+    /// valid for this process's own activation: a <i>redirected</i> activation carries another
+    /// process's arguments, and this one's command line says nothing about it.
+    /// </summary>
+    private static bool HasWatchdogArgOnCommandLine() =>
+        Environment.GetCommandLineArgs().Any(argument =>
+            string.Equals(argument, WatchdogRelaunchArg, StringComparison.Ordinal));
+
+    /// <summary>
+    /// Registers the watchdog against the app execution alias rather than the running
+    /// executable, so the task survives a package update — see <see cref="AppLaunchPath"/> for
+    /// why the version-stamped process path silently breaks auto-relaunch after every update.
+    /// </summary>
     private static void RegisterWatchdog()
     {
-        var exePath = Environment.ProcessPath;
-        if (!string.IsNullOrEmpty(exePath))
+        var launchPath = AppLaunchPath.Resolve(
+            AppLaunchPath.ExecutionAliasPath,
+            Environment.ProcessPath,
+            File.Exists);
+        if (string.IsNullOrEmpty(launchPath))
         {
-            RestartWatchdog.Register(exePath, WatchdogRelaunchArg);
+            LogStartup("Watchdog registration skipped: no launch path could be resolved.");
+            return;
         }
+
+        LogStartup($"Registering restart watchdog with launch path: {launchPath}");
+        RestartWatchdog.Register(launchPath, WatchdogRelaunchArg);
     }
 
     private void ShowMainWindow()
@@ -279,8 +312,22 @@ public partial class App : Application
         window.CloseNowAndUpdateRequested += (_, _) => _ = HandleManualRestartToUpdateAsync();
         window.CheckForUpdatesRequested += (_, _) =>
         {
+            if (_updateManager is null)
+            {
+                SetUpdateCheckStatus("Update checks are unavailable.");
+                return;
+            }
+
+            // The check loop skips checks entirely while an update is staged, so a click here
+            // would otherwise leave "Checking for updates..." up forever.
+            if (_updateManager.IsUpdateStaged)
+            {
+                SetUpdateCheckStatus("Update already downloaded.");
+                return;
+            }
+
             SetUpdateCheckStatus("Checking for updates...");
-            _updateManager?.RequestCheckNow();
+            _updateManager.RequestCheckNow();
         };
         window.Activate();
         LogStartup("MainWindow activated.");
@@ -453,6 +500,7 @@ public partial class App : Application
     {
         _updateStagedAtUtc = DateTimeOffset.UtcNow;
         _ = _dispatcherQueue?.TryEnqueue(() => _viewModel?.NotifyUpdateStaged());
+        SetUpdateCheckStatus("Update downloaded.");
         LogStartup("Store update staged.");
 
         EvaluateUpdateRestart();
@@ -557,7 +605,7 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// The in-window "Close now and update" button's handler — an explicit user request always
+    /// The in-window "Restart now to update" button's handler — an explicit user request always
     /// proceeds immediately, bypassing the busy/deadline check (unlike the automatic path), and
     /// is the one path allowed to let the OS put its consent dialog on screen, since the user is
     /// looking at the window that will own it.
@@ -570,6 +618,12 @@ public partial class App : Application
         {
             return;
         }
+
+        // The install terminates this process; the watchdog brings it back within a minute. Say
+        // so in the notice card, and ask that relaunch to restore the window — the user asked
+        // for a restart, so the app silently vanishing is the wrong feedback.
+        _ = _dispatcherQueue?.TryEnqueue(() => _viewModel?.NotifyUpdateInstalling());
+        RelaunchWindowFlag.Set(RelaunchWindowFlag.FlagPath);
 
         await InstallUpdateAndRestartAsync(allowInteractive: true);
     }
@@ -660,7 +714,10 @@ public partial class App : Application
         {
             _countdownCancellation?.Cancel();
             _updateStagedAtUtc = null;
+            // The process survived, so nothing is going to consume the relaunch flag.
+            RelaunchWindowFlag.TryConsume(RelaunchWindowFlag.FlagPath);
             _ = _dispatcherQueue?.TryEnqueue(() => _viewModel?.NotifyUpdateUnstaged());
+            SetUpdateCheckStatus("Update install did not complete; it will be retried.");
         }
         finally
         {

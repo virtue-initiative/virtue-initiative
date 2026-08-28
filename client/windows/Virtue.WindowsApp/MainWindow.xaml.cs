@@ -36,6 +36,7 @@ public sealed partial class MainWindow : Window
     private readonly TextBlock _errorTextBlock;
     private readonly Border _updateNoticeCard;
     private readonly TextBlock _updateNoticeTextBlock;
+    private readonly Button _restartNowButton = CreateActionButton("Restart now to update");
     private Button? _signInButton;
     private bool _allowClose;
 
@@ -120,7 +121,7 @@ public sealed partial class MainWindow : Window
     /// </summary>
     public event EventHandler? Hidden;
 
-    /// <summary>Raised by the in-window update notice's "Close now and update" button.</summary>
+    /// <summary>Raised by the in-window update notice's "Restart now to update" button.</summary>
     public event EventHandler? CloseNowAndUpdateRequested;
 
     /// <summary>
@@ -242,13 +243,12 @@ public sealed partial class MainWindow : Window
 
     private Border BuildUpdateNoticeCard()
     {
-        var closeNowButton = CreateActionButton("Close now and update");
-        closeNowButton.Click += (_, _) => CloseNowAndUpdateRequested?.Invoke(this, EventArgs.Empty);
+        _restartNowButton.Click += (_, _) => CloseNowAndUpdateRequested?.Invoke(this, EventArgs.Empty);
 
         var content = new StackPanel { Spacing = 8 };
         content.Children.Add(CreateSectionLabel("Update Ready"));
         content.Children.Add(_updateNoticeTextBlock);
-        content.Children.Add(closeNowButton);
+        content.Children.Add(_restartNowButton);
 
         var card = CreateCard(content);
         card.BorderBrush = WarningBrush;
@@ -848,9 +848,12 @@ public sealed partial class MainWindow : Window
     private void SyncFromViewModel()
     {
         _updateNoticeCard.Visibility = ViewModel.UpdateReady ? Visibility.Visible : Visibility.Collapsed;
-        _updateNoticeTextBlock.Text = ViewModel.UpdateCountdownText is { } countdown
-            ? $"Virtue will close and update in {countdown}."
-            : "An update is ready and will install soon.";
+        _updateNoticeTextBlock.Text = ViewModel.UpdateInstalling
+            ? "Installing the update. Virtue will close and restart itself within a minute."
+            : ViewModel.UpdateCountdownText is { } countdown
+                ? $"Virtue will restart to update in {countdown}."
+                : "An update is ready and will install soon.";
+        _restartNowButton.IsEnabled = !ViewModel.UpdateInstalling;
 
         _statusTextBlock.Text = BuildPrimaryStatusText();
         var statusBrush = StatusBrush();

@@ -76,9 +76,9 @@ public sealed class SessionViewModelTests
 
         var changed = new List<string?>();
         viewModel.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
-        viewModel.UpdateCheckStatusText = "Up to date.";
+        viewModel.UpdateCheckStatusText = "No updates found.";
 
-        Assert.Equal("Up to date.", viewModel.UpdateCheckStatusText);
+        Assert.Equal("No updates found.", viewModel.UpdateCheckStatusText);
         Assert.Contains(nameof(SessionViewModel.UpdateCheckStatusText), changed);
     }
 
@@ -630,6 +630,25 @@ public sealed class SessionViewModelTests
         public void Dispose()
         {
         }
+    }
+
+    [Fact]
+    public void NotifyUpdateInstalling_FlagsTheNoticeAndIsClearedByUnstaging()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+        var changed = new List<string?>();
+        viewModel.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        viewModel.NotifyUpdateStaged();
+        viewModel.NotifyUpdateInstalling();
+
+        Assert.True(viewModel.UpdateInstalling);
+        Assert.Contains(nameof(SessionViewModel.UpdateInstalling), changed);
+
+        viewModel.NotifyUpdateUnstaged();
+
+        Assert.False(viewModel.UpdateInstalling);
     }
 
     private sealed class FakeRustInteropClient : IRustInteropClient
