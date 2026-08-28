@@ -263,7 +263,31 @@ public partial class App : Application
         }
 
         LogStartup($"Registering restart watchdog with launch path: {launchPath}");
-        RestartWatchdog.Register(launchPath, WatchdogRelaunchArg);
+        LogStartup(RestartWatchdog.Register(launchPath, WatchdogRelaunchArg));
+
+        // We are running, so any one-shot relaunch still armed from an earlier update has
+        // either already done its job or been made redundant by whatever started us.
+        UpdateRelaunchTask.Cancel();
+    }
+
+    /// <summary>
+    /// Arms the one-shot relaunch that brings the app back within seconds of the package swap,
+    /// rather than on <see cref="RestartWatchdog"/>'s per-minute poll. Best-effort by design —
+    /// see <see cref="UpdateRelaunchTask"/>; the watchdog stays registered as the safety net.
+    /// </summary>
+    private static void ScheduleUpdateRelaunch()
+    {
+        var launchPath = AppLaunchPath.Resolve(
+            AppLaunchPath.ExecutionAliasPath,
+            Environment.ProcessPath,
+            File.Exists);
+        if (string.IsNullOrEmpty(launchPath))
+        {
+            LogStartup("Update relaunch task skipped: no launch path could be resolved.");
+            return;
+        }
+
+        LogStartup(UpdateRelaunchTask.Schedule(launchPath, WatchdogRelaunchArg));
     }
 
     private void ShowMainWindow()
@@ -393,6 +417,9 @@ public partial class App : Application
         try
         {
             RestartWatchdog.Unregister();
+            // A deliberate exit must not be resurrected by a relaunch armed for an update that
+            // is no longer going to happen.
+            UpdateRelaunchTask.Cancel();
             _refreshLoopCancellation?.Cancel();
             _countdownCancellation?.Cancel();
             _updateManager?.Dispose();
@@ -668,6 +695,9 @@ public partial class App : Application
 
         try
         {
+            // Armed immediately before the call that terminates us, since the countdown starts
+            // now rather than when the process actually dies.
+            ScheduleUpdateRelaunch();
             var outcome = await _updateManager!.TryInstallStagedUpdateAsync(allowInteractive);
             LogStartup($"Update install call returned (outcome={outcome}).");
 
@@ -677,6 +707,9 @@ public partial class App : Application
                 // Awaited, not fire-and-forget: the consent dialog is owned by an HWND, so the
                 // window has to actually be up before the retry raises it.
                 await RunOnUiThreadAsync(ShowMainWindow);
+                // Re-armed: the first one-shot has very likely fired into this still-running
+                // process while the consent dialog was up, and a spent shot cannot relaunch us.
+                ScheduleUpdateRelaunch();
                 outcome = await _updateManager!.TryInstallStagedUpdateAsync(allowInteractive: true);
                 LogStartup($"Interactive update install call returned (outcome={outcome}).");
             }
@@ -714,8 +747,10 @@ public partial class App : Application
         {
             _countdownCancellation?.Cancel();
             _updateStagedAtUtc = null;
-            // The process survived, so nothing is going to consume the relaunch flag.
+            // The process survived, so nothing is going to consume the relaunch flag, and the
+            // armed one-shot would fire into a running app.
             RelaunchWindowFlag.TryConsume(RelaunchWindowFlag.FlagPath);
+            UpdateRelaunchTask.Cancel();
             _ = _dispatcherQueue?.TryEnqueue(() => _viewModel?.NotifyUpdateUnstaged());
             SetUpdateCheckStatus("Update install did not complete; it will be retried.");
         }

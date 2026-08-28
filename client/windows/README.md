@@ -172,7 +172,7 @@ Remote logs are always written locally under:
 - Launching the app from Start reuses the resident instance and opens the settings/login window.
 - Closing the settings window hides it back to the tray.
 - Tray `Exit` asks for confirmation before stopping active monitoring, records an explicit user stop, stops resident monitoring, and exits the app without logging the device out.
-- The app registers a per-user Scheduled Task (`VirtueResidentWatchdog`, every 1 minute — Task Scheduler's floor for a repeating trigger, confirmed against `schtasks.exe` on this repo's `virtue-win11` VM: a sub-minute `Interval` is rejected as out of range even via an XML task definition) at startup that relaunches `Virtue.WindowsApp.exe` if it isn't running, covering accidental crashes/hangs. The app's existing single-instance redirect makes each periodic relaunch attempt a no-op while the app is already running, so the task doesn't need its own "is it running" check, and the relaunch comes back into the tray quietly (same as the startup task). The task's command is the app execution alias `%LOCALAPPDATA%\Microsoft\WindowsApps\virtue-initiative.exe` (declared as a `uap5:AppExecutionAlias` in `Package.appxmanifest`; resolved by `AppLaunchPath`, unit-tested), **not** `Environment.ProcessPath`. `Environment.ProcessPath` for an MSIX app is version-stamped (`...\WindowsApps\..._0.1.1.0_x64__...\Virtue.WindowsApp.exe`), so a Store update deleted the directory the task pointed at and every later run failed with `0x80070002` (`ERROR_FILE_NOT_FOUND`) — the app the update had just terminated was never brought back, and re-registering on launch couldn't repair it because nothing was left to launch. `explorer.exe shell:AppsFolder\...` is the other version-independent way to start a packaged app but drops command-line arguments, which the quiet-relaunch flag needs. Check a suspect machine with `schtasks /Query /TN VirtueResidentWatchdog /XML` and `Get-ScheduledTaskInfo -TaskName VirtueResidentWatchdog` (`LastTaskResult`). Tray `Exit` deletes the task first so a deliberate exit isn't resurrected. Windows' Application Recovery and Restart API (`RegisterApplicationRestart`) was tried first but does not automatically relaunch MSIX-packaged apps (confirmed both by community reports and by testing on this repo's `virtue-win11` VM: registration succeeds and WER correctly reports the crash/hang, but no relaunch follows), hence the Scheduled Task instead. See `Virtue.WindowsApp.Core/Interop/RestartWatchdog.cs` and `Virtue.WindowsApp/App.xaml.cs`. The `client/core` late-wakeup tamper threshold (`client/core/SPEC.md` §2) was raised from 1 to 2 minutes so a normal ~1-minute watchdog relaunch doesn't itself trip the tamper alert.
+- The app registers a per-user Scheduled Task (`VirtueResidentWatchdog`, every 1 minute — Task Scheduler's floor for a _repeating_ trigger: the schema pins `Repetition/Interval` at `minInclusive="PT1M"`, confirmed against `schtasks.exe` on this repo's `virtue-win11` VM, where a sub-minute `Interval` is rejected as out of range even via an XML task definition. That floor binds repetition only — a _one-shot_ trigger can be aimed seconds out, which is what `UpdateRelaunchTask` does after an update; see below) at startup that relaunches `Virtue.WindowsApp.exe` if it isn't running, covering accidental crashes/hangs. The app's existing single-instance redirect makes each periodic relaunch attempt a no-op while the app is already running, so the task doesn't need its own "is it running" check, and the relaunch comes back into the tray quietly (same as the startup task). The task's command is the app execution alias `%LOCALAPPDATA%\Microsoft\WindowsApps\virtue-initiative.exe` (declared as a `uap5:AppExecutionAlias` in `Package.appxmanifest`; resolved by `AppLaunchPath`, unit-tested), **not** `Environment.ProcessPath`. `Environment.ProcessPath` for an MSIX app is version-stamped (`...\WindowsApps\..._0.1.1.0_x64__...\Virtue.WindowsApp.exe`), so a Store update deleted the directory the task pointed at and every later run failed with `0x80070002` (`ERROR_FILE_NOT_FOUND`) — the app the update had just terminated was never brought back, and re-registering on launch couldn't repair it because nothing was left to launch. `explorer.exe shell:AppsFolder\...` is the other version-independent way to start a packaged app but drops command-line arguments, which the quiet-relaunch flag needs. Check a suspect machine with `schtasks /Query /TN VirtueResidentWatchdog /XML` and `Get-ScheduledTaskInfo -TaskName VirtueResidentWatchdog` (`LastTaskResult`). Tray `Exit` deletes the task first so a deliberate exit isn't resurrected. Windows' Application Recovery and Restart API (`RegisterApplicationRestart`) was tried first but does not automatically relaunch MSIX-packaged apps (confirmed both by community reports and by testing on this repo's `virtue-win11` VM: registration succeeds and WER correctly reports the crash/hang, but no relaunch follows), hence the Scheduled Task instead. See `Virtue.WindowsApp.Core/Interop/RestartWatchdog.cs` and `Virtue.WindowsApp/App.xaml.cs`. The `client/core` late-wakeup tamper threshold (`client/core/SPEC.md` §2) was raised from 1 to 2 minutes so a normal ~1-minute watchdog relaunch doesn't itself trip the tamper alert.
 - `client/core` is intentionally unchanged by this architecture; Windows-specific behavior lives under `client/windows/`.
 
 ## Store Update Handling
@@ -262,9 +262,49 @@ takes the immediate-restart branch. The notice button calls the manual-restart h
 the busy/deadline check as an explicit user request and passing `allowInteractive: true`. An
 `Interlocked`-guarded flag in `InstallUpdateAndRestartAsync` ensures only the first of these
 concurrent triggers actually proceeds. `RestartWatchdog` is deliberately left registered through
-all of this (unlike tray Exit) so its existing per-minute poll relaunches the updated build, and
+all of this (unlike tray Exit) so its per-minute poll relaunches the updated build, and
 the released `AppLifecycleInstance` key means the relaunched process becomes the new primary
 instance with no extra code, exactly like a crash-recovery relaunch.
+
+#### Coming back within seconds, not within a minute
+
+The watchdog poll alone leaves the app gone for anywhere from 0 to 60 seconds after an update.
+`UpdateRelaunchTask` (`Virtue.WindowsApp.Core/Interop/UpdateRelaunchTask.cs`, unit-tested) closes
+that to a measured ~15s: immediately before each install attempt, `App.ScheduleUpdateRelaunch()`
+registers a **one-shot** `VirtueUpdateRelaunch` task pointing at the same `AppLaunchPath`
+execution alias the watchdog uses.
+
+The app cannot restart itself here. The OS terminates the process for the package swap, so there
+is no "after" in which to run code, and every process carrying the package identity — including
+any helper the app spawned, since child processes inherit that identity — is terminated with it.
+The relaunch has to be owned by something outside the package, and the scheduler service is.
+`Microsoft.Windows.AppLifecycle.AppInstance.Restart` specifically cannot serve: [its design
+spec](https://github.com/microsoft/WindowsAppSDK/blob/main/specs/AppLifecycle/Restart/restartApi.markdown)
+has the helper agent take "the executable path of the application" and `CreateProcess` it, which
+for an MSIX app is the version-stamped `WindowsApps` directory the update deletes — the same
+`0x80070002` trap that `AppLaunchPath` exists to avoid — and it has to be called from a live
+process, which we no longer are once the swap begins.
+
+The trigger is a `TimeTrigger` with a seconds-precision `StartBoundary`, registered via
+`schtasks /Create /XML` (the `/TR` shorthand cannot express it: `/ST` is documented as `HH:mm`,
+with no seconds field, so even `/SC ONCE` is stuck on minute boundaries). A `RegistrationTrigger`
+with a sub-minute `<Delay>` is the more natural fit — it is relative, so it sidesteps clock skew
+— and its schema imposes no minimum, but on the VM it **never fires at all** when registered
+through `schtasks /Create /XML`: the task registers successfully, then sits at
+`SCHED_S_TASK_HAS_NOT_RUN` (`267011`) indefinitely. The `TimeTrigger` shape was measured firing at
+15.86s for a 15s delay, with `DeleteExpiredTaskAfter` collecting the task afterwards on schedule.
+`Principal` carries no `UserId` — `schtasks` resolves the invoking account itself (the registered
+task reports `Run As User: help` on the VM), which also keeps a Windows-only `WindowsIdentity`
+SID lookup out of the plain-`net8.0` `Core` project.
+
+This is an optimization and never a guarantee, which is why the watchdog stays registered
+throughout. If the one shot fires while the swap is still in flight, the launch fails and the
+shot is spent; the watchdog still picks the app up within a minute, exactly as before this
+existed. Every failure degrades to that. The task is cancelled on the paths where it would
+otherwise fire into a running app: at startup (`RegisterWatchdog()`), on tray Exit alongside
+`RestartWatchdog.Unregister()`, and in `ClearStagedUpdateAfterFailedInstall()`. It is also
+re-armed before the interactive install retry, since the first shot has very likely already
+fired while the consent dialog was up.
 
 Pressing the notice's button also sets `RelaunchWindowFlag`
 (`%PROGRAMDATA%\Virtue\show-window-on-next-launch`, unit-tested) and flips the card to
@@ -310,7 +350,8 @@ there is a developer-only shortcut. Write a file at
 the poll slice consumes it (reading, then deleting it) and raises the _same_ `UpdateStaged`
 event a real download would, so the countdown, the window-closed auto-restart and the button all
 run for real. `TryInstallStagedUpdateAsync` then returns `Installed` without touching the Store,
-the app exits, and `RestartWatchdog` relaunches it within a minute.
+the app exits, and `UpdateRelaunchTask` brings it back ~15 seconds later (with `RestartWatchdog`
+behind it within a minute), so the whole relaunch path is exercised too.
 
 The file's contents may be a short duration (`5m`, `90s`, `2h`; a bare number is minutes) that
 overrides `UpdateRestartPolicy.DeferralCap` for that simulated update, making the forced-restart
