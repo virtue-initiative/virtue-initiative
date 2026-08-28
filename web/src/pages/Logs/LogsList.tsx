@@ -106,6 +106,9 @@ export function LogsList({
                   <div class="logs-vrow-top">
                     <span class="logs-type">{getLogCategory(item)}</span>
                     <span class="logs-device">{deviceName(item.device_id)}</span>
+                    {getRiskLevel(item.risk) === 'alert' && (
+                      <span class="logs-verify-badge logs-verify-badge--failed">⚠ Alert</span>
+                    )}
                     {getRiskLevel(item.risk) === 'high' && (
                       <span class="logs-verify-badge logs-verify-badge--failed">⚠ High</span>
                     )}

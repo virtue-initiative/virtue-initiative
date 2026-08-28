@@ -194,8 +194,15 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
         if (typeFilter !== null && getLogCategory(item) !== typeFilter) return false;
         if (riskFilter !== 'all') {
           const rating = getRiskRating(item.risk);
-          if (riskFilter === 'high' && rating !== 'high') return false;
-          if (riskFilter === 'moderate' && rating !== 'moderate' && rating !== 'high') return false;
+          if (riskFilter === 'alert' && rating !== 'alert') return false;
+          if (riskFilter === 'high' && rating !== 'high' && rating !== 'alert') return false;
+          if (
+            riskFilter === 'moderate' &&
+            rating !== 'moderate' &&
+            rating !== 'high' &&
+            rating !== 'alert'
+          )
+            return false;
         }
         return true;
       }),
@@ -208,8 +215,15 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
         if (item.image_w === undefined) return false;
         if (riskFilter !== 'all') {
           const rating = getRiskRating(item.risk);
-          if (riskFilter === 'high' && rating !== 'high') return false;
-          if (riskFilter === 'moderate' && rating !== 'moderate' && rating !== 'high') return false;
+          if (riskFilter === 'alert' && rating !== 'alert') return false;
+          if (riskFilter === 'high' && rating !== 'high' && rating !== 'alert') return false;
+          if (
+            riskFilter === 'moderate' &&
+            rating !== 'moderate' &&
+            rating !== 'high' &&
+            rating !== 'alert'
+          )
+            return false;
         }
         return true;
       }),
@@ -257,7 +271,7 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
                       ))}
                     </Select>
                   </Field>
-                  <Field label="Risk" class="logs-filter-field">
+                  <Field label="Concern" class="logs-filter-field">
                     <Select
                       size="md"
                       class="logs-filter-select"
@@ -267,6 +281,7 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
                       }
                     >
                       <option value="all">All</option>
+                      <option value="alert">Alert</option>
                       <option value="high">High</option>
                       <option value="moderate">Medium</option>
                     </Select>
@@ -404,7 +419,7 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
                   ))}
                 </Select>
               </Field>
-              <Field label="Risk" class="logs-filter-field">
+              <Field label="Concern" class="logs-filter-field">
                 <Select
                   size="md"
                   class="logs-filter-select"
@@ -414,6 +429,7 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
                   }
                 >
                   <option value="all">All</option>
+                  <option value="alert">Alert</option>
                   <option value="high">High</option>
                   <option value="moderate">Medium</option>
                 </Select>
