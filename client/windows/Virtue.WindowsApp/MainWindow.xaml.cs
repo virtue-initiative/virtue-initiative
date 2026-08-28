@@ -6,6 +6,7 @@ using Microsoft.UI;
 using Microsoft.UI.Text;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -161,7 +162,10 @@ public sealed partial class MainWindow : Window
         StyleInput(_emailTextBox);
 
         _passwordBox.PlaceholderText = "Password";
-        _passwordBox.PasswordRevealMode = PasswordRevealMode.Peek;
+        // `Peek` is meant to draw WinUI's own reveal button inside the box, but
+        // it never renders here, so the reveal is driven from our own toggle
+        // (see BuildPasswordRow) flipping this between Hidden and Visible.
+        _passwordBox.PasswordRevealMode = PasswordRevealMode.Hidden;
         _passwordBox.PasswordChanged += PasswordBox_OnPasswordChanged;
         StyleInput(_passwordBox);
 
@@ -341,7 +345,7 @@ public sealed partial class MainWindow : Window
         _loginPanel.Spacing = 12;
         _loginPanel.Margin = new Thickness(0, 12, 0, 0);
         _loginPanel.Children.Add(_emailTextBox);
-        _loginPanel.Children.Add(_passwordBox);
+        _loginPanel.Children.Add(BuildPasswordRow());
         _loginPanel.Children.Add(_deviceNameTextBox);
 
         _signInButton = CreatePrimaryButton("Sign In");
@@ -457,6 +461,50 @@ public sealed partial class MainWindow : Window
         button.Resources["ButtonBorderBrushPointerOver"] = BorderHoverBrush;
         button.Resources["ButtonBorderBrushPressed"] = BorderHoverBrush;
         return button;
+    }
+
+    /// The password box plus the eye toggle that reveals what was typed, laid
+    /// out so the box takes the remaining width and the button sits beside it.
+    private Grid BuildPasswordRow()
+    {
+        var row = new Grid();
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        Grid.SetColumn(_passwordBox, 0);
+        row.Children.Add(_passwordBox);
+
+        var revealIcon = new FontIcon
+        {
+            Glyph = "\uE7B3",
+            FontSize = 16,
+            Foreground = Ink2Brush,
+        };
+        var revealButton = new Button
+        {
+            Content = revealIcon,
+            Margin = new Thickness(8, 0, 0, 0),
+            Padding = new Thickness(10, 8, 10, 8),
+            CornerRadius = new CornerRadius(2),
+            BorderBrush = BorderBrushToken,
+            Background = PaperBrush,
+        };
+        AutomationProperties.SetName(revealButton, "Show password");
+        ToolTipService.SetToolTip(revealButton, "Show password");
+        revealButton.Click += (_, _) =>
+        {
+            var reveal = _passwordBox.PasswordRevealMode != PasswordRevealMode.Visible;
+            _passwordBox.PasswordRevealMode =
+                reveal ? PasswordRevealMode.Visible : PasswordRevealMode.Hidden;
+            revealIcon.Glyph = reveal ? "\uED1A" : "\uE7B3";
+            var label = reveal ? "Hide password" : "Show password";
+            AutomationProperties.SetName(revealButton, label);
+            ToolTipService.SetToolTip(revealButton, label);
+        };
+
+        Grid.SetColumn(revealButton, 1);
+        row.Children.Add(revealButton);
+        return row;
     }
 
     // Cream-filled input on a hairline border; focus border goes forest.
