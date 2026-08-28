@@ -14,6 +14,22 @@ public sealed class UpdateRestartPolicyTests
     }
 
     [Fact]
+    public void GetDeadlineUtc_WithExplicitCap_UsesItInsteadOfTheDeferralCap()
+    {
+        Assert.Equal(
+            StagedAt + TimeSpan.FromMinutes(5),
+            UpdateRestartPolicy.GetDeadlineUtc(StagedAt, TimeSpan.FromMinutes(5)));
+    }
+
+    [Fact]
+    public void GetDeadlineUtc_WithNullCap_FallsBackToTheDeferralCap()
+    {
+        Assert.Equal(
+            StagedAt + UpdateRestartPolicy.DeferralCap,
+            UpdateRestartPolicy.GetDeadlineUtc(StagedAt, cap: null));
+    }
+
+    [Fact]
     public void ShouldForceRestart_Busy_NeverRestarts_RegardlessOfDeadline()
     {
         var deadline = UpdateRestartPolicy.GetDeadlineUtc(StagedAt);

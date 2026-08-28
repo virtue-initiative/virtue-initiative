@@ -82,7 +82,13 @@ public partial class App : Application
             // StoreUpdateManager's owner-window note. Initialize() ran above, so it exists.
             _updateManager = new StoreUpdateManager(_trayController.WindowHandle);
             _updateManager.UpdateStaged += (_, _) => OnUpdateStaged();
-            _updateManager.UpdateCheckFailed += (_, reason) => LogStartup($"Store update check/download failed: {reason}");
+            _updateManager.UpdateCheckFailed += (_, reason) =>
+            {
+                LogStartup($"Store update check/download failed: {reason}");
+                SetUpdateCheckStatus("Update check failed.");
+            };
+            _updateManager.CheckCompleted += (_, foundUpdate) =>
+                SetUpdateCheckStatus(foundUpdate ? null : "Up to date.");
             _updateManager.Log += (_, message) => LogStartup(message);
             _updateManager.Start();
 
@@ -231,6 +237,9 @@ public partial class App : Application
     {
         _mainWindow ??= CreateMainWindow();
         _mainWindow.ShowFromTray();
+        // Seed the notice card's countdown from the window's now-visible state, rather than
+        // leaving the generic "will install soon" text up until the next minute tick.
+        EvaluateUpdateRestart();
         _ = _viewModel?.RefreshAsync();
     }
 
@@ -268,6 +277,11 @@ public partial class App : Application
         var window = new MainWindow(_viewModel);
         window.Hidden += (_, _) => EvaluateUpdateRestart();
         window.CloseNowAndUpdateRequested += (_, _) => _ = HandleManualRestartToUpdateAsync();
+        window.CheckForUpdatesRequested += (_, _) =>
+        {
+            SetUpdateCheckStatus("Checking for updates...");
+            _updateManager?.RequestCheckNow();
+        };
         window.Activate();
         LogStartup("MainWindow activated.");
         return window;
@@ -458,14 +472,22 @@ public partial class App : Application
 
     /// <summary>
     /// The single decision point for the staged-update restart: called immediately when an
-    /// update stages, every minute while it's pending, and every time the main window
-    /// transitions to hidden (<see cref="MainWindow.Hidden"/>). If the window is hidden and the
-    /// session isn't busy, restarts right away. Otherwise updates the in-window countdown text,
-    /// and once the 6-hour deferral cap is reached, hides the window itself — which re-raises
-    /// <see cref="MainWindow.Hidden"/> and re-enters this method, taking the hidden branch to
-    /// actually restart.
+    /// update stages, every minute while it's pending, every time the main window is shown, and
+    /// every time it transitions to hidden (<see cref="MainWindow.Hidden"/>). If the window is
+    /// hidden and the session isn't busy, restarts right away. Otherwise updates the in-window
+    /// countdown text, and once the deferral cap is reached, hides the window itself — which
+    /// re-raises <see cref="MainWindow.Hidden"/> and re-enters this method, taking the hidden
+    /// branch to actually restart.
+    ///
+    /// The whole body runs on the UI thread: it reads <see cref="MainWindow.IsVisibleToUser"/>,
+    /// which is written there, and the countdown timer calls in from a pool thread.
     /// </summary>
     private void EvaluateUpdateRestart()
+    {
+        _ = _dispatcherQueue?.TryEnqueue(EvaluateUpdateRestartOnUiThread);
+    }
+
+    private void EvaluateUpdateRestartOnUiThread()
     {
         if (_updateManager?.IsUpdateStaged != true || _updateStagedAtUtc is not { } stagedAtUtc)
         {
@@ -479,27 +501,66 @@ public partial class App : Application
         {
             if (!sessionIsBusy)
             {
-                _ = InstallUpdateAndRestartAsync();
+                _ = InstallUpdateAndRestartAsync(allowInteractive: false);
             }
 
             return;
         }
 
-        var deadlineUtc = UpdateRestartPolicy.GetDeadlineUtc(stagedAtUtc);
+        var deadlineUtc = UpdateRestartPolicy.GetDeadlineUtc(stagedAtUtc, _updateManager?.DeferralOverride);
         var now = DateTimeOffset.UtcNow;
-        var countdownText = UpdateRestartPolicy.FormatCountdown(deadlineUtc - now);
-        _ = _dispatcherQueue?.TryEnqueue(() => _viewModel?.SetUpdateCountdownText(countdownText));
+        _viewModel?.SetUpdateCountdownText(UpdateRestartPolicy.FormatCountdown(deadlineUtc - now));
 
         if (UpdateRestartPolicy.ShouldForceRestart(sessionIsBusy, deadlineUtc, now))
         {
             LogStartup("Update deferral cap reached; hiding window to force the update restart.");
-            _ = _dispatcherQueue?.TryEnqueue(() => _mainWindow?.HideToTray());
+            _mainWindow?.HideToTray();
         }
     }
 
     /// <summary>
+    /// Runs <paramref name="action"/> on the UI thread and completes once it has actually run.
+    /// </summary>
+    private Task RunOnUiThreadAsync(Action action)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var enqueued = _dispatcherQueue?.TryEnqueue(() =>
+        {
+            try
+            {
+                action();
+                completion.TrySetResult();
+            }
+            catch (Exception ex)
+            {
+                completion.TrySetException(ex);
+            }
+        }) ?? false;
+
+        if (!enqueued)
+        {
+            completion.TrySetResult();
+        }
+
+        return completion.Task;
+    }
+
+    private void SetUpdateCheckStatus(string? text)
+    {
+        _ = _dispatcherQueue?.TryEnqueue(() =>
+        {
+            if (_viewModel is not null)
+            {
+                _viewModel.UpdateCheckStatusText = text;
+            }
+        });
+    }
+
+    /// <summary>
     /// The in-window "Close now and update" button's handler — an explicit user request always
-    /// proceeds immediately, bypassing the busy/deadline check (unlike the automatic path).
+    /// proceeds immediately, bypassing the busy/deadline check (unlike the automatic path), and
+    /// is the one path allowed to let the OS put its consent dialog on screen, since the user is
+    /// looking at the window that will own it.
     /// </summary>
     private async Task HandleManualRestartToUpdateAsync()
     {
@@ -510,28 +571,39 @@ public partial class App : Application
             return;
         }
 
-        await InstallUpdateAndRestartAsync();
+        await InstallUpdateAndRestartAsync(allowInteractive: true);
     }
 
     /// <summary>
-    /// Stops resident monitoring the same way an OS session logoff/shutdown does (NOT the
-    /// tray-exit path — this must not be treated as a user-initiated stop for CORE-002
-    /// purposes, and it must not log the device out), installs the staged Store update, and
-    /// exits. `RestartWatchdog` is deliberately left registered (unlike tray Exit) so its
-    /// existing per-minute poll relaunches the updated build.
+    /// Installs the staged Store update and exits. The monitoring daemon is deliberately
+    /// <b>never</b> stopped for this: the OS terminates the process itself for the package
+    /// swap, which is the same shape as a crash-recovery relaunch that `RestartWatchdog` (left
+    /// registered here, unlike tray Exit) and CORE-002's late-wakeup budget already cover, and
+    /// `DaemonState` is persisted every tick so there is nothing to truncate. Stopping it early
+    /// instead flipped the window and tray to "Monitoring stopped" for however long the install
+    /// took — indefinitely, when it was waiting on a dialog nobody could see. macOS's Sparkle
+    /// updater made the same call.
     ///
-    /// Can legitimately be reached from several concurrent triggers around the same
-    /// moment (a <see cref="MainWindow.Hidden"/> event, a countdown tick, and the manual
-    /// button), so an <see cref="Interlocked"/> guard ensures only the first call
-    /// actually proceeds.
+    /// The main window is likewise <b>not</b> hidden first: <c>RequestDownloadAndInstall...</c>
+    /// always shows an OS consent dialog, and that dialog needs a real visible owner.
+    ///
+    /// Can legitimately be reached from several concurrent triggers around the same moment (a
+    /// <see cref="MainWindow.Hidden"/> event, a countdown tick, and the manual button), so an
+    /// <see cref="Interlocked"/> guard ensures only the first call actually proceeds.
     ///
     /// Exits only if the install actually succeeded (the Store API normally terminates the app
     /// itself in that case). On failure, exiting anyway would spin: the watchdog relaunches
-    /// within a minute, the check re-stages, and the app exits again — with monitoring down the
-    /// whole time. Instead monitoring is resumed and <see cref="StoreUpdateManager"/>'s retry
-    /// backoff picks the update up again on its next cycle.
+    /// within a minute, the check re-stages, and the app exits again. Instead the staged state
+    /// is cleared and <see cref="StoreUpdateManager"/>'s retry backoff picks the update up again
+    /// on its next cycle.
     /// </summary>
-    private async Task InstallUpdateAndRestartAsync()
+    /// <param name="allowInteractive">
+    /// Whether the OS may show its install-consent dialog — see
+    /// <see cref="StoreUpdateManager.TryInstallStagedUpdateAsync"/>. The automatic path passes
+    /// <c>false</c> and, if consent turns out to be required, shows the main window and retries
+    /// once with <c>true</c> so the dialog has somewhere visible to appear.
+    /// </param>
+    private async Task InstallUpdateAndRestartAsync(bool allowInteractive)
     {
         if (Interlocked.CompareExchange(ref _updateRestartStarted, 1, 0) != 0)
         {
@@ -539,54 +611,56 @@ public partial class App : Application
         }
 
         _countdownCancellation?.Cancel();
-        // MainWindow is a WinRT object with UI-thread affinity; this method may run on a
-        // background poll thread (the automatic countdown path) as well as the UI thread
-        // (the manual in-window button path), so always marshal the hide through the dispatcher.
-        _ = _dispatcherQueue?.TryEnqueue(() => _mainWindow?.HideToTray());
 
         try
         {
-            _refreshLoopCancellation?.Cancel();
-            new RustInteropClient().StopMonitoringForOsSessionEnd();
-            LogStartup("Stopped resident monitoring for Store update install.");
+            var outcome = await _updateManager!.TryInstallStagedUpdateAsync(allowInteractive);
+            LogStartup($"Update install call returned (outcome={outcome}).");
 
-            var installed = await _updateManager!.TryInstallStagedUpdateAsync();
-            LogStartup($"Update install call returned (installed={installed}).");
-            if (!installed)
+            if (outcome == UpdateInstallOutcome.NeedsUserInteraction)
             {
-                ResumeAfterFailedUpdateInstall();
+                LogStartup("Update install needs user consent; showing the main window and retrying interactively.");
+                // Awaited, not fire-and-forget: the consent dialog is owned by an HWND, so the
+                // window has to actually be up before the retry raises it.
+                await RunOnUiThreadAsync(ShowMainWindow);
+                outcome = await _updateManager!.TryInstallStagedUpdateAsync(allowInteractive: true);
+                LogStartup($"Interactive update install call returned (outcome={outcome}).");
+            }
+
+            if (outcome != UpdateInstallOutcome.Installed)
+            {
+                ClearStagedUpdateAfterFailedInstall();
                 return;
             }
         }
         catch (Exception ex)
         {
             LogStartup($"Update install failed: {ex}");
-            ResumeAfterFailedUpdateInstall();
+            ClearStagedUpdateAfterFailedInstall();
             return;
         }
 
-        // Application.Exit() has UI-thread affinity — same reasoning as the HideToTray()
-        // marshal above.
+        // Application.Exit() has UI-thread affinity, and this method also runs from the
+        // background countdown thread, so marshal it through the dispatcher.
         _ = _dispatcherQueue?.TryEnqueue(() => Current.Exit());
     }
 
     /// <summary>
-    /// Undoes the pre-install teardown when the install didn't happen: restarts the monitoring
-    /// daemon and the status refresh loop this method stopped, and releases the one-shot
-    /// restart guard so a later staged update can try again.
+    /// Resets the staged-update state after an install that didn't happen. Nothing was torn
+    /// down to restore (monitoring is never stopped for an update), but the countdown timer,
+    /// the notice card and the one-shot restart guard all have to be released — otherwise the
+    /// card stays up with a frozen countdown over a dead button, and
+    /// <see cref="EvaluateUpdateRestart"/> early-returns forever. The check loop re-stages on
+    /// its own backoff, which rebuilds all of it through <see cref="OnUpdateStaged"/>.
     /// </summary>
-    private void ResumeAfterFailedUpdateInstall()
+    private void ClearStagedUpdateAfterFailedInstall()
     {
-        LogStartup("Update install did not complete; resuming monitoring and leaving the retry to the update loop.");
+        LogStartup("Update install did not complete; clearing the staged update and leaving the retry to the update loop.");
         try
         {
-            new RustInteropClient().StartMonitoring();
-            _refreshLoopCancellation = null;
-            StartRefreshLoop();
-        }
-        catch (Exception ex)
-        {
-            LogStartup($"Failed to resume monitoring after an unsuccessful update install: {ex}");
+            _countdownCancellation?.Cancel();
+            _updateStagedAtUtc = null;
+            _ = _dispatcherQueue?.TryEnqueue(() => _viewModel?.NotifyUpdateUnstaged());
         }
         finally
         {

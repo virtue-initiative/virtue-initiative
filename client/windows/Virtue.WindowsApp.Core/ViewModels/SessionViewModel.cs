@@ -30,6 +30,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private string? _errorText;
     private bool _updateReady;
     private string? _updateCountdownText;
+    private string? _updateCheckStatusText;
 
     public SessionViewModel(IRustInteropClient interopClient, string? windowsPackageVersion = null)
     {
@@ -222,7 +223,33 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         }
     }
 
+    /// <summary>
+    /// Called when a staged update stops being staged without the app restarting — the install
+    /// was declined, or the Store retracted the update. Without this the notice card would stay
+    /// up forever showing a frozen countdown over a button that no longer does anything. The
+    /// check loop re-stages on its own backoff, which rebuilds all of this through
+    /// <see cref="NotifyUpdateStaged"/>.
+    /// </summary>
+    public void NotifyUpdateUnstaged()
+    {
+        UpdateCountdownText = null;
+        if (SetProperty(ref _updateReady, false, nameof(UpdateReady)))
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TrayTooltip)));
+        }
+    }
+
     public bool UpdateReady => _updateReady;
+
+    /// <summary>
+    /// Feedback for the manual "Check for updates" button, rendered beneath it. Null when there
+    /// is nothing to say; a found update reports itself through the Update Ready card instead.
+    /// </summary>
+    public string? UpdateCheckStatusText
+    {
+        get => _updateCheckStatusText;
+        set => SetProperty(ref _updateCheckStatusText, value);
+    }
 
     public string? UpdateCountdownText
     {

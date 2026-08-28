@@ -46,6 +46,43 @@ public sealed class SessionViewModelTests
     }
 
     [Fact]
+    public void NotifyUpdateUnstaged_ClearsTheNoticeCountdownAndTooltipSuffix()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+        viewModel.NotifyUpdateStaged();
+        viewModel.SetUpdateCountdownText("42m");
+
+        var changed = new List<string?>();
+        viewModel.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        viewModel.NotifyUpdateUnstaged();
+
+        Assert.False(viewModel.UpdateReady);
+        Assert.Null(viewModel.UpdateCountdownText);
+        Assert.Equal("Virtue: loading status", viewModel.TrayTooltip);
+        Assert.Contains(nameof(SessionViewModel.UpdateReady), changed);
+        Assert.Contains(nameof(SessionViewModel.UpdateCountdownText), changed);
+        Assert.Contains(nameof(SessionViewModel.TrayTooltip), changed);
+    }
+
+    [Fact]
+    public void UpdateCheckStatusText_RaisesPropertyChanged()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        Assert.Null(viewModel.UpdateCheckStatusText);
+
+        var changed = new List<string?>();
+        viewModel.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+        viewModel.UpdateCheckStatusText = "Up to date.";
+
+        Assert.Equal("Up to date.", viewModel.UpdateCheckStatusText);
+        Assert.Contains(nameof(SessionViewModel.UpdateCheckStatusText), changed);
+    }
+
+    [Fact]
     public async Task LoginAsync_RefreshesStatusAfterSuccess()
     {
         var fakeClient = new FakeRustInteropClient
