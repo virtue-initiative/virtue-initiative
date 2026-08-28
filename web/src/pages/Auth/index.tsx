@@ -27,7 +27,7 @@ import {
   SegmentedControl,
 } from '@virtueinitiative/shared-web';
 import { LANDING_URL } from '../../utils/landing-url';
-import { EyeIcon, EyeSlashIcon } from '../../components/icons';
+import { PasswordField } from './PasswordField';
 
 type AuthMode = 'login' | 'signup' | 'forgot' | 'reset' | 'finish-signup';
 
@@ -72,8 +72,6 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -298,7 +296,7 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
           )}
 
           {authMode !== 'forgot' && authMode !== 'signup' && (
-            <Field
+            <PasswordField
               label={
                 authMode === 'reset'
                   ? 'New password'
@@ -307,69 +305,40 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
                     : 'Password'
               }
               id="password"
-            >
-              <div class="auth-password-field">
-                <Input
-                  id="password"
-                  name="password"
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
-                  placeholder={
-                    authMode === 'login'
-                      ? 'Enter your password'
-                      : authMode === 'reset'
-                        ? 'Choose a new password'
-                        : 'Choose a password'
-                  }
-                  autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
-                  required
-                  disabled={
-                    (authMode === 'reset' && !resetTokenValid) ||
-                    (authMode === 'finish-signup' && !signupTokenValid)
-                  }
-                />
-                <button
-                  type="button"
-                  class="auth-password-toggle"
-                  onClick={() => setShowPassword((v) => !v)}
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  aria-pressed={showPassword}
-                >
-                  {showPassword ? <EyeSlashIcon /> : <EyeIcon />}
-                </button>
-              </div>
-            </Field>
+              name="password"
+              value={password}
+              onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
+              placeholder={
+                authMode === 'login'
+                  ? 'Enter your password'
+                  : authMode === 'reset'
+                    ? 'Choose a new password'
+                    : 'Choose a password'
+              }
+              autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
+              required
+              disabled={
+                (authMode === 'reset' && !resetTokenValid) ||
+                (authMode === 'finish-signup' && !signupTokenValid)
+              }
+            />
           )}
 
           {(authMode === 'reset' || authMode === 'finish-signup') && (
-            <Field label="Confirm password" id="password-confirm">
-              <div class="auth-password-field">
-                <Input
-                  id="password-confirm"
-                  name="password-confirm"
-                  type={showConfirm ? 'text' : 'password'}
-                  value={confirm}
-                  onInput={(e) => setConfirm((e.target as HTMLInputElement).value)}
-                  placeholder="Retype your password"
-                  autoComplete="new-password"
-                  required
-                  disabled={
-                    (authMode === 'reset' && !resetTokenValid) ||
-                    (authMode === 'finish-signup' && !signupTokenValid)
-                  }
-                />
-                <button
-                  type="button"
-                  class="auth-password-toggle"
-                  onClick={() => setShowConfirm((v) => !v)}
-                  aria-label={showConfirm ? 'Hide password' : 'Show password'}
-                  aria-pressed={showConfirm}
-                >
-                  {showConfirm ? <EyeSlashIcon /> : <EyeIcon />}
-                </button>
-              </div>
-            </Field>
+            <PasswordField
+              label="Confirm password"
+              id="password-confirm"
+              name="password-confirm"
+              value={confirm}
+              onInput={(e) => setConfirm((e.target as HTMLInputElement).value)}
+              placeholder="Retype your password"
+              autoComplete="new-password"
+              required
+              disabled={
+                (authMode === 'reset' && !resetTokenValid) ||
+                (authMode === 'finish-signup' && !signupTokenValid)
+              }
+            />
           )}
 
           {requiresTermsAcceptance && (
