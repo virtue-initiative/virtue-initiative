@@ -19,6 +19,7 @@ public sealed partial class MainWindow : Window
 {
     private const string WebsiteDisplayUrl = "virtueinitiative.org";
     private const string WebsiteNavigateUrl = "https://virtueinitiative.org";
+    private const string SignUpNavigateUrl = "https://app.virtueinitiative.org/signup";
 
     private readonly AppWindow _appWindow;
     private readonly TextBlock _statusTextBlock;
@@ -160,7 +161,7 @@ public sealed partial class MainWindow : Window
         StyleInput(_emailTextBox);
 
         _passwordBox.PlaceholderText = "Password";
-        _passwordBox.PasswordRevealMode = PasswordRevealMode.Hidden;
+        _passwordBox.PasswordRevealMode = PasswordRevealMode.Peek;
         _passwordBox.PasswordChanged += PasswordBox_OnPasswordChanged;
         StyleInput(_passwordBox);
 
@@ -287,7 +288,7 @@ public sealed partial class MainWindow : Window
         var reportBugButton = CreateActionButton("Report a Bug");
         reportBugButton.Click += async (_, _) => await ShowReportBugDialogAsync();
 
-        var forceCaptureButton = CreateActionButton("Force Screenshot & Upload");
+        var forceCaptureButton = CreateActionButton("Test Screenshot");
         forceCaptureButton.Click += async (_, _) => await ForceCaptureButton_OnClickAsync();
 
         var stopMonitoringButton = CreateActionButton("Stop Monitoring");
@@ -348,7 +349,28 @@ public sealed partial class MainWindow : Window
         _loginPanel.Children.Add(_signInButton);
 
         var signOutButton = CreateActionButton("Sign Out");
-        signOutButton.Click += async (_, _) => await ViewModel.LogoutAsync();
+        signOutButton.Click += async (_, _) =>
+        {
+            if (await ShowLogoutConfirmationAsync())
+            {
+                await ViewModel.LogoutAsync();
+            }
+        };
+
+        var signUpLink = new HyperlinkButton
+        {
+            Content = "Don't have an account? Sign up",
+            NavigateUri = new Uri(SignUpNavigateUrl),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(0),
+            FontFamily = BodyFont,
+            Foreground = ForestBrush,
+        };
+        signUpLink.Resources["HyperlinkButtonForeground"] = ForestBrush;
+        signUpLink.Resources["HyperlinkButtonForegroundPointerOver"] = Forest3Brush;
+        signUpLink.Resources["HyperlinkButtonForegroundPressed"] = Forest2Brush;
+        signUpLink.Resources["HyperlinkButtonForegroundDisabled"] = Ink3Brush;
+        _loginPanel.Children.Add(signUpLink);
 
         _accountActionsPanel.Orientation = Orientation.Horizontal;
         _accountActionsPanel.Spacing = 10;
@@ -517,6 +539,76 @@ public sealed partial class MainWindow : Window
         {
             Title = CreateDialogTitle("Stop Monitoring"),
             PrimaryButtonText = "Stop Monitoring",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            Content = content,
+        };
+        ApplyDialogTheme(dialog);
+
+        if (Content is FrameworkElement root)
+        {
+            dialog.XamlRoot = root.XamlRoot;
+        }
+
+        var result = await dialog.ShowAsync();
+        return result == ContentDialogResult.Primary;
+    }
+
+    private async Task<bool> ShowLogoutConfirmationAsync()
+    {
+        var warningIcon = new FontIcon
+        {
+            Glyph = "",
+            FontSize = 28,
+            Foreground = WarningBrush,
+            Margin = new Thickness(0, 2, 16, 0),
+        };
+
+        var textStack = new StackPanel
+        {
+            Spacing = 8,
+        };
+        textStack.Children.Add(new TextBlock
+        {
+            Text = "Sign out of Virtue?",
+            FontFamily = BodyFont,
+            FontSize = 20,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = InkBrush,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        textStack.Children.Add(new TextBlock
+        {
+            Text = "Signing out will delete this device and stop monitoring. Logging in again will create a new device.",
+            FontFamily = BodyFont,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = Ink2Brush,
+        });
+        textStack.Children.Add(new TextBlock
+        {
+            Text = "Anyone monitoring you may be alerted.",
+            FontFamily = BodyFont,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = WarningBrush,
+            FontWeight = FontWeights.Medium,
+        });
+
+        var content = new Grid
+        {
+            ColumnSpacing = 0,
+            MinWidth = 420,
+        };
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(warningIcon, 0);
+        Grid.SetColumn(textStack, 1);
+        content.Children.Add(warningIcon);
+        content.Children.Add(textStack);
+
+        var dialog = new ContentDialog
+        {
+            Title = CreateDialogTitle("Sign Out"),
+            PrimaryButtonText = "Sign Out",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
             Content = content,
@@ -810,12 +902,12 @@ public sealed partial class MainWindow : Window
     {
         var dialog = new ContentDialog
         {
-            Title = CreateDialogTitle("Screenshot Captured"),
+            Title = CreateDialogTitle("Screenshot Uploaded"),
             CloseButtonText = "Close",
             DefaultButton = ContentDialogButton.Close,
             Content = new TextBlock
             {
-                Text = "A screenshot was captured and is uploading.",
+                Text = "Screenshot uploaded. Check the web logs page to view it.",
                 TextWrapping = TextWrapping.Wrap,
                 FontFamily = BodyFont,
                 Foreground = Ink2Brush,

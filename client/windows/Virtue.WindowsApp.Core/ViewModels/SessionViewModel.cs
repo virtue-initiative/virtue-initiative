@@ -376,7 +376,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
             await RefreshInternalAsync();
             StatusText = BuildStatusText();
             succeeded = true;
-        }, "Capturing screenshot...");
+        }, "Screenshot uploading...");
         return succeeded;
     }
 

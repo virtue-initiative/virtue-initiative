@@ -39,7 +39,7 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
     private bool _iconAdded;
     private uint _taskbarCreatedMessage;
     private string _toolTip = "Virtue";
-    // Force Screenshot needs an active (logged-in) monitoring session, so it starts
+    // Test Screenshot needs an active (logged-in) monitoring session, so it starts
     // unavailable and is hidden from the menu entirely (rather than shown-but-disabled)
     // until the app calls SetForceCaptureAvailable.
     private bool _forceCaptureAvailable;
@@ -104,7 +104,7 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
         RebuildMenu();
     }
 
-    /// Rebuilds the popup menu from scratch so an unavailable item (Force Screenshot
+    /// Rebuilds the popup menu from scratch so an unavailable item (Test Screenshot
     /// before login) is omitted entirely rather than shown disabled — Win32 popup menus
     /// have no per-item show/hide, so this is the standard way to change which items are
     /// present. The HMENU is a USER object owned by the calling thread, so callers must
@@ -117,7 +117,7 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
         _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayOpen, "Open");
         if (_forceCaptureAvailable)
         {
-            _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayForceCapture, "Force Screenshot && Upload");
+            _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayForceCapture, "Test Screenshot");
         }
 
         _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayReportBug, "Report a Bug");

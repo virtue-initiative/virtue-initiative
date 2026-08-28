@@ -59,6 +59,12 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://virtueinitiative.org")))
         }
 
+        binding.signUpLink.setOnClickListener {
+            startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse("https://app.virtueinitiative.org/signup"))
+            )
+        }
+
         binding.reportBugLink.setOnClickListener { showReportBugDialog() }
 
         KeepAliveWorker.schedule(this)
