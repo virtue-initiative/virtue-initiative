@@ -217,13 +217,14 @@ final class MonitoringCoordinator: ObservableObject {
             return
         }
         isForceCapturing = true
-        forceCaptureMessage = "Capturing screenshot…"
+        forceCaptureMessage = "Screenshot uploading…"
         Task {
             let error = await Task.detached(priority: .userInitiated) {
                 NativeBridge.forceCapture()
             }.value
             isForceCapturing = false
-            let message = error.map { "Force screenshot failed: \($0)" } ?? "Screenshot captured and uploading"
+            let message = error.map { "Test screenshot failed: \($0)" }
+                ?? "Screenshot uploaded. Check the web logs page to view it."
             forceCaptureMessage = message
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             // Only clear if a later call hasn't already replaced this message.

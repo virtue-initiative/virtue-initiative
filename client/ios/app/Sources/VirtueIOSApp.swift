@@ -18,6 +18,7 @@ struct ContentView: View {
     @ObservedObject var coordinator: MonitoringCoordinator
     @State private var showPauseConfirmation = false
     @State private var showLogoutConfirmation = false
+    @State private var isPasswordVisible = false
     @State private var showStatusSheet = false
     @State private var showReportBugSheet = false
     @State private var showReportBugConfirmation = false
@@ -63,7 +64,7 @@ struct ContentView: View {
                 coordinator.logout()
             }
         } message: {
-            Text("Logging out will alert people monitoring you and will recreate a new device on your next login. Continue?")
+            Text("Signing out will delete this device and stop monitoring. Anyone monitoring you may be alerted. Logging in again will create a new device.")
         }
     }
 
@@ -157,8 +158,28 @@ struct ContentView: View {
                             .autocorrectionDisabled()
                             .textFieldStyle(.roundedBorder)
 
-                        SecureField("Password", text: $coordinator.password)
-                            .textFieldStyle(.roundedBorder)
+                        // SwiftUI has no reveal affordance on SecureField, so swap
+                        // in a plain TextField while the eye toggle is on. Both
+                        // bind the same password, so toggling never loses input.
+                        HStack(spacing: 8) {
+                            if isPasswordVisible {
+                                TextField("Password", text: $coordinator.password)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                                    .textFieldStyle(.roundedBorder)
+                            } else {
+                                SecureField("Password", text: $coordinator.password)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                            Button {
+                                isPasswordVisible.toggle()
+                            } label: {
+                                Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
+                                    .foregroundStyle(VirtueBrand.textMuted)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(isPasswordVisible ? "Hide password" : "Show password")
+                        }
 
                         TextField("Device name", text: $coordinator.deviceName)
                             .autocorrectionDisabled()
@@ -171,6 +192,13 @@ struct ContentView: View {
                             .buttonStyle(VirtueButtonStyle(prominent: true))
                             .disabled(coordinator.isSigningIn)
                         }
+
+                        Link(
+                            "Don't have an account? Sign up",
+                            destination: URL(string: "https://app.virtueinitiative.org/signup")!
+                        )
+                        .font(.subheadline)
+                        .foregroundStyle(VirtueBrand.accent)
 
                         if let error = coordinator.loginError {
                             Text(error)
