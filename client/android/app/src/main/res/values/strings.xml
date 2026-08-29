@@ -51,7 +51,7 @@
 
     <!-- Dialogs -->
     <string name="dialog_sign_out_title">Sign out?</string>
-    <string name="dialog_sign_out_message">Signing out will delete this device and stop monitoring. Anyone monitoring you may be alerted. Logging in again will create a new device.</string>
+    <string name="dialog_sign_out_message">Signing out will deactivate this device and stop monitoring. Anyone monitoring you may be alerted. Logging in again will create a new device.</string>
     <string name="dialog_pause_title">Pause monitoring?</string>
     <string name="dialog_pause_message">This will stop monitoring on this device. People monitoring you may be alerted.</string>
     <string name="dialog_resume_title">Resume monitoring?</string>

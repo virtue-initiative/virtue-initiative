@@ -229,7 +229,7 @@ fn login(paths: ClientPaths, email: Option<String>, device_name: Option<String>)
 
 fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
     println!(
-        "Warning: signing out will delete this device and stop monitoring. Anyone monitoring \
+        "Warning: signing out will deactivate this device and stop monitoring. Anyone monitoring \
          you may be alerted. Logging in again will create a new device."
     );
 

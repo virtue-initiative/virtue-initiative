@@ -188,7 +188,7 @@ function DeviceCard({
           {device.status === 'online'
             ? 'Online'
             : device.status === 'logged_out'
-              ? 'Logged out'
+              ? 'Deactivated'
               : 'Offline'}
         </Badge>
       </CardHeader>
@@ -227,7 +227,7 @@ function DeviceCard({
               onClick={openDeleteDialog}
               disabled={saving || deleting}
             >
-              Delete device
+              Delete device permanently
             </Button>
           </DialogSecondaryActions>
           <DialogActions>

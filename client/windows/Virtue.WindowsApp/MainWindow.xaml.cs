@@ -628,7 +628,7 @@ public sealed partial class MainWindow : Window
         });
         textStack.Children.Add(new TextBlock
         {
-            Text = "Signing out will delete this device and stop monitoring. Logging in again will create a new device.",
+            Text = "Signing out will deactivate this device and stop monitoring. Logging in again will create a new device.",
             FontFamily = BodyFont,
             TextWrapping = TextWrapping.Wrap,
             Foreground = Ink2Brush,
