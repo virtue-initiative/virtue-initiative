@@ -108,6 +108,8 @@ const LOG_KIND_TABLE: Record<
     category: string;
     icon: () => JSX.Element;
     message: (deviceName: string, data: Record<string, unknown>) => string;
+    /** Extra explanatory copy shown below the message in the detail dialog. */
+    description?: string;
   }
 > = {
   screenshot: {
@@ -219,6 +221,8 @@ const LOG_KIND_TABLE: Record<
     category: 'Daily Check-in',
     icon: ActivityIcon,
     message: (d) => `Daily check-in received from ${d}`,
+    description:
+      'Once a day, your device sends a small update to confirm that monitoring is still active.',
   },
 };
 
@@ -257,6 +261,13 @@ export function getLogMessage(log: DataLog, deviceName: string): string {
   const key = getLogCaseKey(log);
   if (key === 'unknown') return `Event on ${deviceName}`;
   return LOG_KIND_TABLE[key].message(deviceName, log.data);
+}
+
+/** Extra explanatory copy for the detail dialog, if this log kind has any. */
+export function getLogDescription(log: DataLog): string | undefined {
+  const key = getLogCaseKey(log);
+  if (key === 'unknown') return undefined;
+  return LOG_KIND_TABLE[key].description;
 }
 
 export const LOG_TYPES = [
@@ -436,6 +447,7 @@ export function LogDetailDialog({
         On {deviceName(item.device_id)} at {formatDate(item.ts)} {formatTime(item.ts)}
       </p>
       <p class="logs-detail-message">{getLogMessage(item, deviceName(item.device_id))}</p>
+      {getLogDescription(item) && <p class="logs-detail-description">{getLogDescription(item)}</p>}
       {!imgSrc && item.type !== 'screenshot' && (
         <div class="logs-detail-icon">
           <LogIcon log={item} />

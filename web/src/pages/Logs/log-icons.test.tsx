@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { DataLog } from '../../utils/api/api';
 import {
   getLogCategory,
+  getLogDescription,
   getLogHelpAnchor,
   getLogHelpUrl,
   getLogMessage,
@@ -64,6 +65,16 @@ describe('getLogMessage', () => {
         'Bob’s PC',
       ),
     ).toContain('2 min');
+  });
+});
+
+describe('getLogDescription', () => {
+  it('explains what a daily check-in is', () => {
+    expect(getLogDescription(log('heartbeat'))).toMatch(/once a day/i);
+  });
+
+  it('is undefined for log kinds without extra explanation', () => {
+    expect(getLogDescription(log('screenshot'))).toBeUndefined();
   });
 });
 
