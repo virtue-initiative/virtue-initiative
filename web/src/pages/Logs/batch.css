@@ -67,12 +67,6 @@
   margin: 0.5rem 0 0.75rem;
 }
 
-.logs-detail-description {
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  margin: -0.5rem 0 0.75rem;
-}
-
 .logs-detail-more {
   margin-top: 1rem;
   font-size: 0.85rem;

@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import { DataLog } from '../../utils/api/api';
 import {
   getLogCategory,
-  getLogDescription,
   getLogHelpAnchor,
   getLogHelpUrl,
   getLogMessage,
@@ -45,7 +44,7 @@ describe('getLogCategory — titles', () => {
 describe('getLogMessage', () => {
   it('builds device-specific messages per log kind', () => {
     expect(getLogMessage(log('heartbeat'), 'Bob’s PC')).toBe(
-      'Daily check-in received from Bob’s PC',
+      'Once a day, your device sends a small update to confirm that monitoring is still active.',
     );
     expect(getLogMessage(log('system_login', { utc_ms: 0 }), 'Bob’s PC')).toBe(
       'Bob’s PC was logged into or started up',
@@ -65,16 +64,6 @@ describe('getLogMessage', () => {
         'Bob’s PC',
       ),
     ).toContain('2 min');
-  });
-});
-
-describe('getLogDescription', () => {
-  it('explains what a daily check-in is', () => {
-    expect(getLogDescription(log('heartbeat'))).toMatch(/once a day/i);
-  });
-
-  it('is undefined for log kinds without extra explanation', () => {
-    expect(getLogDescription(log('screenshot'))).toBeUndefined();
   });
 });
 
