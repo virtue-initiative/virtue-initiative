@@ -30,6 +30,8 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private string? _errorText;
     private bool _updateReady;
     private string? _updateCountdownText;
+    private string? _updateCheckStatusText;
+    private bool _updateInstalling;
 
     public SessionViewModel(IRustInteropClient interopClient, string? windowsPackageVersion = null)
     {
@@ -222,7 +224,50 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         }
     }
 
+    /// <summary>
+    /// Called when a staged update stops being staged without the app restarting — the install
+    /// was declined, or the Store retracted the update. Without this the notice card would stay
+    /// up forever showing a frozen countdown over a button that no longer does anything. The
+    /// check loop re-stages on its own backoff, which rebuilds all of this through
+    /// <see cref="NotifyUpdateStaged"/>.
+    /// </summary>
+    public void NotifyUpdateUnstaged()
+    {
+        UpdateCountdownText = null;
+        UpdateInstalling = false;
+        if (SetProperty(ref _updateReady, false, nameof(UpdateReady)))
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TrayTooltip)));
+        }
+    }
+
+    /// <summary>
+    /// Called once the install has actually been started, which ends with the OS terminating
+    /// this process and the restart watchdog relaunching it. The notice card says so and its
+    /// button goes dead, so the wait doesn't read as the button having done nothing.
+    /// </summary>
+    public void NotifyUpdateInstalling()
+    {
+        UpdateInstalling = true;
+    }
+
+    public bool UpdateInstalling
+    {
+        get => _updateInstalling;
+        private set => SetProperty(ref _updateInstalling, value);
+    }
+
     public bool UpdateReady => _updateReady;
+
+    /// <summary>
+    /// Feedback for the manual "Check for updates" button, rendered beside it. Every check
+    /// outcome maps to some text here — an empty line after a click reads as a hang.
+    /// </summary>
+    public string? UpdateCheckStatusText
+    {
+        get => _updateCheckStatusText;
+        set => SetProperty(ref _updateCheckStatusText, value);
+    }
 
     public string? UpdateCountdownText
     {

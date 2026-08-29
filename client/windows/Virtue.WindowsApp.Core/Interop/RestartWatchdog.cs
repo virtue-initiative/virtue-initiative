@@ -1,5 +1,3 @@
-using System.Diagnostics;
-
 namespace Virtue.WindowsApp.Core.Interop;
 
 /// <summary>
@@ -13,9 +11,12 @@ namespace Virtue.WindowsApp.Core.Interop;
 /// attempt a no-op when the app is already running, so no separate "is it
 /// running" check is needed here.
 ///
-/// 1 minute is Task Scheduler's floor for a repeating trigger — confirmed against
-/// schtasks.exe, which rejects a sub-minute `Interval` (e.g. `PT45S`) as out of
-/// range even via an XML task definition, so there's no way to go faster than this.
+/// 1 minute is Task Scheduler's floor for a repeating trigger — the schema pins
+/// `Repetition/Interval` at `minInclusive="PT1M"`, so schtasks.exe rejects a
+/// sub-minute `Interval` (e.g. `PT45S`) as out of range even via an XML task
+/// definition. That floor is specific to *repetition*: a one-shot `TimeTrigger`
+/// can be aimed seconds out, which is how <see cref="UpdateRelaunchTask"/> beats
+/// this poll after an update. This task stays the general-purpose safety net.
 /// </summary>
 public static class RestartWatchdog
 {
@@ -29,45 +30,22 @@ public static class RestartWatchdog
     /// Command-line arg the relaunched process should receive, so it comes back
     /// into the tray quietly rather than popping a window.
     /// </param>
-    public static void Register(string exePath, string quietArg)
+    /// <returns>A human-readable outcome for the startup log.</returns>
+    public static string Register(string exePath, string quietArg)
     {
-        RunSchtasks(new[]
-        {
+        var result = Schtasks.Run(
             "/Create", "/F",
             "/SC", "MINUTE", "/MO", "1",
             "/TN", TaskName,
             "/TR", $"\"{exePath}\" {quietArg}",
-            "/RL", "LIMITED",
-        });
+            "/RL", "LIMITED");
+        return result.Succeeded
+            ? $"Restart watchdog registered ({exePath})."
+            : $"Restart watchdog registration failed ({result}).";
     }
 
     /// <summary>
     /// Removes the watchdog task so a deliberate process exit is not resurrected.
     /// </summary>
-    public static void Unregister()
-    {
-        RunSchtasks(new[] { "/Delete", "/F", "/TN", TaskName });
-    }
-
-    private static void RunSchtasks(IEnumerable<string> arguments)
-    {
-        try
-        {
-            using var process = new Process();
-            process.StartInfo.FileName = "schtasks.exe";
-            process.StartInfo.UseShellExecute = false;
-            process.StartInfo.CreateNoWindow = true;
-            foreach (var arg in arguments)
-            {
-                process.StartInfo.ArgumentList.Add(arg);
-            }
-
-            process.Start();
-            process.WaitForExit();
-        }
-        catch
-        {
-            // Best-effort: a failure to (un)register the watchdog should not block startup/exit.
-        }
-    }
+    public static void Unregister() => Schtasks.Run("/Delete", "/F", "/TN", TaskName);
 }

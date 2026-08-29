@@ -24,6 +24,7 @@ public sealed partial class MainWindow : Window
     private readonly TextBlock _statusTextBlock;
     private readonly TextBlock _statusDetailTextBlock;
     private readonly TextBlock _buildLabelTextBlock;
+    private readonly TextBlock _updateCheckStatusTextBlock;
     private readonly TextBlock _accountSummaryTextBlock;
     private readonly StackPanel _loginPanel;
     private readonly StackPanel _accountActionsPanel;
@@ -35,6 +36,7 @@ public sealed partial class MainWindow : Window
     private readonly TextBlock _errorTextBlock;
     private readonly Border _updateNoticeCard;
     private readonly TextBlock _updateNoticeTextBlock;
+    private readonly Button _restartNowButton = CreateActionButton("Restart now to update");
     private Button? _signInButton;
     private bool _allowClose;
 
@@ -67,6 +69,7 @@ public sealed partial class MainWindow : Window
         _statusTextBlock = new TextBlock();
         _statusDetailTextBlock = new TextBlock { TextWrapping = TextWrapping.Wrap };
         _buildLabelTextBlock = new TextBlock();
+        _updateCheckStatusTextBlock = new TextBlock();
         _accountSummaryTextBlock = new TextBlock();
         _emailTextBox = new TextBox();
         _passwordBox = new PasswordBox();
@@ -118,8 +121,15 @@ public sealed partial class MainWindow : Window
     /// </summary>
     public event EventHandler? Hidden;
 
-    /// <summary>Raised by the in-window update notice's "Close now and update" button.</summary>
+    /// <summary>Raised by the in-window update notice's "Restart now to update" button.</summary>
     public event EventHandler? CloseNowAndUpdateRequested;
+
+    /// <summary>
+    /// Raised by the status card's "Check for updates" button. Its only effect is to
+    /// short-circuit the update check's 4-hour cadence — see
+    /// <c>StoreUpdateManager.RequestCheckNow</c>.
+    /// </summary>
+    public event EventHandler? CheckForUpdatesRequested;
 
     public void HideToTray()
     {
@@ -233,13 +243,12 @@ public sealed partial class MainWindow : Window
 
     private Border BuildUpdateNoticeCard()
     {
-        var closeNowButton = CreateActionButton("Close now and update");
-        closeNowButton.Click += (_, _) => CloseNowAndUpdateRequested?.Invoke(this, EventArgs.Empty);
+        _restartNowButton.Click += (_, _) => CloseNowAndUpdateRequested?.Invoke(this, EventArgs.Empty);
 
         var content = new StackPanel { Spacing = 8 };
         content.Children.Add(CreateSectionLabel("Update Ready"));
         content.Children.Add(_updateNoticeTextBlock);
-        content.Children.Add(closeNowButton);
+        content.Children.Add(_restartNowButton);
 
         var card = CreateCard(content);
         card.BorderBrush = WarningBrush;
@@ -259,6 +268,10 @@ public sealed partial class MainWindow : Window
         _buildLabelTextBlock.FontFamily = MonoFont;
         _buildLabelTextBlock.FontSize = 12;
         _buildLabelTextBlock.Foreground = Ink3Brush;
+        _updateCheckStatusTextBlock.FontFamily = BodyFont;
+        _updateCheckStatusTextBlock.FontSize = 12;
+        _updateCheckStatusTextBlock.Foreground = Ink3Brush;
+        _updateCheckStatusTextBlock.VerticalAlignment = VerticalAlignment.Center;
 
         var headingRow = new StackPanel
         {
@@ -280,6 +293,9 @@ public sealed partial class MainWindow : Window
         var stopMonitoringButton = CreateActionButton("Stop Monitoring");
         stopMonitoringButton.Click += StopMonitoringButton_OnClick;
 
+        var checkForUpdatesButton = CreateActionButton("Check for updates");
+        checkForUpdatesButton.Click += (_, _) => CheckForUpdatesRequested?.Invoke(this, EventArgs.Empty);
+
         _signedInActionsPanel.Orientation = Orientation.Horizontal;
         _signedInActionsPanel.Spacing = 10;
         _signedInActionsPanel.Children.Add(forceCaptureButton);
@@ -295,11 +311,21 @@ public sealed partial class MainWindow : Window
         actionRow.Children.Add(reportBugButton);
         actionRow.Children.Add(_signedInActionsPanel);
 
+        var buildRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 10,
+            Margin = new Thickness(0, 6, 0, 0),
+        };
+        buildRow.Children.Add(checkForUpdatesButton);
+        buildRow.Children.Add(_updateCheckStatusTextBlock);
+
         var content = new StackPanel { Spacing = 8 };
         content.Children.Add(CreateSectionLabel("Status"));
         content.Children.Add(headingRow);
         content.Children.Add(_statusDetailTextBlock);
         content.Children.Add(_buildLabelTextBlock);
+        content.Children.Add(buildRow);
         content.Children.Add(actionRow);
 
         return CreateCard(content);
@@ -822,9 +848,12 @@ public sealed partial class MainWindow : Window
     private void SyncFromViewModel()
     {
         _updateNoticeCard.Visibility = ViewModel.UpdateReady ? Visibility.Visible : Visibility.Collapsed;
-        _updateNoticeTextBlock.Text = ViewModel.UpdateCountdownText is { } countdown
-            ? $"Virtue will close and update in {countdown}."
-            : "An update is ready and will install soon.";
+        _updateNoticeTextBlock.Text = ViewModel.UpdateInstalling
+            ? "Installing the update. Virtue will close and restart itself within a minute."
+            : ViewModel.UpdateCountdownText is { } countdown
+                ? $"Virtue will restart to update in {countdown}."
+                : "An update is ready and will install soon.";
+        _restartNowButton.IsEnabled = !ViewModel.UpdateInstalling;
 
         _statusTextBlock.Text = BuildPrimaryStatusText();
         var statusBrush = StatusBrush();
@@ -832,6 +861,7 @@ public sealed partial class MainWindow : Window
         _statusDot.Background = statusBrush;
         _statusDetailTextBlock.Text = BuildSecondaryStatusText();
         _buildLabelTextBlock.Text = ViewModel.BuildLabelText;
+        _updateCheckStatusTextBlock.Text = ViewModel.UpdateCheckStatusText ?? string.Empty;
 
         if (!ViewModel.HasLoadedStatus)
         {

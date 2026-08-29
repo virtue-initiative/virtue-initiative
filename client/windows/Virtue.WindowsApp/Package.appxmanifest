@@ -3,11 +3,12 @@
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
   xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
   xmlns:uap11="http://schemas.microsoft.com/appx/manifest/uap/windows10/11"
   xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
   xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap uap10 uap11 desktop desktop6 rescap">
+  IgnorableNamespaces="uap uap5 uap10 uap11 desktop desktop6 rescap">
   <Identity Name="VirtueInitiative.VirtueAccountability" Publisher="CN=CE0CD9E5-E8B5-49DD-96E4-E6C5D6146BC6" Version="0.0.5.0" />
   <Properties>
     <DisplayName>Virtue Initiative</DisplayName>
@@ -34,6 +35,12 @@
         <desktop:Extension Category="windows.startupTask" Executable="Virtue.WindowsApp.exe" EntryPoint="Windows.FullTrustApplication">
           <desktop:StartupTask TaskId="VirtueTrayStartup" Enabled="true" DisplayName="Virtue Tray" />
         </desktop:Extension>
+        <!-- Version-independent launch path for the restart watchdog; see AppLaunchPath. -->
+        <uap5:Extension Category="windows.appExecutionAlias" Executable="Virtue.WindowsApp.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap5:AppExecutionAlias>
+            <uap5:ExecutionAlias Alias="virtue-initiative.exe" />
+          </uap5:AppExecutionAlias>
+        </uap5:Extension>
       </Extensions>
     </Application>
   </Applications>

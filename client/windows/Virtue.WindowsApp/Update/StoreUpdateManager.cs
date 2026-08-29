@@ -13,6 +13,19 @@ namespace Virtue.WindowsApp.Update;
 /// WinUI process.
 ///
 /// <para>
+/// <b>Silent first.</b> Both <c>RequestDownloadStorePackageUpdatesAsync</c> and
+/// <c>RequestDownloadAndInstallStorePackageUpdatesAsync</c> show an OS consent dialog — the
+/// install one <i>always</i> does. That dialog is what made auto-update look dead: it is owned
+/// by whichever HWND the context was initialized with, which in resident mode is the tray
+/// host's hidden window, so the user saw nothing happen. The <c>TrySilent*</c> pair does the
+/// same work with no UI whenever <see cref="StoreContext.CanSilentlyDownloadStorePackageUpdates"/>
+/// is set (it is, unless the user turned off the Store's "Update apps automatically"), so those
+/// are preferred and the <c>Request*</c> ones are only a fallback. The fallback install is
+/// gated behind an explicit <c>allowInteractive</c> flag so <c>App</c> can put a real window on
+/// screen first — see <see cref="TryInstallStagedUpdateAsync"/>.
+/// </para>
+///
+/// <para>
 /// <b>Owner window.</b> In a packaged <i>desktop</i> app (as opposed to a UWP one) the
 /// <see cref="StoreContext"/> returned by <c>GetDefault()</c> must be associated with an owner
 /// HWND via the <c>IInitializeWithWindow</c> interop before any Store call that <i>can</i> show
@@ -25,31 +38,31 @@ namespace Virtue.WindowsApp.Update;
 /// lifetime.
 /// </para>
 ///
-/// Detect and download are deliberately kept separate from install:
-///  - <see cref="CheckOnceAsync"/> only calls <c>GetAppAndOptionalStorePackageUpdatesAsync</c>
-///    and <c>RequestDownloadStorePackageUpdatesAsync</c>, both of which run in the background
-///    without requiring the app to stop — see the task-level design notes captured in
-///    the implementation plan for this feature.
-///  - <see cref="TryInstallStagedUpdateAsync"/> (which calls
-///    <c>RequestDownloadAndInstallStorePackageUpdatesAsync</c> — a fast install-only pass
-///    since the update was already staged by the download step) is only ever invoked by
-///    <c>App.xaml.cs</c> once it has stopped the resident monitoring daemon at a safe point.
-///
-/// No changes were made to `client/core`'s tamper-detection budget (CORE-002) for this: an
-/// update-triggered exit is deliberately treated the same as a crash by the daemon (it is
-/// NOT excused via `note_user_stop`, since only an actual user-initiated stop may use that
-/// path), and relies on `RestartWatchdog`'s existing per-minute relaunch to bring the app
-/// back — the same worst-case gap crash recovery already produces, which is what the
-/// CORE-002 single-late threshold was already sized for. See `client/windows/README.md`.
+/// The monitoring daemon is deliberately <b>never</b> stopped for an update — the OS terminates
+/// the process for the package swap, which is the same shape as a crash-recovery relaunch that
+/// <c>RestartWatchdog</c> and CORE-002's late-wakeup budget already cover, and `DaemonState` is
+/// persisted every tick so there is nothing to truncate. macOS's Sparkle updater made the same
+/// call (`client/mac/app/Sources/UpdateController.swift`). See `client/windows/README.md`.
 /// </summary>
 public sealed class StoreUpdateManager : IDisposable
 {
+    /// <summary>
+    /// How long the loop sleeps between slices. Short so the debug sentinel is picked up
+    /// promptly and <see cref="RequestCheckNow"/> feels instant; the real Store check still
+    /// only runs on <see cref="StoreUpdateRetryPolicy"/>'s cadence.
+    /// </summary>
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
+
     private readonly StoreContext _storeContext;
     private readonly bool _ownerInitialized;
     /// Owner-window failure recorded at construction time, when no <see cref="Log"/> handler is
     /// subscribed yet; flushed on the first check instead of being dropped.
     private string? _pendingOwnerWindowError;
     private CancellationTokenSource? _loopCancellation;
+    /// Released by <see cref="RequestCheckNow"/> to cut a poll slice short.
+    private readonly SemaphoreSlim _checkNowSignal = new(0);
+    /// Set once the debug sentinel has staged a fake update; makes the install a no-op exit.
+    private bool _simulatedUpdate;
 
     /// <param name="ownerWindow">
     /// HWND to own any Store-shown UI — see the owner-window note on the class. Pass
@@ -84,6 +97,13 @@ public sealed class StoreUpdateManager : IDisposable
     public event EventHandler<string>? UpdateCheckFailed;
 
     /// <summary>
+    /// Raised after every completed check, with whether it found an update. Drives the manual
+    /// "Check for updates" button's status line; a found update reports itself through the
+    /// Update Ready card instead.
+    /// </summary>
+    public event EventHandler<bool>? CheckCompleted;
+
+    /// <summary>
     /// Raised (log-only) for ordinary check-lifecycle progress. `ui-startup.log` is the only
     /// observability channel on a Store install, so the whole lifecycle is logged — including
     /// the "no updates available" case, whose previous silence made it impossible to tell a
@@ -92,6 +112,12 @@ public sealed class StoreUpdateManager : IDisposable
     public event EventHandler<string>? Log;
 
     public bool IsUpdateStaged { get; private set; }
+
+    /// <summary>
+    /// Overrides <see cref="UpdateRestartPolicy.DeferralCap"/> for the currently staged update.
+    /// Only ever set by the debug sentinel; <c>null</c> for a real Store update.
+    /// </summary>
+    public TimeSpan? DeferralOverride { get; private set; }
 
     /// <summary>
     /// Starts the periodic background check. Safe to call once per process lifetime.
@@ -108,21 +134,33 @@ public sealed class StoreUpdateManager : IDisposable
         _ = Task.Run(async () =>
         {
             var consecutiveFailures = 0;
+            var nextCheckAtUtc = DateTimeOffset.UtcNow;
             try
             {
                 while (!token.IsCancellationRequested)
                 {
                     // Nothing to check for while an update is already staged and waiting for a
                     // safe restart. If the install later fails, App clears the flag and this
-                    // loop picks the check back up on its next tick.
-                    if (!IsUpdateStaged)
+                    // loop picks the check back up on its next slice.
+                    if (!IsUpdateStaged && DateTimeOffset.UtcNow >= nextCheckAtUtc)
                     {
                         var succeeded = await CheckOnceAsync().ConfigureAwait(false);
                         consecutiveFailures = succeeded ? 0 : consecutiveFailures + 1;
+                        nextCheckAtUtc = DateTimeOffset.UtcNow + StoreUpdateRetryPolicy.GetNextDelay(consecutiveFailures);
                     }
 
-                    var delay = StoreUpdateRetryPolicy.GetNextDelay(consecutiveFailures);
-                    await Task.Delay(delay, token).ConfigureAwait(false);
+                    if (!IsUpdateStaged)
+                    {
+                        StageSimulatedUpdateIfRequested();
+                    }
+
+                    // Waking on a short slice rather than one long delay keeps every path that
+                    // stages an update (real check, debug sentinel, manual re-check) on this
+                    // one thread, and lets RequestCheckNow short-circuit the cadence.
+                    if (await _checkNowSignal.WaitAsync(PollInterval, token).ConfigureAwait(false))
+                    {
+                        nextCheckAtUtc = DateTimeOffset.UtcNow;
+                    }
                 }
             }
             catch (OperationCanceledException)
@@ -130,6 +168,38 @@ public sealed class StoreUpdateManager : IDisposable
                 // Disposed — normal shutdown.
             }
         }, token);
+    }
+
+    /// <summary>
+    /// Runs the next Store check immediately instead of on <see cref="StoreUpdateRetryPolicy"/>'s
+    /// cadence. That is its only effect — the check itself, and everything downstream of it, is
+    /// unchanged. Backs the main window's "Check for updates" button.
+    /// </summary>
+    public void RequestCheckNow()
+    {
+        if (_checkNowSignal.CurrentCount == 0)
+        {
+            _checkNowSignal.Release();
+        }
+    }
+
+    /// <summary>
+    /// Developer-only path: a sentinel file stages a fake update so the countdown, the
+    /// window-closed auto-restart and the "Close now and update" button can all be exercised
+    /// without a Store flight. See <see cref="DebugUpdateSentinel"/>.
+    /// </summary>
+    private void StageSimulatedUpdateIfRequested()
+    {
+        if (!DebugUpdateSentinel.TryConsume(DebugUpdateSentinel.SentinelPath, out var deferralOverride))
+        {
+            return;
+        }
+
+        _simulatedUpdate = true;
+        DeferralOverride = deferralOverride;
+        IsUpdateStaged = true;
+        Log?.Invoke(this, $"Debug sentinel staged a simulated update (deferral override={deferralOverride?.ToString() ?? "none"}).");
+        UpdateStaged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <returns><c>true</c> if the check completed without error (whether or not it found an update).</returns>
@@ -146,18 +216,31 @@ public sealed class StoreUpdateManager : IDisposable
             Log?.Invoke(this, $"Store update check starting (owner window initialized={_ownerInitialized}).");
             var updates = await _storeContext.GetAppAndOptionalStorePackageUpdatesAsync();
             Log?.Invoke(this, $"Store update check found {updates.Count} update(s).");
+            CheckCompleted?.Invoke(this, updates.Count > 0);
             if (updates.Count == 0)
             {
                 return true;
             }
 
-            Log?.Invoke(this, "Store update download started.");
-            var downloadOperation = _storeContext.RequestDownloadStorePackageUpdatesAsync(updates);
-            var downloadResult = await downloadOperation;
+            // Silent when the Store allows it (the normal case), so no consent dialog appears
+            // for a background download — see the class note.
+            StorePackageUpdateResult downloadResult;
+            if (_storeContext.CanSilentlyDownloadStorePackageUpdates)
+            {
+                Log?.Invoke(this, "Store update silent download started.");
+                downloadResult = await _storeContext.TrySilentDownloadStorePackageUpdatesAsync(updates);
+            }
+            else
+            {
+                Log?.Invoke(this, "Store update download started (silent download unavailable).");
+                downloadResult = await _storeContext.RequestDownloadStorePackageUpdatesAsync(updates);
+            }
+
             if (downloadResult.OverallState == StorePackageUpdateState.Completed)
             {
                 Log?.Invoke(this, $"Store update download finished (OverallState={downloadResult.OverallState}).");
                 IsUpdateStaged = true;
+                DeferralOverride = null;
                 UpdateStaged?.Invoke(this, EventArgs.Empty);
                 return true;
             }
@@ -173,17 +256,30 @@ public sealed class StoreUpdateManager : IDisposable
     }
 
     /// <summary>
-    /// Installs the update staged by a prior <see cref="CheckOnceAsync"/> call. Only ever
-    /// called once the caller has confirmed this is a safe point (daemon stopped). Never
-    /// throws — failures are reported via <see cref="UpdateCheckFailed"/> and returned as
-    /// <c>false</c>, which the caller uses to decide whether to exit for the install or
-    /// resume monitoring and let the retry loop try again.
+    /// Installs the update staged by a prior <see cref="CheckOnceAsync"/> call. Never throws —
+    /// failures are reported via <see cref="UpdateCheckFailed"/> and returned as
+    /// <see cref="UpdateInstallOutcome.Failed"/>.
     /// </summary>
-    public async Task<bool> TryInstallStagedUpdateAsync()
+    /// <param name="allowInteractive">
+    /// Whether the caller is willing for the OS to show its consent dialog. Only pass
+    /// <c>true</c> with the main window on screen: the dialog is owned by the context's owner
+    /// HWND (the hidden tray window in resident mode), so an unowned one is invisible and the
+    /// install silently stalls waiting on it. When silent install is unavailable and this is
+    /// <c>false</c>, nothing is attempted and
+    /// <see cref="UpdateInstallOutcome.NeedsUserInteraction"/> is returned with the update left
+    /// staged.
+    /// </param>
+    public async Task<UpdateInstallOutcome> TryInstallStagedUpdateAsync(bool allowInteractive)
     {
         if (!IsUpdateStaged)
         {
-            return false;
+            return UpdateInstallOutcome.Failed;
+        }
+
+        if (_simulatedUpdate)
+        {
+            Log?.Invoke(this, "Simulated update install (debug sentinel); exiting without touching the Store.");
+            return UpdateInstallOutcome.Installed;
         }
 
         try
@@ -195,20 +291,37 @@ public sealed class StoreUpdateManager : IDisposable
             if (updates.Count == 0)
             {
                 IsUpdateStaged = false;
-                return false;
+                return UpdateInstallOutcome.Failed;
             }
 
-            var installOperation = _storeContext.RequestDownloadAndInstallStorePackageUpdatesAsync(updates);
-            var installResult = await installOperation;
+            StorePackageUpdateResult installResult;
+            if (_storeContext.CanSilentlyDownloadStorePackageUpdates)
+            {
+                Log?.Invoke(this, "Store update silent install started.");
+                installResult = await _storeContext.TrySilentDownloadAndInstallStorePackageUpdatesAsync(updates);
+            }
+            else if (allowInteractive)
+            {
+                Log?.Invoke(this, "Store update interactive install started (silent install unavailable).");
+                installResult = await _storeContext.RequestDownloadAndInstallStorePackageUpdatesAsync(updates);
+            }
+            else
+            {
+                Log?.Invoke(this, "Store update install needs user consent; leaving it staged for an interactive retry.");
+                return UpdateInstallOutcome.NeedsUserInteraction;
+            }
+
             Log?.Invoke(this, $"Store update install finished (OverallState={installResult.OverallState}).");
             IsUpdateStaged = false;
-            return installResult.OverallState == StorePackageUpdateState.Completed;
+            return installResult.OverallState == StorePackageUpdateState.Completed
+                ? UpdateInstallOutcome.Installed
+                : UpdateInstallOutcome.Failed;
         }
         catch (Exception ex)
         {
             UpdateCheckFailed?.Invoke(this, Describe(ex));
             IsUpdateStaged = false;
-            return false;
+            return UpdateInstallOutcome.Failed;
         }
     }
 
@@ -224,5 +337,7 @@ public sealed class StoreUpdateManager : IDisposable
         _loopCancellation?.Cancel();
         _loopCancellation?.Dispose();
         _loopCancellation = null;
+        // _checkNowSignal is deliberately not disposed: the loop may be sitting in WaitAsync on
+        // it right now, and cancellation unblocks that without needing the handle torn down.
     }
 }

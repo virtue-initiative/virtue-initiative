@@ -20,8 +20,12 @@ public static class UpdateRestartPolicy
     public static readonly TimeSpan DeferralCap = TimeSpan.FromHours(6);
 
     /// <param name="updateStagedAtUtc">When the update finished downloading/staging.</param>
-    public static DateTimeOffset GetDeadlineUtc(DateTimeOffset updateStagedAtUtc) =>
-        updateStagedAtUtc + DeferralCap;
+    /// <param name="cap">
+    /// Overrides <see cref="DeferralCap"/> — only ever supplied by the debug sentinel
+    /// (<see cref="DebugUpdateSentinel"/>), which needs a deadline reachable in minutes.
+    /// </param>
+    public static DateTimeOffset GetDeadlineUtc(DateTimeOffset updateStagedAtUtc, TimeSpan? cap = null) =>
+        updateStagedAtUtc + (cap ?? DeferralCap);
 
     /// <param name="sessionIsBusy">Whether <c>SessionViewModel.IsBusy</c> is set (e.g. a login/logout in progress).</param>
     /// <param name="deadlineUtc">The forced-restart deadline, from <see cref="GetDeadlineUtc"/>.</param>
