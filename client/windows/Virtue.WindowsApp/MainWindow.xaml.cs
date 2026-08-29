@@ -472,10 +472,13 @@ public sealed partial class MainWindow : Window
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        // The box stretches to the reveal button's height, which is taller than
-        // a single line of text; without this the password sits pinned to the
-        // top of the box while every other field's text is centered.
-        _passwordBox.VerticalContentAlignment = VerticalAlignment.Center;
+        // A Grid stretches its children vertically, so the box grows to the
+        // reveal button's height while its text stays pinned to the top —
+        // PasswordBox ignores VerticalContentAlignment, so the only way to
+        // center the text is to stop the box from stretching in the first
+        // place. Centering the button too keeps the pair lined up whichever
+        // one ends up taller.
+        _passwordBox.VerticalAlignment = VerticalAlignment.Center;
 
         Grid.SetColumn(_passwordBox, 0);
         row.Children.Add(_passwordBox);
@@ -489,6 +492,7 @@ public sealed partial class MainWindow : Window
         var revealButton = new Button
         {
             Content = revealIcon,
+            VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(8, 0, 0, 0),
             Padding = new Thickness(10, 8, 10, 8),
             CornerRadius = new CornerRadius(2),
