@@ -125,7 +125,7 @@ describe('Logs — type filter', () => {
     await waitFor(() => {
       expect(screen.getByRole('option', { name: 'System Login' })).toBeInTheDocument();
       expect(screen.getByRole('option', { name: 'Suspend Detected' })).toBeInTheDocument();
-      expect(screen.getByRole('option', { name: 'Heartbeat' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Daily Check-in' })).toBeInTheDocument();
     });
     expect(LOG_CATEGORIES).toContain('System Login');
   });

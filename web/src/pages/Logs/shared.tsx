@@ -216,9 +216,10 @@ const LOG_KIND_TABLE: Record<
     },
   },
   heartbeat: {
-    category: 'Heartbeat',
+    category: 'Daily Check-in',
     icon: ActivityIcon,
-    message: (d) => `Heartbeat received from ${d}`,
+    message: () =>
+      'Once a day, your device sends a small update to confirm that monitoring is still active.',
   },
 };
 
