@@ -47,7 +47,6 @@
     <string name="btn_open_accessibility_settings">Open Accessibility Settings</string>
     <string name="msg_core_init_failed">Setup failed to complete: %s. Please close and reopen the app.</string>
     <string name="msg_force_capture_started">Screenshot uploading…</string>
-    <string name="msg_force_capture_succeeded">Screenshot uploaded. Check the web logs page to view it.</string>
     <string name="msg_force_capture_failed">Test screenshot failed: %s</string>
 
     <!-- Dialogs -->

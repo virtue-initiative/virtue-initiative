@@ -882,12 +882,32 @@ fn dev_add_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
 }
 
 fn force_screenshot(paths: ClientPaths) -> Result<()> {
-    let mut client = connect_to_daemon(&paths)?;
-    println!("Screenshot uploading...");
-    client
-        .force_capture_now()
-        .context("failed to request forced screenshot capture")?;
-    println!("Screenshot uploaded. Check the web logs page to view it.");
+    // The baseline the wait compares against: `force_capture_now` returns once
+    // the capture is committed, not once its batch has landed.
+    let before = {
+        let mut client = connect_to_daemon(&paths)?;
+        let before = client
+            .get_status()
+            .context("failed to read daemon status")?;
+        println!("Screenshot uploading...");
+        client
+            .force_capture_now()
+            .context("failed to request forced screenshot capture")?;
+        before
+    };
+
+    // The daemon serves one connection at a time, so poll on a fresh
+    // connection each time rather than holding the socket for the whole wait.
+    let outcome = virtue_core::force_capture::wait_for_upload(
+        &before,
+        virtue_core::force_capture::DEFAULT_UPLOAD_TIMEOUT,
+        virtue_core::force_capture::DEFAULT_POLL_INTERVAL,
+        || ClientController::connect(&paths.state_dir.join("daemon.sock"))?.get_status(),
+        std::thread::sleep,
+    )
+    .context("failed to read daemon status while waiting for the upload")?;
+
+    println!("{}", outcome.message());
     Ok(())
 }
 

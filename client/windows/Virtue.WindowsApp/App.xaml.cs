@@ -313,8 +313,10 @@ public partial class App : Application
     {
         try
         {
-            await Task.Run(() => new RustInteropClient().ForceScreenshotAndUpload());
-            _trayController?.ShowBalloonTip("Virtue", "Screenshot uploaded. Check the web logs page to view it.");
+            // Returns once the batch has landed (or the wait gave up), so the
+            // balloon reports what happened instead of assuming success.
+            var result = await Task.Run(() => new RustInteropClient().ForceScreenshotAndUpload());
+            _trayController?.ShowBalloonTip("Virtue", result.Message);
         }
         catch (InvalidOperationException ex)
         {

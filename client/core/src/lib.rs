@@ -4,6 +4,7 @@ pub mod config;
 pub mod crypto;
 pub mod daemon;
 pub mod error;
+pub mod force_capture;
 /// Empty on platforms whose CLI/tray is in-process; see the module's own
 /// `#![cfg]`.
 pub mod ipc;
@@ -23,6 +24,7 @@ pub use config::{
 };
 pub use daemon::{DAEMON_STATE_VERSION, Daemon, DaemonState};
 pub use error::{CoreError, CoreResult};
+pub use force_capture::{ForcedCaptureOutcome, wait_for_upload as wait_for_forced_capture_upload};
 pub use model::{
     AuthState, BatchUpload, EventData, LogEntry, LoopOutcome, Screenshot, ServiceStatus,
 };

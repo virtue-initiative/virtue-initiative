@@ -7,6 +7,7 @@ use anyhow::Result;
 use serde::Serialize;
 use virtue_core::Daemon;
 use virtue_core::api::HttpApiClient;
+use virtue_core::force_capture::{self, ForcedCaptureOutcome};
 use virtue_core::model::ServiceStatus;
 
 use crate::capture::WindowsPlatformHooks;
@@ -229,10 +230,21 @@ pub fn app_logout() -> Result<()> {
     Ok(())
 }
 
-pub fn force_capture_now() -> Result<()> {
+/// Forces a capture, then waits for the batch it produced to actually reach
+/// the server so the UI's confirmation is true rather than optimistic. See
+/// `virtue_core::force_capture`.
+pub fn force_capture_now() -> Result<ForcedCaptureOutcome> {
     let daemon = current_daemon().ok_or_else(|| anyhow::anyhow!("monitoring is not running"))?;
+    let before = daemon.status();
     daemon.force_capture_now();
-    Ok(())
+    let outcome = force_capture::wait_for_upload(
+        &before,
+        force_capture::DEFAULT_UPLOAD_TIMEOUT,
+        force_capture::DEFAULT_POLL_INTERVAL,
+        || Ok(daemon.status()),
+        std::thread::sleep,
+    )?;
+    Ok(outcome)
 }
 
 fn update_snapshot(update: impl FnOnce(&mut MonitorStatusSnapshot)) {

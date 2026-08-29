@@ -10,6 +10,7 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
+using Virtue.WindowsApp.Core.Interop;
 using Virtue.WindowsApp.Core.ViewModels;
 using Windows.Graphics;
 using WinRT.Interop;
@@ -939,23 +940,25 @@ public sealed partial class MainWindow : Window
 
     private async Task ForceCaptureButton_OnClickAsync()
     {
-        var succeeded = await ViewModel.ForceCaptureAsync();
-        if (succeeded)
+        var result = await ViewModel.ForceCaptureAsync();
+        if (result is not null)
         {
-            await ShowForceCaptureConfirmationAsync();
+            // The interop call waited for the batch, so `result.Message` says
+            // what really happened: uploaded, gated, or still in flight.
+            await ShowForceCaptureConfirmationAsync(result);
         }
     }
 
-    private async Task ShowForceCaptureConfirmationAsync()
+    private async Task ShowForceCaptureConfirmationAsync(ForceCapturePayload result)
     {
         var dialog = new ContentDialog
         {
-            Title = CreateDialogTitle("Screenshot Uploaded"),
+            Title = CreateDialogTitle(result.Outcome == "uploaded" ? "Screenshot Uploaded" : "Test Screenshot"),
             CloseButtonText = "Close",
             DefaultButton = ContentDialogButton.Close,
             Content = new TextBlock
             {
-                Text = "Screenshot uploaded. Check the web logs page to view it.",
+                Text = result.Message,
                 TextWrapping = TextWrapping.Wrap,
                 FontFamily = BodyFont,
                 Foreground = Ink2Brush,

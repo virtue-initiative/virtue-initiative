@@ -64,10 +64,9 @@ public sealed class RustInteropClient : IRustInteropClient
         ThrowIfError(error);
     }
 
-    public void ForceScreenshotAndUpload()
+    public ForceCapturePayload ForceScreenshotAndUpload()
     {
-        var error = NativeMethods.virtue_windows_force_capture();
-        ThrowIfError(error);
+        return ReadJsonPayload<ForceCapturePayload>(NativeMethods.virtue_windows_force_capture());
     }
 
     public void ReportIssue(string message, string? contactEmail, bool includeLogs)
