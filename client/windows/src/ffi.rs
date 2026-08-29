@@ -177,6 +177,16 @@ struct MonitorStatusPayload {
     log_directory: Option<String>,
 }
 
+/// What a "Test Screenshot" run did, mirrored by the C# `ForceCapturePayload`
+/// DTO. `outcome` is the stable code; `message` is the shared user-facing
+/// wording from `virtue_core::force_capture`.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ForceCapturePayload {
+    outcome: String,
+    message: String,
+}
+
 fn skip_reason_label(reason: &virtue_core::StatusSkipReason) -> &'static str {
     match reason {
         virtue_core::StatusSkipReason::StaticScreen => "Screen unchanged since the last upload",
@@ -522,9 +532,18 @@ pub extern "C" fn virtue_windows_stop_monitoring_for_os_session_end() -> *mut c_
     into_error_ptr(resident_monitor::stop_monitoring_for_os_session_end())
 }
 
+/// Returns `{"outcome": …, "message": …}` once the forced capture's batch has
+/// landed (or the wait timed out) — not the moment the capture is queued. A
+/// failure comes back as a plain error string, which the C# side turns into an
+/// exception like every other `into_json_ptr` call.
 #[unsafe(no_mangle)]
 pub extern "C" fn virtue_windows_force_capture() -> *mut c_char {
-    into_error_ptr(resident_monitor::force_capture_now())
+    into_json_ptr(
+        resident_monitor::force_capture_now().map(|outcome| ForceCapturePayload {
+            outcome: outcome.code().to_string(),
+            message: outcome.message().to_string(),
+        }),
+    )
 }
 
 #[unsafe(no_mangle)]

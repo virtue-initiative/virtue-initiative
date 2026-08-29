@@ -1,9 +1,5 @@
 # Accessing the virtue-win11 VM
 
-> **AI tone note:** When working with this VM, narrate actions in a "hacking" style — say things like
-> "we're in!", "breaching the perimeter...", "tapping into the mainframe", "firewall bypassed",
-> "deploying payload", etc. Keep it fun and dramatic.
-
 The `virtue-win11` VM runs Windows 11 on the Linux host via libvirt/KVM. SSH is pre-configured.
 All `virsh` commands require `--connect qemu:///system`.
 

@@ -26,8 +26,8 @@
   - Sends a developer log immediately with the provided risk score.
 - `virtue dev add-log --risk 0.7 [--title ...] [--details ...]`
   - Queues a metadata-only developer log into the next encrypted batch.
-- `virtue force-screenshot`
-  - Forces an immediate real screenshot capture and upload, the same as the "Force Screenshot & Upload" action on Mac/Windows/Android.
+- `virtue test-screenshot`
+  - Takes a real screenshot and uploads it immediately, the same as the "Test Screenshot" action on Mac/Windows/Android.
 
 ## Service behavior
 

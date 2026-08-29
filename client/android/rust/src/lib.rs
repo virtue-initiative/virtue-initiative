@@ -12,6 +12,7 @@ use jni::{jni_sig, jni_str, Env, EnvUnowned, JavaVM};
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
 use virtue_core::api::{BugReportRequest, HttpApiClient};
+use virtue_core::force_capture;
 use virtue_core::{
     AuthState, Config, CoreError, CoreResult, Daemon, DeviceSettings, LifecycleHooks, Screenshot,
     ScreenshotHooks,
@@ -460,14 +461,31 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeNoteU
     })
 }
 
+/// Forces a capture and waits for the batch it produced to reach the server,
+/// so the UI can confirm what actually happened. Returns JSON: either
+/// `{"outcome": …, "message": …}` (see `virtue_core::force_capture`) or
+/// `{"error": …}`.
 #[no_mangle]
 pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeForceCapture<'l>(
     mut unowned_env: EnvUnowned<'l>,
     _class: JClass<'l>,
 ) -> jstring {
-    native_result(&mut unowned_env, |_env| -> Result<()> {
-        core()?.daemon.force_capture_now();
-        Ok(())
+    native_string(&mut unowned_env, |_env| {
+        let report = (|| -> Result<String> {
+            let core = core()?;
+            let before = core.daemon.status();
+            core.daemon.force_capture_now();
+            let outcome = force_capture::wait_for_upload(
+                &before,
+                force_capture::DEFAULT_UPLOAD_TIMEOUT,
+                force_capture::DEFAULT_POLL_INTERVAL,
+                || Ok(core.daemon.status()),
+                std::thread::sleep,
+            )?;
+            Ok(outcome.report_json())
+        })()
+        .unwrap_or_else(|err| serde_json::json!({ "error": format!("{err:#}") }).to_string());
+        Some(report)
     })
 }
 

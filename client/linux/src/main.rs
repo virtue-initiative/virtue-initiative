@@ -64,7 +64,8 @@ enum Commands {
         command: DevCommands,
     },
     #[command(
-        about = "Force an immediate screenshot capture and upload, same as Force Screenshot & Upload on other platforms"
+        name = "test-screenshot",
+        about = "Take a screenshot and upload it now, same as Test Screenshot on other platforms"
     )]
     ForceScreenshot,
     #[command(about = "Report an issue to the Virtue Initiative team")]
@@ -180,6 +181,7 @@ async fn daemon_command(paths: ClientPaths, command: Option<DaemonCommands>) -> 
 }
 
 fn login(paths: ClientPaths, email: Option<String>, device_name: Option<String>) -> Result<()> {
+    println!("Don't have an account? Sign up at https://app.virtueinitiative.org/signup");
     let email = match email {
         Some(email) => email,
         None => {
@@ -227,7 +229,8 @@ fn login(paths: ClientPaths, email: Option<String>, device_name: Option<String>)
 
 fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
     println!(
-        "Warning: logging out will alert people monitoring you and will recreate a new device on login."
+        "Warning: signing out will deactivate this device and stop monitoring. Anyone monitoring \
+         you may be alerted. Logging in again will create a new device."
     );
 
     if !yes && !prompt_yes_no("Continue logout?", false)? {
@@ -816,7 +819,7 @@ fn dev_send(paths: ClientPaths, args: SendLogArgs) -> Result<()> {
     }
 
     println!(
-        "Queued {count} log(s) in the next batch with risk {}. Run `virtue force-screenshot` to send them now.",
+        "Queued {count} log(s) in the next batch with risk {}. Run `virtue test-screenshot` to send them now.",
         format_risk(args.risk)
     );
     Ok(())
@@ -879,14 +882,32 @@ fn dev_add_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
 }
 
 fn force_screenshot(paths: ClientPaths) -> Result<()> {
-    let mut client = connect_to_daemon(&paths)?;
-    client
-        .force_capture_now()
-        .context("failed to request forced screenshot capture")?;
-    println!(
-        "Requested a forced screenshot capture (bypasses the interval gate, still honors \
-         the lock/screensaver and dedup gates) and flushed the queue for immediate upload."
-    );
+    // The baseline the wait compares against: `force_capture_now` returns once
+    // the capture is committed, not once its batch has landed.
+    let before = {
+        let mut client = connect_to_daemon(&paths)?;
+        let before = client
+            .get_status()
+            .context("failed to read daemon status")?;
+        println!("Screenshot uploading...");
+        client
+            .force_capture_now()
+            .context("failed to request forced screenshot capture")?;
+        before
+    };
+
+    // The daemon serves one connection at a time, so poll on a fresh
+    // connection each time rather than holding the socket for the whole wait.
+    let outcome = virtue_core::force_capture::wait_for_upload(
+        &before,
+        virtue_core::force_capture::DEFAULT_UPLOAD_TIMEOUT,
+        virtue_core::force_capture::DEFAULT_POLL_INTERVAL,
+        || ClientController::connect(&paths.state_dir.join("daemon.sock"))?.get_status(),
+        std::thread::sleep,
+    )
+    .context("failed to read daemon status while waiting for the upload")?;
+
+    println!("{}", outcome.message());
     Ok(())
 }
 

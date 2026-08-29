@@ -6,9 +6,11 @@ using Microsoft.UI;
 using Microsoft.UI.Text;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
+using Virtue.WindowsApp.Core.Interop;
 using Virtue.WindowsApp.Core.ViewModels;
 using Windows.Graphics;
 using WinRT.Interop;
@@ -19,6 +21,7 @@ public sealed partial class MainWindow : Window
 {
     private const string WebsiteDisplayUrl = "virtueinitiative.org";
     private const string WebsiteNavigateUrl = "https://virtueinitiative.org";
+    private const string SignUpNavigateUrl = "https://app.virtueinitiative.org/signup";
 
     private readonly AppWindow _appWindow;
     private readonly TextBlock _statusTextBlock;
@@ -160,6 +163,9 @@ public sealed partial class MainWindow : Window
         StyleInput(_emailTextBox);
 
         _passwordBox.PlaceholderText = "Password";
+        // `Peek` is meant to draw WinUI's own reveal button inside the box, but
+        // it never renders here, so the reveal is driven from our own toggle
+        // (see BuildPasswordRow) flipping this between Hidden and Visible.
         _passwordBox.PasswordRevealMode = PasswordRevealMode.Hidden;
         _passwordBox.PasswordChanged += PasswordBox_OnPasswordChanged;
         StyleInput(_passwordBox);
@@ -287,7 +293,7 @@ public sealed partial class MainWindow : Window
         var reportBugButton = CreateActionButton("Report a Bug");
         reportBugButton.Click += async (_, _) => await ShowReportBugDialogAsync();
 
-        var forceCaptureButton = CreateActionButton("Force Screenshot & Upload");
+        var forceCaptureButton = CreateActionButton("Test Screenshot");
         forceCaptureButton.Click += async (_, _) => await ForceCaptureButton_OnClickAsync();
 
         var stopMonitoringButton = CreateActionButton("Stop Monitoring");
@@ -340,7 +346,7 @@ public sealed partial class MainWindow : Window
         _loginPanel.Spacing = 12;
         _loginPanel.Margin = new Thickness(0, 12, 0, 0);
         _loginPanel.Children.Add(_emailTextBox);
-        _loginPanel.Children.Add(_passwordBox);
+        _loginPanel.Children.Add(BuildPasswordRow());
         _loginPanel.Children.Add(_deviceNameTextBox);
 
         _signInButton = CreatePrimaryButton("Sign In");
@@ -348,7 +354,28 @@ public sealed partial class MainWindow : Window
         _loginPanel.Children.Add(_signInButton);
 
         var signOutButton = CreateActionButton("Sign Out");
-        signOutButton.Click += async (_, _) => await ViewModel.LogoutAsync();
+        signOutButton.Click += async (_, _) =>
+        {
+            if (await ShowLogoutConfirmationAsync())
+            {
+                await ViewModel.LogoutAsync();
+            }
+        };
+
+        var signUpLink = new HyperlinkButton
+        {
+            Content = "Don't have an account? Sign up",
+            NavigateUri = new Uri(SignUpNavigateUrl),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(0),
+            FontFamily = BodyFont,
+            Foreground = ForestBrush,
+        };
+        signUpLink.Resources["HyperlinkButtonForeground"] = ForestBrush;
+        signUpLink.Resources["HyperlinkButtonForegroundPointerOver"] = Forest3Brush;
+        signUpLink.Resources["HyperlinkButtonForegroundPressed"] = Forest2Brush;
+        signUpLink.Resources["HyperlinkButtonForegroundDisabled"] = Ink3Brush;
+        _loginPanel.Children.Add(signUpLink);
 
         _accountActionsPanel.Orientation = Orientation.Horizontal;
         _accountActionsPanel.Spacing = 10;
@@ -437,6 +464,59 @@ public sealed partial class MainWindow : Window
         return button;
     }
 
+    /// The password box plus the eye toggle that reveals what was typed, laid
+    /// out so the box takes the remaining width and the button sits beside it.
+    private Grid BuildPasswordRow()
+    {
+        var row = new Grid();
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        // A Grid stretches its children vertically, so the box grows to the
+        // reveal button's height while its text stays pinned to the top —
+        // PasswordBox ignores VerticalContentAlignment, so the only way to
+        // center the text is to stop the box from stretching in the first
+        // place. Centering the button too keeps the pair lined up whichever
+        // one ends up taller.
+        _passwordBox.VerticalAlignment = VerticalAlignment.Center;
+
+        Grid.SetColumn(_passwordBox, 0);
+        row.Children.Add(_passwordBox);
+
+        var revealIcon = new FontIcon
+        {
+            Glyph = "\uE7B3",
+            FontSize = 16,
+            Foreground = Ink2Brush,
+        };
+        var revealButton = new Button
+        {
+            Content = revealIcon,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(8, 0, 0, 0),
+            Padding = new Thickness(10, 8, 10, 8),
+            CornerRadius = new CornerRadius(2),
+            BorderBrush = BorderBrushToken,
+            Background = PaperBrush,
+        };
+        AutomationProperties.SetName(revealButton, "Show password");
+        ToolTipService.SetToolTip(revealButton, "Show password");
+        revealButton.Click += (_, _) =>
+        {
+            var reveal = _passwordBox.PasswordRevealMode != PasswordRevealMode.Visible;
+            _passwordBox.PasswordRevealMode =
+                reveal ? PasswordRevealMode.Visible : PasswordRevealMode.Hidden;
+            revealIcon.Glyph = reveal ? "\uED1A" : "\uE7B3";
+            var label = reveal ? "Hide password" : "Show password";
+            AutomationProperties.SetName(revealButton, label);
+            ToolTipService.SetToolTip(revealButton, label);
+        };
+
+        Grid.SetColumn(revealButton, 1);
+        row.Children.Add(revealButton);
+        return row;
+    }
+
     // Cream-filled input on a hairline border; focus border goes forest.
     private static void StyleInput(Control input)
     {
@@ -517,6 +597,70 @@ public sealed partial class MainWindow : Window
         {
             Title = CreateDialogTitle("Stop Monitoring"),
             PrimaryButtonText = "Stop Monitoring",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            Content = content,
+        };
+        ApplyDialogTheme(dialog);
+
+        if (Content is FrameworkElement root)
+        {
+            dialog.XamlRoot = root.XamlRoot;
+        }
+
+        var result = await dialog.ShowAsync();
+        return result == ContentDialogResult.Primary;
+    }
+
+    private async Task<bool> ShowLogoutConfirmationAsync()
+    {
+        var warningIcon = new FontIcon
+        {
+            Glyph = "",
+            FontSize = 28,
+            Foreground = WarningBrush,
+            Margin = new Thickness(0, 2, 16, 0),
+        };
+
+        // The dialog's own title carries the question, so the body starts
+        // straight in on the consequences — a second heading inside the
+        // content just repeats the chrome above it.
+        var textStack = new StackPanel
+        {
+            Spacing = 8,
+        };
+        textStack.Children.Add(new TextBlock
+        {
+            Text = "Signing out will deactivate this device and stop monitoring. Logging in again will create a new device.",
+            FontFamily = BodyFont,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = Ink2Brush,
+        });
+        textStack.Children.Add(new TextBlock
+        {
+            Text = "Anyone monitoring you may be alerted.",
+            FontFamily = BodyFont,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = WarningBrush,
+            FontWeight = FontWeights.Medium,
+        });
+
+        var content = new Grid
+        {
+            ColumnSpacing = 0,
+            MinWidth = 420,
+        };
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(warningIcon, 0);
+        Grid.SetColumn(textStack, 1);
+        content.Children.Add(warningIcon);
+        content.Children.Add(textStack);
+
+        var dialog = new ContentDialog
+        {
+            Title = CreateDialogTitle("Sign out of Virtue?"),
+            PrimaryButtonText = "Sign Out",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
             Content = content,
@@ -799,23 +943,25 @@ public sealed partial class MainWindow : Window
 
     private async Task ForceCaptureButton_OnClickAsync()
     {
-        var succeeded = await ViewModel.ForceCaptureAsync();
-        if (succeeded)
+        var result = await ViewModel.ForceCaptureAsync();
+        if (result is not null)
         {
-            await ShowForceCaptureConfirmationAsync();
+            // The interop call waited for the batch, so `result.Message` says
+            // what really happened: uploaded, gated, or still in flight.
+            await ShowForceCaptureConfirmationAsync(result);
         }
     }
 
-    private async Task ShowForceCaptureConfirmationAsync()
+    private async Task ShowForceCaptureConfirmationAsync(ForceCapturePayload result)
     {
         var dialog = new ContentDialog
         {
-            Title = CreateDialogTitle("Screenshot Captured"),
+            Title = CreateDialogTitle(result.Outcome == "uploaded" ? "Screenshot Uploaded" : "Test Screenshot"),
             CloseButtonText = "Close",
             DefaultButton = ContentDialogButton.Close,
             Content = new TextBlock
             {
-                Text = "A screenshot was captured and is uploading.",
+                Text = result.Message,
                 TextWrapping = TextWrapping.Wrap,
                 FontFamily = BodyFont,
                 Foreground = Ink2Brush,

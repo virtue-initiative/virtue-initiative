@@ -40,6 +40,16 @@ public sealed record MonitorStatusPayload(
     long? BatchWindowSeconds = null,
     string? LogDirectory = null);
 
+/// <summary>
+/// What a "Test Screenshot" run actually did, once its batch has had a chance
+/// to reach the server. <c>Outcome</c> is the stable code
+/// (<c>uploaded</c>/<c>not_captured</c>/<c>pending</c>); <c>Message</c> is the
+/// wording every platform shows, from <c>virtue_core::force_capture</c>.
+/// </summary>
+public sealed record ForceCapturePayload(
+    string Outcome,
+    string Message);
+
 internal sealed record LoginRequest(
     string Email,
     string Password,

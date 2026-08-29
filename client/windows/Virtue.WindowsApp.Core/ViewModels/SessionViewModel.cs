@@ -367,17 +367,21 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         }, "Signing out...");
     }
 
-    public async Task<bool> ForceCaptureAsync()
+    /// <summary>
+    /// Runs a test screenshot and returns what it actually did — the interop
+    /// call only comes back once the resulting batch has landed or the wait
+    /// timed out. Null means the call failed; <see cref="ErrorText"/> says why.
+    /// </summary>
+    public async Task<ForceCapturePayload?> ForceCaptureAsync()
     {
-        var succeeded = false;
+        ForceCapturePayload? result = null;
         await RunBusyAsync(async () =>
         {
-            await Task.Run(() => _interopClient.ForceScreenshotAndUpload());
+            result = await Task.Run(() => _interopClient.ForceScreenshotAndUpload());
             await RefreshInternalAsync();
             StatusText = BuildStatusText();
-            succeeded = true;
-        }, "Capturing screenshot...");
-        return succeeded;
+        }, "Screenshot uploading...");
+        return result;
     }
 
     public async Task<bool> SubmitBugReportAsync(string message, string? contactEmail, bool includeLogs)

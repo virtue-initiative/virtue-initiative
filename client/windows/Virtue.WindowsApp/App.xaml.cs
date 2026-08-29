@@ -313,13 +313,15 @@ public partial class App : Application
     {
         try
         {
-            await Task.Run(() => new RustInteropClient().ForceScreenshotAndUpload());
-            _trayController?.ShowBalloonTip("Virtue", "Screenshot captured and uploading");
+            // Returns once the batch has landed (or the wait gave up), so the
+            // balloon reports what happened instead of assuming success.
+            var result = await Task.Run(() => new RustInteropClient().ForceScreenshotAndUpload());
+            _trayController?.ShowBalloonTip("Virtue", result.Message);
         }
         catch (InvalidOperationException ex)
         {
             LogStartup($"Force capture failed: {ex}");
-            _trayController?.ShowBalloonTip("Virtue", $"Force screenshot failed: {ex.Message}");
+            _trayController?.ShowBalloonTip("Virtue", $"Test screenshot failed: {ex.Message}");
         }
     }
 

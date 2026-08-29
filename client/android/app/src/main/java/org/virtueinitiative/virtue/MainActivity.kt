@@ -59,6 +59,12 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://virtueinitiative.org")))
         }
 
+        binding.signUpLink.setOnClickListener {
+            startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse("https://app.virtueinitiative.org/signup"))
+            )
+        }
+
         binding.reportBugLink.setOnClickListener { showReportBugDialog() }
 
         KeepAliveWorker.schedule(this)
@@ -252,15 +258,20 @@ class MainActivity : AppCompatActivity() {
         binding.forceCaptureButton.isEnabled = false
         setStatus(getString(R.string.msg_force_capture_started))
         lifecycleScope.launch {
-            val error = withContext(Dispatchers.IO) {
+            // The native call waits for the batch to land, so its message
+            // reports what actually happened rather than assuming an upload.
+            val raw = withContext(Dispatchers.IO) {
                 NativeBridge.nativeForceCapture()
             }
             binding.forceCaptureButton.isEnabled = true
 
-            if (error == null) {
-                setStatus(getString(R.string.msg_force_capture_succeeded))
+            val report = runCatching { JSONObject(raw) }.getOrElse { JSONObject() }
+            val error = if (report.isNull("error")) null else report.optString("error", "").ifBlank { null }
+            val message = if (report.isNull("message")) "" else report.optString("message", "")
+            if (error != null || message.isBlank()) {
+                setStatus(getString(R.string.msg_force_capture_failed, error ?: raw))
             } else {
-                setStatus(getString(R.string.msg_force_capture_failed, error))
+                setStatus(message)
             }
             // Transient confirmation/error — revert to the real status after a beat
             // rather than leaving it stuck here, matching toggleMonitoring's pattern.

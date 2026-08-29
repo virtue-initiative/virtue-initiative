@@ -472,20 +472,38 @@ public sealed class SessionViewModelTests
     }
 
     [Fact]
-    public async Task ForceCaptureAsync_ReturnsTrueAndInvokesInteropOnSuccess()
+    public async Task ForceCaptureAsync_ReturnsTheOutcomeAndInvokesInteropOnSuccess()
     {
         var fakeClient = new FakeRustInteropClient();
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
 
         var result = await viewModel.ForceCaptureAsync();
 
-        Assert.True(result);
+        Assert.NotNull(result);
+        Assert.Equal("uploaded", result!.Outcome);
         Assert.True(fakeClient.ForceScreenshotAndUploadCalled);
         Assert.Null(viewModel.ErrorText);
     }
 
     [Fact]
-    public async Task ForceCaptureAsync_ReturnsFalseAndSetsErrorTextOnFailure()
+    public async Task ForceCaptureAsync_PassesThroughAnOutcomeThatIsNotAnUpload()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            ForceScreenshotAndUploadResult = new("not_captured", "No screenshot was taken."),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        var result = await viewModel.ForceCaptureAsync();
+
+        Assert.NotNull(result);
+        Assert.Equal("not_captured", result!.Outcome);
+        Assert.Equal("No screenshot was taken.", result.Message);
+        Assert.Null(viewModel.ErrorText);
+    }
+
+    [Fact]
+    public async Task ForceCaptureAsync_ReturnsNullAndSetsErrorTextOnFailure()
     {
         var fakeClient = new FakeRustInteropClient
         {
@@ -495,7 +513,7 @@ public sealed class SessionViewModelTests
 
         var result = await viewModel.ForceCaptureAsync();
 
-        Assert.False(result);
+        Assert.Null(result);
         Assert.Equal("monitoring is not running", viewModel.ErrorText);
     }
 
@@ -721,7 +739,10 @@ public sealed class SessionViewModelTests
 
         public Exception? ForceScreenshotAndUploadError { get; set; }
 
-        public void ForceScreenshotAndUpload()
+        public ForceCapturePayload ForceScreenshotAndUploadResult { get; set; } =
+            new("uploaded", "Screenshot uploaded. Check the web logs page to view it.");
+
+        public ForceCapturePayload ForceScreenshotAndUpload()
         {
             if (ForceScreenshotAndUploadError is not null)
             {
@@ -729,6 +750,7 @@ public sealed class SessionViewModelTests
             }
 
             ForceScreenshotAndUploadCalled = true;
+            return ForceScreenshotAndUploadResult;
         }
     }
 }

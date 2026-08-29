@@ -288,6 +288,18 @@
                         android:layout_height="wrap_content"
                         android:text="@string/btn_sign_in"
                         android:backgroundTint="@color/virtue_forest" />
+
+                    <TextView
+                        android:id="@+id/signUpLink"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center_horizontal"
+                        android:layout_marginTop="12dp"
+                        android:text="@string/btn_sign_up"
+                        android:textSize="14sp"
+                        android:textColor="@color/virtue_forest"
+                        android:clickable="true"
+                        android:focusable="true" />
                 </LinearLayout>
             </LinearLayout>
 
