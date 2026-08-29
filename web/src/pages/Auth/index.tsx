@@ -27,6 +27,7 @@ import {
   SegmentedControl,
 } from '@virtueinitiative/shared-web';
 import { LANDING_URL } from '../../utils/landing-url';
+import { PasswordField } from './PasswordField';
 
 type AuthMode = 'login' | 'signup' | 'forgot' | 'reset' | 'finish-signup';
 
@@ -295,7 +296,7 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
           )}
 
           {authMode !== 'forgot' && authMode !== 'signup' && (
-            <Field
+            <PasswordField
               label={
                 authMode === 'reset'
                   ? 'New password'
@@ -304,47 +305,40 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
                     : 'Password'
               }
               id="password"
-            >
-              <Input
-                id="password"
-                name="password"
-                type="password"
-                value={password}
-                onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
-                placeholder={
-                  authMode === 'login'
-                    ? 'Enter your password'
-                    : authMode === 'reset'
-                      ? 'Choose a new password'
-                      : 'Choose a password'
-                }
-                autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
-                required
-                disabled={
-                  (authMode === 'reset' && !resetTokenValid) ||
-                  (authMode === 'finish-signup' && !signupTokenValid)
-                }
-              />
-            </Field>
+              name="password"
+              value={password}
+              onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
+              placeholder={
+                authMode === 'login'
+                  ? 'Enter your password'
+                  : authMode === 'reset'
+                    ? 'Choose a new password'
+                    : 'Choose a password'
+              }
+              autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
+              required
+              disabled={
+                (authMode === 'reset' && !resetTokenValid) ||
+                (authMode === 'finish-signup' && !signupTokenValid)
+              }
+            />
           )}
 
           {(authMode === 'reset' || authMode === 'finish-signup') && (
-            <Field label="Confirm password" id="password-confirm">
-              <Input
-                id="password-confirm"
-                name="password-confirm"
-                type="password"
-                value={confirm}
-                onInput={(e) => setConfirm((e.target as HTMLInputElement).value)}
-                placeholder="Retype your password"
-                autoComplete="new-password"
-                required
-                disabled={
-                  (authMode === 'reset' && !resetTokenValid) ||
-                  (authMode === 'finish-signup' && !signupTokenValid)
-                }
-              />
-            </Field>
+            <PasswordField
+              label="Confirm password"
+              id="password-confirm"
+              name="password-confirm"
+              value={confirm}
+              onInput={(e) => setConfirm((e.target as HTMLInputElement).value)}
+              placeholder="Retype your password"
+              autoComplete="new-password"
+              required
+              disabled={
+                (authMode === 'reset' && !resetTokenValid) ||
+                (authMode === 'finish-signup' && !signupTokenValid)
+              }
+            />
           )}
 
           {requiresTermsAcceptance && (
