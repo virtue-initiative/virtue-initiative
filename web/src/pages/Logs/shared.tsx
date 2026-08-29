@@ -239,6 +239,9 @@ export function LogIcon({ log }: { log: DataLog }) {
 /** Base URL of the help page documenting every log type. */
 export const LOG_TYPES_HELP_URL = `${LANDING_URL}/help/web/log-types`;
 
+/** URL of the help page explaining the concern percentage/levels. */
+export const CONCERN_HELP_URL = `${LANDING_URL}/help/web/concern-scores`;
+
 /** Slugified anchor for a log's section on the log-types help page. Mirrors the
  * id markdown generates from the matching heading (the category title). */
 export function getLogHelpAnchor(log: DataLog): string {
@@ -359,9 +362,11 @@ export function LogDetailDialog({
   const [imgSrc, setImgSrc] = useState<string | null>(null);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const metadata = getLogMetadata(item);
-  const riskLabel = describeRiskLevel(item.risk) ?? 'Risk unavailable';
+  const riskLabel = describeRiskLevel(item.risk) ?? 'Concern unavailable';
   const riskBadge =
-    getRiskLevel(item.risk) === 'high' ? (
+    getRiskLevel(item.risk) === 'alert' ? (
+      <span class="logs-verify-badge logs-verify-badge--failed">⚠ {riskLabel}</span>
+    ) : getRiskLevel(item.risk) === 'high' ? (
       <span class="logs-verify-badge logs-verify-badge--failed">⚠ {riskLabel}</span>
     ) : getRiskLevel(item.risk) === 'medium' ? (
       <span class="logs-verify-badge logs-verify-badge--moderate">{riskLabel}</span>
@@ -419,11 +424,11 @@ export function LogDetailDialog({
             )}
             <a
               class="logs-detail-help-link"
-              href={getLogHelpUrl(item)}
+              href={CONCERN_HELP_URL}
               target="_blank"
               rel="noreferrer"
-              aria-label="Learn more about this event"
-              title="Learn more about this event"
+              aria-label="Learn more about the concern score"
+              title="Learn more about the concern score"
             >
               <InformationCircleIcon />
             </a>

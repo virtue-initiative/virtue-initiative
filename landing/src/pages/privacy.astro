@@ -34,16 +34,16 @@ import SiteLayout from '../layouts/SiteLayout.astro';
         <strong>Batch metadata</strong> - unencrypted information sent alongside each encrypted batch
         so the service can index and summarize it without reading it. Your device sends the time range
         the batch covers and counts of the events and screenshots inside it; we store the device it came
-        from, the time range, and how many of its events were scored as medium or high risk, along with
-        the key material and integrity hash for that batch. We do not store the contents of any event.
+        from, the time range, and how many of its events were scored as medium or high concern, along
+        with the key material and integrity hash for that batch. We do not store the contents of any event.
       </li>
       <li>
-        <strong>Alert details</strong> - when a client records a high-risk event (for example, you stop
-        monitoring, or a device stops reporting), it sends a short unencrypted summary of that event alongside
-        the batch - its type, timestamp, risk score, and a brief title and description. We use that summary
-        only to compose an alert email to your accountability partners, and we do not store it; the event
-        itself is retained only in encrypted form. If you have no accepted partners, or they have turned
-        alert emails off, no alert is sent.
+        <strong>Alert details</strong> - when a client records a high-concern event (for example, you
+        stop monitoring, or a device stops reporting), it sends a short unencrypted summary of that event
+        alongside the batch - its type, timestamp, concern score, and a brief title and description. We
+        use that summary only to compose an alert email to your accountability partners, and we do not
+        store it; the event itself is retained only in encrypted form. If you have no accepted partners,
+        or they have turned alert emails off, no alert is sent.
       </li>
       <li>
         <strong>Partner relationships</strong> - the email addresses of accountability partners you invite,
@@ -118,9 +118,9 @@ import SiteLayout from '../layouts/SiteLayout.astro';
         events.
       </li>
       <li>
-        Alert details are used to email your accountability partners when a high-risk event occurs,
-        so that a partner learns about it even if they do not open the app. The alert names you, the
-        device involved, and what happened.
+        Alert details are used to email your accountability partners when a high-concern event
+        occurs, so that a partner learns about it even if they do not open the app. The alert names
+        you, the device involved, and what happened.
       </li>
       <li>
         Stored batch metadata is used to build the periodic summary emails your partners have chosen
@@ -152,10 +152,10 @@ import SiteLayout from '../layouts/SiteLayout.astro';
         Detected text itself is never uploaded.
       </li>
       <li>
-        <strong>Risk scoring</strong> - clients run a local image classifier to estimate whether a screenshot
-        contains explicit content, and record that score with the event. The classifier runs on your device,
-        is shipped with the app, and does not send your screenshots anywhere for analysis. Only the resulting
-        scores and counts, not the screenshot, are visible to us.
+        <strong>Concern scoring</strong> - clients run a local image classifier to estimate whether a
+        screenshot contains explicit content, and record that score with the event. The classifier runs
+        on your device, is shipped with the app, and does not send your screenshots anywhere for analysis.
+        Only the resulting scores and counts, not the screenshot, are visible to us.
       </li>
       <li>
         <strong>Screenshot processing</strong> - screenshots are downscaled and blurred, then encrypted
