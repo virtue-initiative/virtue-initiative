@@ -162,7 +162,7 @@ struct ContentView: View {
                         .foregroundStyle(VirtueBrand.textMuted)
 
                     HStack(spacing: 10) {
-                        Button(coordinator.isSigningOut ? "Signing Out…" : "Logout") {
+                        Button(coordinator.isSigningOut ? "Signing Out…" : "Sign Out") {
                             showLogoutConfirmation = true
                         }
                         .buttonStyle(VirtueButtonStyle())
