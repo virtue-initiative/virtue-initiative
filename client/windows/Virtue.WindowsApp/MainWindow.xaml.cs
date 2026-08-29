@@ -472,6 +472,11 @@ public sealed partial class MainWindow : Window
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
+        // The box stretches to the reveal button's height, which is taller than
+        // a single line of text; without this the password sits pinned to the
+        // top of the box while every other field's text is centered.
+        _passwordBox.VerticalContentAlignment = VerticalAlignment.Center;
+
         Grid.SetColumn(_passwordBox, 0);
         row.Children.Add(_passwordBox);
 
@@ -613,19 +618,13 @@ public sealed partial class MainWindow : Window
             Margin = new Thickness(0, 2, 16, 0),
         };
 
+        // The dialog's own title carries the question, so the body starts
+        // straight in on the consequences — a second heading inside the
+        // content just repeats the chrome above it.
         var textStack = new StackPanel
         {
             Spacing = 8,
         };
-        textStack.Children.Add(new TextBlock
-        {
-            Text = "Sign out of Virtue?",
-            FontFamily = BodyFont,
-            FontSize = 20,
-            FontWeight = FontWeights.SemiBold,
-            Foreground = InkBrush,
-            TextWrapping = TextWrapping.Wrap,
-        });
         textStack.Children.Add(new TextBlock
         {
             Text = "Signing out will deactivate this device and stop monitoring. Logging in again will create a new device.",
@@ -656,7 +655,7 @@ public sealed partial class MainWindow : Window
 
         var dialog = new ContentDialog
         {
-            Title = CreateDialogTitle("Sign Out"),
+            Title = CreateDialogTitle("Sign out of Virtue?"),
             PrimaryButtonText = "Sign Out",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
