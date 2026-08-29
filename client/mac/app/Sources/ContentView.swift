@@ -51,7 +51,7 @@ struct ContentView: View {
                 coordinator.logout()
             }
         } message: {
-            Text("Signing out will delete this device and stop monitoring. Anyone monitoring you may be alerted. Logging in again will create a new device.")
+            Text("Signing out will deactivate this device and stop monitoring. Anyone monitoring you may be alerted. Logging in again will create a new device.")
         }
     }
 
