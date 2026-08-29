@@ -120,7 +120,12 @@ setdir "api"
 cp .dev.vars.example .dev.vars
 apply_shared_env "JWT_PRIVATE_KEY JWT_PUBLIC_KEY APP_URL LANDING_URL APP_NAME API_BASE_PATH R2_URL HASH_SERVER_URL EMAIL_DELIVERY_MODE BUG_REPORT_EMAIL AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION"
 yes | bun run db:migrate:local
-./scripts/seed-dev-user.mjs
+# Absolute path: `setdir "api"` left us in api/, and the seeder lives at the
+# repo root. It cd's to api/ itself, so it doesn't care where it's run from.
+"$ROOT/scripts/seed-dev-user.mjs" || {
+  echo "Error: seeding the dev account failed" >&2
+  exit 1
+}
 
 # Donations API setup
 setdir "api-donate"
