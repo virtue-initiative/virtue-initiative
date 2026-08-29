@@ -76,7 +76,7 @@ configuration or permissions problem with screen capture — see the
 A developer or diagnostic log entry. These are produced by developer tooling and
 are not part of normal monitoring.
 
-## Heartbeat
+## Daily Check-in
 
-A periodic signal confirming the device is online and monitoring is still
-running, even when there's nothing else to report.
+Once a day, your device sends a small update to confirm that monitoring is
+still active, even when there's nothing else to report.

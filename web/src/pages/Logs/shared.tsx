@@ -216,9 +216,9 @@ const LOG_KIND_TABLE: Record<
     },
   },
   heartbeat: {
-    category: 'Heartbeat',
+    category: 'Daily Check-in',
     icon: ActivityIcon,
-    message: (d) => `Heartbeat received from ${d}`,
+    message: (d) => `Daily check-in received from ${d}`,
   },
 };
 

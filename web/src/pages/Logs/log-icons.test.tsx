@@ -25,7 +25,7 @@ describe('getLogCategory — titles', () => {
     expect(getLogCategory(log('repeated_restarts'))).toBe('Repeated Restarts');
     expect(getLogCategory(log('capture_failed'))).toBe('Capture Failed');
     expect(getLogCategory(log('screenshot_skipped'))).toBe('Screenshot Skipped');
-    expect(getLogCategory(log('heartbeat'))).toBe('Heartbeat');
+    expect(getLogCategory(log('heartbeat'))).toBe('Daily Check-in');
   });
 
   it('still recognizes the pre-rewrite lifecycle/lifecycle_alert shapes for older stored logs', () => {
@@ -43,7 +43,9 @@ describe('getLogCategory — titles', () => {
 
 describe('getLogMessage', () => {
   it('builds device-specific messages per log kind', () => {
-    expect(getLogMessage(log('heartbeat'), 'Bob’s PC')).toBe('Heartbeat received from Bob’s PC');
+    expect(getLogMessage(log('heartbeat'), 'Bob’s PC')).toBe(
+      'Daily check-in received from Bob’s PC',
+    );
     expect(getLogMessage(log('system_login', { utc_ms: 0 }), 'Bob’s PC')).toBe(
       'Bob’s PC was logged into or started up',
     );
