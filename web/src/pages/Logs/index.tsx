@@ -10,7 +10,7 @@ import { getRiskRating, type RiskRating } from '@virtueinitiative/shared-web/ris
 import { FeedLog, formatDayLabel, getLogCategory, LOG_CATEGORIES } from './shared';
 import './style.css';
 import { useUrlState } from '../../hooks/useUrlState';
-import { Button, Dialog, DialogHeader, Field, Select } from '@virtueinitiative/shared-web';
+import { Button, Checkbox, Dialog, DialogHeader, Field, Select } from '@virtueinitiative/shared-web';
 import { cacheClient } from '../../utils/cache/client';
 import { formatRelativeTimestamp } from '../../utils/time';
 
@@ -35,6 +35,11 @@ const RANGE_SEGMENTS = [
   { label: 'Past week', value: 'week' },
   { label: 'Past month', value: 'month' },
 ];
+
+/** Matches `LOG_KIND_TABLE.screenshot_skipped.category` in `shared.tsx` — every
+ * "Screenshot Skipped" entry (locked/asleep or duplicate-frame) shares this one
+ * category, so hiding it by category hides both skip reasons at once. */
+const SKIPPED_SCREENSHOTS_CATEGORY = 'Screenshot Skipped';
 
 export function Logs({ userId: routeUserId }: { userId?: string }) {
   const api = useAPIContext();
@@ -64,6 +69,11 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
     'type',
     'string',
     null,
+  );
+  const [showSkippedScreenshots, setShowSkippedScreenshots] = useUrlState<boolean>(
+    'show_skipped',
+    'boolean',
+    false,
   );
 
   const endDate = today;
@@ -192,6 +202,12 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
       (logs ?? []).filter((item) => {
         if (item.ts < weekStart || item.ts > weekEnd) return false;
         if (typeFilter !== null && getLogCategory(item) !== typeFilter) return false;
+        if (
+          !showSkippedScreenshots &&
+          typeFilter !== SKIPPED_SCREENSHOTS_CATEGORY &&
+          getLogCategory(item) === SKIPPED_SCREENSHOTS_CATEGORY
+        )
+          return false;
         if (riskFilter !== 'all') {
           const rating = getRiskRating(item.risk);
           if (riskFilter === 'alert' && rating !== 'alert') return false;
@@ -206,7 +222,7 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
         }
         return true;
       }),
-    [logs, riskFilter, typeFilter, weekStart, weekEnd],
+    [logs, riskFilter, typeFilter, weekStart, weekEnd, showSkippedScreenshots],
   );
   const galleryItems = useMemo(
     () =>
@@ -304,6 +320,18 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
                         ))}
                       </Select>
                     </Field>
+                  )}
+                  {!isGallery && (
+                    <div class="logs-filter-field logs-filter-checkbox-field">
+                      <Checkbox
+                        id="show-skipped-screenshots"
+                        label="Show skipped screenshots"
+                        checked={showSkippedScreenshots}
+                        onChange={(e) =>
+                          setShowSkippedScreenshots((e.target as HTMLInputElement).checked)
+                        }
+                      />
+                    </div>
                   )}
                 </div>
                 <Button
@@ -450,6 +478,18 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
                     ))}
                   </Select>
                 </Field>
+              )}
+              {!isGallery && (
+                <div class="logs-filter-field logs-filter-checkbox-field">
+                  <Checkbox
+                    id="show-skipped-screenshots-dialog"
+                    label="Show skipped screenshots"
+                    checked={showSkippedScreenshots}
+                    onChange={(e) =>
+                      setShowSkippedScreenshots((e.target as HTMLInputElement).checked)
+                    }
+                  />
+                </div>
               )}
             </div>
           </Dialog>
