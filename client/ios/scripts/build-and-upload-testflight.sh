@@ -31,6 +31,19 @@ MARKETING_VERSION="$(virtue_base_version)"
 CURRENT_PROJECT_VERSION="$(virtue_apple_build_number).${GITHUB_RUN_NUMBER:-0}"
 VIRTUE_BUILD_LABEL="$(virtue_build_label)"
 
+# distribute-testflight-build.mjs has to find this exact build in App Store
+# Connect afterwards, and (marketing version, build version) is the only pair
+# that identifies it. Export rather than recompute: GITHUB_RUN_NUMBER makes
+# CURRENT_PROJECT_VERSION run-specific, so a second derivation in the workflow
+# would be a silent source of drift.
+if [[ -n "${GITHUB_ENV:-}" ]]; then
+  {
+    echo "IOS_MARKETING_VERSION=${MARKETING_VERSION}"
+    echo "IOS_BUILD_VERSION=${CURRENT_PROJECT_VERSION}"
+    echo "IOS_WHATS_NEW=${VIRTUE_BUILD_LABEL}"
+  } >> "$GITHUB_ENV"
+fi
+
 rm -rf "$BUILD_DIR"
 mkdir -p "$EXPORT_PATH"
 

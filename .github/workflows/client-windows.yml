@@ -182,3 +182,19 @@ jobs:
           STORE_FLIGHT_ID: ${{ vars.WINSTORE_FLIGHT_ID }}
         run: ./windows/scripts/submit-store-flight.ps1 -PackagePath "windows/dist/virtue-windows-${{ steps.version.outputs.build_label }}.msix"
         working-directory: client
+
+      # The main listing, not a flight: this is the submission Store customers
+      # install and auto-update from. Package version comes out of
+      # build-msix.ps1 as <VERSION>.0 on main (vs. <major>.<minor>.<run>.0 for
+      # dev builds), so it stays distinct from every flight package and the
+      # flight stays ahead of the listing as Microsoft's model expects.
+      - name: Submit Windows MSIX to Store main app
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          STORE_TENANT_ID: ${{ vars.WINSTORE_TENANT_ID }}
+          STORE_CLIENT_ID: ${{ vars.WINSTORE_CLIENT_ID }}
+          STORE_CLIENT_SECRET: ${{ secrets.WINSTORE_CLIENT_SECRET }}
+          STORE_APP_ID: ${{ vars.WINSTORE_APP_ID }}
+        run: ./windows/scripts/submit-store-app.ps1 -PackagePath "windows/dist/virtue-windows-${{ steps.version.outputs.build_label }}.msix"
+        working-directory: client
