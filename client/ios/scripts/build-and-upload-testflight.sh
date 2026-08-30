@@ -28,7 +28,16 @@ EXT_PROFILE_NAME='Virtue iOS Safari Ext App Store'
 source "${CLIENT_ROOT}/scripts/version.sh"
 
 MARKETING_VERSION="$(virtue_base_version)"
-CURRENT_PROJECT_VERSION="$(virtue_apple_build_number).${GITHUB_RUN_NUMBER:-0}"
+# GITHUB_RUN_ATTEMPT, not just GITHUB_RUN_NUMBER: the run number is identical
+# across re-run attempts of the same run, so re-running a workflow that already
+# reached the upload produced a duplicate CFBundleVersion and altool rejected it
+# with ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE ("The bundle version must be
+# higher than the previously uploaded version"). App Store Connect permits three
+# period-separated integers, and it treats a missing component as zero, so
+# 10.1000 < 10.1000.1 < 10.1000.2 < 10.1001.1 — ordering holds both across runs
+# and across attempts of one run, including against builds already uploaded
+# under the old two-component scheme.
+CURRENT_PROJECT_VERSION="$(virtue_apple_build_number).${GITHUB_RUN_NUMBER:-0}.${GITHUB_RUN_ATTEMPT:-1}"
 VIRTUE_BUILD_LABEL="$(virtue_build_label)"
 
 # distribute-testflight-build.mjs has to find this exact build in App Store
