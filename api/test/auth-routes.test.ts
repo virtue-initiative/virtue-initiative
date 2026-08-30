@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { SELF, env } from 'cloudflare:test';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { fetchMock, SELF, env } from 'cloudflare:test';
 import {
   authHeaders,
   BASE,
+  batchMetadataForm,
   clearDB,
   createDeviceForUser,
   extractTokenFromDelivery,
@@ -16,17 +17,29 @@ import {
   signupAndGetCookie,
   uuidToBytes,
 } from './helpers';
+import { installHashServerMock, seedHashState } from './hash-server-mock';
 import { CURRENT_HASH_PARAMS, verifyPasswordAuth } from '../src/lib/password';
+
+beforeAll(() => {
+  fetchMock.activate();
+  fetchMock.disableNetConnect();
+  installHashServerMock();
+});
 
 beforeEach(clearDB);
 
 describe('Auth routes', () => {
-  it('returns the current hash params and login material in an enumeration-safe shape', async () => {
+  it('returns current hash params with no email, and login material in an enumeration-safe shape with one', async () => {
     await signupAndGetCookie('alice@example.com', 'correct horse');
 
-    const paramsRes = await SELF.fetch(`${BASE}/current-hash-params`);
+    const paramsRes = await SELF.fetch(`${BASE}/user/login-material`);
     expect(paramsRes.status).toBe(200);
-    expect(await paramsRes.json()).toMatchObject({
+    const paramsBody = (await paramsRes.json()) as {
+      password_salt?: string;
+      params: { salt_length: number };
+    };
+    expect(paramsBody.password_salt).toBeUndefined();
+    expect(paramsBody.params).toMatchObject({
       version: CURRENT_HASH_PARAMS.version,
       algorithm: CURRENT_HASH_PARAMS.algorithm,
       memory_cost_kib: CURRENT_HASH_PARAMS.memory_cost_kib,
@@ -73,8 +86,7 @@ describe('Auth routes', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: 'alice@example.com' }),
     });
-    expect(requestRes.status).toBe(200);
-    expect(await requestRes.json()).toEqual({ ok: true });
+    expect(requestRes.status).toBe(204);
 
     const deliveries = await listEmailDeliveries();
     expect(deliveries).toHaveLength(1);
@@ -99,11 +111,11 @@ describe('Auth routes', () => {
         password_auth,
         password_salt,
         pub_key,
-        priv_key,
+        encrypted_priv_key: priv_key,
         name: 'Alice',
       }),
     });
-    expect(signupRes.status).toBe(201);
+    expect(signupRes.status).toBe(200);
     expect(signupRes.headers.get('set-cookie')).toContain('refresh_token=');
 
     const signupBody = (await signupRes.json()) as {
@@ -116,7 +128,7 @@ describe('Auth routes', () => {
     });
 
     const storedUser = await env.DB.prepare(
-      'SELECT id, email_verified, password_hash, password_salt, pub_key, priv_key FROM users WHERE email = ?',
+      'SELECT id, email_verified, password_hash, password_salt, pub_key, encrypted_priv_key FROM users WHERE email = ?',
     )
       .bind('alice@example.com')
       .first<{
@@ -125,7 +137,7 @@ describe('Auth routes', () => {
         password_hash: string;
         password_salt: ArrayBuffer;
         pub_key: ArrayBuffer;
-        priv_key: ArrayBuffer;
+        encrypted_priv_key: ArrayBuffer;
       }>();
     expect(storedUser).toBeTruthy();
     expect(storedUser?.email_verified).toBe(1);
@@ -135,7 +147,7 @@ describe('Auth routes', () => {
     ).toBe(true);
     expect(Buffer.from(storedUser!.password_salt).toString('base64')).toBe(password_salt);
     expect(Buffer.from(storedUser!.pub_key).toString('base64')).toBe(pub_key);
-    expect(Buffer.from(storedUser!.priv_key).toString('base64')).toBe(priv_key);
+    expect(Buffer.from(storedUser!.encrypted_priv_key).toString('base64')).toBe(priv_key);
 
     const consumedToken = await latestEmailToken('signup');
     expect(consumedToken?.consumed_at).not.toBeNull();
@@ -150,21 +162,133 @@ describe('Auth routes', () => {
         password_auth: await passwordAuthFor('pw'),
         password_salt: await passwordSaltFor('nope@example.com'),
         pub_key: await publicKeyFor('nope@example.com'),
-        priv_key: privateKeyFor('nope@example.com'),
+        encrypted_priv_key: privateKeyFor('nope@example.com'),
       }),
     });
     expect(badRes.status).toBe(400);
   });
 
-  it('rejects signup-request for an existing account', async () => {
+  it('signup-request for an existing account looks identical to a fresh request but notifies the owner instead', async () => {
     await signupAndGetCookie('taken@example.com', 'pw');
+
+    const tokenCountBefore = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM email_tokens WHERE purpose = 'signup' AND email = ?",
+    )
+      .bind('taken@example.com')
+      .first<{ count: number }>();
 
     const res = await SELF.fetch(`${BASE}/signup-request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: 'taken@example.com' }),
     });
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(204);
+
+    const deliveries = await listEmailDeliveries();
+    const notice = deliveries.find((delivery) => delivery.kind === 'account_exists_notice');
+    expect(notice).toMatchObject({
+      recipient_email: 'taken@example.com',
+      status: 'sent',
+    });
+
+    // No new signup token should have been issued for the already-owned email.
+    const tokenCountAfter = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM email_tokens WHERE purpose = 'signup' AND email = ?",
+    )
+      .bind('taken@example.com')
+      .first<{ count: number }>();
+    expect(tokenCountAfter?.count).toBe(tokenCountBefore?.count);
+  });
+
+  it('signup consumes the token and does not leak account existence on a token-redemption race', async () => {
+    const password_auth = await passwordAuthFor('client-derived-auth');
+    const password_salt = await passwordSaltFor('racer@example.com');
+    const pub_key = await publicKeyFor('racer@example.com');
+    const priv_key = privateKeyFor('racer@example.com');
+
+    const requestRes = await SELF.fetch(`${BASE}/signup-request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'racer@example.com' }),
+    });
+    expect(requestRes.status).toBe(204);
+
+    const deliveries = await listEmailDeliveries();
+    const signupDelivery = deliveries.find(
+      (delivery) =>
+        delivery.kind === 'email_verification' && delivery.recipient_email === 'racer@example.com',
+    );
+    const verificationToken = extractTokenFromDelivery(signupDelivery!, 'signup_token');
+
+    // Someone else claims the email in the window between /signup-request and /signup.
+    await signupAndGetCookie('racer@example.com', 'someone-else');
+
+    const signupRes = await SELF.fetch(`${BASE}/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        verification_token: verificationToken,
+        password_auth,
+        password_salt,
+        pub_key,
+        encrypted_priv_key: priv_key,
+      }),
+    });
+    expect(signupRes.status).toBe(400);
+    expect(await signupRes.json()).toEqual({ error: 'Invalid or expired verification token' });
+
+    const consumedToken = await latestEmailToken('signup');
+    expect(consumedToken?.consumed_at).not.toBeNull();
+  });
+
+  it('signup/validate resolves the email for a pending signup token', async () => {
+    const requestRes = await SELF.fetch(`${BASE}/signup-request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'pending@example.com' }),
+    });
+    expect(requestRes.status).toBe(204);
+
+    const deliveries = await listEmailDeliveries();
+    const verificationToken = extractTokenFromDelivery(deliveries[0]!, 'signup_token');
+
+    const validateRes = await SELF.fetch(`${BASE}/signup/validate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: verificationToken }),
+    });
+    expect(validateRes.status).toBe(200);
+    expect(await validateRes.json()).toEqual({ email: 'pending@example.com' });
+  });
+
+  it('signup/validate rejects an invalid, expired, or already-claimed token', async () => {
+    const badRes = await SELF.fetch(`${BASE}/signup/validate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: 'not-a-real-token' }),
+    });
+    expect(badRes.status).toBe(400);
+    expect(await badRes.json()).toEqual({ error: 'Invalid or expired verification token' });
+
+    const requestRes = await SELF.fetch(`${BASE}/signup-request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'claimed@example.com' }),
+    });
+    expect(requestRes.status).toBe(204);
+    const deliveries = await listEmailDeliveries();
+    const verificationToken = extractTokenFromDelivery(deliveries[0]!, 'signup_token');
+
+    // Someone else claims the email in the window between /signup-request and /signup/validate.
+    await signupAndGetCookie('claimed@example.com', 'someone-else');
+
+    const claimedRes = await SELF.fetch(`${BASE}/signup/validate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: verificationToken }),
+    });
+    expect(claimedRes.status).toBe(400);
+    expect(await claimedRes.json()).toEqual({ error: 'Invalid or expired verification token' });
   });
 
   it('logs in with password_auth and sets a refresh cookie', async () => {
@@ -178,12 +302,8 @@ describe('Auth routes', () => {
         password_auth: await passwordAuthFor('pw'),
       }),
     });
-    expect(loginRes.status).toBe(200);
+    expect(loginRes.status).toBe(204);
     expect(loginRes.headers.get('set-cookie')).toContain('refresh_token=');
-    const loginBody = (await loginRes.json()) as { ok: boolean; refresh_token: string };
-    expect(loginBody).toMatchObject({ ok: true });
-    expect(typeof loginBody.refresh_token).toBe('string');
-    expect(loginBody.refresh_token.length).toBeGreaterThan(0);
 
     const badLoginRes = await SELF.fetch(`${BASE}/login`, {
       method: 'POST',
@@ -194,6 +314,64 @@ describe('Auth routes', () => {
       }),
     });
     expect(badLoginRes.status).toBe(401);
+  });
+
+  it('sends a reverification email and 403s when logging into an unverified account, and the emailed token verifies it', async () => {
+    const { userId } = await signupAndGetCookie('unverified-login@example.com', 'pw');
+    await env.DB.prepare('UPDATE users SET email_verified = 0 WHERE id = ?')
+      .bind(uuidToBytes(userId))
+      .run();
+
+    const loginRes = await SELF.fetch(`${BASE}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'unverified-login@example.com',
+        password_auth: await passwordAuthFor('pw'),
+      }),
+    });
+    expect(loginRes.status).toBe(403);
+    expect(await loginRes.json()).toEqual({
+      error: 'Please verify your email before logging in. A verification email has been sent.',
+    });
+
+    const deliveries = await listEmailDeliveries();
+    // The signup flow earlier in this test already sent one `email_verification`-kind
+    // delivery (the initial signup link); this login attempt sends a second one, so take
+    // the most recent match rather than the first.
+    const verifyDelivery = [...deliveries]
+      .reverse()
+      .find(
+        (delivery) =>
+          delivery.kind === 'email_verification' &&
+          delivery.recipient_email === 'unverified-login@example.com',
+      );
+    expect(verifyDelivery).toBeTruthy();
+    const verificationToken = extractTokenFromDelivery(verifyDelivery!, 'token');
+    expect(verificationToken).toBeTruthy();
+
+    const verifyRes = await SELF.fetch(`${BASE}/email-verification/validate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: verificationToken }),
+    });
+    expect(verifyRes.status).toBe(200);
+    expect(await verifyRes.json()).toEqual({
+      ok: true,
+      email: 'unverified-login@example.com',
+      purpose: 'email_verification',
+    });
+    expect(verifyRes.headers.get('set-cookie')).toContain('refresh_token=');
+
+    const nowVerifiedLoginRes = await SELF.fetch(`${BASE}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'unverified-login@example.com',
+        password_auth: await passwordAuthFor('pw'),
+      }),
+    });
+    expect(nowVerifiedLoginRes.status).toBe(204);
   });
 
   it('returns the current user and allows updating profile fields', async () => {
@@ -208,7 +386,7 @@ describe('Auth routes', () => {
       body: JSON.stringify({
         name: 'Updated Carol',
         pub_key: nextPubKey,
-        priv_key: nextPrivKey,
+        encrypted_priv_key: nextPrivKey,
       }),
     });
     expect(patchRes.status).toBe(200);
@@ -223,13 +401,13 @@ describe('Auth routes', () => {
       email_verified: boolean;
       settings: { email_frequency: string; timezone: string };
       pub_key: string;
-      priv_key: string;
+      encrypted_priv_key: string;
     };
     expect(body.name).toBe('Updated Carol');
     expect(body.email_verified).toBe(true);
     expect(body.settings).toMatchObject({ email_frequency: 'daily', timezone: 'UTC' });
     expect(body.pub_key).toBe(nextPubKey);
-    expect(body.priv_key).toBe(nextPrivKey);
+    expect(body.encrypted_priv_key).toBe(nextPrivKey);
     await markUserEmailVerified(userId);
     const updateEmailRes = await SELF.fetch(`${BASE}/user`, {
       method: 'PATCH',
@@ -290,6 +468,42 @@ describe('Auth routes', () => {
 
     const latestVerificationToken = await latestEmailToken('email_change');
     expect(latestVerificationToken?.email).toBe('carol-new@example.com');
+  });
+
+  it('PATCH /user email change to an in-use address notifies the owner instead of leaking a 409', async () => {
+    await signupAndGetCookie('owner@example.com', 'pw');
+    const { cookie } = await signupAndGetCookie('requester@example.com', 'pw', 'Requester');
+
+    const patchRes = await SELF.fetch(`${BASE}/user`, {
+      method: 'PATCH',
+      headers: authHeaders(cookie),
+      body: JSON.stringify({ email: 'owner@example.com' }),
+    });
+    expect(patchRes.status).toBe(200);
+    expect(await patchRes.json()).toEqual({
+      ok: true,
+      email_verification_required: true,
+      pending_email: 'owner@example.com',
+    });
+
+    const deliveries = await listEmailDeliveries();
+    const notice = deliveries.find((delivery) => delivery.kind === 'email_in_use_notice');
+    expect(notice).toMatchObject({ recipient_email: 'owner@example.com', status: 'sent' });
+
+    // No email_change token should have been issued for the requester's attempt.
+    const tokenCount = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM email_tokens WHERE purpose = 'email_change' AND email = ?",
+    )
+      .bind('owner@example.com')
+      .first<{ count: number }>();
+    expect(tokenCount?.count).toBe(0);
+
+    const requesterRes = await SELF.fetch(`${BASE}/user`, {
+      headers: authHeaders(cookie),
+    });
+    expect((await requesterRes.json()) as { email: string }).toMatchObject({
+      email: 'requester@example.com',
+    });
   });
 
   it('verifies email-change tokens and sets a new session cookie', async () => {
@@ -360,56 +574,46 @@ describe('Auth routes', () => {
     void userId;
   });
 
-  it('requires matching email confirmation and permanently deletes the account with cascaded data cleanup', async () => {
+  it('requires matching email confirmation and permanently deletes the account with cascaded D1 cleanup', async () => {
     const { cookie, userId } = await signupAndGetCookie('delete-me@example.com', 'pw', 'Delete Me');
-    const device = await createDeviceForUser(cookie, 'Phone', 'ios');
+    const device = await createDeviceForUser('delete-me@example.com', 'pw', 'Phone', 'ios');
 
-    const hashTokenRes = await SELF.fetch(`${BASE}/d/token`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${device.refresh_token}` },
+    // Simulates the client having already uploaded a hash directly to the (mocked)
+    // hash server — the API itself never POSTs there, so there's no request to make.
+    seedHashState(device.id, { hash: '09'.repeat(32), seq: 1, last_received: 500 });
+
+    const form = batchMetadataForm({
+      start_time: 1710000000000,
+      end_time: 1710003600000,
+      access_keys: { [userId]: Buffer.from('owner-envelope').toString('base64') },
+      file: new File([new Uint8Array([4, 5, 6])], 'batch.enc'),
     });
-    expect(hashTokenRes.status).toBe(200);
-    const { hash_token } = (await hashTokenRes.json()) as { hash_token: string };
-
-    const hashUploadRes = await SELF.fetch(`${BASE}/hash`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${hash_token}` },
-      body: new Uint8Array(32).fill(9),
-    });
-    expect(hashUploadRes.status).toBe(200);
-
-    const form = new FormData();
-    form.set('start_time', '1710000000000');
-    form.set('end_time', '1710003600000');
-    form.set(
-      'access_keys',
-      JSON.stringify({
-        keys: [{ user_id: userId, hpke_key: Buffer.from('owner-envelope').toString('base64') }],
-      }),
-    );
-    form.set('file', new File([new Uint8Array([4, 5, 6])], 'batch.enc'));
     const batchRes = await SELF.fetch(`${BASE}/d/batch`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${device.refresh_token}` },
       body: form,
     });
-    expect(batchRes.status).toBe(201);
+    expect(batchRes.status).toBe(200);
     const batch = (await batchRes.json()) as { id: string; url: string };
 
     expect(await env.BUCKET.head(batch.url.replace(`${env.R2_URL}/`, ''))).toBeTruthy();
 
-    const badDeleteRes = await SELF.fetch(`${BASE}/user`, {
-      method: 'DELETE',
-      headers: authHeaders(cookie),
-      body: JSON.stringify({ confirm_email: 'wrong@example.com' }),
-    });
+    const badDeleteRes = await SELF.fetch(
+      `${BASE}/user?confirm_email=${encodeURIComponent('wrong@example.com')}`,
+      {
+        method: 'DELETE',
+        headers: authHeaders(cookie),
+      },
+    );
     expect(badDeleteRes.status).toBe(400);
 
-    const deleteRes = await SELF.fetch(`${BASE}/user`, {
-      method: 'DELETE',
-      headers: authHeaders(cookie),
-      body: JSON.stringify({ confirm_email: 'delete-me@example.com' }),
-    });
+    const deleteRes = await SELF.fetch(
+      `${BASE}/user?confirm_email=${encodeURIComponent('delete-me@example.com')}`,
+      {
+        method: 'DELETE',
+        headers: authHeaders(cookie),
+      },
+    );
     expect(deleteRes.status).toBe(204);
     expect(deleteRes.headers.get('set-cookie')).toContain('refresh_token=');
 
@@ -442,7 +646,9 @@ describe('Auth routes', () => {
         .bind(uuidToBytes(device.id))
         .first<{ count: number }>(),
     ).toMatchObject({ count: 0 });
-    expect(await env.BUCKET.head(batch.url.replace(`${env.R2_URL}/`, ''))).toBeNull();
+    // R2 batch blobs are no longer deleted inline on account deletion — they age
+    // out via the bucket lifecycle rule independent of the D1 row/account lifetime.
+    expect(await env.BUCKET.head(batch.url.replace(`${env.R2_URL}/`, ''))).toBeTruthy();
   });
 
   it('requests and applies password resets with new auth material and keypair bytes', async () => {
@@ -486,20 +692,20 @@ describe('Auth routes', () => {
         password_auth: newPasswordAuth,
         password_salt: newPasswordSalt,
         pub_key: newPubKey,
-        priv_key: newPrivKey,
+        encrypted_priv_key: newPrivKey,
       }),
     });
     expect(resetRes.status).toBe(200);
 
     const storedUser = await env.DB.prepare(
-      'SELECT password_hash, password_salt, pub_key, priv_key FROM users WHERE email = ?',
+      'SELECT password_hash, password_salt, pub_key, encrypted_priv_key FROM users WHERE email = ?',
     )
       .bind('reset@example.com')
       .first<{
         password_hash: string;
         password_salt: ArrayBuffer;
         pub_key: ArrayBuffer;
-        priv_key: ArrayBuffer;
+        encrypted_priv_key: ArrayBuffer;
       }>();
     expect(storedUser).toBeTruthy();
     expect(
@@ -507,6 +713,26 @@ describe('Auth routes', () => {
     ).toBe(true);
     expect(Buffer.from(storedUser!.password_salt).toString('base64')).toBe(newPasswordSalt);
     expect(Buffer.from(storedUser!.pub_key).toString('base64')).toBe(newPubKey);
-    expect(Buffer.from(storedUser!.priv_key).toString('base64')).toBe(newPrivKey);
+    expect(Buffer.from(storedUser!.encrypted_priv_key).toString('base64')).toBe(newPrivKey);
+  });
+
+  it('rejects an unprefixed or wrong-purpose refresh token before touching the session table', async () => {
+    const unprefixedRes = await SELF.fetch(`${BASE}/user`, {
+      headers: authHeaders('not-a-prefixed-token'),
+    });
+    expect(unprefixedRes.status).toBe(401);
+
+    const { id: deviceRefreshToken } = await (async () => {
+      await signupAndGetCookie('device-owner@example.com', 'pw');
+      const device = await createDeviceForUser('device-owner@example.com', 'pw', 'Laptop', 'linux');
+      return { id: device.refresh_token };
+    })();
+
+    // A device_session token (dst_...) presented as a web session (wst_...) must
+    // be rejected on prefix alone, without a session-table lookup.
+    const wrongPurposeRes = await SELF.fetch(`${BASE}/user`, {
+      headers: authHeaders(deviceRefreshToken),
+    });
+    expect(wrongPurposeRes.status).toBe(401);
   });
 });

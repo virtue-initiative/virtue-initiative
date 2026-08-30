@@ -1,13 +1,13 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/preact';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
 import { renderWithClient } from '../../test-utils';
 import { TEST_DEVICES } from '../../mocks/fixtures';
 import type { FeedLog } from './types';
 import { Logs } from './index';
 import { LOG_CATEGORIES } from './shared';
 
-const SAMPLE_LOGS: FeedLog[] = [
+const DEFAULT_SAMPLE_LOGS: FeedLog[] = [
   {
     id: 'log-login',
     device_id: TEST_DEVICES[0].id,
@@ -19,6 +19,20 @@ const SAMPLE_LOGS: FeedLog[] = [
     source: 'batch',
   },
 ];
+
+// Reassignable per test (see "Logs — skipped screenshots filter" below), and
+// read lazily by the mocked `cacheQuery` below, so a test can swap in its own
+// fixture without disturbing the others. Reset after every test.
+let SAMPLE_LOGS: FeedLog[] = DEFAULT_SAMPLE_LOGS;
+afterEach(() => {
+  SAMPLE_LOGS = DEFAULT_SAMPLE_LOGS;
+  // `useUrlState` persists filters into `window.location` via
+  // `history.replaceState`, which — unlike component state — isn't torn down
+  // between tests by @testing-library's auto-cleanup. Without this, a filter
+  // set by one test (e.g. the "type filter" tests below) leaks into the next
+  // test's initial render.
+  window.history.replaceState({}, '', window.location.pathname);
+});
 
 vi.mock('../../utils/cache/client', () => ({
   cacheClient: {
@@ -125,7 +139,7 @@ describe('Logs — type filter', () => {
     await waitFor(() => {
       expect(screen.getByRole('option', { name: 'System Login' })).toBeInTheDocument();
       expect(screen.getByRole('option', { name: 'Suspend Detected' })).toBeInTheDocument();
-      expect(screen.getByRole('option', { name: 'Heartbeat' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Daily Check-in' })).toBeInTheDocument();
     });
     expect(LOG_CATEGORIES).toContain('System Login');
   });
@@ -158,6 +172,63 @@ describe('Logs — type filter', () => {
     await user.selectOptions(typeSelect, 'Suspend Detected');
     await waitFor(() => {
       expect(screen.getByText('No logs found.')).toBeInTheDocument();
+    });
+  });
+});
+
+describe('Logs — skipped screenshots filter', () => {
+  const skippedLog: FeedLog = {
+    id: 'log-skipped',
+    device_id: TEST_DEVICES[0].id,
+    ts: Date.now(),
+    created_at: Date.now(),
+    type: 'screenshot_skipped',
+    data: { reason: 'locked_or_screensaver' },
+    batch_status: 'verified',
+    source: 'batch',
+  };
+
+  it('hides skipped screenshots by default', async () => {
+    SAMPLE_LOGS = [skippedLog];
+    renderWithClient(<Logs />);
+    await waitFor(() => {
+      expect(screen.getByText('No logs found.')).toBeInTheDocument();
+    });
+  });
+
+  it('shows skipped screenshots once "Show skipped screenshots" is checked', async () => {
+    SAMPLE_LOGS = [skippedLog];
+    const user = userEvent.setup();
+    renderWithClient(<Logs />);
+
+    await waitFor(() => {
+      expect(screen.getByText('No logs found.')).toBeInTheDocument();
+    });
+
+    const [checkbox] = screen.getAllByRole('checkbox', { name: /show skipped screenshots/i });
+    await user.click(checkbox);
+
+    await waitFor(() => {
+      expect(screen.queryByText('No logs found.')).not.toBeInTheDocument();
+    });
+  });
+
+  it('always shows skipped screenshots when explicitly filtering to that type', async () => {
+    SAMPLE_LOGS = [skippedLog];
+    const user = userEvent.setup();
+    renderWithClient(<Logs />);
+
+    await waitFor(() => {
+      expect(screen.getByText('No logs found.')).toBeInTheDocument();
+    });
+
+    const typeSelect = screen
+      .getByRole('option', { name: 'System Login' })
+      .closest('select') as HTMLSelectElement;
+    await user.selectOptions(typeSelect, 'Screenshot Skipped');
+
+    await waitFor(() => {
+      expect(screen.queryByText('No logs found.')).not.toBeInTheDocument();
     });
   });
 });

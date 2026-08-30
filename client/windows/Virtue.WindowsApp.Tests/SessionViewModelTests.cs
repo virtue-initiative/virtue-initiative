@@ -21,27 +21,65 @@ public sealed class SessionViewModelTests
     }
 
     [Fact]
-    public async Task InitializeAsync_LoadsSessionAndRuntimeConfig()
+    public void NotifyUpdateStaged_AppendsUpdateReadySuffixToTrayTooltip()
     {
-        var fakeClient = new FakeRustInteropClient
-        {
-            SessionStatus = new SessionStatusPayload(false, null, "user@example.com", "build-123"),
-            MonitorStatus = new MonitorStatusPayload("signed_out", false, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 45, 90, @"C:\ProgramData\Virtue\config\config.json", "build-123"),
-        };
+        var fakeClient = new FakeRustInteropClient();
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
 
-        await viewModel.InitializeAsync();
+        viewModel.NotifyUpdateStaged();
 
-        Assert.Equal("build-123", viewModel.BuildLabel);
-        Assert.Equal("Build build-123 | Windows package 0.0.5.1234", viewModel.BuildLabelText);
-        Assert.Equal("user@example.com", viewModel.EmailInput);
-        Assert.Equal("https://api.example.com", viewModel.ApiBaseUrl);
-        Assert.Equal("45", viewModel.CaptureIntervalSeconds);
-        Assert.Equal("90", viewModel.BatchWindowSeconds);
-        Assert.Equal(@"C:\ProgramData\Virtue\config\config.json", viewModel.ConfigPath);
-        Assert.Equal(@"C:\ProgramData\Virtue\config\config.json", viewModel.ConfigPathDisplay);
-        Assert.Equal("Sign in to start monitoring.", viewModel.StatusText);
+        Assert.True(viewModel.UpdateReady);
+        Assert.Equal("Virtue: loading status (update ready)", viewModel.TrayTooltip);
+    }
+
+    [Fact]
+    public void SetUpdateCountdownText_UpdatesProperty()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        Assert.Null(viewModel.UpdateCountdownText);
+
+        viewModel.SetUpdateCountdownText("42m");
+
+        Assert.Equal("42m", viewModel.UpdateCountdownText);
+    }
+
+    [Fact]
+    public void NotifyUpdateUnstaged_ClearsTheNoticeCountdownAndTooltipSuffix()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+        viewModel.NotifyUpdateStaged();
+        viewModel.SetUpdateCountdownText("42m");
+
+        var changed = new List<string?>();
+        viewModel.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        viewModel.NotifyUpdateUnstaged();
+
+        Assert.False(viewModel.UpdateReady);
+        Assert.Null(viewModel.UpdateCountdownText);
+        Assert.Equal("Virtue: loading status", viewModel.TrayTooltip);
+        Assert.Contains(nameof(SessionViewModel.UpdateReady), changed);
+        Assert.Contains(nameof(SessionViewModel.UpdateCountdownText), changed);
+        Assert.Contains(nameof(SessionViewModel.TrayTooltip), changed);
+    }
+
+    [Fact]
+    public void UpdateCheckStatusText_RaisesPropertyChanged()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        Assert.Null(viewModel.UpdateCheckStatusText);
+
+        var changed = new List<string?>();
+        viewModel.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+        viewModel.UpdateCheckStatusText = "No updates found.";
+
+        Assert.Equal("No updates found.", viewModel.UpdateCheckStatusText);
+        Assert.Contains(nameof(SessionViewModel.UpdateCheckStatusText), changed);
     }
 
     [Fact]
@@ -51,7 +89,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
             MonitorStatus = new MonitorStatusPayload("running", true, 0, 123, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\ProgramData\Virtue\config\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234")
         {
@@ -68,25 +105,73 @@ public sealed class SessionViewModelTests
     }
 
     [Fact]
-    public async Task SaveSettingsAsync_PassesRuntimeConfigUpdateToInterop()
+    public async Task RefreshAsync_ExposesTheFullStatusPagePayload()
     {
         var fakeClient = new FakeRustInteropClient
         {
-            SessionStatus = new SessionStatusPayload(false, null, null, "build-123"),
-            MonitorStatus = new MonitorStatusPayload("signed_out", false, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 45, 90, @"C:\ProgramData\Virtue\config\config.json", "build-123"),
+            SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
+            MonitorStatus = new MonitorStatusPayload(
+                "running",
+                true,
+                2,
+                123,
+                null,
+                AccountEmail: "user@example.com",
+                DeviceId: "device-1",
+                DeviceName: "Work Laptop",
+                PartnerCount: 2,
+                PendingHashCount: 3,
+                PendingBatchCount: 4,
+                LastLoopAtMs: 500,
+                LastScreenshotAttemptAtMs: 400,
+                LastSkipReason: "Screen locked or screensaver active",
+                LastBatchAtMs: 300,
+                RecentErrors: new[] { new StatusErrorPayload(200, "batch_upload", "boom") },
+                ApiBaseUrl: "https://api.example.org",
+                HashBaseUrl: "https://hash.example.org",
+                CaptureIntervalSeconds: 300,
+                BatchWindowSeconds: 60,
+                LogDirectory: @"C:\ProgramData\Virtue\data\logs"),
         };
-        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234")
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        await viewModel.RefreshAsync();
+
+        var status = viewModel.MonitorStatus;
+        Assert.NotNull(status);
+        Assert.Equal("Work Laptop", status!.DeviceName);
+        Assert.Equal(2, status.PartnerCount);
+        Assert.Equal(3, status.PendingHashCount);
+        Assert.Equal(4, status.PendingBatchCount);
+        Assert.Equal(400, status.LastScreenshotAttemptAtMs);
+        Assert.Equal("Screen locked or screensaver active", status.LastSkipReason);
+        Assert.Single(status.RecentErrors!);
+        Assert.Equal("https://api.example.org", status.ApiBaseUrl);
+        Assert.Equal(@"C:\ProgramData\Virtue\data\logs", status.LogDirectory);
+        Assert.Equal(123, viewModel.LastScreenshotAtMs);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_FallsBackToTheDaemonsDeviceIdWhenTheSessionHasNone()
+    {
+        var fakeClient = new FakeRustInteropClient
         {
-            ApiBaseUrl = "https://dev-api.example.com",
-            CaptureIntervalSeconds = "30",
-            BatchWindowSeconds = "180",
+            SessionStatus = new SessionStatusPayload(true, null, null, "build-123"),
+            MonitorStatus = new MonitorStatusPayload(
+                "running",
+                true,
+                0,
+                null,
+                null,
+                AccountEmail: "user@example.com",
+                DeviceId: "device-from-daemon"),
         };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
 
-        await viewModel.SaveSettingsAsync();
+        await viewModel.RefreshAsync();
 
-        Assert.Equal(new RuntimeConfigUpdate("https://dev-api.example.com", 30, 180), fakeClient.LastRuntimeConfigUpdate);
-        Assert.Equal("Runtime settings saved.", viewModel.StatusText);
+        Assert.Equal("device-from-daemon", viewModel.DeviceId);
+        Assert.Equal("user@example.com", viewModel.AccountEmail);
     }
 
     [Fact]
@@ -96,7 +181,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
             MonitorStatus = new MonitorStatusPayload("running", true, 0, 123, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\ProgramData\Virtue\config\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
 
@@ -113,7 +197,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(false, null, null, "build-123"),
             MonitorStatus = new MonitorStatusPayload("running", true, 4, 123, "stale error"),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\ProgramData\Virtue\config\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234")
         {
@@ -139,7 +222,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
             MonitorStatus = new MonitorStatusPayload("signed_out", false, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\ProgramData\Virtue\config\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
 
@@ -189,18 +271,6 @@ public sealed class SessionViewModelTests
     }
 
     [Fact]
-    public void RustInteropJson_SerializesDto()
-    {
-        var update = new RuntimeConfigUpdate("https://api.example.com", 30, 90);
-
-        var json = RustInteropJson.Serialize(update);
-
-        Assert.Contains("\"apiBaseUrl\"", json);
-        Assert.Contains("\"captureIntervalSeconds\"", json);
-        Assert.Contains("\"batchWindowSeconds\"", json);
-    }
-
-    [Fact]
     public async Task LoginAsync_FailsWithMissingEmail()
     {
         var fakeClient = new FakeRustInteropClient();
@@ -239,7 +309,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
             MonitorStatus = new MonitorStatusPayload("running", true, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
 
@@ -256,7 +325,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
             MonitorStatus = new MonitorStatusPayload("running", true, 0, 123, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
 
@@ -264,48 +332,6 @@ public sealed class SessionViewModelTests
 
         Assert.True(fakeClient.StopMonitoringCalled);
         Assert.Equal("Monitoring is stopped on this device.", viewModel.StatusText);
-    }
-
-    [Fact]
-    public async Task SaveSettingsAsync_FailsWithNonNumericCaptureInterval()
-    {
-        var fakeClient = new FakeRustInteropClient
-        {
-            SessionStatus = new SessionStatusPayload(false, null, null, "build-123"),
-            MonitorStatus = new MonitorStatusPayload("signed_out", false, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 45, 90, @"C:\cfg\config.json", "build-123"),
-        };
-        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234")
-        {
-            CaptureIntervalSeconds = "not-a-number",
-            BatchWindowSeconds = "90",
-        };
-
-        await viewModel.SaveSettingsAsync();
-
-        Assert.Null(fakeClient.LastRuntimeConfigUpdate);
-        Assert.Contains("not-a-number", viewModel.StatusText);
-    }
-
-    [Fact]
-    public async Task SaveSettingsAsync_FailsWithNegativeBatchWindow()
-    {
-        var fakeClient = new FakeRustInteropClient
-        {
-            SessionStatus = new SessionStatusPayload(false, null, null, "build-123"),
-            MonitorStatus = new MonitorStatusPayload("signed_out", false, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 45, 90, @"C:\cfg\config.json", "build-123"),
-        };
-        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234")
-        {
-            CaptureIntervalSeconds = "45",
-            BatchWindowSeconds = "-1",
-        };
-
-        await viewModel.SaveSettingsAsync();
-
-        Assert.Null(fakeClient.LastRuntimeConfigUpdate);
-        Assert.Contains("-1", viewModel.StatusText);
     }
 
     [Theory]
@@ -321,7 +347,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(loggedIn, loggedIn ? "device-1" : null, loggedIn ? "user@example.com" : null, "build-123"),
             MonitorStatus = new MonitorStatusPayload(monitorState, loggedIn, 0, null, lastError),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
 
@@ -337,7 +362,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(false, null, null, "build-123"),
             MonitorStatus = new MonitorStatusPayload("signed_out", false, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
 
@@ -353,7 +377,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
             MonitorStatus = new MonitorStatusPayload("running", true, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
 
@@ -370,7 +393,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(false, null, null, "build-123"),
             MonitorStatus = new MonitorStatusPayload("signed_out", false, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
 
@@ -396,7 +418,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(false, null, "server@example.com", "build-123"),
             MonitorStatus = new MonitorStatusPayload("signed_out", false, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
         viewModel.EmailInput = "typed@example.com";
@@ -413,7 +434,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(true, "device-1", "server@example.com", "build-123"),
             MonitorStatus = new MonitorStatusPayload("running", true, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
         viewModel.EmailInput = "typed@example.com";
@@ -421,6 +441,133 @@ public sealed class SessionViewModelTests
         await viewModel.RefreshAsync();
 
         Assert.Equal("server@example.com", viewModel.EmailInput);
+    }
+
+    [Fact]
+    public async Task SubmitBugReportAsync_ReturnsTrueAndForwardsFieldsOnSuccess()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        var result = await viewModel.SubmitBugReportAsync("Screenshots stopped uploading", "me@example.com", true);
+
+        Assert.True(result);
+        Assert.Equal(("Screenshots stopped uploading", "me@example.com", true), fakeClient.LastReportIssue);
+        Assert.Null(viewModel.ErrorText);
+    }
+
+    [Fact]
+    public async Task SubmitBugReportAsync_ReturnsFalseAndSetsErrorTextOnFailure()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            ReportIssueError = new InvalidOperationException("Too many requests"),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        var result = await viewModel.SubmitBugReportAsync("Screenshots stopped uploading", null, false);
+
+        Assert.False(result);
+        Assert.Equal("Too many requests", viewModel.ErrorText);
+    }
+
+    [Fact]
+    public async Task ForceCaptureAsync_ReturnsTheOutcomeAndInvokesInteropOnSuccess()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        var result = await viewModel.ForceCaptureAsync();
+
+        Assert.NotNull(result);
+        Assert.Equal("uploaded", result!.Outcome);
+        Assert.True(fakeClient.ForceScreenshotAndUploadCalled);
+        Assert.Null(viewModel.ErrorText);
+    }
+
+    [Fact]
+    public async Task ForceCaptureAsync_PassesThroughAnOutcomeThatIsNotAnUpload()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            ForceScreenshotAndUploadResult = new("not_captured", "No screenshot was taken."),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        var result = await viewModel.ForceCaptureAsync();
+
+        Assert.NotNull(result);
+        Assert.Equal("not_captured", result!.Outcome);
+        Assert.Equal("No screenshot was taken.", result.Message);
+        Assert.Null(viewModel.ErrorText);
+    }
+
+    [Fact]
+    public async Task ForceCaptureAsync_ReturnsNullAndSetsErrorTextOnFailure()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            ForceScreenshotAndUploadError = new InvalidOperationException("monitoring is not running"),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        var result = await viewModel.ForceCaptureAsync();
+
+        Assert.Null(result);
+        Assert.Equal("monitoring is not running", viewModel.ErrorText);
+    }
+
+    [Fact]
+    public void TrayMenuController_RoutesReportBugEvent()
+    {
+        var host = new NullTrayIconHost();
+        var controller = new TrayMenuController(host);
+        var reportBugRaised = false;
+
+        controller.ReportBugRequested += (_, _) => reportBugRaised = true;
+
+        host.RequestReportBug();
+
+        Assert.True(reportBugRaised);
+    }
+
+    [Fact]
+    public void NullTrayIconHost_HasNoWindowHandle()
+    {
+        Assert.Equal(IntPtr.Zero, new NullTrayIconHost().WindowHandle);
+    }
+
+    [Fact]
+    public void TrayMenuController_ForwardsWindowHandleFromHost()
+    {
+        var host = new FakeTrayIconHost { WindowHandle = new IntPtr(0x1234) };
+        var controller = new TrayMenuController(host);
+
+        Assert.Equal(new IntPtr(0x1234), controller.WindowHandle);
+    }
+
+    [Fact]
+    public void TrayMenuController_RoutesForceCaptureEvent()
+    {
+        var host = new NullTrayIconHost();
+        var controller = new TrayMenuController(host);
+        var forceCaptureRaised = false;
+
+        controller.ForceCaptureRequested += (_, _) => forceCaptureRaised = true;
+
+        host.RequestForceCapture();
+
+        Assert.True(forceCaptureRaised);
+    }
+
+    [Fact]
+    public void ForceScreenshotAndUpload_InvokesInterop()
+    {
+        var fakeClient = new FakeRustInteropClient();
+
+        fakeClient.ForceScreenshotAndUpload();
+
+        Assert.True(fakeClient.ForceScreenshotAndUploadCalled);
     }
 
     [Fact]
@@ -448,7 +595,6 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
             MonitorStatus = new MonitorStatusPayload("running", true, 0, null, null),
-            RuntimeConfig = new RuntimeConfigPayload("https://api.example.com", 60, 120, @"C:\cfg\config.json", "build-123"),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234")
         {
@@ -465,17 +611,71 @@ public sealed class SessionViewModelTests
         Assert.True(viewModel.LoggedIn);
     }
 
+    /// <summary>Minimal host used to prove <see cref="TrayMenuController"/> forwards its host's HWND.</summary>
+    private sealed class FakeTrayIconHost : ITrayIconHost
+    {
+        public event EventHandler? OpenRequested;
+        public event EventHandler? ExitRequested;
+        public event EventHandler? ReportBugRequested;
+        public event EventHandler? ForceCaptureRequested;
+        public event EventHandler? SessionLogoffObserved;
+        public event EventHandler? SystemShutdownObserved;
+
+        public IntPtr WindowHandle { get; set; }
+
+        public void Initialize()
+        {
+            _ = OpenRequested;
+            _ = ExitRequested;
+            _ = ReportBugRequested;
+            _ = ForceCaptureRequested;
+            _ = SessionLogoffObserved;
+            _ = SystemShutdownObserved;
+        }
+
+        public void UpdateToolTip(string toolTip)
+        {
+        }
+
+        public void ShowBalloonTip(string title, string text)
+        {
+        }
+
+        public void SetForceCaptureAvailable(bool available)
+        {
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    [Fact]
+    public void NotifyUpdateInstalling_FlagsTheNoticeAndIsClearedByUnstaging()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+        var changed = new List<string?>();
+        viewModel.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        viewModel.NotifyUpdateStaged();
+        viewModel.NotifyUpdateInstalling();
+
+        Assert.True(viewModel.UpdateInstalling);
+        Assert.Contains(nameof(SessionViewModel.UpdateInstalling), changed);
+
+        viewModel.NotifyUpdateUnstaged();
+
+        Assert.False(viewModel.UpdateInstalling);
+    }
+
     private sealed class FakeRustInteropClient : IRustInteropClient
     {
         public SessionStatusPayload SessionStatus { get; set; } = new(false, null, null, "build-unknown");
 
         public MonitorStatusPayload MonitorStatus { get; set; } = new("stopped", false, 0, null, null);
 
-        public RuntimeConfigPayload RuntimeConfig { get; set; } = new(string.Empty, 300, 3600, string.Empty, "build-unknown");
-
         public (string Email, string Password, string? DeviceName)? LastLogin { get; private set; }
-
-        public RuntimeConfigUpdate? LastRuntimeConfigUpdate { get; private set; }
 
         public bool StartMonitoringCalled { get; private set; }
 
@@ -483,7 +683,7 @@ public sealed class SessionViewModelTests
 
         public bool StopMonitoringFromTrayExitCalled { get; private set; }
 
-        public void Initialize(RuntimeConfigUpdate? overrides = null)
+        public void Initialize()
         {
         }
 
@@ -508,19 +708,6 @@ public sealed class SessionViewModelTests
 
         public MonitorStatusPayload GetMonitorStatus() => MonitorStatus;
 
-        public RuntimeConfigPayload GetRuntimeConfig() => RuntimeConfig;
-
-        public void SetRuntimeConfig(RuntimeConfigUpdate update)
-        {
-            LastRuntimeConfigUpdate = update;
-            RuntimeConfig = new RuntimeConfigPayload(
-                update.ApiBaseUrl ?? RuntimeConfig.ApiBaseUrl,
-                update.CaptureIntervalSeconds ?? RuntimeConfig.CaptureIntervalSeconds,
-                update.BatchWindowSeconds ?? RuntimeConfig.BatchWindowSeconds,
-                RuntimeConfig.ConfigPath,
-                RuntimeConfig.BuildLabel);
-        }
-
         public void Login(string email, string password, string? deviceName = null)
         {
             LastLogin = (email, password, deviceName);
@@ -532,6 +719,38 @@ public sealed class SessionViewModelTests
         {
             SessionStatus = SessionStatus with { LoggedIn = false };
             MonitorStatus = MonitorStatus with { State = "signed_out", LoggedIn = false, LastError = null };
+        }
+
+        public (string Message, string? ContactEmail, bool IncludeLogs)? LastReportIssue { get; private set; }
+
+        public Exception? ReportIssueError { get; set; }
+
+        public void ReportIssue(string message, string? contactEmail, bool includeLogs)
+        {
+            if (ReportIssueError is not null)
+            {
+                throw ReportIssueError;
+            }
+
+            LastReportIssue = (message, contactEmail, includeLogs);
+        }
+
+        public bool ForceScreenshotAndUploadCalled { get; private set; }
+
+        public Exception? ForceScreenshotAndUploadError { get; set; }
+
+        public ForceCapturePayload ForceScreenshotAndUploadResult { get; set; } =
+            new("uploaded", "Screenshot uploaded. Check the web logs page to view it.");
+
+        public ForceCapturePayload ForceScreenshotAndUpload()
+        {
+            if (ForceScreenshotAndUploadError is not null)
+            {
+                throw ForceScreenshotAndUploadError;
+            }
+
+            ForceScreenshotAndUploadCalled = true;
+            return ForceScreenshotAndUploadResult;
         }
     }
 }

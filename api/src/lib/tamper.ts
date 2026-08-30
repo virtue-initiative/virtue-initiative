@@ -9,6 +9,7 @@ const riskRatingToSeverity: Record<RiskRating, TamperSeverity> = {
   marginal: 'info',
   moderate: 'warning',
   high: 'critical',
+  alert: 'critical',
 };
 
 export function riskToSeverity(risk: number | null | undefined): TamperSeverity | null {
@@ -58,6 +59,7 @@ export async function notifyPartnersAboutRiskLog(
       db,
       kind: 'tamper_alert',
       recipient: target.watcher_email,
+      recipientEmailVerified: target.watcher_email_verified,
       subject: email.subject,
       text: email.text,
       html: email.html,

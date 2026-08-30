@@ -2,9 +2,6 @@ use std::io;
 
 use thiserror::Error;
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-use crate::events::remote::IpcError;
-
 pub type CoreResult<T> = Result<T, CoreError>;
 
 #[derive(Debug, Error)]
@@ -24,7 +21,7 @@ pub enum CoreError {
     #[error("image error: {0}")]
     Image(#[from] image::ImageError),
     #[error("HTTP error: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(#[from] ureq::Error),
     #[error("base64 decode error: {0}")]
     Base64(#[from] base64::DecodeError),
     #[error("argon2 error: {0}")]
@@ -41,17 +38,12 @@ pub enum CoreError {
     Crypto(&'static str),
     #[error("external command failed: {0}")]
     CommandFailed(String),
+    #[error("{0}")]
+    Remote(String),
     #[error("classifier error: {0}")]
     Classifier(String),
     #[error("IPC error: {0}")]
     Ipc(String),
-}
-
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-impl From<IpcError> for CoreError {
-    fn from(e: IpcError) -> Self {
-        CoreError::Ipc(e.to_string())
-    }
 }
 
 impl CoreError {
@@ -65,5 +57,9 @@ impl CoreError {
 
     pub fn is_bad_request(&self) -> bool {
         matches!(self, Self::HttpStatus { status: 400, .. })
+    }
+
+    pub fn is_conflict(&self) -> bool {
+        matches!(self, Self::HttpStatus { status: 409, .. })
     }
 }

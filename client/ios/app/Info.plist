@@ -20,6 +20,15 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- "Non-exempt" means exempt from export DOCUMENTATION requirements, not
+	     free of cryptography. client/core implements AES-256-GCM, HPKE, Argon2id
+	     and HKDF itself, which is Apple's "industry standard algorithms not
+	     provided within the Apple operating system" tier: no CCATS, no uploaded
+	     documents. App Store Connect confirmed no documents are required for
+	     this app's answers and directs you to declare it here, which keeps every
+	     build out of "Missing Compliance" without a per-build API call. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>VirtueBuildLabel</key>
 	<string>$(VIRTUE_BUILD_LABEL)</string>
 	<key>LSRequiresIPhoneOS</key>
@@ -36,6 +45,7 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>

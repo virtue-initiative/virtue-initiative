@@ -18,6 +18,14 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- App Store Connect reads the containing app's Info.plist for this, so
+	     strictly the app target alone would do. Declared on the appex too
+	     because the two ship as one upload and a mismatch between them is the
+	     kind of thing that only surfaces as a "Missing Compliance" build after
+	     a release has already gone out. See the app's Info.plist for why the
+	     value is false. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionPointIdentifier</key>

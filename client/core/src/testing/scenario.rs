@@ -5,35 +5,28 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use crate::config::Config;
+use crate::daemon::{Daemon, DaemonState};
 use crate::error::CoreResult;
-use crate::events::Ping;
-use crate::events::bus::{EventBus, Observer, StateType};
 use crate::model::{AuthState, BatchRecipient, DeviceCredentials, DeviceSettings, ServiceStatus};
-use crate::module::auth::AuthModule;
-use crate::module::capture_availability::CaptureAvailabilityModule;
-use crate::module::config::ConfigModule;
-use crate::module::lifecycle::{LifecycleModule, LifecycleObserverState};
-use crate::module::screenshot::ScreenshotModule;
-use crate::module::status::StatusModule;
-use crate::module::status::{StatusRequest, StatusResponse};
-use crate::module::upload::{UploadModule, UploadObserverState};
-use crate::state::load_state;
+use crate::module::upload::Upload;
+use crate::rng::RandomSource;
 use crate::testing::api::MockApiClient;
 use crate::testing::clock::MockClock;
 use crate::testing::platform::TestPlatformHooks;
-use crate::testing::spawner::InlineSpawner;
+use crate::testing::rng::TestRandomSource;
 
 static SCENARIO_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-const STATUS_PARTIAL_COUNT: usize = 3;
-
-/// Test harness wrapping an `EventBus` with the default 7 modules.
+/// Test harness wrapping a [`Daemon`] built via the same [`Daemon::new`]
+/// production uses, so scenario tests exercise the real construction and
+/// startup-refresh path rather than a hand-wired subset.
 pub struct Scenario {
-    pub bus: EventBus,
+    pub daemon: Daemon<TestPlatformHooks, MockApiClient>,
     pub api: MockApiClient,
     pub clock: MockClock,
     pub state_dir: PathBuf,
     pub platform: TestPlatformHooks,
+    pub rng: TestRandomSource,
 }
 
 impl Scenario {
@@ -50,6 +43,7 @@ impl Scenario {
                 device_id: "scenario-device".into(),
                 refresh_token: "scenario-device-refresh".into(),
             }),
+            account_email: Some("scenario@example.org".into()),
         };
         let settings = DeviceSettings {
             device_id: "scenario-device".into(),
@@ -69,81 +63,62 @@ impl Scenario {
         let state_dir = scenario_temp_dir();
 
         if let Some(ref auth) = auth {
-            let upload_state = UploadObserverState {
-                device_credentials: auth.device_credentials.clone(),
-                ..Default::default()
-            };
             let event_state = serde_json::json!({
                 "auth": auth,
-                "screenshot": { "enabled": true, "last_screenshot_at_ms": null },
-                "upload": upload_state,
+                "screenshot": { "enabled": true, "next_screenshot_at_ms": null },
+                "upload": { "device_credentials": auth.device_credentials },
             });
             let path = state_dir.join("event_state.json");
             fs::write(&path, serde_json::to_vec_pretty(&event_state).unwrap())
                 .expect("seed event state with auth");
         }
 
-        let config = scenario_config(state_dir.clone());
-        let screenshot_interval_ms = config.screenshot_interval.as_millis() as i64;
-        let batch_interval_ms = config.batch_interval.as_millis() as i64;
-        let device_name = config.device_name.clone();
-        let platform_name = config.platform_name.clone();
+        Self::from_state_dir(state_dir, settings, 0)
+    }
 
-        let clock = MockClock::default();
+    fn from_state_dir(
+        state_dir: PathBuf,
+        settings: Option<DeviceSettings>,
+        initial_ms: i64,
+    ) -> Self {
+        let config = scenario_config(state_dir.clone());
+        let clock = MockClock::new(initial_ms);
         let platform = TestPlatformHooks::with_clock(clock.clone());
         let api = MockApiClient::new();
-
         if let Some(ref s) = settings {
             api.state().default_device_settings = s.clone();
         }
-
         let api_handle = api.clone();
-
-        let observers: Vec<Box<dyn Observer>> = vec![
-            Box::new(LifecycleModule::new(Box::new(platform.clone()))),
-            Box::new(ScreenshotModule::new(
-                Arc::new(platform.clone()),
-                screenshot_interval_ms,
-            )),
-            Box::new(UploadModule::new(
-                Box::new(platform.clone()),
-                api.clone(),
-                batch_interval_ms,
-            )),
-            Box::new(CaptureAvailabilityModule::new(Box::new(platform.clone()))),
-            Box::new(AuthModule::new(api, device_name, platform_name)),
-            Box::new(StatusModule::new(STATUS_PARTIAL_COUNT)),
-            Box::new(ConfigModule::new(config)),
-        ];
+        let rng = TestRandomSource::new();
 
         let state_path = state_dir.join("event_state.json");
-        let saved_state = load_state(&state_path).unwrap_or(StateType::Null);
-        // Inline spawner so offloaded screenshot captures run synchronously and
-        // scenarios stay deterministic.
-        let mut bus = EventBus::with_spawner(observers, saved_state, Arc::new(InlineSpawner))
-            .expect("scenario bus must construct");
-
-        // Pre-set device settings in upload module if provided
-        if let Some(s) = settings {
-            bus.observer_mut("upload")
-                .expect("upload module must exist")
-                .as_any_mut()
-                .downcast_mut::<UploadModule<MockApiClient>>()
-                .expect("upload module is UploadModule<MockApiClient>")
-                .state
-                .settings = Some(s);
-        }
-
-        // Perform one iter so the bus is in a clean state after init
-        bus.iter().expect("initial bus iter must succeed");
+        let daemon = Daemon::new(config, platform.clone(), api, state_path)
+            .expect("scenario daemon must construct")
+            .with_rng(Arc::new(rng.clone()) as Arc<dyn RandomSource>);
 
         Self {
-            bus,
+            daemon,
             api: api_handle,
             clock,
             state_dir,
             platform,
+            rng,
         }
+    }
+
+    /// Build an authenticated service that reuses an *existing* state
+    /// directory — used to test state surviving a daemon restart.
+    pub fn authenticated_with_state_dir(state_dir: PathBuf) -> Self {
+        Self::from_state_dir(state_dir, None, 0)
+    }
+
+    /// Same as [`Scenario::authenticated_with_state_dir`], but constructs the
+    /// `Daemon` (and thus runs its one-time `Daemon::new` startup logic, e.g.
+    /// restart-loop tracking) with the mock clock already set to `now_ms` —
+    /// used to simulate a real restart happening at a specific time rather
+    /// than always at t=0.
+    pub fn authenticated_with_state_dir_at(state_dir: PathBuf, now_ms: i64) -> Self {
+        Self::from_state_dir(state_dir, None, now_ms)
     }
 
     // --- time control ---
@@ -158,39 +133,73 @@ impl Scenario {
         self
     }
 
-    // --- actions ---
+    // --- driving the daemon ---
 
-    /// Send a Ping and iterate the bus (equivalent to one monitor loop iteration).
-    pub fn loop_iteration(&mut self) -> &mut Self {
-        self.bus.send(Ping).expect("send Ping must succeed");
-        self.bus.iter().expect("bus iter must succeed");
+    /// Run one tick at the current clock time, single-threaded (no
+    /// `run_forever` loop thread involved).
+    pub fn tick(&mut self) -> &mut Self {
+        self.daemon.tick_once_for_test(self.clock.now_ms());
         self
     }
 
-    /// Send an arbitrary typed event and iterate the bus.
-    pub fn send<E: crate::events::bus::Event>(&mut self, event: E) -> &mut Self {
-        self.bus.send(event).expect("send event must succeed");
-        self.bus.iter().expect("bus iter must succeed");
+    pub fn tick_n(&mut self, n: usize) -> &mut Self {
+        for _ in 0..n {
+            self.tick();
+        }
         self
     }
 
-    /// Queue an event without iterating.
-    pub fn queue<E: crate::events::bus::Event>(&mut self, event: E) -> &mut Self {
-        self.bus.send(event).expect("queue event must succeed");
+    pub fn login(
+        &mut self,
+        email: &str,
+        password: &str,
+        device_name: Option<&str>,
+    ) -> CoreResult<String> {
+        self.daemon.test_login(email, password, device_name)
+    }
+
+    pub fn logout(&mut self) -> CoreResult<()> {
+        self.daemon.test_logout()
+    }
+
+    pub fn status(&mut self) -> ServiceStatus {
+        self.daemon.status()
+    }
+
+    pub fn note_user_stop(&mut self, source: &str) -> &mut Self {
+        self.daemon.test_note_user_stop(source);
         self
     }
 
-    /// Iterate without sending (flush the queue).
-    pub fn drain(&mut self) -> &mut Self {
-        self.bus.iter().expect("bus iter must succeed");
+    pub fn note_user_start(&mut self) -> &mut Self {
+        self.daemon.test_note_user_start();
         self
     }
 
-    /// Save current bus state to disk.
-    pub fn persist(&mut self) -> CoreResult<()> {
-        let state = self.bus.iter()?;
-        let path = self.state_dir.join("event_state.json");
-        crate::state::store_state(&path, &state)
+    pub fn queue_upload(&mut self, upload: Upload) -> &mut Self {
+        self.daemon.test_queue_upload(upload);
+        self
+    }
+
+    pub fn flush_batch_now(&mut self) -> &mut Self {
+        self.daemon.test_flush_batch_now();
+        self
+    }
+
+    pub fn force_capture_now(&mut self) -> &mut Self {
+        self.daemon.test_force_capture();
+        self
+    }
+
+    /// A cloned snapshot of the daemon's current state.
+    pub fn state(&self) -> DaemonState {
+        self.daemon.state_snapshot()
+    }
+
+    /// Run `f` with exclusive access to the daemon's live state, e.g. to
+    /// seed a scenario precondition.
+    pub fn with_state_mut<R>(&mut self, f: impl FnOnce(&mut DaemonState) -> R) -> R {
+        self.daemon.with_state_mut(f)
     }
 
     // --- state-file readers ---
@@ -208,58 +217,7 @@ impl Scenario {
         }
     }
 
-    pub fn read_errors_log(&self) -> String {
-        self.read_file("errors.log")
-    }
-
     // --- assertions ---
-
-    /// Pull a `StatusResponse` via request/response and pass it to the closure.
-    pub fn assert_status(&mut self, check: impl FnOnce(&ServiceStatus)) -> &mut Self {
-        use crate::events::bus::EventChannel;
-        let response: StatusResponse = self
-            .bus
-            .request(StatusRequest)
-            .expect("status request must succeed");
-        check(&response.status);
-        self
-    }
-
-    pub fn assert_is_authenticated(&mut self, expected: bool) -> &mut Self {
-        self.assert_status(|s| {
-            assert_eq!(
-                s.is_authenticated, expected,
-                "expected status.is_authenticated = {expected}, got {}",
-                s.is_authenticated
-            );
-        })
-    }
-
-    /// Assert the service reports is_running = true (always true while bus is active).
-    pub fn assert_is_running(&mut self, _expected: bool) -> &mut Self {
-        // In the new event-bus model, is_running is always true while the bus is
-        // alive. The daemon is responsible for shutting down; the modules always
-        // report running.
-        self
-    }
-
-    pub fn assert_errors_log_nonempty(&self) -> &Self {
-        let contents = self.read_errors_log();
-        assert!(
-            !contents.trim().is_empty(),
-            "expected errors.log to be non-empty but it was empty"
-        );
-        self
-    }
-
-    pub fn assert_errors_log_empty(&self) -> &Self {
-        let contents = self.read_errors_log();
-        assert!(
-            contents.trim().is_empty(),
-            "expected errors.log to be empty but got: {contents}"
-        );
-        self
-    }
 
     pub fn assert_batch_upload_count(&self, expected: usize) -> &Self {
         let actual = self.api.state().batch_uploads.len();
@@ -277,118 +235,6 @@ impl Scenario {
             "expected {expected} notify calls, recorded {actual}"
         );
         self
-    }
-
-    pub fn assert_screenshot_call_count(&self, expected: u64) -> &Self {
-        // The screenshot call count is tracked via the API; count upload events instead.
-        let actual = self.api.state().batch_uploads.len();
-        // We count platform take_screenshot calls via the platform handle directly
-        let _ = actual; // Actual check is via platform.take_call_count() — caller must use platform directly
-        // For backward compat, this is a no-op: scenarios that need exact screenshot counts
-        // should use `scenario.platform.take_call_count()` instead.
-        let _ = expected;
-        self
-    }
-
-    pub fn assert_pending_request_count(&mut self, expected: usize) -> &mut Self {
-        let actual = self
-            .bus
-            .observer_mut("upload")
-            .expect("upload module must exist")
-            .as_any_mut()
-            .downcast_mut::<UploadModule<MockApiClient>>()
-            .expect("upload module is UploadModule<MockApiClient>")
-            .state
-            .pending_request_count();
-        assert_eq!(
-            actual, expected,
-            "expected {expected} pending requests, got {actual}"
-        );
-        self
-    }
-
-    // --- state setters ---
-
-    pub fn set_last_batch_at_ms(&mut self, ms: Option<i64>) -> &mut Self {
-        self.bus
-            .observer_mut("upload")
-            .expect("upload module must exist")
-            .as_any_mut()
-            .downcast_mut::<UploadModule<MockApiClient>>()
-            .expect("upload module is UploadModule<MockApiClient>")
-            .state
-            .last_batch_at_ms = ms;
-        self
-    }
-
-    pub fn set_last_screenshot_at_ms(&mut self, ms: Option<i64>) -> &mut Self {
-        self.bus
-            .observer_mut("screenshot")
-            .expect("screenshot module must exist")
-            .as_any_mut()
-            .downcast_mut::<ScreenshotModule>()
-            .expect("screenshot module is ScreenshotModule")
-            .state
-            .last_screenshot_at_ms = ms;
-        self
-    }
-
-    pub fn set_lifecycle_observer_state(&mut self, state: LifecycleObserverState) -> &mut Self {
-        self.bus
-            .observer_mut("lifecycle")
-            .expect("lifecycle module must exist")
-            .as_any_mut()
-            .downcast_mut::<LifecycleModule>()
-            .expect("lifecycle module is LifecycleModule")
-            .state = state;
-        self
-    }
-
-    // --- alternate constructors ---
-
-    /// Build an authenticated service that reuses an *existing* state directory.
-    pub fn authenticated_with_state_dir(state_dir: PathBuf) -> Self {
-        let config = scenario_config(state_dir.clone());
-        let screenshot_interval_ms = config.screenshot_interval.as_millis() as i64;
-        let batch_interval_ms = config.batch_interval.as_millis() as i64;
-        let device_name = config.device_name.clone();
-        let platform_name = config.platform_name.clone();
-
-        let clock = MockClock::default();
-        let platform = TestPlatformHooks::with_clock(clock.clone());
-        let api = MockApiClient::new();
-        let api_handle = api.clone();
-
-        let observers: Vec<Box<dyn Observer>> = vec![
-            Box::new(LifecycleModule::new(Box::new(platform.clone()))),
-            Box::new(ScreenshotModule::new(
-                Arc::new(platform.clone()),
-                screenshot_interval_ms,
-            )),
-            Box::new(UploadModule::new(
-                Box::new(platform.clone()),
-                api.clone(),
-                batch_interval_ms,
-            )),
-            Box::new(CaptureAvailabilityModule::new(Box::new(platform.clone()))),
-            Box::new(AuthModule::new(api, device_name, platform_name)),
-            Box::new(StatusModule::new(STATUS_PARTIAL_COUNT)),
-            Box::new(ConfigModule::new(config)),
-        ];
-
-        let state_path = state_dir.join("event_state.json");
-        let saved_state = load_state(&state_path).unwrap_or(StateType::Null);
-        let mut bus = EventBus::with_spawner(observers, saved_state, Arc::new(InlineSpawner))
-            .expect("scenario bus must construct");
-        bus.iter().expect("initial bus iter must succeed");
-
-        Self {
-            bus,
-            api: api_handle,
-            clock,
-            state_dir,
-            platform,
-        }
     }
 }
 
@@ -420,7 +266,6 @@ fn scenario_config(state_dir: PathBuf) -> Config {
         "scenario-device",
         "test-platform",
         state_dir,
-        None,
         Duration::from_secs(60),
         Duration::from_secs(60),
     )

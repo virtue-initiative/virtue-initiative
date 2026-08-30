@@ -15,12 +15,9 @@ public sealed class RustInteropClient : IRustInteropClient
         EnsureResolverInstalled();
     }
 
-    public void Initialize(RuntimeConfigUpdate? overrides = null)
+    public void Initialize()
     {
-        var error = NativeMethods.virtue_windows_init(
-            overrides?.ApiBaseUrl ?? string.Empty,
-            overrides?.CaptureIntervalSeconds?.ToString() ?? string.Empty,
-            overrides?.BatchWindowSeconds?.ToString() ?? string.Empty);
+        var error = NativeMethods.virtue_windows_init();
         ThrowIfError(error);
     }
 
@@ -54,16 +51,6 @@ public sealed class RustInteropClient : IRustInteropClient
     public MonitorStatusPayload GetMonitorStatus() =>
         ReadJsonPayload<MonitorStatusPayload>(NativeMethods.virtue_windows_get_monitor_status_json());
 
-    public RuntimeConfigPayload GetRuntimeConfig() =>
-        ReadJsonPayload<RuntimeConfigPayload>(NativeMethods.virtue_windows_get_runtime_config_json());
-
-    public void SetRuntimeConfig(RuntimeConfigUpdate update)
-    {
-        var payload = RustInteropJson.Serialize(update);
-        var error = NativeMethods.virtue_windows_set_runtime_config_json(payload);
-        ThrowIfError(error);
-    }
-
     public void Login(string email, string password, string? deviceName = null)
     {
         var payload = RustInteropJson.Serialize(new LoginRequest(email, password, deviceName));
@@ -74,6 +61,18 @@ public sealed class RustInteropClient : IRustInteropClient
     public void Logout()
     {
         var error = NativeMethods.virtue_windows_logout();
+        ThrowIfError(error);
+    }
+
+    public ForceCapturePayload ForceScreenshotAndUpload()
+    {
+        return ReadJsonPayload<ForceCapturePayload>(NativeMethods.virtue_windows_force_capture());
+    }
+
+    public void ReportIssue(string message, string? contactEmail, bool includeLogs)
+    {
+        var payload = RustInteropJson.Serialize(new ReportIssueRequest(message, contactEmail, includeLogs));
+        var error = NativeMethods.virtue_windows_report_issue(payload);
         ThrowIfError(error);
     }
 
@@ -158,10 +157,7 @@ public sealed class RustInteropClient : IRustInteropClient
     private static class NativeMethods
     {
         [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern IntPtr virtue_windows_init(
-            [MarshalAs(UnmanagedType.LPUTF8Str)] string apiBaseUrl,
-            [MarshalAs(UnmanagedType.LPUTF8Str)] string captureIntervalSeconds,
-            [MarshalAs(UnmanagedType.LPUTF8Str)] string batchWindowSeconds);
+        internal static extern IntPtr virtue_windows_init();
 
         [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
         internal static extern IntPtr virtue_windows_get_session_status_json();
@@ -189,11 +185,11 @@ public sealed class RustInteropClient : IRustInteropClient
         internal static extern IntPtr virtue_windows_logout();
 
         [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern IntPtr virtue_windows_get_runtime_config_json();
+        internal static extern IntPtr virtue_windows_force_capture();
 
         [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
-        internal static extern IntPtr virtue_windows_set_runtime_config_json(
-            [MarshalAs(UnmanagedType.LPUTF8Str)] string configJson);
+        internal static extern IntPtr virtue_windows_report_issue(
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string requestJson);
 
         [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
         internal static extern void virtue_windows_free_string(IntPtr value);

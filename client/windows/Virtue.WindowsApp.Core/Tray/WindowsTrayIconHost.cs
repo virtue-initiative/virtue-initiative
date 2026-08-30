@@ -7,6 +7,7 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
     private const int NifMessage = 0x00000001;
     private const int NifIcon = 0x00000002;
     private const int NifTip = 0x00000004;
+    private const int NifInfo = 0x00000010;
     private const int NimAdd = 0x00000000;
     private const int NimModify = 0x00000001;
     private const int NimDelete = 0x00000002;
@@ -24,6 +25,8 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
     private const int LrLoadFromFile = 0x00000010;
     private const int IdTrayOpen = 2001;
     private const int IdTrayExit = 2002;
+    private const int IdTrayReportBug = 2003;
+    private const int IdTrayForceCapture = 2005;
     private const int WindowId = 1;
     private static readonly uint WmTrayIcon = WmApp + 1;
 
@@ -36,6 +39,10 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
     private bool _iconAdded;
     private uint _taskbarCreatedMessage;
     private string _toolTip = "Virtue";
+    // Test Screenshot needs an active (logged-in) monitoring session, so it starts
+    // unavailable and is hidden from the menu entirely (rather than shown-but-disabled)
+    // until the app calls SetForceCaptureAvailable.
+    private bool _forceCaptureAvailable;
 
     public WindowsTrayIconHost()
     {
@@ -44,8 +51,13 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
 
     public event EventHandler? OpenRequested;
     public event EventHandler? ExitRequested;
+    public event EventHandler? ReportBugRequested;
+    public event EventHandler? ForceCaptureRequested;
     public event EventHandler? SessionLogoffObserved;
     public event EventHandler? SystemShutdownObserved;
+
+    /// <inheritdoc />
+    public IntPtr WindowHandle => _windowHandle;
 
     public void Initialize()
     {
@@ -75,12 +87,46 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
             throw new InvalidOperationException("Failed to create tray host window.");
         }
 
-        _menuHandle = CreatePopupMenu();
-        _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayOpen, "Open");
-        _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayExit, "Exit");
+        RebuildMenu();
 
         AddOrUpdateIcon(NimAdd);
         _initialized = true;
+    }
+
+    public void SetForceCaptureAvailable(bool available)
+    {
+        if (_forceCaptureAvailable == available)
+        {
+            return;
+        }
+
+        _forceCaptureAvailable = available;
+        RebuildMenu();
+    }
+
+    /// Rebuilds the popup menu from scratch so an unavailable item (Test Screenshot
+    /// before login) is omitted entirely rather than shown disabled — Win32 popup menus
+    /// have no per-item show/hide, so this is the standard way to change which items are
+    /// present. The HMENU is a USER object owned by the calling thread, so callers must
+    /// keep this on the thread that owns the tray window.
+    private void RebuildMenu()
+    {
+        var oldMenuHandle = _menuHandle;
+
+        _menuHandle = CreatePopupMenu();
+        _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayOpen, "Open");
+        if (_forceCaptureAvailable)
+        {
+            _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayForceCapture, "Test Screenshot");
+        }
+
+        _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayReportBug, "Report a Bug");
+        _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayExit, "Exit");
+
+        if (oldMenuHandle != IntPtr.Zero)
+        {
+            DestroyMenu(oldMenuHandle);
+        }
     }
 
     public void UpdateToolTip(string toolTip)
@@ -90,6 +136,27 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
         {
             AddOrUpdateIcon(NimModify);
         }
+    }
+
+    public void ShowBalloonTip(string title, string text)
+    {
+        if (!_iconAdded || _windowHandle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var data = new NotifyIconData
+        {
+            cbSize = Marshal.SizeOf<NotifyIconData>(),
+            hWnd = _windowHandle,
+            uID = WindowId,
+            uFlags = NifInfo,
+            szTip = BuildToolTip(_toolTip),
+            szInfo = text.Length <= 255 ? text : text[..255],
+            szInfoTitle = title.Length <= 63 ? title : title[..63],
+        };
+
+        _ = Shell_NotifyIcon(NimModify, ref data);
     }
 
     public void Dispose()
@@ -227,6 +294,14 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
                 if (command == IdTrayOpen)
                 {
                     OpenRequested?.Invoke(this, EventArgs.Empty);
+                }
+                else if (command == IdTrayReportBug)
+                {
+                    ReportBugRequested?.Invoke(this, EventArgs.Empty);
+                }
+                else if (command == IdTrayForceCapture)
+                {
+                    ForceCaptureRequested?.Invoke(this, EventArgs.Empty);
                 }
                 else if (command == IdTrayExit)
                 {

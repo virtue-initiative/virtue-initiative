@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IOS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 DERIVED_DATA_PATH="$IOS_DIR/.derived-data-device"
-TEAM_ID="${TEAM_ID:-6277E5UTS9}"
+TEAM_ID="${TEAM_ID:-Y2Z8ZS4D33}"
 BUNDLE_ID="${BUNDLE_ID:-org.virtueinitiative.virtueios}"
 DEVICE_UDID="${DEVICE_UDID:-}"
 

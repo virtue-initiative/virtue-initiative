@@ -1,22 +1,87 @@
+import Darwin
 import Foundation
 import SafariServices
 
 private let extensionMessageKey = "message"
 
+/// Extension-process diagnostics, attached to every response sent back to
+/// `background.js` so they show up in Safari Web Inspector's JS console
+/// (which is reachable from the phone; OS-level logs are not). This is the
+/// cheapest way to see, from the failing device itself, how long the App
+/// Extension process has been alive and how its resident memory trends
+/// right up until the process gets jetsam-killed for memory pressure — the
+/// last diagnostics line logged by `background.js` before a gap in console
+/// output pinpoints roughly where/when that kill happened.
+private enum ProcessDiagnostics {
+    static let processStartedAt = Date()
+
+    private static let lock = NSLock()
+    private static var requestCount: Int = 0
+    private static var screenshotCount: Int = 0
+
+    static func nextRequestCount() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        requestCount += 1
+        return requestCount
+    }
+
+    /// Called from `virtue_ios_capture_png_write` on every frame actually handed
+    /// to the Rust daemon for processing — i.e. a real capture+classify cycle,
+    /// not just a `capture_frame` message arriving from `content.js` (most of
+    /// those don't coincide with the daemon's own capture schedule).
+    static func recordScreenshotCaptured() {
+        lock.lock()
+        defer { lock.unlock() }
+        screenshotCount += 1
+    }
+
+    /// Resident set size in MB via `task_info(MACH_TASK_BASIC_INFO)`, or -1 if unavailable.
+    static func residentMemoryMB() -> Double {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<mach_task_basic_info>.size / MemoryLayout<natural_t>.size
+        )
+        let result: kern_return_t = withUnsafeMutablePointer(to: &info) { infoPtr in
+            infoPtr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { intPtr in
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), intPtr, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return -1 }
+        return Double(info.resident_size) / 1024.0 / 1024.0
+    }
+
+    static func snapshot() -> [String: Any] {
+        lock.lock()
+        let currentScreenshotCount = screenshotCount
+        lock.unlock()
+
+        return [
+            "diag_mem_mb": (residentMemoryMB() * 100).rounded() / 100,
+            "diag_uptime_s": Date().timeIntervalSince(processStartedAt),
+            "diag_request_count": nextRequestCount(),
+            "diag_daemon_running": SafariSharedStateStore.shared.readDaemonRunning(),
+            "diag_screenshot_count": currentScreenshotCount,
+            "diag_nsfw_run_count": virtue_ios_native_nsfw_run_count(),
+            "diag_batch_upload_count": virtue_ios_native_batch_upload_count(),
+        ]
+    }
+}
+
 @_silgen_name("virtue_ios_native_init")
 private func virtue_ios_native_init(
     _ configDir: UnsafePointer<CChar>?,
-    _ dataDir: UnsafePointer<CChar>?,
-    _ baseApiUrl: UnsafePointer<CChar>?,
-    _ captureIntervalSeconds: UnsafePointer<CChar>?,
-    _ batchWindowSeconds: UnsafePointer<CChar>?
+    _ dataDir: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
-@_silgen_name("virtue_ios_native_run_daemon_loop")
-private func virtue_ios_native_run_daemon_loop() -> UnsafeMutablePointer<CChar>?
+@_silgen_name("virtue_ios_native_tick_once")
+private func virtue_ios_native_tick_once() -> UnsafeMutablePointer<CChar>?
 
-@_silgen_name("virtue_ios_native_stop_daemon")
-private func virtue_ios_native_stop_daemon() -> UnsafeMutablePointer<CChar>?
+@_silgen_name("virtue_ios_native_nsfw_run_count")
+private func virtue_ios_native_nsfw_run_count() -> UInt64
+
+@_silgen_name("virtue_ios_native_batch_upload_count")
+private func virtue_ios_native_batch_upload_count() -> UInt64
 
 @_silgen_name("virtue_ios_free_string")
 private func virtue_ios_free_string(_ value: UnsafeMutablePointer<CChar>?)
@@ -176,6 +241,12 @@ private final class SafariSharedStateStore {
         lock.unlock()
     }
 
+    func readDaemonRunning() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return defaults?.bool(forKey: VirtueShared.safariDaemonRunningKey) ?? false
+    }
+
     func markDaemonState(running: Bool, error: String?) {
         lock.lock()
         defaults?.set(running, forKey: VirtueShared.safariDaemonRunningKey)
@@ -193,18 +264,6 @@ private final class SafariSharedStateStore {
         lock.unlock()
     }
 
-    func markPauseStopIssued(_ issued: Bool) {
-        lock.lock()
-        defaults?.set(issued, forKey: VirtueShared.safariPauseStopIssuedKey)
-        lock.unlock()
-    }
-
-    func hasPauseStopBeenIssued() -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return defaults?.bool(forKey: VirtueShared.safariPauseStopIssuedKey) ?? false
-    }
-
     func isMonitoringEnabled() -> Bool {
         lock.lock()
         defer { lock.unlock() }
@@ -220,14 +279,34 @@ private final class SafariNativeRuntime {
     static let shared = SafariNativeRuntime()
 
     private let lock = NSLock()
-    private let daemonQueue = DispatchQueue(label: "org.virtueinitiative.ios.safari.daemon")
     private var initialized = false
-    private var daemonRunning = false
-    private var stopRequested = false
+    private var tickInFlight = false
 
     private init() {}
 
-    func ensureInitializedAndRunning() {
+    /// Ensures native is initialized, then schedules exactly one bounded
+    /// tick. `beginRequest`'s `completeRequest` round trip has to return
+    /// within whatever window WebKit gives `sendNativeMessage` (undocumented,
+    /// but observed to be a low single-digit number of seconds — well under
+    /// what a cold model load + network upload can take), so the tick itself
+    /// runs inside `ProcessInfo.performExpiringActivity`, which asks the OS
+    /// for extra background time *after* this method (and therefore
+    /// `completeRequest`) has already returned. These are two different
+    /// budgets: `performExpiringActivity` extends how long the process may
+    /// keep running, not how long WebKit waits for the reply — see SPEC.md
+    /// CORE-015 and `architecture.md` for why there's no persistent daemon loop
+    /// here at all (unlike Linux/Mac/Windows/Android, or the app target's own
+    /// temporary loop).
+    ///
+    /// `Daemon::tick_once` is documented as not callable concurrently with
+    /// itself — it panics if it is (it shares `run_forever`'s single-request-
+    /// receiver guard). Since messages can arrive faster than one tick takes
+    /// to finish, `tickInFlight` skips scheduling a new tick while one is
+    /// still running; the frame a skipped `capture_frame` call carried is
+    /// already latched into `SafariFrameStore` before this is ever called,
+    /// so nothing is lost — the next tick to actually run picks up whatever
+    /// the latest stored frame is.
+    func ensureInitializedAndTick() {
         if let initError = initializeIfNeeded() {
             SafariFrameStore.shared.updateState(code: captureStateUnknown, clearFrame: true)
             SafariSharedStateStore.shared.markCaptureError(
@@ -236,7 +315,43 @@ private final class SafariNativeRuntime {
             )
             return
         }
-        startDaemonIfNeeded()
+
+        lock.lock()
+        if tickInFlight {
+            lock.unlock()
+            return
+        }
+        tickInFlight = true
+        lock.unlock()
+
+        SafariSharedStateStore.shared.markDaemonState(running: true, error: nil)
+
+        ProcessInfo.processInfo.performExpiringActivity(
+            withReason: "org.virtueinitiative.ios.safari.tick"
+        ) { [weak self] expired in
+            guard let self else { return }
+
+            // `expired == true` means the system is telling us our extra time
+            // is up. `virtue_ios_native_tick_once()` is one opaque blocking
+            // FFI call with no cooperative-cancellation hook, so there's
+            // nothing to do here but let it run its course (or get killed) —
+            // this callback fires on whichever invocation is still pending,
+            // not a fresh one, so it must not re-enter the FFI call or clear
+            // `tickInFlight` out from under a call that's still in progress.
+            guard !expired else { return }
+
+            let tickError = virtue_ios_native_tick_once()
+            var tickMessage: String?
+            if let tickError {
+                tickMessage = String(cString: tickError)
+                virtue_ios_free_string(tickError)
+            }
+            SafariSharedStateStore.shared.markDaemonState(running: false, error: tickMessage)
+
+            self.lock.lock()
+            self.tickInFlight = false
+            self.lock.unlock()
+        }
     }
 
     private func initializeIfNeeded() -> String? {
@@ -246,13 +361,6 @@ private final class SafariNativeRuntime {
             return nil
         }
         lock.unlock()
-
-        let defaults = UserDefaults(suiteName: VirtueShared.appGroupID)
-        let overrides = (
-            defaults?.string(forKey: VirtueShared.baseApiUrlKey) ?? VirtueShared.defaultBaseApiUrl,
-            defaults?.string(forKey: VirtueShared.captureIntervalKey) ?? VirtueShared.defaultCaptureIntervalSeconds,
-            defaults?.string(forKey: VirtueShared.batchWindowKey) ?? VirtueShared.defaultBatchWindowSeconds
-        )
 
         guard let root = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: VirtueShared.appGroupID
@@ -272,19 +380,7 @@ private final class SafariNativeRuntime {
 
         let initError = configDir.path.withCString { configCString in
             dataDir.path.withCString { dataCString in
-                overrides.0.withCString { baseURLCString in
-                    overrides.1.withCString { captureIntervalCString in
-                        overrides.2.withCString { batchWindowCString in
-                            virtue_ios_native_init(
-                                configCString,
-                                dataCString,
-                                baseURLCString,
-                                captureIntervalCString,
-                                batchWindowCString
-                            )
-                        }
-                    }
-                }
+                virtue_ios_native_init(configCString, dataCString)
             }
         }
 
@@ -299,74 +395,6 @@ private final class SafariNativeRuntime {
         lock.unlock()
         return nil
     }
-
-    private func startDaemonIfNeeded() {
-        lock.lock()
-        if daemonRunning {
-            lock.unlock()
-            return
-        }
-        daemonRunning = true
-        stopRequested = false
-        lock.unlock()
-
-        SafariSharedStateStore.shared.markDaemonState(running: true, error: nil)
-
-        daemonQueue.async { [weak self] in
-            guard let self else { return }
-            let daemonError = virtue_ios_native_run_daemon_loop()
-
-            var daemonMessage: String?
-            if let daemonError {
-                daemonMessage = String(cString: daemonError)
-                virtue_ios_free_string(daemonError)
-            }
-
-            self.lock.lock()
-            self.daemonRunning = false
-            self.stopRequested = false
-            self.lock.unlock()
-
-            SafariSharedStateStore.shared.markDaemonState(
-                running: false,
-                error: daemonMessage
-            )
-        }
-    }
-
-    func requestPauseIfNeeded(source: String) {
-        lock.lock()
-        let shouldRequestStop = daemonRunning
-            && !stopRequested
-            && !SafariSharedStateStore.shared.hasPauseStopBeenIssued()
-        if shouldRequestStop {
-            stopRequested = true
-        }
-        lock.unlock()
-
-        guard shouldRequestStop else {
-            SafariSharedStateStore.shared.markDaemonState(running: false, error: nil)
-            return
-        }
-
-        SafariSharedStateStore.shared.markPauseStopIssued(true)
-        _ = source
-        let pauseError = virtue_ios_native_stop_daemon()
-
-        if let pauseError {
-            let message = String(cString: pauseError)
-            virtue_ios_free_string(pauseError)
-            lock.lock()
-            stopRequested = false
-            lock.unlock()
-            SafariSharedStateStore.shared.markPauseStopIssued(false)
-            SafariSharedStateStore.shared.markDaemonState(
-                running: true,
-                error: "pause_request_failed: \(message)"
-            )
-        }
-    }
-
 }
 
 @_cdecl("virtue_ios_capture_status")
@@ -393,6 +421,7 @@ public func virtue_ios_capture_png_write(
     frame.copyBytes(to: raw.assumingMemoryBound(to: UInt8.self), count: frame.count)
     outBuffer.pointee = UnsafePointer(raw.assumingMemoryBound(to: UInt8.self))
     outLength.pointee = frame.count
+    ProcessDiagnostics.recordScreenshotCaptured()
     return 0
 }
 
@@ -405,7 +434,8 @@ public func virtue_ios_capture_png_release(_ buffer: UnsafePointer<UInt8>?, _ le
 
 final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
     func beginRequest(with context: NSExtensionContext) {
-        let responsePayload = handleRequest(context)
+        var responsePayload = handleRequest(context)
+        responsePayload.merge(ProcessDiagnostics.snapshot()) { current, _ in current }
         let response = NSExtensionItem()
         response.userInfo = [extensionMessageKey: responsePayload]
         context.completeRequest(returningItems: [response], completionHandler: nil)
@@ -417,7 +447,6 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         if !SafariSharedStateStore.shared.isMonitoringEnabled() {
             SafariFrameStore.shared.updateState(code: captureStateUnknown, clearFrame: true)
             SafariSharedStateStore.shared.markCaptureState(VirtueShared.captureStateUnknown)
-            SafariNativeRuntime.shared.requestPauseIfNeeded(source: "ios_app_pause_toggle")
             return ["ok": true, "paused": true]
         }
 
@@ -445,7 +474,7 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         case "ping":
             SafariFrameStore.shared.updateState(code: captureStateSessionUnavailable, clearFrame: false)
             SafariSharedStateStore.shared.markCaptureState(VirtueShared.captureStateSessionUnavailable)
-            SafariNativeRuntime.shared.ensureInitializedAndRunning()
+            SafariNativeRuntime.shared.ensureInitializedAndTick()
             return ["ok": true]
         default:
             return ["ok": false, "error": "unsupported_type", "type": type]
@@ -467,7 +496,7 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             url: payload["url"] as? String,
             title: payload["title"] as? String
         )
-        SafariNativeRuntime.shared.ensureInitializedAndRunning()
+        SafariNativeRuntime.shared.ensureInitializedAndTick()
 
         return ["ok": true, "bytes": png.count]
     }

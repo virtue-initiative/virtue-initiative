@@ -1,13 +1,16 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using Microsoft.UI;
 using Microsoft.UI.Text;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
+using Virtue.WindowsApp.Core.Interop;
 using Virtue.WindowsApp.Core.ViewModels;
 using Windows.Graphics;
 using WinRT.Interop;
@@ -18,11 +21,13 @@ public sealed partial class MainWindow : Window
 {
     private const string WebsiteDisplayUrl = "virtueinitiative.org";
     private const string WebsiteNavigateUrl = "https://virtueinitiative.org";
+    private const string SignUpNavigateUrl = "https://app.virtueinitiative.org/signup";
 
     private readonly AppWindow _appWindow;
     private readonly TextBlock _statusTextBlock;
     private readonly TextBlock _statusDetailTextBlock;
     private readonly TextBlock _buildLabelTextBlock;
+    private readonly TextBlock _updateCheckStatusTextBlock;
     private readonly TextBlock _accountSummaryTextBlock;
     private readonly StackPanel _loginPanel;
     private readonly StackPanel _accountActionsPanel;
@@ -32,6 +37,9 @@ public sealed partial class MainWindow : Window
     private readonly TextBox _deviceNameTextBox;
     private readonly Border _statusDot;
     private readonly TextBlock _errorTextBlock;
+    private readonly Border _updateNoticeCard;
+    private readonly TextBlock _updateNoticeTextBlock;
+    private readonly Button _restartNowButton = CreateActionButton("Restart now to update");
     private Button? _signInButton;
     private bool _allowClose;
 
@@ -64,6 +72,7 @@ public sealed partial class MainWindow : Window
         _statusTextBlock = new TextBlock();
         _statusDetailTextBlock = new TextBlock { TextWrapping = TextWrapping.Wrap };
         _buildLabelTextBlock = new TextBlock();
+        _updateCheckStatusTextBlock = new TextBlock();
         _accountSummaryTextBlock = new TextBlock();
         _emailTextBox = new TextBox();
         _passwordBox = new PasswordBox();
@@ -84,6 +93,13 @@ public sealed partial class MainWindow : Window
             Foreground = DangerBrush,
             FontFamily = BodyFont,
         };
+        _updateNoticeTextBlock = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            FontFamily = BodyFont,
+            Foreground = InkBrush,
+        };
+        _updateNoticeCard = BuildUpdateNoticeCard();
 
         Content = BuildContent();
         ViewModel.PropertyChanged += ViewModelOnPropertyChanged;
@@ -99,11 +115,31 @@ public sealed partial class MainWindow : Window
 
     public bool IsVisibleToUser { get; private set; }
 
+    /// <summary>
+    /// Raised at the end of <see cref="HideToTray"/>, i.e. every time the window transitions
+    /// to hidden — the X-button close, the tray-Exit confirmation's cancel-path re-hide, and
+    /// the update flow's own hide all funnel through here uniformly. Lets
+    /// <c>App.EvaluateUpdateRestart</c> react the instant the window closes instead of waiting
+    /// for the next countdown tick.
+    /// </summary>
+    public event EventHandler? Hidden;
+
+    /// <summary>Raised by the in-window update notice's "Restart now to update" button.</summary>
+    public event EventHandler? CloseNowAndUpdateRequested;
+
+    /// <summary>
+    /// Raised by the status card's "Check for updates" button. Its only effect is to
+    /// short-circuit the update check's 4-hour cadence — see
+    /// <c>StoreUpdateManager.RequestCheckNow</c>.
+    /// </summary>
+    public event EventHandler? CheckForUpdatesRequested;
+
     public void HideToTray()
     {
         var windowHandle = WindowNative.GetWindowHandle(this);
         ShowWindow(windowHandle, ShowWindowCommands.Hide);
         IsVisibleToUser = false;
+        Hidden?.Invoke(this, EventArgs.Empty);
     }
 
     public void ShowFromTray()
@@ -127,6 +163,9 @@ public sealed partial class MainWindow : Window
         StyleInput(_emailTextBox);
 
         _passwordBox.PlaceholderText = "Password";
+        // `Peek` is meant to draw WinUI's own reveal button inside the box, but
+        // it never renders here, so the reveal is driven from our own toggle
+        // (see BuildPasswordRow) flipping this between Hidden and Visible.
         _passwordBox.PasswordRevealMode = PasswordRevealMode.Hidden;
         _passwordBox.PasswordChanged += PasswordBox_OnPasswordChanged;
         StyleInput(_passwordBox);
@@ -148,6 +187,7 @@ public sealed partial class MainWindow : Window
         };
 
         contentStack.Children.Add(BuildHeader());
+        contentStack.Children.Add(_updateNoticeCard);
         contentStack.Children.Add(BuildStatusCard());
         contentStack.Children.Add(BuildAccountCard());
 
@@ -207,6 +247,20 @@ public sealed partial class MainWindow : Window
         return header;
     }
 
+    private Border BuildUpdateNoticeCard()
+    {
+        _restartNowButton.Click += (_, _) => CloseNowAndUpdateRequested?.Invoke(this, EventArgs.Empty);
+
+        var content = new StackPanel { Spacing = 8 };
+        content.Children.Add(CreateSectionLabel("Update Ready"));
+        content.Children.Add(_updateNoticeTextBlock);
+        content.Children.Add(_restartNowButton);
+
+        var card = CreateCard(content);
+        card.BorderBrush = WarningBrush;
+        return card;
+    }
+
     private UIElement BuildStatusCard()
     {
         _statusTextBlock.FontFamily = BodyFont;
@@ -220,6 +274,10 @@ public sealed partial class MainWindow : Window
         _buildLabelTextBlock.FontFamily = MonoFont;
         _buildLabelTextBlock.FontSize = 12;
         _buildLabelTextBlock.Foreground = Ink3Brush;
+        _updateCheckStatusTextBlock.FontFamily = BodyFont;
+        _updateCheckStatusTextBlock.FontSize = 12;
+        _updateCheckStatusTextBlock.Foreground = Ink3Brush;
+        _updateCheckStatusTextBlock.VerticalAlignment = VerticalAlignment.Center;
 
         var headingRow = new StackPanel
         {
@@ -232,11 +290,21 @@ public sealed partial class MainWindow : Window
         var detailsButton = CreateActionButton("Status Details");
         detailsButton.Click += StatusDetailsButton_OnClick;
 
+        var reportBugButton = CreateActionButton("Report a Bug");
+        reportBugButton.Click += async (_, _) => await ShowReportBugDialogAsync();
+
+        var forceCaptureButton = CreateActionButton("Test Screenshot");
+        forceCaptureButton.Click += async (_, _) => await ForceCaptureButton_OnClickAsync();
+
         var stopMonitoringButton = CreateActionButton("Stop Monitoring");
         stopMonitoringButton.Click += StopMonitoringButton_OnClick;
 
+        var checkForUpdatesButton = CreateActionButton("Check for updates");
+        checkForUpdatesButton.Click += (_, _) => CheckForUpdatesRequested?.Invoke(this, EventArgs.Empty);
+
         _signedInActionsPanel.Orientation = Orientation.Horizontal;
         _signedInActionsPanel.Spacing = 10;
+        _signedInActionsPanel.Children.Add(forceCaptureButton);
         _signedInActionsPanel.Children.Add(stopMonitoringButton);
 
         var actionRow = new StackPanel
@@ -246,13 +314,24 @@ public sealed partial class MainWindow : Window
             Margin = new Thickness(0, 18, 0, 0),
         };
         actionRow.Children.Add(detailsButton);
+        actionRow.Children.Add(reportBugButton);
         actionRow.Children.Add(_signedInActionsPanel);
+
+        var buildRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 10,
+            Margin = new Thickness(0, 6, 0, 0),
+        };
+        buildRow.Children.Add(checkForUpdatesButton);
+        buildRow.Children.Add(_updateCheckStatusTextBlock);
 
         var content = new StackPanel { Spacing = 8 };
         content.Children.Add(CreateSectionLabel("Status"));
         content.Children.Add(headingRow);
         content.Children.Add(_statusDetailTextBlock);
         content.Children.Add(_buildLabelTextBlock);
+        content.Children.Add(buildRow);
         content.Children.Add(actionRow);
 
         return CreateCard(content);
@@ -267,7 +346,7 @@ public sealed partial class MainWindow : Window
         _loginPanel.Spacing = 12;
         _loginPanel.Margin = new Thickness(0, 12, 0, 0);
         _loginPanel.Children.Add(_emailTextBox);
-        _loginPanel.Children.Add(_passwordBox);
+        _loginPanel.Children.Add(BuildPasswordRow());
         _loginPanel.Children.Add(_deviceNameTextBox);
 
         _signInButton = CreatePrimaryButton("Sign In");
@@ -275,7 +354,28 @@ public sealed partial class MainWindow : Window
         _loginPanel.Children.Add(_signInButton);
 
         var signOutButton = CreateActionButton("Sign Out");
-        signOutButton.Click += async (_, _) => await ViewModel.LogoutAsync();
+        signOutButton.Click += async (_, _) =>
+        {
+            if (await ShowLogoutConfirmationAsync())
+            {
+                await ViewModel.LogoutAsync();
+            }
+        };
+
+        var signUpLink = new HyperlinkButton
+        {
+            Content = "Don't have an account? Sign up",
+            NavigateUri = new Uri(SignUpNavigateUrl),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(0),
+            FontFamily = BodyFont,
+            Foreground = ForestBrush,
+        };
+        signUpLink.Resources["HyperlinkButtonForeground"] = ForestBrush;
+        signUpLink.Resources["HyperlinkButtonForegroundPointerOver"] = Forest3Brush;
+        signUpLink.Resources["HyperlinkButtonForegroundPressed"] = Forest2Brush;
+        signUpLink.Resources["HyperlinkButtonForegroundDisabled"] = Ink3Brush;
+        _loginPanel.Children.Add(signUpLink);
 
         _accountActionsPanel.Orientation = Orientation.Horizontal;
         _accountActionsPanel.Spacing = 10;
@@ -362,6 +462,59 @@ public sealed partial class MainWindow : Window
         button.Resources["ButtonBorderBrushPointerOver"] = BorderHoverBrush;
         button.Resources["ButtonBorderBrushPressed"] = BorderHoverBrush;
         return button;
+    }
+
+    /// The password box plus the eye toggle that reveals what was typed, laid
+    /// out so the box takes the remaining width and the button sits beside it.
+    private Grid BuildPasswordRow()
+    {
+        var row = new Grid();
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        // A Grid stretches its children vertically, so the box grows to the
+        // reveal button's height while its text stays pinned to the top —
+        // PasswordBox ignores VerticalContentAlignment, so the only way to
+        // center the text is to stop the box from stretching in the first
+        // place. Centering the button too keeps the pair lined up whichever
+        // one ends up taller.
+        _passwordBox.VerticalAlignment = VerticalAlignment.Center;
+
+        Grid.SetColumn(_passwordBox, 0);
+        row.Children.Add(_passwordBox);
+
+        var revealIcon = new FontIcon
+        {
+            Glyph = "\uE7B3",
+            FontSize = 16,
+            Foreground = Ink2Brush,
+        };
+        var revealButton = new Button
+        {
+            Content = revealIcon,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(8, 0, 0, 0),
+            Padding = new Thickness(10, 8, 10, 8),
+            CornerRadius = new CornerRadius(2),
+            BorderBrush = BorderBrushToken,
+            Background = PaperBrush,
+        };
+        AutomationProperties.SetName(revealButton, "Show password");
+        ToolTipService.SetToolTip(revealButton, "Show password");
+        revealButton.Click += (_, _) =>
+        {
+            var reveal = _passwordBox.PasswordRevealMode != PasswordRevealMode.Visible;
+            _passwordBox.PasswordRevealMode =
+                reveal ? PasswordRevealMode.Visible : PasswordRevealMode.Hidden;
+            revealIcon.Glyph = reveal ? "\uED1A" : "\uE7B3";
+            var label = reveal ? "Hide password" : "Show password";
+            AutomationProperties.SetName(revealButton, label);
+            ToolTipService.SetToolTip(revealButton, label);
+        };
+
+        Grid.SetColumn(revealButton, 1);
+        row.Children.Add(revealButton);
+        return row;
     }
 
     // Cream-filled input on a hairline border; focus border goes forest.
@@ -459,6 +612,70 @@ public sealed partial class MainWindow : Window
         return result == ContentDialogResult.Primary;
     }
 
+    private async Task<bool> ShowLogoutConfirmationAsync()
+    {
+        var warningIcon = new FontIcon
+        {
+            Glyph = "",
+            FontSize = 28,
+            Foreground = WarningBrush,
+            Margin = new Thickness(0, 2, 16, 0),
+        };
+
+        // The dialog's own title carries the question, so the body starts
+        // straight in on the consequences — a second heading inside the
+        // content just repeats the chrome above it.
+        var textStack = new StackPanel
+        {
+            Spacing = 8,
+        };
+        textStack.Children.Add(new TextBlock
+        {
+            Text = "Signing out will deactivate this device and stop monitoring. Logging in again will create a new device.",
+            FontFamily = BodyFont,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = Ink2Brush,
+        });
+        textStack.Children.Add(new TextBlock
+        {
+            Text = "Anyone monitoring you may be alerted.",
+            FontFamily = BodyFont,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = WarningBrush,
+            FontWeight = FontWeights.Medium,
+        });
+
+        var content = new Grid
+        {
+            ColumnSpacing = 0,
+            MinWidth = 420,
+        };
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(warningIcon, 0);
+        Grid.SetColumn(textStack, 1);
+        content.Children.Add(warningIcon);
+        content.Children.Add(textStack);
+
+        var dialog = new ContentDialog
+        {
+            Title = CreateDialogTitle("Sign out of Virtue?"),
+            PrimaryButtonText = "Sign Out",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            Content = content,
+        };
+        ApplyDialogTheme(dialog);
+
+        if (Content is FrameworkElement root)
+        {
+            dialog.XamlRoot = root.XamlRoot;
+        }
+
+        var result = await dialog.ShowAsync();
+        return result == ContentDialogResult.Primary;
+    }
+
     private async Task ShowStatusDialogAsync()
     {
         var statusBlock = new TextBlock
@@ -471,6 +688,7 @@ public sealed partial class MainWindow : Window
             Width = 520,
         };
 
+        var logDirectory = ViewModel.MonitorStatus?.LogDirectory;
         var dialog = new ContentDialog
         {
             Title = CreateDialogTitle("Virtue Status"),
@@ -484,6 +702,18 @@ public sealed partial class MainWindow : Window
                 MinHeight = 320,
             },
         };
+
+        if (!string.IsNullOrWhiteSpace(logDirectory))
+        {
+            dialog.PrimaryButtonText = "Open log folder";
+            dialog.PrimaryButtonClick += (_, args) =>
+            {
+                // Keep the dialog open: opening Explorer isn't a "done here"
+                // action, and closing would force a reopen to read on.
+                args.Cancel = true;
+                OpenLogFolder(logDirectory!);
+            };
+        }
         ApplyDialogTheme(dialog);
 
         if (Content is FrameworkElement root)
@@ -494,32 +724,206 @@ public sealed partial class MainWindow : Window
         await dialog.ShowAsync();
     }
 
+    public async Task ShowReportBugDialogAsync()
+    {
+        var messageBox = new TextBox
+        {
+            PlaceholderText = "Describe the issue",
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            Height = 120,
+        };
+        StyleInput(messageBox);
+
+        var contactEmailBox = new TextBox
+        {
+            PlaceholderText = "Contact email (optional)",
+            Text = ViewModel.LoggedIn ? ViewModel.AccountEmail : string.Empty,
+        };
+        StyleInput(contactEmailBox);
+
+        var includeLogsCheckBox = new CheckBox
+        {
+            Content = "Include the last day of diagnostic logs",
+            IsChecked = true,
+            FontFamily = BodyFont,
+            Foreground = InkBrush,
+        };
+
+        var includeLogsCaption = new TextBlock
+        {
+            Text = "Includes timestamps, monitoring status, and error messages from the last day. " +
+                   "No screenshots or window titles are included. Known tokens are redacted automatically.",
+            TextWrapping = TextWrapping.Wrap,
+            FontFamily = BodyFont,
+            FontSize = 12,
+            Foreground = Ink3Brush,
+            Margin = new Thickness(28, 0, 0, 0),
+        };
+
+        var reportErrorTextBlock = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = DangerBrush,
+            FontFamily = BodyFont,
+            Visibility = Visibility.Collapsed,
+        };
+
+        var content = new StackPanel { Spacing = 12, Width = 420 };
+        content.Children.Add(messageBox);
+        content.Children.Add(contactEmailBox);
+        content.Children.Add(includeLogsCheckBox);
+        content.Children.Add(includeLogsCaption);
+        content.Children.Add(reportErrorTextBlock);
+
+        var dialog = new ContentDialog
+        {
+            Title = CreateDialogTitle("Report a Bug"),
+            PrimaryButtonText = "Send Report",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            Content = content,
+        };
+        ApplyDialogTheme(dialog);
+
+        if (Content is FrameworkElement root)
+        {
+            dialog.XamlRoot = root.XamlRoot;
+        }
+
+        var reportSent = false;
+        dialog.PrimaryButtonClick += async (_, args) =>
+        {
+            var message = messageBox.Text.Trim();
+            if (string.IsNullOrEmpty(message))
+            {
+                args.Cancel = true;
+                reportErrorTextBlock.Text = "Please describe the issue.";
+                reportErrorTextBlock.Visibility = Visibility.Visible;
+                return;
+            }
+
+            var deferral = args.GetDeferral();
+            try
+            {
+                var contactEmail = contactEmailBox.Text.Trim();
+                var succeeded = await ViewModel.SubmitBugReportAsync(
+                    message,
+                    string.IsNullOrEmpty(contactEmail) ? null : contactEmail,
+                    includeLogsCheckBox.IsChecked == true);
+
+                if (!succeeded)
+                {
+                    args.Cancel = true;
+                    reportErrorTextBlock.Text = ViewModel.ErrorText ?? "Failed to send the report.";
+                    reportErrorTextBlock.Visibility = Visibility.Visible;
+                }
+                else
+                {
+                    reportSent = true;
+                }
+            }
+            finally
+            {
+                deferral.Complete();
+            }
+        };
+
+        await dialog.ShowAsync();
+
+        if (reportSent)
+        {
+            await ShowReportBugConfirmationAsync();
+        }
+    }
+
+    private async Task ShowReportBugConfirmationAsync()
+    {
+        var dialog = new ContentDialog
+        {
+            Title = CreateDialogTitle("Report Sent"),
+            CloseButtonText = "Close",
+            DefaultButton = ContentDialogButton.Close,
+            Content = new TextBlock
+            {
+                Text = "Thanks — your report was sent to the Virtue Initiative team.",
+                TextWrapping = TextWrapping.Wrap,
+                FontFamily = BodyFont,
+                Foreground = Ink2Brush,
+                Width = 380,
+            },
+        };
+        ApplyDialogTheme(dialog);
+
+        if (Content is FrameworkElement root)
+        {
+            dialog.XamlRoot = root.XamlRoot;
+        }
+
+        await dialog.ShowAsync();
+    }
+
+    /// <summary>
+    /// The status page (client/core/SPEC.md CORE-010): the same sections, in
+    /// the same order, as every other platform's status screen, plus the
+    /// Windows-specific monitor state, package version, and log directory.
+    /// </summary>
     private string BuildStatusDetailsText()
     {
+        var status = ViewModel.MonitorStatus;
         var lines = new List<string>
         {
-            $"logged_in: {ViewModel.LoggedIn.ToString().ToLowerInvariant()}",
-            $"monitor_state: {ViewModel.MonitorState}",
-            $"email: {DisplayOrPlaceholder(ViewModel.AccountEmail)}",
-            $"device_id: {DisplayOrPlaceholder(ViewModel.DeviceId)}",
-            $"pending_request_count: {ViewModel.PendingRequestCount}",
-            $"last_screenshot_at: {FormatUnixTimestamp(ViewModel.LastScreenshotAtMs)}",
-            $"build: {ViewModel.BuildLabel}",
+            "Account",
+            $"  signed in:          {ViewModel.LoggedIn.ToString().ToLowerInvariant()}",
+            $"  email:              {DisplayOrPlaceholder(ViewModel.AccountEmail)}",
+            $"  device name:        {DisplayOrPlaceholder(status?.DeviceName)}",
+            $"  partners:           {status?.PartnerCount?.ToString() ?? "<unknown>"}",
+            string.Empty,
+            "Queues",
+            $"  waiting for hash:   {status?.PendingHashCount ?? 0}",
+            $"  waiting in batch:   {status?.PendingBatchCount ?? 0}",
+            $"  last batch upload:  {FormatUnixTimestamp(status?.LastBatchAtMs)}",
+            string.Empty,
+            "Capture",
+            $"  monitor state:      {ViewModel.MonitorState}",
+            $"  last loop:          {FormatUnixTimestamp(status?.LastLoopAtMs)}",
+            $"  last attempt:       {FormatUnixTimestamp(status?.LastScreenshotAttemptAtMs)}",
+            $"  last screenshot:    {FormatUnixTimestamp(ViewModel.LastScreenshotAtMs)}",
+            $"  last skip reason:   {DisplayOrPlaceholder(status?.LastSkipReason)}",
+            string.Empty,
+            "Recent errors",
         };
+
+        var recentErrors = status?.RecentErrors;
+        if (recentErrors is null || recentErrors.Count == 0)
+        {
+            lines.Add(string.IsNullOrWhiteSpace(ViewModel.MonitorError)
+                ? "  (none)"
+                : $"  {ViewModel.MonitorError}");
+        }
+        else
+        {
+            foreach (var error in recentErrors.Take(5))
+            {
+                lines.Add($"  {FormatUnixTimestamp(error.AtMs)} [{error.Context}] {error.Message}");
+            }
+        }
+
+        lines.Add(string.Empty);
+        lines.Add("Advanced");
+        lines.Add($"  device id:          {DisplayOrPlaceholder(ViewModel.DeviceId)}");
+        lines.Add($"  api url:            {DisplayOrPlaceholder(status?.ApiBaseUrl)}");
+        lines.Add($"  hash base url:      {(string.IsNullOrWhiteSpace(status?.HashBaseUrl) ? "<default>" : status!.HashBaseUrl)}");
+        lines.Add($"  capture interval:   {(status?.CaptureIntervalSeconds is long capture ? $"{capture}s" : "<unknown>")}");
+        lines.Add($"  batch window:       {(status?.BatchWindowSeconds is long batch ? $"{batch}s" : "<unknown>")}");
+        lines.Add($"  build:              {ViewModel.BuildLabel}");
 
         if (!string.IsNullOrWhiteSpace(ViewModel.WindowsPackageVersion))
         {
-            lines.Add($"windows_package: {ViewModel.WindowsPackageVersion}");
+            lines.Add($"  windows package:    {ViewModel.WindowsPackageVersion}");
         }
 
-        lines.Add($"capture_interval_seconds: {ViewModel.CaptureIntervalSeconds}");
-        lines.Add($"batch_window_seconds: {ViewModel.BatchWindowSeconds}");
-        lines.Add($"base_api_url: {ViewModel.ApiBaseUrl}");
-
-        if (!string.IsNullOrWhiteSpace(ViewModel.MonitorError))
-        {
-            lines.Add($"last_error: {ViewModel.MonitorError}");
-        }
+        lines.Add($"  logs:               {DisplayOrPlaceholder(status?.LogDirectory)}");
 
         return string.Join(Environment.NewLine, lines);
     }
@@ -537,6 +941,43 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private async Task ForceCaptureButton_OnClickAsync()
+    {
+        var result = await ViewModel.ForceCaptureAsync();
+        if (result is not null)
+        {
+            // The interop call waited for the batch, so `result.Message` says
+            // what really happened: uploaded, gated, or still in flight.
+            await ShowForceCaptureConfirmationAsync(result);
+        }
+    }
+
+    private async Task ShowForceCaptureConfirmationAsync(ForceCapturePayload result)
+    {
+        var dialog = new ContentDialog
+        {
+            Title = CreateDialogTitle(result.Outcome == "uploaded" ? "Screenshot Uploaded" : "Test Screenshot"),
+            CloseButtonText = "Close",
+            DefaultButton = ContentDialogButton.Close,
+            Content = new TextBlock
+            {
+                Text = result.Message,
+                TextWrapping = TextWrapping.Wrap,
+                FontFamily = BodyFont,
+                Foreground = Ink2Brush,
+                Width = 380,
+            },
+        };
+        ApplyDialogTheme(dialog);
+
+        if (Content is FrameworkElement root)
+        {
+            dialog.XamlRoot = root.XamlRoot;
+        }
+
+        await dialog.ShowAsync();
+    }
+
     private void PasswordBox_OnPasswordChanged(object sender, RoutedEventArgs e)
     {
         if (sender is PasswordBox passwordBox)
@@ -552,12 +993,21 @@ public sealed partial class MainWindow : Window
 
     private void SyncFromViewModel()
     {
+        _updateNoticeCard.Visibility = ViewModel.UpdateReady ? Visibility.Visible : Visibility.Collapsed;
+        _updateNoticeTextBlock.Text = ViewModel.UpdateInstalling
+            ? "Installing the update. Virtue will close and restart itself within a minute."
+            : ViewModel.UpdateCountdownText is { } countdown
+                ? $"Virtue will restart to update in {countdown}."
+                : "An update is ready and will install soon.";
+        _restartNowButton.IsEnabled = !ViewModel.UpdateInstalling;
+
         _statusTextBlock.Text = BuildPrimaryStatusText();
         var statusBrush = StatusBrush();
         _statusTextBlock.Foreground = statusBrush;
         _statusDot.Background = statusBrush;
         _statusDetailTextBlock.Text = BuildSecondaryStatusText();
         _buildLabelTextBlock.Text = ViewModel.BuildLabelText;
+        _updateCheckStatusTextBlock.Text = ViewModel.UpdateCheckStatusText ?? string.Empty;
 
         if (!ViewModel.HasLoadedStatus)
         {
@@ -716,6 +1166,25 @@ public sealed partial class MainWindow : Window
 
         args.Cancel = true;
         HideToTray();
+    }
+
+    private static void OpenLogFolder(string logDirectory)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = logDirectory,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            // Nothing actionable for the user here — the path is printed in
+            // the dialog either way, so a failed launch isn't worth an error
+            // dialog on top of the status dialog.
+            System.Diagnostics.Debug.WriteLine($"failed to open log folder: {ex}");
+        }
     }
 
     private static string DisplayOrPlaceholder(string? value) =>

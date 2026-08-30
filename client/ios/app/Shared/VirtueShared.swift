@@ -1,5 +1,8 @@
 import Foundation
 
+@_silgen_name("virtue_ios_default_api_base_url")
+private func virtue_ios_default_api_base_url() -> UnsafePointer<CChar>?
+
 @_silgen_name("virtue_ios_default_capture_interval_seconds")
 private func virtue_ios_default_capture_interval_seconds() -> UInt64
 
@@ -20,14 +23,17 @@ enum VirtueShared {
         return "0.0.0"
     }()
 
-    static let baseApiUrlKey = "VIRTUE_BASE_API_URL"
-    static let captureIntervalKey = "VIRTUE_CAPTURE_INTERVAL_SECONDS"
-    static let batchWindowKey = "VIRTUE_BATCH_WINDOW_SECONDS"
     static let monitoringEnabledKey = "VIRTUE_MONITORING_ENABLED"
+    static let accountEmailKey = "VIRTUE_ACCOUNT_EMAIL"
     static let safariCaptureStateCodeKey = "VIRTUE_SAFARI_CAPTURE_STATE_CODE"
     static let safariPauseStopIssuedKey = "VIRTUE_SAFARI_PAUSE_STOP_ISSUED"
 
-    static let defaultBaseApiUrl = "https://api.virtueinitiative.org"
+    static let defaultBaseApiUrl: String = {
+        guard let ptr = virtue_ios_default_api_base_url() else {
+            return "https://api.virtueinitiative.org"
+        }
+        return String(cString: ptr)
+    }()
     static let defaultCaptureIntervalSeconds = String(virtue_ios_default_capture_interval_seconds())
     static let defaultBatchWindowSeconds = String(virtue_ios_default_batch_window_seconds())
     static let defaultMonitoringEnabled = true

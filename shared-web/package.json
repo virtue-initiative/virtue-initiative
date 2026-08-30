@@ -21,6 +21,8 @@
     ".": "./index.ts",
     "./risk": "./risk.ts",
     "./risk.ts": "./risk.ts",
+    "./api-version": "./api-version.ts",
+    "./api-version.ts": "./api-version.ts",
     "./types": "./types.ts",
     "./types.ts": "./types.ts",
     "./tokens.css": "./tokens.css",

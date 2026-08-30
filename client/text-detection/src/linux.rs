@@ -8,17 +8,38 @@ pub struct ScreenshotOCR {
     min_confidence: u8,
 }
 
+/// The bundled `.deb` vendors `eng.traineddata` at `usr/lib/<pkg>/tessdata/`,
+/// alongside the vendored `.so`s (see `client/linux/scripts/build-deb.sh`),
+/// where `<pkg>` is the same name as the installed binary (`usr/bin/<pkg>`).
+/// When no explicit data path was given, prefer that bundled directory over
+/// Tesseract's compiled-in system default so a clean install doesn't depend
+/// on an OS `tesseract-ocr-eng` package. Falls back to `None` (system
+/// default) for dev/test binaries with no such bundle next to them.
+fn bundled_tessdata_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let bin_name = exe.file_name()?;
+    let dir = exe
+        .parent()?
+        .parent()?
+        .join("lib")
+        .join(bin_name)
+        .join("tessdata");
+    dir.is_dir().then_some(dir)
+}
+
+fn resolve_data_path(explicit: Option<PathBuf>) -> Option<PathBuf> {
+    explicit.or_else(bundled_tessdata_dir)
+}
+
 impl ScreenshotOCR {
     pub fn new(options: OcrOptions) -> Result<Self, OcrError> {
         let lang = options.language.as_deref().unwrap_or("eng");
-        let data_path_str = options
-            .tesseract_data_path
-            .as_deref()
-            .and_then(|p| p.to_str());
+        let data_path = resolve_data_path(options.tesseract_data_path);
+        let data_path_str = data_path.as_deref().and_then(|p| p.to_str());
         leptess::LepTess::new(data_path_str, lang).map_err(|e| OcrError::Init(e.to_string()))?;
         Ok(Self {
             lang: lang.to_string(),
-            data_path: options.tesseract_data_path,
+            data_path,
             min_confidence: options.min_word_confidence,
         })
     }

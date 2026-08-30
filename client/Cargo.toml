@@ -1,13 +1,20 @@
 [workspace]
 members = [
+  "android/rust",
   "core",
   "linux",
   "mac",
   "mac/rust",
   "windows",
+  "ios/rust",
   "text-detection",
 ]
 resolver = "2"
+
+# Several members only compile for their own platform (android/rust, mac,
+# mac/rust, windows), so a bare `cargo build` here fails on any single host.
+# Always name the package: `cargo build -p virtue-core`, and for Android go
+# through `cargo ndk` (see client/android/app/build.gradle.kts).
 
 # Optimize heavy dependencies even in debug builds. The workspace crates stay at
 # the dev profile's opt-level 0 (fast incremental rebuilds + good debugging); only
@@ -26,14 +33,14 @@ opt-level = 3
 [profile.dev.package.ndarray]
 opt-level = 3
 
-# Screenshot image decode/blur/resize + WebP encode.
+# Screenshot image decode/blur/resize + WebP encode. `zune-jpeg` only enters the
+# graph through virtue-text-detection on Apple/Windows targets; `image`'s own WebP
+# decoder (`image-webp`) isn't used at all — WebP is encoded via `libwebp-sys`.
 [profile.dev.package.image]
 opt-level = 3
 [profile.dev.package.png]
 opt-level = 3
 [profile.dev.package.zune-jpeg]
-opt-level = 3
-[profile.dev.package.image-webp]
 opt-level = 3
 [profile.dev.package.libwebp-sys]
 opt-level = 3

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { User, useUser, useAPIContext } from '../../utils/api';
+import { User, useUser, useAPIContext, describeError } from '../../utils/api';
 import { PageHeading } from '../../components/PageHeading';
 import { SettingsIcon } from '../../components/icons';
 import {
@@ -68,7 +68,7 @@ export function Settings() {
         .updateSettings(patch)
         .then(() => setSettingsShowSaved(true))
         .catch((err: unknown) => {
-          setSettingsStatus(err instanceof Error ? err.message : 'Failed to save');
+          setSettingsStatus(describeError(err, 'Failed to save'));
         }),
     );
   }
@@ -89,7 +89,7 @@ export function Settings() {
           }
         })
         .catch((err: unknown) => {
-          setEmailStatus(err instanceof Error ? err.message : 'Failed to update email');
+          setEmailStatus(describeError(err, 'Failed to update email'));
         }),
     );
   }
@@ -124,7 +124,7 @@ export function Settings() {
           await api.logout();
         })
         .catch((err: unknown) => {
-          setDeleteAccountStatus(err instanceof Error ? err.message : 'Failed to delete account');
+          setDeleteAccountStatus(describeError(err, 'Failed to delete account'));
         }),
     );
   }

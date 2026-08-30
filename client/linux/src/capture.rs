@@ -1,9 +1,7 @@
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, anyhow};
-use virtue_core::{
-    CoreError, CoreResult, LifecycleHooks, PlatformHooks, Screenshot, ScreenshotHooks,
-};
+use virtue_core::{CoreError, CoreResult, LifecycleHooks, Screenshot, ScreenshotHooks};
 
 #[derive(Clone, Copy, Debug)]
 pub enum CaptureBackend {
@@ -19,7 +17,7 @@ pub struct CaptureProbe {
 
 pub fn detect_backend() -> Option<CaptureBackend> {
     detect_backend_from(
-        env_var_nonempty("WAYLAND_DISPLAY").is_some(),
+        resolve_session_env_var("WAYLAND_DISPLAY").is_some(),
         resolve_x11_display().is_some(),
     )
 }
@@ -90,7 +88,11 @@ pub fn is_session_unavailable_text(text: &str) -> bool {
 }
 
 fn capture_wayland() -> Result<Vec<u8>> {
-    run_capture_command("grim", &["-"], &[]).with_context(
+    let mut env_overrides = Vec::new();
+    if let Some(wayland_display) = resolve_session_env_var("WAYLAND_DISPLAY") {
+        env_overrides.push(("WAYLAND_DISPLAY", wayland_display));
+    }
+    run_capture_command("grim", &["-"], &env_overrides).with_context(
         || "grim capture failed (Wayland usually requires compositor support and permissions)",
     )
 }
@@ -131,7 +133,31 @@ fn env_var_nonempty(name: &str) -> Option<String> {
 }
 
 fn resolve_x11_display() -> Option<String> {
-    env_var_nonempty("DISPLAY").or_else(detect_x11_socket_display)
+    resolve_session_env_var("DISPLAY").or_else(detect_x11_socket_display)
+}
+
+/// Resolves a session environment variable, preferring this process's own (frozen at
+/// exec time) environment, and falling back to the systemd `--user` manager's live
+/// environment if unset here. Compositors typically push variables like
+/// `WAYLAND_DISPLAY` into the systemd `--user` manager after they start, and that push
+/// isn't reliably ordered before this daemon's own activation — this fallback lets the
+/// daemon recover on its next capture tick without needing a restart.
+fn resolve_session_env_var(name: &str) -> Option<String> {
+    env_var_nonempty(name).or_else(|| systemd_user_environment_var(name))
+}
+
+fn systemd_user_environment_var(name: &str) -> Option<String> {
+    let connection = zbus::blocking::Connection::session().ok()?;
+    let proxy = SystemdManagerProxy::new(&connection).ok()?;
+    let environment = proxy.environment().ok()?;
+    environment.iter().find_map(|entry| {
+        let (key, value) = entry.split_once('=')?;
+        if key == name && !value.is_empty() {
+            Some(value.to_string())
+        } else {
+            None
+        }
+    })
 }
 
 fn detect_x11_socket_display() -> Option<String> {
@@ -230,7 +256,18 @@ impl LinuxPlatformHooks {
 
 impl ScreenshotHooks for LinuxPlatformHooks {
     fn take_screenshot(&self) -> CoreResult<Screenshot> {
-        let bytes = capture_screen().map_err(|err| CoreError::CommandFailed(err.to_string()))?;
+        let bytes = capture_screen().map_err(|err| {
+            let message = err.to_string();
+            if is_session_unavailable_text(&message) {
+                // Common/expected while no graphical session is active (e.g. before
+                // login) — the capture cadence is now on the order of minutes, so this
+                // no longer needs throttled logging.
+                tracing::debug!(error = %message, "capture session unavailable");
+            } else {
+                tracing::warn!(error = %message, "screenshot capture failed");
+            }
+            CoreError::CommandFailed(message)
+        })?;
         Ok(Screenshot {
             captured_at_ms: self.get_time_utc_ms()?,
             bytes,
@@ -290,6 +327,22 @@ trait Login1Session {
     /// Session start time, µs since epoch.
     #[zbus(property)]
     fn timestamp(&self) -> zbus::Result<u64>;
+}
+
+// Blocking proxy for the systemd `--user` manager, exposed on the session bus (same
+// object `systemctl --user show-environment` reads). Used to recover session variables
+// like `WAYLAND_DISPLAY` that a compositor imported after this daemon's own env snapshot
+// was taken at exec time.
+#[zbus::proxy(
+    interface = "org.freedesktop.systemd1.Manager",
+    default_service = "org.freedesktop.systemd1",
+    default_path = "/org/freedesktop/systemd1",
+    gen_async = false,
+    gen_blocking = true
+)]
+trait SystemdManager {
+    #[zbus(property)]
+    fn environment(&self) -> zbus::Result<Vec<String>>;
 }
 
 /// Real UID of this process, read from `/proc/self/status` (no libc dependency).
@@ -383,29 +436,26 @@ fn query_screensaver_active() -> Option<bool> {
     None
 }
 
-fn read_clock_ms(clock_id: libc::clockid_t) -> CoreResult<i64> {
-    let mut ts = libc::timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    // SAFETY: `ts` is a valid, owned `timespec` we pass as an out-param; `clock_gettime`
-    // does not retain the pointer past the call.
-    let rc = unsafe { libc::clock_gettime(clock_id, &mut ts) };
-    if rc != 0 {
-        return Err(CoreError::CommandFailed(
-            std::io::Error::last_os_error().to_string(),
-        ));
-    }
-    Ok(ts.tv_sec * 1000 + ts.tv_nsec / 1_000_000)
-}
-
 impl LifecycleHooks for LinuxPlatformHooks {
-    fn get_boot_clock_ms(&self) -> CoreResult<i64> {
-        read_clock_ms(libc::CLOCK_BOOTTIME)
-    }
-
+    // `CLOCK_MONOTONIC` excludes time spent suspended (unlike
+    // `CLOCK_BOOTTIME`, which includes it) — see `clock_gettime(2)`. Feeds
+    // only `lifecycle::tick`'s suspend evidence (CORE-002); screenshot
+    // scheduling is unaffected.
     fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
-        read_clock_ms(libc::CLOCK_MONOTONIC)
+        let mut ts = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        // SAFETY: `ts` is a valid, owned out-param that does not outlive this
+        // call; `clock_gettime` has no other preconditions.
+        let rc = unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
+        if rc != 0 {
+            return Err(CoreError::CommandFailed(format!(
+                "clock_gettime(CLOCK_MONOTONIC) failed: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
+        Ok(ts.tv_sec * 1000 + ts.tv_nsec / 1_000_000)
     }
 
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {
@@ -431,12 +481,10 @@ impl LifecycleHooks for LinuxPlatformHooks {
     }
 }
 
-impl PlatformHooks for LinuxPlatformHooks {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use virtue_core::{LifecycleHooks, ScreenshotHooks};
+    use virtue_core::ScreenshotHooks;
 
     #[test]
     fn is_session_unavailable_text_matches_known_error_strings() {
@@ -491,20 +539,17 @@ mod tests {
     }
 
     #[test]
-    fn boot_clock_includes_at_least_as_much_as_monotonic_clock() {
+    fn platform_hooks_get_monotonic_clock_ms_is_positive_and_advances() {
         let hooks = LinuxPlatformHooks::new();
-        let boot = hooks
-            .get_boot_clock_ms()
-            .expect("boot clock should not fail");
-        let mono = hooks
+        let first = hooks
             .get_monotonic_clock_ms()
-            .expect("monotonic clock should not fail");
-        assert!(boot >= 0);
-        assert!(mono >= 0);
-        assert!(
-            boot >= mono,
-            "CLOCK_BOOTTIME ({boot}) should be >= CLOCK_MONOTONIC ({mono}) since it includes suspend"
-        );
+            .expect("clock should not fail");
+        assert!(first > 0);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let second = hooks
+            .get_monotonic_clock_ms()
+            .expect("clock should not fail");
+        assert!(second >= first);
     }
 
     #[test]

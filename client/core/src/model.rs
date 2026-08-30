@@ -36,40 +36,23 @@ impl From<&str> for Redacted<String> {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum LifecycleKind {
-    /// A suspend interval detected retrospectively via boot-vs-monotonic
-    /// clock divergence.
-    SuspendDetected { duration_ms: i64 },
-    /// Start of a new expected-running window (OS session/user login).
-    SystemLogin { utc_ms: i64 },
-    /// End of an expected-running window (OS session/user logout).
-    SystemLogout { utc_ms: i64 },
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum ScreenshotSkipReason {
     StaticScreen,        // duplicate frame (fingerprint unchanged)
     LockedOrScreensaver, // session locked / screensaver / screen off
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// Why the most recent screenshot attempt didn't produce an upload. Kept
+/// deliberately separate from [`ScreenshotSkipReason`], which is a wire
+/// format the API and web app decode: this one is local status only (CORE-018)
+/// and can gain variants — such as an outright capture failure, which is not a
+/// "skip" — without touching the uploaded event shape.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "snake_case")]
-pub enum AlertReason {
-    /// The process wasn't running during a stretch of awake time between a
-    /// known login and the first observed heartbeat.
-    UnexpectedStart,
-    /// The process stopped running before the session's logout, leaving a
-    /// gap between the last heartbeat and the (possibly reconstructed)
-    /// logout timestamp.
-    UnexpectedStop,
-    /// A stretch of awake time (same boot) between two heartbeats with no
-    /// sample — crash, force-kill-and-restart, or frozen process.
-    UnexpectedGap,
-    /// The user explicitly quit the monitor while it was expected to be
-    /// running.
-    UserStop,
+pub enum StatusSkipReason {
+    StaticScreen,
+    LockedOrScreensaver,
+    CaptureFailed,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -88,13 +71,12 @@ pub enum UploadKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         nsfw_detection: Option<f32>,
     },
-    Lifecycle {
-        #[serde(flatten)]
-        kind: LifecycleKind,
-    },
-    LifecycleAlert {
-        reason: AlertReason,
-    },
+    /// The user explicitly quit the monitor while it was expected to be
+    /// running. Always high risk.
+    UserStop,
+    /// Monitoring resumed after a prior `UserStop`. Always risk 0% — purely
+    /// informational, pairing with the `UserStop` it follows.
+    UserStart,
     ScreenshotSkipped {
         reason: ScreenshotSkipReason,
     },
@@ -107,6 +89,27 @@ pub enum UploadKind {
         details: Option<String>,
     },
     Heartbeat,
+    /// A single wakeup was more than a minute late, or the sum of recent
+    /// lateness (over the last 10 tracked wakeups) exceeded 5 minutes.
+    /// Excused near a system login/logout. See CORE-002.
+    ScreenshotMissed,
+    /// The daemon detected that the last known system login time changed.
+    /// Always risk 0%. See CORE-006.
+    SystemLogin {
+        utc_ms: i64,
+    },
+    /// The daemon detected that the last known system logout time changed.
+    /// Always risk 0%. See CORE-006.
+    SystemLogout {
+        utc_ms: i64,
+    },
+    /// The daemon process started more than `RESTART_ALERT_THRESHOLD` times
+    /// within a rolling window — evidence of a crash loop or repeated kill.
+    /// See CORE-018.
+    RepeatedRestarts {
+        count: u32,
+        window_ms: i64,
+    },
 }
 
 /// Hand-written so the captured screenshot bytes never reach a log line
@@ -124,10 +127,8 @@ impl std::fmt::Debug for UploadKind {
                 "Screenshot {{ image: <{} bytes>, content_type: {content_type:?}, skin_detection: {skin_detection:?}, nsfw_detection: {nsfw_detection:?} }}",
                 image.len()
             ),
-            UploadKind::Lifecycle { kind } => write!(f, "Lifecycle {{ kind: {kind:?} }}"),
-            UploadKind::LifecycleAlert { reason } => {
-                write!(f, "LifecycleAlert {{ reason: {reason:?} }}")
-            }
+            UploadKind::UserStop => write!(f, "UserStop"),
+            UploadKind::UserStart => write!(f, "UserStart"),
             UploadKind::ScreenshotSkipped { reason } => {
                 write!(f, "ScreenshotSkipped {{ reason: {reason:?} }}")
             }
@@ -137,27 +138,21 @@ impl std::fmt::Debug for UploadKind {
                 write!(f, "Dev {{ title: {title:?}, details: {details:?} }}")
             }
             UploadKind::Heartbeat => write!(f, "Heartbeat"),
+            UploadKind::ScreenshotMissed => write!(f, "ScreenshotMissed"),
+            UploadKind::SystemLogin { utc_ms } => {
+                write!(f, "SystemLogin {{ utc_ms: {utc_ms:?} }}")
+            }
+            UploadKind::SystemLogout { utc_ms } => {
+                write!(f, "SystemLogout {{ utc_ms: {utc_ms:?} }}")
+            }
+            UploadKind::RepeatedRestarts { count, window_ms } => {
+                write!(
+                    f,
+                    "RepeatedRestarts {{ count: {count:?}, window_ms: {window_ms:?} }}"
+                )
+            }
         }
     }
-}
-
-/// A single piece of `ServiceStatus` reported by one module in response to a
-/// `StatusRequest`. Each module emits only the fields it owns; the status
-/// module merges them into a complete `ServiceStatus`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", content = "data", rename_all = "snake_case")]
-pub enum PartialStatus {
-    Auth {
-        is_authenticated: bool,
-        device_id: Option<String>,
-    },
-    Lifecycle {
-        is_running: bool,
-        last_loop_at_ms: Option<i64>,
-    },
-    Upload {
-        pending_request_count: usize,
-    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -210,16 +205,24 @@ pub struct BatchUpload {
     #[serde(with = "serde_bytes")]
     pub bytes: Vec<u8>,
     pub access_keys: Vec<BatchAccessKey>,
+    /// Total number of events in this batch.
+    pub total_count: u32,
     /// Number of events in this batch whose risk fell in the high band (>= 0.7).
     pub high_risk_count: u32,
     /// Number of events in this batch whose risk fell in the medium band (0.4–0.7).
     pub medium_risk_count: u32,
+    /// Number of `UploadKind::Screenshot` events in this batch.
+    pub screenshot_count: u32,
+    /// Alert-email metadata for any high-risk events in this batch, carried
+    /// alongside the batch upload instead of a separate notify call.
+    #[serde(default)]
+    pub notifications: Vec<NotifyPayload>,
 }
 
-/// Minimal metadata sent to `POST /d/notify` to trigger an alert email for a
-/// high-risk event. The event body itself is uploaded end-to-end encrypted via a
-/// batch; this payload carries only what the notification email needs.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Minimal metadata sent alongside a batch upload to trigger an alert email for a
+/// high-risk event. The event body itself is uploaded end-to-end encrypted via the
+/// same batch; this payload carries only what the notification email needs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NotifyPayload {
     pub ts: i64,
     #[serde(rename = "type")]
@@ -276,15 +279,69 @@ pub struct HashParams {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AuthState {
     pub device_credentials: Option<DeviceCredentials>,
+    /// The email the device was registered with, kept so every platform's
+    /// status page can name the signed-in account (CORE-010) instead of each
+    /// one stashing it separately. `None` on states written before this
+    /// existed, and cleared on logout.
+    #[serde(default)]
+    pub account_email: Option<String>,
 }
 
+/// One entry in the daemon's recent-errors ring (CORE-018). `context` is a
+/// short stable identifier for the failing phase (`"batch_upload"`,
+/// `"screenshot_capture"`, …) so a UI can group or filter without parsing
+/// `message`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StatusError {
+    pub at_ms: i64,
+    pub context: String,
+    pub message: String,
+}
+
+/// Everything a platform's status page shows, assembled by
+/// `module::status::build`. See CORE-010; every field but `is_running` is
+/// derivable from persisted state plus compile-time config, so a client whose
+/// daemon isn't running reports the same data from disk.
+///
+/// New fields are all `#[serde(default)]`: this struct is the IPC wire shape
+/// between a client and a possibly-older daemon process (`ipc.rs`).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ServiceStatus {
     pub is_authenticated: bool,
     pub is_running: bool,
+    #[serde(default)]
+    pub account_email: Option<String>,
     pub device_id: Option<String>,
-    pub last_loop_at_ms: Option<i64>,
+    #[serde(default)]
+    pub device_name: Option<String>,
+    /// Wrapping keys minus the owner's own key. `None` until device settings
+    /// have been fetched at least once — distinct from a real count of zero.
+    #[serde(default)]
+    pub partner_count: Option<usize>,
+    #[serde(default)]
+    pub pending_hash_count: usize,
+    #[serde(default)]
+    pub pending_batch_count: usize,
     pub pending_request_count: usize,
+    pub last_loop_at_ms: Option<i64>,
+    #[serde(default)]
+    pub last_screenshot_attempt_at_ms: Option<i64>,
+    #[serde(default)]
+    pub last_screenshot_at_ms: Option<i64>,
+    #[serde(default)]
+    pub last_skip_reason: Option<StatusSkipReason>,
+    #[serde(default)]
+    pub last_batch_at_ms: Option<i64>,
+    #[serde(default)]
+    pub recent_errors: Vec<StatusError>,
+    #[serde(default)]
+    pub api_base_url: String,
+    #[serde(default)]
+    pub hash_base_url: Option<String>,
+    #[serde(default)]
+    pub capture_interval_seconds: u64,
+    #[serde(default)]
+    pub batch_window_seconds: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -298,39 +355,46 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    // `LifecycleKind` must serialize as a bare `"kind"`-tagged object flattened
-    // into `UploadKind::Lifecycle`'s `data` — this is exactly the wire shape
-    // the web viewer's `getLogCategory`/`getLogMessage` assume, and previously
-    // silently drifted from it when the variants gained fields (see #526).
     #[test]
-    fn lifecycle_kind_serializes_to_flattened_tagged_shape() {
+    fn upload_kind_user_stop_serializes_to_tagged_shape() {
+        let upload = UploadKind::UserStop;
         assert_eq!(
-            serde_json::to_value(LifecycleKind::SuspendDetected {
-                duration_ms: 60_033
-            })
-            .unwrap(),
-            json!({ "kind": "suspend_detected", "duration_ms": 60_033 })
-        );
-        assert_eq!(
-            serde_json::to_value(LifecycleKind::SystemLogin { utc_ms: 123 }).unwrap(),
-            json!({ "kind": "system_login", "utc_ms": 123 })
-        );
-        assert_eq!(
-            serde_json::to_value(LifecycleKind::SystemLogout { utc_ms: 456 }).unwrap(),
-            json!({ "kind": "system_logout", "utc_ms": 456 })
+            serde_json::to_value(upload).unwrap(),
+            json!({ "type": "user_stop" })
         );
     }
 
     #[test]
-    fn upload_kind_lifecycle_flattens_kind_into_data() {
-        let upload = UploadKind::Lifecycle {
-            kind: LifecycleKind::SystemLogin { utc_ms: 789 },
-        };
+    fn upload_kind_screenshot_missed_serializes_to_tagged_shape() {
+        // CORE-002: "The late wakeup event SHOULD be called
+        // \"screenshot_missed\"."
+        let upload = UploadKind::ScreenshotMissed;
+        assert_eq!(
+            serde_json::to_value(upload).unwrap(),
+            json!({ "type": "screenshot_missed" })
+        );
+    }
+
+    #[test]
+    fn upload_kind_system_login_serializes_to_tagged_shape() {
+        let upload = UploadKind::SystemLogin { utc_ms: 1_000 };
         assert_eq!(
             serde_json::to_value(upload).unwrap(),
             json!({
-                "type": "lifecycle",
-                "data": { "kind": "system_login", "utc_ms": 789 }
+                "type": "system_login",
+                "data": { "utc_ms": 1_000 }
+            })
+        );
+    }
+
+    #[test]
+    fn upload_kind_system_logout_serializes_to_tagged_shape() {
+        let upload = UploadKind::SystemLogout { utc_ms: 2_000 };
+        assert_eq!(
+            serde_json::to_value(upload).unwrap(),
+            json!({
+                "type": "system_logout",
+                "data": { "utc_ms": 2_000 }
             })
         );
     }

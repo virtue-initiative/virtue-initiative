@@ -3,22 +3,25 @@ mod config;
 mod daemon;
 mod tray;
 
+use std::fs;
 use std::io::{self, Write};
-use std::time::{Duration, Instant};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use std::process::Command;
 use std::process::ExitCode;
+use std::process::Stdio;
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 #[cfg(debug_assertions)]
-use virtue_core::{AlertReason, LifecycleKind, ScreenshotSkipReason};
-use virtue_core::{ClientController, ScreenshotHooks, ServiceStatus, Upload, UploadKind};
+use virtue_core::ScreenshotSkipReason;
+use virtue_core::ipc::ClientController;
+use virtue_core::{ScreenshotHooks, StatusSkipReason, Upload, UploadKind};
 
 use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_backend};
-use crate::config::{ClientPaths, build_core_config, default_device_name};
+use crate::config::{ClientPaths, build_core_config, default_device_name, load_service_status};
 
 const BUILD_LABEL: &str = virtue_core::BUILD_LABEL;
 
@@ -60,6 +63,22 @@ enum Commands {
         #[command(subcommand)]
         command: DevCommands,
     },
+    #[command(
+        name = "test-screenshot",
+        about = "Take a screenshot and upload it now, same as Test Screenshot on other platforms"
+    )]
+    ForceScreenshot,
+    #[command(about = "Report an issue to the Virtue Initiative team")]
+    ReportIssue {
+        /// Skips the interactive prompt; the report is submitted as-is.
+        #[arg(long)]
+        message: Option<String>,
+        #[arg(long)]
+        contact_email: Option<String>,
+        /// Skips the "here's what will be sent" confirmation prompt.
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -79,10 +98,6 @@ enum DevCommands {
     UploadLog(DeveloperEventArgs),
     #[command(about = "Queue a developer log into the next encrypted batch")]
     AddLog(DeveloperEventArgs),
-    #[command(about = "Capture a screenshot and queue it into the next encrypted batch")]
-    AddScreenshot(DeveloperEventArgs),
-    #[command(about = "Upload any queued batch items right now")]
-    UploadBatch,
     #[cfg(debug_assertions)]
     #[command(about = "Queue a log of any type into the next batch (debug builds only)")]
     Send(SendLogArgs),
@@ -96,10 +111,7 @@ struct SendLogArgs {
     /// Log type to emit. Use `all` to queue one of every type.
     #[arg(long = "type", value_name = "TYPE")]
     log_type: String,
-    /// Lifecycle kind (snake_case) when --type lifecycle, e.g. system_login, login.
-    #[arg(long)]
-    kind: Option<String>,
-    /// Alert reason (snake_case) when --type lifecycle_alert, e.g. ping_gap_while_running.
+    /// Skip reason (snake_case) when --type screenshot_skipped, e.g. static_screen.
     #[arg(long)]
     reason: Option<String>,
     /// Message body when --type alert.
@@ -147,8 +159,14 @@ async fn run() -> Result<()> {
         }
         Commands::Logout { yes } => tokio::task::block_in_place(|| logout(paths, yes)),
         Commands::Daemon { command } => daemon_command(paths, command).await,
-        Commands::Status { json } => status(paths, json),
+        Commands::Status { json } => tokio::task::block_in_place(|| status(paths, json)),
         Commands::Dev { command } => tokio::task::block_in_place(|| dev(paths, command)),
+        Commands::ForceScreenshot => tokio::task::block_in_place(|| force_screenshot(paths)),
+        Commands::ReportIssue {
+            message,
+            contact_email,
+            yes,
+        } => tokio::task::block_in_place(|| report_issue(paths, message, contact_email, yes)),
     }
 }
 
@@ -163,6 +181,7 @@ async fn daemon_command(paths: ClientPaths, command: Option<DaemonCommands>) -> 
 }
 
 fn login(paths: ClientPaths, email: Option<String>, device_name: Option<String>) -> Result<()> {
+    println!("Don't have an account? Sign up at https://app.virtueinitiative.org/signup");
     let email = match email {
         Some(email) => email,
         None => {
@@ -210,7 +229,8 @@ fn login(paths: ClientPaths, email: Option<String>, device_name: Option<String>)
 
 fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
     println!(
-        "Warning: logging out will alert people monitoring you and will recreate a new device on login."
+        "Warning: signing out will deactivate this device and stop monitoring. Anyone monitoring \
+         you may be alerted. Logging in again will create a new device."
     );
 
     if !yes && !prompt_yes_no("Continue logout?", false)? {
@@ -227,46 +247,360 @@ fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
     Ok(())
 }
 
-fn status(paths: ClientPaths, json: bool) -> Result<()> {
-    let mut config = build_core_config(&paths);
-    config.refresh_from_runtime_file()?;
-    let status = load_service_status(&paths)?;
+fn report_issue(
+    paths: ClientPaths,
+    message: Option<String>,
+    contact_email: Option<String>,
+    yes: bool,
+) -> Result<()> {
+    let message = match message {
+        Some(message) => message,
+        None => {
+            let mut rl = rustyline::DefaultEditor::new()?;
+            rl.readline("Describe the issue: ")?
+        }
+    };
+    let message = message.trim().to_string();
+    if message.is_empty() {
+        println!("No message entered; nothing was sent.");
+        return Ok(());
+    }
 
-    let logged_in = status.is_authenticated;
-    let device_id = status.device_id.as_deref().unwrap_or("<none>").to_string();
+    let device_refresh_token = read_device_refresh_token(&paths);
+
+    let contact_email = match contact_email {
+        Some(email) => Some(email),
+        None if device_refresh_token.is_some() => None,
+        None => {
+            let mut rl = rustyline::DefaultEditor::new()?;
+            let entered = rl.readline("Contact email (optional, press Enter to skip): ")?;
+            let entered = entered.trim();
+            (!entered.is_empty()).then(|| entered.to_string())
+        }
+    };
+
+    let platform_details = linux_platform_details();
+    let logs = recent_logs();
+
+    println!("This report will be sent to the Virtue Initiative team and will include:");
+    println!("  - Your message: \"{message}\"");
+    if let Some(email) = &contact_email {
+        println!("  - Your contact email: {email}");
+    }
+    println!("  - Platform details: {platform_details}");
+    if device_refresh_token.is_some() {
+        println!("  - This device's identity and your account email (you're logged in)");
+    }
+    match &logs {
+        Some(logs) => println!(
+            "  - The last day of this device's operational logs ({} KB) from \
+             `journalctl --user -u {}`: diagnostic entries only (errors, capture/upload status) \
+             — no screenshots or screenshot content, and no window titles.",
+            logs.len().div_ceil(1024),
+            service_name(),
+        ),
+        None => println!("  - (no logs found to attach)"),
+    }
+
+    if !yes && !prompt_yes_no("Send this report?", true)? {
+        println!("Report cancelled.");
+        return Ok(());
+    }
+
+    let config = build_core_config(&paths);
+    let api = virtue_core::api::HttpApiClient::new(&config)?;
+    api.report_issue(
+        device_refresh_token.as_deref(),
+        &virtue_core::api::BugReportRequest {
+            message: &message,
+            contact_email: contact_email.as_deref(),
+            platform: "linux",
+            app_version: BUILD_LABEL,
+            platform_details: Some(&platform_details),
+        },
+        logs.as_deref(),
+    )
+    .context("failed to submit bug report")?;
+
+    println!("Thanks — your report was sent to the Virtue Initiative team.");
+    Ok(())
+}
+
+/// Best-effort last day of this device's `virtue` user-service logs, redacted
+/// (see `virtue_core::api::redact_secrets`) and trimmed to the API's
+/// attachment size cap (keeping the most recent bytes, since those are the
+/// most relevant to a just-encountered issue).
+fn recent_logs() -> Option<Vec<u8>> {
+    let output = Command::new("journalctl")
+        .args([
+            "--user",
+            "-u",
+            &service_name(),
+            "--since",
+            "-1 day",
+            "--no-pager",
+            "-o",
+            "short-iso",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+
+    if !output.status.success() || output.stdout.is_empty() {
+        return None;
+    }
+
+    let redacted = virtue_core::api::redact_secrets(&String::from_utf8_lossy(&output.stdout));
+    let mut logs = redacted.into_bytes();
+    if logs.len() > virtue_core::api::MAX_LOG_ATTACHMENT_BYTES {
+        let start = logs.len() - virtue_core::api::MAX_LOG_ATTACHMENT_BYTES;
+        logs.drain(0..start);
+    }
+    Some(logs)
+}
+
+/// Reads this device's refresh token straight off disk rather than through
+/// the daemon, so `report-issue` still works (anonymously otherwise) even
+/// when the daemon isn't running. See CORE-010's disk-fallback precedent in
+/// `load_service_status`.
+fn read_device_refresh_token(paths: &ClientPaths) -> Option<String> {
+    let state_path = paths.state_dir.join("event_state.json");
+    let state: virtue_core::DaemonState = virtue_core::load_state(&state_path).ok()?;
+    state
+        .auth
+        .device_credentials
+        .map(|creds| creds.refresh_token)
+}
+
+/// Best-effort OS description for `platform_details`: kernel release plus
+/// `/etc/os-release`'s NAME/VERSION, e.g. "Linux 6.8.0-60-lowlatency;
+/// Ubuntu 24.04.1 LTS".
+fn linux_platform_details() -> String {
+    let kernel = Command::new("uname")
+        .arg("-r")
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    let os_release = fs::read_to_string("/etc/os-release")
+        .ok()
+        .map(|contents| parse_os_release(&contents));
+
+    let mut parts = Vec::new();
+    if let Some(kernel) = kernel {
+        parts.push(format!("Linux {kernel}"));
+    }
+    if let Some((name, version)) = os_release {
+        match (name, version) {
+            (Some(name), Some(version)) => parts.push(format!("{name} {version}")),
+            (Some(name), None) => parts.push(name),
+            (None, _) => {}
+        }
+    }
+
+    if parts.is_empty() {
+        "unknown".to_string()
+    } else {
+        parts.join("; ")
+    }
+}
+
+/// Parses `NAME=`/`VERSION=` out of `/etc/os-release` (each value optionally
+/// double-quoted, per the os-release(5) format).
+fn parse_os_release(contents: &str) -> (Option<String>, Option<String>) {
+    let mut name = None;
+    let mut version = None;
+    for line in contents.lines() {
+        if let Some(value) = line.strip_prefix("NAME=") {
+            name = Some(value.trim_matches('"').to_string());
+        } else if let Some(value) = line.strip_prefix("VERSION=") {
+            version = Some(value.trim_matches('"').to_string());
+        }
+    }
+    (name, version)
+}
+
+/// Formats a UTC-ms timestamp as a local-time string plus a relative age,
+/// which is what actually answers "is this thing working right now?".
+fn format_timestamp(now_ms: i64, value: Option<i64>) -> String {
+    let Some(ms) = value else {
+        return "<none>".to_string();
+    };
+    let secs = ms / 1000;
+    let stamp = chrono::DateTime::from_timestamp(secs, 0)
+        .map(|dt| {
+            dt.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string()
+        })
+        .unwrap_or_else(|| ms.to_string());
+    format!("{stamp} ({})", format_age(now_ms - ms))
+}
+
+fn format_age(delta_ms: i64) -> String {
+    if delta_ms < 0 {
+        return "in the future".to_string();
+    }
+    let secs = delta_ms / 1000;
+    match secs {
+        0..=59 => format!("{secs}s ago"),
+        60..=3599 => format!("{}m ago", secs / 60),
+        3600..=86_399 => format!("{}h ago", secs / 3600),
+        _ => format!("{}d ago", secs / 86_400),
+    }
+}
+
+fn skip_reason_label(reason: &StatusSkipReason) -> &'static str {
+    match reason {
+        StatusSkipReason::StaticScreen => "screen unchanged since the last upload",
+        StatusSkipReason::LockedOrScreensaver => "screen locked or screensaver active",
+        StatusSkipReason::CaptureFailed => "capture failed",
+    }
+}
+
+fn log_command() -> String {
+    format!("journalctl --user -u {} --since -1h", service_name())
+}
+
+fn status(paths: ClientPaths, json: bool) -> Result<()> {
+    // Every field below comes from `load_service_status` — the shared
+    // `status::build` (CORE-010), which already folds in the compile-time
+    // config — so there is nothing for this command to assemble itself.
+    let status = load_service_status(&paths)?;
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+
     let backend = match detect_backend() {
         Some(CaptureBackend::Wayland) => "wayland",
         Some(CaptureBackend::X11) => "x11",
         None => "<unknown>",
     };
+    let service_active = is_user_service_active().unwrap_or(false);
 
     if json {
-        println!(
-            "{}",
-            serde_json::json!({
-                "logged_in": logged_in,
-                "running": status.is_running,
-                "pending_request_count": status.pending_request_count,
-                "device_id": device_id,
-                "capture_interval_seconds": config.screenshot_interval.as_secs(),
-                "batch_window_seconds": config.batch_interval.as_secs(),
-                "base_api_url": config.api_base_url,
-                "backend": backend,
-            })
-        );
-    } else {
-        println!("logged_in: {logged_in}");
-        println!("running: {}", status.is_running);
-        println!("pending_request_count: {}", status.pending_request_count);
-        println!("device_id: {device_id}");
-        println!(
-            "capture_interval_seconds: {}",
-            config.screenshot_interval.as_secs()
-        );
-        println!("batch_window_seconds: {}", config.batch_interval.as_secs());
-        println!("base_api_url: {}", config.api_base_url);
-        println!("backend: {backend}");
+        let mut value = serde_json::to_value(&status)?;
+        if let Some(object) = value.as_object_mut() {
+            // Linux-only extras, alongside the shared `ServiceStatus` fields
+            // every platform's status page renders (CORE-010).
+            object.insert("backend".into(), backend.into());
+            object.insert("service_name".into(), service_name().into());
+            object.insert("service_active".into(), service_active.into());
+            object.insert(
+                "state_dir".into(),
+                paths.state_dir.display().to_string().into(),
+            );
+            object.insert("log_command".into(), log_command().into());
+            // Retained for compatibility with anything parsing the older
+            // key names this command printed.
+            object.insert("logged_in".into(), status.is_authenticated.into());
+            object.insert("running".into(), status.is_running.into());
+            object.insert("base_api_url".into(), status.api_base_url.clone().into());
+        }
+        println!("{}", serde_json::to_string_pretty(&value)?);
+        return Ok(());
     }
+
+    let none = "<none>".to_string();
+
+    println!("Account");
+    println!("  signed in:            {}", status.is_authenticated);
+    println!(
+        "  email:                {}",
+        status.account_email.as_ref().unwrap_or(&none)
+    );
+    println!(
+        "  device name:          {}",
+        status.device_name.as_ref().unwrap_or(&none)
+    );
+    println!(
+        "  partners:             {}",
+        status
+            .partner_count
+            .map(|count| count.to_string())
+            .unwrap_or_else(|| "<unknown>".to_string())
+    );
+
+    println!();
+    println!("Queues");
+    println!("  waiting for hash:     {}", status.pending_hash_count);
+    println!("  waiting in batch:     {}", status.pending_batch_count);
+    println!(
+        "  last batch upload:    {}",
+        format_timestamp(now_ms, status.last_batch_at_ms)
+    );
+
+    println!();
+    println!("Capture");
+    println!("  daemon running:       {}", status.is_running);
+    println!(
+        "  last loop:            {}",
+        format_timestamp(now_ms, status.last_loop_at_ms)
+    );
+    println!(
+        "  last attempt:         {}",
+        format_timestamp(now_ms, status.last_screenshot_attempt_at_ms)
+    );
+    println!(
+        "  last screenshot:      {}",
+        format_timestamp(now_ms, status.last_screenshot_at_ms)
+    );
+    println!(
+        "  last skip reason:     {}",
+        status
+            .last_skip_reason
+            .as_ref()
+            .map(|reason| skip_reason_label(reason).to_string())
+            .unwrap_or_else(|| none.clone())
+    );
+    println!("  capture backend:      {backend}");
+
+    println!();
+    println!("Recent errors");
+    if status.recent_errors.is_empty() {
+        println!("  (none)");
+    } else {
+        for error in status.recent_errors.iter().take(5) {
+            println!(
+                "  {} [{}] {}",
+                format_timestamp(now_ms, Some(error.at_ms)),
+                error.context,
+                error.message
+            );
+        }
+    }
+
+    println!();
+    println!("Advanced");
+    println!(
+        "  device id:            {}",
+        status.device_id.unwrap_or(none.clone())
+    );
+    println!("  api url:              {}", status.api_base_url);
+    println!(
+        "  hash base url:        {}",
+        status
+            .hash_base_url
+            .unwrap_or_else(|| "<default>".to_string())
+    );
+    println!(
+        "  capture interval:     {}s",
+        status.capture_interval_seconds
+    );
+    println!("  batch window:         {}s", status.batch_window_seconds);
+    println!(
+        "  systemd service:      {} ({})",
+        service_name(),
+        if service_active { "active" } else { "inactive" }
+    );
+    println!("  state dir:            {}", paths.state_dir.display());
+    println!("  logs:                 {}", log_command());
 
     Ok(())
 }
@@ -306,13 +640,9 @@ fn daemon_stop(paths: ClientPaths, yes: bool) -> Result<()> {
         .request_user_stop("cli_daemon_stop")
         .context("failed to record stop intent")?;
 
-    // `request_user_stop` only publishes onto the IPC socket — it doesn't wait
-    // for the daemon to actually read and dispatch it. Without this round trip,
-    // `systemctl stop`'s SIGTERM can arrive before the daemon's next loop
-    // iteration drains the socket, silently dropping the immediate/emailed
-    // UserStop alert. `get_status` is a synchronous request/response over the
-    // same ordered connection, so its reply guarantees the daemon has already
-    // processed (and persisted) the earlier UserStopRequested.
+    // `request_user_stop` already blocks until the daemon acks the stop
+    // request; this extra round trip is just cheap insurance against
+    // `systemctl stop`'s SIGTERM racing the daemon's persist of it.
     let _ = client.get_status();
 
     run_systemctl_user(["stop", &svc])?;
@@ -373,8 +703,6 @@ fn dev(paths: ClientPaths, command: DevCommands) -> Result<()> {
     match command {
         DevCommands::UploadLog(args) => dev_upload_log(paths, args),
         DevCommands::AddLog(args) => dev_add_log(paths, args),
-        DevCommands::AddScreenshot(args) => dev_add_screenshot(paths, args),
-        DevCommands::UploadBatch => dev_upload_batch(paths),
         #[cfg(debug_assertions)]
         DevCommands::Send(args) => dev_send(paths, args),
     }
@@ -388,24 +716,10 @@ fn build_send_kind(args: &SendLogArgs) -> Result<UploadKind> {
         Ok(serde_json::Value::String(value.to_string()))
     };
     match args.log_type.as_str() {
-        "lifecycle" => {
-            let kind = args
-                .kind
-                .as_deref()
-                .context("--kind is required for --type lifecycle")?;
-            let kind: LifecycleKind = serde_json::from_value(parse_enum(kind)?)
-                .with_context(|| format!("unknown lifecycle kind: {kind}"))?;
-            Ok(UploadKind::Lifecycle { kind })
-        }
-        "lifecycle_alert" => {
-            let reason = args
-                .reason
-                .as_deref()
-                .context("--reason is required for --type lifecycle_alert")?;
-            let reason: AlertReason = serde_json::from_value(parse_enum(reason)?)
-                .with_context(|| format!("unknown alert reason: {reason}"))?;
-            Ok(UploadKind::LifecycleAlert { reason })
-        }
+        "user_stop" => Ok(UploadKind::UserStop),
+        "screenshot_missed" => Ok(UploadKind::ScreenshotMissed),
+        "system_login" => Ok(UploadKind::SystemLogin { utc_ms: now_ms() }),
+        "system_logout" => Ok(UploadKind::SystemLogout { utc_ms: now_ms() }),
         "alert" => Ok(UploadKind::Alert {
             message: args
                 .message
@@ -427,37 +741,35 @@ fn build_send_kind(args: &SendLogArgs) -> Result<UploadKind> {
             details: args.details.clone(),
         }),
         other => anyhow::bail!(
-            "unsupported --type {other:?} (expected: lifecycle, lifecycle_alert, screenshot_skipped, alert, capture_failed, dev, screenshot, or all)"
+            "unsupported --type {other:?} (expected: user_stop, screenshot_missed, system_login, system_logout, screenshot_skipped, alert, capture_failed, dev, screenshot, or all)"
         ),
     }
+}
+
+/// Current UTC time in milliseconds — used as the `utc_ms` for dev-triggered
+/// `system_login`/`system_logout` events, which have no real login/logout
+/// to report.
+#[cfg(debug_assertions)]
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 /// Every concrete log variant `dev send --all` queues — one per web log icon.
 #[cfg(debug_assertions)]
 fn all_send_kinds() -> Vec<UploadKind> {
-    use AlertReason::*;
-    let lifecycle = [
-        LifecycleKind::SuspendDetected {
-            duration_ms: 60_000,
-        },
-        LifecycleKind::SystemLogin { utc_ms: 0 },
-        LifecycleKind::SystemLogout { utc_ms: 0 },
-    ]
-    .into_iter()
-    .map(|kind| UploadKind::Lifecycle { kind });
-    let alerts = [UnexpectedStart, UnexpectedStop, UnexpectedGap, UserStop]
-        .into_iter()
-        .map(|reason| UploadKind::LifecycleAlert { reason });
     let skips = [
         ScreenshotSkipReason::StaticScreen,
         ScreenshotSkipReason::LockedOrScreensaver,
     ]
     .into_iter()
     .map(|reason| UploadKind::ScreenshotSkipped { reason });
-    lifecycle
-        .chain(alerts)
-        .chain(skips)
+    let utc_ms = now_ms();
+    skips
         .chain([
+            UploadKind::UserStop,
             UploadKind::Alert {
                 message: "Developer test alert".to_string(),
             },
@@ -466,13 +778,16 @@ fn all_send_kinds() -> Vec<UploadKind> {
                 title: "Developer CLI log".to_string(),
                 details: None,
             },
+            UploadKind::ScreenshotMissed,
+            UploadKind::SystemLogin { utc_ms },
+            UploadKind::SystemLogout { utc_ms },
         ])
         .collect()
 }
 
 #[cfg(debug_assertions)]
 fn dev_send(paths: ClientPaths, args: SendLogArgs) -> Result<()> {
-    let client = connect_to_daemon(&paths)?;
+    let mut client = connect_to_daemon(&paths)?;
 
     let kinds = if args.log_type == "all" {
         // Screenshots are excluded here: the running daemon already produces real
@@ -504,7 +819,7 @@ fn dev_send(paths: ClientPaths, args: SendLogArgs) -> Result<()> {
     }
 
     println!(
-        "Queued {count} log(s) in the next batch with risk {}. Run `virtue dev upload-batch` to send them now.",
+        "Queued {count} log(s) in the next batch with risk {}. Run `virtue test-screenshot` to send them now.",
         format_risk(args.risk)
     );
     Ok(())
@@ -515,7 +830,7 @@ fn dev_send(paths: ClientPaths, args: SendLogArgs) -> Result<()> {
 /// directly — the daemon holds that state in memory and rewrites the file on
 /// every ping (~1s), so a direct edit would race with (or be silently
 /// clobbered by) the daemon's next write.
-fn connect_to_daemon(paths: &ClientPaths) -> Result<ClientController<virtue_core::RemoteEventBus>> {
+fn connect_to_daemon(paths: &ClientPaths) -> Result<ClientController> {
     let sock = paths.state_dir.join("daemon.sock");
     ClientController::connect(&sock)
         .context("failed to connect to daemon (is it running? try `virtue daemon start`)")
@@ -525,7 +840,7 @@ fn dev_upload_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
     let title = args
         .title
         .unwrap_or_else(|| "Developer CLI log".to_string());
-    let client = connect_to_daemon(&paths)?;
+    let mut client = connect_to_daemon(&paths)?;
     // risk >= 1.0 routes through the encrypted batch plus an immediate POST /d/notify.
     client
         .queue_upload(Upload {
@@ -548,7 +863,7 @@ fn dev_add_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
     let title = args
         .title
         .unwrap_or_else(|| "Developer CLI batched log".to_string());
-    let client = connect_to_daemon(&paths)?;
+    let mut client = connect_to_daemon(&paths)?;
     client
         .queue_upload(Upload {
             risk: args.risk,
@@ -566,75 +881,33 @@ fn dev_add_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
     Ok(())
 }
 
-fn dev_add_screenshot(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
-    let screenshot = LinuxPlatformHooks::new()
-        .take_screenshot()
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let client = connect_to_daemon(&paths)?;
-    client
-        .queue_upload(Upload {
-            risk: args.risk,
-            kind: UploadKind::Screenshot {
-                image: screenshot.bytes,
-                content_type: screenshot.content_type,
-                skin_detection: None,
-                nsfw_detection: None,
-            },
-        })
-        .context("failed to queue developer screenshot")?;
-
-    println!(
-        "Captured and queued a developer screenshot with risk {}.",
-        format_risk(args.risk)
-    );
-    Ok(())
-}
-
-fn dev_upload_batch(paths: ClientPaths) -> Result<()> {
-    let mut client = connect_to_daemon(&paths)?;
-
-    let initial_pending = client
-        .get_status()
-        .context("failed to query daemon status")?
-        .pending_request_count;
-    if initial_pending == 0 {
-        println!("No pending batch items to upload.");
-        return Ok(());
-    }
-
-    client
-        .flush_batch_now()
-        .context("failed to request batch flush")?;
-
-    // The flush is processed asynchronously on the daemon's next ping cycle
-    // (≤1s) plus however long the network upload takes. Give it a full cycle
-    // before the first check, then keep polling as long as it's still making
-    // progress, up to a generous cap.
-    std::thread::sleep(Duration::from_millis(1200));
-    let mut remaining = client
-        .get_status()
-        .context("failed to query daemon status")?
-        .pending_request_count;
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while remaining > 0 && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(500));
-        let seen = client
+fn force_screenshot(paths: ClientPaths) -> Result<()> {
+    // The baseline the wait compares against: `force_capture_now` returns once
+    // the capture is committed, not once its batch has landed.
+    let before = {
+        let mut client = connect_to_daemon(&paths)?;
+        let before = client
             .get_status()
-            .context("failed to query daemon status")?
-            .pending_request_count;
-        if seen == remaining {
-            break;
-        }
-        remaining = seen;
-    }
+            .context("failed to read daemon status")?;
+        println!("Screenshot uploading...");
+        client
+            .force_capture_now()
+            .context("failed to request forced screenshot capture")?;
+        before
+    };
 
-    let attempted = initial_pending.saturating_sub(remaining);
-    if remaining == 0 {
-        println!("Processed {attempted} batch item(s); no batch items remain queued.");
-    } else {
-        println!("Processed {attempted} batch item(s); {remaining} batch item(s) remain queued.");
-    }
+    // The daemon serves one connection at a time, so poll on a fresh
+    // connection each time rather than holding the socket for the whole wait.
+    let outcome = virtue_core::force_capture::wait_for_upload(
+        &before,
+        virtue_core::force_capture::DEFAULT_UPLOAD_TIMEOUT,
+        virtue_core::force_capture::DEFAULT_POLL_INTERVAL,
+        || ClientController::connect(&paths.state_dir.join("daemon.sock"))?.get_status(),
+        std::thread::sleep,
+    )
+    .context("failed to read daemon status while waiting for the upload")?;
 
+    println!("{}", outcome.message());
     Ok(())
 }
 
@@ -742,21 +1015,60 @@ fn format_risk(risk: f32) -> String {
     value
 }
 
-fn load_service_status(paths: &ClientPaths) -> Result<ServiceStatus> {
-    // Try to get live status from the daemon via IPC; fall back to defaults.
-    let sock = paths.state_dir.join("daemon.sock");
-    if let Ok(mut client) = ClientController::connect(&sock)
-        && let Ok(status) = client.get_status()
-    {
-        return Ok(status);
-    }
-    Ok(ServiceStatus::default())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Commands, DaemonCommands};
+    use super::{Cli, Commands, DaemonCommands, parse_os_release};
     use clap::Parser;
+
+    #[test]
+    fn cli_accepts_report_issue_command() {
+        let cli = Cli::try_parse_from(["virtue", "report-issue"])
+            .expect("report-issue command should parse");
+        assert!(matches!(
+            cli.command,
+            Commands::ReportIssue {
+                message: None,
+                contact_email: None,
+                yes: false,
+            }
+        ));
+    }
+
+    #[test]
+    fn cli_accepts_report_issue_flags() {
+        let cli = Cli::try_parse_from([
+            "virtue",
+            "report-issue",
+            "--message",
+            "Screenshots stopped uploading",
+            "--contact-email",
+            "me@example.com",
+            "--yes",
+        ])
+        .expect("report-issue flags should parse");
+        assert!(matches!(
+            cli.command,
+            Commands::ReportIssue { message: Some(m), contact_email: Some(e), yes: true }
+                if m == "Screenshots stopped uploading" && e == "me@example.com"
+        ));
+    }
+
+    #[test]
+    fn parse_os_release_reads_name_and_version() {
+        let contents = "NAME=\"Ubuntu\"\nVERSION=\"24.04.1 LTS (Noble Numbat)\"\nID=ubuntu\n";
+        assert_eq!(
+            parse_os_release(contents),
+            (
+                Some("Ubuntu".to_string()),
+                Some("24.04.1 LTS (Noble Numbat)".to_string())
+            )
+        );
+    }
+
+    #[test]
+    fn parse_os_release_handles_missing_fields() {
+        assert_eq!(parse_os_release("ID=arch\n"), (None, None));
+    }
 
     #[test]
     fn cli_accepts_login_command() {

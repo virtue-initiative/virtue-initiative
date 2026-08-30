@@ -8,16 +8,6 @@
   line-height: 1.5;
 }
 
-.download-hero {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-
-  & p {
-    max-width: 42rem;
-  }
-}
-
 .release-card {
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -122,5 +112,128 @@
 @media (max-width: 640px) {
   .download-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+.instructions {
+  border-top: 1px solid var(--border);
+  padding-top: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.instructions-heading {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.instructions-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.instructions-tab-label {
+  cursor: pointer;
+  padding: 0.4rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 0.9rem;
+  text-decoration: none;
+  user-select: none;
+}
+
+/* shared-web/base.css's `a:hover { text-decoration: underline }` outranks a
+   plain class on specificity, so it has to be overridden explicitly or these
+   pills would show a link-style underline on hover. */
+.instructions-tab-label:hover {
+  text-decoration: none;
+}
+
+/* Active-tab styling for the anchor whose href targets the currently-shown
+   panel (the panel with a matching #id is the URL's :target). One rule per
+   platform since CSS can't select "the anchor pointing at :target" generically. */
+.instructions-tabs:has(#linux:target) a[href='#linux'],
+.instructions-tabs:has(#mac:target) a[href='#mac'],
+.instructions-tabs:has(#windows:target) a[href='#windows'],
+.instructions-tabs:has(#android:target) a[href='#android'],
+.instructions-tabs:has(#ios:target) a[href='#ios'],
+.instructions-tabs:not(:has(.instructions-tab-panel:target)) a[href='#windows'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast, white);
+}
+
+/* `.instructions-tab-panel.help-doc` beats plain `.help-doc { display: flex }`
+   (imported later, in help-doc.css) on specificity so panels stay hidden. */
+.instructions-tab-panel.help-doc {
+  display: none;
+  flex-basis: 100%;
+  padding-top: 0.5rem;
+  /* Jumping to a panel's #hash should still leave the "Installation
+     instructions" heading and tab row (which sit above the panel) visible,
+     not just the panel's own top edge. Below 640px the tabs stack into a
+     column of 5 pills instead of one row, so there's a lot more of them to
+     clear (the site header also isn't sticky there, so no extra offset for
+     it is needed). Above 640px it's one tab row, but the site header is
+     sticky (76px), so that has to be cleared instead. */
+  scroll-margin-top: 320px;
+}
+
+@media (min-width: 641px) {
+  .instructions-tab-panel.help-doc {
+    scroll-margin-top: 190px;
+  }
+}
+
+/* Step screenshots: always their own line (never inline with surrounding
+   list-item text), all rendered at the same width regardless of their
+   original pixel size, and a bit narrower than the .help-doc default. Needs
+   the doubled-up `.instructions-tab-panel.help-doc` selector (matching the
+   hidden-state rule above) to outrank the plain `.help-doc img` rule
+   imported later in help-doc.css at equal specificity otherwise. */
+.instructions-tab-panel.help-doc img {
+  display: block;
+  margin-top: 0.5rem;
+  /* `width`, not `max-width`, so every screenshot renders at the same size
+     instead of each sitting at its own (possibly smaller) natural size;
+     min() lets it still shrink below that on narrow viewports. */
+  width: min(620px, 100%);
+  height: auto;
+}
+
+/* URL hash (e.g. /download#windows) selects the panel via :target — no JS.
+   With no hash (or an unrelated one), the first panel (Windows) shows by default. */
+.instructions-tab-panel:target,
+.instructions-tabs:not(:has(.instructions-tab-panel:target)) .instructions-tab-panel:first-of-type {
+  display: flex;
+}
+
+@media (max-width: 640px) {
+  .instructions-tabs {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .instructions-tab-label {
+    text-align: center;
+  }
+}
+
+@media (max-width: 640px) {
+  .release-card {
+    /* Bleed edge-to-edge (cancel .site-main's padding-inline: 1.5rem) and drop
+       the border/radius so the card reads as a flat white square instead of
+       a boxed card with lots of surrounding padding on narrow screens. Keep
+       the card's own padding equal to that cancelled inline padding so text
+       inside the card lines up with text outside it. */
+    margin-inline: -1.5rem;
+    padding: 1.5rem;
+    border-left: none;
+    border-right: none;
+    border-radius: 0;
   }
 }

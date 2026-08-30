@@ -13,11 +13,21 @@ private func virtue_mac_native_login(
 @_silgen_name("virtue_mac_native_logout")
 private func virtue_mac_native_logout() -> UnsafeMutablePointer<CChar>?
 
+@_silgen_name("virtue_mac_native_report_issue")
+private func virtue_mac_native_report_issue(
+    _ message: UnsafePointer<CChar>?,
+    _ contactEmail: UnsafePointer<CChar>?,
+    _ includeLogs: Bool
+) -> UnsafeMutablePointer<CChar>?
+
 @_silgen_name("virtue_mac_native_is_logged_in")
 private func virtue_mac_native_is_logged_in() -> Bool
 
 @_silgen_name("virtue_mac_native_get_device_id")
 private func virtue_mac_native_get_device_id() -> UnsafeMutablePointer<CChar>?
+
+@_silgen_name("virtue_mac_native_get_account_email")
+private func virtue_mac_native_get_account_email() -> UnsafeMutablePointer<CChar>?
 
 @_silgen_name("virtue_mac_native_get_status_json")
 private func virtue_mac_native_get_status_json() -> UnsafeMutablePointer<CChar>?
@@ -30,12 +40,8 @@ private func virtue_mac_native_request_user_stop(
     _ source: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
-@_silgen_name("virtue_mac_native_set_overrides")
-private func virtue_mac_native_set_overrides(
-    _ baseApiUrl: UnsafePointer<CChar>?,
-    _ captureIntervalSeconds: UnsafePointer<CChar>?,
-    _ batchWindowSeconds: UnsafePointer<CChar>?
-) -> UnsafeMutablePointer<CChar>?
+@_silgen_name("virtue_mac_native_force_capture")
+private func virtue_mac_native_force_capture() -> UnsafeMutablePointer<CChar>?
 
 @_silgen_name("virtue_mac_native_has_capture_permission")
 private func virtue_mac_native_has_capture_permission() -> Bool
@@ -90,32 +96,26 @@ enum DaemonStatus: Int32 {
     case unreachable = 2
 }
 
-struct RuntimeOverrides {
-    var baseApiUrl: String = ""
-    var captureIntervalSeconds: String = ""
-    var batchWindowSeconds: String = ""
+/// `{"outcome": …, "message": …}` on success, `{"error": …}` on failure —
+/// the shape `virtue_mac_native_force_capture` returns.
+private struct ForceCaptureReport: Decodable {
+    let outcome: String?
+    let message: String?
+    let error: String?
+}
+
+/// What a "Test Screenshot" run ended up doing, ready to show the user.
+enum ForceCaptureResult {
+    /// The capture ran; the message says whether it uploaded, was gated, or
+    /// is still in flight.
+    case finished(String)
+    case failed(String)
 }
 
 enum NativeBridge {
     static func initialize() -> String? {
         callReturningError {
             virtue_mac_native_init()
-        }
-    }
-
-    static func setOverrides(_ overrides: RuntimeOverrides) -> String? {
-        callReturningError {
-            overrides.baseApiUrl.withCString { baseApiCString in
-                overrides.captureIntervalSeconds.withCString { captureIntervalCString in
-                    overrides.batchWindowSeconds.withCString { batchWindowCString in
-                        virtue_mac_native_set_overrides(
-                            baseApiCString,
-                            captureIntervalCString,
-                            batchWindowCString
-                        )
-                    }
-                }
-            }
         }
     }
 
@@ -137,6 +137,16 @@ enum NativeBridge {
         }
     }
 
+    static func reportIssue(message: String, contactEmail: String?, includeLogs: Bool) -> String? {
+        callReturningError {
+            message.withCString { messageCString in
+                withOptionalCString(contactEmail) { contactEmailCString in
+                    virtue_mac_native_report_issue(messageCString, contactEmailCString, includeLogs)
+                }
+            }
+        }
+    }
+
     static func isLoggedIn() -> Bool {
         virtue_mac_native_is_logged_in()
     }
@@ -149,6 +159,10 @@ enum NativeBridge {
         consumeOptionalString(virtue_mac_native_get_status_json())
     }
 
+    static func getAccountEmail() -> String? {
+        consumeOptionalString(virtue_mac_native_get_account_email())
+    }
+
     static func pollDaemonStatus() -> DaemonStatus {
         DaemonStatus(rawValue: virtue_mac_native_poll_daemon_status()) ?? .stopped
     }
@@ -159,6 +173,22 @@ enum NativeBridge {
                 virtue_mac_native_request_user_stop(sourceCString)
             }
         }
+    }
+
+    /// Runs a forced capture and waits for its batch to land. The native side
+    /// answers with the message to show — either the shared outcome wording
+    /// from `virtue_core::force_capture`, or an error.
+    static func forceCapture() -> ForceCaptureResult {
+        guard let json = consumeOptionalString(virtue_mac_native_force_capture()),
+              let data = json.data(using: .utf8),
+              let payload = try? JSONDecoder().decode(ForceCaptureReport.self, from: data)
+        else {
+            return .failed("the native layer returned no result")
+        }
+        if let error = payload.error {
+            return .failed(error)
+        }
+        return .finished(payload.message ?? "Test screenshot finished.")
     }
 
     static func hasCapturePermission() -> Bool {
@@ -230,5 +260,15 @@ enum NativeBridge {
         _ call: () -> UnsafeMutablePointer<CChar>?
     ) -> String? {
         consumeOptionalString(call())
+    }
+
+    private static func withOptionalCString<Result>(
+        _ value: String?,
+        _ body: (UnsafePointer<CChar>?) -> Result
+    ) -> Result {
+        guard let value else {
+            return body(nil)
+        }
+        return value.withCString(body)
     }
 }

@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::error::CoreResult;
 use crate::model::Screenshot;
-use crate::platform::{LifecycleHooks, PlatformHooks, ScreenshotHooks};
+use crate::platform::{LifecycleHooks, ScreenshotHooks};
 use crate::testing::clock::MockClock;
 use crate::testing::fixtures::tiny_png_screenshot;
 
@@ -18,10 +18,12 @@ struct TestPlatformInner {
     take_call_count: u64,
     default_screenshot: Screenshot,
     locked_or_screensaver: bool,
-    boot_clock_override_ms: Option<i64>,
-    monotonic_clock_override_ms: Option<i64>,
     last_login_utc_ms: Option<i64>,
     last_logout_utc_ms: Option<i64>,
+    lifecycle_enabled: bool,
+    /// When `Some`, overrides `get_monotonic_clock_ms()` instead of it
+    /// mirroring `clock` (the default — see `set_monotonic_clock_override`).
+    monotonic_override_ms: Option<i64>,
 }
 
 impl TestPlatformHooks {
@@ -37,10 +39,10 @@ impl TestPlatformHooks {
                 take_call_count: 0,
                 default_screenshot: tiny_png_screenshot(),
                 locked_or_screensaver: false,
-                boot_clock_override_ms: None,
-                monotonic_clock_override_ms: None,
                 last_login_utc_ms: None,
                 last_logout_utc_ms: None,
+                lifecycle_enabled: true,
+                monotonic_override_ms: None,
             })),
         }
     }
@@ -61,28 +63,28 @@ impl TestPlatformHooks {
         self.lock().locked_or_screensaver = locked;
     }
 
-    /// Override the boot clock returned by `get_boot_clock_ms`. Sticky until
-    /// overridden again; with no override, it tracks the shared `MockClock`
-    /// in lockstep (normal operation, no suspend/reboot).
-    pub fn set_boot_clock_ms(&self, ms: i64) {
-        self.lock().boot_clock_override_ms = Some(ms);
-    }
-
-    /// Override the monotonic clock returned by `get_monotonic_clock_ms`.
-    /// Sticky until overridden again. Freezing this while the wall clock (and
-    /// an unfrozen boot clock) advance simulates a suspend; resetting both
-    /// boot and monotonic to a small value while the wall clock keeps
-    /// climbing simulates a reboot.
-    pub fn set_monotonic_clock_ms(&self, ms: i64) {
-        self.lock().monotonic_clock_override_ms = Some(ms);
-    }
-
     pub fn set_last_login(&self, utc_ms: Option<i64>) {
         self.lock().last_login_utc_ms = utc_ms;
     }
 
     pub fn set_last_logout(&self, utc_ms: Option<i64>) {
         self.lock().last_logout_utc_ms = utc_ms;
+    }
+
+    /// Mirrors `IosPlatformHooks::lifecycle_enabled() -> false` for tests
+    /// that need to exercise the "lifecycle check disabled" path.
+    pub fn set_lifecycle_enabled(&self, enabled: bool) {
+        self.lock().lifecycle_enabled = enabled;
+    }
+
+    /// Diverges `get_monotonic_clock_ms()` from `clock` (the UTC clock) — by
+    /// default it mirrors `clock` exactly, like every platform's real
+    /// suspend-safe clock does while the system isn't suspended. Simulate a
+    /// suspend by setting this to a fixed value and then advancing `clock`
+    /// (real time passes, the suspend-safe clock doesn't); pass `None` to
+    /// resume mirroring `clock` again (simulating a resume).
+    pub fn set_monotonic_clock_override(&self, ms: Option<i64>) {
+        self.lock().monotonic_override_ms = ms;
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, TestPlatformInner> {
@@ -121,18 +123,11 @@ impl LifecycleHooks for TestPlatformHooks {
         Ok(self.clock.now_ms())
     }
 
-    fn get_boot_clock_ms(&self) -> CoreResult<i64> {
-        Ok(self
-            .lock()
-            .boot_clock_override_ms
-            .unwrap_or_else(|| self.clock.now_ms()))
-    }
-
     fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
         Ok(self
             .lock()
-            .monotonic_clock_override_ms
-            .unwrap_or_else(|| self.clock.now_ms()))
+            .monotonic_override_ms
+            .unwrap_or(self.clock.now_ms()))
     }
 
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {
@@ -142,6 +137,8 @@ impl LifecycleHooks for TestPlatformHooks {
     fn get_last_logout_utc_ms(&self) -> CoreResult<Option<i64>> {
         Ok(self.lock().last_logout_utc_ms)
     }
-}
 
-impl PlatformHooks for TestPlatformHooks {}
+    fn lifecycle_enabled(&self) -> bool {
+        self.lock().lifecycle_enabled
+    }
+}

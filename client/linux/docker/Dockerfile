@@ -13,6 +13,7 @@ FROM rust:1-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libleptonica-dev \
     libtesseract-dev \
+    tesseract-ocr-eng \
     libclang-dev \
     clang \
     patchelf \

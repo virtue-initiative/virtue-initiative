@@ -5,11 +5,12 @@ import { PageHeading } from '../../components/PageHeading';
 import { LogsIcon } from '../../components/icons';
 import { LogsGallery } from './LogsGallery';
 import { LogsList } from './LogsList';
+import { DecryptionStatsButton } from './DecryptionStatsDialog';
 import { getRiskRating, type RiskRating } from '@virtueinitiative/shared-web/risk';
 import { FeedLog, formatDayLabel, getLogCategory, LOG_CATEGORIES } from './shared';
 import './style.css';
 import { useUrlState } from '../../hooks/useUrlState';
-import { Button, Dialog, DialogHeader, Field, Select } from '@virtueinitiative/shared-web';
+import { Button, Checkbox, Dialog, DialogHeader, Field, Select } from '@virtueinitiative/shared-web';
 import { cacheClient } from '../../utils/cache/client';
 import { formatRelativeTimestamp } from '../../utils/time';
 
@@ -34,6 +35,11 @@ const RANGE_SEGMENTS = [
   { label: 'Past week', value: 'week' },
   { label: 'Past month', value: 'month' },
 ];
+
+/** Matches `LOG_KIND_TABLE.screenshot_skipped.category` in `shared.tsx` — every
+ * "Screenshot Skipped" entry (locked/asleep or duplicate-frame) shares this one
+ * category, so hiding it by category hides both skip reasons at once. */
+const SKIPPED_SCREENSHOTS_CATEGORY = 'Screenshot Skipped';
 
 export function Logs({ userId: routeUserId }: { userId?: string }) {
   const api = useAPIContext();
@@ -63,6 +69,11 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
     'type',
     'string',
     null,
+  );
+  const [showSkippedScreenshots, setShowSkippedScreenshots] = useUrlState<boolean>(
+    'show_skipped',
+    'boolean',
+    false,
   );
 
   const endDate = today;
@@ -191,14 +202,27 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
       (logs ?? []).filter((item) => {
         if (item.ts < weekStart || item.ts > weekEnd) return false;
         if (typeFilter !== null && getLogCategory(item) !== typeFilter) return false;
+        if (
+          !showSkippedScreenshots &&
+          typeFilter !== SKIPPED_SCREENSHOTS_CATEGORY &&
+          getLogCategory(item) === SKIPPED_SCREENSHOTS_CATEGORY
+        )
+          return false;
         if (riskFilter !== 'all') {
           const rating = getRiskRating(item.risk);
-          if (riskFilter === 'high' && rating !== 'high') return false;
-          if (riskFilter === 'moderate' && rating !== 'moderate' && rating !== 'high') return false;
+          if (riskFilter === 'alert' && rating !== 'alert') return false;
+          if (riskFilter === 'high' && rating !== 'high' && rating !== 'alert') return false;
+          if (
+            riskFilter === 'moderate' &&
+            rating !== 'moderate' &&
+            rating !== 'high' &&
+            rating !== 'alert'
+          )
+            return false;
         }
         return true;
       }),
-    [logs, riskFilter, typeFilter, weekStart, weekEnd],
+    [logs, riskFilter, typeFilter, weekStart, weekEnd, showSkippedScreenshots],
   );
   const galleryItems = useMemo(
     () =>
@@ -207,8 +231,15 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
         if (item.image_w === undefined) return false;
         if (riskFilter !== 'all') {
           const rating = getRiskRating(item.risk);
-          if (riskFilter === 'high' && rating !== 'high') return false;
-          if (riskFilter === 'moderate' && rating !== 'moderate' && rating !== 'high') return false;
+          if (riskFilter === 'alert' && rating !== 'alert') return false;
+          if (riskFilter === 'high' && rating !== 'high' && rating !== 'alert') return false;
+          if (
+            riskFilter === 'moderate' &&
+            rating !== 'moderate' &&
+            rating !== 'high' &&
+            rating !== 'alert'
+          )
+            return false;
         }
         return true;
       }),
@@ -256,7 +287,7 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
                       ))}
                     </Select>
                   </Field>
-                  <Field label="Risk" class="logs-filter-field">
+                  <Field label="Concern" class="logs-filter-field">
                     <Select
                       size="md"
                       class="logs-filter-select"
@@ -266,6 +297,7 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
                       }
                     >
                       <option value="all">All</option>
+                      <option value="alert">Alert</option>
                       <option value="high">High</option>
                       <option value="moderate">Medium</option>
                     </Select>
@@ -288,6 +320,18 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
                         ))}
                       </Select>
                     </Field>
+                  )}
+                  {!isGallery && (
+                    <div class="logs-filter-field logs-filter-checkbox-field">
+                      <Checkbox
+                        id="show-skipped-screenshots"
+                        label="Show skipped screenshots"
+                        checked={showSkippedScreenshots}
+                        onChange={(e) =>
+                          setShowSkippedScreenshots((e.target as HTMLInputElement).checked)
+                        }
+                      />
+                    </div>
                   )}
                 </div>
                 <Button
@@ -333,6 +377,13 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
                   : null}
               </>
             )}
+            <DecryptionStatsButton
+              viewerId={userId ?? ''}
+              targetUserId={activeTargetUserId ?? ''}
+              deviceId={selectedDevice ?? undefined}
+              startTime={weekStart}
+              endTime={weekEnd}
+            />
           </p>
 
           <div class="logs-sticky-date" aria-live="polite">
@@ -396,7 +447,7 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
                   ))}
                 </Select>
               </Field>
-              <Field label="Risk" class="logs-filter-field">
+              <Field label="Concern" class="logs-filter-field">
                 <Select
                   size="md"
                   class="logs-filter-select"
@@ -406,6 +457,7 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
                   }
                 >
                   <option value="all">All</option>
+                  <option value="alert">Alert</option>
                   <option value="high">High</option>
                   <option value="moderate">Medium</option>
                 </Select>
@@ -426,6 +478,18 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
                     ))}
                   </Select>
                 </Field>
+              )}
+              {!isGallery && (
+                <div class="logs-filter-field logs-filter-checkbox-field">
+                  <Checkbox
+                    id="show-skipped-screenshots-dialog"
+                    label="Show skipped screenshots"
+                    checked={showSkippedScreenshots}
+                    onChange={(e) =>
+                      setShowSkippedScreenshots((e.target as HTMLInputElement).checked)
+                    }
+                  />
+                </div>
               )}
             </div>
           </Dialog>

@@ -5,6 +5,7 @@ import VirtueKit
 @main
 struct VirtueMacApp: App {
     @StateObject private var coordinator = MonitoringCoordinator()
+    @StateObject private var updateController = UpdateController()
     @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
@@ -16,10 +17,13 @@ struct VirtueMacApp: App {
         // time, since the label (unlike the lazily-built menu content) is
         // rendered immediately.
         MenuBarExtra {
-            MenuBarMenuContent(coordinator: coordinator)
+            MenuBarMenuContent(coordinator: coordinator, updateController: updateController)
         } label: {
             Image("TrayIcon")
                 .onAppear {
+                    // Lets the coordinator avoid relaunching itself while
+                    // Sparkle is mid-install. See `checkForReplacedBundle`.
+                    coordinator.updateController = updateController
                     openWindow(id: "main")
                     NSApp.activate(ignoringOtherApps: true)
                 }
@@ -39,6 +43,7 @@ struct VirtueMacApp: App {
 /// user opens the app window for that.
 private struct MenuBarMenuContent: View {
     @ObservedObject var coordinator: MonitoringCoordinator
+    @ObservedObject var updateController: UpdateController
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -53,6 +58,20 @@ private struct MenuBarMenuContent: View {
                 openWindow(id: "main")
                 NSApp.activate(ignoringOtherApps: true)
             }
+        } else {
+            Divider()
+            Button("Test Screenshot") {
+                coordinator.forceCapture()
+            }
+            .disabled(coordinator.isForceCapturing)
+        }
+
+        if updateController.isEnabled {
+            Divider()
+            Button("Check for Updates") {
+                updateController.checkForUpdates()
+            }
+            .disabled(!updateController.canCheckForUpdates)
         }
 
         Divider()

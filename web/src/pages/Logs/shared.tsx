@@ -37,6 +37,7 @@ function getLogMetadata(log: DataLog) {
 type LogCaseKey =
   | 'screenshot'
   | 'screenshot_skipped'
+  | 'screenshot_missed'
   | 'system_login'
   | 'system_logout'
   | 'suspend_detected'
@@ -45,6 +46,8 @@ type LogCaseKey =
   | 'unexpected_stop'
   | 'unexpected_start'
   | 'user_stop'
+  | 'user_start'
+  | 'repeated_restarts'
   | 'lifecycle_alert_other'
   | 'alert'
   | 'capture_failed'
@@ -61,6 +64,20 @@ function getLogCaseKey(log: DataLog): LogCaseKey {
       return 'screenshot';
     case 'screenshot_skipped':
       return 'screenshot_skipped';
+    case 'screenshot_missed':
+      return 'screenshot_missed';
+    case 'system_login':
+      return 'system_login';
+    case 'system_logout':
+      return 'system_logout';
+    case 'user_stop':
+      return 'user_stop';
+    case 'user_start':
+      return 'user_start';
+    case 'repeated_restarts':
+      return 'repeated_restarts';
+    // `lifecycle`/`lifecycle_alert` are the pre-rewrite client's wire shapes
+    // — no longer sent, but kept here so already-stored logs still render.
     case 'lifecycle':
       if (kind === 'system_login') return 'system_login';
       if (kind === 'system_logout') return 'system_logout';
@@ -108,6 +125,11 @@ const LOG_KIND_TABLE: Record<
       return `Screenshot skipped on ${d}`;
     },
   },
+  screenshot_missed: {
+    category: 'Screenshot Missed',
+    icon: ClockIcon,
+    message: (d) => `${d} missed a scheduled screenshot`,
+  },
   system_login: {
     category: 'System Login',
     icon: SignInIcon,
@@ -154,6 +176,21 @@ const LOG_KIND_TABLE: Record<
     icon: ExclamationTriangleIcon,
     message: (d) => `Monitoring stopped by user on ${d}`,
   },
+  user_start: {
+    category: 'Monitoring Resumed by User',
+    icon: SignInIcon,
+    message: (d) => `Monitoring resumed by user on ${d}`,
+  },
+  repeated_restarts: {
+    category: 'Repeated Restarts',
+    icon: ExclamationTriangleIcon,
+    message: (d, data) => {
+      const count = data.count as number | undefined;
+      return count
+        ? `${d} restarted ${count} times in a short window`
+        : `${d} restarted repeatedly in a short window`;
+    },
+  },
   lifecycle_alert_other: {
     category: 'Alert',
     icon: ExclamationTriangleIcon,
@@ -179,9 +216,10 @@ const LOG_KIND_TABLE: Record<
     },
   },
   heartbeat: {
-    category: 'Heartbeat',
+    category: 'Daily Check-in',
     icon: ActivityIcon,
-    message: (d) => `Heartbeat received from ${d}`,
+    message: () =>
+      'Once a day, your device sends a small update to confirm that monitoring is still active.',
   },
 };
 
@@ -201,6 +239,9 @@ export function LogIcon({ log }: { log: DataLog }) {
 
 /** Base URL of the help page documenting every log type. */
 export const LOG_TYPES_HELP_URL = `${LANDING_URL}/help/web/log-types`;
+
+/** URL of the help page explaining the concern percentage/levels. */
+export const CONCERN_HELP_URL = `${LANDING_URL}/help/web/concern-scores`;
 
 /** Slugified anchor for a log's section on the log-types help page. Mirrors the
  * id markdown generates from the matching heading (the category title). */
@@ -225,12 +266,19 @@ export function getLogMessage(log: DataLog, deviceName: string): string {
 export const LOG_TYPES = [
   'screenshot',
   'screenshot_skipped',
-  'lifecycle',
-  'lifecycle_alert',
+  'screenshot_missed',
+  'system_login',
+  'system_logout',
+  'user_stop',
+  'user_start',
+  'repeated_restarts',
   'alert',
   'capture_failed',
   'dev',
   'heartbeat',
+  // Pre-rewrite wire shapes, kept so already-stored logs still render.
+  'lifecycle',
+  'lifecycle_alert',
 ] as const;
 
 const _dayLabelFmt = new Intl.DateTimeFormat(undefined, {
@@ -315,9 +363,11 @@ export function LogDetailDialog({
   const [imgSrc, setImgSrc] = useState<string | null>(null);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const metadata = getLogMetadata(item);
-  const riskLabel = describeRiskLevel(item.risk) ?? 'Risk unavailable';
+  const riskLabel = describeRiskLevel(item.risk) ?? 'Concern unavailable';
   const riskBadge =
-    getRiskLevel(item.risk) === 'high' ? (
+    getRiskLevel(item.risk) === 'alert' ? (
+      <span class="logs-verify-badge logs-verify-badge--failed">⚠ {riskLabel}</span>
+    ) : getRiskLevel(item.risk) === 'high' ? (
       <span class="logs-verify-badge logs-verify-badge--failed">⚠ {riskLabel}</span>
     ) : getRiskLevel(item.risk) === 'medium' ? (
       <span class="logs-verify-badge logs-verify-badge--moderate">{riskLabel}</span>
@@ -375,11 +425,11 @@ export function LogDetailDialog({
             )}
             <a
               class="logs-detail-help-link"
-              href={getLogHelpUrl(item)}
+              href={CONCERN_HELP_URL}
               target="_blank"
               rel="noreferrer"
-              aria-label="Learn more about this event"
-              title="Learn more about this event"
+              aria-label="Learn more about the concern score"
+              title="Learn more about the concern score"
             >
               <InformationCircleIcon />
             </a>

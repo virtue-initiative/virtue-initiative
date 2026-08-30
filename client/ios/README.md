@@ -5,7 +5,7 @@ Extension. ReplayKit/system broadcast is removed.
 
 ## Architecture
 
-- iOS app (`VirtueIOS`): login/session/runtime override UI + native core init.
+- iOS app (`VirtueIOS`): login/session UI + native core init.
 - Safari Web Extension (`VirtueSafariWebExtension`):
   - JS captures the visible Safari tab image.
   - Native extension handler stores the latest PNG in-memory.
@@ -13,7 +13,6 @@ Extension. ReplayKit/system broadcast is removed.
     capture callbacks when `run_batch_daemon` asks.
 - Shared App Group storage (`group.org.virtueinitiative.virtueios`) carries:
   - token/state files for Rust core
-  - runtime overrides
   - Safari capture heartbeat/status for the app UI
 
 ## Layout
@@ -47,10 +46,84 @@ Extension. ReplayKit/system broadcast is removed.
 
 - Capture is Safari-only; non-Safari apps are not captured.
 - Capture depends on extension enablement and active Safari browsing context.
-- Default overrides are hardcoded at startup:
-  - `VIRTUE_BASE_API_URL=http://10.7.7.4:8787`
-  - `VIRTUE_CAPTURE_INTERVAL_SECONDS=15`
-  - `VIRTUE_BATCH_WINDOW_SECONDS=30`
+- `api_base_url`, `capture_interval_seconds`, and `batch_window_seconds` are
+  compile-time constants baked into `virtue-core` via `env!()` (see
+  `client/core/build.rs`) — there is no runtime override mechanism on any
+  platform. To use local dev values, copy `.env.example` (repo root) to
+  `.env` (gitignored) and set `VIRTUE_DEFAULT_API_URL`,
+  `VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS`, `VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS`
+  before building.
+
+## TestFlight releases
+
+`.github/workflows/client-ios.yml` archives, uploads and distributes on every push to
+`main` and `staging`:
+
+| Branch    | TestFlight group                                      | Beta App Review                   |
+| --------- | ----------------------------------------------------- | --------------------------------- |
+| `main`    | `Virtue Initiative iOS Public Beta` (external)        | required, submitted automatically |
+| `staging` | whatever `IOS_STAGING_BETA_GROUP_NAME` names (opt-in) | skipped for internal groups       |
+
+`scripts/build-and-upload-testflight.sh` ends at `xcrun altool --upload-app`, which only
+parks the build in App Store Connect — it processes for several minutes and then belongs
+to no group. `scripts/distribute-testflight-build.mjs` does everything after that over the
+App Store Connect API (altool cannot): wait for processing, record export compliance,
+write "What to Test", attach the build to the named group, verify the attachment actually
+took, and submit for Beta App Review when the group is external.
+
+It runs under plain `node` with no dependencies — App Store Connect wants an ES256 JWT,
+and `crypto.sign(..., { dsaEncoding: 'ieee-p1363' })` produces exactly the raw `r||s`
+signature that needs.
+
+If `IOS_STAGING_BETA_GROUP_NAME` is unset the step no-ops on `staging`, leaving that
+branch's distribution to App Store Connect's own settings as before. `main` always
+distributes.
+
+### Keeping stable builds out of the staging group
+
+`client/core/build.rs` bakes the API base URL in at compile time from the release channel:
+a `main` build talks to `https://api.virtueinitiative.org`, a `staging` build to
+`https://staging.app.virtueinitiative.org/api`. Group membership is therefore the only
+thing keeping staging testers off production data, so on `main` the workflow sets
+`IOS_EXCLUSIVE_BETA_GROUP=true` and the distribute step removes the build from every group
+except the public beta, failing the job if it cannot.
+
+This is a cleanup, not a guarantee. Internal groups with "automatically distribute new
+builds" enabled pick up every build as soon as it becomes distributable, and that happens
+asynchronously — so a tester could briefly see a stable build before it is pulled. The
+setting is fixed when the group is created — App Store Connect does not let you change it
+afterwards, and `hasAccessToAllBuilds` is read-only in the API too — so removal is the only
+lever available. The step therefore prunes twice, once immediately after processing and
+again at the end, to keep that window as short as possible.
+
+To eliminate the window rather than shorten it, recreate the group with automatic
+distribution off and set `IOS_STAGING_BETA_GROUP_NAME` so this workflow distributes staging
+explicitly. External groups never auto-receive builds, so an external staging group has
+nothing to prevent and this step will simply report the target group.
+
+### Export compliance
+
+A build with no export compliance answer sits in TestFlight as "Missing Compliance" and
+reaches nobody. `ITSAppUsesNonExemptEncryption` is declared `false` in both the app and the
+Safari extension `Info.plist`, so every build arrives already answered and the distribute
+step only asserts it, failing the release if the key ever goes missing.
+
+(The other way to satisfy this is an approved App Encryption Declaration attached per build
+over the API. That is what you need if Apple ever _does_ require uploaded documents for
+this app; it is deliberately not implemented while the Info.plist answer suffices.)
+
+Note what "non-exempt" means in that key: _exempt from export **documentation**
+requirements_, not "contains no cryptography". `client/core` implements AES-256-GCM, HPKE,
+Argon2id and HKDF itself rather than calling Apple's CryptoKit, which by [Apple's
+classification][export-compliance] is "industry standard algorithms not provided within
+the Apple operating system" — that tier needs no CCATS, only a French declaration where
+applicable, which is why App Store Connect reports that no documents are required.
+
+Using exempt encryption without filing documentation with Apple can still carry a
+year-end self-classification report obligation to the U.S. Bureau of Industry and
+Security. That is a filing question, not a build question.
+
+[export-compliance]: https://developer.apple.com/help/app-store-connect/reference/app-information/export-compliance-documentation-for-encryption/
 
 ## Generate project
 

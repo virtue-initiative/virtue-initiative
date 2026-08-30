@@ -2,41 +2,87 @@ import Combine
 import Foundation
 import UIKit
 
-private struct CoreServiceStatus: Decodable {
+/// One entry in the daemon's recent-errors ring — `virtue_core::StatusError`.
+struct CoreStatusError: Decodable {
+    let atMs: Int64
+    let context: String
+    let message: String
+
+    private enum CodingKeys: String, CodingKey {
+        case atMs = "at_ms"
+        case context
+        case message
+    }
+}
+
+/// Why the most recent capture attempt produced no screenshot —
+/// `virtue_core::StatusSkipReason`.
+enum CoreSkipReason: String, Decodable {
+    case staticScreen = "static_screen"
+    case lockedOrScreensaver = "locked_or_screensaver"
+    case captureFailed = "capture_failed"
+    case unknown
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = CoreSkipReason(rawValue: raw) ?? .unknown
+    }
+
+    var label: String {
+        switch self {
+        case .staticScreen: return "Screen unchanged since the last upload"
+        case .lockedOrScreensaver: return "Screen locked or screensaver active"
+        case .captureFailed: return "Capture failed"
+        case .unknown: return "Unknown"
+        }
+    }
+}
+
+/// Mirrors `virtue_core::ServiceStatus` — the shared status-page payload
+/// (`client/core/SPEC.md` CORE-010) every platform renders. Kept as a local
+/// copy because the iOS app doesn't link `shared-swift`'s VirtueKit the way
+/// the Mac app does.
+struct CoreServiceStatus: Decodable {
     let isRunning: Bool
     let isAuthenticated: Bool
-    let lastLoopAtMs: Int64?
-    let lastScreenshotAtMs: Int64?
-    let lastBatchAtMs: Int64?
+    let accountEmail: String?
+    let deviceId: String?
+    let deviceName: String?
+    let partnerCount: Int?
+    let pendingHashCount: Int?
+    let pendingBatchCount: Int?
     let pendingRequestCount: Int
-    let lifecycle: CoreLifecycleStatus?
+    let lastLoopAtMs: Int64?
+    let lastScreenshotAttemptAtMs: Int64?
+    let lastScreenshotAtMs: Int64?
+    let lastSkipReason: CoreSkipReason?
+    let lastBatchAtMs: Int64?
+    let recentErrors: [CoreStatusError]?
+    let apiBaseUrl: String?
+    let hashBaseUrl: String?
+    let captureIntervalSeconds: Int64?
+    let batchWindowSeconds: Int64?
 
     private enum CodingKeys: String, CodingKey {
         case isRunning = "is_running"
         case isAuthenticated = "is_authenticated"
-        case lastLoopAtMs = "last_loop_at_ms"
-        case lastScreenshotAtMs = "last_screenshot_at_ms"
-        case lastBatchAtMs = "last_batch_at_ms"
+        case accountEmail = "account_email"
+        case deviceId = "device_id"
+        case deviceName = "device_name"
+        case partnerCount = "partner_count"
+        case pendingHashCount = "pending_hash_count"
+        case pendingBatchCount = "pending_batch_count"
         case pendingRequestCount = "pending_request_count"
-        case lifecycle
-    }
-}
-
-private struct CoreLifecycleStatus: Decodable {
-    let snapshot: CoreLifecycleSnapshot
-}
-
-private struct CoreLifecycleSnapshot: Decodable {
-    let userSession: String
-    let primaryService: String
-    let capturePermission: String
-    let captureAvailability: String
-
-    private enum CodingKeys: String, CodingKey {
-        case userSession = "user_session"
-        case primaryService = "primary_service"
-        case capturePermission = "capture_permission"
-        case captureAvailability = "capture_availability"
+        case lastLoopAtMs = "last_loop_at_ms"
+        case lastScreenshotAttemptAtMs = "last_screenshot_attempt_at_ms"
+        case lastScreenshotAtMs = "last_screenshot_at_ms"
+        case lastSkipReason = "last_skip_reason"
+        case lastBatchAtMs = "last_batch_at_ms"
+        case recentErrors = "recent_errors"
+        case apiBaseUrl = "api_base_url"
+        case hashBaseUrl = "hash_base_url"
+        case captureIntervalSeconds = "capture_interval_seconds"
+        case batchWindowSeconds = "batch_window_seconds"
     }
 }
 
@@ -44,9 +90,6 @@ final class MonitoringCoordinator: ObservableObject {
     @Published var email: String = ""
     @Published var password: String = ""
     @Published var deviceName: String = UIDevice.current.name
-    @Published var baseApiUrlOverride: String = ""
-    @Published var captureIntervalOverride: String = ""
-    @Published var batchWindowOverride: String = ""
 
     @Published private(set) var statusMessage: String = "Not initialized"
     @Published private(set) var isSigningIn: Bool = false
@@ -54,6 +97,7 @@ final class MonitoringCoordinator: ObservableObject {
     @Published private(set) var loginError: String? = nil
     @Published private(set) var loggedIn: Bool = false
     @Published private(set) var deviceId: String = "<none>"
+    @Published private(set) var accountEmail: String?
     @Published private(set) var monitoringEnabled: Bool = VirtueShared.defaultMonitoringEnabled
     @Published private(set) var monitorSummary: String = "idle"
     @Published private(set) var pendingRequestCount: Int = 0
@@ -61,10 +105,10 @@ final class MonitoringCoordinator: ObservableObject {
     @Published private(set) var lastCoreLoop: String = "<none>"
     @Published private(set) var lastCoreScreenshot: String = "<none>"
     @Published private(set) var lastCoreBatch: String = "<none>"
-    @Published private(set) var coreUserSession: String = "unknown"
-    @Published private(set) var corePrimaryService: String = "unknown"
-    @Published private(set) var coreCapturePermission: String = "unknown"
-    @Published private(set) var coreCaptureAvailability: String = "unknown"
+    @Published private(set) var lastCoreScreenshotAttempt: String = "<none>"
+    /// The full shared status payload (CORE-010) the Status Details sheet
+    /// renders; the scalars above stay for the main screen's own bindings.
+    @Published private(set) var coreStatus: CoreServiceStatus?
 
     @Published private(set) var safariCaptureHealth: String = "No Safari extension heartbeat yet"
     @Published private(set) var safariPermissionSummary: String = "Unknown"
@@ -72,7 +116,7 @@ final class MonitoringCoordinator: ObservableObject {
     @Published private(set) var safariLastFrame: String = "<none>"
     @Published private(set) var safariLastPage: String = "<none>"
     @Published private(set) var safariLastError: String = "<none>"
-    @Published private(set) var safariDaemonStatus: String = "No daemon state yet"
+    @Published private(set) var safariDaemonStatus: String = "Not started yet"
 
     private var didBecomeActiveObserver: NSObjectProtocol?
     private var willEnterForegroundObserver: NSObjectProtocol?
@@ -102,7 +146,7 @@ final class MonitoringCoordinator: ObservableObject {
         configDir = root.appendingPathComponent("config", isDirectory: true)
         dataDir = root.appendingPathComponent("data", isDirectory: true)
 
-        loadOverrideInputs()
+        monitoringEnabled = readMonitoringEnabledPreference(defaults: sharedDefaults ?? UserDefaults.standard)
         initializeCore()
         bindAppLifecycleState()
         refreshSessionState()
@@ -119,19 +163,6 @@ final class MonitoringCoordinator: ObservableObject {
             NotificationCenter.default.removeObserver(willEnterForegroundObserver)
         }
         stopStatusRefreshTimer()
-    }
-
-    func applyOverrides() {
-        let overrides = runtimeOverrides()
-        persistOverrides(overrides)
-
-        if let error = NativeBridge.setOverrides(overrides) {
-            statusMessage = "Override update failed: \(error)"
-            return
-        }
-
-        refreshCoreStatus()
-        statusMessage = "Runtime overrides updated"
     }
 
     func login() {
@@ -151,19 +182,31 @@ final class MonitoringCoordinator: ObservableObject {
         let pw = password
         let trimmedDeviceName = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedDeviceName = trimmedDeviceName.isEmpty ? UIDevice.current.name : trimmedDeviceName
+        let configDirPath = configDir.path
+        let dataDirPath = dataDir.path
 
         Task { @MainActor in
-            let error = await Task.detached(priority: .userInitiated) {
-                NativeBridge.login(email: trimmedEmail, password: pw, deviceName: resolvedDeviceName)
+            let error = await Task.detached(priority: .userInitiated) { () -> String? in
+                if let initError = NativeBridge.ensureInitialized(
+                    configDir: configDirPath,
+                    dataDir: dataDirPath
+                ) {
+                    return initError
+                }
+                return NativeBridge.login(email: trimmedEmail, password: pw, deviceName: resolvedDeviceName)
             }.value
             isSigningIn = false
             if let error {
                 statusMessage = "Login failed: \(error)"
-                loginError = "Invalid username or password"
+                loginError = error
                 return
             }
             password = ""
             setMonitoringEnabled(true)
+            // Core's AuthState/DeviceCredentials don't carry the account email, so this
+            // is app-layer state persisted here purely to prefill the bug-report form's
+            // contact-email field — mirrors the Android client's AccountEmailStore.
+            UserDefaults.standard.set(trimmedEmail, forKey: VirtueShared.accountEmailKey)
             refreshSessionState()
             refreshCoreStatus()
             refreshSafariStatus()
@@ -176,12 +219,16 @@ final class MonitoringCoordinator: ObservableObject {
         statusMessage = "Signing out..."
 
         isSigningOut = true
+        let configDirPath = configDir.path
+        let dataDirPath = dataDir.path
         Task { @MainActor in
             let error = await Task.detached(priority: .userInitiated) {
-                NativeBridge.logout()
+                NativeBridge.ensureInitialized(configDir: configDirPath, dataDir: dataDirPath)
+                return NativeBridge.logout()
             }.value
             isSigningOut = false
             statusMessage = error.map { "Logout warning: \($0)" } ?? "Signed out"
+            UserDefaults.standard.removeObject(forKey: VirtueShared.accountEmailKey)
             refreshSessionState()
             refreshCoreStatus()
             refreshSafariStatus()
@@ -190,20 +237,69 @@ final class MonitoringCoordinator: ObservableObject {
 
     func toggleMonitoring() {
         let nextValue = !monitoringEnabled
-        if !nextValue {
-            if let error = NativeBridge.requestPauseMonitoring(source: "ios_pause_button") {
+        guard !nextValue else {
+            Task { @MainActor in
+                let error = await Task.detached(priority: .userInitiated) {
+                    NativeBridge.requestResumeMonitoring()
+                }.value
+                if let error {
+                    statusMessage = "Resume request failed: \(error)"
+                    refreshCoreStatus()
+                    refreshSafariStatus()
+                    return
+                }
+                setMonitoringEnabled(true)
+                refreshCoreStatus()
+                refreshSafariStatus()
+                statusMessage = "Monitoring resumed. Open Safari to restart capture."
+            }
+            return
+        }
+
+        Task { @MainActor in
+            let error = await Task.detached(priority: .userInitiated) {
+                NativeBridge.requestPauseMonitoring(source: "ios_pause_button")
+            }.value
+            if let error {
                 statusMessage = "Pause request failed: \(error)"
                 refreshCoreStatus()
                 refreshSafariStatus()
                 return
             }
+            setMonitoringEnabled(false)
+            refreshCoreStatus()
+            refreshSafariStatus()
+            statusMessage = "Monitoring paused. Safari capture will stop on the next extension heartbeat."
         }
-        setMonitoringEnabled(nextValue)
-        refreshCoreStatus()
-        refreshSafariStatus()
-        statusMessage = nextValue
-            ? "Monitoring resumed. Open Safari to restart capture."
-            : "Monitoring paused. Safari capture will stop on the next extension heartbeat."
+    }
+
+    /// Submits a bug report, invoking `completion` with `nil` on success or an
+    /// error message on failure. Off-main like every other native call that
+    /// touches the network/daemon.
+    func submitBugReport(
+        message: String,
+        contactEmail: String?,
+        includeLogs: Bool,
+        completion: @escaping (String?) -> Void
+    ) {
+        let details = platformDetails()
+        Task { @MainActor in
+            let error = await Task.detached(priority: .userInitiated) {
+                NativeBridge.reportIssue(
+                    message: message,
+                    contactEmail: contactEmail,
+                    includeLogs: includeLogs,
+                    platformDetails: details
+                )
+            }.value
+            completion(error)
+        }
+    }
+
+    /// Best-effort "iOS <version> (<model>)" string, e.g. `"iOS 17.5.1 (iPhone)"`.
+    private func platformDetails() -> String {
+        let device = UIDevice.current
+        return "\(device.systemName) \(device.systemVersion) (\(device.model))"
     }
 
     private func initializeCore() {
@@ -215,10 +311,9 @@ final class MonitoringCoordinator: ObservableObject {
             return
         }
 
-        let error = NativeBridge.initialize(
+        let error = NativeBridge.ensureInitialized(
             configDir: configDir.path,
-            dataDir: dataDir.path,
-            overrides: runtimeOverrides()
+            dataDir: dataDir.path
         )
 
         if let error {
@@ -232,6 +327,7 @@ final class MonitoringCoordinator: ObservableObject {
         loggedIn = NativeBridge.isLoggedIn()
         deviceId = NativeBridge.getDeviceId() ?? "<none>"
         monitoringEnabled = readMonitoringEnabledPreference()
+        accountEmail = UserDefaults.standard.string(forKey: VirtueShared.accountEmailKey)
     }
 
     private func bindAppLifecycleState() {
@@ -352,7 +448,7 @@ final class MonitoringCoordinator: ObservableObject {
         )
 
         if defaults.object(forKey: VirtueShared.safariDaemonRunningKey) == nil {
-            safariDaemonStatus = "No daemon state yet"
+            safariDaemonStatus = "Not started yet"
         } else {
             let running = defaults.bool(forKey: VirtueShared.safariDaemonRunningKey)
             if running {
@@ -366,24 +462,17 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     private func refreshCoreStatus() {
-        currentApiBaseUrl = runtimeOverrides().baseApiUrl.isEmpty
-            ? VirtueShared.defaultBaseApiUrl
-            : runtimeOverrides().baseApiUrl
-
         let serviceStatus = loadCoreStatus()
 
         pendingRequestCount = serviceStatus?.pendingRequestCount ?? 0
         lastCoreLoop = formatMillisTimestamp(serviceStatus?.lastLoopAtMs)
         lastCoreScreenshot = formatMillisTimestamp(serviceStatus?.lastScreenshotAtMs)
+        lastCoreScreenshotAttempt = formatMillisTimestamp(serviceStatus?.lastScreenshotAttemptAtMs)
         lastCoreBatch = formatMillisTimestamp(serviceStatus?.lastBatchAtMs)
-        coreUserSession = normalizedLifecycleValue(serviceStatus?.lifecycle?.snapshot.userSession)
-        corePrimaryService = normalizedLifecycleValue(serviceStatus?.lifecycle?.snapshot.primaryService)
-        coreCapturePermission = normalizedLifecycleValue(
-            serviceStatus?.lifecycle?.snapshot.capturePermission
-        )
-        coreCaptureAvailability = normalizedLifecycleValue(
-            serviceStatus?.lifecycle?.snapshot.captureAvailability
-        )
+        coreStatus = serviceStatus
+        if let apiBaseUrl = serviceStatus?.apiBaseUrl, !apiBaseUrl.isEmpty {
+            currentApiBaseUrl = apiBaseUrl
+        }
 
         if !loggedIn {
             monitorSummary = "signed out"
@@ -394,47 +483,6 @@ final class MonitoringCoordinator: ObservableObject {
         } else {
             monitorSummary = "idle"
         }
-    }
-
-    private func runtimeOverrides() -> RuntimeOverrides {
-        RuntimeOverrides(
-            baseApiUrl: baseApiUrlOverride.trimmingCharacters(in: .whitespacesAndNewlines),
-            captureIntervalSeconds: captureIntervalOverride.trimmingCharacters(in: .whitespacesAndNewlines),
-            batchWindowSeconds: batchWindowOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-        )
-    }
-
-    private func persistOverrides(_ overrides: RuntimeOverrides) {
-        let write = { (defaults: UserDefaults) in
-            defaults.set(overrides.baseApiUrl, forKey: VirtueShared.baseApiUrlKey)
-            defaults.set(overrides.captureIntervalSeconds, forKey: VirtueShared.captureIntervalKey)
-            defaults.set(overrides.batchWindowSeconds, forKey: VirtueShared.batchWindowKey)
-        }
-        write(UserDefaults.standard)
-        if let sharedDefaults {
-            write(sharedDefaults)
-        }
-    }
-
-    private func loadOverrideInputs() {
-        let preferredDefaults = sharedDefaults ?? UserDefaults.standard
-        monitoringEnabled = readMonitoringEnabledPreference(defaults: preferredDefaults)
-        baseApiUrlOverride = storedOverride(
-            forKey: VirtueShared.baseApiUrlKey,
-            defaults: preferredDefaults,
-            fallback: VirtueShared.defaultBaseApiUrl
-        )
-        captureIntervalOverride = storedOverride(
-            forKey: VirtueShared.captureIntervalKey,
-            defaults: preferredDefaults,
-            fallback: VirtueShared.defaultCaptureIntervalSeconds
-        )
-        batchWindowOverride = storedOverride(
-            forKey: VirtueShared.batchWindowKey,
-            defaults: preferredDefaults,
-            fallback: VirtueShared.defaultBatchWindowSeconds
-        )
-        persistOverrides(runtimeOverrides())
     }
 
     private func setMonitoringEnabled(_ enabled: Bool) {
@@ -459,14 +507,6 @@ final class MonitoringCoordinator: ObservableObject {
         return defaults.bool(forKey: VirtueShared.monitoringEnabledKey)
     }
 
-    private func storedOverride(forKey key: String, defaults: UserDefaults, fallback: String) -> String {
-        let value = defaults.string(forKey: key)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if key == VirtueShared.baseApiUrlKey, value == "http://10.7.7.4:8787" {
-            return fallback
-        }
-        return (value?.isEmpty == false) ? value! : fallback
-    }
-
     private func loadCoreStatus() -> CoreServiceStatus? {
         guard let json = NativeBridge.getStatusJson(),
               let data = json.data(using: .utf8),
@@ -484,6 +524,18 @@ final class MonitoringCoordinator: ObservableObject {
         return defaults.double(forKey: key)
     }
 
+    /// Local time plus a relative age, for the status sheet's timestamps —
+    /// "when did this last work?" is what those rows are really answering.
+    func formatStatusTimestamp(_ timestampMs: Int64?) -> String {
+        guard let timestampMs else {
+            return "<none>"
+        }
+        let date = Date(timeIntervalSince1970: TimeInterval(timestampMs) / 1000)
+        let relative = RelativeDateTimeFormatter()
+        relative.unitsStyle = .short
+        return "\(formatAbsoluteTime(date.timeIntervalSince1970)) (\(relative.localizedString(for: date, relativeTo: Date())))"
+    }
+
     private func formatMillisTimestamp(_ timestampMs: Int64?) -> String {
         guard let timestampMs else {
             return "<none>"
@@ -497,13 +549,6 @@ final class MonitoringCoordinator: ObservableObject {
         formatter.dateStyle = .none
         formatter.timeStyle = .medium
         return formatter.string(from: Date(timeIntervalSince1970: timestamp))
-    }
-
-    private func normalizedLifecycleValue(_ value: String?) -> String {
-        guard let value, !value.isEmpty else {
-            return "unknown"
-        }
-        return value.replacingOccurrences(of: "_", with: " ")
     }
 
     private func deriveSafariPermissionSummary(

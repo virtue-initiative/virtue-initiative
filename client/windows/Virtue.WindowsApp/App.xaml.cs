@@ -3,9 +3,11 @@ using Microsoft.UI.Dispatching;
 using Microsoft.Windows.AppLifecycle;
 using Windows.ApplicationModel;
 using Windows.ApplicationModel.Activation;
+using WinRT;
 using Virtue.WindowsApp.Core.Tray;
 using Virtue.WindowsApp.Core.Interop;
 using Virtue.WindowsApp.Core.ViewModels;
+using Virtue.WindowsApp.Update;
 using WinUiLaunchActivatedEventArgs = Microsoft.UI.Xaml.LaunchActivatedEventArgs;
 using StartupTaskActivatedEventArgs = Windows.ApplicationModel.Activation.StartupTaskActivatedEventArgs;
 using AppLifecycleInstance = Microsoft.Windows.AppLifecycle.AppInstance;
@@ -21,6 +23,11 @@ public partial class App : Application
     private CancellationTokenSource? _refreshLoopCancellation;
     private AppLifecycleInstance? _mainInstance;
     private DispatcherQueue? _dispatcherQueue;
+    private StoreUpdateManager? _updateManager;
+    private CancellationTokenSource? _countdownCancellation;
+    private DateTimeOffset? _updateStagedAtUtc;
+    private int _updateRestartStarted;
+    private static readonly TimeSpan CountdownTickInterval = TimeSpan.FromMinutes(1);
     private static readonly string StartupLogPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
         "Virtue",
@@ -57,6 +64,8 @@ public partial class App : Application
             _trayController = new TrayMenuController();
             _trayController.OpenRequested += (_, _) => ShowMainWindow();
             _trayController.ExitRequested += async (_, _) => await RequestResidentShutdownAsync();
+            _trayController.ReportBugRequested += async (_, _) => await ShowReportBugFromTrayAsync();
+            _trayController.ForceCaptureRequested += async (_, _) => await ForceCaptureAsync();
             _trayController.SessionLogoffObserved += (_, _) => HandleSessionLogoff();
             _trayController.SystemShutdownObserved += (_, _) => HandleSystemShutdown();
             _trayController.Initialize();
@@ -66,8 +75,35 @@ public partial class App : Application
             await InitializeViewModelAsync(_viewModel);
             StartRefreshLoop();
 
+            RegisterWatchdog();
+
+            // The tray host's hidden window is the process's only HWND in resident mode, and
+            // StoreContext needs one before any Store call that can show UI — see
+            // StoreUpdateManager's owner-window note. Initialize() ran above, so it exists.
+            _updateManager = new StoreUpdateManager(_trayController.WindowHandle);
+            _updateManager.UpdateStaged += (_, _) => OnUpdateStaged();
+            _updateManager.UpdateCheckFailed += (_, reason) =>
+            {
+                LogStartup($"Store update check/download failed: {reason}");
+                SetUpdateCheckStatus("Update check failed.");
+            };
+            _updateManager.CheckCompleted += (_, foundUpdate) =>
+                SetUpdateCheckStatus(foundUpdate ? "Update found; downloading..." : "No updates found.");
+            _updateManager.Log += (_, message) => LogStartup(message);
+            _updateManager.Start();
+
             var activation = AppLifecycleInstance.GetCurrent().GetActivatedEventArgs();
-            if (!IsStartupActivation(activation))
+            // Consumed unconditionally so a flag left behind by an install that never completed
+            // doesn't pop a window at some unrelated later launch.
+            var restoreWindowAfterUpdate = RelaunchWindowFlag.TryConsume(RelaunchWindowFlag.FlagPath);
+            var quiet = (IsQuietActivation(activation) || HasWatchdogArgOnCommandLine())
+                && !restoreWindowAfterUpdate;
+            if (restoreWindowAfterUpdate)
+            {
+                LogStartup("Relaunched after a user-requested update install; restoring the main window.");
+            }
+
+            if (!quiet)
             {
                 ShowMainWindow();
             }
@@ -151,7 +187,7 @@ public partial class App : Application
 
     private void MainInstanceOnActivated(object? sender, AppActivationArguments args)
     {
-        if (IsStartupActivation(args))
+        if (IsQuietActivation(args))
         {
             return;
         }
@@ -159,7 +195,18 @@ public partial class App : Application
         _ = _dispatcherQueue?.TryEnqueue(ShowMainWindow);
     }
 
-    private bool IsStartupActivation(AppActivationArguments activation)
+    /// <summary>
+    /// Command-line arg the watchdog Scheduled Task relaunches with, so the resident
+    /// process comes back into the tray quietly rather than popping a window.
+    /// </summary>
+    private const string WatchdogRelaunchArg = "--restarted-by-watchdog";
+
+    private static bool IsQuietActivation(AppActivationArguments activation)
+    {
+        return IsStartupActivation(activation) || IsWatchdogActivation(activation);
+    }
+
+    private static bool IsStartupActivation(AppActivationArguments activation)
     {
         if (activation.Kind != ExtendedActivationKind.StartupTask)
         {
@@ -169,11 +216,113 @@ public partial class App : Application
         return activation.Data is StartupTaskActivatedEventArgs;
     }
 
+    private static bool IsWatchdogActivation(AppActivationArguments activation)
+    {
+        if (activation.Kind != ExtendedActivationKind.Launch || activation.Data is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var launchArgs = activation.Data.As<Windows.ApplicationModel.Activation.ILaunchActivatedEventArgs>();
+            return launchArgs.Arguments.Contains(WatchdogRelaunchArg, StringComparison.Ordinal);
+        }
+        catch (InvalidCastException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// A launch through the app execution alias (how the watchdog starts us now — see
+    /// <see cref="AppLaunchPath"/>) does not always surface its arguments through
+    /// <c>ILaunchActivatedEventArgs</c>, so the process command line is checked as well. Only
+    /// valid for this process's own activation: a <i>redirected</i> activation carries another
+    /// process's arguments, and this one's command line says nothing about it.
+    /// </summary>
+    private static bool HasWatchdogArgOnCommandLine() =>
+        Environment.GetCommandLineArgs().Any(argument =>
+            string.Equals(argument, WatchdogRelaunchArg, StringComparison.Ordinal));
+
+    /// <summary>
+    /// Registers the watchdog against the app execution alias rather than the running
+    /// executable, so the task survives a package update — see <see cref="AppLaunchPath"/> for
+    /// why the version-stamped process path silently breaks auto-relaunch after every update.
+    /// </summary>
+    private static void RegisterWatchdog()
+    {
+        var launchPath = AppLaunchPath.Resolve(
+            AppLaunchPath.ExecutionAliasPath,
+            Environment.ProcessPath,
+            File.Exists);
+        if (string.IsNullOrEmpty(launchPath))
+        {
+            LogStartup("Watchdog registration skipped: no launch path could be resolved.");
+            return;
+        }
+
+        LogStartup($"Registering restart watchdog with launch path: {launchPath}");
+        LogStartup(RestartWatchdog.Register(launchPath, WatchdogRelaunchArg));
+
+        // We are running, so any one-shot relaunch still armed from an earlier update has
+        // either already done its job or been made redundant by whatever started us.
+        UpdateRelaunchTask.Cancel();
+    }
+
+    /// <summary>
+    /// Arms the one-shot relaunch that brings the app back within seconds of the package swap,
+    /// rather than on <see cref="RestartWatchdog"/>'s per-minute poll. Best-effort by design —
+    /// see <see cref="UpdateRelaunchTask"/>; the watchdog stays registered as the safety net.
+    /// </summary>
+    private static void ScheduleUpdateRelaunch()
+    {
+        var launchPath = AppLaunchPath.Resolve(
+            AppLaunchPath.ExecutionAliasPath,
+            Environment.ProcessPath,
+            File.Exists);
+        if (string.IsNullOrEmpty(launchPath))
+        {
+            LogStartup("Update relaunch task skipped: no launch path could be resolved.");
+            return;
+        }
+
+        LogStartup(UpdateRelaunchTask.Schedule(launchPath, WatchdogRelaunchArg));
+    }
+
     private void ShowMainWindow()
     {
         _mainWindow ??= CreateMainWindow();
         _mainWindow.ShowFromTray();
+        // Seed the notice card's countdown from the window's now-visible state, rather than
+        // leaving the generic "will install soon" text up until the next minute tick.
+        EvaluateUpdateRestart();
         _ = _viewModel?.RefreshAsync();
+    }
+
+    private async Task ShowReportBugFromTrayAsync()
+    {
+        ShowMainWindow();
+        if (_mainWindow is not null)
+        {
+            await _mainWindow.ShowReportBugDialogAsync();
+        }
+    }
+
+    private async Task ForceCaptureAsync()
+    {
+        try
+        {
+            // Returns once the batch has landed (or the wait gave up), so the
+            // balloon reports what happened instead of assuming success.
+            var result = await Task.Run(() => new RustInteropClient().ForceScreenshotAndUpload());
+            _trayController?.ShowBalloonTip("Virtue", result.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            LogStartup($"Force capture failed: {ex}");
+            _trayController?.ShowBalloonTip("Virtue", $"Test screenshot failed: {ex.Message}");
+        }
     }
 
     private MainWindow CreateMainWindow()
@@ -185,6 +334,27 @@ public partial class App : Application
 
         LogStartup("MainWindow created.");
         var window = new MainWindow(_viewModel);
+        window.Hidden += (_, _) => EvaluateUpdateRestart();
+        window.CloseNowAndUpdateRequested += (_, _) => _ = HandleManualRestartToUpdateAsync();
+        window.CheckForUpdatesRequested += (_, _) =>
+        {
+            if (_updateManager is null)
+            {
+                SetUpdateCheckStatus("Update checks are unavailable.");
+                return;
+            }
+
+            // The check loop skips checks entirely while an update is staged, so a click here
+            // would otherwise leave "Checking for updates..." up forever.
+            if (_updateManager.IsUpdateStaged)
+            {
+                SetUpdateCheckStatus("Update already downloaded.");
+                return;
+            }
+
+            SetUpdateCheckStatus("Checking for updates...");
+            _updateManager.RequestCheckNow();
+        };
         window.Activate();
         LogStartup("MainWindow activated.");
         return window;
@@ -200,6 +370,15 @@ public partial class App : Application
         if (e.PropertyName is nameof(SessionViewModel.TrayTooltip) && _viewModel is not null)
         {
             _trayController?.UpdateToolTip(_viewModel.TrayTooltip);
+        }
+
+        if (e.PropertyName is nameof(SessionViewModel.LoggedIn) && _viewModel is not null)
+        {
+            // SetForceCaptureAvailable rebuilds the tray HMENU, and HMENUs are USER objects
+            // owned by the thread that creates them, so keep that work on the UI thread that
+            // owns the tray window rather than on whatever thread raised PropertyChanged.
+            var loggedIn = _viewModel.LoggedIn;
+            _ = _dispatcherQueue?.TryEnqueue(() => _trayController?.SetForceCaptureAvailable(loggedIn));
         }
     }
 
@@ -239,7 +418,13 @@ public partial class App : Application
 
         try
         {
+            RestartWatchdog.Unregister();
+            // A deliberate exit must not be resurrected by a relaunch armed for an update that
+            // is no longer going to happen.
+            UpdateRelaunchTask.Cancel();
             _refreshLoopCancellation?.Cancel();
+            _countdownCancellation?.Cancel();
+            _updateManager?.Dispose();
             if (_viewModel is not null)
             {
                 if (_viewModel.LoggedIn)
@@ -331,6 +516,249 @@ public partial class App : Application
         catch (Exception ex)
         {
             LogStartup($"System shutdown lifecycle handling failed: {ex}");
+        }
+    }
+
+    /// <summary>
+    /// Fired once <see cref="StoreUpdateManager"/> finishes downloading/staging an update.
+    /// Reflects the state in the tray tooltip, evaluates immediately (covers the case where
+    /// the window is already hidden, and seeds the countdown text if it's open), then starts a
+    /// 1-minute timer that re-evaluates each tick — see <see cref="EvaluateUpdateRestart"/>.
+    /// </summary>
+    private void OnUpdateStaged()
+    {
+        _updateStagedAtUtc = DateTimeOffset.UtcNow;
+        _ = _dispatcherQueue?.TryEnqueue(() => _viewModel?.NotifyUpdateStaged());
+        SetUpdateCheckStatus("Update downloaded.");
+        LogStartup("Store update staged.");
+
+        EvaluateUpdateRestart();
+
+        _countdownCancellation?.Cancel();
+        _countdownCancellation = new CancellationTokenSource();
+        var token = _countdownCancellation.Token;
+        _ = Task.Run(async () =>
+        {
+            using var timer = new PeriodicTimer(CountdownTickInterval);
+            while (await timer.WaitForNextTickAsync(token))
+            {
+                EvaluateUpdateRestart();
+            }
+        }, token);
+    }
+
+    /// <summary>
+    /// The single decision point for the staged-update restart: called immediately when an
+    /// update stages, every minute while it's pending, every time the main window is shown, and
+    /// every time it transitions to hidden (<see cref="MainWindow.Hidden"/>). If the window is
+    /// hidden and the session isn't busy, restarts right away. Otherwise updates the in-window
+    /// countdown text, and once the deferral cap is reached, hides the window itself — which
+    /// re-raises <see cref="MainWindow.Hidden"/> and re-enters this method, taking the hidden
+    /// branch to actually restart.
+    ///
+    /// The whole body runs on the UI thread: it reads <see cref="MainWindow.IsVisibleToUser"/>,
+    /// which is written there, and the countdown timer calls in from a pool thread.
+    /// </summary>
+    private void EvaluateUpdateRestart()
+    {
+        _ = _dispatcherQueue?.TryEnqueue(EvaluateUpdateRestartOnUiThread);
+    }
+
+    private void EvaluateUpdateRestartOnUiThread()
+    {
+        if (_updateManager?.IsUpdateStaged != true || _updateStagedAtUtc is not { } stagedAtUtc)
+        {
+            return;
+        }
+
+        var sessionIsBusy = _viewModel?.IsBusy ?? false;
+        var mainWindowVisible = _mainWindow?.IsVisibleToUser ?? false;
+
+        if (!mainWindowVisible)
+        {
+            if (!sessionIsBusy)
+            {
+                _ = InstallUpdateAndRestartAsync(allowInteractive: false);
+            }
+
+            return;
+        }
+
+        var deadlineUtc = UpdateRestartPolicy.GetDeadlineUtc(stagedAtUtc, _updateManager?.DeferralOverride);
+        var now = DateTimeOffset.UtcNow;
+        _viewModel?.SetUpdateCountdownText(UpdateRestartPolicy.FormatCountdown(deadlineUtc - now));
+
+        if (UpdateRestartPolicy.ShouldForceRestart(sessionIsBusy, deadlineUtc, now))
+        {
+            LogStartup("Update deferral cap reached; hiding window to force the update restart.");
+            _mainWindow?.HideToTray();
+        }
+    }
+
+    /// <summary>
+    /// Runs <paramref name="action"/> on the UI thread and completes once it has actually run.
+    /// </summary>
+    private Task RunOnUiThreadAsync(Action action)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var enqueued = _dispatcherQueue?.TryEnqueue(() =>
+        {
+            try
+            {
+                action();
+                completion.TrySetResult();
+            }
+            catch (Exception ex)
+            {
+                completion.TrySetException(ex);
+            }
+        }) ?? false;
+
+        if (!enqueued)
+        {
+            completion.TrySetResult();
+        }
+
+        return completion.Task;
+    }
+
+    private void SetUpdateCheckStatus(string? text)
+    {
+        _ = _dispatcherQueue?.TryEnqueue(() =>
+        {
+            if (_viewModel is not null)
+            {
+                _viewModel.UpdateCheckStatusText = text;
+            }
+        });
+    }
+
+    /// <summary>
+    /// The in-window "Restart now to update" button's handler — an explicit user request always
+    /// proceeds immediately, bypassing the busy/deadline check (unlike the automatic path), and
+    /// is the one path allowed to let the OS put its consent dialog on screen, since the user is
+    /// looking at the window that will own it.
+    /// </summary>
+    private async Task HandleManualRestartToUpdateAsync()
+    {
+        var staged = _updateManager?.IsUpdateStaged == true;
+        LogStartup($"Manual restart-to-update requested (update staged={staged}).");
+        if (!staged)
+        {
+            return;
+        }
+
+        // The install terminates this process; the watchdog brings it back within a minute. Say
+        // so in the notice card, and ask that relaunch to restore the window — the user asked
+        // for a restart, so the app silently vanishing is the wrong feedback.
+        _ = _dispatcherQueue?.TryEnqueue(() => _viewModel?.NotifyUpdateInstalling());
+        RelaunchWindowFlag.Set(RelaunchWindowFlag.FlagPath);
+
+        await InstallUpdateAndRestartAsync(allowInteractive: true);
+    }
+
+    /// <summary>
+    /// Installs the staged Store update and exits. The monitoring daemon is deliberately
+    /// <b>never</b> stopped for this: the OS terminates the process itself for the package
+    /// swap, which is the same shape as a crash-recovery relaunch that `RestartWatchdog` (left
+    /// registered here, unlike tray Exit) and CORE-002's late-wakeup budget already cover, and
+    /// `DaemonState` is persisted every tick so there is nothing to truncate. Stopping it early
+    /// instead flipped the window and tray to "Monitoring stopped" for however long the install
+    /// took — indefinitely, when it was waiting on a dialog nobody could see. macOS's Sparkle
+    /// updater made the same call.
+    ///
+    /// The main window is likewise <b>not</b> hidden first: <c>RequestDownloadAndInstall...</c>
+    /// always shows an OS consent dialog, and that dialog needs a real visible owner.
+    ///
+    /// Can legitimately be reached from several concurrent triggers around the same moment (a
+    /// <see cref="MainWindow.Hidden"/> event, a countdown tick, and the manual button), so an
+    /// <see cref="Interlocked"/> guard ensures only the first call actually proceeds.
+    ///
+    /// Exits only if the install actually succeeded (the Store API normally terminates the app
+    /// itself in that case). On failure, exiting anyway would spin: the watchdog relaunches
+    /// within a minute, the check re-stages, and the app exits again. Instead the staged state
+    /// is cleared and <see cref="StoreUpdateManager"/>'s retry backoff picks the update up again
+    /// on its next cycle.
+    /// </summary>
+    /// <param name="allowInteractive">
+    /// Whether the OS may show its install-consent dialog — see
+    /// <see cref="StoreUpdateManager.TryInstallStagedUpdateAsync"/>. The automatic path passes
+    /// <c>false</c> and, if consent turns out to be required, shows the main window and retries
+    /// once with <c>true</c> so the dialog has somewhere visible to appear.
+    /// </param>
+    private async Task InstallUpdateAndRestartAsync(bool allowInteractive)
+    {
+        if (Interlocked.CompareExchange(ref _updateRestartStarted, 1, 0) != 0)
+        {
+            return;
+        }
+
+        _countdownCancellation?.Cancel();
+
+        try
+        {
+            // Armed immediately before the call that terminates us, since the countdown starts
+            // now rather than when the process actually dies.
+            ScheduleUpdateRelaunch();
+            var outcome = await _updateManager!.TryInstallStagedUpdateAsync(allowInteractive);
+            LogStartup($"Update install call returned (outcome={outcome}).");
+
+            if (outcome == UpdateInstallOutcome.NeedsUserInteraction)
+            {
+                LogStartup("Update install needs user consent; showing the main window and retrying interactively.");
+                // Awaited, not fire-and-forget: the consent dialog is owned by an HWND, so the
+                // window has to actually be up before the retry raises it.
+                await RunOnUiThreadAsync(ShowMainWindow);
+                // Re-armed: the first one-shot has very likely fired into this still-running
+                // process while the consent dialog was up, and a spent shot cannot relaunch us.
+                ScheduleUpdateRelaunch();
+                outcome = await _updateManager!.TryInstallStagedUpdateAsync(allowInteractive: true);
+                LogStartup($"Interactive update install call returned (outcome={outcome}).");
+            }
+
+            if (outcome != UpdateInstallOutcome.Installed)
+            {
+                ClearStagedUpdateAfterFailedInstall();
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            LogStartup($"Update install failed: {ex}");
+            ClearStagedUpdateAfterFailedInstall();
+            return;
+        }
+
+        // Application.Exit() has UI-thread affinity, and this method also runs from the
+        // background countdown thread, so marshal it through the dispatcher.
+        _ = _dispatcherQueue?.TryEnqueue(() => Current.Exit());
+    }
+
+    /// <summary>
+    /// Resets the staged-update state after an install that didn't happen. Nothing was torn
+    /// down to restore (monitoring is never stopped for an update), but the countdown timer,
+    /// the notice card and the one-shot restart guard all have to be released — otherwise the
+    /// card stays up with a frozen countdown over a dead button, and
+    /// <see cref="EvaluateUpdateRestart"/> early-returns forever. The check loop re-stages on
+    /// its own backoff, which rebuilds all of it through <see cref="OnUpdateStaged"/>.
+    /// </summary>
+    private void ClearStagedUpdateAfterFailedInstall()
+    {
+        LogStartup("Update install did not complete; clearing the staged update and leaving the retry to the update loop.");
+        try
+        {
+            _countdownCancellation?.Cancel();
+            _updateStagedAtUtc = null;
+            // The process survived, so nothing is going to consume the relaunch flag, and the
+            // armed one-shot would fire into a running app.
+            RelaunchWindowFlag.TryConsume(RelaunchWindowFlag.FlagPath);
+            UpdateRelaunchTask.Cancel();
+            _ = _dispatcherQueue?.TryEnqueue(() => _viewModel?.NotifyUpdateUnstaged());
+            SetUpdateCheckStatus("Update install did not complete; it will be retried.");
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _updateRestartStarted, 0);
         }
     }
 

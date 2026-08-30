@@ -2,59 +2,23 @@ pub mod fingerprint;
 pub mod image_pipeline;
 pub mod risk_classifier;
 
-use std::any::Any;
-use std::sync::Arc;
-
 use serde::{Deserialize, Serialize};
 
-use crate::ScreenshotHooks;
 use crate::error::CoreResult;
-use crate::events::Ping;
-use crate::events::bus::{Emitter, EventBus, Observer, StateType};
-use crate::model::{ScreenshotSkipReason, UploadKind};
-use crate::module::auth::{Login, Logout};
-use crate::module::config::ConfigChanged;
-use crate::module::upload::Upload;
+use crate::model::{ScreenshotSkipReason, StatusSkipReason, UploadKind};
+use crate::module::capture_availability::{self, CaptureAvailabilityState};
+use crate::module::upload::{self, UploadState};
+use crate::platform::ScreenshotHooks;
+use crate::rng::RandomSource;
 use risk_classifier::RiskClassifier;
 use virtue_text_detection::ScreenshotOCR;
 
 #[cfg(not(test))]
-const MODEL_BYTES: &[u8] = include_bytes!("../../models/nsfw_small_v1.onnx");
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CaptureFailed;
-
-/// In-process event emitted by the background capture job when it finishes (on
-/// **every** branch, including failure) so the module can clear its in-flight
-/// guard. Never serialized to the network — it only travels the local bus.
-///
-/// `update_fingerprint` is `Some` only when a frame was actually uploaded and
-/// its fingerprint computed; the module then advances its dedup anchor.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScreenshotCaptured {
-    pub update_fingerprint: Option<fingerprint::Fingerprint>,
-}
-
-#[derive(Serialize, Deserialize, Default, Clone)]
-#[serde(default)]
-pub struct ScreenshotObserverState {
-    pub last_screenshot_at_ms: Option<i64>,
-    pub enabled: bool,
-    /// Grayscale grid fingerprint of the last frame we actually uploaded (size scales
-    /// with the screen resolution; see [`fingerprint`]). Used to dedup: a capture whose
-    /// fingerprint hasn't materially changed from this one is suppressed. Always compared
-    /// against the last *uploaded* frame (never the previous capture) so cumulative
-    /// sub-threshold drift eventually crosses the threshold and forces a fresh upload.
-    #[serde(default, deserialize_with = "deserialize_fingerprint_lenient")]
-    pub last_uploaded_fingerprint: Option<fingerprint::Fingerprint>,
-}
+const MODEL_BYTES: &[u8] = include_bytes!("../../models/nsfw_small_v1.nnef.tar");
 
 /// Lenient deserializer for the dedup fingerprint: any value that doesn't match the current
 /// [`fingerprint::Fingerprint`] shape — e.g. a fingerprint written by an older build whose
-/// format has since changed — decodes to `None` instead of failing the whole observer's
-/// state load. The fingerprint is only a dedup hint, so dropping it merely forces the next
-/// frame to upload and re-baseline; that is far cheaper than failing `init` and crash-looping
-/// the daemon on every start.
+/// format has since changed — decodes to `None` instead of failing the whole state load.
 fn deserialize_fingerprint_lenient<'de, D>(
     deserializer: D,
 ) -> Result<Option<fingerprint::Fingerprint>, D::Error>
@@ -65,196 +29,194 @@ where
     Ok(serde_json::from_value(value).unwrap_or(None))
 }
 
-pub struct ScreenshotModule {
-    pub state: ScreenshotObserverState,
-    /// Shared so a background capture job can hold its own handle (`Arc`, no
-    /// `Mutex` — `ScreenshotHooks` is `Send + Sync`).
-    platform: Arc<dyn ScreenshotHooks>,
-    pub screenshot_interval_ms: i64,
-    /// Shared with the background capture job. `RiskClassifier` is `Send + Sync`
-    /// (tract op types are), so an `Arc` crosses threads without a `Mutex`.
-    classifier: Option<Arc<RiskClassifier>>,
-    /// Shared OCR engine for text redaction before upload. `None` when OCR
-    /// is unavailable (platform not supported, tesseract not installed, etc.).
-    ocr: Option<Arc<ScreenshotOCR>>,
-    /// True while a background capture is running. A **module field**, never
-    /// persisted to `event_state.json`, so a crash/restart can't leave it stuck
-    /// true. Guards against launching overlapping captures when one runs longer
-    /// than the screenshot interval.
-    capture_in_flight: bool,
+#[derive(Serialize, Deserialize, Default, Clone)]
+#[serde(default)]
+pub struct ScreenshotState {
+    /// Randomly-drawn (exponential inter-arrival) time of the next screenshot
+    /// attempt. `None` means "take one immediately" — the state right after
+    /// login, before the first draw.
+    pub next_screenshot_at_ms: Option<i64>,
+    pub enabled: bool,
+    /// Grayscale grid fingerprint of the last frame we actually uploaded (size scales
+    /// with the screen resolution; see [`fingerprint`]). Used to dedup: a capture whose
+    /// fingerprint hasn't materially changed from this one is suppressed. Always compared
+    /// against the last *uploaded* frame (never the previous capture) so cumulative
+    /// sub-threshold drift eventually crosses the threshold and forces a fresh upload.
+    #[serde(default, deserialize_with = "deserialize_fingerprint_lenient")]
+    pub last_uploaded_fingerprint: Option<fingerprint::Fingerprint>,
+    /// CORE-018 status data: when a capture was last attempted (whether it
+    /// uploaded, was skipped, or failed), when one last actually produced an
+    /// upload, and why the most recent attempt didn't. `last_skip_reason` is
+    /// cleared by every successful capture so it can't outlive its cause.
+    #[serde(default)]
+    pub last_attempt_at_ms: Option<i64>,
+    #[serde(default)]
+    pub last_capture_at_ms: Option<i64>,
+    #[serde(default)]
+    pub last_skip_reason: Option<StatusSkipReason>,
 }
 
-impl ScreenshotModule {
-    pub fn new(platform: Arc<dyn ScreenshotHooks>, screenshot_interval_ms: i64) -> Self {
-        #[cfg(not(test))]
-        let classifier = match RiskClassifier::new(MODEL_BYTES) {
-            Ok(classifier) => Some(Arc::new(classifier)),
-            Err(err) => {
-                // The model is embedded via `include_bytes!` at build time; the usual cause of
-                // a load failure is an unresolved Git LFS pointer baked in instead of the real
-                // ONNX (see build.rs guard). Without a classifier every screenshot risk is 0,
-                // so make that loud rather than silent.
-                tracing::error!(
-                    error = %err,
-                    "NSFW classifier disabled, all screenshot risk will be 0"
-                );
-                None
-            }
-        };
-        #[cfg(test)]
-        let classifier: Option<Arc<RiskClassifier>> = None;
-
-        #[cfg(not(test))]
-        let ocr = match ScreenshotOCR::new(Default::default()) {
-            Ok(ocr) => Some(Arc::new(ocr)),
-            Err(err) => {
-                tracing::warn!(error = %err, "OCR disabled, text will not be redacted");
-                None
-            }
-        };
-        #[cfg(test)]
-        let ocr: Option<Arc<ScreenshotOCR>> = None;
-
-        Self {
-            state: ScreenshotObserverState::default(),
-            platform,
-            screenshot_interval_ms,
-            classifier,
-            ocr,
-            capture_in_flight: false,
-        }
-    }
-
-    fn handle_ping(&mut self, emitter: &Emitter) -> CoreResult<()> {
-        if !self.state.enabled {
-            return Ok(());
-        }
-
-        let now_ms = self.platform.get_time_utc_ms()?;
-
-        // Sanity check: reset if time went backwards.
-        if let Some(last) = self.state.last_screenshot_at_ms
-            && now_ms < last
-        {
-            self.state.last_screenshot_at_ms = None;
-        }
-
-        let should = self
-            .state
-            .last_screenshot_at_ms
-            .map(|last| now_ms - last >= self.screenshot_interval_ms)
-            .unwrap_or(true);
-        if !should {
-            return Ok(());
-        }
-
-        // Gate 1 — locked / screensaver: checked *before* capturing (inline, cheap).
-        // While locked or screensaving the user cannot be viewing real content, so skip
-        // the capture entirely (saving capture + classification cost) and emit a
-        // lightweight `ScreenshotSkipped` log so the feed records that monitoring was
-        // active. We advance the cadence clock so pacing continues and we re-check next
-        // interval (skip events fire at most once per screenshot interval); the
-        // last-uploaded fingerprint is left untouched. No background work is spawned.
-        // Fail-safe is `false` (fall back to the diff gate), never silently suppress.
-        if self.platform.is_locked_or_screensaver()? {
-            self.state.last_screenshot_at_ms = Some(now_ms);
-            let _ = emitter.send(Upload {
-                risk: 0.0,
-                kind: UploadKind::ScreenshotSkipped {
-                    reason: ScreenshotSkipReason::LockedOrScreensaver,
-                },
-            });
-            return Ok(());
-        }
-
-        // Overlap guard: a previous capture is still running on a background thread.
-        // Skip this interval rather than stacking captures (covers captures slower than
-        // the screenshot interval).
-        if self.capture_in_flight {
-            return Ok(());
-        }
-
-        // Hand the heavy work (capture → fingerprint → classify → image-process) to a
-        // background thread so a slow capture can't stall the daemon's event loop and
-        // trip a false `UnexpectedGap`. Advance the cadence clock and set the
-        // in-flight guard *before* spawning so pacing continues while it runs; the guard
-        // is cleared when the terminal `ScreenshotCaptured` event arrives.
-        self.capture_in_flight = true;
-        self.state.last_screenshot_at_ms = Some(now_ms);
-
-        let platform = Arc::clone(&self.platform);
-        let classifier = self.classifier.clone();
-        let ocr = self.ocr.clone();
-        let anchor = self.state.last_uploaded_fingerprint.clone();
-        emitter.spawn(move |em| {
-            run_capture(
-                platform.as_ref(),
-                classifier.as_deref(),
-                ocr.as_deref(),
-                anchor.as_ref(),
-                em,
-            )
-        });
-
-        Ok(())
-    }
+/// Draws the next screenshot time via an exponential inter-arrival: every
+/// second has the same chance of being chosen, averaging `mean_ms` apart. See
+/// CORE-003.
+fn draw_next_screenshot_at_ms(now_ms: i64, mean_ms: i64, rng: &dyn RandomSource) -> i64 {
+    let u = rng.uniform();
+    let delay_ms = -(mean_ms as f64) * (1.0 - u).ln();
+    now_ms + delay_ms.round() as i64
 }
 
-/// Heavy screenshot pipeline run off the event loop (capture → fingerprint diff →
-/// classify → image process). Thread-free and unit-testable on its own.
-///
-/// Emits **exactly one** [`ScreenshotCaptured`] on every branch so the module's
-/// in-flight guard always clears, plus the appropriate payload:
-/// - capture error → [`CaptureFailed`] + `ScreenshotCaptured { None }`,
-/// - static vs anchor → `Upload { ScreenshotSkipped { StaticScreen } }` + `{ None }`,
-/// - else → `Upload { Screenshot { .. } }` + `ScreenshotCaptured { Some(fp) }` (`Some`
-///   only when the fingerprint computed, matching the prior dedup behavior).
-fn run_capture(
-    platform: &dyn ScreenshotHooks,
+/// Enable screenshot capture on login: the first screenshot is taken
+/// immediately, on the next tick.
+pub fn enable(state: &mut ScreenshotState) {
+    state.enabled = true;
+    state.next_screenshot_at_ms = None;
+}
+
+/// Disable screenshot capture on logout.
+pub fn disable(state: &mut ScreenshotState) {
+    state.enabled = false;
+    state.next_screenshot_at_ms = None;
+}
+
+/// What `plan` decided to do this tick — passed to `capture_and_process`.
+pub struct CapturePlan {
+    anchor: Option<fingerprint::Fingerprint>,
+}
+
+/// Phase 2a (cheap): decide whether a screenshot is due this tick, applying
+/// the locked/screensaver gate. Draws and stores the next scheduled time
+/// whenever a decision (capture or skip) is made, so pacing continues either
+/// way.
+pub fn plan(
+    state: &mut ScreenshotState,
+    upload: &mut UploadState,
+    hooks: &dyn ScreenshotHooks,
+    now_ms: i64,
+    mean_interval_ms: i64,
+    rng: &dyn RandomSource,
+) -> CoreResult<Option<CapturePlan>> {
+    if !state.enabled {
+        return Ok(None);
+    }
+
+    let due = state
+        .next_screenshot_at_ms
+        .is_none_or(|next| now_ms >= next);
+    if !due {
+        return Ok(None);
+    }
+
+    // Gate 1 — locked / screensaver: checked before capturing (cheap). Fail-safe
+    // to `false` (fall back to the diff gate), never silently suppress.
+    if hooks.is_locked_or_screensaver()? {
+        state.next_screenshot_at_ms =
+            Some(draw_next_screenshot_at_ms(now_ms, mean_interval_ms, rng));
+        state.last_attempt_at_ms = Some(now_ms);
+        state.last_skip_reason = Some(StatusSkipReason::LockedOrScreensaver);
+        upload::enqueue(
+            upload,
+            now_ms,
+            0.0,
+            UploadKind::ScreenshotSkipped {
+                reason: ScreenshotSkipReason::LockedOrScreensaver,
+            },
+        );
+        return Ok(None);
+    }
+
+    state.next_screenshot_at_ms = Some(draw_next_screenshot_at_ms(now_ms, mean_interval_ms, rng));
+    Ok(Some(CapturePlan {
+        anchor: state.last_uploaded_fingerprint.clone(),
+    }))
+}
+
+/// Builds a forced-capture plan, bypassing the interval-due gate (Gate 0)
+/// but keeping the locked/screensaver gate (Gate 1). Used for an
+/// on-demand "capture now" request rather than the normal cadence. Unlike
+/// `plan`, this never touches `state.next_screenshot_at_ms` — the schedule
+/// for the next *automatic* capture is left undisturbed — and never
+/// enqueues a `ScreenshotSkipped` upload when locked, since there's no
+/// scheduled slot being consumed. `anchor` is always `None`, so the
+/// fingerprint-diff gate in `capture_and_process` always treats the forced
+/// frame as changed (same as the very first capture ever).
+pub fn plan_forced(
+    state: &ScreenshotState,
+    hooks: &dyn ScreenshotHooks,
+) -> CoreResult<Option<CapturePlan>> {
+    if !state.enabled {
+        return Ok(None);
+    }
+
+    if hooks.is_locked_or_screensaver()? {
+        return Ok(None);
+    }
+
+    Ok(Some(CapturePlan { anchor: None }))
+}
+
+/// Outcome of the heavy capture pipeline.
+pub enum CaptureOutcome {
+    Failed {
+        /// Why the capture failed, kept for the status page's recent-errors
+        /// ring (CORE-018) rather than only reaching the log.
+        reason: String,
+    },
+    StaticFrame,
+    Uploaded {
+        risk: f32,
+        kind: UploadKind,
+        fingerprint: Option<fingerprint::Fingerprint>,
+    },
+}
+
+/// Phase 2b (slow): capture -> fingerprint diff -> classify -> redact ->
+/// image process. Unit-testable on its own.
+pub fn capture_and_process(
+    plan: CapturePlan,
+    hooks: &dyn ScreenshotHooks,
     classifier: Option<&RiskClassifier>,
     ocr: Option<&ScreenshotOCR>,
-    anchor: Option<&fingerprint::Fingerprint>,
-    emitter: &Emitter,
-) -> CoreResult<()> {
-    let screenshot = match platform.take_screenshot() {
+) -> CaptureOutcome {
+    let screenshot = match hooks.take_screenshot() {
         Ok(s) => s,
-        Err(_) => {
-            let _ = emitter.send(CaptureFailed);
-            let _ = emitter.send(ScreenshotCaptured {
-                update_fingerprint: None,
-            });
-            return Ok(());
+        Err(err) => {
+            return CaptureOutcome::Failed {
+                reason: format!("take_screenshot failed: {err}"),
+            };
         }
     };
 
-    // Gate 2 — screen-change diff vs the last *uploaded* frame. A failed fingerprint
-    // is `None`, which falls through to the upload path (fail-safe to upload). With no
-    // prior uploaded fingerprint we always upload the first frame.
-    let fingerprint = fingerprint::fingerprint(&screenshot.bytes).ok();
-    let static_frame = match (anchor, fingerprint.as_ref()) {
-        (Some(prev), Some(cur)) => !fingerprint::changed(prev, cur),
-        _ => false,
+    // Decoded once and shared by the fingerprint, the classifier, redaction, and the image
+    // pipeline below — all of them only need derivatives of the same decoded frame, so
+    // decoding it repeatedly would be a wasted full-resolution allocation each time. A decode
+    // failure here is unrecoverable (every step downstream needs a decoded image), so it fails
+    // the whole capture immediately rather than limping through steps that would all fail on
+    // the same bytes anyway.
+    let decoded = match image::load_from_memory(&screenshot.bytes) {
+        Ok(img) => img,
+        Err(err) => {
+            tracing::error!(error = %err, "screenshot decode failed");
+            return CaptureOutcome::Failed {
+                reason: format!("screenshot decode failed: {err}"),
+            };
+        }
+    };
+
+    // Gate 2 — screen-change diff vs the last *uploaded* frame. With no prior uploaded
+    // fingerprint we always upload the first frame.
+    let fp = fingerprint::fingerprint_from_image(&decoded);
+    let static_frame = match plan.anchor.as_ref() {
+        Some(prev) => !fingerprint::changed(prev, &fp),
+        None => false,
     };
     if static_frame {
-        // Redundant frame: suppress image upload + classification, keep the anchor
-        // fingerprint, but record a lightweight `ScreenshotSkipped` log so the feed
-        // shows the screen was static rather than leaving an unexplained gap.
-        let _ = emitter.send(Upload {
-            risk: 0.0,
-            kind: UploadKind::ScreenshotSkipped {
-                reason: ScreenshotSkipReason::StaticScreen,
-            },
-        });
-        let _ = emitter.send(ScreenshotCaptured {
-            update_fingerprint: None,
-        });
-        return Ok(());
+        return CaptureOutcome::StaticFrame;
     }
 
-    // Classify before the (consuming) image pipeline. A `None` classifier (model failed to
-    // load) or a classify error fails safe to risk 0 with no raw scores, but — unlike the old
-    // silent `.ok()` — we log the error so an always-0 misconfiguration is diagnosable.
-    let scores = classifier.and_then(|c| match c.classify(&screenshot.bytes) {
+    // Classify before the (consuming) image pipeline. A `None` classifier (model
+    // failed to load) or a classify error fails safe to risk 0 with no raw scores,
+    // logged so an always-0 misconfiguration is diagnosable.
+    let scores = classifier.and_then(|c| match c.classify_image(&decoded) {
         Ok(scores) => Some(scores),
         Err(err) => {
             tracing::warn!(error = %err, "classify failed, recording risk 0");
@@ -265,19 +227,20 @@ fn run_capture(
         Some(scores) => (scores.risk, Some(scores.skin), scores.nsfw),
         None => (0.0, None, None),
     };
-    let screenshot = redact_if_ocr(ocr, screenshot);
-    let processed = match image_pipeline::ImagePipeline.process(screenshot) {
-        Ok(p) => p,
-        Err(err) => {
-            // Clear the in-flight guard even when image processing fails, then let the
-            // error propagate (the bus turns it into an `Error` event).
-            let _ = emitter.send(ScreenshotCaptured {
-                update_fingerprint: None,
-            });
-            return Err(err);
-        }
-    };
-    let _ = emitter.send(Upload {
+
+    let redacted = redact_if_ocr(ocr, &screenshot.bytes, decoded);
+    let processed =
+        match image_pipeline::ImagePipeline.process_image(redacted, screenshot.captured_at_ms) {
+            Ok(p) => p,
+            Err(err) => {
+                tracing::error!(error = %err, "screenshot image pipeline failed");
+                return CaptureOutcome::Failed {
+                    reason: format!("screenshot image pipeline failed: {err}"),
+                };
+            }
+        };
+
+    CaptureOutcome::Uploaded {
         risk,
         kind: UploadKind::Screenshot {
             image: processed.bytes,
@@ -285,38 +248,80 @@ fn run_capture(
             skin_detection,
             nsfw_detection,
         },
-    });
-    let _ = emitter.send(ScreenshotCaptured {
-        update_fingerprint: fingerprint,
-    });
-    Ok(())
+        fingerprint: Some(fp),
+    }
 }
 
-fn redact_if_ocr(ocr: Option<&ScreenshotOCR>, mut shot: crate::Screenshot) -> crate::Screenshot {
-    let Some(engine) = ocr else {
-        return shot;
-    };
-    match engine.detect(&shot.bytes) {
-        Ok(result) if !result.regions.is_empty() => {
-            if let Err(err) = redact_text_regions(&mut shot, &result.regions) {
-                tracing::warn!(error = %err, "text redaction failed, uploading unredacted");
-            }
-            shot
+/// Phase 2c: apply the capture outcome.
+pub fn commit(
+    state: &mut ScreenshotState,
+    upload: &mut UploadState,
+    availability: &mut CaptureAvailabilityState,
+    outcome: Option<CaptureOutcome>,
+    now_ms: i64,
+) {
+    if outcome.is_some() {
+        state.last_attempt_at_ms = Some(now_ms);
+    }
+
+    match outcome {
+        None => {}
+        Some(CaptureOutcome::Failed { .. }) => {
+            state.last_skip_reason = Some(StatusSkipReason::CaptureFailed);
+            capture_availability::note_failure(availability, now_ms);
         }
-        Ok(_) => shot,
+        Some(CaptureOutcome::StaticFrame) => {
+            state.last_skip_reason = Some(StatusSkipReason::StaticScreen);
+            upload::enqueue(
+                upload,
+                now_ms,
+                0.0,
+                UploadKind::ScreenshotSkipped {
+                    reason: ScreenshotSkipReason::StaticScreen,
+                },
+            );
+        }
+        Some(CaptureOutcome::Uploaded {
+            risk,
+            kind,
+            fingerprint,
+        }) => {
+            state.last_capture_at_ms = Some(now_ms);
+            state.last_skip_reason = None;
+            upload::enqueue(upload, now_ms, risk, kind);
+            if let Some(fp) = fingerprint {
+                state.last_uploaded_fingerprint = Some(fp);
+            }
+        }
+    }
+}
+
+/// Detects and blacks out on-screen text, operating on the already-decoded frame (`img`) so
+/// this doesn't need its own PNG decode — `engine.detect` still needs the original encoded
+/// `bytes` since Vision/Tesseract/etc. decode the frame themselves internally.
+fn redact_if_ocr(
+    ocr: Option<&ScreenshotOCR>,
+    bytes: &[u8],
+    img: image::DynamicImage,
+) -> image::DynamicImage {
+    let Some(engine) = ocr else {
+        return img;
+    };
+    match engine.detect(bytes) {
+        Ok(result) if !result.regions.is_empty() => redact_text_regions(img, &result.regions),
+        Ok(_) => img,
         Err(err) => {
             tracing::warn!(error = %err, "OCR failed, uploading unredacted");
-            shot
+            img
         }
     }
 }
 
 fn redact_text_regions(
-    shot: &mut crate::Screenshot,
+    img: image::DynamicImage,
     regions: &[virtue_text_detection::TextRegion],
-) -> CoreResult<()> {
-    let mut img =
-        image::load_from_memory_with_format(&shot.bytes, image::ImageFormat::Png)?.to_rgba8();
+) -> image::DynamicImage {
+    let mut img = img.to_rgba8();
     for r in regions {
         let bb = &r.bounding_box;
         for py in (bb.y as u32)..((bb.y + bb.height) as u32).min(img.height()) {
@@ -325,403 +330,203 @@ fn redact_text_regions(
             }
         }
     }
-    let dyn_img = image::DynamicImage::ImageRgba8(img);
-    let mut out = Vec::new();
-    dyn_img.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)?;
-    shot.bytes = out;
-    Ok(())
+    image::DynamicImage::ImageRgba8(img)
 }
 
-impl Observer for ScreenshotModule {
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
+/// Builds the (lazily-initializing) NSFW classifier. Construction itself is infallible — the
+/// model isn't actually parsed/built until the first classification that needs it; see
+/// [`RiskClassifier::new`].
+pub fn load_classifier() -> Option<RiskClassifier> {
+    #[cfg(not(test))]
+    {
+        Some(RiskClassifier::new(MODEL_BYTES))
     }
-
-    fn name(&self) -> &'static str {
-        "screenshot"
+    #[cfg(test)]
+    {
+        None
     }
+}
 
-    fn init(&mut self, _bus: &mut EventBus, state: StateType) -> CoreResult<()> {
-        if !state.is_null() {
-            self.state = serde_json::from_value(state)?;
-            if !self.state.enabled {
-                self.state.last_screenshot_at_ms = None;
+/// Loads the OCR engine used to redact text before upload. `None` (with a
+/// logged warning) if unavailable on this platform.
+pub fn load_ocr() -> Option<ScreenshotOCR> {
+    #[cfg(not(test))]
+    {
+        match ScreenshotOCR::new(Default::default()) {
+            Ok(ocr) => Some(ocr),
+            Err(err) => {
+                tracing::warn!(error = %err, "OCR disabled, text will not be redacted");
+                None
             }
         }
-        Ok(())
     }
-
-    fn on_event(&mut self, event: &dyn Any, emitter: &Emitter) -> CoreResult<()> {
-        crate::dispatch_event!(event, {
-            _: Login => {
-                self.state.enabled = true;
-                self.state.last_screenshot_at_ms = None;
-                Ok(())
-            },
-            _: Logout => {
-                self.state.enabled = false;
-                self.state.last_screenshot_at_ms = None;
-                Ok(())
-            },
-            _: Ping => self.handle_ping(emitter),
-            ev: ScreenshotCaptured => {
-                self.capture_in_flight = false;
-                if let Some(fp) = &ev.update_fingerprint {
-                    self.state.last_uploaded_fingerprint = Some(fp.clone());
-                }
-                Ok(())
-            },
-            ev: ConfigChanged => {
-                self.screenshot_interval_ms = ev.screenshot_interval_ms as i64;
-                Ok(())
-            },
-        })
-    }
-
-    fn save(&self) -> CoreResult<StateType> {
-        Ok(serde_json::to_value(&self.state)?)
+    #[cfg(test)]
+    {
+        None
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::Ping;
-    use crate::model::{
-        BatchRecipient, DeviceCredentials, DeviceSettings, ScreenshotSkipReason, UploadKind,
-    };
-    use crate::module::auth::{Login, Logout};
-    use crate::module::upload::Upload;
-    use crate::testing::EventTester;
+    use crate::model::{BatchRecipient, DeviceCredentials, DeviceSettings};
+    use crate::testing::{TestPlatformHooks, TestRandomSource};
 
-    fn test_login() -> Login {
-        Login {
-            credentials: DeviceCredentials {
-                device_id: "test-device".into(),
-                refresh_token: "test-refresh".into(),
-            },
-            settings: DeviceSettings {
-                device_id: "test-device".into(),
-                name: "test device".into(),
-                platform: "test".into(),
-                wrapping_keys: vec![BatchRecipient {
-                    user_id: "test-user".into(),
-                    pub_key_base64: "CQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
-                }],
-                hash_base_url: None,
-            },
-        }
-    }
-
-    #[test]
-    fn ping_when_logged_out_does_nothing() {
-        let mut b = EventTester::builder();
-        b.add(ScreenshotModule::new(Arc::new(b.platform()), 60_000));
-        let mut t = b.build();
-        t.emit(1, Ping);
-        assert!(t.captured::<Upload>().is_empty());
-        assert_eq!(t.platform.take_call_count(), 0);
-    }
-
-    #[test]
-    fn login_then_ping_takes_screenshot() {
-        let mut b = EventTester::builder();
-        b.add(ScreenshotModule::new(Arc::new(b.platform()), 60_000));
-        let mut t = b.build();
-        t.emit(1, test_login());
-        t.clear_captured();
-        t.emit(1, Ping);
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::Screenshot { .. },
-            ..
-        }));
-        assert_eq!(t.platform.take_call_count(), 1);
-    }
-
-    #[test]
-    fn screenshot_not_retaken_before_interval() {
-        let mut b = EventTester::builder();
-        b.clock.set(30_000);
-        let mut module = ScreenshotModule::new(Arc::new(b.platform()), 60_000);
-        module.state.enabled = true;
-        module.state.last_screenshot_at_ms = Some(0);
-        b.add(module);
-        let mut t = b.build();
-        t.emit(30, Ping);
-        assert_eq!(t.platform.take_call_count(), 0);
-    }
-
-    #[test]
-    fn screenshot_retaken_after_interval() {
-        let mut b = EventTester::builder();
-        b.clock.set(61_000);
-        let mut module = ScreenshotModule::new(Arc::new(b.platform()), 60_000);
-        module.state.enabled = true;
-        module.state.last_screenshot_at_ms = Some(0);
-        b.add(module);
-        let mut t = b.build();
-        t.emit(61, Ping);
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::Screenshot { .. },
-            ..
-        }));
-        assert_eq!(t.platform.take_call_count(), 1);
-    }
-
-    #[test]
-    fn static_frame_suppressed_after_first_upload() {
-        use crate::testing::fixtures::solid_png_screenshot;
-        let mut b = EventTester::builder();
-        b.platform()
-            .set_default_screenshot(solid_png_screenshot(100));
-        b.add(ScreenshotModule::new(Arc::new(b.platform()), 60_000));
-        let mut t = b.build();
-        t.emit(1, test_login());
-        t.clear_captured();
-        // First ping uploads the baseline frame.
-        t.emit(1, Ping);
-        assert_eq!(t.captured::<Upload>().len(), 1);
-        t.clear_captured();
-        // Next interval: identical screen → captured but image upload suppressed; a
-        // `ScreenshotSkipped { StaticScreen }` log is emitted instead.
-        t.emit(61, Ping);
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::ScreenshotSkipped {
-                reason: ScreenshotSkipReason::StaticScreen
-            },
-            ..
-        }));
-        t.assert_not_like(crate::like!(Upload {
-            kind: UploadKind::Screenshot { .. },
-            ..
-        }));
-        assert_eq!(t.platform.take_call_count(), 2);
-    }
-
-    #[test]
-    fn changed_frame_uploads_again() {
-        use crate::testing::fixtures::solid_png_screenshot;
-        let mut b = EventTester::builder();
-        b.platform()
-            .set_default_screenshot(solid_png_screenshot(100));
-        b.add(ScreenshotModule::new(Arc::new(b.platform()), 60_000));
-        let mut t = b.build();
-        t.emit(1, test_login());
-        t.emit(1, Ping); // baseline upload (solid 100)
-        t.clear_captured();
-        // A materially different frame on the next capture must re-upload.
-        t.platform.queue_screenshot(Ok(solid_png_screenshot(220)));
-        t.emit(61, Ping);
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::Screenshot { .. },
-            ..
-        }));
-    }
-
-    #[test]
-    fn locked_skips_capture_entirely() {
-        let mut b = EventTester::builder();
-        b.platform().set_locked_or_screensaver(true);
-        let mut module = ScreenshotModule::new(Arc::new(b.platform()), 60_000);
-        module.state.enabled = true;
-        b.add(module);
-        let mut t = b.build();
-        t.emit(1, Ping);
-        // No image captured, but a `ScreenshotSkipped { LockedOrScreensaver }` is logged.
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::ScreenshotSkipped {
-                reason: ScreenshotSkipReason::LockedOrScreensaver
-            },
-            ..
-        }));
-        t.assert_not_like(crate::like!(Upload {
-            kind: UploadKind::Screenshot { .. },
-            ..
-        }));
-        // No capture taken at all while locked.
-        assert_eq!(t.platform.take_call_count(), 0);
-        // Cadence still advances so we re-check next interval.
-        assert_eq!(
-            t.observer::<ScreenshotModule>().state.last_screenshot_at_ms,
-            Some(1000)
-        );
-    }
-
-    #[test]
-    fn unlock_resumes_capture() {
-        let mut b = EventTester::builder();
-        b.platform().set_locked_or_screensaver(true);
-        let mut module = ScreenshotModule::new(Arc::new(b.platform()), 60_000);
-        module.state.enabled = true;
-        b.add(module);
-        let mut t = b.build();
-        t.emit(1, Ping); // locked → skip (records ScreenshotSkipped, no Screenshot)
-        t.assert_not_like(crate::like!(Upload {
-            kind: UploadKind::Screenshot { .. },
-            ..
-        }));
-        t.clear_captured();
-        t.platform.set_locked_or_screensaver(false);
-        t.emit(61, Ping); // unlocked → capture + upload
-        t.assert_like(crate::like!(Upload {
-            kind: UploadKind::Screenshot { .. },
-            ..
-        }));
-        assert_eq!(t.platform.take_call_count(), 1);
-    }
-
-    #[test]
-    fn legacy_fingerprint_format_does_not_break_state_load() {
-        // An older build persisted `last_uploaded_fingerprint` as a flat integer array;
-        // the current type is a struct. Loading such state must not fail — the fingerprint
-        // resets to None while the rest of the screenshot state is preserved (rather than
-        // erroring out of `init` and crash-looping the daemon).
-        let saved = serde_json::json!({
-            "screenshot": {
-                "enabled": true,
-                "last_screenshot_at_ms": 12_345,
-                "last_uploaded_fingerprint": [22, 17, 17, 19, 23]
-            }
+    #[allow(clippy::field_reassign_with_default)]
+    fn authenticated_upload() -> UploadState {
+        let mut upload = UploadState::default();
+        upload.device_credentials = Some(DeviceCredentials {
+            device_id: "d".into(),
+            refresh_token: "r".into(),
         });
-        let mut b = EventTester::builder();
-        b.add(ScreenshotModule::new(Arc::new(b.platform()), 60_000));
-        b.with_state(saved);
-        let mut t = b.build();
-        let st = &t.observer::<ScreenshotModule>().state;
-        assert!(st.enabled, "enabled flag should survive the load");
-        assert_eq!(st.last_screenshot_at_ms, Some(12_345));
-        assert!(
-            st.last_uploaded_fingerprint.is_none(),
-            "incompatible legacy fingerprint should decode to None"
-        );
+        upload.settings = Some(DeviceSettings {
+            device_id: "d".into(),
+            name: "n".into(),
+            platform: "p".into(),
+            wrapping_keys: vec![BatchRecipient {
+                user_id: "u".into(),
+                pub_key_base64: "CQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
+            }],
+            hash_base_url: None,
+        });
+        upload
     }
 
     #[test]
-    fn logout_disables_and_resets_schedule() {
-        let mut b = EventTester::builder();
-        let mut module = ScreenshotModule::new(Arc::new(b.platform()), 60_000);
-        module.state.enabled = true;
-        module.state.last_screenshot_at_ms = Some(500);
-        b.add(module);
-        let mut t = b.build();
-        t.emit(1, Logout);
-        assert!(!t.observer::<ScreenshotModule>().state.enabled);
-        assert_eq!(
-            t.observer::<ScreenshotModule>().state.last_screenshot_at_ms,
-            None
-        );
+    fn disabled_never_plans_a_capture() {
+        let mut state = ScreenshotState::default();
+        let mut upload = authenticated_upload();
+        let hooks = TestPlatformHooks::new();
+        let rng = TestRandomSource::new();
+        let plan = plan(&mut state, &mut upload, &hooks, 1_000, 300_000, &rng).unwrap();
+        assert!(plan.is_none());
     }
 
     #[test]
-    fn capture_completion_updates_fingerprint_and_clears_flag() {
+    fn enabled_with_no_prior_schedule_captures_immediately() {
+        let mut state = ScreenshotState::default();
+        enable(&mut state);
+        let mut upload = authenticated_upload();
+        let hooks = TestPlatformHooks::new();
+        let rng = TestRandomSource::new();
+        let plan = plan(&mut state, &mut upload, &hooks, 1_000, 300_000, &rng).unwrap();
+        assert!(plan.is_some());
+        assert!(state.next_screenshot_at_ms.is_some());
+    }
+
+    #[test]
+    fn not_due_before_the_drawn_time() {
+        let mut state = ScreenshotState::default();
+        enable(&mut state);
+        state.next_screenshot_at_ms = Some(60_000);
+        let mut upload = authenticated_upload();
+        let hooks = TestPlatformHooks::new();
+        let rng = TestRandomSource::new();
+        let plan = plan(&mut state, &mut upload, &hooks, 30_000, 300_000, &rng).unwrap();
+        assert!(plan.is_none());
+    }
+
+    #[test]
+    fn locked_screen_skips_capture_and_reschedules() {
+        let mut state = ScreenshotState::default();
+        enable(&mut state);
+        let mut upload = authenticated_upload();
+        let hooks = TestPlatformHooks::new();
+        hooks.set_locked_or_screensaver(true);
+        let rng = TestRandomSource::new();
+        let plan = plan(&mut state, &mut upload, &hooks, 1_000, 300_000, &rng).unwrap();
+        assert!(plan.is_none());
+        assert!(state.next_screenshot_at_ms.is_some());
+        assert!(upload.pending_hash_events.iter().any(|e| matches!(
+            e.event,
+            UploadKind::ScreenshotSkipped {
+                reason: ScreenshotSkipReason::LockedOrScreensaver
+            }
+        )));
+    }
+
+    #[test]
+    fn static_frame_is_suppressed_but_capture_failure_is_reported() {
         use crate::testing::fixtures::solid_png_screenshot;
-        let mut b = EventTester::builder();
-        b.platform()
-            .set_default_screenshot(solid_png_screenshot(100));
-        b.add(ScreenshotModule::new(Arc::new(b.platform()), 60_000));
-        let mut t = b.build();
-        t.emit(1, test_login());
-        t.emit(1, Ping);
-        // The inline spawner runs the whole capture pipeline synchronously, so by now
-        // the terminal `ScreenshotCaptured` has updated the dedup anchor and cleared
-        // the in-flight guard.
-        let m = t.observer::<ScreenshotModule>();
-        assert!(
-            m.state.last_uploaded_fingerprint.is_some(),
-            "anchor fingerprint should be set after a successful upload"
+        let hooks = TestPlatformHooks::new();
+        hooks.set_default_screenshot(solid_png_screenshot(100));
+        let anchor = fingerprint::fingerprint(&solid_png_screenshot(100).bytes).unwrap();
+        let outcome = capture_and_process(
+            CapturePlan {
+                anchor: Some(anchor),
+            },
+            &hooks,
+            None,
+            None,
         );
-        assert!(!m.capture_in_flight, "in-flight guard should be cleared");
+        assert!(matches!(outcome, CaptureOutcome::StaticFrame));
     }
 
     #[test]
-    fn capture_failure_emits_capture_failed_and_clears_flag() {
-        let mut b = EventTester::builder();
-        b.add(ScreenshotModule::new(Arc::new(b.platform()), 60_000));
-        b.capture::<CaptureFailed>();
-        let mut t = b.build();
-        t.emit(1, test_login());
-        t.clear_captured();
-        // Next capture fails; the failure path must still emit `CaptureFailed` and clear
-        // the in-flight guard so future pings aren't permanently blocked.
-        t.platform
-            .queue_screenshot(Err(crate::error::CoreError::CommandFailed("boom".into())));
-        t.emit(1, Ping);
-        assert_eq!(t.captured::<CaptureFailed>().len(), 1);
-        assert!(
-            !t.observer::<ScreenshotModule>().capture_in_flight,
-            "in-flight guard should clear even when capture fails"
+    fn changed_frame_uploads() {
+        use crate::testing::fixtures::solid_png_screenshot;
+        let hooks = TestPlatformHooks::new();
+        hooks.set_default_screenshot(solid_png_screenshot(220));
+        let anchor = fingerprint::fingerprint(&solid_png_screenshot(10).bytes).unwrap();
+        let outcome = capture_and_process(
+            CapturePlan {
+                anchor: Some(anchor),
+            },
+            &hooks,
+            None,
+            None,
+        );
+        assert!(matches!(outcome, CaptureOutcome::Uploaded { .. }));
+    }
+
+    #[test]
+    fn capture_failure_reported() {
+        let hooks = TestPlatformHooks::new();
+        hooks.queue_screenshot(Err(crate::error::CoreError::CommandFailed("boom".into())));
+        let outcome = capture_and_process(CapturePlan { anchor: None }, &hooks, None, None);
+        assert!(matches!(outcome, CaptureOutcome::Failed { .. }));
+    }
+
+    #[test]
+    fn plan_forced_bypasses_the_interval_due_gate() {
+        let mut state = ScreenshotState::default();
+        enable(&mut state);
+        state.next_screenshot_at_ms = Some(1_000_000_000);
+        let hooks = TestPlatformHooks::new();
+        let plan = plan_forced(&state, &hooks).unwrap();
+        assert!(plan.is_some());
+        assert_eq!(
+            state.next_screenshot_at_ms,
+            Some(1_000_000_000),
+            "plan_forced must not disturb the normal capture schedule"
         );
     }
 
     #[test]
-    fn in_flight_guard_prevents_overlapping_captures() {
-        use std::sync::{Arc, Mutex};
+    fn plan_forced_still_respects_locked_or_screensaver() {
+        let mut state = ScreenshotState::default();
+        enable(&mut state);
+        let hooks = TestPlatformHooks::new();
+        hooks.set_locked_or_screensaver(true);
+        let plan = plan_forced(&state, &hooks).unwrap();
+        assert!(plan.is_none());
+    }
 
-        use crate::events::Ping;
-        use crate::events::bus::{EventBus, Spawner, StateType};
-        use crate::testing::TestPlatformHooks;
+    #[test]
+    fn plan_forced_is_a_noop_when_disabled() {
+        let state = ScreenshotState::default();
+        let hooks = TestPlatformHooks::new();
+        let plan = plan_forced(&state, &hooks).unwrap();
+        assert!(plan.is_none());
+    }
 
-        type Job = Box<dyn FnOnce() + Send + 'static>;
-
-        // Spawner that holds jobs until explicitly run, so we can observe the module
-        // while a capture is mid-flight.
-        #[derive(Clone, Default)]
-        struct DeferringSpawner {
-            jobs: Arc<Mutex<Vec<Job>>>,
-        }
-        impl DeferringSpawner {
-            fn pending(&self) -> usize {
-                self.jobs.lock().unwrap().len()
-            }
-            fn run_all(&self) {
-                let jobs: Vec<_> = std::mem::take(&mut *self.jobs.lock().unwrap());
-                for job in jobs {
-                    job();
-                }
-            }
-        }
-        impl Spawner for DeferringSpawner {
-            fn spawn(&self, job: Job) {
-                self.jobs.lock().unwrap().push(job);
-            }
-        }
-
-        let spawner = DeferringSpawner::default();
-        let platform = TestPlatformHooks::new();
-        let mut module = ScreenshotModule::new(Arc::new(platform.clone()), 60_000);
-        module.state.enabled = true;
-        let mut bus = EventBus::with_spawner(
-            vec![Box::new(module)],
-            StateType::Null,
-            Arc::new(spawner.clone()),
-        )
-        .unwrap();
-
-        // First ping: schedules a capture job (deferred — capture hasn't run yet).
-        platform.clock.set(0);
-        bus.send(Ping).unwrap();
-        bus.iter().unwrap();
-        assert_eq!(spawner.pending(), 1);
-        assert_eq!(
-            platform.take_call_count(),
-            0,
-            "capture runs inside the deferred job, not on the event loop"
-        );
-
-        // Second ping a full interval later, while the first capture is still in flight:
-        // the overlap guard must skip it — no second job scheduled.
-        platform.clock.set(60_000);
-        bus.send(Ping).unwrap();
-        bus.iter().unwrap();
-        assert_eq!(
-            spawner.pending(),
-            1,
-            "overlap guard must prevent a second concurrent capture"
-        );
-
-        // Run the deferred capture and drain its completion event: exactly one capture.
-        spawner.run_all();
-        bus.iter().unwrap();
-        assert_eq!(platform.take_call_count(), 1);
+    #[test]
+    fn draw_next_screenshot_is_deterministic_given_a_fixed_uniform() {
+        let rng = TestRandomSource::new();
+        rng.queue(0.5);
+        let next = draw_next_screenshot_at_ms(0, 300_000, &rng);
+        let expected = (-(300_000f64) * (0.5f64).ln()).round() as i64;
+        assert_eq!(next, expected);
+        assert!(next > 0);
     }
 }

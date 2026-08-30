@@ -1,3 +1,6 @@
 AI
 node_modules
 .DS_Store
+
+# Per-worktree overrides layered on top of ~/.config/virtue-dev.env — see AGENTS.md.
+/.env

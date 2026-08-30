@@ -5,7 +5,7 @@ import SiteLayout from '../layouts/SiteLayout.astro';
 <SiteLayout pageTitle="Terms of Use">
   <section class="legal">
     <h1>Terms of Use</h1>
-    <p class="legal-date">Last updated: March 2026</p>
+    <p class="legal-date">Last updated: August 2026</p>
 
     <h2>1. Acceptance</h2>
     <p>
@@ -16,10 +16,18 @@ import SiteLayout from '../layouts/SiteLayout.astro';
     <h2>2. Description of service</h2>
     <p>
       The Virtue Initiative is a free, non-profit pornography accountability tool. Its client
-      applications may capture screenshots, monitor device or system state, and send logs or
-      encrypted monitoring data to the service so that information can be made available to you and
-      the accountability partners you designate. The Virtue Initiative is operated as a non-profit
-      project, provided free of charge, and may change as the software continues to develop.
+      applications for Linux, macOS, Windows, Android, and iOS may capture screenshots, monitor
+      device or system state, analyze screenshots on your device to estimate concern, and send
+      encrypted monitoring data and the metadata needed to index and summarize it to the service, so
+      that information can be made available to you and the accountability partners you designate.
+      The service may also email you and your partners alerts and periodic summaries, subject to the
+      preferences you set. The Virtue Initiative is operated as a non-profit project, provided free
+      of charge, and may change as the software continues to develop.
+    </p>
+    <p>
+      Concern scoring is automated and imperfect. It will miss some content and flag some content
+      wrongly, and it is not a substitute for your own judgment or your partners'. Nothing about the
+      service should be relied on as a complete or accurate record of what happened on a device.
     </p>
 
     <h2>3. Eligibility</h2>
@@ -31,9 +39,9 @@ import SiteLayout from '../layouts/SiteLayout.astro';
     <h2>4. Your account</h2>
     <p>
       You are responsible for maintaining the security of your account credentials. You are
-      responsible for all activity that occurs under your account. Notify us immediately at
-      <a href="mailto:help@virtueinitiative.org">help@virtueinitiative.org</a>
-      if you suspect unauthorized access.
+      responsible for all activity that occurs under your account. Notify us immediately at <a
+        href="mailto:help@virtueinitiative.org">help@virtueinitiative.org</a
+      > if you suspect unauthorized access.
     </p>
 
     <h2>5. Acceptable use</h2>
@@ -53,23 +61,48 @@ import SiteLayout from '../layouts/SiteLayout.astro';
         Use the service in a way that violates platform rules, workplace policies, school policies,
         or other obligations that apply to you.
       </li>
+      <li>
+        Invite someone as an accountability partner using an email address you do not have their
+        permission to use, or submit bug reports abusively or in bulk.
+      </li>
     </ul>
 
     <h2>6. Accountability partners</h2>
     <p>
-      When you invite an accountability partner, you grant them access to your monitoring data and
-      logs according to the permissions you configure and the sharing state of your account. You are
-      responsible for choosing your partners, understanding what access you are granting, and
-      managing that access appropriately.
+      When you invite an accountability partner and they accept, you grant them the ability to
+      decrypt and view your monitoring data, and they receive alert and summary emails about your
+      account. You are responsible for choosing your partners, understanding what access you are
+      granting, and managing that access appropriately. Removing a partner stops their access to
+      data captured afterward; it cannot undo access to data they could already decrypt.
     </p>
 
-    <h2>7. Data and privacy</h2>
+    <h2>7. Donations</h2>
     <p>
-      Your use of The Virtue Initiative is also governed by our
-      <a href="/privacy">Privacy Policy</a>, which is incorporated into these Terms by reference.
+      Donations are voluntary and are not required to use the service; donating grants no additional
+      features, access, or rights. Donations are processed by Stripe and are subject to Stripe's own
+      terms. Donations are generally non-refundable, though you may contact us about a donation made
+      in error. If you set up a recurring donation, it continues until you cancel it; you may cancel
+      at any time by contacting us. We are a non-profit project - contact us if you need a receipt,
+      and consult your own advisor about the tax treatment of your donation.
     </p>
 
-    <h2>8. Open source</h2>
+    <h2>8. Bug reports</h2>
+    <p>
+      When you submit a bug report you may include a description, a contact email address, and, from
+      a client app, a recent excerpt of that device's operational log. The app tells you before it
+      attaches logs. If you are signed in, or reporting from a client app signed in to your account,
+      the report always identifies your account; it is not anonymous. Do not include information in
+      a report that you do not want us to receive. We use reports to diagnose problems and to reply
+      to you, and we handle them as described in the <a href="/privacy">Privacy Policy</a>.
+    </p>
+
+    <h2>9. Data and privacy</h2>
+    <p>
+      Your use of The Virtue Initiative is also governed by our <a href="/privacy">Privacy Policy</a
+      >, which is incorporated into these Terms by reference.
+    </p>
+
+    <h2>10. Open source</h2>
     <p>
       The Virtue Initiative software is intended to remain open source and self-hostable. Use,
       copying, modification, and distribution of the source code are governed by the license terms
@@ -77,44 +110,49 @@ import SiteLayout from '../layouts/SiteLayout.astro';
       operated by us.
     </p>
 
-    <h2>9. Disclaimer of warranties</h2>
+    <h2>11. Disclaimer of warranties</h2>
     <p>
       The Virtue Initiative is provided "as is" without warranties of any kind, express or implied.
       We do not warrant that the service will be uninterrupted, error-free, or that data will not be
       lost. Use the service at your own risk.
     </p>
 
-    <h2>10. Limitation of liability</h2>
+    <h2>12. Limitation of liability</h2>
     <p>
       To the fullest extent permitted by law, The Virtue Initiative shall not be liable for any
       indirect, incidental, special, consequential, or punitive damages arising out of or related to
       your use of the service.
     </p>
 
-    <h2>11. Termination</h2>
+    <h2>13. Termination</h2>
     <p>
-      You may stop using the service at any time. If you want your hosted account and associated
-      data deleted, you may request deletion by contacting us. We reserve the right to suspend or
-      terminate accounts that violate these Terms.
+      You may stop using the service at any time. You may delete your hosted account and its
+      associated data yourself from the web app's settings, or request deletion by contacting us;
+      encrypted monitoring data is removed on the schedule described in the
+      <a href="/privacy">Privacy Policy</a>. We reserve the right to suspend or terminate accounts
+      that violate these Terms.
     </p>
 
-    <h2>12. Governing law</h2>
+    <h2>14. Governing law</h2>
     <p>
-      These Terms are governed by the laws of the United States. Any disputes shall be resolved in
-      accordance with applicable United States federal or state law.
+      These Terms are governed by the laws of the State of New York, without regard to its conflict
+      of laws rules. You and we agree that any dispute arising out of or relating to these Terms or
+      the service shall be brought exclusively in the state or federal courts located in New York,
+      and you consent to the personal jurisdiction of those courts.
     </p>
 
-    <h2>13. Changes to these Terms</h2>
+    <h2>15. Changes to these Terms</h2>
     <p>
       We may update these Terms from time to time. Material changes will be communicated by updating
       the "Last updated" date above. Continued use of the service after changes constitutes
       acceptance of the revised Terms.
     </p>
 
-    <h2>14. Contact</h2>
+    <h2>16. Contact</h2>
     <p>
-      For questions about these Terms, contact us at
-      <a href="mailto:help@virtueinitiative.org">help@virtueinitiative.org</a>.
+      For questions about these Terms, contact us at <a href="mailto:help@virtueinitiative.org"
+        >help@virtueinitiative.org</a
+      >.
     </p>
   </section>
 </SiteLayout>

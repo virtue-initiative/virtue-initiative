@@ -39,8 +39,6 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
         binding.versionText.text = "Build ${BuildConfig.VIRTUE_BUILD_LABEL}"
 
-        populateOverrideInputs()
-
         if (binding.deviceNameInput.text.isNullOrBlank()) {
             binding.deviceNameInput.setText(deviceName())
         }
@@ -50,19 +48,24 @@ class MainActivity : AppCompatActivity() {
             setStatus("Core init failed: $initError")
         }
 
-        binding.saveOverridesButton.setOnClickListener { saveOverrides(applyNow = true, showSavedMessage = true) }
         binding.loginButton.setOnClickListener { login() }
         binding.signOutButton.setOnClickListener { logout() }
-        binding.overridesButton.setOnClickListener { showOverridesDialog() }
-        binding.overridesButtonSession.setOnClickListener { showOverridesDialog() }
         binding.statusDetailsButton.setOnClickListener { showStatusDetails() }
         binding.pauseResumeButton.setOnClickListener { toggleMonitoring() }
-        binding.grantCaptureButton.setOnClickListener { openAccessibilitySettings() }
-        binding.startServiceButton.setOnClickListener { openAccessibilitySettings() }
+        binding.forceCaptureButton.setOnClickListener { forceCapture() }
+        binding.openAccessibilitySettingsButton.setOnClickListener { openAccessibilitySettings() }
 
         binding.websiteLink.setOnClickListener {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://virtueinitiative.org")))
         }
+
+        binding.signUpLink.setOnClickListener {
+            startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse("https://app.virtueinitiative.org/signup"))
+            )
+        }
+
+        binding.reportBugLink.setOnClickListener { showReportBugDialog() }
 
         KeepAliveWorker.schedule(this)
         requestBackgroundFriendlySettings()
@@ -77,7 +80,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun login() {
-        if (!saveOverrides(applyNow = true, showSavedMessage = false)) return
+        // nativeLogin() blocks waiting for a reply from the daemon loop thread,
+        // so the loop must already be running before we call it. The loop is
+        // only ever started by the accessibility service (on connect, or via
+        // resume() after a prior logout paused it) — require that first rather
+        // than attempting a login that can only time out.
+        if (!VirtueAccessibilityService.isConnected()) {
+            showAccessibilityOnboarding()
+            return
+        }
+        if (!VirtueAccessibilityService.isEnabled()) {
+            VirtueAccessibilityService.resume()
+        }
 
         val email = binding.emailInput.text?.toString()?.trim().orEmpty()
         val password = binding.passwordInput.text?.toString().orEmpty()
@@ -104,14 +118,8 @@ class MainActivity : AppCompatActivity() {
             binding.loginButton.isEnabled = true
 
             if (error == null) {
+                AccountEmailStore.save(this@MainActivity, email)
                 refreshUi()
-                if (!VirtueAccessibilityService.isConnected()) {
-                    showAccessibilityOnboarding()
-                } else if (!VirtueAccessibilityService.isEnabled()) {
-                    VirtueAccessibilityService.resume()
-                    setStatus("Monitoring started.")
-                    refreshUi()
-                }
             } else {
                 setStatus("Login failed: $error")
             }
@@ -135,6 +143,7 @@ class MainActivity : AppCompatActivity() {
                             }
                         }
                     }
+                    AccountEmailStore.clear(this@MainActivity)
                     VirtueAccessibilityService.pause()
                     ScreenshotService.stop(this@MainActivity)
                     refreshUi()
@@ -146,39 +155,70 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshUi() {
         val loggedIn = NativeBridge.nativeIsLoggedIn()
-        binding.loginPanel.visibility = if (loggedIn) android.view.View.GONE else android.view.View.VISIBLE
-        binding.sessionPanel.visibility = if (loggedIn) android.view.View.VISIBLE else android.view.View.GONE
+        val accessibilityConnected = VirtueAccessibilityService.isConnected()
 
-        if (loggedIn) {
-            binding.deviceIdText.text = deviceName()
-            binding.statusButtonsLayout.visibility = android.view.View.VISIBLE
-
-            when {
-                VirtueAccessibilityService.isEnabled() -> {
-                    binding.statusTitle.text = getString(R.string.status_monitoring)
-                    binding.pauseResumeButton.text = getString(R.string.btn_pause_monitoring)
-                    setStatus("Monitoring service is running")
-                }
-                VirtueAccessibilityService.isPaused() -> {
-                    binding.statusTitle.text = getString(R.string.status_paused)
-                    binding.pauseResumeButton.text = getString(R.string.btn_resume_monitoring)
-                    setStatus("Monitoring is paused")
-                }
-                VirtueAccessibilityService.isConnected() -> {
-                    binding.statusTitle.text = getString(R.string.status_waiting)
-                    binding.pauseResumeButton.text = getString(R.string.btn_resume_monitoring)
-                    setStatus("Accessibility service connected — tap Resume to start")
-                }
-                else -> {
-                    binding.statusTitle.text = getString(R.string.status_waiting)
-                    binding.pauseResumeButton.text = getString(R.string.btn_resume_monitoring)
-                    setStatus("Enable Virtue in Accessibility Settings to start monitoring")
-                }
-            }
-        } else {
-            binding.statusTitle.text = getString(R.string.status_signed_out)
+        // First-install flow: nothing else can happen (login blocks waiting on the
+        // daemon loop, which the accessibility service is what starts) until the
+        // service is connected, so keep signed-out users on the onboarding screen
+        // until then.
+        if (!loggedIn && !accessibilityConnected) {
+            binding.onboardingPanel.visibility = android.view.View.VISIBLE
+            binding.loginPanel.visibility = android.view.View.GONE
+            binding.sessionPanel.visibility = android.view.View.GONE
             binding.statusButtonsLayout.visibility = android.view.View.GONE
+            binding.onboardingStatusText.text = getString(R.string.msg_onboarding_waiting)
+            binding.statusTitle.text = getString(R.string.status_signed_out)
             setStatus(getString(R.string.msg_sign_in_to_start))
+            return
+        }
+
+        if (!loggedIn) {
+            // Accessibility just connected (or already was) — make sure the core
+            // actually finished initializing before handing off to the login screen,
+            // since login() blocks on a daemon loop thread that only the core's
+            // successful init can start.
+            val initError = NativeBridge.ensureInitialized(this)
+            val coreReady = initError == null
+            binding.onboardingPanel.visibility = if (coreReady) android.view.View.GONE else android.view.View.VISIBLE
+            binding.loginPanel.visibility = if (coreReady) android.view.View.VISIBLE else android.view.View.GONE
+            binding.sessionPanel.visibility = android.view.View.GONE
+            binding.statusButtonsLayout.visibility = android.view.View.GONE
+            if (!coreReady) {
+                binding.onboardingStatusText.text = getString(R.string.msg_core_init_failed, initError)
+            }
+            binding.statusTitle.text = getString(R.string.status_signed_out)
+            setStatus(getString(R.string.msg_sign_in_to_start))
+            return
+        }
+
+        binding.onboardingPanel.visibility = android.view.View.GONE
+        binding.loginPanel.visibility = android.view.View.GONE
+        binding.sessionPanel.visibility = android.view.View.VISIBLE
+
+        binding.deviceIdText.text = deviceName()
+        binding.statusButtonsLayout.visibility = android.view.View.VISIBLE
+
+        when {
+            VirtueAccessibilityService.isEnabled() -> {
+                binding.statusTitle.text = getString(R.string.status_monitoring)
+                binding.pauseResumeButton.text = getString(R.string.btn_pause_monitoring)
+                setStatus("Monitoring service is running")
+            }
+            VirtueAccessibilityService.isPaused() -> {
+                binding.statusTitle.text = getString(R.string.status_paused)
+                binding.pauseResumeButton.text = getString(R.string.btn_resume_monitoring)
+                setStatus("Monitoring is paused")
+            }
+            VirtueAccessibilityService.isConnected() -> {
+                binding.statusTitle.text = getString(R.string.status_waiting)
+                binding.pauseResumeButton.text = getString(R.string.btn_resume_monitoring)
+                setStatus("Accessibility service connected — tap Resume to start")
+            }
+            else -> {
+                binding.statusTitle.text = getString(R.string.status_waiting)
+                binding.pauseResumeButton.text = getString(R.string.btn_resume_monitoring)
+                setStatus("Enable Virtue in Accessibility Settings to start monitoring")
+            }
         }
     }
 
@@ -214,6 +254,31 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun forceCapture() {
+        binding.forceCaptureButton.isEnabled = false
+        setStatus(getString(R.string.msg_force_capture_started))
+        lifecycleScope.launch {
+            // The native call waits for the batch to land, so its message
+            // reports what actually happened rather than assuming an upload.
+            val raw = withContext(Dispatchers.IO) {
+                NativeBridge.nativeForceCapture()
+            }
+            binding.forceCaptureButton.isEnabled = true
+
+            val report = runCatching { JSONObject(raw) }.getOrElse { JSONObject() }
+            val error = if (report.isNull("error")) null else report.optString("error", "").ifBlank { null }
+            val message = if (report.isNull("message")) "" else report.optString("message", "")
+            if (error != null || message.isBlank()) {
+                setStatus(getString(R.string.msg_force_capture_failed, error ?: raw))
+            } else {
+                setStatus(message)
+            }
+            // Transient confirmation/error — revert to the real status after a beat
+            // rather than leaving it stuck here, matching toggleMonitoring's pattern.
+            binding.root.postDelayed({ refreshUi() }, 2500)
+        }
+    }
+
     private fun openAccessibilitySettings() {
         startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
     }
@@ -225,8 +290,9 @@ class MainActivity : AppCompatActivity() {
                 "Virtue needs Accessibility permission to monitor your screen.\n\n" +
                 "1. Tap \"Open Settings\" below\n" +
                 "2. Find \"Virtue\" in the list\n" +
-                "3. Toggle it on and confirm\n\n" +
-                "Monitoring will start automatically once enabled."
+                "3. Toggle it on and confirm\n" +
+                "4. Return here to sign in\n\n" +
+                "Monitoring will start automatically once you're signed in."
             )
             .setPositiveButton("Open Settings") { _, _ -> openAccessibilitySettings() }
             .setNegativeButton(getString(R.string.dialog_cancel), null)
@@ -265,194 +331,43 @@ class MainActivity : AppCompatActivity() {
         return if (model.startsWith(manufacturer, ignoreCase = true)) model else "$manufacturer $model"
     }
 
-    private fun populateOverrideInputs() {
-        val overrides = OverrideSettings.load(this)
-        binding.baseApiUrlInput.setText(overrides.baseApiUrl.orEmpty())
-        binding.captureIntervalInput.setText(overrides.captureIntervalSeconds.orEmpty())
-        binding.batchWindowInput.setText(overrides.batchWindowSeconds.orEmpty())
-    }
-
-    private fun saveOverrides(applyNow: Boolean, showSavedMessage: Boolean): Boolean {
-        val baseUrl = binding.baseApiUrlInput.text?.toString().orEmpty().trim()
-        val captureInterval = binding.captureIntervalInput.text?.toString().orEmpty().trim()
-        val batchWindow = binding.batchWindowInput.text?.toString().orEmpty().trim()
-
-        if (baseUrl.isNotEmpty() && !baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
-            setStatus("VIRTUE_BASE_API_URL must start with http:// or https://")
-            return false
-        }
-        if (captureInterval.isNotEmpty() && captureInterval.toLongOrNull()?.let { it > 0 } != true) {
-            setStatus("VIRTUE_CAPTURE_INTERVAL_SECONDS must be a positive integer")
-            return false
-        }
-        if (batchWindow.isNotEmpty() && batchWindow.toLongOrNull()?.let { it > 0 } != true) {
-            setStatus("VIRTUE_BATCH_WINDOW_SECONDS must be a positive integer")
-            return false
-        }
-
-        val values = OverrideValues(
-            baseApiUrl = baseUrl.ifEmpty { null },
-            captureIntervalSeconds = captureInterval.ifEmpty { null },
-            batchWindowSeconds = batchWindow.ifEmpty { null }
-        )
-        OverrideSettings.save(this, values)
-
-        if (applyNow) {
-            val error = NativeBridge.applyOverrides(this)
-            if (error != null) {
-                setStatus("Failed to apply overrides: $error")
-                return false
-            }
-        }
-
-        if (showSavedMessage) setStatus("Overrides saved")
-        return true
-    }
-
-    private fun showOverridesDialog() {
-        val bgColor = 0xFFF4EFE3.toInt()
-        val cardColor = 0xFFFBF7EA.toInt()
-        val borderColor = 0xFFD9D1BC.toInt()
-        val labelColor = 0xFF9C9682.toInt()
-        val valueColor = 0xFF1B1A16.toInt()
-        val dp = resources.displayMetrics.density
-
-        fun cardDrawable() = GradientDrawable().apply {
-            setColor(cardColor)
-            cornerRadius = 4 * dp
-            setStroke((1 * dp).toInt(), borderColor)
-        }
-
-        fun divider() = android.view.View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, (1 * dp).toInt()
-            ).apply { topMargin = (14 * dp).toInt(); bottomMargin = (14 * dp).toInt() }
-            setBackgroundColor(borderColor)
-        }
-
-        fun makeField(label: String, value: String, numeric: Boolean): android.widget.EditText {
-            return android.widget.EditText(this).apply {
-                setText(value)
-                hint = label
-                setHintTextColor(labelColor)
-                setTextColor(valueColor)
-                textSize = 15f
-                inputType = if (numeric)
-                    android.text.InputType.TYPE_CLASS_NUMBER
-                else
-                    android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
-                background = null
-                setPadding(0, (4 * dp).toInt(), 0, (4 * dp).toInt())
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-            }
-        }
-
-        val apiEdit = makeField(getString(R.string.override_api_url), binding.baseApiUrlInput.text.toString(), numeric = false)
-        val captureEdit = makeField(getString(R.string.override_capture_interval), binding.captureIntervalInput.text.toString(), numeric = true)
-        val batchEdit = makeField(getString(R.string.override_batch_window), binding.batchWindowInput.text.toString(), numeric = true)
-
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = cardDrawable()
-            val pad = (20 * dp).toInt()
-            setPadding(pad, pad, pad, pad)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-        }
-        card.addView(apiEdit)
-        card.addView(divider())
-        card.addView(captureEdit)
-        card.addView(divider())
-        card.addView(batchEdit)
-
-        val cancelBtn = com.google.android.material.button.MaterialButton(
-            this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle
-        ).apply {
-            text = getString(R.string.dialog_cancel)
-            setTextColor(0xFF1E3A2E.toInt())
-            strokeColor = android.content.res.ColorStateList.valueOf(0xFF1E3A2E.toInt())
-            backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.TRANSPARENT)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = (8 * dp).toInt() }
-        }
-        val applyBtn = com.google.android.material.button.MaterialButton(this).apply {
-            text = getString(R.string.btn_apply_overrides)
-            backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF1E3A2E.toInt())
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-        }
-
-        val outerScroll = ScrollView(this).apply { setBackgroundColor(bgColor) }
-        val outerContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            val pad = (20 * dp).toInt()
-            setPadding(pad, pad, pad, pad)
-        }
-        outerScroll.addView(outerContainer)
-
-        outerContainer.addView(TextView(this).apply {
-            text = getString(R.string.section_overrides)
-            textSize = 20f
-            setTextColor(valueColor)
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = (18 * dp).toInt() }
-        })
-        outerContainer.addView(card)
-        outerContainer.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = (16 * dp).toInt() }
-            addView(cancelBtn)
-            addView(applyBtn)
-        })
-
-        val dialog = Dialog(this, android.R.style.Theme_Material_Light_NoActionBar_Fullscreen)
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
-        dialog.setContentView(outerScroll)
-        dialog.window?.apply {
-            setLayout(
-                android.view.WindowManager.LayoutParams.MATCH_PARENT,
-                android.view.WindowManager.LayoutParams.MATCH_PARENT
-            )
-            setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-        }
-
-        cancelBtn.setOnClickListener { dialog.dismiss() }
-        applyBtn.setOnClickListener {
-            binding.baseApiUrlInput.setText(apiEdit.text)
-            binding.captureIntervalInput.setText(captureEdit.text)
-            binding.batchWindowInput.setText(batchEdit.text)
-            if (saveOverrides(applyNow = true, showSavedMessage = true)) dialog.dismiss()
-        }
-
-        dialog.show()
-    }
-
     private fun showStatusDetails() {
+        // Every field here comes from the shared core status payload
+        // (client/core/SPEC.md CORE-010), so this screen shows the same things
+        // as the desktop clients', plus the Android-specific rows below.
         val json = runCatching { JSONObject(NativeBridge.nativeGetStatusJson()) }.getOrElse { JSONObject() }
-        val lifecycle = json.optJSONObject("lifecycle") ?: JSONObject()
-        val snapshot = lifecycle.optJSONObject("snapshot") ?: JSONObject()
 
+        // `optString` renders a JSON null as the literal "null", so absent and
+        // null values are both routed through `isNull` first.
+        fun optText(key: String): String =
+            if (json.isNull(key)) "—" else json.optString(key, "").ifBlank { "—" }
+        fun optTime(key: String): String = formatTimestampMs(json.optLong(key, 0))
+
+        val accountEmail = optText("account_email")
+        val deviceName = optText("device_name")
+        val partners = if (json.isNull("partner_count")) "unknown" else json.optInt("partner_count", 0).toString()
+        val pendingHash = json.optInt("pending_hash_count", 0)
+        val pendingBatch = json.optInt("pending_batch_count", 0)
         val pendingRequests = json.optInt("pending_request_count", 0)
-        val lastLoop = formatTimestampMs(json.optLong("last_loop_at_ms", 0))
-        val lastScreenshot = formatTimestampMs(json.optLong("last_screenshot_at_ms", 0))
-        val lastBatch = formatTimestampMs(json.optLong("last_batch_at_ms", 0))
-        val userSession = snapshot.optString("user_session", "unknown")
-        val primaryService = snapshot.optString("primary_service", "unknown")
-        val capturePermission = snapshot.optString("capture_permission", "unknown")
-        val captureAvailability = snapshot.optString("capture_availability", "unknown")
-
-        val overrides = OverrideSettings.load(this)
-        val apiUrl = overrides.baseApiUrl ?: "https://api.virtueinitiative.org"
+        val lastLoop = optTime("last_loop_at_ms")
+        val lastAttempt = optTime("last_screenshot_attempt_at_ms")
+        val lastScreenshot = optTime("last_screenshot_at_ms")
+        val lastBatch = optTime("last_batch_at_ms")
+        val skipReason = when (if (json.isNull("last_skip_reason")) "" else json.optString("last_skip_reason", "")) {
+            "static_screen" -> "Screen unchanged since the last upload"
+            "locked_or_screensaver" -> "Screen locked or screensaver active"
+            "capture_failed" -> "Capture failed"
+            else -> "—"
+        }
+        val recentErrors = json.optJSONArray("recent_errors")
+        val apiBaseUrl = optText("api_base_url")
+        val hashBaseUrl = if (json.isNull("hash_base_url")) "default" else json.optString("hash_base_url", "").ifBlank { "default" }
+        val captureInterval = "${json.optLong("capture_interval_seconds", 0)}s"
+        val batchWindow = "${json.optLong("batch_window_seconds", 0)}s"
+        val deviceId = optText("device_id")
+        val logFile = java.io.File(filesDir, "core-data/logs")
+            .listFiles()
+            ?.maxByOrNull { it.lastModified() }
 
         val bgColor = 0xFFF4EFE3.toInt()
         val cardColor = 0xFFFBF7EA.toInt()
@@ -547,29 +462,70 @@ class MainActivity : AppCompatActivity() {
             else -> "Not enabled"
         }
 
-        outerContainer.addView(sectionLabel("Service"))
+        outerContainer.addView(sectionLabel("Account"))
         outerContainer.addView(makeCard(
             "Summary" to binding.statusTitle.text.toString(),
             "Status" to binding.statusText.text.toString(),
-            "Accessibility service" to a11yStatus,
+            "Email" to accountEmail,
+            "Device name" to deviceName,
+            "Partners" to partners,
+        ))
+
+        outerContainer.addView(sectionLabel("Queues"))
+        outerContainer.addView(makeCard(
+            "Waiting for hash" to pendingHash.toString(),
+            "Waiting in batch" to pendingBatch.toString(),
             "Pending requests" to pendingRequests.toString(),
-            "API" to apiUrl,
+            "Last batch upload" to lastBatch,
         ))
 
-        outerContainer.addView(sectionLabel("Core Lifecycle"))
+        outerContainer.addView(sectionLabel("Capture"))
         outerContainer.addView(makeCard(
-            "User session" to userSession,
-            "Primary service" to primaryService,
-            "Capture permission" to capturePermission,
-            "Capture availability" to captureAvailability,
-        ))
-
-        outerContainer.addView(sectionLabel("Timing"))
-        outerContainer.addView(makeCard(
+            "Accessibility service" to a11yStatus,
             "Last loop" to lastLoop,
+            "Last attempt" to lastAttempt,
             "Last screenshot" to lastScreenshot,
-            "Last batch" to lastBatch,
+            "Last skip reason" to skipReason,
         ))
+
+        outerContainer.addView(sectionLabel("Recent errors"))
+        val errorRows = mutableListOf<Pair<String, String>>()
+        if (recentErrors != null) {
+            for (i in 0 until minOf(recentErrors.length(), 5)) {
+                val error = recentErrors.optJSONObject(i) ?: continue
+                errorRows.add(
+                    "${formatTimestampMs(error.optLong("at_ms", 0))} · ${error.optString("context")}"
+                        to error.optString("message")
+                )
+            }
+        }
+        outerContainer.addView(
+            if (errorRows.isEmpty()) makeCard("Errors" to "None")
+            else makeCard(*errorRows.toTypedArray())
+        )
+
+        outerContainer.addView(sectionLabel("Advanced"))
+        outerContainer.addView(makeCard(
+            "Device ID" to deviceId,
+            "API URL" to apiBaseUrl,
+            "Hash base URL" to hashBaseUrl,
+            "Capture interval" to captureInterval,
+            "Batch window" to batchWindow,
+            "Log file" to (logFile?.absolutePath ?: "—"),
+        ))
+
+        val openLogBtn = com.google.android.material.button.MaterialButton(this).apply {
+            text = getString(R.string.btn_open_log)
+            setTextColor(0xFF1E3A2E.toInt())
+            strokeColor = android.content.res.ColorStateList.valueOf(0xFF1E3A2E.toInt())
+            strokeWidth = (1 * dp).toInt()
+            backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.TRANSPARENT)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            setOnClickListener { openLogFile(logFile) }
+        }
+        outerContainer.addView(openLogBtn)
 
         val dialog = Dialog(this, android.R.style.Theme_Material_Light_NoActionBar_Fullscreen)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
@@ -580,6 +536,171 @@ class MainActivity : AppCompatActivity() {
         )
         doneBtn.setOnClickListener { dialog.dismiss() }
         dialog.show()
+    }
+
+    private fun showReportBugDialog() {
+        val dp = resources.displayMetrics.density
+
+        val descriptionLayout = com.google.android.material.textfield.TextInputLayout(this).apply {
+            boxBackgroundMode = com.google.android.material.textfield.TextInputLayout.BOX_BACKGROUND_OUTLINE
+        }
+        val descriptionInput = com.google.android.material.textfield.TextInputEditText(descriptionLayout.context).apply {
+            hint = getString(R.string.report_bug_description_hint)
+            isSingleLine = false
+            minLines = 3
+            maxLines = 6
+        }
+        descriptionLayout.addView(descriptionInput)
+
+        val emailLayout = com.google.android.material.textfield.TextInputLayout(this).apply {
+            boxBackgroundMode = com.google.android.material.textfield.TextInputLayout.BOX_BACKGROUND_OUTLINE
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (12 * dp).toInt() }
+        }
+        val emailInput = com.google.android.material.textfield.TextInputEditText(emailLayout.context).apply {
+            hint = getString(R.string.report_bug_contact_email_hint)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+            setText(AccountEmailStore.load(this@MainActivity).orEmpty())
+        }
+        emailLayout.addView(emailInput)
+
+        val includeLogsCheckBox = android.widget.CheckBox(this).apply {
+            text = getString(R.string.report_bug_include_logs)
+            isChecked = true
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (14 * dp).toInt() }
+        }
+
+        val includeLogsCaption = TextView(this).apply {
+            text = getString(R.string.report_bug_include_logs_caption)
+            textSize = 12f
+            setTextColor(0xFF9C9682.toInt())
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (4 * dp).toInt() }
+        }
+
+        val errorText = TextView(this).apply {
+            setTextColor(0xFFEF4444.toInt())
+            visibility = android.view.View.GONE
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (10 * dp).toInt() }
+        }
+
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = (20 * dp).toInt()
+            setPadding(pad, pad, pad, 0)
+            addView(descriptionLayout)
+            addView(emailLayout)
+            addView(includeLogsCheckBox)
+            addView(includeLogsCaption)
+            addView(errorText)
+        }
+
+        val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.dialog_report_bug_title))
+            .setView(content)
+            .setPositiveButton(getString(R.string.btn_send_report), null)
+            .setNegativeButton(getString(R.string.dialog_cancel), null)
+            .create()
+
+        dialog.setOnShowListener {
+            val sendButton = dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE)
+            sendButton.setOnClickListener {
+                val message = descriptionInput.text?.toString()?.trim().orEmpty()
+                if (message.isEmpty()) {
+                    errorText.text = getString(R.string.report_bug_message_required)
+                    errorText.visibility = android.view.View.VISIBLE
+                    return@setOnClickListener
+                }
+
+                val contactEmail = emailInput.text?.toString()?.trim().orEmpty()
+                val includeLogs = includeLogsCheckBox.isChecked
+                val platformDetails = androidPlatformDetails()
+
+                sendButton.isEnabled = false
+                lifecycleScope.launch {
+                    val error = withContext(Dispatchers.IO) {
+                        NativeBridge.nativeReportIssue(message, contactEmail, includeLogs, platformDetails)
+                    }
+                    sendButton.isEnabled = true
+
+                    if (error == null) {
+                        dialog.dismiss()
+                        showReportSentDialog()
+                    } else {
+                        errorText.text = getString(R.string.report_bug_send_failed)
+                        errorText.visibility = android.view.View.VISIBLE
+                    }
+                }
+            }
+        }
+
+        dialog.show()
+    }
+
+    private fun showReportSentDialog() {
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.dialog_report_sent_title))
+            .setMessage(getString(R.string.dialog_report_sent_message))
+            .setPositiveButton(getString(R.string.btn_done), null)
+            .show()
+    }
+
+    private fun androidPlatformDetails(): String {
+        return "Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT}); ${deviceName()}"
+    }
+
+    /**
+     * Opens the newest rolling log file in a text viewer — an app-internal file
+     * is otherwise unreachable to the user. Falls back to the share sheet when
+     * no installed app can view `text/plain`, since that at least gets the file
+     * somewhere the user can read it.
+     */
+    private fun openLogFile(logFile: java.io.File?) {
+        if (logFile == null || !logFile.exists()) {
+            setStatus(getString(R.string.open_log_unavailable))
+            return
+        }
+        // The rolling log files are named `virtue.<date>` with no extension, so
+        // a viewer that sniffs the type from the file name (rather than the
+        // intent's) refuses to render them. Hand out a `.txt` copy instead —
+        // which also keeps the viewer off a file the daemon is still appending to.
+        val readable = java.io.File(cacheDir, "logs").let { dir ->
+            dir.mkdirs()
+            java.io.File(dir, "virtue-log.txt").also { logFile.copyTo(it, overwrite = true) }
+        }
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            this,
+            "$packageName.fileprovider",
+            readable,
+        )
+        val view = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "text/plain")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        if (view.resolveActivity(packageManager) != null) {
+            startActivity(Intent.createChooser(view, getString(R.string.open_log_chooser)))
+            return
+        }
+
+        // No viewer installed (a bare emulator image, say) — hand the file to
+        // whatever can take it instead, so the log still gets somewhere readable.
+        val share = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            startActivity(Intent.createChooser(share, getString(R.string.open_log_chooser)))
+        } catch (e: android.content.ActivityNotFoundException) {
+            android.util.Log.w("MainActivity", "no app can open or receive the log file", e)
+            setStatus(getString(R.string.open_log_no_viewer))
+        }
     }
 
     private fun formatTimestampMs(ms: Long): String {

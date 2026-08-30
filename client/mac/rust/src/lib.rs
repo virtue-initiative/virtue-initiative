@@ -1,12 +1,17 @@
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use anyhow::{Context, Result, anyhow};
 use once_cell::sync::OnceCell;
-use virtue_core::{AuthState, ClientController};
+use virtue_core::AuthState;
+use virtue_core::force_capture;
+use virtue_core::ipc::ClientController;
 use virtue_mac_platform::capture::{has_screen_capture_access, request_screen_capture_access};
-use virtue_mac_platform::config::{ClientPaths, ClientState, read_auth_state, save_state};
+use virtue_mac_platform::config::{
+    ClientPaths, ClientState, build_core_config, read_auth_state, save_state,
+};
 use virtue_mac_platform::launch_agent;
 
 static CORE: OnceCell<MacCore> = OnceCell::new();
@@ -79,6 +84,129 @@ pub extern "C" fn virtue_mac_native_logout() -> *mut c_char {
     into_c_result(result)
 }
 
+/// Submits `POST /bug-report` (API-042). `contact_email` is treated as unset
+/// when blank. Reads the device's refresh token straight off disk, same
+/// disk-fallback approach Linux/Windows use, so a report can be attributed to
+/// this device even when the resident daemon isn't reachable over IPC;
+/// gathers macOS version info via `sw_vers`; and, when `include_logs` is
+/// true, reads/redacts/trims the last two days of the daemon's own
+/// rotated log files (`paths.logs_dir`) for the optional attachment.
+#[unsafe(no_mangle)]
+pub extern "C" fn virtue_mac_native_report_issue(
+    message: *const c_char,
+    contact_email: *const c_char,
+    include_logs: bool,
+) -> *mut c_char {
+    let result = (|| -> Result<()> {
+        let core = core()?;
+        let message = c_string_or_empty(message).trim().to_string();
+        if message.is_empty() {
+            return Err(anyhow!("message is required"));
+        }
+        let contact_email = c_string_or_empty(contact_email);
+        let contact_email =
+            (!contact_email.trim().is_empty()).then(|| contact_email.trim().to_string());
+
+        let bearer_token = local_auth_state(core)
+            .device_credentials
+            .map(|creds| creds.refresh_token);
+
+        let platform_details = mac_platform_details();
+        let logs = include_logs.then(|| recent_logs(&core.paths)).flatten();
+
+        let config = build_core_config(&core.paths);
+        let api = virtue_core::api::HttpApiClient::new(&config)?;
+        api.report_issue(
+            bearer_token.as_deref(),
+            &virtue_core::api::BugReportRequest {
+                message: &message,
+                contact_email: contact_email.as_deref(),
+                platform: "macos",
+                app_version: virtue_core::BUILD_LABEL,
+                platform_details: Some(&platform_details),
+            },
+            logs.as_deref(),
+        )
+        .context("failed to submit bug report")?;
+        Ok(())
+    })();
+    into_c_result(result)
+}
+
+/// Best-effort "ProductName ProductVersion (Build BuildVersion)" string via
+/// `sw_vers`, e.g. `"macOS 14.5 (Build 23F79)"`. Falls back to a fixed
+/// placeholder on any error, mirroring the Windows client's registry-read
+/// fallback in `windows_platform_details`.
+fn mac_platform_details() -> String {
+    let product_name = sw_vers("-productName");
+    let product_version = sw_vers("-productVersion");
+    let build_version = sw_vers("-buildVersion");
+
+    let mut parts = Vec::new();
+    if let Some(product_name) = product_name {
+        parts.push(product_name);
+    }
+
+    let version_part = match (product_version, build_version) {
+        (Some(version), Some(build)) => Some(format!("{version} (Build {build})")),
+        (Some(version), None) => Some(version),
+        (None, Some(build)) => Some(format!("Build {build}")),
+        (None, None) => None,
+    };
+    if let Some(version_part) = version_part {
+        parts.push(version_part);
+    }
+
+    if parts.is_empty() {
+        "macOS (unknown version)".to_string()
+    } else {
+        parts.join(" ")
+    }
+}
+
+fn sw_vers(flag: &str) -> Option<String> {
+    Command::new("sw_vers")
+        .arg(flag)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+/// Best-effort last two days of this device's daemon logs: today's and (if
+/// present) yesterday's daily-rotated log file from `paths.logs_dir` (see
+/// `daemon::init_logging`), redacted (`virtue_core::api::redact_secrets`) and
+/// trimmed to the API's attachment size cap, keeping the most recent bytes.
+fn recent_logs(paths: &ClientPaths) -> Option<Vec<u8>> {
+    let today = chrono::Local::now().date_naive();
+    let mut combined = String::new();
+
+    for date in [today, today - chrono::Duration::days(1)] {
+        let file_name = format!(
+            "{}.{}.log",
+            virtue_core::logging::DEFAULT_FILE_LOG_POLICY.file_name_prefix,
+            date.format("%Y-%m-%d")
+        );
+        if let Ok(contents) = std::fs::read_to_string(paths.logs_dir.join(file_name)) {
+            combined.push_str(&contents);
+        }
+    }
+
+    if combined.is_empty() {
+        return None;
+    }
+
+    let redacted = virtue_core::api::redact_secrets(&combined);
+    let mut logs = redacted.into_bytes();
+    if logs.len() > virtue_core::api::MAX_LOG_ATTACHMENT_BYTES {
+        let start = logs.len() - virtue_core::api::MAX_LOG_ATTACHMENT_BYTES;
+        logs.drain(0..start);
+    }
+    Some(logs)
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn virtue_mac_native_is_logged_in() -> bool {
     core()
@@ -93,6 +221,18 @@ pub extern "C" fn virtue_mac_native_get_device_id() -> *mut c_char {
         .and_then(|c| local_auth_state(c).device_credentials)
         .map(|d| d.device_id);
     optional_string_to_c(device_id)
+}
+
+/// The email address of the currently signed-in account, persisted to
+/// `ui_state_file` at login (see `virtue_mac_native_login`), or null when
+/// signed out. Used to pre-fill the "Report a Bug" contact-email field.
+#[unsafe(no_mangle)]
+pub extern "C" fn virtue_mac_native_get_account_email() -> *mut c_char {
+    let email = core()
+        .ok()
+        .and_then(|c| virtue_mac_platform::config::load_state(&c.paths.ui_state_file).ok())
+        .and_then(|state| state.email);
+    optional_string_to_c(email)
 }
 
 /// Returns a JSON-serialized `ServiceStatus` (caller frees with
@@ -116,7 +256,7 @@ pub extern "C" fn virtue_mac_native_get_status_json() -> *mut c_char {
 /// stopped, `1`) from a timeout/IPC error (daemon alive but busy, `2`). A
 /// successful status response always means running (`0`), since the
 /// lifecycle module hardcodes `is_running: true` whenever it can answer a
-/// `StatusRequest`.
+/// status request at all.
 #[unsafe(no_mangle)]
 pub extern "C" fn virtue_mac_native_poll_daemon_status() -> c_int {
     let Ok(core) = core() else {
@@ -132,8 +272,8 @@ pub extern "C" fn virtue_mac_native_poll_daemon_status() -> c_int {
     }
 }
 
-/// Send `UserStopRequested` to the daemon and wait for a status round-trip on
-/// the same connection, guaranteeing the daemon processed it before the
+/// Tell the daemon a user requested a stop, and wait for a status round-trip
+/// on the same connection, guaranteeing the daemon processed it before the
 /// caller proceeds to stop the launch agent.
 #[unsafe(no_mangle)]
 pub extern "C" fn virtue_mac_native_request_user_stop(source: *const c_char) -> *mut c_char {
@@ -150,29 +290,44 @@ pub extern "C" fn virtue_mac_native_request_user_stop(source: *const c_char) -> 
     into_c_result(result)
 }
 
-/// Write runtime overrides (base API URL / capture interval / batch window) to
-/// `config.json`, which the daemon's `ConfigModule` hot-reloads on the next
-/// `Ping`. Blank fields omit that key so the daemon falls back to its
-/// built-in default. Mirrors iOS's `virtue_ios_native_set_overrides`.
+/// Forces an immediate screenshot capture (bypassing the normal interval-due
+/// gate, but still honoring the locked/screensaver and fingerprint-dedup
+/// gates) and requests an immediate batch flush, so the result uploads
+/// without waiting out the normal batch interval.
+///
+/// Then waits for the batch to actually land, so the UI can confirm what
+/// really happened rather than guessing. Returns JSON: either
+/// `{"outcome": …, "message": …}` (see `force_capture::ForcedCaptureOutcome`)
+/// or `{"error": …}`.
 #[unsafe(no_mangle)]
-pub extern "C" fn virtue_mac_native_set_overrides(
-    base_api_url: *const c_char,
-    capture_interval_seconds: *const c_char,
-    batch_window_seconds: *const c_char,
-) -> *mut c_char {
-    let result = (|| -> Result<()> {
+pub extern "C" fn virtue_mac_native_force_capture() -> *mut c_char {
+    let result = (|| -> Result<String> {
         let core = core()?;
-        let base_api_url = c_string_or_empty(base_api_url);
-        let capture_interval_seconds = c_string_or_empty(capture_interval_seconds);
-        let batch_window_seconds = c_string_or_empty(batch_window_seconds);
-        write_runtime_overrides(
-            &core.paths.runtime_config_file,
-            &base_api_url,
-            &capture_interval_seconds,
-            &batch_window_seconds,
+        let sock = core.paths.state_dir.join("daemon.sock");
+        let before = {
+            let mut client = ClientController::connect(&sock)
+                .context("failed to connect to daemon (is it running?)")?;
+            let before = client.get_status().context("failed to read status")?;
+            client.force_capture_now().context("force capture failed")?;
+            before
+        };
+        // The daemon serves one connection at a time, so poll on a fresh
+        // connection each time rather than holding the socket — and the app's
+        // own status polling — for the whole wait.
+        let outcome = force_capture::wait_for_upload(
+            &before,
+            force_capture::DEFAULT_UPLOAD_TIMEOUT,
+            force_capture::DEFAULT_POLL_INTERVAL,
+            || ClientController::connect(&sock)?.get_status(),
+            std::thread::sleep,
         )
+        .context("failed to read status while waiting for the upload")?;
+        Ok(outcome.report_json())
     })();
-    into_c_result(result)
+    match result {
+        Ok(json) => string_to_c(json),
+        Err(err) => string_to_c(serde_json::json!({ "error": format!("{err:#}") }).to_string()),
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -251,12 +406,12 @@ pub extern "C" fn virtue_mac_native_default_device_name() -> *mut c_char {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn virtue_mac_native_default_capture_interval_seconds() -> u64 {
-    virtue_core::DEFAULT_CAPTURE_INTERVAL_SECONDS
+    virtue_core::default_capture_interval_seconds()
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn virtue_mac_native_default_batch_window_seconds() -> u64 {
-    virtue_core::DEFAULT_BATCH_WINDOW_SECONDS
+    virtue_core::default_batch_window_seconds()
 }
 
 /// Resolve the daemon executable bundled inside the app at
@@ -321,47 +476,6 @@ fn optional_string_to_c(value: Option<String>) -> *mut c_char {
 fn into_c_result(result: Result<()>) -> *mut c_char {
     match result {
         Ok(()) => std::ptr::null_mut(),
-        Err(err) => string_to_c(err.to_string()),
+        Err(err) => string_to_c(format!("{err:#}")),
     }
-}
-
-fn write_runtime_overrides(
-    path: &Path,
-    base_api_url: &str,
-    capture_interval_seconds: &str,
-    batch_window_seconds: &str,
-) -> Result<()> {
-    let mut payload = serde_json::Map::new();
-    if !base_api_url.trim().is_empty() {
-        payload.insert(
-            "api_base_url".to_string(),
-            serde_json::Value::String(base_api_url.trim().to_string()),
-        );
-    }
-    if !capture_interval_seconds.trim().is_empty() {
-        payload.insert(
-            "capture_interval_seconds".to_string(),
-            serde_json::Value::Number(parse_u64(capture_interval_seconds)?.into()),
-        );
-    }
-    if !batch_window_seconds.trim().is_empty() {
-        payload.insert(
-            "batch_window_seconds".to_string(),
-            serde_json::Value::Number(parse_u64(batch_window_seconds)?.into()),
-        );
-    }
-
-    let bytes = serde_json::to_vec_pretty(&serde_json::Value::Object(payload))?;
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes).with_context(|| format!("failed writing {}", tmp.display()))?;
-    std::fs::rename(&tmp, path)
-        .with_context(|| format!("failed replacing {} with {}", path.display(), tmp.display()))?;
-    Ok(())
-}
-
-fn parse_u64(value: &str) -> Result<u64> {
-    value
-        .trim()
-        .parse::<u64>()
-        .with_context(|| format!("invalid integer override: {value}"))
 }

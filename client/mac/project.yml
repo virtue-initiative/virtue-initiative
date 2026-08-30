@@ -14,12 +14,26 @@ settings:
     DEVELOPMENT_TEAM: ''
     VIRTUE_APP_BUNDLE_ID: org.virtueinitiative.virtue.mac
     CURRENT_PROJECT_VERSION: '1'
-    MARKETING_VERSION: '0.0.8'
+    MARKETING_VERSION: '0.1.0'
     VIRTUE_BUILD_LABEL: '$(MARKETING_VERSION)'
+    # Auto-update (Sparkle) wiring. All three are intentionally EMPTY by
+    # default: an empty VIRTUE_SPARKLE_FEED_URL is what UpdateController
+    # reads as "auto-update disabled", so a local `xcodebuild`/Xcode build,
+    # or a PR CI build, can never replace itself with whatever is currently
+    # on GitHub Releases. Only build-app.sh, and only when invoked with
+    # VIRTUE_ENABLE_AUTO_UPDATE=1 (which just the release branches of
+    # .github/workflows/client-macos.yml set), overrides them. This mirrors
+    # the Linux package's /usr/lib/virtue/auto-update-enabled flag.
+    VIRTUE_SPARKLE_FEED_URL: ''
+    VIRTUE_SPARKLE_PUBLIC_KEY: ''
+    VIRTUE_RELEASE_CHANNEL: ''
     LIBRARY_SEARCH_PATHS: '$(inherited) $(BUILT_PRODUCTS_DIR) $(TARGET_BUILD_DIR)'
 packages:
   VirtueKit:
     path: ../shared-swift
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.9.6
 targets:
   VirtueMac:
     type: application
@@ -40,6 +54,7 @@ targets:
       - path: app/Assets.xcassets
     dependencies:
       - package: VirtueKit
+      - package: Sparkle
       - framework: ApplicationServices.framework
         embed: false
     preBuildScripts:

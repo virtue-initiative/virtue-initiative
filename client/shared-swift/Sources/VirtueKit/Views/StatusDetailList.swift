@@ -25,7 +25,9 @@ public struct StatusDetailList: View {
         List {
             ForEach(sections) { section in
                 Section(section.title) {
-                    ForEach(section.rows, id: \.label) { row in
+                    // Indexed rather than keyed by label: a section like
+                    // "Recent errors" can legitimately repeat a label.
+                    ForEach(Array(section.rows.enumerated()), id: \.offset) { _, row in
                         DetailRow(label: row.label, value: row.value)
                     }
                 }

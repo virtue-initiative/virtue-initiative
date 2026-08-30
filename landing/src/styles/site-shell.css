@@ -31,6 +31,12 @@ body {
   z-index: 10;
 }
 
+@media (max-width: 640px) {
+  .site-header-shell {
+    position: static;
+  }
+}
+
 .site-header {
   display: flex;
   align-items: center;
@@ -115,14 +121,24 @@ body {
   padding: 1.5rem 0;
   margin-top: 2rem;
 
-  & p {
+  & > .site-container > p {
     color: var(--text-muted);
     font-size: 0.875rem;
     text-align: center;
   }
 
-  & a {
+  & > .site-container > p a {
     color: var(--text-muted);
+  }
+
+  & .footer-link-button {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    color: var(--text-muted);
+    cursor: pointer;
   }
 }
 

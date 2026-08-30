@@ -37,6 +37,12 @@ button.logs-filter-toggle {
   min-width: 0;
 }
 
+.logs-filter-checkbox-field {
+  display: flex;
+  align-items: center;
+  height: var(--button-height);
+}
+
 .logs-filter-select {
   min-width: 8.75rem;
   max-width: min(11.5rem, 32vw);

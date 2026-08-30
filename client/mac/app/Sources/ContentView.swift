@@ -7,7 +7,8 @@ struct ContentView: View {
     @State private var showStopConfirmation = false
     @State private var showLogoutConfirmation = false
     @State private var showStatusSheet = false
-    @State private var showOverridesSheet = false
+    @State private var showReportBugSheet = false
+    @State private var showReportBugConfirmation = false
 
     var body: some View {
         ScrollView {
@@ -26,8 +27,15 @@ struct ContentView: View {
         .sheet(isPresented: $showStatusSheet) {
             StatusSheet(coordinator: coordinator)
         }
-        .sheet(isPresented: $showOverridesSheet) {
-            OverridesSheet(coordinator: coordinator)
+        .sheet(isPresented: $showReportBugSheet) {
+            ReportBugSheet(coordinator: coordinator) {
+                showReportBugConfirmation = true
+            }
+        }
+        .alert("Report Sent", isPresented: $showReportBugConfirmation) {
+            Button("OK") {}
+        } message: {
+            Text("Thanks — your report was sent to the Virtue Initiative team.")
         }
         .alert("Stop monitoring and quit?", isPresented: $showStopConfirmation) {
             Button("Cancel", role: .cancel) {}
@@ -43,7 +51,7 @@ struct ContentView: View {
                 coordinator.logout()
             }
         } message: {
-            Text("Logging out will alert people monitoring you and will recreate a new device on your next login. Continue?")
+            Text("Signing out will deactivate this device and stop monitoring. Anyone monitoring you may be alerted. Logging in again will create a new device.")
         }
     }
 
@@ -93,17 +101,48 @@ struct ContentView: View {
                         .foregroundStyle(VirtueBrand.danger)
                 }
 
-                HStack(spacing: 10) {
-                    Button("Status Details") {
-                        showStatusSheet = true
-                    }
-                    .buttonStyle(VirtueButtonStyle())
+                if let forceCaptureMessage = coordinator.forceCaptureMessage {
+                    Text(forceCaptureMessage)
+                        .font(.subheadline)
+                        .foregroundStyle(VirtueBrand.textMuted)
+                }
 
-                    Button("Stop Monitoring and Quit") {
-                        showStopConfirmation = true
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        Button("Status Details") {
+                            showStatusSheet = true
+                        }
+                        .buttonStyle(VirtueButtonStyle())
+
+                        Button(coordinator.isForceCapturing ? "Uploading…" : "Test Screenshot") {
+                            coordinator.forceCapture()
+                        }
+                        .buttonStyle(VirtueButtonStyle())
+                        .disabled(!coordinator.loggedIn || coordinator.isForceCapturing)
+                        .overlay {
+                            // A disabled view stops receiving the hover events that
+                            // drive `.help()`, so host the tooltip on a plain
+                            // (non-disabled) overlay instead of the button itself.
+                            if !coordinator.loggedIn {
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .help("Sign in to use this feature")
+                            }
+                        }
                     }
-                    .buttonStyle(VirtueButtonStyle(prominent: true))
-                    .disabled(!coordinator.loggedIn)
+
+                    HStack(spacing: 10) {
+                        Button("Report a Bug") {
+                            showReportBugSheet = true
+                        }
+                        .buttonStyle(VirtueButtonStyle())
+
+                        Button("Stop Monitoring & Quit") {
+                            showStopConfirmation = true
+                        }
+                        .buttonStyle(VirtueButtonStyle(prominent: true))
+                        .disabled(!coordinator.loggedIn)
+                    }
                 }
                 .padding(.top, 6)
             }
@@ -123,16 +162,11 @@ struct ContentView: View {
                         .foregroundStyle(VirtueBrand.textMuted)
 
                     HStack(spacing: 10) {
-                        Button(coordinator.isSigningOut ? "Signing Out…" : "Logout") {
+                        Button(coordinator.isSigningOut ? "Signing Out…" : "Sign Out") {
                             showLogoutConfirmation = true
                         }
                         .buttonStyle(VirtueButtonStyle())
                         .disabled(coordinator.isSigningOut)
-
-                        Button("Runtime Overrides") {
-                            showOverridesSheet = true
-                        }
-                        .buttonStyle(VirtueButtonStyle())
                     }
                     .padding(.top, 6)
                 } else {
@@ -148,12 +182,6 @@ struct ContentView: View {
                         loginError: coordinator.loginError,
                         onSubmit: coordinator.login
                     )
-                    .padding(.top, 6)
-
-                    Button("Runtime Overrides") {
-                        showOverridesSheet = true
-                    }
-                    .buttonStyle(VirtueButtonStyle())
                     .padding(.top, 6)
                 }
             }

@@ -1,32 +1,31 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::Result;
 use tokio::sync::mpsc;
-use virtue_core::{
-    EventBus, FlushBatchNow, IpcBridge, LifecycleHooks, Ping, PlatformConfig, ProcessStarted,
-    ProcessStopped, build_default_modules_reqwest, load_state, store_state,
-};
+use virtue_core::Daemon;
+use virtue_core::api::HttpApiClient;
 
-use crate::capture::{MacPlatformHooks, has_screen_capture_access, is_permission_missing_error};
+use crate::capture::MacPlatformHooks;
 use crate::config::{ClientPaths, build_core_config};
 
-const POST_WAKE_CAPTURE_STATE_SUPPRESSION: Duration = Duration::from_secs(30);
-const ITER_INTERVAL: Duration = Duration::from_secs(1);
-/// Boot-vs-monotonic divergence, measured locally each tick, worth treating as
-/// "the machine just woke from sleep" for UX purposes (post-wake capture
-/// suppression, a prompt batch flush). There's no real-time OS suspend/resume
-/// notification anymore (the lifecycle model derives suspend retrospectively
-/// from clocks rather than subscribing to sleep/wake events) — this constant
-/// and the check built on it are independent daemon-loop UX plumbing, not
-/// part of the core alerting model.
+const SUSPEND_CHECK_POLL_INTERVAL: Duration = Duration::from_millis(200);
+/// Boot-vs-monotonic divergence, measured locally each poll, worth treating as
+/// "the machine just woke from sleep" for UX purposes (a prompt batch flush).
+/// There's no real-time OS suspend/resume notification anymore (the core
+/// lifecycle model no longer tracks suspend at all) — this constant and the
+/// check built on it are independent daemon-loop UX plumbing, not part of the
+/// core alerting model. See `client/CLAUDE.md`.
 const LOCAL_SUSPEND_MIN_MS: i64 = 5_000;
 
+type MacDaemon = Daemon<MacPlatformHooks, HttpApiClient>;
+
 /// Installs the process-wide `tracing` subscriber, writing daily-rotated
-/// plain-text logs to `paths.logs_dir` (`~/Library/Logs/virtue.log`). The
-/// returned guard must be kept alive for the life of the process — dropping
-/// it stops the background writer thread that flushes buffered log lines.
+/// plain-text logs to `paths.logs_dir` (`~/Library/Logs/virtue.<date>.log`).
+/// The returned guard must be kept alive for the life of the process —
+/// dropping it stops the background writer thread that flushes buffered log
+/// lines.
 ///
 /// A launchd stdout/stderr redirect (see `launch_agent.rs`) remains as a
 /// fallback safety net for output emitted before this installs, or panics
@@ -45,24 +44,45 @@ pub fn init_logging(paths: &ClientPaths) -> tracing_appender::non_blocking::Work
         eprintln!("failed to prune old logs: {err}");
     }
 
-    let file_appender = tracing_appender::rolling::daily(
-        &paths.logs_dir,
-        virtue_core::logging::DEFAULT_FILE_LOG_POLICY.file_name_prefix,
-    );
-    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    // Matches the Windows client's `Builder` usage: an explicit `.log` suffix
+    // (the plain `rolling::daily` constructor leaves the filename extensionless,
+    // e.g. `virtue.2026-08-22` with no suffix at all).
+    let file_appender = tracing_appender::rolling::Builder::new()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix(virtue_core::logging::DEFAULT_FILE_LOG_POLICY.file_name_prefix)
+        .filename_suffix("log")
+        .build(&paths.logs_dir);
 
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         tracing_subscriber::EnvFilter::new(virtue_core::logging::default_filter_directive(cfg!(
             debug_assertions
         )))
     });
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_writer(non_blocking)
-        .with_ansi(false)
-        .init();
 
-    guard
+    match file_appender {
+        Ok(file_appender) => {
+            let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+            tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .with_writer(non_blocking)
+                .with_ansi(false)
+                .init();
+            guard
+        }
+        Err(err) => {
+            eprintln!(
+                "failed to open log file in {}: {err}",
+                paths.logs_dir.display()
+            );
+            let (non_blocking, guard) = tracing_appender::non_blocking(std::io::stderr());
+            tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .with_writer(non_blocking)
+                .with_ansi(false)
+                .init();
+            guard
+        }
+    }
 }
 
 pub fn run_daemon(paths: &ClientPaths) -> Result<()> {
@@ -83,106 +103,64 @@ async fn run_daemon_service_loop(paths: &ClientPaths) -> Result<()> {
 
     let config = build_core_config(paths);
     let state_path = paths.state_dir.join("event_state.json");
-
     let platform = MacPlatformHooks::new();
-    let modules = tokio::task::block_in_place(|| {
-        build_default_modules_reqwest(config, platform.clone(), PlatformConfig::default())
-    })?;
-    let mut bus = EventBus::new(modules, load_state(&state_path)?)?;
 
-    bus.send(ProcessStarted)?;
-    store_state(&state_path, &bus.iter()?)?;
+    let daemon: Arc<MacDaemon> = Arc::new(tokio::task::block_in_place(|| {
+        let api = HttpApiClient::new(&config)?;
+        Daemon::new(config, platform.clone(), api, state_path)
+    })?);
 
-    let mut ipc = IpcBridge::bind(&paths.state_dir.join("daemon.sock"));
-    if let Some(ipc) = &mut ipc {
-        ipc.subscribe_standard_outbound(&mut bus);
-    }
+    virtue_core::ipc::spawn_server(paths.state_dir.join("daemon.sock"), Arc::clone(&daemon));
 
     let shutdown = Arc::new(AtomicBool::new(false));
     let (signal_tx, mut signal_rx) = mpsc::unbounded_channel::<String>();
-    spawn_signal_handler(shutdown.clone(), signal_tx);
+    spawn_signal_handler(Arc::clone(&daemon), shutdown.clone(), signal_tx);
 
-    let mut suppress_capture_state_until: Option<Instant> = None;
+    let loop_daemon = Arc::clone(&daemon);
+    let loop_handle = std::thread::spawn(move || loop_daemon.run_forever());
+
+    // Watch for a local wake-from-sleep signal (see `LOCAL_SUSPEND_MIN_MS`)
+    // on this thread, while the daemon's own sequential loop runs on its own
+    // thread.
     let mut last_clocks: Option<(i64, i64)> = None;
     loop {
-        if shutdown.load(Ordering::SeqCst) {
+        if shutdown.load(Ordering::SeqCst) || loop_handle.is_finished() {
             break;
         }
 
-        // Wire up any newly accepted IPC connections.
-        if let Some(ipc) = &mut ipc {
-            ipc.accept_pending(&mut bus, IpcBridge::forward_standard_inbound);
-        }
-
-        // Detect "just resumed from sleep" locally so post-wake capture
-        // suppression and a prompt batch flush still happen, now that there's
-        // no real-time OS suspend/resume subscription to trigger them.
-        if let (Ok(boot_ms), Ok(mono_ms)) = (
-            platform.get_boot_clock_ms(),
-            platform.get_monotonic_clock_ms(),
-        ) {
+        if let (Ok(boot_ms), Ok(mono_ms)) =
+            (platform.boot_clock_ms(), platform.monotonic_clock_ms())
+        {
             if let Some((prev_boot_ms, prev_mono_ms)) = last_clocks {
                 let suspend_ms = (boot_ms - prev_boot_ms) - (mono_ms - prev_mono_ms);
                 if suspend_ms >= LOCAL_SUSPEND_MIN_MS {
-                    suppress_capture_state_until =
-                        Some(Instant::now() + POST_WAKE_CAPTURE_STATE_SUPPRESSION);
-                    let _ = bus.send(FlushBatchNow);
+                    daemon.flush_batch_now();
                 }
             }
             last_clocks = Some((boot_ms, mono_ms));
         }
 
-        match tokio::task::block_in_place(|| {
-            bus.send(Ping)?;
-            bus.iter()
-        }) {
-            Ok(state) => {
-                if !has_screen_capture_access() {
-                    suppress_capture_state_until = None;
-                }
-                if let Err(e) = store_state(&state_path, &state) {
-                    tracing::error!(error = %e, "daemon: failed to store state");
-                }
-            }
-            Err(err) => {
-                let error_text = err.to_string();
-                if suppress_capture_state_until.is_none_or(|until| Instant::now() >= until) {
-                    if is_permission_missing_error(&error_text) {
-                        tracing::warn!("daemon: capture permission missing: {error_text}");
-                    } else {
-                        tracing::warn!("daemon: capture blocked: {error_text}");
-                    }
-                }
-                tracing::warn!("daemon: {error_text}");
-            }
-        }
-
         tokio::select! {
             signal = signal_rx.recv() => {
                 if signal.is_some() {
-                    tokio::task::block_in_place(|| {
-                        let _ = bus.send(ProcessStopped);
-                        if let Ok(state) = bus.iter() {
-                            let _ = store_state(&state_path, &state);
-                        }
-                    });
+                    daemon.request_stop();
                 }
                 break;
             }
-            _ = tokio::time::sleep(ITER_INTERVAL) => {}
+            _ = tokio::time::sleep(SUSPEND_CHECK_POLL_INTERVAL) => {}
         }
     }
 
-    tokio::task::block_in_place(|| {
-        let _ = bus.send(Ping);
-        if let Ok(state) = bus.iter() {
-            let _ = store_state(&state_path, &state);
-        }
-    });
+    daemon.request_stop();
+    let _ = loop_handle.join();
     Ok(())
 }
 
-fn spawn_signal_handler(shutdown: Arc<AtomicBool>, signal_tx: mpsc::UnboundedSender<String>) {
+fn spawn_signal_handler(
+    daemon: Arc<MacDaemon>,
+    shutdown: Arc<AtomicBool>,
+    signal_tx: mpsc::UnboundedSender<String>,
+) {
     tokio::spawn(async move {
         use tokio::signal::unix::{SignalKind, signal};
 
@@ -203,6 +181,7 @@ fn spawn_signal_handler(shutdown: Arc<AtomicBool>, signal_tx: mpsc::UnboundedSen
         };
 
         shutdown.store(true, Ordering::SeqCst);
+        daemon.request_stop();
         let _ = signal_tx.send(signal_name.to_string());
     });
 }

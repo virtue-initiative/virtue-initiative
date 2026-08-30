@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { api, finishSignup, login, requestSignup, useSetAPIClient } from '../../utils/api';
+import {
+  api,
+  describeError,
+  finishSignup,
+  login,
+  requestSignup,
+  useSetAPIClient,
+} from '../../utils/api';
 import {
   derivePasswordMaterial,
   encryptData,
@@ -11,6 +18,7 @@ import {
   Alert,
   Button,
   Card,
+  Checkbox,
   Dialog,
   DialogActions,
   DialogHeader,
@@ -18,6 +26,8 @@ import {
   Input,
   SegmentedControl,
 } from '@virtueinitiative/shared-web';
+import { LANDING_URL } from '../../utils/landing-url';
+import { PasswordField } from './PasswordField';
 
 type AuthMode = 'login' | 'signup' | 'forgot' | 'reset' | 'finish-signup';
 
@@ -54,6 +64,10 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
       : mode === 'signup' && signupToken
         ? 'finish-signup'
         : mode;
+  // Gated on the finish step rather than the request step: this is where the
+  // account is actually created, and the emailed link may be opened on a
+  // different device than the one that requested it.
+  const requiresTermsAcceptance = authMode === 'finish-signup';
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
@@ -62,6 +76,8 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [resetTokenValid, setResetTokenValid] = useState(!resetToken);
+  const [signupTokenValid, setSignupTokenValid] = useState(!signupToken);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [signupVerificationEmail, setSignupVerificationEmail] = useState('');
   const signupVerificationDialogRef = useRef<HTMLDialogElement>(null);
 
@@ -77,10 +93,27 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
       })
       .catch((err: unknown) => {
         setResetTokenValid(false);
-        setError(err instanceof Error ? err.message : 'Reset token is invalid');
+        setError(describeError(err, 'Reset token is invalid'));
       })
       .finally(() => setLoading(false));
   }, [authMode, resetToken]);
+
+  useEffect(() => {
+    if (!signupToken || authMode !== 'finish-signup') return;
+    setLoading(true);
+    api
+      .validateSignupToken(signupToken)
+      .then((result) => {
+        setEmail(result.email);
+        setSignupTokenValid(true);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        setSignupTokenValid(false);
+        setError(describeError(err, 'Signup token is invalid'));
+      })
+      .finally(() => setLoading(false));
+  }, [authMode, signupToken]);
 
   async function handleSubmit(e: Event) {
     e.preventDefault();
@@ -89,6 +122,10 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
     setLoading(true);
 
     try {
+      if (requiresTermsAcceptance && !acceptedTerms) {
+        throw new Error('Please accept the Terms of Use and Privacy Policy to continue.');
+      }
+
       if (authMode === 'login') {
         const client = await login(email, password);
         if (toParam) {
@@ -105,6 +142,9 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
       } else if (authMode === 'finish-signup') {
         if (!signupToken) {
           throw new Error('Signup token is missing');
+        }
+        if (!signupTokenValid) {
+          throw new Error('Signup token is invalid or expired');
         }
         if (password !== confirm) {
           throw new Error('Passwords do not match');
@@ -146,7 +186,7 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
         navigate('/', true);
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Something went wrong');
+      setError(describeError(err, 'Something went wrong'));
     } finally {
       setLoading(false);
     }
@@ -168,7 +208,7 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
         password_auth: passwordAuth.toBase64(),
         password_salt: passwordSalt.toBase64(),
         pub_key: keyPair.publicKey.toBase64(),
-        priv_key: (await encryptData(wrappingKey, keyPair.privateKey)).toBase64(),
+        encrypted_priv_key: (await encryptData(wrappingKey, keyPair.privateKey)).toBase64(),
       },
     };
   }
@@ -225,24 +265,27 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
           </p>
         )}
 
-        <form class="auth-form" onSubmit={handleSubmit}>
-          {authMode !== 'finish-signup' && (
-            <Field label="Email">
-              <Input
-                type="email"
-                value={email}
-                onInput={(e) => setEmail((e.target as HTMLInputElement).value)}
-                placeholder="you@example.com"
-                autoComplete="email"
-                required
-                disabled={authMode === 'reset'}
-              />
-            </Field>
-          )}
+        <form class="auth-form" method="post" onSubmit={handleSubmit}>
+          <Field label="Email" id="email">
+            <Input
+              id="email"
+              name="email"
+              type="email"
+              value={email}
+              onInput={(e) => setEmail((e.target as HTMLInputElement).value)}
+              placeholder="you@example.com"
+              autoComplete={authMode === 'login' ? 'email' : 'username'}
+              required
+              readOnly={authMode === 'reset' || authMode === 'finish-signup'}
+              tabIndex={authMode === 'reset' || authMode === 'finish-signup' ? -1 : undefined}
+            />
+          </Field>
 
           {authMode === 'finish-signup' && (
-            <Field label="Name">
+            <Field label="Name" id="name">
               <Input
+                id="name"
+                name="name"
                 type="text"
                 value={name}
                 onInput={(e) => setName((e.target as HTMLInputElement).value)}
@@ -253,7 +296,7 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
           )}
 
           {authMode !== 'forgot' && authMode !== 'signup' && (
-            <Field
+            <PasswordField
               label={
                 authMode === 'reset'
                   ? 'New password'
@@ -261,37 +304,69 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
                     ? 'Choose a password'
                     : 'Password'
               }
-            >
-              <Input
-                type="password"
-                value={password}
-                onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
-                placeholder={
-                  authMode === 'login'
-                    ? 'Enter your password'
-                    : authMode === 'reset'
-                      ? 'Choose a new password'
-                      : 'Choose a password'
-                }
-                autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
-                required
-                disabled={authMode === 'reset' && !resetTokenValid}
-              />
-            </Field>
+              id="password"
+              name="password"
+              value={password}
+              onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
+              placeholder={
+                authMode === 'login'
+                  ? 'Enter your password'
+                  : authMode === 'reset'
+                    ? 'Choose a new password'
+                    : 'Choose a password'
+              }
+              autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
+              required
+              disabled={
+                (authMode === 'reset' && !resetTokenValid) ||
+                (authMode === 'finish-signup' && !signupTokenValid)
+              }
+            />
           )}
 
           {(authMode === 'reset' || authMode === 'finish-signup') && (
-            <Field label="Confirm password">
-              <Input
-                type="password"
-                value={confirm}
-                onInput={(e) => setConfirm((e.target as HTMLInputElement).value)}
-                placeholder="Retype your password"
-                autoComplete="new-password"
-                required
-                disabled={authMode === 'reset' && !resetTokenValid}
+            <PasswordField
+              label="Confirm password"
+              id="password-confirm"
+              name="password-confirm"
+              value={confirm}
+              onInput={(e) => setConfirm((e.target as HTMLInputElement).value)}
+              placeholder="Retype your password"
+              autoComplete="new-password"
+              required
+              disabled={
+                (authMode === 'reset' && !resetTokenValid) ||
+                (authMode === 'finish-signup' && !signupTokenValid)
+              }
+            />
+          )}
+
+          {requiresTermsAcceptance && (
+            <div class="auth-terms">
+              <Checkbox
+                id="accept-terms"
+                name="accept-terms"
+                checked={acceptedTerms}
+                onChange={(e) => setAcceptedTerms((e.target as HTMLInputElement).checked)}
+                disabled={authMode === 'finish-signup' && !signupTokenValid}
               />
-            </Field>
+              <label class="hint-text auth-terms-label" for="accept-terms">
+                I have read and agree to the{' '}
+                <a class="auth-link" href={`${LANDING_URL}/terms`} target="_blank" rel="noreferrer">
+                  Terms of Use
+                </a>{' '}
+                and{' '}
+                <a
+                  class="auth-link"
+                  href={`${LANDING_URL}/privacy`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Privacy Policy
+                </a>
+                .
+              </label>
+            </div>
           )}
 
           {(authMode === 'signup' || authMode === 'finish-signup') && (
@@ -305,7 +380,12 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
           {status && <Alert variant="success">{status}</Alert>}
           {error && <Alert variant="error">{error}</Alert>}
 
-          <Button variant="primary" type="submit" class="auth-submit" disabled={loading}>
+          <Button
+            variant="primary"
+            type="submit"
+            class="auth-submit"
+            disabled={loading || (requiresTermsAcceptance && !acceptedTerms)}
+          >
             {loading
               ? 'Please wait…'
               : authMode === 'login'

@@ -5,8 +5,8 @@ sidebar_position: 2
 # Log types
 
 Every entry in your log feed has a **type** and a matching icon. Most entries are
-routine activity (screenshots, sign-ins, suspend/resume). A few are **alerts** that
-flag a gap or interruption in monitoring worth a second look.
+routine activity (screenshots, sign-ins). A few are **alerts** that flag an
+interruption in monitoring worth a second look.
 
 Open any entry to see its details, the device it came from, and a link back to
 this page.
@@ -31,36 +31,35 @@ without a separate login step)
 
 The user logged out of this computer, or the computer was shut down
 
-## Suspend Detected
+## Screenshot Missed
 
-The device was asleep for a while. No screenshots are captured while a device
-is asleep; this entry is logged retrospectively once monitoring resumes.
-
-## Activity
-
-A monitoring lifecycle event occurred that doesn't fall into the categories
-above.
-
-## Unexpected Gap
-
-There was a gap in monitoring while the app was running — no events arrived for
-longer than expected. This can happen when the device was offline, under heavy
-load, or asleep without recording a sleep event. An occasional gap is normal;
-frequent gaps are worth investigating.
-
-## Process Stopped Unexpectedly
-
-Monitoring was stopped before the device's session ended normally. This can
-indicate the app was closed or killed rather than the user logging out or the
-device shutting down cleanly.
+A scheduled screenshot was noticeably late, or several recent ones added up to
+a longer-than-expected delay, and it wasn't explained by a nearby sign-in or
+sign-out. This can happen when the device was offline, under heavy load, or
+asleep without recording a sleep event. An occasional one is normal; frequent
+ones are worth investigating.
 
 ## Monitoring Stopped by User
 
 A user stopped the monitoring process.
 
-## Unexpected Restart
+## Monitoring Resumed by User
 
-The monitoring process restarted unexpectedly.
+A user resumed monitoring after previously stopping it.
+
+## Repeated Restarts
+
+The monitoring process was started, stopped, or killed and relaunched an
+unusually high number of times in a short span. This can indicate someone is
+repeatedly trying to disable monitoring by killing the process, or a genuine
+crash loop. Investigate if you see this.
+
+## Repeated Restarts
+
+The monitoring process was started, stopped, or killed and relaunched an
+unusually high number of times in a short span. This can indicate someone is
+repeatedly trying to disable monitoring by killing the process, or a genuine
+crash loop. Investigate if you see this.
 
 ## Alert
 
@@ -70,9 +69,14 @@ A general alert was raised. Open the entry to read the alert message.
 
 Screenshot capture failed repeatedly on the device. This usually points to a
 configuration or permissions problem with screen capture — see the
-[installation guide](/help/installation) for your platform.
+[installation guide](/download) for your platform.
 
 ## Developer
 
 A developer or diagnostic log entry. These are produced by developer tooling and
 are not part of normal monitoring.
+
+## Daily Check-in
+
+Once a day, your device sends a small update to confirm that monitoring is
+still active, even when there's nothing else to report.

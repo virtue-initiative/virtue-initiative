@@ -19,7 +19,7 @@
 //! (a terminal filling with text across one of two monitors on a 3840×1080 desktop). See the
 //! unit tests for the calibration table.
 
-use image::GenericImageView;
+use image::{DynamicImage, GenericImageView};
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
@@ -78,16 +78,23 @@ pub(crate) fn grid_dims(width: u32, height: u32) -> (u32, u32) {
 /// Reduce an encoded image to a size-appropriate grayscale grid fingerprint.
 pub fn fingerprint(image_bytes: &[u8]) -> CoreResult<Fingerprint> {
     let decoded = image::load_from_memory(image_bytes)?;
+    Ok(fingerprint_from_image(&decoded))
+}
+
+/// Same as [`fingerprint`], but takes an already-decoded image so a caller that also needs
+/// the decoded image for something else (e.g. classification) doesn't pay for a second full
+/// PNG decode of the same bytes.
+pub fn fingerprint_from_image(decoded: &DynamicImage) -> Fingerprint {
     let (width, height) = decoded.dimensions();
     let (grid_w, grid_h) = grid_dims(width, height);
     let grid = decoded
         .resize_exact(grid_w, grid_h, image::imageops::FilterType::Triangle)
         .to_luma8();
-    Ok(Fingerprint {
+    Fingerprint {
         width: grid_w as u16,
         height: grid_h as u16,
         cells: grid.into_raw(),
-    })
+    }
 }
 
 /// True if `cur` differs materially from `prev`.

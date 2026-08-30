@@ -4,7 +4,6 @@ use std::thread;
 use std::time::Duration;
 
 use ksni::blocking::TrayMethods;
-use virtue_core::ClientController;
 
 use crate::config::{self, ClientPaths};
 
@@ -139,22 +138,27 @@ fn run_one_tray_session(
 }
 
 fn build_tooltip(paths: &ClientPaths) -> String {
-    let sock = paths.state_dir.join("daemon.sock");
-    let is_authenticated = ClientController::connect(&sock)
-        .ok()
-        .and_then(|mut c| c.get_status().ok())
-        .map(|s| s.is_authenticated)
-        .unwrap_or(false);
+    let status = config::load_service_status(paths).ok();
 
     let bin = match config::INSTANCE {
         Some(n) if !n.is_empty() => format!("virtue-{n}"),
         _ => "virtue".to_string(),
     };
 
-    if is_authenticated {
-        format!("Signed in. Run '{bin} status' from a terminal for details.")
-    } else {
-        format!("Not signed in. Run '{bin} login' from a terminal.")
+    match status {
+        Some(status) if status.is_authenticated => {
+            let pending = status.pending_hash_count + status.pending_batch_count;
+            let queue = if pending == 0 {
+                "nothing queued".to_string()
+            } else {
+                format!("{pending} waiting to upload")
+            };
+            let account = status
+                .account_email
+                .unwrap_or_else(|| "signed in".to_string());
+            format!("{account} — {queue}. Run '{bin} status' from a terminal for details.")
+        }
+        _ => format!("Not signed in. Run '{bin} login' from a terminal."),
     }
 }
 
@@ -259,7 +263,7 @@ fn build_icon() -> ksni::Icon {
         let width = 16_i32;
         let height = 16_i32;
         let mut argb = vec![0_u8; (width * height * 4) as usize];
-        for pixel in argb.chunks_exact_mut(4) {
+        for pixel in argb.as_chunks_mut::<4>().0 {
             pixel.copy_from_slice(&[0xff, 0x20, 0x20, 0x20]);
         }
         ksni::Icon {
@@ -280,7 +284,7 @@ fn build_icon() -> ksni::Icon {
     let width = decoded.width() as i32;
     let height = decoded.height() as i32;
     let mut argb = decoded.into_raw();
-    for pixel in argb.chunks_exact_mut(4) {
+    for pixel in argb.as_chunks_mut::<4>().0 {
         pixel.rotate_right(1);
     }
 

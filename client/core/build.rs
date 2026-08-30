@@ -6,12 +6,16 @@ use std::process::Command;
 use chrono::Utc;
 
 fn main() {
+    load_dotenv();
+
     println!("cargo:rerun-if-env-changed=VIRTUE_BUILD_LABEL");
     println!("cargo:rerun-if-env-changed=VIRTUE_BUILD_DATE");
     println!("cargo:rerun-if-env-changed=VIRTUE_GIT_SHORT_HASH");
     println!("cargo:rerun-if-env-changed=VIRTUE_GIT_REF_NAME");
     println!("cargo:rerun-if-env-changed=VIRTUE_RELEASE_CHANNEL");
     println!("cargo:rerun-if-env-changed=VIRTUE_DEFAULT_API_URL");
+    println!("cargo:rerun-if-env-changed=VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS");
+    println!("cargo:rerun-if-env-changed=VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS");
     println!("cargo:rerun-if-env-changed=GITHUB_SHA");
     println!("cargo:rerun-if-env-changed=GITHUB_REF_NAME");
     println!("cargo:rerun-if-changed=../version.properties");
@@ -24,22 +28,89 @@ fn main() {
 
     let default_api_url = default_api_base_url();
     println!("cargo:rustc-env=VIRTUE_DEFAULT_API_URL={default_api_url}");
+
+    let capture_interval_seconds = capture_interval_seconds();
+    println!("cargo:rustc-env=VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS={capture_interval_seconds}");
+
+    let batch_window_seconds = batch_window_seconds();
+    println!("cargo:rustc-env=VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS={batch_window_seconds}");
+}
+
+/// Loads compile-time defaults (API URL, intervals) from, in priority order: the repo-root
+/// `.env` (per-worktree overrides), then `~/.config/virtue-dev.env` (machine-wide defaults,
+/// `$VIRTUE_DEV_ENV`-overridable — see root AGENTS.md; shared with the shell scripts that
+/// source the same file). Each `KEY=VALUE` pair is set as a process env var only if that key
+/// isn't already set — by an earlier, higher-priority file in this same loop, or by a real
+/// process/CI env var set before `cargo build` ran — so real env vars always win, and the
+/// repo-root file wins over the machine-wide one.
+fn load_dotenv() {
+    let Ok(manifest_dir) = env::var("CARGO_MANIFEST_DIR") else {
+        return;
+    };
+    // client/core -> repo root is two levels up.
+    let repo_root = PathBuf::from(&manifest_dir).join("../..");
+    let repo_env = repo_root.join(".env");
+
+    let shared_env = env::var("VIRTUE_DEV_ENV")
+        .ok()
+        .map(PathBuf::from)
+        .or_else(|| home_dir().map(|home| home.join(".config/virtue-dev.env")));
+
+    for path in [Some(repo_env), shared_env].into_iter().flatten() {
+        println!("cargo:rerun-if-changed={}", path.display());
+        load_dotenv_file(&path);
+    }
+}
+
+fn home_dir() -> Option<PathBuf> {
+    env::var("HOME")
+        .or_else(|_| env::var("USERPROFILE"))
+        .ok()
+        .map(PathBuf::from)
+}
+
+fn load_dotenv_file(path: &PathBuf) {
+    let Ok(contents) = fs::read_to_string(path) else {
+        return;
+    };
+
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim().trim_matches('"').trim_matches('\'');
+        if key.is_empty() {
+            continue;
+        }
+        if env::var(key).is_err() {
+            unsafe {
+                env::set_var(key, value);
+            }
+        }
+    }
 }
 
 /// The NSFW model is tracked by Git LFS and embedded into the binary via `include_bytes!`
-/// (`src/module/screenshot.rs`). If LFS objects aren't materialized at build time, the file on
-/// disk is a ~130-byte text *pointer*, which gets baked into the binary instead of the model.
-/// The classifier then fails to load and every screenshot risk is silently 0. Catch that here at
+/// (`src/module/screenshot.rs`) — as an NNEF tar pre-converted offline from the source ONNX
+/// model (see `examples/onnx_to_nnef.rs`; both files are LFS-tracked, but only the NNEF one is
+/// actually compiled in). If LFS objects aren't materialized at build time, the file on disk is
+/// a ~130-byte text *pointer*, which gets baked into the binary instead of the model. The
+/// classifier then fails to load and every screenshot risk is silently 0. Catch that here at
 /// build time — loudly — instead of shipping a broken detector.
 fn assert_model_resolved() {
     const LFS_POINTER_MAGIC: &[u8] = b"version https://git-lfs.github.com/spec/v1";
-    // The real ONNX model is ~17 MB; any LFS pointer is well under 1 KiB. Anything below this is
-    // certainly not a usable model.
+    // The real NNEF model is ~17 MB; any LFS pointer is well under 1 KiB. Anything below this
+    // is certainly not a usable model.
     const MIN_MODEL_BYTES: u64 = 4096;
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
-    let model_path = manifest_dir.join("models/nsfw_small_v1.onnx");
-    println!("cargo:rerun-if-changed=models/nsfw_small_v1.onnx");
+    let model_path = manifest_dir.join("models/nsfw_small_v1.nnef.tar");
+    println!("cargo:rerun-if-changed=models/nsfw_small_v1.nnef.tar");
 
     let metadata = fs::metadata(&model_path).unwrap_or_else(|err| {
         panic!(
@@ -54,7 +125,7 @@ fn assert_model_resolved() {
 
     if is_pointer || metadata.len() < MIN_MODEL_BYTES {
         panic!(
-            "NSFW model {} is an unresolved Git LFS pointer ({} bytes), not the real ONNX. \
+            "NSFW model {} is an unresolved Git LFS pointer ({} bytes), not the real NNEF. \
              Run `git lfs install && git lfs pull` (and ensure CI checks out with `lfs: true`) \
              before building, or the screenshot risk classifier will silently report 0.",
             model_path.display(),
@@ -81,6 +152,43 @@ fn default_api_base_url() -> String {
                 "https://staging.app.virtueinitiative.org/api".to_string()
             }
         })
+}
+
+/// Enforced at build time (panics on violation) rather than clamped silently at runtime, so a
+/// misconfigured interval fails fast in CI/build instead of shipping a silently-adjusted value.
+const MIN_CAPTURE_INTERVAL_SECONDS: u64 = 15;
+const MIN_BATCH_INTERVAL_SECONDS: u64 = 1;
+
+fn capture_interval_seconds() -> u64 {
+    build_time_u64_env(
+        "VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS",
+        300,
+        MIN_CAPTURE_INTERVAL_SECONDS,
+    )
+}
+
+fn batch_window_seconds() -> u64 {
+    build_time_u64_env(
+        "VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS",
+        3600,
+        MIN_BATCH_INTERVAL_SECONDS,
+    )
+}
+
+fn build_time_u64_env(key: &str, default: u64, floor: u64) -> u64 {
+    let value = match env::var(key).ok().filter(|v| !v.trim().is_empty()) {
+        Some(raw) => raw
+            .trim()
+            .parse::<u64>()
+            .unwrap_or_else(|err| panic!("{key}={raw:?} is not a valid u64: {err}")),
+        None => default,
+    };
+
+    if value < floor {
+        panic!("{key}={value} is below the minimum allowed value of {floor}");
+    }
+
+    value
 }
 
 fn release_tag() -> String {

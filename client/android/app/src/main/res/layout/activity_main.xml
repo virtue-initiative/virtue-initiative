@@ -65,6 +65,17 @@
                         android:textSize="12sp"
                         android:textColor="?attr/colorOnSurfaceVariant"
                         android:layout_marginTop="4dp" />
+
+                    <TextView
+                        android:id="@+id/reportBugLink"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/btn_report_bug"
+                        android:textSize="14sp"
+                        android:textColor="@color/virtue_forest"
+                        android:layout_marginTop="6dp"
+                        android:clickable="true"
+                        android:focusable="true" />
                 </LinearLayout>
             </LinearLayout>
         </LinearLayout>
@@ -124,6 +135,16 @@
                     app:strokeColor="@color/virtue_forest" />
 
                 <com.google.android.material.button.MaterialButton
+                    android:id="@+id/forceCaptureButton"
+                    style="@style/Widget.App.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/btn_force_capture"
+                    android:textColor="@color/virtue_forest"
+                    app:strokeColor="@color/virtue_forest" />
+
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/pauseResumeButton"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -151,13 +172,57 @@
                 android:textColor="?attr/colorOnSurfaceVariant"
                 android:letterSpacing="0.05" />
 
-            <!-- Login Panel (shown when signed out) -->
+            <!-- Onboarding Panel (shown on first install, before accessibility service is enabled) -->
+            <LinearLayout
+                android:id="@+id/onboardingPanel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginTop="10dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/msg_onboarding_intro"
+                    android:textSize="14sp"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="@string/msg_onboarding_steps"
+                    android:textSize="14sp"
+                    android:lineSpacingExtra="4dp"
+                    android:textColor="?attr/colorOnSurface" />
+
+                <TextView
+                    android:id="@+id/onboardingStatusText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="@string/msg_onboarding_waiting"
+                    android:textSize="13sp"
+                    android:textStyle="italic"
+                    android:textColor="@color/virtue_moss" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/openAccessibilitySettingsButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="@string/btn_open_accessibility_settings"
+                    android:backgroundTint="@color/virtue_forest" />
+            </LinearLayout>
+
+            <!-- Login Panel (shown when signed out, after accessibility service is enabled) -->
             <LinearLayout
                 android:id="@+id/loginPanel"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:layout_marginTop="10dp">
+                android:layout_marginTop="10dp"
+                android:visibility="gone">
 
                 <TextView
                     android:layout_width="match_parent"
@@ -224,15 +289,17 @@
                         android:text="@string/btn_sign_in"
                         android:backgroundTint="@color/virtue_forest" />
 
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/overridesButton"
-                        style="@style/Widget.App.Button.OutlinedButton"
-                        android:layout_width="match_parent"
+                    <TextView
+                        android:id="@+id/signUpLink"
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/btn_runtime_overrides"
+                        android:layout_gravity="center_horizontal"
+                        android:layout_marginTop="12dp"
+                        android:text="@string/btn_sign_up"
+                        android:textSize="14sp"
                         android:textColor="@color/virtue_forest"
-                        app:strokeColor="@color/virtue_forest" />
+                        android:clickable="true"
+                        android:focusable="true" />
                 </LinearLayout>
             </LinearLayout>
 
@@ -275,50 +342,8 @@
                         android:text="@string/btn_sign_out"
                         android:textColor="@color/virtue_forest"
                         app:strokeColor="@color/virtue_forest" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/overridesButtonSession"
-                        style="@style/Widget.App.Button.OutlinedButton"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/btn_runtime_overrides"
-                        android:textColor="@color/virtue_forest"
-                        app:strokeColor="@color/virtue_forest" />
                 </LinearLayout>
             </LinearLayout>
-        </LinearLayout>
-
-        <!-- Hidden override inputs (for compatibility with existing MainActivity code) -->
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:orientation="vertical"
-            android:visibility="gone">
-            <EditText
-                android:id="@+id/baseApiUrlInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
-            <EditText
-                android:id="@+id/captureIntervalInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
-            <EditText
-                android:id="@+id/batchWindowInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
-            <Button
-                android:id="@+id/saveOverridesButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
-            <Button
-                android:id="@+id/grantCaptureButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
-            <Button
-                android:id="@+id/startServiceButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
         </LinearLayout>
 
     </LinearLayout>

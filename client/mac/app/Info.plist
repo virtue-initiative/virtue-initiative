@@ -22,6 +22,24 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>VirtueBuildLabel</key>
 	<string>$(VIRTUE_BUILD_LABEL)</string>
+	<key>VirtueReleaseChannel</key>
+	<string>$(VIRTUE_RELEASE_CHANNEL)</string>
+	<!-- Sparkle. SUFeedURL/SUPublicEDKey are empty unless build-app.sh was run
+	     with VIRTUE_ENABLE_AUTO_UPDATE=1; UpdateController treats an empty feed
+	     URL as "auto-update disabled" and never starts the updater. The two
+	     SU*Automatic* keys below are Sparkle's persisted defaults for a first
+	     launch — VirtueUpdateDriver never presents a choice either way, since a
+	     dismissible update prompt on a monitoring client is a bypass. -->
+	<key>SUFeedURL</key>
+	<string>$(VIRTUE_SPARKLE_FEED_URL)</string>
+	<key>SUPublicEDKey</key>
+	<string>$(VIRTUE_SPARKLE_PUBLIC_KEY)</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUAutomaticallyUpdate</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>21600</integer>
 	<key>LSUIElement</key>
 	<true/>
 	<key>LSMinimumSystemVersion</key>

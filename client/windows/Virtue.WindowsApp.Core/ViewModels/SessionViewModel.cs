@@ -21,31 +21,29 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private string? _deviceId;
     private int _pendingRequestCount;
     private long? _lastScreenshotAtMs;
-    private string _apiBaseUrl = string.Empty;
-    private string _captureIntervalSeconds = string.Empty;
-    private string _batchWindowSeconds = string.Empty;
-    private string _configPath = "Loading config path...";
+    private MonitorStatusPayload? _monitorStatus;
     private bool _isBusy;
     private bool _hasLoadedStatus;
     private bool _isHydratingEmailInput;
     private bool _hasUserEditedEmailInput;
     private string? _transitionMessage;
     private string? _errorText;
+    private bool _updateReady;
+    private string? _updateCountdownText;
+    private string? _updateCheckStatusText;
+    private bool _updateInstalling;
 
     public SessionViewModel(IRustInteropClient interopClient, string? windowsPackageVersion = null)
     {
         _interopClient = interopClient;
         _windowsPackageVersion = windowsPackageVersion?.Trim() ?? string.Empty;
         RefreshCommand = new DelegateCommand(RefreshAsync, () => !IsBusy);
-        SaveSettingsCommand = new DelegateCommand(SaveSettingsAsync, () => !IsBusy);
         LogoutCommand = new DelegateCommand(LogoutAsync, () => !IsBusy);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public DelegateCommand RefreshCommand { get; }
-
-    public DelegateCommand SaveSettingsCommand { get; }
 
     public DelegateCommand LogoutCommand { get; }
 
@@ -185,9 +183,23 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         private set => SetProperty(ref _lastScreenshotAtMs, value);
     }
 
+    /// <summary>
+    /// The last full status payload read from the core, which the Status
+    /// Details dialog renders. Individual properties above stay for the parts
+    /// the main window binds to directly.
+    /// </summary>
+    public MonitorStatusPayload? MonitorStatus
+    {
+        get => _monitorStatus;
+        private set => SetProperty(ref _monitorStatus, value);
+    }
+
     public string MonitorStateDisplay => MonitorState.Replace('_', ' ');
 
     public string TrayTooltip =>
+        BaseTrayTooltip + (_updateReady ? " (update ready)" : string.Empty);
+
+    private string BaseTrayTooltip =>
         MonitorState switch
         {
             "loading" => "Virtue: loading status",
@@ -200,38 +212,77 @@ public sealed class SessionViewModel : INotifyPropertyChanged
             _ => "Virtue: monitoring stopped",
         };
 
-    public string ApiBaseUrl
+    /// <summary>
+    /// Called once a Store update has finished downloading/staging, so the tray tooltip
+    /// reflects it. See <c>Virtue.WindowsApp.Update.StoreUpdateManager</c>.
+    /// </summary>
+    public void NotifyUpdateStaged()
     {
-        get => _apiBaseUrl;
-        set => SetProperty(ref _apiBaseUrl, value);
-    }
-
-    public string CaptureIntervalSeconds
-    {
-        get => _captureIntervalSeconds;
-        set => SetProperty(ref _captureIntervalSeconds, value);
-    }
-
-    public string BatchWindowSeconds
-    {
-        get => _batchWindowSeconds;
-        set => SetProperty(ref _batchWindowSeconds, value);
-    }
-
-    public string ConfigPath
-    {
-        get => _configPath;
-        private set
+        if (SetProperty(ref _updateReady, true, nameof(UpdateReady)))
         {
-            if (SetProperty(ref _configPath, value))
-            {
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ConfigPathDisplay)));
-            }
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TrayTooltip)));
         }
     }
 
-    public string ConfigPathDisplay =>
-        string.IsNullOrWhiteSpace(ConfigPath) ? "Config path unavailable." : ConfigPath;
+    /// <summary>
+    /// Called when a staged update stops being staged without the app restarting — the install
+    /// was declined, or the Store retracted the update. Without this the notice card would stay
+    /// up forever showing a frozen countdown over a button that no longer does anything. The
+    /// check loop re-stages on its own backoff, which rebuilds all of this through
+    /// <see cref="NotifyUpdateStaged"/>.
+    /// </summary>
+    public void NotifyUpdateUnstaged()
+    {
+        UpdateCountdownText = null;
+        UpdateInstalling = false;
+        if (SetProperty(ref _updateReady, false, nameof(UpdateReady)))
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TrayTooltip)));
+        }
+    }
+
+    /// <summary>
+    /// Called once the install has actually been started, which ends with the OS terminating
+    /// this process and the restart watchdog relaunching it. The notice card says so and its
+    /// button goes dead, so the wait doesn't read as the button having done nothing.
+    /// </summary>
+    public void NotifyUpdateInstalling()
+    {
+        UpdateInstalling = true;
+    }
+
+    public bool UpdateInstalling
+    {
+        get => _updateInstalling;
+        private set => SetProperty(ref _updateInstalling, value);
+    }
+
+    public bool UpdateReady => _updateReady;
+
+    /// <summary>
+    /// Feedback for the manual "Check for updates" button, rendered beside it. Every check
+    /// outcome maps to some text here — an empty line after a click reads as a hang.
+    /// </summary>
+    public string? UpdateCheckStatusText
+    {
+        get => _updateCheckStatusText;
+        set => SetProperty(ref _updateCheckStatusText, value);
+    }
+
+    public string? UpdateCountdownText
+    {
+        get => _updateCountdownText;
+        private set => SetProperty(ref _updateCountdownText, value);
+    }
+
+    /// <summary>
+    /// Called each time the countdown to the forced Store-update restart deadline is
+    /// recomputed, so the in-window notice can show it. See <c>App.EvaluateUpdateRestart</c>.
+    /// </summary>
+    public void SetUpdateCountdownText(string? text)
+    {
+        UpdateCountdownText = text;
+    }
 
     public bool IsBusy
     {
@@ -241,7 +292,6 @@ public sealed class SessionViewModel : INotifyPropertyChanged
             if (SetProperty(ref _isBusy, value))
             {
                 RefreshCommand.RaiseCanExecuteChanged();
-                SaveSettingsCommand.RaiseCanExecuteChanged();
                 LogoutCommand.RaiseCanExecuteChanged();
             }
         }
@@ -317,6 +367,34 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         }, "Signing out...");
     }
 
+    /// <summary>
+    /// Runs a test screenshot and returns what it actually did — the interop
+    /// call only comes back once the resulting batch has landed or the wait
+    /// timed out. Null means the call failed; <see cref="ErrorText"/> says why.
+    /// </summary>
+    public async Task<ForceCapturePayload?> ForceCaptureAsync()
+    {
+        ForceCapturePayload? result = null;
+        await RunBusyAsync(async () =>
+        {
+            result = await Task.Run(() => _interopClient.ForceScreenshotAndUpload());
+            await RefreshInternalAsync();
+            StatusText = BuildStatusText();
+        }, "Screenshot uploading...");
+        return result;
+    }
+
+    public async Task<bool> SubmitBugReportAsync(string message, string? contactEmail, bool includeLogs)
+    {
+        var succeeded = false;
+        await RunBusyAsync(async () =>
+        {
+            await Task.Run(() => _interopClient.ReportIssue(message, contactEmail, includeLogs));
+            succeeded = true;
+        }, "Sending report...");
+        return succeeded;
+    }
+
     public async Task RefreshAsync()
     {
         await RunBusyAsync(async () =>
@@ -340,31 +418,9 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         MonitorError = _loggedIn ? monitorStatus.LastError : null;
         PendingRequestCount = _loggedIn ? monitorStatus.PendingRequestCount : 0;
         LastScreenshotAtMs = _loggedIn ? monitorStatus.LastScreenshotAtMs : null;
+        MonitorStatus = monitorStatus;
 
         return Task.CompletedTask;
-    }
-
-    public async Task SaveSettingsAsync()
-    {
-        if (!TryParseInteger(CaptureIntervalSeconds, out var captureIntervalSeconds, out var captureError))
-        {
-            StatusText = captureError;
-            return;
-        }
-
-        if (!TryParseInteger(BatchWindowSeconds, out var batchWindowSeconds, out var batchError))
-        {
-            StatusText = batchError;
-            return;
-        }
-
-        await RunBusyAsync(async () =>
-        {
-            StatusText = "Saving runtime settings...";
-            _interopClient.SetRuntimeConfig(new RuntimeConfigUpdate(ApiBaseUrl, captureIntervalSeconds, batchWindowSeconds));
-            await RefreshInternalAsync();
-            StatusText = "Runtime settings saved.";
-        }, "Saving runtime settings...");
     }
 
     private Task RefreshInternalAsync()
@@ -372,18 +428,20 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         var status = _interopClient.GetSessionStatus();
         HasLoadedStatus = true;
         var monitorStatus = _interopClient.GetMonitorStatus();
-        var runtimeConfig = _interopClient.GetRuntimeConfig();
         var resolvedMonitorState = ResolveMonitorState(_hasLoadedStatus, status.LoggedIn, monitorStatus.State);
         var isSignedIn = status.LoggedIn;
 
         BuildLabel = status.BuildLabel;
         LoggedIn = isSignedIn;
-        DeviceId = isSignedIn ? status.DeviceId : null;
-        AccountEmail = status.Email ?? string.Empty;
+        DeviceId = isSignedIn ? (status.DeviceId ?? monitorStatus.DeviceId) : null;
+        // Only fall back to the daemon's email while signed in — a stale
+        // monitor snapshot must not resurrect an email after a sign-out.
+        AccountEmail = status.Email ?? (isSignedIn ? monitorStatus.AccountEmail : null) ?? string.Empty;
         MonitorState = resolvedMonitorState;
         MonitorError = isSignedIn ? monitorStatus.LastError : null;
         PendingRequestCount = isSignedIn ? monitorStatus.PendingRequestCount : 0;
         LastScreenshotAtMs = isSignedIn ? monitorStatus.LastScreenshotAtMs : null;
+        MonitorStatus = monitorStatus;
         if (isSignedIn)
         {
             SetEmailInput(status.Email ?? string.Empty);
@@ -392,10 +450,6 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         {
             SetEmailInput(status.Email ?? string.Empty);
         }
-        ApiBaseUrl = runtimeConfig.ApiBaseUrl;
-        CaptureIntervalSeconds = runtimeConfig.CaptureIntervalSeconds.ToString();
-        BatchWindowSeconds = runtimeConfig.BatchWindowSeconds.ToString();
-        ConfigPath = runtimeConfig.ConfigPath;
 
         return Task.CompletedTask;
     }
@@ -480,27 +534,6 @@ public sealed class SessionViewModel : INotifyPropertyChanged
             TransitionMessage = null;
             IsBusy = false;
         }
-    }
-
-    private static bool TryParseInteger(string rawValue, out int? value, out string error)
-    {
-        if (string.IsNullOrWhiteSpace(rawValue))
-        {
-            value = null;
-            error = string.Empty;
-            return true;
-        }
-
-        if (int.TryParse(rawValue, out var parsed) && parsed >= 0)
-        {
-            value = parsed;
-            error = string.Empty;
-            return true;
-        }
-
-        value = null;
-        error = $"Expected a positive integer value, got '{rawValue}'.";
-        return false;
     }
 
     private bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

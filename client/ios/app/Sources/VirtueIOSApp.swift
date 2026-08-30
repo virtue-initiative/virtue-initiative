@@ -18,8 +18,10 @@ struct ContentView: View {
     @ObservedObject var coordinator: MonitoringCoordinator
     @State private var showPauseConfirmation = false
     @State private var showLogoutConfirmation = false
+    @State private var isPasswordVisible = false
     @State private var showStatusSheet = false
-    @State private var showOverridesSheet = false
+    @State private var showReportBugSheet = false
+    @State private var showReportBugConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -38,8 +40,15 @@ struct ContentView: View {
         .sheet(isPresented: $showStatusSheet) {
             StatusSheet(coordinator: coordinator)
         }
-        .sheet(isPresented: $showOverridesSheet) {
-            OverridesSheet(coordinator: coordinator)
+        .sheet(isPresented: $showReportBugSheet) {
+            ReportBugSheet(coordinator: coordinator) {
+                showReportBugConfirmation = true
+            }
+        }
+        .alert("Report Sent", isPresented: $showReportBugConfirmation) {
+            Button("OK") {}
+        } message: {
+            Text("Thanks — your report was sent to the Virtue Initiative team.")
         }
         .alert("Pause monitoring?", isPresented: $showPauseConfirmation) {
             Button("Cancel", role: .cancel) {}
@@ -55,7 +64,7 @@ struct ContentView: View {
                 coordinator.logout()
             }
         } message: {
-            Text("Logging out will alert people monitoring you and will recreate a new device on your next login. Continue?")
+            Text("Signing out will deactivate this device and stop monitoring. Anyone monitoring you may be alerted. Logging in again will create a new device.")
         }
     }
 
@@ -74,6 +83,12 @@ struct ContentView: View {
                     Text("Build \(VirtueShared.buildLabel)")
                         .font(.footnote)
                         .foregroundStyle(VirtueBrand.textMuted)
+                    Button("Report a Bug") {
+                        showReportBugSheet = true
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(VirtueBrand.accent)
+                    .padding(.top, 2)
                 }
 
                 Spacer(minLength: 0)
@@ -131,11 +146,6 @@ struct ContentView: View {
                         }
                         .buttonStyle(VirtueButtonStyle())
                         .disabled(coordinator.isSigningOut)
-
-                        Button("Runtime Overrides") {
-                            showOverridesSheet = true
-                        }
-                        .buttonStyle(VirtueButtonStyle())
                     }
                     .padding(.top, 6)
                 } else {
@@ -148,8 +158,28 @@ struct ContentView: View {
                             .autocorrectionDisabled()
                             .textFieldStyle(.roundedBorder)
 
-                        SecureField("Password", text: $coordinator.password)
-                            .textFieldStyle(.roundedBorder)
+                        // SwiftUI has no reveal affordance on SecureField, so swap
+                        // in a plain TextField while the eye toggle is on. Both
+                        // bind the same password, so toggling never loses input.
+                        HStack(spacing: 8) {
+                            if isPasswordVisible {
+                                TextField("Password", text: $coordinator.password)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                                    .textFieldStyle(.roundedBorder)
+                            } else {
+                                SecureField("Password", text: $coordinator.password)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                            Button {
+                                isPasswordVisible.toggle()
+                            } label: {
+                                Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
+                                    .foregroundStyle(VirtueBrand.textMuted)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(isPasswordVisible ? "Hide password" : "Show password")
+                        }
 
                         TextField("Device name", text: $coordinator.deviceName)
                             .autocorrectionDisabled()
@@ -161,12 +191,14 @@ struct ContentView: View {
                             }
                             .buttonStyle(VirtueButtonStyle(prominent: true))
                             .disabled(coordinator.isSigningIn)
-
-                            Button("Runtime Overrides") {
-                                showOverridesSheet = true
-                            }
-                            .buttonStyle(VirtueButtonStyle())
                         }
+
+                        Link(
+                            "Don't have an account? Sign up",
+                            destination: URL(string: "https://app.virtueinitiative.org/signup")!
+                        )
+                        .font(.subheadline)
+                        .foregroundStyle(VirtueBrand.accent)
 
                         if let error = coordinator.loginError {
                             Text(error)
@@ -189,16 +221,17 @@ struct ContentView: View {
                     .foregroundStyle(VirtueBrand.text)
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Permission state: \(coordinator.safariPermissionSummary)")
-                    Text("Daemon state: \(coordinator.safariDaemonStatus)")
+                    Text("Extension status: \(coordinator.safariDaemonStatus)")
                 }
                 .font(.subheadline)
                 .foregroundStyle(VirtueBrand.textMuted)
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("1. Open Settings > Safari > Extensions.")
-                    Text("2. Enable Virtue Safari Capture.")
-                    Text("3. Allow access on All Websites.")
-                    Text("4. Virtue will produce screenshots while browsing.")
+                    Text("1. Open Settings > Safari > Extensions > Virtue Safari Capture.")
+                    Text("2. Turn on \"Allow Extension\" and \"Allow in Private Browsing\".")
+                    Text("3. In Permissions, select \"Allow\" for \"All Websites\".")
+                    Text("4. Fully close Safari (swipe it away in the app switcher) and reopen it.")
+                    Text("5. Virtue will produce screenshots while browsing.")
                 }
                 .font(.subheadline)
                 .foregroundStyle(VirtueBrand.text)
@@ -239,6 +272,9 @@ struct ContentView: View {
     }
 }
 
+/// The status page (see `client/core/SPEC.md` CORE-010): the same sections, in
+/// the same order, as every other platform's status screen, followed by the
+/// iOS-only Safari extension section.
 private struct StatusSheet: View {
     @ObservedObject var coordinator: MonitoringCoordinator
     @Environment(\.dismiss) private var dismiss
@@ -246,30 +282,62 @@ private struct StatusSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Service") {
+                Section("Account") {
                     DetailRow(label: "Summary", value: coordinator.monitorSummary)
                     DetailRow(label: "Status", value: coordinator.statusMessage)
+                    DetailRow(label: "Email", value: status?.accountEmail ?? coordinator.accountEmail ?? "<none>")
+                    DetailRow(label: "Device name", value: status?.deviceName ?? "<none>")
+                    DetailRow(label: "Partners", value: status?.partnerCount.map(String.init) ?? "<unknown>")
+                }
+
+                Section("Queues") {
+                    DetailRow(label: "Waiting for hash", value: "\(status?.pendingHashCount ?? 0)")
+                    DetailRow(label: "Waiting in batch", value: "\(status?.pendingBatchCount ?? 0)")
                     DetailRow(label: "Pending requests", value: "\(coordinator.pendingRequestCount)")
-                    DetailRow(label: "API", value: coordinator.currentApiBaseUrl)
+                    DetailRow(label: "Last batch upload", value: coordinator.lastCoreBatch)
                 }
 
-                Section("Core Lifecycle") {
-                    DetailRow(label: "User session", value: coordinator.coreUserSession)
-                    DetailRow(label: "Primary service", value: coordinator.corePrimaryService)
-                    DetailRow(label: "Capture permission", value: coordinator.coreCapturePermission)
-                    DetailRow(label: "Capture availability", value: coordinator.coreCaptureAvailability)
-                }
-
-                Section("Timing") {
+                Section("Capture") {
                     DetailRow(label: "Last loop", value: coordinator.lastCoreLoop)
+                    DetailRow(label: "Last attempt", value: coordinator.lastCoreScreenshotAttempt)
                     DetailRow(label: "Last screenshot", value: coordinator.lastCoreScreenshot)
-                    DetailRow(label: "Last batch", value: coordinator.lastCoreBatch)
+                    DetailRow(label: "Last skip reason", value: status?.lastSkipReason?.label ?? "<none>")
+                }
+
+                Section("Recent errors") {
+                    if let errors = status?.recentErrors, !errors.isEmpty {
+                        ForEach(Array(errors.prefix(5).enumerated()), id: \.offset) { _, error in
+                            DetailRow(
+                                label: "\(coordinator.formatStatusTimestamp(error.atMs)) · \(error.context)",
+                                value: error.message
+                            )
+                        }
+                    } else {
+                        DetailRow(label: "Errors", value: "None")
+                    }
+                }
+
+                Section("Advanced") {
+                    DetailRow(label: "Device ID", value: coordinator.deviceId)
+                    DetailRow(label: "API URL", value: status?.apiBaseUrl ?? coordinator.currentApiBaseUrl)
+                    DetailRow(label: "Hash base URL", value: status?.hashBaseUrl ?? "<default>")
+                    DetailRow(
+                        label: "Capture interval",
+                        value: status?.captureIntervalSeconds.map { "\($0)s" }
+                            ?? "\(VirtueShared.defaultCaptureIntervalSeconds)s"
+                    )
+                    DetailRow(
+                        label: "Batch window",
+                        value: status?.batchWindowSeconds.map { "\($0)s" }
+                            ?? "\(VirtueShared.defaultBatchWindowSeconds)s"
+                    )
+                    DetailRow(label: "Build", value: VirtueShared.buildLabel)
                 }
 
                 Section("Safari Extension") {
                     DetailRow(label: "Capture health", value: coordinator.safariCaptureHealth)
                     DetailRow(label: "Permission state", value: coordinator.safariPermissionSummary)
-                    DetailRow(label: "Daemon", value: coordinator.safariDaemonStatus)
+                    DetailRow(label: "Extension status", value: coordinator.safariDaemonStatus)
                     DetailRow(label: "Last heartbeat", value: coordinator.safariLastHeartbeat)
                     DetailRow(label: "Last frame", value: coordinator.safariLastFrame)
                     DetailRow(label: "Last page", value: coordinator.safariLastPage)
@@ -289,50 +357,8 @@ private struct StatusSheet: View {
             }
         }
     }
-}
 
-private struct OverridesSheet: View {
-    @ObservedObject var coordinator: MonitoringCoordinator
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("Runtime Overrides") {
-                    TextField("VIRTUE_BASE_API_URL", text: $coordinator.baseApiUrlOverride)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .listRowBackground(VirtueBrand.surface)
-                    TextField("VIRTUE_CAPTURE_INTERVAL_SECONDS", text: $coordinator.captureIntervalOverride)
-                        .keyboardType(.numberPad)
-                        .listRowBackground(VirtueBrand.surface)
-                    TextField("VIRTUE_BATCH_WINDOW_SECONDS", text: $coordinator.batchWindowOverride)
-                        .keyboardType(.numberPad)
-                        .listRowBackground(VirtueBrand.surface)
-                }
-
-                Section {
-                    Button("Apply Overrides") {
-                        coordinator.applyOverrides()
-                        dismiss()
-                    }
-                    .listRowBackground(VirtueBrand.surface)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-                }
-            }
-            .scrollContentBackground(.hidden)
-            .background(VirtueBrand.bg)
-            .navigationTitle("Runtime Overrides")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
-        }
-    }
+    private var status: CoreServiceStatus? { coordinator.coreStatus }
 }
 
 private struct VirtueButtonStyle: ButtonStyle {
@@ -447,7 +473,7 @@ private struct AppBrandIcon: View {
     }
 }
 
-private enum VirtueBrand {
+enum VirtueBrand {
     // Forest green — matches --accent / --forest in shared-web/tokens.css
     static let accent = Color(
         red: 30.0 / 255.0,

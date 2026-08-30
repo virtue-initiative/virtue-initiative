@@ -34,7 +34,12 @@ class VirtueAccessibilityService : AccessibilityService() {
             return
         }
 
-        if (NativeBridge.nativeIsLoggedIn() && !paused) {
+        // The daemon loop must be running before login can succeed: nativeLogin()
+        // sends a request over the daemon's mpsc channel and blocks for a reply
+        // from the run_forever() loop thread, so it needs a loop thread already
+        // running here — same as every other platform, which starts the loop
+        // unconditionally at process startup regardless of login state.
+        if (!paused) {
             startDaemonLoop()
         }
     }

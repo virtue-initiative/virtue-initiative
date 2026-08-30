@@ -5,15 +5,18 @@ export interface Env {
   JWT_PRIVATE_KEY: string;
   JWT_PUBLIC_KEY: string;
   API_BASE_PATH?: string;
-  HASH_SERVER_URL?: string;
+  COMMIT_SHA?: string;
+  HASH_SERVER_URL: string;
   R2_URL: string;
   APP_URL: string;
+  LANDING_URL: string;
   APP_NAME: string;
   AWS_ACCESS_KEY_ID: string;
   AWS_SECRET_ACCESS_KEY: string;
   AWS_SES_REGION: string;
   AWS_SES_FROM_EMAIL: string;
   EMAIL_DELIVERY_MODE: 'ses' | 'log';
+  BUG_REPORT_EMAIL: string;
 }
 
 export interface Variables {

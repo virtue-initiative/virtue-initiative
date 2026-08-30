@@ -39,6 +39,7 @@ docker run --rm \
     -e VIRTUE_GIT_SHORT_HASH \
     -e VIRTUE_BUILD_DATE \
     -e VIRTUE_GIT_REF_NAME \
+    -e VIRTUE_ENABLE_AUTO_UPDATE \
     -v "$CLIENT_ROOT:/workspace" \
     -v "$DOCKER_TARGET_DIR:/workspace/target" \
     -w /workspace \

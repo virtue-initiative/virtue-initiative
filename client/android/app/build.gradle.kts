@@ -124,11 +124,14 @@ dependencies {
     implementation("com.google.mlkit:text-recognition:16.0.1")
 }
 
-val buildRustRelease by tasks.registering(Exec::class) {
+val rustProfile = (project.findProperty("rustProfile") as String?) ?: "release"
+
+val buildRustNative by tasks.registering(Exec::class) {
     group = "rust"
     description = "Build Rust JNI library for Android"
 
     workingDir = rootDir
+    val cargoProfileFlag = if (rustProfile == "release") "--release" else ""
     commandLine(
         "bash", "-lc",
         """
@@ -137,11 +140,11 @@ val buildRustRelease by tasks.registering(Exec::class) {
         export ANDROID_NDK_ROOT="${'$'}{ANDROID_NDK_ROOT:-${'$'}ANDROID_SDK_ROOT/ndk/26.1.10909125}"
         export ANDROID_NDK_HOME="${'$'}ANDROID_NDK_ROOT"
         export PATH="${'$'}HOME/.cargo/bin:${'$'}PATH"
-        cargo ndk -t arm64-v8a -t x86_64 -o app/src/main/jniLibs build --release --locked --manifest-path rust/Cargo.toml
+        cargo ndk -t arm64-v8a -t x86_64 -o app/src/main/jniLibs build $cargoProfileFlag --locked --manifest-path rust/Cargo.toml
         """.trimIndent()
     )
 }
 
 tasks.named("preBuild").configure {
-    dependsOn(buildRustRelease)
+    dependsOn(buildRustNative)
 }

@@ -25,10 +25,10 @@ jobs:
         with:
           lfs: true
 
-      - name: Install OCR system dependencies
+      - name: Install OCR and headless-capture system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libleptonica-dev libtesseract-dev libclang-dev clang
+          sudo apt-get install -y --no-install-recommends libleptonica-dev libtesseract-dev libclang-dev clang xvfb
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -41,6 +41,7 @@ jobs:
           cache-on-failure: true
           workspaces: |
             client -> target
+            hash-server -> target
 
       - name: Rust format check (workspace)
         run: cargo fmt --all -- --check
@@ -66,6 +67,29 @@ jobs:
         run: cargo test -p virtue-linux
         working-directory: client
 
+      - name: Build hash server
+        run: cargo build
+        working-directory: hash-server
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Run device -> api/hash integration test
+        run: bun client/linux/scripts/integration-test.ts
+
       # build-deb-docker.sh deliberately builds with its own CARGO_HOME and
       # target dir (client/.docker-cargo-home, client/target-docker) instead
       # of the host paths the "Cache Rust artifacts" step above manages —
@@ -85,7 +109,15 @@ jobs:
             linux-deb-docker-v1-
 
       - name: Build Linux .deb package
-        run: ./linux/scripts/build-deb-docker.sh
+        run: |
+          if [[ "${{ github.event_name }}" == "push" && ( "${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/staging" ) ]]; then
+            # Only the build that actually gets published to GitHub Releases
+            # ships with auto-update turned on -- PR/debug builds must not
+            # risk overwriting a developer's local install.
+            VIRTUE_ENABLE_AUTO_UPDATE=1 ./linux/scripts/build-deb-docker.sh
+          else
+            ./linux/scripts/build-deb-docker.sh --debug
+          fi
         working-directory: client
 
       - name: Resolve version info

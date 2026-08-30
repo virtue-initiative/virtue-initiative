@@ -277,6 +277,90 @@ export function renderPasswordResetTemplate(input: {
   };
 }
 
+export function renderAccountExistsTemplate(input: {
+  appName: string;
+  recipientName?: string | null;
+  loginUrl: string;
+  forgotPasswordUrl: string;
+  appUrl: string;
+}) {
+  const appName = normalizeAppName(input.appName);
+  const greeting = input.recipientName ? `Hi ${input.recipientName},` : 'Hi,';
+  const footer = withFooter({
+    appName,
+    appUrl: input.appUrl,
+    headline: 'Someone tried to sign up with your email',
+    textLines: [
+      greeting,
+      '',
+      `Someone just tried to create a new ${appName} account using this email address, but you already have one.`,
+      '',
+      `If this was you, log in instead: ${input.loginUrl}`,
+      `Forgot your password? Reset it here: ${input.forgotPasswordUrl}`,
+      '',
+      'If you did not expect this, you can safely ignore this email.',
+    ],
+    htmlSections: [
+      paragraph(greeting),
+      paragraph(
+        `Someone just tried to create a new ${appName} account using this email address, but you already have one.`,
+      ),
+      actionButton(input.loginUrl, 'Log in'),
+      `<p style="${inlineStyle({
+        margin: '0 0 16px 0',
+        color: EMAIL_COLORS.textMuted,
+        'font-size': '13px',
+        'line-height': '1.5',
+      })}">Forgot your password? ${themedLink(input.forgotPasswordUrl, 'Reset it here')}.</p>`,
+      paragraph('If you did not expect this, you can safely ignore this email.'),
+    ],
+  });
+
+  return {
+    subject: `Someone tried to sign up for ${appName.replace('The', '').trim()} with your email`,
+    text: footer.text,
+    html: footer.html,
+  };
+}
+
+export function renderEmailInUseTemplate(input: {
+  appName: string;
+  recipientName?: string | null;
+  forgotPasswordUrl: string;
+  appUrl: string;
+}) {
+  const appName = normalizeAppName(input.appName);
+  const greeting = input.recipientName ? `Hi ${input.recipientName},` : 'Hi,';
+  const footer = withFooter({
+    appName,
+    appUrl: input.appUrl,
+    headline: 'This email is already associated with an account',
+    textLines: [
+      greeting,
+      '',
+      `Someone tried to change a ${appName} account's email address to this one, but it's already associated with your account.`,
+      '',
+      `If you forgot your password, you can reset it here: ${input.forgotPasswordUrl}`,
+      '',
+      'If you did not expect this, you can safely ignore this email.',
+    ],
+    htmlSections: [
+      paragraph(greeting),
+      paragraph(
+        `Someone tried to change a ${appName} account's email address to this one, but it's already associated with your account.`,
+      ),
+      actionButton(input.forgotPasswordUrl, 'Reset password'),
+      paragraph('If you did not expect this, you can safely ignore this email.'),
+    ],
+  });
+
+  return {
+    subject: `This email is already in use on ${appName.replace('The', '').trim()}`,
+    text: footer.text,
+    html: footer.html,
+  };
+}
+
 export function renderPartnerInviteTemplate(input: {
   ownerName?: string | null;
   ownerEmail: string;
@@ -553,5 +637,34 @@ export function renderPartnerDigestTemplate(input: {
     subject: `${periodLabel} summary for ${summaryTarget}`,
     text: footer.text,
     html: footer.html,
+  };
+}
+
+// Internal-only notification (not sent to an app user), so this deliberately
+// skips renderEmailDocument's branded card/footer and just outputs plain text
+// wrapped in <pre> — there is no reader here to design for.
+export function renderBugReportTemplate(input: {
+  message: string;
+  contactEmail?: string | null;
+  reporter?: string | null;
+  platform?: string | null;
+  appVersion?: string | null;
+  platformDetails?: string | null;
+  hasLogAttachment?: boolean;
+}) {
+  const details: string[] = [];
+  if (input.reporter) details.push(`Reporter: ${input.reporter}`);
+  if (input.contactEmail) details.push(`Contact email: ${input.contactEmail}`);
+  if (input.platform) details.push(`Platform: ${input.platform}`);
+  if (input.appVersion) details.push(`App version: ${input.appVersion}`);
+  if (input.platformDetails) details.push(`Platform details: ${input.platformDetails}`);
+  if (input.hasLogAttachment) details.push('Attached: recent-logs.txt');
+
+  const text = [...details, '', input.message].join('\n');
+
+  return {
+    subject: `Bug report: ${input.message.slice(0, 80)}`,
+    text,
+    html: `<pre>${escapeHtml(text)}</pre>`,
   };
 }

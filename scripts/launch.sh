@@ -1,5 +1,6 @@
 #!/bin/bash
-# Start all web services with interleaved colored logs.
+# Start all web services (plus the standalone Rust hash server) with
+# interleaved colored logs.
 # Usage: ./scripts/launch.sh [--donate] [domain]
 #   --donate  Also start the donations worker (api-donate) and, if the Stripe
 #             CLI is available, forward Stripe webhooks to it.
@@ -10,8 +11,10 @@
 #
 # Shared configuration (e.g. STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
 # PUBLIC_STRIPE_PORTAL_URL) can live in ~/.config/virtue-dev.env so it doesn't
-# have to be copied into each worker's .dev.vars. That file is sourced below and
-# its values are passed through to the relevant dev servers.
+# have to be copied into each worker's .dev.vars. That file is sourced below,
+# then .env (repo root, per-worktree overrides — see AGENTS.md) is sourced on
+# top of it, and the merged values are passed through to the relevant dev
+# servers.
 
 DOMAIN=""
 DONATE=0
@@ -35,6 +38,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Shared dev configuration. Anything exported here (secrets, portal URLs, etc.)
 # is available to the child dev servers without editing per-worker .dev.vars.
+# .env (repo root) is sourced second so its values win over the machine-wide file.
 VIRTUE_DEV_ENV="${VIRTUE_DEV_ENV:-$HOME/.config/virtue-dev.env}"
 if [ -f "$VIRTUE_DEV_ENV" ]; then
     set -a
@@ -42,16 +46,46 @@ if [ -f "$VIRTUE_DEV_ENV" ]; then
     . "$VIRTUE_DEV_ENV"
     set +a
 fi
+if [ -f "$ROOT/.env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . "$ROOT/.env"
+    set +a
+fi
 
-# Pick 4 unique free ports in one bun process so the OS can't reuse them between calls.
-read -r API_PORT WEB_PORT LANDING_PORT DONATE_PORT < <(bun -e "
+# api/.dev.vars keys that can be centrally overridden (see AGENTS.md); passed
+# as --var so they win over api/.dev.vars without editing that file.
+API_EXTRA_VARS=()
+for _key in JWT_PRIVATE_KEY JWT_PUBLIC_KEY APP_NAME API_BASE_PATH EMAIL_DELIVERY_MODE BUG_REPORT_EMAIL AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION; do
+    eval "_value=\${$_key:-}"
+    [ -n "$_value" ] && API_EXTRA_VARS+=(--var "$_key:$_value")
+done
+unset _key _value
+
+# Pick 5 unique free ports in one bun process so the OS can't reuse them between calls.
+read -r API_PORT WEB_PORT LANDING_PORT DONATE_PORT HASH_PORT < <(bun -e "
 const {createServer} = require('net');
 const pick = () => new Promise(r => {
     const s = createServer();
     s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); });
 });
-Promise.all([pick(), pick(), pick(), pick()]).then(ports => console.log(ports.join(' ')));
+Promise.all([pick(), pick(), pick(), pick(), pick()]).then(ports => console.log(ports.join(' ')));
 " 2>/dev/null)
+
+# The hash server verifies JWTs signed by the API, so it needs the same public
+# key. Pull it straight out of api/.dev.vars (setup.sh's copy of
+# api/.dev.vars.example) rather than hardcoding it, so a locally rotated
+# keypair stays in sync automatically.
+API_DEV_VARS="$ROOT/api/.dev.vars"
+if [ ! -f "$API_DEV_VARS" ]; then
+    echo "Error: $API_DEV_VARS not found. Run ./scripts/setup.sh first." >&2
+    exit 1
+fi
+HASH_SERVER_JWT_PUBLIC_KEY="$(grep -m1 '^JWT_PUBLIC_KEY=' "$API_DEV_VARS" | sed -E 's/^JWT_PUBLIC_KEY="?//; s/"$//')"
+if [ -z "$HASH_SERVER_JWT_PUBLIC_KEY" ]; then
+    echo "Error: could not read JWT_PUBLIC_KEY from $API_DEV_VARS." >&2
+    exit 1
+fi
 
 export FORCE_COLOR=1
 
@@ -69,6 +103,17 @@ run() {
         | while IFS= read -r line; do
             printf '\033[%sm[%s]\033[0m %s\n' "$color" "$name" "$line"
           done &
+}
+
+# Start the standalone hash server (see hash-server/SPEC.md). Always run, since
+# both the API and client rely on it for the hash-chain protocol.
+start_hash_server() {
+    run "hash" "33" "hash-server" env \
+        HOST=127.0.0.1 \
+        PORT="$HASH_PORT" \
+        RUST_LOG=info \
+        "JWT_PUBLIC_KEY=$HASH_SERVER_JWT_PUBLIC_KEY" \
+        cargo run --quiet
 }
 
 # Local D1 state persists across dev sessions, but this script picks a fresh
@@ -172,10 +217,12 @@ if [ -n "$DOMAIN" ]; then
     export VITE_LANDING_URL="https://${DOMAIN}.localhost"
     export __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS="$ALLOWED_HOSTS"
     export PUBLIC_APP_URL="https://app.${DOMAIN}.localhost"
+    export PUBLIC_API_URL="https://app.${DOMAIN}.localhost/api"
     printf '\n  Landing : http://%s.localhost  /  https://%s.localhost\n' "$DOMAIN" "$DOMAIN"
     printf '  Web     : http://app.%s.localhost  /  https://app.%s.localhost\n' "$DOMAIN" "$DOMAIN"
     printf '  API     : https://app.%s.localhost/api\n' "$DOMAIN"
     [ "$DONATE" = 1 ] && printf '  Donate  : https://donate.%s.localhost\n' "$DOMAIN"
+    printf '  Hash    : http://localhost:%s\n' "$HASH_PORT"
     printf '\n'
 
     cleanup() {
@@ -191,10 +238,13 @@ if [ -n "$DOMAIN" ]; then
     }
 
     rewrite_local_batch_urls "https://app.${DOMAIN}.localhost/r2"
+    start_hash_server
     run "api"     "31" "api"     bun run dev -- --port "$API_PORT" \
         --var "APP_URL:https://app.${DOMAIN}.localhost" \
+        --var "LANDING_URL:https://${DOMAIN}.localhost" \
         --var "R2_URL:https://app.${DOMAIN}.localhost/r2" \
-        --var "HASH_SERVER_URL:http://localhost:${API_PORT}/api"
+        --var "HASH_SERVER_URL:http://localhost:${HASH_PORT}" \
+        "${API_EXTRA_VARS[@]}"
     [ "$DONATE" = 1 ] && start_donate "https://${DOMAIN}.localhost"
     run "web"     "32" "web"     bun run dev -- --port "$WEB_PORT" --host 127.0.0.1
     run "landing" "34" "landing" bun run dev -- --port "$LANDING_PORT" --host 127.0.0.1
@@ -203,18 +253,23 @@ else
     export VITE_API_PROXY_TARGET="http://localhost:${API_PORT}"
     export VITE_LANDING_URL="http://localhost:${LANDING_PORT}"
     export PUBLIC_APP_URL="http://localhost:${WEB_PORT}"
+    export PUBLIC_API_URL="http://localhost:${API_PORT}"
     [ "$DONATE" = 1 ] && export PUBLIC_DONATE_API_URL="http://localhost:${DONATE_PORT}"
     printf '\n  Landing : http://localhost:%s\n' "$LANDING_PORT"
     printf '  Web     : http://localhost:%s\n' "$WEB_PORT"
     printf '  API     : http://localhost:%s\n' "$API_PORT"
     [ "$DONATE" = 1 ] && printf '  Donate  : http://localhost:%s\n' "$DONATE_PORT"
+    printf '  Hash    : http://localhost:%s\n' "$HASH_PORT"
     printf '\n'
 
     rewrite_local_batch_urls "http://localhost:${API_PORT}/r2"
+    start_hash_server
     run "api"     "31" "api"     bun run dev -- --port "$API_PORT" \
         --var "APP_URL:http://localhost:${WEB_PORT}" \
+        --var "LANDING_URL:http://localhost:${LANDING_PORT}" \
         --var "R2_URL:http://localhost:${API_PORT}/r2" \
-        --var "HASH_SERVER_URL:http://localhost:${API_PORT}/api"
+        --var "HASH_SERVER_URL:http://localhost:${HASH_PORT}" \
+        "${API_EXTRA_VARS[@]}"
     [ "$DONATE" = 1 ] && start_donate "http://localhost:${LANDING_PORT}"
     run "web"     "32" "web"     bun run dev -- --port "$WEB_PORT"
     run "landing" "34" "landing" bun run dev -- --port "$LANDING_PORT"

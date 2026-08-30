@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
-import { Device, useAPIContext, useDevices } from '../../utils/api';
+import { Device, describeError, useAPIContext, useDevices } from '../../utils/api';
 import { PageHeading } from '../../components/PageHeading';
 import { DevicesIcon } from '../../components/icons';
 import {
@@ -23,7 +23,6 @@ import { LANDING_URL } from '../../utils/landing-url';
 import './style.css';
 
 const DOWNLOAD_URL = `${LANDING_URL}/download`;
-const INSTALLATION_URL = `${LANDING_URL}/help/installation`;
 
 export function Devices() {
   const api = useAPIContext();
@@ -102,7 +101,7 @@ function AddDeviceButton() {
         </ol>
         <DialogActions
           left={
-            <Button variant="ghost" href={INSTALLATION_URL} target="_blank" rel="noreferrer">
+            <Button variant="ghost" href={DOWNLOAD_URL} target="_blank" rel="noreferrer">
               View guide
             </Button>
           }
@@ -161,7 +160,8 @@ function DeviceCard({
       await onUpdateDevice(device.id, { name });
       dialogRef.current?.close();
     } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Failed to save', 'error');
+      const message = describeError(err, 'Failed to save');
+      if (message) pushToast(message, 'error');
     } finally {
       setSaving(false);
     }
@@ -173,7 +173,8 @@ function DeviceCard({
       await onRemoveDevice(device.id);
       closeDeleteDialog();
     } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Failed to delete device', 'error');
+      const message = describeError(err, 'Failed to delete device');
+      if (message) pushToast(message, 'error');
     } finally {
       setDeleting(false);
     }
@@ -187,7 +188,7 @@ function DeviceCard({
           {device.status === 'online'
             ? 'Online'
             : device.status === 'logged_out'
-              ? 'Logged out'
+              ? 'Deactivated'
               : 'Offline'}
         </Badge>
       </CardHeader>
@@ -226,7 +227,7 @@ function DeviceCard({
               onClick={openDeleteDialog}
               disabled={saving || deleting}
             >
-              Delete device
+              Delete device permanently
             </Button>
           </DialogSecondaryActions>
           <DialogActions>

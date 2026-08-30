@@ -9,6 +9,7 @@ public struct LoginFormView: View {
     private let isSigningIn: Bool
     private let loginError: String?
     private let onSubmit: () -> Void
+    @State private var isPasswordVisible = false
 
     public init(
         email: Binding<String>,
@@ -30,14 +31,39 @@ public struct LoginFormView: View {
         VStack(alignment: .leading, spacing: VirtueSpacing.s3) {
             TextField("Email", text: $email)
                 .textFieldStyle(.roundedBorder)
-            SecureField("Password", text: $password)
-                .textFieldStyle(.roundedBorder)
+            // SwiftUI has no reveal affordance on SecureField, so swap in a
+            // plain TextField while the eye toggle is on. Both bind the same
+            // `$password`, so toggling never loses what was typed.
+            HStack(spacing: VirtueSpacing.s2) {
+                if isPasswordVisible {
+                    TextField("Password", text: $password)
+                        .textFieldStyle(.roundedBorder)
+                } else {
+                    SecureField("Password", text: $password)
+                        .textFieldStyle(.roundedBorder)
+                }
+                Button {
+                    isPasswordVisible.toggle()
+                } label: {
+                    Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
+                        .foregroundStyle(VirtueBrand.textMuted)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isPasswordVisible ? "Hide password" : "Show password")
+            }
             TextField("Device name", text: $deviceName)
                 .textFieldStyle(.roundedBorder)
 
             Button(isSigningIn ? "Signing In…" : "Sign In", action: onSubmit)
                 .buttonStyle(VirtueButtonStyle(prominent: true))
                 .disabled(isSigningIn)
+
+            Link(
+                "Don't have an account? Sign up",
+                destination: URL(string: "https://app.virtueinitiative.org/signup")!
+            )
+            .font(.subheadline)
+            .foregroundStyle(VirtueBrand.accent)
 
             if let loginError {
                 Text(loginError)

@@ -10,6 +10,10 @@
   - Clears local auth/device state and disables monitoring.
 - `virtue status`
   - Shows login and monitoring state.
+- `virtue report-issue [--message ...] [--contact-email ...] [--yes]`
+  - Prompts for a description (and optional contact email) and emails it to the Virtue Initiative team, attaching the last day of this device's `virtue` service logs (via `journalctl --user`). These are diagnostic logs only — no screenshots or screenshot content, no window titles — and any known secret/token patterns are redacted before sending.
+  - Prints exactly what will be sent (message, contact email, platform details, log attachment) and asks for confirmation before submitting; `--yes` skips the prompt.
+  - Works whether or not the daemon is running or the device is logged in; attaches this device's identity automatically when it's logged in.
 - `virtue daemon`
   - Background worker used by systemd.
   - On desktop sessions, it also starts a minimal tray icon with hover status.
@@ -22,10 +26,8 @@
   - Sends a developer log immediately with the provided risk score.
 - `virtue dev add-log --risk 0.7 [--title ...] [--details ...]`
   - Queues a metadata-only developer log into the next encrypted batch.
-- `virtue dev add-screenshot --risk 0.7 [--title ...] [--details ...]`
-  - Captures a screenshot and queues it into the next encrypted batch.
-- `virtue dev upload-batch`
-  - Forces the currently queued batch items to upload now.
+- `virtue test-screenshot`
+  - Takes a real screenshot and uploads it immediately, the same as the "Test Screenshot" action on Mac/Windows/Android.
 
 ## Service behavior
 
@@ -57,40 +59,53 @@ And lifecycle alerts, fired when the expected login→logout running window does
   - procfs with `/proc/sys/kernel/random/boot_id` (startup detection).
 - Non-systemd distributions are not currently supported for system lifecycle logs.
 
-Capture/upload timing is file-driven through `~/.config/virtue/config.json`.
+`api_base_url`, `capture_interval_seconds` (default `300`, minimum `15`), and
+`batch_window_seconds` (default `3600`, minimum `1`) are baked into the binary
+at **compile time** — there is no runtime override file. To build against a
+local API or with different intervals, set `VIRTUE_DEFAULT_API_URL`,
+`VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS`, and/or
+`VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS` (as real env vars, or via a
+`.env` file at the repo root, copied from `.env.example`) before running
+`cargo build`.
 
-Supported keys:
+`virtue status` prints the current build-resolved values.
 
-- `api_base_url`
-- `capture_interval_seconds` (default `300`, minimum `15`)
-- `batch_window_seconds` (default `3600`, minimum `1`)
+The client uses `XDG_CONFIG_HOME` and `XDG_STATE_HOME` when those variables are set. Otherwise it falls back to `~/.config/virtue` for config and `~/.local/state/virtue` for mutable state.
 
-`virtue status` prints the current CLI-resolved values.
+## Auto-update
 
-## Runtime Config
+The package installs a system-level (not `--user`) `virtue-update.timer` /
+`virtue-update.service` pair. The timer fires 10 minutes after boot and then every 6 hours
+(± a random 30-minute delay), running `/usr/lib/virtue/update-check.sh` as root.
 
-Use one `.deb` for both prod and local API. Override values through `~/.config/virtue/config.json`.
+Whether `postinst` actually enables/starts the timer is controlled by
+`/usr/lib/virtue/auto-update-enabled` (`"1"` or `"0"`), baked into the package at build time by
+`VIRTUE_ENABLE_AUTO_UPDATE=1 ./scripts/build-deb-docker.sh`. This defaults to **off** — a
+native/Docker build run locally, or a PR's `--debug` CI build, never enables the timer, so it
+can't silently overwrite a developer's local install with whatever's on GitHub Releases. Only
+the CI job that actually publishes a release build to `main`/`staging` sets the env var, so only
+an officially-distributed `.deb` ships with auto-update turned on by default.
+
+The script polls the GitHub Releases API for the release tag baked into the package at build
+time (`/usr/lib/virtue/release-tag` — `<VERSION>` on the `main`-branch/stable channel,
+`<VERSION>-dev` on every other branch/dev channel, matching whichever channel this exact build
+was produced from; see `client/scripts/version.sh`). If the release's current `.deb` asset for
+this architecture has a different embedded build label than the locally installed one
+(`/usr/lib/virtue/build-label`), it downloads and `dpkg -i`s it, falling back to
+`apt-get install -f -y` on a dependency failure. Installing the new `.deb` re-runs `postinst`,
+which restarts `virtue.service` for every logged-in user — the same upgrade path as a manual
+`dpkg -i`. A `flock` on `/run/lock/virtue-update.lock` prevents overlapping runs; a failed run
+exits non-zero and is simply retried at the next timer firing.
+
+Check status/logs with:
 
 ```bash
-mkdir -p ~/.config/virtue
-cat > ~/.config/virtue/config.json <<'EOF'
-{
-  "api_base_url": "http://localhost:8787",
-  "capture_interval_seconds": 120,
-  "batch_window_seconds": 900
-}
-EOF
+systemctl status virtue-update.timer
+journalctl -u virtue-update.service
 ```
 
-Revert service back to default API:
-
-```bash
-rm -f ~/.config/virtue/config.json
-```
-
-The core reloads this file during daemon operation, so runtime changes do not require a service restart.
-
-The client uses `XDG_CONFIG_HOME` and `XDG_STATE_HOME` when those variables are set. Otherwise it falls back to `~/.config/virtue/config.json` for config and `~/.local/state/virtue` for mutable state.
+`--instance`-suffixed side-by-side builds (used for local dev/testing) do not get this timer,
+matching how they also skip `postinst`/`prerm`/the regular systemd unit install.
 
 ## Wayland and X11
 
@@ -105,7 +120,9 @@ The client uses `XDG_CONFIG_HOME` and `XDG_STATE_HOME` when those variables are 
 
 The script bundles `libtesseract`/`liblept`/`libjpeg` into the package (instead of depending
 on the OS-provided packages, whose names — and in libjpeg's case, ABI — vary across distro
-versions) and uses `patchelf` to set their RPATH.
+versions) and uses `patchelf` to set their RPATH. It also bundles the `eng.traineddata`
+Tesseract language data file so OCR-based screenshot redaction works out of the box, without
+depending on the OS `tesseract-ocr-eng` package.
 
 ### Recommended: Docker build (widest compatibility)
 

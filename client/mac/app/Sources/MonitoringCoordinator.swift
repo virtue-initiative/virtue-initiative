@@ -9,20 +9,6 @@ enum PermissionPhase {
     case needsRelaunch
 }
 
-/// UserDefaults keys + built-in defaults for runtime overrides. Capture/batch
-/// defaults are read from the Rust core via NativeBridge rather than
-/// duplicated here. Blank fields mean "use the built-in default" — the FFI
-/// layer omits blank keys from the override JSON entirely.
-private enum OverrideDefaults {
-    static let baseApiUrlKey = "VIRTUE_BASE_API_URL"
-    static let captureIntervalKey = "VIRTUE_CAPTURE_INTERVAL_SECONDS"
-    static let batchWindowKey = "VIRTUE_BATCH_WINDOW_SECONDS"
-
-    static let baseApiUrl = "https://api.virtueinitiative.org"
-    static let captureIntervalSeconds = String(NativeBridge.defaultCaptureIntervalSeconds())
-    static let batchWindowSeconds = String(NativeBridge.defaultBatchWindowSeconds())
-}
-
 /// Faithfully ports `main.rs`'s tray event loop state machine: the daemon
 /// poll cadence, the `STOPPED_TIMEOUT` grace period that tolerates a brief
 /// launchd restart race, the "Unreachable" (alive-but-busy) distinction, and
@@ -44,6 +30,7 @@ final class MonitoringCoordinator: ObservableObject {
     @Published private(set) var isSigningOut: Bool = false
     @Published private(set) var loginError: String?
     @Published private(set) var deviceId: String = "<none>"
+    @Published private(set) var accountEmail: String?
 
     @Published private(set) var daemonStatus: DaemonStatus = .stopped
     @Published private(set) var unexpectedStopMessage: String?
@@ -53,16 +40,29 @@ final class MonitoringCoordinator: ObservableObject {
 
     @Published private(set) var pendingRequestCount: Int = 0
     @Published private(set) var lastLoopAt: String = "<none>"
+    /// The full shared status payload (CORE-010) the Status Details sheet
+    /// renders. The scalars above stay for the main window's own bindings.
+    @Published private(set) var coreStatus: CoreServiceStatus?
 
-    @Published var baseApiUrlOverride: String = ""
-    @Published var captureIntervalOverride: String = ""
-    @Published var batchWindowOverride: String = ""
-    @Published private(set) var overridesMessage: String?
+    @Published private(set) var isForceCapturing: Bool = false
+    @Published private(set) var forceCaptureMessage: String?
 
     let buildLabel = NativeBridge.getBuildLabel()
 
     private var statusTimer: Timer?
     private var isPolling = false
+    /// `VirtueBuildLabel` as it was on disk when this process launched, for
+    /// detecting that the bundle has since been replaced. See
+    /// `checkForReplacedBundle`.
+    private let launchedBuildLabel =
+        Bundle.main.object(forInfoDictionaryKey: "VirtueBuildLabel") as? String ?? ""
+    private var pendingReplacedBundleLabel: String?
+    /// One-shot: `openApplication` is async and the poll fires every 2s, so
+    /// without this a slow handover would spawn a burst of new instances.
+    private var isRelaunchingIntoNewBundle = false
+    /// Set by the app once the updater exists; nil in builds without
+    /// auto-update wired in.
+    weak var updateController: UpdateController?
     private var relaunching = false
     private var gracefulShutdown = false
     private var stoppedSince: Date?
@@ -72,8 +72,8 @@ final class MonitoringCoordinator: ObservableObject {
         NativeBridge.daemonExePath(appBundlePath: Bundle.main.bundlePath)
 
     init() {
+        terminateOtherInstances()
         registerAsLoginItem()
-        loadOverrideInputs()
 
         let initError = NativeBridge.initialize()
         if let initError {
@@ -100,9 +100,8 @@ final class MonitoringCoordinator: ObservableObject {
         postRelaunchGraceUntil = Date().addingTimeInterval(Self.postRelaunchGrace)
 
         Task {
-            let error = await Task.detached(priority: .userInitiated) { [daemonExePath, overrides = runtimeOverrides()] () -> String? in
-                _ = NativeBridge.setOverrides(overrides)
-                return NativeBridge.ensureDaemonRunning(daemonExePath: daemonExePath)
+            let error = await Task.detached(priority: .userInitiated) { [daemonExePath] () -> String? in
+                NativeBridge.ensureDaemonRunning(daemonExePath: daemonExePath)
             }.value
             // Previously discarded entirely: if `launchctl bootstrap` fails
             // (e.g. leftover launchd state from a prior crash/kill), the app
@@ -171,6 +170,23 @@ final class MonitoringCoordinator: ObservableObject {
         }
     }
 
+    /// Submits a bug report, invoking `completion` with `nil` on success or an
+    /// error message on failure. Off-main like every other native call that
+    /// touches the network/daemon.
+    func submitBugReport(
+        message: String,
+        contactEmail: String?,
+        includeLogs: Bool,
+        completion: @escaping (String?) -> Void
+    ) {
+        Task {
+            let error = await Task.detached(priority: .userInitiated) {
+                NativeBridge.reportIssue(message: message, contactEmail: contactEmail, includeLogs: includeLogs)
+            }.value
+            completion(error)
+        }
+    }
+
     /// Stops the background daemon (if registered) and quits. When the user
     /// was logged in, this is tagged as a user-initiated stop so the daemon
     /// records a clean user stop (fires a stop-time alert) rather than being
@@ -188,6 +204,40 @@ final class MonitoringCoordinator: ObservableObject {
                 }.value
             }
             NSApplication.shared.terminate(nil)
+        }
+    }
+
+    /// Forces an immediate screenshot capture, bypassing the normal
+    /// interval-due gate (still honors the locked/screensaver and
+    /// fingerprint-dedup gates), then waits for the resulting batch to reach
+    /// the server so the confirmation reflects what actually happened — a
+    /// gated capture and an upload still in flight each say so. Shows a
+    /// transient message that clears itself after a few seconds, rather than
+    /// sticking around forever.
+    func forceCapture() {
+        guard loggedIn, !isForceCapturing else {
+            return
+        }
+        isForceCapturing = true
+        forceCaptureMessage = "Screenshot uploading…"
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                NativeBridge.forceCapture()
+            }.value
+            isForceCapturing = false
+            let message: String
+            switch result {
+            case .finished(let text):
+                message = text
+            case .failed(let error):
+                message = "Test screenshot failed: \(error)"
+            }
+            forceCaptureMessage = message
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            // Only clear if a later call hasn't already replaced this message.
+            if forceCaptureMessage == message {
+                forceCaptureMessage = nil
+            }
         }
     }
 
@@ -228,61 +278,6 @@ final class MonitoringCoordinator: ObservableObject {
         }
     }
 
-    // MARK: - Runtime overrides
-
-    /// Writes overrides to `config.json`, which the daemon's `ConfigModule`
-    /// hot-reloads on its next `Ping` — no relaunch required.
-    func applyOverrides() {
-        let overrides = runtimeOverrides()
-        persistOverrides(overrides)
-        overridesMessage = "Applying…"
-        Task {
-            let error = await Task.detached(priority: .userInitiated) {
-                NativeBridge.setOverrides(overrides)
-            }.value
-            overridesMessage = error.map { "Override update failed: \($0)" } ?? "Runtime overrides updated"
-        }
-    }
-
-    private func runtimeOverrides() -> RuntimeOverrides {
-        RuntimeOverrides(
-            baseApiUrl: baseApiUrlOverride.trimmingCharacters(in: .whitespacesAndNewlines),
-            captureIntervalSeconds: captureIntervalOverride.trimmingCharacters(in: .whitespacesAndNewlines),
-            batchWindowSeconds: batchWindowOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-        )
-    }
-
-    private func persistOverrides(_ overrides: RuntimeOverrides) {
-        let defaults = UserDefaults.standard
-        defaults.set(overrides.baseApiUrl, forKey: OverrideDefaults.baseApiUrlKey)
-        defaults.set(overrides.captureIntervalSeconds, forKey: OverrideDefaults.captureIntervalKey)
-        defaults.set(overrides.batchWindowSeconds, forKey: OverrideDefaults.batchWindowKey)
-    }
-
-    private func loadOverrideInputs() {
-        let defaults = UserDefaults.standard
-        baseApiUrlOverride = storedOverride(
-            forKey: OverrideDefaults.baseApiUrlKey,
-            defaults: defaults,
-            fallback: OverrideDefaults.baseApiUrl
-        )
-        captureIntervalOverride = storedOverride(
-            forKey: OverrideDefaults.captureIntervalKey,
-            defaults: defaults,
-            fallback: OverrideDefaults.captureIntervalSeconds
-        )
-        batchWindowOverride = storedOverride(
-            forKey: OverrideDefaults.batchWindowKey,
-            defaults: defaults,
-            fallback: OverrideDefaults.batchWindowSeconds
-        )
-    }
-
-    private func storedOverride(forKey key: String, defaults: UserDefaults, fallback: String) -> String {
-        let value = defaults.string(forKey: key)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (value?.isEmpty == false) ? value! : fallback
-    }
-
     // MARK: - Status polling
 
     private func startStatusTimerIfNeeded() {
@@ -312,6 +307,7 @@ final class MonitoringCoordinator: ObservableObject {
         guard !relaunching, !isPolling else {
             return
         }
+        checkForReplacedBundle()
         isPolling = true
         Task {
             let snapshot = await Task.detached(priority: .utility) { () -> PolledSnapshot in
@@ -371,6 +367,7 @@ final class MonitoringCoordinator: ObservableObject {
         if let json = snapshot.statusJson, let status = CoreServiceStatus.decode(fromJson: json) {
             pendingRequestCount = status.pendingRequestCount
             lastLoopAt = status.lastLoopAtMs.map(formatMillisTimestamp) ?? "<none>"
+            coreStatus = status
         }
         // Local TCC cache check, not IPC — cheap enough to run on the main actor.
         if NativeBridge.hasCapturePermission() {
@@ -381,10 +378,107 @@ final class MonitoringCoordinator: ObservableObject {
     private func refreshSessionState() {
         loggedIn = NativeBridge.isLoggedIn()
         deviceId = NativeBridge.getDeviceId() ?? "<none>"
+        accountEmail = NativeBridge.getAccountEmail()
     }
 
     private func refreshPermissionPhase() {
         permissionPhase = NativeBridge.hasCapturePermission() ? nil : .needsRequest
+    }
+
+    // MARK: - Stale instances (issue #539)
+
+    /// Dragging a new `Virtue.app` over a running one leaves the *old* app
+    /// process alive, and opening the new one then yields two menu bar icons
+    /// backed by two different app versions — both talking to one daemon.
+    /// Newest launch wins: terminate any other running instance of this
+    /// bundle id before doing anything else.
+    ///
+    /// This is only about duplicate *app* processes. The daemon is a
+    /// LaunchAgent, singleton by construction, and is restarted a few lines
+    /// later by `ensureDaemonRunning`.
+    private func terminateOtherInstances() {
+        let others = NSRunningApplication.runningApplications(
+            withBundleIdentifier: Bundle.main.bundleIdentifier ?? ""
+        ).filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
+
+        for other in others {
+            // Not `forceTerminate`: a normal terminate lets the old instance
+            // unwind cleanly. It has no unsaved state and no quit handler
+            // that records a user stop, so this does not look like tampering
+            // to the daemon.
+            other.terminate()
+        }
+    }
+
+    /// The other half of the drag-install problem: this process is now
+    /// running code from a bundle that has been replaced on disk. Detect it
+    /// by re-reading `VirtueBuildLabel` from the on-disk `Info.plist` (the
+    /// in-memory `Bundle` copy is cached at launch and never changes) and
+    /// relaunch into the new version, which will in turn kickstart the
+    /// daemon onto the new binary.
+    ///
+    /// Requires two consecutive polls to agree before acting, so a bundle
+    /// caught mid-copy can't trigger a relaunch into a half-written app.
+    private func checkForReplacedBundle() {
+        guard !isRelaunchingIntoNewBundle else {
+            return
+        }
+        // Sparkle does its own quit-install-relaunch dance; racing it with a
+        // second relaunch would be a mess.
+        guard !isUpdateInProgress() else {
+            pendingReplacedBundleLabel = nil
+            return
+        }
+
+        let infoPlistURL = Bundle.main.bundleURL
+            .appendingPathComponent("Contents")
+            .appendingPathComponent("Info.plist")
+        guard
+            let onDisk = NSDictionary(contentsOf: infoPlistURL),
+            let diskLabel = onDisk["VirtueBuildLabel"] as? String,
+            !diskLabel.isEmpty,
+            diskLabel != launchedBuildLabel
+        else {
+            pendingReplacedBundleLabel = nil
+            return
+        }
+
+        guard pendingReplacedBundleLabel == diskLabel else {
+            pendingReplacedBundleLabel = diskLabel
+            return
+        }
+
+        relaunchSelf()
+    }
+
+    private func isUpdateInProgress() -> Bool {
+        updateController?.isUpdateSessionInProgress ?? false
+    }
+
+    /// Relaunch this app from its (new) bundle and exit. `open` is used
+    /// rather than re-exec'ing so the replacement process is started by
+    /// launchservices against the new bundle, not inherited from this one.
+    private func relaunchSelf() {
+        isRelaunchingIntoNewBundle = true
+        let bundleURL = Bundle.main.bundleURL
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: bundleURL, configuration: configuration) { _, error in
+            if let error {
+                NSLog("Failed to relaunch after bundle replacement: \(error)")
+                // Let a later poll try again rather than sitting on a stale
+                // bundle forever.
+                Task { @MainActor in
+                    self.isRelaunchingIntoNewBundle = false
+                }
+                return
+            }
+            // The new instance's own `terminateOtherInstances()` would get
+            // us anyway; exiting here just makes the handover immediate.
+            Task { @MainActor in
+                NSApp.terminate(nil)
+            }
+        }
     }
 
     /// Only the daemon is a `LaunchAgent` (`RunAtLoad`); the app itself (and
@@ -409,6 +503,27 @@ final class MonitoringCoordinator: ObservableObject {
             return "Login failed. Check your email and password and try again."
         }
         return "Login failed: \(raw)"
+    }
+
+    /// Local time plus a relative age — "when did this last work?" is the
+    /// question every timestamp on the status sheet is really answering.
+    func formatStatusTimestamp(_ timestampMs: Int64?) -> String {
+        guard let timestampMs else { return "<none>" }
+        let date = Date(timeIntervalSince1970: TimeInterval(timestampMs) / 1000)
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .medium
+        let relative = RelativeDateTimeFormatter()
+        relative.unitsStyle = .short
+        return "\(formatter.string(from: date)) (\(relative.localizedString(for: date, relativeTo: Date())))"
+    }
+
+    /// Where this app's daemon writes its rolling log files — surfaced on the
+    /// status sheet so a user can find them without knowing the convention.
+    var logDirectory: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library")
+            .appendingPathComponent("Logs")
     }
 
     private func formatMillisTimestamp(_ timestampMs: Int64) -> String {

@@ -1,7 +1,9 @@
 ---
+import type { MarkdownInstance } from 'astro';
 import { Button } from '@virtueinitiative/shared-web';
 import LaptopIcon from '../components/icons/LaptopIcon.astro';
 import MobileIcon from '../components/icons/MobileIcon.astro';
+import { ContactModalButton } from '../components/ContactModalButton';
 import releaseData from '../data/releases.json';
 import SiteLayout from '../layouts/SiteLayout.astro';
 
@@ -24,57 +26,54 @@ type Platform = {
   detail: string;
   kind: 'laptop' | 'mobile';
   preferredMatches?: (assetName: string) => boolean;
-  fallbackMatches: (assetName: string) => boolean;
+  fallbackMatches?: (assetName: string) => boolean;
+  staticHref?: string;
+  isContactOnly?: boolean;
+  // Slug of the matching file in src/content/download-instructions/ and the
+  // anchor id of its section further down the page.
+  instructionsSlug: string;
 };
 
 const platforms: Platform[] = [
   {
+    label: 'Windows',
+    detail: 'Microsoft Store',
+    kind: 'laptop',
+    instructionsSlug: 'windows',
+    staticHref: 'https://apps.microsoft.com/detail/9PHQ4Z8445DQ',
+  },
+  {
+    label: 'macOS',
+    detail: '.dmg installer',
+    kind: 'laptop',
+    instructionsSlug: 'mac',
+    fallbackMatches: (assetName) =>
+      /\.dmg$/i.test(assetName) &&
+      (/^virtue-macos-/i.test(assetName) || /^Virtue-/i.test(assetName)),
+  },
+  {
     label: 'Linux',
     detail: '.deb package',
     kind: 'laptop',
+    instructionsSlug: 'linux',
     preferredMatches: (assetName) => /^virtue-linux_/i.test(assetName),
     fallbackMatches: (assetName) =>
       /\.deb$/i.test(assetName) &&
       (/^virtue-linux_/i.test(assetName) || /^virtue_/i.test(assetName)),
   },
   {
-    label: 'macOS (Apple Silicon)',
-    detail: '.dmg installer',
-    kind: 'laptop',
-    preferredMatches: (assetName) => /^virtue-macos-apple-silicon-/i.test(assetName),
-    fallbackMatches: (assetName) =>
-      /\.dmg$/i.test(assetName) && /^virtue-macos-apple-silicon-/i.test(assetName),
-  },
-  {
-    label: 'macOS (Intel)',
-    detail: '.dmg installer',
-    kind: 'laptop',
-    preferredMatches: (assetName) => /^virtue-macos-intel-/i.test(assetName),
-    fallbackMatches: (assetName) =>
-      /\.dmg$/i.test(assetName) &&
-      (/^virtue-macos-intel-/i.test(assetName) || /^Virtue-/i.test(assetName)),
-  },
-  {
-    label: 'Windows',
-    detail: '.zip setup bundle',
-    kind: 'laptop',
-    fallbackMatches: (assetName) =>
-      (/\.exe$/i.test(assetName) && /windows-installer/i.test(assetName)) ||
-      (/\.zip$/i.test(assetName) &&
-        /^virtue-windows-/i.test(assetName) &&
-        /-setup\.zip$/i.test(assetName)),
-  },
-  {
     label: 'Android',
     detail: '.apk package',
     kind: 'mobile',
+    instructionsSlug: 'android',
     fallbackMatches: (assetName) => /\.apk$/i.test(assetName) && /android/i.test(assetName),
   },
   {
     label: 'iOS',
-    detail: '.zip app bundle',
+    detail: 'TestFlight beta only',
     kind: 'mobile',
-    fallbackMatches: (assetName) => /\.zip$/i.test(assetName) && /^VirtueIOS/i.test(assetName),
+    instructionsSlug: 'ios',
+    isContactOnly: true,
   },
 ];
 
@@ -93,11 +92,69 @@ function findPlatformAsset(release: Release, platform: Platform) {
     if (preferred) return preferred;
   }
 
-  return release.assets.find((asset) => platform.fallbackMatches(asset.name)) ?? null;
+  return release.assets.find((asset) => platform.fallbackMatches?.(asset.name)) ?? null;
+}
+
+function findPlatformHref(release: Release | null, platform: Platform) {
+  if (platform.staticHref) return platform.staticHref;
+  return release ? (findPlatformAsset(release, platform)?.browser_download_url ?? null) : null;
 }
 
 const stableRelease = releaseData.stableRelease as Release | null;
 const prereleaseRelease = releaseData.prereleaseRelease as Release | null;
+
+// Staging deploys (`astro build --mode staging`) surface development builds
+// instead of the stable release, mirroring NoindexMeta.astro / CanonicalLink.astro.
+const isStaging = import.meta.env.MODE === 'staging';
+const activeRelease = isStaging ? prereleaseRelease : stableRelease;
+
+// Platform install docs live in src/content/download-instructions/*.md and can
+// reference the current download link for their platform via {LINUX_DOWNLOAD},
+// {MAC_DOWNLOAD}, {WINDOWS_DOWNLOAD}, {ANDROID_DOWNLOAD} — substituted into the
+// compiled HTML below since Astro compiles markdown before this file runs.
+const downloadVarTokens: Record<string, string> = {
+  linux: '{LINUX_DOWNLOAD}',
+  mac: '{MAC_DOWNLOAD}',
+  windows: '{WINDOWS_DOWNLOAD}',
+  android: '{ANDROID_DOWNLOAD}',
+};
+
+function applyDownloadVars(html: string) {
+  return platforms.reduce((acc, platform) => {
+    const token = downloadVarTokens[platform.instructionsSlug];
+    if (!token) return acc;
+    const href = findPlatformHref(activeRelease, platform) ?? '/download';
+    // Markdown link syntax puts the token in an href="...", so the compiled
+    // HTML has it percent-encoded (e.g. `{` -> `%7B`) — replace both forms.
+    return acc.replaceAll(token, href).replaceAll(encodeURI(token), href);
+  }, html);
+}
+
+// All 5 platform docs now render on this one page, so their auto-generated
+// heading ids (e.g. "## Installation" -> id="installation") would otherwise
+// collide across panels — invalid duplicate ids and a broken #installation
+// target. Namespace every heading id to the platform's slug.
+function namespaceHeadingIds(html: string, slug: string) {
+  return html.replace(/(<h[1-6][^>]*\sid=")([^"]+)(")/g, `$1${slug}-$2$3`);
+}
+
+const instructionModules = import.meta.glob('../content/download-instructions/*.md', {
+  eager: true,
+}) as Record<string, MarkdownInstance<Record<string, never>>>;
+
+const instructionSections = await Promise.all(
+  platforms.map(async (platform) => {
+    const entry =
+      instructionModules[`../content/download-instructions/${platform.instructionsSlug}.md`];
+    const html = entry
+      ? namespaceHeadingIds(
+          applyDownloadVars(await entry.compiledContent()),
+          platform.instructionsSlug,
+        )
+      : null;
+    return { platform, html };
+  }),
+);
 ---
 
 <SiteLayout pageTitle="Downloads" tagline="Download Virtue for your devices">
@@ -106,45 +163,43 @@ const prereleaseRelease = releaseData.prereleaseRelease as Release | null;
     are provided for testing purposes only.
   </div>
 
-  <section class="download-hero">
-    <h2>Downloads</h2>
-    <p>
-      Choose the latest stable release when available. Development builds are available from GitHub.
-    </p>
-    <div class="section-actions">
-      <Button href="/help/installation" variant="outline">Installation guide</Button>
-    </div>
-  </section>
-
   <section>
-    <h2>Latest stable release</h2>
+    <h2>Downloads - {isStaging ? 'Latest development release' : 'Latest stable release'}</h2>
     <div class="release-card">
       {
-        stableRelease ? (
+        activeRelease ? (
           <>
             <div class="release-card-header">
               <div>
-                <h3>{stableRelease.name || stableRelease.tag_name}</h3>
+                <h3>{activeRelease.name || activeRelease.tag_name}</h3>
               </div>
-              <Button variant="ghost" size="sm" href={stableRelease.html_url}>
+              <Button variant="ghost" size="sm" href={activeRelease.html_url}>
                 View on GitHub
               </Button>
             </div>
             <div class="release-card-meta">
-              <span>Tag: {stableRelease.tag_name}</span>
-              <span>Published: {formatDate(stableRelease.published_at)}</span>
+              <span>Tag: {activeRelease.tag_name}</span>
+              <span>Published: {formatDate(activeRelease.published_at)}</span>
             </div>
             <div class="release-card-body">
               <div class="download-grid">
                 {platforms.map((platform) => {
-                  const asset = findPlatformAsset(stableRelease, platform);
                   const Icon = platform.kind === 'laptop' ? LaptopIcon : MobileIcon;
 
-                  return asset ? (
-                    <a
-                      class="vi-btn vi-btn--outline text-icon download-button"
-                      href={asset.browser_download_url}
-                    >
+                  if (platform.isContactOnly) {
+                    return (
+                      <ContactModalButton
+                        client:load
+                        label={platform.label}
+                        detail={platform.detail}
+                      />
+                    );
+                  }
+
+                  const href = findPlatformHref(activeRelease, platform);
+
+                  return href ? (
+                    <a class="vi-btn vi-btn--outline text-icon download-button" href={href}>
                       <span class="icon">
                         <Icon />
                       </span>
@@ -170,6 +225,25 @@ const prereleaseRelease = releaseData.prereleaseRelease as Release | null;
                 })}
               </div>
             </div>
+
+            <div class="instructions">
+              <h4 class="instructions-heading">Installation instructions</h4>
+              <div class="instructions-tabs">
+                {instructionSections.map(({ platform }) => (
+                  <a href={`#${platform.instructionsSlug}`} class="instructions-tab-label">
+                    {platform.label}
+                  </a>
+                ))}
+                {instructionSections.map(
+                  ({ platform, html }) =>
+                    html && (
+                      <div id={platform.instructionsSlug} class="instructions-tab-panel help-doc">
+                        <Fragment set:html={html} />
+                      </div>
+                    ),
+                )}
+              </div>
+            </div>
           </>
         ) : (
           <div class="release-card-body">
@@ -177,29 +251,6 @@ const prereleaseRelease = releaseData.prereleaseRelease as Release | null;
           </div>
         )
       }
-    </div>
-  </section>
-
-  <section>
-    <h2>Latest development release</h2>
-    <div class="release-card">
-      <div class="release-card-header">
-        <div>
-          <h3>Development release</h3>
-        </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          href="https://github.com/virtue-initiative/virtue-initiative/releases"
-          >View on GitHub</Button
-        >
-      </div>
-      <div class="release-card-body">
-        <p>
-          Development builds are published on GitHub. Use the release page to choose the latest dev
-          asset for your platform.
-        </p>
-      </div>
     </div>
   </section>
 </SiteLayout>

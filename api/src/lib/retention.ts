@@ -1,4 +1,9 @@
-import { deleteExpiredBatchesChunk } from './db';
+import {
+  deleteExpiredBatchesChunk,
+  deleteExpiredDeviceSessionsChunk,
+  deleteExpiredEmailTokensChunk,
+  deleteExpiredUserSessionsChunk,
+} from './db';
 import { Env } from '../types/bindings';
 
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -14,6 +19,42 @@ export async function pruneExpiredBatches(env: Env, now = Date.now()) {
 
   while (true) {
     const deleted = await deleteExpiredBatchesChunk(env.DB, cutoff, PRUNE_CHUNK_LIMIT);
+    deletedTotal += deleted;
+    if (deleted < PRUNE_CHUNK_LIMIT) break; // drained
+  }
+
+  return deletedTotal;
+}
+
+export async function pruneExpiredEmailTokens(env: Env, now = Date.now()) {
+  let deletedTotal = 0;
+
+  while (true) {
+    const deleted = await deleteExpiredEmailTokensChunk(env.DB, now, PRUNE_CHUNK_LIMIT);
+    deletedTotal += deleted;
+    if (deleted < PRUNE_CHUNK_LIMIT) break; // drained
+  }
+
+  return deletedTotal;
+}
+
+export async function pruneExpiredUserSessions(env: Env, now = Date.now()) {
+  let deletedTotal = 0;
+
+  while (true) {
+    const deleted = await deleteExpiredUserSessionsChunk(env.DB, now, PRUNE_CHUNK_LIMIT);
+    deletedTotal += deleted;
+    if (deleted < PRUNE_CHUNK_LIMIT) break; // drained
+  }
+
+  return deletedTotal;
+}
+
+export async function pruneExpiredDeviceSessions(env: Env, now = Date.now()) {
+  let deletedTotal = 0;
+
+  while (true) {
+    const deleted = await deleteExpiredDeviceSessionsChunk(env.DB, now, PRUNE_CHUNK_LIMIT);
     deletedTotal += deleted;
     if (deleted < PRUNE_CHUNK_LIMIT) break; // drained
   }

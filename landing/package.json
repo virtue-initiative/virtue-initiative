@@ -9,14 +9,15 @@
     "prepare-release-data": "bun ./scripts/prepare-release-data.mjs",
     "pretypecheck": "bun run prepare-release-data",
     "typecheck": "astro check",
-    "prebuild": "bun run prepare-release-data",
+    "prebuild": "bun run prepare-release-data && bun run build-appcast",
     "build": "astro build",
     "format": "prettier --plugin prettier-plugin-astro --write .",
     "format:check": "prettier --plugin prettier-plugin-astro --check .",
     "deploy:prod": "bun run build && wrangler deploy --env prod",
-    "deploy:staging": "bun run prepare-release-data && astro build --mode staging && wrangler deploy --env staging",
+    "deploy:staging": "bun run prepare-release-data && bun run build-appcast && astro build --mode staging && wrangler deploy --env staging",
     "preview": "astro preview",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build-appcast": "bun ./scripts/build-appcast.mjs"
   },
   "keywords": [],
   "author": "",

@@ -5,7 +5,7 @@ use flate2::write::GzEncoder;
 
 use crate::crypto::CryptoEngine;
 use crate::error::{CoreError, CoreResult};
-use crate::model::{BatchRecipient, BatchUpload};
+use crate::model::{BatchRecipient, BatchUpload, NotifyPayload};
 
 pub(crate) const MAX_BATCH_ITEMS_PER_UPLOAD: usize = 200;
 
@@ -22,6 +22,8 @@ impl BatchBuilder {
         end_time_ms: i64,
         high_risk_count: u32,
         medium_risk_count: u32,
+        screenshot_count: u32,
+        notifications: Vec<NotifyPayload>,
     ) -> CoreResult<BatchUpload> {
         if encoded_events.is_empty() {
             return Err(CoreError::InvalidState(
@@ -56,8 +58,11 @@ impl BatchBuilder {
             end_time_ms,
             bytes: encrypted,
             access_keys,
+            total_count: encoded_events.len() as u32,
             high_risk_count,
             medium_risk_count,
+            screenshot_count,
+            notifications,
         })
     }
 }

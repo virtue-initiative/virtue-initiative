@@ -8,7 +8,6 @@
     <!-- Section labels -->
     <string name="section_status">STATUS</string>
     <string name="section_account">ACCOUNT</string>
-    <string name="section_overrides">RUNTIME OVERRIDES</string>
 
     <!-- Status -->
     <string name="status_signed_out">Signed out</string>
@@ -25,34 +24,49 @@
 
     <!-- Buttons -->
     <string name="btn_sign_in">Sign In</string>
+    <string name="btn_sign_up">Don\'t have an account? Sign up</string>
     <string name="btn_sign_out">Sign Out</string>
-    <string name="btn_runtime_overrides">Runtime Overrides</string>
     <string name="btn_status_details">Status Details</string>
+    <string name="btn_force_capture">Test Screenshot</string>
     <string name="btn_pause_monitoring">Pause Monitoring</string>
     <string name="btn_resume_monitoring">Resume Monitoring</string>
-    <string name="btn_apply_overrides">Apply Overrides</string>
     <string name="btn_done">Done</string>
-
-    <!-- Override fields -->
-    <string name="override_api_url">API base URL</string>
-    <string name="override_api_url_hint">e.g., http://10.0.2.2:8787</string>
-    <string name="override_capture_interval">Capture interval (seconds)</string>
-    <string name="override_batch_window">Batch window (seconds)</string>
+    <string name="btn_open_log">Open log file</string>
+    <string name="open_log_chooser">Open Virtue log</string>
+    <string name="open_log_unavailable">No log file has been written yet.</string>
+    <string name="open_log_no_viewer">No app on this device can open a text file.</string>
+    <string name="btn_report_bug">Report a Bug</string>
+    <string name="btn_send_report">Send Report</string>
 
     <!-- Messages -->
     <string name="msg_sign_in_to_start">Sign in to start monitoring</string>
     <string name="msg_grant_permission">After signing in, grant screenshot permission to enable monitoring.</string>
-    <string name="msg_overrides_applied">Overrides applied</string>
+    <string name="msg_onboarding_intro">Virtue needs Accessibility permission to monitor your screen. This lets Virtue capture screenshots for accountability — no interaction data is collected.</string>
+    <string name="msg_onboarding_steps">1. Tap \"Open Accessibility Settings\" below\n2. Find \"Virtue\" in the list\n3. Toggle it on and confirm\n4. Return to this app</string>
+    <string name="msg_onboarding_waiting">Waiting for Accessibility permission…</string>
+    <string name="btn_open_accessibility_settings">Open Accessibility Settings</string>
+    <string name="msg_core_init_failed">Setup failed to complete: %s. Please close and reopen the app.</string>
+    <string name="msg_force_capture_started">Screenshot uploading…</string>
+    <string name="msg_force_capture_failed">Test screenshot failed: %s</string>
 
     <!-- Dialogs -->
     <string name="dialog_sign_out_title">Sign out?</string>
-    <string name="dialog_sign_out_message">Logging out will alert people monitoring you and will recreate a new device on your next login. Continue?</string>
+    <string name="dialog_sign_out_message">Signing out will deactivate this device and stop monitoring. Anyone monitoring you may be alerted. Logging in again will create a new device.</string>
     <string name="dialog_pause_title">Pause monitoring?</string>
     <string name="dialog_pause_message">This will stop monitoring on this device. People monitoring you may be alerted.</string>
     <string name="dialog_resume_title">Resume monitoring?</string>
     <string name="dialog_resume_message">Resume monitoring on this device?</string>
     <string name="dialog_cancel">Cancel</string>
     <string name="dialog_confirm">Confirm</string>
+    <string name="dialog_report_bug_title">Report a Bug</string>
+    <string name="report_bug_description_hint">Describe the issue</string>
+    <string name="report_bug_contact_email_hint">Contact email (optional)</string>
+    <string name="report_bug_include_logs">Include the last day of diagnostic logs</string>
+    <string name="report_bug_include_logs_caption">Includes timestamps, monitoring status, and error messages from the last day. No screenshots or window titles are included. Known tokens are redacted automatically.</string>
+    <string name="report_bug_message_required">Please describe the issue.</string>
+    <string name="report_bug_send_failed">Failed to send the report.</string>
+    <string name="dialog_report_sent_title">Report Sent</string>
+    <string name="dialog_report_sent_message">Thanks — your report was sent to the Virtue Initiative team.</string>
 
     <!-- Accessibility service -->
     <string name="accessibility_service_label">Virtue Screen Monitor</string>

@@ -1,3 +1,4 @@
+import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
 import { sendToast } from '../toast';
 import '../cache/client';
 import type {
@@ -16,12 +17,12 @@ import type {
   PasswordResetValidation,
   SignupPayload,
   SignupResponse,
-  LoginResponse,
+  SignupValidation,
   EmailVerifyResponse,
   UpdateUserPayload,
   UpdateUserResponse,
   CreatePartnerResponse,
-  PatchDeviceResponse,
+  BugReportPayload,
 } from '@virtueinitiative/shared-web/types';
 export type {
   EmailFrequency,
@@ -39,15 +40,16 @@ export type {
   PasswordResetValidation,
   SignupPayload,
   SignupResponse,
-  LoginResponse,
+  SignupValidation,
   EmailVerifyResponse,
   UpdateUserPayload,
   UpdateUserResponse,
   CreatePartnerResponse,
-  PatchDeviceResponse,
+  BugReportPayload,
 };
 
-const BASE = (import.meta as any).env?.VITE_API_URL ?? 'http://localhost:8787';
+const BASE =
+  ((import.meta as any).env?.VITE_API_URL ?? 'http://localhost:8787') + `/${CURRENT_API_VERSION}`;
 const NETWORK_ERROR_MESSAGE = "Error: Couldn't connect to the network. Try reloading.";
 const NETWORK_TOAST_THROTTLE_MS = 3_000;
 let lastNetworkToastAt = 0;
@@ -97,6 +99,16 @@ function firstValidationMessage(details: unknown): string | null {
   }
 
   return null;
+}
+
+export function describeError(err: unknown, fallback: string): string | null {
+  if (err && typeof err === 'object' && 'toastHandled' in err) {
+    return null;
+  }
+  if (err instanceof Error && err.message) {
+    return err.message;
+  }
+  return fallback;
 }
 
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -166,7 +178,8 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  getCurrentHashParams: () => req<HashParams>('/current-hash-params'),
+  getCurrentHashParams: () =>
+    req<{ params: HashParams }>('/user/login-material').then((res) => res.params),
 
   getLoginMaterial: (email: string) => {
     const qs = new URLSearchParams({ email });
@@ -174,13 +187,13 @@ export const api = {
   },
 
   login: (email: string, password_auth: string, timezone?: string) =>
-    req<LoginResponse>('/login', {
+    req<void>('/login', {
       method: 'POST',
       body: JSON.stringify({ email, password_auth, ...(timezone ? { timezone } : {}) }),
     }),
 
   signupRequest: (email: string, to?: string) =>
-    req<{ ok: boolean }>('/signup-request', {
+    req<void>('/signup-request', {
       method: 'POST',
       body: JSON.stringify({
         email,
@@ -194,6 +207,12 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  validateSignupToken: (token: string) =>
+    req<SignupValidation>('/signup/validate', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    }),
+
   logout: () => req<void>('/logout', { method: 'POST' }),
 
   getUser: () => req<User>('/user'),
@@ -205,9 +224,8 @@ export const api = {
     }),
 
   deleteUser: (confirm_email: string) =>
-    req<void>('/user', {
+    req<void>(`/user?confirm_email=${encodeURIComponent(confirm_email)}`, {
       method: 'DELETE',
-      body: JSON.stringify({ confirm_email }),
     }),
 
   verifyEmail: (token: string) =>
@@ -234,7 +252,7 @@ export const api = {
       password_auth: string;
       password_salt: string;
       pub_key?: string;
-      priv_key?: string;
+      encrypted_priv_key?: string;
     },
   ) =>
     req<{ ok: boolean }>('/password-reset/finalize', {
@@ -245,7 +263,7 @@ export const api = {
   getDevices: () => req<Device[]>('/device'),
 
   patchDevice: (id: string, patch: { name?: string }) =>
-    req<PatchDeviceResponse>(`/device/${id}`, {
+    req<void>(`/device/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }),
@@ -272,13 +290,22 @@ export const api = {
       body: JSON.stringify({ token: inviteToken }),
     }),
 
-  deleteWatcher: (id: string) => req<void>(`/partner/watcher/${id}`, { method: 'DELETE' }),
+  // The API exposes a single DELETE /partner/:id that works from either side of the
+  // partnership; deleteWatcher/deleteWatching stay as separate names here only because
+  // the call sites (removing a watcher vs. leaving a partnership you're watching) read
+  // more clearly that way.
+  deleteWatcher: (id: string) => req<void>(`/partner/${id}`, { method: 'DELETE' }),
 
-  deleteWatching: (id: string) => req<void>(`/partner/watching/${id}`, { method: 'DELETE' }),
+  deleteWatching: (id: string) => req<void>(`/partner/${id}`, { method: 'DELETE' }),
 
-  getData: (params?: { user?: string; since?: number }) => {
+  reportBug: (payload: BugReportPayload) => {
+    const form = new FormData();
+    form.set('metadata', JSON.stringify(payload));
+    return req<void>('/bug-report', { method: 'POST', body: form });
+  },
+
+  getData: (params?: { since?: number }) => {
     const qs = new URLSearchParams();
-    if (params?.user) qs.set('user', params.user);
     if (params?.since !== undefined) qs.set('since', String(params.since));
     const query = qs.toString();
     return req<DataPage>(`/data${query ? `?${query}` : ''}`);
