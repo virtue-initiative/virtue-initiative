@@ -38,7 +38,7 @@ jobs:
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          key: windows-explicit-target-v1
+          prefix-key: 'v1-windows'
           cache-on-failure: true
           workspaces: |
             client -> target
