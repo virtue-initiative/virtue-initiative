@@ -90,19 +90,42 @@ The packaging script also runs the managed tests before producing the MSIX artif
 
 GitHub Actions release packaging no longer uses an external signing service. The manifest's `Identity Publisher` (`client/windows/Virtue.WindowsApp/Package.appxmanifest`) must always match the publisher assigned by Partner Center for this app's Store identity, so the workflow lets `build-msix.ps1` fall back to its built-in self-signed development certificate (the same path used for PR/Debug builds) rather than overriding the publisher with an external signing cert's subject. Microsoft Store re-signs the package on ingestion, so a self-signed upload is sufficient for submission; for sideload installs the generated `.cer` in the setup bundle still needs to be trusted on the target machine as before.
 
-## Store Staging Flight Submission
+## Store Submissions
 
-Every push to `staging` runs `scripts/submit-store-flight.ps1` after the release MSIX is
-built and published, submitting that same artifact to a pre-created Microsoft Store
-"Staging" flight via the classic Store Submission API
-(`https://manage.devcenter.microsoft.com/v1.0/my/...`). This is a one-way push: it
-creates a new flight submission (cancelling any in-progress submission left over from a
-prior run, whatever stage it is at — uncommitted, processing, or in certification —
-since any of them block creating a new one), replaces the flight's package with the new `.msix`, commits, and polls
-Partner Center briefly to catch immediate validation failures before letting the CI job
-succeed — Store certification and rollout to flight testers continues asynchronously
-afterward, the same way the iOS TestFlight upload step doesn't block on Apple's
-processing.
+Two separate Store destinations, driven by branch:
+
+| Branch    | Destination                  | Script                            | Who gets it         |
+| --------- | ---------------------------- | --------------------------------- | ------------------- |
+| `staging` | "Staging" package flight     | `scripts/submit-store-flight.ps1` | flight testers only |
+| `main`    | the app's main Store listing | `scripts/submit-store-app.ps1`    | all Store customers |
+
+Both run after the release MSIX is built and published, submit that same artifact via
+the classic Store Submission API (`https://manage.devcenter.microsoft.com/v1.0/my/...`),
+and are one-way pushes: each cancels any in-progress submission left over from a prior
+run (whatever stage it is at — uncommitted, processing, or in certification — since any
+of them block creating a new one), replaces the package, commits, and polls Partner
+Center briefly to catch immediate validation failures before letting the CI job succeed.
+Store certification and rollout continue asynchronously afterward, the same way the iOS
+TestFlight upload step doesn't block on Apple's processing.
+
+The two differ in more than their URLs:
+
+- A **flight** submission is created empty; an **app** submission is created as a clone of
+  the last published one, so the store listing, screenshots, age ratings and certification
+  notes carry over and only the package is swapped. That clone is PUT back in full, which
+  is why `submit-store-app.ps1` serializes it with `ConvertTo-Json -Depth 100` — past its
+  depth limit `ConvertTo-Json` silently degrades nested nodes to strings rather than
+  erroring, which would rewrite the live listing with garbage.
+- The package list field is `applicationPackages`, not `flightPackages`.
+- `submit-store-app.ps1` forces `targetPublishMode = Immediate` (and clears any cloned
+  `targetPublishDate`) so a merge to `main` actually ships. Pass `-TargetPublishMode Manual`
+  to stop after certification and publish by hand instead.
+
+Package versions never collide between the two: `build-msix.ps1` gives stable (`main`)
+builds `<VERSION>.0` and dev (`staging`) builds `<major>.<minor>.<GITHUB_RUN_NUMBER>.0`, so
+flight packages stay ahead of the main listing as Microsoft's flighting model requires.
+
+### One-time setup
 
 This depends on one-time manual setup in Partner Center / Microsoft Entra ID that this
 repo cannot provision on its own:
@@ -128,6 +151,8 @@ repo cannot provision on its own:
    - `WINSTORE_CLIENT_SECRET` (secret) — Entra app client secret
    - `WINSTORE_APP_ID` (variable) — Partner Center Store ID for this app (e.g. `9NXXXXXXXXXX`)
    - `WINSTORE_FLIGHT_ID` (variable) — GUID of the pre-created "Staging" flight
+     (used only by the `staging` flight submission; the `main` app submission needs just
+     the tenant/client/secret/app values above)
 
 ## Linux-Driven Remote Windows Loop
 

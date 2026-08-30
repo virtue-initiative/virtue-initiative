@@ -101,7 +101,7 @@ jobs:
         working-directory: client/ios
 
       - name: Import signing certificate into CI keychain
-        if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         env:
           IOS_DIST_CERTIFICATE_P12_BASE64: ${{ secrets.IOS_DIST_CERTIFICATE_P12_BASE64 }}
           IOS_DIST_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DIST_CERTIFICATE_PASSWORD }}
@@ -124,8 +124,17 @@ jobs:
 
           rm -f "$CERT_PATH"
 
+      # Node (not bun) because this needs ES256 JWT signing for App Store
+      # Connect, and node:crypto's ieee-p1363 dsaEncoding is the one stdlib
+      # call that produces the raw r||s signature JWT requires.
+      - name: Setup Node
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - name: Archive and upload to TestFlight
-        if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         env:
           IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
           IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
@@ -147,10 +156,53 @@ jobs:
 
           ./scripts/build-and-upload-testflight.sh
 
-          rm -f "$IOS_ASC_API_KEY_PATH" "$IOS_APP_PROVISIONING_PROFILE_PATH" "$IOS_EXT_PROVISIONING_PROFILE_PATH"
+          # The .p8 is deliberately left in place for the distribution step
+          # below, which needs the same key to call the App Store Connect API.
+          # The "Clean up CI keychain" step removes it, and runs even on failure.
+          rm -f "$IOS_APP_PROVISIONING_PROFILE_PATH" "$IOS_EXT_PROVISIONING_PROFILE_PATH"
+        working-directory: client/ios
+
+      # Uploading only parks the build in App Store Connect: it processes for
+      # several minutes and then belongs to no group. This is what waits for
+      # that and actually distributes it. `main` always targets the external
+      # public beta; on staging it is opt-in (see the group-name check below).
+      - name: Distribute build to TestFlight group
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
+        env:
+          IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
+          IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
+          IOS_BETA_GROUP_NAME: ${{ github.ref_name == 'main' && 'Virtue Initiative iOS Public Beta' || vars.IOS_STAGING_BETA_GROUP_NAME }}
+          # A stable build points at https://api.virtueinitiative.org while a
+          # dev build points at staging (client/core/build.rs bakes the URL in
+          # per release channel), so a `main` build must not reach the staging
+          # testers' group — it would move them onto production data. Enforced
+          # only on main: staging builds reaching extra groups is harmless.
+          IOS_EXCLUSIVE_BETA_GROUP: ${{ github.ref_name == 'main' && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          # `main` always has a group name (literal above), so this can only be
+          # empty on staging, where automatic distribution is opt-in: staging
+          # distributed through App Store Connect's own settings before this
+          # step existed, and failing the job would regress that. Set the
+          # IOS_STAGING_BETA_GROUP_NAME repo variable to opt staging in.
+          if [[ -z "${IOS_BETA_GROUP_NAME:-}" ]]; then
+            echo "No IOS_STAGING_BETA_GROUP_NAME repo variable set; leaving ${GITHUB_REF_NAME} distribution to App Store Connect."
+            exit 0
+          fi
+          export IOS_ASC_API_KEY_PATH="$RUNNER_TEMP/AuthKey_${IOS_ASC_KEY_ID}.p8"
+          # IOS_MARKETING_VERSION / IOS_BUILD_VERSION / IOS_WHATS_NEW come from
+          # build-and-upload-testflight.sh via GITHUB_ENV.
+          node ./scripts/distribute-testflight-build.mjs
         working-directory: client/ios
 
       - name: Clean up CI keychain
-        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/staging'
+        if: always() && github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
+        env:
+          IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
         run: |
           security delete-keychain "$RUNNER_TEMP/virtue-ios-ci.keychain-db" || true
+          # Both copies of the App Store Connect private key: the one the
+          # archive step decoded, and the one build-and-upload-testflight.sh
+          # places where altool insists on finding it.
+          rm -f "$RUNNER_TEMP/AuthKey_${IOS_ASC_KEY_ID}.p8"
+          rm -f "$HOME/.appstoreconnect/private_keys/AuthKey_${IOS_ASC_KEY_ID}.p8"
