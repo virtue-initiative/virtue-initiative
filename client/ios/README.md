@@ -104,16 +104,13 @@ nothing to prevent and this step will simply report the target group.
 ### Export compliance
 
 A build with no export compliance answer sits in TestFlight as "Missing Compliance" and
-reaches nobody, so the distribute step insists on one of two routes and fails loudly if
-neither is present:
+reaches nobody. `ITSAppUsesNonExemptEncryption` is declared `false` in both the app and the
+Safari extension `Info.plist`, so every build arrives already answered and the distribute
+step only asserts it, failing the release if the key ever goes missing.
 
-1. **`ITSAppUsesNonExemptEncryption` in `client/ios/app/Info.plist`.** The build arrives
-   already answered and the step is a no-op. Deterministic, and what App Store Connect
-   steers you to once it has told you your answers require no uploaded documents.
-   **This is the route this repo takes** — the key is declared `false` in both the app and
-   the Safari extension Info.plist.
-2. **An approved App Encryption Declaration**, which the step finds and attaches per
-   build. Set `IOS_APP_ENCRYPTION_DECLARATION_ID` to pin a specific one.
+(The other way to satisfy this is an approved App Encryption Declaration attached per build
+over the API. That is what you need if Apple ever _does_ require uploaded documents for
+this app; it is deliberately not implemented while the Info.plist answer suffices.)
 
 Note what "non-exempt" means in that key: _exempt from export **documentation**
 requirements_, not "contains no cryptography". `client/core` implements AES-256-GCM, HPKE,

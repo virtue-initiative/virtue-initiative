@@ -21,8 +21,6 @@
  * Optional env:
  *   IOS_BUNDLE_ID                       default org.virtueinitiative.virtueios
  *   IOS_WHATS_NEW                       "What to Test" text
- *   IOS_APP_ENCRYPTION_DECLARATION_ID   pin a specific declaration instead of
- *                                       auto-selecting the newest approved one
  *   IOS_EXCLUSIVE_BETA_GROUP            "true" to remove the build from every
  *                                       other beta group (see below)
  *   IOS_PROCESSING_TIMEOUT_SECONDS      default 2700 (45 minutes)
@@ -223,115 +221,32 @@ async function waitForProcessedBuild(client, { appId, buildVersion, marketingVer
 }
 
 /**
- * Clears the build's "Missing Compliance" state, if it has one.
+ * Fails fast if the build has no export compliance answer.
  *
- * Three ways a build can be compliant, checked in that order:
+ * `ITSAppUsesNonExemptEncryption` in Info.plist answers this at build time, so
+ * App Store Connect reports it on the build and there is nothing to set here.
+ * Without it the build sits in TestFlight as "Missing Compliance" and reaches
+ * nobody, which is worth stopping the release for rather than distributing into
+ * a void.
  *
- * 1. `ITSAppUsesNonExemptEncryption` in Info.plist. The build arrives already
- *    answered and there is nothing to do — this is the deterministic option and
- *    the one App Store Connect steers you to once it has told you that your
- *    answers require no uploaded documents.
- * 2. An approved App Encryption Declaration, attached here per build. Needed
- *    when Apple did require documentation, or when Info.plist stays silent.
- * 3. Neither — hard failure with instructions, because the build would sit in
- *    TestFlight as "Missing Compliance" and reach nobody.
- *
- * Note that "non-exempt" in the Info.plist key means *exempt from export
- * documentation requirements*, not "isn't encryption". Virtue implements
- * AES-256-GCM, HPKE, Argon2id and HKDF in `client/core` rather than calling
- * Apple's CryptoKit, which by Apple's classification is "industry standard
- * algorithms not provided within the Apple operating system" — that tier needs
- * no CCATS, only a French declaration where applicable, which is why App Store
- * Connect reports that no documents are required.
+ * "Non-exempt" in that key means *exempt from export documentation
+ * requirements*, not "isn't encryption". `client/core` implements AES-256-GCM,
+ * HPKE, Argon2id and HKDF rather than calling Apple's CryptoKit, which by
+ * Apple's classification is "industry standard algorithms not provided within
+ * the Apple operating system" — that tier needs no CCATS, only a French
+ * declaration where applicable, which is why App Store Connect reports that no
+ * documents are required.
  */
-async function ensureExportCompliance(client, { appId, build }) {
-  if (typeof build.attributes?.usesNonExemptEncryption === 'boolean') {
-    console.log(
-      `Export compliance already answered on the build (usesNonExemptEncryption=` +
-        `${build.attributes.usesNonExemptEncryption}), presumably from Info.plist; nothing to do.`,
-    );
-    return;
-  }
-
-  const pinnedDeclarationId = process.env.IOS_APP_ENCRYPTION_DECLARATION_ID?.trim();
-
-  let declarationId = pinnedDeclarationId || null;
-  if (!declarationId) {
-    const { body } = await client.request(
-      'GET',
-      `/v1/appEncryptionDeclarations?filter[app]=${encodeURIComponent(appId)}` +
-        `&filter[appEncryptionDeclarationState]=APPROVED&limit=200`,
-    );
-    const approved = body?.data ?? [];
-    if (approved.length === 0) {
-      throw new Error(
-        [
-          'This build has no export compliance answer and there is no APPROVED app encryption',
-          'declaration to attach, so it would sit in TestFlight as "Missing Compliance" and',
-          'reach no testers. Fix it either way:',
-          '',
-          'A. Declare it in Info.plist (deterministic, no per-build API call). If App Store',
-          '   Connect has told you your answers require no uploaded documents, add to',
-          '   client/ios/app/Info.plist:',
-          '       <key>ITSAppUsesNonExemptEncryption</key>',
-          '       <false/>',
-          '   "Non-exempt" there means "exempt from export DOCUMENTATION requirements", which is',
-          '   what App Store Connect just determined — it does not claim the app has no crypto.',
-          '',
-          'B. Or create the declaration once in App Store Connect (App Information ->',
-          '   App Encryption Documentation): uses encryption -> Yes; standard algorithms',
-          "   instead of/in addition to Apple's OS encryption -> Yes; proprietary algorithms",
-          '   -> No; then answer the French availability question. Once it shows APPROVED this',
-          '   step finds and attaches it on its own.',
-        ].join('\n'),
-      );
-    }
-    // Newest first: App Store Connect returns these oldest-first, and a newer
-    // declaration supersedes an older one when the answers were revised.
-    declarationId = approved[approved.length - 1].id;
-    console.log(`Using approved app encryption declaration ${declarationId}.`);
-  } else {
-    console.log(`Using pinned app encryption declaration ${declarationId}.`);
-  }
-
-  // Two PATCHes rather than one combined request. Both fields are settable on
-  // BuildUpdateRequest, but the declaration is the authoritative answer and the
-  // boolean is the shortcut used when no declaration exists — so if App Store
-  // Connect treats the boolean as derived once a declaration is attached and
-  // rejects it, that must not take the declaration down with it. Split, the
-  // failure modes stay independent and a re-run is still idempotent.
-  const complianceAnswer = await client.request(
-    'PATCH',
-    `/v1/builds/${build.id}`,
-    {
-      data: {
-        type: 'builds',
-        id: build.id,
-        attributes: { usesNonExemptEncryption: true },
-      },
-    },
-    { allowStatuses: [409, 422] },
-  );
-
-  if (complianceAnswer.status !== 200) {
-    console.log(
-      `Setting usesNonExemptEncryption returned ${complianceAnswer.status} ` +
-        `(${formatAscErrors(complianceAnswer.body) || 'no detail'}); the declaration below is what governs.`,
+function assertExportCompliance(build) {
+  const answer = build.attributes?.usesNonExemptEncryption;
+  if (typeof answer !== 'boolean') {
+    throw new Error(
+      'Build has no export compliance answer, so it would sit in TestFlight as "Missing ' +
+        'Compliance" and reach no testers. Is ITSAppUsesNonExemptEncryption still declared in ' +
+        'client/ios/app/Info.plist?',
     );
   }
-
-  await client.request('PATCH', `/v1/builds/${build.id}`, {
-    data: {
-      type: 'builds',
-      id: build.id,
-      relationships: {
-        appEncryptionDeclaration: {
-          data: { type: 'appEncryptionDeclarations', id: declarationId },
-        },
-      },
-    },
-  });
-  console.log('Export compliance recorded on the build.');
+  console.log(`Export compliance declared in Info.plist (usesNonExemptEncryption=${answer}).`);
 }
 
 /**
@@ -498,21 +413,11 @@ async function verifyGroupMembership(client, { appId, group, build, buildVersion
  * Internal groups never need it, so this is skipped for them.
  */
 async function submitForBetaReview(client, { build }) {
-  const existing = await client.request(
-    'GET',
-    `/v1/builds/${build.id}/betaAppReviewSubmission`,
-    undefined,
-    { allowStatuses: [404] },
-  );
-  const state = existing.body?.data?.attributes?.betaReviewState;
-  if (state) {
-    console.log(`Build already has a beta app review submission (${state}); leaving it alone.`);
-    return;
-  }
-
-  // 409 covers the legitimate "nothing to submit" cases — most commonly that
-  // this marketing version was already approved for beta review, after which
-  // Apple releases subsequent builds of it without a fresh review.
+  // No "is it already submitted" pre-check: re-submitting returns 409, which is
+  // the same answer the check would have given, so the extra round trip only
+  // adds a way to be wrong. 409 also covers the other legitimate "nothing to
+  // submit" case — this marketing version was already approved, after which
+  // Apple releases later builds of it without a fresh review.
   const { status, body } = await client.request(
     'POST',
     '/v1/betaAppReviewSubmissions',
@@ -564,6 +469,9 @@ async function main() {
     timeoutMs,
   });
 
+  // Free, and fails the run, so it goes before anything that mutates state.
+  assertExportCompliance(build);
+
   const exclusive = process.env.IOS_EXCLUSIVE_BETA_GROUP === 'true';
 
   // Pruned here as well as at the end. A group with "automatically distribute
@@ -577,7 +485,6 @@ async function main() {
     await enforceExclusiveGroup(client, { build, group });
   }
 
-  await ensureExportCompliance(client, { appId, build });
   await setWhatToTest(client, { build, whatsNew });
   await addBuildToGroup(client, { group, build });
   await verifyGroupMembership(client, { appId, group, build, buildVersion });

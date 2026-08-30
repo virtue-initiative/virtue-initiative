@@ -172,7 +172,6 @@ jobs:
           IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
           IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
           IOS_BETA_GROUP_NAME: ${{ github.ref_name == 'main' && 'Virtue Initiative iOS Public Beta' || vars.IOS_STAGING_BETA_GROUP_NAME }}
-          IOS_APP_ENCRYPTION_DECLARATION_ID: ${{ vars.IOS_APP_ENCRYPTION_DECLARATION_ID }}
           # A stable build points at https://api.virtueinitiative.org while a
           # dev build points at staging (client/core/build.rs bakes the URL in
           # per release channel), so a `main` build must not reach the staging
