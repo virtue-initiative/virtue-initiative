@@ -221,16 +221,17 @@ struct ContentView: View {
                     .foregroundStyle(VirtueBrand.text)
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Permission state: \(coordinator.safariPermissionSummary)")
-                    Text("Daemon state: \(coordinator.safariDaemonStatus)")
+                    Text("Extension status: \(coordinator.safariDaemonStatus)")
                 }
                 .font(.subheadline)
                 .foregroundStyle(VirtueBrand.textMuted)
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("1. Open Settings > Safari > Extensions.")
-                    Text("2. Enable Virtue Safari Capture.")
-                    Text("3. Allow access on All Websites.")
-                    Text("4. Virtue will produce screenshots while browsing.")
+                    Text("1. Open Settings > Safari > Extensions > Virtue Safari Capture.")
+                    Text("2. Turn on \"Allow Extension\" and \"Allow in Private Browsing\".")
+                    Text("3. In Permissions, select \"Allow\" for \"All Websites\".")
+                    Text("4. Fully close Safari (swipe it away in the app switcher) and reopen it.")
+                    Text("5. Virtue will produce screenshots while browsing.")
                 }
                 .font(.subheadline)
                 .foregroundStyle(VirtueBrand.text)
@@ -336,7 +337,7 @@ private struct StatusSheet: View {
                 Section("Safari Extension") {
                     DetailRow(label: "Capture health", value: coordinator.safariCaptureHealth)
                     DetailRow(label: "Permission state", value: coordinator.safariPermissionSummary)
-                    DetailRow(label: "Daemon", value: coordinator.safariDaemonStatus)
+                    DetailRow(label: "Extension status", value: coordinator.safariDaemonStatus)
                     DetailRow(label: "Last heartbeat", value: coordinator.safariLastHeartbeat)
                     DetailRow(label: "Last frame", value: coordinator.safariLastFrame)
                     DetailRow(label: "Last page", value: coordinator.safariLastPage)

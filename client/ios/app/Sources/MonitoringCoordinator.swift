@@ -116,7 +116,7 @@ final class MonitoringCoordinator: ObservableObject {
     @Published private(set) var safariLastFrame: String = "<none>"
     @Published private(set) var safariLastPage: String = "<none>"
     @Published private(set) var safariLastError: String = "<none>"
-    @Published private(set) var safariDaemonStatus: String = "No daemon state yet"
+    @Published private(set) var safariDaemonStatus: String = "Not started yet"
 
     private var didBecomeActiveObserver: NSObjectProtocol?
     private var willEnterForegroundObserver: NSObjectProtocol?
@@ -448,7 +448,7 @@ final class MonitoringCoordinator: ObservableObject {
         )
 
         if defaults.object(forKey: VirtueShared.safariDaemonRunningKey) == nil {
-            safariDaemonStatus = "No daemon state yet"
+            safariDaemonStatus = "Not started yet"
         } else {
             let running = defaults.bool(forKey: VirtueShared.safariDaemonRunningKey)
             if running {
