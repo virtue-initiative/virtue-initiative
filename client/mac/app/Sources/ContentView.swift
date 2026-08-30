@@ -51,7 +51,7 @@ struct ContentView: View {
                 coordinator.logout()
             }
         } message: {
-            Text("Logging out will alert people monitoring you and will recreate a new device on your next login. Continue?")
+            Text("Signing out will deactivate this device and stop monitoring. Anyone monitoring you may be alerted. Logging in again will create a new device.")
         }
     }
 
@@ -114,7 +114,7 @@ struct ContentView: View {
                         }
                         .buttonStyle(VirtueButtonStyle())
 
-                        Button(coordinator.isForceCapturing ? "Capturing…" : "Force Screenshot & Upload") {
+                        Button(coordinator.isForceCapturing ? "Uploading…" : "Test Screenshot") {
                             coordinator.forceCapture()
                         }
                         .buttonStyle(VirtueButtonStyle())
@@ -162,7 +162,7 @@ struct ContentView: View {
                         .foregroundStyle(VirtueBrand.textMuted)
 
                     HStack(spacing: 10) {
-                        Button(coordinator.isSigningOut ? "Signing Out…" : "Logout") {
+                        Button(coordinator.isSigningOut ? "Signing Out…" : "Sign Out") {
                             showLogoutConfirmation = true
                         }
                         .buttonStyle(VirtueButtonStyle())

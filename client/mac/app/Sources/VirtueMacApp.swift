@@ -60,7 +60,7 @@ private struct MenuBarMenuContent: View {
             }
         } else {
             Divider()
-            Button("Force Screenshot & Upload") {
+            Button("Test Screenshot") {
                 coordinator.forceCapture()
             }
             .disabled(coordinator.isForceCapturing)

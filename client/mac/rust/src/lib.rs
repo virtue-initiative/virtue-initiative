@@ -6,6 +6,7 @@ use std::process::Command;
 use anyhow::{Context, Result, anyhow};
 use once_cell::sync::OnceCell;
 use virtue_core::AuthState;
+use virtue_core::force_capture;
 use virtue_core::ipc::ClientController;
 use virtue_mac_platform::capture::{has_screen_capture_access, request_screen_capture_access};
 use virtue_mac_platform::config::{
@@ -293,17 +294,40 @@ pub extern "C" fn virtue_mac_native_request_user_stop(source: *const c_char) -> 
 /// gate, but still honoring the locked/screensaver and fingerprint-dedup
 /// gates) and requests an immediate batch flush, so the result uploads
 /// without waiting out the normal batch interval.
+///
+/// Then waits for the batch to actually land, so the UI can confirm what
+/// really happened rather than guessing. Returns JSON: either
+/// `{"outcome": …, "message": …}` (see `force_capture::ForcedCaptureOutcome`)
+/// or `{"error": …}`.
 #[unsafe(no_mangle)]
 pub extern "C" fn virtue_mac_native_force_capture() -> *mut c_char {
-    let result = (|| -> Result<()> {
+    let result = (|| -> Result<String> {
         let core = core()?;
         let sock = core.paths.state_dir.join("daemon.sock");
-        let mut client = ClientController::connect(&sock)
-            .context("failed to connect to daemon (is it running?)")?;
-        client.force_capture_now().context("force capture failed")?;
-        Ok(())
+        let before = {
+            let mut client = ClientController::connect(&sock)
+                .context("failed to connect to daemon (is it running?)")?;
+            let before = client.get_status().context("failed to read status")?;
+            client.force_capture_now().context("force capture failed")?;
+            before
+        };
+        // The daemon serves one connection at a time, so poll on a fresh
+        // connection each time rather than holding the socket — and the app's
+        // own status polling — for the whole wait.
+        let outcome = force_capture::wait_for_upload(
+            &before,
+            force_capture::DEFAULT_UPLOAD_TIMEOUT,
+            force_capture::DEFAULT_POLL_INTERVAL,
+            || ClientController::connect(&sock)?.get_status(),
+            std::thread::sleep,
+        )
+        .context("failed to read status while waiting for the upload")?;
+        Ok(outcome.report_json())
     })();
-    into_c_result(result)
+    match result {
+        Ok(json) => string_to_c(json),
+        Err(err) => string_to_c(serde_json::json!({ "error": format!("{err:#}") }).to_string()),
+    }
 }
 
 #[unsafe(no_mangle)]

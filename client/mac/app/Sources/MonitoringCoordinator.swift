@@ -209,21 +209,29 @@ final class MonitoringCoordinator: ObservableObject {
 
     /// Forces an immediate screenshot capture, bypassing the normal
     /// interval-due gate (still honors the locked/screensaver and
-    /// fingerprint-dedup gates). Shows a transient confirmation/error
-    /// message that clears itself after a few seconds, rather than sticking
-    /// around forever.
+    /// fingerprint-dedup gates), then waits for the resulting batch to reach
+    /// the server so the confirmation reflects what actually happened — a
+    /// gated capture and an upload still in flight each say so. Shows a
+    /// transient message that clears itself after a few seconds, rather than
+    /// sticking around forever.
     func forceCapture() {
         guard loggedIn, !isForceCapturing else {
             return
         }
         isForceCapturing = true
-        forceCaptureMessage = "Capturing screenshot…"
+        forceCaptureMessage = "Screenshot uploading…"
         Task {
-            let error = await Task.detached(priority: .userInitiated) {
+            let result = await Task.detached(priority: .userInitiated) {
                 NativeBridge.forceCapture()
             }.value
             isForceCapturing = false
-            let message = error.map { "Force screenshot failed: \($0)" } ?? "Screenshot captured and uploading"
+            let message: String
+            switch result {
+            case .finished(let text):
+                message = text
+            case .failed(let error):
+                message = "Test screenshot failed: \(error)"
+            }
             forceCaptureMessage = message
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             // Only clear if a later call hasn't already replaced this message.

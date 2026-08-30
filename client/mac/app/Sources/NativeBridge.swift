@@ -96,6 +96,22 @@ enum DaemonStatus: Int32 {
     case unreachable = 2
 }
 
+/// `{"outcome": …, "message": …}` on success, `{"error": …}` on failure —
+/// the shape `virtue_mac_native_force_capture` returns.
+private struct ForceCaptureReport: Decodable {
+    let outcome: String?
+    let message: String?
+    let error: String?
+}
+
+/// What a "Test Screenshot" run ended up doing, ready to show the user.
+enum ForceCaptureResult {
+    /// The capture ran; the message says whether it uploaded, was gated, or
+    /// is still in flight.
+    case finished(String)
+    case failed(String)
+}
+
 enum NativeBridge {
     static func initialize() -> String? {
         callReturningError {
@@ -159,10 +175,20 @@ enum NativeBridge {
         }
     }
 
-    static func forceCapture() -> String? {
-        callReturningError {
-            virtue_mac_native_force_capture()
+    /// Runs a forced capture and waits for its batch to land. The native side
+    /// answers with the message to show — either the shared outcome wording
+    /// from `virtue_core::force_capture`, or an error.
+    static func forceCapture() -> ForceCaptureResult {
+        guard let json = consumeOptionalString(virtue_mac_native_force_capture()),
+              let data = json.data(using: .utf8),
+              let payload = try? JSONDecoder().decode(ForceCaptureReport.self, from: data)
+        else {
+            return .failed("the native layer returned no result")
         }
+        if let error = payload.error {
+            return .failed(error)
+        }
+        return .finished(payload.message ?? "Test screenshot finished.")
     }
 
     static func hasCapturePermission() -> Bool {
