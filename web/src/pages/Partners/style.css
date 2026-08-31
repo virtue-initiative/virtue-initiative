@@ -67,7 +67,9 @@
    leftover width spread between the columns rather than stretching the cards.
    `min()` keeps the track from overflowing a phone; below that the device
    names ellipsise. */
-.partners-grid--wide {
+/* Chained with .vi-card-grid so this always outranks the shared 260px default,
+   whichever order the two stylesheets land in the bundle. */
+.vi-card-grid.partners-grid--wide {
   grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 320px));
   justify-content: space-between;
 }
