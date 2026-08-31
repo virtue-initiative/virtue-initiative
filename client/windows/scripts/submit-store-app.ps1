@@ -103,10 +103,16 @@ function New-AppSubmission {
     )
 
     $createUri = "https://manage.devcenter.microsoft.com/v1.0/my/applications/$AppId/submissions"
-    # As with flights, the API rejects a POST with no body/Content-Type ("Only
-    # JSON content is accepted"), so an explicit empty JSON body is required
-    # even though the request logically carries no data.
-    return Invoke-RestMethod -Method Post -Uri $createUri -Headers $Headers -Body "{}" -ContentType "application/json"
+    # Unlike the flight endpoint, this one parses the request body as the
+    # submission to create and validates it, so the flight script's "{}" is
+    # rejected here with "The size of Listings must be 1 or more" — an empty
+    # object is a submission with no listings. The docs say to send no body at
+    # all; what the API actually requires is a zero-length one with a JSON
+    # Content-Type (a POST carrying neither header is refused outright). An
+    # explicit empty byte array pins that wire shape — Content-Length: 0 plus
+    # the content type — rather than relying on how a given PowerShell version
+    # frames an omitted -Body.
+    return Invoke-RestMethod -Method Post -Uri $createUri -Headers $Headers -Body ([byte[]]::new(0)) -ContentType "application/json"
 }
 
 function Update-AppSubmissionPackages {
