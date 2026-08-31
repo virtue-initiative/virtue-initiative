@@ -372,7 +372,6 @@ export function LogDetailDialog({
   const [imgSrc, setImgSrc] = useState<string | null>(null);
   /** Object URL currently held by `imgSrc`, revoked only once it's replaced. */
   const imgUrlRef = useRef<string | null>(null);
-  const [lightboxOpen, setLightboxOpen] = useState(false);
   const metadata = getLogMetadata(item);
   const riskLabel = describeRiskLevel(item.risk) ?? 'Concern unavailable';
   const riskBadge =
@@ -400,12 +399,7 @@ export function LogDetailDialog({
       if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
       // The Advanced dialog sits on top; let it have Escape and the arrows.
       if (advancedRef.current?.open) return;
-      if (e.key === 'Escape' && lightboxOpen) {
-        // Without this the browser's own <dialog> handling would close the
-        // detail dialog too, dismissing both with a single press.
-        e.preventDefault();
-        setLightboxOpen(false);
-      } else if (e.key === 'ArrowLeft' && onPrev) {
+      if (e.key === 'ArrowLeft' && onPrev) {
         e.preventDefault();
         onPrev();
       } else if (e.key === 'ArrowRight' && onNext) {
@@ -415,7 +409,7 @@ export function LogDetailDialog({
     }
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onPrev, onNext, lightboxOpen]);
+  }, [onPrev, onNext]);
 
   /** The step buttons live in the header, so they hold one spot regardless of
    * the log's type — they're rendered even at the ends of the list, disabled,
@@ -441,38 +435,6 @@ export function LogDetailDialog({
         <ChevronRightIcon />
       </button>
     </div>
-  );
-
-  /** The lightbox covers the header, so it carries its own pair. */
-  const lightboxNav = (
-    <>
-      {onPrev && (
-        <button
-          class="logs-detail-nav logs-detail-nav--prev"
-          type="button"
-          aria-label="Previous log"
-          onClick={(e) => {
-            e.stopPropagation();
-            onPrev();
-          }}
-        >
-          <ChevronLeftIcon />
-        </button>
-      )}
-      {onNext && (
-        <button
-          class="logs-detail-nav logs-detail-nav--next"
-          type="button"
-          aria-label="Next log"
-          onClick={(e) => {
-            e.stopPropagation();
-            onNext();
-          }}
-        >
-          <ChevronRightIcon />
-        </button>
-      )}
-    </>
   );
 
   useEffect(
@@ -503,7 +465,6 @@ export function LogDetailDialog({
       if (imgUrlRef.current) URL.revokeObjectURL(imgUrlRef.current);
       imgUrlRef.current = null;
       setImgSrc(null);
-      setLightboxOpen(false);
     };
 
     // Prefer inline image bytes (freshly decrypted, not yet persisted to IDB),
@@ -564,14 +525,7 @@ export function LogDetailDialog({
         </div>
         <div class="logs-detail-media">
           {imgSrc ? (
-            <button
-              class="logs-detail-image-button"
-              type="button"
-              onClick={() => setLightboxOpen(true)}
-              aria-label="Open image fullscreen"
-            >
-              <img class="logs-detail-image" src={imgSrc} alt="screenshot" />
-            </button>
+            <img class="logs-detail-image" src={imgSrc} alt="screenshot" />
           ) : (
             /* A log with no picture gets an enlarged echo of its gallery tile,
                so the media area holds the same object you clicked. */
@@ -607,20 +561,6 @@ export function LogDetailDialog({
           ))}
         </dl>
       </Dialog>
-
-      {lightboxOpen && imgSrc && (
-        <div class="logs-lightbox-overlay" onClick={() => setLightboxOpen(false)}>
-          <div class="logs-lightbox-frame">
-            <img
-              class="logs-lightbox-image"
-              src={imgSrc}
-              alt="screenshot"
-              onClick={(e) => e.stopPropagation()}
-            />
-            {lightboxNav}
-          </div>
-        </div>
-      )}
     </Dialog>
   );
 }
