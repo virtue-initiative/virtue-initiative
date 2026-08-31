@@ -77,6 +77,31 @@ describe('Partners — monitored device list', () => {
   });
 });
 
+describe('Partners — more devices dialog', () => {
+  it('opens a dialog listing every device when "+N more" is clicked', async () => {
+    const user = userEvent.setup();
+    const many = Array.from({ length: 6 }, (_, i) => ({
+      ...TEST_DEVICES[0],
+      id: `many-device-${i}`,
+      name: `Device ${i}`,
+      owner: TEST_WATCHING.user.id,
+    }));
+    server.use(http.get(`${BASE}/device`, () => HttpResponse.json(many)));
+    renderWithClient(<Partners />);
+
+    const moreBtn = await screen.findByRole('button', { name: /\+2 more devices/i });
+    // The card itself lists only the first four.
+    expect(screen.queryByRole('button', { name: /Device 5/ })).not.toBeInTheDocument();
+
+    await user.click(moreBtn);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Device 5/ })).toBeInTheDocument();
+    });
+    expect(screen.getAllByRole('button', { name: /^close$/i }).length).toBeGreaterThan(0);
+  });
+});
+
 describe('Partners — Invite partner dialog', () => {
   it('opens the invite dialog with an email input', async () => {
     const user = userEvent.setup();

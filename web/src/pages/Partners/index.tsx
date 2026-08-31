@@ -29,6 +29,8 @@ import { deviceStatusLabel, deviceStatusVariant } from '../../utils/device-statu
 import { formatCompactRelativeTimestamp, formatRelativeTimestamp } from '../../utils/time';
 import './style.css';
 
+const MAX_LISTED_DEVICES = 4;
+
 function UserPlusIcon() {
   return (
     <svg
@@ -320,6 +322,21 @@ function PendingPartnerCard({
   );
 }
 
+function PartnerDeviceRow({ device, onOpen }: { device: Device; onOpen: () => void }) {
+  return (
+    <button class="partner-device-row" type="button" onClick={onOpen} title={device.name}>
+      <span class="partner-device-name">{device.name}</span>
+      <span
+        class="partner-device-activity"
+        title={`Last seen: ${formatRelativeTimestamp(device.last_hash_at)}`}
+      >
+        ({formatCompactRelativeTimestamp(device.last_hash_at)})
+      </span>
+      <Badge variant={deviceStatusVariant(device.status)}>{deviceStatusLabel(device.status)}</Badge>
+    </button>
+  );
+}
+
 function PartnerCard({
   kind,
   partner,
@@ -338,9 +355,15 @@ function PartnerCard({
   const [action, setAction] = useState<'remove' | null>(null);
   const { push: pushToast } = useToast();
   const confirmRef = useRef<HTMLDialogElement>(null);
+  const allDevicesRef = useRef<HTMLDialogElement>(null);
   const partnerLabel = partner.user.name ?? partner.user.email;
   const partnerEmailTooltip = partner.user.name ? undefined : partner.user.email;
   const partnerName = partnerLabel;
+
+  function openDeviceLogs(deviceId: string) {
+    allDevicesRef.current?.close();
+    route(`/logs/${partner.user.id}?device_id=${deviceId}`);
+  }
 
   async function removeConfirmed() {
     setAction('remove');
@@ -364,30 +387,23 @@ function PartnerCard({
         <div class="partner-devices">
           <h3 class="eyebrow partner-devices-heading">Devices (last seen)</h3>
           <div class="partner-device-list">
-            {devices.slice(0, 4).map((device) => (
-              <button
+            {devices.slice(0, MAX_LISTED_DEVICES).map((device) => (
+              <PartnerDeviceRow
                 key={device.id}
-                class="partner-device-row"
-                type="button"
-                onClick={() => route(`/logs/${partner.user.id}?device_id=${device.id}`)}
-                title={device.name}
-              >
-                <span class="partner-device-name">{device.name}</span>
-                <span
-                  class="partner-device-activity"
-                  title={`Last seen: ${formatRelativeTimestamp(device.last_hash_at)}`}
-                >
-                  ({formatCompactRelativeTimestamp(device.last_hash_at)})
-                </span>
-                <Badge variant={deviceStatusVariant(device.status)}>
-                  {deviceStatusLabel(device.status)}
-                </Badge>
-              </button>
+                device={device}
+                onOpen={() => openDeviceLogs(device.id)}
+              />
             ))}
-            {devices.length > 4 && (
-              <p class="partner-device-more">+{devices.length - 4} more devices</p>
-            )}
           </div>
+          {devices.length > MAX_LISTED_DEVICES && (
+            <button
+              class="partner-device-more"
+              type="button"
+              onClick={() => allDevicesRef.current?.showModal()}
+            >
+              +{devices.length - MAX_LISTED_DEVICES} more devices
+            </button>
+          )}
         </div>
       )}
       <CardActions>
@@ -429,6 +445,23 @@ function PartnerCard({
             disabled={action !== null}
           >
             {action === 'remove' ? 'Removing…' : 'Remove partner'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+      <Dialog dialogRef={allDevicesRef}>
+        <DialogHeader>{partnerName}'s devices (last seen)</DialogHeader>
+        <div class="partner-device-list partner-device-list--dialog">
+          {devices.map((device) => (
+            <PartnerDeviceRow
+              key={device.id}
+              device={device}
+              onOpen={() => openDeviceLogs(device.id)}
+            />
+          ))}
+        </div>
+        <DialogActions>
+          <Button variant="ghost" type="button" onClick={() => allDevicesRef.current?.close()}>
+            Close
           </Button>
         </DialogActions>
       </Dialog>
