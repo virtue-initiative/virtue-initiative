@@ -38,7 +38,6 @@ jobs:
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          cache-on-failure: true
           workspaces: |
             client -> target
             hash-server -> target

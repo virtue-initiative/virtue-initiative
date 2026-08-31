@@ -34,7 +34,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           prefix-key: 'v2'
-          cache-on-failure: true
           workspaces: |
             client -> target
             hash-server -> target
