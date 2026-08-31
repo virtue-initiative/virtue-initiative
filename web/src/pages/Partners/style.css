@@ -124,6 +124,11 @@
   white-space: nowrap;
 }
 
+/* A touch more air before the status tag than between name and time. */
+.partner-device-row .vi-badge {
+  margin-inline-start: var(--space-1);
+}
+
 .partner-device-more {
   margin: var(--space-1) 0 0;
   color: var(--text-muted);
