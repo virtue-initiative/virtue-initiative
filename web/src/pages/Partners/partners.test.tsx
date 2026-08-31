@@ -67,8 +67,8 @@ describe('Partners — monitored device list', () => {
 
     const row = await screen.findByRole('button', { name: new RegExp(TEST_DEVICES[0].name, 'i') });
     expect(row).toHaveTextContent('Deactivated');
-    // last_hash_at is seconds old in the fixtures, so dayjs renders it as "a few seconds ago".
-    expect(row).toHaveTextContent(/ago/);
+    // last_hash_at is seconds old in the fixtures, so it renders in the compact form.
+    expect(row).toHaveTextContent('now');
     expect(
       await screen.findByRole('button', { name: new RegExp(TEST_DEVICES[1].name, 'i') }),
     ).toHaveTextContent('Online');

@@ -26,7 +26,7 @@ import {
   useToast,
 } from '@virtueinitiative/shared-web';
 import { deviceStatusLabel, deviceStatusVariant } from '../../utils/device-status';
-import { formatRelativeTimestamp } from '../../utils/time';
+import { formatCompactRelativeTimestamp, formatRelativeTimestamp } from '../../utils/time';
 import './style.css';
 
 function UserPlusIcon() {
@@ -142,13 +142,15 @@ function PartnerArea({
   onRemoveWatcher: (id: string) => Promise<void>;
 }) {
   const partners = [...pending, ...accepted];
+  // Only the "watching" cards carry a device table, which needs room for three columns.
+  const isWatchingPanel = kind === 'watching';
 
   return (
     <section class="partners-panel">
       {partners.length === 0 ? (
         <p class="empty">{emptyLabel}</p>
       ) : (
-        <CardGrid>
+        <CardGrid class={isWatchingPanel ? 'partners-grid--wide' : undefined}>
           {partners.map((partner) =>
             partner.status === 'pending' ? (
               <PendingPartnerCard
@@ -371,8 +373,11 @@ function PartnerCard({
                 title={device.name}
               >
                 <span class="partner-device-name">{device.name}</span>
-                <span class="partner-device-activity">
-                  {formatRelativeTimestamp(device.last_hash_at)}
+                <span
+                  class="partner-device-activity"
+                  title={`Last activity: ${formatRelativeTimestamp(device.last_hash_at)}`}
+                >
+                  {formatCompactRelativeTimestamp(device.last_hash_at)}
                 </span>
                 <Badge variant={deviceStatusVariant(device.status)}>
                   {deviceStatusLabel(device.status)}

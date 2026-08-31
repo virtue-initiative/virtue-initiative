@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatCompactRelativeTimestamp,
   formatDate,
   formatDayHeading,
   formatRelativeTimestamp,
@@ -22,6 +23,28 @@ describe('formatRelativeTimestamp', () => {
     const result = formatRelativeTimestamp(Date.now() - 60_000);
     expect(typeof result).toBe('string');
     expect(result.length).toBeGreaterThan(0);
+  });
+});
+
+describe('formatCompactRelativeTimestamp', () => {
+  const ago = (ms: number) => Date.now() - ms;
+
+  it('returns Never for null and 0', () => {
+    expect(formatCompactRelativeTimestamp(null)).toBe('Never');
+    expect(formatCompactRelativeTimestamp(0)).toBe('Never');
+  });
+
+  it('collapses anything under a minute to "now"', () => {
+    expect(formatCompactRelativeTimestamp(ago(5_000))).toBe('now');
+    expect(formatCompactRelativeTimestamp(Date.now() + 5_000)).toBe('now');
+  });
+
+  it('steps up through minutes, hours, days, weeks, and years', () => {
+    expect(formatCompactRelativeTimestamp(ago(5 * 60_000))).toBe('5m');
+    expect(formatCompactRelativeTimestamp(ago(3 * 3_600_000))).toBe('3h');
+    expect(formatCompactRelativeTimestamp(ago(2 * 86_400_000))).toBe('2d');
+    expect(formatCompactRelativeTimestamp(ago(21 * 86_400_000))).toBe('3w');
+    expect(formatCompactRelativeTimestamp(ago(400 * 86_400_000))).toBe('1y');
   });
 });
 

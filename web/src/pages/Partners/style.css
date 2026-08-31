@@ -62,6 +62,12 @@
   margin-bottom: var(--space-4);
 }
 
+/* Watching cards carry the device table, so they get a wider column than the
+   default 260px card grid. `min()` keeps the track from overflowing a phone. */
+.partners-grid--wide {
+  grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr));
+}
+
 .partner-devices {
   margin-top: var(--space-4);
 }
@@ -80,7 +86,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2) var(--space-3);
   width: 100%;
   padding: var(--space-2);
   border: 0;
@@ -112,6 +118,18 @@
   font-size: 0.75rem;
   color: var(--text-muted);
   white-space: nowrap;
+}
+
+/* On a narrow phone the three columns stop fitting on one line: let the name
+   take the full width and drop last-activity + status onto a second line. */
+@media (max-width: 26rem) {
+  .partner-device-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .partner-device-name {
+    grid-column: 1 / -1;
+  }
 }
 
 .partner-device-more {
