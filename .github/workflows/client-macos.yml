@@ -33,7 +33,7 @@ jobs:
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: 'v2'
+          prefix-key: 'v3'
           cache-on-failure: true
           workspaces: |
             client -> target
