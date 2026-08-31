@@ -63,12 +63,14 @@ describe('Partners — monitored device list', () => {
     );
     renderWithClient(<Partners />);
 
-    expect(await screen.findByRole('heading', { name: /^devices$/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: /^devices \(last seen\)$/i }),
+    ).toBeInTheDocument();
 
     const row = await screen.findByRole('button', { name: new RegExp(TEST_DEVICES[0].name, 'i') });
     expect(row).toHaveTextContent('Deactivated');
     // last_hash_at is seconds old in the fixtures, so it renders in the compact form.
-    expect(row).toHaveTextContent('now');
+    expect(row).toHaveTextContent('(now)');
     expect(
       await screen.findByRole('button', { name: new RegExp(TEST_DEVICES[1].name, 'i') }),
     ).toHaveTextContent('Online');

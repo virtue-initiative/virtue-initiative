@@ -362,7 +362,7 @@ function PartnerCard({
       </CardHeader>
       {isWatching && devices.length > 0 && (
         <div class="partner-devices">
-          <h3 class="eyebrow partner-devices-heading">Devices</h3>
+          <h3 class="eyebrow partner-devices-heading">Devices (last seen)</h3>
           <div class="partner-device-list">
             {devices.slice(0, 4).map((device) => (
               <button
@@ -375,9 +375,9 @@ function PartnerCard({
                 <span class="partner-device-name">{device.name}</span>
                 <span
                   class="partner-device-activity"
-                  title={`Last activity: ${formatRelativeTimestamp(device.last_hash_at)}`}
+                  title={`Last seen: ${formatRelativeTimestamp(device.last_hash_at)}`}
                 >
-                  {formatCompactRelativeTimestamp(device.last_hash_at)}
+                  ({formatCompactRelativeTimestamp(device.last_hash_at)})
                 </span>
                 <Badge variant={deviceStatusVariant(device.status)}>
                   {deviceStatusLabel(device.status)}
