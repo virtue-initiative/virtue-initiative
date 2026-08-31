@@ -63,15 +63,14 @@
 }
 
 /* Watching cards list the account's devices, so they get a wider column than
-   the default 260px card grid: a 300px floor and a 320px target, with the
-   leftover width spread between the columns rather than stretching the cards.
-   `min()` keeps the track from overflowing a phone; below that the device
-   names ellipsise. */
-/* Chained with .vi-card-grid so this always outranks the shared 260px default,
+   the default 260px card grid: a 300px floor, then the tracks share out
+   whatever width is left. `min()` keeps the track from overflowing a phone;
+   below that the device names ellipsise.
+
+   Chained with .vi-card-grid so this always outranks the shared 260px default,
    whichever order the two stylesheets land in the bundle. */
 .vi-card-grid.partners-grid--wide {
-  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 320px));
-  justify-content: space-between;
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
 }
 
 /* Cards list different numbers of devices, so hold every card in the panel to
