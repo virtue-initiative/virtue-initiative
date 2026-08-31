@@ -10,8 +10,17 @@ import { getRiskRating, type RiskRating } from '@virtueinitiative/shared-web/ris
 import { FeedLog, formatDayLabel, getLogCategory, LOG_CATEGORIES } from './shared';
 import './style.css';
 import { useUrlState } from '../../hooks/useUrlState';
-import { Button, Checkbox, Dialog, DialogHeader, Field, Select } from '@virtueinitiative/shared-web';
+import {
+  Badge,
+  Button,
+  Checkbox,
+  Dialog,
+  DialogHeader,
+  Field,
+  Select,
+} from '@virtueinitiative/shared-web';
 import { cacheClient } from '../../utils/cache/client';
+import { deviceStatusLabel, deviceStatusVariant } from '../../utils/device-status';
 import { formatRelativeTimestamp } from '../../utils/time';
 
 function dateToBoundsStart(d: string): number {
@@ -251,7 +260,18 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
       <div class="logs-layout">
         <section class="logs-main">
           <div class="logs-header">
-            <PageHeading icon={<LogsIcon />}>{title}</PageHeading>
+            <PageHeading
+              icon={<LogsIcon />}
+              after={
+                selectedDeviceInfo?.status === 'logged_out' ? (
+                  <Badge variant={deviceStatusVariant(selectedDeviceInfo.status)}>
+                    {deviceStatusLabel(selectedDeviceInfo.status)}
+                  </Badge>
+                ) : undefined
+              }
+            >
+              {title}
+            </PageHeading>
             <div class="logs-header-actions">
               <div class="logs-filter-section">
                 <div class="logs-inline-filters">

@@ -18,6 +18,7 @@ import {
   Input,
   useToast,
 } from '@virtueinitiative/shared-web';
+import { deviceStatusLabel, deviceStatusVariant } from '../../utils/device-status';
 import { formatRelativeTimestamp } from '../../utils/time';
 import { LANDING_URL } from '../../utils/landing-url';
 import './style.css';
@@ -184,16 +185,8 @@ function DeviceCard({
     <Card>
       <CardHeader>
         <span class="vi-card__name">{device.name}</span>
-        <Badge
-          variant={
-            device.status === 'online' ? 'green' : device.status === 'logged_out' ? 'red' : 'gray'
-          }
-        >
-          {device.status === 'online'
-            ? 'Online'
-            : device.status === 'logged_out'
-              ? 'Deactivated'
-              : 'Offline'}
+        <Badge variant={deviceStatusVariant(device.status)}>
+          {deviceStatusLabel(device.status)}
         </Badge>
       </CardHeader>
       <dl class="vi-card__meta">

@@ -22,6 +22,7 @@ export const TEST_DEVICES: Device[] = [
     platform: 'linux',
     status: 'offline',
     last_upload_at: Date.now() - 60_000,
+    last_hash_at: Date.now() - 30_000,
     pending_count: 0,
   },
   {
@@ -31,6 +32,7 @@ export const TEST_DEVICES: Device[] = [
     platform: 'android',
     status: 'online',
     last_upload_at: Date.now() - 5_000,
+    last_hash_at: Date.now() - 2_000,
     pending_count: 0,
   },
 ];

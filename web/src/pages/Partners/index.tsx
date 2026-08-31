@@ -25,6 +25,8 @@ import {
   Input,
   useToast,
 } from '@virtueinitiative/shared-web';
+import { deviceStatusLabel, deviceStatusVariant } from '../../utils/device-status';
+import { formatRelativeTimestamp } from '../../utils/time';
 import './style.css';
 
 function UserPlusIcon() {
@@ -357,24 +359,30 @@ function PartnerCard({
         </span>
       </CardHeader>
       {isWatching && devices.length > 0 && (
-        <div class="partner-device-list">
-          {devices.slice(0, 4).map((device) => (
-            <button
-              key={device.id}
-              class="partner-device-chip"
-              type="button"
-              onClick={() => route(`/logs/${partner.user.id}?device_id=${device.id}`)}
-              title={device.name}
-            >
-              <span
-                class={`partner-device-status ${device.status === 'online' ? 'partner-device-status-online' : 'partner-device-status-offline'}`}
-              />
-              <span>{device.name}</span>
-            </button>
-          ))}
-          {devices.length > 4 && (
-            <p class="partner-device-more">+{devices.length - 4} more devices</p>
-          )}
+        <div class="partner-devices">
+          <h3 class="eyebrow partner-devices-heading">Devices</h3>
+          <div class="partner-device-list">
+            {devices.slice(0, 4).map((device) => (
+              <button
+                key={device.id}
+                class="partner-device-row"
+                type="button"
+                onClick={() => route(`/logs/${partner.user.id}?device_id=${device.id}`)}
+                title={device.name}
+              >
+                <span class="partner-device-name">{device.name}</span>
+                <span class="partner-device-activity">
+                  {formatRelativeTimestamp(device.last_hash_at)}
+                </span>
+                <Badge variant={deviceStatusVariant(device.status)}>
+                  {deviceStatusLabel(device.status)}
+                </Badge>
+              </button>
+            ))}
+            {devices.length > 4 && (
+              <p class="partner-device-more">+{devices.length - 4} more devices</p>
+            )}
+          </div>
         </div>
       )}
       <CardActions>

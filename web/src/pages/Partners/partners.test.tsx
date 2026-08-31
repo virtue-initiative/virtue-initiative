@@ -4,7 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
 import { describe, expect, it } from 'vitest';
 import { server } from '../../mocks/server';
-import { TEST_WATCHER, TEST_WATCHING } from '../../mocks/fixtures';
+import { TEST_DEVICES, TEST_WATCHER, TEST_WATCHING } from '../../mocks/fixtures';
 import { renderWithClient } from '../../test-utils';
 import { Partners } from './index';
 
@@ -48,6 +48,30 @@ describe('Partners — sections', () => {
       expect(screen.getByText('No one can monitor you yet.')).toBeInTheDocument();
       expect(screen.getByText('You cannot monitor anyone yet.')).toBeInTheDocument();
     });
+  });
+});
+
+describe('Partners — monitored device list', () => {
+  it("lists a watched account's devices with their status", async () => {
+    server.use(
+      http.get(`${BASE}/device`, () =>
+        HttpResponse.json([
+          { ...TEST_DEVICES[1], owner: TEST_WATCHING.user.id },
+          { ...TEST_DEVICES[0], owner: TEST_WATCHING.user.id, status: 'logged_out' },
+        ]),
+      ),
+    );
+    renderWithClient(<Partners />);
+
+    expect(await screen.findByRole('heading', { name: /^devices$/i })).toBeInTheDocument();
+
+    const row = await screen.findByRole('button', { name: new RegExp(TEST_DEVICES[0].name, 'i') });
+    expect(row).toHaveTextContent('Deactivated');
+    // last_hash_at is seconds old in the fixtures, so dayjs renders it as "a few seconds ago".
+    expect(row).toHaveTextContent(/ago/);
+    expect(
+      await screen.findByRole('button', { name: new RegExp(TEST_DEVICES[1].name, 'i') }),
+    ).toHaveTextContent('Online');
   });
 });
 
