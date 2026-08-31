@@ -10,6 +10,7 @@ import {
   usePartners,
 } from '../../utils/api';
 import { PageHeading } from '../../components/PageHeading';
+import { DeviceStatusBadge } from '../../components/DeviceStatusBadge';
 import { PartnersIcon } from '../../components/icons';
 import {
   Badge,
@@ -25,7 +26,6 @@ import {
   Input,
   useToast,
 } from '@virtueinitiative/shared-web';
-import { deviceStatusLabel, deviceStatusVariant } from '../../utils/device-status';
 import { formatCompactRelativeTimestamp, formatRelativeTimestamp } from '../../utils/time';
 import './style.css';
 
@@ -324,16 +324,26 @@ function PendingPartnerCard({
 
 function PartnerDeviceRow({ device, onOpen }: { device: Device; onOpen: () => void }) {
   return (
-    <button class="partner-device-row" type="button" onClick={onOpen} title={device.name}>
-      <span class="partner-device-name">{device.name}</span>
+    <div class="partner-device-row">
+      {/* The name button stretches over the whole row (see the ::after rule in
+          style.css), so the row still opens the device's logs from anywhere the
+          status link doesn't cover. */}
+      <button
+        class="partner-device-name partner-device-open"
+        type="button"
+        onClick={onOpen}
+        title={device.name}
+      >
+        {device.name}
+      </button>
       <span
         class="partner-device-activity"
         title={`Last seen: ${formatRelativeTimestamp(device.last_hash_at)}`}
       >
         ({formatCompactRelativeTimestamp(device.last_hash_at)})
       </span>
-      <Badge variant={deviceStatusVariant(device.status)}>{deviceStatusLabel(device.status)}</Badge>
-    </button>
+      <DeviceStatusBadge status={device.status} class="partner-device-status" />
+    </div>
   );
 }
 

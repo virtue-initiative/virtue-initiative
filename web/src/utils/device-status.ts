@@ -1,4 +1,5 @@
 import type { Device } from './api';
+import { LANDING_URL } from './landing-url';
 
 /** Human-readable label for a device's status, as shown on the devices list. */
 export function deviceStatusLabel(status: Device['status']): string {
@@ -22,4 +23,12 @@ export function deviceStatusVariant(status: Device['status']): 'green' | 'red' |
     default:
       return 'gray';
   }
+}
+
+export const DEVICE_STATUS_HELP_URL = `${LANDING_URL}/help/web/device-status`;
+
+/** Deep link to the section of the help page explaining this particular status.
+ * The anchors mirror the ids markdown generates from that page's headings. */
+export function deviceStatusHelpUrl(status: Device['status']): string {
+  return `${DEVICE_STATUS_HELP_URL}#${deviceStatusLabel(status).toLowerCase()}`;
 }

@@ -112,6 +112,7 @@
 }
 
 .partner-device-row {
+  position: relative;
   display: grid;
   grid-column: 1 / -1;
   grid-template-columns: subgrid;
@@ -152,14 +153,34 @@
 /* The name is the only part that gives: it shrinks and ellipsises so the time
    and status tag stay on the line, however long the device is named. */
 .partner-device-name {
-  /* 0 1 auto, not 1 1 auto: the time and tag stay next to the name rather than
-     being pushed out to the right edge. */
-  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text);
+}
+
+.partner-device-open {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Stretch the name button's hit area over the whole row, so clicking anywhere
+   but the status link opens the device's logs. */
+.partner-device-open::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-sm);
+}
+
+/* Above the stretched hit area, so the status tag keeps its own link. */
+.partner-device-status {
+  position: relative;
 }
 
 .partner-device-activity {

@@ -1,0 +1,12 @@
+.device-status-badge {
+  display: inline-flex;
+  flex-shrink: 0;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+
+  &:hover .vi-badge,
+  &:focus-visible .vi-badge {
+    outline: 1px solid currentColor;
+    outline-offset: 1px;
+  }
+}

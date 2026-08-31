@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { LogQueryResult, useAPIContext, useDevices, usePartners } from '../../utils/api';
 import { PageHeading } from '../../components/PageHeading';
+import { DeviceStatusBadge } from '../../components/DeviceStatusBadge';
 import { LogsIcon } from '../../components/icons';
 import { LogsGallery } from './LogsGallery';
 import { LogsList } from './LogsList';
@@ -11,7 +12,6 @@ import { FeedLog, formatDayLabel, getLogCategory, LOG_CATEGORIES } from './share
 import './style.css';
 import { useUrlState } from '../../hooks/useUrlState';
 import {
-  Badge,
   Button,
   Checkbox,
   Dialog,
@@ -20,7 +20,6 @@ import {
   Select,
 } from '@virtueinitiative/shared-web';
 import { cacheClient } from '../../utils/cache/client';
-import { deviceStatusLabel, deviceStatusVariant } from '../../utils/device-status';
 import { formatRelativeTimestamp } from '../../utils/time';
 
 function dateToBoundsStart(d: string): number {
@@ -264,9 +263,7 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
               icon={<LogsIcon />}
               after={
                 selectedDeviceInfo?.status === 'logged_out' ? (
-                  <Badge variant={deviceStatusVariant(selectedDeviceInfo.status)}>
-                    {deviceStatusLabel(selectedDeviceInfo.status)}
-                  </Badge>
+                  <DeviceStatusBadge status={selectedDeviceInfo.status} />
                 ) : undefined
               }
             >

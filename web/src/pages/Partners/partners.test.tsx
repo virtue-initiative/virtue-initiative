@@ -67,13 +67,22 @@ describe('Partners — monitored device list', () => {
       await screen.findByRole('heading', { name: /^devices \(last seen\)$/i }),
     ).toBeInTheDocument();
 
-    const row = await screen.findByRole('button', { name: new RegExp(TEST_DEVICES[0].name, 'i') });
+    const rowOf = async (name: string) =>
+      (await screen.findByRole('button', { name: new RegExp(name, 'i') })).closest(
+        '.partner-device-row',
+      )!;
+
+    const row = await rowOf(TEST_DEVICES[0].name);
     expect(row).toHaveTextContent('Deactivated');
     // last_hash_at is seconds old in the fixtures, so it renders in the compact form.
     expect(row).toHaveTextContent('(now)');
-    expect(
-      await screen.findByRole('button', { name: new RegExp(TEST_DEVICES[1].name, 'i') }),
-    ).toHaveTextContent('Online');
+    expect(await rowOf(TEST_DEVICES[1].name)).toHaveTextContent('Online');
+
+    // Each status tag links to the section of the help page explaining it.
+    expect(row.querySelector('a.device-status-badge')).toHaveAttribute(
+      'href',
+      expect.stringContaining('/help/web/device-status#deactivated'),
+    );
   });
 });
 

@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { Device, describeError, useAPIContext, useDevices } from '../../utils/api';
 import { PageHeading } from '../../components/PageHeading';
+import { DeviceStatusBadge } from '../../components/DeviceStatusBadge';
 import { DevicesIcon } from '../../components/icons';
 import {
   Badge,
@@ -18,7 +19,6 @@ import {
   Input,
   useToast,
 } from '@virtueinitiative/shared-web';
-import { deviceStatusLabel, deviceStatusVariant } from '../../utils/device-status';
 import { formatRelativeTimestamp } from '../../utils/time';
 import { LANDING_URL } from '../../utils/landing-url';
 import './style.css';
@@ -185,9 +185,7 @@ function DeviceCard({
     <Card>
       <CardHeader>
         <span class="vi-card__name">{device.name}</span>
-        <Badge variant={deviceStatusVariant(device.status)}>
-          {deviceStatusLabel(device.status)}
-        </Badge>
+        <DeviceStatusBadge status={device.status} />
       </CardHeader>
       <dl class="vi-card__meta">
         <dt>Platform</dt>
