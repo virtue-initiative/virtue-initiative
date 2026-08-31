@@ -184,10 +184,17 @@
   }
 }
 
-/* The full list in the dialog can outgrow the viewport. */
+/* The full list in the dialog can outgrow the viewport. Rows here sit in the
+   dialog's own padding box, so drop the negative margin that pulls the hover
+   well out to a card's edge. */
 .partner-device-list--dialog {
   max-height: min(60vh, 30rem);
   overflow-y: auto;
+}
+
+.partner-device-list--dialog .partner-device-row {
+  margin-inline: 0;
+  width: 100%;
 }
 
 .partner-card-compact {

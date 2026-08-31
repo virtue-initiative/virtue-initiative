@@ -449,7 +449,8 @@ function PartnerCard({
         </DialogActions>
       </Dialog>
       <Dialog dialogRef={allDevicesRef}>
-        <DialogHeader>{partnerName}'s devices (last seen)</DialogHeader>
+        <DialogHeader>{partnerName}'s devices</DialogHeader>
+        <h3 class="eyebrow partner-devices-heading">Devices (last seen)</h3>
         <div class="partner-device-list partner-device-list--dialog">
           {devices.map((device) => (
             <PartnerDeviceRow
