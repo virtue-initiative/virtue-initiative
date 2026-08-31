@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/preact';
+import { render, screen, waitFor } from '@testing-library/preact';
 import userEvent from '@testing-library/user-event';
 import { renderWithClient } from '../../test-utils';
 import { TEST_DEVICES } from '../../mocks/fixtures';
 import type { FeedLog } from './types';
 import { Logs } from './index';
-import { LOG_CATEGORIES } from './shared';
+import { LOG_CATEGORIES, LogDetailDialog } from './shared';
 
 const DEFAULT_SAMPLE_LOGS: FeedLog[] = [
   {
@@ -230,5 +230,121 @@ describe('Logs — skipped screenshots filter', () => {
     await waitFor(() => {
       expect(screen.queryByText('No logs found.')).not.toBeInTheDocument();
     });
+  });
+});
+
+describe('Logs — URL-driven filters (#659)', () => {
+  it('clears the device filter when the URL loses device_id', async () => {
+    window.history.replaceState({}, '', `/logs?device_id=${TEST_DEVICES[0].id}`);
+    renderWithClient(<Logs />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', { name: new RegExp(TEST_DEVICES[0].name, 'i'), level: 1 }),
+      ).toBeInTheDocument();
+    });
+
+    // What clicking "My logs" in the sidebar does: preact-iso's LocationProvider
+    // navigates by listening for popstate.
+    window.history.pushState({}, '', '/logs');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /^my logs$/i, level: 1 })).toBeInTheDocument();
+    });
+  });
+});
+
+describe('Logs — gallery is the default view (#661)', () => {
+  it('shows non-image logs and the type filter in the default (gallery) view', async () => {
+    window.history.replaceState({}, '', '/logs');
+    renderWithClient(<Logs />);
+
+    // DEFAULT_SAMPLE_LOGS holds a single lifecycle log with no image — before
+    // #661 the gallery dropped it and fell back to the empty state.
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: 'System Login' })).toBeInTheDocument();
+    });
+    expect(screen.queryByText('No logs found.')).not.toBeInTheDocument();
+  });
+});
+
+describe('LogDetailDialog — prev/next navigation (#660)', () => {
+  const item = DEFAULT_SAMPLE_LOGS[0];
+
+  // Virtualised rows don't paint in happy-dom (see the note above), so drive the
+  // dialog directly rather than opening it from the gallery.
+  function renderDialog(onPrev: () => void, onNext: () => void) {
+    return render(
+      <LogDetailDialog
+        item={item}
+        deviceName={() => TEST_DEVICES[0].name}
+        onClose={() => {}}
+        viewerId="user-1"
+        onPrev={onPrev}
+        onNext={onNext}
+      />,
+    );
+  }
+
+  it('steps with the arrow keys', async () => {
+    const user = userEvent.setup();
+    const onPrev = vi.fn();
+    const onNext = vi.fn();
+    renderDialog(onPrev, onNext);
+
+    await user.keyboard('{ArrowRight}');
+    expect(onNext).toHaveBeenCalledTimes(1);
+
+    await user.keyboard('{ArrowLeft}');
+    expect(onPrev).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops the previous screenshot when stepping onto a log without one', async () => {
+    const imageItem: FeedLog = {
+      ...item,
+      id: 'log-screenshot',
+      type: 'screenshot',
+      data: { image: [82, 73, 70, 70] },
+      image_w: 100,
+      image_h: 50,
+    };
+
+    const { rerender } = render(
+      <LogDetailDialog
+        item={imageItem}
+        deviceName={() => TEST_DEVICES[0].name}
+        onClose={() => {}}
+        viewerId="user-1"
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getByAltText('screenshot')).toBeInTheDocument();
+    });
+
+    rerender(
+      <LogDetailDialog
+        item={item}
+        deviceName={() => TEST_DEVICES[0].name}
+        onClose={() => {}}
+        viewerId="user-1"
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.queryByAltText('screenshot')).not.toBeInTheDocument();
+    });
+  });
+
+  it('steps when the on-screen arrows are clicked', async () => {
+    const user = userEvent.setup();
+    const onPrev = vi.fn();
+    const onNext = vi.fn();
+    renderDialog(onPrev, onNext);
+
+    await user.click(screen.getByRole('button', { name: /next log/i }));
+    expect(onNext).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole('button', { name: /previous log/i }));
+    expect(onPrev).toHaveBeenCalledTimes(1);
   });
 });

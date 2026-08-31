@@ -179,7 +179,9 @@ export function Sidebar() {
   const onLogs = currentPath === '/logs' || currentPath.startsWith('/logs/');
   const logsUserMatch = currentPath.match(/^\/logs\/([^/]+)/);
   const activeLogsUserId = logsUserMatch ? logsUserMatch[1] : null;
-  const activeUserId = activeLogsUserId === 'gallery' ? null : activeLogsUserId;
+  // `/logs/list` and `/logs/gallery` are view segments, not user ids.
+  const activeUserId =
+    activeLogsUserId === 'gallery' || activeLogsUserId === 'list' ? null : activeLogsUserId;
 
   const deviceCount = devices.filter((device) => device.owner === api.userId).length;
   const partnerCount =

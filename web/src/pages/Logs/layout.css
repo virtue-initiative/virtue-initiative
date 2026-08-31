@@ -161,19 +161,6 @@
   height: 1.5rem;
 }
 
-.logs-detail-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem 0;
-  color: var(--text-muted);
-}
-
-.logs-detail-icon svg {
-  width: 3rem;
-  height: 3rem;
-}
-
 .logs-detail-help-link {
   display: inline-flex;
   align-items: center;
@@ -202,8 +189,48 @@
   }
 }
 
-.logs-detail-learn-more {
-  margin-top: 1rem;
+.logs-detail-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  flex-shrink: 0;
+}
+
+/* Step buttons, sized to match the dialog's own close button. */
+.logs-detail-step {
+  display: flex;
+  gap: 0.15rem;
+}
+
+.logs-detail-step-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  font-size: 1.1rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
+
+  &:hover:not(:disabled) {
+    color: var(--text);
+    background: var(--bg-subtle);
+  }
+
+  &:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
 }
 
 .logs-vrow-body {
@@ -458,8 +485,24 @@
 }
 
 /* Detail dialog */
-.logs-detail-dialog {
+/* One size, derived from the viewport alone: a screenshot and a one-line
+   lifecycle log open the same dialog, so nothing shifts when stepping between
+   them. `.vi-dialog--lg` is bundled later, hence the doubled class. */
+.vi-dialog.logs-detail-dialog {
+  width: min(84rem, calc(100vw - 2rem));
+  max-width: min(84rem, calc(100vw - 2rem));
+  height: calc(100dvh - 2rem);
   max-height: calc(100dvh - 2rem);
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 1.25rem;
+}
+
+.logs-detail-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
 }

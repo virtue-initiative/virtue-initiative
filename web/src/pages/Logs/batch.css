@@ -22,33 +22,27 @@
   margin-bottom: 0.2rem;
 }
 
-.logs-detail-subtitle {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  margin: 0 0 0.75rem;
+/* The log's icon belongs beside its category, not floating in the middle of an
+   otherwise text-only dialog. */
+.logs-detail-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
-.logs-detail-image-button {
-  display: block;
-  width: 100%;
-  border: 0;
-  border-radius: 8px;
-  padding: 0;
-  margin-bottom: 0.75rem;
-  cursor: zoom-in;
-  overflow: hidden;
-  background: var(--bg-subtle);
-  text-align: center;
+.logs-detail-title-icon {
+  display: flex;
+  font-size: 1.2rem;
+  color: var(--text-muted);
 }
 
 .logs-detail-image {
   display: block;
-  width: auto;
-  height: auto;
-  max-width: 100%;
-  max-height: 65dvh;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
-  margin: 0 auto;
+  border-radius: 8px;
+  background: var(--bg-subtle);
 }
 
 .logs-detail-risk-neutral {
@@ -61,21 +55,80 @@
   margin-top: 0.5rem;
 }
 
+/* Description on the left, timestamp on its right — stacked once the dialog is
+   too narrow for the pair to share a line. */
+.logs-detail-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+  flex-shrink: 0;
+}
+
 .logs-detail-message {
   font-size: 1rem;
   font-weight: 500;
-  margin: 0.5rem 0 0.75rem;
+  margin: 0;
 }
 
-.logs-detail-more {
-  margin-top: 1rem;
-  font-size: 0.85rem;
+.logs-detail-time {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
 
-  & summary {
-    cursor: pointer;
-    color: var(--text-muted);
-    font-weight: 500;
-    user-select: none;
-    margin-bottom: 0.5rem;
+@media (max-width: 40rem) {
+  .logs-detail-summary {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
   }
+
+  .logs-detail-time {
+    white-space: normal;
+  }
+}
+
+/* Sized and dressed like a gallery tile, just larger. */
+.logs-detail-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  height: min(100%, 18rem);
+  aspect-ratio: 16 / 9;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+}
+
+.logs-detail-preview-icon {
+  display: flex;
+  font-size: 2.75rem;
+  color: var(--text-muted);
+}
+
+.logs-detail-preview-type {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.logs-detail-media {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Metadata moved out of the detail dialog into its own Advanced dialog, which
+   can be long enough to need its own scroll. */
+.logs-advanced-dialog {
+  max-height: calc(100dvh - 4rem);
+  overflow-y: auto;
 }

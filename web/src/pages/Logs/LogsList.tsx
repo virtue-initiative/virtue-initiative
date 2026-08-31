@@ -31,7 +31,9 @@ export function LogsList({
   onVisibleDateChange?: (date: string | null) => void;
   viewerId: string;
 }) {
-  const [selectedItem, setSelectedItem] = useState<FeedLog | null>(null);
+  // Logs stream in while the dialog is open, so an id survives where a stored
+  // index or object wouldn't.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const virtualizer = useVirtualizer({
@@ -57,6 +59,8 @@ export function LogsList({
       }
     },
   });
+
+  const selectedIndex = selectedId === null ? -1 : items.findIndex((i) => i.id === selectedId);
 
   if (items.length === 0 && !loading) {
     return <p class="empty">No logs found.</p>;
@@ -91,7 +95,7 @@ export function LogsList({
                   height: `${virtualRow.size}px`,
                   transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
                 }}
-                onClick={() => setSelectedItem(item)}
+                onClick={() => setSelectedId(item.id)}
               >
                 <div class="logs-vrow-thumb">
                   {item.image_w !== undefined ? (
@@ -132,12 +136,18 @@ export function LogsList({
         </div>
       </div>
       {loading && <p class="logs-loading">Loading…</p>}
-      {selectedItem && (
+      {selectedIndex !== -1 && (
         <LogDetailDialog
-          item={selectedItem}
+          item={items[selectedIndex]}
           deviceName={deviceName}
-          onClose={() => setSelectedItem(null)}
+          onClose={() => setSelectedId(null)}
           viewerId={viewerId}
+          onPrev={selectedIndex > 0 ? () => setSelectedId(items[selectedIndex - 1].id) : undefined}
+          onNext={
+            selectedIndex < items.length - 1
+              ? () => setSelectedId(items[selectedIndex + 1].id)
+              : undefined
+          }
         />
       )}
     </>
