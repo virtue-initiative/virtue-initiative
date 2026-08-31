@@ -88,17 +88,27 @@ for cargo_file in "${cargo_files[@]}"; do
   replace_package_version "$cargo_file"
 done
 
+# One lockfile for every member: android/rust used to carry its own, but it was
+# folded into the client workspace, and pointing at the old path made this script
+# die under `set -e` before it reached the Xcode/manifest/API-version sync below.
+# virtue-mac-ffi and virtue-text-detection are deliberately absent — they carry
+# their own independent versions and are not in cargo_files either.
 replace_lockfile_version "${CLIENT_ROOT}/Cargo.lock" "virtue-core"
 replace_lockfile_version "${CLIENT_ROOT}/Cargo.lock" "virtue-linux"
 replace_lockfile_version "${CLIENT_ROOT}/Cargo.lock" "virtue-mac"
 replace_lockfile_version "${CLIENT_ROOT}/Cargo.lock" "virtue-windows"
-replace_lockfile_version "${CLIENT_ROOT}/android/rust/Cargo.lock" "virtue-android"
-replace_lockfile_version "${CLIENT_ROOT}/android/rust/Cargo.lock" "virtue-core"
+replace_lockfile_version "${CLIENT_ROOT}/Cargo.lock" "virtue-android"
+replace_lockfile_version "${CLIENT_ROOT}/Cargo.lock" "virtue-ios"
 
+# Quote-agnostic on purpose: project.yml writes this value single-quoted, and a
+# pattern that assumed double quotes matched nothing and failed silently — perl
+# reports no error for a substitution that never fires. project.yml is the
+# source xcodegen regenerates the .xcodeproj from, so a missed bump here quietly
+# reverts MARKETING_VERSION the next time anyone runs generate-project.sh.
 replace_line \
   "${CLIENT_ROOT}/ios/project.yml" \
-  '^    MARKETING_VERSION: ".*"$' \
-  "    MARKETING_VERSION: \"${BASE_VERSION}\""
+  '^    MARKETING_VERSION: .*$' \
+  "    MARKETING_VERSION: '${BASE_VERSION}'"
 
 replace_line \
   "${CLIENT_ROOT}/ios/VirtueIOS.xcodeproj/project.pbxproj" \
