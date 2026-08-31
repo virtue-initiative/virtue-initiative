@@ -1,8 +1,14 @@
 .device-status-badge {
   display: inline-flex;
   flex-shrink: 0;
-  text-decoration: none;
   border-radius: var(--radius-sm);
+
+  /* base.css underlines links on hover; the badge is a fill, not body text. */
+  &,
+  &:hover,
+  &:focus-visible {
+    text-decoration: none;
+  }
 
   &:hover .vi-badge,
   &:focus-visible .vi-badge {
