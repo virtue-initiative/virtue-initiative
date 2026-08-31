@@ -129,8 +129,10 @@ function AppShell() {
               <Route path="/" component={Devices} />
               <Route path="/partners" component={Partners} />
               <Route path="/logs" component={Logs} />
+              <Route path="/logs/list" component={Logs} />
               <Route path="/logs/gallery" component={Logs} />
               <Route path="/logs/:userId" component={Logs} />
+              <Route path="/logs/:userId/list" component={Logs} />
               <Route path="/logs/:userId/gallery" component={Logs} />
               <Route path="/settings" component={Settings} />
               <Route path="/verify-email" component={VerifyEmail} />
