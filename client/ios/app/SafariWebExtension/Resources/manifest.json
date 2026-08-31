@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Virtue Safari Capture",
   "description": "Capture Safari tab screenshots for Virtue monitoring.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "icons": {
     "16": "icon-16.png",
     "32": "icon-32.png",

@@ -40,7 +40,7 @@ From WSL:
 
 ```bash
 cd /home/jeff/code/virtue-initiative/client/windows
-./scripts/build-msix.sh -Version 0.1.0-dev -Profile Debug
+./scripts/build-msix.sh -Version 0.1.1-dev -Profile Debug
 ```
 
 Expected output:
@@ -182,7 +182,7 @@ Build the Windows MSIX package from Linux:
 ./client/windows/scripts/remote-windows-build.sh \
   --build-host win11 \
   --mode msix \
-  --version 0.1.0-dev \
+  --version 0.1.1-dev \
   --profile Debug
 ```
 

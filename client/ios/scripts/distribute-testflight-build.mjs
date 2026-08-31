@@ -283,6 +283,26 @@ async function setWhatToTest(client, { build, whatsNew }) {
 }
 
 /**
+ * Is this build a member of that group?
+ *
+ * Asked from the builds side on purpose. The obvious direction,
+ * `GET /v1/builds/{id}/betaGroups`, is rejected by App Store Connect with
+ * "The relationship 'betaGroups' does not allow 'GET_RELATED'. Allowed
+ * operations are: CREATE, DELETE" — that relationship is write-only. Filtering
+ * builds by `filter[betaGroups]` reads the same fact in a supported direction.
+ */
+async function buildIsInGroup(client, { appId, buildVersion, marketingVersion, groupId, buildId }) {
+  const { body } = await client.request(
+    'GET',
+    `/v1/builds?filter[app]=${encodeURIComponent(appId)}` +
+      `&filter[version]=${encodeURIComponent(buildVersion)}` +
+      `&filter[preReleaseVersion.version]=${encodeURIComponent(marketingVersion)}` +
+      `&filter[betaGroups]=${encodeURIComponent(groupId)}&limit=1`,
+  );
+  return body?.data?.[0]?.id === buildId;
+}
+
+/**
  * Keeps the build out of every group except the target one.
  *
  * `client/core/build.rs` bakes the API base URL in at compile time from the
@@ -294,19 +314,35 @@ async function setWhatToTest(client, { build, whatsNew }) {
  *
  * Internal groups with `hasAccessToAllBuilds` receive every build automatically
  * as soon as it is distributable, which is why this has to actively remove the
- * build rather than just decline to add it. That auto-add is asynchronous and
- * only unblocks once export compliance is answered — i.e. partway through this
- * script — so a single pass can race it; hence the re-check loop.
+ * build rather than just decline to add it. That auto-add is asynchronous, so a
+ * single pass can race it; hence the re-check loop.
  *
  * External groups never auto-receive builds, so if nothing is reported here
  * there was nothing to prevent.
  */
-async function enforceExclusiveGroup(client, { build, group }) {
+async function enforceExclusiveGroup(client, context) {
+  const { build, group, groups, appId, buildVersion, marketingVersion } = context;
   const MAX_PASSES = 3;
+  const others = groups.filter((candidate) => candidate.id !== group.id);
 
+  if (others.length === 0) {
+    console.log(`Verified: "${group.name}" is the app's only beta group.`);
+    return;
+  }
+
+  let strays = [];
   for (let pass = 1; pass <= MAX_PASSES; pass += 1) {
-    const { body } = await client.request('GET', `/v1/builds/${build.id}/betaGroups?limit=200`);
-    const strays = (body?.data ?? []).filter((candidate) => candidate.id !== group.id);
+    strays = [];
+    for (const other of others) {
+      const present = await buildIsInGroup(client, {
+        appId,
+        buildVersion,
+        marketingVersion,
+        groupId: other.id,
+        buildId: build.id,
+      });
+      if (present) strays.push(other);
+    }
 
     if (strays.length === 0) {
       console.log(`Verified: build is in "${group.name}" and no other beta group.`);
@@ -333,21 +369,17 @@ async function enforceExclusiveGroup(client, { build, group }) {
       }
     }
 
-    // The auto-add can land between the list and the delete, so confirm on the
+    // The auto-add can land between the check and the delete, so confirm on the
     // next pass rather than trusting one round of deletes.
     await sleep(5000);
   }
 
-  const { body } = await client.request('GET', `/v1/builds/${build.id}/betaGroups?limit=200`);
-  const remaining = (body?.data ?? []).filter((candidate) => candidate.id !== group.id);
-  if (remaining.length > 0) {
-    const names = remaining.map((entry) => `"${entry.attributes?.name ?? entry.id}"`).join(', ');
-    throw new Error(
-      `Build is still attached to ${names} after ${MAX_PASSES} removal passes. Those testers ` +
-        'would be pointed at the wrong API. Turn off "automatically distribute new builds" ' +
-        'for those groups in App Store Connect.',
-    );
-  }
+  const names = strays.map((entry) => `"${entry.attributes?.name ?? entry.id}"`).join(', ');
+  throw new Error(
+    `Build is still attached to ${names} after ${MAX_PASSES} removal passes. Those testers ` +
+      'would be pointed at the wrong API. Turn off "automatically distribute new builds" ' +
+      'for those groups in App Store Connect.',
+  );
 }
 
 async function resolveBetaGroup(client, { appId, groupName }) {
@@ -372,7 +404,9 @@ async function resolveBetaGroup(client, { appId, groupName }) {
   console.log(
     `Beta group "${groupName}" -> id ${match.id} (${isInternal ? 'internal' : 'external'}).`,
   );
-  return { id: match.id, name: groupName, isInternal };
+  // `groups` comes back too: enforceExclusiveGroup must check every other group
+  // on the app, and this response already holds them.
+  return { group: { id: match.id, name: groupName, isInternal }, groups };
 }
 
 async function addBuildToGroup(client, { group, build }) {
@@ -391,15 +425,17 @@ async function addBuildToGroup(client, { group, build }) {
   }
 }
 
-async function verifyGroupMembership(client, { appId, group, build, buildVersion }) {
-  const { body } = await client.request(
-    'GET',
-    `/v1/builds?filter[app]=${encodeURIComponent(appId)}` +
-      `&filter[version]=${encodeURIComponent(buildVersion)}` +
-      `&filter[betaGroups]=${encodeURIComponent(group.id)}&limit=1`,
-  );
+async function verifyGroupMembership(client, context) {
+  const { appId, group, build, buildVersion, marketingVersion } = context;
+  const present = await buildIsInGroup(client, {
+    appId,
+    buildVersion,
+    marketingVersion,
+    groupId: group.id,
+    buildId: build.id,
+  });
 
-  if (body?.data?.[0]?.id !== build.id) {
+  if (!present) {
     throw new Error(
       `Build ${buildVersion} is not a member of beta group ${group.id} after the add call. It has not been distributed.`,
     );
@@ -461,7 +497,7 @@ async function main() {
   });
 
   const appId = await resolveAppId(client, bundleId);
-  const group = await resolveBetaGroup(client, { appId, groupName });
+  const { group, groups } = await resolveBetaGroup(client, { appId, groupName });
   const build = await waitForProcessedBuild(client, {
     appId,
     buildVersion,
@@ -482,12 +518,19 @@ async function main() {
   // cleanup is the only lever; running it first shortens the window in which a
   // stray group holds a build pointed at the wrong API.
   if (exclusive) {
-    await enforceExclusiveGroup(client, { build, group });
+    await enforceExclusiveGroup(client, {
+      build,
+      group,
+      groups,
+      appId,
+      buildVersion,
+      marketingVersion,
+    });
   }
 
   await setWhatToTest(client, { build, whatsNew });
   await addBuildToGroup(client, { group, build });
-  await verifyGroupMembership(client, { appId, group, build, buildVersion });
+  await verifyGroupMembership(client, { appId, group, build, buildVersion, marketingVersion });
 
   if (group.isInternal) {
     console.log('Internal group: no beta app review needed.');
@@ -496,7 +539,14 @@ async function main() {
   }
 
   if (exclusive) {
-    await enforceExclusiveGroup(client, { build, group });
+    await enforceExclusiveGroup(client, {
+      build,
+      group,
+      groups,
+      appId,
+      buildVersion,
+      marketingVersion,
+    });
   }
 
   console.log(
