@@ -28,8 +28,9 @@ export function formatRelativeTimestamp(timestamp: number | null): string {
 }
 
 /**
- * Compact relative time ("now", "5m", "3h", "2d", "6w", "1y") for dense rows
- * where the prose form of `formatRelativeTimestamp` would blow out the column.
+ * Compact relative time ("now", "25m ago", "3h ago", "2d ago", "6w ago",
+ * "1y ago") for dense rows where the prose form of `formatRelativeTimestamp`
+ * would blow out the column.
  */
 export function formatCompactRelativeTimestamp(timestamp: number | null): string {
   if (!timestamp) return 'Never';
@@ -38,18 +39,18 @@ export function formatCompactRelativeTimestamp(timestamp: number | null): string
   if (seconds < 60) return 'now';
 
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 60) return `${minutes}m ago`;
 
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
+  if (hours < 24) return `${hours}h ago`;
 
   const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d`;
+  if (days < 7) return `${days}d ago`;
 
   const weeks = Math.floor(days / 7);
-  if (days < 365) return `${weeks}w`;
+  if (days < 365) return `${weeks}w ago`;
 
-  return `${Math.floor(days / 365)}y`;
+  return `${Math.floor(days / 365)}y ago`;
 }
 
 export function formatDate(timestamp: number): string {

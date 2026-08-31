@@ -40,11 +40,11 @@ describe('formatCompactRelativeTimestamp', () => {
   });
 
   it('steps up through minutes, hours, days, weeks, and years', () => {
-    expect(formatCompactRelativeTimestamp(ago(5 * 60_000))).toBe('5m');
-    expect(formatCompactRelativeTimestamp(ago(3 * 3_600_000))).toBe('3h');
-    expect(formatCompactRelativeTimestamp(ago(2 * 86_400_000))).toBe('2d');
-    expect(formatCompactRelativeTimestamp(ago(21 * 86_400_000))).toBe('3w');
-    expect(formatCompactRelativeTimestamp(ago(400 * 86_400_000))).toBe('1y');
+    expect(formatCompactRelativeTimestamp(ago(25 * 60_000))).toBe('25m ago');
+    expect(formatCompactRelativeTimestamp(ago(3 * 3_600_000))).toBe('3h ago');
+    expect(formatCompactRelativeTimestamp(ago(2 * 86_400_000))).toBe('2d ago');
+    expect(formatCompactRelativeTimestamp(ago(21 * 86_400_000))).toBe('3w ago');
+    expect(formatCompactRelativeTimestamp(ago(400 * 86_400_000))).toBe('1y ago');
   });
 });
 
