@@ -92,6 +92,12 @@
   margin: 0 0 var(--space-2);
 }
 
+.partner-devices-empty {
+  margin: 0;
+  padding: var(--space-2) 0;
+  text-align: center;
+}
+
 /* A table again — one shared set of columns so name, last-seen and status line
    up down the list — but content-sized, so the columns keep their relative
    widths instead of being split evenly. */

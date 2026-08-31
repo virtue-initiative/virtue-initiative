@@ -77,6 +77,15 @@ describe('Partners — monitored device list', () => {
   });
 });
 
+describe('Partners — monitored account with no devices', () => {
+  it('says "No devices" under the heading', async () => {
+    server.use(http.get(`${BASE}/device`, () => HttpResponse.json([])));
+    renderWithClient(<Partners />);
+
+    expect(await screen.findByText('No devices')).toBeInTheDocument();
+  });
+});
+
 describe('Partners — more devices dialog', () => {
   it('opens a dialog listing every device when "+N more" is clicked', async () => {
     const user = userEvent.setup();

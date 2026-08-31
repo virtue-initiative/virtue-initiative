@@ -383,9 +383,10 @@ function PartnerCard({
           {partnerLabel}
         </span>
       </CardHeader>
-      {isWatching && devices.length > 0 && (
+      {isWatching && (
         <div class="partner-devices">
           <h3 class="eyebrow partner-devices-heading">Devices (last seen)</h3>
+          {devices.length === 0 && <p class="empty partner-devices-empty">No devices</p>}
           <div class="partner-device-list">
             {devices.slice(0, MAX_LISTED_DEVICES).map((device) => (
               <PartnerDeviceRow
