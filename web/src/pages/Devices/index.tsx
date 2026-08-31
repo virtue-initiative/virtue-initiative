@@ -184,7 +184,11 @@ function DeviceCard({
     <Card>
       <CardHeader>
         <span class="vi-card__name">{device.name}</span>
-        <Badge variant={device.status === 'online' ? 'green' : 'gray'}>
+        <Badge
+          variant={
+            device.status === 'online' ? 'green' : device.status === 'logged_out' ? 'red' : 'gray'
+          }
+        >
           {device.status === 'online'
             ? 'Online'
             : device.status === 'logged_out'

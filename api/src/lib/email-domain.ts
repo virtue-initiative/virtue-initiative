@@ -25,6 +25,7 @@ export const emailKinds = [
   'partner_invite',
   'partner_accepted',
   'device_deleted',
+  'device_logout',
   'tamper_alert',
   'daily_digest',
   'weekly_digest',

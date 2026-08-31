@@ -610,6 +610,8 @@ The client MUST be authenticated with a **Device Token**.
 
 The server MUST revoke the device token and soft-delete the device. It also resets the device hash state.
 
+Because a logout removes a device from monitoring, the server SHOULD email the owner and the owner's accepted watchers (skipping watchers whose `email_frequency` is `none`) that the device logged out. Email delivery MUST be best-effort: a failure to send MUST NOT fail the request.
+
 On success, the server MUST respond with **HTTP 204**
 
 ### API-038 `POST /d/batch`
