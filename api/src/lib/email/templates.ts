@@ -461,6 +461,45 @@ export function renderDeviceDeletedTemplate(input: {
   };
 }
 
+export function renderDeviceLoggedOutTemplate(input: {
+  appName: string;
+  appUrl: string;
+  recipientName?: string | null;
+  deviceName: string;
+  devicePlatform: string;
+  ownerName?: string | null;
+  ownerEmail?: string;
+  forPartner?: boolean;
+}) {
+  const appName = normalizeAppName(input.appName);
+  const greeting = input.recipientName ? `Hi ${input.recipientName},` : 'Hi,';
+  const owner = input.ownerName?.trim() || input.ownerEmail;
+  const deviceLine = input.forPartner
+    ? `${owner ?? 'One of your monitored accounts'} logged out of the device "${input.deviceName}" (${input.devicePlatform}), so ${appName} is no longer monitoring it.`
+    : `Your device "${input.deviceName}" (${input.devicePlatform}) logged out of ${appName} and is no longer being monitored.`;
+  const followup = input.forPartner
+    ? 'If you did not expect this, review the account dashboard and recent activity.'
+    : 'If you did not expect this, review your account and sign the device back in.';
+  const footer = withFooter({
+    appName,
+    appUrl: input.appUrl,
+    headline: 'Device logged out',
+    textLines: [greeting, '', deviceLine, followup, '', `Open your dashboard: ${input.appUrl}`],
+    htmlSections: [
+      paragraph(greeting),
+      paragraph(deviceLine),
+      paragraph(followup),
+      actionButton(input.appUrl, 'Open dashboard'),
+    ],
+  });
+
+  return {
+    subject: `Device logged out of ${appName}`,
+    text: footer.text,
+    html: footer.html,
+  };
+}
+
 export function renderTamperAlertTemplate(input: {
   severity: TamperSeverity;
   ownerName?: string | null;

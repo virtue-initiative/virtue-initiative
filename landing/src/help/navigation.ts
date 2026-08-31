@@ -48,6 +48,7 @@ export const helpSidebar: HelpNavItem[] = [
       { label: 'Log types', href: '/help/web/log-types' },
       { label: 'Decryption errors', href: '/help/web/decryption-errors' },
       { label: 'Concern scores', href: '/help/web/concern-scores' },
+      { label: 'Device status', href: '/help/web/device-status' },
     ],
   },
   {

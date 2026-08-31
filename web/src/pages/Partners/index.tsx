@@ -10,6 +10,7 @@ import {
   usePartners,
 } from '../../utils/api';
 import { PageHeading } from '../../components/PageHeading';
+import { DeviceStatusBadge } from '../../components/DeviceStatusBadge';
 import { PartnersIcon } from '../../components/icons';
 import {
   Badge,
@@ -25,7 +26,10 @@ import {
   Input,
   useToast,
 } from '@virtueinitiative/shared-web';
+import { formatCompactRelativeTimestamp, formatRelativeTimestamp } from '../../utils/time';
 import './style.css';
+
+const MAX_LISTED_DEVICES = 4;
 
 function UserPlusIcon() {
   return (
@@ -140,13 +144,15 @@ function PartnerArea({
   onRemoveWatcher: (id: string) => Promise<void>;
 }) {
   const partners = [...pending, ...accepted];
+  // Only the "watching" cards carry a device table, which needs room for three columns.
+  const isWatchingPanel = kind === 'watching';
 
   return (
     <section class="partners-panel">
       {partners.length === 0 ? (
         <p class="empty">{emptyLabel}</p>
       ) : (
-        <CardGrid>
+        <CardGrid class={isWatchingPanel ? 'partners-grid--wide' : undefined}>
           {partners.map((partner) =>
             partner.status === 'pending' ? (
               <PendingPartnerCard
@@ -316,6 +322,31 @@ function PendingPartnerCard({
   );
 }
 
+function PartnerDeviceRow({ device, onOpen }: { device: Device; onOpen: () => void }) {
+  return (
+    <div class="partner-device-row">
+      {/* The name button stretches over the whole row (see the ::after rule in
+          style.css), so the row still opens the device's logs from anywhere the
+          status link doesn't cover. */}
+      <button
+        class="partner-device-name partner-device-open"
+        type="button"
+        onClick={onOpen}
+        title={device.name}
+      >
+        {device.name}
+      </button>
+      <span
+        class="partner-device-activity"
+        title={`Last seen: ${formatRelativeTimestamp(device.last_hash_at)}`}
+      >
+        ({formatCompactRelativeTimestamp(device.last_hash_at)})
+      </span>
+      <DeviceStatusBadge status={device.status} class="partner-device-status" />
+    </div>
+  );
+}
+
 function PartnerCard({
   kind,
   partner,
@@ -334,9 +365,15 @@ function PartnerCard({
   const [action, setAction] = useState<'remove' | null>(null);
   const { push: pushToast } = useToast();
   const confirmRef = useRef<HTMLDialogElement>(null);
+  const allDevicesRef = useRef<HTMLDialogElement>(null);
   const partnerLabel = partner.user.name ?? partner.user.email;
   const partnerEmailTooltip = partner.user.name ? undefined : partner.user.email;
   const partnerName = partnerLabel;
+
+  function openDeviceLogs(deviceId: string) {
+    allDevicesRef.current?.close();
+    route(`/logs/${partner.user.id}?device_id=${deviceId}`);
+  }
 
   async function removeConfirmed() {
     setAction('remove');
@@ -356,24 +393,27 @@ function PartnerCard({
           {partnerLabel}
         </span>
       </CardHeader>
-      {isWatching && devices.length > 0 && (
-        <div class="partner-device-list">
-          {devices.slice(0, 4).map((device) => (
-            <button
-              key={device.id}
-              class="partner-device-chip"
-              type="button"
-              onClick={() => route(`/logs/${partner.user.id}?device_id=${device.id}`)}
-              title={device.name}
-            >
-              <span
-                class={`partner-device-status ${device.status === 'online' ? 'partner-device-status-online' : 'partner-device-status-offline'}`}
+      {isWatching && (
+        <div class="partner-devices">
+          <h3 class="eyebrow partner-devices-heading">Devices (last seen)</h3>
+          {devices.length === 0 && <p class="empty partner-devices-empty">No devices</p>}
+          <div class="partner-device-list">
+            {devices.slice(0, MAX_LISTED_DEVICES).map((device) => (
+              <PartnerDeviceRow
+                key={device.id}
+                device={device}
+                onOpen={() => openDeviceLogs(device.id)}
               />
-              <span>{device.name}</span>
+            ))}
+          </div>
+          {devices.length > MAX_LISTED_DEVICES && (
+            <button
+              class="partner-device-more"
+              type="button"
+              onClick={() => allDevicesRef.current?.showModal()}
+            >
+              +{devices.length - MAX_LISTED_DEVICES} more devices
             </button>
-          ))}
-          {devices.length > 4 && (
-            <p class="partner-device-more">+{devices.length - 4} more devices</p>
           )}
         </div>
       )}
@@ -416,6 +456,24 @@ function PartnerCard({
             disabled={action !== null}
           >
             {action === 'remove' ? 'Removing…' : 'Remove partner'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+      <Dialog dialogRef={allDevicesRef}>
+        <DialogHeader>{partnerName}'s devices</DialogHeader>
+        <h3 class="eyebrow partner-devices-heading">Devices (last seen)</h3>
+        <div class="partner-device-list partner-device-list--dialog">
+          {devices.map((device) => (
+            <PartnerDeviceRow
+              key={device.id}
+              device={device}
+              onOpen={() => openDeviceLogs(device.id)}
+            />
+          ))}
+        </div>
+        <DialogActions>
+          <Button variant="ghost" type="button" onClick={() => allDevicesRef.current?.close()}>
+            Close
           </Button>
         </DialogActions>
       </Dialog>

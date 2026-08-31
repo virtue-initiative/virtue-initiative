@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/preact';
 import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
+import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
 import { renderWithClient } from '../../test-utils';
+import { server } from '../../mocks/server';
 import { TEST_DEVICES } from '../../mocks/fixtures';
 import type { FeedLog } from './types';
 import { Logs } from './index';
@@ -99,6 +102,41 @@ describe('Logs — device dropdown', () => {
         screen.getByRole('heading', { name: new RegExp(TEST_DEVICES[0].name, 'i'), level: 1 }),
       ).toBeInTheDocument();
     });
+  });
+});
+
+describe('Logs — deactivated device', () => {
+  it('tags the heading when the selected device is logged out', async () => {
+    const user = userEvent.setup();
+    const loggedOut = { ...TEST_DEVICES[0], status: 'logged_out' as const };
+    server.use(
+      http.get(`http://localhost:8787/${CURRENT_API_VERSION}/device`, () =>
+        HttpResponse.json([loggedOut, TEST_DEVICES[1]]),
+      ),
+    );
+    renderWithClient(<Logs />);
+
+    const deviceOpts = await screen.findAllByRole('option', { name: loggedOut.name });
+    await user.selectOptions(deviceOpts[0].closest('select')!, [loggedOut.name]);
+
+    await waitFor(() => {
+      expect(screen.getByText('Deactivated')).toBeInTheDocument();
+    });
+  });
+
+  it('leaves the heading untagged for an active device', async () => {
+    const user = userEvent.setup();
+    renderWithClient(<Logs />);
+
+    const deviceOpts = await screen.findAllByRole('option', { name: TEST_DEVICES[0].name });
+    await user.selectOptions(deviceOpts[0].closest('select')!, [TEST_DEVICES[0].name]);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', { name: new RegExp(TEST_DEVICES[0].name, 'i'), level: 1 }),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Deactivated')).not.toBeInTheDocument();
   });
 });
 
