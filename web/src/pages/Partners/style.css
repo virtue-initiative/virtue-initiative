@@ -62,8 +62,9 @@
   margin-bottom: var(--space-4);
 }
 
-/* Watching cards carry the device table, so they get a wider column than the
-   default 260px card grid. `min()` keeps the track from overflowing a phone. */
+/* Watching cards list the account's devices, so they get a wider column than
+   the default 260px card grid. `min()` keeps the track from overflowing a
+   phone; the rows wrap on their own below that. */
 .partners-grid--wide {
   grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr));
 }
@@ -79,18 +80,19 @@
 .partner-device-list {
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--border);
+  gap: var(--space-1);
 }
 
 .partner-device-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2) var(--space-3);
-  width: 100%;
-  padding: var(--space-2);
+  gap: var(--space-1) var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  /* Pull the hover well out to the card's padding edge. */
+  margin-inline: calc(-1 * var(--space-2));
+  width: calc(100% + 2 * var(--space-2));
   border: 0;
-  border-bottom: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
@@ -108,9 +110,11 @@
 }
 
 .partner-device-name {
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--text);
 }
 
 .partner-device-activity {
@@ -120,20 +124,8 @@
   white-space: nowrap;
 }
 
-/* On a narrow phone the three columns stop fitting on one line: let the name
-   take the full width and drop last-activity + status onto a second line. */
-@media (max-width: 26rem) {
-  .partner-device-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .partner-device-name {
-    grid-column: 1 / -1;
-  }
-}
-
 .partner-device-more {
-  margin: var(--space-2) var(--space-2) 0;
+  margin: var(--space-1) 0 0;
   color: var(--text-muted);
   font-size: 0.8rem;
 }
