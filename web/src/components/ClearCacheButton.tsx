@@ -6,15 +6,16 @@ type ClearCacheButtonProps = {
   variant?: 'outline' | 'danger';
 };
 
-// Wipes the local decrypted-log cache and reloads. Nothing on the server is lost, so there
-// is no confirmation step: the app downloads and decrypts the logs again on the next view.
+// Resets the local decrypted-log cache: every tab drops its cache worker, the OPFS files are
+// deleted, and every tab reloads onto a fresh worker. Nothing on the server is lost, so there
+// is no confirmation step; the app downloads and decrypts the logs again on the next view.
 export function ClearCacheButton({ variant = 'outline' }: ClearCacheButtonProps) {
   const [clearing, setClearing] = usePromise();
 
   function clear() {
     if (!cacheClient) return;
     setClearing(
-      cacheClient.clearCache().then(() => {
+      cacheClient.resetCache().then(() => {
         window.location.reload();
       }),
     );

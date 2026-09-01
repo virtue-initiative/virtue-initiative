@@ -82,14 +82,14 @@ type CacheProgress = { type: 'queryProgress'; id: string; processed: number; tot
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let db: any = null;
 // The SAH pool VFS can only be installed once per worker, so the util object is kept here
-// and reused across reopens. It also exposes wipeFiles(), which is how a hard reset deletes
-// the OPFS backing files without going through SQLite.
+// rather than being a local of openDatabase(). It also exposes wipeFiles(), which is how
+// hardReset() empties the OPFS backing files without going through SQLite.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let poolUtil: any = null;
 
 // Directory the SAH pool VFS stores its backing files in: "." + vfsName, with the default
-// vfsName being "opfs-sahpool". Removing it is the last-resort reset when poolUtil is
-// unavailable because init itself failed.
+// vfsName being "opfs-sahpool". Removing it is the fallback when poolUtil is unavailable
+// because init itself failed.
 const SAH_POOL_DIR = '.opfs-sahpool';
 
 function createSchema(): void {
@@ -156,8 +156,9 @@ async function openDatabase(): Promise<void> {
   console.log('[cache-worker] init: done');
 }
 
-// Delete the cache outright and start over. Used by the clearCache request, which is the
-// user's escape hatch from a corrupt cache, so it must work even when init failed.
+// Empty the cache and start over, for the clearCache request that logout issues. This is
+// the in-worker path; a full reset (client-side termination plus deleting the OPFS
+// directory) is what the user-facing button does, since that also survives a wedged worker.
 async function hardReset(): Promise<void> {
   try {
     db?.close();
@@ -854,8 +855,8 @@ self.onmessage = async (e: MessageEvent<CacheRequest>) => {
   const req = e.data;
   console.log('[cache-worker] received', req.method);
 
-  // Handled before the initPromise gate: clearing the cache is the escape hatch from a
-  // database that init could not open, so it must not wait on init succeeding.
+  // Handled before the initPromise gate: clearing the cache has to work even when init
+  // failed to open the database.
   if (req.method === 'clearCache') {
     let response: CacheResponse;
     try {

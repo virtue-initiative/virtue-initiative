@@ -10,14 +10,15 @@ import { Settings } from './index';
 
 const BASE = `http://localhost:8787/${CURRENT_API_VERSION}`;
 
-const clearCache = vi.fn(() => Promise.resolve());
+const resetCache = vi.fn(() => Promise.resolve());
 
 vi.mock('../../utils/cache/client', () => ({
   cacheClient: {
     setSession: vi.fn(),
     cacheQuery: vi.fn(),
     refetch: vi.fn(),
-    clearCache: () => clearCache(),
+    clearCache: vi.fn(() => Promise.resolve()),
+    resetCache: () => resetCache(),
     deleteDeviceData: vi.fn(() => Promise.resolve()),
     getEventImage: vi.fn(() => Promise.resolve(null)),
     getDeviceBatchEndTimes: vi.fn(() => Promise.resolve([])),
@@ -176,7 +177,7 @@ describe('Settings — clear cache', () => {
       await user.click(button);
 
       await waitFor(() => {
-        expect(clearCache).toHaveBeenCalled();
+        expect(resetCache).toHaveBeenCalled();
         expect(reload).toHaveBeenCalled();
       });
     } finally {
