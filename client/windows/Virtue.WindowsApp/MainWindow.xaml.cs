@@ -22,6 +22,7 @@ public sealed partial class MainWindow : Window
     private const string WebsiteDisplayUrl = "virtueinitiative.org";
     private const string WebsiteNavigateUrl = "https://virtueinitiative.org";
     private const string SignUpNavigateUrl = "https://app.virtueinitiative.org/signup";
+    private const string DevicesNavigateUrl = "https://app.virtueinitiative.org/devices";
 
     private readonly AppWindow _appWindow;
     private readonly TextBlock _statusTextBlock;
@@ -30,6 +31,11 @@ public sealed partial class MainWindow : Window
     private readonly TextBlock _updateCheckStatusTextBlock;
     private readonly TextBlock _accountSummaryTextBlock;
     private readonly StackPanel _loginPanel;
+    private readonly StackPanel _codePanel;
+    private readonly StackPanel _passwordPanel;
+    private readonly TextBlock _userCodeTextBlock;
+    private readonly TextBlock _codeHintTextBlock;
+    private readonly DispatcherTimer _codePollTimer;
     private readonly StackPanel _accountActionsPanel;
     private readonly StackPanel _signedInActionsPanel;
     private readonly TextBox _emailTextBox;
@@ -41,6 +47,7 @@ public sealed partial class MainWindow : Window
     private readonly TextBlock _updateNoticeTextBlock;
     private readonly Button _restartNowButton = CreateActionButton("Restart now to update");
     private Button? _signInButton;
+    private Button? _getCodeButton;
     private bool _allowClose;
 
     // Warm institutional palette (see shared-web/DESIGN-GUIDELINES.md).
@@ -79,6 +86,12 @@ public sealed partial class MainWindow : Window
         _passwordBox = new PasswordBox();
         _deviceNameTextBox = new TextBox();
         _loginPanel = new StackPanel();
+        _codePanel = new StackPanel();
+        _passwordPanel = new StackPanel();
+        _userCodeTextBlock = new TextBlock();
+        _codeHintTextBlock = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        _codePollTimer = new DispatcherTimer();
+        _codePollTimer.Tick += CodePollTimer_OnTick;
         _accountActionsPanel = new StackPanel();
         _signedInActionsPanel = new StackPanel();
         _statusDot = new Border
@@ -346,13 +359,11 @@ public sealed partial class MainWindow : Window
 
         _loginPanel.Spacing = 12;
         _loginPanel.Margin = new Thickness(0, 12, 0, 0);
-        _loginPanel.Children.Add(_emailTextBox);
-        _loginPanel.Children.Add(BuildPasswordRow());
+        // The device name is chosen here for both flows, so it sits above the
+        // pair of mode-specific panels rather than inside either one.
         _loginPanel.Children.Add(_deviceNameTextBox);
-
-        _signInButton = CreatePrimaryButton("Sign In");
-        _signInButton.Click += SignInButton_OnClick;
-        _loginPanel.Children.Add(_signInButton);
+        _loginPanel.Children.Add(BuildCodePanel());
+        _loginPanel.Children.Add(BuildPasswordPanel());
 
         var signOutButton = CreateActionButton("Sign Out");
         signOutButton.Click += async (_, _) =>
@@ -391,6 +402,157 @@ public sealed partial class MainWindow : Window
         content.Children.Add(_errorTextBlock);
 
         return CreateCard(content);
+    }
+
+    /// <summary>
+    /// The default sign-in view (CORE-020): name the device, get a code, then
+    /// approve it from an already-signed-in web session.
+    /// </summary>
+    private UIElement BuildCodePanel()
+    {
+        _codePanel.Spacing = 12;
+
+        _codePanel.Children.Add(new TextBlock
+        {
+            Text = "Get a code here, then enter it on the Virtue website while signed in.",
+            TextWrapping = TextWrapping.Wrap,
+            FontFamily = BodyFont,
+            Foreground = Ink2Brush,
+        });
+
+        _getCodeButton = CreatePrimaryButton("Get code");
+        _getCodeButton.Click += GetCodeButton_OnClick;
+        _codePanel.Children.Add(_getCodeButton);
+
+        _userCodeTextBlock.FontFamily = MonoFont;
+        _userCodeTextBlock.FontSize = 40;
+        _userCodeTextBlock.FontWeight = FontWeights.SemiBold;
+        _userCodeTextBlock.CharacterSpacing = 120;
+        _userCodeTextBlock.Foreground = InkBrush;
+        _userCodeTextBlock.Visibility = Visibility.Collapsed;
+        _codePanel.Children.Add(_userCodeTextBlock);
+
+        _codeHintTextBlock.FontFamily = BodyFont;
+        _codeHintTextBlock.Foreground = Ink2Brush;
+        _codeHintTextBlock.Visibility = Visibility.Collapsed;
+        _codePanel.Children.Add(_codeHintTextBlock);
+
+        var websiteLink = new HyperlinkButton
+        {
+            Content = "Open the Devices page",
+            NavigateUri = new Uri(DevicesNavigateUrl),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(0),
+            FontFamily = BodyFont,
+        };
+        StyleLink(websiteLink);
+        _codePanel.Children.Add(websiteLink);
+
+        var usePasswordButton = CreateLinkButton("Use a password instead");
+        usePasswordButton.Click += (_, _) =>
+        {
+            StopCodePolling();
+            ViewModel.ShowPasswordLogin();
+            SyncFromViewModel();
+        };
+        _codePanel.Children.Add(usePasswordButton);
+
+        return _codePanel;
+    }
+
+    /// <summary>The password fallback (CORE-008), reached from the code panel's link.</summary>
+    private UIElement BuildPasswordPanel()
+    {
+        _passwordPanel.Spacing = 12;
+        _passwordPanel.Visibility = Visibility.Collapsed;
+        _passwordPanel.Children.Add(_emailTextBox);
+        _passwordPanel.Children.Add(BuildPasswordRow());
+
+        _signInButton = CreatePrimaryButton("Sign In");
+        _signInButton.Click += SignInButton_OnClick;
+        _passwordPanel.Children.Add(_signInButton);
+
+        var useCodeButton = CreateLinkButton("Use a code instead");
+        useCodeButton.Click += (_, _) =>
+        {
+            ViewModel.ShowCodeLogin();
+            SyncFromViewModel();
+        };
+        _passwordPanel.Children.Add(useCodeButton);
+
+        return _passwordPanel;
+    }
+
+    private async void GetCodeButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        await ViewModel.BeginCodeLoginAsync();
+
+        if (ViewModel.HasPendingCode)
+        {
+            StartCodePolling();
+        }
+    }
+
+    /// <summary>
+    /// Polls at the interval the server asked for (API-044's <c>interval</c>),
+    /// rather than a rate this client picks for itself.
+    /// </summary>
+    private void StartCodePolling()
+    {
+        _codePollTimer.Interval = TimeSpan.FromSeconds(Math.Max(1, ViewModel.PendingCodeIntervalSeconds));
+        _codePollTimer.Start();
+    }
+
+    private void StopCodePolling()
+    {
+        _codePollTimer.Stop();
+    }
+
+    private async void CodePollTimer_OnTick(object? sender, object e)
+    {
+        var status = await ViewModel.PollCodeLoginAsync();
+
+        // Anything but "pending" ends the wait: approved and expired both clear
+        // the code, and a null status means the call itself failed.
+        if (status != "pending")
+        {
+            StopCodePolling();
+        }
+
+        SyncFromViewModel();
+    }
+
+    // A hyperlink-styled text button for switching sign-in modes.
+    private static Button CreateLinkButton(string text)
+    {
+        var button = new Button
+        {
+            Content = text,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(0),
+            FontFamily = BodyFont,
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            BorderThickness = new Thickness(0),
+        };
+        button.Resources["ButtonBackground"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        button.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        button.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        button.Resources["ButtonForeground"] = ForestBrush;
+        button.Resources["ButtonForegroundPointerOver"] = Forest3Brush;
+        button.Resources["ButtonForegroundPressed"] = Forest2Brush;
+        button.Resources["ButtonBorderBrush"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        button.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        button.Resources["ButtonBorderBrushPressed"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        return button;
+    }
+
+    private static void StyleLink(HyperlinkButton link)
+    {
+        link.Foreground = ForestBrush;
+        link.Resources["HyperlinkButtonForeground"] = ForestBrush;
+        link.Resources["HyperlinkButtonForegroundPointerOver"] = Forest3Brush;
+        link.Resources["HyperlinkButtonForegroundPressed"] = Forest2Brush;
+        link.Resources["HyperlinkButtonForegroundDisabled"] = Ink3Brush;
     }
 
     private static Border CreateCard(UIElement content) =>
@@ -1027,11 +1189,26 @@ public sealed partial class MainWindow : Window
             _signedInActionsPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
         }
 
+        _codePanel.Visibility = ViewModel.UseCodeLogin ? Visibility.Visible : Visibility.Collapsed;
+        _passwordPanel.Visibility = ViewModel.UsePasswordLogin ? Visibility.Visible : Visibility.Collapsed;
+
+        _userCodeTextBlock.Text = ViewModel.PendingUserCode ?? string.Empty;
+        _userCodeTextBlock.Visibility = ViewModel.HasPendingCode ? Visibility.Visible : Visibility.Collapsed;
+        _codeHintTextBlock.Text = ViewModel.HasPendingCode
+            ? "Waiting for you to approve this code on the website."
+            : string.Empty;
+        _codeHintTextBlock.Visibility = ViewModel.HasPendingCode ? Visibility.Visible : Visibility.Collapsed;
+
         var loginEnabled = !ViewModel.IsBusy;
         _emailTextBox.IsEnabled = loginEnabled;
         _passwordBox.IsEnabled = loginEnabled;
         _deviceNameTextBox.IsEnabled = loginEnabled;
         if (_signInButton is not null) _signInButton.IsEnabled = loginEnabled;
+        if (_getCodeButton is not null)
+        {
+            _getCodeButton.IsEnabled = loginEnabled;
+            _getCodeButton.Content = ViewModel.HasPendingCode ? "Get a new code" : "Get code";
+        }
 
         _errorTextBlock.Text = ViewModel.ErrorText ?? "";
         _errorTextBlock.Visibility = string.IsNullOrWhiteSpace(ViewModel.ErrorText)

@@ -7,7 +7,8 @@ export type TokenPurpose =
   | 'email_change'
   | 'email_verification'
   | 'password_reset'
-  | 'partner_invite';
+  | 'partner_invite'
+  | 'device_pairing';
 
 const TOKEN_PREFIXES: Record<TokenPurpose, string> = {
   web_session: 'wst_',
@@ -17,6 +18,7 @@ const TOKEN_PREFIXES: Record<TokenPurpose, string> = {
   email_verification: 'evt_',
   password_reset: 'prt_',
   partner_invite: 'pit_',
+  device_pairing: 'dpc_',
 };
 
 export function generateOpaqueToken(purpose: TokenPurpose) {

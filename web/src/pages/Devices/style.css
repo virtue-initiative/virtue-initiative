@@ -42,3 +42,48 @@
   font-weight: 600;
   font-size: 1.02rem;
 }
+
+/* Add-device pairing code (API-043) */
+
+.device-code-inputs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.device-code-input {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  text-transform: uppercase;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 1.6rem;
+  letter-spacing: 0.25em;
+  /* The letter-spacing above trails the last glyph, which would otherwise read
+     as off-center; half of it back as padding recenters the text. */
+  padding-left: 0.125em;
+  text-indent: 0.125em;
+}
+
+.device-code-separator {
+  color: var(--text-muted);
+  font-size: 1.6rem;
+}
+
+.device-code-error {
+  color: var(--danger, var(--text));
+  font-size: var(--text-sm);
+  margin: var(--space-2) 0 0;
+}
+
+.device-code-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+}
+
+.device-code-summary-name {
+  font-size: 1.15rem;
+  font-weight: 600;
+}

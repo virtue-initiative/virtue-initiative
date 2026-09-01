@@ -4,13 +4,14 @@ import auth from './routes/auth';
 import bugReport from './routes/bug-report';
 import data from './routes/data';
 import deviceOnly from './routes/device-only';
-import devices from './routes/devices';
+import devices, { deviceCodes } from './routes/devices';
 import emailWebhooks from './routes/email-webhooks';
 import partners from './routes/partners';
 import { isApiVersionGone, stripApiVersion } from './lib/api-version';
 import { stripApiBasePath } from './lib/base-path';
 import {
   pruneExpiredBatches,
+  pruneExpiredDeviceAuthCodes,
   pruneExpiredDeviceSessions,
   pruneExpiredEmailTokens,
   pruneExpiredUserSessions,
@@ -64,6 +65,7 @@ app.route('/', bugReport);
 app.route('/', partners);
 app.route('/', emailWebhooks);
 app.route('/device', devices);
+app.route('/device-code', deviceCodes);
 app.route('/data', data);
 app.route('/d', deviceOnly);
 
@@ -99,5 +101,6 @@ export default {
     ctx.waitUntil(pruneExpiredEmailTokens(env, controller.scheduledTime));
     ctx.waitUntil(pruneExpiredUserSessions(env, controller.scheduledTime));
     ctx.waitUntil(pruneExpiredDeviceSessions(env, controller.scheduledTime));
+    ctx.waitUntil(pruneExpiredDeviceAuthCodes(env, controller.scheduledTime));
   },
 };

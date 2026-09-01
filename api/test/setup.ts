@@ -93,6 +93,21 @@ CREATE TABLE IF NOT EXISTS device_sessions (
   created_at INTEGER NOT NULL,
   FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS device_auth_codes (
+  id BLOB PRIMARY KEY,
+  user_code TEXT NOT NULL UNIQUE,
+  device_code_hash TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  platform TEXT NOT NULL,
+  approved_by BLOB,
+  approved_at INTEGER,
+  consumed_at INTEGER,
+  expires_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_device_auth_codes_expires_at ON device_auth_codes(expires_at);
+
 CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_device_sessions_device_id ON device_sessions(device_id);
 `;

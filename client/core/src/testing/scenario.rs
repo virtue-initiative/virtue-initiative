@@ -4,10 +4,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use crate::api::DeviceCodeStart;
 use crate::config::Config;
 use crate::daemon::{Daemon, DaemonState};
 use crate::error::CoreResult;
 use crate::model::{AuthState, BatchRecipient, DeviceCredentials, DeviceSettings, ServiceStatus};
+use crate::module::auth::CodeLoginPoll;
 use crate::module::upload::Upload;
 use crate::rng::RandomSource;
 use crate::testing::api::MockApiClient;
@@ -44,6 +46,7 @@ impl Scenario {
                 refresh_token: "scenario-device-refresh".into(),
             }),
             account_email: Some("scenario@example.org".into()),
+            pending_code_login: None,
         };
         let settings = DeviceSettings {
             device_id: "scenario-device".into(),
@@ -121,6 +124,12 @@ impl Scenario {
         Self::from_state_dir(state_dir, None, now_ms)
     }
 
+    /// Restart onto an existing state directory without seeding any auth state,
+    /// so whatever the previous run persisted is what the new `Daemon` reads.
+    pub fn restarted_in_state_dir(state_dir: PathBuf) -> Self {
+        Self::from_state_dir(state_dir, None, 0)
+    }
+
     // --- time control ---
 
     pub fn at_t(&mut self, ms: i64) -> &mut Self {
@@ -156,6 +165,14 @@ impl Scenario {
         device_name: Option<&str>,
     ) -> CoreResult<String> {
         self.daemon.test_login(email, password, device_name)
+    }
+
+    pub fn begin_code_login(&mut self, device_name: Option<&str>) -> CoreResult<DeviceCodeStart> {
+        self.daemon.test_begin_code_login(device_name)
+    }
+
+    pub fn poll_code_login(&mut self) -> CoreResult<CodeLoginPoll> {
+        self.daemon.test_poll_code_login()
     }
 
     pub fn logout(&mut self) -> CoreResult<()> {

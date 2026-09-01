@@ -37,10 +37,21 @@ use crate::api::ApiTransport;
 use crate::daemon::Daemon;
 use crate::error::{CoreError, CoreResult};
 use crate::model::{Redacted, ServiceStatus};
+use crate::module::auth::CodeLoginPoll;
 use crate::module::upload::Upload;
 use crate::platform::PlatformHooks;
 
 // ── Wire protocol ────────────────────────────────────────────────────────
+
+/// What a client needs to drive a pairing: the code to show and how to pace the
+/// polling. Deliberately does not carry the device code — see
+/// [`WireReply::BeginCodeLoginResult`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingCode {
+    pub user_code: String,
+    pub expires_at_ms: i64,
+    pub interval_seconds: u32,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 enum WireRequest {
@@ -49,6 +60,10 @@ enum WireRequest {
         password: Redacted<String>,
         device_name: Option<String>,
     },
+    BeginCodeLogin {
+        device_name: Option<String>,
+    },
+    PollCodeLogin,
     Logout,
     Status,
     NoteUserStop {
@@ -67,6 +82,21 @@ enum WireReply {
         success: bool,
         error: Option<String>,
         device_id: Option<String>,
+    },
+    /// The device code itself never crosses this socket: it stays in the
+    /// daemon's persisted state, so the CLI can drive the polling without ever
+    /// handling the secret (CORE-020).
+    BeginCodeLoginResult {
+        success: bool,
+        error: Option<String>,
+        user_code: Option<String>,
+        expires_at_ms: Option<i64>,
+        interval_seconds: Option<u32>,
+    },
+    PollCodeLoginResult {
+        success: bool,
+        error: Option<String>,
+        outcome: Option<CodeLoginPoll>,
     },
     LogoutResult {
         success: bool,
@@ -108,6 +138,36 @@ where
                 success: false,
                 error: Some(err.to_string()),
                 device_id: None,
+            },
+        },
+        WireRequest::BeginCodeLogin { device_name } => {
+            match daemon.begin_code_login(device_name.as_deref()) {
+                Ok(start) => WireReply::BeginCodeLoginResult {
+                    success: true,
+                    error: None,
+                    user_code: Some(start.user_code),
+                    expires_at_ms: Some(start.expires_at_ms),
+                    interval_seconds: Some(start.interval_seconds),
+                },
+                Err(err) => WireReply::BeginCodeLoginResult {
+                    success: false,
+                    error: Some(err.to_string()),
+                    user_code: None,
+                    expires_at_ms: None,
+                    interval_seconds: None,
+                },
+            }
+        }
+        WireRequest::PollCodeLogin => match daemon.poll_code_login() {
+            Ok(outcome) => WireReply::PollCodeLoginResult {
+                success: true,
+                error: None,
+                outcome: Some(outcome),
+            },
+            Err(err) => WireReply::PollCodeLoginResult {
+                success: false,
+                error: Some(err.to_string()),
+                outcome: None,
             },
         },
         WireRequest::Logout => match daemon.logout() {
@@ -297,6 +357,57 @@ impl ClientController {
         }
     }
 
+    /// Start a passwordless sign-in and block for the code to show the user
+    /// (CORE-020).
+    pub fn begin_code_login(&mut self, device_name: Option<&str>) -> CoreResult<PendingCode> {
+        match self.call(WireRequest::BeginCodeLogin {
+            device_name: device_name.map(String::from),
+        })? {
+            WireReply::BeginCodeLoginResult {
+                success: true,
+                user_code,
+                expires_at_ms,
+                interval_seconds,
+                ..
+            } => Ok(PendingCode {
+                user_code: user_code.unwrap_or_default(),
+                expires_at_ms: expires_at_ms.unwrap_or_default(),
+                interval_seconds: interval_seconds.unwrap_or(5),
+            }),
+            WireReply::BeginCodeLoginResult {
+                success: false,
+                error,
+                ..
+            } => Err(CoreError::Remote(
+                error
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "could not start a code login".to_string()),
+            )),
+            _ => Err(CoreError::Ipc(
+                "unexpected reply to begin_code_login".to_string(),
+            )),
+        }
+    }
+
+    /// Ask the daemon whether the pending pairing has been approved (CORE-021).
+    pub fn poll_code_login(&mut self) -> CoreResult<CodeLoginPoll> {
+        match self.call(WireRequest::PollCodeLogin)? {
+            WireReply::PollCodeLoginResult {
+                success: true,
+                outcome: Some(outcome),
+                ..
+            } => Ok(outcome),
+            WireReply::PollCodeLoginResult { error, .. } => Err(CoreError::Remote(
+                error
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "code login poll failed".to_string()),
+            )),
+            _ => Err(CoreError::Ipc(
+                "unexpected reply to poll_code_login".to_string(),
+            )),
+        }
+    }
+
     /// Send a logout request and block until the reply is received.
     pub fn logout(&mut self) -> CoreResult<()> {
         match self.call(WireRequest::Logout)? {
@@ -436,6 +547,71 @@ mod tests {
         // promptly rather than hanging forever.
         let mut second = ClientController::connect(&sock).expect("connect second");
         assert!(second.get_status().is_ok());
+
+        let _ = std::fs::remove_file(&sock);
+    }
+
+    /// A hand-rolled daemon-side stub that answers the two pairing requests
+    /// with canned successes, so the client half's decoding is exercised
+    /// without a `run_forever` thread to service a real `Daemon`'s channel.
+    fn spawn_code_login_stub(sock: &Path) {
+        let _ = std::fs::remove_file(sock);
+        let listener = UnixListener::bind(sock).expect("bind");
+        thread::spawn(move || {
+            let Ok((stream, _)) = listener.accept() else {
+                return;
+            };
+            let mut reader = BufReader::new(stream.try_clone().expect("clone"));
+            let mut writer = stream;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                    return;
+                }
+                let reply = if line.contains("BeginCodeLogin") {
+                    WireReply::BeginCodeLoginResult {
+                        success: true,
+                        error: None,
+                        user_code: Some("K7R-M3X".to_string()),
+                        expires_at_ms: Some(1_700_000_000_000),
+                        interval_seconds: Some(5),
+                    }
+                } else {
+                    WireReply::PollCodeLoginResult {
+                        success: true,
+                        error: None,
+                        outcome: Some(CodeLoginPoll::Approved {
+                            device_id: "paired-device".to_string(),
+                        }),
+                    }
+                };
+                if write_line(&mut writer, &reply).is_err() {
+                    return;
+                }
+            }
+        });
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    #[test]
+    fn code_login_round_trips_over_the_socket() {
+        let sock = test_sock_path("code-login");
+        spawn_code_login_stub(&sock);
+
+        let mut controller = ClientController::connect(&sock).expect("connect");
+        let pending = controller
+            .begin_code_login(Some("My Laptop"))
+            .expect("begin code login");
+        assert_eq!(pending.user_code, "K7R-M3X");
+        assert_eq!(pending.expires_at_ms, 1_700_000_000_000);
+        assert_eq!(pending.interval_seconds, 5);
+
+        assert_eq!(
+            controller.poll_code_login().expect("poll"),
+            CodeLoginPoll::Approved {
+                device_id: "paired-device".to_string()
+            }
+        );
 
         let _ = std::fs::remove_file(&sock);
     }

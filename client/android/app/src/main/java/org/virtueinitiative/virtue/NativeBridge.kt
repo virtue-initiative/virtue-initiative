@@ -44,6 +44,12 @@ object NativeBridge {
         dataDir: String
     ): String?
     external fun nativeLogin(email: String, password: String, deviceName: String): String?
+    /** CORE-020. JSON: `{"userCode": …, "expiresAtMs": …, "intervalSeconds": …}`, or `{"error": …}`. */
+    external fun nativeBeginCodeLogin(deviceName: String): String
+
+    /** CORE-021. JSON: `{"status": "pending"|"approved"|"expired", "deviceId": …}`, or `{"error": …}`. */
+    external fun nativePollCodeLogin(): String
+
     external fun nativeLogout(): String?
     external fun nativeIsLoggedIn(): Boolean
     external fun nativeGetDeviceId(): String?

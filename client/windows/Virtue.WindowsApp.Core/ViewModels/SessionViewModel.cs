@@ -32,6 +32,10 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private string? _updateCountdownText;
     private string? _updateCheckStatusText;
     private bool _updateInstalling;
+    private bool _usePasswordLogin;
+    private string? _pendingUserCode;
+    private long _pendingCodeExpiresAtMs;
+    private int _pendingCodeIntervalSeconds = 5;
 
     public SessionViewModel(IRustInteropClient interopClient, string? windowsPackageVersion = null)
     {
@@ -328,6 +332,118 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         });
     }
 
+    /// <summary>
+    /// True while the sign-in card should show the email/password form instead
+    /// of the pairing-code flow (CORE-008 remains the fallback).
+    /// </summary>
+    public bool UsePasswordLogin
+    {
+        get => _usePasswordLogin;
+        private set
+        {
+            if (SetProperty(ref _usePasswordLogin, value))
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(UseCodeLogin)));
+            }
+        }
+    }
+
+    public bool UseCodeLogin => !UsePasswordLogin;
+
+    /// <summary>
+    /// The code the user types into their web session, formatted for display, or
+    /// null before <see cref="BeginCodeLoginAsync"/> has produced one.
+    /// </summary>
+    public string? PendingUserCode
+    {
+        get => _pendingUserCode;
+        private set
+        {
+            if (SetProperty(ref _pendingUserCode, value))
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasPendingCode)));
+            }
+        }
+    }
+
+    public bool HasPendingCode => !string.IsNullOrEmpty(PendingUserCode);
+
+    /// <summary>How often the UI should call <see cref="PollCodeLoginAsync"/>, from the server.</summary>
+    public int PendingCodeIntervalSeconds => _pendingCodeIntervalSeconds;
+
+    public long PendingCodeExpiresAtMs => _pendingCodeExpiresAtMs;
+
+    public void ShowPasswordLogin()
+    {
+        ClearPendingCode();
+        UsePasswordLogin = true;
+    }
+
+    public void ShowCodeLogin()
+    {
+        UsePasswordLogin = false;
+    }
+
+    /// <summary>Clears a displayed code, e.g. when it expired or the user switched modes.</summary>
+    public void ClearPendingCode()
+    {
+        PendingUserCode = null;
+        _pendingCodeExpiresAtMs = 0;
+    }
+
+    /// <summary>
+    /// CORE-020: asks the core for a pairing code and publishes it for display.
+    /// </summary>
+    public async Task BeginCodeLoginAsync()
+    {
+        var deviceName = ResolveDeviceName();
+
+        await RunBusyAsync(async () =>
+        {
+            var start = await Task.Run(() => _interopClient.BeginCodeLogin(deviceName));
+            _pendingCodeExpiresAtMs = start.ExpiresAtMs;
+            _pendingCodeIntervalSeconds = start.IntervalSeconds > 0 ? start.IntervalSeconds : 5;
+            PendingUserCode = start.UserCode;
+            StatusText = "Enter the code shown here on the Virtue website.";
+        }, "Getting a code...");
+    }
+
+    /// <summary>
+    /// CORE-021: one poll. Returns the status the core reported, or null if the
+    /// call failed; <see cref="ErrorText"/> then says why. Deliberately does not
+    /// use <c>RunBusyAsync</c>: this runs on a timer, and blocking the card's
+    /// buttons every few seconds would make them unusable.
+    /// </summary>
+    public async Task<string?> PollCodeLoginAsync()
+    {
+        try
+        {
+            var result = await Task.Run(() => _interopClient.PollCodeLogin());
+
+            if (result.Status == "approved")
+            {
+                ClearPendingCode();
+                await RefreshInternalAsync();
+                StatusText = BuildStatusText();
+            }
+            else if (result.Status == "expired")
+            {
+                ClearPendingCode();
+                StatusText = "That code expired. Get a new one to sign in.";
+            }
+
+            return result.Status;
+        }
+        catch (Exception ex)
+        {
+            ErrorText = ex.Message;
+            return null;
+        }
+    }
+
+    private string ResolveDeviceName() =>
+        string.IsNullOrWhiteSpace(DeviceNameInput) ? Environment.MachineName : DeviceNameInput.Trim();
+
     public async Task LoginAsync()
     {
         if (string.IsNullOrWhiteSpace(EmailInput))
@@ -342,9 +458,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
             return;
         }
 
-        var deviceName = string.IsNullOrWhiteSpace(DeviceNameInput)
-            ? Environment.MachineName
-            : DeviceNameInput.Trim();
+        var deviceName = ResolveDeviceName();
 
         await RunBusyAsync(async () =>
         {
@@ -362,6 +476,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         await RunBusyAsync(async () =>
         {
             await Task.Run(() => _interopClient.Logout());
+            ClearPendingCode();
             await RefreshInternalAsync();
             StatusText = BuildStatusText();
         }, "Signing out...");

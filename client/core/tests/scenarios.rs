@@ -7,6 +7,7 @@
 //! Run with:
 //!   cargo test -p virtue-core --features testing --test scenarios
 
+use virtue_core::module::auth::CodeLoginPoll;
 use virtue_core::module::upload::Upload;
 use virtue_core::testing::Scenario;
 use virtue_core::{CoreError, StatusSkipReason, UploadKind};
@@ -642,4 +643,47 @@ fn status_reports_recent_upload_errors_and_they_survive_a_restart() {
             .map(|e| e.context.clone()),
         Some("hash_upload".to_string())
     );
+}
+
+// ── Passwordless pairing (CORE-020/CORE-021) ──────────────────────────────
+
+#[test]
+fn a_pending_pairing_survives_a_daemon_restart() {
+    // The code is on the user's screen while the daemon restarts underneath it.
+    // Persisting the pairing is what lets the same code still be approved
+    // afterwards, rather than the user having to fetch a fresh one.
+    let mut scenario1 = Scenario::new();
+    let start = scenario1
+        .begin_code_login(Some("My Laptop"))
+        .expect("begin code login");
+    assert_eq!(start.user_code, "K7R-M3X");
+
+    // `scenario1` is deliberately kept alive: dropping a `Scenario` removes its
+    // temp state directory, which is exactly what the restart below reads.
+    let state_dir = scenario1.state_dir_path().to_path_buf();
+
+    let mut scenario2 = Scenario::restarted_in_state_dir(state_dir);
+    let pending = scenario2
+        .state()
+        .auth
+        .pending_code_login
+        .expect("pairing must survive the restart");
+    assert_eq!(pending.user_code, "K7R-M3X");
+    assert_eq!(pending.device_name, "My Laptop");
+
+    // And the restarted daemon can finish the pairing with the same code.
+    scenario2
+        .api
+        .program_poll_device_code(Ok(scenario2.api.approved_device_code()));
+    assert_eq!(
+        scenario2.poll_code_login().expect("poll"),
+        CodeLoginPoll::Approved {
+            device_id: "mock-device".to_string()
+        }
+    );
+
+    let status = scenario2.status();
+    assert!(status.is_authenticated);
+    assert_eq!(status.account_email.as_deref(), Some("mock@example.org"));
+    assert!(scenario2.state().auth.pending_code_login.is_none());
 }

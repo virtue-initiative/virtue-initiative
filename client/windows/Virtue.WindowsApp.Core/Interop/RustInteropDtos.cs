@@ -50,6 +50,25 @@ public sealed record ForceCapturePayload(
     string Outcome,
     string Message);
 
+/// <summary>
+/// CORE-020: the code to show the user, and how to pace the polling.
+/// </summary>
+public sealed record BeginCodeLoginPayload(
+    string UserCode,
+    long ExpiresAtMs,
+    int IntervalSeconds);
+
+/// <summary>
+/// CORE-021: <c>Status</c> is <c>pending</c>, <c>approved</c>, or
+/// <c>expired</c>. <c>DeviceId</c> is set only when approved.
+/// </summary>
+public sealed record PollCodeLoginPayload(
+    string Status,
+    string? DeviceId);
+
+internal sealed record BeginCodeLoginRequest(
+    string? DeviceName);
+
 internal sealed record LoginRequest(
     string Email,
     string Password,

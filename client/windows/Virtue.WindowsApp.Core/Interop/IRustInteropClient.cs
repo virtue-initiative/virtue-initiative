@@ -9,6 +9,8 @@ public interface IRustInteropClient
     SessionStatusPayload GetSessionStatus();
     MonitorStatusPayload GetMonitorStatus();
     void Login(string email, string password, string? deviceName = null);
+    BeginCodeLoginPayload BeginCodeLogin(string? deviceName = null);
+    PollCodeLoginPayload PollCodeLogin();
     void Logout();
     ForceCapturePayload ForceScreenshotAndUpload();
     void ReportIssue(string message, string? contactEmail, bool includeLogs);

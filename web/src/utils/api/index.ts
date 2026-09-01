@@ -31,5 +31,12 @@ export {
 
 export { APIClient } from './client';
 export type { LogQueryResult } from './client';
-export type { User, Device, WatcherPartner, WatchingPartner } from './api';
+export type {
+  User,
+  Device,
+  DeviceCodeLookupResponse,
+  DeviceCodeApproveResponse,
+  WatcherPartner,
+  WatchingPartner,
+} from './api';
 export { api, describeError } from './api';

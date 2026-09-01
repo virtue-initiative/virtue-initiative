@@ -32,6 +32,30 @@ pub struct RegisteredDevice {
     pub credentials: DeviceCredentials,
     pub settings: DeviceSettings,
     pub hash_token: String,
+    /// The account this device now belongs to. Password registration knows it
+    /// from what the user typed; the pairing flow (API-045) has to be told,
+    /// since the device never sees the email. Either way CORE-010's
+    /// `account_email` comes from here.
+    pub account_email: String,
+}
+
+/// What `POST /d/device-code` (API-044) hands back: the code to show the user,
+/// the secret to poll with, and how to pace the polling.
+#[derive(Debug, Clone)]
+pub struct DeviceCodeStart {
+    pub user_code: String,
+    pub device_code: String,
+    pub expires_at_ms: i64,
+    pub interval_seconds: u32,
+}
+
+/// One `POST /d/device-code/poll` outcome (API-045).
+#[derive(Debug, Clone)]
+pub enum DeviceCodePoll {
+    Pending,
+    Expired,
+    /// Boxed because `RegisteredDevice` is far larger than the other variants.
+    Approved(Box<RegisteredDevice>),
 }
 
 #[derive(Debug, Clone)]
@@ -62,7 +86,9 @@ pub const MAX_LOG_ATTACHMENT_BYTES: usize = 8 * 1024 * 1024;
 /// Opaque-session-token prefixes this codebase hands out (`api/src/lib/tokens.ts`'s
 /// `TOKEN_PREFIXES`) — kept in sync manually, since native clients have no
 /// build-time link to that TypeScript file.
-const SECRET_TOKEN_PREFIXES: [&str; 7] = ["wst_", "dst_", "sut_", "ect_", "evt_", "prt_", "pit_"];
+const SECRET_TOKEN_PREFIXES: [&str; 8] = [
+    "wst_", "dst_", "sut_", "ect_", "evt_", "prt_", "pit_", "dpc_",
+];
 
 /// True for a `header.payload.signature`-shaped JWT: three dot-separated
 /// base64url segments, each long enough not to false-positive on ordinary
@@ -162,6 +188,12 @@ pub trait ApiTransport: Send + Sync {
         name: &str,
         platform: &str,
     ) -> CoreResult<RegisteredDevice>;
+    /// Starts a passwordless pairing (API-044). Unauthenticated, like
+    /// `register_device`: this is the device's first call.
+    fn start_device_code(&self, name: &str, platform: &str) -> CoreResult<DeviceCodeStart>;
+    /// Asks whether the pairing has been approved yet (API-045). The device row
+    /// is created server-side by the poll that first sees the approval.
+    fn poll_device_code(&self, device_code: &str) -> CoreResult<DeviceCodePoll>;
     fn get_device_settings(&self, device_refresh_token: &str) -> CoreResult<DeviceState>;
     fn upload_batch(
         &self,
@@ -303,7 +335,76 @@ impl ApiTransport for HttpApiClient {
             },
             settings,
             hash_token,
+            account_email: email.trim().to_string(),
         })
+    }
+
+    fn start_device_code(&self, name: &str, platform: &str) -> CoreResult<DeviceCodeStart> {
+        #[derive(Serialize)]
+        struct StartDeviceCodeRequest<'a> {
+            name: &'a str,
+            platform: &'a str,
+        }
+
+        #[derive(Deserialize)]
+        struct StartDeviceCodeResponse {
+            user_code: String,
+            device_code: String,
+            expires_at: i64,
+            interval: u32,
+        }
+
+        let response: StartDeviceCodeResponse = self.expect_json(
+            self.post(None, "/d/device-code", None)
+                .send_json(StartDeviceCodeRequest { name, platform })?,
+        )?;
+
+        Ok(DeviceCodeStart {
+            user_code: response.user_code,
+            device_code: response.device_code,
+            expires_at_ms: response.expires_at,
+            interval_seconds: response.interval,
+        })
+    }
+
+    fn poll_device_code(&self, device_code: &str) -> CoreResult<DeviceCodePoll> {
+        #[derive(Serialize)]
+        struct PollDeviceCodeRequest<'a> {
+            device_code: &'a str,
+        }
+
+        #[derive(Deserialize)]
+        struct PollDeviceCodeResponse {
+            token: String,
+            settings: DeviceSettingsResponse,
+            account_email: String,
+        }
+
+        let response = self
+            .post(None, "/d/device-code/poll", None)
+            .send_json(PollDeviceCodeRequest { device_code })?;
+
+        // The agent is built with `http_status_as_error(false)`, so 202 and 410
+        // arrive here as ordinary responses to be read rather than errors.
+        match response.status() {
+            StatusCode::ACCEPTED => return Ok(DeviceCodePoll::Pending),
+            StatusCode::GONE => return Ok(DeviceCodePoll::Expired),
+            _ => {}
+        }
+
+        let response: PollDeviceCodeResponse = self.expect_json(response)?;
+        let hash_token = response.settings.hash_token.clone();
+        let settings: DeviceSettings = response.settings.into();
+
+        Ok(DeviceCodePoll::Approved(Box::new(RegisteredDevice {
+            credentials: DeviceCredentials {
+                device_id: settings.device_id.clone(),
+                refresh_token: response.token,
+            },
+            settings,
+            hash_token,
+            account_email: response.account_email,
+        })))
     }
 
     fn get_device_settings(&self, device_refresh_token: &str) -> CoreResult<DeviceState> {

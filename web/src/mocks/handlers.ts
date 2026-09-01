@@ -61,6 +61,12 @@ export const handlers = [
   http.get(`${BASE}/device`, () => HttpResponse.json(TEST_DEVICES)),
   http.patch(`${BASE}/device/:id`, () => new HttpResponse(null, { status: 204 })),
   http.delete(`${BASE}/device/:id`, () => new HttpResponse(null, { status: 204 })),
+  http.post(`${BASE}/device-code/lookup`, () =>
+    HttpResponse.json({ name: 'Work Laptop', platform: 'linux', expires_at: Date.now() + 600_000 }),
+  ),
+  http.post(`${BASE}/device-code/approve`, () =>
+    HttpResponse.json({ name: 'Work Laptop', platform: 'linux' }),
+  ),
 
   // ── Partners ───────────────────────────────────────────────────────────
   http.get(`${BASE}/partner`, () =>

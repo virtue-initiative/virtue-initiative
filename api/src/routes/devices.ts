@@ -1,8 +1,11 @@
 import { Hono } from 'hono';
 import { authenticateWebSession } from '../middleware/auth';
+import { rateLimitByDevice, rateLimitByIp } from '../middleware/rate-limit';
 import { validateZ } from '../middleware/validation';
 import {
+  approveDeviceAuthCode,
   deleteDeviceById,
+  findDeviceAuthCodeByUserCode,
   findOwnedDevice,
   findUserById,
   listBatchUrlsForDevice,
@@ -15,10 +18,15 @@ import { hashGetMany } from '../lib/hash-server';
 import { sendEmail } from '../lib/email';
 import { renderDeviceDeletedTemplate } from '../lib/email/templates';
 import { deleteObject } from '../lib/r2';
+import { normalizeUserCode } from '../lib/device-codes';
 import { Env, Variables } from '../types/bindings';
-import { updateDeviceSchema } from '../../../shared-web/types';
+import { deviceCodeRequestSchema, updateDeviceSchema } from '../../../shared-web/types';
 
 const devices = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+/** Mounted at `/device-code`, not under `/device`, so the paths match API-043. */
+export const deviceCodes = new Hono<{ Bindings: Env; Variables: Variables }>();
+
 const ONLINE_WINDOW_MS = 2 * 60 * 60 * 1000;
 
 devices.get('/', authenticateWebSession(), async (c) => {
@@ -60,6 +68,78 @@ devices.get('/', authenticateWebSession(), async (c) => {
     }),
   );
 });
+
+/**
+ * The one message every device-code failure returns (API-046). Distinguishing
+ * "no such code" from "expired" from "already approved" would let someone
+ * guessing codes learn which guesses were close.
+ */
+const INVALID_CODE_MESSAGE = 'That code is not valid. It may have expired.';
+
+/**
+ * POST /device-code/lookup (API-046) - Resolve a code the user typed into the
+ * name and platform the device chose, so they can see what they are about to add
+ * before they add it.
+ *
+ * `rateLimitByDevice()` keys on `c.get('sub')`, which after web auth is the user
+ * id; the name is a misnomer here. Both limits matter: a guessed code signs a
+ * stranger's device in to the guesser's account.
+ */
+deviceCodes.post(
+  '/lookup',
+  authenticateWebSession(),
+  rateLimitByDevice(),
+  rateLimitByIp(),
+  validateZ('json', deviceCodeRequestSchema),
+  async (c) => {
+    const userCode = normalizeUserCode(c.req.valid('json').user_code);
+    if (!userCode) {
+      return c.json({ error: INVALID_CODE_MESSAGE }, 404);
+    }
+
+    const row = await findDeviceAuthCodeByUserCode(c.env.DB, userCode);
+    if (!row || row.approved_by || row.consumed_at !== null || row.expires_at <= Date.now()) {
+      return c.json({ error: INVALID_CODE_MESSAGE }, 404);
+    }
+
+    return c.json({ name: row.name, platform: row.platform, expires_at: row.expires_at });
+  },
+);
+
+/**
+ * POST /device-code/approve (API-047) - Sign the pending device in to this
+ * account. The device itself creates its row on its next poll.
+ */
+deviceCodes.post(
+  '/approve',
+  authenticateWebSession(),
+  rateLimitByDevice(),
+  rateLimitByIp(),
+  validateZ('json', deviceCodeRequestSchema),
+  async (c) => {
+    const userCode = normalizeUserCode(c.req.valid('json').user_code);
+    if (!userCode) {
+      return c.json({ error: INVALID_CODE_MESSAGE }, 404);
+    }
+
+    const row = await findDeviceAuthCodeByUserCode(c.env.DB, userCode);
+    if (!row || row.consumed_at !== null || row.expires_at <= Date.now()) {
+      return c.json({ error: INVALID_CODE_MESSAGE }, 404);
+    }
+
+    if (row.approved_by) {
+      return c.json({ error: 'That code was already approved.' }, 409);
+    }
+
+    const approved = await approveDeviceAuthCode(c.env.DB, userCode, c.get('sub'), Date.now());
+    if (!approved) {
+      // Another request approved it between the read above and this update.
+      return c.json({ error: 'That code was already approved.' }, 409);
+    }
+
+    return c.json({ name: row.name, platform: row.platform });
+  },
+);
 
 devices.patch(
   '/:id',

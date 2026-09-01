@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/preact';
+import { screen, waitFor, within } from '@testing-library/preact';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
@@ -71,6 +71,86 @@ describe('Devices — Add device dialog', () => {
     await user.click(addBtn);
 
     expect(screen.getByRole('heading', { name: /add device/i, level: 3 })).toBeInTheDocument();
+  });
+
+  it('looks up a code, confirms the device, then approves it', async () => {
+    let lookupBody: unknown;
+    let approveBody: unknown;
+    server.use(
+      http.post(`${BASE}/device-code/lookup`, async ({ request }) => {
+        lookupBody = await request.json();
+        return HttpResponse.json({
+          name: 'Work Laptop',
+          platform: 'linux',
+          expires_at: Date.now() + 600_000,
+        });
+      }),
+      http.post(`${BASE}/device-code/approve`, async ({ request }) => {
+        approveBody = await request.json();
+        return HttpResponse.json({ name: 'Work Laptop', platform: 'linux' });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderWithClient(<Devices />);
+
+    await user.click(await screen.findByRole('button', { name: /add device/i }));
+    await user.type(screen.getByLabelText(/first three characters/i), 'k7r');
+    await user.type(screen.getByLabelText(/last three characters/i), 'm3x');
+    await user.click(screen.getByRole('button', { name: /continue/i }));
+
+    // Step two names the device, so the user can see what they are adding.
+    // Scoped to the dialog: the device list behind it also lists platforms.
+    const dialog = screen.getByRole('dialog');
+    await waitFor(() => {
+      expect(within(dialog).getByText('Work Laptop')).toBeInTheDocument();
+      expect(within(dialog).getByText('linux')).toBeInTheDocument();
+    });
+    expect(lookupBody).toEqual({ user_code: 'K7RM3X' });
+
+    await user.click(screen.getByRole('button', { name: /^add$/i }));
+
+    await waitFor(() => {
+      expect(approveBody).toEqual({ user_code: 'K7RM3X' });
+    });
+  });
+
+  it('splits a full code pasted into the first box across both boxes', async () => {
+    const user = userEvent.setup();
+    renderWithClient(<Devices />);
+
+    await user.click(await screen.findByRole('button', { name: /add device/i }));
+    const first = screen.getByLabelText(/first three characters/i) as HTMLInputElement;
+    await user.click(first);
+    await user.paste('K7R-M3X');
+
+    expect(first.value).toBe('K7R');
+    expect((screen.getByLabelText(/last three characters/i) as HTMLInputElement).value).toBe('M3X');
+  });
+
+  it('shows the error the server returns for an invalid code', async () => {
+    server.use(
+      http.post(`${BASE}/device-code/lookup`, () =>
+        HttpResponse.json(
+          { error: 'That code is not valid. It may have expired.' },
+          { status: 404 },
+        ),
+      ),
+    );
+
+    const user = userEvent.setup();
+    renderWithClient(<Devices />);
+
+    await user.click(await screen.findByRole('button', { name: /add device/i }));
+    await user.type(screen.getByLabelText(/first three characters/i), 'zzz');
+    await user.type(screen.getByLabelText(/last three characters/i), 'zzz');
+    await user.click(screen.getByRole('button', { name: /continue/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/that code is not valid/i)).toBeInTheDocument();
+    });
+    // The confirmation step must not appear for a code the server rejected.
+    expect(screen.queryByRole('button', { name: /^add$/i })).not.toBeInTheDocument();
   });
 });
 

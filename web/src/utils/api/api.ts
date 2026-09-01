@@ -23,6 +23,8 @@ import type {
   UpdateUserResponse,
   CreatePartnerResponse,
   BugReportPayload,
+  DeviceCodeLookupResponse,
+  DeviceCodeApproveResponse,
 } from '@virtueinitiative/shared-web/types';
 export type {
   EmailFrequency,
@@ -46,6 +48,8 @@ export type {
   UpdateUserResponse,
   CreatePartnerResponse,
   BugReportPayload,
+  DeviceCodeLookupResponse,
+  DeviceCodeApproveResponse,
 };
 
 const BASE =
@@ -269,6 +273,21 @@ export const api = {
     }),
 
   deleteDevice: (id: string) => req<void>(`/device/${id}`, { method: 'DELETE' }),
+
+  // API-046/API-047: resolve a pairing code the user read off a device, then
+  // sign that device in to this account. Split in two so the user sees which
+  // device they are about to add before they add it.
+  lookupDeviceCode: (userCode: string) =>
+    req<DeviceCodeLookupResponse>('/device-code/lookup', {
+      method: 'POST',
+      body: JSON.stringify({ user_code: userCode }),
+    }),
+
+  approveDeviceCode: (userCode: string) =>
+    req<DeviceCodeApproveResponse>('/device-code/approve', {
+      method: 'POST',
+      body: JSON.stringify({ user_code: userCode }),
+    }),
 
   getPartners: () => req<PartnerRelationships>('/partner'),
 

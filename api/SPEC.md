@@ -583,6 +583,8 @@ The client MUST send
 
 The server MUST validate the login (see `POST /login`) and create a long lived refresh token.
 
+This endpoint is the password fallback for signing a device in; the pairing-code flow of API-043 is the primary path.
+
 It should also return the device settings (see `GET /d/device`)
 
 On success, it must return **HTTP 200** with
@@ -721,3 +723,140 @@ The server MUST email the report to a fixed internal address and include, the me
 The server SHOULD set the Reply-To header to the `contact_email` or the email of the authenticated account.
 
 On success, the server MUST respond **HTTP 204**.
+
+## API-043 Device pairing codes
+
+A device MAY sign in without the account password by displaying a short **user code** that
+the account owner types into an authenticated web session. The device holds a secret
+**device code**, polls until the code is approved, and then receives exactly the credentials
+`POST /d/device` would have returned.
+
+**UserCode**: 6 characters drawn from the alphabet `23456789ABCDEFGHJKMNPQRSTVWXYZ` (30
+characters; `I`, `L`, `O`, `U`, `0` and `1` are excluded because they are easily confused).
+The server MUST generate each character uniformly at random. The server SHOULD display and
+return it grouped as `XXX-XXX`, and MUST accept it back in any case, with or without
+separators.
+
+**DeviceCode**: an opaque string prefixed `dpc_`, held only by the device. The server MUST
+store only its SHA-256 digest.
+
+A pairing MUST expire 10 minutes after it is created. The server MUST prune expired
+pairings.
+
+Because a guessed user code signs a stranger's device in to the guesser's account, the
+server MUST rate limit API-044 through API-047, by IP address for the unauthenticated
+device endpoints and by both user and IP address for the web-session endpoints. It MUST
+respond **HTTP 429** with `{ "error": "Too many requests" }` once a limit is exceeded.
+
+### API-044 `POST /d/device-code`
+
+The client MUST NOT be authenticated and MUST send
+
+```js
+{
+  "name": "My Laptop",
+  "platform": "linux"
+}
+```
+
+The server MUST create a pairing that records the name and platform, and MUST respond
+**HTTP 200** with
+
+```js
+{
+  "user_code": "K7R-M3X",
+  "device_code": "dpc_...",
+  "expires_at": DateTime,
+  "interval": 5
+}
+```
+
+`interval` is the number of seconds the device SHOULD wait between polls.
+
+### API-045 `POST /d/device-code/poll`
+
+The client MUST NOT be authenticated and MUST send
+
+```js
+{
+  "device_code": "dpc_..."
+}
+```
+
+The server MUST look up the pairing by the digest of `device_code`.
+
+If no pairing matches, or it has expired, or its credentials have already been collected,
+the server MUST respond **HTTP 410** with `{ "error": "expired" }`.
+
+If the pairing has not been approved, the server MUST respond **HTTP 202** with
+`{ "status": "pending" }`.
+
+If the pairing has been approved, the server MUST create the device owned by the approving
+user, create a long lived refresh token, mark the pairing collected, and respond **HTTP
+200** with
+
+```js
+{
+  "token": DeviceRefreshToken,
+  "settings": DeviceSettings,
+  "account_email": "user@example.com"
+}
+```
+
+The device is created here rather than at approval time so that an approval the device never
+collects leaves no device behind. The server MUST create the device at most once per
+pairing, even under concurrent polls.
+
+`account_email` is the email of the approving account. The device never learns it from the
+user in this flow, so the server MUST supply it.
+
+### API-046 `POST /device-code/lookup`
+
+The client MUST be authenticated with a **Web Token** and send
+
+```js
+{
+  "user_code": "K7R-M3X"
+}
+```
+
+The server MUST normalize the code and look up an unexpired, unapproved pairing.
+
+On success the server MUST respond **HTTP 200** with
+
+```js
+{
+  "name": "My Laptop",
+  "platform": "linux",
+  "expires_at": DateTime
+}
+```
+
+Otherwise the server MUST respond **HTTP 404** with
+`{ "error": "That code is not valid. It may have expired." }`. The server MUST use that one
+message for every failure, so that a caller guessing codes learns nothing from the wording.
+
+### API-047 `POST /device-code/approve`
+
+The client MUST be authenticated with a **Web Token** and send
+
+```js
+{
+  "user_code": "K7R-M3X"
+}
+```
+
+The server MUST record the authenticated user as the approver of an unexpired, unapproved
+pairing, and MUST respond **HTTP 200** with
+
+```js
+{
+  "name": "My Laptop",
+  "platform": "linux"
+}
+```
+
+The server MUST respond **HTTP 404** with the message of API-046 if no unexpired pairing
+matches, and **HTTP 409** with `{ "error": "That code was already approved." }` if the
+pairing has already been approved, so that a repeated submit cannot reassign a device to a
+different account.

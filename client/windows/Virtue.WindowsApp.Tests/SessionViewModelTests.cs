@@ -669,6 +669,103 @@ public sealed class SessionViewModelTests
         Assert.False(viewModel.UpdateInstalling);
     }
 
+    [Fact]
+    public void DefaultsToTheCodeLoginView()
+    {
+        var viewModel = new SessionViewModel(new FakeRustInteropClient(), "0.0.5.1234");
+
+        Assert.True(viewModel.UseCodeLogin);
+        Assert.False(viewModel.UsePasswordLogin);
+        Assert.False(viewModel.HasPendingCode);
+    }
+
+    [Fact]
+    public void ShowPasswordLogin_SwitchesViewsAndDropsAnyDisplayedCode()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        viewModel.ShowPasswordLogin();
+
+        Assert.True(viewModel.UsePasswordLogin);
+        Assert.False(viewModel.UseCodeLogin);
+        Assert.Null(viewModel.PendingUserCode);
+
+        viewModel.ShowCodeLogin();
+        Assert.True(viewModel.UseCodeLogin);
+    }
+
+    [Fact]
+    public async Task BeginCodeLoginAsync_PublishesTheCodeAndPollingInterval()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            BeginCodeLoginResult = new BeginCodeLoginPayload("J4T-N8P", 1_700_000_000_000, 7),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+        viewModel.DeviceNameInput = "  Work PC  ";
+
+        await viewModel.BeginCodeLoginAsync();
+
+        Assert.Equal("J4T-N8P", viewModel.PendingUserCode);
+        Assert.True(viewModel.HasPendingCode);
+        Assert.Equal(7, viewModel.PendingCodeIntervalSeconds);
+        Assert.Equal(1_700_000_000_000, viewModel.PendingCodeExpiresAtMs);
+        Assert.Equal("Work PC", fakeClient.LastCodeLoginDeviceName);
+    }
+
+    [Fact]
+    public async Task BeginCodeLoginAsync_FallsBackToTheMachineNameWhenTheFieldIsBlank()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+        viewModel.DeviceNameInput = "   ";
+
+        await viewModel.BeginCodeLoginAsync();
+
+        Assert.Equal(Environment.MachineName, fakeClient.LastCodeLoginDeviceName);
+    }
+
+    [Fact]
+    public async Task PollCodeLoginAsync_LeavesEverythingInPlaceWhilePending()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+        await viewModel.BeginCodeLoginAsync();
+
+        Assert.Equal("pending", await viewModel.PollCodeLoginAsync());
+        Assert.True(viewModel.HasPendingCode);
+        Assert.False(viewModel.LoggedIn);
+    }
+
+    [Fact]
+    public async Task PollCodeLoginAsync_SignsInOnApprovalAndClearsTheCode()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        fakeClient.PollResults.Enqueue(new PollCodeLoginPayload("approved", "device-9"));
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+        await viewModel.BeginCodeLoginAsync();
+
+        Assert.Equal("approved", await viewModel.PollCodeLoginAsync());
+        Assert.False(viewModel.HasPendingCode);
+        Assert.True(viewModel.LoggedIn);
+        Assert.Equal("alice@example.org", viewModel.AccountEmail);
+    }
+
+    [Fact]
+    public async Task PollCodeLoginAsync_ClearsTheCodeOnExpiry()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        fakeClient.PollResults.Enqueue(new PollCodeLoginPayload("expired", null));
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+        await viewModel.BeginCodeLoginAsync();
+
+        Assert.Equal("expired", await viewModel.PollCodeLoginAsync());
+        Assert.False(viewModel.HasPendingCode);
+        Assert.False(viewModel.LoggedIn);
+        Assert.Contains("expired", viewModel.StatusText, StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed class FakeRustInteropClient : IRustInteropClient
     {
         public SessionStatusPayload SessionStatus { get; set; } = new(false, null, null, "build-unknown");
@@ -713,6 +810,34 @@ public sealed class SessionViewModelTests
             LastLogin = (email, password, deviceName);
             SessionStatus = SessionStatus with { LoggedIn = true, Email = email };
             MonitorStatus = MonitorStatus with { State = "running", LoggedIn = true, LastError = null };
+        }
+
+        public string? LastCodeLoginDeviceName { get; private set; }
+
+        public BeginCodeLoginPayload BeginCodeLoginResult { get; set; } =
+            new("K7R-M3X", 600_000, 5);
+
+        public Queue<PollCodeLoginPayload> PollResults { get; } = new();
+
+        public BeginCodeLoginPayload BeginCodeLogin(string? deviceName = null)
+        {
+            LastCodeLoginDeviceName = deviceName;
+            return BeginCodeLoginResult;
+        }
+
+        public PollCodeLoginPayload PollCodeLogin()
+        {
+            var result = PollResults.Count > 0
+                ? PollResults.Dequeue()
+                : new PollCodeLoginPayload("pending", null);
+
+            if (result.Status == "approved")
+            {
+                SessionStatus = SessionStatus with { LoggedIn = true, Email = "alice@example.org" };
+                MonitorStatus = MonitorStatus with { State = "running", LoggedIn = true, LastError = null };
+            }
+
+            return result;
         }
 
         public void Logout()

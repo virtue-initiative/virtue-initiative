@@ -2,6 +2,8 @@ import {
   api,
   Batch,
   Device,
+  DeviceCodeApproveResponse,
+  DeviceCodeLookupResponse,
   PartnerRelationships,
   User,
   WatcherPartner,
@@ -299,6 +301,22 @@ export class APIClient {
       ?.deleteDeviceData(this.userId, id)
       .catch((err) => console.warn('[api-client] failed to wipe device data from cache', err));
     await this.fetchDevices(true);
+  }
+
+  /** API-046: what device is behind this code, without signing anything in yet. */
+  async lookupDeviceCode(userCode: string): Promise<DeviceCodeLookupResponse> {
+    return api.lookupDeviceCode(userCode);
+  }
+
+  /**
+   * API-047: sign the pending device in to this account. The device itself
+   * appears in the list on its next poll, so force a refresh rather than wait
+   * for the cache to age out.
+   */
+  async approveDeviceCode(userCode: string): Promise<DeviceCodeApproveResponse> {
+    const approved = await api.approveDeviceCode(userCode);
+    await this.fetchDevices(true);
+    return approved;
   }
 
   private async fetchDevices(force = false): Promise<Device[] | null> {

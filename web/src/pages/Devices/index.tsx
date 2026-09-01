@@ -1,6 +1,12 @@
 import { useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
-import { Device, describeError, useAPIContext, useDevices } from '../../utils/api';
+import {
+  Device,
+  DeviceCodeLookupResponse,
+  describeError,
+  useAPIContext,
+  useDevices,
+} from '../../utils/api';
 import { PageHeading } from '../../components/PageHeading';
 import { DeviceStatusBadge } from '../../components/DeviceStatusBadge';
 import { DevicesIcon } from '../../components/icons';
@@ -64,15 +70,99 @@ export function Devices() {
   );
 }
 
+/**
+ * API-043's web half. Two steps on purpose: typing the code only resolves it to
+ * a device name and platform, and a second, explicit Add is what actually signs
+ * that device in. A phished code is therefore visible as an unfamiliar device
+ * before it is honored.
+ */
 function AddDeviceButton() {
+  const api = useAPIContext();
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const [firstHalf, setFirstHalf] = useState('');
+  const [secondHalf, setSecondHalf] = useState('');
+  const [pending, setPending] = useState<DeviceCodeLookupResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // One ref on the wrapping element rather than two on the `Input` components:
+  // `Input` is a plain function component, so a ref passed to it would not reach
+  // the underlying `<input>`.
+  const codeInputsRef = useRef<HTMLDivElement>(null);
+  const { push: pushToast } = useToast();
+
+  const userCode = `${firstHalf}${secondHalf}`;
+
+  function reset() {
+    setFirstHalf('');
+    setSecondHalf('');
+    setPending(null);
+    setError(null);
+    setLoading(false);
+  }
 
   function open() {
+    reset();
     dialogRef.current?.showModal();
   }
 
   function close() {
     dialogRef.current?.close();
+  }
+
+  /**
+   * Split whatever landed in a box across the two boxes, so pasting or typing a
+   * whole `K7R-M3X` into the first one fills both instead of being truncated.
+   * Characters outside the code alphabet (the separator included) are dropped;
+   * the server normalizes the same way (API-046).
+   */
+  function handleCodeInput(box: 'first' | 'second', raw: string) {
+    const cleaned = raw.toUpperCase().replace(/[^0-9A-Z]/g, '');
+
+    if (box === 'first') {
+      setFirstHalf(cleaned.slice(0, 3));
+      if (cleaned.length > 3) {
+        setSecondHalf(cleaned.slice(3, 6));
+      }
+      if (cleaned.length >= 3) {
+        focusSecondBox();
+      }
+      return;
+    }
+
+    setSecondHalf(cleaned.slice(0, 3));
+  }
+
+  function focusSecondBox() {
+    codeInputsRef.current?.querySelectorAll('input')[1]?.focus();
+  }
+
+  async function handleLookup(e: Event) {
+    e.preventDefault();
+    if (!api) return;
+    setLoading(true);
+    setError(null);
+    try {
+      setPending(await api.lookupDeviceCode(userCode));
+    } catch (err) {
+      setError(describeError(err, 'That code is not valid. It may have expired.'));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleApprove() {
+    if (!api) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const approved = await api.approveDeviceCode(userCode);
+      close();
+      pushToast(`${approved.name} was added. It will appear here shortly.`, 'success');
+    } catch (err) {
+      setError(describeError(err, 'That code could not be approved.'));
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -82,38 +172,76 @@ function AddDeviceButton() {
       </Button>
       <Dialog dialogRef={dialogRef} class="device-setup-dialog">
         <DialogHeader>Add device</DialogHeader>
-        <p class="invite-desc">
-          Set up Virtue on a phone or computer, then sign in with this account so it starts
-          appearing in your dashboard.
-        </p>
-        <ol class="device-setup-steps">
-          <li>
-            <span class="device-setup-step-label">Download the app.</span>
-            Choose the installer for the device you want to monitor.
-          </li>
-          <li>
-            <span class="device-setup-step-label">Follow the installation instructions.</span>
-            Use the platform-specific setup guide if you need it.
-          </li>
-          <li>
-            <span class="device-setup-step-label">Log in on that device.</span>
-            Once the app signs in and uploads, it will show up here.
-          </li>
-        </ol>
-        <DialogActions
-          left={
-            <Button variant="ghost" href={DOWNLOAD_URL} target="_blank" rel="noreferrer">
-              View guide
-            </Button>
-          }
-        >
-          <Button variant="ghost" type="button" onClick={close}>
-            Close
-          </Button>
-          <Button variant="primary" href={DOWNLOAD_URL} target="_blank" rel="noreferrer">
-            Download
-          </Button>
-        </DialogActions>
+        {pending ? (
+          <>
+            <p class="invite-desc">Add this device to your account.</p>
+            <div class="device-code-summary">
+              <span class="device-code-summary-name">{pending.name}</span>
+              <Badge>{pending.platform}</Badge>
+            </div>
+            {error && <p class="device-code-error">{error}</p>}
+            <DialogActions>
+              <Button variant="ghost" type="button" onClick={reset}>
+                Back
+              </Button>
+              <Button variant="primary" type="button" onClick={handleApprove} disabled={loading}>
+                {loading ? 'Adding…' : 'Add'}
+              </Button>
+            </DialogActions>
+          </>
+        ) : (
+          <>
+            <p class="invite-desc">
+              Open Virtue on the device you want to monitor and sign in. It shows a code. Type that
+              code here.
+            </p>
+            <form onSubmit={handleLookup}>
+              <Field label="Device code">
+                <div class="device-code-inputs" ref={codeInputsRef}>
+                  <Input
+                    class="device-code-input"
+                    value={firstHalf}
+                    onInput={(e) => handleCodeInput('first', (e.target as HTMLInputElement).value)}
+                    aria-label="Device code, first three characters"
+                    autocomplete="off"
+                    autoCorrect="off"
+                    spellcheck={false}
+                    required
+                    autoFocus
+                  />
+                  <span class="device-code-separator" aria-hidden="true">
+                    –
+                  </span>
+                  <Input
+                    class="device-code-input"
+                    value={secondHalf}
+                    onInput={(e) => handleCodeInput('second', (e.target as HTMLInputElement).value)}
+                    aria-label="Device code, last three characters"
+                    autocomplete="off"
+                    autoCorrect="off"
+                    spellcheck={false}
+                    required
+                  />
+                </div>
+              </Field>
+              {error && <p class="device-code-error">{error}</p>}
+              <DialogActions
+                left={
+                  <Button variant="ghost" href={DOWNLOAD_URL} target="_blank" rel="noreferrer">
+                    Download
+                  </Button>
+                }
+              >
+                <Button variant="ghost" href={DOWNLOAD_URL} target="_blank" rel="noreferrer">
+                  View guide
+                </Button>
+                <Button variant="primary" type="submit" disabled={loading || userCode.length !== 6}>
+                  {loading ? 'Checking…' : 'Continue'}
+                </Button>
+              </DialogActions>
+            </form>
+          </>
+        )}
       </Dialog>
     </>
   );

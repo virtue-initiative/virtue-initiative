@@ -3,13 +3,16 @@ import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { authenticateDeviceSession } from '../middleware/auth';
 import { CURRENT_API_VERSION } from '../lib/api-version';
-import { rateLimitByDevice } from '../middleware/rate-limit';
+import { rateLimitByDevice, rateLimitByIp } from '../middleware/rate-limit';
 import { validateZ } from '../middleware/validation';
 import {
+  claimDeviceAuthCode,
   createBatch,
   createDevice,
+  createDeviceAuthCode,
   createSessionRecord,
   deleteDeviceSessionsByDeviceId,
+  findDeviceAuthCodeByDeviceCodeHash,
   findDeviceById,
   findUserById,
   listAcceptedNotificationTargetsForUser,
@@ -25,6 +28,8 @@ import { generateToken } from '../lib/jwt';
 import { putObject } from '../lib/r2';
 import { notifyPartnersAboutRiskLog, riskToSeverity } from '../lib/tamper';
 import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
+import { formatUserCode, generateUserCode } from '../lib/device-codes';
+import { DEVICE_CODE_TTL_MS } from '../lib/email-domain';
 import { Env, Variables } from '../types/bindings';
 import { verifyUserCredentials } from '../lib/credentials';
 
@@ -38,6 +43,12 @@ const registerDeviceSchema = z.object({
   password_auth: z.base64(),
   name: z.string().min(1),
   platform: z.string().min(1),
+});
+
+const startDeviceCodeSchema = registerDeviceSchema.pick({ name: true, platform: true });
+
+const pollDeviceCodeSchema = z.object({
+  device_code: z.string().min(1),
 });
 
 const notifyEntrySchema = z.object({
@@ -154,6 +165,117 @@ deviceOnly.post('/device', validateZ('json', registerDeviceSchema), async (c) =>
 
   return c.json({ token: refreshToken, settings }, 200);
 });
+
+const DEVICE_CODE_POLL_INTERVAL_SECONDS = 5;
+const USER_CODE_COLLISION_RETRIES = 5;
+
+/**
+ * POST /d/device-code (API-044) - Start a passwordless pairing. Unauthenticated,
+ * like POST /d/device: this is the device's first call. It returns a short code
+ * for the user to read out to their web session, plus the `dpc_` secret the
+ * device polls with.
+ */
+deviceOnly.post(
+  '/device-code',
+  rateLimitByIp(),
+  validateZ('json', startDeviceCodeSchema),
+  async (c) => {
+    const { name, platform } = c.req.valid('json');
+    const now = Date.now();
+    const expiresAt = now + DEVICE_CODE_TTL_MS;
+    const deviceCode = generateOpaqueToken('device_pairing');
+
+    for (let attempt = 0; ; attempt += 1) {
+      const userCode = generateUserCode();
+
+      try {
+        await createDeviceAuthCode(c.env.DB, {
+          id: uuidv4(),
+          user_code: userCode,
+          device_code_hash: hashOpaqueToken(deviceCode),
+          name,
+          platform,
+          expires_at: expiresAt,
+          created_at: now,
+        });
+
+        return c.json(
+          {
+            user_code: formatUserCode(userCode),
+            device_code: deviceCode,
+            expires_at: expiresAt,
+            interval: DEVICE_CODE_POLL_INTERVAL_SECONDS,
+          },
+          200,
+        );
+      } catch (error) {
+        // A live code collided. Redraw a few times before giving up — with 30^6
+        // codes and a 10-minute TTL this should effectively never happen twice.
+        if (attempt >= USER_CODE_COLLISION_RETRIES) {
+          throw error;
+        }
+      }
+    }
+  },
+);
+
+/**
+ * POST /d/device-code/poll (API-045) - The device asks whether its pairing has
+ * been approved yet. The approved branch is where the device row is actually
+ * created, so an approval nobody collects leaves nothing behind.
+ */
+deviceOnly.post(
+  '/device-code/poll',
+  rateLimitByIp(),
+  validateZ('json', pollDeviceCodeSchema),
+  async (c) => {
+    const { device_code } = c.req.valid('json');
+    const hash = hashOpaqueToken(device_code);
+    const now = Date.now();
+
+    const row = await findDeviceAuthCodeByDeviceCodeHash(c.env.DB, hash);
+    if (!row || row.consumed_at !== null || row.expires_at <= now) {
+      return c.json({ error: 'expired' }, 410);
+    }
+
+    if (!row.approved_by) {
+      return c.json({ status: 'pending' }, 202);
+    }
+
+    // Guard the race between two concurrent polls: only the UPDATE that flips
+    // consumed_at from NULL proceeds to create the device.
+    const claimed = await claimDeviceAuthCode(c.env.DB, hash, now);
+    if (!claimed) {
+      return c.json({ error: 'expired' }, 410);
+    }
+
+    const owner = await findUserById(c.env.DB, row.approved_by);
+    if (!owner) {
+      return c.json({ error: 'expired' }, 410);
+    }
+
+    const id = uuidv4();
+    await createDevice(c.env.DB, {
+      id,
+      owner: owner.id,
+      name: row.name,
+      platform: row.platform,
+    });
+    const refreshToken = await createDeviceSession(c, id);
+
+    const settings = await buildDeviceSettings(c, {
+      id,
+      owner: owner.id,
+      name: row.name,
+      platform: row.platform,
+    });
+    if (!settings) {
+      return c.json({ error: 'Hash server not configured' }, 500);
+    }
+
+    return c.json({ token: refreshToken, settings, account_email: owner.email }, 200);
+  },
+);
 
 /**
  * GET /d/device - Refresh settings and mint a fresh hash-server token for the
