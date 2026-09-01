@@ -480,6 +480,8 @@ enum VirtueBrand {
         green: 58.0 / 255.0,
         blue: 46.0 / 255.0
     )
+    // Link color — matches --link in shared-web/tokens.css
+    static let link = Color(red: 179.0 / 255.0, green: 67.0 / 255.0, blue: 0.0 / 255.0)
     // Warm ochre — matches --ochre in shared-web/tokens.css
     static let ochre = Color(
         red: 166.0 / 255.0,
