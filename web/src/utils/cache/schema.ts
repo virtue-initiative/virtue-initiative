@@ -119,15 +119,21 @@ export const CACHE_TABLES: TableSchema[] = [
 /**
  * Report why the cache must be rebuilt, or null when it is up to date.
  *
- * `existing` maps each table present in the database to its column names, as read from
+ * `existing` maps every table present in the database to its column names, as read from
  * PRAGMA table_info. The column check is deliberately redundant with the version check: it
  * catches drift even when a schema change forgets to bump CACHE_SCHEMA_VERSION, which is
  * exactly how the original bug shipped.
+ *
+ * An empty map means the database has no tables at all, so there is nothing to migrate and
+ * nothing to throw away. That is the ordinary first-run case, including the run right after
+ * the cache is cleared, and it must not be reported as drift: user_version reads 0 there
+ * only because 0 is SQLite's default for a fresh database.
  */
 export function findSchemaDrift(
   userVersion: number,
   existing: Map<string, Set<string>>,
 ): string | null {
+  if (existing.size === 0) return null;
   if (userVersion !== CACHE_SCHEMA_VERSION) {
     return `schema version ${userVersion} does not match expected ${CACHE_SCHEMA_VERSION}`;
   }

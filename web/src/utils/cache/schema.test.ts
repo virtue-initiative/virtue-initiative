@@ -10,6 +10,21 @@ describe('findSchemaDrift', () => {
     expect(findSchemaDrift(CACHE_SCHEMA_VERSION, currentSchema())).toBeNull();
   });
 
+  it('reports no drift for a brand-new database with no tables', () => {
+    // A fresh database reads user_version 0 because that is SQLite's default, not because
+    // it is stale. Reporting drift here would make every first run, and every run right
+    // after the cache is cleared, log a rebuild it does not need.
+    expect(findSchemaDrift(0, new Map())).toBeNull();
+  });
+
+  it('reports drift for a populated database left at user_version 0', () => {
+    // The real upgrade case: tables created before this module existed, so the version was
+    // never stamped and the columns may predate later additions.
+    const existing = currentSchema();
+    existing.get('events')!.delete('created_at');
+    expect(findSchemaDrift(0, existing)).toContain('schema version 0');
+  });
+
   it('reports drift when user_version is behind', () => {
     const reason = findSchemaDrift(0, currentSchema());
     expect(reason).toContain('schema version 0');

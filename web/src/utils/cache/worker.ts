@@ -98,30 +98,36 @@ function createSchema(): void {
   }
 }
 
-// Read the on-disk table → column-name map, for findSchemaDrift.
+// Every table the database currently holds, declared or not, mapped to its column names.
+// Undeclared tables are included so that an empty map means "brand-new database" and not
+// merely "none of the tables we know about".
 function readExistingSchema(): Map<string, Set<string>> {
   const existing = new Map<string, Set<string>>();
-  for (const table of CACHE_TABLES) {
+  for (const name of listTables()) {
     const columns = new Set<string>();
-    db.exec(`PRAGMA table_info(${table.name})`, {
+    db.exec(`PRAGMA table_info("${name}")`, {
       rowMode: 'object',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       callback: (row: any) => columns.add(row.name as string),
     });
-    if (columns.size > 0) existing.set(table.name, columns);
+    existing.set(name, columns);
   }
   return existing;
 }
 
-// Drop every table the database currently holds, not just the declared ones, so stale
-// tables from older releases (e.g. direct_logs, removed in #467) go too.
-function dropAllTables(): void {
+function listTables(): string[] {
   const names: string[] = [];
   db.exec(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`, {
     rowMode: 'array',
     callback: (row: [string]) => names.push(row[0]),
   });
-  for (const name of names) {
+  return names;
+}
+
+// Drop every table the database currently holds, not just the declared ones, so stale
+// tables from older releases (e.g. direct_logs, removed in #467) go too.
+function dropAllTables(): void {
+  for (const name of listTables()) {
     db.exec(`DROP TABLE IF EXISTS "${name}"`);
   }
 }
@@ -140,18 +146,19 @@ async function openDatabase(): Promise<void> {
   }
   console.log('[cache-worker] init: opening /cache.db');
   db = new poolUtil.OpfsSAHPoolDb('/cache.db');
-  createSchema();
 
-  // A cache provisioned by an older release keeps its old table definitions, since
-  // CREATE TABLE IF NOT EXISTS is a no-op there and there is no ALTER TABLE path. Detect
-  // that and rebuild, rather than letting every query fail with "no such column".
+  // Inspect before creating anything: a cache provisioned by an older release keeps its old
+  // table definitions, since CREATE TABLE IF NOT EXISTS is a no-op there and there is no
+  // ALTER TABLE path. Rebuild on a mismatch rather than letting every query that names a
+  // newer column fail with "no such column". A brand-new database reports no drift: it has
+  // no tables yet, and its user_version is 0 only because that is SQLite's default.
   const userVersion = (db.selectValue('PRAGMA user_version') as number | undefined) ?? 0;
   const drift = findSchemaDrift(userVersion, readExistingSchema());
   if (drift) {
     console.warn('[cache-worker] init: rebuilding cache, schema drift:', drift);
     dropAllTables();
-    createSchema();
   }
+  createSchema();
   db.exec(`PRAGMA user_version = ${CACHE_SCHEMA_VERSION}`);
   console.log('[cache-worker] init: done');
 }
