@@ -24,11 +24,17 @@ runs:
     #
     # The key also omits runner.os deliberately: the object store is byte-identical
     # across platforms, so the macOS and Windows jobs reuse the entry Linux saved.
+    # The key alone isn't enough for Windows, though — actions/cache derives an
+    # internal cache *version* from the path plus compression method, and Windows's
+    # differs, so it would silently save a second entry under the same key.
+    # enableCrossOsArchive forces the portable archive format that lets it share.
+    # Safe here: .git/lfs/objects is plain files, no symlinks or meaningful modes.
     - name: Cache LFS objects
       uses: actions/cache@v4
       with:
         path: .git/lfs/objects
         key: lfs-v1-${{ steps.key.outputs.key }}
+        enableCrossOsArchive: true
 
     # No network traffic on a cache hit. This also replaces the pointer files in
     # the working tree with the real objects.
