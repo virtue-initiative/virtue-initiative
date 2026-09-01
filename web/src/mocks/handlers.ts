@@ -75,6 +75,13 @@ export const handlers = [
   http.post(`${BASE}/partner/accept`, () => HttpResponse.json({ id: 'new-partner-1' })),
   http.delete(`${BASE}/partner/:id`, () => new HttpResponse(null, { status: 204 })),
 
+  // ── Have I Been Pwned range search (third-party, called from the browser) ──
+  http.get('https://api.pwnedpasswords.com/range/:prefix', () =>
+    HttpResponse.text(
+      '0000000000000000000000000000000000A:3\n0000000000000000000000000000000000B:0',
+    ),
+  ),
+
   // ── Data ───────────────────────────────────────────────────────────────
   http.get(`${BASE}/data`, () =>
     HttpResponse.json({ batches: [], user: TEST_USER, watching: [], watchers: [] }),

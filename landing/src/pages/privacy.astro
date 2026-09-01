@@ -212,6 +212,11 @@ import SiteLayout from '../layouts/SiteLayout.astro';
         are never handled by our servers.
       </li>
       <li>
+        <strong>Have I Been Pwned</strong> - when you choose a new password, your browser checks it against
+        a public database of passwords exposed in known breaches. Only the first five characters of a
+        hash of the password are sent, never the password itself, and we do not receive or store the result.
+      </li>
+      <li>
         <strong>Our own tamper-evidence server</strong> - a server we operate that stores a running hash
         chain per device, used to detect whether monitoring data has been altered or removed. It stores
         hashes and device identifiers only, never your content.
@@ -229,7 +234,9 @@ import SiteLayout from '../layouts/SiteLayout.astro';
       other service metadata are stored server-side unencrypted and are intended to be accessible
       only through authorized account access. Passwords are hashed and are not stored in plaintext.
       Before a client attaches a log excerpt to a bug report, it scrubs anything that looks like a
-      session token from the text.
+      session token from the text. When you choose a new password, your browser sends the first five
+      characters of a hash of that password to Have I Been Pwned to warn you if it appears in a
+      known breach. Your password itself never leaves your device.
     </p>
 
     <h2>8. Children</h2>

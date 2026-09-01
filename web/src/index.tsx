@@ -1,3 +1,6 @@
+// Installs the Uint8Array base64/hex methods where the browser lacks them.
+// Must come before any module that converts a Uint8Array.
+import './utils/uint8array-base64';
 import * as preact from 'preact';
 import {
   LocationProvider,
