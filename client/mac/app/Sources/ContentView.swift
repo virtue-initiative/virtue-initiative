@@ -174,15 +174,34 @@ struct ContentView: View {
                         .foregroundStyle(VirtueBrand.textMuted)
                         .padding(.top, 4)
 
-                    LoginFormView(
-                        email: $coordinator.email,
-                        password: $coordinator.password,
-                        deviceName: $coordinator.deviceName,
-                        isSigningIn: coordinator.isSigningIn,
-                        loginError: coordinator.loginError,
-                        onSubmit: coordinator.login
-                    )
-                    .padding(.top, 6)
+                    if coordinator.usePasswordLogin {
+                        LoginFormView(
+                            email: $coordinator.email,
+                            password: $coordinator.password,
+                            deviceName: $coordinator.deviceName,
+                            isSigningIn: coordinator.isSigningIn,
+                            loginError: coordinator.loginError,
+                            onSubmit: coordinator.login
+                        )
+                        .padding(.top, 6)
+
+                        Button("Use a code instead") {
+                            coordinator.showCodeLogin()
+                        }
+                        .buttonStyle(.plain)
+                        .font(.subheadline)
+                        .foregroundStyle(VirtueBrand.link)
+                    } else {
+                        CodeLoginView(
+                            deviceName: $coordinator.deviceName,
+                            userCode: coordinator.pendingUserCode,
+                            isRequestingCode: coordinator.isRequestingCode,
+                            errorText: coordinator.loginError,
+                            onGetCode: coordinator.beginCodeLogin,
+                            onUsePassword: coordinator.showPasswordLogin
+                        )
+                        .padding(.top, 6)
+                    }
                 }
             }
         }

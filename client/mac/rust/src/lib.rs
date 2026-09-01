@@ -8,6 +8,7 @@ use once_cell::sync::OnceCell;
 use virtue_core::AuthState;
 use virtue_core::force_capture;
 use virtue_core::ipc::ClientController;
+use virtue_core::module::auth::CodeLoginPoll;
 use virtue_mac_platform::capture::{has_screen_capture_access, request_screen_capture_access};
 use virtue_mac_platform::config::{
     ClientPaths, ClientState, build_core_config, read_auth_state, save_state,
@@ -66,6 +67,70 @@ pub extern "C" fn virtue_mac_native_login(
         Ok(())
     })();
     into_c_result(result)
+}
+
+/// CORE-020: start a passwordless pairing and return the code to display.
+/// JSON: `{"userCode": …, "expiresAtMs": …, "intervalSeconds": …}`, or
+/// `{"error": …}`. The device code itself never leaves the daemon.
+#[unsafe(no_mangle)]
+pub extern "C" fn virtue_mac_native_begin_code_login(device_name: *const c_char) -> *mut c_char {
+    let json = (|| -> Result<String> {
+        let core = core()?;
+        let device_name = c_string_or_empty(device_name);
+        let sock = core.paths.state_dir.join("daemon.sock");
+        let mut client = ClientController::connect(&sock)
+            .context("failed to connect to daemon (is it running?)")?;
+        let pending = client
+            .begin_code_login(Some(&device_name))
+            .context("could not start a code login")?;
+        Ok(serde_json::json!({
+            "userCode": pending.user_code,
+            "expiresAtMs": pending.expires_at_ms,
+            "intervalSeconds": pending.interval_seconds,
+        })
+        .to_string())
+    })();
+    into_json_c_result(json)
+}
+
+/// CORE-021: one poll. JSON: `{"status": "pending"|"approved"|"expired"}`, or
+/// `{"error": …}`.
+///
+/// This takes its own short-lived IPC connection, like every other call here.
+/// `ipc.rs` serves one client at a time, so while this poll is out on the
+/// network the app's 2-second status poller waits behind it — the same stall
+/// the password login already causes, and well inside the coordinator's
+/// 20-second `stoppedTimeout` grace, so the UI can't misreport the daemon as
+/// stopped because of it.
+///
+/// On approval the account email is read back out of the daemon's status and
+/// persisted to `ui_state_file`, the same thing `virtue_mac_native_login` does
+/// with what the user typed — in this flow the device never sees the email
+/// until the server sends it (API-045).
+#[unsafe(no_mangle)]
+pub extern "C" fn virtue_mac_native_poll_code_login() -> *mut c_char {
+    let json = (|| -> Result<String> {
+        let core = core()?;
+        let sock = core.paths.state_dir.join("daemon.sock");
+        let mut client = ClientController::connect(&sock)
+            .context("failed to connect to daemon (is it running?)")?;
+        let outcome = client
+            .poll_code_login()
+            .context("could not check the code")?;
+
+        if matches!(outcome, CodeLoginPoll::Approved { .. }) {
+            let email = client.get_status().ok().and_then(|s| s.account_email);
+            save_state(&core.paths.ui_state_file, &ClientState { email })?;
+        }
+
+        Ok(match outcome {
+            CodeLoginPoll::Pending => serde_json::json!({ "status": "pending" }),
+            CodeLoginPoll::Approved { .. } => serde_json::json!({ "status": "approved" }),
+            CodeLoginPoll::Expired => serde_json::json!({ "status": "expired" }),
+        }
+        .to_string())
+    })();
+    into_json_c_result(json)
 }
 
 #[unsafe(no_mangle)]
@@ -470,6 +535,16 @@ fn optional_string_to_c(value: Option<String>) -> *mut c_char {
     match value {
         Some(value) => string_to_c(value),
         None => std::ptr::null_mut(),
+    }
+}
+
+/// Like [`into_c_result`], but for the calls that answer with a JSON payload:
+/// a failure comes back as `{"error": …}` rather than a null pointer, so the
+/// Swift side has one shape to decode either way.
+fn into_json_c_result(result: Result<String>) -> *mut c_char {
+    match result {
+        Ok(json) => string_to_c(json),
+        Err(err) => string_to_c(serde_json::json!({ "error": format!("{err:#}") }).to_string()),
     }
 }
 

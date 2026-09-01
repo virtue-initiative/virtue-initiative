@@ -95,6 +95,11 @@ final class MonitoringCoordinator: ObservableObject {
     @Published private(set) var isSigningIn: Bool = false
     @Published private(set) var isSigningOut: Bool = false
     @Published private(set) var loginError: String? = nil
+    /// False while the pairing-code view is showing (CORE-020), true once the
+    /// user has picked "Use a password instead" (CORE-008).
+    @Published private(set) var usePasswordLogin: Bool = false
+    @Published private(set) var pendingUserCode: String?
+    @Published private(set) var isRequestingCode: Bool = false
     @Published private(set) var loggedIn: Bool = false
     @Published private(set) var deviceId: String = "<none>"
     @Published private(set) var accountEmail: String?
@@ -121,6 +126,9 @@ final class MonitoringCoordinator: ObservableObject {
     private var didBecomeActiveObserver: NSObjectProtocol?
     private var willEnterForegroundObserver: NSObjectProtocol?
     private var statusRefreshTimer: Timer?
+    /// Drives CORE-021 at the interval the server asked for, separately from
+    /// the app-wide status refresh above.
+    private var codePollTimer: Timer?
 
     private var sharedDefaults: UserDefaults? {
         UserDefaults(suiteName: VirtueShared.appGroupID)
@@ -163,6 +171,128 @@ final class MonitoringCoordinator: ObservableObject {
             NotificationCenter.default.removeObserver(willEnterForegroundObserver)
         }
         stopStatusRefreshTimer()
+        stopCodePolling()
+    }
+
+    // MARK: - Pairing-code login (CORE-020 / CORE-021)
+
+    func showPasswordLogin() {
+        stopCodePolling()
+        pendingUserCode = nil
+        loginError = nil
+        usePasswordLogin = true
+    }
+
+    func showCodeLogin() {
+        loginError = nil
+        usePasswordLogin = false
+    }
+
+    /// Asks the core for a pairing code and starts polling for its approval.
+    /// Nothing about the signed-in state changes until a poll comes back
+    /// approved — no device exists before then.
+    func beginCodeLogin() {
+        stopCodePolling()
+        loginError = nil
+        isRequestingCode = true
+        statusMessage = "Getting a code..."
+        let resolvedDeviceName = resolvedDeviceName()
+        let configDirPath = configDir.path
+        let dataDirPath = dataDir.path
+
+        Task { @MainActor in
+            let result = await Task.detached(priority: .userInitiated) {
+                () -> Result<CodeLoginStart, String> in
+                if let initError = NativeBridge.ensureInitialized(
+                    configDir: configDirPath,
+                    dataDir: dataDirPath
+                ) {
+                    return .failure(initError)
+                }
+                return NativeBridge.beginCodeLogin(deviceName: resolvedDeviceName)
+            }.value
+            isRequestingCode = false
+
+            switch result {
+            case .failure(let message):
+                pendingUserCode = nil
+                loginError = message
+                statusMessage = "Could not get a code: \(message)"
+            case .success(let start):
+                pendingUserCode = start.userCode
+                statusMessage = "Enter the code shown here on the Virtue website."
+                startCodePolling(
+                    intervalSeconds: start.intervalSeconds ?? defaultCodeLoginIntervalSeconds
+                )
+            }
+        }
+    }
+
+    private func startCodePolling(intervalSeconds: Int) {
+        let interval = TimeInterval(max(1, intervalSeconds))
+        codePollTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) {
+            [weak self] _ in
+            Task { @MainActor in
+                self?.pollCodeLogin()
+            }
+        }
+    }
+
+    private func stopCodePolling() {
+        codePollTimer?.invalidate()
+        codePollTimer = nil
+    }
+
+    private func pollCodeLogin() {
+        let configDirPath = configDir.path
+        let dataDirPath = dataDir.path
+
+        Task { @MainActor in
+            let outcome = await Task.detached(priority: .userInitiated) { () -> CodeLoginPoll in
+                if let initError = NativeBridge.ensureInitialized(
+                    configDir: configDirPath,
+                    dataDir: dataDirPath
+                ) {
+                    return .failed(initError)
+                }
+                return NativeBridge.pollCodeLogin()
+            }.value
+
+            switch outcome {
+            case .pending:
+                return
+            case .failed:
+                // Usually a transient network blip. Keep the code on screen and
+                // try again on the next tick rather than making the user fetch
+                // a new one.
+                return
+            case .approved(let accountEmail):
+                stopCodePolling()
+                pendingUserCode = nil
+                password = ""
+                setMonitoringEnabled(true)
+                // App-layer state used only to prefill the bug-report contact
+                // field. In this flow the device never sees the email until the
+                // server sends it (API-045).
+                if let accountEmail {
+                    UserDefaults.standard.set(accountEmail, forKey: VirtueShared.accountEmailKey)
+                }
+                refreshSessionState()
+                refreshCoreStatus()
+                refreshSafariStatus()
+                statusMessage = "Signed in. Enable Virtue Safari extension in Safari settings."
+            case .expired:
+                stopCodePolling()
+                pendingUserCode = nil
+                loginError = "That code expired. Get a new one to sign in."
+                statusMessage = "That code expired. Get a new one to sign in."
+            }
+        }
+    }
+
+    private func resolvedDeviceName() -> String {
+        let trimmed = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? UIDevice.current.name : trimmed
     }
 
     func login() {
@@ -180,8 +310,7 @@ final class MonitoringCoordinator: ObservableObject {
         isSigningIn = true
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         let pw = password
-        let trimmedDeviceName = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedDeviceName = trimmedDeviceName.isEmpty ? UIDevice.current.name : trimmedDeviceName
+        let resolvedDeviceName = resolvedDeviceName()
         let configDirPath = configDir.path
         let dataDirPath = dataDir.path
 
@@ -215,6 +344,8 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     func logout() {
+        stopCodePolling()
+        pendingUserCode = nil
         setMonitoringEnabled(false)
         statusMessage = "Signing out..."
 

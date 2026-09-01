@@ -152,62 +152,89 @@ struct ContentView: View {
                     Text("Sign in to start monitoring on this device.")
                         .foregroundStyle(VirtueBrand.textMuted)
 
-                    VStack(alignment: .leading, spacing: 12) {
-                        TextField("Email", text: $coordinator.email)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .textFieldStyle(.roundedBorder)
-
-                        // SwiftUI has no reveal affordance on SecureField, so swap
-                        // in a plain TextField while the eye toggle is on. Both
-                        // bind the same password, so toggling never loses input.
-                        HStack(spacing: 8) {
-                            if isPasswordVisible {
-                                TextField("Password", text: $coordinator.password)
-                                    .textInputAutocapitalization(.never)
-                                    .autocorrectionDisabled()
-                                    .textFieldStyle(.roundedBorder)
-                            } else {
-                                SecureField("Password", text: $coordinator.password)
-                                    .textFieldStyle(.roundedBorder)
-                            }
-                            Button {
-                                isPasswordVisible.toggle()
-                            } label: {
-                                Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
-                                    .foregroundStyle(VirtueBrand.textMuted)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(isPasswordVisible ? "Hide password" : "Show password")
-                        }
-
-                        TextField("Device name", text: $coordinator.deviceName)
-                            .autocorrectionDisabled()
-                            .textFieldStyle(.roundedBorder)
-
-                        HStack(spacing: 10) {
-                            Button(coordinator.isSigningIn ? "Signing In…" : "Sign In") {
-                                coordinator.login()
-                            }
-                            .buttonStyle(VirtueButtonStyle(prominent: true))
-                            .disabled(coordinator.isSigningIn)
-                        }
-
-                        Link(
-                            "Don't have an account? Sign up",
-                            destination: URL(string: "https://app.virtueinitiative.org/signup")!
-                        )
-                        .font(.subheadline)
-                        .foregroundStyle(VirtueBrand.link)
-
-                        if let error = coordinator.loginError {
-                            Text(error)
-                                .font(.subheadline)
-                                .foregroundStyle(Color.red)
+                    Group {
+                        if coordinator.usePasswordLogin {
+                            passwordLoginForm
+                        } else {
+                            CodeLoginView(
+                                deviceName: $coordinator.deviceName,
+                                userCode: coordinator.pendingUserCode,
+                                isRequestingCode: coordinator.isRequestingCode,
+                                errorText: coordinator.loginError,
+                                onGetCode: coordinator.beginCodeLogin,
+                                onUsePassword: coordinator.showPasswordLogin
+                            )
                         }
                     }
                     .padding(.top, 6)
                 }
+            }
+        }
+    }
+
+    /// The password fallback (CORE-008). Kept inline rather than sharing
+    /// VirtueKit's `LoginFormView` because these fields carry the iOS-only
+    /// autocapitalization modifiers.
+    private var passwordLoginForm: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            TextField("Email", text: $coordinator.email)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+
+            // SwiftUI has no reveal affordance on SecureField, so swap
+            // in a plain TextField while the eye toggle is on. Both
+            // bind the same password, so toggling never loses input.
+            HStack(spacing: 8) {
+                if isPasswordVisible {
+                    TextField("Password", text: $coordinator.password)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .textFieldStyle(.roundedBorder)
+                } else {
+                    SecureField("Password", text: $coordinator.password)
+                        .textFieldStyle(.roundedBorder)
+                }
+                Button {
+                    isPasswordVisible.toggle()
+                } label: {
+                    Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
+                        .foregroundStyle(VirtueBrand.textMuted)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isPasswordVisible ? "Hide password" : "Show password")
+            }
+
+            TextField("Device name", text: $coordinator.deviceName)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+
+            HStack(spacing: 10) {
+                Button(coordinator.isSigningIn ? "Signing In…" : "Sign In") {
+                    coordinator.login()
+                }
+                .buttonStyle(VirtueButtonStyle(prominent: true))
+                .disabled(coordinator.isSigningIn)
+            }
+
+            Button("Use a code instead") {
+                coordinator.showCodeLogin()
+            }
+            .buttonStyle(.plain)
+            .font(.subheadline)
+            .foregroundStyle(VirtueBrand.link)
+
+            Link(
+                "Don't have an account? Sign up",
+                destination: URL(string: "https://app.virtueinitiative.org/signup")!
+            )
+            .font(.subheadline)
+            .foregroundStyle(VirtueBrand.link)
+
+            if let error = coordinator.loginError {
+                Text(error)
+                    .font(.subheadline)
+                    .foregroundStyle(Color.red)
             }
         }
     }
@@ -359,6 +386,82 @@ private struct StatusSheet: View {
     }
 
     private var status: CoreServiceStatus? { coordinator.coreStatus }
+}
+
+/// Dumb view: no business logic, just bindings and callbacks. The coordinator
+/// owns the pairing and the polling.
+private struct CodeLoginView: View {
+    @Binding var deviceName: String
+    let userCode: String?
+    let isRequestingCode: Bool
+    let errorText: String?
+    let onGetCode: () -> Void
+    let onUsePassword: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Get a code here, then enter it on the Virtue website while signed in.")
+                .font(.subheadline)
+                .foregroundStyle(VirtueBrand.textMuted)
+
+            TextField("Device name", text: $deviceName)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+
+            Button(buttonTitle, action: onGetCode)
+                .buttonStyle(VirtueButtonStyle(prominent: true))
+                .disabled(isRequestingCode)
+
+            if let userCode {
+                // Monospaced digits keep the six glyphs on an even rhythm, so a
+                // code read off this screen and typed into another is easy to
+                // track character by character.
+                Text(userCode)
+                    .font(.system(size: 34, weight: .semibold, design: .monospaced))
+                    .kerning(4)
+                    .foregroundStyle(VirtueBrand.text)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .textSelection(.enabled)
+                    .accessibilityLabel(spelledOut(userCode))
+
+                Text("Waiting for you to approve this code on the website.")
+                    .font(.subheadline)
+                    .foregroundStyle(VirtueBrand.textMuted)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+
+            Link(
+                "Open the Devices page",
+                destination: URL(string: "https://app.virtueinitiative.org/devices?add")!
+            )
+            .font(.subheadline)
+            .foregroundStyle(VirtueBrand.link)
+
+            Button("Use a password instead", action: onUsePassword)
+                .buttonStyle(.plain)
+                .font(.subheadline)
+                .foregroundStyle(VirtueBrand.link)
+
+            if let errorText {
+                Text(errorText)
+                    .font(.subheadline)
+                    .foregroundStyle(Color.red)
+            }
+        }
+    }
+
+    private var buttonTitle: String {
+        if isRequestingCode {
+            return "Getting Code…"
+        }
+        return userCode == nil ? "Get Code" : "Get a New Code"
+    }
+
+    /// VoiceOver reads `K7R-M3X` as a word; spacing the characters out makes it
+    /// read them one at a time, which is the only useful way to hear a code.
+    private func spelledOut(_ code: String) -> String {
+        code.map(String.init).joined(separator: " ")
+    }
 }
 
 private struct VirtueButtonStyle: ButtonStyle {

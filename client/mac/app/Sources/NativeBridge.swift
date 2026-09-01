@@ -1,4 +1,5 @@
 import Foundation
+import VirtueKit
 
 @_silgen_name("virtue_mac_native_init")
 private func virtue_mac_native_init() -> UnsafeMutablePointer<CChar>?
@@ -9,6 +10,14 @@ private func virtue_mac_native_login(
     _ password: UnsafePointer<CChar>?,
     _ deviceName: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
+
+@_silgen_name("virtue_mac_native_begin_code_login")
+private func virtue_mac_native_begin_code_login(
+    _ deviceName: UnsafePointer<CChar>?
+) -> UnsafeMutablePointer<CChar>?
+
+@_silgen_name("virtue_mac_native_poll_code_login")
+private func virtue_mac_native_poll_code_login() -> UnsafeMutablePointer<CChar>?
 
 @_silgen_name("virtue_mac_native_logout")
 private func virtue_mac_native_logout() -> UnsafeMutablePointer<CChar>?
@@ -112,6 +121,7 @@ enum ForceCaptureResult {
     case failed(String)
 }
 
+
 enum NativeBridge {
     static func initialize() -> String? {
         callReturningError {
@@ -135,6 +145,20 @@ enum NativeBridge {
         callReturningError {
             virtue_mac_native_logout()
         }
+    }
+
+    /// CORE-020. Returns the code to display, or an error message.
+    static func beginCodeLogin(deviceName: String) -> Result<CodeLoginStart, String> {
+        let json = deviceName.withCString { deviceNameCString in
+            consumeOptionalString(virtue_mac_native_begin_code_login(deviceNameCString))
+        }
+        return decodeCodeLoginStart(json)
+    }
+
+    /// CORE-021. One poll; the caller paces the calls at the interval the
+    /// server asked for.
+    static func pollCodeLogin() -> CodeLoginPoll {
+        decodeCodeLoginPoll(consumeOptionalString(virtue_mac_native_poll_code_login()))
     }
 
     static func reportIssue(message: String, contactEmail: String?, includeLogs: Bool) -> String? {

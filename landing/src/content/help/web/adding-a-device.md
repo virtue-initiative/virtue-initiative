@@ -40,5 +40,5 @@ their screenshots land in your logs.
 
 Every platform keeps a password option for cases where the code flow will not
 work. On Linux, press Enter while the code is showing, or run
-`virtue login --password`. On Windows and Android, select **Use a password
-instead** on the sign-in screen.
+`virtue login --password`. On Windows, Mac, Android and iOS, select **Use a
+password instead** on the sign-in screen.
