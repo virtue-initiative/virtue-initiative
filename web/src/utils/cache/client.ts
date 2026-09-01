@@ -98,6 +98,13 @@ export interface CacheClient {
 
 const CHANNEL_NAME = 'cache-worker';
 
+// How long to wait for the worker to confirm a cache wipe before wiping OPFS from this
+// thread instead. A wedged worker is the case the button exists for, so it can't block.
+const CLEAR_CACHE_TIMEOUT_MS = 8000;
+
+// Directory the SQLite SAH pool VFS keeps its backing files in ("." + the default vfsName).
+const SAH_POOL_DIR = '.opfs-sahpool';
+
 type PendingEntry = { resolve: (v: unknown) => void; reject: (e: Error) => void };
 
 // Distributive Omit preserves discriminated union members
@@ -310,7 +317,29 @@ export function createCacheClient(): CacheClient {
       send({ id: makeId(), method: 'refetch' });
     },
 
-    clearCache: () => call<void>({ method: 'clearCache' }),
+    // Always resolves, so a wedged worker can never leave the UI stuck. If the worker
+    // doesn't answer in time, tear it down and delete the VFS directory from this thread.
+    clearCache: async () => {
+      try {
+        await Promise.race([
+          call<void>({ method: 'clearCache' }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('clearCache timed out')), CLEAR_CACHE_TIMEOUT_MS),
+          ),
+        ]);
+        return;
+      } catch (err) {
+        console.warn('[cache-client] clearCache via worker failed, wiping OPFS directly', err);
+      }
+      try {
+        leaderWorker?.terminate();
+        leaderWorker = null;
+        const root = await navigator.storage.getDirectory();
+        await root.removeEntry(SAH_POOL_DIR, { recursive: true });
+      } catch (err) {
+        console.warn('[cache-client] direct OPFS wipe failed', err);
+      }
+    },
 
     deleteDeviceData: (viewerId, deviceId) =>
       call<void>({ method: 'deleteDeviceData', viewerId, deviceId }),
