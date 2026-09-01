@@ -3,7 +3,6 @@ import type { MarkdownInstance } from 'astro';
 import { Button } from '@virtueinitiative/shared-web';
 import LaptopIcon from '../components/icons/LaptopIcon.astro';
 import MobileIcon from '../components/icons/MobileIcon.astro';
-import { ContactModalButton } from '../components/ContactModalButton';
 import releaseData from '../data/releases.json';
 import SiteLayout from '../layouts/SiteLayout.astro';
 
@@ -28,7 +27,6 @@ type Platform = {
   preferredMatches?: (assetName: string) => boolean;
   fallbackMatches?: (assetName: string) => boolean;
   staticHref?: string;
-  isContactOnly?: boolean;
   // Slug of the matching file in src/content/download-instructions/ and the
   // anchor id of its section further down the page.
   instructionsSlug: string;
@@ -70,10 +68,10 @@ const platforms: Platform[] = [
   },
   {
     label: 'iOS',
-    detail: 'TestFlight beta only',
+    detail: 'TestFlight beta',
     kind: 'mobile',
     instructionsSlug: 'ios',
-    isContactOnly: true,
+    staticHref: 'https://testflight.apple.com/join/RCcmnCd5',
   },
 ];
 
@@ -110,13 +108,15 @@ const activeRelease = isStaging ? prereleaseRelease : stableRelease;
 
 // Platform install docs live in src/content/download-instructions/*.md and can
 // reference the current download link for their platform via {LINUX_DOWNLOAD},
-// {MAC_DOWNLOAD}, {WINDOWS_DOWNLOAD}, {ANDROID_DOWNLOAD} — substituted into the
-// compiled HTML below since Astro compiles markdown before this file runs.
+// {MAC_DOWNLOAD}, {WINDOWS_DOWNLOAD}, {ANDROID_DOWNLOAD}, {IOS_DOWNLOAD} —
+// substituted into the compiled HTML below since Astro compiles markdown before
+// this file runs.
 const downloadVarTokens: Record<string, string> = {
   linux: '{LINUX_DOWNLOAD}',
   mac: '{MAC_DOWNLOAD}',
   windows: '{WINDOWS_DOWNLOAD}',
   android: '{ANDROID_DOWNLOAD}',
+  ios: '{IOS_DOWNLOAD}',
 };
 
 function applyDownloadVars(html: string) {
@@ -185,16 +185,6 @@ const instructionSections = await Promise.all(
               <div class="download-grid">
                 {platforms.map((platform) => {
                   const Icon = platform.kind === 'laptop' ? LaptopIcon : MobileIcon;
-
-                  if (platform.isContactOnly) {
-                    return (
-                      <ContactModalButton
-                        client:load
-                        label={platform.label}
-                        detail={platform.detail}
-                      />
-                    );
-                  }
 
                   const href = findPlatformHref(activeRelease, platform);
 
