@@ -3,9 +3,10 @@
 Our main accountability tool is an app that takes screenshots at random
 intervals. When you install [Virtue](/download) on your phone or computer it
 starts capturing screenshots around every 5 minutes. It shrinks and blurs the
-screenshots to increase privacy (and protect your partner). It keeps these
-screenshots on your device and then uploads them in a secure encrypted batch
-about once an hour.
+screenshots and blacks out any detected text to increase privacy (and protect
+your partner). It also performs a check on-device to detect potential concern
+in images. It keeps these screenshots on your device and then uploads them in
+a secure encrypted batch about once an hour.
 
 > Note: On iOS the screenshots can only be captured inside the Safari browser
 > due to Apple's limitations. We will have specific instructions on how to
