@@ -19,12 +19,6 @@ required-features = ["testing"]
 [build-dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
-# Only used by examples/onnx_to_nnef.rs and examples/compare_onnx_nnef.rs (offline
-# ONNX→NNEF conversion tooling for the NSFW model — see risk_classifier.rs) — not part of
-# the shipped runtime, which loads the pre-converted NNEF file via tract-nnef instead.
-[dev-dependencies]
-tract-onnx = "0.21"
-
 # `serde_bytes` is only ever named inside `#[serde(with = "serde_bytes")]`
 # attributes, which cargo-machete's source scan can't see.
 [package.metadata.cargo-machete]
