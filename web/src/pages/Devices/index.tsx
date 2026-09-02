@@ -224,11 +224,23 @@ function AddDeviceButton() {
         {pending ? (
           <>
             <DialogHeader>Add device</DialogHeader>
-            <p class="invite-desc">Add this device to your account.</p>
-            <div class="device-code-summary">
-              <span class="device-code-summary-name">{pending.name}</span>
-              <Badge>{pending.platform}</Badge>
-            </div>
+            <p class="invite-desc">
+              This is the device the code belongs to. Check it is the one in front of you.
+            </p>
+            {/* Shaped like the device cards behind the dialog, so what is about
+                to be added is recognisable as the thing that will appear. */}
+            <Card class="device-code-card">
+              <CardHeader>
+                <span class="vi-card__name">{pending.name}</span>
+                <Badge>{pending.platform}</Badge>
+              </CardHeader>
+              <dl class="vi-card__meta">
+                <dt>Code</dt>
+                <dd class="device-code-card-code">{code}</dd>
+                <dt>Expires</dt>
+                <dd>{formatRelativeTimestamp(pending.expires_at)}</dd>
+              </dl>
+            </Card>
             {error && <p class="device-code-error">{error}</p>}
             <DialogActions>
               <Button variant="ghost" type="button" onClick={reset}>

@@ -67,14 +67,11 @@
   margin: var(--space-2) 0 0;
 }
 
-.device-code-summary {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
+.device-code-card {
   margin: 0 0 var(--space-4);
 }
 
-.device-code-summary-name {
-  font-size: 1.15rem;
-  font-weight: 600;
+.device-code-card-code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  letter-spacing: 0.08em;
 }
