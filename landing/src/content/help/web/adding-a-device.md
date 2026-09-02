@@ -16,7 +16,7 @@ in here.
 2. Open Virtue on that device and start signing in. It asks for a name for the
    device, then shows a six-character code such as `K7R-M3X`.
 3. On this site, open the [Devices page](/app/devices) and select **Add device**.
-4. Type the code into the two boxes and select **Continue**.
+4. Type the code and select **Continue**. The dash is added for you.
 5. Check the device name and platform shown, then select **Add**.
 
 The device finishes signing in within a few seconds and appears on your Devices

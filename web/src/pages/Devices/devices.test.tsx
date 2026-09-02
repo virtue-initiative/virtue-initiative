@@ -70,7 +70,9 @@ describe('Devices — Add device dialog', () => {
     const addBtn = await screen.findByRole('button', { name: /add device/i });
     await user.click(addBtn);
 
-    expect(screen.getByRole('heading', { name: /add device/i, level: 3 })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: /enter device code/i, level: 3 }),
+    ).toBeInTheDocument();
   });
 
   it('opens the dialog on load when the URL carries ?add', async () => {
@@ -81,7 +83,7 @@ describe('Devices — Add device dialog', () => {
     try {
       renderWithClient(<Devices />);
       expect(
-        await screen.findByRole('heading', { name: /add device/i, level: 3 }),
+        await screen.findByRole('heading', { name: /enter device code/i, level: 3 }),
       ).toBeInTheDocument();
     } finally {
       window.history.replaceState({}, '', original);
@@ -114,7 +116,7 @@ describe('Devices — Add device dialog', () => {
     renderWithClient(<Devices />);
     await user.click(await screen.findByRole('button', { name: /add device/i }));
     const dialog = screen.getByRole('dialog');
-    await user.type(within(dialog).getByLabelText(/first three/i), 'K7RM3X');
+    await user.type(within(dialog).getByLabelText(/device code/i), 'K7RM3X');
     await user.click(within(dialog).getByRole('button', { name: /continue/i }));
     await user.click(await within(dialog).findByRole('button', { name: /^add$/i }));
 
@@ -153,8 +155,7 @@ describe('Devices — Add device dialog', () => {
     renderWithClient(<Devices />);
 
     await user.click(await screen.findByRole('button', { name: /add device/i }));
-    await user.type(screen.getByLabelText(/first three characters/i), 'k7r');
-    await user.type(screen.getByLabelText(/last three characters/i), 'm3x');
+    await user.type(screen.getByLabelText(/device code/i), 'k7r m3x');
     await user.click(screen.getByRole('button', { name: /continue/i }));
 
     // Step two names the device, so the user can see what they are adding.
@@ -173,17 +174,28 @@ describe('Devices — Add device dialog', () => {
     });
   });
 
-  it('splits a full code pasted into the first box across both boxes', async () => {
+  it('formats the code as XXX-XXX however it is typed or pasted', async () => {
     const user = userEvent.setup();
     renderWithClient(<Devices />);
 
     await user.click(await screen.findByRole('button', { name: /add device/i }));
-    const first = screen.getByLabelText(/first three characters/i) as HTMLInputElement;
-    await user.click(first);
-    await user.paste('K7R-M3X');
+    const input = screen.getByLabelText(/device code/i) as HTMLInputElement;
 
-    expect(first.value).toBe('K7R');
-    expect((screen.getByLabelText(/last three characters/i) as HTMLInputElement).value).toBe('M3X');
+    // Typed straight through, no dash.
+    await user.type(input, 'K7RM3X');
+    expect(input.value).toBe('K7R-M3X');
+
+    // Pasted with a dash already in it, and past the six-character limit.
+    await user.clear(input);
+    await user.paste('k7r-m3xzz');
+    expect(input.value).toBe('K7R-M3X');
+
+    // Backspacing off the end drops the dash again rather than stranding it.
+    await user.clear(input);
+    await user.type(input, 'K7RM');
+    expect(input.value).toBe('K7R-M');
+    await user.type(input, '{Backspace}');
+    expect(input.value).toBe('K7R');
   });
 
   it('shows the error the server returns for an invalid code', async () => {
@@ -200,8 +212,7 @@ describe('Devices — Add device dialog', () => {
     renderWithClient(<Devices />);
 
     await user.click(await screen.findByRole('button', { name: /add device/i }));
-    await user.type(screen.getByLabelText(/first three characters/i), 'zzz');
-    await user.type(screen.getByLabelText(/last three characters/i), 'zzz');
+    await user.type(screen.getByLabelText(/device code/i), 'zzzzzz');
     await user.click(screen.getByRole('button', { name: /continue/i }));
 
     await waitFor(() => {

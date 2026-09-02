@@ -79,15 +79,11 @@ export function Devices() {
 function AddDeviceButton() {
   const api = useAPIContext();
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const [firstHalf, setFirstHalf] = useState('');
-  const [secondHalf, setSecondHalf] = useState('');
+  // Held formatted (`K7R-M3X`); `userCode` below is the bare six characters.
+  const [code, setCode] = useState('');
   const [pending, setPending] = useState<DeviceCodeLookupResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // One ref on the wrapping element rather than two on the `Input` components:
-  // `Input` is a plain function component, so a ref passed to it would not reach
-  // the underlying `<input>`.
-  const codeInputsRef = useRef<HTMLDivElement>(null);
   const { push: pushToast } = useToast();
   // The clients print a `/devices?add` link, so following it should land on the
   // code box rather than on a page with a button still to find.
@@ -101,11 +97,10 @@ function AddDeviceButton() {
     open();
   }, [url]);
 
-  const userCode = `${firstHalf}${secondHalf}`;
+  const userCode = code.replace('-', '');
 
   function reset() {
-    setFirstHalf('');
-    setSecondHalf('');
+    setCode('');
     setPending(null);
     setError(null);
     setLoading(false);
@@ -121,30 +116,17 @@ function AddDeviceButton() {
   }
 
   /**
-   * Split whatever landed in a box across the two boxes, so pasting or typing a
-   * whole `K7R-M3X` into the first one fills both instead of being truncated.
-   * Characters outside the code alphabet (the separator included) are dropped;
-   * the server normalizes the same way (API-046).
+   * Keeps the box showing `XXX-XXX` however the code arrives: typed without the
+   * dash, pasted with one, lowercase, or spaced. Characters outside the code
+   * alphabet are dropped rather than rejected, which is how the server
+   * normalizes too (API-046), so a pasted `k7r m3x` just works.
    */
-  function handleCodeInput(box: 'first' | 'second', raw: string) {
-    const cleaned = raw.toUpperCase().replace(/[^0-9A-Z]/g, '');
-
-    if (box === 'first') {
-      setFirstHalf(cleaned.slice(0, 3));
-      if (cleaned.length > 3) {
-        setSecondHalf(cleaned.slice(3, 6));
-      }
-      if (cleaned.length >= 3) {
-        focusSecondBox();
-      }
-      return;
-    }
-
-    setSecondHalf(cleaned.slice(0, 3));
-  }
-
-  function focusSecondBox() {
-    codeInputsRef.current?.querySelectorAll('input')[1]?.focus();
+  function handleCodeInput(raw: string) {
+    const cleaned = raw
+      .toUpperCase()
+      .replace(/[^0-9A-Z]/g, '')
+      .slice(0, 6);
+    setCode(cleaned.length > 3 ? `${cleaned.slice(0, 3)}-${cleaned.slice(3)}` : cleaned);
   }
 
   async function handleLookup(e: Event) {
@@ -182,9 +164,9 @@ function AddDeviceButton() {
         Add device
       </Button>
       <Dialog dialogRef={dialogRef} class="device-setup-dialog">
-        <DialogHeader>Add device</DialogHeader>
         {pending ? (
           <>
+            <DialogHeader>Add device</DialogHeader>
             <p class="invite-desc">Add this device to your account.</p>
             <div class="device-code-summary">
               <span class="device-code-summary-name">{pending.name}</span>
@@ -202,35 +184,20 @@ function AddDeviceButton() {
           </>
         ) : (
           <>
+            <DialogHeader>Enter device code</DialogHeader>
             <form onSubmit={handleLookup}>
-              <Field label="Device code">
-                <div class="device-code-inputs" ref={codeInputsRef}>
-                  <Input
-                    class="device-code-input"
-                    value={firstHalf}
-                    onInput={(e) => handleCodeInput('first', (e.target as HTMLInputElement).value)}
-                    aria-label="Device code, first three characters"
-                    autocomplete="off"
-                    autoCorrect="off"
-                    spellcheck={false}
-                    required
-                    autoFocus
-                  />
-                  <span class="device-code-separator" aria-hidden="true">
-                    –
-                  </span>
-                  <Input
-                    class="device-code-input"
-                    value={secondHalf}
-                    onInput={(e) => handleCodeInput('second', (e.target as HTMLInputElement).value)}
-                    aria-label="Device code, last three characters"
-                    autocomplete="off"
-                    autoCorrect="off"
-                    spellcheck={false}
-                    required
-                  />
-                </div>
-              </Field>
+              <Input
+                class="device-code-input"
+                value={code}
+                onInput={(e) => handleCodeInput((e.target as HTMLInputElement).value)}
+                placeholder="XXX-XXX"
+                aria-label="Device code"
+                autocomplete="off"
+                autoCorrect="off"
+                spellcheck={false}
+                required
+                autoFocus
+              />
               {error && <p class="device-code-error">{error}</p>}
               <p class="invite-desc">
                 Open Virtue on the device you want to monitor and sign in. It shows the code to type
