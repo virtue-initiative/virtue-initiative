@@ -201,8 +201,9 @@ async fn daemon_command(paths: ClientPaths, command: Option<DaemonCommands>) -> 
 /// where it would be most confusing.
 const APP_URL: &str = "https://app.virtueinitiative.org";
 
-/// Deep link to the Devices page with the "Add device" dialog already open, so
-/// the user lands on the code box rather than hunting for the button.
+/// Deep link to the Devices page with the "Add device" dialog already open and
+/// the code filled in, so a terminal that makes URLs clickable leaves the user
+/// nothing to type. `?add` alone opens the dialog empty.
 const ADD_DEVICE_URL: &str = "https://app.virtueinitiative.org/devices?add";
 
 fn login(
@@ -300,7 +301,7 @@ fn code_login(client: &mut ClientController, device_name: &str) -> Result<CodeLo
         .context("could not start a code login")?;
 
     println!();
-    println!("Enter this code at {ADD_DEVICE_URL}");
+    println!("Enter this code at {ADD_DEVICE_URL}={}", pending.user_code);
     println!();
     println!("    {}", pending.user_code);
     println!();

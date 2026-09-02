@@ -34,6 +34,10 @@ const DOWNLOAD_URL = `${LANDING_URL}/download`;
 /** The characters a pairing code can contain, in the order they were given. */
 const codeCharsOf = (value: string) => value.toUpperCase().replace(/[^0-9A-Z]/g, '');
 
+/** `K7RM3X` -> `K7R-M3X`, leaving a partial code alone until it needs the dash. */
+const formatCode = (chars: string) =>
+  chars.length > 3 ? `${chars.slice(0, 3)}-${chars.slice(3)}` : chars;
+
 export function Devices() {
   const api = useAPIContext();
   const userId = api?.userId ?? null;
@@ -88,16 +92,18 @@ function AddDeviceButton() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { push: pushToast } = useToast();
-  // The clients print a `/devices?add` link, so following it should land on the
-  // code box rather than on a page with a button still to find.
+  // The clients print a `/devices?add=<code>` link, so following it should land
+  // on the code box with the code already in it, not on a page with a button
+  // still to find and a code still to copy across.
   const { url, path, route } = useLocation();
   const autoOpened = useRef(false);
 
   useEffect(() => {
     const query = url.includes('?') ? url.slice(url.indexOf('?')) : '';
-    if (!new URLSearchParams(query).has('add') || autoOpened.current) return;
+    const params = new URLSearchParams(query);
+    if (!params.has('add') || autoOpened.current) return;
     autoOpened.current = true;
-    open();
+    open(params.get('add') ?? '');
   }, [url]);
 
   const userCode = code.replace('-', '');
@@ -109,8 +115,15 @@ function AddDeviceButton() {
     setLoading(false);
   }
 
-  function open() {
+  /**
+   * `prefill` is whatever `?add=` carried. Anything but a complete code is
+   * ignored rather than half-filled: a truncated code would look like the user
+   * mistyped it, and the box is easier to use empty than partly wrong.
+   */
+  function open(prefill = '') {
     reset();
+    const chars = codeCharsOf(prefill);
+    if (chars.length === 6) setCode(formatCode(chars));
     clearAddParam();
     dialogRef.current?.showModal();
   }
@@ -158,7 +171,7 @@ function AddDeviceButton() {
       precedingChars -= 1;
     }
 
-    const formatted = cleaned.length > 3 ? `${cleaned.slice(0, 3)}-${cleaned.slice(3)}` : cleaned;
+    const formatted = formatCode(cleaned);
     const caretAfter = Math.min(
       precedingChars > 3 ? precedingChars + 1 : precedingChars,
       formatted.length,
@@ -204,7 +217,7 @@ function AddDeviceButton() {
 
   return (
     <>
-      <Button variant="primary" type="button" onClick={open}>
+      <Button variant="primary" type="button" onClick={() => open()}>
         Add device
       </Button>
       <Dialog dialogRef={dialogRef} class="device-setup-dialog" onClose={clearAddParam}>

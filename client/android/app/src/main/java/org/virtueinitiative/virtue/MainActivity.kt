@@ -57,16 +57,7 @@ class MainActivity : AppCompatActivity() {
         binding.loginButton.setOnClickListener { login() }
         binding.getCodeButton.setOnClickListener { beginCodeLogin() }
         binding.usePasswordLink.setOnClickListener { showPasswordLogin() }
-        binding.devicesLink.setOnClickListener {
-            // ?add opens the "Add device" dialog straight away, so the user
-            // lands on the code box rather than hunting for the button.
-            startActivity(
-                Intent(
-                    Intent.ACTION_VIEW,
-                    Uri.parse("https://app.virtueinitiative.org/devices?add")
-                )
-            )
-        }
+        binding.devicesLink.setOnClickListener { openDevicesPage() }
         binding.useCodeLink.setOnClickListener { showCodeLogin() }
         binding.signOutButton.setOnClickListener { logout() }
         binding.statusDetailsButton.setOnClickListener { showStatusDetails() }
@@ -108,6 +99,18 @@ class MainActivity : AppCompatActivity() {
     private fun showCodeLogin() {
         binding.passwordLoginPanel.visibility = android.view.View.GONE
         binding.codeLoginPanel.visibility = android.view.View.VISIBLE
+    }
+
+    /**
+     * `?add=<code>` opens the "Add device" dialog with the code already in it,
+     * so the user does not have to read it off this screen and type it into the
+     * other device. The link is only shown while a code is pending, so there is
+     * always one to carry.
+     */
+    private fun openDevicesPage() {
+        val code = binding.userCodeText.text.toString()
+        val url = "https://app.virtueinitiative.org/devices?add=" + Uri.encode(code)
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
     }
 
     private fun clearPendingCode() {

@@ -19,6 +19,10 @@ in here.
 4. Type the code and select **Continue**. The dash is added for you.
 5. Check the device name and platform shown, then select **Add**.
 
+If you can open a browser on the device showing the code, use the **Open the
+Devices page** link beside it instead. It opens this site with the code already
+filled in, so you only have to check the device and select **Add**.
+
 The device finishes signing in within a few seconds and appears on your Devices
 page.
 

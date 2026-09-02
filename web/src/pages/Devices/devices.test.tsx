@@ -90,6 +90,37 @@ describe('Devices — Add device dialog', () => {
     }
   });
 
+  it('prefills the code when ?add carries one', async () => {
+    // The clients link `?add=<code>`, so the user should not have to read the
+    // code off the device and type it in again.
+    const original = window.location.href;
+    window.history.replaceState({}, '', '/devices?add=K7R-M3X');
+    try {
+      renderWithClient(<Devices />);
+      const input = await screen.findByLabelText('Device code');
+      await waitFor(() => expect(input).toHaveValue('K7R-M3X'));
+      expect(screen.getByRole('button', { name: /continue/i })).toBeEnabled();
+    } finally {
+      window.history.replaceState({}, '', original);
+    }
+  });
+
+  it('ignores an ?add code that is not six characters', async () => {
+    // Half a code looks like a typo the user has to find and fix; an empty box
+    // is clearer.
+    const original = window.location.href;
+    window.history.replaceState({}, '', '/devices?add=K7R');
+    try {
+      renderWithClient(<Devices />);
+      const input = await screen.findByLabelText('Device code');
+      // The dialog still opens, so wait for that before reading the box.
+      await waitFor(() => expect(input.closest('dialog')).toHaveProperty('open', true));
+      expect(input).toHaveValue('');
+    } finally {
+      window.history.replaceState({}, '', original);
+    }
+  });
+
   it('drops ?add from the URL once the dialog has opened', async () => {
     // Otherwise a reload, or coming back to the page later, reopens the dialog.
     const original = window.location.href;
