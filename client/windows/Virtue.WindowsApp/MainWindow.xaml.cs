@@ -250,12 +250,8 @@ public sealed partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Left,
             Padding = new Thickness(0),
             FontFamily = MonoFont,
-            Foreground = LinkBrush,
         };
-        websiteLink.Resources["HyperlinkButtonForeground"] = LinkBrush;
-        websiteLink.Resources["HyperlinkButtonForegroundPointerOver"] = LinkBrush;
-        websiteLink.Resources["HyperlinkButtonForegroundPressed"] = LinkBrush;
-        websiteLink.Resources["HyperlinkButtonForegroundDisabled"] = Ink3Brush;
+        StyleLink(websiteLink);
         textStack.Children.Add(websiteLink);
 
         return header;
@@ -381,12 +377,8 @@ public sealed partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Left,
             Padding = new Thickness(0),
             FontFamily = BodyFont,
-            Foreground = LinkBrush,
         };
-        signUpLink.Resources["HyperlinkButtonForeground"] = LinkBrush;
-        signUpLink.Resources["HyperlinkButtonForegroundPointerOver"] = LinkBrush;
-        signUpLink.Resources["HyperlinkButtonForegroundPressed"] = LinkBrush;
-        signUpLink.Resources["HyperlinkButtonForegroundDisabled"] = Ink3Brush;
+        StyleLink(signUpLink);
         _loginPanel.Children.Add(signUpLink);
 
         _accountActionsPanel.Orientation = Orientation.Horizontal;
@@ -538,12 +530,15 @@ public sealed partial class MainWindow : Window
         return link;
     }
 
+    // Every link on this page, whether it navigates or only switches sign-in
+    // mode. WinUI's default hyperlink foreground is its own accent blue, and it
+    // is set per-state, so all four states have to be overridden together.
     private static void StyleLink(HyperlinkButton link)
     {
-        link.Foreground = ForestBrush;
-        link.Resources["HyperlinkButtonForeground"] = ForestBrush;
-        link.Resources["HyperlinkButtonForegroundPointerOver"] = Forest3Brush;
-        link.Resources["HyperlinkButtonForegroundPressed"] = Forest2Brush;
+        link.Foreground = LinkBrush;
+        link.Resources["HyperlinkButtonForeground"] = LinkBrush;
+        link.Resources["HyperlinkButtonForegroundPointerOver"] = LinkBrush;
+        link.Resources["HyperlinkButtonForegroundPressed"] = LinkBrush;
         link.Resources["HyperlinkButtonForegroundDisabled"] = Ink3Brush;
     }
 
