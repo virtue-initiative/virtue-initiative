@@ -252,7 +252,9 @@ export type CreatePartnerResponse = z.infer<typeof createPartnerResponseSchema>;
 export const deviceCodeLookupResponseSchema = z.object({
   name: z.string(),
   platform: z.string(),
+  created_at: z.number(),
   expires_at: z.number(),
+  requested_from: z.string().nullable(),
 });
 export type DeviceCodeLookupResponse = z.infer<typeof deviceCodeLookupResponseSchema>;
 

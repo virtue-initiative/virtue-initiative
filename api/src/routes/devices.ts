@@ -102,7 +102,13 @@ deviceCodes.post(
       return c.json({ error: INVALID_CODE_MESSAGE }, 404);
     }
 
-    return c.json({ name: row.name, platform: row.platform, expires_at: row.expires_at });
+    return c.json({
+      name: row.name,
+      platform: row.platform,
+      created_at: row.created_at,
+      expires_at: row.expires_at,
+      requested_from: row.requested_from,
+    });
   },
 );
 

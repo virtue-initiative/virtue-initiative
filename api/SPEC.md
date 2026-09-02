@@ -759,8 +759,11 @@ The client MUST NOT be authenticated and MUST send
 }
 ```
 
-The server MUST create a pairing that records the name and platform, and MUST respond
-**HTTP 200** with
+The server MUST create a pairing that records the name and platform. It SHOULD also record
+a coarse description of where the request came from, such as a city and country or a country
+alone, for the account owner to check at API-046. It MUST NOT record the client's IP address.
+
+The server MUST respond **HTTP 200** with
 
 ```js
 {
@@ -828,9 +831,15 @@ On success the server MUST respond **HTTP 200** with
 {
   "name": "My Laptop",
   "platform": "linux",
-  "expires_at": DateTime
+  "created_at": DateTime,
+  "expires_at": DateTime,
+  "requested_from": "Boston, US" | null
 }
 ```
+
+`created_at` is when the device asked for the code and `requested_from` is where it asked
+from, or null where that is unknown. Both describe the device that is waiting, so that a
+code obtained from someone else is visible as unfamiliar before it is approved.
 
 Otherwise the server MUST respond **HTTP 404** with
 `{ "error": "That code is not valid. It may have expired." }`. The server MUST use that one

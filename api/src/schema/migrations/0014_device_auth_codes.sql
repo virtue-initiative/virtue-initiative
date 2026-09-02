@@ -13,6 +13,7 @@ CREATE TABLE device_auth_codes (
   consumed_at INTEGER,                    -- set when the device collects its token
   expires_at INTEGER NOT NULL,            -- ms, matching email_tokens
   created_at INTEGER NOT NULL,
+  requested_from TEXT,                    -- coarse origin (API-044), best effort
   FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE CASCADE
 );
 

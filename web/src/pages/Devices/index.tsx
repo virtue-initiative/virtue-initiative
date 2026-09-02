@@ -110,6 +110,15 @@ function AddDeviceButton() {
 
   function reset() {
     setCode('');
+    back();
+  }
+
+  /**
+   * Leaves the confirmation without throwing the typed code away: Back is for
+   * "that is not the device I meant", and retyping six characters the user got
+   * right is not part of fixing that.
+   */
+  function back() {
     setPending(null);
     setError(null);
     setLoading(false);
@@ -223,7 +232,7 @@ function AddDeviceButton() {
       <Dialog dialogRef={dialogRef} class="device-setup-dialog" onClose={clearAddParam}>
         {pending ? (
           <>
-            <DialogHeader>Add device</DialogHeader>
+            <DialogHeader>Add device?</DialogHeader>
             <p class="invite-desc">
               This is the device the code belongs to. Check it is the one in front of you.
             </p>
@@ -237,13 +246,15 @@ function AddDeviceButton() {
               <dl class="vi-card__meta">
                 <dt>Code</dt>
                 <dd class="device-code-card-code">{code}</dd>
-                <dt>Expires</dt>
-                <dd>{formatRelativeTimestamp(pending.expires_at)}</dd>
+                <dt>Requested</dt>
+                <dd>{formatRelativeTimestamp(pending.created_at)}</dd>
+                <dt>From</dt>
+                <dd>{pending.requested_from ?? 'Unknown location'}</dd>
               </dl>
             </Card>
             {error && <p class="device-code-error">{error}</p>}
             <DialogActions>
-              <Button variant="ghost" type="button" onClick={reset}>
+              <Button variant="ghost" type="button" onClick={back}>
                 Back
               </Button>
               <Button variant="primary" type="button" onClick={handleApprove} disabled={loading}>

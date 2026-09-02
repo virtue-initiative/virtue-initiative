@@ -4,6 +4,7 @@ import { authHeaders, BASE, clearDB, signupAndGetCookie } from './helpers';
 import { installHashServerMock } from './hash-server-mock';
 import {
   ALPHABET,
+  describeRequestOrigin,
   formatUserCode,
   generateUserCode,
   normalizeUserCode,
@@ -80,7 +81,15 @@ describe('Device pairing codes', () => {
 
     const lookupRes = await lookup(cookie, start.user_code);
     expect(lookupRes.status).toBe(200);
-    expect(await lookupRes.json()).toMatchObject({ name: 'Work Laptop', platform: 'linux' });
+    expect(await lookupRes.json()).toMatchObject({
+      name: 'Work Laptop',
+      platform: 'linux',
+      // What the owner checks the pairing against before approving it. There is
+      // no Cloudflare geography in the test runtime, so the origin is unknown.
+      created_at: start.expires_at - 10 * 60 * 1000,
+      expires_at: start.expires_at,
+      requested_from: null,
+    });
 
     const approveRes = await approve(cookie, start.user_code);
     expect(approveRes.status).toBe(200);
@@ -284,5 +293,25 @@ describe('User code encoding', () => {
     // I and L are outside the alphabet, so they are stripped rather than counted:
     // a user who typed a lookalike still gets six characters, and a wrong guess.
     expect(normalizeUserCode('K7RM3XIL')).toBe('K7RM3X');
+  });
+});
+
+describe('Request origin', () => {
+  // `cf` is read-only on a real Request in the workers runtime, so the shape
+  // describeRequestOrigin actually reads is stood up directly.
+  const withCf = (cf: Record<string, string> | undefined) => ({ cf }) as unknown as Request;
+
+  it('describes a request by city and country', () => {
+    expect(describeRequestOrigin(withCf({ city: 'Boston', country: 'US' }))).toBe('Boston, US');
+  });
+
+  it('falls back to whichever half Cloudflare resolved', () => {
+    expect(describeRequestOrigin(withCf({ country: 'US' }))).toBe('US');
+    expect(describeRequestOrigin(withCf({ city: 'Boston' }))).toBe('Boston');
+  });
+
+  it('is null off Cloudflare, where there is nothing to report', () => {
+    expect(describeRequestOrigin(withCf(undefined))).toBeNull();
+    expect(describeRequestOrigin(withCf({ city: '  ', country: '' }))).toBeNull();
   });
 });

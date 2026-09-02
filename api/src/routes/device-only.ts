@@ -28,7 +28,7 @@ import { generateToken } from '../lib/jwt';
 import { putObject } from '../lib/r2';
 import { notifyPartnersAboutRiskLog, riskToSeverity } from '../lib/tamper';
 import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
-import { formatUserCode, generateUserCode } from '../lib/device-codes';
+import { describeRequestOrigin, formatUserCode, generateUserCode } from '../lib/device-codes';
 import { DEVICE_CODE_TTL_MS } from '../lib/email-domain';
 import { Env, Variables } from '../types/bindings';
 import { verifyUserCredentials } from '../lib/credentials';
@@ -184,6 +184,7 @@ deviceOnly.post(
     const now = Date.now();
     const expiresAt = now + DEVICE_CODE_TTL_MS;
     const deviceCode = generateOpaqueToken('device_pairing');
+    const requestedFrom = describeRequestOrigin(c.req.raw);
 
     for (let attempt = 0; ; attempt += 1) {
       const userCode = generateUserCode();
@@ -197,6 +198,7 @@ deviceOnly.post(
           platform,
           expires_at: expiresAt,
           created_at: now,
+          requested_from: requestedFrom,
         });
 
         return c.json(

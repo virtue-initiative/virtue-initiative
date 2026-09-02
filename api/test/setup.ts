@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS device_auth_codes (
   consumed_at INTEGER,
   expires_at INTEGER NOT NULL,
   created_at INTEGER NOT NULL,
+  requested_from TEXT,
   FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_device_auth_codes_expires_at ON device_auth_codes(expires_at);

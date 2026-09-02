@@ -1033,13 +1033,14 @@ export async function createDeviceAuthCode(
     platform: string;
     expires_at: number;
     created_at: number;
+    requested_from: string | null;
   },
 ) {
   return db
     .prepare(
       `INSERT INTO device_auth_codes
-         (id, user_code, device_code_hash, name, platform, expires_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         (id, user_code, device_code_hash, name, platform, expires_at, created_at, requested_from)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       uuidToBytes(input.id),
@@ -1049,6 +1050,7 @@ export async function createDeviceAuthCode(
       input.platform,
       input.expires_at,
       input.created_at,
+      input.requested_from,
     )
     .run();
 }
@@ -1064,10 +1066,11 @@ type DeviceAuthCodeRow = {
   consumed_at: number | null;
   expires_at: number;
   created_at: number;
+  requested_from: string | null;
 };
 
 const DEVICE_AUTH_CODE_COLUMNS = `id, user_code, device_code_hash, name, platform,
-          approved_by, approved_at, consumed_at, expires_at, created_at`;
+          approved_by, approved_at, consumed_at, expires_at, created_at, requested_from`;
 
 export async function findDeviceAuthCodeByDeviceCodeHash(db: D1Database, deviceCodeHash: string) {
   return firstWithUuidFields<DeviceAuthCodeRow>(

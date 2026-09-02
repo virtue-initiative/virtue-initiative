@@ -281,6 +281,38 @@ describe('Devices — Add device dialog', () => {
     expect(input.selectionStart).toBe(2);
   });
 
+  it('keeps the typed code when the user goes back from the confirmation', async () => {
+    // Back means "wrong device", not "wrong code" -- retyping six characters
+    // the user already got right is not part of fixing that.
+    const user = userEvent.setup();
+    renderWithClient(<Devices />);
+    await user.click(await screen.findByRole('button', { name: /add device/i }));
+
+    const input = screen.getByLabelText('Device code');
+    await user.type(input, 'K7RM3X');
+    await user.click(screen.getByRole('button', { name: /continue/i }));
+    await screen.findByText('Work Laptop');
+
+    await user.click(screen.getByRole('button', { name: /back/i }));
+    expect(screen.getByLabelText('Device code')).toHaveValue('K7R-M3X');
+  });
+
+  it('shows where and when the pending device asked for its code', async () => {
+    const user = userEvent.setup();
+    renderWithClient(<Devices />);
+    await user.click(await screen.findByRole('button', { name: /add device/i }));
+
+    await user.type(screen.getByLabelText('Device code'), 'K7RM3X');
+    await user.click(screen.getByRole('button', { name: /continue/i }));
+
+    await screen.findByText('Work Laptop');
+    // Scoped to the card: the device list behind the dialog shows relative
+    // times too, so an unscoped match would not prove anything about this one.
+    const card = within(document.querySelector('.device-code-card') as HTMLElement);
+    expect(card.getByText('Boston, US')).toBeInTheDocument();
+    expect(card.getByText(/ago$/)).toBeInTheDocument();
+  });
+
   it('shows the error the server returns for an invalid code', async () => {
     server.use(
       http.post(`${BASE}/device-code/lookup`, () =>

@@ -17,7 +17,8 @@ in here.
    six-character code such as `K7R-M3X`.
 3. On this site, open the [Devices page](/app/devices) and select **Add device**.
 4. Type the code and select **Continue**. The dash is added for you.
-5. Check the device name and platform shown, then select **Add**.
+5. Check the device shown, then select **Add**. It lists the name and platform
+   the device chose, along with when and roughly where it asked for the code.
 
 If you can open a browser on the device showing the code, use the **Open the
 Devices page** link beside it instead. It opens this site with the code already

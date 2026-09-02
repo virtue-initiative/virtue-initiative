@@ -47,3 +47,20 @@ export function normalizeUserCode(input: string): string | null {
 
   return stripped.length === USER_CODE_LENGTH ? stripped : null;
 }
+
+/**
+ * A coarse "where did this come from" for the pairing the user is about to
+ * approve (API-044). Cloudflare resolves the geography for us, so nothing about
+ * the request is stored beyond what is shown: no IP address, no coordinates.
+ *
+ * Returns null off Cloudflare (local dev, tests) and wherever the lookup found
+ * nothing, which the web app renders as an unknown origin rather than an error.
+ */
+export function describeRequestOrigin(request: Request): string | null {
+  const cf = (request as Request & { cf?: { city?: string; country?: string } }).cf;
+  const city = cf?.city?.trim();
+  const country = cf?.country?.trim();
+
+  if (city && country) return `${city}, ${country}`;
+  return country || city || null;
+}

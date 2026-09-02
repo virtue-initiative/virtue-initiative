@@ -62,7 +62,13 @@ export const handlers = [
   http.patch(`${BASE}/device/:id`, () => new HttpResponse(null, { status: 204 })),
   http.delete(`${BASE}/device/:id`, () => new HttpResponse(null, { status: 204 })),
   http.post(`${BASE}/device-code/lookup`, () =>
-    HttpResponse.json({ name: 'Work Laptop', platform: 'linux', expires_at: Date.now() + 600_000 }),
+    HttpResponse.json({
+      name: 'Work Laptop',
+      platform: 'linux',
+      created_at: Date.now() - 30_000,
+      expires_at: Date.now() + 600_000,
+      requested_from: 'Boston, US',
+    }),
   ),
   http.post(`${BASE}/device-code/approve`, () =>
     HttpResponse.json({ name: 'Work Laptop', platform: 'linux' }),
