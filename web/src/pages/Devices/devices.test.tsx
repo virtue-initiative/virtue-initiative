@@ -90,6 +90,25 @@ describe('Devices — Add device dialog', () => {
     }
   });
 
+  it('drops ?add from the URL once the dialog has opened', async () => {
+    // Otherwise a reload, or coming back to the page later, reopens the dialog.
+    const original = window.location.href;
+    window.history.replaceState({}, '', '/devices?add');
+    try {
+      const user = userEvent.setup();
+      renderWithClient(<Devices />);
+      await screen.findByRole('heading', { name: /enter device code/i, level: 3 });
+      await waitFor(() => expect(window.location.search).toBe(''));
+      expect(window.location.pathname).toBe('/devices');
+
+      // Closing leaves it off too, by whichever route the dialog is dismissed.
+      await user.keyboard('{Escape}');
+      expect(window.location.search).toBe('');
+    } finally {
+      window.history.replaceState({}, '', original);
+    }
+  });
+
   it('shows the approved device once it appears on a later fetch', async () => {
     // API-045 creates the device row on the device's next poll, not on approve,
     // so the first refresh after approval legitimately misses it.

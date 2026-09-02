@@ -90,7 +90,7 @@ function AddDeviceButton() {
   const { push: pushToast } = useToast();
   // The clients print a `/devices?add` link, so following it should land on the
   // code box rather than on a page with a button still to find.
-  const { url } = useLocation();
+  const { url, path, route } = useLocation();
   const autoOpened = useRef(false);
 
   useEffect(() => {
@@ -111,7 +111,24 @@ function AddDeviceButton() {
 
   function open() {
     reset();
+    clearAddParam();
     dialogRef.current?.showModal();
+  }
+
+  /**
+   * Drops `?add` once it has done its job, so reloading the page or coming back
+   * to it later does not reopen the dialog over whatever the user is doing.
+   * Replaces the history entry rather than pushing one, so Back still leaves
+   * the page instead of landing on the link again.
+   */
+  function clearAddParam() {
+    const queryIndex = url.indexOf('?');
+    if (queryIndex === -1) return;
+    const params = new URLSearchParams(url.slice(queryIndex));
+    if (!params.has('add')) return;
+    params.delete('add');
+    const rest = params.toString();
+    route(rest ? `${path}?${rest}` : path, true);
   }
 
   function close() {
@@ -190,7 +207,7 @@ function AddDeviceButton() {
       <Button variant="primary" type="button" onClick={open}>
         Add device
       </Button>
-      <Dialog dialogRef={dialogRef} class="device-setup-dialog">
+      <Dialog dialogRef={dialogRef} class="device-setup-dialog" onClose={clearAddParam}>
         {pending ? (
           <>
             <DialogHeader>Add device</DialogHeader>
