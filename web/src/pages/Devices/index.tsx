@@ -232,8 +232,7 @@ function AddDeviceButton() {
               />
               {error && <p class="device-code-error">{error}</p>}
               <p class="invite-desc">
-                Open Virtue on the device you want to monitor and sign in. It shows the code to type
-                here.
+                Open Virtue on the device you want to monitor. It shows the code to type here.
               </p>
               <DialogActions
                 left={

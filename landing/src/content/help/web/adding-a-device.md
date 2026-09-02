@@ -13,8 +13,8 @@ in here.
 1. Install Virtue on the device you want to monitor. See the
    [download page](/download) for the installer and the setup steps for that
    platform.
-2. Open Virtue on that device and start signing in. It asks for a name for the
-   device, then shows a six-character code such as `K7R-M3X`.
+2. Open Virtue on that device. It asks for a name for the device, then shows a
+   six-character code such as `K7R-M3X`.
 3. On this site, open the [Devices page](/app/devices) and select **Add device**.
 4. Type the code and select **Continue**. The dash is added for you.
 5. Check the device name and platform shown, then select **Add**.
