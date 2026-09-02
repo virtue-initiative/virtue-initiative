@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { User, useUser, useAPIContext, describeError } from '../../utils/api';
 import { PageHeading } from '../../components/PageHeading';
 import { SettingsIcon } from '../../components/icons';
+import { ClearCacheButton } from '../../components/ClearCacheButton';
 import {
   Alert,
   Button,
@@ -219,6 +220,16 @@ export function Settings() {
             </Button>
           </DialogActions>
         </Dialog>
+      </Card>
+
+      <Card class="settings-section">
+        <h2>Local cache</h2>
+        <p class="hint-text settings-section-hint">
+          Your logs are decrypted and stored on this device so they load quickly. Clear the cache if
+          logs are missing or fail to load. The app downloads and decrypts them again the next time
+          you open your logs.
+        </p>
+        <ClearCacheButton />
       </Card>
 
       <Card class="settings-section settings-danger-zone">

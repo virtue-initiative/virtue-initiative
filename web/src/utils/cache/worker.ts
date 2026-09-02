@@ -6,6 +6,7 @@ import { unwrapBatchKey } from '../api/crypto';
 import { createNativeBatchKeyUnwrapper } from '../api/hpke-native';
 import type { Batch, DataPage } from '../api/api';
 import type { FeedLog } from '../../pages/Logs/types';
+import { CACHE_SCHEMA_VERSION, CACHE_TABLES, findSchemaDrift } from './schema';
 
 export type {};
 
@@ -80,84 +81,116 @@ type CacheProgress = { type: 'queryProgress'; id: string; processed: number; tot
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let db: any = null;
+// The SAH pool VFS can only be installed once per worker, so the util object is kept here
+// rather than being a local of openDatabase(). It also exposes wipeFiles(), which is how
+// hardReset() empties the OPFS backing files without going through SQLite.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let poolUtil: any = null;
 
-const initPromise = (async () => {
-  console.log('[cache-worker] init: loading sqlite3 wasm');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sqlite3 = (await sqlite3InitModule()) as any;
-  console.log('[cache-worker] init: installing OPFS SAH pool VFS');
-  // Must open the DB via the pool returned here. Opening with sqlite3.oo1.OpfsDb instead
-  // silently falls back to the default OPFS VFS, which proxies every I/O to a separate
-  // worker and blocks on Atomics + an fsync per commit — ~100s of ms per write, which
-  // throttles the whole decrypt pipeline to a crawl regardless of fetch concurrency.
-  const poolUtil = await sqlite3.installOpfsSAHPoolVfs({});
+// Directory the SAH pool VFS stores its backing files in: "." + vfsName, with the default
+// vfsName being "opfs-sahpool". Removing it is the fallback when poolUtil is unavailable
+// because init itself failed.
+const SAH_POOL_DIR = '.opfs-sahpool';
+
+function createSchema(): void {
+  for (const table of CACHE_TABLES) {
+    db.exec(table.ddl);
+  }
+}
+
+// Every table the database currently holds, declared or not, mapped to its column names.
+// Undeclared tables are included so that an empty map means "brand-new database" and not
+// merely "none of the tables we know about".
+function readExistingSchema(): Map<string, Set<string>> {
+  const existing = new Map<string, Set<string>>();
+  for (const name of listTables()) {
+    const columns = new Set<string>();
+    db.exec(`PRAGMA table_info("${name}")`, {
+      rowMode: 'object',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      callback: (row: any) => columns.add(row.name as string),
+    });
+    existing.set(name, columns);
+  }
+  return existing;
+}
+
+function listTables(): string[] {
+  const names: string[] = [];
+  db.exec(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`, {
+    rowMode: 'array',
+    callback: (row: [string]) => names.push(row[0]),
+  });
+  return names;
+}
+
+// Drop every table the database currently holds, not just the declared ones, so stale
+// tables from older releases (e.g. direct_logs, removed in #467) go too.
+function dropAllTables(): void {
+  for (const name of listTables()) {
+    db.exec(`DROP TABLE IF EXISTS "${name}"`);
+  }
+}
+
+async function openDatabase(): Promise<void> {
+  if (!poolUtil) {
+    console.log('[cache-worker] init: loading sqlite3 wasm');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sqlite3 = (await sqlite3InitModule()) as any;
+    console.log('[cache-worker] init: installing OPFS SAH pool VFS');
+    // Must open the DB via the pool returned here. Opening with sqlite3.oo1.OpfsDb instead
+    // silently falls back to the default OPFS VFS, which proxies every I/O to a separate
+    // worker and blocks on Atomics + an fsync per commit — ~100s of ms per write, which
+    // throttles the whole decrypt pipeline to a crawl regardless of fetch concurrency.
+    poolUtil = await sqlite3.installOpfsSAHPoolVfs({});
+  }
   console.log('[cache-worker] init: opening /cache.db');
   db = new poolUtil.OpfsSAHPoolDb('/cache.db');
-  db.exec(
-    `CREATE TABLE IF NOT EXISTS feeds (
-       viewer_id TEXT NOT NULL,
-       target_user_id TEXT NOT NULL,
-       since INTEGER,
-       PRIMARY KEY (viewer_id, target_user_id)
-     )`,
-  );
-  db.exec(
-    `CREATE TABLE IF NOT EXISTS batches (
-       id TEXT PRIMARY KEY,
-       viewer_id TEXT NOT NULL,
-       target_user_id TEXT NOT NULL,
-       device_id TEXT NOT NULL,
-       url TEXT NOT NULL,
-       encrypted_key TEXT NOT NULL,
-       start_time INTEGER NOT NULL,
-       end_time INTEGER NOT NULL,
-       created_at INTEGER NOT NULL,
-       start_hash TEXT,
-       end_hash TEXT,
-       version TEXT
-     )`,
-  );
-  db.exec(
-    `CREATE TABLE IF NOT EXISTS materialized_batch_ids (
-       batch_id TEXT PRIMARY KEY
-     )`,
-  );
-  db.exec(
-    `CREATE TABLE IF NOT EXISTS events (
-       id TEXT PRIMARY KEY,
-       viewer_id TEXT NOT NULL,
-       target_user_id TEXT NOT NULL,
-       device_id TEXT NOT NULL,
-       ts INTEGER NOT NULL,
-       type TEXT NOT NULL,
-       data TEXT NOT NULL,
-       risk REAL,
-       batch_status TEXT,
-       source TEXT NOT NULL DEFAULT 'batch',
-       image_w INTEGER,
-       image_h INTEGER,
-       created_at INTEGER NOT NULL DEFAULT 0
-     )`,
-  );
-  db.exec(
-    `CREATE TABLE IF NOT EXISTS event_images (
-       event_id TEXT PRIMARY KEY,
-       data BLOB NOT NULL
-     )`,
-  );
-  db.exec(
-    `CREATE TABLE IF NOT EXISTS failed_batch_ids (
-       batch_id TEXT PRIMARY KEY,
-       error TEXT
-     )`,
-  );
-  // direct_logs was removed in #467 (high-risk events now live in encrypted batches);
-  // drop it so already-provisioned local caches reclaim the space.
-  db.exec('DROP TABLE IF EXISTS direct_logs');
+
+  // Inspect before creating anything: a cache provisioned by an older release keeps its old
+  // table definitions, since CREATE TABLE IF NOT EXISTS is a no-op there and there is no
+  // ALTER TABLE path. Rebuild on a mismatch rather than letting every query that names a
+  // newer column fail with "no such column". A brand-new database reports no drift: it has
+  // no tables yet, and its user_version is 0 only because that is SQLite's default.
+  const userVersion = (db.selectValue('PRAGMA user_version') as number | undefined) ?? 0;
+  const drift = findSchemaDrift(userVersion, readExistingSchema());
+  if (drift) {
+    console.warn('[cache-worker] init: rebuilding cache, schema drift:', drift);
+    dropAllTables();
+  }
+  createSchema();
+  db.exec(`PRAGMA user_version = ${CACHE_SCHEMA_VERSION}`);
   console.log('[cache-worker] init: done');
-})().catch((err) => {
-  console.error('[cache-worker] init FAILED', err);
-});
+}
+
+// Empty the cache and start over, for the clearCache request that logout issues. This is
+// the in-worker path; a full reset (client-side termination plus deleting the OPFS
+// directory) is what the user-facing button does, since that also survives a wedged worker.
+async function hardReset(): Promise<void> {
+  try {
+    db?.close();
+  } catch (err) {
+    console.warn('[cache-worker] reset: closing db failed', err);
+  }
+  db = null;
+
+  if (poolUtil) {
+    await poolUtil.wipeFiles();
+  } else {
+    // Init never got far enough to install the VFS; remove its directory directly.
+    const root = await navigator.storage.getDirectory();
+    await root.removeEntry(SAH_POOL_DIR, { recursive: true }).catch((err: unknown) => {
+      console.warn('[cache-worker] reset: removing', SAH_POOL_DIR, 'failed', err);
+    });
+  }
+
+  await openDatabase();
+}
+
+// Mutable so a hard reset can replace it. Failures are surfaced to callers in
+// self.onmessage rather than swallowed, so a wedged init can't leave requests hanging.
+let initPromise: Promise<void> = openDatabase();
+initPromise.catch((err) => console.error('[cache-worker] init FAILED', err));
 
 // ---------------------------------------------------------------------------
 // SQLite helpers
@@ -347,15 +380,6 @@ function sqlQueryEvents(
 
 function sqlPruneOldData(viewerId: string, cutoffTs: number): void {
   db.exec(`DELETE FROM events WHERE viewer_id=? AND ts<?`, { bind: [viewerId, cutoffTs] });
-}
-
-function sqlClearAll(): void {
-  db.exec(`DELETE FROM events`);
-  db.exec(`DELETE FROM batches`);
-  db.exec(`DELETE FROM feeds`);
-  db.exec(`DELETE FROM materialized_batch_ids`);
-  db.exec(`DELETE FROM event_images`);
-  db.exec(`DELETE FROM failed_batch_ids`);
 }
 
 function sqlDeleteDeviceData(viewerId: string, deviceId: string): void {
@@ -809,10 +833,6 @@ async function handleStreaming(
 // One-shot handlers
 
 async function dispatchOneShot(req: CacheRequest): Promise<unknown> {
-  if (req.method === 'clearCache') {
-    sqlClearAll();
-    return 0;
-  }
   if (req.method === 'deleteDeviceData') {
     sqlDeleteDeviceData(req.viewerId, req.deviceId);
     return 0;
@@ -841,10 +861,39 @@ async function dispatchOneShot(req: CacheRequest): Promise<unknown> {
 self.onmessage = async (e: MessageEvent<CacheRequest>) => {
   const req = e.data;
   console.log('[cache-worker] received', req.method);
+
+  // Handled before the initPromise gate: clearing the cache has to work even when init
+  // failed to open the database.
+  if (req.method === 'clearCache') {
+    let response: CacheResponse;
+    try {
+      await hardReset();
+      activeQueries.clear();
+      fetchInFlight.clear();
+      knownTargetUserIds.clear();
+      initPromise = Promise.resolve();
+      response = { id: req.id, result: 0 };
+    } catch (err) {
+      console.error('[cache-worker] clearCache failed', err);
+      initPromise = openDatabase();
+      initPromise.catch((e2) => console.error('[cache-worker] reopen after reset FAILED', e2));
+      response = { id: req.id, error: (err as Error).message };
+    }
+    self.postMessage(response);
+    return;
+  }
+
   try {
     await initPromise;
   } catch (err) {
-    console.error('[cache-worker] init failed, dropping message', req.method, err);
+    console.error('[cache-worker] init failed, failing message', req.method, err);
+    const message = `cache unavailable: ${(err as Error).message}`;
+    if (req.method === 'cacheQuery') {
+      // Settle the stream so the Logs page shows an empty result instead of spinning.
+      postChunk(req.id, [], true);
+    } else if (req.method !== 'setSession' && req.method !== 'refetch') {
+      self.postMessage({ id: req.id, error: message } satisfies CacheResponse);
+    }
     return;
   }
 

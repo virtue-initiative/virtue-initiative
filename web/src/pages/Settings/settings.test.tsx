@@ -2,13 +2,31 @@ import { screen, waitFor } from '@testing-library/preact';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { server } from '../../mocks/server';
 import { TEST_USER } from '../../mocks/fixtures';
 import { renderWithClient } from '../../test-utils';
 import { Settings } from './index';
 
 const BASE = `http://localhost:8787/${CURRENT_API_VERSION}`;
+
+const resetCache = vi.fn(() => Promise.resolve());
+
+vi.mock('../../utils/cache/client', () => ({
+  cacheClient: {
+    setSession: vi.fn(),
+    cacheQuery: vi.fn(),
+    refetch: vi.fn(),
+    clearCache: vi.fn(() => Promise.resolve()),
+    resetCache: () => resetCache(),
+    deleteDeviceData: vi.fn(() => Promise.resolve()),
+    getEventImage: vi.fn(() => Promise.resolve(null)),
+    getDeviceBatchEndTimes: vi.fn(() => Promise.resolve([])),
+    getDecryptionStats: vi.fn(),
+  },
+  logCacheQuery: vi.fn(),
+  triggerRefetch: vi.fn(),
+}));
 
 describe('Settings — page renders', () => {
   it('shows the user display name', async () => {
@@ -142,5 +160,31 @@ describe('Settings — delete account', () => {
     await waitFor(() => {
       expect(deleteCalled).toBe(true);
     });
+  });
+});
+
+describe('Settings — clear cache', () => {
+  it('clears the cache and reloads the page', async () => {
+    const reload = vi.fn();
+    const originalReload = window.location.reload;
+    Object.defineProperty(window.location, 'reload', { configurable: true, value: reload });
+
+    try {
+      const user = userEvent.setup();
+      renderWithClient(<Settings />);
+
+      const button = await screen.findByRole('button', { name: /^clear cache$/i });
+      await user.click(button);
+
+      await waitFor(() => {
+        expect(resetCache).toHaveBeenCalled();
+        expect(reload).toHaveBeenCalled();
+      });
+    } finally {
+      Object.defineProperty(window.location, 'reload', {
+        configurable: true,
+        value: originalReload,
+      });
+    }
   });
 });
