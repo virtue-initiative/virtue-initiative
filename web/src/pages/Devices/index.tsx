@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import {
   Device,
@@ -89,6 +89,17 @@ function AddDeviceButton() {
   // the underlying `<input>`.
   const codeInputsRef = useRef<HTMLDivElement>(null);
   const { push: pushToast } = useToast();
+  // The clients print a `/devices?add` link, so following it should land on the
+  // code box rather than on a page with a button still to find.
+  const { url } = useLocation();
+  const autoOpened = useRef(false);
+
+  useEffect(() => {
+    const query = url.includes('?') ? url.slice(url.indexOf('?')) : '';
+    if (!new URLSearchParams(query).has('add') || autoOpened.current) return;
+    autoOpened.current = true;
+    open();
+  }, [url]);
 
   const userCode = `${firstHalf}${secondHalf}`;
 
@@ -191,10 +202,6 @@ function AddDeviceButton() {
           </>
         ) : (
           <>
-            <p class="invite-desc">
-              Open Virtue on the device you want to monitor and sign in. It shows a code. Type that
-              code here.
-            </p>
             <form onSubmit={handleLookup}>
               <Field label="Device code">
                 <div class="device-code-inputs" ref={codeInputsRef}>
@@ -225,16 +232,17 @@ function AddDeviceButton() {
                 </div>
               </Field>
               {error && <p class="device-code-error">{error}</p>}
+              <p class="invite-desc">
+                Open Virtue on the device you want to monitor and sign in. It shows the code to type
+                here.
+              </p>
               <DialogActions
                 left={
                   <Button variant="ghost" href={DOWNLOAD_URL} target="_blank" rel="noreferrer">
-                    Download
+                    Download Virtue Initiative
                   </Button>
                 }
               >
-                <Button variant="ghost" href={DOWNLOAD_URL} target="_blank" rel="noreferrer">
-                  View guide
-                </Button>
                 <Button variant="primary" type="submit" disabled={loading || userCode.length !== 6}>
                   {loading ? 'Checking…' : 'Continue'}
                 </Button>

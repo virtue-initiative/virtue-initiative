@@ -57,6 +57,16 @@ class MainActivity : AppCompatActivity() {
         binding.loginButton.setOnClickListener { login() }
         binding.getCodeButton.setOnClickListener { beginCodeLogin() }
         binding.usePasswordLink.setOnClickListener { showPasswordLogin() }
+        binding.devicesLink.setOnClickListener {
+            // ?add opens the "Add device" dialog straight away, so the user
+            // lands on the code box rather than hunting for the button.
+            startActivity(
+                Intent(
+                    Intent.ACTION_VIEW,
+                    Uri.parse("https://app.virtueinitiative.org/devices?add")
+                )
+            )
+        }
         binding.useCodeLink.setOnClickListener { showCodeLogin() }
         binding.signOutButton.setOnClickListener { logout() }
         binding.statusDetailsButton.setOnClickListener { showStatusDetails() }
@@ -103,6 +113,7 @@ class MainActivity : AppCompatActivity() {
     private fun clearPendingCode() {
         binding.userCodeText.visibility = android.view.View.GONE
         binding.codeHintText.visibility = android.view.View.GONE
+        binding.devicesLink.visibility = android.view.View.GONE
         binding.getCodeButton.setText(R.string.btn_get_code)
     }
 
@@ -140,6 +151,7 @@ class MainActivity : AppCompatActivity() {
             binding.userCodeText.visibility = android.view.View.VISIBLE
             binding.codeHintText.setText(R.string.msg_code_login_waiting)
             binding.codeHintText.visibility = android.view.View.VISIBLE
+            binding.devicesLink.visibility = android.view.View.VISIBLE
             binding.getCodeButton.setText(R.string.btn_get_new_code)
 
             startCodePolling(json.optInt("intervalSeconds", 5).coerceAtLeast(1))

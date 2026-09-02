@@ -57,7 +57,9 @@
   text-align: center;
   text-transform: uppercase;
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 1.6rem;
+  font-size: 2.6rem;
+  font-weight: 600;
+  line-height: 1.4;
   letter-spacing: 0.25em;
   /* The letter-spacing above trails the last glyph, which would otherwise read
      as off-center; half of it back as padding recenters the text. */
@@ -67,7 +69,7 @@
 
 .device-code-separator {
   color: var(--text-muted);
-  font-size: 1.6rem;
+  font-size: 2.6rem;
 }
 
 .device-code-error {

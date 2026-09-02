@@ -5,7 +5,7 @@ mod tray;
 
 use std::fs;
 use std::io::{self, Write};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
@@ -201,15 +201,19 @@ async fn daemon_command(paths: ClientPaths, command: Option<DaemonCommands>) -> 
 /// where it would be most confusing.
 const APP_URL: &str = "https://app.virtueinitiative.org";
 
+/// Deep link to the Devices page with the "Add device" dialog already open, so
+/// the user lands on the code box rather than hunting for the button.
+const ADD_DEVICE_URL: &str = "https://app.virtueinitiative.org/devices?add";
+
 fn login(
     paths: ClientPaths,
     email: Option<String>,
     device_name: Option<String>,
     use_password: bool,
 ) -> Result<()> {
-    println!("Don't have an account? Sign up at {APP_URL}/signup");
-
     let device_name = resolve_device_name(device_name)?;
+
+    println!("Don't have an account? Sign up at {APP_URL}/signup");
 
     let sock = paths.state_dir.join("daemon.sock");
     let mut client =
@@ -219,8 +223,9 @@ fn login(
         password_login(&mut client, email, &device_name)?
     } else {
         match code_login(&mut client, &device_name)? {
-            Some(device_id) => device_id,
-            None => return Ok(()),
+            CodeLoginOutcome::LoggedIn(device_id) => device_id,
+            CodeLoginOutcome::Expired => return Ok(()),
+            CodeLoginOutcome::UsePassword => password_login(&mut client, email, &device_name)?,
         }
     };
 
@@ -274,29 +279,42 @@ fn password_login(
         .context("login failed")
 }
 
+/// How a pairing-code sign-in ended.
+enum CodeLoginOutcome {
+    LoggedIn(String),
+    /// The code expired before anyone approved it. The user has been told.
+    Expired,
+    /// The user pressed Enter to sign in with an email and password instead.
+    UsePassword,
+}
+
 /// CORE-020/CORE-021: show a pairing code and poll until the user approves it in
-/// their web session. Returns `None` when the code expired before that happened,
-/// having already told the user so.
+/// their web session.
 ///
-/// Ctrl-C during the wait simply kills the process, which is safe: the pairing
-/// lives in the daemon's persisted state, so nothing is left half-applied and
-/// `virtue login` can start a fresh one.
-fn code_login(client: &mut ClientController, device_name: &str) -> Result<Option<String>> {
+/// Ctrl-C during the wait is safe: the pairing lives in the daemon's persisted
+/// state, so nothing is left half-applied and `virtue login` can start a fresh
+/// one.
+fn code_login(client: &mut ClientController, device_name: &str) -> Result<CodeLoginOutcome> {
     let pending = client
         .begin_code_login(Some(device_name))
         .context("could not start a code login")?;
 
     println!();
-    println!("Enter this code at {APP_URL}");
+    println!("Enter this code at {ADD_DEVICE_URL}");
     println!();
     println!("    {}", pending.user_code);
     println!();
+    println!("Press Enter to sign in with your email and password instead.");
 
     let interval = Duration::from_secs(pending.interval_seconds.max(1) as u64);
 
     loop {
         print_countdown(pending.expires_at_ms);
-        std::thread::sleep(interval);
+        if wait_for_password_switch(interval)? {
+            clear_countdown();
+            println!("Signing in with an email and password instead.");
+            return Ok(CodeLoginOutcome::UsePassword);
+        }
 
         match client
             .poll_code_login()
@@ -305,15 +323,57 @@ fn code_login(client: &mut ClientController, device_name: &str) -> Result<Option
             CodeLoginPoll::Pending => continue,
             CodeLoginPoll::Approved { device_id } => {
                 clear_countdown();
-                return Ok(Some(device_id));
+                return Ok(CodeLoginOutcome::LoggedIn(device_id));
             }
             CodeLoginPoll::Expired => {
                 clear_countdown();
                 println!("That code expired. Run `virtue login` to get a new one.");
-                return Ok(None);
+                return Ok(CodeLoginOutcome::Expired);
             }
         }
     }
+}
+
+/// Waits out one poll interval, returning `true` if the user pressed Enter to
+/// abandon the code and sign in with a password.
+///
+/// Raw mode is what makes a bare Enter visible without the user also having to
+/// send a line; it also means Ctrl-C no longer raises SIGINT, so this handles it
+/// explicitly rather than leaving the terminal wedged. When stdin is not a
+/// terminal (`virtue login` under a script), there are no keypresses to wait
+/// for, so this degrades to a plain sleep.
+fn wait_for_password_switch(interval: Duration) -> Result<bool> {
+    if enable_raw_mode().is_err() {
+        std::thread::sleep(interval);
+        return Ok(false);
+    }
+
+    let deadline = Instant::now() + interval;
+    let result = (|| {
+        while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
+            if !crossterm::event::poll(remaining).context("failed polling for terminal input")? {
+                return Ok(false);
+            }
+            match crossterm::event::read().context("failed reading terminal event")? {
+                Event::Key(KeyEvent {
+                    code: KeyCode::Enter,
+                    ..
+                }) => return Ok(true),
+                Event::Key(KeyEvent {
+                    code: KeyCode::Char(c),
+                    modifiers,
+                    ..
+                }) if (c == 'c' || c == 'd') && modifiers.contains(KeyModifiers::CONTROL) => {
+                    return Err(anyhow::anyhow!("interrupted"));
+                }
+                _ => continue,
+            }
+        }
+        Ok(false)
+    })();
+
+    disable_raw_mode().context("failed restoring terminal mode")?;
+    result
 }
 
 /// Redraws the "waiting" line in place, so the countdown ticks down rather than

@@ -309,14 +309,27 @@ export class APIClient {
   }
 
   /**
-   * API-047: sign the pending device in to this account. The device itself
-   * appears in the list on its next poll, so force a refresh rather than wait
-   * for the cache to age out.
+   * API-047: sign the pending device in to this account. The device row is not
+   * created by this call — API-045 creates it when the device next polls, up to
+   * one poll interval later — so a single refresh here almost always runs too
+   * early and the user sees an unchanged list.
    */
   async approveDeviceCode(userCode: string): Promise<DeviceCodeApproveResponse> {
+    const before = new Set((this.devicesCache ?? []).map((device) => device.id));
     const approved = await api.approveDeviceCode(userCode);
-    await this.fetchDevices(true);
+    // Deliberately not awaited: the dialog should close on approval, and
+    // subscribers pick the new device up whenever it lands.
+    void this.pollForNewDevice(before);
     return approved;
+  }
+
+  /** Re-fetch on a backoff until a device id we had not seen before appears. */
+  private async pollForNewDevice(before: Set<string>): Promise<void> {
+    for (const delayMs of [0, 1000, 2000, 3000, 5000, 8000]) {
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+      const devices = await this.fetchDevices(true);
+      if (devices?.some((device) => !before.has(device.id))) return;
+    }
   }
 
   private async fetchDevices(force = false): Promise<Device[] | null> {

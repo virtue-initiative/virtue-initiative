@@ -22,7 +22,7 @@ public sealed partial class MainWindow : Window
     private const string WebsiteDisplayUrl = "virtueinitiative.org";
     private const string WebsiteNavigateUrl = "https://virtueinitiative.org";
     private const string SignUpNavigateUrl = "https://app.virtueinitiative.org/signup";
-    private const string DevicesNavigateUrl = "https://app.virtueinitiative.org/devices";
+    private const string DevicesNavigateUrl = "https://app.virtueinitiative.org/devices?add";
 
     private readonly AppWindow _appWindow;
     private readonly TextBlock _statusTextBlock;

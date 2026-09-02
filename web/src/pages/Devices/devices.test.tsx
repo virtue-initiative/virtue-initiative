@@ -73,6 +73,64 @@ describe('Devices — Add device dialog', () => {
     expect(screen.getByRole('heading', { name: /add device/i, level: 3 })).toBeInTheDocument();
   });
 
+  it('opens the dialog on load when the URL carries ?add', async () => {
+    // The clients print a `/devices?add` deep link; following it should land on
+    // the code box rather than on a page with a button still to find.
+    const original = window.location.href;
+    window.history.replaceState({}, '', '/devices?add');
+    try {
+      renderWithClient(<Devices />);
+      expect(
+        await screen.findByRole('heading', { name: /add device/i, level: 3 }),
+      ).toBeInTheDocument();
+    } finally {
+      window.history.replaceState({}, '', original);
+    }
+  });
+
+  it('shows the approved device once it appears on a later fetch', async () => {
+    // API-045 creates the device row on the device's next poll, not on approve,
+    // so the first refresh after approval legitimately misses it.
+    const user = userEvent.setup();
+    let approved = false;
+    let fetchesAfterApproval = 0;
+    const newDevice = { ...TEST_DEVICES[0], id: 'device-new', name: 'Paired Desktop' };
+    server.use(
+      http.post(`${BASE}/device-code/lookup`, () =>
+        HttpResponse.json({ name: 'Paired Desktop', platform: 'linux', expires_at: Date.now() }),
+      ),
+      http.post(`${BASE}/device-code/approve`, () => {
+        approved = true;
+        return HttpResponse.json({ name: 'Paired Desktop', platform: 'linux' });
+      }),
+      http.get(`${BASE}/device`, () => {
+        if (approved && ++fetchesAfterApproval > 1) {
+          return HttpResponse.json([...TEST_DEVICES, newDevice]);
+        }
+        return HttpResponse.json(TEST_DEVICES);
+      }),
+    );
+
+    renderWithClient(<Devices />);
+    await user.click(await screen.findByRole('button', { name: /add device/i }));
+    const dialog = screen.getByRole('dialog');
+    await user.type(within(dialog).getByLabelText(/first three/i), 'K7RM3X');
+    await user.click(within(dialog).getByRole('button', { name: /continue/i }));
+    await user.click(await within(dialog).findByRole('button', { name: /^add$/i }));
+
+    // Scoped to the device cards on purpose: the dialog is closed but still in
+    // the DOM, and its confirmation summary names the same device.
+    await waitFor(
+      () => {
+        const cardNames = Array.from(document.querySelectorAll('.vi-card__name')).map(
+          (el) => el.textContent,
+        );
+        expect(cardNames).toContain('Paired Desktop');
+      },
+      { timeout: 5000 },
+    );
+  });
+
   it('looks up a code, confirms the device, then approves it', async () => {
     let lookupBody: unknown;
     let approveBody: unknown;

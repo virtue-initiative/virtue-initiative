@@ -48,6 +48,9 @@ fn adopt_registration(
 ) -> String {
     let device_id = registered.credentials.device_id.clone();
     auth.device_credentials = Some(registered.credentials.clone());
+    // Whichever path got here, any half-finished pairing is now moot: a
+    // password login that abandoned one must not leave it behind to be polled.
+    auth.pending_code_login = None;
     // Kept so every platform's status page can name the signed-in
     // account without stashing the email separately (CORE-010).
     auth.account_email = Some(registered.account_email);
@@ -423,6 +426,35 @@ mod tests {
         assert!(auth.device_credentials.is_none());
         assert!(!screenshot.enabled);
         assert_eq!(api.state().poll_device_code_calls, vec!["dpc_mock"]);
+    }
+
+    #[test]
+    fn a_password_login_clears_an_abandoned_pairing() {
+        // The Linux CLI lets the user press Enter mid-pairing to sign in with a
+        // password instead; the code they walked away from must not survive.
+        let mut auth = AuthState::default();
+        let mut screenshot = ScreenshotState::default();
+        let mut upload = UploadState::default();
+        let api = MockApiClient::new();
+        let _ = begin_code_login(&mut auth, &api, "d", "p", None).expect("begin");
+        assert!(auth.pending_code_login.is_some());
+
+        login(
+            &mut auth,
+            &mut screenshot,
+            &mut upload,
+            &api,
+            "d",
+            "p",
+            "user@example.com",
+            "pw",
+            None,
+            1_000,
+        )
+        .expect("login");
+
+        assert!(auth.pending_code_login.is_none());
+        assert!(auth.device_credentials.is_some());
     }
 
     #[test]
