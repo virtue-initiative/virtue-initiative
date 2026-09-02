@@ -53,7 +53,7 @@
                         android:id="@+id/websiteLink"
                         android:text="@string/app_website"
                         android:textSize="14sp"
-                        android:textColor="@color/virtue_forest"
+                        android:textColor="@color/virtue_link"
                         android:layout_marginTop="2dp"
                         android:clickable="true"
                         android:focusable="true" />
@@ -297,7 +297,7 @@
                         android:layout_marginTop="12dp"
                         android:text="@string/btn_sign_up"
                         android:textSize="14sp"
-                        android:textColor="@color/virtue_forest"
+                        android:textColor="@color/virtue_link"
                         android:clickable="true"
                         android:focusable="true" />
                 </LinearLayout>

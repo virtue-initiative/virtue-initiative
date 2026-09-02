@@ -7,6 +7,9 @@
     <color name="virtue_forest_2">#163026</color>
     <color name="virtue_forest_3">#2C4D3E</color>
 
+    <!-- Link -->
+    <color name="virtue_link">#B34300</color>
+
     <!-- Moss (secondary green) -->
     <color name="virtue_moss">#4D6B58</color>
     <color name="virtue_moss_2">#7A8F76</color>

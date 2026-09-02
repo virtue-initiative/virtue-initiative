@@ -66,7 +66,7 @@ struct ContentView: View {
                         .foregroundStyle(VirtueBrand.text)
                     Link("virtueinitiative.org", destination: URL(string: "https://virtueinitiative.org")!)
                         .font(.subheadline)
-                        .foregroundStyle(VirtueBrand.accent)
+                        .foregroundStyle(VirtueBrand.link)
                         .onHover { hovering in
                             if hovering {
                                 NSCursor.pointingHand.push()

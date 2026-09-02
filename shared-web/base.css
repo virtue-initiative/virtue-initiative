@@ -27,7 +27,7 @@ body {
 }
 
 a {
-  color: var(--forest);
+  color: var(--link);
   text-decoration: none;
 
   &:hover {
