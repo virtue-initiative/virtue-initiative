@@ -186,6 +186,11 @@ windows-build profile="Debug":
 windows-build-ssh *args:
     ./client/windows/scripts/remote-windows-build.sh --build-host virtue-win11 {{args}}
 
+# Make the host's `just dev <domain>` stack reachable from the win11 VM under the same *.localhost names. Run once per VM rebuild.
+[group('windows')]
+windows-vm-network *args:
+    ./client/windows/scripts/setup-vm-dev-network.sh {{args}}
+
 # Run the Windows client's test suite (Windows only).
 [group('windows')]
 [working-directory: 'client']

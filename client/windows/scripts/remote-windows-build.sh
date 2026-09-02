@@ -19,6 +19,10 @@ Options:
   --target <triple>               Rust target for packaging modes. Default: x86_64-pc-windows-msvc
   --profile <Debug|Release>       Packaging profile. Default: Debug
   --version <version>             Artifact label. Default: 0.1.2-dev
+  --api-url <url>                 Bake VIRTUE_DEFAULT_API_URL into the build, to
+                                  point the app at a dev API. The URL is resolved
+                                  inside the VM, so a host-only name needs
+                                  setup-vm-dev-network.sh to have been run.
   --clean                         Run cargo clean before packaging
   --skip-sync                     Reuse remote source tree without uploading local client/
   --log-dir <dir>                 Local directory for full remote run logs.
@@ -45,6 +49,7 @@ CACHE_ROOT="C:/virtue-build/cache"
 TARGET="x86_64-pc-windows-msvc"
 PROFILE="Debug"
 VERSION="0.1.2-dev"
+API_URL=""
 CLEAN=0
 SKIP_SYNC=0
 LOG_DIR="$REPO_ROOT/client/windows/dist/remote-logs"
@@ -79,6 +84,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --version)
       VERSION="${2:-}"
+      shift 2
+      ;;
+    --api-url)
+      API_URL="${2:-}"
       shift 2
       ;;
     --clean)
@@ -172,6 +181,7 @@ cat >"$TMP_DIR/$REMOTE_SCRIPT_NAME" <<EOF
 \$target = '$(ps_quote "$TARGET")'
 \$buildProfile = '$(ps_quote "$PROFILE")'
 \$version = '$(ps_quote "$VERSION")'
+\$apiUrl = '$(ps_quote "$API_URL")'
 \$clean = $CLEAN_BOOL
 \$skipSync = $( [[ $SKIP_SYNC -eq 1 ]] && echo '$true' || echo '$false' )
 \$signingCertPath = '$(ps_quote "$SIGNING_CERT_PATH")'
@@ -212,6 +222,13 @@ try {
         New-Item -ItemType Directory -Force -Path \$targetDir | Out-Null
         New-Item -ItemType Directory -Force -Path \$sccacheDir | Out-Null
         \$env:CARGO_TARGET_DIR = \$targetDir
+
+        # Compile-time only (client/core/build.rs), so it has to be set before
+        # cargo runs rather than configured in the installed app.
+        if (\$apiUrl) {
+            \$env:VIRTUE_DEFAULT_API_URL = \$apiUrl
+            Write-Host "Building against API: \$apiUrl"
+        }
 
         Remove-Item Env:RUSTC_WRAPPER -ErrorAction SilentlyContinue
         Remove-Item Env:SCCACHE_DIR -ErrorAction SilentlyContinue
