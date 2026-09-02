@@ -261,7 +261,7 @@ final class MonitoringCoordinator: ObservableObject {
             switch outcome {
             case .pending:
                 return
-            case .failed:
+            case .unavailable, .failed:
                 // Usually a transient network blip. Keep the code on screen and
                 // try again on the next tick rather than making the user fetch
                 // a new one.

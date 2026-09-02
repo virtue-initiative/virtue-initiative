@@ -310,6 +310,7 @@ pub extern "C" fn virtue_ios_native_poll_code_login() -> *mut c_char {
                 "accountEmail": core.daemon.status().account_email,
             }),
             CodeLoginPoll::Expired => serde_json::json!({ "status": "expired" }),
+            CodeLoginPoll::Unavailable => serde_json::json!({ "status": "unavailable" }),
         }
         .to_string())
     })();

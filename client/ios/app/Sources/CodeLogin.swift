@@ -37,8 +37,11 @@ enum CodeLoginPoll {
     /// it. The device never learns the email from the user in this flow.
     case approved(accountEmail: String?)
     case expired
-    /// The poll itself failed. Usually transient, so callers keep waiting
-    /// rather than throwing away the code already on screen.
+    /// CORE-021: the server could not be reached. The pairing is untouched, so
+    /// callers keep waiting rather than throwing away the code already on
+    /// screen.
+    case unavailable
+    /// The poll itself failed. Usually transient, so callers keep waiting too.
     case failed(String)
 }
 
@@ -75,6 +78,7 @@ func decodeCodeLoginPoll(_ json: String?) -> CodeLoginPoll {
     case "pending": return .pending
     case "approved": return .approved(accountEmail: payload.accountEmail)
     case "expired": return .expired
+    case "unavailable": return .unavailable
     default: return .failed("unexpected poll status: \(payload.status ?? "<none>")")
     }
 }

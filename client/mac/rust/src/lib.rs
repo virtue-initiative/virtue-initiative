@@ -127,6 +127,7 @@ pub extern "C" fn virtue_mac_native_poll_code_login() -> *mut c_char {
             CodeLoginPoll::Pending => serde_json::json!({ "status": "pending" }),
             CodeLoginPoll::Approved { .. } => serde_json::json!({ "status": "approved" }),
             CodeLoginPoll::Expired => serde_json::json!({ "status": "expired" }),
+            CodeLoginPoll::Unavailable => serde_json::json!({ "status": "unavailable" }),
         }
         .to_string())
     })();
