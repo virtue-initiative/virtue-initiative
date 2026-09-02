@@ -1,5 +1,6 @@
 import {
   deleteExpiredBatchesChunk,
+  deleteExpiredDeviceAuthCodesChunk,
   deleteExpiredDeviceSessionsChunk,
   deleteExpiredEmailTokensChunk,
   deleteExpiredUserSessionsChunk,
@@ -55,6 +56,18 @@ export async function pruneExpiredDeviceSessions(env: Env, now = Date.now()) {
 
   while (true) {
     const deleted = await deleteExpiredDeviceSessionsChunk(env.DB, now, PRUNE_CHUNK_LIMIT);
+    deletedTotal += deleted;
+    if (deleted < PRUNE_CHUNK_LIMIT) break; // drained
+  }
+
+  return deletedTotal;
+}
+
+export async function pruneExpiredDeviceAuthCodes(env: Env, now = Date.now()) {
+  let deletedTotal = 0;
+
+  while (true) {
+    const deleted = await deleteExpiredDeviceAuthCodesChunk(env.DB, now, PRUNE_CHUNK_LIMIT);
     deletedTotal += deleted;
     if (deleted < PRUNE_CHUNK_LIMIT) break; // drained
   }

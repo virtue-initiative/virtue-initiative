@@ -13,6 +13,7 @@ use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
 use virtue_core::api::{BugReportRequest, HttpApiClient};
 use virtue_core::force_capture;
+use virtue_core::module::auth::CodeLoginPoll;
 use virtue_core::{
     AuthState, Config, CoreError, CoreResult, Daemon, DeviceSettings, LifecycleHooks, Screenshot,
     ScreenshotHooks,
@@ -356,6 +357,67 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeLogin
             .login(&email, &password, Some(&device_name))
             .map_err(|err| anyhow!(err.to_string()))?;
         Ok(())
+    })
+}
+
+/// CORE-020. Returns a JSON object with the code to display, or one carrying an
+/// `error` key if the pairing could not be started.
+#[no_mangle]
+pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeBeginCodeLogin<'l>(
+    mut unowned_env: EnvUnowned<'l>,
+    _class: JClass<'l>,
+    device_name: JString<'l>,
+) -> jstring {
+    let device_name: String = device_name.to_string();
+    native_string(&mut unowned_env, move |_env| {
+        Some(
+            (|| -> Result<String> {
+                let core = core()?;
+                let start = core
+                    .daemon
+                    .begin_code_login(Some(&device_name))
+                    .map_err(|err| anyhow!(err.to_string()))?;
+                Ok(serde_json::json!({
+                    "userCode": start.user_code,
+                    "expiresAtMs": start.expires_at_ms,
+                    "intervalSeconds": start.interval_seconds,
+                })
+                .to_string())
+            })()
+            .unwrap_or_else(|err| serde_json::json!({ "error": format!("{err:#}") }).to_string()),
+        )
+    })
+}
+
+/// CORE-021. `status` is `pending`, `approved`, or `expired`; an `error` key
+/// instead means the poll itself failed and the caller should try again.
+#[no_mangle]
+pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativePollCodeLogin<'l>(
+    mut unowned_env: EnvUnowned<'l>,
+    _class: JClass<'l>,
+) -> jstring {
+    native_string(&mut unowned_env, |_env| {
+        Some(
+            (|| -> Result<String> {
+                let core = core()?;
+                let outcome = core
+                    .daemon
+                    .poll_code_login()
+                    .map_err(|err| anyhow!(err.to_string()))?;
+                Ok(match outcome {
+                    CodeLoginPoll::Pending => serde_json::json!({ "status": "pending" }),
+                    CodeLoginPoll::Approved { device_id } => {
+                        serde_json::json!({ "status": "approved", "deviceId": device_id })
+                    }
+                    CodeLoginPoll::Expired => serde_json::json!({ "status": "expired" }),
+                    CodeLoginPoll::Unavailable => {
+                        serde_json::json!({ "status": "unavailable" })
+                    }
+                }
+                .to_string())
+            })()
+            .unwrap_or_else(|err| serde_json::json!({ "error": format!("{err:#}") }).to_string()),
+        )
     })
 }
 

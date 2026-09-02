@@ -58,6 +58,15 @@ public sealed class RustInteropClient : IRustInteropClient
         ThrowIfError(error);
     }
 
+    public BeginCodeLoginPayload BeginCodeLogin(string? deviceName = null)
+    {
+        var payload = RustInteropJson.Serialize(new BeginCodeLoginRequest(deviceName));
+        return ReadJsonPayload<BeginCodeLoginPayload>(NativeMethods.virtue_windows_begin_code_login(payload));
+    }
+
+    public PollCodeLoginPayload PollCodeLogin() =>
+        ReadJsonPayload<PollCodeLoginPayload>(NativeMethods.virtue_windows_poll_code_login());
+
     public void Logout()
     {
         var error = NativeMethods.virtue_windows_logout();
@@ -180,6 +189,13 @@ public sealed class RustInteropClient : IRustInteropClient
         [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
         internal static extern IntPtr virtue_windows_login(
             [MarshalAs(UnmanagedType.LPUTF8Str)] string requestJson);
+
+        [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern IntPtr virtue_windows_begin_code_login(
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string requestJson);
+
+        [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern IntPtr virtue_windows_poll_code_login();
 
         [DllImport(NativeLibraryName, CallingConvention = CallingConvention.Cdecl)]
         internal static extern IntPtr virtue_windows_logout();

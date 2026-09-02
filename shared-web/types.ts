@@ -212,6 +212,11 @@ export const updateDeviceSchema = z
   .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
 export type UpdateDevicePayload = z.infer<typeof updateDeviceSchema>;
 
+// API-043: the user types the code in whatever shape they read it, so the server
+// normalizes rather than the schema. Only the length is bounded here.
+export const deviceCodeRequestSchema = z.object({ user_code: z.string().min(1).max(32) });
+export type DeviceCodeRequestPayload = z.infer<typeof deviceCodeRequestSchema>;
+
 // ── Additional response schemas ──────────────────────────────────────────────
 
 export const signupResponseSchema = z.object({
@@ -243,3 +248,18 @@ export const createPartnerResponseSchema = z.object({
   status: z.literal('pending'),
 });
 export type CreatePartnerResponse = z.infer<typeof createPartnerResponseSchema>;
+
+export const deviceCodeLookupResponseSchema = z.object({
+  name: z.string(),
+  platform: z.string(),
+  created_at: z.number(),
+  expires_at: z.number(),
+  requested_from: z.string().nullable(),
+});
+export type DeviceCodeLookupResponse = z.infer<typeof deviceCodeLookupResponseSchema>;
+
+export const deviceCodeApproveResponseSchema = z.object({
+  name: z.string(),
+  platform: z.string(),
+});
+export type DeviceCodeApproveResponse = z.infer<typeof deviceCodeApproveResponseSchema>;

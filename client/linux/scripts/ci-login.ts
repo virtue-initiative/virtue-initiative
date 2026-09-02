@@ -1,5 +1,9 @@
 #!/usr/bin/env bun
-// Drives `virtue login` non-interactively for CI.
+// Drives `virtue login --password` non-interactively for CI.
+//
+// `virtue login` now defaults to the pairing-code flow, which needs a human at
+// a logged-in web session to approve the code. CI pins the password path with
+// `--password` instead.
 //
 // The Linux client reads the password from the controlling terminal in raw
 // mode (crossterm), so it cannot be fed over a normal stdin pipe. Bun has no
@@ -26,11 +30,12 @@ export interface CiLoginArgs {
   env?: Record<string, string>;
 }
 
-/** Runs `<bin> login`, feeding the password once the pty prompt appears. Throws on failure. */
+/** Runs `<bin> login --password`, feeding the password once the pty prompt appears. Throws on failure. */
 export async function ciLogin(args: CiLoginArgs): Promise<void> {
   const childCmd = [
     shQuote(args.bin),
     'login',
+    '--password',
     '--email',
     shQuote(args.email),
     '--device-name',

@@ -2,9 +2,10 @@
 
 1. If you do not have one, [create an account](/signup).
 2. Install Virtue from the [Microsoft Store]({WINDOWS_DOWNLOAD}).
-3. Once complete, launch Virtue and sign in with your account.
+3. Once complete, launch Virtue. Name the device, then select **Get code**.
    ![virtue login](./win-login.png)
-4. Done! The app will periodically collect screenshots (about once every 5 minutes) and upload them once an hour. You and your partners will be able to view them from the logs page on the website.
+4. Enter the code it shows on the [Devices page](/app/devices?add) of the web app, under **Add device**. See [Adding a device](/help/web/adding-a-device) for the full walkthrough. To sign in with your email and password instead, select **Use a password instead**.
+5. Done! The app will periodically collect screenshots (about once every 5 minutes) and upload them once an hour. You and your partners will be able to view them from the logs page on the website.
 
 ## Usage
 

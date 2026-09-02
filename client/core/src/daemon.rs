@@ -5,12 +5,12 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::api::ApiTransport;
+use crate::api::{ApiTransport, DeviceCodeStart};
 use crate::config::Config;
 use crate::error::{CoreError, CoreResult};
 use crate::logging::log_warning;
 use crate::model::{AuthState, ServiceStatus};
-use crate::module::auth;
+use crate::module::auth::{self, CodeLoginPoll};
 use crate::module::capture_availability::{self, CaptureAvailabilityState};
 use crate::module::errors::{self, ErrorState};
 use crate::module::heartbeat::{self, HeartbeatState};
@@ -42,6 +42,13 @@ enum DaemonRequest {
         password: String,
         device_name: Option<String>,
         reply: mpsc::Sender<CoreResult<String>>,
+    },
+    BeginCodeLogin {
+        device_name: Option<String>,
+        reply: mpsc::Sender<CoreResult<DeviceCodeStart>>,
+    },
+    PollCodeLogin {
+        reply: mpsc::Sender<CoreResult<CodeLoginPoll>>,
     },
     Logout {
         reply: mpsc::Sender<CoreResult<()>>,
@@ -305,6 +312,34 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         )
     }
 
+    fn apply_begin_code_login(
+        &self,
+        state: &mut DaemonState,
+        device_name_override: Option<&str>,
+    ) -> CoreResult<DeviceCodeStart> {
+        auth::begin_code_login(
+            &mut state.auth,
+            &self.api,
+            &self.config.device_name,
+            &self.config.platform_name,
+            device_name_override,
+        )
+    }
+
+    fn apply_poll_code_login(
+        &self,
+        state: &mut DaemonState,
+        now_ms: i64,
+    ) -> CoreResult<CodeLoginPoll> {
+        let DaemonState {
+            auth,
+            screenshot,
+            upload,
+            ..
+        } = state;
+        auth::poll_code_login(auth, screenshot, upload, &self.api, now_ms)
+    }
+
     fn apply_logout(&self, state: &mut DaemonState) {
         let DaemonState {
             auth,
@@ -410,6 +445,21 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         })?
     }
 
+    /// Starts a passwordless sign-in (CORE-020) and returns the code to show
+    /// the user. Poll `poll_code_login` at the returned interval until it stops
+    /// reporting `Pending`.
+    pub fn begin_code_login(&self, device_name: Option<&str>) -> CoreResult<DeviceCodeStart> {
+        self.call(|reply| DaemonRequest::BeginCodeLogin {
+            device_name: device_name.map(str::to_string),
+            reply,
+        })?
+    }
+
+    /// Asks whether the pending pairing has been approved yet (CORE-021).
+    pub fn poll_code_login(&self) -> CoreResult<CodeLoginPoll> {
+        self.call(|reply| DaemonRequest::PollCodeLogin { reply })?
+    }
+
     pub fn logout(&self) -> CoreResult<()> {
         self.call(|reply| DaemonRequest::Logout { reply })?
     }
@@ -489,6 +539,23 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         let now_ms = self.now_ms();
         let mut guard = self.state.lock().expect("daemon state lock poisoned");
         let result = self.apply_login(&mut guard, email, password, device_name, now_ms);
+        self.persist(&guard);
+        result
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub fn test_begin_code_login(&self, device_name: Option<&str>) -> CoreResult<DeviceCodeStart> {
+        let mut guard = self.state.lock().expect("daemon state lock poisoned");
+        let result = self.apply_begin_code_login(&mut guard, device_name);
+        self.persist(&guard);
+        result
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub fn test_poll_code_login(&self) -> CoreResult<CodeLoginPoll> {
+        let now_ms = self.now_ms();
+        let mut guard = self.state.lock().expect("daemon state lock poisoned");
+        let result = self.apply_poll_code_login(&mut guard, now_ms);
         self.persist(&guard);
         result
     }
@@ -606,6 +673,18 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
                             device_name.as_deref(),
                             now_ms,
                         );
+                        fires.push(Box::new(move || {
+                            let _ = reply.send(result);
+                        }));
+                    }
+                    DaemonRequest::BeginCodeLogin { device_name, reply } => {
+                        let result = self.apply_begin_code_login(working, device_name.as_deref());
+                        fires.push(Box::new(move || {
+                            let _ = reply.send(result);
+                        }));
+                    }
+                    DaemonRequest::PollCodeLogin { reply } => {
+                        let result = self.apply_poll_code_login(working, now_ms);
                         fires.push(Box::new(move || {
                             let _ = reply.send(result);
                         }));

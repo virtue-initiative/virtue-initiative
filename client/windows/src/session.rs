@@ -1,5 +1,8 @@
 use anyhow::{Context, Result};
 
+use virtue_core::api::DeviceCodeStart;
+use virtue_core::module::auth::CodeLoginPoll;
+
 use crate::config::{ClientPaths, ClientState, load_state, save_state};
 use crate::resident_monitor;
 
@@ -51,6 +54,29 @@ impl SessionManager {
         )?;
 
         Ok(device_id)
+    }
+
+    /// CORE-020. Nothing is written to the UI state file here: no account is
+    /// known until the pairing is approved, and the device's own poll is what
+    /// learns the email (API-045).
+    pub fn begin_code_login_blocking(&self, device_name: &str) -> Result<DeviceCodeStart> {
+        resident_monitor::app_begin_code_login(device_name).context("could not start a code login")
+    }
+
+    /// CORE-021. On approval the account email comes back through the daemon's
+    /// status, so the UI state file only records that a session now exists.
+    pub fn poll_code_login_blocking(&self) -> Result<CodeLoginPoll> {
+        let outcome =
+            resident_monitor::app_poll_code_login().context("could not check the code")?;
+
+        if matches!(outcome, CodeLoginPoll::Approved { .. }) {
+            let email = resident_monitor::status_snapshot()
+                .core
+                .and_then(|status| status.account_email);
+            save_state(&self.paths.ui_state_file, &ClientState { email })?;
+        }
+
+        Ok(outcome)
     }
 
     pub fn logout_blocking(&self) -> Result<()> {

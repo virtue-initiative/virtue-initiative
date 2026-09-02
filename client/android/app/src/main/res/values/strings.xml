@@ -24,6 +24,14 @@
 
     <!-- Buttons -->
     <string name="btn_sign_in">Sign In</string>
+    <string name="btn_get_code">Get code</string>
+    <string name="btn_get_new_code">Get a new code</string>
+    <string name="btn_use_password">Use a password instead</string>
+    <string name="btn_use_code">Use a code instead</string>
+    <string name="msg_code_login_intro">Get a code here, then enter it on the Virtue website while signed in.</string>
+    <string name="msg_code_login_waiting">Waiting for you to approve this code on the website.</string>
+    <string name="msg_code_login_expired">That code expired. Get a new one to sign in.</string>
+    <string name="link_open_devices_page">Open the Devices page</string>
     <string name="btn_sign_up">Don\'t have an account? Sign up</string>
     <string name="btn_sign_out">Sign Out</string>
     <string name="btn_status_details">Status Details</string>

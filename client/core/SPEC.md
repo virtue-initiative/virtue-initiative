@@ -80,13 +80,39 @@ The core MUST expose the following methods to clients. Each blocks until the loo
 
 `login(email, password, device_name?) -> device_id`
 
-MUST revoke any existing device session first, then register a new device with the API. On success MUST store the returned device credentials, settings, and hash token, and MUST enable screenshot capture. On failure MUST leave the client logged out. `device_name` is optional; if absent or blank, the platform's configured default name MUST be used.
+MUST revoke any existing device session first, then register a new device with the API. On success MUST store the returned device credentials, settings, and hash token, and MUST enable screenshot capture. On failure MUST leave the client logged out. `device_name` is optional; if absent or blank, the platform's configured default name MUST be used. This remains available as the password fallback for platforms and situations where the pairing-code flow of CORE-020 cannot be used.
 
 ### CORE-009 logout
 
 `logout()`
 
 MUST best-effort revoke the device session with the API, MUST clear stored device credentials, and MUST disable screenshot capture.
+
+### CORE-020 begin_code_login
+
+`begin_code_login(device_name?) -> { user_code, expires_at_ms, interval_seconds }`
+
+Starts a passwordless sign-in (API-043): the client displays `user_code` and the user types it into an already-signed-in web session.
+
+MUST revoke any existing device session first, for the same reason CORE-008 does. MUST persist the pending pairing, including the device-held secret, so a daemon restart mid-pairing does not invalidate the code already on screen and so a separate client process can poll without ever handling that secret. MUST NOT enable screenshot capture, and MUST NOT otherwise change the client's logged-in state: no device exists yet. `device_name` is resolved exactly as CORE-008 resolves it, and is sent with the pairing so the user sees the device's chosen name before approving.
+
+`interval_seconds` is how long the client SHOULD wait between calls to CORE-021.
+
+### CORE-021 poll_code_login
+
+`poll_code_login() -> Pending | Approved { device_id } | Expired | Unavailable`
+
+MUST return an error if no pairing is pending.
+
+MUST report `Expired` without contacting the server once the pairing's own expiry has passed.
+
+On approval, MUST apply exactly the same state transition CORE-008 specifies — device credentials, settings, hash token, account email, and enabled screenshot capture — and MUST clear the pending pairing.
+
+On expiry, MUST clear the pending pairing and MUST leave the client logged out.
+
+While the pairing is still awaiting approval, MUST leave all state unchanged.
+
+A poll that cannot reach the server MUST report `Unavailable`, MUST leave the pairing pending, and MUST NOT return an error: a pairing waits for minutes, so a dropped connection is an expected event rather than a reason to abandon a code the user is looking at. Callers SHOULD keep polling.
 
 ### CORE-010 status
 

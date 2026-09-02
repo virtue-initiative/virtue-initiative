@@ -627,6 +627,22 @@ export async function deleteExpiredEmailTokensChunk(db: D1Database, cutoff: numb
   return result.meta.changes;
 }
 
+export async function deleteExpiredDeviceAuthCodesChunk(
+  db: D1Database,
+  cutoff: number,
+  limit: number,
+) {
+  const result = await db
+    .prepare(
+      `DELETE FROM device_auth_codes WHERE id IN (
+         SELECT id FROM device_auth_codes WHERE expires_at < ? ORDER BY expires_at ASC LIMIT ?
+       )`,
+    )
+    .bind(cutoff, limit)
+    .run();
+  return result.meta.changes;
+}
+
 export async function deleteExpiredUserSessionsChunk(
   db: D1Database,
   cutoff: number,
@@ -1000,6 +1016,118 @@ export async function consumeEmailToken(
   if (token.user_id) {
     await invalidateEmailTokens(db, token.user_id, token.purpose);
   }
+}
+
+/**
+ * API-043 device pairing codes. `user_code` is normalized (uppercase, no
+ * separator) and `device_code_hash` is the SHA-256 of the device-held secret,
+ * the same shape `email_tokens.token_hash` uses.
+ */
+export async function createDeviceAuthCode(
+  db: D1Database,
+  input: {
+    id: string;
+    user_code: string;
+    device_code_hash: string;
+    name: string;
+    platform: string;
+    expires_at: number;
+    created_at: number;
+    requested_from: string | null;
+  },
+) {
+  return db
+    .prepare(
+      `INSERT INTO device_auth_codes
+         (id, user_code, device_code_hash, name, platform, expires_at, created_at, requested_from)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      uuidToBytes(input.id),
+      input.user_code,
+      input.device_code_hash,
+      input.name,
+      input.platform,
+      input.expires_at,
+      input.created_at,
+      input.requested_from,
+    )
+    .run();
+}
+
+type DeviceAuthCodeRow = {
+  id: string;
+  user_code: string;
+  device_code_hash: string;
+  name: string;
+  platform: string;
+  approved_by: string | null;
+  approved_at: number | null;
+  consumed_at: number | null;
+  expires_at: number;
+  created_at: number;
+  requested_from: string | null;
+};
+
+const DEVICE_AUTH_CODE_COLUMNS = `id, user_code, device_code_hash, name, platform,
+          approved_by, approved_at, consumed_at, expires_at, created_at, requested_from`;
+
+export async function findDeviceAuthCodeByDeviceCodeHash(db: D1Database, deviceCodeHash: string) {
+  return firstWithUuidFields<DeviceAuthCodeRow>(
+    db
+      .prepare(
+        `SELECT ${DEVICE_AUTH_CODE_COLUMNS} FROM device_auth_codes WHERE device_code_hash = ?`,
+      )
+      .bind(deviceCodeHash),
+    ['id', 'approved_by'],
+  );
+}
+
+export async function findDeviceAuthCodeByUserCode(db: D1Database, userCode: string) {
+  return firstWithUuidFields<DeviceAuthCodeRow>(
+    db
+      .prepare(`SELECT ${DEVICE_AUTH_CODE_COLUMNS} FROM device_auth_codes WHERE user_code = ?`)
+      .bind(userCode),
+    ['id', 'approved_by'],
+  );
+}
+
+/**
+ * Approves an unexpired, unapproved pairing. The `approved_by IS NULL` guard is
+ * what stops a double submit from reassigning a code that another session (or
+ * this one, twice) already approved.
+ */
+export async function approveDeviceAuthCode(
+  db: D1Database,
+  userCode: string,
+  approvedBy: string,
+  now: number,
+) {
+  const result = await db
+    .prepare(
+      `UPDATE device_auth_codes SET approved_by = ?, approved_at = ?
+       WHERE user_code = ? AND approved_by IS NULL AND consumed_at IS NULL AND expires_at > ?`,
+    )
+    .bind(uuidToBytes(approvedBy), now, userCode, now)
+    .run();
+  return result.meta.changes > 0;
+}
+
+/**
+ * Claims an approved pairing for its one and only device creation. Two concurrent
+ * polls both read an approved row, but only the UPDATE that flips `consumed_at`
+ * away from NULL reports a change, and only that caller creates the device.
+ */
+export async function claimDeviceAuthCode(db: D1Database, deviceCodeHash: string, now: number) {
+  const result = await db
+    .prepare(
+      `UPDATE device_auth_codes SET consumed_at = ?
+       WHERE device_code_hash = ? AND consumed_at IS NULL
+         AND approved_by IS NOT NULL AND expires_at > ?`,
+    )
+    .bind(now, deviceCodeHash, now)
+    .run();
+  return result.meta.changes > 0;
 }
 
 export async function createSessionRecord(

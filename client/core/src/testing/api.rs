@@ -1,7 +1,10 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use crate::api::{ApiTransport, DeviceState, RegisteredDevice, UploadedBatchResponse};
+use crate::api::{
+    ApiTransport, DeviceCodePoll, DeviceCodeStart, DeviceState, RegisteredDevice,
+    UploadedBatchResponse,
+};
 use crate::error::CoreResult;
 use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, NotifyPayload};
 
@@ -29,6 +32,8 @@ pub struct MockApiState {
     pub logout_calls: Vec<String>,
     pub register_device_calls: Vec<RegisterDeviceCall>,
     pub get_device_settings_calls: Vec<String>,
+    pub start_device_code_calls: Vec<StartDeviceCodeCall>,
+    pub poll_device_code_calls: Vec<String>,
     pub batch_uploads: Vec<BatchCall>,
     /// Derived from each successful `upload_batch` call's `batch.notifications` —
     /// there is no standalone notify method anymore, so this records what the
@@ -40,6 +45,8 @@ pub struct MockApiState {
     pub logout_responses: VecDeque<CoreResult<()>>,
     pub register_device_responses: VecDeque<CoreResult<RegisteredDevice>>,
     pub get_device_settings_responses: VecDeque<CoreResult<DeviceState>>,
+    pub start_device_code_responses: VecDeque<CoreResult<DeviceCodeStart>>,
+    pub poll_device_code_responses: VecDeque<CoreResult<DeviceCodePoll>>,
     pub batch_responses: VecDeque<CoreResult<UploadedBatchResponse>>,
     pub hash_responses: VecDeque<CoreResult<()>>,
 
@@ -48,6 +55,9 @@ pub struct MockApiState {
     pub default_refresh_token: String,
     pub default_hash_token: String,
     pub default_device_settings: DeviceSettings,
+    pub default_account_email: String,
+    pub default_user_code: String,
+    pub default_device_code: String,
     batch_id_counter: u64,
 }
 
@@ -55,6 +65,12 @@ pub struct MockApiState {
 pub struct RegisterDeviceCall {
     pub email: String,
     pub password: String,
+    pub name: String,
+    pub platform: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct StartDeviceCodeCall {
     pub name: String,
     pub platform: String,
 }
@@ -86,6 +102,8 @@ impl Default for MockApiState {
             logout_calls: Vec::new(),
             register_device_calls: Vec::new(),
             get_device_settings_calls: Vec::new(),
+            start_device_code_calls: Vec::new(),
+            poll_device_code_calls: Vec::new(),
             batch_uploads: Vec::new(),
             notify_calls: Vec::new(),
             hash_uploads: Vec::new(),
@@ -93,6 +111,8 @@ impl Default for MockApiState {
             logout_responses: VecDeque::new(),
             register_device_responses: VecDeque::new(),
             get_device_settings_responses: VecDeque::new(),
+            start_device_code_responses: VecDeque::new(),
+            poll_device_code_responses: VecDeque::new(),
             batch_responses: VecDeque::new(),
             hash_responses: VecDeque::new(),
 
@@ -110,6 +130,9 @@ impl Default for MockApiState {
                 }],
                 hash_base_url: None,
             },
+            default_account_email: "mock@example.org".to_string(),
+            default_user_code: "K7R-M3X".to_string(),
+            default_device_code: "dpc_mock".to_string(),
             batch_id_counter: 0,
         }
     }
@@ -132,6 +155,29 @@ impl MockApiClient {
 
     pub fn program_register_device(&self, response: CoreResult<RegisteredDevice>) {
         self.state().register_device_responses.push_back(response);
+    }
+
+    pub fn program_start_device_code(&self, response: CoreResult<DeviceCodeStart>) {
+        self.state().start_device_code_responses.push_back(response);
+    }
+
+    pub fn program_poll_device_code(&self, response: CoreResult<DeviceCodePoll>) {
+        self.state().poll_device_code_responses.push_back(response);
+    }
+
+    /// The canned `Approved` payload a real poll would return, so a test can
+    /// program approval without rebuilding a whole `RegisteredDevice`.
+    pub fn approved_device_code(&self) -> DeviceCodePoll {
+        let state = self.state();
+        DeviceCodePoll::Approved(Box::new(RegisteredDevice {
+            credentials: DeviceCredentials {
+                device_id: state.default_device_id.clone(),
+                refresh_token: state.default_refresh_token.clone(),
+            },
+            settings: state.default_device_settings.clone(),
+            hash_token: state.default_hash_token.clone(),
+            account_email: state.default_account_email.clone(),
+        }))
     }
 
     pub fn program_get_device_settings(&self, response: CoreResult<DeviceState>) {
@@ -190,7 +236,36 @@ impl ApiTransport for MockApiClient {
                 },
                 settings: state.default_device_settings.clone(),
                 hash_token: state.default_hash_token.clone(),
+                account_email: email.trim().to_string(),
             })
+        }
+    }
+
+    fn start_device_code(&self, name: &str, platform: &str) -> CoreResult<DeviceCodeStart> {
+        let mut state = self.state();
+        state.start_device_code_calls.push(StartDeviceCodeCall {
+            name: name.to_string(),
+            platform: platform.to_string(),
+        });
+        if let Some(canned) = state.start_device_code_responses.pop_front() {
+            canned
+        } else {
+            Ok(DeviceCodeStart {
+                user_code: state.default_user_code.clone(),
+                device_code: state.default_device_code.clone(),
+                expires_at_ms: 600_000,
+                interval_seconds: 5,
+            })
+        }
+    }
+
+    fn poll_device_code(&self, device_code: &str) -> CoreResult<DeviceCodePoll> {
+        let mut state = self.state();
+        state.poll_device_code_calls.push(device_code.to_string());
+        if let Some(canned) = state.poll_device_code_responses.pop_front() {
+            canned
+        } else {
+            Ok(DeviceCodePoll::Pending)
         }
     }
 

@@ -130,6 +130,9 @@ function AppShell() {
               <Route path="/signup" component={RedirectToDashboard} />
               <Route path="/forgot-password" component={RedirectToDashboard} />
               <Route path="/" component={Devices} />
+              {/* Named path too, so the clients' "add a device" deep link and
+                  the help docs can point somewhere self-describing. */}
+              <Route path="/devices" component={Devices} />
               <Route path="/partners" component={Partners} />
               <Route path="/logs" component={Logs} />
               <Route path="/logs/list" component={Logs} />

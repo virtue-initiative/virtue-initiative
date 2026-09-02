@@ -238,6 +238,101 @@
                     app:boxBackgroundMode="outline">
 
                     <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/deviceNameInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="@string/device_name_hint"
+                        android:inputType="text" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <!-- Pairing-code sign-in (CORE-020), the default. -->
+                <LinearLayout
+                    android:id="@+id/codeLoginPanel"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:layout_marginTop="12dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/msg_code_login_intro"
+                        android:textSize="14sp"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/getCodeButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:text="@string/btn_get_code"
+                        android:backgroundTint="@color/virtue_forest" />
+
+                    <TextView
+                        android:id="@+id/userCodeText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:gravity="center_horizontal"
+                        android:textSize="34sp"
+                        android:textStyle="bold"
+                        android:letterSpacing="0.15"
+                        android:fontFamily="monospace"
+                        android:textIsSelectable="true"
+                        android:textColor="?attr/colorOnSurface"
+                        android:visibility="gone" />
+
+                    <TextView
+                        android:id="@+id/codeHintText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:gravity="center_horizontal"
+                        android:textSize="14sp"
+                        android:textColor="?attr/colorOnSurfaceVariant"
+                        android:visibility="gone" />
+
+                    <TextView
+                        android:id="@+id/devicesLink"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center_horizontal"
+                        android:layout_marginTop="16dp"
+                        android:text="@string/link_open_devices_page"
+                        android:textSize="14sp"
+                        android:textColor="@color/virtue_link"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:visibility="gone" />
+
+                    <TextView
+                        android:id="@+id/usePasswordLink"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center_horizontal"
+                        android:layout_marginTop="16dp"
+                        android:text="@string/btn_use_password"
+                        android:textSize="14sp"
+                        android:textColor="@color/virtue_link"
+                        android:clickable="true"
+                        android:focusable="true" />
+                </LinearLayout>
+
+                <!-- Password sign-in (CORE-008), the fallback. -->
+                <LinearLayout
+                    android:id="@+id/passwordLoginPanel"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    app:boxBackgroundMode="outline">
+
+                    <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/emailInput"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -262,20 +357,6 @@
                         android:autofillHints="password" />
                 </com.google.android.material.textfield.TextInputLayout>
 
-                <com.google.android.material.textfield.TextInputLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    app:boxBackgroundMode="outline">
-
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/deviceNameInput"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:hint="@string/device_name_hint"
-                        android:inputType="text" />
-                </com.google.android.material.textfield.TextInputLayout>
-
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -290,17 +371,30 @@
                         android:backgroundTint="@color/virtue_forest" />
 
                     <TextView
-                        android:id="@+id/signUpLink"
+                        android:id="@+id/useCodeLink"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_gravity="center_horizontal"
-                        android:layout_marginTop="12dp"
-                        android:text="@string/btn_sign_up"
+                        android:layout_marginTop="16dp"
+                        android:text="@string/btn_use_code"
                         android:textSize="14sp"
                         android:textColor="@color/virtue_link"
                         android:clickable="true"
                         android:focusable="true" />
                 </LinearLayout>
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/signUpLink"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal"
+                    android:layout_marginTop="16dp"
+                    android:text="@string/btn_sign_up"
+                    android:textSize="14sp"
+                    android:textColor="@color/virtue_link"
+                    android:clickable="true"
+                    android:focusable="true" />
             </LinearLayout>
 
             <!-- Session Panel (shown when signed in) -->

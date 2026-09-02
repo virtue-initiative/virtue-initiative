@@ -42,3 +42,36 @@
   font-weight: 600;
   font-size: 1.02rem;
 }
+
+/* Add-device pairing code (API-043) */
+
+.device-code-input {
+  width: 100%;
+  margin-bottom: var(--space-3);
+  text-align: center;
+  text-transform: uppercase;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 2.6rem;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: 0.25em;
+  /* The letter-spacing above trails the last glyph, which would otherwise read
+     as off-center; half of it back as padding recenters the text. */
+  padding-left: 0.125em;
+  text-indent: 0.125em;
+}
+
+.device-code-error {
+  color: var(--danger, var(--text));
+  font-size: var(--text-sm);
+  margin: var(--space-2) 0 0;
+}
+
+.device-code-card {
+  margin: 0 0 var(--space-4);
+}
+
+.device-code-card-code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  letter-spacing: 0.08em;
+}

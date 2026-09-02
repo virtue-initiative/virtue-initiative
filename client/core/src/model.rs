@@ -285,6 +285,26 @@ pub struct AuthState {
     /// existed, and cleared on logout.
     #[serde(default)]
     pub account_email: Option<String>,
+    /// A passwordless pairing (CORE-020) waiting for the user to approve the
+    /// displayed code. Persisted rather than held in memory so a daemon restart
+    /// mid-pairing doesn't invalidate the code already on screen, and so a
+    /// separate client process can drive the polling without ever handling the
+    /// device code itself. `#[serde(default)]` keeps states written before this
+    /// existed readable.
+    #[serde(default)]
+    pub pending_code_login: Option<PendingCodeLogin>,
+}
+
+/// The device's half of an in-flight pairing (API-044). `user_code` is the
+/// display form the user reads off the screen; `device_code` is the secret the
+/// device polls with, wrapped in [`Redacted`] so it can't reach a log line.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingCodeLogin {
+    pub device_code: Redacted<String>,
+    pub user_code: String,
+    pub device_name: String,
+    pub expires_at_ms: i64,
+    pub interval_seconds: u32,
 }
 
 /// One entry in the daemon's recent-errors ring (CORE-018). `context` is a

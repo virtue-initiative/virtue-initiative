@@ -1,6 +1,7 @@
 ---
 import type { MarkdownInstance } from 'astro';
 import { Button } from '@virtueinitiative/shared-web';
+import { applyAppLinks } from '../lib/app-url';
 import LaptopIcon from '../components/icons/LaptopIcon.astro';
 import MobileIcon from '../components/icons/MobileIcon.astro';
 import releaseData from '../data/releases.json';
@@ -148,7 +149,7 @@ const instructionSections = await Promise.all(
       instructionModules[`../content/download-instructions/${platform.instructionsSlug}.md`];
     const html = entry
       ? namespaceHeadingIds(
-          applyDownloadVars(await entry.compiledContent()),
+          applyAppLinks(applyDownloadVars(await entry.compiledContent())),
           platform.instructionsSlug,
         )
       : null;

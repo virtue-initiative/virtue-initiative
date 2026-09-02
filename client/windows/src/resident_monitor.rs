@@ -6,9 +6,10 @@ use std::thread;
 use anyhow::Result;
 use serde::Serialize;
 use virtue_core::Daemon;
-use virtue_core::api::HttpApiClient;
+use virtue_core::api::{DeviceCodeStart, HttpApiClient};
 use virtue_core::force_capture::{self, ForcedCaptureOutcome};
 use virtue_core::model::ServiceStatus;
+use virtue_core::module::auth::CodeLoginPoll;
 
 use crate::capture::WindowsPlatformHooks;
 use crate::config::{ClientPaths, build_core_config};
@@ -221,6 +222,25 @@ pub fn app_login(email: &str, password: &str, device_name: &str) -> Result<Strin
         .map_err(anyhow::Error::from)?;
     note_login_state(true);
     Ok(device_id)
+}
+
+/// CORE-020: start a passwordless pairing and return the code to display.
+pub fn app_begin_code_login(device_name: &str) -> Result<DeviceCodeStart> {
+    let daemon = current_daemon().ok_or_else(|| anyhow::anyhow!("monitoring is not running"))?;
+    daemon
+        .begin_code_login(Some(device_name))
+        .map_err(anyhow::Error::from)
+}
+
+/// CORE-021: check whether the pending pairing has been approved. The login
+/// state is only recorded once a device actually exists.
+pub fn app_poll_code_login() -> Result<CodeLoginPoll> {
+    let daemon = current_daemon().ok_or_else(|| anyhow::anyhow!("monitoring is not running"))?;
+    let outcome = daemon.poll_code_login().map_err(anyhow::Error::from)?;
+    if matches!(outcome, CodeLoginPoll::Approved { .. }) {
+        note_login_state(true);
+    }
+    Ok(outcome)
 }
 
 pub fn app_logout() -> Result<()> {

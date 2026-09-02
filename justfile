@@ -181,6 +181,16 @@ mac-build *args:
 windows-build profile="Debug":
     pwsh ./client/windows/scripts/build-msix.ps1 -Profile {{profile}}
 
+# Build Windows from Linux by driving the virtue-win11 VM over SSH. Smoke check by default; add `--mode msix` to package, or `--build-host <alias>` for another VM. Run `client/windows/scripts/remote-windows-build.sh --help` for all flags.
+[group('windows')]
+windows-build-ssh *args:
+    ./client/windows/scripts/remote-windows-build.sh --build-host virtue-win11 {{args}}
+
+# Make the host's `just dev <domain>` stack reachable from the win11 VM under the same *.localhost names. Run once per VM rebuild.
+[group('windows')]
+windows-vm-network *args:
+    ./client/windows/scripts/setup-vm-dev-network.sh {{args}}
+
 # Run the Windows client's test suite (Windows only).
 [group('windows')]
 [working-directory: 'client']

@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
+use virtue_core::module::auth::CodeLoginPoll;
 
 use crate::config::{ClientPaths, build_core_config, default_device_name};
 use crate::resident_monitor::{self, MonitorStatusSnapshot};
@@ -253,6 +254,50 @@ struct LoginRequest {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
+struct BeginCodeLoginRequest {
+    device_name: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BeginCodeLoginPayload {
+    user_code: String,
+    expires_at_ms: i64,
+    interval_seconds: u32,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PollCodeLoginPayload {
+    status: &'static str,
+    device_id: Option<String>,
+}
+
+impl From<CodeLoginPoll> for PollCodeLoginPayload {
+    fn from(value: CodeLoginPoll) -> Self {
+        match value {
+            CodeLoginPoll::Pending => Self {
+                status: "pending",
+                device_id: None,
+            },
+            CodeLoginPoll::Approved { device_id } => Self {
+                status: "approved",
+                device_id: Some(device_id),
+            },
+            CodeLoginPoll::Expired => Self {
+                status: "expired",
+                device_id: None,
+            },
+            CodeLoginPoll::Unavailable => Self {
+                status: "unavailable",
+                device_id: None,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
 struct ReportIssueRequest {
     message: String,
     contact_email: Option<String>,
@@ -299,6 +344,44 @@ pub extern "C" fn virtue_windows_login(request_json: *const c_char) -> *mut c_ch
         let manager = with_session_manager()?;
         manager.login_blocking(&request.email, &request.password, &device_name)?;
         Ok(())
+    })())
+}
+
+/// CORE-020. Returns the code to display plus the polling interval, as JSON.
+#[unsafe(no_mangle)]
+pub extern "C" fn virtue_windows_begin_code_login(request_json: *const c_char) -> *mut c_char {
+    into_json_ptr((|| {
+        let request_json = c_string_or_empty(request_json);
+        let request: BeginCodeLoginRequest = if request_json.trim().is_empty() {
+            BeginCodeLoginRequest::default()
+        } else {
+            serde_json::from_str(&request_json)
+                .context("failed parsing begin-code-login request json")?
+        };
+
+        let device_name = request
+            .device_name
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(default_device_name);
+
+        let manager = with_session_manager()?;
+        let start = manager.begin_code_login_blocking(&device_name)?;
+        Ok(BeginCodeLoginPayload {
+            user_code: start.user_code,
+            expires_at_ms: start.expires_at_ms,
+            interval_seconds: start.interval_seconds,
+        })
+    })())
+}
+
+/// CORE-021. `status` is one of `pending`, `approved`, or `expired`.
+#[unsafe(no_mangle)]
+pub extern "C" fn virtue_windows_poll_code_login() -> *mut c_char {
+    into_json_ptr((|| {
+        let manager = with_session_manager()?;
+        Ok(PollCodeLoginPayload::from(
+            manager.poll_code_login_blocking()?,
+        ))
     })())
 }
 

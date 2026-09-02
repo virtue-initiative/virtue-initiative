@@ -5,7 +5,7 @@ mod tray;
 
 use std::fs;
 use std::io::{self, Write};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
@@ -18,6 +18,7 @@ use clap::{Args, Parser, Subcommand};
 #[cfg(debug_assertions)]
 use virtue_core::ScreenshotSkipReason;
 use virtue_core::ipc::ClientController;
+use virtue_core::module::auth::CodeLoginPoll;
 use virtue_core::{ScreenshotHooks, StatusSkipReason, Upload, UploadKind};
 
 use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_backend};
@@ -42,6 +43,9 @@ enum Commands {
         email: Option<String>,
         #[arg(long)]
         device_name: Option<String>,
+        /// Sign in with an email and password instead of a pairing code.
+        #[arg(long)]
+        password: bool,
     },
     #[command(about = "Log out and disable monitoring on this device")]
     Logout {
@@ -154,9 +158,20 @@ async fn run() -> Result<()> {
     paths.ensure_dirs()?;
 
     match cli.command {
-        Commands::Login { email, device_name } => {
-            tokio::task::block_in_place(|| login(paths, email, device_name))
-        }
+        Commands::Login {
+            email,
+            device_name,
+            password,
+        } => tokio::task::block_in_place(|| {
+            // `--email` only means anything to the password path, so supplying
+            // it is a request for that path.
+            login(
+                paths,
+                email.clone(),
+                device_name,
+                password || email.is_some(),
+            )
+        }),
         Commands::Logout { yes } => tokio::task::block_in_place(|| logout(paths, yes)),
         Commands::Daemon { command } => daemon_command(paths, command).await,
         Commands::Status { json } => tokio::task::block_in_place(|| status(paths, json)),
@@ -180,40 +195,40 @@ async fn daemon_command(paths: ClientPaths, command: Option<DaemonCommands>) -> 
     }
 }
 
-fn login(paths: ClientPaths, email: Option<String>, device_name: Option<String>) -> Result<()> {
-    println!("Don't have an account? Sign up at https://app.virtueinitiative.org/signup");
-    let email = match email {
-        Some(email) => email,
-        None => {
-            let mut rl = rustyline::DefaultEditor::new()?;
-            rl.readline("Email: ")?
-        }
-    };
-    let password = prompt_password("Password: ")?;
+/// Where the user types their pairing code. Not derived from the compile-time
+/// API URL: a dev build's web app runs on its own port that the API URL doesn't
+/// name (see `scripts/launch.sh`), so a derived link would be wrong exactly
+/// where it would be most confusing.
+const APP_URL: &str = "https://app.virtueinitiative.org";
 
-    // Resolve the device name: use the flag if given, otherwise prompt
-    // interactively with the hostname as the blank-accepts default.
-    let default_name = default_device_name();
-    let device_name = match device_name {
-        Some(name) => name,
-        None => {
-            let mut rl = rustyline::DefaultEditor::new()?;
-            let entered = rl.readline(&format!("Device name [{default_name}]: "))?;
-            let entered = entered.trim();
-            if entered.is_empty() {
-                default_name
-            } else {
-                entered.to_string()
-            }
-        }
-    };
+/// Deep link to the Devices page with the "Add device" dialog already open and
+/// the code filled in, so a terminal that makes URLs clickable leaves the user
+/// nothing to type. `?add` alone opens the dialog empty.
+const ADD_DEVICE_URL: &str = "https://app.virtueinitiative.org/devices?add";
+
+fn login(
+    paths: ClientPaths,
+    email: Option<String>,
+    device_name: Option<String>,
+    use_password: bool,
+) -> Result<()> {
+    let device_name = resolve_device_name(device_name)?;
+
+    println!("Don't have an account? Sign up at {APP_URL}/signup");
 
     let sock = paths.state_dir.join("daemon.sock");
     let mut client =
         ClientController::connect(&sock).context("failed to connect to daemon (is it running?)")?;
-    let device_id = client
-        .login(&email, &password, Some(&device_name))
-        .context("login failed")?;
+
+    let device_id = if use_password {
+        password_login(&mut client, email, &device_name)?
+    } else {
+        match code_login(&mut client, &device_name)? {
+            CodeLoginOutcome::LoggedIn(device_id) => device_id,
+            CodeLoginOutcome::Expired => return Ok(()),
+            CodeLoginOutcome::UsePassword => password_login(&mut client, email, &device_name)?,
+        }
+    };
 
     let probe = probe_backend();
     println!("{}", probe.guidance);
@@ -225,6 +240,161 @@ fn login(paths: ClientPaths, email: Option<String>, device_name: Option<String>)
     }
 
     Ok(())
+}
+
+/// Resolve the device name: use the flag if given, otherwise prompt
+/// interactively with the hostname as the blank-accepts default.
+fn resolve_device_name(device_name: Option<String>) -> Result<String> {
+    let default_name = default_device_name();
+    Ok(match device_name {
+        Some(name) => name,
+        None => {
+            let mut rl = rustyline::DefaultEditor::new()?;
+            let entered = rl.readline(&format!("Device name [{default_name}]: "))?;
+            let entered = entered.trim();
+            if entered.is_empty() {
+                default_name
+            } else {
+                entered.to_string()
+            }
+        }
+    })
+}
+
+fn password_login(
+    client: &mut ClientController,
+    email: Option<String>,
+    device_name: &str,
+) -> Result<String> {
+    let email = match email {
+        Some(email) => email,
+        None => {
+            let mut rl = rustyline::DefaultEditor::new()?;
+            rl.readline("Email: ")?
+        }
+    };
+    let password = prompt_password("Password: ")?;
+
+    client
+        .login(&email, &password, Some(device_name))
+        .context("login failed")
+}
+
+/// How a pairing-code sign-in ended.
+enum CodeLoginOutcome {
+    LoggedIn(String),
+    /// The code expired before anyone approved it. The user has been told.
+    Expired,
+    /// The user pressed Enter to sign in with an email and password instead.
+    UsePassword,
+}
+
+/// CORE-020/CORE-021: show a pairing code and poll until the user approves it in
+/// their web session.
+///
+/// Ctrl-C during the wait is safe: the pairing lives in the daemon's persisted
+/// state, so nothing is left half-applied and `virtue login` can start a fresh
+/// one.
+fn code_login(client: &mut ClientController, device_name: &str) -> Result<CodeLoginOutcome> {
+    let pending = client
+        .begin_code_login(Some(device_name))
+        .context("could not start a code login")?;
+
+    println!();
+    println!("Enter this code at {ADD_DEVICE_URL}={}", pending.user_code);
+    println!();
+    println!("    {}", pending.user_code);
+    println!();
+    println!("Press Enter to sign in with your email and password instead.");
+
+    let interval = Duration::from_secs(pending.interval_seconds.max(1) as u64);
+
+    loop {
+        print_countdown(pending.expires_at_ms);
+        if wait_for_password_switch(interval)? {
+            clear_countdown();
+            println!("Signing in with an email and password instead.");
+            return Ok(CodeLoginOutcome::UsePassword);
+        }
+
+        match client
+            .poll_code_login()
+            .context("could not check the code")?
+        {
+            // Unavailable is the server being unreachable, which a ten-minute
+            // wait should ride out rather than abandon the code over.
+            CodeLoginPoll::Pending | CodeLoginPoll::Unavailable => continue,
+            CodeLoginPoll::Approved { device_id } => {
+                clear_countdown();
+                return Ok(CodeLoginOutcome::LoggedIn(device_id));
+            }
+            CodeLoginPoll::Expired => {
+                clear_countdown();
+                println!("That code expired. Run `virtue login` to get a new one.");
+                return Ok(CodeLoginOutcome::Expired);
+            }
+        }
+    }
+}
+
+/// Waits out one poll interval, returning `true` if the user pressed Enter to
+/// abandon the code and sign in with a password.
+///
+/// Raw mode is what makes a bare Enter visible without the user also having to
+/// send a line; it also means Ctrl-C no longer raises SIGINT, so this handles it
+/// explicitly rather than leaving the terminal wedged. When stdin is not a
+/// terminal (`virtue login` under a script), there are no keypresses to wait
+/// for, so this degrades to a plain sleep.
+fn wait_for_password_switch(interval: Duration) -> Result<bool> {
+    if enable_raw_mode().is_err() {
+        std::thread::sleep(interval);
+        return Ok(false);
+    }
+
+    let deadline = Instant::now() + interval;
+    let result = (|| {
+        while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
+            if !crossterm::event::poll(remaining).context("failed polling for terminal input")? {
+                return Ok(false);
+            }
+            match crossterm::event::read().context("failed reading terminal event")? {
+                Event::Key(KeyEvent {
+                    code: KeyCode::Enter,
+                    ..
+                }) => return Ok(true),
+                Event::Key(KeyEvent {
+                    code: KeyCode::Char(c),
+                    modifiers,
+                    ..
+                }) if (c == 'c' || c == 'd') && modifiers.contains(KeyModifiers::CONTROL) => {
+                    return Err(anyhow::anyhow!("interrupted"));
+                }
+                _ => continue,
+            }
+        }
+        Ok(false)
+    })();
+
+    disable_raw_mode().context("failed restoring terminal mode")?;
+    result
+}
+
+/// Redraws the "waiting" line in place, so the countdown ticks down rather than
+/// scrolling a new line every poll.
+fn print_countdown(expires_at_ms: i64) {
+    let remaining_ms = (expires_at_ms - now_ms()).max(0);
+    let total_seconds = remaining_ms / 1000;
+    print!(
+        "\rWaiting for approval... (expires in {}:{:02})",
+        total_seconds / 60,
+        total_seconds % 60
+    );
+    let _ = io::stdout().flush();
+}
+
+fn clear_countdown() {
+    print!("\r\x1b[2K");
+    let _ = io::stdout().flush();
 }
 
 fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
@@ -746,10 +916,9 @@ fn build_send_kind(args: &SendLogArgs) -> Result<UploadKind> {
     }
 }
 
-/// Current UTC time in milliseconds — used as the `utc_ms` for dev-triggered
-/// `system_login`/`system_logout` events, which have no real login/logout
-/// to report.
-#[cfg(debug_assertions)]
+/// Current UTC time in milliseconds — the pairing-code countdown, and the
+/// `utc_ms` for dev-triggered `system_login`/`system_logout` events, which have
+/// no real login/logout to report.
 fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1077,7 +1246,22 @@ mod tests {
             cli.command,
             Commands::Login {
                 email: None,
-                device_name: None
+                device_name: None,
+                password: false
+            }
+        ));
+    }
+
+    #[test]
+    fn cli_accepts_login_password_flag() {
+        let cli = Cli::try_parse_from(["virtue", "login", "--password"])
+            .expect("login --password should parse");
+        assert!(matches!(
+            cli.command,
+            Commands::Login {
+                email: None,
+                device_name: None,
+                password: true
             }
         ));
     }
@@ -1090,7 +1274,8 @@ mod tests {
             cli.command,
             Commands::Login {
                 email: None,
-                device_name: Some(name)
+                device_name: Some(name),
+                password: false
             } if name == "My Box"
         ));
     }

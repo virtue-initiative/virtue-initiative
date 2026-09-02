@@ -257,6 +257,7 @@ export function extractTokenFromDelivery(
 export async function clearDB(): Promise<void> {
   clearMockEmailDeliveries();
   resetHashServerMock();
+  await env.DB.prepare('DELETE FROM device_auth_codes').run();
   await env.DB.prepare('DELETE FROM email_tokens').run();
   await env.DB.prepare('DELETE FROM user_sessions').run();
   await env.DB.prepare('DELETE FROM device_sessions').run();

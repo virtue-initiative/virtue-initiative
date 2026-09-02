@@ -69,6 +69,36 @@ launch via `Start-Process shell:AppsFolder\...` will **not** show a window on th
 `Get-Process` won't see GUI apps running in the interactive session. Use the virsh keyboard
 method below to launch GUI apps and see them on screen.
 
+## Reach the host's dev stack from the VM
+
+`scripts/launch.sh <domain>` on the host serves `app.<domain>.localhost` and
+friends through Caddy. Windows resolves every name ending in `.localhost` to
+loopback inside `getaddrinfo`, ahead of the hosts file, so hosts entries do not
+work here: `ping` follows them but curl, browsers and .NET do not. Forwarding
+the VM's own loopback ports to the host does work, and Caddy routes on the Host
+header, so ports 80 and 443 cover every dev domain at once.
+
+```bash
+just windows-vm-network        # once per VM rebuild
+```
+
+That sets up the port proxy and trusts Caddy's local CA (needed only for
+`https://` in a browser inside the VM; the Rust client can use the `http://`
+URL and needs no trust store changes). Afterwards, from inside the VM:
+
+```
+http://app.<domain>.localhost          web app
+http://app.<domain>.localhost/api      API
+http://<domain>.localhost              landing
+```
+
+The client's API URL is compile-time, and comes from the repo-root `.env` the
+same way a local build does — that file is synced to the VM, so set it there:
+
+```
+VIRTUE_DEFAULT_API_URL=http://app.<domain>.localhost/api
+```
+
 ## Build the MSIX
 
 Run from the Linux host repo root. Syncs local source to the VM and builds:

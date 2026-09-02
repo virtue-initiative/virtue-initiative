@@ -2,6 +2,8 @@ import {
   api,
   Batch,
   Device,
+  DeviceCodeApproveResponse,
+  DeviceCodeLookupResponse,
   PartnerRelationships,
   User,
   WatcherPartner,
@@ -299,6 +301,35 @@ export class APIClient {
       ?.deleteDeviceData(this.userId, id)
       .catch((err) => console.warn('[api-client] failed to wipe device data from cache', err));
     await this.fetchDevices(true);
+  }
+
+  /** API-046: what device is behind this code, without signing anything in yet. */
+  async lookupDeviceCode(userCode: string): Promise<DeviceCodeLookupResponse> {
+    return api.lookupDeviceCode(userCode);
+  }
+
+  /**
+   * API-047: sign the pending device in to this account. The device row is not
+   * created by this call — API-045 creates it when the device next polls, up to
+   * one poll interval later — so a single refresh here almost always runs too
+   * early and the user sees an unchanged list.
+   */
+  async approveDeviceCode(userCode: string): Promise<DeviceCodeApproveResponse> {
+    const before = new Set((this.devicesCache ?? []).map((device) => device.id));
+    const approved = await api.approveDeviceCode(userCode);
+    // Deliberately not awaited: the dialog should close on approval, and
+    // subscribers pick the new device up whenever it lands.
+    void this.pollForNewDevice(before);
+    return approved;
+  }
+
+  /** Re-fetch on a backoff until a device id we had not seen before appears. */
+  private async pollForNewDevice(before: Set<string>): Promise<void> {
+    for (const delayMs of [0, 1000, 2000, 3000, 5000, 8000]) {
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+      const devices = await this.fetchDevices(true);
+      if (devices?.some((device) => !before.has(device.id))) return;
+    }
   }
 
   private async fetchDevices(force = false): Promise<Device[] | null> {

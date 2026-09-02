@@ -19,6 +19,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import org.virtueinitiative.virtue.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -28,6 +31,9 @@ import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
+
+    /** The pairing-code poll loop (CORE-021), cancelled with the activity. */
+    private var codePollJob: Job? = null
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -49,6 +55,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.loginButton.setOnClickListener { login() }
+        binding.getCodeButton.setOnClickListener { beginCodeLogin() }
+        binding.usePasswordLink.setOnClickListener { showPasswordLogin() }
+        binding.devicesLink.setOnClickListener { openDevicesPage() }
+        binding.useCodeLink.setOnClickListener { showCodeLogin() }
         binding.signOutButton.setOnClickListener { logout() }
         binding.statusDetailsButton.setOnClickListener { showStatusDetails() }
         binding.pauseResumeButton.setOnClickListener { toggleMonitoring() }
@@ -79,19 +89,139 @@ class MainActivity : AppCompatActivity() {
         binding.root.postDelayed({ refreshUi() }, 600)
     }
 
-    private fun login() {
-        // nativeLogin() blocks waiting for a reply from the daemon loop thread,
-        // so the loop must already be running before we call it. The loop is
-        // only ever started by the accessibility service (on connect, or via
-        // resume() after a prior logout paused it) — require that first rather
-        // than attempting a login that can only time out.
+    private fun showPasswordLogin() {
+        stopCodePolling()
+        clearPendingCode()
+        binding.codeLoginPanel.visibility = android.view.View.GONE
+        binding.passwordLoginPanel.visibility = android.view.View.VISIBLE
+    }
+
+    private fun showCodeLogin() {
+        binding.passwordLoginPanel.visibility = android.view.View.GONE
+        binding.codeLoginPanel.visibility = android.view.View.VISIBLE
+    }
+
+    /**
+     * `?add=<code>` opens the "Add device" dialog with the code already in it,
+     * so the user does not have to read it off this screen and type it into the
+     * other device. The link is only shown while a code is pending, so there is
+     * always one to carry.
+     */
+    private fun openDevicesPage() {
+        val code = binding.userCodeText.text.toString()
+        val url = "https://app.virtueinitiative.org/devices?add=" + Uri.encode(code)
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    }
+
+    private fun clearPendingCode() {
+        binding.userCodeText.visibility = android.view.View.GONE
+        binding.codeHintText.visibility = android.view.View.GONE
+        binding.devicesLink.visibility = android.view.View.GONE
+        binding.getCodeButton.setText(R.string.btn_get_code)
+    }
+
+    private fun stopCodePolling() {
+        codePollJob?.cancel()
+        codePollJob = null
+    }
+
+    /**
+     * CORE-020: ask the core for a pairing code, show it, and start polling.
+     * Like [login], this needs the daemon loop already running, since the native
+     * call blocks waiting for it.
+     */
+    private fun beginCodeLogin() {
+        if (!requireDaemonLoop()) return
+
+        val deviceName = binding.deviceNameInput.text?.toString()?.trim()
+            ?.ifBlank { null } ?: deviceName()
+
+        stopCodePolling()
+        binding.getCodeButton.isEnabled = false
+        lifecycleScope.launch {
+            val json = withContext(Dispatchers.IO) {
+                JSONObject(NativeBridge.nativeBeginCodeLogin(deviceName))
+            }
+            binding.getCodeButton.isEnabled = true
+
+            val error = json.optString("error").ifBlank { null }
+            if (error != null) {
+                setStatus("Could not get a code: $error")
+                return@launch
+            }
+
+            binding.userCodeText.text = json.optString("userCode")
+            binding.userCodeText.visibility = android.view.View.VISIBLE
+            binding.codeHintText.setText(R.string.msg_code_login_waiting)
+            binding.codeHintText.visibility = android.view.View.VISIBLE
+            binding.devicesLink.visibility = android.view.View.VISIBLE
+            binding.getCodeButton.setText(R.string.btn_get_new_code)
+
+            startCodePolling(json.optInt("intervalSeconds", 5).coerceAtLeast(1))
+        }
+    }
+
+    /**
+     * Polls at the interval the server asked for (API-044's `interval`). Runs in
+     * `lifecycleScope`, so it stops when the activity does.
+     */
+    private fun startCodePolling(intervalSeconds: Int) {
+        codePollJob = lifecycleScope.launch {
+            while (isActive) {
+                delay(intervalSeconds * 1000L)
+
+                val json = withContext(Dispatchers.IO) {
+                    JSONObject(NativeBridge.nativePollCodeLogin())
+                }
+
+                // A failed poll is usually just a dropped connection, so keep
+                // waiting rather than throwing the code on screen away.
+                if (json.has("error")) continue
+
+                when (json.optString("status")) {
+                    "approved" -> {
+                        clearPendingCode()
+                        // The device never saw the email, so it comes from the
+                        // status the poll just populated (API-045).
+                        accountEmailFromStatus()?.let {
+                            AccountEmailStore.save(this@MainActivity, it)
+                        }
+                        refreshUi()
+                        return@launch
+                    }
+                    "expired" -> {
+                        clearPendingCode()
+                        setStatus(getString(R.string.msg_code_login_expired))
+                        return@launch
+                    }
+                }
+            }
+        }
+    }
+
+    private fun accountEmailFromStatus(): String? =
+        runCatching { JSONObject(NativeBridge.nativeGetStatusJson()).optString("account_email") }
+            .getOrNull()
+            ?.ifBlank { null }
+
+    /**
+     * Both sign-in paths block on the daemon loop thread, which only the
+     * accessibility service starts. Returns false having steered the user to
+     * onboarding when it is not running yet.
+     */
+    private fun requireDaemonLoop(): Boolean {
         if (!VirtueAccessibilityService.isConnected()) {
             showAccessibilityOnboarding()
-            return
+            return false
         }
         if (!VirtueAccessibilityService.isEnabled()) {
             VirtueAccessibilityService.resume()
         }
+        return true
+    }
+
+    private fun login() {
+        if (!requireDaemonLoop()) return
 
         val email = binding.emailInput.text?.toString()?.trim().orEmpty()
         val password = binding.passwordInput.text?.toString().orEmpty()
@@ -191,6 +321,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        stopCodePolling()
         binding.onboardingPanel.visibility = android.view.View.GONE
         binding.loginPanel.visibility = android.view.View.GONE
         binding.sessionPanel.visibility = android.view.View.VISIBLE

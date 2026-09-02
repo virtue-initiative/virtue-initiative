@@ -2,7 +2,7 @@
 import type { MarkdownInstance } from 'astro';
 import HelpLayout from '../../layouts/HelpLayout.astro';
 import { findHelpItem } from '../../help/navigation';
-import { APP_URL } from '../../lib/app-url';
+import { APP_URL, applyAppLinks } from '../../lib/app-url';
 
 type HelpEntry = {
   Content: any;
@@ -38,9 +38,10 @@ const SIGNUP_URL = `${APP_URL}/signup`;
 const { currentPath, entry } = Astro.props;
 const currentItem = findHelpItem(currentPath);
 const contentHtml = hasCompiledContent(entry)
-  ? (await entry.compiledContent())
-      .replaceAll('href="/app"', `href="${APP_URL}"`)
-      .replaceAll('href="/signup"', `href="${SIGNUP_URL}"`)
+  ? applyAppLinks(await entry.compiledContent()).replaceAll(
+      'href="/signup"',
+      `href="${SIGNUP_URL}"`,
+    )
   : null;
 const EntryContent = entry.Content;
 ---

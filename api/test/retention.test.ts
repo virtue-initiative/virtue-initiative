@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { env } from 'cloudflare:test';
-import { pruneExpiredBatches } from '../src/lib/retention';
+import { pruneExpiredBatches, pruneExpiredDeviceAuthCodes } from '../src/lib/retention';
 import { clearDB, createDeviceForUser, signupAndGetCookie, uuidToBytes } from './helpers';
 
 beforeEach(clearDB);
@@ -146,5 +146,38 @@ describe('pruneExpiredBatches', () => {
 
     expect(deleted).toBe(backlogSize);
     expect(await batchCount()).toBe(0);
+  });
+});
+
+describe('pruneExpiredDeviceAuthCodes', () => {
+  async function insertDeviceAuthCode(id: string, expiresAt: number) {
+    await env.DB.prepare(
+      `INSERT INTO device_auth_codes
+         (id, user_code, device_code_hash, name, platform, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(
+        uuidToBytes(id),
+        id.slice(0, 6).toUpperCase(),
+        `hash-${id}`,
+        'Laptop',
+        'linux',
+        expiresAt,
+        0,
+      )
+      .run();
+  }
+
+  it('deletes expired pairings and keeps live ones', async () => {
+    const now = Date.now();
+    await insertDeviceAuthCode('11111111-1111-4111-8111-111111111111', now - 1);
+    await insertDeviceAuthCode('22222222-2222-4222-8222-222222222222', now + 60_000);
+
+    const deleted = await pruneExpiredDeviceAuthCodes(env, now);
+
+    expect(deleted).toBe(1);
+    const remaining = await env.DB.prepare('SELECT user_code FROM device_auth_codes').all();
+    expect(remaining.results).toHaveLength(1);
+    expect(remaining.results[0]).toMatchObject({ user_code: '222222' });
   });
 });

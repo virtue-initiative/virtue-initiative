@@ -22,6 +22,9 @@ public sealed partial class MainWindow : Window
     private const string WebsiteDisplayUrl = "virtueinitiative.org";
     private const string WebsiteNavigateUrl = "https://virtueinitiative.org";
     private const string SignUpNavigateUrl = "https://app.virtueinitiative.org/signup";
+    // `?add` opens the "Add device" dialog on arrival; `?add=<code>` also fills
+    // the code in, so following the link is the whole of the user's side.
+    private const string DevicesNavigateUrl = "https://app.virtueinitiative.org/devices?add";
 
     private readonly AppWindow _appWindow;
     private readonly TextBlock _statusTextBlock;
@@ -30,6 +33,12 @@ public sealed partial class MainWindow : Window
     private readonly TextBlock _updateCheckStatusTextBlock;
     private readonly TextBlock _accountSummaryTextBlock;
     private readonly StackPanel _loginPanel;
+    private readonly StackPanel _codePanel;
+    private readonly StackPanel _passwordPanel;
+    private readonly TextBlock _userCodeTextBlock;
+    private HyperlinkButton? _devicesLink;
+    private readonly TextBlock _codeHintTextBlock;
+    private readonly DispatcherTimer _codePollTimer;
     private readonly StackPanel _accountActionsPanel;
     private readonly StackPanel _signedInActionsPanel;
     private readonly TextBox _emailTextBox;
@@ -41,6 +50,7 @@ public sealed partial class MainWindow : Window
     private readonly TextBlock _updateNoticeTextBlock;
     private readonly Button _restartNowButton = CreateActionButton("Restart now to update");
     private Button? _signInButton;
+    private Button? _getCodeButton;
     private bool _allowClose;
 
     // Warm institutional palette (see shared-web/DESIGN-GUIDELINES.md).
@@ -70,15 +80,24 @@ public sealed partial class MainWindow : Window
         ViewModel = viewModel;
         Title = "Virtue";
 
-        _statusTextBlock = new TextBlock();
-        _statusDetailTextBlock = new TextBlock { TextWrapping = TextWrapping.Wrap };
-        _buildLabelTextBlock = new TextBlock();
-        _updateCheckStatusTextBlock = new TextBlock();
-        _accountSummaryTextBlock = new TextBlock();
+        // WinUI text is not selectable unless it asks to be, so every block that
+        // shows content worth copying -- a pairing code, a device id, an error to
+        // paste into a bug report -- sets IsTextSelectionEnabled.
+        _statusTextBlock = new TextBlock { IsTextSelectionEnabled = true };
+        _statusDetailTextBlock = new TextBlock { IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap };
+        _buildLabelTextBlock = new TextBlock { IsTextSelectionEnabled = true };
+        _updateCheckStatusTextBlock = new TextBlock { IsTextSelectionEnabled = true };
+        _accountSummaryTextBlock = new TextBlock { IsTextSelectionEnabled = true };
         _emailTextBox = new TextBox();
         _passwordBox = new PasswordBox();
         _deviceNameTextBox = new TextBox();
         _loginPanel = new StackPanel();
+        _codePanel = new StackPanel();
+        _passwordPanel = new StackPanel();
+        _userCodeTextBlock = new TextBlock { IsTextSelectionEnabled = true };
+        _codeHintTextBlock = new TextBlock { IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap };
+        _codePollTimer = new DispatcherTimer();
+        _codePollTimer.Tick += CodePollTimer_OnTick;
         _accountActionsPanel = new StackPanel();
         _signedInActionsPanel = new StackPanel();
         _statusDot = new Border
@@ -90,12 +109,14 @@ public sealed partial class MainWindow : Window
         };
         _errorTextBlock = new TextBlock
         {
+            IsTextSelectionEnabled = true,
             TextWrapping = TextWrapping.Wrap,
             Foreground = DangerBrush,
             FontFamily = BodyFont,
         };
         _updateNoticeTextBlock = new TextBlock
         {
+            IsTextSelectionEnabled = true,
             TextWrapping = TextWrapping.Wrap,
             FontFamily = BodyFont,
             Foreground = InkBrush,
@@ -223,6 +244,7 @@ public sealed partial class MainWindow : Window
 
         textStack.Children.Add(new TextBlock
         {
+            IsTextSelectionEnabled = true,
             Text = "Virtue",
             FontFamily = BodyFont,
             FontSize = 32,
@@ -237,12 +259,8 @@ public sealed partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Left,
             Padding = new Thickness(0),
             FontFamily = MonoFont,
-            Foreground = LinkBrush,
         };
-        websiteLink.Resources["HyperlinkButtonForeground"] = LinkBrush;
-        websiteLink.Resources["HyperlinkButtonForegroundPointerOver"] = LinkBrush;
-        websiteLink.Resources["HyperlinkButtonForegroundPressed"] = LinkBrush;
-        websiteLink.Resources["HyperlinkButtonForegroundDisabled"] = Ink3Brush;
+        StyleLink(websiteLink);
         textStack.Children.Add(websiteLink);
 
         return header;
@@ -346,13 +364,11 @@ public sealed partial class MainWindow : Window
 
         _loginPanel.Spacing = 12;
         _loginPanel.Margin = new Thickness(0, 12, 0, 0);
-        _loginPanel.Children.Add(_emailTextBox);
-        _loginPanel.Children.Add(BuildPasswordRow());
+        // The device name is chosen here for both flows, so it sits above the
+        // pair of mode-specific panels rather than inside either one.
         _loginPanel.Children.Add(_deviceNameTextBox);
-
-        _signInButton = CreatePrimaryButton("Sign In");
-        _signInButton.Click += SignInButton_OnClick;
-        _loginPanel.Children.Add(_signInButton);
+        _loginPanel.Children.Add(BuildCodePanel());
+        _loginPanel.Children.Add(BuildPasswordPanel());
 
         var signOutButton = CreateActionButton("Sign Out");
         signOutButton.Click += async (_, _) =>
@@ -370,12 +386,8 @@ public sealed partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Left,
             Padding = new Thickness(0),
             FontFamily = BodyFont,
-            Foreground = LinkBrush,
         };
-        signUpLink.Resources["HyperlinkButtonForeground"] = LinkBrush;
-        signUpLink.Resources["HyperlinkButtonForegroundPointerOver"] = LinkBrush;
-        signUpLink.Resources["HyperlinkButtonForegroundPressed"] = LinkBrush;
-        signUpLink.Resources["HyperlinkButtonForegroundDisabled"] = Ink3Brush;
+        StyleLink(signUpLink);
         _loginPanel.Children.Add(signUpLink);
 
         _accountActionsPanel.Orientation = Orientation.Horizontal;
@@ -391,6 +403,155 @@ public sealed partial class MainWindow : Window
         content.Children.Add(_errorTextBlock);
 
         return CreateCard(content);
+    }
+
+    /// <summary>
+    /// The default sign-in view (CORE-020): name the device, get a code, then
+    /// approve it from an already-signed-in web session.
+    /// </summary>
+    private UIElement BuildCodePanel()
+    {
+        _codePanel.Spacing = 12;
+
+        _codePanel.Children.Add(new TextBlock
+        {
+            IsTextSelectionEnabled = true,
+            Text = "Get a code here, then enter it on the Virtue website while signed in.",
+            TextWrapping = TextWrapping.Wrap,
+            FontFamily = BodyFont,
+            Foreground = Ink2Brush,
+        });
+
+        _getCodeButton = CreatePrimaryButton("Get code");
+        _getCodeButton.Click += GetCodeButton_OnClick;
+        _codePanel.Children.Add(_getCodeButton);
+
+        _userCodeTextBlock.FontFamily = MonoFont;
+        _userCodeTextBlock.FontSize = 40;
+        _userCodeTextBlock.FontWeight = FontWeights.SemiBold;
+        _userCodeTextBlock.CharacterSpacing = 120;
+        _userCodeTextBlock.Foreground = InkBrush;
+        _userCodeTextBlock.Visibility = Visibility.Collapsed;
+        _codePanel.Children.Add(_userCodeTextBlock);
+
+        _codeHintTextBlock.FontFamily = BodyFont;
+        _codeHintTextBlock.Foreground = Ink2Brush;
+        _codeHintTextBlock.Visibility = Visibility.Collapsed;
+        _codePanel.Children.Add(_codeHintTextBlock);
+
+        _devicesLink = new HyperlinkButton
+        {
+            Content = "Open the Devices page",
+            NavigateUri = new Uri(DevicesNavigateUrl),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(0),
+            FontFamily = BodyFont,
+        };
+        StyleLink(_devicesLink);
+        _codePanel.Children.Add(_devicesLink);
+
+        var usePasswordButton = CreateLinkButton("Use a password instead");
+        usePasswordButton.Click += (_, _) =>
+        {
+            StopCodePolling();
+            ViewModel.ShowPasswordLogin();
+            SyncFromViewModel();
+        };
+        _codePanel.Children.Add(usePasswordButton);
+
+        return _codePanel;
+    }
+
+    /// <summary>The password fallback (CORE-008), reached from the code panel's link.</summary>
+    private UIElement BuildPasswordPanel()
+    {
+        _passwordPanel.Spacing = 12;
+        _passwordPanel.Visibility = Visibility.Collapsed;
+        _passwordPanel.Children.Add(_emailTextBox);
+        _passwordPanel.Children.Add(BuildPasswordRow());
+
+        _signInButton = CreatePrimaryButton("Sign In");
+        _signInButton.Click += SignInButton_OnClick;
+        _passwordPanel.Children.Add(_signInButton);
+
+        var useCodeButton = CreateLinkButton("Use a code instead");
+        useCodeButton.Click += (_, _) =>
+        {
+            ViewModel.ShowCodeLogin();
+            SyncFromViewModel();
+        };
+        _passwordPanel.Children.Add(useCodeButton);
+
+        return _passwordPanel;
+    }
+
+    private async void GetCodeButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        await ViewModel.BeginCodeLoginAsync();
+
+        if (ViewModel.HasPendingCode)
+        {
+            StartCodePolling();
+        }
+    }
+
+    /// <summary>
+    /// Polls at the interval the server asked for (API-044's <c>interval</c>),
+    /// rather than a rate this client picks for itself.
+    /// </summary>
+    private void StartCodePolling()
+    {
+        _codePollTimer.Interval = TimeSpan.FromSeconds(Math.Max(1, ViewModel.PendingCodeIntervalSeconds));
+        _codePollTimer.Start();
+    }
+
+    private void StopCodePolling()
+    {
+        _codePollTimer.Stop();
+    }
+
+    private async void CodePollTimer_OnTick(object? sender, object e)
+    {
+        var status = await ViewModel.PollCodeLoginAsync();
+
+        // Only a decision ends the wait. "unavailable" is the server being
+        // unreachable and null is the call itself failing; a pairing lasts ten
+        // minutes, so either is something to poll through rather than a reason
+        // to abandon a code the user is still looking at.
+        if (status is "approved" or "expired")
+        {
+            StopCodePolling();
+        }
+
+        SyncFromViewModel();
+    }
+
+    // The sign-in mode switches. A HyperlinkButton with no NavigateUri is still
+    // just a click handler, and it matches the other links on this page rather
+    // than approximating one with a restyled Button.
+    private static HyperlinkButton CreateLinkButton(string text)
+    {
+        var link = new HyperlinkButton
+        {
+            Content = text,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(0),
+            FontFamily = BodyFont,
+        };
+        StyleLink(link);
+        return link;
+    }
+
+    // Every link on this page, whether it navigates or only switches sign-in
+    // mode. WinUI's default hyperlink foreground is its own accent blue, and it
+    // is set per-state, so all four states have to be overridden together.
+    private static void StyleLink(HyperlinkButton link)
+    {
+        link.Foreground = LinkBrush;
+        link.Resources["HyperlinkButtonForeground"] = LinkBrush;
+        link.Resources["HyperlinkButtonForegroundPointerOver"] = LinkBrush;
+        link.Resources["HyperlinkButtonForegroundPressed"] = LinkBrush;
+        link.Resources["HyperlinkButtonForegroundDisabled"] = Ink3Brush;
     }
 
     private static Border CreateCard(UIElement content) =>
@@ -559,6 +720,7 @@ public sealed partial class MainWindow : Window
         };
         textStack.Children.Add(new TextBlock
         {
+            IsTextSelectionEnabled = true,
             Text = "Stop monitoring and close Virtue?",
             FontFamily = BodyFont,
             FontSize = 20,
@@ -568,6 +730,7 @@ public sealed partial class MainWindow : Window
         });
         textStack.Children.Add(new TextBlock
         {
+            IsTextSelectionEnabled = true,
             Text = "This will stop monitoring on this device and close the main window and tray app.",
             FontFamily = BodyFont,
             TextWrapping = TextWrapping.Wrap,
@@ -575,6 +738,7 @@ public sealed partial class MainWindow : Window
         });
         textStack.Children.Add(new TextBlock
         {
+            IsTextSelectionEnabled = true,
             Text = "People monitoring you may be alerted.",
             FontFamily = BodyFont,
             TextWrapping = TextWrapping.Wrap,
@@ -632,6 +796,7 @@ public sealed partial class MainWindow : Window
         };
         textStack.Children.Add(new TextBlock
         {
+            IsTextSelectionEnabled = true,
             Text = "Signing out will deactivate this device and stop monitoring. Logging in again will create a new device.",
             FontFamily = BodyFont,
             TextWrapping = TextWrapping.Wrap,
@@ -639,6 +804,7 @@ public sealed partial class MainWindow : Window
         });
         textStack.Children.Add(new TextBlock
         {
+            IsTextSelectionEnabled = true,
             Text = "Anyone monitoring you may be alerted.",
             FontFamily = BodyFont,
             TextWrapping = TextWrapping.Wrap,
@@ -681,6 +847,7 @@ public sealed partial class MainWindow : Window
     {
         var statusBlock = new TextBlock
         {
+            IsTextSelectionEnabled = true,
             Text = BuildStatusDetailsText(),
             TextWrapping = TextWrapping.Wrap,
             FontFamily = MonoFont,
@@ -753,6 +920,7 @@ public sealed partial class MainWindow : Window
 
         var includeLogsCaption = new TextBlock
         {
+            IsTextSelectionEnabled = true,
             Text = "Includes timestamps, monitoring status, and error messages from the last day. " +
                    "No screenshots or window titles are included. Known tokens are redacted automatically.",
             TextWrapping = TextWrapping.Wrap,
@@ -764,6 +932,7 @@ public sealed partial class MainWindow : Window
 
         var reportErrorTextBlock = new TextBlock
         {
+            IsTextSelectionEnabled = true,
             TextWrapping = TextWrapping.Wrap,
             Foreground = DangerBrush,
             FontFamily = BodyFont,
@@ -847,6 +1016,7 @@ public sealed partial class MainWindow : Window
             DefaultButton = ContentDialogButton.Close,
             Content = new TextBlock
             {
+                IsTextSelectionEnabled = true,
                 Text = "Thanks — your report was sent to the Virtue Initiative team.",
                 TextWrapping = TextWrapping.Wrap,
                 FontFamily = BodyFont,
@@ -962,6 +1132,7 @@ public sealed partial class MainWindow : Window
             DefaultButton = ContentDialogButton.Close,
             Content = new TextBlock
             {
+                IsTextSelectionEnabled = true,
                 Text = result.Message,
                 TextWrapping = TextWrapping.Wrap,
                 FontFamily = BodyFont,
@@ -1027,11 +1198,35 @@ public sealed partial class MainWindow : Window
             _signedInActionsPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
         }
 
+        _codePanel.Visibility = ViewModel.UseCodeLogin ? Visibility.Visible : Visibility.Collapsed;
+        _passwordPanel.Visibility = ViewModel.UsePasswordLogin ? Visibility.Visible : Visibility.Collapsed;
+
+        var pendingUserCode = ViewModel.PendingUserCode ?? string.Empty;
+        if (_devicesLink is not null)
+        {
+            _devicesLink.NavigateUri = new Uri(
+                pendingUserCode.Length == 0
+                    ? DevicesNavigateUrl
+                    : $"{DevicesNavigateUrl}={Uri.EscapeDataString(pendingUserCode)}");
+        }
+
+        _userCodeTextBlock.Text = pendingUserCode;
+        _userCodeTextBlock.Visibility = ViewModel.HasPendingCode ? Visibility.Visible : Visibility.Collapsed;
+        _codeHintTextBlock.Text = ViewModel.HasPendingCode
+            ? "Waiting for you to approve this code on the website."
+            : string.Empty;
+        _codeHintTextBlock.Visibility = ViewModel.HasPendingCode ? Visibility.Visible : Visibility.Collapsed;
+
         var loginEnabled = !ViewModel.IsBusy;
         _emailTextBox.IsEnabled = loginEnabled;
         _passwordBox.IsEnabled = loginEnabled;
         _deviceNameTextBox.IsEnabled = loginEnabled;
         if (_signInButton is not null) _signInButton.IsEnabled = loginEnabled;
+        if (_getCodeButton is not null)
+        {
+            _getCodeButton.IsEnabled = loginEnabled;
+            _getCodeButton.Content = ViewModel.HasPendingCode ? "Get a new code" : "Get code";
+        }
 
         _errorTextBlock.Text = ViewModel.ErrorText ?? "";
         _errorTextBlock.Visibility = string.IsNullOrWhiteSpace(ViewModel.ErrorText)

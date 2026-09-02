@@ -203,6 +203,7 @@ mod tests {
                 refresh_token: "refresh-abc".to_string(),
             }),
             account_email: Some("alice@example.org".to_string()),
+            pending_code_login: None,
         };
         let event_state = serde_json::json!({ "auth": persisted_auth });
         std::fs::write(
