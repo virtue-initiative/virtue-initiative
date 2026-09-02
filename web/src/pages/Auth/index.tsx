@@ -27,6 +27,11 @@ import {
   SegmentedControl,
 } from '@virtueinitiative/shared-web';
 import { LANDING_URL } from '../../utils/landing-url';
+import {
+  MIN_PASSWORD_LENGTH,
+  checkPwnedPassword,
+  passwordLengthError,
+} from '../../utils/password-policy';
 import { PasswordField } from './PasswordField';
 
 type AuthMode = 'login' | 'signup' | 'forgot' | 'reset' | 'finish-signup';
@@ -68,6 +73,9 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
   // account is actually created, and the emailed link may be opened on a
   // different device than the one that requested it.
   const requiresTermsAcceptance = authMode === 'finish-signup';
+  // The two flows where the user picks a password. Login only checks an
+  // existing one, so the policy must not apply there.
+  const isNewPassword = authMode === 'finish-signup' || authMode === 'reset';
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
@@ -79,6 +87,7 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
   const [signupTokenValid, setSignupTokenValid] = useState(!signupToken);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [signupVerificationEmail, setSignupVerificationEmail] = useState('');
+  const [pwnedCount, setPwnedCount] = useState<number | null>(null);
   const signupVerificationDialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -115,6 +124,25 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
       .finally(() => setLoading(false));
   }, [authMode, signupToken]);
 
+  useEffect(() => {
+    setPwnedCount(null);
+    // Wait until the password passes the length rule so a half-typed password
+    // is not looked up on every keystroke.
+    if (!isNewPassword || passwordLengthError(password)) return;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      checkPwnedPassword(password, controller.signal).then((count) => {
+        if (!controller.signal.aborted) setPwnedCount(count);
+      });
+    }, 400);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [password, isNewPassword]);
+
   async function handleSubmit(e: Event) {
     e.preventDefault();
     setError(null);
@@ -149,6 +177,10 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
         if (password !== confirm) {
           throw new Error('Passwords do not match');
         }
+        const lengthError = passwordLengthError(password);
+        if (lengthError) {
+          throw new Error(lengthError);
+        }
         const client = await finishSignup(signupToken, name.trim() || undefined, password);
         setClient(client);
         setName('');
@@ -167,6 +199,10 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
         }
         if (password !== confirm) {
           throw new Error('Passwords do not match');
+        }
+        const lengthError = passwordLengthError(password);
+        if (lengthError) {
+          throw new Error(lengthError);
         }
         const rotatedKeys = await buildResetKeyMaterial(password);
         await api.resetPassword(resetToken, rotatedKeys.payload);
@@ -321,8 +357,32 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
                 (authMode === 'reset' && !resetTokenValid) ||
                 (authMode === 'finish-signup' && !signupTokenValid)
               }
+              helpText={
+                isNewPassword ? `Use at least ${MIN_PASSWORD_LENGTH} characters.` : undefined
+              }
+              error={
+                isNewPassword && password.length > 0 && password.length < MIN_PASSWORD_LENGTH
+                  ? (passwordLengthError(password) ?? undefined)
+                  : undefined
+              }
             />
           )}
+
+          {pwnedCount ? (
+            <Alert variant="warning" class="auth-flow-hint">
+              This password has appeared in {pwnedCount.toLocaleString()} known data breaches.
+              Choose a different one. Read more at{' '}
+              <a
+                class="auth-link"
+                href="https://haveibeenpwned.com/Passwords"
+                target="_blank"
+                rel="noreferrer"
+              >
+                haveibeenpwned.com
+              </a>
+              .
+            </Alert>
+          ) : null}
 
           {(authMode === 'reset' || authMode === 'finish-signup') && (
             <PasswordField

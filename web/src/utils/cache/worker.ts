@@ -1,4 +1,6 @@
 /// <reference lib="webworker" />
+// The worker has its own global scope, so it needs the polyfill too.
+import '../uint8array-base64';
 import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { decryptAndFlattenBatch, DecryptionError } from '../api/batch-materializer';

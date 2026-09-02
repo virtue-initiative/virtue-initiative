@@ -6,15 +6,17 @@ import { EyeIcon, EyeSlashIcon } from '../../components/icons';
 type PasswordFieldProps = Omit<JSX.IntrinsicElements['input'], 'type' | 'id' | 'size'> & {
   label: string;
   id: string;
+  error?: string;
+  helpText?: string;
 };
 
-export function PasswordField({ label, id, ...inputProps }: PasswordFieldProps) {
+export function PasswordField({ label, id, error, helpText, ...inputProps }: PasswordFieldProps) {
   const [visible, setVisible] = useState(false);
 
   return (
-    <Field label={label} id={id}>
+    <Field label={label} id={id} error={error} helpText={helpText}>
       <div class="auth-password-field">
-        <Input id={id} type={visible ? 'text' : 'password'} {...inputProps} />
+        <Input id={id} type={visible ? 'text' : 'password'} error={!!error} {...inputProps} />
         <button
           type="button"
           class="auth-password-toggle"
