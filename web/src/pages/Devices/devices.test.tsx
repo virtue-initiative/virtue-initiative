@@ -198,6 +198,39 @@ describe('Devices — Add device dialog', () => {
     expect(input.value).toBe('K7R');
   });
 
+  it('keeps the caret where the user was typing', async () => {
+    const user = userEvent.setup();
+    renderWithClient(<Devices />);
+
+    await user.click(await screen.findByRole('button', { name: /add device/i }));
+    const input = screen.getByLabelText(/device code/i) as HTMLInputElement;
+
+    // `type` clicks first, which parks the caret at the end; `keyboard` types
+    // wherever the caret already is, which is the point of these assertions.
+    await user.type(input, 'K7RM');
+    expect(input.selectionStart).toBe(5);
+
+    // Editing mid-string leaves the caret after the character just typed
+    // rather than dumping it at the end of the box.
+    await user.keyboard('3X');
+    input.setSelectionRange(1, 1);
+    await user.keyboard('9');
+    expect(input.value).toBe('K97-RM3');
+    expect(input.selectionStart).toBe(2);
+
+    // A rejected character moves nothing at all.
+    await user.keyboard('-');
+    expect(input.value).toBe('K97-RM3');
+    expect(input.selectionStart).toBe(2);
+
+    // Backspacing the dash takes the code character before it, and the caret
+    // follows that deletion instead of jumping to the end.
+    input.setSelectionRange(4, 4);
+    await user.keyboard('{Backspace}');
+    expect(input.value).toBe('K9R-M3');
+    expect(input.selectionStart).toBe(2);
+  });
+
   it('shows the error the server returns for an invalid code', async () => {
     server.use(
       http.post(`${BASE}/device-code/lookup`, () =>

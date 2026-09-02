@@ -31,6 +31,9 @@ import './style.css';
 
 const DOWNLOAD_URL = `${LANDING_URL}/download`;
 
+/** The characters a pairing code can contain, in the order they were given. */
+const codeCharsOf = (value: string) => value.toUpperCase().replace(/[^0-9A-Z]/g, '');
+
 export function Devices() {
   const api = useAPIContext();
   const userId = api?.userId ?? null;
@@ -120,13 +123,37 @@ function AddDeviceButton() {
    * dash, pasted with one, lowercase, or spaced. Characters outside the code
    * alphabet are dropped rather than rejected, which is how the server
    * normalizes too (API-046), so a pasted `k7r m3x` just works.
+   *
+   * Reformatting inserts and drops characters, so the caret is remapped by how
+   * many code characters precede it rather than restored to its raw offset.
    */
-  function handleCodeInput(raw: string) {
-    const cleaned = raw
-      .toUpperCase()
-      .replace(/[^0-9A-Z]/g, '')
-      .slice(0, 6);
-    setCode(cleaned.length > 3 ? `${cleaned.slice(0, 3)}-${cleaned.slice(3)}` : cleaned);
+  function handleCodeInput(input: HTMLInputElement, backspaced: boolean) {
+    const raw = input.value;
+    const caret = input.selectionStart ?? raw.length;
+    let cleaned = codeCharsOf(raw).slice(0, 6);
+    let precedingChars = Math.min(codeCharsOf(raw.slice(0, caret)).length, cleaned.length);
+
+    // Backspace over the dash deletes a character the user never typed, so
+    // reformatting would put it straight back and the key would look dead.
+    // Take the code character before it instead.
+    if (backspaced && cleaned === userCode && precedingChars > 0) {
+      cleaned = cleaned.slice(0, precedingChars - 1) + cleaned.slice(precedingChars);
+      precedingChars -= 1;
+    }
+
+    const formatted = cleaned.length > 3 ? `${cleaned.slice(0, 3)}-${cleaned.slice(3)}` : cleaned;
+    const caretAfter = Math.min(
+      precedingChars > 3 ? precedingChars + 1 : precedingChars,
+      formatted.length,
+    );
+
+    // Written straight to the DOM as well as to state: a keystroke that changes
+    // nothing (a rejected character, say) re-renders nothing, so state alone
+    // would leave the raw text in the box. Doing it here also means the render
+    // that follows finds the value already correct and leaves the caret alone.
+    input.value = formatted;
+    input.setSelectionRange(caretAfter, caretAfter);
+    setCode(formatted);
   }
 
   async function handleLookup(e: Event) {
@@ -189,7 +216,12 @@ function AddDeviceButton() {
               <Input
                 class="device-code-input"
                 value={code}
-                onInput={(e) => handleCodeInput((e.target as HTMLInputElement).value)}
+                onInput={(e: InputEvent) =>
+                  handleCodeInput(
+                    e.target as HTMLInputElement,
+                    e.inputType === 'deleteContentBackward',
+                  )
+                }
                 placeholder="XXX-XXX"
                 aria-label="Device code"
                 autocomplete="off"
