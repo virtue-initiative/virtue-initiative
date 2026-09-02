@@ -300,7 +300,7 @@
                         android:layout_marginTop="16dp"
                         android:text="@string/link_open_devices_page"
                         android:textSize="14sp"
-                        android:textColor="@color/virtue_forest"
+                        android:textColor="@color/virtue_link"
                         android:clickable="true"
                         android:focusable="true"
                         android:visibility="gone" />
@@ -313,7 +313,7 @@
                         android:layout_marginTop="16dp"
                         android:text="@string/btn_use_password"
                         android:textSize="14sp"
-                        android:textColor="@color/virtue_forest"
+                        android:textColor="@color/virtue_link"
                         android:clickable="true"
                         android:focusable="true" />
                 </LinearLayout>
@@ -392,7 +392,7 @@
                     android:layout_marginTop="16dp"
                     android:text="@string/btn_sign_up"
                     android:textSize="14sp"
-                    android:textColor="@color/virtue_forest"
+                    android:textColor="@color/virtue_link"
                     android:clickable="true"
                     android:focusable="true" />
             </LinearLayout>

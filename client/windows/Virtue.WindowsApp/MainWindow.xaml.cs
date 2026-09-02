@@ -522,28 +522,20 @@ public sealed partial class MainWindow : Window
         SyncFromViewModel();
     }
 
-    // A hyperlink-styled text button for switching sign-in modes.
-    private static Button CreateLinkButton(string text)
+    // The sign-in mode switches. A HyperlinkButton with no NavigateUri is still
+    // just a click handler, and it matches the other links on this page rather
+    // than approximating one with a restyled Button.
+    private static HyperlinkButton CreateLinkButton(string text)
     {
-        var button = new Button
+        var link = new HyperlinkButton
         {
             Content = text,
             HorizontalAlignment = HorizontalAlignment.Left,
             Padding = new Thickness(0),
             FontFamily = BodyFont,
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
-            BorderThickness = new Thickness(0),
         };
-        button.Resources["ButtonBackground"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        button.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        button.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        button.Resources["ButtonForeground"] = ForestBrush;
-        button.Resources["ButtonForegroundPointerOver"] = Forest3Brush;
-        button.Resources["ButtonForegroundPressed"] = Forest2Brush;
-        button.Resources["ButtonBorderBrush"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        button.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        button.Resources["ButtonBorderBrushPressed"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        return button;
+        StyleLink(link);
+        return link;
     }
 
     private static void StyleLink(HyperlinkButton link)
