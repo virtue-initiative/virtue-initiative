@@ -853,10 +853,9 @@ fn build_send_kind(args: &SendLogArgs) -> Result<UploadKind> {
     }
 }
 
-/// Current UTC time in milliseconds — used as the `utc_ms` for dev-triggered
-/// `system_login`/`system_logout` events, which have no real login/logout
-/// to report.
-#[cfg(debug_assertions)]
+/// Current UTC time in milliseconds — the pairing-code countdown, and the
+/// `utc_ms` for dev-triggered `system_login`/`system_logout` events, which have
+/// no real login/logout to report.
 fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
