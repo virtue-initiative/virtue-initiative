@@ -92,10 +92,11 @@ http://app.<domain>.localhost/api      API
 http://<domain>.localhost              landing
 ```
 
-The client's API URL is compile-time, so point a build at it with:
+The client's API URL is compile-time, and comes from the repo-root `.env` the
+same way a local build does — that file is synced to the VM, so set it there:
 
-```bash
-just windows-build-ssh --mode msix --api-url http://app.<domain>.localhost/api
+```
+VIRTUE_DEFAULT_API_URL=http://app.<domain>.localhost/api
 ```
 
 ## Build the MSIX

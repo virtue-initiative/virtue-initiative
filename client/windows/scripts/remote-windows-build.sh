@@ -19,10 +19,6 @@ Options:
   --target <triple>               Rust target for packaging modes. Default: x86_64-pc-windows-msvc
   --profile <Debug|Release>       Packaging profile. Default: Debug
   --version <version>             Artifact label. Default: 0.1.2-dev
-  --api-url <url>                 Bake VIRTUE_DEFAULT_API_URL into the build, to
-                                  point the app at a dev API. The URL is resolved
-                                  inside the VM, so a host-only name needs
-                                  setup-vm-dev-network.sh to have been run.
   --clean                         Run cargo clean before packaging
   --skip-sync                     Reuse remote source tree without uploading local client/
   --log-dir <dir>                 Local directory for full remote run logs.
@@ -49,7 +45,6 @@ CACHE_ROOT="C:/virtue-build/cache"
 TARGET="x86_64-pc-windows-msvc"
 PROFILE="Debug"
 VERSION="0.1.2-dev"
-API_URL=""
 CLEAN=0
 SKIP_SYNC=0
 LOG_DIR="$REPO_ROOT/client/windows/dist/remote-logs"
@@ -84,10 +79,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --version)
       VERSION="${2:-}"
-      shift 2
-      ;;
-    --api-url)
-      API_URL="${2:-}"
       shift 2
       ;;
     --clean)
@@ -154,6 +145,16 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 REMOTE_ARCHIVE_NAME="virtue-client-src.tgz"
 REMOTE_SCRIPT_NAME="virtue-remote-build.ps1"
 
+# The compile-time defaults in client/core/build.rs (VIRTUE_DEFAULT_API_URL and
+# friends) come from the repo-root .env, so the remote build needs it to produce
+# the same binary a local build would. It is gitignored and often absent.
+SYNC_PATHS=(client)
+HAS_DOTENV='$false'
+if [[ -f "$REPO_ROOT/.env" ]]; then
+  SYNC_PATHS+=(.env)
+  HAS_DOTENV='$true'
+fi
+
 if [[ $SKIP_SYNC -eq 0 ]]; then
   ARCHIVE_PATH="$TMP_DIR/$REMOTE_ARCHIVE_NAME"
   tar -C "$REPO_ROOT" \
@@ -163,7 +164,7 @@ if [[ $SKIP_SYNC -eq 0 ]]; then
     --exclude='client/android/.gradle' \
     --exclude='client/android/**/build' \
     -czf "$ARCHIVE_PATH" \
-    client
+    "${SYNC_PATHS[@]}"
   scp -q "$ARCHIVE_PATH" "$BUILD_HOST:$REMOTE_ARCHIVE_NAME"
 fi
 
@@ -181,9 +182,9 @@ cat >"$TMP_DIR/$REMOTE_SCRIPT_NAME" <<EOF
 \$target = '$(ps_quote "$TARGET")'
 \$buildProfile = '$(ps_quote "$PROFILE")'
 \$version = '$(ps_quote "$VERSION")'
-\$apiUrl = '$(ps_quote "$API_URL")'
 \$clean = $CLEAN_BOOL
 \$skipSync = $( [[ $SKIP_SYNC -eq 1 ]] && echo '$true' || echo '$false' )
+\$hasDotEnv = $HAS_DOTENV
 \$signingCertPath = '$(ps_quote "$SIGNING_CERT_PATH")'
 \$signingCertPass = '$(ps_quote "$SIGNING_CERT_PASS")'
 
@@ -203,6 +204,12 @@ if (-not \$skipSync) {
         Remove-Item -Recurse -Force \$clientDir
     }
     tar -xf \$archivePath -C \$repoRoot
+
+    # An .env left by an earlier run would otherwise keep overriding the build
+    # defaults invisibly after the local one is deleted.
+    if (-not \$hasDotEnv) {
+        Remove-Item (Join-Path \$repoRoot ".env") -ErrorAction SilentlyContinue
+    }
 }
 
 if (-not (Test-Path \$clientDir)) {
@@ -222,13 +229,6 @@ try {
         New-Item -ItemType Directory -Force -Path \$targetDir | Out-Null
         New-Item -ItemType Directory -Force -Path \$sccacheDir | Out-Null
         \$env:CARGO_TARGET_DIR = \$targetDir
-
-        # Compile-time only (client/core/build.rs), so it has to be set before
-        # cargo runs rather than configured in the installed app.
-        if (\$apiUrl) {
-            \$env:VIRTUE_DEFAULT_API_URL = \$apiUrl
-            Write-Host "Building against API: \$apiUrl"
-        }
 
         Remove-Item Env:RUSTC_WRAPPER -ErrorAction SilentlyContinue
         Remove-Item Env:SCCACHE_DIR -ErrorAction SilentlyContinue

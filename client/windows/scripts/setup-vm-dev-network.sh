@@ -92,7 +92,7 @@ Done. From inside the VM, with `scripts/launch.sh <domain>` running on the host:
   http://app.<domain>.localhost/api      API
   http://<domain>.localhost              landing
 
-Build the Windows client against it (the URL is compile-time):
+Point the client at it via the repo-root .env, which is synced to the VM:
 
-  just windows-build-ssh --mode msix --api-url http://app.<domain>.localhost/api
+  VIRTUE_DEFAULT_API_URL=http://app.<domain>.localhost/api
 EOF
