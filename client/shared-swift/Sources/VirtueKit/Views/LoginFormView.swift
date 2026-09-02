@@ -63,7 +63,7 @@ public struct LoginFormView: View {
                 destination: URL(string: "https://app.virtueinitiative.org/signup")!
             )
             .font(.subheadline)
-            .foregroundStyle(VirtueBrand.accent)
+            .foregroundStyle(VirtueBrand.link)
 
             if let loginError {
                 Text(loginError)

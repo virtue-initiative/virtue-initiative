@@ -13,6 +13,14 @@ private func virtue_ios_native_login(
     _ deviceName: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
+@_silgen_name("virtue_ios_native_begin_code_login")
+private func virtue_ios_native_begin_code_login(
+    _ deviceName: UnsafePointer<CChar>?
+) -> UnsafeMutablePointer<CChar>?
+
+@_silgen_name("virtue_ios_native_poll_code_login")
+private func virtue_ios_native_poll_code_login() -> UnsafeMutablePointer<CChar>?
+
 @_silgen_name("virtue_ios_native_logout")
 private func virtue_ios_native_logout() -> UnsafeMutablePointer<CChar>?
 
@@ -49,6 +57,7 @@ private func virtue_ios_native_request_resume_monitoring() -> UnsafeMutablePoint
 
 @_silgen_name("virtue_ios_free_string")
 private func virtue_ios_free_string(_ value: UnsafeMutablePointer<CChar>?)
+
 
 enum NativeBridge {
     private static let initLock = NSLock()
@@ -158,6 +167,26 @@ enum NativeBridge {
         }
     }
 
+    /// CORE-020. Like `login`, this blocks on the daemon loop, so it has to run
+    /// inside `withDaemonLoop`.
+    static func beginCodeLogin(deviceName: String) -> Result<CodeLoginStart, String> {
+        let json = withDaemonLoop {
+            deviceName.withCString { deviceNameCString in
+                consumeOptionalString(virtue_ios_native_begin_code_login(deviceNameCString))
+            }
+        }
+        return decodeCodeLoginStart(json)
+    }
+
+    /// CORE-021. One poll; the caller paces the calls at the interval the
+    /// server asked for.
+    static func pollCodeLogin() -> CodeLoginPoll {
+        let json = withDaemonLoop {
+            consumeOptionalString(virtue_ios_native_poll_code_login())
+        }
+        return decodeCodeLoginPoll(json)
+    }
+
     static func isLoggedIn() -> Bool {
         virtue_ios_native_is_logged_in()
     }
@@ -234,15 +263,19 @@ enum NativeBridge {
         }
     }
 
+    private static func consumeOptionalString(_ ptr: UnsafeMutablePointer<CChar>?) -> String? {
+        guard let ptr else {
+            return nil
+        }
+        let value = String(cString: ptr)
+        virtue_ios_free_string(ptr)
+        return value
+    }
+
     private static func callReturningError(
         _ call: () -> UnsafeMutablePointer<CChar>?
     ) -> String? {
-        guard let errorPtr = call() else {
-            return nil
-        }
-        let message = String(cString: errorPtr)
-        virtue_ios_free_string(errorPtr)
-        return message
+        consumeOptionalString(call())
     }
 
     private static func withOptionalCString<Result>(

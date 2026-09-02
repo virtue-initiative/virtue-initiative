@@ -29,6 +29,11 @@ final class MonitoringCoordinator: ObservableObject {
     @Published private(set) var isSigningIn: Bool = false
     @Published private(set) var isSigningOut: Bool = false
     @Published private(set) var loginError: String?
+    /// False while the pairing-code view is showing (CORE-020), true once the
+    /// user has picked "Use a password instead" (CORE-008).
+    @Published private(set) var usePasswordLogin: Bool = false
+    @Published private(set) var pendingUserCode: String?
+    @Published private(set) var isRequestingCode: Bool = false
     @Published private(set) var deviceId: String = "<none>"
     @Published private(set) var accountEmail: String?
 
@@ -51,6 +56,9 @@ final class MonitoringCoordinator: ObservableObject {
 
     private var statusTimer: Timer?
     private var isPolling = false
+    /// Drives CORE-021 at the interval the server asked for. Separate from
+    /// `statusTimer`, which runs at its own cadence for the whole app.
+    private var codePollTimer: Timer?
     /// `VirtueBuildLabel` as it was on disk when this process launched, for
     /// detecting that the bundle has since been replaced. See
     /// `checkForReplacedBundle`.
@@ -118,6 +126,100 @@ final class MonitoringCoordinator: ObservableObject {
 
     deinit {
         statusTimer?.invalidate()
+        codePollTimer?.invalidate()
+    }
+
+    // MARK: - Pairing-code login (CORE-020 / CORE-021)
+
+    func showPasswordLogin() {
+        stopCodePolling()
+        pendingUserCode = nil
+        loginError = nil
+        usePasswordLogin = true
+    }
+
+    func showCodeLogin() {
+        loginError = nil
+        usePasswordLogin = false
+    }
+
+    /// Asks the daemon for a pairing code and starts polling for its approval.
+    /// Nothing about the signed-in state changes until a poll comes back
+    /// approved — no device exists before then.
+    func beginCodeLogin() {
+        stopCodePolling()
+        loginError = nil
+        isRequestingCode = true
+        let resolvedDeviceName = resolvedDeviceName()
+
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                NativeBridge.beginCodeLogin(deviceName: resolvedDeviceName)
+            }.value
+            isRequestingCode = false
+
+            switch result {
+            case .failure(let message):
+                pendingUserCode = nil
+                loginError = message
+            case .success(let start):
+                pendingUserCode = start.userCode
+                startCodePolling(
+                    intervalSeconds: start.intervalSeconds ?? defaultCodeLoginIntervalSeconds
+                )
+            }
+        }
+    }
+
+    private func startCodePolling(intervalSeconds: Int) {
+        let interval = TimeInterval(max(1, intervalSeconds))
+        codePollTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) {
+            [weak self] _ in
+            Task { @MainActor in
+                self?.pollCodeLogin()
+            }
+        }
+    }
+
+    private func stopCodePolling() {
+        codePollTimer?.invalidate()
+        codePollTimer = nil
+    }
+
+    private func pollCodeLogin() {
+        Task {
+            let outcome = await Task.detached(priority: .userInitiated) {
+                NativeBridge.pollCodeLogin()
+            }.value
+
+            switch outcome {
+            case .pending:
+                return
+            case .unavailable, .failed:
+                // Usually a transient IPC or network blip. Keep the code on
+                // screen and try again on the next tick rather than making the
+                // user fetch a new one.
+                return
+            case .approved:
+                stopCodePolling()
+                pendingUserCode = nil
+                password = ""
+                refreshSessionState()
+                // Same as the password path: don't auto-request screen-capture
+                // access, so the one-per-launch prompt isn't consumed before
+                // the user clicks "Request Permissions".
+                refreshPermissionPhase()
+            case .expired:
+                stopCodePolling()
+                pendingUserCode = nil
+                loginError = "That code expired. Get a new one to sign in."
+            }
+        }
+    }
+
+    private func resolvedDeviceName() -> String {
+        let trimmed = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? NativeBridge.defaultDeviceName() : trimmed
     }
 
     // MARK: - Login / logout
@@ -136,10 +238,7 @@ final class MonitoringCoordinator: ObservableObject {
         isSigningIn = true
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         let pw = password
-        let trimmedDeviceName = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedDeviceName = trimmedDeviceName.isEmpty
-            ? NativeBridge.defaultDeviceName()
-            : trimmedDeviceName
+        let resolvedDeviceName = resolvedDeviceName()
 
         Task {
             let error = await Task.detached(priority: .userInitiated) {
@@ -160,6 +259,8 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     func logout() {
+        stopCodePolling()
+        pendingUserCode = nil
         isSigningOut = true
         Task {
             _ = await Task.detached(priority: .userInitiated) {

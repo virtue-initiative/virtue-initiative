@@ -10,6 +10,7 @@ use anyhow::{anyhow, Context, Result};
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
 use virtue_core::api::{BugReportRequest, HttpApiClient};
+use virtue_core::module::auth::CodeLoginPoll;
 use virtue_core::{
     AuthState, Config, CoreError, CoreResult, Daemon, DeviceSettings, LifecycleHooks, Screenshot,
     ScreenshotHooks,
@@ -264,6 +265,57 @@ pub extern "C" fn virtue_ios_native_login(
     })();
 
     into_c_result(result)
+}
+
+/// CORE-020: start a passwordless pairing and return the code to display.
+/// JSON: `{"userCode": …, "expiresAtMs": …, "intervalSeconds": …}`, or
+/// `{"error": …}`. The device code itself stays in the daemon's state.
+#[no_mangle]
+pub extern "C" fn virtue_ios_native_begin_code_login(device_name: *const c_char) -> *mut c_char {
+    let json = (|| -> Result<String> {
+        let device_name = c_string_or_empty(device_name);
+        let core = core()?;
+        let start = core
+            .daemon
+            .begin_code_login(Some(&device_name))
+            .map_err(|err| anyhow!(err.to_string()))?;
+        Ok(serde_json::json!({
+            "userCode": start.user_code,
+            "expiresAtMs": start.expires_at_ms,
+            "intervalSeconds": start.interval_seconds,
+        })
+        .to_string())
+    })();
+
+    into_json_c_result(json)
+}
+
+/// CORE-021: one poll. JSON: `{"status": "pending"|"approved"|"expired",
+/// "accountEmail": …}`, or `{"error": …}`. `accountEmail` is present only on
+/// approval: in this flow the device never sees the email until the server
+/// sends it (API-045), and the app layer persists it for the bug-report form.
+#[no_mangle]
+pub extern "C" fn virtue_ios_native_poll_code_login() -> *mut c_char {
+    let json = (|| -> Result<String> {
+        let core = core()?;
+        let outcome = core
+            .daemon
+            .poll_code_login()
+            .map_err(|err| anyhow!(err.to_string()))?;
+
+        Ok(match outcome {
+            CodeLoginPoll::Pending => serde_json::json!({ "status": "pending" }),
+            CodeLoginPoll::Approved { .. } => serde_json::json!({
+                "status": "approved",
+                "accountEmail": core.daemon.status().account_email,
+            }),
+            CodeLoginPoll::Expired => serde_json::json!({ "status": "expired" }),
+            CodeLoginPoll::Unavailable => serde_json::json!({ "status": "unavailable" }),
+        }
+        .to_string())
+    })();
+
+    into_json_c_result(json)
 }
 
 #[no_mangle]
@@ -588,6 +640,17 @@ fn c_string_or_empty(ptr: *const c_char) -> String {
     unsafe { CStr::from_ptr(ptr) }
         .to_string_lossy()
         .into_owned()
+}
+
+/// Like [`into_c_result`], but for the calls that answer with a JSON payload:
+/// a failure comes back as `{"error": …}` rather than a null pointer, so the
+/// Swift side has one shape to decode either way.
+fn into_json_c_result(result: Result<String>) -> *mut c_char {
+    let json =
+        result.unwrap_or_else(|err| serde_json::json!({ "error": format!("{err:#}") }).to_string());
+    CString::new(json)
+        .map(CString::into_raw)
+        .unwrap_or(std::ptr::null_mut())
 }
 
 fn into_c_result(result: Result<()>) -> *mut c_char {
