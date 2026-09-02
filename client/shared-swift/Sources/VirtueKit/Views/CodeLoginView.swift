@@ -61,12 +61,9 @@ public struct CodeLoginView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
             }
 
-            Link(
-                "Open the Devices page",
-                destination: URL(string: "https://app.virtueinitiative.org/devices?add")!
-            )
-            .font(.subheadline)
-            .foregroundStyle(VirtueBrand.link)
+            Link("Open the Devices page", destination: devicesURL)
+                .font(.subheadline)
+                .foregroundStyle(VirtueBrand.link)
 
             Button("Use a password instead", action: onUsePassword)
                 .buttonStyle(.plain)
@@ -79,6 +76,19 @@ public struct CodeLoginView: View {
                     .foregroundStyle(VirtueBrand.danger)
             }
         }
+    }
+
+    /// `?add` opens the "Add device" dialog on arrival and `?add=<code>` fills
+    /// the code in too, so following this link from the device showing the code
+    /// leaves the user nothing to type.
+    private var devicesURL: URL {
+        let base = "https://app.virtueinitiative.org/devices?add"
+        guard let userCode, !userCode.isEmpty,
+              let withCode = URL(string: "\(base)=\(userCode)")
+        else {
+            return URL(string: base)!
+        }
+        return withCode
     }
 
     private var buttonTitle: String {
