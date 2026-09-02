@@ -514,9 +514,11 @@ public sealed partial class MainWindow : Window
     {
         var status = await ViewModel.PollCodeLoginAsync();
 
-        // Anything but "pending" ends the wait: approved and expired both clear
-        // the code, and a null status means the call itself failed.
-        if (status != "pending")
+        // Only a decision ends the wait. "unavailable" is the server being
+        // unreachable and null is the call itself failing; a pairing lasts ten
+        // minutes, so either is something to poll through rather than a reason
+        // to abandon a code the user is still looking at.
+        if (status is "approved" or "expired")
         {
             StopCodePolling();
         }

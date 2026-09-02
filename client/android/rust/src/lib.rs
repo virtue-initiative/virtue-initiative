@@ -410,6 +410,9 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativePollC
                         serde_json::json!({ "status": "approved", "deviceId": device_id })
                     }
                     CodeLoginPoll::Expired => serde_json::json!({ "status": "expired" }),
+                    CodeLoginPoll::Unavailable => {
+                        serde_json::json!({ "status": "unavailable" })
+                    }
                 }
                 .to_string())
             })()

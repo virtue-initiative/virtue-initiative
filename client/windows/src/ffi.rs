@@ -288,6 +288,10 @@ impl From<CodeLoginPoll> for PollCodeLoginPayload {
                 status: "expired",
                 device_id: None,
             },
+            CodeLoginPoll::Unavailable => Self {
+                status: "unavailable",
+                device_id: None,
+            },
         }
     }
 }

@@ -321,7 +321,9 @@ fn code_login(client: &mut ClientController, device_name: &str) -> Result<CodeLo
             .poll_code_login()
             .context("could not check the code")?
         {
-            CodeLoginPoll::Pending => continue,
+            // Unavailable is the server being unreachable, which a ten-minute
+            // wait should ride out rather than abandon the code over.
+            CodeLoginPoll::Pending | CodeLoginPoll::Unavailable => continue,
             CodeLoginPoll::Approved { device_id } => {
                 clear_countdown();
                 return Ok(CodeLoginOutcome::LoggedIn(device_id));

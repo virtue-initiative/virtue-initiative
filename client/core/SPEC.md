@@ -100,15 +100,19 @@ MUST revoke any existing device session first, for the same reason CORE-008 does
 
 ### CORE-021 poll_code_login
 
-`poll_code_login() -> Pending | Approved { device_id } | Expired`
+`poll_code_login() -> Pending | Approved { device_id } | Expired | Unavailable`
 
 MUST return an error if no pairing is pending.
+
+MUST report `Expired` without contacting the server once the pairing's own expiry has passed.
 
 On approval, MUST apply exactly the same state transition CORE-008 specifies — device credentials, settings, hash token, account email, and enabled screenshot capture — and MUST clear the pending pairing.
 
 On expiry, MUST clear the pending pairing and MUST leave the client logged out.
 
 While the pairing is still awaiting approval, MUST leave all state unchanged.
+
+A poll that cannot reach the server MUST report `Unavailable`, MUST leave the pairing pending, and MUST NOT return an error: a pairing waits for minutes, so a dropped connection is an expected event rather than a reason to abandon a code the user is looking at. Callers SHOULD keep polling.
 
 ### CORE-010 status
 

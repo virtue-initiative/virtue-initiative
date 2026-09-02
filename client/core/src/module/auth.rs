@@ -102,22 +102,37 @@ pub fn poll_code_login<A: ApiTransport>(
     api: &A,
     now_ms: i64,
 ) -> CoreResult<CodeLoginPoll> {
-    let device_code = auth
+    let pending = auth
         .pending_code_login
         .as_ref()
-        .map(|pending| pending.device_code.0.clone())
         .ok_or(CoreError::InvalidState("no pairing code is pending"))?;
 
-    match api.poll_device_code(&device_code)? {
-        DeviceCodePoll::Pending => Ok(CodeLoginPoll::Pending),
-        DeviceCodePoll::Expired => {
+    // The code on screen is dead once its own expiry passes, so say so rather
+    // than asking a server that may be the reason we are still here.
+    if now_ms >= pending.expires_at_ms {
+        auth.pending_code_login = None;
+        return Ok(CodeLoginPoll::Expired);
+    }
+
+    let device_code = pending.device_code.0.clone();
+
+    match api.poll_device_code(&device_code) {
+        Ok(DeviceCodePoll::Pending) => Ok(CodeLoginPoll::Pending),
+        Ok(DeviceCodePoll::Expired) => {
             auth.pending_code_login = None;
             Ok(CodeLoginPoll::Expired)
         }
-        DeviceCodePoll::Approved(registered) => {
+        Ok(DeviceCodePoll::Approved(registered)) => {
             auth.pending_code_login = None;
             let device_id = adopt_registration(auth, screenshot, upload, *registered, now_ms);
             Ok(CodeLoginPoll::Approved { device_id })
+        }
+        // A pairing waits for minutes, so a dropped connection, a 5xx, or a dev
+        // server reloading is an ordinary event on the way to approval. Failing
+        // the call would throw away a code the user is still looking at.
+        Err(error) => {
+            tracing::warn!(%error, "could not reach the server to check the pairing code");
+            Ok(CodeLoginPoll::Unavailable)
         }
     }
 }
@@ -127,8 +142,13 @@ pub fn poll_code_login<A: ApiTransport>(
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CodeLoginPoll {
     Pending,
-    Approved { device_id: String },
+    Approved {
+        device_id: String,
+    },
     Expired,
+    /// The server could not be reached. The pairing is untouched and the caller
+    /// SHOULD keep polling; only expiry ends the wait.
+    Unavailable,
 }
 
 /// CORE-008: a blank or absent override falls back to the platform's configured
@@ -476,7 +496,7 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_poll_keeps_the_pairing_so_the_caller_can_retry() {
+    fn an_unreachable_server_leaves_the_pairing_for_the_next_poll() {
         let mut auth = AuthState::default();
         let mut screenshot = ScreenshotState::default();
         let mut upload = UploadState::default();
@@ -484,8 +504,36 @@ mod tests {
         let _ = begin_code_login(&mut auth, &api, "d", "p", None).expect("begin");
         api.program_poll_device_code(Err(crate::error::CoreError::InvalidState("offline")));
 
-        assert!(poll_code_login(&mut auth, &mut screenshot, &mut upload, &api, 1_000).is_err());
+        // Not an error: the user is looking at a code that is still good, and
+        // one dropped request is not a reason to make them start again.
+        let outcome =
+            poll_code_login(&mut auth, &mut screenshot, &mut upload, &api, 1_000).expect("poll");
+
+        assert_eq!(outcome, CodeLoginPoll::Unavailable);
         assert!(auth.pending_code_login.is_some());
+    }
+
+    #[test]
+    fn a_pairing_past_its_expiry_is_expired_without_asking_the_server() {
+        let mut auth = AuthState::default();
+        let mut screenshot = ScreenshotState::default();
+        let mut upload = UploadState::default();
+        let api = MockApiClient::new();
+        let start = begin_code_login(&mut auth, &api, "d", "p", None).expect("begin");
+
+        let outcome = poll_code_login(
+            &mut auth,
+            &mut screenshot,
+            &mut upload,
+            &api,
+            start.expires_at_ms,
+        )
+        .expect("poll");
+
+        assert_eq!(outcome, CodeLoginPoll::Expired);
+        assert!(auth.pending_code_login.is_none());
+        // Nothing to ask: an offline client must still stop waiting on time.
+        assert!(api.state().poll_device_code_calls.is_empty());
     }
 
     #[test]

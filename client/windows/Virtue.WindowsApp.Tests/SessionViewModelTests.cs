@@ -766,6 +766,23 @@ public sealed class SessionViewModelTests
         Assert.Contains("expired", viewModel.StatusText, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task PollCodeLoginAsync_KeepsTheCodeWhenTheServerIsUnreachable()
+    {
+        // CORE-021 reports "unavailable" rather than failing, because a pairing
+        // waits for minutes and one dropped request must not cost the user the
+        // code they are reading off the screen.
+        var fakeClient = new FakeRustInteropClient();
+        fakeClient.PollResults.Enqueue(new PollCodeLoginPayload("unavailable", null));
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+        await viewModel.BeginCodeLoginAsync();
+
+        Assert.Equal("unavailable", await viewModel.PollCodeLoginAsync());
+        Assert.True(viewModel.HasPendingCode);
+        Assert.False(viewModel.LoggedIn);
+        Assert.Null(viewModel.ErrorText);
+    }
+
     private sealed class FakeRustInteropClient : IRustInteropClient
     {
         public SessionStatusPayload SessionStatus { get; set; } = new(false, null, null, "build-unknown");
