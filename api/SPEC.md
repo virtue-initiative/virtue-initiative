@@ -509,7 +509,7 @@ The server MUST respond **HTTP 204**.
 
 ## API-043 Locked passwords
 
-A locked password lets a user (the owner) store a secret they don't want easy access to themselves, e.g. a Screen Time passcode. It exists only in the owner's own account: watchers have no visibility into it at all, and no endpoint here accepts a partnership id. Reading the value is still allowed, but treated as a red flag: it permanently marks the entry accessed and immediately emails every one of the owner's accepted watchers, without exposing the value to them.
+A locked password lets a user (the owner) store a secret they don't want easy access to themselves, e.g. a Screen Time passcode. Reading it is treated as a red flag: the entry is permanently marked accessed and every accepted watcher is emailed immediately, without exposing the value to them. Watchers otherwise have no visibility into it at all.
 
 The value MUST be end-to-end encrypted the same way batch keys are (see `access_keys`), sealed with HPKE for the owner's own `pub_key`.
 
@@ -538,7 +538,7 @@ The server MUST store the entry against the caller as owner and respond **HTTP 2
 
 The client MUST authenticate with a **Web Token**.
 
-The server MUST return every entry the caller owns. The server MUST NOT include `wrapped_value` in this list.
+The server MUST return every entry the caller owns, including soft-deleted ones (the client decides how to display them). The server MUST NOT include `wrapped_value` in this list.
 
 ```js
 [
@@ -546,7 +546,8 @@ The server MUST return every entry the caller owns. The server MUST NOT include 
     "id": UUID,
     "label": "Screen Time passcode",
     "created_at": DateTime,
-    "accessed_at": DateTime | null
+    "accessed_at": DateTime | null,
+    "deleted_at": DateTime | null
   }
 ]
 ```
@@ -570,7 +571,13 @@ If `accessed_at` was previously null, the server MUST permanently set it to now 
 
 The client MUST authenticate with a **Web Token**. The caller MUST be the entry's owner, else **HTTP 404**.
 
-The server MUST delete the entry and respond **HTTP 204**.
+The server MUST soft-delete the entry by setting `deleted_at` to now and respond **HTTP 204**. The server SHOULD hard-delete any entry whose `deleted_at` is more than 7 days old.
+
+### API-048 `POST /locked-password/:id/restore`
+
+The client MUST authenticate with a **Web Token**. The caller MUST be the entry's owner, else **HTTP 404**.
+
+The server MUST null out `deleted_at` and respond **HTTP 204**.
 
 ## API-028 Device Management
 
