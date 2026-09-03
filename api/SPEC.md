@@ -579,6 +579,12 @@ The client MUST authenticate with a **Web Token**. The caller MUST be the entry'
 
 The server MUST null out `deleted_at` and respond **HTTP 204**.
 
+### API-049 `DELETE /locked-password/:id/permanent`
+
+The client MUST authenticate with a **Web Token**. The caller MUST be the entry's owner, else **HTTP 404**.
+
+The server MUST hard-delete the entry regardless of its current `deleted_at` and respond **HTTP 204**.
+
 ## API-028 Device Management
 
 ### API-029 `GET /device`
