@@ -23,6 +23,10 @@ import type {
   UpdateUserResponse,
   CreatePartnerResponse,
   BugReportPayload,
+  LockedPassword,
+  CreateLockedPasswordPayload,
+  CreateLockedPasswordResponse,
+  RevealLockedPasswordResponse,
 } from '@virtueinitiative/shared-web/types';
 export type {
   EmailFrequency,
@@ -46,6 +50,10 @@ export type {
   UpdateUserResponse,
   CreatePartnerResponse,
   BugReportPayload,
+  LockedPassword,
+  CreateLockedPasswordPayload,
+  CreateLockedPasswordResponse,
+  RevealLockedPasswordResponse,
 };
 
 const BASE =
@@ -303,6 +311,25 @@ export const api = {
     form.set('metadata', JSON.stringify(payload));
     return req<void>('/bug-report', { method: 'POST', body: form });
   },
+
+  getLockedPasswords: () => req<LockedPassword[]>('/locked-password'),
+
+  createLockedPassword: (payload: CreateLockedPasswordPayload) =>
+    req<CreateLockedPasswordResponse>('/locked-password', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  revealLockedPassword: (id: string) =>
+    req<RevealLockedPasswordResponse>(`/locked-password/${id}/reveal`, { method: 'POST' }),
+
+  deleteLockedPassword: (id: string) => req<void>(`/locked-password/${id}`, { method: 'DELETE' }),
+
+  restoreLockedPassword: (id: string) =>
+    req<void>(`/locked-password/${id}/restore`, { method: 'POST' }),
+
+  permanentlyDeleteLockedPassword: (id: string) =>
+    req<void>(`/locked-password/${id}/permanent`, { method: 'DELETE' }),
 
   getData: (params?: { since?: number }) => {
     const qs = new URLSearchParams();

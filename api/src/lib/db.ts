@@ -1113,6 +1113,109 @@ export async function deleteSessionByRefreshTokenHash(
     .run();
 }
 
+export async function createLockedPassword(
+  db: D1Database,
+  input: { id: string; owner_id: string; label: string; wrapped_value: string; created_at: number },
+) {
+  return db
+    .prepare(
+      `INSERT INTO locked_passwords (id, owner_id, label, wrapped_value, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      uuidToBytes(input.id),
+      uuidToBytes(input.owner_id),
+      input.label,
+      input.wrapped_value,
+      input.created_at,
+    )
+    .run();
+}
+
+export async function findOwnedLockedPassword(db: D1Database, id: string, ownerId: string) {
+  return firstWithUuidFields<{
+    id: string;
+    owner_id: string;
+    label: string;
+    wrapped_value: string;
+    accessed_at: number | null;
+    deleted_at: number | null;
+    created_at: number;
+  }>(
+    db
+      .prepare(
+        `SELECT id, owner_id, label, wrapped_value, accessed_at, deleted_at, created_at
+         FROM locked_passwords
+         WHERE id = ? AND owner_id = ?`,
+      )
+      .bind(uuidToBytes(id), uuidToBytes(ownerId)),
+    ['id', 'owner_id'],
+  );
+}
+
+export async function listLockedPasswordsForOwner(db: D1Database, ownerId: string) {
+  return allWithUuidFields<{
+    id: string;
+    label: string;
+    accessed_at: number | null;
+    deleted_at: number | null;
+    created_at: number;
+  }>(
+    db
+      .prepare(
+        `SELECT id, label, accessed_at, deleted_at, created_at
+         FROM locked_passwords
+         WHERE owner_id = ?
+         ORDER BY created_at DESC`,
+      )
+      .bind(uuidToBytes(ownerId)),
+    ['id'],
+  );
+}
+
+export async function markLockedPasswordAccessed(db: D1Database, id: string, accessedAt: number) {
+  return db
+    .prepare('UPDATE locked_passwords SET accessed_at = ? WHERE id = ? AND accessed_at IS NULL')
+    .bind(accessedAt, uuidToBytes(id))
+    .run();
+}
+
+export async function markLockedPasswordDeleted(db: D1Database, id: string, deletedAt: number) {
+  return db
+    .prepare('UPDATE locked_passwords SET deleted_at = ? WHERE id = ?')
+    .bind(deletedAt, uuidToBytes(id))
+    .run();
+}
+
+export async function restoreLockedPassword(db: D1Database, id: string) {
+  return db
+    .prepare('UPDATE locked_passwords SET deleted_at = NULL WHERE id = ?')
+    .bind(uuidToBytes(id))
+    .run();
+}
+
+export async function deleteLockedPasswordById(db: D1Database, id: string) {
+  return db.prepare('DELETE FROM locked_passwords WHERE id = ?').bind(uuidToBytes(id)).run();
+}
+
+export async function deleteExpiredLockedPasswordsChunk(
+  db: D1Database,
+  cutoff: number,
+  limit: number,
+) {
+  const result = await db
+    .prepare(
+      `DELETE FROM locked_passwords WHERE id IN (
+         SELECT id FROM locked_passwords
+         WHERE deleted_at IS NOT NULL AND deleted_at < ?
+         ORDER BY deleted_at ASC LIMIT ?
+       )`,
+    )
+    .bind(cutoff, limit)
+    .run();
+  return result.meta.changes;
+}
+
 export async function listDigestEligiblePartnerships(db: D1Database) {
   const rows = await allWithUuidFields<{
     partnership_id: string;

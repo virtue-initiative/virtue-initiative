@@ -34,7 +34,11 @@ function AllProviders({ children }: { children: ComponentChildren }) {
   );
 }
 
-export function renderWithClient(ui: h.JSX.Element, options?: Omit<RenderOptions, 'wrapper'>) {
-  mockSessionRestore();
+export function renderWithClient(
+  ui: h.JSX.Element,
+  options?: Omit<RenderOptions, 'wrapper'>,
+  session?: Session,
+) {
+  mockSessionRestore(session);
   return render(ui, { wrapper: AllProviders, ...options });
 }

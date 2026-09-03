@@ -34,6 +34,10 @@ export const helpSidebar: HelpNavItem[] = [
         label: 'Disable the browser',
         href: '/help/removing-access/disable-browser',
       },
+      {
+        label: 'Block app installs (iPhone)',
+        href: '/help/removing-access/block-app-installs-ios',
+      },
     ],
   },
   {

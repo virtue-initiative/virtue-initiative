@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { useLocation } from 'preact-iso';
-import { useAPIContext, useDevices, usePartners, useUser } from '../utils/api';
+import { useAPIContext, useDevices, usePartners, usePasswords, useUser } from '../utils/api';
 import { Avatar } from '@virtueinitiative/shared-web';
-import { DevicesIcon, PartnersIcon, LogsIcon, SettingsIcon } from './icons';
+import { DevicesIcon, PartnersIcon, LogsIcon, LockIcon, SettingsIcon } from './icons';
 import { LANDING_URL } from '../utils/landing-url';
 import { ReportBugDialog } from './ReportBugDialog';
 
@@ -151,6 +151,7 @@ export function Sidebar() {
   const user = useUser();
   const { watchings, watchers } = usePartners();
   const { devices } = useDevices();
+  const { passwords } = usePasswords();
   const { path: currentPath } = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -184,6 +185,7 @@ export function Sidebar() {
     activeLogsUserId === 'gallery' || activeLogsUserId === 'list' ? null : activeLogsUserId;
 
   const deviceCount = devices.filter((device) => device.owner === api.userId).length;
+  const activePasswordCount = passwords.filter((password) => password.deleted_at === null).length;
   const partnerCount =
     acceptedWatchings.length + watchers.filter((partner) => partner.status === 'accepted').length;
 
@@ -257,6 +259,15 @@ export function Sidebar() {
             onNavigate={closeMobile}
           >
             Partners
+          </NavLink>
+          <NavLink
+            href="/passwords"
+            active={currentPath.startsWith('/passwords')}
+            icon={<LockIcon />}
+            count={activePasswordCount}
+            onNavigate={closeMobile}
+          >
+            Passwords
           </NavLink>
 
           <div class="sidebar-nav-group">

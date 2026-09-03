@@ -1,4 +1,10 @@
-import type { Device, User, WatcherPartner, WatchingPartner } from '../utils/api/api';
+import type {
+  Device,
+  LockedPassword,
+  User,
+  WatcherPartner,
+  WatchingPartner,
+} from '../utils/api/api';
 
 export const TEST_USER: User = {
   id: 'user-1',
@@ -48,4 +54,12 @@ export const TEST_WATCHING: WatchingPartner = {
   user: { id: 'watching-user-1', name: 'Bob', email: 'bob@example.com' },
   status: 'accepted',
   created_at: Date.now() - 86_400_000,
+};
+
+export const TEST_LOCKED_PASSWORD: LockedPassword = {
+  id: 'password-1',
+  label: 'Screen Time passcode',
+  created_at: Date.now() - 3_600_000,
+  accessed_at: null,
+  deleted_at: null,
 };

@@ -95,6 +95,19 @@ CREATE TABLE IF NOT EXISTS device_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_device_sessions_device_id ON device_sessions(device_id);
+
+CREATE TABLE IF NOT EXISTS locked_passwords (
+  id BLOB PRIMARY KEY,
+  owner_id BLOB NOT NULL,
+  label TEXT NOT NULL,
+  wrapped_value TEXT NOT NULL,
+  accessed_at INTEGER,
+  deleted_at INTEGER,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_locked_passwords_owner_id ON locked_passwords(owner_id);
+CREATE INDEX IF NOT EXISTS idx_locked_passwords_deleted_at ON locked_passwords(deleted_at);
 `;
 
 const statements = schema

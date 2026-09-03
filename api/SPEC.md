@@ -507,6 +507,83 @@ The server MUST delete the partnership and notify the other user.
 
 The server MUST respond **HTTP 204**.
 
+## API-043 Locked passwords
+
+A locked password lets a user (the owner) store a secret they don't want easy access to themselves, e.g. a Screen Time passcode. Reading it is treated as a red flag: the entry is permanently marked accessed and every accepted watcher is emailed immediately, without exposing the value to them. Watchers otherwise have no visibility into it at all.
+
+The value MUST be end-to-end encrypted the same way batch keys are (see `access_keys`), sealed with HPKE for the owner's own `pub_key`.
+
+### API-044 `POST /locked-password`
+
+The client MUST authenticate with a **Web Token**.
+
+The client MUST send:
+
+```js
+{
+  "label": "Screen Time passcode",
+  "wrapped_value": Base64 // HPKE-sealed for the caller's own pub_key
+}
+```
+
+The server MUST store the entry against the caller as owner and respond **HTTP 200**:
+
+```js
+{
+  "id": UUID
+}
+```
+
+### API-045 `GET /locked-password`
+
+The client MUST authenticate with a **Web Token**.
+
+The server MUST return every entry the caller owns, including soft-deleted ones (the client decides how to display them). The server MUST NOT include `wrapped_value` in this list.
+
+```js
+// array of:
+{
+  "id": UUID,
+  "label": "Screen Time passcode",
+  "created_at": DateTime,
+  "accessed_at": DateTime | null,
+  "deleted_at": DateTime | null
+}
+```
+
+### API-046 `POST /locked-password/:id/reveal`
+
+The client MUST authenticate with a **Web Token**. The caller MUST be the entry's owner, else **HTTP 404**.
+
+The server MUST respond **HTTP 200**:
+
+```js
+{
+  "wrapped_value": Base64,
+  "accessed_at": DateTime | null
+}
+```
+
+If `accessed_at` was previously null, the server MUST permanently set it to now (no endpoint may clear it) and MUST immediately email every accepted watcher that this password was accessed, naming it by its `label` but never including its value, using the same immediate-alert delivery as a tamper alert (skipping watchers whose `email_frequency` is `none`).
+
+### API-047 `DELETE /locked-password/:id`
+
+The client MUST authenticate with a **Web Token**. The caller MUST be the entry's owner, else **HTTP 404**.
+
+The server MUST soft-delete the entry by setting `deleted_at` to now and respond **HTTP 204**. The server SHOULD hard-delete any entry whose `deleted_at` is more than 7 days old.
+
+### API-048 `POST /locked-password/:id/restore`
+
+The client MUST authenticate with a **Web Token**. The caller MUST be the entry's owner, else **HTTP 404**.
+
+The server MUST null out `deleted_at` and respond **HTTP 204**.
+
+### API-049 `DELETE /locked-password/:id/permanent`
+
+The client MUST authenticate with a **Web Token**. The caller MUST be the entry's owner, else **HTTP 404**.
+
+The server MUST hard-delete the entry regardless of its current `deleted_at` and respond **HTTP 204**.
+
 ## API-028 Device Management
 
 ### API-029 `GET /device`
