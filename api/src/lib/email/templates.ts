@@ -542,6 +542,31 @@ export function renderTamperAlertTemplate(input: {
   };
 }
 
+export function renderLockedPasswordAccessedTemplate(input: {
+  ownerName?: string | null;
+  ownerEmail: string;
+  label: string;
+  appName: string;
+  appUrl: string;
+}) {
+  const appName = normalizeAppName(input.appName);
+  const owner = input.ownerName?.trim() || input.ownerEmail;
+  const line = `${owner} just accessed a locked password labeled "${input.label}". This is never expected — locked passwords are meant to stay untouched by the account owner.`;
+  const footer = withFooter({
+    appName,
+    appUrl: input.appUrl,
+    headline: 'Locked password accessed',
+    textLines: [line, '', `Review the account: ${input.appUrl}`],
+    htmlSections: [paragraph(line), actionButton(input.appUrl, 'Review account')],
+  });
+
+  return {
+    subject: `${owner} accessed a locked password`,
+    text: footer.text,
+    html: footer.html,
+  };
+}
+
 export function renderPartnerDigestTemplate(input: {
   cadence: DigestFrequency;
   partnerSummaries: Array<{

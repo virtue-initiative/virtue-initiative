@@ -1,0 +1,14 @@
+.locked-password-value {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-subtle, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow-wrap: break-word;
+}
+
+.locked-password-value code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-sm);
+  color: var(--text);
+}

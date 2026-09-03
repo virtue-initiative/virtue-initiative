@@ -27,6 +27,7 @@ export const emailKinds = [
   'device_deleted',
   'device_logout',
   'tamper_alert',
+  'locked_password_accessed',
   'daily_digest',
   'weekly_digest',
   'account_exists_notice',

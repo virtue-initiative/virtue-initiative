@@ -541,15 +541,14 @@ The client MUST authenticate with a **Web Token**.
 The server MUST return every entry the caller owns, including soft-deleted ones (the client decides how to display them). The server MUST NOT include `wrapped_value` in this list.
 
 ```js
-[
-  {
-    "id": UUID,
-    "label": "Screen Time passcode",
-    "created_at": DateTime,
-    "accessed_at": DateTime | null,
-    "deleted_at": DateTime | null
-  }
-]
+// array of:
+{
+  "id": UUID,
+  "label": "Screen Time passcode",
+  "created_at": DateTime,
+  "accessed_at": DateTime | null,
+  "deleted_at": DateTime | null
+}
 ```
 
 ### API-046 `POST /locked-password/:id/reveal`

@@ -212,6 +212,12 @@ export const updateDeviceSchema = z
   .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
 export type UpdateDevicePayload = z.infer<typeof updateDeviceSchema>;
 
+export const createLockedPasswordSchema = z.object({
+  label: z.string().min(1),
+  wrapped_value: z.base64(),
+});
+export type CreateLockedPasswordPayload = z.infer<typeof createLockedPasswordSchema>;
+
 // ── Additional response schemas ──────────────────────────────────────────────
 
 export const signupResponseSchema = z.object({
@@ -243,3 +249,21 @@ export const createPartnerResponseSchema = z.object({
   status: z.literal('pending'),
 });
 export type CreatePartnerResponse = z.infer<typeof createPartnerResponseSchema>;
+
+export const lockedPasswordSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  created_at: z.number(),
+  accessed_at: z.number().nullable(),
+  deleted_at: z.number().nullable(),
+});
+export type LockedPassword = z.infer<typeof lockedPasswordSchema>;
+
+export const createLockedPasswordResponseSchema = z.object({ id: z.string() });
+export type CreateLockedPasswordResponse = z.infer<typeof createLockedPasswordResponseSchema>;
+
+export const revealLockedPasswordResponseSchema = z.object({
+  wrapped_value: z.string(),
+  accessed_at: z.number().nullable(),
+});
+export type RevealLockedPasswordResponse = z.infer<typeof revealLockedPasswordResponseSchema>;
