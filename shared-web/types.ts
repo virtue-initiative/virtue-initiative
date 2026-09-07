@@ -213,8 +213,12 @@ export const updateDeviceSchema = z
 export type UpdateDevicePayload = z.infer<typeof updateDeviceSchema>;
 
 export const createLockedPasswordSchema = z.object({
-  label: z.string().min(1),
-  wrapped_value: z.base64(),
+  label: z.string().min(1).max(100),
+  // Sealed value only, capped well below anything file-sized: an HPKE seal
+  // adds a fixed 48 bytes of overhead (32-byte enc + 16-byte AES-GCM tag), so
+  // 1024 base64 chars (768 raw bytes) still allows a plaintext secret up to
+  // ~720 bytes, generous for a password or passphrase.
+  wrapped_value: z.base64().max(1024),
 });
 export type CreateLockedPasswordPayload = z.infer<typeof createLockedPasswordSchema>;
 

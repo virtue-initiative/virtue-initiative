@@ -329,7 +329,7 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
                   </div>
                 </div>
                 <Button
-                  variant="ghost"
+                  variant="primary"
                   size="md"
                   class="logs-filter-toggle"
                   type="button"

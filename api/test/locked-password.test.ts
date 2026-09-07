@@ -67,6 +67,21 @@ describe('Locked passwords', () => {
     expect(res.status).toBe(400);
   });
 
+  it('rejects an oversized wrapped_value, so this cannot be used for file storage', async () => {
+    const { cookie } = await signupAndGetCookie('oversized@example.com');
+
+    const res = await SELF.fetch(`${BASE}/locked-password`, {
+      method: 'POST',
+      headers: authHeaders(cookie),
+      body: JSON.stringify({
+        label: 'Too big',
+        wrapped_value: btoa('x'.repeat(2000)),
+      }),
+    });
+
+    expect(res.status).toBe(400);
+  });
+
   it('lists only the caller-owned entries, without wrapped_value', async () => {
     const { cookie } = await signupAndGetCookie('owner@example.com');
     await signupAndGetCookie('someone-else@example.com');

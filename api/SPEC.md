@@ -513,6 +513,8 @@ A locked password lets a user (the owner) store a secret they don't want easy ac
 
 The value MUST be end-to-end encrypted the same way batch keys are (see `access_keys`), sealed with HPKE for the owner's own `pub_key`.
 
+This is for short secrets, not file storage. The server MUST reject `label` over 100 characters and `wrapped_value` over 1024 Base64 characters (roughly 720 plaintext bytes once HPKE overhead is subtracted) with **HTTP 400**.
+
 ### API-044 `POST /locked-password`
 
 The client MUST authenticate with a **Web Token**.

@@ -8,7 +8,7 @@ import {
 } from '../../utils/api';
 import { decryptForOwnKey, encryptForPublicKey } from '../../utils/api/crypto';
 import { PageHeading } from '../../components/PageHeading';
-import { LockIcon } from '../../components/icons';
+import { DocumentDuplicateIcon, LockIcon } from '../../components/icons';
 import { PasswordField } from '../Auth/PasswordField';
 import {
   Badge,
@@ -21,6 +21,7 @@ import {
   DialogActions,
   DialogHeader,
   Field,
+  IconButton,
   Input,
   useToast,
 } from '@virtueinitiative/shared-web';
@@ -42,8 +43,8 @@ export function Passwords() {
         Passwords
       </PageHeading>
       <p class="invite-desc">
-        A locked password is a secret only you can technically reach. Reading it permanently flags
-        it and immediately notifies every partner watching you.
+        A locked password is a secret only you can access. Revealing it permanently flags it and
+        immediately notifies every partner watching you.
       </p>
       {!loaded ? (
         <p class="loading">Loading…</p>
@@ -136,6 +137,7 @@ function AddPasswordButton() {
               placeholder="Screen Time passcode"
               required
               autoFocus
+              maxLength={100}
             />
           </Field>
           <PasswordField
@@ -144,6 +146,7 @@ function AddPasswordButton() {
             value={value}
             onInput={(e) => setValue((e.target as HTMLInputElement).value)}
             required
+            maxLength={150}
           />
           <DialogActions>
             <Button variant="ghost" type="button" onClick={close} disabled={saving}>
@@ -198,6 +201,17 @@ function PasswordCard({ password }: { password: LockedPassword }) {
     reveal().catch(() => {});
   }
 
+  async function handleCopy() {
+    if (revealedValue === null) return;
+    try {
+      await navigator.clipboard.writeText(revealedValue);
+      pushToast('Copied to clipboard', 'success');
+    } catch (err) {
+      const message = describeError(err, 'Failed to copy to clipboard');
+      if (message) pushToast(message, 'error');
+    }
+  }
+
   async function handleDeleteConfirmed() {
     setDeleting(true);
     try {
@@ -230,11 +244,14 @@ function PasswordCard({ password }: { password: LockedPassword }) {
       {revealedValue !== null && (
         <p class="locked-password-value">
           <code>{revealedValue}</code>
+          <IconButton aria-label="Copy to clipboard" onClick={() => handleCopy().catch(() => {})}>
+            <DocumentDuplicateIcon />
+          </IconButton>
         </p>
       )}
       <CardActions>
         {revealedValue === null ? (
-          <Button variant="ghost" type="button" onClick={handleRevealClick} disabled={revealing}>
+          <Button variant="primary" type="button" onClick={handleRevealClick} disabled={revealing}>
             {revealing ? 'Revealing…' : 'Reveal'}
           </Button>
         ) : (

@@ -2,7 +2,7 @@ import { screen, waitFor } from '@testing-library/preact';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { server } from '../../mocks/server';
 import { TEST_LOCKED_PASSWORD, TEST_USER } from '../../mocks/fixtures';
 import { renderWithClient, makeFakeSession } from '../../test-utils';
@@ -119,6 +119,17 @@ describe('Passwords — reveal', () => {
 
     await waitFor(() => {
       expect(screen.getByText('hunter2')).toBeInTheDocument();
+    });
+
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      configurable: true,
+    });
+
+    await user.click(screen.getByRole('button', { name: /copy to clipboard/i }));
+
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith('hunter2');
     });
   });
 
