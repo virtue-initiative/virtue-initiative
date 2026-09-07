@@ -43,14 +43,11 @@ Your partner needs a backup of the passcode somewhere other than memory, in
 case they forget it or aren't reachable. A plain note or message is risky:
 if you ever come across it, the block is gone with no warning to anyone.
 
-Instead, have your partner use [Canarytokens](https://canarytokens.org), a
-free tripwire service that needs no account. They create a **Microsoft Word**
-token, type the passcode straight into the document it gives them, and enter
-their own email address for alerts. That document never expires. The moment
-anyone opens it, an email lands in your partner's inbox right away.
+Instead, use Virtue's own [locked passwords](/help/web/locked-passwords)
+feature. While your partner still has your phone, have them open your
+Passwords page and add a locked password there too, typing the Screen Time
+passcode in without letting you see it.
 
-Your partner saves that document somewhere private, like a notes app or cloud
-drive, and never shares it with you.
-
-If that notification email ever shows up, your partner knows the passcode was
-found and should change it right away.
+If you ever reveal that entry, it's permanently flagged and every partner
+watching you is emailed immediately, so they'll know the passcode was found
+and can change it right away.

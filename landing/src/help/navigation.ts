@@ -53,6 +53,7 @@ export const helpSidebar: HelpNavItem[] = [
       { label: 'Decryption errors', href: '/help/web/decryption-errors' },
       { label: 'Concern scores', href: '/help/web/concern-scores' },
       { label: 'Device status', href: '/help/web/device-status' },
+      { label: 'Locked passwords', href: '/help/web/locked-passwords' },
     ],
   },
   {

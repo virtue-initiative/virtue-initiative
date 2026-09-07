@@ -21,20 +21,21 @@ devices to partners.
 
 ### Data storage
 
-| Item         | Place   | Format                                                 | Access           |
-| ------------ | ------- | ------------------------------------------------------ | ---------------- |
-| Password     | Server  | `HKDF-SHA256("auth", Argon2id(pwd, salt, params))`     | None             |
-| Email        | Server  | Plaintext                                              | Partners         |
-| Private Key  | Server  | `AES-256-GCM(HKDF-SHA256("key", Argon2id(...), salt))` | User             |
-| Private Key  | Browser | Plaintext                                              | Browser          |
-| Private Key  | Device  | Plaintext                                              | Device           |
-| Public Key   | Server  | Plaintext (X25519)                                     | Anyone           |
-| Batch List   | Server  | Plaintext                                              | Partners         |
-| Batch Key    | Server  | `HPKE(DHKEM(X25519), HKDF-SHA256, AES-256-GCM)`        | Partners         |
-| Batches      | Server  | `AES-256-GCM(batch_key)`                               | Anyone with UUID |
-| Latest Batch | Device  | Plaintext                                              | Device           |
-| Logs         | Server  | Plaintext                                              | Partners         |
-| Logs         | Device  | Plaintext                                              | Device           |
+| Item                  | Place   | Format                                                                      | Access           |
+| --------------------- | ------- | --------------------------------------------------------------------------- | ---------------- |
+| Password              | Server  | `HKDF-SHA256("auth", Argon2id(pwd, salt, params))`                          | None             |
+| Email                 | Server  | Plaintext                                                                   | Partners         |
+| Private Key           | Server  | `AES-256-GCM(HKDF-SHA256("key", Argon2id(...), salt))`                      | User             |
+| Private Key           | Browser | Plaintext                                                                   | Browser          |
+| Private Key           | Device  | Plaintext                                                                   | Device           |
+| Public Key            | Server  | Plaintext (X25519)                                                          | Anyone           |
+| Batch List            | Server  | Plaintext                                                                   | Partners         |
+| Batch Key             | Server  | `HPKE(DHKEM(X25519), HKDF-SHA256, AES-256-GCM)`                             | Partners         |
+| Batches               | Server  | `AES-256-GCM(batch_key)`                                                    | Anyone with UUID |
+| Latest Batch          | Device  | Plaintext                                                                   | Device           |
+| Logs                  | Server  | Plaintext                                                                   | Partners         |
+| Logs                  | Device  | Plaintext                                                                   | Device           |
+| Locked Password Value | Server  | `HPKE(DHKEM(X25519), HKDF-SHA256, AES-256-GCM)` (sealed for the owner only) | Owner            |
 
 ## Details
 
@@ -139,6 +140,20 @@ database (see **Batch list**).
 
 The in-progress batch is stored in plaintext on the device, but is compressed
 then encrypted as a batch before being sent to the server using `AES-256-GCM`.
+
+### Locked passwords
+
+A [locked password](/help/web/locked-passwords) value is sealed once, for the
+owner's own public key, using the same primitive as a batch key:
+
+```
+HPKE(DHKEM(X25519), HKDF-SHA256, AES-256-GCM)
+```
+
+Unlike a batch key, it's never wrapped for anyone else. Partners hold no key
+that could open it, and have no endpoint that would let them try. The server
+stores and returns the sealed value without ever being able to read it
+itself.
 
 ### Verification
 
