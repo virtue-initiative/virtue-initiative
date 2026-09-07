@@ -1,3 +1,9 @@
+.locked-passwords-deleted-section {
+  /* More than the section header's own 0.5rem padding-bottom to the rule
+     below it, so the rule doesn't read as glued to the CardGrid above. */
+  margin-top: var(--space-4);
+}
+
 .locked-password-value {
   display: flex;
   align-items: center;

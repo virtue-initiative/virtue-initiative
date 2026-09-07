@@ -59,7 +59,7 @@ export function Passwords() {
       )}
 
       {deleted.length > 0 && (
-        <section class="dashboard-section">
+        <section class="dashboard-section locked-passwords-deleted-section">
           <div class="dashboard-section-header">
             <h2>Recently deleted</h2>
           </div>
