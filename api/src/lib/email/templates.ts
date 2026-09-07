@@ -551,7 +551,7 @@ export function renderLockedPasswordAccessedTemplate(input: {
 }) {
   const appName = normalizeAppName(input.appName);
   const owner = input.ownerName?.trim() || input.ownerEmail;
-  const line = `${owner} just accessed a locked password labeled "${input.label}". This is never expected — locked passwords are meant to stay untouched by the account owner.`;
+  const line = `${owner} just accessed a locked password labeled "${input.label}". This is never expected. Locked passwords are meant to stay untouched by the account owner.`;
   const footer = withFooter({
     appName,
     appUrl: input.appUrl,
