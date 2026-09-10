@@ -21,4 +21,6 @@ export interface Env {
 
 export interface Variables {
   sub: string;
+  // Hash of the refresh token that authenticated this request; set by the session middlewares.
+  sessionTokenHash: string;
 }

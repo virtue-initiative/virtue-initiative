@@ -16,6 +16,7 @@ export function makeFakeSession(overrides: Partial<Session> = {}): Session {
     onTokenRefreshFailed: vi.fn(),
     isInvalidated: vi.fn().mockReturnValue(false),
     unwrapPrivateKey: vi.fn().mockResolvedValue(undefined),
+    changePassword: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   } as unknown as Session;
 }

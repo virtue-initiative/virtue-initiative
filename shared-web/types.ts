@@ -183,11 +183,17 @@ export const updateUserSchema = z
         timezone: z.string().optional(),
       })
       .optional(),
-    pub_key: z.base64().optional(),
-    encrypted_priv_key: z.base64().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
 export type UpdateUserPayload = z.infer<typeof updateUserSchema>;
+
+export const changePasswordSchema = z.object({
+  current_password_auth: z.base64(),
+  password_auth: z.base64(),
+  password_salt: z.base64(),
+  encrypted_priv_key: z.base64(),
+});
+export type ChangePasswordPayload = z.infer<typeof changePasswordSchema>;
 
 export const deleteUserSchema = z.object({ confirm_email: z.email() });
 export type DeleteUserPayload = z.infer<typeof deleteUserSchema>;

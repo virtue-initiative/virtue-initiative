@@ -25,6 +25,10 @@ to recover the old one. Any batch encrypted before the reset can no longer
 be opened afterward. This is expected and not a sign of data loss; it's a
 side effect of how the reset flow re-establishes your key from scratch.
 
+Changing your password in **Settings** keeps your private key, so it doesn't
+cause these failures. If you still know your password, change it there
+instead of resetting it.
+
 ### Client/server version mismatch
 
 A client running a very old or very new version may produce a batch format

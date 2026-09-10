@@ -374,9 +374,11 @@ describe('Auth routes', () => {
     expect(nowVerifiedLoginRes.status).toBe(204);
   });
 
-  it('returns the current user and allows updating profile fields', async () => {
+  it('returns the current user and allows updating profile fields but not key material', async () => {
     const { cookie, userId } = await signupAndGetCookie('carol@example.com', 'pw', 'Carol');
 
+    const originalPubKey = await publicKeyFor('carol@example.com');
+    const originalPrivKey = privateKeyFor('carol@example.com');
     const nextPubKey = await publicKeyFor('carol-updated');
     const nextPrivKey = privateKeyFor('carol-updated');
 
@@ -406,8 +408,9 @@ describe('Auth routes', () => {
     expect(body.name).toBe('Updated Carol');
     expect(body.email_verified).toBe(true);
     expect(body.settings).toMatchObject({ email_frequency: 'daily', timezone: 'UTC' });
-    expect(body.pub_key).toBe(nextPubKey);
-    expect(body.encrypted_priv_key).toBe(nextPrivKey);
+    // API-020: a web session alone must not be able to swap the key pair.
+    expect(body.pub_key).toBe(originalPubKey);
+    expect(body.encrypted_priv_key).toBe(originalPrivKey);
     await markUserEmailVerified(userId);
     const updateEmailRes = await SELF.fetch(`${BASE}/user`, {
       method: 'PATCH',
@@ -714,6 +717,153 @@ describe('Auth routes', () => {
     expect(Buffer.from(storedUser!.password_salt).toString('base64')).toBe(newPasswordSalt);
     expect(Buffer.from(storedUser!.pub_key).toString('base64')).toBe(newPubKey);
     expect(Buffer.from(storedUser!.encrypted_priv_key).toString('base64')).toBe(newPrivKey);
+  });
+
+  describe('POST /user/password', () => {
+    async function changePassword(cookie: string, body: Record<string, unknown>) {
+      return SELF.fetch(`${BASE}/user/password`, {
+        method: 'POST',
+        headers: authHeaders(cookie),
+        body: JSON.stringify(body),
+      });
+    }
+
+    async function loginCookie(email: string, password: string) {
+      const res = await SELF.fetch(`${BASE}/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password_auth: await passwordAuthFor(password) }),
+      });
+      expect(res.status).toBe(204);
+      return (res.headers.get('set-cookie') ?? '').match(/refresh_token=([^;]+)/)![1]!;
+    }
+
+    it('swaps password and wrapped private key, keeps pub_key, and revokes only other web sessions', async () => {
+      const email = 'changer@example.com';
+      const { cookie, userId } = await signupAndGetCookie(email, 'old-password', 'Changer');
+      const otherCookie = await loginCookie(email, 'old-password');
+      const device = await createDeviceForUser(email, 'old-password', 'Laptop', 'linux');
+
+      await SELF.fetch(`${BASE}/password-reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const pendingReset = await latestEmailToken('password_reset');
+      expect(pendingReset?.consumed_at).toBeNull();
+
+      const newPasswordAuth = await passwordAuthFor('new-password');
+      const newSalt = await passwordSaltFor(`${email}:new`);
+      const rewrappedPrivKey = privateKeyFor(`${email}:rewrapped`);
+
+      const res = await changePassword(cookie, {
+        current_password_auth: await passwordAuthFor('old-password'),
+        password_auth: newPasswordAuth,
+        password_salt: newSalt,
+        encrypted_priv_key: rewrappedPrivKey,
+      });
+      expect(res.status).toBe(204);
+
+      const stored = await env.DB.prepare(
+        'SELECT password_hash, password_salt, pub_key, encrypted_priv_key FROM users WHERE id = ?',
+      )
+        .bind(uuidToBytes(userId))
+        .first<{
+          password_hash: string;
+          password_salt: ArrayBuffer;
+          pub_key: ArrayBuffer;
+          encrypted_priv_key: ArrayBuffer;
+        }>();
+      expect(
+        await verifyPasswordAuth(Buffer.from(newPasswordAuth, 'base64'), stored!.password_hash),
+      ).toBe(true);
+      expect(Buffer.from(stored!.password_salt).toString('base64')).toBe(newSalt);
+      expect(Buffer.from(stored!.pub_key).toString('base64')).toBe(await publicKeyFor(email));
+      expect(Buffer.from(stored!.encrypted_priv_key).toString('base64')).toBe(rewrappedPrivKey);
+
+      // The requesting session survives; the other browser is logged out.
+      expect((await SELF.fetch(`${BASE}/user`, { headers: authHeaders(cookie) })).status).toBe(200);
+      expect((await SELF.fetch(`${BASE}/user`, { headers: authHeaders(otherCookie) })).status).toBe(
+        401,
+      );
+
+      // Devices keep monitoring.
+      expect(
+        (
+          await SELF.fetch(`${BASE}/d/device`, {
+            headers: { Authorization: `Bearer ${device.refresh_token}` },
+          })
+        ).status,
+      ).toBe(200);
+
+      // A reset link issued before the change no longer works.
+      expect(
+        (
+          await env.DB.prepare('SELECT consumed_at FROM email_tokens WHERE id = ?')
+            .bind(uuidToBytes(pendingReset!.id))
+            .first<{ consumed_at: number | null }>()
+        )?.consumed_at,
+      ).not.toBeNull();
+
+      // Only the new password logs in.
+      const oldLogin = await SELF.fetch(`${BASE}/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password_auth: await passwordAuthFor('old-password') }),
+      });
+      expect(oldLogin.status).toBe(401);
+      await loginCookie(email, 'new-password');
+
+      const notice = (await listEmailDeliveries()).find((d) => d.kind === 'password_changed');
+      expect(notice).toMatchObject({ recipient_email: email, status: 'sent' });
+    });
+
+    it('rejects a wrong current password without changing anything', async () => {
+      const email = 'wrong-current@example.com';
+      const { cookie } = await signupAndGetCookie(email, 'old-password');
+      const otherCookie = await loginCookie(email, 'old-password');
+
+      const res = await changePassword(cookie, {
+        current_password_auth: await passwordAuthFor('not-my-password'),
+        password_auth: await passwordAuthFor('new-password'),
+        password_salt: await passwordSaltFor(`${email}:new`),
+        encrypted_priv_key: privateKeyFor(`${email}:rewrapped`),
+      });
+      expect(res.status).toBe(403);
+
+      await loginCookie(email, 'old-password');
+      expect((await SELF.fetch(`${BASE}/user`, { headers: authHeaders(otherCookie) })).status).toBe(
+        200,
+      );
+      expect((await listEmailDeliveries()).some((d) => d.kind === 'password_changed')).toBe(false);
+    });
+
+    it('requires a web session and well-formed key material', async () => {
+      const email = 'shape@example.com';
+      const { cookie } = await signupAndGetCookie(email, 'old-password');
+      const valid = {
+        current_password_auth: await passwordAuthFor('old-password'),
+        password_auth: await passwordAuthFor('new-password'),
+        password_salt: await passwordSaltFor(`${email}:new`),
+        encrypted_priv_key: privateKeyFor(`${email}:rewrapped`),
+      };
+
+      const unauthenticated = await SELF.fetch(`${BASE}/user/password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(valid),
+      });
+      expect(unauthenticated.status).toBe(401);
+
+      const shortSalt = await changePassword(cookie, {
+        ...valid,
+        password_salt: Buffer.from('short').toString('base64'),
+      });
+      expect(shortSalt.status).toBe(400);
+
+      const missingKey = await changePassword(cookie, { ...valid, encrypted_priv_key: undefined });
+      expect(missingKey.status).toBe(400);
+    });
   });
 
   it('rejects an unprefixed or wrong-purpose refresh token before touching the session table', async () => {

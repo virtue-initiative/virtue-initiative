@@ -277,6 +277,42 @@ export function renderPasswordResetTemplate(input: {
   };
 }
 
+export function renderPasswordChangedTemplate(input: {
+  appName: string;
+  recipientName?: string | null;
+  forgotPasswordUrl: string;
+  appUrl: string;
+}) {
+  const appName = normalizeAppName(input.appName);
+  const greeting = input.recipientName ? `Hi ${input.recipientName},` : 'Hi,';
+  const summary =
+    'The password for your account was just changed. Any other browsers signed in to your account were logged out. Your devices are still being monitored.';
+  const footer = withFooter({
+    appName,
+    appUrl: input.appUrl,
+    headline: 'Your password was changed',
+    textLines: [
+      greeting,
+      '',
+      summary,
+      '',
+      `If you did not do this, reset your password now: ${input.forgotPasswordUrl}`,
+    ],
+    htmlSections: [
+      paragraph(greeting),
+      paragraph(summary),
+      paragraph('If you did not do this, reset your password now.'),
+      actionButton(input.forgotPasswordUrl, 'Reset password'),
+    ],
+  });
+
+  return {
+    subject: `Your ${appName.replace('The', '').trim()} password was changed`,
+    text: footer.text,
+    html: footer.html,
+  };
+}
+
 export function renderAccountExistsTemplate(input: {
   appName: string;
   recipientName?: string | null;

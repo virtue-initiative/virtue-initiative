@@ -5,6 +5,8 @@ import {
   encryptData,
   encryptForPublicKey,
   generateUserKeyPair,
+  importUserPrivateKey,
+  privateKeyMatchesPublicKey,
   unwrapBatchKey,
   verifyBatch,
 } from './crypto';
@@ -74,6 +76,17 @@ describe('generateUserKeyPair / encryptForPublicKey / unwrapBatchKey', () => {
     const encrypted = await encryptData(encKey, testData);
     const decrypted = await decryptBatch(unwrapped, encrypted);
     expect(Array.from(decrypted)).toEqual(Array.from(testData));
+  });
+});
+
+describe('privateKeyMatchesPublicKey', () => {
+  it('accepts a private key with its own public key and rejects another key pair', async () => {
+    const mine = await generateUserKeyPair();
+    const other = await generateUserKeyPair();
+    const privateKey = await importUserPrivateKey(mine.privateKey);
+
+    expect(await privateKeyMatchesPublicKey(privateKey, mine.publicKey)).toBe(true);
+    expect(await privateKeyMatchesPublicKey(privateKey, other.publicKey)).toBe(false);
   });
 });
 
