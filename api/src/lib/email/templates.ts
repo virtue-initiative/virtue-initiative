@@ -542,6 +542,31 @@ export function renderTamperAlertTemplate(input: {
   };
 }
 
+export function renderLockedPasswordAccessedTemplate(input: {
+  ownerName?: string | null;
+  ownerEmail: string;
+  label: string;
+  appName: string;
+  appUrl: string;
+}) {
+  const appName = normalizeAppName(input.appName);
+  const owner = input.ownerName?.trim() || input.ownerEmail;
+  const line = `${owner} just accessed a locked password labeled "${input.label}". If this was not expected, you should ask them about it. Locked passwords are designed to stay hidden from the owner unless they really need them.`;
+  const footer = withFooter({
+    appName,
+    appUrl: input.appUrl,
+    headline: 'Locked password accessed',
+    textLines: [line, '', `Review the account: ${input.appUrl}`],
+    htmlSections: [paragraph(line), actionButton(input.appUrl, 'Review account')],
+  });
+
+  return {
+    subject: `${owner} accessed a locked password`,
+    text: footer.text,
+    html: footer.html,
+  };
+}
+
 export function renderPartnerDigestTemplate(input: {
   cadence: DigestFrequency;
   partnerSummaries: Array<{

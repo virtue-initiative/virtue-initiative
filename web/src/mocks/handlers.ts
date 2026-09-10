@@ -1,6 +1,12 @@
 import { http, HttpResponse } from 'msw';
 import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
-import { TEST_DEVICES, TEST_USER, TEST_WATCHER, TEST_WATCHING } from './fixtures';
+import {
+  TEST_DEVICES,
+  TEST_LOCKED_PASSWORD,
+  TEST_USER,
+  TEST_WATCHER,
+  TEST_WATCHING,
+} from './fixtures';
 
 const BASE = `http://localhost:8787/${CURRENT_API_VERSION}`;
 
@@ -74,6 +80,19 @@ export const handlers = [
   ),
   http.post(`${BASE}/partner/accept`, () => HttpResponse.json({ id: 'new-partner-1' })),
   http.delete(`${BASE}/partner/:id`, () => new HttpResponse(null, { status: 204 })),
+
+  // ── Locked passwords ───────────────────────────────────────────────────
+  http.get(`${BASE}/locked-password`, () => HttpResponse.json([TEST_LOCKED_PASSWORD])),
+  http.post(`${BASE}/locked-password`, () => HttpResponse.json({ id: 'new-password-1' })),
+  http.post(`${BASE}/locked-password/:id/reveal`, () =>
+    HttpResponse.json({ wrapped_value: btoa('wrapped'), accessed_at: Date.now() }),
+  ),
+  http.delete(`${BASE}/locked-password/:id`, () => new HttpResponse(null, { status: 204 })),
+  http.post(`${BASE}/locked-password/:id/restore`, () => new HttpResponse(null, { status: 204 })),
+  http.delete(
+    `${BASE}/locked-password/:id/permanent`,
+    () => new HttpResponse(null, { status: 204 }),
+  ),
 
   // ── Have I Been Pwned range search (third-party, called from the browser) ──
   http.get('https://api.pwnedpasswords.com/range/:prefix', () =>

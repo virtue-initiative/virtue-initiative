@@ -1,0 +1,25 @@
+.locked-passwords-deleted-section {
+  /* More than the section header's own 0.5rem padding-bottom to the rule
+     below it, so the rule doesn't read as glued to the CardGrid above. */
+  margin-top: var(--space-4);
+}
+
+.locked-password-value {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-subtle, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.locked-password-value code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-sm);
+  color: var(--text);
+  overflow-wrap: break-word;
+  min-width: 0;
+}

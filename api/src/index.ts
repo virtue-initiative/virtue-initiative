@@ -6,6 +6,7 @@ import data from './routes/data';
 import deviceOnly from './routes/device-only';
 import devices from './routes/devices';
 import emailWebhooks from './routes/email-webhooks';
+import lockedPasswords from './routes/locked-password';
 import partners from './routes/partners';
 import { isApiVersionGone, stripApiVersion } from './lib/api-version';
 import { stripApiBasePath } from './lib/base-path';
@@ -13,6 +14,7 @@ import {
   pruneExpiredBatches,
   pruneExpiredDeviceSessions,
   pruneExpiredEmailTokens,
+  pruneExpiredLockedPasswords,
   pruneExpiredUserSessions,
 } from './lib/retention';
 import { runNotificationSchedule } from './lib/scheduler';
@@ -64,6 +66,7 @@ app.route('/', bugReport);
 app.route('/', partners);
 app.route('/', emailWebhooks);
 app.route('/device', devices);
+app.route('/locked-password', lockedPasswords);
 app.route('/data', data);
 app.route('/d', deviceOnly);
 
@@ -99,5 +102,6 @@ export default {
     ctx.waitUntil(pruneExpiredEmailTokens(env, controller.scheduledTime));
     ctx.waitUntil(pruneExpiredUserSessions(env, controller.scheduledTime));
     ctx.waitUntil(pruneExpiredDeviceSessions(env, controller.scheduledTime));
+    ctx.waitUntil(pruneExpiredLockedPasswords(env, controller.scheduledTime));
   },
 };
