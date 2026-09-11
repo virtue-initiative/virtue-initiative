@@ -3,8 +3,10 @@ import { getCookie, deleteCookie, setCookie } from 'hono/cookie';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { authenticateWebSession } from '../middleware/auth';
+import { rateLimitByDevice } from '../middleware/rate-limit';
 import { validateZ } from '../middleware/validation';
 import {
+  changeUserPassword,
   createEmailToken,
   createSessionRecord,
   createUser,
@@ -21,6 +23,7 @@ import {
   renderAccountExistsTemplate,
   renderEmailInUseTemplate,
   renderEmailVerificationTemplate,
+  renderPasswordChangedTemplate,
   renderPasswordResetTemplate,
 } from '../lib/email/templates';
 import { sendEmail } from '../lib/email';
@@ -38,6 +41,7 @@ import {
   passwordResetValidateSchema,
   passwordResetSchema,
   updateUserSchema,
+  changePasswordSchema,
   deleteUserSchema,
   type SignupResponse,
   type EmailVerifyResponse,
@@ -48,6 +52,7 @@ import {
   HASH_PARAMS_VERSION,
   generatePasswordSalt,
   hashPasswordAuth,
+  verifyPasswordAuth,
 } from '../lib/password';
 import { assertTokenPurpose, generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
@@ -99,9 +104,11 @@ const keyMaterialSchema = z.object({
   encrypted_priv_key: base64NonEmpty('encrypted_priv_key'),
 });
 
-const updateKeyMaterialSchema = z.object({
-  pub_key: base64Bytes(32, 'pub_key').optional(),
-  encrypted_priv_key: base64NonEmpty('encrypted_priv_key').optional(),
+const changePasswordMaterialSchema = z.object({
+  current_password_auth: base64Bytes(32, 'current_password_auth'),
+  password_auth: base64Bytes(32, 'password_auth'),
+  password_salt: base64Bytes(CURRENT_HASH_PARAMS.salt_length, 'password_salt'),
+  encrypted_priv_key: base64NonEmpty('encrypted_priv_key'),
 });
 
 function invalidRequestData(
@@ -292,6 +299,31 @@ async function sendPasswordResetEmail(
     html: email.html,
     related_user_id: user.id,
     metadata: { purpose: 'password_reset', resetUrl },
+  });
+}
+
+async function sendPasswordChangedEmail(
+  c: Context<{ Bindings: Env; Variables: Variables }>,
+  user: { id: string; email: string; name?: string | null },
+) {
+  const forgotPasswordUrl = `${c.env.APP_URL}/forgot-password`;
+  const email = renderPasswordChangedTemplate({
+    appName: c.env.APP_NAME,
+    appUrl: c.env.APP_URL,
+    recipientName: user.name,
+    forgotPasswordUrl,
+  });
+
+  await sendEmail({
+    env: c.env,
+    db: c.env.DB,
+    kind: 'password_changed',
+    recipient: user.email,
+    subject: email.subject,
+    text: email.text,
+    html: email.html,
+    related_user_id: user.id,
+    metadata: { purpose: 'password_changed', forgotPasswordUrl },
   });
 }
 
@@ -497,7 +529,8 @@ auth.get('/user', authenticateWebSession(), async (c) => {
 
 auth.patch('/user', authenticateWebSession(), validateZ('json', updateUserSchema), async (c) => {
   const userId = c.get('sub');
-  const { email, name, settings, pub_key, encrypted_priv_key } = c.req.valid('json');
+  // API-020: key material is deliberately not accepted here; see POST /user/password.
+  const { email, name, settings } = c.req.valid('json');
   const normalizedEmail = email?.trim().toLowerCase();
   const user = await findUserById(c.env.DB, userId);
 
@@ -505,17 +538,7 @@ auth.patch('/user', authenticateWebSession(), validateZ('json', updateUserSchema
     return c.json({ error: 'User account not found' }, 404);
   }
 
-  const decoded = updateKeyMaterialSchema.safeParse({ pub_key, encrypted_priv_key });
-  if (!decoded.success) {
-    return invalidRequestData(c, decoded.error);
-  }
-
-  await updateUser(c.env.DB, userId, {
-    name,
-    settings,
-    pub_key: decoded.data.pub_key,
-    encrypted_priv_key: decoded.data.encrypted_priv_key,
-  });
+  await updateUser(c.env.DB, userId, { name, settings });
 
   const emailChanged = Boolean(normalizedEmail && normalizedEmail !== user.email);
   if (emailChanged) {
@@ -554,6 +577,53 @@ auth.patch('/user', authenticateWebSession(), validateZ('json', updateUserSchema
       : {}),
   });
 });
+
+// API-050: change the password while keeping the user's key pair, so batches
+// wrapped for the existing pub_key stay readable.
+auth.post(
+  '/user/password',
+  authenticateWebSession(),
+  rateLimitByDevice(),
+  validateZ('json', changePasswordSchema),
+  async (c) => {
+    const userId = c.get('sub');
+    const decoded = changePasswordMaterialSchema.safeParse(c.req.valid('json'));
+    if (!decoded.success) {
+      return invalidRequestData(c, decoded.error);
+    }
+
+    const sessionUser = await findUserById(c.env.DB, userId);
+    const user = sessionUser && (await findUserByEmail(c.env.DB, sessionUser.email));
+    if (!user) {
+      return c.json({ error: 'User account not found' }, 404);
+    }
+
+    if (!(await verifyPasswordAuth(decoded.data.current_password_auth, user.password_hash))) {
+      return c.json({ error: 'Current password is incorrect' }, 403);
+    }
+
+    const changed = await changeUserPassword(c.env.DB, userId, {
+      expected_password_hash: user.password_hash,
+      password_hash: await hashPasswordAuth(decoded.data.password_auth),
+      password_salt: decoded.data.password_salt,
+      password_params_version: HASH_PARAMS_VERSION,
+      encrypted_priv_key: decoded.data.encrypted_priv_key,
+      keep_refresh_token_hash: c.get('sessionTokenHash'),
+    });
+    if (!changed) {
+      // Another request changed the password between our check and the update.
+      return c.json({ error: 'Current password is incorrect' }, 403);
+    }
+
+    try {
+      await sendPasswordChangedEmail(c, user);
+    } catch (error) {
+      console.error('failed to send password-changed email', error);
+    }
+
+    return c.body(null, 204);
+  },
+);
 
 auth.delete('/user', authenticateWebSession(), validateZ('query', deleteUserSchema), async (c) => {
   const userId = c.get('sub');

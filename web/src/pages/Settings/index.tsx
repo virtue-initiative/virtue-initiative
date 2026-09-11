@@ -15,6 +15,9 @@ import {
   Select,
 } from '@virtueinitiative/shared-web';
 import { usePromise } from '../../hooks/usePromise';
+import { usePwnedPasswordCount } from '../../hooks/usePwnedPasswordCount';
+import { PasswordField, PwnedPasswordWarning } from '../../components/PasswordField';
+import { MIN_PASSWORD_LENGTH, passwordLengthError } from '../../utils/password-policy';
 import './style.css';
 
 export function Settings() {
@@ -34,6 +37,13 @@ export function Settings() {
   const [deleteAccountStatus, setDeleteAccountStatus] = useState<string | null>(null);
   const [deleteAccountPending, setDeleteAccountSave] = usePromise();
   const [emailChangeVerificationTarget, setEmailChangeVerificationTarget] = useState<string>('');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordStatus, setPasswordStatus] = useState<string | null>(null);
+  const [passwordChanged, setPasswordChanged] = useState(false);
+  const [passwordSaving, setPasswordSave] = usePromise();
+  const pwnedCount = usePwnedPasswordCount(newPassword, true);
   const emailChangeDialogRef = useRef<HTMLDialogElement>(null);
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
 
@@ -91,6 +101,44 @@ export function Settings() {
         })
         .catch((err: unknown) => {
           setEmailStatus(describeError(err, 'Failed to update email'));
+        }),
+    );
+  }
+
+  function onPasswordInput(setter: (value: string) => void) {
+    return (e: Event) => {
+      setter((e.target as HTMLInputElement).value);
+      setPasswordStatus(null);
+      setPasswordChanged(false);
+    };
+  }
+
+  function changePassword(e: Event) {
+    e.preventDefault();
+    if (!api) return;
+    setPasswordStatus(null);
+    setPasswordChanged(false);
+    const problem =
+      newPassword !== confirmPassword
+        ? 'Passwords do not match.'
+        : newPassword === currentPassword
+          ? 'Choose a new password that is different from your current one.'
+          : passwordLengthError(newPassword);
+    if (problem) {
+      setPasswordStatus(problem);
+      return;
+    }
+    setPasswordSave(
+      api
+        .changePassword(currentPassword, newPassword)
+        .then(() => {
+          setCurrentPassword('');
+          setNewPassword('');
+          setConfirmPassword('');
+          setPasswordChanged(true);
+        })
+        .catch((err: unknown) => {
+          setPasswordStatus(describeError(err, 'Failed to change password'));
         }),
     );
   }
@@ -220,6 +268,66 @@ export function Settings() {
             </Button>
           </DialogActions>
         </Dialog>
+      </Card>
+
+      <Card class="settings-section">
+        <h2>Password</h2>
+        <p class="hint-text settings-section-hint">
+          Your existing logs stay readable after you change your password. Other browsers signed in
+          to your account are logged out. Your devices stay signed in and keep monitoring.
+        </p>
+        <form class="settings-form" onSubmit={changePassword}>
+          {/* Lets password managers attach the new password to the right account. */}
+          <input type="email" value={user.email} autoComplete="username" readOnly hidden />
+          <PasswordField
+            label="Current password"
+            id="current-password"
+            name="current-password"
+            value={currentPassword}
+            onInput={onPasswordInput(setCurrentPassword)}
+            autoComplete="current-password"
+            required
+            disabled={passwordSaving}
+          />
+          <PasswordField
+            label="New password"
+            id="new-password"
+            name="new-password"
+            value={newPassword}
+            onInput={onPasswordInput(setNewPassword)}
+            autoComplete="new-password"
+            required
+            disabled={passwordSaving}
+            helpText={`Use at least ${MIN_PASSWORD_LENGTH} characters.`}
+            error={
+              newPassword.length > 0 && newPassword.length < MIN_PASSWORD_LENGTH
+                ? (passwordLengthError(newPassword) ?? undefined)
+                : undefined
+            }
+          />
+          <PwnedPasswordWarning count={pwnedCount} />
+          <PasswordField
+            label="Confirm new password"
+            id="confirm-new-password"
+            name="confirm-new-password"
+            value={confirmPassword}
+            onInput={onPasswordInput(setConfirmPassword)}
+            autoComplete="new-password"
+            required
+            disabled={passwordSaving}
+          />
+          {passwordStatus && <Alert variant="error">{passwordStatus}</Alert>}
+          {passwordChanged && <Alert variant="success">Your password was changed.</Alert>}
+          <Button
+            variant="primary"
+            type="submit"
+            disabled={
+              !api || passwordSaving || !currentPassword || !newPassword || !confirmPassword
+            }
+          >
+            {passwordSaving ? 'Changing password…' : 'Change password'}
+          </Button>
+        </form>
       </Card>
 
       <Card class="settings-section">

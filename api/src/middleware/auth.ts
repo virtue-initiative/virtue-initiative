@@ -23,17 +23,15 @@ export function authenticateWebSession() {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
-    const session = await findSessionByRefreshTokenHash(
-      c.env.DB,
-      hashOpaqueToken(refreshToken),
-      'web',
-    );
+    const refreshTokenHash = hashOpaqueToken(refreshToken);
+    const session = await findSessionByRefreshTokenHash(c.env.DB, refreshTokenHash, 'web');
 
     if (!session || !session.user_id || session.expires_at < Date.now()) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
     c.set('sub', session.user_id);
+    c.set('sessionTokenHash', refreshTokenHash);
     await next();
   };
 }
@@ -55,13 +53,15 @@ export function authenticateDeviceSession() {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
-    const session = await findSessionByRefreshTokenHash(c.env.DB, hashOpaqueToken(token), 'device');
+    const refreshTokenHash = hashOpaqueToken(token);
+    const session = await findSessionByRefreshTokenHash(c.env.DB, refreshTokenHash, 'device');
 
     if (!session || !session.device_id || session.expires_at < Date.now()) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
     c.set('sub', session.device_id);
+    c.set('sessionTokenHash', refreshTokenHash);
     await next();
   };
 }

@@ -326,6 +326,57 @@ export async function updateUser(
     .run();
 }
 
+// API-050: swaps the password and re-wrapped private key in one statement,
+// conditioned on the hash the caller just verified so a concurrent change
+// can't be silently overwritten. Returns false if that hash no longer matches.
+// On success, revokes every other web session and any pending reset link.
+export async function changeUserPassword(
+  db: D1Database,
+  userId: string,
+  input: {
+    expected_password_hash: string;
+    password_hash: string;
+    password_salt: ArrayBuffer;
+    password_params_version: string;
+    encrypted_priv_key: ArrayBuffer;
+    keep_refresh_token_hash: string;
+  },
+) {
+  const userIdBytes = uuidToBytes(userId);
+  const result = await db
+    .prepare(
+      `UPDATE users
+       SET password_hash = ?, password_salt = ?, password_params_version = ?, encrypted_priv_key = ?
+       WHERE id = ? AND password_hash = ?`,
+    )
+    .bind(
+      input.password_hash,
+      input.password_salt,
+      input.password_params_version,
+      input.encrypted_priv_key,
+      userIdBytes,
+      input.expected_password_hash,
+    )
+    .run();
+
+  if (result.meta.changes === 0) {
+    return false;
+  }
+
+  await db.batch([
+    db
+      .prepare('DELETE FROM user_sessions WHERE user_id = ? AND refresh_token_hash != ?')
+      .bind(userIdBytes, input.keep_refresh_token_hash),
+    db
+      .prepare(
+        "UPDATE email_tokens SET consumed_at = ? WHERE user_id = ? AND purpose = 'password_reset' AND consumed_at IS NULL",
+      )
+      .bind(Date.now(), userIdBytes),
+  ]);
+
+  return true;
+}
+
 export async function createDevice(
   db: D1Database,
   input: { id: string; owner: string; name: string; platform: string },

@@ -22,6 +22,7 @@ export type DigestFrequency = Extract<(typeof emailFrequencies)[number], 'daily'
 export const emailKinds = [
   'email_verification',
   'password_reset',
+  'password_changed',
   'partner_invite',
   'partner_accepted',
   'device_deleted',
